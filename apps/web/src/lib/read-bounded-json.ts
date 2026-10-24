@@ -1,12 +1,17 @@
 export class ResponseBodyTooLarge extends Error {}
 
-/** Read and decode JSON without ever buffering more than the configured response-body cap. */
-export async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
+export interface ReadBoundedJsonOptions {
+  /** Existing callers remain replacement-tolerant; security-sensitive commands opt into fatal UTF-8. */
+  fatalUtf8?: boolean;
+}
+
+/** Read and decode JSON without ever buffering more than the configured body cap (requests and responses). */
+export async function readBoundedJson(response: Pick<Response, "body" | "headers">, maxBytes: number, options: ReadBoundedJsonOptions = {}): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw new ResponseBodyTooLarge();
   if (!response.body) throw new Error("Empty response body");
   const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: options.fatalUtf8 ?? false });
   let bytes = 0;
   let text = "";
   try {
@@ -19,7 +24,7 @@ export async function readBoundedJson(response: Response, maxBytes: number): Pro
     }
     return JSON.parse(text + decoder.decode());
   } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+    try { await reader.cancel(); } catch { /* The parse/limit failure remains authoritative. */ }
+    finally { reader.releaseLock(); }
   }
 }

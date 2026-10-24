@@ -9,7 +9,7 @@ import postcss from "postcss";
 import { describe, expect, it } from "vitest";
 import { bookingCardModel } from "../../../apps/web/src/lib/presentation-booking-model";
 import {
-  BookingCheckoutViewV1, BookingPageViewV1, BookingPreviewV1, CatalogueViewV1, COPY_REGISTRY_V1, DetailViewV1, EN_COPY_V1, EN_STATIC_COPY_V1, HelpViewV1,
+  BookingCheckoutViewV1, BookingPageViewV1, BookingPreviewV1, CatalogueViewV1, COPY_REGISTRY_V1, DetailViewV1, EN_COPY_V1, EN_STATIC_COPY_V1, ExperienceCardV1, HelpViewV1,
   HomeViewV1, HostViewV1, MobileGalleryViewV1, PRESENTATION_MANIFEST_V1, PresentationRootV1, SiteFooterV1, SiteHeaderV1, DetailBookingDatesV1,
   RichMessageV1, STATIC_COPY_REGISTRY_V1, assertAssetBindingsV1, assertPresentationIdentityV1, createCopyV1, createStaticCopyV1,
   defaultAssetBindingsV1, defaultStaticCopyValuesV1, type BookingPreviewModelV1, type DetailViewModelV1, type HomeViewModelV1,
@@ -146,6 +146,31 @@ describe("v1 portable presentation", () => {
     expect(html).not.toContain(EN_STATIC_COPY_V1.text("detail.goodToKnow"));
     expect(html).toContain("Ask slot");
     expect(renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, know: [], notSuitable: [] }} />)).not.toContain("Ask slot");
+  });
+
+  it("shows the review line under the title (a link, a plain count, or the New badge) and the reviews section before the cancellation terms", () => {
+    const plain = renderToStaticMarkup(<DetailViewV1 model={detailModel} />);
+    expect(plain).not.toContain('id="reviews"');
+    const linked = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, reviewHeadline: { label: "★ 4.9 · 12 reviews", accessibleLabel: "Rated 4.9 out of 5 from 12 reviews. Go to the reviews", href: "#reviews" }, reviews: { title: "Reviews", content: <p>Reviews content</p> } }} />);
+    expect(linked).toContain('<a href="#reviews" aria-label="Rated 4.9 out of 5 from 12 reviews. Go to the reviews"');
+    expect(linked).toContain("★ 4.9 · 12 reviews");
+    expect(linked).toMatch(/<section id="reviews" class="scroll-mt-24 pt-12"><h2[^>]*>Reviews<\/h2><p>Reviews content<\/p>/);
+    // The line sits right under the title, before the host row; the section sits before the cancellation terms.
+    expect(linked.indexOf("★ 4.9")).toBeGreaterThan(linked.indexOf("</h1>"));
+    expect(linked.indexOf("★ 4.9")).toBeLessThan(linked.indexOf("Hosted by"));
+    expect(linked.indexOf('id="reviews"')).toBeLessThan(linked.indexOf(EN_STATIC_COPY_V1.text("detail.cancellation")));
+    const count = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, reviewHeadline: { label: "2 reviews", href: "#reviews" } }} />);
+    expect(count).toContain(">2 reviews</a>");
+    const fresh = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, reviewHeadline: { label: "New", isNew: true } }} />);
+    expect(fresh).toContain(">New</span>");
+    expect(fresh).not.toContain('href="#reviews"');
+  });
+
+  it("adds a review line to a card only when the consumer supplies one", () => {
+    const model = { ...card, href: card.href };
+    expect(renderToStaticMarkup(<ExperienceCardV1 card={model} />)).not.toContain("★");
+    const rated = renderToStaticMarkup(<ExperienceCardV1 card={{ ...model, reviewLine: { text: "★ 4.9 · 12", label: "Rated 4.9 out of 5 from 12 reviews" } }} />);
+    expect(rated).toContain('<span aria-hidden="true">★ 4.9 · 12</span><span class="sr-only">Rated 4.9 out of 5 from 12 reviews</span>');
   });
 
   it("adds Before you book, the mobile number and a host heading to checkout without changing the default screen", () => {

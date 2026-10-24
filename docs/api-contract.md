@@ -8,6 +8,8 @@
 
 機械可読の契約は [`packages/api-client/contract/experience-public-api.openapi.json`](../packages/api-client/contract/experience-public-api.openapi.json)、公開項目の規則は [`public-field-policy.json`](../packages/api-client/contract/public-field-policy.json) です。この文書と食い違ったら JSON を正とし、文書を直します。
 
+この文書は旅行者向け公開APIを扱う。認証付きのAdmin予約参照と予約別担当・内部メモcaseは公開APIへ混ぜず、選別済みの別契約と [Admin予約支援](admin-support.md) で管理する。
+
 ## 1. 境界
 
 | 持つ側 | 持つもの |
@@ -164,6 +166,24 @@
   - 書き込みは同じ fetch の中だけで変わり、Web は要求ごとに作り直すので次の要求には残らない。
   - 写真の URL は `https://uploads.niho-mock.test/...`（`isMockPhotoUrl`）。option `uploadsDisabled` で上げ口の 503 を再現できる。
 
+### 9.2 Host本人のNIHOサポート設定（#130）
+
+- 独立契約：`experience-host-support-settings-api.openapi.json` v1.0.1。sourceCommit `4787c3b34b2c30d51a9f0f523c34f865c20e4230`、SHA256 `9cff926462fe388b8ff5a8c82a582eb26d6aafc8eba49f5468ea064021c07a75`、状態 `agreed-not-deployed`。既存Admin auth/read/case/operations/history契約には混ぜない。
+- SDK：server-onlyの`@niho-experience/api-client/host-support-settings`。ブラウザはtokenを持たず、strict decoderだけを`host-support-settings-schema`から使う。固定の対象一覧GETとkind/id別GET/PUT以外へ中継しない。
+- 認可：NIHO APIが現在の本人OWNERを毎回正本として判定する。EDITOR、Admin、platform roleをOWNERへ読み替えない。通常Spotと外部Providerをkindで区別する。
+- 配備境界：`HOST_SUPPORT_SETTINGS_API_ENABLED`は既定OFFで、HTTP modeだけ有効。API配備・受入前はBFFを404に保ち、失敗や未設定をmock成功/OFFへfallbackしない。preview flagはmock専用browser stubで、BFFを開かない。
+- 保存：確認直前にGETし、host・policy・setting revision/state・write capabilityが変われば古いcommandを捨てて再確認する。同意済みの`enabled`・`consentVersion`・`expectedRevision`はimmutable payloadとし、結果不明時だけ同payloadを再送する。409は入力を保持する。GETで同値を見ても今回の保存成功とは断言しない。
+- 表示：OFF合計10%／ON合計15%はいずれも決済手数料込み。人件費はホストから担当者へ直接払い。全額キャンセル・返金で戻らないStripe決済費用はNIHO負担。ただし、このAPIは設定保存だけで、料金producer・予約snapshot・精算への接続済みを示さない。変更後の新規予約だけへ適用し、過去予約は変更しない。
+
+### 9.3 予約別の実料金・精算（#134）
+
+- 独立契約：`experience-fee-summary-api.openapi.json` v1.0.0。sourceCommit `291bc1fca9a9e21ebaeae4a9637379afc472aa61`、SHA256 `c7b39ac5ae5331268915f4b9b2ded477a09f35eb333a291a9826e6b8f3a9d95e`、状態 `agreed-not-deployed`。
+- SDK：browser-safeな`@niho-experience/api-client/fee-summary`は型とstrict decoderだけを公開する。Bearerを扱う`fee-summary-server`とはexportを分離する。
+- パス：Adminは`GET /api/admin/experience-bookings/{requestId}/fee-summary`、Host本人は`GET /api/experience-providers/management/bookings/{requestId}/fee-summary`だけ。query、別method、対象ID不一致、余分なDTO項目を受けない。
+- 表示：APIの金額だけを整形する。nullは未確認、0は¥0として区別し、負数が許されるホスト残額とNIHO入出金差額も符号を保つ。NIHO入出金差額はAdminだけに示し、利益とは呼ばない。
+- 配備境界：`EXPERIENCE_FEE_SUMMARY_API_ENABLED`は既定OFFかつHTTP専用で、Admin/Host双方のconsole/sessionを別々に再検証する。preview flagはmock専用browser stubで、実BFFを開かない。HTTP失敗を合成成功へfallbackしない。
+- 現在地：SDK、固定BFF、Admin/Host読取パネル、合成E2Eまで。ホストの実予約HTTP導線が未接続なので、Admin・Host・NIHO APIの三者実受入完了とは扱わない。
+
 ## 10. mock
 
 ```ts
@@ -226,8 +246,9 @@ NIHO 側の Issue：参加の条件 niho-coliving/niho-app#19318、予約前の�
 | 質問の失敗 | `{ error: { code, message, retryable, field } }`。`VALIDATION_ERROR` 400／`INPUT_INVALID` 422（`field`＝`message` \| `guestName` \| `guestEmail` \| `topic`）／`UNAVAILABLE` 409（この体験は質問を受けていない）／`RATE_LIMITED` 429（`Retry-After`）／`SEND_FAILED` 503（受け付けられなかった・再送してよい） | 入力の誤りはその欄へ、上限は待つ秒数、受付停止・失敗は理由の文で出す。コードは見せない |
 | checkout の追加項目 | `guestPhone?`（数字 7〜15 桁・24 字まで・任意）、`conditionsConsent?: { version }`。同意の対象がある条件を持つ体験は `conditionsConsent` が必須（無いと `INPUT_INVALID`・field `conditionsConsent`、版が古いと `CONSENT_OUTDATED`・field `conditionsConsent.version`）。条件の無い体験に付けると `INPUT_INVALID` | 予約入力の "Mobile number (optional, for the day)" と "Before you book"。電話番号は当日の連絡用で提供者の当日の画面だけに出す（owner 決定 2026-10-22）。応答・ログ・URL・計測・storage には複製しない |
 | 無料取消の期限 | 契約の項目ではなく計算：開催回の `startAt` − `cancellationPolicy.freeCancellationHoursBefore`（§5） | 予約入力の確認の行に "Until Thu 12 Nov, 7:00 AM Japan time"（常に日本時間）。その時間を過ぎる日は "Not available for this date"。契約に `freeCancellationDeadline` が出たらそれを使う |
-| 決済後のページ | NIHO の Stripe の戻り先が `/booking/return?type=instant` または `?type=approval`（固定の語だけ） | 見出しを分ける（`docs/design-system.md` 決済からの復帰）。今の戻り先は NIHO の状態ページで、体験サイトへは戻らない（`cancelUrl` だけ体験サイト）。変えるかは #103 で確認中 |
+| レビュー | `GET /api/public/experiences/{experienceSlug}/reviews?limit=`（1〜50・新しい順）。応答 `{ summary: { count, average（1.0〜5.0・0 件は null）, tags[{ label, count }]}, reviews[] }`。`reviews[]` は `{ id（不透明）, rating（1〜5）, body（2000 字まで）, tags[]（よかった点の表示名）, displayName（名＋国・地域を NIHO が組んだもの・姓とメールは含めない）, originLabel, publishedAt, fromBooking, reply（提供者の返信 1 つ・null 可）}`。閉じた形（余分な項目は想定外の応答） | 題名の下の 1 行・"Reviews" の節・カードの行・"Show all N reviews"。詳細の SSR は新しい順の 3 件と集計を読み、全件はダイアログを開いたときにブラウザから読む（`limit=50`）。平均とスターは画面の規則で 3 件から。構造化データの条件は [seo.md](seo.md) |
+| 決済後のページ | NIHO の Stripe の戻り先が `/booking/return?type=instant` または `?type=approval`（固定の語だけ） | 見出しを分ける（`docs/design-system.md` 決済からの復帰）。今の戻り先は NIHO の状態ページで、体験サイトへは戻らない（`cancelUrl` だけ体験サイト）。この戻り先へ変える（owner 決定 2026-10-22。NIHO 側の実装は niho-coliving/niho-app#19331。配備までは現在の戻り先を維持） |
 
-- mock の scenario（`?mock=` で ブラウザ側に渡す）：`ask-rate-limited`・`ask-unavailable`・`ask-send-failed`。条件を持つ合成の体験は 3 つ（承認制で同意の対象あり・即時確定で返金なし・予約を受けていない）、条件の無い体験は dinner。pilot の Zen は fixture にある事実だけを条件の形に並べた（新しい事実は足さない）。
+- mock の scenario（`?mock=` で ブラウザ側に渡す）：`ask-rate-limited`・`ask-unavailable`・`ask-send-failed`・`reviews-error`（一覧の応答が 503。詳細の SSR だけ失敗させる `reviews-error` と、"Show all" だけ失敗させる `reviews-more-error` を画面が使う）。条件を持つ合成の体験は 3 つ（承認制で同意の対象あり・即時確定で返金なし・予約を受けていない）、条件の無い体験は dinner。pilot の Zen は fixture にある事実だけを条件の形に並べた（新しい事実は足さない）。レビューは合成の体験だけに置き（名前に `(sample)`・12 件／2 件／1 件／0 件）、pilot（実在のホスト）には入れない。
 - 個人情報：質問の本文・名前・メール・電話番号は §8 の規則のとおり（URL・storage・SSR・計測・ログ・公開 cache に入れない）。受け付けたら画面の入力を消す。
 - 表示用の文言は presentation の copy registry に足さず、画面から表示用の文字列として渡す（registry の key 集合を変えると、保存済みの日本語の訳が不完全になるため）。日本語の画面にはこの機能を出さない。

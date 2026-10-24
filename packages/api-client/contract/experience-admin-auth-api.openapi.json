@@ -1,0 +1,840 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NIHO Experience Admin Auth API",
+    "version": "1.0.0",
+    "description": "niho-experienceのAdmin画面へ配るapp-connect認証契約。正本はniho-appのcontracts/openapi.yaml。",
+    "x-niho-contract-status": "agreed",
+    "x-niho-contract-source": "niho-app contracts/openapi.yaml"
+  },
+  "servers": [
+    {
+      "url": "https://niho.life",
+      "description": "NIHO API origin"
+    }
+  ],
+  "security": [
+    {
+      "FirebaseIdToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth"
+    }
+  ],
+  "paths": {
+    "/api/auth/app-connect/start": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mac アプリの接続を始める（一度きりのコードを発行）",
+        "description": "NIHO アカウントでログイン（NIHO photo・NIHO docs。Epic #18551 / specs/initiatives/niho-account-desktop-login.md §API の契約）。\nniho.life の接続の確認画面（`/connect/<app>`）が、ログイン済みのユーザーとして呼ぶ。5 分・1 回限りのコードを発行し、\n`niho-<app>://auth?code=…&state=…` の `redirectUrl` を返す（web はこれへ遷移する）。\nWeb の接続先（`niho-experience` / `niho-experience-admin`）は `redirectOrigin` が必須で、client ごとの callback を返す。\nhost の origin は env `APP_CONNECT_WEB_ORIGINS`、Admin の origin は独立した env `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN` と完全一致が必要。\n`redirectOrigin` の欠落・Mac アプリでの送信は 400（`VALIDATION_ERROR`・\n`redirect_origin_required` / `redirect_origin_unexpected`）、env `APP_CONNECT_WEB_ORIGINS` の未設定・不正・不一致は 400（`BAD_REQUEST`・\n`web_origins_unset` / `web_origins_invalid` / `redirect_origin_not_allowed`）。\nメール未確認の password ユーザーは 403（`EMAIL_VERIFICATION_REQUIRED`）、アプリの接続由来の token からは 403\n（`app_connection_cannot_start`）、`auth_time` の無い token は 401（`auth_time_missing`）。\n1 人の未消費コードは 5 件まで（429 `too_many_active_codes`）。feature flag（`APP_CONNECT_ENABLED`）無効時は 404。\n",
+        "operationId": "postAuthAppConnectStart",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthAppConnectStartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAppConnectStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/auth/app-connect/exchange": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mac アプリがコードと PKCE verifier を custom token に替える",
+        "description": "公開（PKCE が身元）。コードは 1 回限りで、`clientId`・`codeVerifier`（S256）の一致が必須。消費済みコードの verifier まで一致する\n再提示は再利用と見なし、そのコードで作った接続を失効させる。成功すると接続（`AppConnection`）を作り、Firebase の custom token\n（developer claims `niho_app_connection` / `niho_app_client` つき）と、接続 refresh token（`POST /api/auth/app-connect/refresh` 用。\nアプリがこの Mac に保存する。Firebase の refresh token ではない）を返す。\n400 は `details.reason` が `code_invalid`（無い・消費済み・不一致）か `code_expired`。退会済み 403、Firebase の user が無効 403、\n接続を始めたログインがユーザー全体の失効より前なら 401（`session_revoked`）。`niho-experience-admin` は現在の\nplatform ADMIN だけが交換でき、接続は発行から8時間の絶対期限を持つ。\n",
+        "operationId": "postAuthAppConnectExchange",
+        "security": [
+          {}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthAppConnectExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAppConnectExchangeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "コードが無効（`code_invalid`）・期限切れ（`code_expired`）・入力が不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/auth/app-connect/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mac アプリが接続 refresh token で新しい custom token と新しい接続 refresh token をもらう",
+        "description": "公開（接続 refresh token が身元）。1 時間に 1 回。接続 refresh token は毎回取り替え、返りの `refreshToken` 以後はそれだけを使う\n（2026-10-17 改定・D-15）。1 つ前の token は取り替えから 10 分だけ受けてもう一度取り替える（応答を受け取れずに再送した正規のアプリ）。\n10 分を過ぎた 1 つ前の token は再利用と見なして接続を失効（`REFRESH_REUSE`）し 401（`app_connection_revoked`）。それより古い token・\n失効・期限（最後に使ってから 180 日）・`clientId` 不一致も 401（`app_connection_revoked`）。接続を始めたログインがユーザー全体の失効\n（`revokeRefreshTokens`・パスワード変更）より前なら失効させて 401（`session_revoked`）。成功すると `lastUsedAt` を更新し、接続の期限を\nいまから 180 日に延ばす。`niho-experience-admin` は現在の platform ADMIN だけ更新でき、発行時の8時間絶対期限は延長しない。\ncustom token を作れなかったときは 503（取り替えは済んでいるので、猶予の中で同じ token を再送できる）。\n",
+        "operationId": "postAuthAppConnectRefresh",
+        "security": [
+          {}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthAppConnectRefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAppConnectRefreshResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/auth/app-connect/experience-admin/session": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "NIHO Experience Admin の現在の短命 session を確認する",
+        "description": "`niho-experience-admin` の app-connect token 専用。現在も有効な platform ADMIN であることを毎回確認し、\nactor の id / displayName と接続 id / 絶対期限だけを返す。他 client と通常の web session は 403。\n",
+        "operationId": "getAuthAppConnectExperienceAdminSession",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Admin session情報を共有cacheやブラウザcacheへ保存しない。",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "private, no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAppConnectExperienceAdminSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/auth/app-connections/{connectionId}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mac アプリの接続を解除する",
+        "description": "自分の接続だけ（他人のは 404）。アプリの接続由来の token は自分の接続しか解除できない（他は 403 `app_connection_foreign`）。\nアプリ自身のログアウトは `?reason=logout`（`revokedReason: LOGOUT`。それ以外は `USER_REVOKED`）。既に失効なら 204 のまま。\nアプリ自身が解除した接続の token での再送は、認証で 401 `app_connection_revoked`（アプリは解除済みとして扱う）。\nFirebase の `revokeRefreshTokens` は呼ばない（接続の記録で個別に失効し、API の認証と `refresh` で照らす）。\n",
+        "operationId": "deleteAuthAppConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connectionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "logout"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "解除した（冪等）"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuthAppConnectClientId": {
+        "type": "string",
+        "description": "NIHO Experience Admin専用app-connect client。",
+        "enum": [
+          "niho-experience-admin"
+        ]
+      },
+      "AuthAppConnectExchangeRequest": {
+        "type": "object",
+        "required": [
+          "clientId",
+          "code",
+          "codeVerifier"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "clientId": {
+            "$ref": "#/components/schemas/AuthAppConnectClientId"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "codeVerifier": {
+            "type": "string",
+            "description": "RFC 7636 の code_verifier。",
+            "pattern": "^[A-Za-z0-9._~-]{43,128}$"
+          },
+          "deviceName": {
+            "type": "string",
+            "description": "この Mac の名前（自己申告・表示用。80 文字に切る）。",
+            "maxLength": 400
+          }
+        }
+      },
+      "AuthAppConnectExchangeResponse": {
+        "type": "object",
+        "required": [
+          "customToken",
+          "refreshToken",
+          "connectionId",
+          "connectionExpiresAt",
+          "user"
+        ],
+        "properties": {
+          "customToken": {
+            "type": "string",
+            "description": "Firebase の custom token（1 時間）。Identity Toolkit の signInWithCustomToken で ID token にする。保存しない。"
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "接続 refresh token（アプリがこの Mac に保存する）。POST /api/auth/app-connect/refresh に渡す。refresh のたびに取り替わる。"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "connectionExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "接続の期限。通常 client は最後に使ってから180日、Admin client は発行から8時間でrefreshしても延長しない。"
+          },
+          "user": {
+            "type": "object",
+            "required": [
+              "id",
+              "displayName",
+              "handle",
+              "iconImage"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string",
+                "nullable": true
+              },
+              "handle": {
+                "type": "string",
+                "nullable": true
+              },
+              "iconImage": {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UploadedImage"
+                  }
+                ],
+                "nullable": true,
+                "description": "`/api/auth/me` の `userIconImage` と同じ（署名 URL）。uploads 無効時は null。"
+              }
+            }
+          }
+        }
+      },
+      "AuthAppConnectExperienceAdminSessionResponse": {
+        "type": "object",
+        "required": [
+          "actor",
+          "connection"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "object",
+            "required": [
+              "id",
+              "displayName"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          "connection": {
+            "type": "object",
+            "required": [
+              "id",
+              "expiresAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "AuthAppConnectRefreshRequest": {
+        "type": "object",
+        "required": [
+          "clientId",
+          "refreshToken"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "clientId": {
+            "$ref": "#/components/schemas/AuthAppConnectClientId"
+          },
+          "refreshToken": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          }
+        }
+      },
+      "AuthAppConnectRefreshResponse": {
+        "type": "object",
+        "required": [
+          "customToken",
+          "expiresAt",
+          "refreshToken",
+          "connectionExpiresAt"
+        ],
+        "properties": {
+          "customToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "custom token の期限（発行から 1 時間）。"
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "新しい接続 refresh token（取り替え後。以後はこれだけを使う）。アプリは signInWithCustomToken より前にこの Mac に保存する。"
+          },
+          "connectionExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "接続の期限。通常 client はいまから180日に延長、Admin client は発行時の8時間絶対期限を維持する。"
+          }
+        }
+      },
+      "AuthAppConnectStartRequest": {
+        "type": "object",
+        "required": [
+          "clientId",
+          "codeChallenge",
+          "codeChallengeMethod",
+          "state",
+          "redirectOrigin"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "clientId": {
+            "$ref": "#/components/schemas/AuthAppConnectClientId"
+          },
+          "codeChallenge": {
+            "type": "string",
+            "description": "PKCE S256 の challenge（base64url 43 文字）。",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "codeChallengeMethod": {
+            "type": "string",
+            "enum": [
+              "S256"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "アプリが作った state。API は保存せず redirectUrl に写すだけ。",
+            "pattern": "^[A-Za-z0-9._~-]{22,128}$"
+          },
+          "redirectOrigin": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "APP_CONNECT_EXPERIENCE_ADMIN_ORIGINと完全一致するAdmin接続専用origin。"
+          }
+        }
+      },
+      "AuthAppConnectStartResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "expiresAt",
+          "redirectUrl",
+          "client"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "一度きりのコード（5 分）。niho.life の URL・履歴・storage に入れない。"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "redirectUrl": {
+            "type": "string",
+            "description": "<redirectOrigin>/admin/auth/callback?code=…&state=…。NIHOの確認画面はこのURLへ遷移する。"
+          },
+          "client": {
+            "type": "object",
+            "required": [
+              "clientId",
+              "name"
+            ],
+            "properties": {
+              "clientId": {
+                "$ref": "#/components/schemas/AuthAppConnectClientId"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "description": "エラーコード（実装の `ErrorCode` に準拠）",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "BODY_JSON_TOO_LARGE",
+                      "BODY_JSON_INVALID",
+                      "MEMBER_BLOCK_INVALID",
+                      "MEMBER_BLOCK_CROSS_SPOT_FORBIDDEN"
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "details"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "UploadedImage": {
+        "type": "object",
+        "description": "Uploads 画像（members-only: signed URL）。\n`thumb` は vNext thumbnails（v1）で optional（未生成期間があるため）。無い場合は省略または null。\n`variants` は `thumb` があるときに、その種類で作る全部の幅を返しうる（#16525。現状は CDN の issuer だけ）。\n`aspectRatio` は `thumb` の派生に寸法が記録してあるときに返しうる（#16698。現状は CDN の issuer だけ）。\n",
+        "properties": {
+          "objectKey": {
+            "type": "string"
+          },
+          "signedUrl": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "thumb": {
+            "$ref": "#/components/schemas/UploadedImageThumb",
+            "nullable": true
+          },
+          "variants": {
+            "type": "array",
+            "description": "表示幅に合わせて選べる派生の短命 read URL。srcset 用。無いときは thumb / signedUrl を使う。\n幅の昇順。`thumb` と同じ幅も含む。配信幅（`thumb.width`）以外の幅は backfill 前だと 404 になりうるので、\n読み込みに失敗したら srcset を外して `thumb` / `signedUrl` に戻す。幅が1つだけの種類（アイコンなど）では付かない。\n",
+            "items": {
+              "$ref": "#/components/schemas/UploadedImageVariant"
+            }
+          },
+          "aspectRatio": {
+            "type": "number",
+            "minimum": 0.0001,
+            "description": "表示する向き（EXIF の回転後）の縦横比（幅 ÷ 高さ、小数第 4 位で丸める）（#16698）。\n派生を作ったときに記録した寸法から出す。派生が無い・記録前の派生では省略する。\nweb は読み込み前の枠の確保に使う。\n"
+          }
+        },
+        "required": [
+          "objectKey",
+          "signedUrl",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "UploadedImageThumb": {
+        "type": "object",
+        "description": "vNext thumbnails（v1）の派生画像。\nmembers-only（署名URL）を維持し、UI は thumb を優先しつつ未生成時は source にフォールバックできる。\n",
+        "properties": {
+          "objectKey": {
+            "type": "string",
+            "description": "vNext thumbnails（v1）規約で決定される objectKey。\n例: `thumb/v1/w256/profile/icon/u123/abc.webp`\n"
+          },
+          "signedUrl": {
+            "type": "string",
+            "description": "members-only のため signed URL を返す"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "signed URL の有効期限（TTLは v2 uploads と同じ方針）"
+          },
+          "width": {
+            "type": "integer",
+            "enum": [
+              256,
+              512,
+              1024
+            ],
+            "description": "v1 で必須にする thumb の幅"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "webp"
+            ]
+          }
+        },
+        "required": [
+          "objectKey",
+          "signedUrl",
+          "expiresAt",
+          "width",
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "UploadedImageVariant": {
+        "type": "object",
+        "description": "vNext thumbnails（v1）の派生画像の 1 幅ぶん（#16525）。`srcset` の候補に使う。\nobjectKey・format は持たない（`thumb/v1/w{width}/...` の webp）。有効期限は親の `UploadedImage.thumb.expiresAt` と同じ。\n",
+        "properties": {
+          "width": {
+            "type": "integer",
+            "enum": [
+              256,
+              512,
+              1024,
+              2048
+            ],
+            "description": "派生の幅（px）。`srcset` の `{width}w` に使う"
+          },
+          "signedUrl": {
+            "type": "string",
+            "description": "members-only のため signed URL を返す（短命）"
+          }
+        },
+        "required": [
+          "width",
+          "signedUrl"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "Forbidden": {
+        "description": "Forbidden",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/XTraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not Found",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/XTraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "Service Unavailable",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/XTraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "serviceUnavailable": {
+                "value": {
+                  "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "一時的に利用できません",
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Too Many Requests",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/XTraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/XTraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "unauthorized": {
+                "value": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "認証が必要です",
+                    "details": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Validation error",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/XRequestId"
+          },
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/XTraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "XRequestId": {
+        "description": "API request correlation id.\nvX: API は全レスポンスで `X-Request-Id` を返す（client が付与した値を echo するか、server が生成）。\n",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "XTraceId": {
+        "description": "Trace id for correlating Cloud Logging / Cloud Trace.\nvX: API は全レスポンスで `X-Trace-Id` を返す（32 hex を想定）。\n",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{32}$"
+        }
+      }
+    },
+    "securitySchemes": {
+      "FirebaseIdToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+      }
+    }
+  }
+}

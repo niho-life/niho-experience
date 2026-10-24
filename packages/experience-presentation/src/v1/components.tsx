@@ -94,6 +94,8 @@ export const BOOKING_FIELD_INPUT_CLASS_V1 = "mt-1.5 block min-h-[50px] w-full ro
 export type ExperienceCardModelV1 = Readonly<{
   slug: string; href: string; cover: DisplayImageV1 | null; face: FaceV1; groupLabel: string | null; withLabel: string; title: string; lead: string;
   durationLabel: string; language: { short: string; full: string } | null; scheduleLabel: string | null; priceLabel: string; priceIsFrom: boolean; priceSuffix: string;
+  /** "★ 4.9 · 12" and its spoken form. Only for experiences that have reviews (the average only from three). */
+  reviewLine?: Readonly<{ text: string; label: string }>;
 }>;
 
 export function ExperienceCardV1({ card, dates, highlight = null, variant = "home", priority = false, primitives, copy = EN_STATIC_COPY_V1 }: { card: ExperienceCardModelV1; dates?: ReactNode; highlight?: string | null; variant?: "home" | "list"; priority?: boolean; primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1 }) {
@@ -105,7 +107,7 @@ export function ExperienceCardV1({ card, dates, highlight = null, variant = "hom
   </div><div className="flex flex-1 flex-col pt-3"><p className="min-h-[1.375rem] pr-20 text-sm font-bold text-muted">{card.withLabel}</p>
     <h3 className="mt-1 text-[1.375rem] leading-[1.18]"><Link href={card.href} className="bg-[linear-gradient(var(--color-leaf),var(--color-leaf))] bg-[length:0_3px] bg-[position:0_100%] bg-no-repeat transition-[background-size] duration-300 group-hover:bg-[length:100%_3px] after:absolute after:inset-0 focus-visible:outline-none group-has-[:focus-visible]:bg-[length:100%_3px]">{card.title}</Link></h3>
     {list ? <p className="mt-2 line-clamp-2 text-[0.9375rem] text-ink-soft">{card.lead}</p> : null}
-    <ul className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 text-sm font-bold text-ink-soft"><li className="flex items-center gap-1.5"><HandIcon name="clock" className="size-[22px]" />{card.durationLabel}</li>{card.language ? <li className="flex items-center gap-1.5"><HandIcon name="chat" className="size-[22px]" /><span aria-hidden>{card.language.short}</span><span className="sr-only">{card.language.full}</span></li> : null}</ul>
+    <ul className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 text-sm font-bold text-ink-soft"><li className="flex items-center gap-1.5"><HandIcon name="clock" className="size-[22px]" />{card.durationLabel}</li>{card.language ? <li className="flex items-center gap-1.5"><HandIcon name="chat" className="size-[22px]" /><span aria-hidden>{card.language.short}</span><span className="sr-only">{card.language.full}</span></li> : null}{card.reviewLine ? <li><span aria-hidden>{card.reviewLine.text}</span><span className="sr-only">{card.reviewLine.label}</span></li> : null}</ul>
     {highlight ? <p className="mt-3 inline-flex h-7 items-center gap-1.5 self-start rounded-full bg-leaf-pale pr-3 pl-2 text-sm font-extrabold text-moss"><HandIcon name="cal" className="size-5" />{highlight}</p> : dates ?? (card.scheduleLabel ? <p className="mt-3 h-7 text-sm font-bold text-muted">{card.scheduleLabel}</p> : null)}
     <p className="mt-auto pt-3 text-[0.9375rem] text-ink-soft"><RichMessageV1 segments={copy.rich(card.priceIsFrom ? "card.fromPriceRich" : "card.priceRich", { price: card.priceLabel })} emphasisClassName="text-[1.1875rem] font-extrabold text-ink" /></p>
   </div></article>;

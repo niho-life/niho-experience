@@ -20,6 +20,9 @@ export async function getBrowserApi(preview: boolean, nihoWebOrigin: string) {
     "ask-rate-limited": "ask-rate-limited",
     "ask-unavailable": "ask-unavailable",
     "ask-send-failed": "ask-send-failed",
+    // Reviews: the page may be rendered with them, and only "Show all" (read in the browser) fails.
+    "reviews-error": "reviews-error",
+    "reviews-more-error": "reviews-error",
   } as const;
   const scenario = scenarios[requested as keyof typeof scenarios] ?? "default";
   // "all": the server may render either mock catalog; slugs never overlap.

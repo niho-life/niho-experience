@@ -80,9 +80,11 @@ test("a host signs in from /host, switches provider, opens a section and signs o
   await expect(page).toHaveURL(/\/host$/);
 });
 
-test("an account without providers sees the registration entry", async ({ page }) => {
+test("an account without providers sees registration and the normal Spot support entry", async ({ page }) => {
   await signIn(page, "?mock=empty");
-  await expect(page.getByRole("heading", { name: "まず提供者として登録しましょう" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "体験を掲載する場合は提供者登録へ" })).toBeVisible();
+  await expect(page.getByText(/通常拠点のNIHOサポート設定だけを確認する場合、提供者登録は必要ありません。/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "NIHOサポート設定" })).toBeVisible();
   await expect(page.locator("summary", { hasText: "提供者" })).toHaveCount(0);
   await page.getByRole("link", { name: "提供者として登録" }).click();
   await page.waitForURL("**/host/register");

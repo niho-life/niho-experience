@@ -47,10 +47,12 @@ export type JourneyDetailExtras = {
   conditions: ExperienceConditions | null;
   /** 予約前の質問（Ask the host）を受け付けているか。 */
   questionsOpen: boolean;
+  /** レビュー。null はこの配備にレビューの機能が無い（"New" の印も節も出さない）。 */
+  reviews: JourneyReviews | null;
 };
 
 /** 実 API に無い間の値。画面は新しい部品を出さない。 */
-export const NO_JOURNEY_EXTRAS: JourneyDetailExtras = { enabled: false, conditions: null, questionsOpen: false };
+export const NO_JOURNEY_EXTRAS: JourneyDetailExtras = { enabled: false, conditions: null, questionsOpen: false, reviews: null };
 
 /** 同意の対象にする条件の文（`consentText`）。空なら「Before you book」は出さない。 */
 export function conditionConsentTexts(conditions: ExperienceConditions | null): string[] {
@@ -134,3 +136,43 @@ export function isValidGuestPhone(value: string): boolean {
   const digits = text.replace(/\D/g, "").length;
   return digits >= 7 && digits <= 15;
 }
+
+/* ---------- レビュー（niho-coliving/niho-app#19314） ---------- */
+
+/** 平均は 3 件から出す（owner 決定 2026-10-22）。2 件以下は件数と本文だけを見せる。 */
+export const REVIEW_AVERAGE_MIN_COUNT = 3;
+
+export const REVIEW_LIMITS = { bodyMaxLength: 2000, tagMaxLength: 40, displayNameMaxLength: 60, listMaxItems: 50 } as const;
+
+export type ExperienceReviewReply = { hostName: string; body: string };
+
+/**
+ * 公開してよいレビュー 1 件。予約者だけが書き、NIHO が確認してから公開する（owner 決定 2026-10-22）。
+ * 表示名は「名＋国・地域」で、姓・メール・予約の識別子は含めない。
+ */
+export type ExperienceReview = {
+  /** 一覧の key に使う不透明な識別子。予約・利用者の ID ではない。 */
+  id: string;
+  rating: 1 | 2 | 3 | 4 | 5;
+  body: string;
+  /** よかった点（固定の選択肢の表示名）。 */
+  tags: string[];
+  displayName: string;
+  originLabel: string | null;
+  /** 公開した日時（ISO 8601）。新しい順の並びと、構造化データの datePublished に使う。 */
+  publishedAt: string;
+  /** 予約を経由して書かれたレビューか（"Booked on NIHO" の印）。v1 は全件が true の想定。 */
+  fromBooking: boolean;
+  /** 提供者の返信（1 つだけ）。 */
+  reply: ExperienceReviewReply | null;
+};
+
+export type ExperienceReviewTagCount = { label: string; count: number };
+/** 体験ごとの集計。`average` は 1.0〜5.0（件数 0 のとき null）。表示するかどうかは画面の規則（3 件から）。 */
+export type ExperienceReviewSummary = { count: number; average: number | null; tags: ExperienceReviewTagCount[] };
+
+/** `GET /api/public/experiences/{experienceSlug}/reviews?limit=` の応答。`reviews` は新しい順。 */
+export type ExperienceReviewsResponse = { summary: ExperienceReviewSummary; reviews: ExperienceReview[] };
+
+/** 詳細の画面へ渡すレビュー。`unavailable` は読めなかったとき（件数 0 とは別）。 */
+export type JourneyReviews = { status: "ok"; summary: ExperienceReviewSummary; items: ExperienceReview[] } | { status: "unavailable" };

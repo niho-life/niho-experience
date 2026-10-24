@@ -7,6 +7,8 @@ import { CardDates, type CardDatesSource } from "@/components/CardDates";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels, cardFaceOf, type CardModel, type Face } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
+import { getReviewSummaries } from "@/lib/journey";
+import { withReviewLines } from "@/lib/reviews-ui";
 import { config, isPilotPreview, isPreview } from "@/lib/config";
 import { upcomingDays } from "@/lib/date-filter";
 import type { SearchParams } from "@/lib/filters";
@@ -96,7 +98,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   if (!result.ok && result.kind !== "not_found") return <ErrorState title="We couldn't load experiences" />;
   const summaries = result.ok ? result.data.experiences : [];
   const details = await loadDetails(api, summaries, config.publicApiVersion !== "1.0");
-  const cards = buildCardModels(summaries, details, isPilotPreview);
+  const cards = withReviewLines(buildCardModels(summaries, details, isPilotPreview), await getReviewSummaries(summaries.map((summary) => summary.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
   return <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, upcomingDays(new Date(), 14), EN_STATIC_COPY_V1, null)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />;

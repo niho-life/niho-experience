@@ -1,0 +1,23 @@
+{
+  "name": "experience-admin-read-api",
+  "version": "1.0.0",
+  "sourceRepository": "niho-app",
+  "sourceCommit": "08736836328976b130b919bef0ebcdad7d5ba7bb",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "NIHO側で合意済み。API配備・三者受入とapp-connect scope接続は未完了。",
+  "openapiFile": "experience-admin-read-api.openapi.json",
+  "sha256File": "experience-admin-read-api.openapi.json.sha256",
+  "scope": [
+    "cross-host booking query",
+    "booking detail read",
+    "support notification list",
+    "personal notification read receipt"
+  ],
+  "excludedScope": [
+    "booking approval or decline",
+    "booking cancellation or refund",
+    "message delivery",
+    "assignee or internal note mutation",
+    "host support setting mutation"
+  ]
+}

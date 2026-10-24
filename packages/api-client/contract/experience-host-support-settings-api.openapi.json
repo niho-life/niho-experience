@@ -1,0 +1,755 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NIHO Experience Host Support Settings API",
+    "version": "1.0.1",
+    "description": "ホスト本人がNIHOサポート同意設定の対象列挙・参照・保存を行う選別契約。固定APIは親Auth Draftの/api/experience-providers subtreeに含まれる。",
+    "x-niho-contract-status": "agreed-not-deployed",
+    "x-niho-contract-source": "niho-app contracts/openapi.yaml",
+    "x-niho-contract-sha256-file": "experience-host-support-settings-api.openapi.json.sha256"
+  },
+  "servers": [
+    {
+      "url": "https://niho.life",
+      "description": "NIHO API origin"
+    }
+  ],
+  "security": [
+    {
+      "FirebaseIdToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "ExperienceProvider"
+    }
+  ],
+  "paths": {
+    "/api/experience-providers/management/niho-support-hosts": {
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "operationId": "listManagedExperienceNihoSupportHosts",
+        "summary": "ホスト本人がNIHOサポート設定を変更できる対象を列挙する",
+        "description": "現在有効な本人OWNERの通常Spotと外部Providerだけを、kind/idの安定順で最大100件返す。\nProviderはDRAFTを含む既知状態かつactiveな専用vessel、SpotはProvider vesselでない通常拠点に限定する。\nplatform ADMIN・STAFF・EDITOR・共通決済口座はOWNER権限へ読み替えない。queryは受け付けない。\n",
+        "security": [
+          {
+            "FirebaseIdToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsHostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Query is not allowed",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current user is unavailable",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              },
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "GET"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/management/niho-support/{hostKind}/{hostId}": {
+      "parameters": [
+        {
+          "name": "hostKind",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "SPOT",
+              "EXPERIENCE_PROVIDER"
+            ]
+          }
+        },
+        {
+          "name": "hostId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "operationId": "getManagedExperienceNihoSupportSetting",
+        "summary": "ホスト本人が現在のNIHOサポート設定を読む",
+        "description": "現在有効なOWNER本人だけが読む。設定なしはUNSET、現在版の有効snapshotはCURRENT、旧版・不正版は\nRECONSENT_REQUIREDとして保存値を返し、現在のOFFへ補完しない。queryは受け付けない。\n",
+        "security": [
+          {
+            "FirebaseIdToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsStateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid kind or query",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current OWNER permission required",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Host not found or malformed opaque ID",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              },
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "GET, PUT"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "operationId": "putManagedExperienceNihoSupportSetting",
+        "summary": "ホスト本人がNIHOサポートへ再同意して設定を保存する",
+        "description": "現在有効なOWNER本人を設定保存transaction内で再検証し、expectedRevisionでCASする。\n同じ本人・同payloadの応答消失再送だけ同じ結果へ収束する。設定は新規受付だけに使う準備段階で、\nこのAPIの保存だけでは料金・予約snapshotへ接続済みにならない。書込みflagがOFFなら503。\n",
+        "security": [
+          {
+            "FirebaseIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperienceHostSupportSettingsPutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsStateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON body, kind, or query",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current OWNER permission required",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Host not found or malformed opaque ID",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision conflict",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds the stream limit",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type must be application/json",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Support writes are disabled",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceHostSupportSettingsPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportSettingsError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExperienceHostSupportSettingsError": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsHost": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "displayName"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "SPOT",
+              "EXPERIENCE_PROVIDER"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsHostListResponse": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hosts",
+          "limit",
+          "truncated"
+        ],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ExperienceHostSupportSettingsHost"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "enum": [
+              100
+            ]
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsPolicy": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policyVersion",
+          "consentVersion",
+          "offTotalRateBps",
+          "onTotalRateBps",
+          "peopleCostPaidDirectlyByHost",
+          "processingFeesIncluded"
+        ],
+        "properties": {
+          "policyVersion": {
+            "type": "string",
+            "enum": [
+              "2026-10-23"
+            ]
+          },
+          "consentVersion": {
+            "type": "string",
+            "enum": [
+              "2026-10-23"
+            ]
+          },
+          "offTotalRateBps": {
+            "type": "integer",
+            "enum": [
+              1000
+            ]
+          },
+          "onTotalRateBps": {
+            "type": "integer",
+            "enum": [
+              1500
+            ]
+          },
+          "peopleCostPaidDirectlyByHost": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "processingFeesIncluded": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsPutRequest": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "consentVersion",
+          "expectedRevision"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "consentVersion": {
+            "type": "string",
+            "enum": [
+              "2026-10-23"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483646
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsSetting": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "policyVersion",
+          "consentVersion",
+          "consentedAt",
+          "agreementRevision",
+          "sharedConsultationMemo",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "policyVersion": {
+            "type": "string"
+          },
+          "consentVersion": {
+            "type": "string"
+          },
+          "consentedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agreementRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "sharedConsultationMemo": {
+            "type": "string",
+            "maxLength": 4000,
+            "nullable": true
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsStateResponse": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "host",
+          "setting",
+          "settingState",
+          "policy",
+          "writeCapability"
+        ],
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/ExperienceHostSupportSettingsHost"
+          },
+          "setting": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExperienceHostSupportSettingsSetting"
+              }
+            ]
+          },
+          "settingState": {
+            "type": "string",
+            "enum": [
+              "UNSET",
+              "CURRENT",
+              "RECONSENT_REQUIRED"
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ExperienceHostSupportSettingsPolicy"
+          },
+          "writeCapability": {
+            "$ref": "#/components/schemas/ExperienceHostSupportSettingsWriteCapability"
+          }
+        }
+      },
+      "ExperienceHostSupportSettingsWriteCapability": {
+        "x-niho-experience-host-support-settings-dto": true,
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "writable",
+              "reason"
+            ],
+            "properties": {
+              "writable": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "reason": {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "writable",
+              "reason"
+            ],
+            "properties": {
+              "writable": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "SUPPORT_WRITES_DISABLED"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "headers": {
+      "ExperienceHostSupportSettingsPrivateNoStore": {
+        "description": "ホスト本人の支援設定・共有相談内容を共有cacheへ保存しない。",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "private, no-store"
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "FirebaseIdToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+      }
+    }
+  }
+}

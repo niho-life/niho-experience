@@ -217,6 +217,7 @@ test("a draft: what it needs, a photo and an offer, 保存, the consent and 掲�
   await expect(apply).toBeDisabled();
   await expect(listing).toContainText("保存後に申請できます");
   await saveButton(page).click();
+  await expect(page.getByRole("dialog", { name: "保存していない変更があります" })).toHaveCount(0);
   await expect(savedNotice(page)).toBeVisible();
   await expect(apply).toBeEnabled();
   await apply.click();
@@ -503,6 +504,7 @@ test("editor screens have no WCAG 2.2 AA violations", async ({ page }) => {
   await ask.getByRole("button", { name: "編集を続ける" }).click();
   await expect(ask).toHaveCount(0);
   await saveButton(page).click();
+  await expect(page.getByRole("dialog", { name: "保存していない変更があります" })).toHaveCount(0);
   await expect(savedNotice(page)).toBeVisible();
   await audit(page, "saved");
   await panel(page, "申込の設定").getByRole("listitem").first().getByRole("button").click();

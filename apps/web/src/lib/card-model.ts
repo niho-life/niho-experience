@@ -34,6 +34,8 @@ export type CardModel = {
   /** True when options have different adult prices, so the price reads "From ¥X". */
   priceIsFrom: boolean;
   offers: CardOffer[];
+  /** "★ 4.9 · 12" or "2 reviews". Only for experiences that have reviews (lib/reviews-ui.ts); the average only from three. */
+  reviewLine?: { text: string; label: string };
 };
 
 /** First character (grapheme-safe for kana and emoji), upper-cased for Latin names. */

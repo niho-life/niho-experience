@@ -64,6 +64,9 @@ schema 2 は home の2見出しを whole rich message として持つ。`{em}...
 - `BookingCheckoutViewModelV1.guestPhone`：任意の携帯電話の欄（`type="tel"`・24 字まで）。
 - `BookingCheckoutViewModelV1.hostQuestionsHeading`：質問の見出しの置き換え。
 - callbacks：`onGuestPhoneChange`・`onConditionsAgreementChange`。
+- `DetailViewModelV1.reviewHeadline`（`{ label, accessibleLabel?, href?, isNew? }`）：題名の下の 1 行。`href` があれば内部リンク、`isNew` なら "New" のバッジ。
+- `DetailViewModelV1.reviews`（`{ title, content }`）：取消の前に置く節（`id="reviews"`・`scroll-margin` 付き）。見出しの文言と中身は consumer が渡す。
+- `ExperienceCardModelV1.reviewLine`（`{ text, label }`）：カードの所要時間・言語の行の末尾（見た目の文と読み上げの文）。
 
 ## 依存配布の分離
 

@@ -1,0 +1,23 @@
+{
+  "name": "experience-admin-auth-api",
+  "version": "1.0.0",
+  "sourceRepository": "niho-app",
+  "sourceCommit": "b1bee0090e",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "NIHO側の先行実装。配備・本番受入は未完了。",
+  "openapiFile": "experience-admin-auth-api.openapi.json",
+  "sha256File": "experience-admin-auth-api.openapi.json.sha256",
+  "scope": [
+    "app-connect start",
+    "one-time code exchange",
+    "short token refresh",
+    "experience admin session verification",
+    "own connection revocation"
+  ],
+  "excludedScope": [
+    "booking reads or mutations",
+    "pricing",
+    "notifications",
+    "host settings"
+  ]
+}

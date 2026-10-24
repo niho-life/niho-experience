@@ -30,8 +30,67 @@
       "types": "./src/host/mock.ts",
       "default": "./src/host/mock.ts"
     },
+    "./admin-auth": {
+      "types": "./src/admin-auth/index.ts",
+      "default": "./src/admin-auth/index.ts"
+    },
+    "./admin-read": {
+      "types": "./src/admin-read/index.ts",
+      "default": "./src/admin-read/index.ts"
+    },
+    "./admin-read-schema": {
+      "types": "./src/admin-read/schema.ts",
+      "default": "./src/admin-read/schema.ts"
+    },
+    "./admin-support-case": {
+      "types": "./src/admin-support-case/index.ts",
+      "default": "./src/admin-support-case/index.ts"
+    },
+    "./admin-support-case-schema": {
+      "types": "./src/admin-support-case/schema.ts",
+      "default": "./src/admin-support-case/schema.ts"
+    },
+    "./admin-operations": {
+      "types": "./src/admin-operations/index.ts",
+      "default": "./src/admin-operations/index.ts"
+    },
+    "./admin-operations-schema": {
+      "types": "./src/admin-operations/schema.ts",
+      "default": "./src/admin-operations/schema.ts"
+    },
+    "./host-support-history": {
+      "types": "./src/host-support-history/index.ts",
+      "default": "./src/host-support-history/index.ts"
+    },
+    "./host-support-history-schema": {
+      "types": "./src/host-support-history/schema.ts",
+      "default": "./src/host-support-history/schema.ts"
+    },
+    "./host-support-settings": {
+      "types": "./src/host-support-settings/index.ts",
+      "default": "./src/host-support-settings/index.ts"
+    },
+    "./host-support-settings-schema": {
+      "types": "./src/host-support-settings/schema.ts",
+      "default": "./src/host-support-settings/schema.ts"
+    },
+    "./fee-summary": {
+      "types": "./src/fee-summary/index.ts",
+      "default": "./src/fee-summary/index.ts"
+    },
+    "./fee-summary-server": {
+      "types": "./src/fee-summary/server.ts",
+      "default": "./src/fee-summary/server.ts"
+    },
     "./contract/experience-public-api.openapi.json": "./contract/experience-public-api.openapi.json",
-    "./contract/experience-host-api.openapi.json": "./contract/experience-host-api.openapi.json"
+    "./contract/experience-host-api.openapi.json": "./contract/experience-host-api.openapi.json",
+    "./contract/experience-admin-auth-api.openapi.json": "./contract/experience-admin-auth-api.openapi.json",
+    "./contract/experience-admin-read-api.openapi.json": "./contract/experience-admin-read-api.openapi.json",
+    "./contract/experience-admin-support-case-api.openapi.json": "./contract/experience-admin-support-case-api.openapi.json",
+    "./contract/experience-admin-operations-api.openapi.json": "./contract/experience-admin-operations-api.openapi.json",
+    "./contract/experience-host-support-history-api.openapi.json": "./contract/experience-host-support-history-api.openapi.json",
+    "./contract/experience-host-support-settings-api.openapi.json": "./contract/experience-host-support-settings-api.openapi.json",
+    "./contract/experience-fee-summary-api.openapi.json": "./contract/experience-fee-summary-api.openapi.json"
   },
   "scripts": {
     "gen:types": "node ./scripts/gen-types.ts",

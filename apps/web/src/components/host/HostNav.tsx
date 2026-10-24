@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useRef } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
 import { nihoIdOrNull, providerRoleLabel, selectProvider, type HostProviderChoice } from "@/lib/host/providers";
-import { HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
+import { hostSupportPath, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
 import { HostIcon, type HostIconName } from "./HostIcon";
 import { AccountAvatar, InitialAvatar, type HostAccount } from "./ui";
 
@@ -105,6 +105,7 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
   const pathname = usePathname();
   const providerId = useProviderId();
   const name = account.displayName || "NIHO アカウント";
+  const { provider: current } = selectProvider(providers, providerId);
   return (
     <header className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-canvas px-3 pt-[18px] pb-3.5 md:flex">
       <p className="px-2.5 pt-1 pb-4">
@@ -137,6 +138,10 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
         </>
       ) : null}
       <div className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
+        <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} className={FOOT_LINK}>
+          <HostIcon name="settings" className="size-3.5" />
+          <span>NIHOサポート</span>
+        </Link>
         <a href={TRAVELER_SITE_PATH} className={FOOT_LINK}>
           <HostIcon name="external" className="size-3.5" />
           <span>体験サイトを見る</span>
@@ -152,7 +157,7 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
             <p className="text-xs leading-[1.3] text-muted">NIHO アカウント</p>
           </div>
         </div>
-        <form method="post" action={HOST_LOGOUT_PATH}>
+        <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form>
           <button type="submit" className={`${FOOT_LINK} w-full`}>
             ログアウト
           </button>
@@ -187,6 +192,10 @@ function AccountMenu({ account, providers, nihoAppUrl }: HostChromeProps) {
           </div>
         ) : null}
         <div className="flex flex-col gap-0.5 border-t border-line py-1">
+          <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} onClick={() => menu.current?.removeAttribute("open")} className={MENU_LINK}>
+            <HostIcon name="settings" className="size-3.5" />
+            <span>NIHOサポート</span>
+          </Link>
           <a href={TRAVELER_SITE_PATH} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />
             <span>体験サイトを見る</span>
@@ -196,7 +205,7 @@ function AccountMenu({ account, providers, nihoAppUrl }: HostChromeProps) {
             <span>NIHO アプリ</span>
           </a>
         </div>
-        <form method="post" action={HOST_LOGOUT_PATH} className="border-t border-line pt-1">
+        <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form className="border-t border-line pt-1">
           <button type="submit" className={`${MENU_LINK} w-full`}>
             ログアウト
           </button>

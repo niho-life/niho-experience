@@ -1,4 +1,4 @@
-import { HOST_BOOKINGS_PATH, HOST_HOME_PATH, HOST_MESSAGES_PATH, HOST_NAV, HOST_REVIEWS_PATH } from "@/lib/host/routes";
+import { HOST_BOOKINGS_PATH, HOST_HOME_PATH, HOST_MESSAGES_PATH, HOST_NAV, HOST_REVIEWS_PATH, HOST_SUPPORT_PATH } from "@/lib/host/routes";
 
 /** Path only: `?providerId=` (and any other query or hash) never changes which item is selected. */
 function pathOf(location: string): string {
@@ -11,7 +11,7 @@ function pathOf(location: string): string {
  * (#108). The menu keeps ホーム selected and phones get "‹ ホーム" instead of the brand header and
  * the bottom tabs.
  */
-const HOME_SUB_SCREENS: readonly string[] = [HOST_MESSAGES_PATH, HOST_REVIEWS_PATH];
+const HOME_SUB_SCREENS: readonly string[] = [HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, HOST_SUPPORT_PATH];
 
 const isUnder = (path: string, target: string) => path === target || path.startsWith(`${target}/`);
 

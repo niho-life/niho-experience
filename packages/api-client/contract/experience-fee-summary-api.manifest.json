@@ -1,0 +1,22 @@
+{
+  "name": "experience-fee-summary-api",
+  "version": "1.0.0",
+  "sourceRepository": "niho-app",
+  "sourceCommit": "291bc1fca9a9e21ebaeae4a9637379afc472aa61",
+  "jsonSha256": "c7b39ac5ae5331268915f4b9b2ded477a09f35eb333a291a9826e6b8f3a9d95e",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "NIHO側で合意済み。API先行配備、Admin実接続、Host実予約導線と三者受入は未完了。",
+  "openapiFile": "experience-fee-summary-api.openapi.json",
+  "sha256File": "experience-fee-summary-api.openapi.json.sha256",
+  "scope": [
+    "current platform ADMIN per-booking fee summary read",
+    "current OWNER per-booking fee summary read for both host kinds",
+    "selected booking fee, refund and settlement amounts"
+  ],
+  "excludedScope": [
+    "payment, refund, transfer or ledger mutation",
+    "direct Stripe access",
+    "internal reason display or private identifiers",
+    "translation staffing or labor payment"
+  ]
+}

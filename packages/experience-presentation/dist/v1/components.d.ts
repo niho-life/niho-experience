@@ -107,6 +107,11 @@ export type ExperienceCardModelV1 = Readonly<{
     priceLabel: string;
     priceIsFrom: boolean;
     priceSuffix: string;
+    /** "★ 4.9 · 12" and its spoken form. Only for experiences that have reviews (the average only from three). */
+    reviewLine?: Readonly<{
+        text: string;
+        label: string;
+    }>;
 }>;
 export declare function ExperienceCardV1({ card, dates, highlight, variant, priority, primitives, copy }: {
     card: ExperienceCardModelV1;

@@ -1,0 +1,626 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NIHO Experience Admin Support Case API",
+    "version": "1.0.0",
+    "description": "niho-experienceのAdmin画面へ配る予約別担当・内部メモの選別契約。正本はniho-appのcontracts/openapi.yaml。認証接続と実API配備は別工程。",
+    "x-niho-contract-status": "agreed-not-deployed",
+    "x-niho-contract-source": "niho-app contracts/openapi.yaml",
+    "x-niho-contract-sha256-file": "experience-admin-support-case-api.openapi.json.sha256"
+  },
+  "servers": [
+    {
+      "url": "https://niho.life",
+      "description": "NIHO API origin"
+    }
+  ],
+  "security": [
+    {
+      "FirebaseIdToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Admin"
+    }
+  ],
+  "paths": {
+    "/api/admin/experience-bookings/{requestId}/support-case": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "getAdminExperienceSupportCase",
+        "summary": "platform ADMINが予約別の事務局支援ケースを読む",
+        "description": "提供者または通常Spotの体験予約を再検証し、担当・事務局内部メモ・CAS revision・書込可否を返す。\n未作成はrevision 0の空状態。ホストへは公開しない。全応答は`Cache-Control: private, no-store`。\n",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceAdminSupportCaseReadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseNotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseMethodNotAllowed"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "patchAdminExperienceSupportCase",
+        "summary": "platform ADMINが予約別の担当・内部メモをCAS更新する",
+        "description": "支援ONで受け付けた取引PII期限内の予約だけを更新する。担当候補とactorはtransaction内で現在の\nplatform ADMINかつ未退会であることを再検証する。内部メモ本文は監査・ログへ複製しない。\n",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperienceAdminSupportCasePatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceAdminSupportCasePatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseNotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseMethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseConflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/admin/experience-support-admins": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "listAdminExperienceSupportAdmins",
+        "summary": "体験支援ケースへ割り当て可能なplatform ADMINを返す",
+        "description": "現在有効なplatform ADMINのopaque IDとdisplayNameだけを安定順で最大100件返し、超過はtruncatedで明示する。\n全応答は`Cache-Control: private, no-store`。\n",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceAdminSupportAdminListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceAdminSupportCaseForbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/ExperienceAdminSupportAdminMethodNotAllowed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExperienceAdminSupportAdmin": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceAdminSupportAdminListResponse": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "admins",
+          "truncated"
+        ],
+        "properties": {
+          "admins": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportAdmin"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExperienceAdminSupportCase": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bookingRequestId",
+          "assignedAdmin",
+          "internalMemo",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "bookingRequestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "assignedAdmin": {
+            "$ref": "#/components/schemas/ExperienceAdminSupportCaseAssignment"
+          },
+          "internalMemo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "nullable": true
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseAssignment": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "id",
+              "displayName"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "displayName": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "UNASSIGNED",
+                  "UNAVAILABLE"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "ExperienceAdminSupportCaseErrorResponse": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCasePatchRequest": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 2,
+        "required": [
+          "expectedRevision"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "assignedAdminUserId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "nullable": true
+          },
+          "internalMemo": {
+            "type": "string",
+            "maxLength": 4000,
+            "pattern": "^[^\\u0000]*$",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceAdminSupportCasePatchResponse": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "supportCase"
+        ],
+        "properties": {
+          "supportCase": {
+            "$ref": "#/components/schemas/ExperienceAdminSupportCase"
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseReadResponse": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "supportCase",
+          "writeCapability"
+        ],
+        "properties": {
+          "supportCase": {
+            "$ref": "#/components/schemas/ExperienceAdminSupportCase"
+          },
+          "writeCapability": {
+            "$ref": "#/components/schemas/ExperienceAdminSupportCaseWriteCapability"
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseWriteCapability": {
+        "x-niho-experience-admin-support-case-dto": true,
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "writable",
+              "reason"
+            ],
+            "properties": {
+              "writable": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "reason": {
+                "type": "object",
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "writable",
+              "reason"
+            ],
+            "properties": {
+              "writable": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "WRITES_DISABLED",
+                  "SUPPORT_OFF",
+                  "SUPPORT_LEGACY",
+                  "SUPPORT_INVALID",
+                  "PII_RETENTION_EXPIRED"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "responses": {
+      "ExperienceAdminSupportAdminMethodNotAllowed": {
+        "description": "未定義のHTTPメソッド",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          },
+          "Allow": {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "GET"
+              ]
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseConflict": {
+        "description": "revision競合、担当失効、支援条件またはPII期限により更新不可",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseForbidden": {
+        "description": "現在有効なplatform ADMIN権限が必要",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseMethodNotAllowed": {
+        "description": "未定義のHTTPメソッド",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          },
+          "Allow": {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "GET, PATCH"
+              ]
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseNotFound": {
+        "description": "対象が無いか現在の体験予約scope外",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseServiceUnavailable": {
+        "description": "支援書込flagが無効",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseUnauthorized": {
+        "description": "認証が必要",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      },
+      "ExperienceAdminSupportCaseValidationError": {
+        "description": "入力が不正",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/ExperienceAdminSupportCasePrivateNoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceAdminSupportCaseErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "ExperienceAdminSupportCasePrivateNoStore": {
+        "description": "事務局内部メモを含むAdmin本人向け応答を共有cacheへ保存しない。",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "private, no-store"
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "FirebaseIdToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+      }
+    }
+  }
+}

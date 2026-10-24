@@ -6,9 +6,9 @@ import { computeExpectedTotalYen } from "../booking-rules.ts";
 import { buildMockOccurrences } from "../fixtures/availability.ts";
 import { toExperienceSummary } from "../fixtures/catalog.ts";
 import { buildFixtureExperiences, FIXTURE_CONSENT_VERSION } from "../fixtures/experiences.ts";
-import { journeyExtrasFor } from "../fixtures/journey.ts";
+import { journeyExtrasFor, reviewsResponseFor } from "../fixtures/journey.ts";
 import { buildPilotExperiences } from "../fixtures/pilot-experiences.ts";
-import { ASK_HOST_INPUT_LIMITS, askHostInputProblem, conditionConsentTexts, isValidGuestPhone, usableConditions, type AskHostErrorCode, type AskHostTopic } from "../journey.ts";
+import { ASK_HOST_INPUT_LIMITS, REVIEW_LIMITS, askHostInputProblem, conditionConsentTexts, isValidGuestPhone, usableConditions, type AskHostErrorCode, type AskHostTopic } from "../journey.ts";
 import type { FetchLike } from "../client.ts";
 import type { CheckoutErrorCode, ExperienceCheckoutError, ExperienceDetail, ExperienceDetailV11, ExperienceSiteTheme, ExperienceSummaryV12, Occurrence } from "../types.ts";
 
@@ -31,6 +31,8 @@ export const MOCK_SCENARIOS = [
   "ask-rate-limited",
   "ask-unavailable",
   "ask-send-failed",
+  // レビュー（仮契約）：一覧の応答だけを失敗させる。
+  "reviews-error",
 ] as const;
 export type MockScenario = (typeof MOCK_SCENARIOS)[number];
 
@@ -464,6 +466,14 @@ export function createMockExperienceFetch(options: MockExperienceFetchOptions = 
         return checkoutError("VALIDATION_ERROR");
       }
       return handleCheckout(experience, body, new Headers(init?.headers).get("dnt") === "1");
+    }
+    if (tail === "reviews" && method === "GET") {
+      if (!experience) return notFound();
+      if (scenario === "reviews-error") return json(503, { error: { code: "UNAVAILABLE", message: "mock: reviews unavailable" } }, "no-store");
+      const limitParam = url.searchParams.get("limit");
+      const limit = limitParam === null ? REVIEW_LIMITS.listMaxItems : Number(limitParam);
+      if (!Number.isInteger(limit) || limit < 1 || limit > REVIEW_LIMITS.listMaxItems) return validationError("limit is invalid");
+      return json(200, reviewsResponseFor(experience.slug, limit), SHARED_CACHE);
     }
     if (tail === "questions" && method === "POST") {
       if (!experience) return notFound();

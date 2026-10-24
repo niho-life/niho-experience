@@ -168,6 +168,18 @@ export type DetailCancellationModelV1 = Readonly<{
     sellerName: string;
     sellerLegalUrl?: string;
 }>;
+/** The one line under the title: "★ 4.9 · 12 reviews" (a link to the reviews), "2 reviews", or the "New" badge. The consumer supplies the strings. */
+export type DetailReviewHeadlineV1 = Readonly<{
+    label: string;
+    accessibleLabel?: string;
+    href?: string;
+    isNew?: boolean;
+}>;
+/** The reviews section (anchor `#reviews`): a heading and the consumer's content. Placed before the cancellation terms. */
+export type DetailReviewsV1 = Readonly<{
+    title: string;
+    content: ReactNode;
+}>;
 /** One structured participation condition ("Ages 10 and up" + a smaller line). The consumer supplies the display strings. */
 export type DetailConditionV1 = Readonly<{
     icon: HandIconName;
@@ -218,6 +230,8 @@ export type DetailViewModelV1 = Readonly<{
     checkoutCancelled?: ReactNode;
     conditions?: readonly DetailConditionV1[];
     askHost?: ReactNode;
+    reviewHeadline?: DetailReviewHeadlineV1;
+    reviews?: DetailReviewsV1;
 }>;
 export declare function DetailViewV1({ model, primitives, copy, headings }: {
     model: DetailViewModelV1;

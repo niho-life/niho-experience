@@ -21,7 +21,7 @@ import { formatDuration, formatYen } from "@/lib/format";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { addMinutesToClock, formatClock, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { seoDescription } from "@/lib/seo-description";
-import { breadcrumbJsonLd, experienceJsonLd } from "@/lib/structured-data";
+import { breadcrumbJsonLd, experienceJsonLd, reviewsForJsonLd } from "@/lib/structured-data";
 import { iconForText } from "@/lib/themes";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { publicMetadata } from "@/lib/public-metadata";
@@ -29,9 +29,11 @@ import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, japanese
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { LocalizedLink as Link } from "@/components/LocalizedLink";
 import { AskHost } from "@/components/AskHost";
+import { ReviewsSection } from "@/components/ReviewsSection";
 import { NO_JOURNEY_EXTRAS } from "@niho-experience/api-client";
 import { getJourneyExtras } from "@/lib/journey";
 import { askHostTarget, conditionRows } from "@/lib/journey-ui";
+import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -118,7 +120,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     throw error;
   }
   // Conditions and questions to the host have no NIHO contract yet: the mock serves them, a real API shows none (src/lib/journey.ts).
-  const journey = locale === "en" ? await getJourneyExtras(e.slug) : NO_JOURNEY_EXTRAS;
+  const journey = locale === "en" ? await getJourneyExtras(e.slug, query) : NO_JOURNEY_EXTRAS;
   const checkoutCancelled = query.checkout === "cancelled";
   const browseContext = readBrowseContext(query);
   const preferredOfferId = typeof query.offer === "string" && e.offers.some((offer) => offer.id === query.offer) ? query.offer : undefined;
@@ -483,6 +485,8 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       know: e.knowBeforeYouGo,
       conditions: journey.conditions ? conditionRows(journey.conditions) : undefined,
       askHost: journey.questionsOpen ? <AskHost slug={e.slug} target={askHostTarget(hostNames(e))} face={faceOf(e)} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> : undefined,
+      reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews)) ?? undefined,
+      reviews: journey.reviews ? { title: "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> } : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
       cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
@@ -492,7 +496,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     return <DetailViewV1 model={model} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} headings={{ overview: blockText(props, "overviewHeading", copy.text("detail.whatYouDo")), details: blockText(props, "detailsHeading", copy.text("detail.timeline")) }} />;
   };
   return <>
-    {locale === "en" ? <><TrackView event="experience_view" props={{ experience: e.slug }} /><JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Experiences", path: "/experiences" }, { name: e.title, path: `/experiences/${e.slug}` }])} /><JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, config.bookingsEnabled)} /></> : null}
+    {locale === "en" ? <><TrackView event="experience_view" props={{ experience: e.slug }} /><JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Experiences", path: "/experiences" }, { name: e.title, path: `/experiences/${e.slug}` }])} /><JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, config.bookingsEnabled, reviewsForJsonLd(journey.reviews))} /></> : null}
     {portableDetail()}
     <MobileBookingBar summary={booking} />
   </>;

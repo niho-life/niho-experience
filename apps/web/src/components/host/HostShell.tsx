@@ -6,8 +6,8 @@ import type { HostAccount } from "./ui";
 /**
  * The signed-in frame (mock v2 of the provider workspace, #84): on PC (md and up)
  * a 232px sidebar beside the page; on phones a brand header and five bottom tabs.
- * An account with no provider yet has nowhere to go but registration, so the
- * menus are left out.
+ * An account with no provider yet keeps the account/support exits, while the
+ * provider-specific five-section menu stays hidden.
  */
 export function HostShell({ account, providers, nihoAppUrl, preview, children }: { account: HostAccount; providers: readonly HostProviderChoice[]; nihoAppUrl: string; preview: boolean; children: ReactNode }) {
   return (

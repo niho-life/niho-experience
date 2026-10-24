@@ -172,12 +172,12 @@ test("体験: the list, one experience, and back", async ({ page }, testInfo) =>
   await expect(page.getByRole("heading", { name: "ページが見つかりません" })).toBeVisible();
 });
 
-test("設定 has six panels, and 保存 checks the fields and keeps what NIHO has no API for on screen", async ({ page }, testInfo) => {
+test("設定 has seven panels, and 保存 checks the fields and keeps what NIHO has no API for on screen", async ({ page }, testInfo) => {
   await signIn(page);
   await menu(page).getByRole("link", { name: "設定" }).click();
   await page.waitForURL(/\/host\/settings$/);
   await expect(page.getByRole("heading", { level: 1, name: "設定" })).toBeVisible();
-  await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "アカウント"]);
+  await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "NIHOサポート", "アカウント"]);
 
   const provider = page.getByRole("region", { name: "提供者情報" });
   await expect(provider).toContainText("審査済み");
@@ -239,10 +239,10 @@ test("設定 has six panels, and 保存 checks the fields and keeps what NIHO ha
 test("an account without a provider is led to registration, and registering opens the console", async ({ page }) => {
   await signIn(page, "?mock=empty");
   await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "まず提供者として登録しましょう" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "体験を掲載する場合は提供者登録へ" })).toBeVisible();
   await expect(menu(page)).toHaveCount(0);
   await page.goto("/host/settings");
-  await expect(page.getByRole("heading", { name: "まず提供者として登録しましょう" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "体験を掲載する場合は提供者登録へ" })).toBeVisible();
 
   await page.getByRole("link", { name: "提供者として登録" }).click();
   await page.waitForURL(/\/host\/register$/);

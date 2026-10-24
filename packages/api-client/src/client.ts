@@ -23,7 +23,7 @@ import type {
   SelectedExperienceAvailabilityResponse,
   LocalizedCheckoutOutdatedError,
 } from "./types.ts";
-import type { AskHostError, AskHostErrorCode, AskHostRequest, AskHostResult, ExperienceCheckoutJourneyFields } from "./journey.ts";
+import { REVIEW_LIMITS, type AskHostError, type AskHostErrorCode, type AskHostRequest, type AskHostResult, type ExperienceCheckoutJourneyFields, type ExperienceReviewsResponse } from "./journey.ts";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -158,6 +158,37 @@ function isAskHostError(value: unknown, status: number): value is AskHostError {
     typeof value.retryable === "boolean" &&
     isNullableString(value.field)
   );
+}
+
+function isNonEmptyText(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+/** レビュー 1 件（仮契約・journey.ts）。閉じた形だけを受ける。 */
+function isReview(value: unknown): boolean {
+  if (!isObject(value) || Object.keys(value).length !== 9) return false;
+  const reply = value.reply;
+  return (
+    isNonEmptyText(value.id, 64) &&
+    Number.isInteger(value.rating) && (value.rating as number) >= 1 && (value.rating as number) <= 5 &&
+    isNonEmptyText(value.body, REVIEW_LIMITS.bodyMaxLength) &&
+    Array.isArray(value.tags) && value.tags.length <= 8 && value.tags.every((tag) => isNonEmptyText(tag, REVIEW_LIMITS.tagMaxLength)) &&
+    isNonEmptyText(value.displayName, REVIEW_LIMITS.displayNameMaxLength) &&
+    (value.originLabel === null || isNonEmptyText(value.originLabel, REVIEW_LIMITS.displayNameMaxLength)) &&
+    typeof value.publishedAt === "string" && Number.isFinite(Date.parse(value.publishedAt)) &&
+    typeof value.fromBooking === "boolean" &&
+    (reply === null || (isObject(reply) && Object.keys(reply).length === 2 && isNonEmptyText(reply.hostName, REVIEW_LIMITS.displayNameMaxLength) && isNonEmptyText(reply.body, REVIEW_LIMITS.bodyMaxLength)))
+  );
+}
+
+function hasReviewsShape(value: unknown): boolean {
+  if (!isObject(value) || Object.keys(value).length !== 2) return false;
+  const summary = value.summary;
+  if (!isObject(summary) || Object.keys(summary).length !== 3 || !Number.isInteger(summary.count) || (summary.count as number) < 0) return false;
+  const average = summary.average;
+  const validAverage = summary.count === 0 ? average === null : typeof average === "number" && average >= 1 && average <= 5;
+  const validTags = Array.isArray(summary.tags) && summary.tags.every((tag) => isObject(tag) && Object.keys(tag).length === 2 && isNonEmptyText(tag.label, REVIEW_LIMITS.tagMaxLength) && Number.isInteger(tag.count) && (tag.count as number) > 0);
+  return validAverage && validTags && Array.isArray(value.reviews) && value.reviews.length <= REVIEW_LIMITS.listMaxItems && value.reviews.every(isReview);
 }
 
 function hasExperienceCatalogShape(value: unknown): boolean {
@@ -335,6 +366,12 @@ export function createExperienceApiClient(options: ExperienceApiClientOptions) {
     /** 提供者の紹介と写真の説明を含む v1.1 の詳細。 */
     getExperienceV11(slug: string): Promise<ReadResult<ExperienceDetailResponseV11>> {
       return readJson(`/api/public/experiences/v1.1/${encodeURIComponent(slug)}`, true, hasExperienceDetailV11Shape);
+    },
+
+    /** レビューの一覧（新しい順）と集計。SSR でもブラウザからでも読める（仮契約・journey.ts）。 */
+    listReviews(slug: string, params: { limit?: number } = {}): Promise<ReadResult<ExperienceReviewsResponse>> {
+      const query = params.limit ? `?limit=${encodeURIComponent(String(params.limit))}` : "";
+      return readJson(`/api/public/experiences/${encodeURIComponent(slug)}/reviews${query}`, true, hasReviewsShape);
     },
 
     /** 開催回と残席（ブラウザから。キャッシュしない）。 */

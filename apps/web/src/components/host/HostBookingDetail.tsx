@@ -18,7 +18,9 @@ import type { HostBooking } from "@/host/types";
 import { BookingCancelDialog, BookingDecisionDialog, DANGER_BUTTON } from "./HostBookingDialogs";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
+import { HostBookingSupportPanel } from "./HostBookingSupportPanel";
 import { StatusPill } from "./ui";
+import { FeeSummaryPanel } from "@/components/FeeSummaryPanel";
 
 /** One part of the booking (申込内容, 状態, メッセージ, 時系列) under a hairline. */
 function DetailSection({ title, children }: { title: string; children: ReactNode }) {
@@ -102,6 +104,10 @@ export interface HostBookingDetailProps {
   notice: string;
   /** The booking's thread, or the way to start one; null when the guest cannot be written to (お断り・期限切れ). */
   conversation: BookingConversationLink | null;
+  providerId: string;
+  supportPreview: boolean;
+  supportHistoryEnabled: boolean;
+  feeSummaryEnabled: boolean;
   onApprove: () => void;
   onDecline: () => void;
   onCancel: (cancellation: BookingCancellation) => void;
@@ -112,7 +118,7 @@ export interface HostBookingDetailProps {
  * host can do now, メッセージ (the way into its thread) and 時系列. 承認・お断り・取消 are
  * asked in a dialog first.
  */
-export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, onApprove, onDecline, onCancel }: HostBookingDetailProps) {
+export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, onApprove, onDecline, onCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | null>(null);
   const actions = bookingActions(booking.status);
 
@@ -174,6 +180,8 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       <DetailSection title="状態">
         <Rows rows={bookingStateRows(booking)} />
       </DetailSection>
+      <HostBookingSupportPanel providerId={providerId} bookingId={booking.id} preview={supportPreview} historyEnabled={supportHistoryEnabled} />
+      <FeeSummaryPanel key={`host-fee-${booking.id}`} audience="host" bookingId={booking.id} actorKey={providerId} enabled={feeSummaryEnabled} />
       {next ? <div className="mt-3.5 border-t border-line pt-3.5">{next}</div> : null}
       {conversation ? <ConversationSection conversation={conversation} /> : null}
       <DetailSection title="時系列">

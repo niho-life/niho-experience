@@ -1,0 +1,433 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NIHO Experience Fee Summary API",
+    "version": "1.0.0",
+    "description": "体験料金のAdmin/Host本人向け最小read契約。Stripe ID・元口座・内部hash・旅行者PIIは含めない。",
+    "x-niho-contract-status": "agreed-not-deployed",
+    "x-niho-contract-source": "niho-app contracts/openapi.yaml",
+    "x-niho-contract-sha256-file": "experience-fee-summary-api.openapi.json.sha256"
+  },
+  "servers": [
+    {
+      "url": "https://niho.life",
+      "description": "NIHO API origin"
+    }
+  ],
+  "security": [
+    {
+      "FirebaseIdToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Admin"
+    },
+    {
+      "name": "ExperienceProvider"
+    }
+  ],
+  "paths": {
+    "/api/admin/experience-bookings/{requestId}/fee-summary": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "getAdminExperienceBookingFeeSummary",
+        "summary": "platform ADMINが体験料金の最小精算summaryを読む",
+        "description": "固定GET。元口座・Stripe ID・内部hash・旅行者PIIを返さず、全応答をprivate no-storeにする。",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceFeeSummaryPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/management/bookings/{requestId}/fee-summary": {
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "operationId": "getManagedExperienceBookingFeeSummary",
+        "summary": "現在OWNER本人が両host kindの体験料金summaryを読む",
+        "description": "固定GET。Provider vesselと通常Spotを本人の管理範囲だけで選別し、元口座・Stripe ID・内部hash・旅行者PIIを返さない。",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceFeeSummaryPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceFeeSummaryError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExperienceFeeSummary": {
+        "x-niho-experience-fee-summary-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "bookingRequestId",
+          "status",
+          "feePolicy",
+          "accounting",
+          "needsAttention",
+          "reason",
+          "evidenceCheckedAt",
+          "settledAt"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "1.0.0"
+            ]
+          },
+          "bookingRequestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "LEGACY_NOT_RECORDED",
+              "PREPARING",
+              "PROCESSING_COST_PENDING",
+              "PROCESSING",
+              "RESULT_UNKNOWN",
+              "REVIEW_REQUIRED",
+              "SETTLED"
+            ]
+          },
+          "feePolicy": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExperienceFeeSummaryPolicy"
+              }
+            ]
+          },
+          "accounting": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExperienceFeeSummaryAccounting"
+              }
+            ]
+          },
+          "needsAttention": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "evidenceCheckedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "settledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceFeeSummaryAccounting": {
+        "x-niho-experience-fee-summary-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "successfulRefundedYen",
+          "pendingRefundedYen",
+          "targetTotalFeeYen",
+          "applicationFeeRefundedYen",
+          "targetApplicationFeeRefundYen",
+          "processingCompensatedYen",
+          "targetProcessingCompensationYen",
+          "hostRetainedAfterCreditsYen",
+          "netNihoCashYen"
+        ],
+        "properties": {
+          "successfulRefundedYen": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "pendingRefundedYen": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "targetTotalFeeYen": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "applicationFeeRefundedYen": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "targetApplicationFeeRefundYen": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "processingCompensatedYen": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "targetProcessingCompensationYen": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "hostRetainedAfterCreditsYen": {
+            "type": "integer",
+            "nullable": true
+          },
+          "netNihoCashYen": {
+            "type": "integer",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceFeeSummaryError": {
+        "x-niho-experience-fee-summary-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "ExperienceFeeSummaryPolicy": {
+        "x-niho-experience-fee-summary-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "supportEnabled",
+          "totalRateBps",
+          "originalGrossYen",
+          "originalApplicationFeeYen",
+          "processingFeesIncluded",
+          "laborPaidDirectlyByHost"
+        ],
+        "properties": {
+          "supportEnabled": {
+            "type": "boolean"
+          },
+          "totalRateBps": {
+            "type": "integer",
+            "enum": [
+              1000,
+              1500
+            ]
+          },
+          "originalGrossYen": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "originalApplicationFeeYen": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "processingFeesIncluded": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "laborPaidDirectlyByHost": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        }
+      },
+      "ExperienceFeeSummaryResponse": {
+        "x-niho-experience-fee-summary-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "feeSummary"
+        ],
+        "properties": {
+          "feeSummary": {
+            "$ref": "#/components/schemas/ExperienceFeeSummary"
+          }
+        }
+      }
+    },
+    "headers": {
+      "ExperienceFeeSummaryPrivateNoStore": {
+        "description": "体験料金のAdmin/Host本人向けsummaryを共有cacheへ保存しない。",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "private, no-store"
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "FirebaseIdToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+      }
+    }
+  }
+}

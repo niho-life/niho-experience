@@ -1,0 +1,451 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NIHO Experience Host Support History API",
+    "version": "1.0.0",
+    "description": "ホスト本人へNIHO事務局の対応履歴を返す選別契約。固定GETは親Auth Draftの/api/experience-providers subtreeに含まれる。",
+    "x-niho-contract-status": "agreed-not-deployed",
+    "x-niho-contract-source": "niho-app contracts/openapi.yaml",
+    "x-niho-contract-sha256-file": "experience-host-support-history-api.openapi.json.sha256"
+  },
+  "servers": [
+    {
+      "url": "https://niho.life",
+      "description": "NIHO API origin"
+    }
+  ],
+  "security": [
+    {
+      "FirebaseIdToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "ExperienceProvider"
+    }
+  ],
+  "paths": {
+    "/api/experience-providers/management/bookings/{requestId}/support-history": {
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "operationId": "getManagedExperienceBookingSupportHistory",
+        "summary": "ホスト本人がNIHO事務局の対応履歴を読む",
+        "description": "両host kindの本人管理範囲だけ。最大50件の最小metadataで、内部メモ・actor連絡先・payload hash・Stripe IDは返さない。",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceAdminPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportHistoryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportHistoryError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/management/bookings/{requestId}/support-history/{operationId}": {
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "operationId": "getManagedExperienceBookingSupportHistoryDetail",
+        "summary": "ホスト本人がNIHO事務局の対応詳細を読む",
+        "description": "本人予約の既存message/cancelMessage参照から連絡本文を返す。事務局内部メモは返さない。",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/ExperienceAdminPrivateNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportHistoryDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostSupportHistoryError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExperienceHostSupportCommunication": {
+        "x-niho-experience-host-support-history-dto": true,
+        "type": "object",
+        "nullable": true,
+        "additionalProperties": false,
+        "required": [
+          "messageId",
+          "subject",
+          "body",
+          "retained",
+          "deliveryStatus"
+        ],
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "nullable": true
+          },
+          "subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "retained": {
+            "type": "boolean"
+          },
+          "deliveryStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "PENDING",
+              "SENT",
+              "FAILED",
+              "UNKNOWN",
+              null
+            ]
+          }
+        }
+      },
+      "ExperienceHostSupportHistoryDetail": {
+        "x-niho-experience-host-support-history-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "bookingRequestId",
+          "action",
+          "actorKind",
+          "reasonCode",
+          "state",
+          "resultCode",
+          "resultStatus",
+          "resultRefundedYen",
+          "communication",
+          "createdAt",
+          "completedAt"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingRequestId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "APPROVE",
+              "DECLINE",
+              "CANCEL",
+              "MESSAGE"
+            ]
+          },
+          "actorKind": {
+            "type": "string",
+            "enum": [
+              "NIHO_SUPPORT"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "PROCESSING",
+              "UNKNOWN",
+              "SUCCEEDED",
+              "REJECTED",
+              "FAILED"
+            ]
+          },
+          "resultCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultRefundedYen": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "communication": {
+            "$ref": "#/components/schemas/ExperienceHostSupportCommunication"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceHostSupportHistoryDetailResponse": {
+        "x-niho-experience-host-support-history-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/ExperienceHostSupportHistoryDetail"
+          }
+        }
+      },
+      "ExperienceHostSupportHistoryError": {
+        "x-niho-experience-host-support-history-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "ExperienceHostSupportHistoryItem": {
+        "x-niho-experience-host-support-history-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "bookingRequestId",
+          "action",
+          "actorKind",
+          "reasonCode",
+          "state",
+          "resultCode",
+          "resultStatus",
+          "resultRefundedYen",
+          "hasMessage",
+          "createdAt",
+          "completedAt"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bookingRequestId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "APPROVE",
+              "DECLINE",
+              "CANCEL",
+              "MESSAGE"
+            ]
+          },
+          "actorKind": {
+            "type": "string",
+            "enum": [
+              "NIHO_SUPPORT"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "PROCESSING",
+              "UNKNOWN",
+              "SUCCEEDED",
+              "REJECTED",
+              "FAILED"
+            ]
+          },
+          "resultCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "resultRefundedYen": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "hasMessage": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ExperienceHostSupportHistoryResponse": {
+        "x-niho-experience-host-support-history-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bookingRequestId",
+          "operations",
+          "history"
+        ],
+        "properties": {
+          "bookingRequestId": {
+            "type": "string"
+          },
+          "operations": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ExperienceHostSupportHistoryItem"
+            }
+          },
+          "history": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "limit",
+              "truncated"
+            ],
+            "properties": {
+              "limit": {
+                "type": "integer",
+                "enum": [
+                  50
+                ]
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "ExperienceAdminPrivateNoStore": {
+        "description": "Admin本人向け応答を共有cacheへ保存しない。",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "private, no-store"
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "FirebaseIdToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+      }
+    }
+  }
+}

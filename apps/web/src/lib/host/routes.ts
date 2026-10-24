@@ -15,6 +15,8 @@ export const HOST_BOOKINGS_PATH = "/host/bookings";
 export const HOST_BOOKING_SESSION_PATH = "/host/bookings/session";
 export const HOST_SALES_PATH = "/host/sales";
 export const HOST_SETTINGS_PATH = "/host/settings";
+/** 本人OWNERの通常Spot / 外部Providerに独立したNIHOサポート設定。 */
+export const HOST_SUPPORT_PATH = "/host/support";
 /** メッセージ (#106): a screen under ホーム, not in the menu. */
 export const HOST_MESSAGES_PATH = "/host/messages";
 /** レビュー (#108): a screen under ホーム, not in the menu. */
@@ -51,6 +53,10 @@ export function withQuery(href: string, values: Record<string, string | null | u
  */
 export function withProvider(path: string, providerId: string | null | undefined): string {
   return withQuery(path, { providerId });
+}
+
+export function hostSupportPath(kind?: "SPOT" | "EXPERIENCE_PROVIDER" | null, id?: string | null): string {
+  return kind && id ? withQuery(HOST_SUPPORT_PATH, { hostKind: kind, hostId: id }) : HOST_SUPPORT_PATH;
 }
 
 /**

@@ -1,0 +1,20 @@
+{
+  "name": "experience-host-support-history-api",
+  "version": "1.0.0",
+  "sourceRepository": "niho-app",
+  "sourceCommit": "d3e403a140ce39a890f22976c81b5b00ffbea8e2",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "NIHO側で合意済み。API先行配備・三者受入とhost scope接続は未完了。",
+  "openapiFile": "experience-host-support-history-api.openapi.json",
+  "sha256File": "experience-host-support-history-api.openapi.json.sha256",
+  "scope": [
+    "host-owned booking support history",
+    "retained communication detail"
+  ],
+  "excludedScope": [
+    "internal case memo",
+    "admin contact details",
+    "payload hashes or Stripe identifiers",
+    "booking mutation"
+  ]
+}

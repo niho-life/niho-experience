@@ -54,3 +54,71 @@ describe("host console settings", () => {
     expect(ok).toMatchObject({ hostConsoleEnabled: true, hostSessionSecret: secret, nihoFirebaseWebApiKey: "key" });
   });
 });
+
+describe("admin support console settings", () => {
+  it("stays off unless its dedicated flag is exactly true", () => {
+    expect(resolveConfig({}).adminSupportConsoleEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_SUPPORT_CONSOLE_ENABLED: "1" }).adminSupportConsoleEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_SUPPORT_CONSOLE_ENABLED: "true" }).adminSupportConsoleEnabled).toBe(true);
+  });
+
+  it("keeps the independent Admin read API rollout flag off by default", () => {
+    expect(resolveConfig({}).adminSupportReadApiEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_SUPPORT_READ_API_ENABLED: "1" }).adminSupportReadApiEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_SUPPORT_READ_API_ENABLED: "true" }).adminSupportReadApiEnabled).toBe(true);
+  });
+
+  it("allows the synthetic read UI preview only in mock mode", () => {
+    expect(resolveConfig({ ADMIN_SUPPORT_READ_PREVIEW_ENABLED: "true" }).adminSupportReadPreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_READ_PREVIEW_ENABLED: "true" }).adminSupportReadPreviewEnabled).toBe(false);
+  });
+
+  it("keeps the case API and its synthetic preview behind separate exact flags", () => {
+    expect(resolveConfig({ ADMIN_SUPPORT_CASE_API_ENABLED: "true" }).adminSupportCaseApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CASE_API_ENABLED: "1" }).adminSupportCaseApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CASE_API_ENABLED: "true" }).adminSupportCaseApiEnabled).toBe(true);
+    expect(resolveConfig({ ADMIN_SUPPORT_CASE_PREVIEW_ENABLED: "true" }).adminSupportCasePreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CASE_PREVIEW_ENABLED: "true" }).adminSupportCasePreviewEnabled).toBe(false);
+  });
+
+  it("keeps operations and host history independently OFF and HTTP-only", () => {
+    expect(resolveConfig({}).adminOperationsApiEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_OPERATIONS_API_ENABLED: "true" }).adminOperationsApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_OPERATIONS_API_ENABLED: "true" }).adminOperationsApiEnabled).toBe(true);
+    expect(resolveConfig({ ADMIN_OPERATIONS_PREVIEW_ENABLED: "true" }).adminOperationsPreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_OPERATIONS_PREVIEW_ENABLED: "true" }).adminOperationsPreviewEnabled).toBe(false);
+    expect(resolveConfig({ HOST_SUPPORT_HISTORY_API_ENABLED: "true" }).hostSupportHistoryApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_SUPPORT_HISTORY_API_ENABLED: "true" }).hostSupportHistoryApiEnabled).toBe(true);
+    expect(resolveConfig({ HOST_SUPPORT_SETTINGS_API_ENABLED: "true" }).hostSupportSettingsApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_SUPPORT_SETTINGS_API_ENABLED: "true" }).hostSupportSettingsApiEnabled).toBe(true);
+    expect(resolveConfig({ HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true" }).hostSupportSettingsPreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true" }).hostSupportSettingsPreviewEnabled).toBe(false);
+  });
+
+  it("keeps the shared fee summary API and UI preview behind separate exact mode gates", () => {
+    expect(resolveConfig({})).toMatchObject({ experienceFeeSummaryApiEnabled: false, experienceFeeSummaryPreviewEnabled: false });
+    expect(resolveConfig({ EXPERIENCE_FEE_SUMMARY_API_ENABLED: "true" }).experienceFeeSummaryApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_FEE_SUMMARY_API_ENABLED: "1" }).experienceFeeSummaryApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_FEE_SUMMARY_API_ENABLED: "true" }).experienceFeeSummaryApiEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED: "true" }).experienceFeeSummaryPreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED: "true" }).experienceFeeSummaryPreviewEnabled).toBe(false);
+  });
+
+  it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
+    const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
+    const configured = {
+      ...http,
+      ADMIN_SESSION_SECRET: "a".repeat(32),
+      NIHO_FIREBASE_WEB_API_KEY: "firebase-key",
+      NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://experience.example",
+    };
+    expect(() => resolveConfig(http)).toThrow(/ADMIN_SESSION_SECRET/);
+    expect(() => resolveConfig({ ...http, ADMIN_SESSION_SECRET: "a".repeat(32) })).toThrow(/NIHO_FIREBASE_WEB_API_KEY/);
+    expect(() => resolveConfig({ ...http, ADMIN_SESSION_SECRET: "a".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" })).toThrow(/NIHO_EXPERIENCE_ADMIN_ORIGIN/);
+    expect(() => resolveConfig({ ...configured, NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://other.example" })).toThrow(/exactly match/);
+    expect(() => resolveConfig({ ...configured, SITE_URL: "http://experience.example", NIHO_EXPERIENCE_ADMIN_ORIGIN: "http://experience.example" })).toThrow(/HTTPS/);
+    expect(() => resolveConfig({ ...configured, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "http://niho.example" })).toThrow(/NEXT_PUBLIC_NIHO_WEB_ORIGIN.*HTTPS/);
+    expect(resolveConfig(configured)).toMatchObject({ adminSessionSecret: "a".repeat(32), adminOrigin: "https://experience.example" });
+    expect(resolveConfig({ ...configured, SITE_URL: "http://localhost:3000", NIHO_EXPERIENCE_ADMIN_ORIGIN: "http://localhost:3000" }).adminOrigin).toBe("http://localhost:3000");
+  });
+});

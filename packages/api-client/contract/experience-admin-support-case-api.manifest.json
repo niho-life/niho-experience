@@ -1,0 +1,22 @@
+{
+  "name": "experience-admin-support-case-api",
+  "version": "1.0.0",
+  "sourceRepository": "niho-app",
+  "sourceCommit": "9ddb79c3a62bafca6896a06fa2f364f1fb089ff3",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "NIHO側で合意済み。API配備・三者受入とapp-connect scope接続は未完了。",
+  "openapiFile": "experience-admin-support-case-api.openapi.json",
+  "sha256File": "experience-admin-support-case-api.openapi.json.sha256",
+  "scope": [
+    "per-booking support case read",
+    "assignee and internal memo CAS update",
+    "active support admin roster read"
+  ],
+  "excludedScope": [
+    "booking approval or decline",
+    "booking cancellation or refund",
+    "message delivery",
+    "host support setting mutation",
+    "role or permission assignment"
+  ]
+}

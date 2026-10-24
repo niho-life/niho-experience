@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { computeExpectedTotalYen } from "../src/booking-rules.ts";
 import { createExperienceApiClient } from "../src/client.ts";
-import { journeyExtrasFor } from "../src/fixtures/journey.ts";
+import { journeyExtrasFor, reviewsResponseFor } from "../src/fixtures/journey.ts";
 import {
   ASK_HOST_INPUT_LIMITS,
   ASK_HOST_TOPICS,
   EXPERIENCE_CONDITION_KINDS,
   EXPERIENCE_CONDITION_LIMITS,
   NO_JOURNEY_EXTRAS,
+  REVIEW_AVERAGE_MIN_COUNT,
+  REVIEW_LIMITS,
   askHostInputProblem,
   conditionConsentTexts,
   isValidGuestPhone,
@@ -77,7 +79,7 @@ describe("参加の条件の fixture", () => {
   it("mock の体験すべてで参照でき、実在しない slug でも壊れない", () => {
     const all = [...buildFixtureExperiences(), ...buildPilotExperiences()];
     for (const experience of all) expect(() => journeyExtrasFor(experience.slug)).not.toThrow();
-    expect(journeyExtrasFor("no-such-slug")).toEqual({ enabled: true, conditions: null, questionsOpen: true });
+    expect(journeyExtrasFor("no-such-slug")).toEqual({ enabled: true, conditions: null, questionsOpen: true, reviews: { status: "ok", summary: { count: 0, average: null, tags: [] }, items: [] } });
   });
 
   it("条件が空・版が空なら使えない条件として扱う", () => {
@@ -85,7 +87,7 @@ describe("参加の条件の fixture", () => {
     expect(usableConditions({ version: "", items: [{ kind: "AGE", headline: "x", detail: null, consentText: null }] })).toBeNull();
     expect(usableConditions({ version: "v1", items: [] })).toBeNull();
     expect(usableConditions(journeyExtrasFor(ZEN).conditions)).not.toBeNull();
-    expect(NO_JOURNEY_EXTRAS).toEqual({ enabled: false, conditions: null, questionsOpen: false });
+    expect(NO_JOURNEY_EXTRAS).toEqual({ enabled: false, conditions: null, questionsOpen: false, reviews: null });
   });
 });
 
@@ -213,5 +215,72 @@ describe("checkout の追加項目（仮契約の mock）", () => {
     expect((await client.startCheckout(DINNER, first)).ok).toBe(true);
     const changed = await client.startCheckout(DINNER, { ...first, guestPhone: "+44 7700 900999" });
     expect(changed).toMatchObject({ ok: false, kind: "rejected", error: { code: "REQUEST_MISMATCH" } });
+  });
+});
+
+describe("レビューの fixture と一覧の mock", () => {
+  it("12 件（平均を出す）・2 件・1 件・0 件が揃い、新しい順に集計する", () => {
+    const indigo = reviewsResponseFor(INDIGO, 50);
+    expect(indigo.summary.count).toBe(12);
+    expect(indigo.summary.count).toBeGreaterThanOrEqual(REVIEW_AVERAGE_MIN_COUNT);
+    expect(indigo.summary.average).toBe(4.9);
+    expect(indigo.reviews).toHaveLength(12);
+    const dates = indigo.reviews.map((item) => item.publishedAt);
+    expect([...dates].sort().reverse()).toEqual(dates);
+    expect(indigo.summary.tags[0]).toEqual({ label: "Beautiful results", count: 5 });
+    expect(reviewsResponseFor(POTTERY, 50).summary).toMatchObject({ count: 2 });
+    expect(reviewsResponseFor(CYCLING, 50).summary).toMatchObject({ count: 1, average: 5 });
+    expect(reviewsResponseFor(DINNER, 50)).toEqual({ summary: { count: 0, average: null, tags: [] }, reviews: [] });
+    // pilot の体験は実在のホストなので、レビューを入れない。
+    expect(reviewsResponseFor(ZEN, 50).summary.count).toBe(0);
+  });
+
+  it("詳細の SSR は新しい順に 3 件だけ読み、集計は全件", () => {
+    const extras = journeyExtrasFor(INDIGO);
+    expect(extras.reviews).toMatchObject({ status: "ok", summary: { count: 12 } });
+    expect(extras.reviews?.status === "ok" ? extras.reviews.items.map((item) => item.id) : []).toEqual(["rv-indigo-01", "rv-indigo-02", "rv-indigo-03"]);
+  });
+
+  it("名前に (sample) が付き、姓・メール・予約の識別子を含まず、上限に収まる", () => {
+    for (const slug of [INDIGO, CYCLING, POTTERY]) {
+      const { reviews } = reviewsResponseFor(slug, 50);
+      for (const item of reviews) {
+        expect(item.displayName).toMatch(/\(sample\)$/);
+        expect(item.body.length).toBeLessThanOrEqual(REVIEW_LIMITS.bodyMaxLength);
+        expect(item.fromBooking).toBe(true);
+      }
+      expect(findSensitiveValues(reviews)).toEqual([]);
+    }
+  });
+
+  it("listReviews は集計と一覧を返し、limit を守る", async () => {
+    const result = await mockClient().listReviews(INDIGO, { limit: 5 });
+    expect(result.ok && result.data.reviews).toHaveLength(5);
+    expect(result.ok && result.data.summary.count).toBe(12);
+    const all = await mockClient().listReviews(INDIGO);
+    expect(all.ok && all.data.reviews).toHaveLength(12);
+    const none = await mockClient().listReviews(DINNER);
+    expect(none).toEqual({ ok: true, data: { summary: { count: 0, average: null, tags: [] }, reviews: [] } });
+  });
+
+  it("不正な limit・存在しない体験・読めない scenario・通信失敗を区別する", async () => {
+    expect(await mockClient().listReviews(INDIGO, { limit: 51 })).toMatchObject({ ok: false, kind: "invalid_request" });
+    expect(await mockClient().listReviews("no-such-experience")).toEqual({ ok: false, kind: "not_found" });
+    expect(await mockClient("reviews-error").listReviews(INDIGO)).toEqual({ ok: false, kind: "unexpected_response", status: 503 });
+    expect(await mockClient("network-error").listReviews(INDIGO)).toEqual({ ok: false, kind: "network_error" });
+  });
+
+  it("契約に無い形の応答は想定外として扱う", async () => {
+    const good = reviewsResponseFor(INDIGO, 2);
+    const wrong = (body: unknown) => createExperienceApiClient({ nihoWebOrigin: ORIGIN, fetch: async () => new Response(JSON.stringify(body), { status: 200 }) });
+    expect(await wrong(good).listReviews(INDIGO)).toMatchObject({ ok: true });
+    const unexpected = { ok: false, kind: "unexpected_response", status: 200 };
+    expect(await wrong({ ...good, extra: 1 }).listReviews(INDIGO)).toEqual(unexpected);
+    expect(await wrong({ ...good, summary: { ...good.summary, average: 7 } }).listReviews(INDIGO)).toEqual(unexpected);
+    expect(await wrong({ ...good, summary: { count: 0, average: 4, tags: [] }, reviews: [] }).listReviews(INDIGO)).toEqual(unexpected);
+    expect(await wrong({ ...good, reviews: [{ ...good.reviews[0], rating: 6 }] }).listReviews(INDIGO)).toEqual(unexpected);
+    expect(await wrong({ ...good, reviews: [{ ...good.reviews[0], email: "x@example.com" }] }).listReviews(INDIGO)).toEqual(unexpected);
+    expect(await wrong({ ...good, reviews: [{ ...good.reviews[0], publishedAt: "yesterday" }] }).listReviews(INDIGO)).toEqual(unexpected);
+    expect(await wrong({ ...good, reviews: [{ ...good.reviews[0], reply: { hostName: "A" } }] }).listReviews(INDIGO)).toEqual(unexpected);
   });
 });

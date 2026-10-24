@@ -4,6 +4,7 @@ import { FieldRow, FieldSection } from "@/components/host/fields";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
+import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsPanel";
 import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostConsoleData, loadHostPayout } from "@/host/data";
@@ -50,7 +51,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         </div>
       </FieldRow>
       <div className="border-t border-line pt-3 md:pl-[184px]">
-        <form method="post" action={HOST_LOGOUT_PATH}>
+        <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form>
           <button type="submit" className={consoleButtonClass("ghost", "sm")}>
             ログアウト
           </button>
@@ -72,7 +73,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         connectNotice={payout.notice}
         googleConnection={googleConnection}
         preview={isHostMock()}
-        account={accountPanel}
+        account={<><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} />{accountPanel}</>}
       />
     </HostPageBody>
   );

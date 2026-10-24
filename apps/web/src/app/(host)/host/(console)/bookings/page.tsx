@@ -5,6 +5,9 @@ import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostBookings } from "@/host/data";
+import { isHostMock } from "@/lib/host/server";
+import { isHostSupportHistoryEnabled } from "@/lib/host/support-history-server";
+import { isHostFeeSummaryUiEnabled } from "@/lib/host/fee-summary-server";
 
 export const metadata: Metadata = { title: "予約" };
 
@@ -42,5 +45,5 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   // Another provider's booking, or none at all.
   if (opened?.status === "missing") notFound();
   // Keyed by provider: another provider's bookings start from their own list.
-  return <HostBookings key={provider.id} bookings={list.bookings} experiences={experiences} today={today} now={now} providerId={linkProviderId} conversations={conversations} />;
+  return <HostBookings key={provider.id} bookings={list.bookings} experiences={experiences} today={today} now={now} providerId={linkProviderId} providerDataId={provider.id} supportPreview={isHostMock()} supportHistoryEnabled={isHostSupportHistoryEnabled()} feeSummaryEnabled={isHostFeeSummaryUiEnabled()} conversations={conversations} />;
 }

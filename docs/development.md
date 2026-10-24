@@ -72,17 +72,24 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `HOST_CONSOLE_ENABLED` | `false` | `true` でホストの画面（`/host/*`）とログインを開く（#84）。off の間は今の紹介ページのまま。mock のプレビュー（`deploy-preview.yml`）は `true` で、合成のログインで見られる |
 | `HOST_SESSION_SECRET` | なし（mock は開発用の固定値） | ホストのセッション cookie の暗号化の鍵。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
 | `NIHO_FIREBASE_WEB_API_KEY` | なし | NIHO の custom token を ID token に替えるための公開 Web API key。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
+| `HOST_SUPPORT_SETTINGS_API_ENABLED` | `false` | NIHO側の本人OWNER支援設定 v1.0.1 を配備・受入後にだけ開くHTTP BFF。mockではtrueにしても開かない |
+| `HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightが選別契約形のbrowser responseをstubし、BFF・実保存は開かない |
+| `EXPERIENCE_FEE_SUMMARY_API_ENABLED` | `false` | Admin/Host共通の予約別実料金・精算GET。HTTP modeかつ各console/sessionが有効で、NIHO側API配備・受入後だけ開く |
+| `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightのbrowser stubだけを使い、実BFFや合成成功fallbackは開かない |
 
 ## プレビューで状態を確認する
 
 - `/preview/states`：空結果と読込などの表示を確認できる（mock時のみ存在）。
 - `?mock=slow`・`?mock=empty`・`?mock=error`：読込中・掲載なし・API障害を再現（mock時のみ有効）。
-- `npm -w @niho-experience/api-client run gen:types` は公開とホストの 2 つの契約から型を作る（`--check` も両方）。
+- `npm -w @niho-experience/api-client run gen:types` は公開・ホスト・選別済みAdmin/Host支援契約から型を作る（`--check` は全対象のdriftを確認する）。
 - 選別mockのcheckoutエラーは `createMockExperienceFetch` の scenario で再現できる。メールアドレスをトリガーにしない。
 - `?mock=ask-rate-limited`・`ask-unavailable`・`ask-send-failed`：詳細の "Ask {host} a question" の失敗を再現（mock時のみ。仮契約：[api-contract.md](api-contract.md) §15）。参加の条件・質問・携帯電話の入力も mock のときだけ出る（`EXPERIENCE_API_MODE=http` では出ない）。
+- `?mock=reviews-error`（レビューの節が読めない）・`reviews-more-error`（"Show all" だけ失敗）：レビューの失敗を再現（mock時のみ）。合成のレビューは indigo＝12 件・pottery＝2 件・cycling＝1 件・dinner＝0 件。
 - `/preview/checkout` から、決済後のページ `/booking/return` の 3 通り（`?type=instant`・`?type=approval`・種別なし）へ進める。
 - 決済は `/preview/checkout` の模擬ページへ進む。カード情報は扱わない。
 - ホストの画面：`HOST_CONSOLE_ENABLED=true` で `/host` の「NIHO でログイン」から合成のアカウントで入る（mock 時は NIHO へ行かない）。提供者の一覧と詳細はホスト契約の mock（`@niho-experience/api-client/host/mock`）で、指定なしは「サンプルの台所」と「サンプル工房」。`/host?mock=empty`（提供者 0 件。登録の流れを試せる）・`?mock=payments-pending`（口座未接続の提供者 1 件）・`?mock=calendar-revoked`（サンプルの台所の Google カレンダーの接続が切れた状態）から入ると、その scenario の合成セッションになる。体験・予約・売上・メッセージのスレッド・レビューの表示は架空（`apps/web/src/host/mock/`。今は 2026-10-21 15:30 に固定）で、体験の編集・予約の操作・ホームからの承認・スレッドへの返信・出欠・この回の中止・レビューへの返信と報告は画面内の状態だけ（保存しても次の要求には残らない）。返信の「英語にする」は server action で、mock は合成の英語（例の返信以外は「[Preview] …」の 1 文）を返す。提供者情報の保存・審査の申請・受取口座（共有・接続・再確認）・登録はホスト契約の mock を server action から呼ぶ。契約 mock は要求ごとに作り直されるので、書き込みの結果はその応答にだけ残り、mock の登録は `?mock=payments-pending` のログインに置き換わる。
+- 本人のNIHOサポート設定：`/host/support`。通常Spotと外部Providerは独立したkind/idで扱い、Providerが0件でもPCフッター・携帯アカウントメニュー・登録案内から到達できる。HTTPは`HOST_SUPPORT_SETTINGS_API_ENABLED=true`かつ配備受入後だけ。mockの`HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED=true`はbrowser stubを使うE2E専用で、合成保存へfallbackしない。詳細は[Host本人のNIHOサポート設定](host-support-settings.md)。
+- 予約別の実料金・精算：Admin/Hostの予約詳細に独立して表示する。HTTPは`EXPERIENCE_FEE_SUMMARY_API_ENABLED=true`かつ各console/sessionの成立後だけ、mockのpreview flagはbrowser stub E2Eだけに使う。詳細は[予約別の実料金・精算](fee-summary.md)。ホストの実予約HTTP導線は未接続なので、現時点では三者実受入完了ではない。
 
 ## データの扱い
 

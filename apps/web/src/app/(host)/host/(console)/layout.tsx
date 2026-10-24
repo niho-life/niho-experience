@@ -16,7 +16,7 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
         <p className="text-ink-soft">NIHO との接続が終了しています。ほかの端末でログアウトした場合などに起こります。</p>
         <div className="flex flex-wrap gap-3">
           <a href={HOST_LOGIN_PATH} className={hostButtonClass("primary")}>NIHO でログイン</a>
-          <form method="post" action={HOST_LOGOUT_PATH}>
+          <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form>
             <button type="submit" className={hostButtonClass("secondary")}>ログアウト</button>
           </form>
         </div>
