@@ -23,7 +23,7 @@ import type {
   SelectedExperienceAvailabilityResponse,
   LocalizedCheckoutOutdatedError,
 } from "./types.ts";
-import { REVIEW_LIMITS, type AskHostError, type AskHostErrorCode, type AskHostRequest, type AskHostResult, type ExperienceCheckoutJourneyFields, type ExperienceReviewsResponse } from "./journey.ts";
+import { CONDITIONS_VERSION_PATTERN, EXPERIENCE_CONDITION_KINDS, EXPERIENCE_CONDITION_LIMITS, REVIEW_LIMITS, type AskHostError, type AskHostErrorCode, type AskHostRequest, type AskHostResult, type ExperienceCheckoutJourneyFields, type ExperienceDetailResponseV14, type ExperienceReviewsResponse } from "./journey.ts";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -191,6 +191,27 @@ function hasReviewsShape(value: unknown): boolean {
   return validAverage && validTags && Array.isArray(value.reviews) && value.reviews.length <= REVIEW_LIMITS.listMaxItems && value.reviews.every(isReview);
 }
 
+/** 参加の条件の 1 項目（下書きの契約 1.4.0・journey.ts）。閉じた形だけを受ける。 */
+function isConditionItem(value: unknown): boolean {
+  if (!isObject(value) || Object.keys(value).length !== 4) return false;
+  const limits = EXPERIENCE_CONDITION_LIMITS;
+  return (
+    EXPERIENCE_CONDITION_KINDS.includes(value.kind as (typeof EXPERIENCE_CONDITION_KINDS)[number]) &&
+    isNonEmptyText(value.headline, limits.headlineMaxLength) &&
+    (value.detail === null || isNonEmptyText(value.detail, limits.detailMaxLength)) &&
+    (value.consentText === null || isNonEmptyText(value.consentText, limits.consentTextMaxLength))
+  );
+}
+
+/** `conditions`：null（条件なし）か、版と 1〜6 項目（種類は重ならない）。 */
+function hasConditionsShape(value: unknown): boolean {
+  if (value === null) return true;
+  if (!isObject(value) || Object.keys(value).length !== 2) return false;
+  if (typeof value.version !== "string" || !CONDITIONS_VERSION_PATTERN.test(value.version)) return false;
+  if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > EXPERIENCE_CONDITION_LIMITS.maxItems || !value.items.every(isConditionItem)) return false;
+  return new Set(value.items.map((item) => (item as { kind: string }).kind)).size === value.items.length;
+}
+
 function hasExperienceCatalogShape(value: unknown): boolean {
   return isObject(value) && Array.isArray(value.experiences) && value.experiences.every((experience) =>
     isObject(experience) && typeof experience.slug === "string" && typeof experience.title === "string" && isObject(experience.provider),
@@ -232,6 +253,10 @@ function hasExperienceDetailV11Shape(value: unknown): boolean {
     Array.isArray(experience.hosts) && experience.hosts.every((host) =>
       isObject(host) && typeof host.displayName === "string" && isNullableString(host.bio) && hasV11Image(host.avatar)) &&
     isObject(experience.provider) && hasV11Image(experience.provider.logo);
+}
+
+function hasExperienceDetailV14Shape(value: unknown): boolean {
+  return hasExperienceDetailV11Shape(value) && isObject(value) && isObject(value.experience) && hasConditionsShape(value.experience.conditions);
 }
 
 function hasAvailabilityShape(value: unknown): boolean {
@@ -366,6 +391,11 @@ export function createExperienceApiClient(options: ExperienceApiClientOptions) {
     /** 提供者の紹介と写真の説明を含む v1.1 の詳細。 */
     getExperienceV11(slug: string): Promise<ReadResult<ExperienceDetailResponseV11>> {
       return readJson(`/api/public/experiences/v1.1/${encodeURIComponent(slug)}`, true, hasExperienceDetailV11Shape);
+    },
+
+    /** 参加の条件つきの v1.4 の詳細（下書きの契約 1.4.0・journey.ts）。契約が main に入って配備されるまでは mock だけが応える。 */
+    getExperienceV14(slug: string): Promise<ReadResult<ExperienceDetailResponseV14>> {
+      return readJson(`/api/public/experiences/v1.4/${encodeURIComponent(slug)}`, true, hasExperienceDetailV14Shape);
     },
 
     /** レビューの一覧（新しい順）と集計。SSR でもブラウザからでも読める（仮契約・journey.ts）。 */

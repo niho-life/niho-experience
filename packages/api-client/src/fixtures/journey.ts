@@ -2,58 +2,79 @@
  * 旅行者の一周（src/journey.ts）の合成データ。仮契約の mock だけが使う。
  *
  * - 合成の体験（`(sample)`）の文言は架空。
+ * - 参加の条件の文は、NIHO が組む文（niho-coliving/niho-app#19335 の `buildSpotCampaignPagePublicConditionItems`・英語）の出力。
+ *   画面は文を組み立てないので、ホストが入力する項目の例を各体験の上に書き、そこから NIHO の組み立てで出る文をそのまま置く。
+ *   `version` は NIHO と同じ算出（項目 `{ kind, headline, detail, consentText }` の JSON の SHA-256）で、test が再計算して一致を確かめる。
  * - pilot の体験は、fixture に既にある事実（pilot-experiences.ts の notSuitableFor・knowBeforeYouGo・languageNote・highlights）を
  *   条件の形に並べ直しただけで、新しい事実を足さない。オーナーが確認した原稿に置き換わるまでは推奨値。
  * - 条件の無い体験を残す（dinner など）。画面は「条件が空」でも崩れず、従来の Good to know の一覧へ戻ることを確かめる。
  */
 import type { ExperienceConditions, ExperienceReview, ExperienceReviewSummary, ExperienceReviewsResponse, JourneyDetailExtras } from "../journey.ts";
 
-const VERSION = "2026-10-22";
-
 const CONDITIONS: Readonly<Record<string, ExperienceConditions>> = {
-  // 承認制・同意の対象あり（年齢と段差）
+  // 承認制・同意の対象あり（年齢・体の負担・段差）。
+  // ホストの入力：年齢 10 歳から＋大人と一緒／体の負担＝長く立つ（補足あり）／ホストの言語＝日本語・英語はかんたんな言葉／
+  // 食べもの＝出る（ヴィーガン対応）／車いすは不可（段差）／雨でも開催
   "indigo-dyeing-with-an-artisan": {
-    version: VERSION,
+    version: "7c9340a7f490d0dc41335c18725f27cf53c9c5ea5eb94997cd1c157c4672b703",
     items: [
-      { kind: "AGE", headline: "Ages 10 and up", detail: "Children must join with an adult", consentText: "Ages 10 and up" },
-      { kind: "PHYSICAL", headline: "Standing and working with your hands", detail: "About 2 hours, with short breaks", consentText: null },
+      { kind: "AGE", headline: "Ages 10 and up", detail: "Children must join with an adult", consentText: "Ages 10 and up · Children must join with an adult" },
+      { kind: "PHYSICAL", headline: "Standing for a long time", detail: "Working with your hands · about 2 hours, with short breaks", consentText: "Standing for a long time (Working with your hands · about 2 hours, with short breaks)" },
       { kind: "HOST_LANGUAGE", headline: "Hosted in Japanese and basic English", detail: "Step-by-step photo guide provided", consentText: null },
       { kind: "FOOD", headline: "Tea and a sweet after", detail: "Vegan option on request", consentText: null },
       { kind: "ACCESS", headline: "Not wheelchair accessible", detail: "Steps up to the studio", consentText: "Steps up to the studio" },
       { kind: "WEATHER", headline: "Rain or shine", detail: "Held indoors", consentText: null },
     ],
   },
-  // 即時確定・取消なし。条件の一部だけ（食べもの・段差は無い）
+  // 即時確定・取消なし。条件の一部だけ（段差は無い）。
+  // ホストの入力：年齢 8 歳から（補足あり）／体の負担＝種類は選ばず補足だけ／ホストの言語＝英語／食べもの＝出る（対応食なし）／荒天は中止
   "seaside-cycling-and-market-breakfast": {
-    version: VERSION,
+    version: "88f81488ba31bff2e338e296d4636696591c54b689d3fc3c2acfa52edb201292",
     items: [
-      { kind: "AGE", headline: "Ages 8 and up", detail: "Everyone rides their own bicycle", consentText: "Everyone can ride a bicycle confidently" },
-      { kind: "PHYSICAL", headline: "Easy, mostly flat ride", detail: "Helmets provided, bikes fitted before we start", consentText: null },
+      { kind: "AGE", headline: "Ages 8 and up", detail: "Everyone rides their own bicycle", consentText: "Ages 8 and up" },
+      { kind: "PHYSICAL", headline: "Physical activity", detail: "Easy, mostly flat ride · helmets provided, bikes fitted before we start", consentText: "Physical activity (Easy, mostly flat ride · helmets provided, bikes fitted before we start)" },
       { kind: "HOST_LANGUAGE", headline: "Hosted in English", detail: null, consentText: null },
-      { kind: "FOOD", headline: "Market breakfast included", detail: "Ask before booking if you avoid seafood", consentText: null },
-      { kind: "WEATHER", headline: "Light rain is fine", detail: "Stops in heavy rain or strong wind", consentText: "The ride may stop in heavy rain or strong wind" },
+      { kind: "FOOD", headline: "Market breakfast included", detail: null, consentText: null },
+      { kind: "WEATHER", headline: "May be cancelled in bad weather (full refund)", detail: "Light rain is fine", consentText: null },
     ],
   },
-  // 予約を受けていない体験（同意の対象なし）
+  // 予約を受けていない体験。条件はあるが同意の文が無い（言語と雨の日だけ）。ホストの入力：ホストの言語＝日本語・英語はかんたんな言葉／雨でも開催
   "evening-pottery-session": {
-    version: VERSION,
+    version: "12f090e58a895f34f89af3ec27413e794b3ec110f77dc5154a2361b518e45827",
     items: [
-      { kind: "AGE", headline: "Ages 12 and up", detail: null, consentText: null },
-      { kind: "HOST_LANGUAGE", headline: "Japanese with English support", detail: null, consentText: null },
+      { kind: "HOST_LANGUAGE", headline: "Hosted in Japanese and basic English", detail: null, consentText: null },
+      { kind: "WEATHER", headline: "Rain or shine", detail: "Held indoors", consentText: null },
     ],
   },
-  // pilot：fixture にある事実だけ（子どもは 12 歳未満不可・階段と坂・小雨は決行・椅子あり・英語の案内）
+  // pilot：fixture にある事実だけ（12 歳未満不可・床に座る/椅子あり・英語の案内・階段と坂・小雨は決行/荒天は中止と全額返金）。
+  // ホストの入力：年齢 12 歳から／体の負担＝床に座る（椅子の補足）／ホストの言語＝英語／車いすは不可（階段と坂）／荒天は中止（小雨は決行）
   "engakuji-zen-meditation": {
-    version: VERSION,
+    version: "82963b1416024a229a7b3148b8dd0807c497f7fadd0e306695ab3a9f4d59f48b",
     items: [
       { kind: "AGE", headline: "Ages 12 and up", detail: null, consentText: "Ages 12 and up" },
-      { kind: "PHYSICAL", headline: "Seated meditation", detail: "A chair is available if sitting on the floor is difficult", consentText: null },
-      { kind: "HOST_LANGUAGE", headline: "English-speaking guide", detail: null, consentText: null },
-      { kind: "ACCESS", headline: "Hilly grounds with stairs and slopes", detail: "Not suitable if you can't manage stairs and slopes", consentText: "Hilly grounds with stairs and slopes" },
-      { kind: "WEATHER", headline: "Goes ahead in light rain", detail: "Cancelled with a refund or another date in a heavy rain, storm or emergency warning", consentText: null },
+      { kind: "PHYSICAL", headline: "Sitting on the floor", detail: "A chair is available if sitting on the floor is difficult", consentText: "Sitting on the floor (A chair is available if sitting on the floor is difficult)" },
+      { kind: "HOST_LANGUAGE", headline: "Hosted in English", detail: null, consentText: null },
+      { kind: "ACCESS", headline: "Not wheelchair accessible", detail: "Hilly grounds with stairs and slopes", consentText: "Hilly grounds with stairs and slopes" },
+      { kind: "WEATHER", headline: "May be cancelled in bad weather (full refund)", detail: "Goes ahead in light rain", consentText: null },
     ],
   },
 };
+
+/**
+ * scenario 用の条件。`checkout-conditions-added`：条件を持たない体験に、予約の途中で同意が要る条件が足された状態。
+ * `checkout-conditions-outdated`：同意が要る条件の文が予約の途中で変わった状態（`changedConditions`）。
+ */
+export const ADDED_CONDITIONS: ExperienceConditions = {
+  version: "7e4108334b398fde41cc94c177591b1ee7fd3c8e43e4a80cad26fdd1b5ea92c7",
+  items: [{ kind: "AGE", headline: "Ages 6 and up", detail: "Younger children cannot join this session", consentText: "Ages 6 and up" }],
+};
+
+/** 同意の文を 1 つ書き換え、版を変える（mock のブラウザ側は SHA-256 を計算しないので、版は 1 文字だけ変える。scenario 専用）。 */
+export function changedConditions(base: ExperienceConditions): ExperienceConditions {
+  const index = base.items.findIndex((item) => item.consentText !== null);
+  const version = `${base.version.startsWith("0") ? "1" : "0"}${base.version.slice(1)}`;
+  return { version, items: base.items.map((item, at) => (at === index && item.consentText ? { ...item, consentText: `${item.consentText} · Updated by the host` } : item)) };
+}
 
 /**
  * レビュー（#19314）。合成の体験だけに置く（pilot は実在のホストなので、レビュー・実績は入れない：AGENTS.md）。

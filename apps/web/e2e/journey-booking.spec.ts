@@ -33,7 +33,9 @@ test("conditions need an OK, the mobile number is optional, and the free-cancell
   await expect(page.getByText("Questions from Aiko (sample)", { exact: true })).toBeVisible();
   const conditions = page.getByRole("checkbox", { name: /Everyone in my group is OK with/ });
   await expect(conditions).not.toBeChecked();
-  for (const point of ["Ages 10 and up", "Steps up to the studio"]) await expect(page.getByText(point, { exact: true })).toBeVisible();
+  for (const point of ["Ages 10 and up · Children must join with an adult", "Standing for a long time (Working with your hands · about 2 hours, with short breaks)", "Steps up to the studio"]) {
+    await expect(page.getByText(point, { exact: true })).toBeVisible();
+  }
   // The deadline is a weekday, a date and a time, and says it is Japan time.
   await expect(page.getByText(/^Until [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d{2} (AM|PM) Japan time$/)).toBeVisible();
 
@@ -163,4 +165,54 @@ test.describe("/booking/return", () => {
     await page.goto("/booking/return?type=approval");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   });
+});
+
+test("the host changed the points after the page loaded: the form says so, reloads them and asks for the OK again", async ({ page }) => {
+  await page.goto(`${indigo}/book?mock=checkout-conditions-outdated`);
+  await chooseLaterDate(page);
+  await fillIndigoDetails(page);
+  await page.getByRole("checkbox", { name: /Everyone in my group is OK with/ }).check();
+  await page.getByRole("button", { name: "Request to book" }).click();
+
+  await expect(page.locator("main").getByRole("alert").filter({ hasText: "Review the latest details" })).toBeVisible();
+  await expect(page.locator("#booking-problem")).toContainText("The points under “Before you book” changed. Reload the experience to review them.");
+  await expect(page).toHaveURL(/\/book\?mock=checkout-conditions-outdated$/);
+  // Nothing can be sent until the points are read again.
+  await expect(page.getByRole("button", { name: "Request to book" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Reload the experience" }).click();
+  // The new point is shown, the OK is asked for again, and what the traveler typed stays on the page.
+  await expect(page.getByText("Ages 10 and up · Children must join with an adult · Updated by the host", { exact: true })).toBeVisible();
+  const conditions = page.getByRole("checkbox", { name: /Everyone in my group is OK with/ });
+  await expect(conditions).not.toBeChecked();
+  await expect(page.getByRole("textbox", { name: "Full name" })).toHaveValue("Emma Clarke");
+  await expect(page.getByRole("textbox", { name: "Email" })).toHaveValue("emma@example.com");
+  await expect(page.locator("#question-q_colour")).toHaveValue("o_deep");
+  await expect(page.locator("#booking-problem")).toHaveCount(0);
+
+  await conditions.check();
+  await page.getByRole("checkbox", { name: /agree to version/ }).check();
+  await page.getByRole("button", { name: "Request to book" }).click();
+  await expect(page).toHaveURL(/\/preview\/checkout$/);
+});
+
+test("the host added points that need an OK after the page loaded: the form reloads them before booking", async ({ page }) => {
+  await page.goto(`${dinner}/book?mock=checkout-conditions-added`);
+  await chooseFirstDate(page);
+  await expect(page.getByRole("heading", { name: /Before you book/ })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Full name" }).fill("Sample Guest");
+  await page.getByRole("textbox", { name: "Email" }).fill("guest@example.com");
+  await page.getByRole("checkbox", { name: /agree to version/ }).check();
+  await page.getByRole("button", { name: "Continue to mock payment" }).click();
+
+  await expect(page.locator("#booking-problem")).toContainText("This experience has points to confirm before you book. Reload the experience to review them.");
+  await page.getByRole("button", { name: "Reload the experience" }).click();
+
+  await expect(page.getByRole("heading", { name: /Before you book/ })).toBeVisible();
+  await expect(page.getByText("Ages 6 and up", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Full name" })).toHaveValue("Sample Guest");
+  await page.getByRole("checkbox", { name: /Everyone in my group is OK with/ }).check();
+  await page.getByRole("checkbox", { name: /agree to version/ }).check();
+  await page.getByRole("button", { name: "Continue to mock payment" }).click();
+  await expect(page).toHaveURL(/\/preview\/checkout$/);
 });
