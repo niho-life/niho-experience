@@ -1,0 +1,414 @@
+<!doctype html>
+<!--
+  mock: NIHO Experience（experience.niho.life）のロゴ案 v2。v1（experience-logo-v1.html）から owner が絞った D 器 / J 切符 / L リュック / N 足 / R 縦の切符 の 5 方向を、各 3 パターンで見比べる。
+  論点: 5 方向のどれを本命にするか。各方向の中でどのパターンか（器: 水色/ベージュ/クリーム＋縁の帯（真横のアングル・輪郭線なし・緩やかな非対称カーブ・小石は器の後ろに置いて縁の上に頭だけ覗く・箸なし・owner 指摘 10/24）・切符: 傾き/入鋏/2 枚・メモ: 3 行/道順/会える人/小石で押さえる・道順の展開 M2a〜f: 海の帯/目印/水色の紙/会える人/池/署名（上の 1 行は外し道順の線だけ・水色を必ず入れる・owner 10/24）（旅先で教えてもらった手書きの紙片＝NIHO Experience の役割・owner 10/24）・リュック: 現行/蓋/バッジ・足: 横顔/足あと/左右の一歩・縦の切符: 穴/縁の切れ込み/もぎった半券）。
+  作っていない: 足 N1〜N3 は輪郭線なしで小石 9〜10 個を手置き（owner 指示）。各案は SVG の手置きで、選定後に清書・書き出し。ヘッダーのナビは見た目だけ。日本語 wordmark・/ja 面・OGP 画像は未検討。
+  参照: experience-logo-v1.html（19 方向の探索）/ experience.niho.life ヘッダー / niho-experience packages/experience-presentation/src/v1 / apps/mobile/native/ios/NihoLaunchLogo.svg / docs/design/design-guide.md §1–3
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NIHO Experience ロゴ案 v2</title>
+<style>
+@font-face{font-family:"Fraunces Variable";font-style:normal;font-weight:100 900;font-display:swap;src:url("assets/experience/fonts/fraunces-latin-wght-normal.woff2") format("woff2-variations")}
+@font-face{font-family:"Nunito Variable";font-style:normal;font-weight:200 1000;font-display:swap;src:url("assets/experience/fonts/nunito-latin-wght-normal.woff2") format("woff2-variations")}
+@font-face{font-family:"Caveat Variable";font-style:normal;font-weight:400 700;font-display:swap;src:url("assets/experience/fonts/caveat-latin-wght-normal.woff2") format("woff2-variations")}
+:root{
+  --canvas:#fff;--sand:#f5f5f2;--ink:#1c1c1a;--ink-soft:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line-strong:#d4d4cf;
+  --moss:#355e1f;--leaf:#b2d67c;--leaf-pale:#eef5e3;
+  --radius:1.375rem;--shadow:0 1px 2px rgb(28 28 26/.04),0 10px 30px rgb(28 28 26/.08);
+  --sans:"Nunito Variable","Hiragino Sans","Noto Sans JP",ui-sans-serif,system-ui,sans-serif;
+  --display:"Fraunces Variable",Georgia,"Hiragino Mincho ProN",serif;
+  --hand:"Caveat Variable","Bradley Hand",cursive;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit}
+#measure{position:absolute;left:-9999px;top:0;visibility:hidden}
+.defs{position:absolute;width:0;height:0;overflow:hidden}
+
+.bar{position:sticky;top:0;z-index:20;background:rgb(255 255 255/.94);backdrop-filter:blur(10px) saturate(1.2);border-bottom:1px solid var(--line)}
+.bar-in{max-width:1120px;margin:0 auto;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.bar-title{font-family:var(--display);font-size:1.0625rem;font-weight:600;letter-spacing:-.01em;margin-right:auto}
+.bar-title span{font-family:var(--sans);font-weight:800;font-size:.75rem;color:var(--muted);margin-left:.4em}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden;background:#fff}
+.seg button{border:0;background:none;color:var(--ink-soft);font-weight:800;font-size:.8125rem;padding:7px 13px;cursor:pointer;min-width:38px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--ink);color:#fff}
+.seg.pick button.on{background:var(--moss)}
+
+.family{max-width:1120px;margin:22px auto 8px;padding:0 16px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 22px}
+.fam{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:84px}
+.fam img,.fam .plain{width:72px;height:72px;object-fit:contain;display:grid;place-items:center}
+.fam span{font-size:.75rem;font-weight:700;color:var(--muted);white-space:nowrap}
+.fam.cand span{color:var(--moss)}
+.fam.cand span em{font-style:normal;font-family:var(--hand);font-size:1.25rem;line-height:1;margin-left:.25em}
+.appicon{width:72px;height:72px;border-radius:22%;background:linear-gradient(180deg,#fdfcf9,#f0ece4);box-shadow:inset 0 0 0 1px rgb(28 28 26/.07),0 4px 10px rgb(28 28 26/.08);display:grid;place-items:center}
+
+.case{max-width:1120px;margin:26px auto;padding:0 16px}
+.case-h{display:flex;align-items:baseline;gap:12px;margin:0 4px 10px}
+.case-h .tag{font-family:var(--hand);font-size:2.25rem;line-height:.9;font-weight:700;color:var(--moss)}
+.case-h h2{margin:0;font-family:var(--display);font-size:1.375rem;font-weight:600;letter-spacing:-.01em}
+.grid{display:grid;gap:12px;grid-template-columns:1fr;grid-template-areas:"big" "lock" "hdr" "hero" "small" "mono"}
+@media (min-width:880px){
+  .grid{grid-template-columns:300px 1fr 1fr;grid-template-areas:"big lock lock" "big hdr hero" "small small mono"}
+}
+.cell{border:1px solid var(--line);border-radius:var(--radius);background:#fff;padding:18px;display:flex;align-items:center;justify-content:center;min-height:120px;overflow:hidden;transition:box-shadow .2s}
+.cell.big{min-height:300px;grid-area:big}
+.cell.lock{grid-area:lock;min-height:116px}
+.cell.hdrc{grid-area:hdr;padding:0;flex-direction:column;align-items:stretch;justify-content:flex-start;background:var(--sand);container-type:inline-size}
+.cell.hero{grid-area:hero;padding:0;align-items:stretch;container-type:inline-size}
+.cell.small{grid-area:small;flex-wrap:wrap;gap:20px 28px;justify-content:flex-start}
+.cell.mono{grid-area:mono;gap:12px;flex-wrap:wrap}
+.case.on .cell.big{box-shadow:0 0 0 2px var(--leaf)}
+
+.brand{display:inline-flex;align-items:center;line-height:0}
+.hdr-in{display:flex;align-items:center;justify-content:space-between;gap:12px;height:56px;padding:0 16px;background:#fff;border-bottom:1px solid var(--line);min-width:0}
+.hdr-in .brand-slot{flex:none;line-height:0}
+.hdr-in nav{display:flex;align-items:center;gap:16px;font-size:.8125rem;font-weight:800;color:var(--ink);white-space:nowrap}
+.hdr-in nav .lang{border:1px solid var(--line-strong);border-radius:999px;padding:4px 10px}
+.hdr-in.on-photo{background:transparent;border:0}
+.hdr-in.on-photo nav{color:#fff}
+.hdr-in.on-photo nav .lang{border-color:rgb(255 255 255/.6)}
+.page-ghost{padding:14px 16px 18px;display:grid;gap:8px}
+.page-ghost i{display:block;height:9px;border-radius:999px;background:var(--line)}
+.page-ghost i:nth-child(1){width:52%;height:14px;background:var(--line-strong)}
+.page-ghost i:nth-child(2){width:78%}
+.page-ghost i:nth-child(3){width:64%}
+.hero-in{flex:1;min-width:0;width:100%;min-height:190px;display:flex;flex-direction:column;justify-content:space-between;color:#fff;background:linear-gradient(180deg,rgb(0 0 0/.42),rgb(0 0 0/.12) 55%,rgb(0 0 0/.42)),url("assets/niho-dinner-1.jpg") center/cover}
+.hero-h{margin:0;padding:0 16px 14px;font-family:var(--display);font-size:1.5rem;line-height:1.1;font-weight:600;letter-spacing:-.01em;max-width:14ch}
+.hero-h em{font-style:normal;font-family:var(--hand);color:var(--leaf);font-size:1.25em;font-weight:600}
+@container (max-width:560px){.hdr-in nav span:not(.lang){display:none}}
+@media (max-width:420px){.hdr-in nav span:not(.lang){display:none}}
+
+.tabbar{display:flex;align-items:flex-end;padding:8px 10px 0;background:var(--line);border-radius:12px 12px 0 0}
+.tab{display:inline-flex;align-items:center;gap:9px;padding:8px 14px 8px 11px;border-radius:9px 9px 0 0;background:#fff;font-size:.8125rem;font-weight:700;color:var(--ink-soft);white-space:nowrap}
+.tab svg{flex:none}
+.sizes{display:inline-flex;align-items:flex-end;gap:16px}
+.chip{width:96px;height:96px;border-radius:18px;display:grid;place-items:center}
+.chip.sand{background:var(--sand)}
+.chip.moss{background:var(--moss)}
+.chip.ink{background:var(--ink)}
+.group{max-width:1120px;margin:34px auto -8px;padding:0 20px;font-size:.8125rem;font-weight:800;color:var(--muted);letter-spacing:.04em}
+.foot{max-width:1120px;margin:30px auto 50px;padding:0 16px;font-size:.75rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true" focusable="false">
+  <defs id="pebble-defs">
+    <filter id="sketch100" x="-15%" y="-15%" width="130%" height="130%"><feTurbulence type="turbulence" baseFrequency="0.022" numOctaves="2" seed="4" result="t"/><feDisplacementMap in="SourceGraphic" in2="t" scale="4.4" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="rubber100" x="-6%" y="-6%" width="112%" height="112%"><feTurbulence type="fractalNoise" baseFrequency="1.38" numOctaves="2" seed="9" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.2 0 0 0 1.95" result="m"/><feComposite in="SourceGraphic" in2="m" operator="in" result="c"/><feTurbulence type="turbulence" baseFrequency="0.036" numOctaves="1" seed="2" result="w"/><feDisplacementMap in="c" in2="w" scale="1.3" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <clipPath id="bowl-top"><rect x="0" y="0" width="100" height="45.6"/></clipPath>
+    <clipPath id="bowl-in"><path d="M0 0H100V46H82C73 50.6 48 51.8 31 50.3C24.5 49.6 19.6 48.6 18 47H0Z"/></clipPath>
+    <clipPath id="bowl-in-deep"><path d="M0 0H100V46.5H85C76 55.5 48 57.8 30 55.8C22.5 54.9 17 52.3 15 48H0Z"/></clipPath>
+    <mask id="bite-j2" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100"><rect width="100" height="100" fill="#fff"/><circle cx="76" cy="29" r="4.2" fill="#000"/></mask>
+    <mask id="bite-r2" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100"><rect width="100" height="100" fill="#fff"/><circle cx="70" cy="24" r="4.2" fill="#000"/></mask>
+    <path id="stamp-arc" d="M11.5 50a38.5 38.5 0 1 1 77 0a38.5 38.5 0 1 1-77 0"/>
+  </defs>
+</svg>
+<div id="measure"></div>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="bar-title">NIHO Experience ロゴ案<span>v2</span></div>
+    <div class="seg pick" id="seg"></div>
+    <div class="seg" id="handseg"><button data-hand="0" class="on">Experience: セリフ</button><button data-hand="1">手書き</button></div>
+  </div>
+</div>
+
+<section class="family" aria-label="family">
+  <div class="fam"><img src="assets/nihokamakura-logo.jpg" alt=""><span>NIHO kamakura</span></div>
+  <div class="fam"><img src="assets/niho-logo.png" alt=""><span>NIHO app</span></div>
+  <div class="fam"><img src="assets/niho-camera-icon.png" alt=""><span>NIHO camera</span></div>
+  <div class="fam"><img src="assets/niho-docs-icon.png" alt=""><span>NIHO docs</span></div>
+  <div class="fam cand"><div class="plain" id="fam-plain"></div><span>NIHO Experience<em id="fam-key">M2e</em></span></div>
+  <div class="fam cand"><div class="appicon" id="fam-icon"></div><span>&nbsp;</span></div>
+</section>
+
+<main id="cases"></main>
+<p class="foot">docs/mock/logo/experience-logo-v2.html</p>
+
+<script>
+const PEBBLES = [{"id": "pebble-01", "fill": "#FAEBCC", "bbox": [161.5, 146.8, 307.8, 251.7], "w": 146.3, "h": 104.9, "d": "M224.863 227.134C212.783 225.894 211.522 234.925 183.02 224.355C175.888 221.701 161.455 216.094 161.455 201.208C161.455 165.828 189.812 174.959 216.931 161.884C248.223 146.799 278.374 159.03 295.282 179.548C306.828 193.566 307.75 226.216 288.441 237.108C262.583 251.696 244.342 229.144 224.839 227.134H224.863Z"}, {"id": "pebble-02", "fill": "#BCD499", "bbox": [121.1, 217.6, 265.0, 331.5], "w": 143.9, "h": 114.0, "d": "M231.946 316.699C221.2 324.563 211.74 326.871 198.714 329.203C185.688 331.535 169.654 326.871 164.851 314.267C157.622 295.312 143.31 303.053 132.613 283.329C121.139 262.191 124.657 240.408 136.373 229.739C149.763 217.558 168.223 224.554 175.961 230.608C191.34 242.616 193.79 252.837 204.39 248.124C232.334 235.719 250.672 246.213 257.101 264.275C265.008 286.455 241.916 309.405 231.97 316.674L231.946 316.699Z"}, {"id": "pebble-03", "fill": "#4D5E71", "bbox": [244.4, 254.9, 301.0, 340.7], "w": 56.6, "h": 85.7, "d": "M260.182 338.11C251.886 340.665 244.391 331.386 244.391 326.772C244.391 316.947 257.392 309.628 265.349 287.969C266.562 284.669 270.758 268.121 272.966 265.441C275.173 262.737 282.135 254.946 285.579 254.946C296.543 254.946 301.007 262.786 300.061 269.808C298.46 281.617 293.002 295.387 289.727 306.824C288.854 309.851 288.32 316.699 286.913 319.502C282.523 328.384 269.472 335.232 260.182 338.11Z"}, {"id": "pebble-04", "fill": "#CFC1AC", "bbox": [303.5, 228.0, 337.2, 255.7], "w": 33.6, "h": 27.7, "d": "M314.081 255.691C308.89 255.715 304.402 250.753 303.965 245.394C303.529 240.035 306.585 234.776 310.927 231.823C315.269 228.871 320.678 227.978 325.869 228.35C328.077 228.499 330.406 228.945 332.104 230.384C333.292 231.402 334.093 232.841 334.845 234.23C335.936 236.264 337.076 238.398 337.125 240.705C337.173 243.261 335.912 245.692 334.214 247.553C329.726 252.515 322.959 255.591 314.056 255.666L314.081 255.691Z"}, {"id": "pebble-05", "fill": "#F09B84", "bbox": [163.7, 132.1, 206.7, 166.7], "w": 43.1, "h": 34.7, "d": "M183.166 166.474C175.428 166.722 171.668 164.737 169.242 157.914C167.568 153.2 163.663 141.961 166.719 138.041C171.401 132.062 182.947 136.528 187.241 137.892C194.251 140.125 199.418 143.747 204.196 149.454C205.555 151.091 206.719 153.299 206.04 155.309C205.288 157.467 192.529 166.151 183.19 166.474H183.166Z"}, {"id": "pebble-06", "fill": "#4D5E71", "bbox": [282.4, 116.2, 346.4, 179.1], "w": 64.0, "h": 62.8, "d": "M302.558 171.957C298.265 171.411 288.441 164.836 285.967 159.527C282.376 151.836 283.444 136.553 287.422 130.797C292.104 124.023 309.86 116.233 317.064 120.252C324.244 124.272 328.174 127.745 335.087 132.285C343.504 137.818 346.415 150.794 336.979 162.107C322.837 179.052 311.315 173.048 302.558 171.957Z"}, {"id": "pebble-07", "fill": "#4D5E71", "bbox": [61.3, 124.7, 164.0, 231.7], "w": 102.7, "h": 107.0, "d": "M130.867 218.674C116.774 221.651 98.4839 231.699 85.2152 205.252C72.5045 179.896 61.322 180.293 78.2049 148.834C84.9969 136.18 96.8101 124.817 110.904 124.718C118.326 124.669 125.385 127.745 132.177 130.772C135.67 132.31 139.139 133.873 142.632 135.411C147.896 137.743 153.353 140.224 157.089 144.665C164.027 152.902 163.105 165.431 159.442 175.628C155.464 186.669 154.372 213.687 130.843 218.674H130.867Z"}, {"id": "pebble-08", "fill": "#A8D5E2", "bbox": [176.6, 63.1, 305.0, 143.9], "w": 128.4, "h": 80.8, "d": "M207.131 76.264C232.043 73.6589 262.243 66.2407 266.221 65.5708C281.455 63.065 302.316 69.2179 304.062 87.1308C305.008 96.906 300.812 106.681 294.141 113.777C279.975 128.837 253.074 137.644 228.429 141.986C217.707 143.872 211.497 130.424 201.115 127.125C179.429 120.228 176.591 79.4397 207.107 76.2392L207.131 76.264Z"}, {"id": "pebble-09", "fill": "#BCD499", "bbox": [318.6, 160.3, 409.3, 257.3], "w": 90.7, "h": 97.0, "d": "M358.859 165.134C375.014 160.296 393.231 169.798 401.261 185.304C409.29 200.811 407.713 220.733 399.296 236.066C397.064 240.11 394.347 243.955 390.806 246.809C387.531 249.438 383.698 251.126 379.842 252.639C373.316 255.194 365.821 257.303 359.611 254.028C353.789 250.952 350.806 243.906 349.787 237.108C349.399 234.503 349.229 231.823 348.38 229.317C345.105 219.518 333.608 216.317 326.791 208.849C320.096 201.481 318.592 189.373 323.298 180.367C327.98 171.361 339.187 171.039 358.883 165.159L358.859 165.134Z"}, {"id": "pebble-10", "fill": "#F09B84", "bbox": [146.9, 335.7, 260.2, 409.6], "w": 113.3, "h": 73.9, "d": "M216.082 405.171C200.388 409.563 183.554 408.769 168.272 402.939C163.59 401.152 158.908 398.795 155.512 394.826C146.901 384.703 149.958 367.187 158.86 357.362C167.762 347.538 180.643 343.642 193.014 340.963C208.757 337.539 226.028 335.703 240 344.387C246.695 348.555 252.201 355.005 255.549 362.647C259.818 372.397 260.182 384.976 253.972 393.387C247.374 402.318 235.246 399.813 216.082 405.171Z"}, {"id": "pebble-11", "fill": "#CFC1AC", "bbox": [64.5, 271.6, 159.6, 363.5], "w": 95.0, "h": 91.8, "d": "M125.506 302.879C131.862 307.866 141.273 305.137 148.648 308.338C155.173 311.141 159.151 318.485 159.369 325.73C159.563 332.974 156.483 339.995 152.116 345.677C143.675 356.693 128.563 363.466 115.925 358.107C109.254 355.254 104.087 349.498 97.465 346.496C93.4384 344.66 88.9993 343.94 84.8999 342.303C74.0327 338.011 65.9793 327.02 65.009 315.136C64.5239 309.231 65.6397 303.326 67.2407 297.645C69.8362 288.39 74.5178 278.714 83.2504 275.117C91.7161 271.619 101.662 275.117 108.672 281.071C115.706 287.026 118.35 297.248 125.482 302.855L125.506 302.879Z"}, {"id": "pebble-12", "fill": "#A8D5E2", "bbox": [55.2, 226.6, 118.9, 268.5], "w": 63.7, "h": 41.9, "d": "M95.0391 256.733C87.6164 260.653 80.5333 264.349 72.577 266.979C69.7389 267.922 66.5855 268.542 63.7959 267.426C60.8365 266.235 58.9202 263.258 57.6831 260.256C55.9366 255.988 55.2089 251.324 55.5727 246.709C56.0579 240.482 58.9202 234.056 64.3053 231.079C68.1379 228.97 87.4466 226.613 91.7886 226.961C100.594 227.655 118.884 232.468 115.536 247.528C113.256 257.874 102.243 252.887 95.0148 256.733H95.0391Z"}, {"id": "pebble-13", "fill": "#A8D5E2", "bbox": [273.7, 257.0, 412.2, 400.1], "w": 138.4, "h": 143.1, "d": "M354.808 385.596C342.122 396.289 307.701 400.11 297.464 393.238C287.228 386.39 275.318 377.98 274.76 365.128C273.717 341.881 292.419 345.925 298.726 328.806C303.043 317.096 295.96 297.223 315.512 279.632C337.537 259.809 340.763 270.254 356.142 266.93C367.422 264.498 388.574 257.03 397.282 267.773C412.152 286.108 402.207 315.26 377.78 330.964C353.426 346.62 374.917 368.701 354.832 385.596H354.808Z"}];
+const NS = 'http://www.w3.org/2000/svg';
+const MODE_FILL = { white: '#ffffff', ink: '#1c1c1a', moss: '#355e1f' };
+const F = (mode, c) => mode === 'color' ? c : MODE_FILL[mode];
+const P = {};
+PEBBLES.forEach(p => { P[p.id.slice(-2)] = p; });
+(function installPebbleDefs() {
+  const defs = document.getElementById('pebble-defs');
+  PEBBLES.forEach(p => { const path = document.createElementNS(NS, 'path'); path.setAttribute('id', 'pb-' + p.id.slice(-2)); path.setAttribute('d', p.d); defs.appendChild(path); });
+})();
+function peb(n, cx, cy, size, rot = 0, mode = 'color', fill, ax = 1, ay = 1) {
+  const p = P[n]; const [bx, by] = p.bbox; const s = size / Math.max(p.w, p.h); const dw = p.w * s * ax, dh = p.h * s * ay;
+  const par = (ax !== 1 || ay !== 1) ? ' preserveAspectRatio="none"' : '';
+  return `<g transform="rotate(${rot} ${cx} ${cy})"><svg x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" viewBox="${bx} ${by} ${p.w} ${p.h}" overflow="visible"${par}><use href="#pb-${n}" fill="${F(mode, fill || p.fill)}"/></svg></g>`;
+}
+
+function trio(mode, cx, cy, s) { return peb('06', cx, cy - 0.32 * s, s, 0, mode) + peb('05', cx - 0.52 * s, cy + 0.38 * s, s * 0.75, 8, mode) + peb('09', cx + 0.55 * s, cy + 0.38 * s, s * 0.82, -8, mode); }
+const TICKET_H = 'M21 29H79Q86 29 86 36V44.5A5.5 5.5 0 0 0 86 55.5V64Q86 71 79 71H21Q14 71 14 64V55.5A5.5 5.5 0 0 1 14 44.5V36Q14 29 21 29Z';
+const TICKET_V = 'M36 12H64Q70 12 70 18V60.5A5 5 0 0 0 70 70.5V82Q70 88 64 88H36Q30 88 30 82V70.5A5 5 0 0 1 30 60.5V18Q30 12 36 12Z';
+const PACK_BODY = 'M31 46C28 60 28.5 74 32.5 85C44 88 56 88 67.5 85C71.5 74 72 60 69 46C64 38 36 38 31 46Z';
+const PACK_POCKET = 'M40 63C39.5 72 41 79 50 79.5C59 79 60.5 72 60 63C54 61 46 61 40 63Z';
+function bowlSide(mode, bodyColor, stones, bandColor) {
+  // 真横から見た器。上の縁はほぼ水平（わずかに波打つ）。小石は器の後ろに置き、縁の上に頭だけ覗く。
+  const top = 'M17 46C30 44.6 52 44.2 70 44.8C76 45 80.5 45.2 83 45.5';
+  const body = top + 'C84.5 56 80 68 70.5 75.5C63.5 80.4 54 81.4 47 80.8C36 80 26 74.5 21 66.5C17 60 16.4 52.5 17 46Z';
+  const band = bandColor ? `<path d="${top}L82.6 49.6C70 49 50 48.3 30 49.1L17.4 50.2Z" fill="${F(mode, bandColor)}"/>` : '';
+  const foot = 'M39.2 79.6C39.8 83 40.6 85.4 42 86C47.5 87.1 53.5 87 59 85.9C60.4 85.3 61 82.6 61.3 79.4C54 81.2 46 81.3 39.2 79.6Z';
+  return stones + `<path d="${body}" fill="${F(mode, bodyColor)}"/>` + band + `<path d="${foot}" fill="${F(mode, '#4D5E71')}"/>`;
+}
+
+// --- ことづてのメモ（手書きの紙片） ---
+const SCRAP = 'M23.5 30.5C36 28.6 52 29.6 71.5 29C74.2 34 72.6 39 74.6 44.5C73 50 75.4 56 73.4 61.5C74.8 66 73.2 69 74.2 70.5C60 72 40 70.8 25.5 71.2C24.2 60 25.6 46 23.5 30.5Z';
+function paper(mode, color, d = SCRAP) {
+  const c = mode === 'color';
+  return `<path d="${d}" fill="${c ? color : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/>`;
+}
+function handLine(mode, x1, y1, x2, y2, w = 3.4) {
+  const dx = x2 - x1;
+  return `<path d="M${x1} ${y1}C${(x1 + dx * 0.3).toFixed(1)} ${(y1 - 0.9).toFixed(1)} ${(x1 + dx * 0.65).toFixed(1)} ${(y2 + 0.8).toFixed(1)} ${x2} ${y2}" fill="none" stroke="${F(mode, '#4D5E71')}" stroke-width="${w}" stroke-linecap="round"/>`;
+}
+
+const MEMO_T = 'translate(50 50) scale(1.2) translate(-50 -50) rotate(-7 50 50)';
+(function installScrapClip() { const defs = document.getElementById('pebble-defs'); const cp = document.createElementNS(NS, 'clipPath'); cp.setAttribute('id', 'scrap-clip'); const path = document.createElementNS(NS, 'path'); path.setAttribute('d', SCRAP); cp.appendChild(path); defs.appendChild(cp); })();
+function routeLine(mode, d) { return `<path d="${d}" fill="none" stroke="${F(mode, '#4D5E71')}" stroke-width="3" stroke-linecap="round"/>`; }
+
+const MARKS = {
+  D1: { name: '器・水色（真横）',
+    render(mode) {
+      const stones = peb('05', 37, 41, 18, 6, mode) + peb('09', 53, 38, 22, 0, mode) + peb('06', 68, 41.5, 15, -6, mode);
+      return bowlSide(mode, '#A8D5E2', stones, null);
+    } },
+  D2: { name: '器・ベージュ（真横）',
+    render(mode) {
+      const stones = peb('05', 37, 41, 18, 6, mode) + peb('09', 53, 38, 22, 0, mode) + peb('12', 68, 41.5, 16, -6, mode);
+      return bowlSide(mode, '#CFC1AC', stones, null);
+    } },
+  D3: { name: '器・クリームに縁の帯（真横）',
+    render(mode) {
+      const stones = peb('05', 37, 41, 18, 6, mode) + peb('09', 53, 38, 22, 0, mode) + peb('12', 68, 41.5, 16, -6, mode);
+      return bowlSide(mode, '#FAEBCC', stones, '#4D5E71');
+    } },
+  J1: { name: '切符（現行）',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      return `<g transform="rotate(-7 50 50)"><path d="${TICKET_H}" fill="${c ? '#FAEBCC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M67 34.5V65.5" fill="none" stroke="${ink}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${peb('06', 41, 46.5, 16, 0, mode)}${peb('05', 32, 57, 12, 8, mode)}${peb('09', 50, 58, 13, -8, mode)}${peb('12', 76.5, 50, 11, 0, mode)}</g>`;
+    } },
+  J2: { name: '切符（入鋏・水平）',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      return `<path d="${TICKET_H}" mask="url(#bite-j2)" fill="${c ? '#FAEBCC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M67 34.5V65.5" fill="none" stroke="${ink}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${trio(mode, 40, 50, 16)}${peb('12', 76.5, 52, 11, 0, mode)}`;
+    } },
+  J3: { name: '切符 2 枚',
+    render(mode) {
+      const c = mode === 'color';
+      const back = `<g transform="rotate(-16 50 50) translate(-3 -8)"><path d="${TICKET_H}" fill="${c ? '#CFC1AC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/></g>`;
+      const front = `<g transform="rotate(-4 50 50) translate(2 6)"><path d="${TICKET_H}" fill="${c ? '#FAEBCC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M67 34.5V65.5" fill="none" stroke="${F(mode, '#4D5E71')}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${trio(mode, 40, 50, 16)}${peb('12', 76.5, 50, 11, 0, mode)}</g>`;
+      return back + front;
+    } },
+
+  M1: { name: 'ことづて（破いた紙片に 3 行）',
+    render(mode) {
+      return `<g transform="translate(50 50) scale(1.2) translate(-50 -50) rotate(-7 50 50)">${paper(mode, '#FAEBCC')}${handLine(mode, 31, 41, 62, 40.5)}${handLine(mode, 31, 50, 66, 49.5)}${handLine(mode, 31, 59, 50, 58.6)}${peb('05', 58.5, 58.5, 9.5, 8, mode)}</g>`;
+    } },
+  M2: { name: '道順のメモ',
+    render(mode) {
+      const route = `<path d="M31 64C38 62.5 39.5 54.5 46 52.5C54 50 55.5 44.5 63 44.5" fill="none" stroke="${F(mode, '#4D5E71')}" stroke-width="3" stroke-linecap="round"/>`;
+      return `<g transform="translate(50 50) scale(1.2) translate(-50 -50) rotate(-7 50 50)">${paper(mode, '#FAEBCC')}${handLine(mode, 31, 38.5, 58, 38)}${route}${peb('04', 31, 64, 6.5, 0, mode, '#CFC1AC')}${peb('05', 67, 44, 9.5, 0, mode)}</g>`;
+    } },
+  M3: { name: '会える人を記したメモ',
+    render(mode) {
+      return `<g transform="translate(50 50) scale(1.2) translate(-50 -50) rotate(-7 50 50)">${paper(mode, '#CFC1AC')}${trio(mode, 49, 46, 14)}${handLine(mode, 34, 63, 64, 62.5)}</g>`;
+    } },
+  M4: { name: '小石で押さえたメモ',
+    render(mode) {
+      return `<g transform="translate(50 50) scale(1.2) translate(-50 -50) rotate(-7 50 50)">${paper(mode, '#FAEBCC')}${handLine(mode, 31, 44, 58, 43.5)}${handLine(mode, 31, 53, 64, 52.5)}${handLine(mode, 31, 62, 48, 61.6)}${peb('05', 55, 60, 9, 8, mode)}</g>` + peb('06', 74, 29, 20, 0, mode);
+    } },
+  M2a: { name: '海と道順（海は水色の帯）',
+    render(mode) {
+      const sea = `<path clip-path="url(#scrap-clip)" d="M20 62.5C32 60 42 64 52 61.5C62 59 68 63.5 80 61.5V78H20Z" fill="${F(mode, '#A8D5E2')}"/>`;
+      return `<g transform="${MEMO_T}">${paper(mode, '#FAEBCC')}${sea}${routeLine(mode, 'M34 59.5C40 57.5 40 49.5 47 47.5C55 45.5 56 41 62 40')}${peb('09', 44, 37, 8.5, 0, mode)}${peb('05', 65.5, 39.5, 9.5, 0, mode)}</g>`;
+    } },
+  M2b: { name: '目印つきの道順',
+    render(mode) {
+      return `<g transform="${MEMO_T}">${paper(mode, '#FAEBCC')}${routeLine(mode, 'M31 63C38 61 39.5 53 46 51C54 49 55.5 43.5 63 43.5')}${peb('12', 37, 43, 10, 0, mode)}${peb('09', 57, 58.5, 8.5, 0, mode)}${peb('04', 31, 63, 6.5, 0, mode, '#CFC1AC')}${peb('05', 67, 43, 9.5, 0, mode)}</g>`;
+    } },
+  M2c: { name: '水色の紙の道順',
+    render(mode) {
+      return `<g transform="${MEMO_T}">${paper(mode, '#A8D5E2')}${routeLine(mode, 'M31 63C38 61 39.5 53 46 51C54 49 55.5 43.5 63 43.5')}${peb('01', 37, 43, 11, 0, mode)}${peb('09', 57, 58.5, 8.5, 0, mode)}${peb('04', 31, 63, 6.5, 0, mode, '#CFC1AC')}${peb('05', 67, 43, 9.5, 0, mode)}</g>`;
+    } },
+  M2d: { name: '道順の先に会える人',
+    render(mode) {
+      return `<g transform="${MEMO_T}">${paper(mode, '#FAEBCC')}${routeLine(mode, 'M31 63C38 61 39.5 53 45 51C50 49 52 46.5 55 44.5')}${peb('12', 60, 36, 9.5, 0, mode)}${peb('05', 66.5, 43, 10.5, 0, mode)}${peb('09', 60.5, 50.5, 9, 0, mode)}${peb('04', 31, 63, 6.5, 0, mode, '#CFC1AC')}</g>`;
+    } },
+  M2e: { name: '池を回る道順',
+    render(mode) {
+      return `<g transform="${MEMO_T}">${paper(mode, '#FAEBCC')}${peb('08', 38, 41, 15, 0, mode)}${routeLine(mode, 'M31 64C37 62 44 55 46 50C48 45.5 52 43.5 60 42.5')}${peb('09', 54, 60, 8, 0, mode)}${peb('04', 31, 64, 6.5, 0, mode, '#CFC1AC')}${peb('05', 65, 42, 9.5, 0, mode)}</g>`;
+    } },
+  M2f: { name: '署名の小石つき道順',
+    render(mode) {
+      const seal = peb('06', 33.5, 37.5, 7.5, 0, mode) + peb('12', 40.5, 36, 7, 0, mode) + peb('09', 37.5, 43, 7, 0, mode);
+      return `<g transform="${MEMO_T}">${paper(mode, '#FAEBCC')}${seal}${routeLine(mode, 'M31 63C38 61 39.5 53 46 51C54 49 55.5 43.5 63 43.5')}${peb('04', 31, 63, 6.5, 0, mode, '#CFC1AC')}${peb('05', 67, 43, 9.5, 0, mode)}</g>`;
+    } },
+  L1: { name: 'リュック（現行）',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const handle = `<path d="M41 40C43 29 57 29 59 40" fill="none" stroke="${ink}" stroke-width="3.2" stroke-linecap="round"/>`;
+      if (c) return handle + `<path d="${PACK_BODY}" fill="#A8D5E2"/><path d="${PACK_POCKET}" fill="#4D5E71"/>` + peb('05', 60, 51, 9, 0, mode) + peb('09', 40, 52, 10, 0, mode);
+      return handle + `<path d="${PACK_BODY}${PACK_POCKET}" fill="${MODE_FILL[mode]}" fill-rule="evenodd"/>`;
+    } },
+  L2: { name: '蓋つきリュック',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const handle = `<path d="M41 40C43 29 57 29 59 40" fill="none" stroke="${ink}" stroke-width="3.2" stroke-linecap="round"/>`;
+      const lid = 'M31 46C30 50.5 30 55.5 31.5 60.5C40 64 60 64 68.5 60.5C70 55.5 70 50.5 69 46C64 38 36 38 31 46Z';
+      if (c) return handle + `<path d="${PACK_BODY}" fill="#A8D5E2"/><path d="${PACK_POCKET}" fill="#4D5E71"/><path d="${lid}" fill="#FAEBCC"/>` + peb('04', 50, 61, 7.5, 0, mode, '#4D5E71') + peb('05', 63, 70, 8, 0, mode);
+      return handle + `<path d="${PACK_BODY}${PACK_POCKET}" fill="${MODE_FILL[mode]}" fill-rule="evenodd"/><path d="M31.5 60.5C40 64 60 64 68.5 60.5" fill="none" stroke="${MODE_FILL[mode]}" stroke-width="2.4" stroke-linecap="round"/>`;
+    } },
+  L3: { name: 'バッジだらけのリュック',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const handle = `<path d="M41 40C43 29 57 29 59 40" fill="none" stroke="${ink}" stroke-width="3.2" stroke-linecap="round"/>`;
+      if (!c) return handle + `<path d="${PACK_BODY}" fill="${MODE_FILL[mode]}"/>`;
+      return handle + `<path d="${PACK_BODY}" fill="#FAEBCC"/>` + peb('06', 42, 54, 13, 0, mode) + peb('05', 60, 52, 12, 10, mode) + peb('09', 61, 72, 14, -8, mode) + peb('12', 41, 73, 13, 6, mode) + peb('04', 52, 63, 8, 0, mode, '#CFC1AC');
+    } },
+
+  N1: { name: '右へ歩く足（小石 9 個）',
+    render(mode) {
+      const pts = [
+        ['12', 48, 22, 20, 80], ['04', 47, 37, 15, 0], ['06', 49, 53, 22, 0],
+        ['11', 34, 72, 26, 10], ['09', 50, 82, 24, 90], ['10', 68, 84, 24, 0],
+        ['08', 84, 77, 22, -12], ['05', 65, 66, 17, 0], ['04', 76, 72, 12, 0, '#4D5E71'],
+      ];
+      return `<g transform="rotate(-8 52 56)">${pts.map(([n, x, y, sz, r, f]) => peb(n, x, y, sz, r, mode, f || undefined)).join('')}</g>`;
+    } },
+  N2: { name: '足あと（小石 10 個・右へ）',
+    render(mode) {
+      const sole = [['11', 24, 50, 25, 0], ['12', 39, 43, 19, 10], ['09', 40, 58, 18, 0], ['06', 55, 42, 21, 0], ['10', 57, 60, 24, 0]];
+      const toes = [['05', 78, 34, 13, 0, null], ['04', 85.5, 44, 11, 0, '#4D5E71'], ['09', 87.5, 54.5, 10, 0, null], ['12', 84.5, 64, 9, 0, null], ['04', 77, 71.5, 8.5, 0, null]];
+      return sole.map(([n, x, y, sz, r]) => peb(n, x, y, sz, r, mode)).join('') + toes.map(([n, x, y, sz, r, f]) => peb(n, x, y, sz, r, mode, f || undefined)).join('');
+    } },
+  N3: { name: '一歩（左右の足あと）',
+    render(mode) {
+      const back = peb('11', 32, 64, 26, 0, mode, undefined, 1.3, 0.85) + peb('05', 54.5, 55.5, 9.5, 0, mode) + peb('04', 58, 63, 8, 0, mode, '#4D5E71') + peb('09', 56, 70.5, 8, 0, mode) + peb('12', 50.5, 77, 7.5, 0, mode);
+      const front = peb('08', 62, 36, 30, 0, mode, undefined, 1, 1.2) + peb('06', 84.5, 26.5, 10.5, 0, mode) + peb('05', 89, 35, 9, 0, mode) + peb('09', 88, 43.5, 8.5, 0, mode) + peb('04', 82.5, 51, 8, 0, mode);
+      return back + front;
+    } },
+
+  R1: { name: '縦の切符（入鋏・現行）',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const body = TICKET_V + 'M46.4 78a3.6 3.6 0 1 0 7.2 0a3.6 3.6 0 1 0-7.2 0Z';
+      return `<g transform="rotate(8 50 50)"><path d="${body}" fill="${c ? '#FAEBCC' : 'none'}" fill-rule="evenodd" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M35 65.5H65" fill="none" stroke="${ink}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${trio(mode, 50, 40, 17)}</g>`;
+    } },
+  R2: { name: '縦の切符（縁の切れ込み）',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      return `<path d="${TICKET_V}" mask="url(#bite-r2)" fill="${c ? '#FAEBCC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M35 65.5H65" fill="none" stroke="${ink}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${trio(mode, 50, 41, 17)}${peb('12', 50, 77.5, 10, 0, mode)}`;
+    } },
+  R3: { name: 'もぎった半券',
+    render(mode) {
+      const c = mode === 'color';
+      const main = `<path d="M36 12H64Q70 12 70 18V58Q70 63 64 63H36Q30 63 30 58V18Q30 12 36 12Z" fill="${c ? '#FAEBCC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/>`;
+      const stub = `<g transform="rotate(10 52 80) translate(4 2)"><path d="M36 70H64Q70 70 70 74V86Q70 90 64 90H36Q30 90 30 86V74Q30 70 36 70Z" fill="${c ? '#CFC1AC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/>${peb('12', 50, 80, 10, 0, mode)}</g>`;
+      return main + trio(mode, 50, 38, 17) + stub;
+    } },
+};
+const GROUPS = [
+  { title: 'D 器', keys: ['D1', 'D2', 'D3'] },
+  { title: 'J 切符', keys: ['J1', 'J2', 'J3'] },
+  { title: 'M ことづてのメモ（手書きの紙片）', keys: ['M1', 'M2', 'M3', 'M4'] },
+  { title: 'M2 道順のメモ の展開', keys: ['M2a', 'M2b', 'M2c', 'M2d', 'M2e', 'M2f'] },
+  { title: 'L リュック', keys: ['L1', 'L2', 'L3'] },
+  { title: 'N 足（小石だけ・右へ）', keys: ['N1', 'N2', 'N3'] },
+  { title: 'R 縦の切符', keys: ['R1', 'R2', 'R3'] },
+];
+const KEYS = GROUPS.flatMap(g => g.keys);
+let PICK = 'M2e';
+let HAND = false;
+
+function markSVG(key, mode, size, wide = false) {
+  const m = MARKS[key]; const useWide = wide && m.wide; const box = useWide ? m.wideBox : '0 0 100 100';
+  const [, , bw, bh] = box.split(' ').map(Number); const w = size * bw / bh;
+  return `<svg class="mark" viewBox="${box}" width="${w.toFixed(1)}" height="${size}" aria-hidden="true" focusable="false">${(useWide ? m.wide : m.render).call(m, mode, size)}</svg>`;
+}
+
+const meas = document.getElementById('measure');
+function wordmark({ size = 20, mode = 'color', hand = false, dot = false }) {
+  const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'wm'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'NIHO Experience');
+  const t = document.createElementNS(NS, 'text');
+  t.setAttribute('x', '0'); t.setAttribute('y', String(size)); t.setAttribute('font-size', String(size));
+  t.setAttribute('font-family', 'Fraunces Variable, Georgia, serif'); t.setAttribute('font-weight', '600'); t.setAttribute('letter-spacing', String(-0.01 * size));
+  t.setAttribute('fill', F(mode, '#1c1c1a'));
+  t.appendChild(document.createTextNode('NIHO'));
+  const sp = document.createElementNS(NS, 'tspan'); sp.setAttribute('dx', String(size * 0.3));
+  if (hand) {
+    sp.setAttribute('font-family', 'Caveat Variable, cursive'); sp.setAttribute('font-weight', '600'); sp.setAttribute('font-size', String(size * 1.3)); sp.setAttribute('letter-spacing', '0');
+    sp.setAttribute('fill', mode === 'color' ? '#355e1f' : mode === 'white' ? '#b2d67c' : MODE_FILL[mode]);
+  } else { sp.setAttribute('font-weight', '400'); sp.setAttribute('fill', F(mode, '#4b4b47')); }
+  sp.textContent = dot ? 'Experıence' : 'Experience';
+  t.appendChild(sp); svg.appendChild(t); meas.appendChild(svg);
+  const w = t.getComputedTextLength() + size * 0.3 + size * 0.1; const h = size * 1.3;
+  svg.setAttribute('width', w.toFixed(1)); svg.setAttribute('height', h.toFixed(1)); svg.setAttribute('viewBox', `0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
+  if (dot) {
+    const ext = t.getExtentOfChar(9); const cx = ext.x + ext.width / 2; const cy = hand ? size * 0.30 : size * 0.265;
+    const g = document.createElementNS(NS, 'g'); g.innerHTML = peb('05', cx, cy, size * (hand ? 0.3 : 0.27), 0, mode); svg.appendChild(g);
+  }
+  return svg;
+}
+
+function brand(key, { mode = 'color', size = 20 }) {
+  const m = MARKS[key]; const wrap = document.createElement('span'); wrap.className = 'brand'; wrap.style.gap = (size * 0.42).toFixed(1) + 'px';
+  if (!m.dotOnly) wrap.insertAdjacentHTML('beforeend', markSVG(key, mode, Math.round(size * 1.3), true));
+  wrap.appendChild(wordmark({ size, mode, hand: HAND, dot: !!m.dotOnly }));
+  return wrap;
+}
+
+const NAV = '<nav><span>Experiences</span><span>Host with NIHO</span><span>Help</span><span class="lang">EN · ¥</span></nav>';
+function section(key) {
+  const m = MARKS[key];
+  return `<section class="case" id="case-${key}" data-key="${key}">
+    <div class="case-h"><span class="tag">${key}</span><h2>${m.name}</h2></div>
+    <div class="grid">
+      <div class="cell big" data-slot="big"></div>
+      <div class="cell lock" data-slot="lock"></div>
+      <div class="cell hdrc" data-slot="hdr"></div>
+      <div class="cell hero" data-slot="hero"></div>
+      <div class="cell small" data-slot="small"></div>
+      <div class="cell mono" data-slot="mono"></div>
+    </div></section>`;
+}
+function fill(key) {
+  const sec = document.getElementById('case-' + key); const q = s => sec.querySelector(`[data-slot="${s}"]`);
+  q('big').innerHTML = markSVG(key, 'color', 220);
+  const lock = q('lock'); lock.innerHTML = ''; lock.appendChild(brand(key, { size: window.innerWidth < 560 ? 22 : 34 }));
+  const hdr = q('hdr'); hdr.innerHTML = `<div class="hdr-in"><span class="brand-slot"></span>${NAV}</div><div class="page-ghost"><i></i><i></i><i></i></div>`;
+  hdr.querySelector('.brand-slot').appendChild(brand(key, { size: 20 }));
+  const hero = q('hero'); hero.innerHTML = `<div class="hero-in"><div class="hdr-in on-photo"><span class="brand-slot"></span>${NAV}</div><p class="hero-h">Meet the people who make Kamakura <em>home</em></p></div>`;
+  hero.querySelector('.brand-slot').appendChild(brand(key, { size: 20, mode: 'white' }));
+  q('small').innerHTML = `<div class="tabbar"><div class="tab">${markSVG(key, 'color', 16)}<span>Meet the people of Kamakura</span></div></div><div class="sizes">${markSVG(key, 'color', 16)}${markSVG(key, 'color', 32)}${markSVG(key, 'color', 48)}</div><div class="appicon">${markSVG(key, 'color', 46)}</div>`;
+  q('mono').innerHTML = `<div class="chip sand">${markSVG(key, 'ink', 64)}</div><div class="chip moss">${markSVG(key, 'white', 64)}</div><div class="chip ink">${markSVG(key, 'white', 64)}</div>`;
+}
+function renderFamily() {
+  document.getElementById('fam-plain').innerHTML = markSVG(PICK, 'color', 66);
+  document.getElementById('fam-icon').innerHTML = markSVG(PICK, 'color', 44);
+  document.getElementById('fam-key').textContent = PICK;
+  KEYS.forEach(k => document.getElementById('case-' + k).classList.toggle('on', k === PICK));
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.key === PICK));
+}
+function renderAll() { KEYS.forEach(fill); renderFamily(); }
+
+document.getElementById('cases').innerHTML = GROUPS.map(g => '<h3 class="group">' + g.title + '</h3>' + g.keys.map(section).join('')).join('');
+document.getElementById('seg').innerHTML = KEYS.map(k => `<button data-key="${k}">${k}</button>`).join('');
+document.getElementById('seg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; PICK = b.dataset.key; renderFamily(); document.getElementById('case-' + PICK).scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+document.getElementById('handseg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; HAND = b.dataset.hand === '1'; document.querySelectorAll('#handseg button').forEach(x => x.classList.toggle('on', x === b)); renderAll(); });
+document.querySelectorAll('.case').forEach(sec => sec.addEventListener('click', e => { if (e.target.closest('.case-h')) { PICK = sec.dataset.key; renderFamily(); } }));
+
+const fontLoads = ['600 20px "Fraunces Variable"', '400 20px "Fraunces Variable"', '800 13px "Nunito Variable"', '900 13px "Nunito Variable"', '600 20px "Caveat Variable"'].map(f => document.fonts.load(f).catch(() => null));
+Promise.all(fontLoads).then(() => document.fonts.ready).then(renderAll, renderAll);
+let rsz; addEventListener('resize', () => { clearTimeout(rsz); rsz = setTimeout(renderAll, 150); });
+</script>
+</body>
+</html>
