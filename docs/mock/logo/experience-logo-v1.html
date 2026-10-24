@@ -1,0 +1,409 @@
+<!doctype html>
+<!--
+  mock: NIHO Experience（experience.niho.life）のロゴ案 13 方向。集う系 A〜F（卓を囲む / 飛び石 / 開いた戸口 / 器 / はんこ / i の点）、旅・出かける系 G〜M（足あと / 荷札 / 行き先ピン / 切符 / 旅路 / リュック / のれん）、追加 N〜S（右へ歩く足 ×2・リュック ×2・切符 ×2。N/O/P/S は NIHO kamakura と同じく小石が集まって形を成す）
+  論点: 体験予約サイトの顔として、NIHO 家族（小石）との血縁をどこまで見せるか。サイトの Fraunces セリフ・手描き線・はんこと同居できるか。
+        ヘッダー 20px の並び・favicon 16px・写真上の白抜き・単色（印刷/スタンプ）で成立するか。
+  作っていない: N/O/P/S の小石の敷き詰めは乱数（固定 seed）で置いていて、清書時に手で整える。各案は SVG の手置き（小石の形は apps/mobile/native/ios/NihoLaunchLogo.svg の原本をそのまま使用）。選定後に清書・書き出し。
+        ヘッダーのナビは見た目だけで遷移しない。日本語 wordmark・/ja 面・OGP 画像・アニメーションは未検討。E の文字は Nunito の仮組み。
+        上の「家族の列」の既存 4 つは PNG/JPG の現物。候補は A〜F の切替で差し替わる。
+  参照: experience.niho.life ヘッダー（Fraunces「NIHO Experience」・Nunito ナビ・Caveat の強調）
+        niho-experience packages/experience-presentation/src/v1（icons.tsx HandIcon / RubberStamp、styles.source.css の色・書体）
+        apps/web/public/niho-kamakura-logo.png（アーチ #A2C3D1）・apps/web/public/niho-logo.png・docs/design/design-guide.md §1–3
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NIHO Experience ロゴ案 v1</title>
+<style>
+@font-face{font-family:"Fraunces Variable";font-style:normal;font-weight:100 900;font-display:swap;src:url("assets/experience/fonts/fraunces-latin-wght-normal.woff2") format("woff2-variations")}
+@font-face{font-family:"Nunito Variable";font-style:normal;font-weight:200 1000;font-display:swap;src:url("assets/experience/fonts/nunito-latin-wght-normal.woff2") format("woff2-variations")}
+@font-face{font-family:"Caveat Variable";font-style:normal;font-weight:400 700;font-display:swap;src:url("assets/experience/fonts/caveat-latin-wght-normal.woff2") format("woff2-variations")}
+:root{
+  --canvas:#fff;--sand:#f5f5f2;--ink:#1c1c1a;--ink-soft:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line-strong:#d4d4cf;
+  --moss:#355e1f;--leaf:#b2d67c;--leaf-pale:#eef5e3;
+  --radius:1.375rem;--shadow:0 1px 2px rgb(28 28 26/.04),0 10px 30px rgb(28 28 26/.08);
+  --sans:"Nunito Variable","Hiragino Sans","Noto Sans JP",ui-sans-serif,system-ui,sans-serif;
+  --display:"Fraunces Variable",Georgia,"Hiragino Mincho ProN",serif;
+  --hand:"Caveat Variable","Bradley Hand",cursive;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit}
+#measure{position:absolute;left:-9999px;top:0;visibility:hidden}
+.defs{position:absolute;width:0;height:0;overflow:hidden}
+
+.bar{position:sticky;top:0;z-index:20;background:rgb(255 255 255/.94);backdrop-filter:blur(10px) saturate(1.2);border-bottom:1px solid var(--line)}
+.bar-in{max-width:1120px;margin:0 auto;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.bar-title{font-family:var(--display);font-size:1.0625rem;font-weight:600;letter-spacing:-.01em;margin-right:auto}
+.bar-title span{font-family:var(--sans);font-weight:800;font-size:.75rem;color:var(--muted);margin-left:.4em}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden;background:#fff}
+.seg button{border:0;background:none;color:var(--ink-soft);font-weight:800;font-size:.8125rem;padding:7px 13px;cursor:pointer;min-width:38px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--ink);color:#fff}
+.seg.pick button.on{background:var(--moss)}
+
+.family{max-width:1120px;margin:22px auto 8px;padding:0 16px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 22px}
+.fam{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:84px}
+.fam img,.fam .plain{width:72px;height:72px;object-fit:contain;display:grid;place-items:center}
+.fam span{font-size:.75rem;font-weight:700;color:var(--muted);white-space:nowrap}
+.fam.cand span{color:var(--moss)}
+.fam.cand span em{font-style:normal;font-family:var(--hand);font-size:1.25rem;line-height:1;margin-left:.25em}
+.appicon{width:72px;height:72px;border-radius:22%;background:linear-gradient(180deg,#fdfcf9,#f0ece4);box-shadow:inset 0 0 0 1px rgb(28 28 26/.07),0 4px 10px rgb(28 28 26/.08);display:grid;place-items:center}
+
+.case{max-width:1120px;margin:26px auto;padding:0 16px}
+.case-h{display:flex;align-items:baseline;gap:12px;margin:0 4px 10px}
+.case-h .tag{font-family:var(--hand);font-size:2.25rem;line-height:.9;font-weight:700;color:var(--moss)}
+.case-h h2{margin:0;font-family:var(--display);font-size:1.375rem;font-weight:600;letter-spacing:-.01em}
+.grid{display:grid;gap:12px;grid-template-columns:1fr;grid-template-areas:"big" "lock" "hdr" "hero" "small" "mono"}
+@media (min-width:880px){
+  .grid{grid-template-columns:300px 1fr 1fr;grid-template-areas:"big lock lock" "big hdr hero" "small small mono"}
+}
+.cell{border:1px solid var(--line);border-radius:var(--radius);background:#fff;padding:18px;display:flex;align-items:center;justify-content:center;min-height:120px;overflow:hidden;transition:box-shadow .2s}
+.cell.big{min-height:300px;grid-area:big}
+.cell.lock{grid-area:lock;min-height:116px}
+.cell.hdrc{grid-area:hdr;padding:0;flex-direction:column;align-items:stretch;justify-content:flex-start;background:var(--sand);container-type:inline-size}
+.cell.hero{grid-area:hero;padding:0;align-items:stretch;container-type:inline-size}
+.cell.small{grid-area:small;flex-wrap:wrap;gap:20px 28px;justify-content:flex-start}
+.cell.mono{grid-area:mono;gap:12px;flex-wrap:wrap}
+.case.on .cell.big{box-shadow:0 0 0 2px var(--leaf)}
+
+.brand{display:inline-flex;align-items:center;line-height:0}
+.hdr-in{display:flex;align-items:center;justify-content:space-between;gap:12px;height:56px;padding:0 16px;background:#fff;border-bottom:1px solid var(--line);min-width:0}
+.hdr-in .brand-slot{flex:none;line-height:0}
+.hdr-in nav{display:flex;align-items:center;gap:16px;font-size:.8125rem;font-weight:800;color:var(--ink);white-space:nowrap}
+.hdr-in nav .lang{border:1px solid var(--line-strong);border-radius:999px;padding:4px 10px}
+.hdr-in.on-photo{background:transparent;border:0}
+.hdr-in.on-photo nav{color:#fff}
+.hdr-in.on-photo nav .lang{border-color:rgb(255 255 255/.6)}
+.page-ghost{padding:14px 16px 18px;display:grid;gap:8px}
+.page-ghost i{display:block;height:9px;border-radius:999px;background:var(--line)}
+.page-ghost i:nth-child(1){width:52%;height:14px;background:var(--line-strong)}
+.page-ghost i:nth-child(2){width:78%}
+.page-ghost i:nth-child(3){width:64%}
+.hero-in{flex:1;min-width:0;width:100%;min-height:190px;display:flex;flex-direction:column;justify-content:space-between;color:#fff;background:linear-gradient(180deg,rgb(0 0 0/.42),rgb(0 0 0/.12) 55%,rgb(0 0 0/.42)),url("assets/niho-dinner-1.jpg") center/cover}
+.hero-h{margin:0;padding:0 16px 14px;font-family:var(--display);font-size:1.5rem;line-height:1.1;font-weight:600;letter-spacing:-.01em;max-width:14ch}
+.hero-h em{font-style:normal;font-family:var(--hand);color:var(--leaf);font-size:1.25em;font-weight:600}
+@container (max-width:560px){.hdr-in nav span:not(.lang){display:none}}
+@media (max-width:420px){.hdr-in nav span:not(.lang){display:none}}
+
+.tabbar{display:flex;align-items:flex-end;padding:8px 10px 0;background:var(--line);border-radius:12px 12px 0 0}
+.tab{display:inline-flex;align-items:center;gap:9px;padding:8px 14px 8px 11px;border-radius:9px 9px 0 0;background:#fff;font-size:.8125rem;font-weight:700;color:var(--ink-soft);white-space:nowrap}
+.tab svg{flex:none}
+.sizes{display:inline-flex;align-items:flex-end;gap:16px}
+.chip{width:96px;height:96px;border-radius:18px;display:grid;place-items:center}
+.chip.sand{background:var(--sand)}
+.chip.moss{background:var(--moss)}
+.chip.ink{background:var(--ink)}
+.group{max-width:1120px;margin:34px auto -8px;padding:0 20px;font-size:.8125rem;font-weight:800;color:var(--muted);letter-spacing:.04em}
+.foot{max-width:1120px;margin:30px auto 50px;padding:0 16px;font-size:.75rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true" focusable="false">
+  <defs id="pebble-defs">
+    <filter id="sketch100" x="-15%" y="-15%" width="130%" height="130%"><feTurbulence type="turbulence" baseFrequency="0.022" numOctaves="2" seed="4" result="t"/><feDisplacementMap in="SourceGraphic" in2="t" scale="4.4" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="rubber100" x="-6%" y="-6%" width="112%" height="112%"><feTurbulence type="fractalNoise" baseFrequency="1.38" numOctaves="2" seed="9" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.2 0 0 0 1.95" result="m"/><feComposite in="SourceGraphic" in2="m" operator="in" result="c"/><feTurbulence type="turbulence" baseFrequency="0.036" numOctaves="1" seed="2" result="w"/><feDisplacementMap in="c" in2="w" scale="1.3" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <clipPath id="bowl-top"><rect x="0" y="0" width="100" height="45.6"/></clipPath>
+    <path id="stamp-arc" d="M11.5 50a38.5 38.5 0 1 1 77 0a38.5 38.5 0 1 1-77 0"/>
+  </defs>
+</svg>
+<div id="measure"></div>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="bar-title">NIHO Experience ロゴ案<span>v1</span></div>
+    <div class="seg pick" id="seg"></div>
+    <div class="seg" id="handseg"><button data-hand="0" class="on">Experience: セリフ</button><button data-hand="1">手書き</button></div>
+  </div>
+</div>
+
+<section class="family" aria-label="family">
+  <div class="fam"><img src="assets/nihokamakura-logo.jpg" alt=""><span>NIHO kamakura</span></div>
+  <div class="fam"><img src="assets/niho-logo.png" alt=""><span>NIHO app</span></div>
+  <div class="fam"><img src="assets/niho-camera-icon.png" alt=""><span>NIHO camera</span></div>
+  <div class="fam"><img src="assets/niho-docs-icon.png" alt=""><span>NIHO docs</span></div>
+  <div class="fam cand"><div class="plain" id="fam-plain"></div><span>NIHO Experience<em id="fam-key">A</em></span></div>
+  <div class="fam cand"><div class="appicon" id="fam-icon"></div><span>&nbsp;</span></div>
+</section>
+
+<main id="cases"></main>
+<p class="foot">docs/mock/logo/experience-logo-v1.html</p>
+
+<script>
+const PEBBLES = [{"id": "pebble-01", "fill": "#FAEBCC", "bbox": [161.5, 146.8, 307.8, 251.7], "w": 146.3, "h": 104.9, "d": "M224.863 227.134C212.783 225.894 211.522 234.925 183.02 224.355C175.888 221.701 161.455 216.094 161.455 201.208C161.455 165.828 189.812 174.959 216.931 161.884C248.223 146.799 278.374 159.03 295.282 179.548C306.828 193.566 307.75 226.216 288.441 237.108C262.583 251.696 244.342 229.144 224.839 227.134H224.863Z"}, {"id": "pebble-02", "fill": "#BCD499", "bbox": [121.1, 217.6, 265.0, 331.5], "w": 143.9, "h": 114.0, "d": "M231.946 316.699C221.2 324.563 211.74 326.871 198.714 329.203C185.688 331.535 169.654 326.871 164.851 314.267C157.622 295.312 143.31 303.053 132.613 283.329C121.139 262.191 124.657 240.408 136.373 229.739C149.763 217.558 168.223 224.554 175.961 230.608C191.34 242.616 193.79 252.837 204.39 248.124C232.334 235.719 250.672 246.213 257.101 264.275C265.008 286.455 241.916 309.405 231.97 316.674L231.946 316.699Z"}, {"id": "pebble-03", "fill": "#4D5E71", "bbox": [244.4, 254.9, 301.0, 340.7], "w": 56.6, "h": 85.7, "d": "M260.182 338.11C251.886 340.665 244.391 331.386 244.391 326.772C244.391 316.947 257.392 309.628 265.349 287.969C266.562 284.669 270.758 268.121 272.966 265.441C275.173 262.737 282.135 254.946 285.579 254.946C296.543 254.946 301.007 262.786 300.061 269.808C298.46 281.617 293.002 295.387 289.727 306.824C288.854 309.851 288.32 316.699 286.913 319.502C282.523 328.384 269.472 335.232 260.182 338.11Z"}, {"id": "pebble-04", "fill": "#CFC1AC", "bbox": [303.5, 228.0, 337.2, 255.7], "w": 33.6, "h": 27.7, "d": "M314.081 255.691C308.89 255.715 304.402 250.753 303.965 245.394C303.529 240.035 306.585 234.776 310.927 231.823C315.269 228.871 320.678 227.978 325.869 228.35C328.077 228.499 330.406 228.945 332.104 230.384C333.292 231.402 334.093 232.841 334.845 234.23C335.936 236.264 337.076 238.398 337.125 240.705C337.173 243.261 335.912 245.692 334.214 247.553C329.726 252.515 322.959 255.591 314.056 255.666L314.081 255.691Z"}, {"id": "pebble-05", "fill": "#F09B84", "bbox": [163.7, 132.1, 206.7, 166.7], "w": 43.1, "h": 34.7, "d": "M183.166 166.474C175.428 166.722 171.668 164.737 169.242 157.914C167.568 153.2 163.663 141.961 166.719 138.041C171.401 132.062 182.947 136.528 187.241 137.892C194.251 140.125 199.418 143.747 204.196 149.454C205.555 151.091 206.719 153.299 206.04 155.309C205.288 157.467 192.529 166.151 183.19 166.474H183.166Z"}, {"id": "pebble-06", "fill": "#4D5E71", "bbox": [282.4, 116.2, 346.4, 179.1], "w": 64.0, "h": 62.8, "d": "M302.558 171.957C298.265 171.411 288.441 164.836 285.967 159.527C282.376 151.836 283.444 136.553 287.422 130.797C292.104 124.023 309.86 116.233 317.064 120.252C324.244 124.272 328.174 127.745 335.087 132.285C343.504 137.818 346.415 150.794 336.979 162.107C322.837 179.052 311.315 173.048 302.558 171.957Z"}, {"id": "pebble-07", "fill": "#4D5E71", "bbox": [61.3, 124.7, 164.0, 231.7], "w": 102.7, "h": 107.0, "d": "M130.867 218.674C116.774 221.651 98.4839 231.699 85.2152 205.252C72.5045 179.896 61.322 180.293 78.2049 148.834C84.9969 136.18 96.8101 124.817 110.904 124.718C118.326 124.669 125.385 127.745 132.177 130.772C135.67 132.31 139.139 133.873 142.632 135.411C147.896 137.743 153.353 140.224 157.089 144.665C164.027 152.902 163.105 165.431 159.442 175.628C155.464 186.669 154.372 213.687 130.843 218.674H130.867Z"}, {"id": "pebble-08", "fill": "#A8D5E2", "bbox": [176.6, 63.1, 305.0, 143.9], "w": 128.4, "h": 80.8, "d": "M207.131 76.264C232.043 73.6589 262.243 66.2407 266.221 65.5708C281.455 63.065 302.316 69.2179 304.062 87.1308C305.008 96.906 300.812 106.681 294.141 113.777C279.975 128.837 253.074 137.644 228.429 141.986C217.707 143.872 211.497 130.424 201.115 127.125C179.429 120.228 176.591 79.4397 207.107 76.2392L207.131 76.264Z"}, {"id": "pebble-09", "fill": "#BCD499", "bbox": [318.6, 160.3, 409.3, 257.3], "w": 90.7, "h": 97.0, "d": "M358.859 165.134C375.014 160.296 393.231 169.798 401.261 185.304C409.29 200.811 407.713 220.733 399.296 236.066C397.064 240.11 394.347 243.955 390.806 246.809C387.531 249.438 383.698 251.126 379.842 252.639C373.316 255.194 365.821 257.303 359.611 254.028C353.789 250.952 350.806 243.906 349.787 237.108C349.399 234.503 349.229 231.823 348.38 229.317C345.105 219.518 333.608 216.317 326.791 208.849C320.096 201.481 318.592 189.373 323.298 180.367C327.98 171.361 339.187 171.039 358.883 165.159L358.859 165.134Z"}, {"id": "pebble-10", "fill": "#F09B84", "bbox": [146.9, 335.7, 260.2, 409.6], "w": 113.3, "h": 73.9, "d": "M216.082 405.171C200.388 409.563 183.554 408.769 168.272 402.939C163.59 401.152 158.908 398.795 155.512 394.826C146.901 384.703 149.958 367.187 158.86 357.362C167.762 347.538 180.643 343.642 193.014 340.963C208.757 337.539 226.028 335.703 240 344.387C246.695 348.555 252.201 355.005 255.549 362.647C259.818 372.397 260.182 384.976 253.972 393.387C247.374 402.318 235.246 399.813 216.082 405.171Z"}, {"id": "pebble-11", "fill": "#CFC1AC", "bbox": [64.5, 271.6, 159.6, 363.5], "w": 95.0, "h": 91.8, "d": "M125.506 302.879C131.862 307.866 141.273 305.137 148.648 308.338C155.173 311.141 159.151 318.485 159.369 325.73C159.563 332.974 156.483 339.995 152.116 345.677C143.675 356.693 128.563 363.466 115.925 358.107C109.254 355.254 104.087 349.498 97.465 346.496C93.4384 344.66 88.9993 343.94 84.8999 342.303C74.0327 338.011 65.9793 327.02 65.009 315.136C64.5239 309.231 65.6397 303.326 67.2407 297.645C69.8362 288.39 74.5178 278.714 83.2504 275.117C91.7161 271.619 101.662 275.117 108.672 281.071C115.706 287.026 118.35 297.248 125.482 302.855L125.506 302.879Z"}, {"id": "pebble-12", "fill": "#A8D5E2", "bbox": [55.2, 226.6, 118.9, 268.5], "w": 63.7, "h": 41.9, "d": "M95.0391 256.733C87.6164 260.653 80.5333 264.349 72.577 266.979C69.7389 267.922 66.5855 268.542 63.7959 267.426C60.8365 266.235 58.9202 263.258 57.6831 260.256C55.9366 255.988 55.2089 251.324 55.5727 246.709C56.0579 240.482 58.9202 234.056 64.3053 231.079C68.1379 228.97 87.4466 226.613 91.7886 226.961C100.594 227.655 118.884 232.468 115.536 247.528C113.256 257.874 102.243 252.887 95.0148 256.733H95.0391Z"}, {"id": "pebble-13", "fill": "#A8D5E2", "bbox": [273.7, 257.0, 412.2, 400.1], "w": 138.4, "h": 143.1, "d": "M354.808 385.596C342.122 396.289 307.701 400.11 297.464 393.238C287.228 386.39 275.318 377.98 274.76 365.128C273.717 341.881 292.419 345.925 298.726 328.806C303.043 317.096 295.96 297.223 315.512 279.632C337.537 259.809 340.763 270.254 356.142 266.93C367.422 264.498 388.574 257.03 397.282 267.773C412.152 286.108 402.207 315.26 377.78 330.964C353.426 346.62 374.917 368.701 354.832 385.596H354.808Z"}];
+const NS = 'http://www.w3.org/2000/svg';
+const MODE_FILL = { white: '#ffffff', ink: '#1c1c1a', moss: '#355e1f' };
+const F = (mode, c) => mode === 'color' ? c : MODE_FILL[mode];
+const P = {};
+PEBBLES.forEach(p => { P[p.id.slice(-2)] = p; });
+(function installPebbleDefs() {
+  const defs = document.getElementById('pebble-defs');
+  PEBBLES.forEach(p => { const path = document.createElementNS(NS, 'path'); path.setAttribute('id', 'pb-' + p.id.slice(-2)); path.setAttribute('d', p.d); defs.appendChild(path); });
+})();
+function peb(n, cx, cy, size, rot = 0, mode = 'color', fill, ax = 1, ay = 1) {
+  const p = P[n]; const [bx, by] = p.bbox; const s = size / Math.max(p.w, p.h); const dw = p.w * s * ax, dh = p.h * s * ay;
+  const par = (ax !== 1 || ay !== 1) ? ' preserveAspectRatio="none"' : '';
+  return `<g transform="rotate(${rot} ${cx} ${cy})"><svg x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" viewBox="${bx} ${by} ${p.w} ${p.h}" overflow="visible"${par}><use href="#pb-${n}" fill="${F(mode, fill || p.fill)}"/></svg></g>`;
+}
+
+// --- 小石で形を成す（輪郭の中に小石を敷き詰める） ---
+const SIL = {
+  foot: 'M36 14C33 30 26 46 20 62C16 76 24 88 40 88L72 87C84 87 93 81 90 71C87 62 68 60 58 52C51 46 52 32 54 14Z',
+  sole: 'M18 50C18 41 24 34 34 33C48 32 62 37 70 44C73 47 73 53 70 56C62 63 48 68 34 67C24 66 18 59 18 50Z',
+  pack: 'M30 44C27 58 28 74 33 86C44 89 56 89 67 86C72 74 73 58 70 44C64 37 36 37 30 44Z',
+  ticket: 'M21 29H62V71H21Q14 71 14 64V55.5A5.5 5.5 0 0 1 14 44.5V36Q14 29 21 29ZM66 29H79Q86 29 86 36V44.5A5.5 5.5 0 0 0 86 55.5V64Q86 71 79 71H66Z',
+};
+const SILEL = {};
+(function installSilhouettes() {
+  const svg = document.querySelector('svg.defs'); const defs = document.getElementById('pebble-defs');
+  for (const [k, d] of Object.entries(SIL)) {
+    const cp = document.createElementNS(NS, 'clipPath'); cp.setAttribute('id', 'clip-' + k);
+    const cpPath = document.createElementNS(NS, 'path'); cpPath.setAttribute('d', d); cp.appendChild(cpPath); defs.appendChild(cp);
+    const t = document.createElementNS(NS, 'path'); t.setAttribute('d', d); svg.appendChild(t); SILEL[k] = t;
+  }
+})();
+function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const MOSAIC_SHAPES = ['04', '05', '06', '09', '11', '12', '08', '10'];
+const MOSAIC_COLORS = ['#4D5E71', '#F09B84', '#BCD499', '#A8D5E2', '#CFC1AC'];
+function insideSil(el, x, y, m) {
+  const hit = (px, py) => el.isPointInFill(new DOMPoint(px, py));
+  if (!m) return hit(x, y);
+  return hit(x, y) && hit(x - m, y) && hit(x + m, y) && hit(x, y - m) && hit(x, y + m);
+}
+function pack(mode, el, { x0, y0, x1, y1, size = 14, step = 10, seed = 1, inset = 0 }) {
+  const r = rng(seed); let out = ''; let row = 0; let last = -1;
+  for (let y = y0; y <= y1; y += step * 0.86, row++) {
+    let col = 0;
+    for (let x = x0 + (row % 2 ? step / 2 : 0); x <= x1; x += step, col++) {
+      const jx = x + (r() - 0.5) * step * 0.5, jy = y + (r() - 0.5) * step * 0.5;
+      const sz = size * (0.8 + r() * 0.5);
+      const shape = MOSAIC_SHAPES[Math.floor(r() * MOSAIC_SHAPES.length)];
+      const rot = r() * 360;
+      let ci = Math.floor(r() * MOSAIC_COLORS.length); if (ci === last) ci = (ci + 1) % MOSAIC_COLORS.length;
+      if (!insideSil(el, jx, jy, inset ? sz / 2 + inset : 0)) continue;
+      last = ci;
+      out += peb(shape, jx, jy, sz, rot, mode, MOSAIC_COLORS[ci]);
+    }
+  }
+  return out;
+}
+
+const MARKS = {
+  A: { name: '卓を囲む',
+    render(mode) {
+      const cx = 50, cy = 54, r = 30;
+      const seats = [[-90, '08', 24, 0], [-30, '09', 22, 12], [30, '05', 20, -8], [150, '06', 21, 0], [210, '11', 22, -16]];
+      let s = peb('01', cx, cy, 38, 0, mode);
+      for (const [a, n, size, rot] of seats) { const t = a * Math.PI / 180; s += peb(n, cx + r * Math.cos(t), cy + r * Math.sin(t), size, rot, mode); }
+      return s;
+    } },
+  B: { name: '飛び石',
+    render(mode) {
+      const pts = [[22.8, 82.8, '11', 19, 15], [32.2, 62.2, '08', 19, -10], [52.8, 52.8, '09', 19, 20], [62.2, 32.2, '06', 19, 0], [82.8, 22.8, '10', 20, -12]];
+      return pts.map(([x, y, n, s, r]) => peb(n, x, y, s, r, mode)).join('');
+    },
+    wideBox: '0 0 118 100',
+    wide(mode) { return [[22, 62, '08', 30, -10], [59, 40, '09', 30, 15], [96, 62, '10', 30, -8]].map(([x, y, n, s, r]) => peb(n, x, y, s, r, mode)).join(''); } },
+  C: { name: '開いた戸口',
+    render(mode) {
+      const arch = `<path d="M12 93V41Q12 33.5 18.5 29L46 10.5Q50 8 54 10.5L81.5 29Q88 33.5 88 41V93" fill="none" stroke="${F(mode, '#A2C3D1')}" stroke-width="8.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+      return arch + peb('07', 50, 60, 25, 0, mode) + peb('05', 36, 79, 16, 10, mode) + peb('12', 63, 81, 17, -8, mode);
+    } },
+  D: { name: '器',
+    render(mode, sz) {
+      const fil = sz >= 40 ? 'filter="url(#sketch100)"' : '';
+      const fill = mode === 'color' ? '#FAEBCC' : 'none';
+      const stroke = F(mode, '#4D5E71');
+      const stones = `<g clip-path="url(#bowl-top)">${peb('05', 35, 45, 18, 6, mode)}${peb('09', 52, 41, 22, 0, mode)}${peb('12', 68, 46, 16, -6, mode)}</g>`;
+      const bowl = `<g ${fil} fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 46C30 44.4 70 44.4 82 46C81 65 69 78 50 78.4C31 78 19 65 18 46Z" fill="${fill}"/><path d="M40 78.4L41 84.6C47 85.7 53 85.7 59 84.6L60 78.4"/></g>`;
+      return stones + bowl;
+    } },
+  E: { name: 'はんこ',
+    render(mode, sz) {
+      const c = F(mode, '#355e1f');
+      const fil = sz >= 64 ? 'filter="url(#rubber100)"' : '';
+      const txt = sz >= 40 ? `<text fill="${c}" font-family="Nunito Variable, sans-serif" font-size="8.4" font-weight="900" letter-spacing="1.1"><textPath href="#stamp-arc" textLength="232" lengthAdjust="spacing">NIHO EXPERIENCE · KAMAKURA ·</textPath></text>` : '';
+      return `<g ${fil}><circle cx="50" cy="50" r="46.5" fill="none" stroke="${c}" stroke-width="2.6"/><circle cx="50" cy="50" r="30.5" fill="none" stroke="${c}" stroke-width="1.3"/>${txt}${peb('06', 50, 44, 21, 0, mode)}${peb('05', 39, 58, 15, 10, mode)}${peb('09', 61, 58, 17, -10, mode)}</g>`;
+    } },
+  F: { name: 'i の点', dotOnly: true,
+    render(mode) {
+      return `<text x="50" y="86" text-anchor="middle" font-family="Fraunces Variable, Georgia, serif" font-weight="600" font-size="98" fill="${F(mode, '#1c1c1a')}">ı</text>` + peb('05', 50, 21, 21, 0, mode);
+    } },
+  G: { name: '足あと',
+    render(mode) {
+      const foot = (x, y, h, rot, color, mirror) => `<g transform="translate(${x} ${y}) rotate(${rot}) scale(${mirror ? -1 : 1} 1) translate(${-x} ${-y})">${peb('06', x, y + h * 0.1, h, 0, mode, color, 0.58, 1)}${peb('04', x + h * 0.13, y - h * 0.56, h * 0.3, 0, mode, color)}</g>`;
+      return foot(33, 73, 36, 12, '#4D5E71', true) + foot(64, 49, 34, 12, '#F09B84', false) + foot(41, 25, 30, 12, '#A8D5E2', true);
+    } },
+  H: { name: '荷札',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const tag = `<path d="M50 11C58.5 15.5 64.5 22 66.5 29.5C68.2 48 68.2 67 66 86.5C56 88.5 44 88.5 34 86.5C31.8 67 31.8 48 33.5 29.5C35.5 22 41.5 15.5 50 11ZM46.6 25.5a3.4 3.4 0 1 0 6.8 0a3.4 3.4 0 1 0-6.8 0Z" fill="${c ? '#FAEBCC' : 'none'}" fill-rule="evenodd" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/>`;
+      const string = `<path d="M50 25.5C45.5 18 47 7.5 54.5 7C61.5 6.5 62.5 16.5 50 25.5" fill="none" stroke="${ink}" stroke-width="2.4" stroke-linecap="round"/>`;
+      return tag + string + peb('06', 50, 52, 19, 0, mode) + peb('05', 41, 67, 14, 8, mode) + peb('09', 59.5, 67, 15.5, -8, mode);
+    } },
+  I: { name: '行き先ピン',
+    render(mode) {
+      const pin = 'M50 93C37 75 25 61 25 44.5A25 25 0 1 1 75 44.5C75 61 63 75 50 93Z';
+      if (mode === 'color') return `<ellipse cx="50" cy="92.5" rx="11" ry="3.6" fill="#CFC1AC"/><path d="${pin}" fill="#A8D5E2"/>` + peb('01', 50, 44.5, 25, 0, mode);
+      return `<path d="${pin}M39.5 44.5a10.5 10.5 0 1 0 21 0a10.5 10.5 0 1 0-21 0Z" fill="${MODE_FILL[mode]}" fill-rule="evenodd"/>`;
+    } },
+  J: { name: '切符',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const body = 'M21 29H79Q86 29 86 36V44.5A5.5 5.5 0 0 0 86 55.5V64Q86 71 79 71H21Q14 71 14 64V55.5A5.5 5.5 0 0 1 14 44.5V36Q14 29 21 29Z';
+      return `<g transform="rotate(-7 50 50)"><path d="${body}" fill="${c ? '#FAEBCC' : 'none'}" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M67 34.5V65.5" fill="none" stroke="${ink}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${peb('06', 41, 46.5, 16, 0, mode)}${peb('05', 32, 57, 12, 8, mode)}${peb('09', 50, 58, 13, -8, mode)}${peb('12', 76.5, 50, 11, 0, mode)}</g>`;
+    } },
+  K: { name: '旅路',
+    render(mode) {
+      const ink = F(mode, '#4D5E71');
+      return `<path d="M14 86C24 60 46 80 52 58C54 52 56 48 58 46" fill="none" stroke="${ink}" stroke-width="3.6" stroke-linecap="round" stroke-dasharray="0.1 7.2"/>` + peb('05', 13, 88, 13, 0, mode) + peb('06', 76, 22, 18, 0, mode) + peb('11', 64, 34, 15, 0, mode) + peb('09', 84, 37, 16, 0, mode);
+    } },
+  L: { name: 'リュック',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const bodyD = 'M31 46C28 60 28.5 74 32.5 85C44 88 56 88 67.5 85C71.5 74 72 60 69 46C64 38 36 38 31 46Z';
+      const pocketD = 'M40 63C39.5 72 41 79 50 79.5C59 79 60.5 72 60 63C54 61 46 61 40 63Z';
+      const handle = `<path d="M41 40C43 29 57 29 59 40" fill="none" stroke="${ink}" stroke-width="3.2" stroke-linecap="round"/>`;
+      if (c) return handle + `<path d="${bodyD}" fill="#A8D5E2"/><path d="${pocketD}" fill="#4D5E71"/>` + peb('05', 60, 51, 9, 0, mode) + peb('09', 40, 52, 10, 0, mode);
+      return handle + `<path d="${bodyD}${pocketD}" fill="${MODE_FILL[mode]}" fill-rule="evenodd"/>`;
+    } },
+  M: { name: 'のれん',
+    render(mode) {
+      const ink = F(mode, '#4D5E71'); const cloth = F(mode, '#A8D5E2');
+      const panel = (x1, x2, hem) => `M${x1} 24C${x1 - 0.6} 40 ${x1 - 0.6} 56 ${x1 + 0.4} ${hem}C${(x1 + x2) / 2} ${hem + 2.5} ${x2 - 2} ${hem + 1} ${x2 - 0.4} ${hem}C${x2 + 0.6} 56 ${x2 + 0.6} 40 ${x2} 24Z`;
+      const rod = `<path d="M12 22.5C36 21 64 21 88 22.5" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
+      const sides = `<path d="${panel(17, 38, 76)}${panel(62, 83, 76)}" fill="${cloth}"/>`;
+      const center = `<path d="M40 24C39.4 38 39.4 50 40.5 60C45 66 56 66 59.5 60C60.6 50 60.6 38 60 24Z" fill="${cloth}"/>`;
+      return rod + sides + peb('05', 50, 68, 16, 0, mode) + center;
+    } },
+  N: { name: '足（輪郭に小石・右へ）',
+    render(mode) {
+      const outline = `<path d="${SIL.foot}" fill="none" stroke="${F(mode, '#A2C3D1')}" stroke-width="6.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const stones = pack(mode, SILEL.foot, { x0: 14, y0: 10, x1: 94, y1: 92, size: 11, step: 8, seed: 11, inset: 3.6 });
+      return `<g transform="rotate(-8 52 56)">${outline}${stones}</g>`;
+    } },
+  O: { name: '足あと（小石の寄せ集め・右へ）',
+    render(mode) {
+      const base = `<path d="${SIL.sole}" fill="${F(mode, '#FAEBCC')}"/>`;
+      const stones = mode === 'color' ? `<g clip-path="url(#clip-sole)">${pack(mode, SILEL.sole, { x0: 12, y0: 26, x1: 74, y1: 74, size: 14, step: 10, seed: 5 })}</g>` : '';
+      const toes = [[81, 36, 13, '06'], [87.5, 46, 10.5, '05'], [89, 56, 9.5, '09'], [86, 65, 8.5, '08'], [79.5, 72, 7.5, '11']].map(([x, y, sz, n]) => peb(n, x, y, sz, 0, mode)).join('');
+      return base + stones + toes;
+    } },
+  P: { name: 'リュック（小石の寄せ集め）',
+    render(mode) {
+      const ink = F(mode, '#4D5E71');
+      const handle = `<path d="M41 40C43 29 57 29 59 40" fill="none" stroke="${ink}" stroke-width="3.2" stroke-linecap="round"/>`;
+      const base = `<path d="${SIL.pack}" fill="${F(mode, '#FAEBCC')}"/>`;
+      const stones = mode === 'color' ? `<g clip-path="url(#clip-pack)">${pack(mode, SILEL.pack, { x0: 26, y0: 36, x1: 74, y1: 90, size: 14, step: 10, seed: 3 })}</g>` : '';
+      return handle + base + stones;
+    } },
+  Q: { name: '背中のリュック',
+    render(mode) {
+      const ink = F(mode, '#4D5E71');
+      const shoulders = peb('11', 50, 47, 50, 0, mode, '#CFC1AC', 1.15, 0.62);
+      const head = peb('06', 50, 24, 23, 0, mode);
+      const body = `<path d="M33 46C30 60 31 76 36 86C45 88 55 88 64 86C69 76 70 60 67 46C62 40 38 40 33 46Z" fill="${F(mode, '#A8D5E2')}"/>`;
+      const straps = `<path d="M37.5 44.5L34 37.5M62.5 44.5L66 37.5" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
+      return shoulders + head + straps + body + peb('05', 58, 56, 9, 0, mode) + peb('09', 42, 57, 10, 0, mode);
+    } },
+  R: { name: '縦の切符（入鋏）',
+    render(mode) {
+      const c = mode === 'color'; const ink = F(mode, '#4D5E71');
+      const body = 'M36 12H64Q70 12 70 18V60.5A5 5 0 0 0 70 70.5V82Q70 88 64 88H36Q30 88 30 82V70.5A5 5 0 0 1 30 60.5V18Q30 12 36 12ZM46.4 78a3.6 3.6 0 1 0 7.2 0a3.6 3.6 0 1 0-7.2 0Z';
+      return `<g transform="rotate(8 50 50)"><path d="${body}" fill="${c ? '#FAEBCC' : 'none'}" fill-rule="evenodd" stroke="${c ? 'none' : MODE_FILL[mode]}" stroke-width="3" stroke-linejoin="round"/><path d="M35 65.5H65" fill="none" stroke="${ink}" stroke-width="1.8" stroke-dasharray="1 3.6" stroke-linecap="round"/>${peb('06', 50, 33, 17, 0, mode)}${peb('05', 41, 48, 13, 8, mode)}${peb('09', 59, 48, 14, -8, mode)}</g>`;
+    } },
+  S: { name: '切符（小石の寄せ集め）',
+    render(mode) {
+      const base = `<path d="${SIL.ticket}" fill="${F(mode, '#FAEBCC')}"/>`;
+      const stones = mode === 'color' ? `<g clip-path="url(#clip-ticket)">${pack(mode, SILEL.ticket, { x0: 12, y0: 26, x1: 88, y1: 74, size: 13, step: 9.5, seed: 9 })}</g>` : '';
+      return `<g transform="rotate(-7 50 50)">${base}${stones}</g>`;
+    } },
+};
+const KEYS = Object.keys(MARKS);
+let PICK = 'A';
+let HAND = false;
+
+function markSVG(key, mode, size, wide = false) {
+  const m = MARKS[key]; const useWide = wide && m.wide; const box = useWide ? m.wideBox : '0 0 100 100';
+  const [, , bw, bh] = box.split(' ').map(Number); const w = size * bw / bh;
+  return `<svg class="mark" viewBox="${box}" width="${w.toFixed(1)}" height="${size}" aria-hidden="true" focusable="false">${(useWide ? m.wide : m.render).call(m, mode, size)}</svg>`;
+}
+
+const meas = document.getElementById('measure');
+function wordmark({ size = 20, mode = 'color', hand = false, dot = false }) {
+  const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'wm'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'NIHO Experience');
+  const t = document.createElementNS(NS, 'text');
+  t.setAttribute('x', '0'); t.setAttribute('y', String(size)); t.setAttribute('font-size', String(size));
+  t.setAttribute('font-family', 'Fraunces Variable, Georgia, serif'); t.setAttribute('font-weight', '600'); t.setAttribute('letter-spacing', String(-0.01 * size));
+  t.setAttribute('fill', F(mode, '#1c1c1a'));
+  t.appendChild(document.createTextNode('NIHO'));
+  const sp = document.createElementNS(NS, 'tspan'); sp.setAttribute('dx', String(size * 0.3));
+  if (hand) {
+    sp.setAttribute('font-family', 'Caveat Variable, cursive'); sp.setAttribute('font-weight', '600'); sp.setAttribute('font-size', String(size * 1.3)); sp.setAttribute('letter-spacing', '0');
+    sp.setAttribute('fill', mode === 'color' ? '#355e1f' : mode === 'white' ? '#b2d67c' : MODE_FILL[mode]);
+  } else { sp.setAttribute('font-weight', '400'); sp.setAttribute('fill', F(mode, '#4b4b47')); }
+  sp.textContent = dot ? 'Experıence' : 'Experience';
+  t.appendChild(sp); svg.appendChild(t); meas.appendChild(svg);
+  const w = t.getComputedTextLength() + size * 0.3 + size * 0.1; const h = size * 1.3;
+  svg.setAttribute('width', w.toFixed(1)); svg.setAttribute('height', h.toFixed(1)); svg.setAttribute('viewBox', `0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
+  if (dot) {
+    const ext = t.getExtentOfChar(9); const cx = ext.x + ext.width / 2; const cy = hand ? size * 0.30 : size * 0.265;
+    const g = document.createElementNS(NS, 'g'); g.innerHTML = peb('05', cx, cy, size * (hand ? 0.3 : 0.27), 0, mode); svg.appendChild(g);
+  }
+  return svg;
+}
+
+function brand(key, { mode = 'color', size = 20 }) {
+  const m = MARKS[key]; const wrap = document.createElement('span'); wrap.className = 'brand'; wrap.style.gap = (size * 0.42).toFixed(1) + 'px';
+  if (!m.dotOnly) wrap.insertAdjacentHTML('beforeend', markSVG(key, mode, Math.round(size * 1.3), true));
+  wrap.appendChild(wordmark({ size, mode, hand: HAND, dot: !!m.dotOnly }));
+  return wrap;
+}
+
+const NAV = '<nav><span>Experiences</span><span>Host with NIHO</span><span>Help</span><span class="lang">EN · ¥</span></nav>';
+function section(key) {
+  const m = MARKS[key];
+  return `<section class="case" id="case-${key}" data-key="${key}">
+    <div class="case-h"><span class="tag">${key}</span><h2>${m.name}</h2></div>
+    <div class="grid">
+      <div class="cell big" data-slot="big"></div>
+      <div class="cell lock" data-slot="lock"></div>
+      <div class="cell hdrc" data-slot="hdr"></div>
+      <div class="cell hero" data-slot="hero"></div>
+      <div class="cell small" data-slot="small"></div>
+      <div class="cell mono" data-slot="mono"></div>
+    </div></section>`;
+}
+function fill(key) {
+  const sec = document.getElementById('case-' + key); const q = s => sec.querySelector(`[data-slot="${s}"]`);
+  q('big').innerHTML = markSVG(key, 'color', 220);
+  const lock = q('lock'); lock.innerHTML = ''; lock.appendChild(brand(key, { size: window.innerWidth < 560 ? 22 : 34 }));
+  const hdr = q('hdr'); hdr.innerHTML = `<div class="hdr-in"><span class="brand-slot"></span>${NAV}</div><div class="page-ghost"><i></i><i></i><i></i></div>`;
+  hdr.querySelector('.brand-slot').appendChild(brand(key, { size: 20 }));
+  const hero = q('hero'); hero.innerHTML = `<div class="hero-in"><div class="hdr-in on-photo"><span class="brand-slot"></span>${NAV}</div><p class="hero-h">Meet the people who make Kamakura <em>home</em></p></div>`;
+  hero.querySelector('.brand-slot').appendChild(brand(key, { size: 20, mode: 'white' }));
+  q('small').innerHTML = `<div class="tabbar"><div class="tab">${markSVG(key, 'color', 16)}<span>Meet the people of Kamakura</span></div></div><div class="sizes">${markSVG(key, 'color', 16)}${markSVG(key, 'color', 32)}${markSVG(key, 'color', 48)}</div><div class="appicon">${markSVG(key, 'color', 46)}</div>`;
+  q('mono').innerHTML = `<div class="chip sand">${markSVG(key, 'ink', 64)}</div><div class="chip moss">${markSVG(key, 'white', 64)}</div><div class="chip ink">${markSVG(key, 'white', 64)}</div>`;
+}
+function renderFamily() {
+  document.getElementById('fam-plain').innerHTML = markSVG(PICK, 'color', 66);
+  document.getElementById('fam-icon').innerHTML = markSVG(PICK, 'color', 44);
+  document.getElementById('fam-key').textContent = PICK;
+  KEYS.forEach(k => document.getElementById('case-' + k).classList.toggle('on', k === PICK));
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.key === PICK));
+}
+function renderAll() { KEYS.forEach(fill); renderFamily(); }
+
+document.getElementById('cases').innerHTML = KEYS.map(k => (k === 'A' ? '<h3 class="group">集う・家族のつながり</h3>' : k === 'G' ? '<h3 class="group">旅・出かける</h3>' : k === 'N' ? '<h3 class="group">追加: 小石で形を成す・別パターン</h3>' : '') + section(k)).join('');
+document.getElementById('seg').innerHTML = KEYS.map(k => `<button data-key="${k}">${k}</button>`).join('');
+document.getElementById('seg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; PICK = b.dataset.key; renderFamily(); document.getElementById('case-' + PICK).scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+document.getElementById('handseg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; HAND = b.dataset.hand === '1'; document.querySelectorAll('#handseg button').forEach(x => x.classList.toggle('on', x === b)); renderAll(); });
+document.querySelectorAll('.case').forEach(sec => sec.addEventListener('click', e => { if (e.target.closest('.case-h')) { PICK = sec.dataset.key; renderFamily(); } }));
+
+const fontLoads = ['600 20px "Fraunces Variable"', '400 20px "Fraunces Variable"', '800 13px "Nunito Variable"', '900 13px "Nunito Variable"', '600 20px "Caveat Variable"'].map(f => document.fonts.load(f).catch(() => null));
+Promise.all(fontLoads).then(() => document.fonts.ready).then(renderAll, renderAll);
+let rsz; addEventListener('resize', () => { clearTimeout(rsz); rsz = setTimeout(renderAll, 150); });
+</script>
+</body>
+</html>
