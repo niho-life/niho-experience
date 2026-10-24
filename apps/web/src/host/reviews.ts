@@ -208,8 +208,9 @@ export function publishReviewReply(review: HostReview, reply: { japanese: string
 }
 
 /** NIHO に報告する, once per review: the review stays as it is until NIHO decides. */
-export function reportReview(review: HostReview, reason: HostReviewReportReason, at: string): HostReview {
-  return review.report ? review : { ...review, report: { at, reason } };
+export function reportReview(review: HostReview, reason: HostReviewReportReason, at: string, note = ""): HostReview {
+  const trimmedNote = note.trim();
+  return review.report ? review : { ...review, report: { at, reason, ...(trimmedNote ? { note: trimmedNote } : {}) } };
 }
 
 /**

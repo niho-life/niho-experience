@@ -138,6 +138,11 @@ test("one reply is open at a time and keeps what was written; やめる drops it
   await oliver.getByRole("button", { name: "返信する", exact: true }).click();
   const oliverJapanese = replyForm(oliver, "Oliver").getByRole("textbox", { name: "日本語で書く" });
   await oliverJapanese.fill("ありがとうございました。");
+  const experience = page.getByRole("combobox", { name: "体験" });
+  await experience.selectOption("kintsugi");
+  await expect(list(page)).toContainText("レビューはまだありません");
+  await experience.selectOption("");
+  await expect(oliverJapanese).toHaveValue("ありがとうございました。");
   await ella.getByRole("button", { name: "返信する", exact: true }).click();
   await expect(list(page).getByRole("form")).toHaveCount(1);
   await expect(replyForm(ella, "Ella")).toBeVisible();

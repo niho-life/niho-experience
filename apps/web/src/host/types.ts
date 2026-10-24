@@ -466,6 +466,8 @@ export interface HostReviewReport {
   /** YYYY-MM-DDTHH:MM in Japan. */
   at: string;
   reason: HostReviewReportReason;
+  /** Optional explanation given to NIHO with the reason. */
+  note?: string;
 }
 
 export interface HostReview {

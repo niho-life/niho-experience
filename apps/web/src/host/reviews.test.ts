@@ -134,6 +134,7 @@ describe("replies and reports", () => {
     expect(reported).toEqual({ ...oliver, report: { at: AT, reason: "personal" } });
     expect(reportReview(reported, "other", "2026-10-22T09:00")).toBe(reported);
     expect(reportReview(yuki, "untrue", AT).status).toBe("pending");
+    expect(reportReview(oliver, "other", AT, "  当日の内容が違います。  ").report).toEqual({ at: AT, reason: "other", note: "当日の内容が違います。" });
   });
 
   it("brings the published reviews without a reply to ホーム first, then the ones NIHO is checking", () => {

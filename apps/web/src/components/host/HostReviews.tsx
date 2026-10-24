@@ -220,6 +220,7 @@ function ReviewReportDialog({ review, onConfirm, onClose }: { review: HostReview
 
 interface ReviewRowProps {
   review: HostReview;
+  hidden: boolean;
   experienceTitle: string;
   providerId: string;
   /** This review's reply was opened and is kept (hidden while another one is open). */
@@ -238,11 +239,11 @@ interface ReviewRowProps {
  * the guest's words (translated, with the original), the note for the host, the reply (or why
  * there is none yet) and 報告する.
  */
-function ReviewRow({ review, experienceTitle, providerId, kept, composing, notice, onReply, onCancel, onPublish, onReport }: ReviewRowProps) {
+function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composing, notice, onReply, onCancel, onPublish, onReport }: ReviewRowProps) {
   const stage = reviewReplyStage(review);
   const tags = reviewTagLabels(review.tags);
   return (
-    <li className="border-t border-line px-4 py-4 first:border-t-0 md:px-5">
+    <li hidden={hidden} className="border-t border-line px-4 py-4 first:border-t-0 md:px-5">
       <div className="flex items-start gap-3">
         <InitialAvatar name={review.reviewer.name} className="mt-0.5 size-9 text-[0.875rem]" />
         <div className="min-w-0 flex-1 text-[0.875rem] leading-[1.6]">
@@ -342,6 +343,7 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
   const requested = searchParams.get("experience");
   const experienceId = experiences.some((experience) => experience.id === requested) ? requested : null;
   const shown = sortReviews(reviewsOf(reviews, experienceId));
+  const allReviews = sortReviews(reviews);
   const summary = reviewSummary(shown);
   const notes = reviewSummaryNotes(summary);
   const titleOf = (id: string) => experiences.find((experience) => experience.id === id)?.title ?? "";
@@ -386,8 +388,8 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
   };
 
   // TODO(#87): send the reason and the host's word to NIHO; the preview keeps the report on this screen.
-  const report = (review: HostReview, reason: HostReviewReportReason) => {
-    replace(reportReview(review, reason, now));
+  const report = (review: HostReview, reason: HostReviewReportReason, note: string) => {
+    replace(reportReview(review, reason, now, note));
     say(review.id, REVIEW_REPORTED_TEXT);
     focusLater(headingId(review.id));
   };
@@ -435,12 +437,13 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
         ) : null}
 
         <section aria-label="レビューの一覧" className={HOST_SURFACE}>
-          {shown.length ? (
+          {allReviews.length ? (
             <ul>
-              {shown.map((review) => (
+              {allReviews.map((review) => (
                 <ReviewRow
                   key={review.id}
                   review={review}
+                  hidden={!!experienceId && review.experienceId !== experienceId}
                   experienceTitle={titleOf(review.experienceId)}
                   providerId={providerId}
                   kept={drafts.includes(review.id)}
@@ -453,12 +456,13 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
                 />
               ))}
             </ul>
-          ) : (
+          ) : null}
+          {!shown.length ? (
             <p className="px-4 py-6 text-muted md:px-5">レビューはまだありません</p>
-          )}
+          ) : null}
         </section>
       </HostPageBody>
-      {reporting ? <ReviewReportDialog review={reporting} onConfirm={(reason) => report(reporting, reason)} onClose={() => setReporting(null)} /> : null}
+      {reporting ? <ReviewReportDialog review={reporting} onConfirm={(reason, note) => report(reporting, reason, note)} onClose={() => setReporting(null)} /> : null}
     </>
   );
 }
