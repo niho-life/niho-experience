@@ -3,24 +3,24 @@ import { expect, test } from "@playwright/test";
 const dinner = "/experiences/home-cooked-dinner-with-locals";
 
 test("search conditions survive applying filters, detail, booking and the way back", async ({ page }) => {
-  await page.goto("/experiences?q=dinner&theme=FOOD&guests=2");
+  await page.goto("/experiences?q=dinner&theme=FOOD&guests=1");
   const days = page.getByRole("group", { name: "Date (Japan time)" });
   await days.getByRole("button", { name: /, 1 experience$/ }).first().click();
   await expect(page).toHaveURL(/[?&]date=\d{4}-\d{2}-\d{2}/);
   const date = new URL(page.url()).searchParams.get("date")!;
   await page.getByRole("button", { name: "Apply filters" }).click();
-  await expect(page.getByRole("combobox", { name: /Guests/ })).toHaveValue("2");
+  await expect(page.getByRole("combobox", { name: /Guests/ })).toHaveValue("1");
   await page.getByRole("link", { name: /home-cooked dinner/i }).click();
   expect(new URL(page.url()).searchParams.get("date")).toBe(date);
-  expect(new URL(page.url()).searchParams.get("guests")).toBe("2");
+  expect(new URL(page.url()).searchParams.get("guests")).toBe("1");
   await page.getByRole("link", { name: /^Check dates/ }).click();
-  await expect(page.getByRole("spinbutton", { name: "Adults", exact: true })).toHaveValue("2");
+  await expect(page.getByRole("spinbutton", { name: "Adults", exact: true })).toHaveValue("1");
   await expect(page.locator(`input[name="occurrence"][value="${date}"]`)).toBeChecked();
   await page.goBack();
   await page.locator('a[aria-label="All experiences"]:visible, nav[aria-label="Breadcrumb"] a:visible').click();
   await expect(page.getByRole("searchbox", { name: "Search experiences and hosts" })).toHaveValue("dinner");
   await expect(page.getByLabel("Theme")).toHaveValue("FOOD");
-  await expect(page.getByRole("combobox", { name: /Guests/ })).toHaveValue("2");
+  await expect(page.getByRole("combobox", { name: /Guests/ })).toHaveValue("1");
   expect(new URL(page.url()).searchParams.get("date")).toBe(date);
 });
 
@@ -48,7 +48,7 @@ test("changing the party keeps selection and contact details in memory, with ren
   expect(page.url()).not.toContain("guest@example.com");
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   await page.reload();
-  await page.locator('input[name="occurrence"]:not([disabled])').first().check();
+  await page.getByRole("radio", { name: /(?:[4-9]|[1-9]\d+) places currently available/ }).first().check();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Full name" })).toHaveValue("");
 });

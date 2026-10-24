@@ -83,6 +83,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 - `?mock=slow`・`?mock=empty`・`?mock=error`：読込中・掲載なし・API障害を再現（mock時のみ有効）。
 - `npm -w @niho-experience/api-client run gen:types` は公開・ホスト・選別済みAdmin/Host支援契約から型を作る（`--check` は全対象のdriftを確認する）。
 - 選別mockのcheckoutエラーは `createMockExperienceFetch` の scenario で再現できる。メールアドレスをトリガーにしない。
+- `?mock=checkout-conditions-outdated`・`checkout-conditions-added`：予約入力で、同意の文が予約の途中で変わる／条件の無い体験に同意が要る条件が足される状況を再現（最初の checkout が断られ、"Reload the experience" で読み直した詳細に新しい条件が出る。mock時のみ）。
 - `?mock=ask-rate-limited`・`ask-unavailable`・`ask-send-failed`：詳細の "Ask {host} a question" の失敗を再現（mock時のみ。仮契約：[api-contract.md](api-contract.md) §15）。参加の条件・質問・携帯電話の入力も mock のときだけ出る（`EXPERIENCE_API_MODE=http` では出ない）。
 - `?mock=reviews-error`（レビューの節が読めない）・`reviews-more-error`（"Show all" だけ失敗）：レビューの失敗を再現（mock時のみ）。合成のレビューは indigo＝12 件・pottery＝2 件・cycling＝1 件・dinner＝0 件。
 - `/preview/checkout` から、決済後のページ `/booking/return` の 3 通り（`?type=instant`・`?type=approval`・種別なし）へ進める。

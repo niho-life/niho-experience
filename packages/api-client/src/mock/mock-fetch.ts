@@ -6,9 +6,9 @@ import { computeExpectedTotalYen } from "../booking-rules.ts";
 import { buildMockOccurrences } from "../fixtures/availability.ts";
 import { toExperienceSummary } from "../fixtures/catalog.ts";
 import { buildFixtureExperiences, FIXTURE_CONSENT_VERSION } from "../fixtures/experiences.ts";
-import { journeyExtrasFor, reviewsResponseFor } from "../fixtures/journey.ts";
+import { ADDED_CONDITIONS, changedConditions, journeyExtrasFor, reviewsResponseFor } from "../fixtures/journey.ts";
 import { buildPilotExperiences } from "../fixtures/pilot-experiences.ts";
-import { ASK_HOST_INPUT_LIMITS, REVIEW_LIMITS, askHostInputProblem, conditionConsentTexts, isValidGuestPhone, usableConditions, type AskHostErrorCode, type AskHostTopic } from "../journey.ts";
+import { ASK_HOST_INPUT_LIMITS, REVIEW_LIMITS, askHostInputProblem, conditionConsentTexts, isValidGuestPhone, usableConditions, type AskHostErrorCode, type AskHostTopic, type ExperienceConditions } from "../journey.ts";
 import type { FetchLike } from "../client.ts";
 import type { CheckoutErrorCode, ExperienceCheckoutError, ExperienceDetail, ExperienceDetailV11, ExperienceSiteTheme, ExperienceSummaryV12, Occurrence } from "../types.ts";
 
@@ -25,6 +25,9 @@ export const MOCK_SCENARIOS = [
   "checkout-price-changed",
   "checkout-questions-changed",
   "checkout-consent-outdated",
+  // 参加の条件（仮契約・src/journey.ts）：予約の途中で条件が変わった／足された。最初の checkout が断られ、そのあと詳細（v1.4）は新しい条件を返す。
+  "checkout-conditions-outdated",
+  "checkout-conditions-added",
   "checkout-rate-limited",
   "checkout-unavailable",
   // 予約前の質問（仮契約・src/journey.ts）。質問の送信だけを失敗させる。
@@ -202,6 +205,17 @@ export function createMockExperienceFetch(options: MockExperienceFetchOptions = 
   const holds = new Map<string, HoldRecord>();
   let checkoutCounter = 0;
   let priceChangeApplied = false;
+  // 参加の条件が「予約の途中で変わった」状態に入ったか（scenario の checkout-conditions-*。最初の checkout を断ったあとに true）。
+  let conditionsChanged = false;
+
+  /** この体験の今の参加の条件（同意の文を含む）。scenario によっては、最初の checkout のあとに変わる。 */
+  function currentConditions(slug: string): ExperienceConditions | null {
+    const base = usableConditions(journeyExtrasFor(slug).conditions);
+    if (!conditionsChanged) return base;
+    if (scenario === "checkout-conditions-added") return base ? base : ADDED_CONDITIONS;
+    if (scenario === "checkout-conditions-outdated" && base) return changedConditions(base);
+    return base;
+  }
 
   function heldSeats(): Map<string, number> {
     const seats = new Map<string, number>();
@@ -244,15 +258,22 @@ export function createMockExperienceFetch(options: MockExperienceFetchOptions = 
     if (!isObject(body.consent) || body.consent.agreedVersion !== FIXTURE_CONSENT_VERSION) {
       return checkoutError("CONSENT_OUTDATED", { field: "consent.agreedVersion" });
     }
-    // 仮契約（src/journey.ts）：同意の対象がある条件を持つ体験は、同意した版を確かめる。条件の無い体験は受けない。
-    const consentTexts = conditionConsentTexts(usableConditions(journeyExtrasFor(experience.slug).conditions));
-    const conditionsVersion = usableConditions(journeyExtrasFor(experience.slug).conditions)?.version;
-    if (consentTexts.length > 0) {
-      if (!isObject(body.conditionsConsent) || typeof body.conditionsConsent.version !== "string") return checkoutError("INPUT_INVALID", { field: "conditionsConsent" });
-      if (body.conditionsConsent.version !== conditionsVersion) return checkoutError("CONSENT_OUTDATED", { field: "conditionsConsent.version" });
-    } else if (body.conditionsConsent !== undefined) {
+    // 仮契約（src/journey.ts・下書きの契約 1.4.0）：同意の文がある条件を持つ体験は、同意した版を確かめる。送られた版が今の版と違えば
+    // （条件が無くなった体験も）CONSENT_OUTDATED、同意の文があるのに無ければ INPUT_INVALID。画面は詳細（v1.4）を読み直して同意し直す。
+    const conditions = currentConditions(experience.slug);
+    const consentTexts = conditionConsentTexts(conditions);
+    const consented = isObject(body.conditionsConsent) && typeof body.conditionsConsent.version === "string" ? body.conditionsConsent.version : null;
+    if (body.conditionsConsent !== undefined && consented === null) return checkoutError("INPUT_INVALID", { field: "conditionsConsent" });
+    if (!conditionsChanged && scenario === "checkout-conditions-outdated" && consentTexts.length > 0) {
+      conditionsChanged = true;
+      return checkoutError("CONSENT_OUTDATED", { field: "conditionsConsent.version" });
+    }
+    if (!conditionsChanged && scenario === "checkout-conditions-added" && consentTexts.length === 0 && consented === null) {
+      conditionsChanged = true;
       return checkoutError("INPUT_INVALID", { field: "conditionsConsent" });
     }
+    if (consented !== null && consented !== (conditions?.version ?? null)) return checkoutError("CONSENT_OUTDATED", { field: "conditionsConsent.version" });
+    if (consented === null && consentTexts.length > 0) return checkoutError("INPUT_INVALID", { field: "conditionsConsent" });
     if (body.guestPhone !== undefined && (typeof body.guestPhone !== "string" || !isValidGuestPhone(body.guestPhone))) {
       return checkoutError("INPUT_INVALID", { field: "guestPhone" });
     }
@@ -418,6 +439,12 @@ export function createMockExperienceFetch(options: MockExperienceFetchOptions = 
       if (!SLUG_PATTERN.test(tail)) return validationError("experienceSlug is invalid");
       const experience = scenario === "empty-catalog" ? undefined : experiences.find((candidate) => candidate.slug === tail);
       return experience ? json(200, { experience: toV11(withGalleryScenario(experience, scenario)) }, SHARED_CACHE) : notFound();
+    }
+
+    if (slug === "v1.4" && method === "GET") {
+      if (!SLUG_PATTERN.test(tail)) return validationError("experienceSlug is invalid");
+      const experience = scenario === "empty-catalog" ? undefined : experiences.find((candidate) => candidate.slug === tail);
+      return experience ? json(200, { experience: { ...toV11(withGalleryScenario(experience, scenario)), conditions: currentConditions(experience.slug) } }, SHARED_CACHE) : notFound();
     }
 
     if (slug === "v1.2" && method === "GET") {

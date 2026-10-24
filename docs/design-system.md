@@ -135,7 +135,7 @@
 - PC（部品の幅が 56rem 以上）は2列：左に戻るリンクの下の step（商品の選択、step 1〜2／3〜4、案内、確認の行、注記、同意）、右の 380px にサマリーカード（スクロールで流れる）と、その下で追従する合計のカード（合計・日付と時刻・Continue／送信）。下端の固定バーは出さない。公開文書があるときと予約停止中は従来の幅（1列）。
 - ブラウザから `getAvailability` を読み、商品・開催日・大人/子どもの人数を選ぶ。連絡先・回答は URL や Server Action へ送らない。詳細ページから来た `date`・`offer`（公開の日程だけ）は選択の初期値にする。
 - 送信前に開催日（JST）、商品、料金内訳・税込総額、販売者、取消条件、同意文書と版を表示する。取消が無料の商品は、確認の行に "Free cancellation — Until Thu 12 Nov, 7:00 AM Japan time"（開催回の開始から契約の取消時間を引いた日時を、曜日・日付・Japan time で）を出す。その時間をすでに過ぎる日は "Not available for this date"。返金なしの商品には出さない。
-- "Before you book"（Epic #103・仮契約）：同意の対象がある条件（`consentText`）を持つ体験だけ。枠の中に "Everyone in my group is OK with:" とその項目を並べ、チェックしないと進めない（チェック時は枠が緑の面になる）。利用規約への同意（"agree to version"）とは別の欄で、同意した条件の版を予約に添えて送る。
+- "Before you book"（Epic #103・仮契約）：同意の対象がある条件（`consentText`）を持つ体験だけ。枠の中に "Everyone in my group is OK with:" とその項目を並べ、チェックしないと進めない（チェック時は枠が緑の面になる）。利用規約への同意（"agree to version"）とは別の欄で、同意した条件の版を予約に添えて送る。送ったあとで条件が変わっていた（または、同意が要る条件が足されていた）ときは、赤い枠で「"Before you book" の点が変わった／確認する点がある」と知らせ、"Reload the experience" で詳細を読み直して新しい点を見せ、同意の欄を未チェックに戻す（名前・メール・質問の回答は残り、利用規約の同意はもう一度）。
 - 入力は氏名・メール・任意の携帯電話（"Mobile number (optional, for the day)"。当日の連絡用で、提供者の当日の画面だけに出す＝owner 決定 2026-10-22。数字 7〜15 桁・mock のみ）・任意の備考と、商品に定義された申込時の質問だけ。国は収集しない。質問の見出しは "Questions from {host}"（ホスト名が長いときは従来の "Questions from your host"）。
 - ブラウザから選別クライアントの `startCheckout` で NIHO へ直接送る。内容が同じ再送は同じ `clientRequestKey`、内容変更後は新しい key を使う。
 - mock ではブラウザ内で合成 checkout を処理し、個人情報を伴わず `/preview/checkout` へ進む。この模擬ページは、決済後のページ（下）の 3 通りの見え方へのリンクを持つ。

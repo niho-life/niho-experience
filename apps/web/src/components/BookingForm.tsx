@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
-import { NO_JOURNEY_EXTRAS, computeExpectedTotalYen, conditionConsentTexts, createClientRequestKey, isValidGuestPhone, usableConditions, type CheckoutAnswer, type ExperienceApiClient, type ExperienceCheckoutJourneyFields, type ExperienceCheckoutRequest, type ExperienceOffer, type JourneyDetailExtras } from "@niho-experience/api-client";
+import { NO_JOURNEY_EXTRAS, computeExpectedTotalYen, conditionConsentTexts, createClientRequestKey, isValidGuestPhone, normalizeGuestPhone, usableConditions, type CheckoutAnswer, type ExperienceApiClient, type ExperienceConditions, type ExperienceCheckoutJourneyFields, type ExperienceCheckoutRequest, type ExperienceOffer, type JourneyDetailExtras } from "@niho-experience/api-client";
 import { hostNames } from "@/lib/card-model";
 import { JOURNEY_PROBLEMS, askHostTarget, freeCancellationDeadline } from "@/lib/journey-ui";
 import { dayOption } from "@/lib/date-filter";
@@ -23,7 +23,7 @@ import { checkoutProblem, fullNameValidationMessage, retryUnit } from "@/lib/boo
 export type BookingDraft = { guestName: string; guestEmail: string; guestPhone?: string; note: string; answerSets: Record<string, Record<string, string | string[]>> };
 export type CheckoutAttempt = { signature: string; key: string };
 
-export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite) => boolean; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
+export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
   const router = useRouter();
   const copy = useSiteCopy();
   const { locale, releaseId } = useSiteLocale();
@@ -132,7 +132,7 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
     const draft: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & ExperienceCheckoutJourneyFields = {
       offerId: offer.id, occurrenceDate: selection.date, adultCount: selection.adultCount, childCount: selection.childCount,
       expectedTotalYen: total, bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
-      guestName: guestName.trim(), guestEmail: guestEmail.trim(), ...(collectsPhone && guestPhone.trim() ? { guestPhone: guestPhone.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}),
+      guestName: guestName.trim(), guestEmail: guestEmail.trim(), ...(collectsPhone && guestPhone.trim() ? { guestPhone: normalizeGuestPhone(guestPhone) } : {}), ...(note.trim() ? { note: note.trim() } : {}),
       answers: answered, consent: { agreedVersion: experience.booking.consentVersion },
       ...(conditions && consentTexts.length ? { conditionsConsent: { version: conditions.version } } : {}),
       ...(attributionEnabled ? readBookingAttribution(navigator.doNotTrack) : {}),
@@ -166,15 +166,19 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       setClockNow(now);
       setRetryUntil(retryAfter ? now + retryAfter * 1000 : null);
       const conditionsField = result.error.field?.startsWith("conditionsConsent") ?? false;
+      // The host changed the conditions (or added ones that need an OK) after this page loaded: the detail is read again to show them.
+      const conditionsOutdated = conditionsField && result.error.code === "CONSENT_OUTDATED";
+      const conditionsMissing = conditionsField && result.error.code === "INPUT_INVALID" && consentTexts.length === 0;
       setProblem(retryAfter
         ? copy.text("booking.rateLimitedCount", { seconds: retryAfter, noun: retryUnit(locale, retryAfter) })
         : result.error.field === "guestPhone" ? JOURNEY_PROBLEMS.phone
-        : conditionsField ? (result.error.code === "CONSENT_OUTDATED" ? JOURNEY_PROBLEMS.conditionsChanged : JOURNEY_PROBLEMS.conditions)
+        : conditionsOutdated ? JOURNEY_PROBLEMS.conditionsChanged
+        : conditionsMissing ? JOURNEY_PROBLEMS.conditionsAdded
+        : conditionsField ? JOURNEY_PROBLEMS.conditions
         : checkoutProblem(result.error.code, locale, copy));
       setInvalidField(result.error.questionId ?? result.error.field ?? "");
       if (result.error.code === "REQUEST_MISMATCH") attemptRef.current = null;
-      // A changed set of conditions comes from the detail page, not from this refresh: the message asks for a reload.
-      if (!conditionsField && ["CONSENT_OUTDATED", "QUESTIONS_CHANGED", "PRICE_CHANGED"].includes(result.error.code)) setNeedsFreshDetails(true);
+      if (conditionsOutdated || conditionsMissing || (!conditionsField && ["CONSENT_OUTDATED", "QUESTIONS_CHANGED", "PRICE_CHANGED"].includes(result.error.code))) setNeedsFreshDetails(true);
       if (["OCCURRENCE_INVALID", "FULL", "UNAVAILABLE"].includes(result.error.code)) setAvailabilityOk(false);
     } else if (result.kind === "localization_outdated") {
       setNeedsFreshDetails(true);
@@ -196,14 +200,23 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
     setProblem("");
     setInvalidField("");
     try {
-      const latest = publicApiVersion === "1.0"
-        ? await api.getExperience(experience.slug).then((result) => result.ok ? result.data.experience : null)
-        : await api.getExperienceV11(experience.slug).then((result) => result.ok ? result.data.experience : null);
+      // With the journey additions the detail is read as v1.4: the same detail plus the participation conditions to agree to again.
+      let latest: ExperienceDetailForSite | null;
+      let latestConditions: ExperienceConditions | null | undefined;
+      if (locale === "en" && journey.enabled) {
+        const result = await api.getExperienceV14(experience.slug);
+        latest = result.ok ? result.data.experience : null;
+        latestConditions = result.ok ? usableConditions(result.data.experience.conditions) : undefined;
+      } else {
+        latest = publicApiVersion === "1.0"
+          ? await api.getExperience(experience.slug).then((result) => result.ok ? result.data.experience : null)
+          : await api.getExperienceV11(experience.slug).then((result) => result.ok ? result.data.experience : null);
+      }
       if (!latest || latest.slug !== experience.slug) {
         setProblem(copy.text("booking.latestLoadError"));
         return;
       }
-      if (!onExperienceRefresh(latest)) {
+      if (!onExperienceRefresh(latest, latestConditions)) {
         setProblem(copy.text("booking.latestUnavailable"));
       }
     } catch {

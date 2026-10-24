@@ -14,6 +14,8 @@ export async function getBrowserApi(preview: boolean, nihoWebOrigin: string) {
     "checkout-price-changed": "checkout-price-changed",
     "checkout-questions-changed": "checkout-questions-changed",
     "checkout-consent-outdated": "checkout-consent-outdated",
+    "checkout-conditions-outdated": "checkout-conditions-outdated",
+    "checkout-conditions-added": "checkout-conditions-added",
     "checkout-rate-limited": "checkout-rate-limited",
     "checkout-unavailable": "checkout-unavailable",
     // The question to the host (provisional contract, Epic #103) fails in its own ways.
