@@ -18,7 +18,7 @@ async function openAsk(page: Page) {
 test("Good to know lists each condition with its detail and keeps the host's own notes below", async ({ page }) => {
   await page.goto(indigo);
   const section = page.locator("section", { has: page.getByRole("heading", { name: "Good to know", exact: true }) });
-  for (const text of ["Ages 10 and up", "Children must join with an adult", "Hosted in Japanese and basic English", "Vegan option on request", "Not wheelchair accessible", "Steps up to the studio", "Rain or shine"]) {
+  for (const text of ["Ages 10 and up", "Children must join with an adult", "Standing for a long time", "Working with your hands · about 2 hours, with short breaks", "Hosted in Japanese and basic English", "Vegan option on request", "Not wheelchair accessible", "Steps up to the studio", "Rain or shine"]) {
     await expect(section.getByText(text, { exact: true })).toBeVisible();
   }
   const written = await section.innerText();
@@ -33,7 +33,7 @@ test("an experience without conditions keeps the host's list, and a closed one h
   await expect(askButton(page)).toBeVisible();
   // Conditions without a question button: the pottery session takes no bookings, so it takes no questions either.
   await page.goto(pottery);
-  await expect(page.getByText("Ages 12 and up", { exact: true })).toBeVisible();
+  await expect(page.getByText("Hosted in Japanese and basic English", { exact: true })).toBeVisible();
   await expect(askButton(page)).toHaveCount(0);
 });
 

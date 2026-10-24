@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { NO_JOURNEY_EXTRAS, type ExperienceApiClient, type JourneyDetailExtras } from "@niho-experience/api-client";
+import { NO_JOURNEY_EXTRAS, type ExperienceApiClient, type ExperienceConditions, type JourneyDetailExtras } from "@niho-experience/api-client";
 import type { ExperienceDetailForSite } from "@/lib/experience-types";
 import { getBrowserApi } from "@/lib/browser-api";
 import { BookingForm, type BookingDraft, type CheckoutAttempt } from "./BookingForm";
@@ -10,6 +10,10 @@ import { SlotPicker, type BookingSelection } from "./SlotPicker";
 export function BookingFlow({ experience, preview, availabilityIsProvisional, nihoWebOrigin, attributionEnabled, publicApiVersion = "1.1", journey = NO_JOURNEY_EXTRAS, initialOfferId, initialDate, initialAdultCount, titleAs = "h1" }: { experience: ExperienceDetailForSite; preview: boolean; availabilityIsProvisional: boolean; nihoWebOrigin: string; attributionEnabled: boolean; publicApiVersion?: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; initialOfferId?: string; initialDate?: string; initialAdultCount?: number; titleAs?: "h1" | "p" }) {
   const [freshExperience, setFreshExperience] = useState<{ source: ExperienceDetailForSite; value: ExperienceDetailForSite } | null>(null);
   const currentExperience = freshExperience?.source === experience ? freshExperience.value : experience;
+  // The participation conditions come with the detail (v1.4). A reload after "the points changed" replaces them together with the experience.
+  const [freshConditions, setFreshConditions] = useState<{ source: JourneyDetailExtras; value: ExperienceConditions | null } | null>(null);
+  const currentConditions = freshConditions?.source === journey ? freshConditions.value : journey.conditions;
+  const currentJourney: JourneyDetailExtras = currentConditions === journey.conditions ? journey : { ...journey, conditions: currentConditions };
   const [api, setApi] = useState<ExperienceApiClient | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   useEffect(() => {
@@ -35,16 +39,18 @@ export function BookingFlow({ experience, preview, availabilityIsProvisional, ni
     top.current?.scrollIntoView({ block: "start" });
     top.current?.focus({ preventScroll: true });
   }, [selection]);
-  const formKey = bookingFormKey(currentExperience, selection, offer);
-  function acceptFreshExperience(updated: ExperienceDetailForSite) {
+  const formKey = bookingFormKey(currentExperience, selection, offer, currentConditions);
+  function acceptFreshExperience(updated: ExperienceDetailForSite, updatedConditions?: ExperienceConditions | null) {
     const updatedOffer = updated.offers.find((item) => item.id === selection?.offerId);
-    if (bookingFormKey(updated, selection, updatedOffer) === formKey) return false;
+    const conditions = updatedConditions === undefined ? currentConditions : updatedConditions;
+    if (bookingFormKey(updated, selection, updatedOffer, conditions) === formKey) return false;
     setFreshExperience({ source: experience, value: updated });
+    if (updatedConditions !== undefined) setFreshConditions({ source: journey, value: updatedConditions });
     return true;
   }
-  return <div ref={top} tabIndex={-1} className="scroll-mt-20 outline-none">{selection && offer ? <BookingForm key={formKey} api={api} apiUnavailable={apiUnavailable} experience={currentExperience} offer={offer} selection={selection} preview={preview} attributionEnabled={attributionEnabled} publicApiVersion={publicApiVersion} journey={journey} onExperienceRefresh={acceptFreshExperience} draft={draft} onDraftChange={setDraft} attemptRef={attemptRef} onBack={() => setSelection(null)} titleAs={titleAs} /> : <SlotPicker experience={currentExperience} titleAs={titleAs} slug={currentExperience.slug} offers={currentExperience.offers} preview={preview} availabilityIsProvisional={availabilityIsProvisional} nihoWebOrigin={nihoWebOrigin} onContinue={continueBooking} initialOfferId={lastSelection?.offerId ?? initialOfferId} initialDate={lastSelection?.date ?? initialDate} initialAdultCount={lastSelection?.adultCount ?? initialAdultCount} initialChildCount={lastSelection?.childCount} />}</div>;
+  return <div ref={top} tabIndex={-1} className="scroll-mt-20 outline-none">{selection && offer ? <BookingForm key={formKey} api={api} apiUnavailable={apiUnavailable} experience={currentExperience} offer={offer} selection={selection} preview={preview} attributionEnabled={attributionEnabled} publicApiVersion={publicApiVersion} journey={currentJourney} onExperienceRefresh={acceptFreshExperience} draft={draft} onDraftChange={setDraft} attemptRef={attemptRef} onBack={() => setSelection(null)} titleAs={titleAs} /> : <SlotPicker experience={currentExperience} titleAs={titleAs} slug={currentExperience.slug} offers={currentExperience.offers} preview={preview} availabilityIsProvisional={availabilityIsProvisional} nihoWebOrigin={nihoWebOrigin} onContinue={continueBooking} initialOfferId={lastSelection?.offerId ?? initialOfferId} initialDate={lastSelection?.date ?? initialDate} initialAdultCount={lastSelection?.adultCount ?? initialAdultCount} initialChildCount={lastSelection?.childCount} />}</div>;
 }
 
-function bookingFormKey(experience: ExperienceDetailForSite, selection: BookingSelection | null, offer: ExperienceDetailForSite["offers"][number] | undefined) {
-  return offer && selection ? JSON.stringify([selection, offer.bookingQuestionsFingerprint, offer.pricing, offer.minimumParticipants, offer.maxPartySize, offer.cancellationPolicy, offer.acceptanceMode, experience.seller, experience.booking.consentVersion, experience.booking.legalDocuments]) : "";
+function bookingFormKey(experience: ExperienceDetailForSite, selection: BookingSelection | null, offer: ExperienceDetailForSite["offers"][number] | undefined, conditions: ExperienceConditions | null) {
+  return offer && selection ? JSON.stringify([selection, offer.bookingQuestionsFingerprint, offer.pricing, offer.minimumParticipants, offer.maxPartySize, offer.cancellationPolicy, offer.acceptanceMode, experience.seller, experience.booking.consentVersion, experience.booking.legalDocuments, conditions?.version ?? null]) : "";
 }

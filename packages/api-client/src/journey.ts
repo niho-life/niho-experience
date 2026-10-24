@@ -5,16 +5,20 @@
  *   画面は mock のときだけこの機能を出す（実 API に無い機能を動いているように見せない）。
  * - 対応する NIHO 側の Issue：参加の条件 niho-coliving/niho-app#19318、予約前の質問 #19319、
  *   当日の連絡用の電話番号 #19311・#19321、メール未着からの復帰 #19241。
+ * - 参加の条件・同意・電話番号・決済後の戻り先は niho-coliving/niho-app#19335 に下書きの契約（公開契約 1.4.0・詳細は
+ *   `GET /api/public/experiences/v1.4/{experienceSlug}` の `conditions`）があり、下の型と限度はそれに合わせてある。
+ *   版が他の PR（#19330 の電話番号、#19168 の v1.2 一覧）と重なっているので、NIHO 側で版が決まって main に入ってから契約を写す。
  * - 契約が出たら、この型を生成された型の別名へ置き換え、`fixtures/journey.ts` と mock の経路を消す。
  *   画面は `JourneyDetailExtras` を作る 1 か所（apps/web の `lib/journey.ts`）だけが契約の形を知る。
  */
+import type { ExperienceDetailV11 } from "./types.ts";
 
 /** 体験の「参加の条件」の種類。1 つの体験に各種類は最大 1 行。 */
 export const EXPERIENCE_CONDITION_KINDS = ["AGE", "PHYSICAL", "HOST_LANGUAGE", "FOOD", "ACCESS", "WEATHER"] as const;
 export type ExperienceConditionKind = (typeof EXPERIENCE_CONDITION_KINDS)[number];
 
 /**
- * 参加の条件の 1 行。文言は NIHO が用意した英語で、画面は文を組み立てない（翻訳は原文を保って別に持つ：#19244 の規則）。
+ * 参加の条件の 1 行。文言は NIHO が体験の言語で組んだもので、画面は文を組み立てない（翻訳は原文を保って別に持つ：#19244 の規則）。
  */
 export type ExperienceConditionItem = {
   kind: ExperienceConditionKind;
@@ -27,18 +31,29 @@ export type ExperienceConditionItem = {
 };
 
 export type ExperienceConditions = {
-  /** 同意した内容の版。予約の記録に残る。条件の文言が変わると変わる。 */
+  /** 同意した内容の版（項目の文の SHA-256・小文字 16 進 64 字）。予約の記録に残る。条件の文言が変わると変わる。 */
   version: string;
   items: ExperienceConditionItem[];
 };
 
+/** 下書きの契約（#19335）の限度。`versionMaxLength` は checkout の `conditionsConsent.version` の上限。 */
 export const EXPERIENCE_CONDITION_LIMITS = {
   maxItems: EXPERIENCE_CONDITION_KINDS.length,
-  headlineMaxLength: 80,
-  detailMaxLength: 160,
-  consentTextMaxLength: 120,
+  headlineMaxLength: 120,
+  detailMaxLength: 300,
+  consentTextMaxLength: 300,
   versionMaxLength: 100,
 } as const;
+
+/** 同意した条件の版（項目の文の SHA-256・小文字 16 進 64 字）。 */
+export const CONDITIONS_VERSION_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * 参加の条件つきの詳細（下書きの契約 1.4.0・`GET /api/public/experiences/v1.4/{experienceSlug}`）。v1.1 の詳細に `conditions` を足したもので、
+ * 条件の無い体験は null。予約入力が「条件が変わった」と知らされたときの読み直しにも使う。
+ */
+export type ExperienceDetailV14 = ExperienceDetailV11 & { conditions: ExperienceConditions | null };
+export type ExperienceDetailResponseV14 = { experience: ExperienceDetailV14 };
 
 /** 詳細・予約入力の画面へ渡す、契約の外にある（まだ契約に無い）追加の表示データ。 */
 export type JourneyDetailExtras = {
@@ -126,15 +141,25 @@ export type ExperienceCheckoutJourneyFields = {
   conditionsConsent?: { version: string };
 };
 
-export const GUEST_PHONE_MAX_LENGTH = 24;
+export const GUEST_PHONE_LIMITS = { maxLength: 24, minDigits: 7, maxDigits: 15 } as const;
 
-/** 任意の電話番号。国番号つき・なしのどちらも受け、整形はしない（数字が 7〜15 桁、`+` は先頭だけ）。 */
+const GUEST_PHONE_PATTERN = /^\+?[0-9 ().-]+$/;
+
+/** 前後の空白を落とし、続く空白を 1 つにする（NIHO の `normalizeSpotCampaignPageGuestPhone` と同じ。整形や国番号の補完はしない）。 */
+export function normalizeGuestPhone(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+/**
+ * 任意の電話番号。国番号つき・なしのどちらも受け、整形はしない（正規化した後で 24 字まで・数字が 7〜15 桁・`+` は先頭だけ・
+ * ほかは数字と空白と `()-.` だけ）。サーバーが同じ規則で確かめ直す。
+ */
 export function isValidGuestPhone(value: string): boolean {
-  const text = value.trim();
-  if (text.length === 0 || text.length > GUEST_PHONE_MAX_LENGTH) return false;
-  if (!/^\+?[0-9(][0-9 ().-]*$/.test(text)) return false;
-  const digits = text.replace(/\D/g, "").length;
-  return digits >= 7 && digits <= 15;
+  const text = normalizeGuestPhone(value);
+  if (text.length === 0 || text.length > GUEST_PHONE_LIMITS.maxLength) return false;
+  if (!GUEST_PHONE_PATTERN.test(text)) return false;
+  const digits = text.replace(/[^0-9]/g, "").length;
+  return digits >= GUEST_PHONE_LIMITS.minDigits && digits <= GUEST_PHONE_LIMITS.maxDigits;
 }
 
 /* ---------- レビュー（niho-coliving/niho-app#19314） ---------- */

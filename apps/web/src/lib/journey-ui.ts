@@ -61,5 +61,6 @@ export function freeCancellationDeadline(startAt: string, hoursBefore: number | 
 export const JOURNEY_PROBLEMS = {
   phone: "Please check your mobile number, or leave it empty.",
   conditions: "Please confirm that everyone in your group is OK with the points under “Before you book”.",
-  conditionsChanged: "The points under “Before you book” changed. Return to the experience and review them.",
+  conditionsChanged: "The points under “Before you book” changed. Reload the experience to review them.",
+  conditionsAdded: "This experience has points to confirm before you book. Reload the experience to review them.",
 } as const;
