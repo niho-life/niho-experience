@@ -3,9 +3,10 @@ import { addDays, agoJa, dateWithWeekdayJa, durationJa, experienceMeta, minutesB
 import { homeMonth, homeSessions, homeTodos, type HomeUpcoming } from "./home";
 import { MOCK_KITCHEN_BOOKINGS, MOCK_NOW, MOCK_TODAY } from "./mock/bookings";
 import { MOCK_KITCHEN_EXPERIENCES } from "./mock/experiences";
+import { MOCK_KITCHEN_REVIEWS } from "./mock/reviews";
 import { MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD } from "./mock/sales";
 import { MOCK_KITCHEN_THREADS } from "./mock/threads";
-import type { HostBooking } from "./types";
+import type { HostBooking, HostReview } from "./types";
 
 describe("host formatting", () => {
   it("writes dates, money and durations the Japanese way", () => {
@@ -25,6 +26,9 @@ describe("host formatting", () => {
     expect(experienceMeta(MOCK_KITCHEN_EXPERIENCES[0]!)).toBe("火・木・土 18:00 · 2時間 · 定員8 · ¥30,000〜");
     expect(experienceMeta(MOCK_KITCHEN_EXPERIENCES[2]!)).toBe("表紙写真・料金が未入力");
     expect(experienceMeta({ schedule: null, missing: [] })).toBe("日程と料金が未入力");
+    // The English of a page written in Japanese is confirmed, not typed in (#110).
+    expect(experienceMeta({ schedule: null, missing: ["表紙写真", "料金", "英語の確定"] })).toBe("表紙写真・料金が未入力 · 英語が未確定");
+    expect(experienceMeta({ schedule: null, missing: ["英語の確定"] })).toBe("英語が未確定");
   });
 });
 
@@ -32,7 +36,7 @@ describe("host home", () => {
   const todos = (bookings = MOCK_KITCHEN_BOOKINGS, threads = MOCK_KITCHEN_THREADS) => homeTodos(MOCK_KITCHEN_EXPERIENCES, bookings, threads, MOCK_TODAY, MOCK_NOW);
 
   it("puts each request first, the nearest deadline first, then the threads waiting longest, then drafts and listings under review", () => {
-    expect(todos().map((todo) => [todo.key, todo.status.label, todo.aside?.text ?? null, todo.action?.label ?? null])).toEqual([
+    expect(todos().map((todo) => [todo.key, todo.status?.label ?? null, todo.aside?.text ?? null, todo.action?.label ?? null])).toEqual([
       ["booking-bk-2041", "承認待ち", "あと 6 時間", "詳しく見る"],
       ["booking-bk-2044", "承認待ち", "あと 44 時間", "詳しく見る"],
       ["thread-th-3010", "返信待ち", "予約前の質問", "返信する"],
@@ -79,6 +83,53 @@ describe("host home", () => {
     expect(threads["thread-th-3010"]).toMatchObject({ title: "「안녕하세요. 휠체어로도 참가할 수 있을까요? 엘리베이터가…」", detail: "Jiwoo Han さん · 6 時間前 · 翻訳できませんでした" });
     // The answered question waits for nobody.
     expect(threads["thread-th-3007"]).toBeUndefined();
+  });
+
+  it("brings up the published reviews without a reply, the newest first, then the ones NIHO is checking, after the threads (#108)", () => {
+    const rows = homeTodos(MOCK_KITCHEN_EXPERIENCES, MOCK_KITCHEN_BOOKINGS, MOCK_KITCHEN_THREADS, MOCK_TODAY, MOCK_NOW, MOCK_KITCHEN_REVIEWS);
+    expect(rows.map((todo) => todo.key)).toEqual([
+      "booking-bk-2041",
+      "booking-bk-2044",
+      "thread-th-3010",
+      "thread-th-3004",
+      "thread-th-3012",
+      "guest-review-rv-5020",
+      "guest-review-rv-4906",
+      "guest-review-rv-5013",
+      "draft-coffee",
+      "review-kintsugi",
+    ]);
+    expect(rows[5]).toEqual({
+      key: "guest-review-rv-5020",
+      status: { label: "未返信", tone: "draft" },
+      aside: { text: "レビュー", tone: "muted" },
+      rating: 5,
+      title: "「ここに暮らす人たちと 6 品を作り、終電の時間まで話し込みまし…」",
+      detail: "Oliver さん · イギリス · Kamakura Community Dinner with Locals",
+      approval: null,
+      action: { label: "読んで返信する", href: "/host/reviews#review-rv-5020", primary: false },
+    });
+    // NIHO is still checking this one: to read, after the ones to answer although it is newer.
+    expect(rows[7]).toMatchObject({ status: { label: "公開前", tone: "wait" }, rating: 4, detail: "由紀 さん · 日本 · Kamakura Community Dinner with Locals", action: { label: "読む", href: "/host/reviews#review-rv-5013" } });
+    // Replied reviews wait for nothing.
+    expect(rows.some((todo) => todo.key === "guest-review-rv-4912")).toBe(false);
+  });
+
+  it("brings up three reviews at most, and one line for the rest", () => {
+    const more = [5, 6, 7].map((day): HostReview => ({ ...MOCK_KITCHEN_REVIEWS[0]!, id: `extra-${day}`, writtenAt: `2026-10-0${day}T09:00`, privateNote: null }));
+    const rows = homeTodos(MOCK_KITCHEN_EXPERIENCES, [], [], MOCK_TODAY, MOCK_NOW, [...MOCK_KITCHEN_REVIEWS, ...more]).filter((todo) => todo.key.startsWith("guest-review"));
+    expect(rows.map((todo) => todo.key)).toEqual(["guest-review-rv-5020", "guest-review-extra-7", "guest-review-extra-6", "guest-reviews-more"]);
+    expect(rows[3]).toEqual({
+      key: "guest-reviews-more",
+      status: null,
+      aside: null,
+      title: "ほかに 3 件のレビュー",
+      detail: "",
+      approval: null,
+      action: { label: "レビューを見る", href: "/host/reviews", primary: false },
+    });
+    // Without reviews, no review rows and no line.
+    expect(homeTodos(MOCK_KITCHEN_EXPERIENCES, [], [], MOCK_TODAY, MOCK_NOW, []).some((todo) => todo.key.startsWith("guest-review"))).toBe(false);
   });
 
   it("shows today's sessions however far along, tomorrow's, and the next ones from the day after tomorrow, each opening この回", () => {

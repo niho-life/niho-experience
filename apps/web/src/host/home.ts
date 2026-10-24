@@ -1,11 +1,12 @@
 import { HOST_EXPERIENCES_PATH } from "@/lib/host/routes";
 import { bookingSessions, bookingsHref, seatsLabel, sessionHref, type BookingDialogSubject, type BookingExperience, type BookingSession, type SessionQuery } from "./bookings";
-import { addDays, agoJa, dateWithWeekdayJa, dayOfMonth, durationJa, listJa, monthDayJa, remainingJa, shortDateWithWeekdayJa, weekdayJa, yen } from "./format";
+import { addDays, agoJa, dateWithWeekdayJa, dayOfMonth, durationJa, listJa, missingLine, monthDayJa, remainingJa, shortDateWithWeekdayJa, weekdayJa, yen } from "./format";
 import { guestMessageView, lastGuestMessage, messagesHref, quoteJa, sortThreads, threadKind, waitingSince } from "./messages";
+import { HOME_REVIEW_LIMIT, reviewerLabel, reviewReplyStage, reviewsHref, reviewsToAttend } from "./reviews";
 import { salesSummary, type SalesMonth } from "./sales";
 import { attendanceCounts, dietarySummary, SESSION_PHASE_LABELS, sessionBookings, sessionPhase } from "./session";
-import { BOOKING_STATUS, LISTING_STATUS, THREAD_WAITING, type StatusLabel } from "./status";
-import type { HostBooking, HostExperience, HostSale, HostThread } from "./types";
+import { BOOKING_STATUS, LISTING_STATUS, REVIEW_STATUS, REVIEW_UNREPLIED, THREAD_WAITING, type StatusLabel } from "./status";
+import type { HostBooking, HostExperience, HostReview, HostSale, HostThread } from "./types";
 
 /** A request ホーム approves from its row: 承認する asks in the bookings screen's dialog first (#90). */
 export interface HomeApproval {
@@ -13,12 +14,15 @@ export interface HomeApproval {
   booking: BookingDialogSubject;
 }
 
-/** A row of 次にすること. `href` may carry the target screen's own query; the page adds `?providerId=`. */
+/** A row of 次にすること. `href` may carry the target screen's own query (and a hash); the page adds `?providerId=`. */
 export interface HomeTodo {
   key: string;
-  status: StatusLabel;
+  /** null for the line after the reviews (ほかに N 件のレビュー). */
+  status: StatusLabel | null;
   /** Next to the pill: the time left to answer a request (warn), or which kind of message waits. */
   aside: { text: string; tone: "warn" | "muted" } | null;
+  /** A review's stars (1–5), drawn before the title. */
+  rating?: number;
   title: string;
   /** Empty when there is nothing to add. */
   detail: string;
@@ -116,10 +120,44 @@ function threadTodos(threads: readonly HostThread[], now: string): HomeTodo[] {
 }
 
 /**
- * 次にすること, the nearest deadline first: the requests (each has one), the threads waiting
- * for an answer, then drafts to finish and listings under review.
+ * The guests' reviews (#108): the published ones without a reply, the newest first (読んで返信する),
+ * then the ones NIHO is still checking (読む), `limit` of them and one line for the rest. Each
+ * opens on its own review: "★★★★★ 「…」", who and the experience.
  */
-export function homeTodos(experiences: readonly HostExperience[], bookings: readonly HostBooking[], threads: readonly HostThread[], today: string, now: string): HomeTodo[] {
+function reviewTodos(experiences: readonly HostExperience[], reviews: readonly HostReview[], limit = HOME_REVIEW_LIMIT): HomeTodo[] {
+  const attend = reviewsToAttend(reviews);
+  const rows: HomeTodo[] = attend.slice(0, limit).map((review) => {
+    const waiting = reviewReplyStage(review) === "waiting";
+    return {
+      key: `guest-review-${review.id}`,
+      status: waiting ? REVIEW_STATUS.pending : REVIEW_UNREPLIED,
+      aside: { text: "レビュー", tone: "muted" },
+      rating: review.rating,
+      title: quoteJa(guestMessageView(review.body).text),
+      detail: [reviewerLabel(review), experiences.find((experience) => experience.id === review.experienceId)?.title ?? null].filter(Boolean).join(" · "),
+      approval: null,
+      action: { label: waiting ? "読む" : "読んで返信する", href: reviewsHref({ review: review.id }), primary: false },
+    };
+  });
+  const rest = attend.length - rows.length;
+  if (rest > 0) {
+    rows.push({ key: "guest-reviews-more", status: null, aside: null, title: `ほかに ${rest} 件のレビュー`, detail: "", approval: null, action: { label: "レビューを見る", href: reviewsHref(), primary: false } });
+  }
+  return rows;
+}
+
+/**
+ * 次にすること, the nearest deadline first: the requests (each has one), the threads waiting
+ * for an answer, the reviews to answer or read, then drafts to finish and listings under review.
+ */
+export function homeTodos(
+  experiences: readonly HostExperience[],
+  bookings: readonly HostBooking[],
+  threads: readonly HostThread[],
+  today: string,
+  now: string,
+  reviews: readonly HostReview[] = [],
+): HomeTodo[] {
   const drafts: HomeTodo[] = experiences
     .filter((experience) => experience.status === "draft")
     .map((experience) => ({
@@ -127,11 +165,11 @@ export function homeTodos(experiences: readonly HostExperience[], bookings: read
       status: LISTING_STATUS.draft,
       aside: null,
       title: `${experience.title} の原稿を仕上げる`,
-      detail: experience.missing.length ? `${listJa(experience.missing)}が未入力` : "掲載を申請できます",
+      detail: experience.missing.length ? missingLine(experience.missing, listJa) : "掲載を申請できます",
       approval: null,
       action: { label: "編集する", href: experiencePath(experience.id), primary: false },
     }));
-  const reviews: HomeTodo[] = experiences
+  const listingReviews: HomeTodo[] = experiences
     .filter((experience) => experience.status === "review")
     .map((experience) => ({
       key: `review-${experience.id}`,
@@ -142,7 +180,7 @@ export function homeTodos(experiences: readonly HostExperience[], bookings: read
       approval: null,
       action: null,
     }));
-  return [...requestTodos(experiences, bookings, today, now), ...threadTodos(threads, now), ...drafts, ...reviews];
+  return [...requestTodos(experiences, bookings, today, now), ...threadTodos(threads, now), ...reviewTodos(experiences, reviews), ...drafts, ...listingReviews];
 }
 
 /** Today's word for a session: where it stands, and whether attendance is still to record once it is over. */

@@ -1,5 +1,8 @@
+import { EXPERIENCE_CONDITION_KINDS, type ExperienceConditionKind } from "@niho-experience/api-client";
+import { CONDITION_NOTE_LIMIT } from "./conditions";
 import { yen } from "./format";
-import type { HostExperience, HostExperienceContent, HostListing, HostOffer, Weekday } from "./types";
+import { needsEnglishConfirmed } from "./page-english";
+import type { HostExperience, HostExperienceContent, HostListing, HostOffer, HostOfferText, HostPageText, HostTimelineText, Weekday } from "./types";
 
 /*
  * The experience editor's rules (#89), apart from the screen so they can be tested:
@@ -24,10 +27,12 @@ export const EDITOR_LIMITS = {
   offers: 12,
   offerName: 60,
   questions: { items: 5, length: 200 },
+  /** 参加の条件's 補足 (#110). */
+  conditionNote: CONDITION_NOTE_LIMIT,
 } as const;
 
-/** 掲載までに必要, in the order the rail lists them. */
-export const LISTING_REQUIREMENTS = ["題名", "表紙写真", "料金", "定員", "開催曜日", "開始時刻", "所要時間"] as const;
+/** 掲載までに必要, in the order the rail lists them. 英語の確定 is for a page written in Japanese (#110). */
+export const LISTING_REQUIREMENTS = ["題名", "表紙写真", "料金", "定員", "開催曜日", "開始時刻", "所要時間", "英語の確定"] as const;
 export type ListingRequirement = (typeof LISTING_REQUIREMENTS)[number];
 
 function positive(value: number | null): value is number {
@@ -45,16 +50,26 @@ export function offerGaps(offer: HostOffer): ListingRequirement[] {
   return gaps;
 }
 
+/** What 掲載までに必要 reads of a page. */
+export type ListingContent = Pick<HostExperienceContent, "title" | "photos" | "offers" | "timeline" | "conditions" | "writingLanguage" | "japanese" | "englishSource">;
+
+/** The title in the language the page is written in: what the host reads as its name. */
+export function writtenTitle(content: Pick<HostExperienceContent, "title" | "writingLanguage" | "japanese">): string {
+  return content.writingLanguage === "ja" && content.japanese ? content.japanese.title : content.title;
+}
+
 /**
  * 掲載までに必要: what the page lacks before it can be submitted, from its text and its
- * offers. A page with no offer asks for 料金, since an offer is where the price goes.
+ * offers. A page with no offer asks for 料金, since an offer is where the price goes. A page
+ * written in Japanese needs its title in Japanese and its English confirmed (#110).
  */
-export function listingRequirements(content: Pick<HostExperienceContent, "title" | "photos" | "offers">): ListingRequirement[] {
+export function listingRequirements(content: ListingContent): ListingRequirement[] {
   const missing = new Set<ListingRequirement>();
-  if (!content.title.trim()) missing.add("題名");
+  if (!writtenTitle(content).trim()) missing.add("題名");
   if (content.photos.length === 0) missing.add("表紙写真");
   if (content.offers.length === 0) missing.add("料金");
   for (const offer of content.offers) for (const gap of offerGaps(offer)) missing.add(gap);
+  if (needsEnglishConfirmed(content)) missing.add("英語の確定");
   return LISTING_REQUIREMENTS.filter((item) => missing.has(item));
 }
 
@@ -127,7 +142,7 @@ export function moveItem<T>(items: readonly T[], index: number, by: -1 | 1): T[]
  * What the experience list and the home rows show for a page: the cover, the first
  * offer's schedule (once it is complete) and, for a draft, what it still needs.
  */
-export function listingSummary(page: Pick<HostExperience, "status" | "title" | "photos" | "offers">): Pick<HostExperience, "cover" | "schedule" | "missing"> {
+export function listingSummary(page: ListingContent & Pick<HostExperience, "status">): Pick<HostExperience, "cover" | "schedule" | "missing"> {
   const first = page.offers[0];
   const schedule =
     first && positive(first.adultPriceYen) && positive(first.capacity) && positive(first.durationMinutes) && first.startTime && first.weekdays.length > 0
@@ -138,8 +153,8 @@ export function listingSummary(page: Pick<HostExperience, "status" | "title" | "
 
 /** The part of an experience that 保存 keeps. */
 export function experienceContent(experience: HostExperience): HostExperienceContent {
-  const { title, language, lead, dayLanguage, highlights, description, included, notIncluded, notSuitableFor, timeline, meeting, knowBeforeYouGo, photos, offers } = experience;
-  return { title, language, lead, dayLanguage, highlights, description, included, notIncluded, notSuitableFor, timeline, meeting, knowBeforeYouGo, photos, offers };
+  const { title, writingLanguage, japanese, englishSource, lead, dayLanguage, highlights, description, included, notIncluded, notSuitableFor, conditions, timeline, meeting, knowBeforeYouGo, photos, offers } = experience;
+  return { title, writingLanguage, japanese, englishSource, lead, dayLanguage, highlights, description, included, notIncluded, notSuitableFor, conditions, timeline, meeting, knowBeforeYouGo, photos, offers };
 }
 
 function sameValue(a: unknown, b: unknown): boolean {
@@ -213,4 +228,93 @@ export function offerFromDraft(id: string, draft: OfferDraft): HostOffer {
     closedDates: [...new Set(draft.closedDates)].sort(),
     questions: draft.questions.map((question) => question.trim()).filter(Boolean),
   };
+}
+
+/*
+ * The Japanese a page's English is drafted from (#110), as the browser sends it to the server
+ * action: each field within the editor's limits, ids that are ids, and condition kinds that are
+ * the traveler side's. Anything else is refused before NIHO is asked.
+ */
+
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
+
+const isText = (value: unknown, max: number): value is string => typeof value === "string" && value.length <= max;
+
+function textList(value: unknown, limit: { items: number; length: number }): string[] | null {
+  return Array.isArray(value) && value.length <= limit.items && value.every((item) => isText(item, limit.length)) ? [...value] : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An object keyed by id, each value read by `read`; built with fromEntries so no key reaches the prototype. */
+function byId<T>(value: unknown, max: number, read: (item: unknown) => T | null): Record<string, T> | null {
+  if (!isRecord(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > max) return null;
+  const pairs: [string, T][] = [];
+  for (const [id, item] of entries) {
+    const each = ID_PATTERN.test(id) ? read(item) : null;
+    if (each === null) return null;
+    pairs.push([id, each]);
+  }
+  return Object.fromEntries(pairs);
+}
+
+function stepText(value: unknown): HostTimelineText | null {
+  if (!isRecord(value)) return null;
+  const { title, text } = value;
+  return isText(title, EDITOR_LIMITS.timeline.title) && isText(text, EDITOR_LIMITS.timeline.text) ? { title, text } : null;
+}
+
+function offerText(value: unknown): HostOfferText | null {
+  if (!isRecord(value)) return null;
+  const questions = textList(value.questions, EDITOR_LIMITS.questions);
+  return isText(value.name, EDITOR_LIMITS.offerName) && questions ? { name: value.name, questions } : null;
+}
+
+function conditionNotes(value: unknown): Partial<Record<ExperienceConditionKind, string>> | null {
+  if (!isRecord(value)) return null;
+  const notes: Partial<Record<ExperienceConditionKind, string>> = {};
+  for (const [kind, note] of Object.entries(value)) {
+    const known = EXPERIENCE_CONDITION_KINDS.find((candidate) => candidate === kind);
+    if (!known || !isText(note, EDITOR_LIMITS.conditionNote)) return null;
+    notes[known] = note;
+  }
+  return notes;
+}
+
+/** A page's Japanese from the browser, or null when any of it is not what the editor sends. */
+export function pageTextFromInput(value: unknown): HostPageText | null {
+  if (!isRecord(value)) return null;
+  const { title, lead, dayLanguage, description, meeting } = value;
+  const highlights = textList(value.highlights, EDITOR_LIMITS.highlights);
+  const included = textList(value.included, EDITOR_LIMITS.list);
+  const notIncluded = textList(value.notIncluded, EDITOR_LIMITS.list);
+  const notSuitableFor = textList(value.notSuitableFor, EDITOR_LIMITS.list);
+  const knowBeforeYouGo = textList(value.knowBeforeYouGo, EDITOR_LIMITS.knowBeforeYouGo);
+  const conditions = conditionNotes(value.conditions);
+  const timeline = byId(value.timeline, EDITOR_LIMITS.timeline.items, stepText);
+  const offers = byId(value.offers, EDITOR_LIMITS.offers, offerText);
+  if (
+    !isText(title, EDITOR_LIMITS.title) ||
+    !isText(lead, EDITOR_LIMITS.lead) ||
+    !isText(dayLanguage, EDITOR_LIMITS.dayLanguage) ||
+    !isText(description, EDITOR_LIMITS.description) ||
+    !isRecord(meeting) ||
+    !isText(meeting.area, EDITOR_LIMITS.meetingArea) ||
+    !isText(meeting.entrance, EDITOR_LIMITS.entrance) ||
+    !highlights ||
+    !included ||
+    !notIncluded ||
+    !notSuitableFor ||
+    !knowBeforeYouGo ||
+    !conditions ||
+    !timeline ||
+    !offers
+  ) {
+    return null;
+  }
+  return { title, lead, dayLanguage, highlights, description, included, notIncluded, notSuitableFor, conditions, timeline, meeting: { area: meeting.area, entrance: meeting.entrance }, knowBeforeYouGo, offers };
 }

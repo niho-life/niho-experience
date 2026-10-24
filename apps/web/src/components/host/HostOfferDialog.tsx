@@ -34,9 +34,10 @@ function dayOffLabel(date: string, today: string): string {
  * One offer of 申込の設定 in a modal dialog (mock v2 `.offer`): name, prices, capacity,
  * start, length, the days it runs, days off and the questions asked when booking.
  * 保存 here hands the offer back to the page; the page's own 保存 keeps it. Only the
- * name is required: what a listing still needs shows in 掲載までに必要.
+ * name is required: what a listing still needs shows in 掲載までに必要. The name and the
+ * questions are in `lang`, the tab's language (#110); the rest is shared by both tabs.
  */
-export function HostOfferDialog({ offer, isNew, today, onSave, onDelete, onClose }: { offer: HostOffer; isNew: boolean; today: string; onSave: (offer: HostOffer) => void; onDelete: () => void; onClose: () => void }) {
+export function HostOfferDialog({ offer, isNew, today, lang = "en", onSave, onDelete, onClose }: { offer: HostOffer; isNew: boolean; today: string; lang?: "ja" | "en"; onSave: (offer: HostOffer) => void; onDelete: () => void; onClose: () => void }) {
   const baseId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
@@ -98,10 +99,11 @@ export function HostOfferDialog({ offer, isNew, today, onSave, onDelete, onClose
             <input
               ref={firstField}
               id={id("name")}
+              lang={lang}
               required
               maxLength={EDITOR_LIMITS.offerName}
               value={draft.name}
-              placeholder="例: Dinner"
+              placeholder={lang === "en" ? "例: Dinner" : "例: ディナー"}
               onChange={(event) => {
                 const name = event.currentTarget.value;
                 event.currentTarget.setCustomValidity(name.trim() ? "" : "商品名は空白以外で入力してください。");
@@ -194,6 +196,7 @@ export function HostOfferDialog({ offer, isNew, today, onSave, onDelete, onClose
                       <input
                         id={id(`question-${index}`)}
                         aria-label={`申込時の質問 ${index + 1}`}
+                        lang={lang}
                         value={question}
                         maxLength={questions.length}
                         onChange={(event) => {

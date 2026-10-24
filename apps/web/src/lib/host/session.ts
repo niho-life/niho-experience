@@ -18,9 +18,12 @@ export const COOKIE_BYTES_LIMIT = 4096;
 const DISPLAY_NAME_MAX = 80;
 const ICON_URL_MAX = 1024;
 
-/** Mock sessions only (`?mock=` on /host/auth/mock-login); mock-niho.ts maps them to the api-client mock's scenarios. */
-export type HostMockScenario = "default" | "empty" | "payments-pending";
-export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending"];
+/**
+ * Mock sessions only (`?mock=` on /host/auth/mock-login); mock-niho.ts maps them to the api-client mock's scenarios.
+ * `calendar-revoked` is the default providers with the kitchen's Google Calendar access taken away in Google (#109).
+ */
+export type HostMockScenario = "default" | "empty" | "payments-pending" | "calendar-revoked";
+export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked"];
 
 export interface HostSession {
   refreshToken: string;

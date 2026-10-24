@@ -1,18 +1,25 @@
+import type { ExperienceConditionKind } from "@niho-experience/api-client";
 import type { ExperienceProviderPaymentReadinessReason } from "@niho-experience/api-client/host";
 import type { HostProviderKind, HostProviderReviewStatus } from "@/lib/host/providers";
+import type { HostReviewTag } from "./reviews";
 
 /*
  * What the host console screens show (#84). The provider's own values (kind, review
  * status, payout readiness) are the host contract's types (#87). Experiences, bookings,
- * messages, sales and the meeting and notification defaults are not in the contract yet, so
- * they stay hand-written from the screens' needs; the screens keep reading these shapes.
+ * messages, reviews, sales and the meeting and notification defaults are not in the contract yet, so
+ * they stay hand-written from the screens' needs; the screens keep reading these shapes. The
+ * calendar and notification settings follow NIHO's own specs for them (#109).
  */
 
 /** One listing state per experience page: draft → review → live (or paused). */
 export type ListingStatus = "draft" | "review" | "live" | "paused";
 
-/** The language a page is written in. The traveler site shows the page in it as it is. */
-export type HostPageLanguage = "ja" | "en";
+/**
+ * 書く言語 (#110): the language the host writes the page in. The experience site shows the page
+ * in English either way: written in English, the text is the public English as it is; written in
+ * Japanese, NIHO drafts the English and the host checks and confirms it (page-english.ts).
+ */
+export type HostWritingLanguage = "ja" | "en";
 
 /** 0 = Sunday … 6 = Saturday, as in NIHO's offers. Screens list them from Monday. */
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -27,7 +34,9 @@ export interface HostExperiencePhoto {
 
 /** One step of 当日の流れ. */
 export interface HostTimelineStep {
-  /** "18:00" (JST); empty until set. */
+  /** Stable while editing, so the step's Japanese stays with it (a local one for a step added in this browser). */
+  id: string;
+  /** "18:00" (JST); empty until set. Shared by both languages. */
   time: string;
   title: string;
   text: string;
@@ -61,10 +70,160 @@ export interface HostOffer {
   questions: readonly string[];
 }
 
-/** Everything 保存 keeps: the page text in the public order, its photos and its offers (#89). */
-export interface HostExperienceContent {
+/*
+ * 参加の条件 (#110, niho-app#19318): what a guest should know before booking, kept as the host's
+ * choices per kind, with a short note. NIHO writes the English the experience site shows from them
+ * (the headline, the detail and whether a guest agrees to it before booking: journey.ts
+ * ExperienceConditionItem); the console never writes that English. The kinds are the traveler
+ * side's (EXPERIENCE_CONDITION_KINDS), one of each at most.
+ * Hand-written from the screen's needs. TODO(#87): NIHO の API（niho-coliving/niho-app#19318）が入ったら合わせる。
+ */
+
+/** 年齢: the lowest age (null = 指定なし) and whether children join with an adult. */
+export interface HostAgeCondition {
+  minimumAge: number | null;
+  withAdult: boolean;
+  /** 補足, in the public English (the Japanese is the page's `japanese`). Empty when there is none. */
+  note: string;
+}
+
+/** 座る: なし / いす / 床に座る. */
+export type HostSeating = "NONE" | "CHAIR" | "FLOOR";
+/** 歩く: ほとんど歩かない / 少し歩く / よく歩く. */
+export type HostWalking = "LITTLE" | "SOME" | "LOTS";
+
+/** 体の負担: sitting (and for about how long) and walking. */
+export interface HostPhysicalCondition {
+  seating: HostSeating;
+  /** 時間の目安 (minutes) of sitting; null when not given. */
+  seatedMinutes: number | null;
+  walking: HostWalking;
+  note: string;
+}
+
+/** The host's English: 流暢 / 日常会話 / かんたん / 話さない. */
+export type HostEnglishLevel = "FLUENT" | "CONVERSATIONAL" | "BASIC" | "NONE";
+
+/** ホストの言語. */
+export interface HostLanguageCondition {
+  /** 日本語を話す. */
+  japanese: boolean;
+  english: HostEnglishLevel;
+  /** 英語の案内資料あり. */
+  englishGuide: boolean;
+  note: string;
+}
+
+/** What is served: 食事 / 軽食 / 飲み物だけ / 出ない. */
+export type HostFoodServed = "MEAL" | "SNACK" | "DRINKS" | "NONE";
+/** 対応できる食事: ベジタリアン / ヴィーガン / ハラール / グルテンフリー / アレルギーは相談. */
+export type HostDiet = "VEGETARIAN" | "VEGAN" | "HALAL" | "GLUTEN_FREE" | "ALLERGY_ASK";
+
+/** 食べもの. NIHO also asks guests their food wishes when they book (its own question, not this screen's). */
+export interface HostFoodCondition {
+  served: HostFoodServed;
+  /** In the order conditions.ts lists them. */
+  diets: readonly HostDiet[];
+  note: string;
+}
+
+/** 段差・車いす: 段差なし・車いす可 / 一部段差あり（相談）/ 段差あり・車いす不可. */
+export type HostAccess = "STEP_FREE" | "SOME_STEPS" | "STEPS";
+
+export interface HostAccessCondition {
+  access: HostAccess;
+  note: string;
+}
+
+/** 雨の日: 雨でも開催（屋内）/ 小雨なら開催 / 雨天は中止（全額返金）. */
+export type HostRainPlan = "INDOOR" | "LIGHT_RAIN" | "CANCELLED";
+
+export interface HostWeatherCondition {
+  rain: HostRainPlan;
+  note: string;
+}
+
+/** Each kind's choices. */
+export interface HostConditionValues {
+  AGE: HostAgeCondition;
+  PHYSICAL: HostPhysicalCondition;
+  HOST_LANGUAGE: HostLanguageCondition;
+  FOOD: HostFoodCondition;
+  ACCESS: HostAccessCondition;
+  WEATHER: HostWeatherCondition;
+}
+
+/** 参加の条件 by kind; null is 未設定 (none is required). */
+export type HostParticipationConditions = { readonly [K in ExperienceConditionKind]: HostConditionValues[K] | null };
+
+/** 当日の流れ's words for one step; its time is the step's own. */
+export interface HostTimelineText {
   title: string;
-  language: HostPageLanguage;
+  text: string;
+}
+
+/** An offer's words: its name and the questions asked when booking. Its prices and days are the offer's own. */
+export interface HostOfferText {
+  name: string;
+  questions: readonly string[];
+}
+
+/**
+ * The words of a page in one language (#110): the fields written once per language, in the public
+ * order. Photos, times, prices, capacity and the conditions' choices are shared and stay out of it.
+ */
+export interface HostPageText {
+  title: string;
+  lead: string;
+  dayLanguage: string;
+  highlights: readonly string[];
+  description: string;
+  included: readonly string[];
+  notIncluded: readonly string[];
+  notSuitableFor: readonly string[];
+  /** 参加の条件's notes, by kind. */
+  conditions: Readonly<Partial<Record<ExperienceConditionKind, string>>>;
+  /** By step id. */
+  timeline: Readonly<Record<string, HostTimelineText>>;
+  /** 公開する集合エリア and 入口の案内. */
+  meeting: { area: string; entrance: string };
+  knowBeforeYouGo: readonly string[];
+  /** By offer id. */
+  offers: Readonly<Record<string, HostOfferText>>;
+}
+
+/** One field of a page's words: what 日本語を変えました points at. */
+export type HostPageTextField = keyof HostPageText;
+
+/**
+ * Where the English of a page written in Japanese comes from (#110). NIHO drafts the English from
+ * the Japanese; the host corrects and confirms it. Only the English last confirmed goes to review
+ * and to the experience site. The rules are page-english.ts's.
+ */
+export interface HostEnglishSource {
+  /** The Japanese NIHO made the English from (英語の下書きを作る / 作り直す); null when it made none since the last 英語を確定. */
+  draftedFrom: HostPageText | null;
+  /** The Japanese the host confirmed the English against (英語を確定); null until the English is confirmed once. */
+  confirmedFrom: HostPageText | null;
+  /** The fields whose English the host corrected since NIHO made it or the host confirmed it. */
+  edited: readonly HostPageTextField[];
+}
+
+/**
+ * Everything 保存 keeps: the page text in the public order, its photos and its offers (#89), and
+ * its Japanese and conditions (#110). The text fields are the page's English: as the host writes
+ * it, or (written in Japanese) NIHO's draft as the host corrects and confirms it.
+ */
+export interface HostExperienceContent {
+  /** The English title, which the list and the other screens name the experience by. */
+  title: string;
+  writingLanguage: HostWritingLanguage;
+  /**
+   * The page's words in Japanese while it is written in Japanese; null for a page never written
+   * in Japanese. Kept when the host goes back to writing English, so it returns with 日本語.
+   */
+  japanese: HostPageText | null;
+  englishSource: HostEnglishSource;
   /** ひとこと紹介. */
   lead: string;
   /** 当日の言語 ("English and Japanese"). */
@@ -74,6 +233,7 @@ export interface HostExperienceContent {
   included: readonly string[];
   notIncluded: readonly string[];
   notSuitableFor: readonly string[];
+  conditions: HostParticipationConditions;
   timeline: readonly HostTimelineStep[];
   meeting: HostExperienceMeeting;
   knowBeforeYouGo: readonly string[];
@@ -271,6 +431,73 @@ export interface HostThread {
   messages: readonly HostThreadMessage[];
 }
 
+/*
+ * レビュー (#108, Epic #103): only a guest who booked can write one, one per booking: 1–5 stars,
+ * their words, the good points (fixed choices), the name and country they show, and a note for
+ * the host only. NIHO checks a review before it is published and tells the host first. The host
+ * may publish one reply (and correct it later) and report a review to NIHO, but never removes or
+ * changes it. NIHO keeps the guest's words as written and its Japanese translation apart; the
+ * host writes the reply in Japanese and checks the English that is published.
+ * TODO(#87): NIHO's reviews (niho-app#19314) are not in the host contract yet.
+ */
+
+/** 公開前 (NIHO is checking it) / 公開中 (on the experience's page). */
+export type HostReviewStatus = "pending" | "published";
+
+/** What a guest wrote (the review, or the note to the host): their own words and NIHO's translation, as a guest's message has them. */
+export type HostReviewText = Pick<HostGuestMessage, "original" | "language" | "translation">;
+
+/** The host's one public reply: the Japanese they wrote and the English they checked, which is what the page shows. */
+export interface HostReviewReply {
+  /** Empty when the host wrote the English directly. */
+  japanese: string;
+  english: string;
+  /** YYYY-MM-DDTHH:MM in Japan. */
+  publishedAt: string;
+  /** The last correction (返信を直す), YYYY-MM-DDTHH:MM in Japan; null when it was never corrected. */
+  editedAt: string | null;
+}
+
+/** Why the host reported a review to NIHO: 個人情報が書かれている / 事実と違う / 不適切な内容 / その他. */
+export type HostReviewReportReason = "personal" | "untrue" | "inappropriate" | "other";
+
+/** The host's report. NIHO decides what happens to the review; it stays as it is meanwhile. */
+export interface HostReviewReport {
+  /** YYYY-MM-DDTHH:MM in Japan. */
+  at: string;
+  reason: HostReviewReportReason;
+  /** Optional explanation given to NIHO with the reason. */
+  note?: string;
+}
+
+export interface HostReview {
+  id: string;
+  experienceId: string;
+  /** The booking it was written for: one review per booking, never for one the guest did not come to. */
+  bookingId: string;
+  /** The session's day (YYYY-MM-DD, JST). */
+  sessionDate: string;
+  /** What the guest shows: their first name and where they live, in Japanese ("イギリス"). */
+  reviewer: { name: string; country: string };
+  /** 1–5. */
+  rating: number;
+  /**
+   * よかった点: the identifiers of NIHO's fixed choices (REVIEW_TAGS in reviews.ts has the words the host reads).
+   * TODO(#87): NIHO の API（niho-coliving/niho-app#19314）が入ったら識別子を合わせる。
+   */
+  tags: readonly HostReviewTag[];
+  body: HostReviewText;
+  /** あなただけへのメモ: for the host only, never published; null when the guest wrote none. */
+  privateNote: HostReviewText | null;
+  /** YYYY-MM-DDTHH:MM in Japan. */
+  writtenAt: string;
+  status: HostReviewStatus;
+  /** YYYY-MM-DDTHH:MM in Japan; null while NIHO checks it. */
+  publishedAt: string | null;
+  reply: HostReviewReply | null;
+  report: HostReviewReport | null;
+}
+
 /**
  * A ledger line's state, in the words of NIHO's provider sales: 計上済み (in the ledger),
  * 入金済み (a payout that reached the bank) and 保留 (not settled yet; a payout on its way
@@ -333,6 +560,79 @@ export interface HostMeetingDefaults {
   entrance: string;
 }
 
+/*
+ * カレンダー (#109, Epic #103): the provider's Google Calendar and the bookings feed for other
+ * calendars. Sessions that overlap an event of the calendars chosen read as full on the
+ * experience site (guests are not told why); confirmed bookings are written to one calendar,
+ * one event per booking, and taken away when cancelled. Disconnecting leaves the bookings (and
+ * the events written) as they are.
+ * TODO(#87): NIHO's ICS feed (niho-app#19316) and Google connection (#19317) are not in the host contract yet.
+ */
+
+/** 未接続 / 接続中 / 接続が切れた (the host took NIHO's access away in Google). */
+export type HostGoogleCalendarStatus = "disconnected" | "connected" | "revoked";
+
+/** One calendar of the connected Google account. */
+export interface HostBusyCalendar {
+  id: string;
+  /** As Google names it. */
+  name: string;
+  /** Google's color for it (#rrggbb). Decorative: the name says which one it is. */
+  color: string;
+  /** Its events close the sessions they overlap. */
+  checked: boolean;
+  /** NIHO may write bookings to it (a calendar the account owns, not a subscribed one such as holidays). */
+  writable: boolean;
+}
+
+export interface HostGoogleCalendar {
+  status: HostGoogleCalendarStatus;
+  /** The Google account's email; null when none is connected. */
+  account: string | null;
+  /** The account's calendars, as Google lists them; empty while not connected. */
+  busyCalendars: readonly HostBusyCalendar[];
+  /** 予定がある時間は予約を受け付けない. */
+  blockBusy: boolean;
+  /** 確定した予約をカレンダーに書き込む. */
+  writeBookings: boolean;
+  /** The calendar bookings are written to; null until one is chosen. */
+  writeCalendarId: string | null;
+}
+
+/** What a Google sign-in brings: the account and its calendars (the preview's synthetic one in mock mode). */
+export interface HostGoogleConnection {
+  account: string;
+  calendars: readonly HostBusyCalendar[];
+}
+
+export interface HostCalendarSettings {
+  google: HostGoogleCalendar;
+  /** ほかのカレンダーで見る: the bookings as an .ics feed at an address no one can guess; null when there is none to show. */
+  icsUrl: string | null;
+}
+
+/*
+ * 通知 (#109, Epic #103): v1 sends email only, to the provider's verified addresses. The shape is
+ * NIHO's `GET/PATCH /api/experience-providers/{providerId}/notification-settings` (niho-app spec
+ * §17.4, OWNER only). Changing the addresses is outside it (#19238).
+ */
+
+/** The notifications NIHO sends a provider, in the order NIHO lists them (notifications.ts has the words). */
+export type HostNotificationKey = "NEW_BOOKING" | "APPROVAL_DEADLINE" | "CANCELLATION" | "GUEST_MESSAGE" | "DAY_BEFORE_SUMMARY" | "NEW_REVIEW" | "LISTING_REVIEW";
+
+/** One notification as NIHO answers it. `key` stays a string: a key the console does not know yet is left out. */
+export interface HostNotificationItem {
+  key: string;
+  enabled: boolean;
+  /** The host cannot turn it off. */
+  locked: boolean;
+}
+
+export interface HostNotificationSettings {
+  email: { addresses: readonly string[] };
+  items: readonly HostNotificationItem[];
+}
+
 /** The settings screen's starting values. */
 export interface HostSettings {
   displayName: string;
@@ -343,5 +643,7 @@ export interface HostSettings {
   /** The provider agreed to the version of NIHO's provider terms in force (審査を申請 needs it). */
   consentCurrent: boolean;
   meetingPoint: HostMeetingDefaults;
-  notificationEmail: string;
+  calendar: HostCalendarSettings;
+  /** Null for anyone but the OWNER: NIHO answers the notification settings to the owner only. */
+  notifications: HostNotificationSettings | null;
 }

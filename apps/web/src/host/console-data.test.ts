@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { createMockHostFetch, MOCK_ID_TOKEN_PREFIX } from "@/lib/host/mock-niho";
-import { bookingClock, bookingList, bookingOf, bookingThreadOf, editorExperience, hostConsoleSnapshot, hostHome, salesList, sessionOf, threadList, threadOf } from "./console-data";
-import { MOCK_CONSOLE_PROVIDERS } from "./mock/provider";
+import { GOOGLE_NOT_CONNECTED } from "./calendar";
+import {
+  bookingClock,
+  bookingList,
+  bookingOf,
+  bookingThreadOf,
+  editorExperience,
+  googleConnectionPreview,
+  hostConsoleSnapshot,
+  hostHome,
+  reviewList,
+  salesList,
+  sessionOf,
+  threadList,
+  threadOf,
+} from "./console-data";
+import { notificationRows } from "./notifications";
+import { MOCK_CONSOLE_PROVIDERS, MOCK_GOOGLE_CONNECTION } from "./mock/provider";
+import { MOCK_KITCHEN_REVIEWS } from "./mock/reviews";
 import { MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD } from "./mock/sales";
 import { MOCK_KITCHEN_THREADS } from "./mock/threads";
 
@@ -16,10 +33,13 @@ describe("console data per provider", () => {
       ["coffee", "draft"],
     ]);
     expect(snapshot.salesPeriod).toEqual(MOCK_SALES_PERIOD);
-    expect(snapshot.notificationEmail).toBe("kitchen@example.com");
+    expect(snapshot.notifications.email.addresses).toEqual(["kitchen@example.com"]);
+    expect(notificationRows(snapshot.notifications.items).every((row) => row.enabled)).toBe(true);
+    expect(snapshot.calendar.google).toMatchObject({ status: "connected", account: "kitchen@example.com", blockBusy: true, writeBookings: true, writeCalendarId: "sample-kitchen-main" });
+    expect(snapshot.calendar.icsUrl).toMatch(/^https:\/\/calendar\.example\.com\/sample-kitchen\/[0-9a-z]{20,}\/bookings\.ics$/);
     expect(snapshot.now).toBe("2026-10-21T15:30");
     const home = hostHome(snapshot);
-    expect(home.todos.map((todo) => todo.status.label)).toEqual(["承認待ち", "承認待ち", "返信待ち", "返信待ち", "返信待ち", "下書き", "審査待ち"]);
+    expect(home.todos.map((todo) => todo.status?.label)).toEqual(["承認待ち", "承認待ち", "返信待ち", "返信待ち", "返信待ち", "未返信", "未返信", "公開前", "下書き", "審査待ち"]);
     expect([home.sessions.today, home.sessions.tomorrow, home.sessions.later].map((sessions) => sessions.length)).toEqual([1, 1, 3]);
     // The preview keeps its own "today": the synthetic dates stay upcoming whenever it is opened.
     expect(home.month).toEqual({ label: "10月", sales: "¥390,000", refunds: "−¥60,000", expected: "¥139,500", confirmed: "8件" });
@@ -30,11 +50,14 @@ describe("console data per provider", () => {
     expect(snapshot.experiences.map((experience) => [experience.title, experience.status])).toEqual([["Write Your Own Kanji with a Kamakura Calligrapher", "draft"]]);
     expect(snapshot.bookings).toEqual([]);
     expect(snapshot.threads).toEqual([]);
+    expect(snapshot.reviews).toEqual([]);
     expect(snapshot.sales).toEqual([]);
+    expect(snapshot.calendar.google).toEqual(GOOGLE_NOT_CONNECTED);
+    expect(snapshot.notifications.email.addresses).toEqual(["studio@example.com"]);
     const home = hostHome(snapshot);
     expect(home.todos.map((todo) => [todo.title, todo.detail, todo.action?.href])).toEqual([
-      // Derived from the page (no photo, no offer yet), as the editor's 掲載までに必要 shows it.
-      ["Write Your Own Kanji with a Kamakura Calligrapher の原稿を仕上げる", "表紙写真と料金が未入力", "/host/experiences/calligraphy"],
+      // Derived from the page (no photo, no offer yet, written in Japanese with no English yet), as the editor's 掲載までに必要 shows it.
+      ["Write Your Own Kanji with a Kamakura Calligrapher の原稿を仕上げる", "表紙写真と料金が未入力 · 英語が未確定", "/host/experiences/calligraphy"],
     ]);
     expect(home.sessions).toEqual({ today: [], tomorrow: [], later: [] });
     expect(home.month).toEqual({ label: "10月", sales: "¥0", refunds: "¥0", expected: "¥0", confirmed: "0件" });
@@ -49,7 +72,16 @@ describe("console data per provider", () => {
   it("shows nothing invented for providers outside the preview set: the preview's sales months, empty", () => {
     for (const id of ["someone-else", "constructor", "__proto__", "sample-provider-garden"]) {
       const snapshot = hostConsoleSnapshot(id, "mock", NOW);
-      expect(snapshot, id).toMatchObject({ experiences: [], bookings: [], threads: [], sales: [], salesPeriod: MOCK_SALES_PERIOD, notificationEmail: "" });
+      expect(snapshot, id).toMatchObject({
+        experiences: [],
+        bookings: [],
+        threads: [],
+        reviews: [],
+        sales: [],
+        salesPeriod: MOCK_SALES_PERIOD,
+        calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
+        notifications: { email: { addresses: [] }, items: [] },
+      });
       expect(hostHome(snapshot).month, id).toEqual({ label: "10月", sales: "¥0", refunds: "¥0", expected: "¥0", confirmed: "0件" });
     }
   });
@@ -87,6 +119,12 @@ describe("console data per provider", () => {
       "confirmed",
       "confirmed",
       "confirmed",
+      // The past dinners with a review (#108).
+      "confirmed",
+      "confirmed",
+      "confirmed",
+      "confirmed",
+      "confirmed",
     ]);
     // 予約 never carries the guest's phone: only この回 shows it (#107).
     expect(list.status === "ready" && list.bookings.filter((booking) => booking.phone !== null)).toEqual([]);
@@ -117,7 +155,6 @@ describe("console data per provider", () => {
       offer: "Dinner",
       capacity: 8,
       meetingArea: "Near Kamakura Station, 2-minute walk",
-      pageLanguage: "en",
       bookings: [
         ["bk-2041", null],
         ["bk-2038", "+44 7700 900123"],
@@ -149,6 +186,12 @@ describe("console data per provider", () => {
     expect([threadOf(kitchen, "http", "th-3012"), bookingThreadOf(kitchen, "http", "bk-2031")]).toEqual([{ status: "unavailable" }, { status: "unavailable" }]);
   });
 
+  it("lists the provider's own reviews, and has none to read in http mode yet (#87, #108)", () => {
+    expect(reviewList(hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW), "mock")).toEqual({ status: "ready", reviews: MOCK_KITCHEN_REVIEWS });
+    expect(reviewList(hostConsoleSnapshot("sample-provider-studio", "mock", NOW), "mock")).toEqual({ status: "ready", reviews: [] });
+    expect(reviewList(hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW), "http")).toEqual({ status: "unavailable" });
+  });
+
   it("is empty in http mode until the provider API is connected (#87)", () => {
     const snapshot = hostConsoleSnapshot("sample-provider-kitchen", "http", NOW);
     expect(snapshot).toEqual({
@@ -158,10 +201,31 @@ describe("console data per provider", () => {
       experiences: [],
       bookings: [],
       threads: [],
+      reviews: [],
       sales: [],
       meetingPoint: { area: "", mapUrl: "", entrance: "" },
-      notificationEmail: "",
+      calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
+      notifications: { email: { addresses: [] }, items: [] },
     });
     expect(hostHome(snapshot)).toEqual({ todos: [], sessions: { today: [], tomorrow: [], later: [] }, month: null });
+  });
+});
+
+describe("the calendar in the preview (#109)", () => {
+  it("takes the kitchen's Google access away for ?mock=calendar-revoked, keeping its account and choices", () => {
+    const revoked = hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW, "calendar-revoked").calendar;
+    const usual = hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW).calendar;
+    expect(revoked).toEqual({ ...usual, google: { ...usual.google, status: "revoked" } });
+    // A calendar that was never connected stays so; nothing else of the scenario differs.
+    expect(hostConsoleSnapshot("sample-provider-studio", "mock", NOW, "calendar-revoked").calendar.google).toEqual(GOOGLE_NOT_CONNECTED);
+    expect(hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW, "calendar-revoked").bookings).toEqual(hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW).bookings);
+    // http mode never reads the scenario.
+    expect(hostConsoleSnapshot("sample-provider-kitchen", "http", NOW, "calendar-revoked").calendar.google).toEqual(GOOGLE_NOT_CONNECTED);
+  });
+
+  it("connects the synthetic Google account in the preview only", () => {
+    expect(googleConnectionPreview("mock")).toBe(MOCK_GOOGLE_CONNECTION);
+    expect(MOCK_GOOGLE_CONNECTION.account).toBe("host@example.com");
+    expect(googleConnectionPreview("http")).toBeNull();
   });
 });

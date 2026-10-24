@@ -5,9 +5,11 @@ import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { consoleButtonClass, HOST_SURFACE, LIST_ROW, LIST_ROW_DETAIL, LIST_ROW_TITLE } from "@/components/host/host-ui";
 import { HostPageBody, MoreLink, PageHead, SectionTitle } from "@/components/host/ui";
+import { homeCalendarPrompt, type HomeCalendarPrompt } from "@/host/calendar";
 import { hostPageContext, loadHostConsoleData } from "@/host/data";
 import type { HomeUpcoming } from "@/host/home";
-import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { isHostMock } from "@/lib/host/server";
 
 export const metadata: Metadata = { title: "ホーム" };
 
@@ -61,15 +63,43 @@ function DaySessions({ id, title, sessions, link }: { id: string; title: string;
   );
 }
 
-/** ホーム (mock v2, the journey mock's H1): what needs doing, today's and tomorrow's sessions, the ones after, and this month's numbers. */
+/**
+ * The card while Google Calendar is not connected, or lost its access (#109, the journey mock's H1):
+ * つなぐ opens 設定 › カレンダー. It stays until the calendar is connected (nothing closes it).
+ */
+function CalendarPromptCard({ prompt, href }: { prompt: HomeCalendarPrompt; href: string }) {
+  return (
+    <section aria-labelledby="home-calendar" className="mt-3.5 flex flex-wrap items-center gap-3 rounded-2xl bg-sand px-4 py-3.5 md:px-5">
+      <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-xl bg-canvas text-[1.0625rem] font-extrabold">
+        G
+      </span>
+      <div className="min-w-0 flex-[1_1_170px]">
+        <h2 id="home-calendar" className="font-sans text-[0.875rem] leading-[1.4] font-extrabold tracking-normal">
+          {prompt.title}
+        </h2>
+        <p className="text-[0.8125rem] leading-normal text-ink-soft">{prompt.text}</p>
+      </div>
+      <Link href={href} aria-describedby="home-calendar" className={consoleButtonClass("secondary", "sm", "max-md:ml-auto")}>
+        {prompt.action}
+      </Link>
+    </section>
+  );
+}
+
+/**
+ * ホーム (mock v2, the journey mock's H1): what needs doing, today's and tomorrow's sessions, the
+ * calendar's card while Google Calendar is not connected (#109), the sessions after, and this month's numbers.
+ */
 export default async function HostHomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const context = await hostPageContext(await searchParams);
   // The console layout shows sign-in, refresh and error states.
   if (!context) return null;
   const { provider, providerNotFound, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="ホーム" />;
-  const { home } = await loadHostConsoleData(provider);
+  const { home, settings } = await loadHostConsoleData(provider);
   const link = (path: string) => withProvider(path, linkProviderId);
+  // Only where it can be connected: the preview (http mode waits for NIHO's Google connection, #87).
+  const calendarPrompt = homeCalendarPrompt(settings.calendar, isHostMock());
   // これからの開催 starts after the days shown above it.
   const upcoming = home.sessions.later;
   const soon = home.sessions.today.length + home.sessions.tomorrow.length > 0;
@@ -87,6 +117,8 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
       <HostHomeTodos key={provider.id} todos={home.todos} providerId={linkProviderId} />
       <DaySessions id="home-today" title="今日の開催" sessions={home.sessions.today} link={link} />
       <DaySessions id="home-tomorrow" title="明日の開催" sessions={home.sessions.tomorrow} link={link} />
+      {/* Under the day's sessions: what needs doing and who comes first, the calendar after them. */}
+      {calendarPrompt ? <CalendarPromptCard prompt={calendarPrompt} href={link(`${HOST_SETTINGS_PATH}#settings-calendar`)} /> : null}
 
       <div className="mt-3.5 grid items-start gap-3.5 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <section aria-labelledby="home-upcoming" className={HOST_SURFACE}>

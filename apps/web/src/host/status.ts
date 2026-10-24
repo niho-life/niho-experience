@@ -1,5 +1,6 @@
 import type { HostProviderReviewStatus } from "@/lib/host/providers";
-import type { HostBookingStatus, ListingStatus, PaymentReadinessReason } from "./types";
+import type { PageEnglishStatus } from "./page-english";
+import type { HostBookingStatus, HostReviewStatus, ListingStatus, PaymentReadinessReason } from "./types";
 
 /**
  * Pill tones: ok = leaf-pale, wait = warn-pale, draft = sand, stop = danger-pale.
@@ -19,6 +20,14 @@ export const LISTING_STATUS: Record<ListingStatus, StatusLabel> = {
   paused: { label: "停止中", tone: "stop" },
 };
 
+/** The English of a page written in Japanese (#110): 未作成 / 下書き / 確定済み / 古い (the Japanese changed since). */
+export const PAGE_ENGLISH_STATUS: Record<PageEnglishStatus, StatusLabel> = {
+  none: { label: "未作成", tone: "draft" },
+  draft: { label: "下書き", tone: "draft" },
+  confirmed: { label: "確定済み", tone: "ok" },
+  stale: { label: "古い", tone: "wait" },
+};
+
 export const BOOKING_STATUS: Record<HostBookingStatus, StatusLabel> = {
   pending: { label: "承認待ち", tone: "wait" },
   confirmed: { label: "確定", tone: "ok" },
@@ -33,6 +42,18 @@ export const PAST_CONFIRMED_BOOKING: StatusLabel = { label: "確定", tone: "dra
 
 /** A thread whose last word is the guest's (メッセージ, #106). */
 export const THREAD_WAITING: StatusLabel = { label: "返信待ち", tone: "wait" };
+
+/** A guest's review (#108): NIHO checks it before it is published. */
+export const REVIEW_STATUS: Record<HostReviewStatus, StatusLabel> = {
+  pending: { label: "公開前", tone: "wait" },
+  published: { label: "公開中", tone: "ok" },
+};
+
+/** A published review the host has not replied to (ホーム). Replying is the host's choice: the quiet tone. */
+export const REVIEW_UNREPLIED: StatusLabel = { label: "未返信", tone: "draft" };
+
+/** A part NIHO cannot keep yet (設定's 集合案内・カレンダー・通知 in http mode): shown, but not to be filled in. */
+export const PREPARING_STATUS: StatusLabel = { label: "準備中", tone: "draft" };
 
 /** The provider's own review, shown beside 設定 › 提供者情報 (NIHO's provider screen calls SUSPENDED 確認が必要). */
 export const PROVIDER_REVIEW_STATUS: Record<HostProviderReviewStatus, StatusLabel> = {

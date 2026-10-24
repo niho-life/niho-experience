@@ -1,23 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { draftReplyEnglish } from "@/host/actions";
 import { bookingsHref, shortDateTime } from "@/host/bookings";
-import {
-  guestMessageView,
-  MESSAGE_TEXT_LIMIT,
-  REPLY_DRAFT_FAILED_TEXT,
-  REPLY_STATUS,
-  replyDraftState,
-  threadContext,
-  threadHeading,
-} from "@/host/messages";
+import { guestMessageView, MESSAGE_TEXT_LIMIT, REPLY_STATUS, replyDraftState, threadContext, threadHeading } from "@/host/messages";
 import type { HostGuestMessage, HostReplyMessage, HostThread } from "@/host/types";
-import { DISABLED, FIELD_LABEL, useFocusAfterRender } from "./editor-parts";
-import { TEXTAREA } from "./fields";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
+import { ReplyDraftFields, useReplyDraft } from "./ReplyDraftFields";
 
 /*
  * One thread of メッセージ (#106, the journey mock's H2): the guest's words in Japanese with their
@@ -114,64 +105,19 @@ export interface ReplyInput {
 /**
  * 送信欄: 日本語で書く → 英語にする → "{名前} さんに届く英語" (英語を作り直す / 英語を直す) →
  * この英語で送る. On phones it stays at the bottom of the screen. While NIHO makes the English,
- * or when it fails, the Japanese stays as written.
+ * or when it fails, the Japanese stays as written (ReplyDraftFields).
  */
 function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; providerId: string; onSend: (reply: ReplyInput) => void }) {
-  const baseId = useId();
-  const japaneseId = `${baseId}-ja`;
-  const englishId = `${baseId}-en`;
-  const [japanese, setJapanese] = useState("");
-  const [english, setEnglish] = useState("");
-  /** The Japanese NIHO made the English from; null once the host corrects or writes it. */
-  const [madeFrom, setMadeFrom] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [drafting, setDrafting] = useState(false);
-  const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
   const japaneseField = useRef<HTMLTextAreaElement>(null);
-  const focusLater = useFocusAfterRender();
-  const { stale, canSend } = replyDraftState({ japanese, english, madeFrom });
-  const hasEnglish = editing || english !== "";
-
-  const makeEnglish = async () => {
-    const source = japanese;
-    if (!source.trim() || drafting) return;
-    setDrafting(true);
-    setError("");
-    setSent(false);
-    try {
-      const result = await draftReplyEnglish({ providerId, threadId: thread.id, japanese: source });
-      if (result.ok) {
-        setEnglish(result.english);
-        setMadeFrom(source);
-        setEditing(false);
-      } else {
-        setError(result.message);
-      }
-    } catch {
-      setError(REPLY_DRAFT_FAILED_TEXT);
-    } finally {
-      setDrafting(false);
-    }
-  };
-
-  /** 英語を直す / 英語を直接書く: the English becomes the host's own, sent as they write it. */
-  const writeEnglish = () => {
-    setEditing(true);
-    setMadeFrom(null);
-    setSent(false);
-    focusLater(englishId);
-  };
+  const draft = useReplyDraft((japanese) => draftReplyEnglish({ providerId, threadId: thread.id, japanese }), { onChange: () => setSent(false) });
+  const { canSend } = replyDraftState(draft);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!canSend || drafting) return;
-    onSend({ japanese, english });
-    setJapanese("");
-    setEnglish("");
-    setMadeFrom(null);
-    setEditing(false);
-    setError("");
+    if (!canSend || draft.drafting) return;
+    onSend({ japanese: draft.japanese, english: draft.english });
+    draft.clear();
     setSent(true);
     // The button pressed waits for the next English: the next reply starts in the Japanese.
     japaneseField.current?.focus();
@@ -179,73 +125,7 @@ function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; pro
 
   return (
     <form onSubmit={submit} aria-label="返信" className="sticky bottom-0 z-10 mt-auto rounded-b-2xl border-t border-line bg-canvas px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-5">
-      <label htmlFor={japaneseId} className={FIELD_LABEL}>
-        日本語で書く
-      </label>
-      <textarea
-        ref={japaneseField}
-        id={japaneseId}
-        rows={3}
-        maxLength={MESSAGE_TEXT_LIMIT}
-        value={japanese}
-        onChange={(event) => {
-          setJapanese(event.currentTarget.value);
-          setSent(false);
-        }}
-        className={`${TEXTAREA} mt-1.5 min-h-[76px]`}
-      />
-
-      {hasEnglish ? (
-        editing ? (
-          <div className="mt-2.5 flex flex-col gap-1.5">
-            <label htmlFor={englishId} className={FIELD_LABEL}>
-              {thread.guest} さんに届く英語
-            </label>
-            <textarea
-              id={englishId}
-              lang="en"
-              rows={3}
-              maxLength={MESSAGE_TEXT_LIMIT}
-              value={english}
-              onChange={(event) => {
-                setEnglish(event.currentTarget.value);
-                setSent(false);
-              }}
-              className={`${TEXTAREA} min-h-[76px]`}
-            />
-          </div>
-        ) : (
-          <div className="mt-2.5 rounded-xl bg-info-pale px-3 py-2.5 text-[0.84375rem] leading-normal">
-            <p className="text-xs font-extrabold text-info">{thread.guest} さんに届く英語</p>
-            <p lang="en" className="mt-0.5 whitespace-pre-wrap [overflow-wrap:anywhere]">
-              {english}
-            </p>
-          </div>
-        )
-      ) : null}
-
-      <p role="status" className={stale ? "mt-2 text-[0.78125rem] leading-normal font-extrabold text-warn" : "sr-only"}>
-        {stale ? "日本語を変えました。英語を作り直してください" : ""}
-      </p>
-      {error ? (
-        <p role="alert" className="mt-2 text-[0.78125rem] leading-normal font-extrabold text-danger">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={makeEnglish} disabled={!japanese.trim() || drafting} className={consoleButtonClass("secondary", "sm", DISABLED)}>
-          {drafting ? "英語にしています…" : hasEnglish ? "英語を作り直す" : "英語にする"}
-        </button>
-        {editing ? null : (
-          <button type="button" onClick={writeEnglish} className={consoleButtonClass(hasEnglish ? "secondary" : "ghost", "sm")}>
-            {hasEnglish ? "英語を直す" : "英語を直接書く"}
-          </button>
-        )}
-        <button type="submit" disabled={!canSend || drafting} className={consoleButtonClass("primary", "md", `ml-auto ${DISABLED}`)}>
-          この英語で送る
-        </button>
-      </div>
+      <ReplyDraftFields draft={draft} japaneseRef={japaneseField} maxLength={MESSAGE_TEXT_LIMIT} englishLabel={`${thread.guest} さんに届く英語`} submitLabel="この英語で送る" canSubmit={canSend} />
       <p className="mt-2 text-xs leading-normal text-muted">{thread.guest} さんにはメールで届きます</p>
       <p role="status" className={sent ? "mt-1 flex items-center gap-1 text-[0.78125rem] leading-normal font-extrabold text-moss" : "sr-only"}>
         {sent ? (

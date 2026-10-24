@@ -27,6 +27,7 @@ const PATHS = {
   plus: <path d="M10 3a1 1 0 0 1 1 1v5h5a1 1 0 1 1 0 2h-5v5a1 1 0 1 1-2 0v-5H4a1 1 0 1 1 0-2h5V4a1 1 0 0 1 1-1z" />,
   external: <path d="M11 3a1 1 0 1 1 0-2h6a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0V4.4l-7.3 7.3a1 1 0 0 1-1.4-1.4L14.6 3zM3 5a2 2 0 0 1 2-2h3a1 1 0 0 1 0 2H5v10h10v-3a1 1 0 1 1 2 0v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   check: <path d="M16.7 5.3a1 1 0 0 1 0 1.4l-8 8a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4l3.3 3.3 7.3-7.3a1 1 0 0 1 1.4 0z" />,
+  lock: <path d="M10 2a4 4 0 0 0-4 4v2h-.5A1.5 1.5 0 0 0 4 9.5v7A1.5 1.5 0 0 0 5.5 18h9a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 14.5 8H14V6a4 4 0 0 0-4-4zm-2 6V6a2 2 0 1 1 4 0v2z" />,
 } as const;
 
 export type HostIconName = keyof typeof PATHS;

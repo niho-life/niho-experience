@@ -11,19 +11,24 @@ import {
   offerFromDraft,
   offerPriceLabel,
   offerScheduleLabel,
+  pageTextFromInput,
   pauseListing,
   sameContent,
   submitListing,
   weekdayLabels,
   withdrawListing,
+  writtenTitle,
 } from "./editor";
-import { MOCK_KITCHEN_EXPERIENCES } from "./mock/experiences";
-import type { HostExperience, HostExperiencePhoto, HostOffer, Weekday } from "./types";
+import { MOCK_KITCHEN_EXPERIENCES, MOCK_STUDIO_EXPERIENCES } from "./mock/experiences";
+import { EMPTY_PAGE_TEXT } from "./page-english";
+import type { HostExperience, HostExperienceContent, HostExperiencePhoto, HostOffer, Weekday } from "./types";
 
-const byId = (id: string): HostExperience => MOCK_KITCHEN_EXPERIENCES.find((experience) => experience.id === id)!;
+const byId = (id: string): HostExperience => [...MOCK_KITCHEN_EXPERIENCES, ...MOCK_STUDIO_EXPERIENCES].find((experience) => experience.id === id)!;
 const DINNER: HostOffer = byId("community-dinner").offers[0]!;
 const COMPLETE: HostOffer = { ...emptyOffer("offer-x"), name: "Workshop", adultPriceYen: 8800, capacity: 4, startTime: "10:00", durationMinutes: 120, weekdays: [6] };
 const PHOTO: HostExperiencePhoto = { id: "p1", url: "/sample/photos/coffee-pour.jpg", alt: "" };
+/** A page written in English (the coffee draft's) with the given parts. */
+const page = (patch: Partial<HostExperienceContent>): HostExperienceContent => ({ ...experienceContent(byId("coffee")), ...patch });
 
 describe("掲載までに必要", () => {
   it("asks a page with no photo and no offer for the cover and a price", () => {
@@ -32,15 +37,27 @@ describe("掲載までに必要", () => {
 
   it("lists what each offer lacks, once, in the rail's order", () => {
     const offers = [emptyOffer("a"), { ...emptyOffer("b"), adultPriceYen: 5000 }];
-    expect(listingRequirements({ title: "", photos: [], offers })).toEqual(["題名", "表紙写真", "料金", "定員", "開催曜日", "開始時刻", "所要時間"]);
-    expect(listingRequirements({ title: "Roast", photos: [PHOTO], offers: [{ ...COMPLETE, weekdays: [], durationMinutes: null }] })).toEqual(["開催曜日", "所要時間"]);
+    expect(listingRequirements(page({ title: "", photos: [], offers }))).toEqual(["題名", "表紙写真", "料金", "定員", "開催曜日", "開始時刻", "所要時間"]);
+    expect(listingRequirements(page({ title: "Roast", photos: [PHOTO], offers: [{ ...COMPLETE, weekdays: [], durationMinutes: null }] }))).toEqual(["開催曜日", "所要時間"]);
   });
 
   it("is empty once the title, a cover and complete offers are there", () => {
-    expect(listingRequirements({ title: "Roast", photos: [PHOTO], offers: [COMPLETE] })).toEqual([]);
+    expect(listingRequirements(page({ title: "Roast", photos: [PHOTO], offers: [COMPLETE] }))).toEqual([]);
     expect(listingRequirements(byId("community-dinner"))).toEqual([]);
     // A blank title counts as none; a price of zero is not a price.
-    expect(listingRequirements({ title: "   ", photos: [PHOTO], offers: [{ ...COMPLETE, adultPriceYen: 0 }] })).toEqual(["題名", "料金"]);
+    expect(listingRequirements(page({ title: "   ", photos: [PHOTO], offers: [{ ...COMPLETE, adultPriceYen: 0 }] }))).toEqual(["題名", "料金"]);
+  });
+
+  it("asks a page written in Japanese for its Japanese title and its English confirmed (#110)", () => {
+    const calligraphy = byId("calligraphy");
+    expect(listingRequirements(calligraphy)).toEqual(["表紙写真", "料金", "英語の確定"]);
+    expect(writtenTitle(calligraphy)).toBe("鎌倉の書家と、自分の漢字を書く");
+    // The English title alone does not name it: the host writes the title in Japanese.
+    const untitled = { ...calligraphy, japanese: { ...calligraphy.japanese!, title: " " } };
+    expect(listingRequirements(untitled)).toEqual(["題名", "表紙写真", "料金", "英語の確定"]);
+    expect(listingRequirements({ ...calligraphy, photos: [PHOTO], offers: [COMPLETE], englishSource: { draftedFrom: null, confirmedFrom: calligraphy.japanese, edited: [] } })).toEqual([]);
+    // Written in English, the English is the page's own: nothing to confirm.
+    expect(listingRequirements({ ...calligraphy, writingLanguage: "en" })).toEqual(["表紙写真", "料金"]);
   });
 });
 
@@ -136,7 +153,8 @@ describe("the list row's summary", () => {
 
   it("says what a draft still needs, and has no schedule until its first offer is complete", () => {
     expect(listingSummary(byId("coffee"))).toEqual({ cover: null, schedule: null, missing: ["表紙写真", "料金"] });
-    expect(listingSummary({ status: "draft", title: "Roast", photos: [PHOTO], offers: [{ ...COMPLETE, startTime: "" }] })).toEqual({ cover: PHOTO.url, schedule: null, missing: ["開始時刻"] });
+    expect(listingSummary({ ...page({ title: "Roast", photos: [PHOTO], offers: [{ ...COMPLETE, startTime: "" }] }), status: "draft" })).toEqual({ cover: PHOTO.url, schedule: null, missing: ["開始時刻"] });
+    expect(listingSummary(byId("calligraphy")).missing).toEqual(["表紙写真", "料金", "英語の確定"]);
   });
 });
 
@@ -150,9 +168,58 @@ describe("保存 shows only when something changed", () => {
     expect(sameContent(page, { ...page, photos: makeCover(page.photos, 1) })).toBe(false);
   });
 
+  it("shows for a change of the Japanese, the English's state or a condition alone (#110)", () => {
+    const page = experienceContent(byId("community-dinner"));
+    expect(sameContent(page, { ...page, japanese: { ...page.japanese!, description: "季節の料理を。" } })).toBe(false);
+    expect(sameContent(page, { ...page, englishSource: { ...page.englishSource, edited: ["lead"] } })).toBe(false);
+    expect(sameContent(page, { ...page, conditions: { ...page.conditions, WEATHER: null } })).toBe(false);
+    expect(sameContent(page, { ...page, writingLanguage: "en" })).toBe(false);
+    expect(sameContent(page, { ...page, japanese: { ...page.japanese!, offers: { ...page.japanese!.offers } } })).toBe(true);
+  });
+
   it("keeps only what 保存 sends: no id, slug or listing state", () => {
     expect(Object.keys(experienceContent(byId("kintsugi"))).sort()).toEqual(
-      ["dayLanguage", "description", "highlights", "included", "knowBeforeYouGo", "language", "lead", "meeting", "notIncluded", "notSuitableFor", "offers", "photos", "timeline", "title"].sort(),
+      ["conditions", "dayLanguage", "description", "englishSource", "highlights", "included", "japanese", "knowBeforeYouGo", "lead", "meeting", "notIncluded", "notSuitableFor", "offers", "photos", "timeline", "title", "writingLanguage"].sort(),
     );
+  });
+});
+
+describe("the Japanese a page's English is drafted from, as the browser sends it (#110)", () => {
+  const japanese = byId("community-dinner").japanese!;
+
+  it("takes the editor's Japanese as it is", () => {
+    expect(pageTextFromInput(japanese)).toEqual(japanese);
+    expect(pageTextFromInput(EMPTY_PAGE_TEXT)).toEqual(EMPTY_PAGE_TEXT);
+    expect(pageTextFromInput({ ...japanese, description: "あ".repeat(4000), highlights: Array(6).fill("い".repeat(120)) })).not.toBeNull();
+  });
+
+  it("refuses anything longer, more, of another shape or keyed by what is not an id or a kind", () => {
+    for (const input of [
+      null,
+      "text",
+      { ...japanese, title: "あ".repeat(96) },
+      { ...japanese, lead: 42 },
+      { ...japanese, highlights: Array(7).fill("い") },
+      { ...japanese, knowBeforeYouGo: ["う".repeat(201)] },
+      { ...japanese, meeting: { area: "駅前" } },
+      { ...japanese, conditions: { RAIN: "雨" } },
+      { ...japanese, conditions: { FOOD: "え".repeat(161) } },
+      { ...japanese, timeline: { "../x": { title: "", text: "" } } },
+      { ...japanese, timeline: Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`s${index}`, { title: "", text: "" }])) },
+      { ...japanese, timeline: { s1: { title: "お".repeat(61), text: "" } } },
+      { ...japanese, offers: { "offer-dinner": { name: "ディナー" } } },
+      { ...japanese, offers: { "offer-dinner": { name: "ディナー", questions: Array(6).fill("か") } } },
+      { ...japanese, offers: [] },
+    ]) {
+      expect(pageTextFromInput(input)).toBeNull();
+    }
+  });
+
+  it("never lets a key reach the prototype", () => {
+    const sent = JSON.parse(`{"__proto__": {"name": "x", "questions": []}}`) as unknown;
+    const read = pageTextFromInput({ ...japanese, offers: sent });
+    expect(Object.getPrototypeOf(read!.offers)).toBe(Object.prototype);
+    expect(Object.keys(read!.offers)).toEqual(["__proto__"]);
+    expect(({} as Record<string, unknown>).name).toBeUndefined();
   });
 });

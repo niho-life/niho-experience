@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ratingStars } from "@/host/reviews";
 import type { StatusLabel } from "@/host/status";
 import { HOST_HEADING } from "./host-ui";
 import { HostIcon } from "./HostIcon";
@@ -77,6 +78,20 @@ export function StatusPill({ status }: { status: StatusLabel }) {
     <span className={`inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-extrabold whitespace-nowrap ${PILL_TONES[status.tone]}`}>
       <span aria-hidden="true" className="size-1.5 rounded-full bg-current opacity-75" />
       {status.label}
+    </span>
+  );
+}
+
+/**
+ * A review's stars (#108): filled in ink, empty as outlines in the muted color. Screen readers get
+ * `label` instead ("5 点中 4 点", or "4 点" in a row that says it is a review).
+ */
+export function RatingStars({ rating, label, className = "" }: { rating: number; label: string; className?: string }) {
+  const { filled, empty } = ratingStars(rating);
+  return (
+    <span role="img" aria-label={label} className={`inline-block tracking-[0.06em] whitespace-nowrap ${className}`.trim()}>
+      <span className="text-ink">{filled}</span>
+      <span className="text-muted">{empty}</span>
     </span>
   );
 }

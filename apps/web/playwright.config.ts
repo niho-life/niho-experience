@@ -6,8 +6,8 @@ const HOST_PORT = Number(process.env.E2E_HOST_PORT ?? 3101);
 const ADMIN_READ_PORT = Number(process.env.E2E_ADMIN_READ_PORT ?? 3102);
 const ADMIN_CASE_PORT = Number(process.env.E2E_ADMIN_CASE_PORT ?? 3103);
 const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
-// The console's sign-in and frame (#86) and its screens (#84/#88/#89/#90/#91/#106/#107) run against the second server.
-const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|bookings|sales|messages|session|support)|admin-support)\.spec\.ts/;
+// The host console and its preview tests run against the second server.
+const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|sales|messages|session|reviews|settings|support)|admin-support)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;

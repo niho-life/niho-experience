@@ -8,10 +8,16 @@ import { hostApiClient, isHostMock, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
 import { openStripe, stepNotice, syncStripe } from "./connect";
 import { readHostPayout } from "./data";
+import { pageTextFromInput } from "./editor";
 import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { mockPageEnglishDraft } from "./mock/experiences";
+import { mockReviewEnglishDraft } from "./mock/reviews";
 import { mockEnglishDraft } from "./mock/threads";
+import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
 import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfileChange, RegisterProviderInput } from "./payout";
+import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
+import type { HostPageText } from "./types";
 
 /*
  * The host console's changes to NIHO (#88/#91), as server actions: each reads the session,
@@ -45,7 +51,7 @@ function text(value: unknown, max: number): string | null {
 }
 
 /** NIHO's limits (the contract), with room for the spaces NIHO trims. */
-const LIMITS = { displayName: 200, bio: 4200, sellerDisclosureUrl: 2048, version: 100, spotId: 200, threadId: 200 } as const;
+const LIMITS = { displayName: 200, bio: 4200, sellerDisclosureUrl: 2048, version: 100, spotId: 200, threadId: 200, reviewId: 200, experienceId: 200 } as const;
 
 /** Pages that show the provider (the frame's name, 設定, 売上 and ホーム) read it again. */
 function refreshConsole() {
@@ -173,19 +179,58 @@ export async function syncPayoutAccount(input: { providerId: string }): Promise<
 }
 
 /**
+ * 英語にする, once the input is checked: the session must still be usable; then NIHO's English
+ * (http mode: not yet, the host writes it) or the preview's synthetic one. Nothing is sent here.
+ */
+type Drafted<T> = { english: T };
+async function draftEnglish<T>(mockEnglish: () => T, { message = "英語にしました", unavailable = REPLY_DRAFT_UNAVAILABLE_TEXT } = {}): Promise<HostActionResult<Drafted<T>>> {
+  const session = await readHostSession();
+  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!isHostMock()) return { ok: false, message: unavailable };
+  return { ok: true, message, english: mockEnglish() };
+}
+
+type EnglishDrafted = Drafted<string>;
+
+/**
  * メッセージ › 英語にする (#106): NIHO's English of the host's Japanese reply, for the host to
  * check (and correct) before it is sent; nothing is sent here. The preview answers with its own
  * synthetic English.
  */
-type EnglishDrafted = { english: string };
 export async function draftReplyEnglish(input: { providerId: string; threadId: string; japanese: string }): Promise<HostActionResult<EnglishDrafted>> {
   const providerId = nihoIdOrNull(input?.providerId);
   const threadId = text(input?.threadId, LIMITS.threadId);
   const japanese = text(input?.japanese, MESSAGE_TEXT_LIMIT);
   if (!providerId || !threadId || !japanese?.trim()) return invalid;
-  const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   // TODO(#87): NIHO's translation for the thread (niho-app#19319/#19238) once the host contract has it.
-  if (!isHostMock()) return { ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT };
-  return { ok: true, message: "英語にしました", english: mockEnglishDraft(threadId, japanese) };
+  return draftEnglish(() => mockEnglishDraft(threadId, japanese));
+}
+
+/**
+ * レビュー › 英語にする (#108): NIHO's English of the host's Japanese reply to a review, for the
+ * host to check (and correct) before it is published; nothing is published here. The preview
+ * answers with its own synthetic English.
+ */
+export async function draftReviewReplyEnglish(input: { providerId: string; reviewId: string; japanese: string }): Promise<HostActionResult<EnglishDrafted>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const reviewId = text(input?.reviewId, LIMITS.reviewId);
+  const japanese = text(input?.japanese, REVIEW_REPLY_TEXT_LIMIT);
+  if (!providerId || !reviewId || !japanese?.trim()) return invalid;
+  // TODO(#87): NIHO's translation for the review's reply (niho-app#19314) once the host contract has it.
+  return draftEnglish(() => mockReviewEnglishDraft(reviewId, japanese));
+}
+
+/**
+ * 体験の編集 › 英語の下書きを作る / 英語を作り直す (#110): NIHO's English of the page's Japanese,
+ * field by field, for the host to check, correct and confirm; nothing is saved or published here.
+ * The preview answers with its own synthetic English.
+ */
+type PageEnglishDrafted = Drafted<HostPageText>;
+export async function draftPageEnglish(input: { providerId: string; experienceId: string; japanese: HostPageText }): Promise<HostActionResult<PageEnglishDrafted>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const experienceId = text(input?.experienceId, LIMITS.experienceId);
+  const japanese = pageTextFromInput(input?.japanese);
+  if (!providerId || !experienceId || !japanese || !textHasWords(japanese)) return invalid;
+  // TODO(#87): NIHO's English draft of the page (niho-coliving/niho-app#19320) once the host contract has it.
+  return draftEnglish(() => mockPageEnglishDraft(experienceId, japanese), { message: "英語の下書きを作りました", unavailable: PAGE_ENGLISH_UNAVAILABLE_TEXT });
 }

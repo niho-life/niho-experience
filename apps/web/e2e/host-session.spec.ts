@@ -179,7 +179,7 @@ test("この回を中止 waits for a reason, cancels each booking and request, a
   const confirm = ask.getByRole("button", { name: "2 件を取り消して ¥60,000 を返金する" });
   await cancel.click();
   await expect(ask).toContainText("10/22（木）18:00の回を中止します。この操作は元に戻せません。");
-  await expect(ask.getByRole("radio", { name: "雨天" })).toBeFocused();
+  await expect(ask.getByRole("radio", { name: "雨・荒天" })).toBeFocused();
   await expect(ask).toContainText("確定 1 件・承認待ち 1 件を取り消し、¥60,000 を全額返金します。承認待ちはカードの仮押さえを解除します。");
   await expect(ask).toContainText("予約者には取消のメールに理由を添えて送ります（自由文は送れません）。");
   // No free text, and nothing to confirm without a reason.
@@ -193,7 +193,7 @@ test("この回を中止 waits for a reason, cancels each booking and request, a
 
   await cancel.click();
   await expect(confirm).toBeDisabled();
-  await ask.getByRole("radio", { name: "雨天" }).check();
+  await ask.getByRole("radio", { name: "雨・荒天" }).check();
   await expect(ask).toContainText("メールに添える文: 申し訳ありませんが、天候のため、この回は中止になりました。");
   await expect(confirm).toBeEnabled();
   await confirm.click();
@@ -276,7 +276,7 @@ test("この回 has no WCAG 2.2 AA violations", async ({ page }) => {
   await audit(page, "contact dialog");
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "この回を中止する（雨天・急病など）" }).click();
-  await page.getByRole("dialog").getByRole("radio", { name: "急病" }).check();
+  await page.getByRole("dialog").getByRole("radio", { name: "急病・けが" }).check();
   await audit(page, "cancel dialog");
   await page.getByRole("dialog").getByRole("button", { name: /を返金する$/ }).click();
   await expect(result(page)).toBeVisible();
@@ -322,8 +322,8 @@ test.describe("320px narrow phone", () => {
     await page.keyboard.press("Escape");
     await cancel.click();
     const ask = page.getByRole("dialog");
-    for (const label of ["雨天", "急病", "その他"]) await inside(ask.getByRole("radio", { name: label }), label);
-    await ask.getByRole("radio", { name: "その他" }).check();
+    for (const label of ["雨・荒天", "急病・けが", "その他の事情"]) await inside(ask.getByRole("radio", { name: label }), label);
+    await ask.getByRole("radio", { name: "その他の事情" }).check();
     await inside(ask.getByRole("button", { name: "2 件を取り消して ¥60,000 を返金する" }), "中止の確定");
     await inside(ask.getByRole("button", { name: "やめる" }), "やめる");
     expect(await overflowX(page), "cancel dialog").toBeLessThanOrEqual(0);

@@ -5,7 +5,8 @@ import type { HostSale, HostSaleCharge, HostSalePayout } from "../types";
  * Invented ledger lines for the sample kitchen; nothing here is a real payment. The payments of
  * the bookings 予約 lists are dated on their 支払い and the refund on its 取消 (bookingId ties them,
  * and a unit test keeps them in step; today's tea time was paid in September and on 2 October).
- * The rest are older invented guests.
+ * August is before the preview's months: no screen shows it, but the first dinners with a review
+ * (#108) were paid then.
  */
 
 /** The preview's sales screen: September to November 2026, opened on October (the preview's "today"). November has nothing yet. */
@@ -42,9 +43,13 @@ export const MOCK_KITCHEN_SALES: readonly HostSale[] = [
   charge({ id: "sl-1002", date: "2026-10-02", guest: "Aiko Tanaka", channel: "NIHO", offer: "tea time", guests: 2, amountYen: 30000, bookingId: "bk-2006" }),
   // September: all paid out.
   payout({ id: "sl-0930", date: "2026-09-30", from: "2026-09-16", to: "2026-09-29", amountYen: 142500, status: "paid" }),
-  charge({ id: "sl-0927", date: "2026-09-27", guest: "佐藤 由紀", channel: "NIHO", offer: "Dinner", guests: 2, amountYen: 60000 }),
-  charge({ id: "sl-0920", date: "2026-09-20", guest: "Lena Novak", channel: "体験サイト", offer: "Dinner", guests: 3, amountYen: 90000 }),
+  charge({ id: "sl-0927", date: "2026-09-27", guest: "佐藤 由紀", channel: "NIHO", offer: "Dinner", guests: 2, amountYen: 60000, bookingId: "bk-2005" }),
+  charge({ id: "sl-0920", date: "2026-09-20", guest: "Lena Novak", channel: "体験サイト", offer: "Dinner", guests: 3, amountYen: 90000, bookingId: "bk-2004" }),
   payout({ id: "sl-0916", date: "2026-09-16", from: "2026-09-01", to: "2026-09-15", amountYen: 71250, status: "paid" }),
   charge({ id: "sl-0913", date: "2026-09-13", guest: "Tom Becker", channel: "NIHO", offer: "tea time", guests: 2, amountYen: 15000, bookingId: "bk-2003" }),
-  charge({ id: "sl-0906", date: "2026-09-06", guest: "Grace Lee", channel: "体験サイト", offer: "Dinner", guests: 2, amountYen: 60000 }),
+  charge({ id: "sl-0906", date: "2026-09-06", guest: "Grace Lee", channel: "体験サイト", offer: "Dinner", guests: 2, amountYen: 60000, bookingId: "bk-2001" }),
+  // August (before the preview's months): paid out on the 31st.
+  payout({ id: "sl-0831", date: "2026-08-31", from: "2026-08-16", to: "2026-08-30", amountYen: 85500, status: "paid" }),
+  charge({ id: "sl-0828", date: "2026-08-28", guest: "Ella Martin", channel: "体験サイト", offer: "Dinner", guests: 1, amountYen: 30000, bookingId: "bk-1998" }),
+  charge({ id: "sl-0825", date: "2026-08-25", guest: "Jonas Weber", channel: "体験サイト", offer: "Dinner", guests: 2, amountYen: 60000, bookingId: "bk-1996" }),
 ];

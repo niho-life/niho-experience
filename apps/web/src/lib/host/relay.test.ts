@@ -107,6 +107,7 @@ describe("synthetic provider API", () => {
       ((await (await createMockHostFetch(scenario)("https://niho.example.test/api/experience-providers", auth)).json()) as { providers: { id: string; memberRole: string }[] }).providers.map(({ id, memberRole }) => `${id}:${memberRole}`);
     expect(await ids("default")).toEqual(["sample-provider-kitchen:OWNER", "sample-provider-studio:EDITOR"]);
     expect(await ids("payments-pending")).toEqual(["sample-provider-garden:OWNER"]);
+    expect(await ids("calendar-revoked")).toEqual(["sample-provider-kitchen:OWNER", "sample-provider-studio:EDITOR"]);
     expect(HOST_MOCK_SCENARIOS.map(hostMockScenario)).toEqual(HOST_MOCK_SCENARIOS);
     expect(hostMockScenario("two-providers")).toBe("default");
   });

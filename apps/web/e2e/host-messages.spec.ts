@@ -42,7 +42,7 @@ function recordSent(page: Page): string[] {
 test("ホーム lists each request with the time left, then the threads waiting longest; 承認 asks first and takes the row away", async ({ page }) => {
   await signIn(page);
   const rows = todos(page);
-  await expect(rows).toHaveCount(7);
+  await expect(rows).toHaveCount(10);
   for (const text of ["承認待ち", "あと 6 時間", "Lucas & Mia Chen さん · 10/22（木）18:00 · Kamakura Community Dinner with Locals · 2名 · ¥60,000", "期限を過ぎると自動でお断りになります"]) await expect(rows.nth(0)).toContainText(text);
   for (const text of ["あと 44 時間", "Ana Souza さん · 10/29（木）18:00 · Kamakura Community Dinner with Locals · 3名 · ¥72,000"]) await expect(rows.nth(1)).toContainText(text);
   // The threads, the longest wait first: an untranslated question reads in the original.
@@ -60,14 +60,14 @@ test("ホーム lists each request with the time left, then the threads waiting 
   await expect(ask.getByRole("button", { name: "やめる" })).toBeFocused();
   await ask.getByRole("button", { name: "やめる" }).click();
   await expect(ask).toHaveCount(0);
-  await expect(rows).toHaveCount(7);
+  await expect(rows).toHaveCount(10);
 
   await approve.click();
   await ask.getByRole("button", { name: "決済して承認" }).click();
   await expect(ask).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "Lucas & Mia Chen さんの申込を承認しました" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "次にすること" })).toBeFocused();
-  await expect(rows).toHaveCount(6);
+  await expect(rows).toHaveCount(9);
   await expect(rows.filter({ hasText: "Lucas & Mia Chen" })).toHaveCount(0);
   await expect(rows.nth(0)).toContainText("Ana Souza さん");
   expect(sent).toEqual([]);

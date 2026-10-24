@@ -75,7 +75,7 @@ export function SessionContactDialog({ contacts, onClose }: { contacts: readonly
 }
 
 /**
- * この回を中止: the reason (雨天・急病・その他; NIHO adds its fixed words to the cancellation
+ * この回を中止: the reason (雨・荒天・急病・けが・その他の事情; NIHO adds its fixed words to the cancellation
  * email, no free text), then what it cancels and refunds. The button names the result and waits
  * for a reason.
  */

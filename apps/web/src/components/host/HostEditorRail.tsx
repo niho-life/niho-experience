@@ -4,8 +4,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { EDITOR_LIMITS, emptyOffer, moveItem, offerChildPriceLabel, offerPriceLabel, offerScheduleLabel } from "@/host/editor";
 import { fullDateJa, monthDayJa } from "@/host/format";
 import { LISTING_STATUS } from "@/host/status";
-import type { HostListing, HostOffer, HostPageLanguage, ListingStatus } from "@/host/types";
+import type { HostListing, HostOffer, HostWritingLanguage, ListingStatus } from "@/host/types";
 import { DISABLED, EditorPanel } from "./editor-parts";
+import { HostConfirmDialog } from "./HostConfirmDialog";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { HostOfferDialog } from "./HostOfferDialog";
@@ -67,7 +68,7 @@ export interface ListingActions {
  * 掲載 (owner decision 2026-10-21, #84): one state per listing and one button to apply.
  * 申請, 停止 and 取り下げ wait until the page is saved, so NIHO reviews what was kept.
  */
-function ListingPanel({ listing, requirements, dirty, consent, onConsent, publicPath, actions }: { listing: HostListing; requirements: readonly string[]; dirty: boolean; consent: boolean; onConsent: (agreed: boolean) => void; publicPath: string; actions: ListingActions }) {
+function ListingPanel({ listing, requirements, dirty, consent, onConsent, publicPath, englishBehind, actions }: { listing: HostListing; requirements: readonly string[]; dirty: boolean; consent: boolean; onConsent: (agreed: boolean) => void; publicPath: string; englishBehind: boolean; actions: ListingActions }) {
   const baseId = useId();
   const hintId = `${baseId}-hint`;
   const headingId = "editor-listing";
@@ -85,6 +86,8 @@ function ListingPanel({ listing, requirements, dirty, consent, onConsent, public
     body = (
       <>
         <p className={LINE}>体験サイトで公開中{listing.liveSince ? ` · ${fullDateJa(listing.liveSince)}から` : ""}</p>
+        {/* Saving does not publish English that is not confirmed (#110). */}
+        {englishBehind ? <p className={`${LINE} -mt-2`}>公開中の英語は前に確定したままです</p> : null}
         <div className="flex flex-wrap gap-2">
           <a href={publicPath} target="_blank" rel="noopener" className={consoleButtonClass("secondary", "sm")}>
             <HostIcon name="external" className="size-3.5" />
@@ -162,12 +165,14 @@ function ListingPanel({ listing, requirements, dirty, consent, onConsent, public
   );
 }
 
-function OfferText({ offer }: { offer: HostOffer }) {
+function OfferText({ offer, lang }: { offer: HostOffer; lang: "ja" | "en" }) {
   const child = offerChildPriceLabel(offer);
   return (
     <>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[0.84375rem] font-extrabold">{offer.name || "名前のない商品"}</span>
+        <span lang={offer.name ? lang : undefined} className="block truncate text-[0.84375rem] font-extrabold">
+          {offer.name || "名前のない商品"}
+        </span>
         <span className="block truncate text-xs text-muted">{offerScheduleLabel(offer)}</span>
       </span>
       <span className="shrink-0 text-right tabular-nums">
@@ -180,8 +185,8 @@ function OfferText({ offer }: { offer: HostOffer }) {
 
 const ARROW = "grid size-8 shrink-0 place-items-center rounded-lg bg-sand text-ink hover:bg-line disabled:pointer-events-none disabled:opacity-40";
 
-/** 申込の設定: the offers as rows; a row opens its dialog. 並び替え shows ↑↓ instead. */
-function OffersPanel({ offers, onOffers, today }: { offers: readonly HostOffer[]; onOffers: (offers: HostOffer[]) => void; today: string }) {
+/** 申込の設定: the offers as rows; a row opens its dialog. 並び替え shows ↑↓ instead. Names and questions are in the tab's language. */
+function OffersPanel({ offers, onOffers, today, lang, marker }: { offers: readonly HostOffer[]; onOffers: (offers: HostOffer[]) => void; today: string; lang: "ja" | "en"; marker: ReactNode }) {
   const [editing, setEditing] = useState<{ index: number | null; offer: HostOffer } | null>(null);
   const [reordering, setReordering] = useState(false);
   const added = useRef(0);
@@ -203,6 +208,7 @@ function OffersPanel({ offers, onOffers, today }: { offers: readonly HostOffer[]
     <EditorPanel
       id="editor-offers"
       title="申込の設定"
+      marker={marker}
       actions={
         <>
           {offers.length > 1 ? (
@@ -225,7 +231,7 @@ function OffersPanel({ offers, onOffers, today }: { offers: readonly HostOffer[]
             <li key={offer.id} className="border-t border-line first:border-t-0">
               {sorting ? (
                 <div className="flex min-h-12 items-center gap-2 py-2">
-                  <OfferText offer={offer} />
+                  <OfferText offer={offer} lang={lang} />
                   <button type="button" aria-label={`${offer.name || "名前のない商品"}を上へ`} disabled={index === 0} onClick={() => onOffers(moveItem(offers, index, -1))} className={ARROW}>
                     <HostIcon name="chevronUp" className="size-4" />
                   </button>
@@ -235,7 +241,7 @@ function OffersPanel({ offers, onOffers, today }: { offers: readonly HostOffer[]
                 </div>
               ) : (
                 <button type="button" onClick={() => setEditing({ index, offer })} className="group flex min-h-12 w-full items-center gap-2.5 py-2.5 text-left">
-                  <OfferText offer={offer} />
+                  <OfferText offer={offer} lang={lang} />
                   <HostIcon name="chevronRight" className="size-4 text-line-strong group-hover:text-muted" />
                 </button>
               )}
@@ -246,12 +252,12 @@ function OffersPanel({ offers, onOffers, today }: { offers: readonly HostOffer[]
         <p className="text-[0.8125rem] text-muted">商品がありません。「商品を追加」から料金と日程を入れます。</p>
       )}
       {full ? <p className="mt-2 text-xs text-muted">商品は{EDITOR_LIMITS.offers}件までです</p> : null}
-      {editing ? <HostOfferDialog offer={editing.offer} isNew={editing.index === null} today={today} onSave={save} onDelete={remove} onClose={() => setEditing(null)} /> : null}
+      {editing ? <HostOfferDialog offer={editing.offer} isNew={editing.index === null} today={today} lang={lang} onSave={save} onDelete={remove} onClose={() => setEditing(null)} /> : null}
     </EditorPanel>
   );
 }
 
-const LANGUAGES: { value: HostPageLanguage; label: string; lang: string }[] = [
+const LANGUAGES: { value: HostWritingLanguage; label: string; lang: string }[] = [
   { value: "ja", label: "日本語", lang: "ja" },
   { value: "en", label: "English", lang: "en" },
 ];
@@ -259,9 +265,15 @@ const LANGUAGES: { value: HostPageLanguage; label: string; lang: string }[] = [
 const KV = "grid grid-cols-[64px_minmax(0,1fr)] items-center gap-2 border-t border-line py-[9px] text-[0.8125rem] first:border-t-0 first:pt-0.5";
 const KV_KEY = "text-xs font-extrabold text-muted";
 
-/** ページ: the page's language and, once it is live, its public address. */
-function PagePanel({ language, onLanguage, publicUrl }: { language: HostPageLanguage; onLanguage: (language: HostPageLanguage) => void; publicUrl: string | null }) {
+/**
+ * ページ: the language the host writes in (書く言語, #110) and, once it is live, its public address.
+ * 日本語 keeps the English as it is as the confirmed English; going back to English asks first
+ * (the Japanese stays, and comes back with 日本語).
+ */
+function PagePanel({ language, onLanguage, publicUrl }: { language: HostWritingLanguage; onLanguage: (language: HostWritingLanguage) => void; publicUrl: string | null }) {
   const [copied, setCopied] = useState<"done" | "failed" | null>(null);
+  const [asking, setAsking] = useState(false);
+  const stay = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(null), 2500);
@@ -276,12 +288,17 @@ function PagePanel({ language, onLanguage, publicUrl }: { language: HostPageLang
       setCopied("failed");
     }
   };
+  const choose = (next: HostWritingLanguage) => {
+    if (next === language) return;
+    if (next === "en") setAsking(true);
+    else onLanguage(next);
+  };
   return (
     <EditorPanel id="editor-page" title="ページ">
       <div>
         <div className={KV}>
           <span id="editor-language-label" className={KV_KEY}>
-            言語
+            書く言語
           </span>
           <span role="radiogroup" aria-labelledby="editor-language-label" className="inline-flex w-fit rounded-full bg-sand p-0.5">
             {LANGUAGES.map((option) => (
@@ -290,7 +307,7 @@ function PagePanel({ language, onLanguage, publicUrl }: { language: HostPageLang
                 lang={option.lang}
                 className="relative block h-8 rounded-full px-3 text-xs leading-8 font-extrabold text-ink-soft has-[:checked]:bg-canvas has-[:checked]:text-ink has-[:checked]:shadow-[0_1px_2px_rgb(0_0_0/0.08)] has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-moss"
               >
-                <input type="radio" name="editor-language" value={option.value} checked={language === option.value} onChange={() => onLanguage(option.value)} className="absolute inset-0 z-[1] size-full cursor-pointer appearance-none rounded-full opacity-0 focus-visible:outline-none" />
+                <input type="radio" name="editor-language" value={option.value} checked={language === option.value} onChange={() => choose(option.value)} className="absolute inset-0 z-[1] size-full cursor-pointer appearance-none rounded-full opacity-0 focus-visible:outline-none" />
                 {option.label}
               </label>
             ))}
@@ -308,9 +325,25 @@ function PagePanel({ language, onLanguage, publicUrl }: { language: HostPageLang
           </div>
         ) : null}
       </div>
+      <p className="mt-1 text-xs leading-normal text-muted">{language === "ja" ? "日本語で書くと、英語の下書きを NIHO が作ります。体験サイトには確定した英語が出ます。" : "体験サイトには、書いた英語がそのまま出ます。"}</p>
       <p role="status" className="text-xs font-bold text-moss">
         {copied === "done" ? "URL をコピーしました" : copied === "failed" ? "コピーできませんでした" : ""}
       </p>
+      {asking ? (
+        <HostConfirmDialog
+          title="英語で書く形に戻しますか？"
+          description="日本語の原稿は残りますが、英語を直接書く形に戻ります。"
+          focusRef={stay}
+          stayRef={stay}
+          confirm={
+            <button type="submit" className={consoleButtonClass("primary")}>
+              英語で書く
+            </button>
+          }
+          onConfirm={() => onLanguage("en")}
+          onClose={() => setAsking(false)}
+        />
+      ) : null}
     </EditorPanel>
   );
 }
@@ -327,19 +360,26 @@ export interface HostEditorRailProps {
   publicPath: string;
   /** The public page's full address, shown while the listing is live. */
   publicUrl: string | null;
+  /** As the tab shows them: names and questions in its language. */
   offers: readonly HostOffer[];
   onOffers: (offers: HostOffer[]) => void;
-  language: HostPageLanguage;
-  onLanguage: (language: HostPageLanguage) => void;
+  /** The words' language (the tab's). */
+  lang: "ja" | "en";
+  /** 日本語を変えました beside 申込の設定, on 英語（公開）. */
+  offersMarker?: ReactNode;
+  /** A live page written in Japanese whose English is not confirmed: the public English is the last confirmed one. */
+  englishBehind: boolean;
+  language: HostWritingLanguage;
+  onLanguage: (language: HostWritingLanguage) => void;
   today: string;
 }
 
 /** The right rail (mock v2 `.rail`): 掲載, 申込の設定 and ページ. */
-export function HostEditorRail({ className = "", listing, requirements, dirty, consent, onConsent, actions, publicPath, publicUrl, offers, onOffers, language, onLanguage, today }: HostEditorRailProps) {
+export function HostEditorRail({ className = "", listing, requirements, dirty, consent, onConsent, actions, publicPath, publicUrl, offers, onOffers, lang, offersMarker, englishBehind, language, onLanguage, today }: HostEditorRailProps) {
   return (
     <div className={`flex min-w-0 flex-col gap-3.5 ${className}`.trim()}>
-      <ListingPanel listing={listing} requirements={requirements} dirty={dirty} consent={consent} onConsent={onConsent} publicPath={publicPath} actions={actions} />
-      <OffersPanel offers={offers} onOffers={onOffers} today={today} />
+      <ListingPanel listing={listing} requirements={requirements} dirty={dirty} consent={consent} onConsent={onConsent} publicPath={publicPath} englishBehind={englishBehind} actions={actions} />
+      <OffersPanel offers={offers} onOffers={onOffers} today={today} lang={lang} marker={offersMarker} />
       <PagePanel language={language} onLanguage={onLanguage} publicUrl={publicUrl} />
     </div>
   );

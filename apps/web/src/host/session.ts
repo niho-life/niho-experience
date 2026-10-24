@@ -209,20 +209,20 @@ export function attendanceSummary(counts: AttendanceCounts): string {
 export type SessionCancelReason = "weather" | "illness" | "other";
 
 export const SESSION_CANCEL_REASONS: readonly { value: SessionCancelReason; label: string }[] = [
-  { value: "weather", label: "雨天" },
-  { value: "illness", label: "急病" },
-  { value: "other", label: "その他" },
+  { value: "weather", label: "雨・荒天" },
+  { value: "illness", label: "急病・けが" },
+  { value: "other", label: "その他の事情" },
 ];
 
 const SESSION_CANCEL_MESSAGES: Record<HostGuestLanguage, Record<SessionCancelReason, string>> = {
   en: {
     weather: "We’re very sorry, but this session has been called off because of the weather.",
-    illness: "We’re very sorry, but this session has been called off because the host has suddenly fallen ill.",
+    illness: "We’re very sorry, but this session has been called off because the host has suddenly fallen ill or been injured.",
     other: "We’re very sorry, but this session has been called off for reasons on the host’s side.",
   },
   ja: {
     weather: "申し訳ありませんが、天候のため、この回は中止になりました。",
-    illness: "申し訳ありませんが、主催者の急病のため、この回は中止になりました。",
+    illness: "申し訳ありませんが、主催者の急病・けがのため、この回は中止になりました。",
     other: "申し訳ありませんが、主催者の都合により、この回は中止になりました。",
   },
 };

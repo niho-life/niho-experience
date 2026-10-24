@@ -102,9 +102,21 @@ export function listJa(items: readonly string[]): string {
   return items.length === 2 ? `${items[0]}と${items[1]}` : items.join("、");
 }
 
+/** The English not confirmed yet, among what a draft still needs (#110): it is not something to type in. */
+const ENGLISH_UNCONFIRMED = "英語の確定";
+
+/**
+ * What a draft still needs, in one line: "表紙写真・料金が未入力", with "英語が未確定" after it for
+ * a page written in Japanese whose English is not confirmed. `join` lists the inputs.
+ */
+export function missingLine(missing: readonly string[], join: (items: readonly string[]) => string): string {
+  const inputs = missing.filter((item) => item !== ENGLISH_UNCONFIRMED);
+  return [inputs.length ? `${join(inputs)}が未入力` : null, missing.includes(ENGLISH_UNCONFIRMED) ? "英語が未確定" : null].filter(Boolean).join(" · ");
+}
+
 /** The line under an experience title: "火・木・土 18:00 · 2時間 · 定員8 · ¥30,000〜", or what a draft still needs. */
 export function experienceMeta(experience: Pick<HostExperience, "schedule" | "missing">): string {
-  if (experience.missing.length > 0) return `${experience.missing.join("・")}が未入力`;
+  if (experience.missing.length > 0) return missingLine(experience.missing, (items) => items.join("・"));
   const schedule = experience.schedule;
   if (!schedule) return "日程と料金が未入力";
   return [`${schedule.weekdays.join("・")} ${schedule.start}`, durationJa(schedule.durationMinutes), `定員${schedule.capacity}`, `${yen(schedule.priceFromYen)}〜`].join(" · ");

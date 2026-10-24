@@ -53,6 +53,7 @@ export default async function HostExperiencePage({ params, searchParams }: { par
     <HostExperienceEditor
       key={`${provider.id}/${editor.experience.id}`}
       experience={editor.experience}
+      providerId={provider.id}
       host={host}
       today={today}
       siteUrl={config.siteUrl}

@@ -36,11 +36,15 @@ vi.mock("@/lib/host/server", async (importActual) => {
   };
 });
 
-import { draftReplyEnglish, openPayoutConnect, registerProvider, saveProviderProfile, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
+import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, openPayoutConnect, registerProvider, saveProviderProfile, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
 import { HOST_ERROR_REASON_TEXT, HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { MOCK_KITCHEN_EXPERIENCES, MOCK_STUDIO_EXPERIENCES, PREVIEW_PAGE_ENGLISH } from "./mock/experiences";
+import { MOCK_REVIEW_REPLY_EXAMPLES } from "./mock/reviews";
+import { EMPTY_PAGE_TEXT, PAGE_ENGLISH_UNAVAILABLE_TEXT } from "./page-english";
 import { MOCK_REPLY_EXAMPLES, PREVIEW_ENGLISH_DRAFT } from "./mock/threads";
+import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
 
 // The contract mock's synthetic consents (packages/api-client/src/host/mock.ts).
 const PROVIDER_CONSENT = "sample-provider-consent-1";
@@ -255,6 +259,80 @@ describe("英語にする (#106)", () => {
   });
 });
 
+describe("レビュー › 英語にする (#108)", () => {
+  const example = MOCK_REVIEW_REPLY_EXAMPLES[0]!;
+
+  it("mock: the example reply's natural English, and a preview sentence for anything else", async () => {
+    expect(await draftReviewReplyEnglish({ providerId: KITCHEN, reviewId: example.reviewId, japanese: example.japanese })).toEqual({ ok: true, message: "英語にしました", english: example.english });
+    expect(await draftReviewReplyEnglish({ providerId: KITCHEN, reviewId: example.reviewId, japanese: "ありがとうございました。" })).toEqual({ ok: true, message: "英語にしました", english: PREVIEW_ENGLISH_DRAFT });
+    expect(state.revalidated).toEqual([]);
+  });
+
+  it("checks what the browser sent: a provider, a review and Japanese that is not blank nor too long", async () => {
+    const ok = { providerId: KITCHEN, reviewId: example.reviewId, japanese: "はい" };
+    for (const input of [
+      { ...ok, providerId: "../admin" },
+      { ...ok, reviewId: "" },
+      { ...ok, reviewId: "x".repeat(201) },
+      { ...ok, japanese: "  \n" },
+      { ...ok, japanese: "あ".repeat(REVIEW_REPLY_TEXT_LIMIT + 1) },
+      { ...ok, japanese: 42 },
+      null,
+    ]) {
+      expect(await draftReviewReplyEnglish(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
+    expect((await draftReviewReplyEnglish({ ...ok, japanese: "あ".repeat(REVIEW_REPLY_TEXT_LIMIT) })).ok).toBe(true);
+  });
+
+  it("http: not until NIHO's API makes the English, and nothing is sent to NIHO", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await draftReviewReplyEnglish({ providerId: KITCHEN, reviewId: example.reviewId, japanese: example.japanese })).toEqual({ ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("体験の編集 › 英語の下書きを作る (#110)", () => {
+  const dinner = MOCK_KITCHEN_EXPERIENCES.find((experience) => experience.id === "community-dinner")!;
+  const calligraphy = MOCK_STUDIO_EXPERIENCES[0]!;
+
+  it("mock: the sample's English for its Japanese, a preview sentence for other Japanese, and blank for blank", async () => {
+    const result = await draftPageEnglish({ providerId: STUDIO, experienceId: "calligraphy", japanese: calligraphy.japanese! });
+    expect(result.ok && [result.message, result.english.title, result.english.dayLanguage, result.english.description]).toEqual(["英語の下書きを作りました", "Write Your Own Kanji with a Kamakura Calligrapher", "Japanese and English", ""]);
+    const changed = await draftPageEnglish({ providerId: KITCHEN, experienceId: "community-dinner", japanese: { ...dinner.japanese!, description: "季節の料理を、地元の人といっしょに。" } });
+    expect(changed.ok && [changed.english.description, changed.english.lead]).toEqual([PREVIEW_PAGE_ENGLISH, dinner.lead]);
+    expect(state.revalidated).toEqual([]);
+  });
+
+  it("checks what the browser sent: a provider, an experience and Japanese within the editor's limits, not all blank", async () => {
+    const ok = { providerId: KITCHEN, experienceId: "community-dinner", japanese: dinner.japanese! };
+    for (const input of [
+      { ...ok, providerId: "../admin" },
+      { ...ok, experienceId: "" },
+      { ...ok, experienceId: "x".repeat(201) },
+      { ...ok, japanese: EMPTY_PAGE_TEXT },
+      { ...ok, japanese: { ...dinner.japanese!, title: "あ".repeat(96) } },
+      { ...ok, japanese: { ...dinner.japanese!, conditions: { RAIN: "雨" } } },
+      { ...ok, japanese: "鎌倉の夕食" },
+      null,
+    ]) {
+      expect(await draftPageEnglish(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
+  });
+
+  it("http: not until NIHO's API drafts a page's English, and nothing is sent to NIHO", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await draftPageEnglish({ providerId: KITCHEN, experienceId: "community-dinner", japanese: dinner.japanese! })).toEqual({ ok: false, message: PAGE_ENGLISH_UNAVAILABLE_TEXT });
+    expect(calls).toEqual([]);
+  });
+
+  it("asks for a reload when the session has ended", async () => {
+    state.expired = true;
+    expect(await draftPageEnglish({ providerId: KITCHEN, experienceId: "community-dinner", japanese: dinner.japanese! })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
+  });
+});
+
 describe("the session", () => {
   it("asks for a reload instead of sending an expired token", async () => {
     state.config.apiMode = "http";
@@ -263,6 +341,7 @@ describe("the session", () => {
     expect(await submitProviderReview({ providerId: KITCHEN })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(await saveProviderProfile({ providerId: KITCHEN, bio: "x" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(await draftReplyEnglish({ providerId: KITCHEN, threadId: "th-3012", japanese: "はい" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
+    expect(await draftReviewReplyEnglish({ providerId: KITCHEN, reviewId: "rv-5020", japanese: "はい" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(calls).toEqual([]);
   });
 });

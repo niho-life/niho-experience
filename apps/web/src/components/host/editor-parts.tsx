@@ -28,12 +28,18 @@ export const DISABLED = "disabled:pointer-events-none disabled:opacity-45";
 
 const ADD_ROW = "inline-flex h-8 items-center gap-1 rounded-full text-[0.8125rem] font-extrabold text-moss hover:underline hover:underline-offset-4";
 
-/** One section of the editor in its own panel, with its actions on the right of the title. */
-export function EditorPanel({ id, title, actions, children }: { id: string; title: string; actions?: ReactNode; children: ReactNode }) {
+/**
+ * One section of the editor in its own panel, with its actions on the right of the title. `marker`
+ * sits next to the title (日本語を変えました on the English tab, #110).
+ */
+export function EditorPanel({ id, title, marker, actions, children }: { id: string; title: string; marker?: ReactNode; actions?: ReactNode; children: ReactNode }) {
   return (
     <section aria-labelledby={id} className={`${HOST_SURFACE} p-4 md:px-5 md:py-[18px]`}>
       <div className="mb-3 flex min-h-[30px] flex-wrap items-center justify-between gap-2.5">
-        <SectionTitle id={id}>{title}</SectionTitle>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <SectionTitle id={id}>{title}</SectionTitle>
+          {marker}
+        </div>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </div>
       {children}
@@ -74,9 +80,9 @@ export function AddRowButton({ id, context, label, onClick }: { id?: string; con
 
 /**
  * A list of one-line texts (見どころ, 含まれるもの, 注意事項…): a row per item with ×, and
- * "＋ 行を足す" until the list is full.
+ * "＋ 行を足す" until the list is full. `lang` is the rows' language (English on the English tab).
  */
-export function TextList({ label, values, max, maxLength, onChange }: { label: string; values: readonly string[]; max: number; maxLength: number; onChange: (values: string[]) => void }) {
+export function TextList({ label, values, max, maxLength, lang, onChange }: { label: string; values: readonly string[]; max: number; maxLength: number; lang?: string; onChange: (values: string[]) => void }) {
   const baseId = useId();
   const focusLater = useFocusAfterRender();
   const add = () => {
@@ -97,6 +103,7 @@ export function TextList({ label, values, max, maxLength, onChange }: { label: s
               <input
                 id={`${baseId}-${index}`}
                 aria-label={`${label} ${index + 1}`}
+                lang={lang}
                 value={value}
                 maxLength={maxLength}
                 onChange={(event) => {

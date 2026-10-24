@@ -8,14 +8,15 @@ import { useFocusAfterRender } from "./editor-parts";
 import { BookingDecisionDialog } from "./HostBookingDialogs";
 import { HostIcon } from "./HostIcon";
 import { consoleButtonClass, HOST_SURFACE, LIST_ROW, LIST_ROW_DETAIL, LIST_ROW_TITLE } from "./host-ui";
-import { MoreLink, SectionTitle, StatusPill } from "./ui";
+import { MoreLink, RatingStars, SectionTitle, StatusPill } from "./ui";
 
 const HEADING = "home-todo";
 
 /**
  * ホーム's 次にすること (#106, the journey mock's H1): one row per request with the time left
  * (承認する asks in the bookings screen's dialog), per thread waiting for an answer (返信する),
- * then drafts and listings under review. "メッセージを見る ›" opens every thread.
+ * per review to answer or read (#108, a few of them), then drafts and listings under review.
+ * "メッセージを見る ›" opens every thread.
  *
  * 承認 takes the row away and says so here (mock mode: nothing is kept, as on 予約).
  * TODO(#87): send 承認 to NIHO and read the request back.
@@ -54,11 +55,16 @@ export function HostHomeTodos({ todos: initialTodos, providerId }: { todos: read
         <ul>
           {todos.map((todo) => (
             <li key={todo.key} className={`${LIST_ROW} flex-wrap border-t border-line first:border-t-0 max-md:items-start`}>
-              <StatusPill status={todo.status} />
+              {todo.status ? <StatusPill status={todo.status} /> : null}
               {/* 170px keeps the pill and the words on one line down to a 320px phone; the buttons wrap below. */}
               <div className="min-w-0 flex-[1_1_170px]">
                 {todo.aside ? <p className={`text-xs leading-normal font-extrabold ${todo.aside.tone === "warn" ? "text-warn" : "text-muted"}`}>{todo.aside.text}</p> : null}
                 <p id={`todo-${todo.key}`} className={LIST_ROW_TITLE}>
+                  {todo.rating ? (
+                    <>
+                      <RatingStars rating={todo.rating} label={`${todo.rating} 点`} />{" "}
+                    </>
+                  ) : null}
                   {todo.title}
                 </p>
                 {todo.detail ? <p className={LIST_ROW_DETAIL}>{todo.detail}</p> : null}

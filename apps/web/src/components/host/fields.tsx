@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { StatusLabel } from "@/host/status";
 import type { HostProviderKind } from "@/lib/host/providers";
 import { HOST_SURFACE } from "./host-ui";
+import { HostIcon } from "./HostIcon";
 import { SectionTitle, StatusPill } from "./ui";
 
 /*
@@ -81,6 +82,65 @@ export function KindSegment({ name, labelId, defaultValue, disabled = false, des
             {option.label}
           </label>
         ))}
+      </span>
+    </div>
+  );
+}
+
+export interface SwitchRowProps {
+  id: string;
+  label: string;
+  /** When it applies, in one line under the label. */
+  detail?: string;
+  checked: boolean;
+  disabled?: boolean;
+  /** Why it cannot be changed ("止められません"), with a lock: it stays as it is and says so (also to screen readers). */
+  locked?: string;
+  onChange?: (checked: boolean) => void;
+}
+
+/**
+ * An on/off setting (mock v2 `.set`): the label and its line on the left, a switch on the right.
+ * A native checkbox with role="switch" (Space toggles it, screen readers say on or off), invisible
+ * over the drawn track like KindSegment's radios. Off is an outlined track, on a moss one: the
+ * knob's side says it too.
+ */
+export function SwitchRow({ id, label, detail, checked, disabled = false, locked, onChange }: SwitchRowProps) {
+  const describedBy = [detail ? `${id}-detail` : null, locked ? `${id}-locked` : null].filter(Boolean).join(" ") || undefined;
+  return (
+    <div className="flex items-center gap-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <label htmlFor={id} className="block text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere]">
+          {label}
+        </label>
+        {detail ? (
+          <p id={`${id}-detail`} className="text-[0.78125rem] leading-normal text-muted">
+            {detail}
+          </p>
+        ) : null}
+        {locked ? (
+          <p id={`${id}-locked`} className="mt-0.5 flex items-center gap-1 text-xs leading-normal font-bold text-muted">
+            <HostIcon name="lock" className="size-3.5" />
+            {locked}
+          </p>
+        ) : null}
+      </div>
+      <span className="relative inline-flex h-7 w-[46px] shrink-0">
+        <input
+          id={id}
+          type="checkbox"
+          role="switch"
+          checked={checked}
+          disabled={disabled || Boolean(locked)}
+          aria-describedby={describedBy}
+          onChange={(event) => onChange?.(event.currentTarget.checked)}
+          className="peer absolute inset-0 z-[1] m-0 size-full cursor-pointer appearance-none rounded-full opacity-0 focus-visible:outline-none disabled:cursor-not-allowed"
+        />
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 rounded-full border-[1.5px] border-muted bg-canvas transition-colors peer-checked:border-moss peer-checked:bg-moss peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-moss peer-disabled:opacity-55"
+        />
+        <span aria-hidden="true" className="absolute top-1 left-1 size-5 rounded-full bg-muted transition-transform peer-checked:translate-x-[18px] peer-checked:bg-canvas peer-disabled:opacity-55 motion-reduce:transition-none" />
       </span>
     </div>
   );

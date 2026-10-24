@@ -19,6 +19,8 @@ export const HOST_SETTINGS_PATH = "/host/settings";
 export const HOST_SUPPORT_PATH = "/host/support";
 /** メッセージ (#106): a screen under ホーム, not in the menu. */
 export const HOST_MESSAGES_PATH = "/host/messages";
+/** レビュー (#108): a screen under ホーム, not in the menu. */
+export const HOST_REVIEWS_PATH = "/host/reviews";
 
 export const HOST_NAV = [
   { href: HOST_HOME_PATH, label: "ホーム" },
@@ -30,15 +32,19 @@ export const HOST_NAV = [
 
 /**
  * `href` with these query values set, after the query it already has. Empty values are left
- * out, so `withQuery("/host/bookings", { filter: null })` stays "/host/bookings".
+ * out, so `withQuery("/host/bookings", { filter: null })` stays "/host/bookings". A `#hash`
+ * (one review, #108) stays at the end.
  */
 export function withQuery(href: string, values: Record<string, string | null | undefined>): string {
-  const at = href.indexOf("?");
-  const path = at < 0 ? href : href.slice(0, at);
-  const query = new URLSearchParams(at < 0 ? "" : href.slice(at + 1));
+  const hashAt = href.indexOf("#");
+  const hash = hashAt < 0 ? "" : href.slice(hashAt);
+  const rest = hashAt < 0 ? href : href.slice(0, hashAt);
+  const at = rest.indexOf("?");
+  const path = at < 0 ? rest : rest.slice(0, at);
+  const query = new URLSearchParams(at < 0 ? "" : rest.slice(at + 1));
   for (const [key, value] of Object.entries(values)) if (value) query.set(key, value);
   const search = query.toString();
-  return search ? `${path}?${search}` : path;
+  return `${search ? `${path}?${search}` : path}${hash}`;
 }
 
 /**

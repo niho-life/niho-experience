@@ -1,11 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { EDITOR_LIMITS, experienceContent, listingRequirements, pauseListing, sameContent, submitListing, withdrawListing } from "@/host/editor";
-import type { HostExperience, HostExperienceContent, HostListing } from "@/host/types";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { draftPageEnglish } from "@/host/actions";
+import { EDITOR_LIMITS, experienceContent, listingRequirements, pauseListing, sameContent, submitListing, withdrawListing, writtenTitle } from "@/host/editor";
+import {
+  applyEnglishDraft,
+  changeInTab,
+  confirmEnglish,
+  contentInTab,
+  editsToReplace,
+  PAGE_ENGLISH_FAILED_TEXT,
+  pageEnglishState,
+  publicEnglishBehind,
+  textHasWords,
+  writeInEnglish,
+  writeInJapanese,
+  type EditorTab,
+} from "@/host/page-english";
+import type { HostExperience, HostExperienceContent, HostListing, HostWritingLanguage } from "@/host/types";
 import { DISABLED } from "./editor-parts";
 import { HostEditorContent } from "./HostEditorContent";
+import { ChangedMark, EDITOR_TAB_PANEL_ID, EditorLanguageTabs, editorTabId, EnglishStatePanel } from "./HostEditorEnglish";
 import { HostEditorRail } from "./HostEditorRail";
 import { HostIcon } from "./HostIcon";
 import { HostLeaveDialog, useHostLeaveGuard } from "./HostLeaveGuard";
@@ -66,6 +82,8 @@ function SaveBar({ dirty, saving, saved, onSave }: { dirty: boolean; saving: boo
 
 export interface HostExperienceEditorProps {
   experience: HostExperience;
+  /** The provider the page is NIHO's for (英語の下書きを作る's server action). */
+  providerId: string;
   /** 迎える人: the provider's name and introduction (設定 › 提供者情報). */
   host: { name: string; bio: string };
   /** The day 掲載を申請 is dated (YYYY-MM-DD, JST). */
@@ -80,20 +98,30 @@ export interface HostExperienceEditorProps {
  * 体験の編集 (#89, mock v2 `screenEditor`). The page text in the public order on the
  * left, 掲載 / 申込の設定 / ページ on the right (first on phones), and one 保存.
  *
+ * A page written in Japanese (#110, the journey mock's H5) has two tabs over both columns:
+ * 日本語で書く (the default) and 英語（公開）, with the English's state and NIHO's draft on top.
+ * The header's title is the title in the language the page is written in.
+ *
  * Mock mode only for now: 保存 keeps the page in this screen, photos stay in the browser
  * as object URLs, and 申請・停止・取り下げ change the state shown here. Going back to
  * the list starts again from the synthetic data (the preview note says nothing is kept).
  */
-export function HostExperienceEditor({ experience, host, today, siteUrl, backHref, settingsHref }: HostExperienceEditorProps) {
+export function HostExperienceEditor({ experience, providerId, host, today, siteUrl, backHref, settingsHref }: HostExperienceEditorProps) {
   const [content, setContent] = useState<HostExperienceContent>(() => experienceContent(experience));
   const [saved, setSaved] = useState<HostExperienceContent>(content);
   const [listing, setListing] = useState<HostListing>(() => ({ status: experience.status, liveSince: experience.liveSince, requestedOn: experience.requestedOn }));
   const [consent, setConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ at: number } | null>(null);
+  const [chosenTab, setTab] = useState<EditorTab>("ja");
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const dirty = useMemo(() => !sameContent(content, saved), [content, saved]);
   const requirements = useMemo(() => listingRequirements(content), [content]);
+  const english = useMemo(() => pageEnglishState(content), [content]);
+  const tab: EditorTab = english ? chosenTab : "en";
+  const view = useMemo(() => contentInTab(content, tab), [content, tab]);
   const leaveGuard = useHostLeaveGuard(dirty ? "dirty" : null);
 
   useEffect(() => {
@@ -102,7 +130,42 @@ export function HostExperienceEditor({ experience, host, today, siteUrl, backHre
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const update = useCallback((patch: Partial<HostExperienceContent>) => setContent((current) => ({ ...current, ...patch })), []);
+  const updateIn = useCallback((on: EditorTab, patch: Partial<HostExperienceContent>) => setContent((current) => changeInTab(current, on, patch)), []);
+  const update = useCallback((patch: Partial<HostExperienceContent>) => updateIn(tab, patch), [tab, updateIn]);
+  /** The header's title is always in the language the page is written in. */
+  const updateTitle = (title: string) => updateIn(content.writingLanguage === "ja" ? "ja" : "en", { title });
+
+  /** 英語の下書きを作る / 作り直す: NIHO's English of the Japanese as it is now. While NIHO drafts, the English is locked and the Japanese stays editable; nothing written is lost when it fails. */
+  const draftEnglish = async (): Promise<boolean> => {
+    const sent = content.japanese;
+    if (!sent || drafting) return false;
+    setDrafting(true);
+    setDraftError("");
+    try {
+      const result = await draftPageEnglish({ providerId, experienceId: experience.id, japanese: sent });
+      if (!result.ok) {
+        setDraftError(result.message);
+        return false;
+      }
+      setContent((current) => applyEnglishDraft(current, sent, result.english));
+      return true;
+    } catch {
+      setDraftError(PAGE_ENGLISH_FAILED_TEXT);
+      return false;
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const changeLanguage = (language: HostWritingLanguage) => {
+    setDraftError("");
+    if (language === "ja") {
+      setContent(writeInJapanese);
+      setTab("ja");
+    } else {
+      setContent(writeInEnglish);
+    }
+  };
 
   const save = async () => {
     const invalid = root.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input:invalid, textarea:invalid");
@@ -122,7 +185,10 @@ export function HostExperienceEditor({ experience, host, today, siteUrl, backHre
     setNotice({ at: Date.now() });
   };
 
-  const title = content.title.trim() || "無題の体験";
+  const title = writtenTitle(content).trim() || content.title.trim() || "無題の体験";
+  const changed = english && tab === "en" ? new Set(english.changed) : undefined;
+  // English is locked while NIHO drafts it (the Japanese tab stays open to edit).
+  const locked = drafting && tab === "en";
   const publicPath = `/experiences/${encodeURIComponent(experience.slug)}`;
   const previewHref = listing.status === "live" || listing.status === "review" ? publicPath : null;
 
@@ -138,44 +204,65 @@ export function HostExperienceEditor({ experience, host, today, siteUrl, backHre
           </Link>
           <input
             aria-label="題名"
-            value={content.title}
+            value={writtenTitle(content)}
             maxLength={EDITOR_LIMITS.title}
             placeholder="題名"
-            onChange={(event) => update({ title: event.currentTarget.value })}
+            onChange={(event) => updateTitle(event.currentTarget.value)}
             className="-ml-2 min-w-0 flex-1 rounded-[10px] border border-transparent bg-transparent px-2 py-1 text-[1.0625rem] leading-[1.3] font-extrabold text-ink placeholder:text-muted hover:bg-sand focus:border-line-strong focus:bg-canvas md:ml-0 md:px-2.5 md:py-1.5 md:text-[1.375rem]"
           />
           <div className="shrink-0 max-md:hidden">
             <PreviewButton href={previewHref} size="md" />
           </div>
         </div>
-        {/* Two columns once the page is wide enough for the 320px rail; one column (rail first) below. */}
-        <div className="@container">
-          <div className="flex flex-col gap-3.5 @3xl:grid @3xl:grid-cols-[minmax(0,1fr)_320px] @3xl:items-start @3xl:gap-5">
-            <HostEditorContent content={content} update={update} host={host} settingsHref={settingsHref} />
-            <HostEditorRail
-              className="order-first @3xl:sticky @3xl:top-4 @3xl:order-none"
-              listing={listing}
-              requirements={requirements}
-              dirty={dirty}
-              consent={consent}
-              onConsent={setConsent}
-              actions={{
-                onSubmit: () => {
-                  setListing((current) => submitListing(current, today));
-                  setConsent(false);
-                },
-                onPause: () => setListing(pauseListing),
-                onWithdraw: () => setListing(withdrawListing),
+        {english ? <EditorLanguageTabs tab={tab} onTab={setTab} english={english} /> : null}
+        {/* The same elements whatever the page is written in, so switching keeps the photos picked in this browser. */}
+        <div id={english ? EDITOR_TAB_PANEL_ID : undefined} role={english ? "tabpanel" : undefined} aria-labelledby={english ? editorTabId(tab) : undefined} className="@container">
+          {english && tab === "en" ? (
+            <EnglishStatePanel
+              english={english}
+              drafting={drafting}
+              error={draftError}
+              canDraft={content.japanese !== null && textHasWords(content.japanese)}
+              replaceCount={editsToReplace(content).length}
+              onDraft={draftEnglish}
+              onConfirm={() => {
+                setDraftError("");
+                setContent(confirmEnglish);
               }}
-              publicPath={publicPath}
-              publicUrl={listing.status === "live" ? `${siteUrl}${publicPath}` : null}
-              offers={content.offers}
-              onOffers={(offers) => update({ offers })}
-              language={content.language}
-              onLanguage={(language) => update({ language })}
-              today={today}
             />
-          </div>
+          ) : null}
+          {/* Two columns once the page is wide enough for the 320px rail; one column (rail first) below. */}
+          <fieldset disabled={locked} aria-busy={locked || undefined} className={`m-0 min-w-0 border-0 p-0 ${locked ? "opacity-60" : ""}`}>
+            <div className="flex flex-col gap-3.5 @3xl:grid @3xl:grid-cols-[minmax(0,1fr)_320px] @3xl:items-start @3xl:gap-5">
+              <HostEditorContent content={view} update={update} host={host} settingsHref={settingsHref} lang={tab} englishTitle={english !== null && tab === "en"} changed={changed} />
+              <HostEditorRail
+                className="order-first @3xl:sticky @3xl:top-4 @3xl:order-none"
+                listing={listing}
+                requirements={requirements}
+                dirty={dirty}
+                consent={consent}
+                onConsent={setConsent}
+                actions={{
+                  onSubmit: () => {
+                    setListing((current) => submitListing(current, today));
+                    setConsent(false);
+                  },
+                  onPause: () => setListing(pauseListing),
+                  onWithdraw: () => setListing(withdrawListing),
+                }}
+                publicPath={publicPath}
+                publicUrl={listing.status === "live" ? `${siteUrl}${publicPath}` : null}
+                offers={view.offers}
+                onOffers={(offers) => update({ offers })}
+                lang={tab}
+                offersMarker={changed?.has("offers") ? <ChangedMark /> : null}
+                englishBehind={publicEnglishBehind(content, listing.status)}
+                language={content.writingLanguage}
+                onLanguage={changeLanguage}
+                today={today}
+              />
+            </div>
+          </fieldset>
         </div>
         <SaveBar dirty={dirty} saving={saving} saved={notice !== null} onSave={save} />
       </HostPageBody>

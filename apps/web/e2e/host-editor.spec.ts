@@ -37,8 +37,10 @@ test("the list opens the page: its title, eight photos and the live listing, and
   await page.goto("/host/experiences");
   await page.getByRole("region", { name: "体験の一覧" }).getByRole("link").first().click();
   await page.waitForURL(/\/host\/experiences\/community-dinner$/);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kamakura Community Dinner with Locals");
-  await expect(page.getByRole("textbox", { name: "題名" })).toHaveValue("Kamakura Community Dinner with Locals");
+  // Written in Japanese (#110): the title is the host's Japanese one, and the page opens on 日本語で書く.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("鎌倉の地元の人と囲むコミュニティディナー");
+  await expect(page.getByRole("textbox", { name: "題名" })).toHaveValue("鎌倉の地元の人と囲むコミュニティディナー");
+  await expect(page.getByRole("tab", { name: "日本語で書く" })).toHaveAttribute("aria-selected", "true");
 
   const photos = panel(page, "写真").getByRole("listitem");
   await expect(photos).toHaveCount(8);
@@ -57,12 +59,14 @@ test("the list opens the page: its title, eight photos and the live listing, and
 
   const offers = panel(page, "申込の設定").getByRole("listitem");
   await expect(offers).toHaveCount(2);
-  for (const text of ["Dinner", "18:00 · 120分 · 定員8", "¥30,000〜", "子ども ¥12,000"]) await expect(offers.nth(0)).toContainText(text);
-  for (const text of ["tea time", "13:00 · 120分 · 定員8", "¥15,000〜"]) await expect(offers.nth(1)).toContainText(text);
+  // The offers' names are in the tab's language (日本語で書く).
+  for (const text of ["ディナー", "18:00 · 120分 · 定員8", "¥30,000〜", "子ども ¥12,000"]) await expect(offers.nth(0)).toContainText(text);
+  for (const text of ["ティータイム", "13:00 · 120分 · 定員8", "¥15,000〜"]) await expect(offers.nth(1)).toContainText(text);
   await expect(offers.nth(1)).not.toContainText("子ども");
 
   const pageSettings = panel(page, "ページ");
-  await expect(pageSettings.getByRole("radio", { name: "English" })).toBeChecked();
+  await expect(pageSettings.getByRole("radio", { name: "日本語" })).toBeChecked();
+  await expect(pageSettings.getByRole("radiogroup", { name: "書く言語" })).toBeVisible();
   await expect(pageSettings).toContainText("/experiences/kamakura-community-dinner");
   await expect(pageSettings.getByRole("button", { name: "URL をコピー" })).toBeVisible();
 
@@ -155,9 +159,16 @@ test("見どころ gets a row and 保存 says 保存しました; until then 掲
   await expect(listing).toContainText("掲載を止めています");
   const apply = listing.getByRole("button", { name: "掲載を申請" });
   await expect(apply).toBeDisabled();
+  await expect(page.getByRole("status").filter({ hasText: "掲載を止めました" })).toHaveCount(1);
+  // The Japanese changed since the English was confirmed (#110): the new application waits for the English.
+  await expect(listing.getByRole("list", { name: "掲載までに必要" }).getByRole("listitem")).toHaveText(["英語の確定"]);
+  await page.getByRole("tab", { name: /^英語（公開）/ }).click();
+  await page.getByRole("region", { name: "英語の状態" }).getByRole("button", { name: "英語を確定" }).click();
+  await expect(listing).toContainText("保存後に申請できます");
+  await saveButton(page).click();
+  await expect(savedNotice(page)).toBeVisible();
   await listing.getByRole("checkbox", { name: "掲載の条件に同意する" }).check();
   await expect(apply).toBeEnabled();
-  await expect(page.getByRole("status").filter({ hasText: "掲載を止めました" })).toHaveCount(1);
 });
 
 test("a draft: what it needs, a photo and an offer, 保存, the consent and 掲載を申請", async ({ page }) => {
@@ -259,6 +270,8 @@ test("an offer name made only of whitespace is rejected", async ({ page }) => {
 test("申込の設定: an offer's dialog, 並び替え and この商品を削除", async ({ page }) => {
   await signIn(page);
   await openEditor(page, "/host/experiences/community-dinner");
+  // The offers' English names and questions (the prices are the same on 日本語で書く).
+  await page.getByRole("tab", { name: /^英語（公開）/ }).click();
   const offers = panel(page, "申込の設定");
   const rows = offers.getByRole("listitem");
   const dialog = page.getByRole("dialog", { name: "商品の編集" });
@@ -419,7 +432,7 @@ test("a reload asks through the browser, and 保存せずに移動 to another pa
   // A reload: the browser's own prompt (beforeunload), then the page as it was.
   await page.reload();
   expect(browserDialogs).toEqual(["beforeunload"]);
-  await expect(lead).toHaveValue(/^Spend an evening/);
+  await expect(lead).toHaveValue(/^地元の人のように/);
 
   // PC: the sidebar's 体験サイトを見る loads another page. After 保存せずに移動 the browser does not ask a second time.
   if (isDesktop(testInfo.project.name)) {
@@ -447,7 +460,7 @@ test("プレビュー leads to the live experience's public page", async ({ page
 test("another provider's experience keeps ?providerId= on its links", async ({ page }) => {
   await signIn(page);
   await openEditor(page, "/host/experiences/calligraphy?providerId=sample-provider-studio");
-  await expect(page.getByRole("textbox", { name: "題名" })).toHaveValue("Write Your Own Kanji with a Kamakura Calligrapher");
+  await expect(page.getByRole("textbox", { name: "題名" })).toHaveValue("鎌倉の書家と、自分の漢字を書く");
   await expect(page.getByRole("link", { name: "体験へ戻る" })).toHaveAttribute("href", "/host/experiences?providerId=sample-provider-studio");
   const host = panel(page, "迎える人");
   await expect(host).toContainText("サンプル工房");

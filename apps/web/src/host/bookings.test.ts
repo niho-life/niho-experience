@@ -67,8 +67,14 @@ describe("the bookings list", () => {
   it("starts 過去 and 取消済み from the latest day, and puts every booking in one of これから, 過去 and 取消済み", () => {
     expect(shape(list("past"))).toEqual([
       ["10月17日（土）18:00", "2 / 8名", ["Oliver Brown", "Chloé Dubois"]],
+      ["10月13日（火）18:00", "2 / 8名", ["佐藤 由紀"]],
       // A booking the guest did not come to stays a booking (確定): its seat counts.
       ["10月10日（土）18:00", "1 / 8名", ["森 健二", "Liam Walker"]],
+      // Older dinners whose guests wrote a review (#108).
+      ["9月26日（土）18:00", "3 / 8名", ["Lena Novak"]],
+      ["9月12日（土）18:00", "2 / 8名", ["Grace Lee"]],
+      ["9月5日（土）18:00", "1 / 8名", ["Ella Martin"]],
+      ["9月1日（火）18:00", "2 / 8名", ["Jonas Weber"]],
     ]);
     expect(shape(list("cancelled"))).toEqual([["10月15日（木）18:00", "0 / 8名", ["Hannah Kim"]]]);
     for (const booking of MOCK_KITCHEN_BOOKINGS) {

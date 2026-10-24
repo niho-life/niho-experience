@@ -11,8 +11,10 @@ import {
   bookingOf,
   bookingThreadOf,
   editorExperience,
+  googleConnectionPreview,
   hostConsoleSnapshot,
   hostHome,
+  reviewList,
   salesList,
   sessionOf,
   threadList,
@@ -21,6 +23,7 @@ import {
   type HostBookingLookup,
   type HostEditorExperience,
   type HostHomeData,
+  type HostReviewList,
   type HostSalesList,
   type HostSessionLookup,
   type HostThreadList,
@@ -28,7 +31,7 @@ import {
 } from "./console-data";
 import { bookingConversations, type BookingConversation } from "./messages";
 import type { HostNotice, HostPayoutLoad } from "./payout";
-import type { HostExperience, HostSettings } from "./types";
+import type { HostExperience, HostGoogleConnection, HostSettings } from "./types";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -62,6 +65,8 @@ export interface HostConsoleData {
   home: HostHomeData;
   experiences: readonly HostExperience[];
   settings: HostSettings;
+  /** The Google account 設定 › カレンダー's つなぐ connects in the preview; null in http mode (not connectable yet). */
+  googleConnection: HostGoogleConnection | null;
 }
 
 /** The session when its ID token can still be sent (the console layout refreshes it otherwise). */
@@ -94,10 +99,13 @@ async function loadProviderDetail(providerId: string): Promise<{ provider: HostP
  * The provider's own fields come from NIHO's provider detail in both modes, falling back
  * to the list. The (client) settings form gets display fields and, for its actions, the
  * provider's id (already in `?providerId=`) and the ids of the owner's spots it may share;
- * never NIHO's other internal ids (the owner's user, the vessel spot).
+ * never NIHO's other internal ids (the owner's user, the vessel spot). The notification
+ * settings are the owner's only, as NIHO answers them (niho-app spec §17.4).
  */
 export async function loadHostConsoleData(provider: HostProvider): Promise<HostConsoleData> {
-  const snapshot = hostConsoleSnapshot(provider.id, isHostMock() ? "mock" : "http", Date.now());
+  const mode = isHostMock() ? "mock" : "http";
+  const session = await readHostSession();
+  const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now(), session?.mockScenario);
   const detail = await loadProviderDetail(provider.id);
   const known = detail?.provider ?? provider;
   return {
@@ -113,8 +121,10 @@ export async function loadHostConsoleData(provider: HostProvider): Promise<HostC
       // Unknown without the detail: NIHO still checks it when the review is requested.
       consentCurrent: detail ? detail.provider.consentVersion === detail.consent.version : true,
       meetingPoint: snapshot.meetingPoint,
-      notificationEmail: snapshot.notificationEmail,
+      calendar: snapshot.calendar,
+      notifications: provider.memberRole === "OWNER" ? snapshot.notifications : null,
     },
+    googleConnection: googleConnectionPreview(mode),
   };
 }
 
@@ -219,6 +229,29 @@ export async function loadHostMessages(provider: HostProvider, requested: { thre
     now: snapshot.now,
     list: threadList(snapshot, mode),
     requested: requested.thread ? threadOf(snapshot, mode, requested.thread) : requested.booking ? bookingThreadOf(snapshot, mode, requested.booking) : null,
+    experiences: snapshot.experiences.map(({ id, title }) => ({ id, title })),
+  };
+}
+
+export interface HostReviewsData {
+  /** The moment a reply or a report is dated with (the preview's fixed one in mock mode). */
+  now: string;
+  list: HostReviewList;
+  /** The provider's experiences' titles, for the select and each review's session line. */
+  experiences: { id: string; title: string }[];
+}
+
+/**
+ * レビュー (#108): the provider's reviews, published or still checked by NIHO: synthetic in mock
+ * mode, nothing yet in http mode (the page says 準備中). The client screen gets the reviews and the
+ * experiences' titles.
+ */
+export function loadHostReviews(provider: Pick<HostProvider, "id">): HostReviewsData {
+  const mode = isHostMock() ? "mock" : "http";
+  const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now());
+  return {
+    now: snapshot.now,
+    list: reviewList(snapshot, mode),
     experiences: snapshot.experiences.map(({ id, title }) => ({ id, title })),
   };
 }

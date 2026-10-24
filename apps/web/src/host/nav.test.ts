@@ -32,7 +32,10 @@ describe("host navigation", () => {
     // メッセージ is a screen under ホーム (#106), not a menu item of its own.
     expect(selected("/host/messages")).toEqual(["ホーム"]);
     expect(selected("/host/messages/?providerId=sample-provider-kitchen&thread=th-3012")).toEqual(["ホーム"]);
+    // So is レビュー (#108).
+    expect(selected("/host/reviews?providerId=sample-provider-kitchen&experience=community-dinner#review-rv-5020")).toEqual(["ホーム"]);
     expect(selected("/host/messages-archive")).toEqual([]);
+    expect(selected("/host/reviewsx")).toEqual([]);
     expect(selected("/host/experiences-archive")).toEqual([]);
     expect(selected("/host/homework")).toEqual([]);
     expect(selected("/host/register")).toEqual([]);
@@ -69,6 +72,14 @@ describe("host navigation", () => {
     expect(hostBackLink("/host/messages", "thread=")).toEqual(home);
   });
 
+  it("leads レビュー back to ホーム, whatever experience or review it shows", () => {
+    const home = { href: "/host/home", label: "ホーム" };
+    expect(hostBackLink("/host/reviews")).toEqual(home);
+    expect(hostBackLink("/host/reviews", "providerId=sample-provider-kitchen&experience=community-dinner")).toEqual(home);
+    expect(hostBackLink("/host/reviews#review-rv-5020")).toEqual(home);
+    expect(providerSwitchPath("/host/reviews")).toBe("/host/reviews");
+  });
+
   it("switches the provider on the same page, or on the section of a page under it", () => {
     expect(providerSwitchPath("/host/messages")).toBe("/host/messages");
     expect(providerSwitchPath("/host/bookings/")).toBe("/host/bookings");
@@ -84,5 +95,9 @@ describe("host navigation", () => {
     expect(withProvider("/host/bookings?filter=pending", "sample-provider-studio")).toBe("/host/bookings?filter=pending&providerId=sample-provider-studio");
     expect(withQuery("/host/bookings", { filter: null, booking: "bk 1&2" })).toBe("/host/bookings?booking=bk+1%262");
     expect(withQuery("/host/bookings?booking=a", { booking: "b" })).toBe("/host/bookings?booking=b");
+    // A hash (one review, #108) stays at the end.
+    expect(withProvider("/host/reviews#review-rv-5020", "sample-provider-kitchen")).toBe("/host/reviews?providerId=sample-provider-kitchen#review-rv-5020");
+    expect(withQuery("/host/reviews?experience=a#review-x", { providerId: "p" })).toBe("/host/reviews?experience=a&providerId=p#review-x");
+    expect(withProvider("/host/reviews#review-x", null)).toBe("/host/reviews#review-x");
   });
 });

@@ -1,16 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, type ChangeEvent } from "react";
+import { useEffect, useId, useRef, type ChangeEvent, type ReactNode } from "react";
 import { EDITOR_LIMITS, makeCover } from "@/host/editor";
-import type { HostExperienceContent, HostExperienceMeeting, HostExperiencePhoto, HostTimelineStep } from "@/host/types";
+import type { HostExperienceContent, HostExperienceMeeting, HostExperiencePhoto, HostPageTextField, HostTimelineStep } from "@/host/types";
 import { AddRowButton, DISABLED, EditorPanel, FIELD_LABEL, LIST_INPUT, LIST_INPUT_SUB, LIST_INPUT_TIME, RemoveButton, SUB_HEADING, TextList, useFocusAfterRender } from "./editor-parts";
 import { INPUT, TEXTAREA } from "./fields";
+import { HostConditionsPanel } from "./HostConditionDialog";
+import { ChangedMark } from "./HostEditorEnglish";
 import { consoleButtonClass } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { InitialAvatar } from "./ui";
 
 type Update = (patch: Partial<HostExperienceContent>) => void;
+
+/** The words' language: Japanese on 日本語で書く, English otherwise (#110). */
+type TextLang = "ja" | "en";
 
 /**
  * Photos picked in this browser, shown from object URLs until uploading arrives with
@@ -114,15 +119,17 @@ function PhotosPanel({ photos, onChange, toPhoto }: { photos: readonly HostExper
   );
 }
 
-/** 当日の流れ: a time, a title and a line per step. */
-function TimelinePanel({ steps, onChange }: { steps: readonly HostTimelineStep[]; onChange: (steps: HostTimelineStep[]) => void }) {
+/** 当日の流れ: a time, a title and a line per step. The time is shared by both languages; a new step gets a local id. */
+function TimelinePanel({ steps, lang, marker, onChange }: { steps: readonly HostTimelineStep[]; lang: TextLang; marker: ReactNode; onChange: (steps: HostTimelineStep[]) => void }) {
   const baseId = useId();
   const focusLater = useFocusAfterRender();
+  const added = useRef(0);
   const { items, title: titleLength, text: textLength } = EDITOR_LIMITS.timeline;
   const full = steps.length >= items;
   const add = () => {
     focusLater(`${baseId}-${steps.length}-title`);
-    onChange([...steps, { time: "", title: "", text: "" }]);
+    added.current += 1;
+    onChange([...steps, { id: `local-step-${added.current}`, time: "", title: "", text: "" }]);
   };
   const remove = (index: number) => {
     const left = steps.length - 1;
@@ -134,6 +141,7 @@ function TimelinePanel({ steps, onChange }: { steps: readonly HostTimelineStep[]
     <EditorPanel
       id="editor-timeline"
       title="当日の流れ"
+      marker={marker}
       actions={
         steps.length && !full ? (
           <button id={`${baseId}-add`} type="button" onClick={add} className={consoleButtonClass("secondary", "sm")}>
@@ -146,7 +154,7 @@ function TimelinePanel({ steps, onChange }: { steps: readonly HostTimelineStep[]
       {steps.length ? (
         <ol>
           {steps.map((step, index) => (
-            <li key={index} className="flex items-start gap-2 border-t border-line py-3 first:border-t-0 first:pt-0 last:pb-0">
+            <li key={step.id} className="flex items-start gap-2 border-t border-line py-3 first:border-t-0 first:pt-0 last:pb-0">
               <input
                 id={`${baseId}-${index}-time`}
                 aria-label={`当日の流れ ${index + 1} の時刻`}
@@ -163,6 +171,7 @@ function TimelinePanel({ steps, onChange }: { steps: readonly HostTimelineStep[]
                 <input
                   id={`${baseId}-${index}-title`}
                   aria-label={`当日の流れ ${index + 1} の題`}
+                  lang={lang}
                   value={step.title}
                   maxLength={titleLength}
                   placeholder="題"
@@ -171,6 +180,7 @@ function TimelinePanel({ steps, onChange }: { steps: readonly HostTimelineStep[]
                 />
                 <input
                   aria-label={`当日の流れ ${index + 1} の一言`}
+                  lang={lang}
                   value={step.text}
                   maxLength={textLength}
                   placeholder="一言"
@@ -190,27 +200,35 @@ function TimelinePanel({ steps, onChange }: { steps: readonly HostTimelineStep[]
   );
 }
 
-/** 集合場所: what the public page says, what booked guests receive, and the building's photo. */
-function MeetingPanel({ meeting, onChange, toPhoto }: { meeting: HostExperienceMeeting; onChange: (meeting: HostExperienceMeeting) => void; toPhoto: (file: File) => HostExperiencePhoto }) {
+/** 集合場所: what the public page says, what booked guests receive, and the building's photo (shared by both languages). */
+function MeetingPanel({ meeting, lang, marker, onChange, toPhoto }: { meeting: HostExperienceMeeting; lang: TextLang; marker: ReactNode; onChange: (meeting: HostExperienceMeeting) => void; toPhoto: (file: File) => HostExperiencePhoto }) {
   const input = useRef<HTMLInputElement>(null);
   const pick = (event: ChangeEvent<HTMLInputElement>) => {
     const [file] = imagesOf(event);
     if (file) onChange({ ...meeting, exteriorPhotoUrl: toPhoto(file).url });
   };
   return (
-    <EditorPanel id="editor-meeting" title="集合場所">
+    <EditorPanel id="editor-meeting" title="集合場所" marker={marker}>
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="editor-meeting-area" className={FIELD_LABEL}>
             公開する集合エリア
           </label>
-          <input id="editor-meeting-area" value={meeting.area} maxLength={EDITOR_LIMITS.meetingArea} placeholder="例: Near Kamakura Station, 5-minute walk" onChange={(event) => onChange({ ...meeting, area: event.currentTarget.value })} className={INPUT} />
+          <input
+            id="editor-meeting-area"
+            lang={lang}
+            value={meeting.area}
+            maxLength={EDITOR_LIMITS.meetingArea}
+            placeholder={lang === "en" ? "例: Near Kamakura Station, 5-minute walk" : "例: 鎌倉駅から歩いて 5 分"}
+            onChange={(event) => onChange({ ...meeting, area: event.currentTarget.value })}
+            className={INPUT}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="editor-meeting-entrance" className={FIELD_LABEL}>
             入口の案内（予約確定後）
           </label>
-          <textarea id="editor-meeting-entrance" rows={3} value={meeting.entrance} maxLength={EDITOR_LIMITS.entrance} onChange={(event) => onChange({ ...meeting, entrance: event.currentTarget.value })} className={TEXTAREA} />
+          <textarea id="editor-meeting-entrance" lang={lang} rows={3} value={meeting.entrance} maxLength={EDITOR_LIMITS.entrance} onChange={(event) => onChange({ ...meeting, entrance: event.currentTarget.value })} className={TEXTAREA} />
         </div>
         <div className="flex flex-col gap-1.5">
           <span id="editor-meeting-exterior" className={FIELD_LABEL}>
@@ -239,31 +257,61 @@ function MeetingPanel({ meeting, onChange, toPhoto }: { meeting: HostExperienceM
   );
 }
 
+export interface HostEditorContentProps {
+  /** The page as the tab shows it (page-english.ts contentInTab). */
+  content: HostExperienceContent;
+  update: Update;
+  host: { name: string; bio: string };
+  settingsHref: string;
+  /** The words' language. */
+  lang: TextLang;
+  /** 英語（公開）of a page written in Japanese: its English title first (the header keeps the Japanese one). */
+  englishTitle?: boolean;
+  /** The fields whose Japanese changed since the English was made (日本語を変えました), on 英語（公開）. */
+  changed?: ReadonlySet<HostPageTextField>;
+}
+
 /**
  * The left column (mock v2 `.content`): one panel per section, in the order the public
- * page shows them. Everything here is kept by 保存.
+ * page shows them. Everything here is kept by 保存. A page written in Japanese shows it per tab
+ * (#110): the words in the tab's language, the photos, times and choices the same on both.
  */
-export function HostEditorContent({ content, update, host, settingsHref }: { content: HostExperienceContent; update: Update; host: { name: string; bio: string }; settingsHref: string }) {
+export function HostEditorContent({ content, update, host, settingsHref, lang, englishTitle = false, changed }: HostEditorContentProps) {
   const toPhoto = useLocalPhotos();
   const { list, highlights, knowBeforeYouGo } = EDITOR_LIMITS;
+  const mark = (field: HostPageTextField) => (changed?.has(field) ? <ChangedMark /> : null);
   return (
     <div className="flex min-w-0 flex-col gap-3.5">
+      {englishTitle ? (
+        <EditorPanel id="editor-english-title" title="英語の題名" marker={mark("title")}>
+          <input aria-labelledby="editor-english-title" lang="en" value={content.title} maxLength={EDITOR_LIMITS.title} onChange={(event) => update({ title: event.currentTarget.value })} className={INPUT} />
+        </EditorPanel>
+      ) : null}
+
       <PhotosPanel photos={content.photos} onChange={(photos) => update({ photos })} toPhoto={toPhoto} />
 
-      <EditorPanel id="editor-lead" title="ひとこと紹介">
-        <textarea aria-labelledby="editor-lead" rows={3} value={content.lead} maxLength={EDITOR_LIMITS.lead} onChange={(event) => update({ lead: event.currentTarget.value })} className={TEXTAREA} />
+      <EditorPanel id="editor-lead" title="ひとこと紹介" marker={mark("lead")}>
+        <textarea aria-labelledby="editor-lead" lang={lang} rows={3} value={content.lead} maxLength={EDITOR_LIMITS.lead} onChange={(event) => update({ lead: event.currentTarget.value })} className={TEXTAREA} />
       </EditorPanel>
 
-      <EditorPanel id="editor-day-language" title="当日の言語">
-        <input aria-labelledby="editor-day-language" value={content.dayLanguage} maxLength={EDITOR_LIMITS.dayLanguage} placeholder="例: English and Japanese" onChange={(event) => update({ dayLanguage: event.currentTarget.value })} className={`${INPUT} md:max-w-[240px]`} />
+      <EditorPanel id="editor-day-language" title="当日の言語" marker={mark("dayLanguage")}>
+        <input
+          aria-labelledby="editor-day-language"
+          lang={lang}
+          value={content.dayLanguage}
+          maxLength={EDITOR_LIMITS.dayLanguage}
+          placeholder={lang === "en" ? "例: English and Japanese" : "例: 英語と日本語"}
+          onChange={(event) => update({ dayLanguage: event.currentTarget.value })}
+          className={`${INPUT} md:max-w-[240px]`}
+        />
       </EditorPanel>
 
-      <EditorPanel id="editor-highlights" title="見どころ">
-        <TextList label="見どころ" values={content.highlights} max={highlights.items} maxLength={highlights.length} onChange={(values) => update({ highlights: values })} />
+      <EditorPanel id="editor-highlights" title="見どころ" marker={mark("highlights")}>
+        <TextList label="見どころ" lang={lang} values={content.highlights} max={highlights.items} maxLength={highlights.length} onChange={(values) => update({ highlights: values })} />
       </EditorPanel>
 
-      <EditorPanel id="editor-description" title="詳しい説明">
-        <textarea aria-labelledby="editor-description" rows={5} value={content.description} maxLength={EDITOR_LIMITS.description} onChange={(event) => update({ description: event.currentTarget.value })} className={TEXTAREA} />
+      <EditorPanel id="editor-description" title="詳しい説明" marker={mark("description")}>
+        <textarea aria-labelledby="editor-description" lang={lang} rows={5} value={content.description} maxLength={EDITOR_LIMITS.description} onChange={(event) => update({ description: event.currentTarget.value })} className={TEXTAREA} />
       </EditorPanel>
 
       <EditorPanel id="editor-included" title="含まれるもの・含まれないもの">
@@ -271,27 +319,35 @@ export function HostEditorContent({ content, update, host, settingsHref }: { con
         <div className="@container">
           <div className="grid gap-4 @lg:grid-cols-2 @lg:gap-5">
             <div className="min-w-0">
-              <h3 className={SUB_HEADING}>含まれるもの</h3>
-              <TextList label="含まれるもの" values={content.included} max={list.items} maxLength={list.length} onChange={(values) => update({ included: values })} />
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className={SUB_HEADING}>含まれるもの</h3>
+                {changed?.has("included") ? <span className="mb-2">{mark("included")}</span> : null}
+              </div>
+              <TextList label="含まれるもの" lang={lang} values={content.included} max={list.items} maxLength={list.length} onChange={(values) => update({ included: values })} />
             </div>
             <div className="min-w-0">
-              <h3 className={SUB_HEADING}>含まれないもの</h3>
-              <TextList label="含まれないもの" values={content.notIncluded} max={list.items} maxLength={list.length} onChange={(values) => update({ notIncluded: values })} />
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className={SUB_HEADING}>含まれないもの</h3>
+                {changed?.has("notIncluded") ? <span className="mb-2">{mark("notIncluded")}</span> : null}
+              </div>
+              <TextList label="含まれないもの" lang={lang} values={content.notIncluded} max={list.items} maxLength={list.length} onChange={(values) => update({ notIncluded: values })} />
             </div>
           </div>
         </div>
       </EditorPanel>
 
-      <EditorPanel id="editor-not-suitable" title="向かない人">
-        <TextList label="向かない人" values={content.notSuitableFor} max={list.items} maxLength={list.length} onChange={(values) => update({ notSuitableFor: values })} />
+      <EditorPanel id="editor-not-suitable" title="向かない人" marker={mark("notSuitableFor")}>
+        <TextList label="向かない人" lang={lang} values={content.notSuitableFor} max={list.items} maxLength={list.length} onChange={(values) => update({ notSuitableFor: values })} />
       </EditorPanel>
 
-      <TimelinePanel steps={content.timeline} onChange={(timeline) => update({ timeline })} />
+      <HostConditionsPanel conditions={content.conditions} lang={lang} marker={mark("conditions")} onChange={(conditions) => update({ conditions })} />
 
-      <MeetingPanel meeting={content.meeting} onChange={(meeting) => update({ meeting })} toPhoto={toPhoto} />
+      <TimelinePanel steps={content.timeline} lang={lang} marker={mark("timeline")} onChange={(timeline) => update({ timeline })} />
 
-      <EditorPanel id="editor-know" title="注意事項">
-        <TextList label="注意事項" values={content.knowBeforeYouGo} max={knowBeforeYouGo.items} maxLength={knowBeforeYouGo.length} onChange={(values) => update({ knowBeforeYouGo: values })} />
+      <MeetingPanel meeting={content.meeting} lang={lang} marker={mark("meeting")} onChange={(meeting) => update({ meeting })} toPhoto={toPhoto} />
+
+      <EditorPanel id="editor-know" title="注意事項" marker={mark("knowBeforeYouGo")}>
+        <TextList label="注意事項" lang={lang} values={content.knowBeforeYouGo} max={knowBeforeYouGo.items} maxLength={knowBeforeYouGo.length} onChange={(values) => update({ knowBeforeYouGo: values })} />
       </EditorPanel>
 
       {/* The host's name and introduction live in 設定 › 提供者情報, shared by every experience. */}

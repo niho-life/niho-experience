@@ -23,8 +23,10 @@ vi.mock("@/lib/host/server", async (importActual) => {
 });
 
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
-import { hostPageContext, loadHostBookings, loadHostConsoleData, loadHostMessages, loadHostPayout, loadHostSales, loadHostSession, loadRegistrationConsent } from "./data";
+import { hostPageContext, loadHostBookings, loadHostConsoleData, loadHostMessages, loadHostPayout, loadHostReviews, loadHostSales, loadHostSession, loadRegistrationConsent } from "./data";
+import { GOOGLE_NOT_CONNECTED } from "./calendar";
 import { HOST_ERROR_REASON_TEXT } from "./errors";
+import { MOCK_GOOGLE_CONNECTION } from "./mock/provider";
 import { MOCK_SALES_PERIOD } from "./mock/sales";
 
 /** A provider as the host contract shapes it (synthetic values). */
@@ -83,10 +85,23 @@ describe("loadHostConsoleData", () => {
       reviewStatus: "APPROVED",
       consentCurrent: true,
       meetingPoint: expect.objectContaining({ area: "Near Kamakura Station, 5-minute walk" }),
-      notificationEmail: "kitchen@example.com",
+      calendar: { google: expect.objectContaining({ status: "connected", account: "kitchen@example.com" }), icsUrl: expect.stringMatching(/^https:\/\/calendar\.example\.com\//) },
+      notifications: { email: { addresses: ["kitchen@example.com"] }, items: expect.any(Array) },
     });
+    expect(data.googleConnection).toBe(MOCK_GOOGLE_CONNECTION);
     expect(data.experiences).toHaveLength(3);
-    expect(data.home.todos).toHaveLength(7);
+    expect(data.home.todos).toHaveLength(10);
+  });
+
+  it("mock: the notification settings are the owner's only, as NIHO answers them", async () => {
+    const data = await loadHostConsoleData(STUDIO);
+    expect(data.settings.notifications).toBeNull();
+    expect(data.settings.calendar.google).toEqual(GOOGLE_NOT_CONNECTED);
+  });
+
+  it("mock: ?mock=calendar-revoked shows the kitchen's calendar as revoked", async () => {
+    state.scenario = "calendar-revoked";
+    expect((await loadHostConsoleData(KITCHEN)).settings.calendar.google).toMatchObject({ status: "revoked", account: "kitchen@example.com" });
   });
 
   it("mock: the studio is a business still in draft", async () => {
@@ -110,8 +125,11 @@ describe("loadHostConsoleData", () => {
       reviewStatus: "REQUESTED",
       consentCurrent: true,
       meetingPoint: { area: "", mapUrl: "", entrance: "" },
-      notificationEmail: "",
+      calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
+      notifications: { email: { addresses: [] }, items: [] },
     });
+    // Nothing to connect until NIHO's Google connection is in the host contract.
+    expect(data.googleConnection).toBeNull();
     expect(data.experiences).toEqual([]);
     expect(data.home).toEqual({ todos: [], sessions: { today: [], tomorrow: [], later: [] }, month: null });
     // A provider who agreed to older terms cannot ask for the review until NIHO sorts it out.
@@ -137,7 +155,7 @@ describe("loadHostBookings", () => {
   it("mock: the kitchen's bookings, the one ?booking= names, and the experiences without their pages", async () => {
     const data = await loadHostBookings(KITCHEN, "bk-2041");
     expect([data.today, data.now]).toEqual(["2026-10-21", "2026-10-21T15:30"]);
-    expect(data.list.status === "ready" && data.list.bookings).toHaveLength(13);
+    expect(data.list.status === "ready" && data.list.bookings).toHaveLength(18);
     expect(data.requested).toMatchObject({ status: "ready", booking: { id: "bk-2041", guest: "Lucas & Mia Chen" } });
     expect(data.experiences[0]).toEqual({
       id: "community-dinner",
@@ -205,6 +223,27 @@ describe("loadHostMessages", () => {
     const calls = stubNiho(() => new Response("unexpected", { status: 500 }));
     const data = await loadHostMessages(KITCHEN, { thread: "th-3012", booking: null });
     expect([data.list, data.requested]).toEqual([{ status: "unavailable" }, { status: "unavailable" }]);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("loadHostReviews", () => {
+  it("mock: the kitchen's reviews, the preview's moment and the experiences' titles; the studio has none", () => {
+    const data = loadHostReviews(KITCHEN);
+    expect(data.now).toBe("2026-10-21T15:30");
+    expect(data.list.status === "ready" && data.list.reviews.map((review) => review.id)).toEqual(["rv-5020", "rv-5013", "rv-4926", "rv-4912", "rv-4906", "rv-4902"]);
+    expect(data.experiences).toEqual([
+      { id: "community-dinner", title: "Kamakura Community Dinner with Locals" },
+      { id: "kintsugi", title: "Mend a Broken Bowl with a Kamakura Restorer" },
+      { id: "coffee", title: "Roast Your Own Coffee in a Kamakura Living Room" },
+    ]);
+    expect(loadHostReviews(STUDIO).list).toEqual({ status: "ready", reviews: [] });
+  });
+
+  it("http: nothing to read until NIHO's API has the reviews (#87)", () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => new Response("unexpected", { status: 500 }));
+    expect(loadHostReviews(KITCHEN).list).toEqual({ status: "unavailable" });
     expect(calls).toEqual([]);
   });
 });

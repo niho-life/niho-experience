@@ -2,21 +2,21 @@
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { saveProviderProfile, submitProviderReview } from "@/host/actions";
+import { notificationChanges, notificationPanelView, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
-import { PROVIDER_REVIEW_STATUS, type StatusLabel } from "@/host/status";
-import type { HostSettings } from "@/host/types";
+import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
+import type { HostGoogleConnection, HostNotificationKey, HostSettings } from "@/host/types";
 import type { HostProviderRole } from "@/lib/host/providers";
 import { DISABLED } from "./editor-parts";
 import { FIELD_DISABLED, FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
+import { HostCalendarPanel } from "./HostCalendarPanel";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { consoleButtonClass } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { HostNoticeLine } from "./HostNoticeLine";
+import { HostNotificationPanel } from "./HostNotificationPanel";
 import { HostPayoutPanel } from "./HostPayoutPanel";
 import { StatusPill } from "./ui";
-
-/** Parts NIHO cannot keep yet: shown, but not to be filled in. */
-const PREPARING: StatusLabel = { label: "準備中", tone: "draft" };
 
 /** The fields of 提供者情報 that differ from what NIHO has (the seller page only for the owner). */
 function changedFields(saved: ProviderProfile, now: ProviderProfile, owner: boolean): Partial<ProviderProfile> {
@@ -34,7 +34,9 @@ export interface HostSettingsFormProps {
   payout: HostPayoutLoad;
   /** What Stripe's way back (`?connect=`) led to. */
   connectNotice: HostNotice | null;
-  /** Mock mode: the parts NIHO cannot keep yet (集合案内・通知) can be tried on screen. */
+  /** The Google account カレンダー's つなぐ connects in the preview; null in http mode. */
+  googleConnection: HostGoogleConnection | null;
+  /** Mock mode: the parts NIHO cannot keep yet (集合案内・カレンダー・通知) can be tried on screen. */
   preview: boolean;
   /** The account panel, passed in because its sign-out form cannot sit inside this form. */
   account: ReactNode;
@@ -43,11 +45,16 @@ export interface HostSettingsFormProps {
 /**
  * 設定 (mock v2): one panel per group and one 保存. 提供者情報 is NIHO's (#88/#91): 保存 sends
  * the fields that changed to the provider API and shows what NIHO kept; a reviewed provider is
- * asked first, as saving sends it back to review. 審査を申請 and the payout account work on
- * their own. 既定の集合案内 and 通知 have no API yet: the preview keeps them on screen only, and
- * http mode shows them as 準備中.
+ * asked first, as saving sends it back to review. 審査を申請, the payout account and カレンダー
+ * (#109) work on their own. 既定の集合案内 and 通知 (#109: the three notifications the host may
+ * stop) are kept by 保存 but have no API yet: the preview keeps them on screen only, and http mode
+ * shows them as 準備中.
+ *
+ * Only 提供者情報 and the payout account sit inside the <form>: カレンダー's dialogs are forms of
+ * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
+ * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, preview, account }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, preview, account }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
@@ -59,6 +66,9 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const [notice, setNotice] = useState<HostNotice | null>(null);
   const [reviewNotice, setReviewNotice] = useState<HostNotice | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const notificationView = notificationPanelView(settings.notifications, role, preview);
+  const [savedNotifications, setSavedNotifications] = useState(notificationView.kind === "owner" ? notificationView.rows : []);
+  const [notifications, setNotifications] = useState(savedNotifications);
   const [saving, startSaving] = useTransition();
   const [submitting, startSubmitting] = useTransition();
   const stay = useRef<HTMLButtonElement>(null);
@@ -89,10 +99,25 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
     setNotice(null);
   };
 
+  const toggle = (key: HostNotificationKey, enabled: boolean) => {
+    setNotifications((current) => toggleNotification(current, key, enabled));
+    setNotice(null);
+  };
+
+  /**
+   * The notifications that changed, "saved" as they are on screen (the preview keeps nothing).
+   * TODO(#87): PATCH them to NIHO's notification settings (niho-app#19315, OWNER only) once the host
+   * contract has it, and show what NIHO answers.
+   */
+  const keepNotifications = () => {
+    if (Object.keys(notificationChanges(savedNotifications, notifications)).length > 0) setSavedNotifications(notifications);
+  };
+
   const commit = () => {
     setNotice(null);
     // Nothing of NIHO's changed: the preview's on-screen parts are "saved" as they are.
     if (!unsaved) {
+      keepNotifications();
       setNotice({ tone: "success", message: "保存しました" });
       return;
     }
@@ -105,6 +130,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
       setSaved(result.profile);
       setProfile(result.profile);
       setReviewStatus(result.reviewStatus);
+      keepNotifications();
       setNotice({ tone: "success", message: result.message });
     });
   };
@@ -137,118 +163,118 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
 
   return (
     <>
-      <form id={formId} className="flex flex-col gap-3.5" onSubmit={submit}>
-        <FieldSection id="settings-provider" title="提供者情報" status={reviewStatus ? PROVIDER_REVIEW_STATUS[reviewStatus] : null}>
-          <FieldRow label="掲載名" htmlFor="settings-display-name">
-            <input
-              id="settings-display-name"
-              required
-              maxLength={100}
-              pattern=".*\S.*"
-              title="掲載名を入力してください"
-              value={profile.displayName}
-              onChange={(event) => edit("displayName", event.currentTarget.value)}
-              className={`${INPUT} ${NARROW}`}
-            />
-          </FieldRow>
-          <FieldRow label="種別" labelId="settings-kind-label">
-            <KindSegment name="settings-kind" labelId="settings-kind-label" defaultValue={settings.kind} disabled describedBy={kindHelp} />
-            <p id={kindHelp} className="mt-1 text-xs text-muted">
-              種別を変えるときは NIHO にお問い合わせください。
-            </p>
-          </FieldRow>
-          <FieldRow label="紹介" htmlFor="settings-bio">
-            <textarea id="settings-bio" rows={3} maxLength={4000} value={profile.bio} onChange={(event) => edit("bio", event.currentTarget.value)} className={TEXTAREA} />
-          </FieldRow>
-          <FieldRow label="販売者表示" labelId="settings-seller-label">
-            {/* The seller's legal page (特商法表示): the provider's own site. NIHO's page for providers without one is not in the contract yet. */}
-            <div role="group" aria-labelledby="settings-seller-label" className="flex flex-col gap-1.5">
-              <label className="inline-flex min-h-8 items-center gap-2.5 font-bold">
-                <input type="radio" name="settings-seller-display" value="own-site" defaultChecked disabled={!owner} className="size-4 shrink-0 accent-moss" />
-                自分のサイトに表示する
-              </label>
-              <div className="pl-[26px]">
-                <label htmlFor="settings-seller-url" className="mb-1 block text-xs font-bold text-muted">
-                  特商法表示 URL
-                </label>
-                <input
-                  id="settings-seller-url"
-                  type="url"
-                  inputMode="url"
-                  placeholder="https://"
-                  pattern="https://.+"
-                  title="https:// で始まる URL を入力してください"
-                  maxLength={2048}
-                  value={profile.sellerDisclosureUrl}
-                  disabled={!owner}
-                  aria-describedby={owner ? undefined : sellerOwnerHelp}
-                  onChange={(event) => edit("sellerDisclosureUrl", event.currentTarget.value)}
-                  className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`}
-                />
-                {owner ? null : (
-                  <p id={sellerOwnerHelp} className="mt-1 text-xs text-muted">
-                    特商法表示 URL はオーナーが変えられます。
-                  </p>
-                )}
-              </div>
-              <label className="inline-flex min-h-8 flex-wrap items-center gap-x-2.5 gap-y-1 text-ink-soft">
-                <input type="radio" name="settings-seller-display" value="niho-page" disabled className="size-4 shrink-0" />
-                NIHO のページに表示する（自前サイトがない事業者）
-                <StatusPill status={PREPARING} />
-              </label>
-            </div>
-          </FieldRow>
-          {review ? (
-            <FieldRow label="審査" labelId="settings-review-label">
-              <div role="group" aria-labelledby="settings-review-label" className="flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1">
-                {review.kind === "submit" ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={review.blocker !== null || submitting}
-                      aria-describedby={review.blocker ? reviewWhy : undefined}
-                      onClick={requestReview}
-                      className={consoleButtonClass("secondary", "sm", DISABLED)}
-                    >
-                      {submitting ? "申請しています…" : "審査を申請"}
-                    </button>
-                    {review.blocker ? (
-                      <span id={reviewWhy} className="text-[0.78125rem] text-muted">
-                        {review.blocker}
-                      </span>
-                    ) : null}
-                  </>
-                ) : (
-                  <span className="text-ink-soft">{review.text}</span>
-                )}
-              </div>
-              <HostNoticeLine notice={reviewNotice} className="pt-1" />
+      <div className="flex flex-col gap-3.5">
+        <form id={formId} className="flex flex-col gap-3.5" onSubmit={submit}>
+          <FieldSection id="settings-provider" title="提供者情報" status={reviewStatus ? PROVIDER_REVIEW_STATUS[reviewStatus] : null}>
+            <FieldRow label="掲載名" htmlFor="settings-display-name">
+              <input
+                id="settings-display-name"
+                required
+                maxLength={100}
+                pattern=".*\S.*"
+                title="掲載名を入力してください"
+                value={profile.displayName}
+                onChange={(event) => edit("displayName", event.currentTarget.value)}
+                className={`${INPUT} ${NARROW}`}
+              />
             </FieldRow>
-          ) : (
-            <HostNoticeLine notice={reviewNotice} className="pt-1" />
-          )}
-        </FieldSection>
+            <FieldRow label="種別" labelId="settings-kind-label">
+              <KindSegment name="settings-kind" labelId="settings-kind-label" defaultValue={settings.kind} disabled describedBy={kindHelp} />
+              <p id={kindHelp} className="mt-1 text-xs text-muted">
+                種別を変えるときは NIHO にお問い合わせください。
+              </p>
+            </FieldRow>
+            <FieldRow label="紹介" htmlFor="settings-bio">
+              <textarea id="settings-bio" rows={3} maxLength={4000} value={profile.bio} onChange={(event) => edit("bio", event.currentTarget.value)} className={TEXTAREA} />
+            </FieldRow>
+            <FieldRow label="販売者表示" labelId="settings-seller-label">
+              {/* The seller's legal page (特商法表示): the provider's own site. NIHO's page for providers without one is not in the contract yet. */}
+              <div role="group" aria-labelledby="settings-seller-label" className="flex flex-col gap-1.5">
+                <label className="inline-flex min-h-8 items-center gap-2.5 font-bold">
+                  <input type="radio" name="settings-seller-display" value="own-site" defaultChecked disabled={!owner} className="size-4 shrink-0 accent-moss" />
+                  自分のサイトに表示する
+                </label>
+                <div className="pl-[26px]">
+                  <label htmlFor="settings-seller-url" className="mb-1 block text-xs font-bold text-muted">
+                    特商法表示 URL
+                  </label>
+                  <input
+                    id="settings-seller-url"
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://"
+                    pattern="https://.+"
+                    title="https:// で始まる URL を入力してください"
+                    maxLength={2048}
+                    value={profile.sellerDisclosureUrl}
+                    disabled={!owner}
+                    aria-describedby={owner ? undefined : sellerOwnerHelp}
+                    onChange={(event) => edit("sellerDisclosureUrl", event.currentTarget.value)}
+                    className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`}
+                  />
+                  {owner ? null : (
+                    <p id={sellerOwnerHelp} className="mt-1 text-xs text-muted">
+                      特商法表示 URL はオーナーが変えられます。
+                    </p>
+                  )}
+                </div>
+                <label className="inline-flex min-h-8 flex-wrap items-center gap-x-2.5 gap-y-1 text-ink-soft">
+                  <input type="radio" name="settings-seller-display" value="niho-page" disabled className="size-4 shrink-0" />
+                  NIHO のページに表示する（自前サイトがない事業者）
+                  <StatusPill status={PREPARING_STATUS} />
+                </label>
+              </div>
+            </FieldRow>
+            {review ? (
+              <FieldRow label="審査" labelId="settings-review-label">
+                <div role="group" aria-labelledby="settings-review-label" className="flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1">
+                  {review.kind === "submit" ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={review.blocker !== null || submitting}
+                        aria-describedby={review.blocker ? reviewWhy : undefined}
+                        onClick={requestReview}
+                        className={consoleButtonClass("secondary", "sm", DISABLED)}
+                      >
+                        {submitting ? "申請しています…" : "審査を申請"}
+                      </button>
+                      {review.blocker ? (
+                        <span id={reviewWhy} className="text-[0.78125rem] text-muted">
+                          {review.blocker}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="text-ink-soft">{review.text}</span>
+                  )}
+                </div>
+                <HostNoticeLine notice={reviewNotice} className="pt-1" />
+              </FieldRow>
+            ) : (
+              <HostNoticeLine notice={reviewNotice} className="pt-1" />
+            )}
+          </FieldSection>
 
-        <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} />
+          <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} />
+        </form>
 
-        <FieldSection id="settings-meeting" title="既定の集合案内" status={onScreenOnly ? PREPARING : null}>
+        <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview={preview} />
+
+        <FieldSection id="settings-meeting" title="既定の集合案内" status={onScreenOnly ? PREPARING_STATUS : null}>
           <FieldRow label="公開する集合エリア" htmlFor="settings-meeting-area">
-            <input id="settings-meeting-area" disabled={onScreenOnly} defaultValue={settings.meetingPoint.area} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
+            <input id="settings-meeting-area" form={formId} disabled={onScreenOnly} defaultValue={settings.meetingPoint.area} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
           </FieldRow>
           <FieldRow label="地図 URL" htmlFor="settings-map-url">
-            <input id="settings-map-url" type="url" inputMode="url" placeholder="https://" disabled={onScreenOnly} defaultValue={settings.meetingPoint.mapUrl} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
+            <input id="settings-map-url" form={formId} type="url" inputMode="url" placeholder="https://" disabled={onScreenOnly} defaultValue={settings.meetingPoint.mapUrl} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
           </FieldRow>
           <FieldRow label="入口の案内（予約確定後）" htmlFor="settings-entrance">
-            <textarea id="settings-entrance" rows={3} disabled={onScreenOnly} defaultValue={settings.meetingPoint.entrance} className={`${TEXTAREA} ${FIELD_DISABLED}`} />
+            <textarea id="settings-entrance" form={formId} rows={3} disabled={onScreenOnly} defaultValue={settings.meetingPoint.entrance} className={`${TEXTAREA} ${FIELD_DISABLED}`} />
           </FieldRow>
         </FieldSection>
 
-        <FieldSection id="settings-notification" title="通知" status={onScreenOnly ? PREPARING : null}>
-          <FieldRow label="予約の通知先" htmlFor="settings-notification-email">
-            <input id="settings-notification-email" type="email" inputMode="email" autoComplete="email" disabled={onScreenOnly} defaultValue={settings.notificationEmail} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
-          </FieldRow>
-        </FieldSection>
-      </form>
+        <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} />
+      </div>
 
       <div className="mt-3.5">{account}</div>
 

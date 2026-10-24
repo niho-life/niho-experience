@@ -282,7 +282,7 @@ export function HostSession({ session, now, conversations, providerId }: HostSes
             </Row>
             {session.meetingArea ? (
               <Row label="集合">
-                <span lang={session.pageLanguage}>{session.meetingArea}</span>
+                <span lang="en">{session.meetingArea}</span>
               </Row>
             ) : null}
             <Row label="食べもの">{dietary || <span className="text-muted">{NO_DIETARY_TEXT}</span>}</Row>
