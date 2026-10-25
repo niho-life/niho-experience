@@ -3,7 +3,7 @@ import { buildFixtureExperiences, journeyExtrasFor, reviewsResponseFor, toExperi
 import type { JourneyReviews } from "@niho-experience/api-client";
 import { buildCardModel } from "./card-model";
 import { averageLabel, cardReviewLine, countLabel, monthYear, ratingLabel, reviewDisplay, reviewHeadline, summaryDisplay, withReviewLines } from "./reviews-ui";
-import { experienceJsonLd, reviewsForJsonLd, serializeJsonLd } from "./structured-data";
+import { experienceJsonLd, experienceProductJsonLd, reviewsForJsonLd, serializeJsonLd } from "./structured-data";
 
 const ok = (slug: string): JourneyReviews => journeyExtrasFor(slug).reviews!;
 const INDIGO = "indigo-dyeing-with-an-artisan"; // 12 reviews
@@ -98,6 +98,21 @@ describe("structured data says only what the page shows", () => {
       expect(data.review).toBeUndefined();
     }
     expect(experienceJsonLd(experience, SITE, true, true, reviewsForJsonLd(ok(INDIGO)))).toBeNull();
+  });
+
+  it("gives the Product the same rating and reviews as the TouristTrip, and nothing without them", () => {
+    const reviews = reviewsForJsonLd(ok(INDIGO));
+    const product = experienceProductJsonLd(experience, SITE, false, true, reviews)!;
+    const trip = experienceJsonLd(experience, SITE, false, true, reviews)!;
+    expect(product.aggregateRating).toEqual(trip.aggregateRating);
+    expect(product.review).toEqual(trip.review);
+    expect(JSON.stringify(product)).not.toMatch(/Reply from|Thank you for dyeing|rv-indigo|tags/);
+    for (const hidden of [ok(POTTERY), { status: "unavailable" } as JourneyReviews, null]) {
+      const bare = experienceProductJsonLd(experience, SITE, false, true, reviewsForJsonLd(hidden))!;
+      expect(bare.aggregateRating).toBeUndefined();
+      expect(bare.review).toBeUndefined();
+    }
+    expect(experienceProductJsonLd(experience, SITE, true, true, reviews)).toBeNull();
   });
 
   it("still escapes script-breaking characters in a review", () => {

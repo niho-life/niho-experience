@@ -21,11 +21,12 @@ import { formatDuration, formatYen } from "@/lib/format";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { addMinutesToClock, formatClock, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { seoDescription } from "@/lib/seo-description";
-import { breadcrumbJsonLd, experienceJsonLd, reviewsForJsonLd } from "@/lib/structured-data";
+import { breadcrumbJsonLd, experienceJsonLd, experienceProductJsonLd, reviewsForJsonLd } from "@/lib/structured-data";
 import { iconForText } from "@/lib/themes";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { publicMetadata } from "@/lib/public-metadata";
-import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, japaneseBookingAllowed, type SiteLocale } from "@/lib/localized-content";
+import { experienceAlternates } from "@/lib/locale-metadata";
+import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease, japaneseBookingAllowed, type SiteLocale } from "@/lib/localized-content";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { LocalizedLink as Link } from "@/components/LocalizedLink";
 import { AskHost } from "@/components/AskHost";
@@ -53,15 +54,17 @@ export async function englishExperienceMetadata({ params, searchParams }: Omit<E
   const description = seoDescription(e.lead);
   // The public image DTO has no rights/OG approval flag. Do not publish a
   // provisional image as a share image until approved photos are available.
-  return publicMetadata(e.title, description, e.canonicalUrl);
+  return { ...publicMetadata(e.title, description, e.canonicalUrl), alternates: await experienceAlternates(e.slug, e.canonicalUrl) };
 }
 export async function japaneseExperienceMetadata({ params }: Omit<ExperiencePageContentProps, "locale">): Promise<Metadata> {
   try {
     const slug = (await params).slug;
-    const [detail, copy] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy()]);
-    assertSameJapaneseRelease(copy.releaseId, detail);
+    // The /ja layout renders nothing but "unavailable" without the static release: no hreflang or index for that.
+    const [detail, copy, release] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), getPreparedJapaneseStaticRelease()]);
+    assertSameJapaneseRelease(copy.releaseId, detail, release);
     const canonical = `${config.siteUrl}/ja/experiences/${detail.experience.slug}`;
-    return { title: detail.experience.title, description: seoDescription(detail.experience.lead), alternates: { canonical }, robots: config.indexingAllowed ? undefined : { index: false, follow: false }, openGraph: { title: detail.experience.title, description: seoDescription(detail.experience.lead), url: canonical, locale: "ja_JP", images: [] } };
+    const english = `${config.siteUrl}/experiences/${detail.experience.slug}`;
+    return { title: detail.experience.title, description: seoDescription(detail.experience.lead), alternates: { canonical, languages: { en: english, ja: canonical, "x-default": english } }, robots: config.indexingAllowed ? undefined : { index: false, follow: false }, openGraph: { title: detail.experience.title, description: seoDescription(detail.experience.lead), url: canonical, locale: "ja_JP", images: [] } };
   } catch { return { title: "Japanese experience unavailable", robots: { index: false, follow: false } }; }
 }
 
@@ -496,7 +499,12 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     return <DetailViewV1 model={model} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} headings={{ overview: blockText(props, "overviewHeading", copy.text("detail.whatYouDo")), details: blockText(props, "detailsHeading", copy.text("detail.timeline")) }} />;
   };
   return <>
-    {locale === "en" ? <><TrackView event="experience_view" props={{ experience: e.slug }} /><JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Experiences", path: "/experiences" }, { name: e.title, path: `/experiences/${e.slug}` }])} /><JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, config.bookingsEnabled, reviewsForJsonLd(journey.reviews))} /></> : null}
+    {locale === "en" ? <TrackView event="experience_view" props={{ experience: e.slug }} /> : null}
+    <JsonLd data={breadcrumbJsonLd(config.siteUrl, locale === "ja"
+      ? [{ name: "ホーム", path: "/ja" }, { name: copy.text("chrome.experiences"), path: "/ja/experiences" }, { name: e.title, path: `/ja/experiences/${e.slug}` }]
+      : [{ name: "Home", path: "/" }, { name: "Experiences", path: "/experiences" }, { name: e.title, path: `/experiences/${e.slug}` }])} />
+    <JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
+    <JsonLd data={experienceProductJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     {portableDetail()}
     <MobileBookingBar summary={booking} />
   </>;
