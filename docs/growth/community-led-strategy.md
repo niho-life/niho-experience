@@ -142,6 +142,7 @@ GetYourGuideは予約管理システムとの接続を提供しており、対�
 - [30日間の流入検証計画](pilot-30day-plan.md)：販売開始の条件、施策の実行判断、振り返り
 - [集客の文案と掲示物](launch-kit.md)：紹介カードや案内の準備
 - [英語検索向けコンテンツ方針](seo-content-policy.md)：検索に届ける内容と公開条件
+- [SEO・AIO 育成戦略](seo-growth-strategy.md)：需要の実測、勝ち筋、被リンク・記事・動画の優先順位（#156）
 - [運営分担](../content/operations.md)：提供者とNIHOの現在の業務分担
 - [商品台帳](../content/product-ledger.md)：商品ごとの公開・販売条件
 
