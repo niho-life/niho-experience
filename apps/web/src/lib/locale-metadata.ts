@@ -2,7 +2,7 @@ import "server-only";
 import type { Metadata } from "next";
 import type { PageId } from "./page-document-contract";
 import { config } from "./config";
-import { getPreparedJapaneseStaticRelease } from "./localized-content";
+import { getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
 
 export async function englishAlternates(sourcePath: string, indexable = true): Promise<Metadata["alternates"]> {
   const canonical = `${config.siteUrl}${sourcePath === "/" ? "/" : sourcePath}`;
@@ -12,6 +12,17 @@ export async function englishAlternates(sourcePath: string, indexable = true): P
     const page = release.pages.find((candidate) => candidate.route.sourcePath === sourcePath);
     if (!page?.route.indexable || !page.seo.indexable) return { canonical, languages: { en: canonical, "x-default": canonical } };
     return { canonical, languages: { en: canonical, ja: `${config.siteUrl}${page.route.path}`, "x-default": canonical } };
+  } catch { return { canonical, languages: { en: canonical, "x-default": canonical } }; }
+}
+
+/**
+ * hreflang for an English experience page: itself and `x-default`, plus `ja` once the approved
+ * Japanese page for this slug exists. Never points at a Japanese page that does not.
+ */
+export async function experienceAlternates(slug: string, canonical: string): Promise<Metadata["alternates"]> {
+  try {
+    await getJapaneseDetail(slug);
+    return { canonical, languages: { en: canonical, ja: `${config.siteUrl}/ja/experiences/${slug}`, "x-default": canonical } };
   } catch { return { canonical, languages: { en: canonical, "x-default": canonical } }; }
 }
 

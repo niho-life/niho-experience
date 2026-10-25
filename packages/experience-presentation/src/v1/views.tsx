@@ -66,7 +66,7 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 <div className="relative h-[340px] overflow-hidden bg-[#222] lg:h-[500px]">
 <DecorativeVideoV1 video={model.banner} primitives={primitives} />
 <div aria-hidden className="absolute inset-0 bg-black/35" />
-<h2 id="strips-heading-v1" className="absolute inset-0 z-[1] flex flex-col items-center justify-center px-6 pb-[90px] text-center text-[2.125rem] text-white lg:pb-40 lg:text-[3.625rem]">{copy.text("home.slowTitle")}<span className="hand mt-2 block text-[0.86em] text-leaf">{model.stripsEyebrow}</span>
+<h2 id="strips-heading-v1" className="absolute inset-0 z-[1] flex flex-col items-center justify-center px-6 pb-[90px] text-center text-[2.125rem] text-white lg:pb-40 lg:text-[3.625rem]">{copy.text("home.slowTitle")}{" "}<span className="hand mt-2 block text-[0.86em] text-leaf">{model.stripsEyebrow}</span>
 </h2>
 </div>
 <ul className="scrollbar-none relative z-[2] -mt-[110px] grid snap-x snap-mandatory auto-cols-[46%] grid-flow-col gap-2.5 overflow-x-auto px-5 sm:auto-cols-[30%] lg:mx-auto lg:-mt-[190px] lg:flex lg:max-w-[75rem] lg:justify-center lg:gap-3.5 lg:overflow-visible lg:px-10">{model.strips.map((strip) => <li key={strip.key} className="snap-start lg:w-[calc((100%_-_4*0.875rem)/5)]">

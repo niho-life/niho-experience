@@ -219,6 +219,9 @@ export function ExperienceList({
           {status}
         </p>
         {visible.length ? (
+          <>
+          {/* The page's h1 is followed by the cards' h3: this keeps h1 → h2 → h3 (#139). */}
+          <h2 className="sr-only">{copy.text("chrome.experiences")}</h2>
           <ul className={`grid gap-x-6 gap-y-10 sm:grid-cols-2 sm:gap-y-11 ${columns === "two" ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
             {visible.map((card, index) => {
               const occurrence = matches?.get(card.slug);
@@ -237,6 +240,7 @@ export function ExperienceList({
               );
             })}
           </ul>
+          </>
         ) : (
           <div className="rounded-[var(--radius-card)] border border-dashed border-line-strong bg-sand px-6 py-12 text-center">
             <h2 className="text-2xl">{chosenDay ? (locale === "ja" ? `${chosenDay.label}${party}に開催する体験はありません` : `Nothing on ${chosenDay.label}${party}`) : (locale === "ja" ? `${guests}名で参加できる体験はありません` : `No experiences for ${guests} guests`)}</h2>
