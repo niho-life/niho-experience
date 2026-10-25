@@ -1,6 +1,6 @@
 # 予約ファネルの計測設計
 
-最終更新：2026-10-19（担当3）。対象：[#14](https://github.com/niho-life/niho-experience/issues/14)。
+最終更新：2026-10-26（月次の検索・AI 回答の観測を追加）。対象：[#14](https://github.com/niho-life/niho-experience/issues/14)。
 計測ツールの選定と実装は担当1、確定予約・売上・流入情報の保存は担当2。この文書はイベント契約と指標の定義を決める。
 
 ## 原則
@@ -90,8 +90,8 @@ NIHOは受け取った値を予約行に保存し、既存の予約データ保�
 
 | パラメータ | 値の例 | 規則 |
 | --- | --- | --- |
-| `utm_source` | `niho_space`、`niho_instagram`、`niho_line`、`niho_site`、`partner_a01` | 小文字・英数字・アンダースコア。提携先は公開文書では匿名のコード（a01など）にし、対応表は非公開台帳に置く |
-| `utm_medium` | `qr`、`social`、`referral`、`email`、`print` | 媒体の種類 |
+| `utm_source` | `niho_space`、`niho_instagram`、`niho_youtube`、`niho_line`、`niho_site`、`partner_a01` | 小文字・英数字・アンダースコア。提携先は公開文書では匿名のコード（a01など）にし、対応表は非公開台帳に置く |
+| `utm_medium` | `qr`、`social`、`video`、`referral`、`email`、`print` | 媒体の種類。YouTube の説明欄は `video` |
 | `utm_campaign` | `pilot_2026q4` | 検証の期間単位 |
 | `utm_content` | `table_card`、`entrance_poster`、`story_1103` | 置き場所・投稿の区別 |
 
@@ -120,6 +120,17 @@ NIHO運営の内部アクセスは、計測ツールの「自分の訪問を除�
 3. 取消・返金は別列で出す。期間中の確定額、期間中に実行した返金額、差引額を混同しない。取消率は開催日が期間内の確定予約を母数にし、申込日基準の確定件数と異なる集計であることを記す。
 4. NIHO v1.2の予約行へのUTM保存が配備・確認されるまでは、**体験別のUmamiファネルと全件の確定予約・売上を横並びで報告**する。配備後は確定予約のUTM別集約件数だけを追加し、Umami visitorとの個人単位の突合や訪問者単位の予約率は出さない。OTAの予約はOTA管理画面とNIHO台帳の重複がないか運営が照合する。
 5. 非公開台帳へ抽出日時、期間、時区、NIHO側の抽出方法・対象状態、UmamiのフィルタとWindow、除外条件、欠測を記録する。公開Issueには判断と未完了事項だけを書く。
+
+## 検索・AI 回答の月次観測
+
+[#155](https://github.com/niho-life/niho-experience/issues/155)。検索や AI 検索に紹介されることは保証できないので、月 1 回、同じ条件で観測して車線ごとの判断（[seo-growth-strategy.md](seo-growth-strategy.md) の「計測と見直し」）に使う。担当3 が授権なしで回せるよう、読むだけの作業に限る。
+
+- **頻度**：月 1 回、月初の 1 週間のうち。前回と同じ条件で見る。
+- **見るもの**：狙う語 30 本の順位（体験固有語・東京起点の体験語・計画段階の語・日本語）、AI 検索 10 問（ChatGPT・Perplexity・Google AI Mode）の引用元、Search Console（非指名クエリの表示回数・国別・「生成 AI 機能」レポート・指名 `niho experience`／`niho kamakura` の表示回数・第三者のリンク元ドメイン数）、Bing Webmaster Tools の AI Performance レポート。語と質問の一覧、記録の書式は非公開台帳（`YYYY-MM-DD-monthly-search-observation-setup.md`）にある。
+- **条件**：英語は Google の米国・英国、日本語は Google の日本で、ログアウト（隔離したブラウザ）・個人化なしで見る。20 位までに無ければ「圏外」。AI には決めた英語の文をそのまま聞き、追加の質問はしない。IP の国を変えられないときは、その旨を記録する。
+- **しないこと**：ログイン・アカウント作成、投稿・レビュー・フォーム送信、CAPTCHA の回避。CAPTCHA が出たらその媒体は欠測にする。Search Console・Bing は閲覧だけで、設定は [#141](https://github.com/niho-life/niho-experience/issues/141) の担当が行う。
+- **記録**：上の突合手順の 5 と同じく、実施日時（JST）、環境（ブラウザ・ログイン状態・地域の指定）、Search Console の期間（太平洋時間で集計される）、サイトの状態（robots.txt・登録・sitemap）、除外と欠測を最初に書く。順位・引用元・競合名・Search Console の数値は非公開台帳の `YYYY-MM-DD-search-observation.md` に書き、#155 には判断と未完了事項を 1〜3 行で書く。
+- **節目の起点**：「3 か月・6 か月・1 年」は、experience.niho.life の robots.txt が全面拒否から公開に変わり、sitemap を送った日（#141）から数える。それまでの観測は起点前の基準値。
 
 ## 同意と計測拒否
 

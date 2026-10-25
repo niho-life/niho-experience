@@ -18,7 +18,7 @@ import { editorialOf, FEATURED_HOST, FEATURED_STORY, shortName, themeEntries, th
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
-import { publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
+import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
 import { siteJsonLd } from "@/lib/structured-data";
 import { englishAlternates } from "@/lib/locale-metadata";
 
@@ -104,7 +104,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
   return <>
-    <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME)} />
+    <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
     <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, upcomingDays(new Date(), 14), EN_STATIC_COPY_V1, null)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />
   </>;
 }

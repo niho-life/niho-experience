@@ -52,7 +52,7 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 
 ## 構造化データ
 
-- トップ：`Organization`（名称・URLだけ。ロゴは承認済み素材が出てから）と `WebSite`。
+- トップ：`Organization`（名称・掲載名の `alternateName`「NIHO Experience, Kamakura」・URLだけ。ロゴは承認済み素材が出てから。各媒体のプロフィールの URL は表記とアカウントが決まってから `sameAs` に足す。[#152](https://github.com/niho-life/niho-experience/issues/152)、[launch-kit.md](growth/launch-kit.md) の「名前の表記」）と `WebSite`。
 - 体験詳細（英語・日本語とも同じ条件）：`BreadcrumbList`、HTTP APIの実データの時だけ `TouristTrip` と `Product`。どちらも題名・要約・URL・公開写真を持ち、`TouristTrip` は言語・提供者、`Product` は提供者を `brand` に持つ。`TouristTrip` はGoogleのリッチリザルトの対象外なので、星や料金の表示を狙うのは `Product`。予約受付中なら画面に表示する最安の大人料金と販売者を `Offer` に含める。日本語版は自分のURL（`/ja/experiences/{slug}`）と `inLanguage: ja` で出し、レビューは日本語版に表示していないので出さない。
 - SSR詳細応答に残席がないため、構造化データに `availability` を入れない。残席はブラウザから取得し、予約時に再確認する。サイト全体の予約停止中も `Offer` を出さない。
 - トップ・一覧・提供者案内・詳細のcanonicalとOG URLを揃え、queryを引き継がない。詳細の正規URLはAPIが正本。未承認のOG画像は出さず、Twitterカードは画像不要の `summary` とする。
