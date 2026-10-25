@@ -26,7 +26,7 @@ import { iconForText } from "@/lib/themes";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { publicMetadata } from "@/lib/public-metadata";
 import { experienceAlternates } from "@/lib/locale-metadata";
-import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, japaneseBookingAllowed, type SiteLocale } from "@/lib/localized-content";
+import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease, japaneseBookingAllowed, type SiteLocale } from "@/lib/localized-content";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { LocalizedLink as Link } from "@/components/LocalizedLink";
 import { AskHost } from "@/components/AskHost";
@@ -59,8 +59,9 @@ export async function englishExperienceMetadata({ params, searchParams }: Omit<E
 export async function japaneseExperienceMetadata({ params }: Omit<ExperiencePageContentProps, "locale">): Promise<Metadata> {
   try {
     const slug = (await params).slug;
-    const [detail, copy] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy()]);
-    assertSameJapaneseRelease(copy.releaseId, detail);
+    // The /ja layout renders nothing but "unavailable" without the static release: no hreflang or index for that.
+    const [detail, copy, release] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), getPreparedJapaneseStaticRelease()]);
+    assertSameJapaneseRelease(copy.releaseId, detail, release);
     const canonical = `${config.siteUrl}/ja/experiences/${detail.experience.slug}`;
     const english = `${config.siteUrl}/experiences/${detail.experience.slug}`;
     return { title: detail.experience.title, description: seoDescription(detail.experience.lead), alternates: { canonical, languages: { en: english, ja: canonical, "x-default": english } }, robots: config.indexingAllowed ? undefined : { index: false, follow: false }, openGraph: { title: detail.experience.title, description: seoDescription(detail.experience.lead), url: canonical, locale: "ja_JP", images: [] } };
