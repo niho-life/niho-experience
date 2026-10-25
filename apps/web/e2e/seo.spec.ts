@@ -145,3 +145,14 @@ test("preview builds are never indexable", async ({ request }) => {
   }
   expect(await (await request.get("/sitemap.xml")).text()).not.toContain("<loc>");
 });
+
+test("a preview keeps every crawler out and offers no IndexNow key (#141)", async ({ request }) => {
+  const robots = await request.get("/robots.txt");
+  expect(robots.status()).toBe(200);
+  const text = await robots.text();
+  expect(text).toMatch(/User-Agent: \*\s+Disallow: \/\s*$/);
+  // The named search and AI crawler groups exist only when indexing is allowed (lib/robots-policy.test.ts).
+  expect(text).not.toContain("OAI-SearchBot");
+  expect(text).not.toContain("Sitemap:");
+  expect((await request.get("/indexnow-key.txt")).status()).toBe(404);
+});
