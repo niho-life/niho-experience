@@ -22,6 +22,20 @@ function deploymentOrigin(value: string, setting: string): string {
   return url.origin;
 }
 
+/** POSIX (`/srv/…`) or Windows (`C:\…`) absolute path. node:path is not imported: this module stays runtime-neutral. */
+const isAbsolutePath = (value: string) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+
+/**
+ * The guide drafts folder (docs/content/guides.md): mock previews only, so http deployments never read it. A relative
+ * path would depend on the server's working directory, so it stops the server at start-up like other invalid settings.
+ */
+function guideDraftsSetting(apiMode: "mock" | "http", value: string | undefined): string | null {
+  const dir = value?.trim() ?? "";
+  if (apiMode !== "mock" || !dir) return null;
+  if (!isAbsolutePath(dir)) throw new Error("GUIDE_DRAFTS_DIR must be an absolute path");
+  return dir;
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -60,6 +74,7 @@ export function resolveConfig(env: Env) {
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const adminOriginSetting = env.NIHO_EXPERIENCE_ADMIN_ORIGIN?.trim() ?? "";
+  const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
     ? assertAdminConsoleSettings(
@@ -86,6 +101,8 @@ export function resolveConfig(env: Env) {
     mockLatencyMs: Number(env.MOCK_LATENCY_MS ?? 0) || 0,
     // "pilot" shows the permitted first experiences with provisional details (docs/content/README.md).
     mockCatalog: env.MOCK_CATALOG === "pilot" ? "pilot" : "synthetic",
+    // Unpublished guide drafts shown in the mock preview only (absolute path, outside git); null otherwise.
+    guideDraftsDir,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.
     indexingAllowed: env.SITE_INDEXING === "allow" && apiMode === "http",

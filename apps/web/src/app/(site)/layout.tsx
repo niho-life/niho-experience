@@ -10,7 +10,7 @@ import { SITE_DESCRIPTION } from "@/lib/public-metadata";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { getJapaneseStaticCounterparts } from "@/lib/localized-content";
-import { availableGuides } from "@/lib/guide-registry";
+import { guideCatalog, hasGuidesPage } from "@/lib/guide-registry";
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 
 // Every page reads environment settings (indexing, API mode, host sign-up) at
@@ -38,6 +38,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const analyticsMode = analyticsModeForRuntime(config.apiMode, config.siteUrl, config.umamiWebsiteId);
   let counterparts: Readonly<Record<string, string>> = {};
   try { counterparts = await getJapaneseStaticCounterparts(); } catch { /* no approved JA release: expose no link */ }
+  const guides = await guideCatalog();
 
   return (
     <html lang="en">
@@ -48,7 +49,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SiteLocaleProvider locale="en">
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <AttributionCapture enabled={config.publicApiVersion === "1.2"} />
-          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={availableGuides().length ? [{ href: "/guides", label: "Guides" }] : undefined}>
+          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={hasGuidesPage(guides) ? [{ href: "/guides", label: "Guides" }] : undefined}>
             {children}
           </CodeSiteChrome>
         </SiteLocaleProvider>

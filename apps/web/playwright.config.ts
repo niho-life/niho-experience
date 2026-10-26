@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
@@ -11,6 +12,8 @@ const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;
+// Synthetic guide drafts (docs/content/guides.md), shown on the first server only. An absolute path, as the setting requires.
+const GUIDE_DRAFTS_DIR = fileURLToPath(new URL("./e2e/fixtures/guide-drafts", import.meta.url));
 // Cloud sandboxes ship a pre-installed Chromium; CI installs the matching one.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
 const serverEnv = { HOSTNAME: "127.0.0.1", EXPERIENCE_API_MODE: "mock", EXPERIENCE_PUBLIC_API_VERSION: "1.2", SITE_INDEXING: "block", NEXT_TELEMETRY_DISABLED: "1", HOST_SIGNUP_MODE: "pilot", NIHO_HOST_START_URL: "https://niho.life/experiences/provider" };
@@ -52,7 +55,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${PORT}/experiences`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { ...serverEnv, PORT: String(PORT) },
+      env: { ...serverEnv, PORT: String(PORT), GUIDE_DRAFTS_DIR },
     },
     {
       command: "sh scripts/start-standalone.sh",

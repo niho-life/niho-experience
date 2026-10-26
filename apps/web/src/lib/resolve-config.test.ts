@@ -122,3 +122,20 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...configured, SITE_URL: "http://localhost:3000", NIHO_EXPERIENCE_ADMIN_ORIGIN: "http://localhost:3000" }).adminOrigin).toBe("http://localhost:3000");
   });
 });
+
+describe("guide drafts folder", () => {
+  it("is read only in mock mode, as a trimmed absolute path, and is null otherwise", () => {
+    expect(resolveConfig({}).guideDraftsDir).toBeNull();
+    expect(resolveConfig({ GUIDE_DRAFTS_DIR: "  " }).guideDraftsDir).toBeNull();
+    expect(resolveConfig({ GUIDE_DRAFTS_DIR: " /srv/secret/guides " }).guideDraftsDir).toBe("/srv/secret/guides");
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "mock", GUIDE_DRAFTS_DIR: "C:\\drafts\\guides" }).guideDraftsDir).toBe("C:\\drafts\\guides");
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_DRAFTS_DIR: "/srv/secret/guides" }).guideDraftsDir).toBeNull();
+  });
+
+  it("fails at start-up on a relative path in mock mode, and ignores it in http mode", () => {
+    expect(() => resolveConfig({ GUIDE_DRAFTS_DIR: "drafts" })).toThrow(/GUIDE_DRAFTS_DIR must be an absolute path/);
+    expect(() => resolveConfig({ GUIDE_DRAFTS_DIR: "./drafts" })).toThrow(/GUIDE_DRAFTS_DIR must be an absolute path/);
+    expect(() => resolveConfig({ GUIDE_DRAFTS_DIR: "~/drafts" })).toThrow(/GUIDE_DRAFTS_DIR must be an absolute path/);
+    expect(() => resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_DRAFTS_DIR: "drafts" })).not.toThrow();
+  });
+});

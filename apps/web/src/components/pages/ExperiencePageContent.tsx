@@ -131,7 +131,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const [journey, relatedCards] = locale === "en"
     ? await Promise.all([getJourneyExtras(e.slug, query), relatedExperienceCards(e.slug, query)])
     : [NO_JOURNEY_EXTRAS, []];
-  const relatedGuides = locale === "en" ? guidesAboutExperience(e.slug) : [];
+  const relatedGuides = locale === "en" ? await guidesAboutExperience(e.slug) : { guides: [], draftSlugs: [] };
   const checkoutCancelled = query.checkout === "cancelled";
   const browseContext = readBrowseContext(query);
   const preferredOfferId = typeof query.offer === "string" && e.offers.some((offer) => offer.id === query.offer) ? query.offer : undefined;
@@ -519,10 +519,10 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     <JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     <JsonLd data={experienceProductJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     {portableDetail()}
-    {relatedGuides.length || relatedCards.length ? <div className="container-page">
-      {relatedGuides.length ? <section aria-labelledby="related-guides-heading" className="pt-14">
+    {relatedGuides.guides.length || relatedCards.length ? <div className="container-page">
+      {relatedGuides.guides.length ? <section aria-labelledby="related-guides-heading" className="pt-14">
         <h2 id="related-guides-heading" className="mb-4 text-[1.75rem] lg:text-[2rem]">Guides for your visit</h2>
-        <div className="max-w-[46rem]"><GuideTeasers guides={relatedGuides} /></div>
+        <div className="max-w-[46rem]"><GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} /></div>
       </section> : null}
       {relatedCards.length ? <section aria-labelledby="related-experiences-heading" className="pt-14">
         <h2 id="related-experiences-heading" className="mb-6 text-[1.75rem] lg:text-[2rem]">More experiences in Kamakura</h2>

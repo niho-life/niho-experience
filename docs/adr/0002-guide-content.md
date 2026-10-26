@@ -24,6 +24,7 @@
 - 公開済みのガイドは `apps/web/src/content/guides/` に **1記事1つの TypeScript モジュール**で置き、`index.ts` の `PUBLISHED_GUIDES` に足す。**未公開の原稿（下書き）はコミットしない**（公開リポのため。下書きは別の場所で書き、公開の PR で初めて入れる）。
 - 項目は型で決める（`types.ts`）：`slug`、`title`、`description`、`author`（実名・役割）、`publishedAt`・`updatedAt`（`YYYY-MM-DD`）、任意の `hero`（`licensed` で共有可否）、`relatedExperienceSlugs`（2〜3）、`relatedGuideSlugs`、`faq`、`body`、`translations.ja`（構造だけ。`/ja/guides` は #59 まで無い）。
 - 本文は小さな Markdown のサブセット（見出し `##`・`###`、段落、`-` と `1.` の箇条書き、`**太字**`・`*斜体*`・`[文](リンク)`）。リポ内のパーサー（`apps/web/src/lib/guide-markdown.ts`）が React 要素の木にし、生の HTML・`dangerouslySetInnerHTML` は使わない。リンクはサイト内のパスか https だけ。対応外の書き方は例外にし、unit test（`guides.test.ts`）が登録済みの全記事を検査するので、壊れた記事は CI で落ちる。
+- 下書きは git 管理しない非公開台帳に Markdown（先頭に項目）で置き、mock のプレビューで `GUIDE_DRAFTS_DIR` を渡したときだけ同じ `Guide` 型に読み替えて表示する（2026-10-26 追記。本番・stg の http モードでは読まない。[guides.md](../content/guides.md)「下書きをプレビューで見る」）。
 - mock のプレビューだけ、合成のサンプル記事（`samples/`）を登録する。実 API の配備で公開記事が 0 本の間は、`/guides` と `/guides/{slug}` は 404、sitemap・フッターに記事は出ない。
 
 ## 結果

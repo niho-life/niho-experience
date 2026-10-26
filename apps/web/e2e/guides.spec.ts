@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Locator } from "@playwright/test";
 
 // Guides (#145): server-rendered HTML as crawlers see it. The mock preview registers the synthetic sample guides only.
 test.beforeEach(({}, testInfo) => test.skip(testInfo.project.name !== "desktop"));
@@ -54,7 +55,8 @@ test("the article shows its body, FAQ and the experiences to book, and links to 
   expect(html).toContain('href="/guides/sample-rainy-day-in-kamakura"');
   expect(html).toContain('src="/placeholders/dinner.svg"');
   expect(html).not.toContain('<meta property="og:image"');
-  expect(html).not.toContain('"image"');
+  // No `image` in the Article structured data (the hero's `<link rel="preload" as="image">` is not a share image).
+  expect(html).not.toMatch(/"image"\s*:/);
   expect(html).toContain('<meta property="og:type" content="article"');
   expect(html).toContain(`<link rel="alternate" hrefLang="en" href="http://localhost:3000${article}"`);
   expect(html).not.toContain('hrefLang="ja"');
@@ -92,4 +94,87 @@ test("the article keeps heading levels in order and has one h1", async ({ page }
   expect(levels[0]).toBe(1);
   expect(levels.filter((level) => level === 1)).toHaveLength(1);
   levels.slice(1).forEach((level, index) => expect(level, `heading ${index + 2} skips a level`).toBeLessThanOrEqual(levels[index]! + 1));
+});
+
+// A draft read from GUIDE_DRAFTS_DIR (playwright.config.ts passes e2e/fixtures/guide-drafts to the first server only).
+const draft = "/guides/sample-draft";
+const draftTitle = "A synthetic draft for preview tests (sample draft)";
+const draftItem = (scope: Locator, name: string) => scope.getByRole("listitem").filter({ has: scope.page().getByRole("link", { name, exact: true }) });
+
+test.describe("a guide draft in the mock preview", () => {
+  test("the guides list shows the draft with a Draft pill, published guides without one, and no draft problems", async ({ page }) => {
+    await page.goto("/guides");
+    const main = page.getByRole("main");
+    await expect(draftItem(main, draftTitle).getByText("Draft", { exact: true })).toBeVisible();
+    await expect(draftItem(main, title).getByText("Draft", { exact: true })).toHaveCount(0);
+    await expect(main.getByText(/drafts? (?:is|are) not shown/)).toHaveCount(0);
+  });
+
+  test("the draft article is marked as a draft and noindex, and is never in the sitemap", async ({ request }) => {
+    const response = await request.get(draft);
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    const head = html.slice(0, html.indexOf("</head>"));
+    expect(head).toMatch(/<meta name="robots" content="noindex, nofollow"/);
+    expect(html).toContain("Draft · not published · visible only in this preview");
+    expect(await (await request.get("/sitemap.xml")).text()).not.toContain("sample-draft");
+  });
+
+  test("the draft renders its photo, table, note, facts to confirm and FAQ answers", async ({ page }) => {
+    await page.goto(draft);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { level: 1 })).toHaveText(draftTitle);
+
+    const figure = main.locator("figure").filter({ has: page.locator("figcaption") });
+    await expect(figure.getByRole("img", { name: "Illustration of a long dinner table set for guests" })).toHaveAttribute("src", "/placeholders/dinner.svg");
+    await expect(figure.locator("figcaption")).toHaveText("An invented caption for the test draft");
+
+    const region = main.getByRole("region", { name: "Compare the two studios" });
+    await region.focus();
+    await expect(region).toBeFocused();
+    const table = region.getByRole("table");
+    await expect(table.getByRole("columnheader")).toHaveText(["What", "Indigo studio", "Pottery studio"]);
+    await expect(table.getByRole("rowheader")).toHaveText(["Language", "Time", "Good for"]);
+    await expect(table.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "Good for" }) }).locator("strong")).toHaveText("Couples");
+
+    const note = main.getByRole("note");
+    await expect(note).toContainText("Checked on 26 Oct 2026");
+    await expect(note.getByRole("listitem")).toHaveText(["Ask the host before you go", "Bring an apron"]);
+
+    await expect(main.locator("mark")).toHaveText([
+      "To confirm: the invented opening hours",
+      "To confirm: the invented length",
+      "To confirm: an invented price",
+    ]);
+
+    const faq = main.getByRole("region", { name: "Frequently asked questions" });
+    await expect(faq.getByRole("heading", { level: 3 })).toHaveText(["Is anything in this draft real?", "Can children come?"]);
+    await expect(faq.locator("strong")).toHaveText("invented");
+    await expect(faq.locator("mark")).toHaveText("To confirm: an invented price");
+    await expect(faq.getByRole("link", { name: "pottery page" })).toHaveAttribute("href", "/experiences/evening-pottery-session");
+    await expect(faq).not.toContainText("**");
+  });
+
+  test("on a 360px phone the page never scrolls sideways; only the table box does", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.goto(draft);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    const region = page.getByRole("region", { name: "Compare the two studios" });
+    expect(await region.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+  });
+
+  test("the draft article has no serious accessibility violations", async ({ page }) => {
+    await page.goto(draft);
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+    const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+    expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+  });
+
+  test("the experience page marks the draft among its guides", async ({ page }) => {
+    await page.goto("/experiences/indigo-dyeing-with-an-artisan");
+    const guides = page.getByRole("region", { name: "Guides for your visit" });
+    await expect(draftItem(guides, draftTitle).getByText("Draft", { exact: true })).toBeVisible();
+    await expect(draftItem(guides, "Indoor crafts for a rainy day in Kamakura (sample guide)").getByText("Draft", { exact: true })).toHaveCount(0);
+  });
 });

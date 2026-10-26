@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildFixtureExperiences } from "@niho-experience/api-client/mock";
 import { PUBLISHED_GUIDES, SAMPLE_GUIDES, guideRegistry, type Guide } from "@/content/guides";
-import { formatGuideDate, guideAlternates, guideProblems, guideRegistryProblems, guidesForExperience, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
+import { formatGuideDate, guideAlternates, guideProblems, guidePublishProblems, guideRegistryProblems, guidesForExperience, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
 import { pickRelatedExperiences } from "./related-experiences";
 import { guideArticleJsonLd } from "./structured-data";
 
@@ -12,6 +12,10 @@ describe("registered guides", () => {
   // Every published guide (and the preview's samples) must pass: a bad article fails CI here, not on the page.
   it("published guides are valid on their own, without the samples", () => {
     expect(guideRegistryProblems(PUBLISHED_GUIDES)).toEqual([]);
+  });
+
+  it("published guides keep no [CONFIRM: …] and no provisional /sample/ photo", () => {
+    expect(PUBLISHED_GUIDES.flatMap((guide) => guidePublishProblems(guide).map((problem) => `${guide.slug}: ${problem}`))).toEqual([]);
   });
 
   it("the preview registry (published + samples) is valid", () => {
@@ -64,11 +68,24 @@ describe("guide validation", () => {
     [{ relatedGuideSlugs: [sample.slug] }, /points at the guide itself/],
     [{ faq: [{ question: "Q?", answer: "" }] }, /answer is empty/],
     [{ faq: [{ question: "Q?", answer: "A." }, { question: "q?", answer: "B." }] }, /repeats a question/],
+    [{ faq: [{ question: "Q?", answer: "An **unclosed answer" }] }, /faq\[0\]\.answer: line 1: Unclosed \*\*/],
+    [{ faq: [{ question: "Q?", answer: "See [here](javascript:void)." }] }, /faq\[0\]\.answer: line 1: Unsafe or unsupported link/],
+    [{ faq: [{ question: "Q?", answer: "One.\n\nTwo." }] }, /faq\[0\]\.answer: line 2: An answer is one paragraph/],
+    [{ body: "![](/a.jpg)" }, /body: line 1: A photo needs alt text/],
+    [{ body: "| a | b |\n| 1 | 2 |" }, /body: line 2: Put a separator row/],
+    [{ body: ":::note\nUnclosed" }, /body: line 1: ":::note" is never closed/],
     [{ body: "" }, /body is empty/],
     [{ body: "<script>alert(1)</script>" }, /body: line 1: Raw HTML/],
     [{ translations: { ja: { title: "題名", description: "説明", body: "# 見出し", faq: [] } } }, /translations.ja.body: line 1/],
   ])("refuses %j", (change, message) => {
     expect(problemsOf(change as Partial<Guide>).join("\n")).toMatch(message);
+  });
+
+  it("accepts formatted FAQ answers, photos, tables, notes and [CONFIRM: …] in a guide", () => {
+    expect(problemsOf({
+      faq: [{ question: "Is it open?", answer: "**Usually**, see [the page](/experiences) [CONFIRM: hours]." }],
+      body: "Intro.\n\n![A gate](/guides/gate.jpg \"The gate\")\n\n| What | When |\n| --- | --- |\n| Open | 9:00 |\n\n:::note\nChecked [CONFIRM: date].\n:::",
+    })).toEqual([]);
   });
 
   it("refuses duplicate slugs and related guides missing from the registry", () => {
@@ -82,6 +99,47 @@ describe("guide validation", () => {
     expect(isGuideDate("2026-13-01")).toBe(false);
     expect(isGuideDate("2026-10-24T00:00:00Z")).toBe(false);
     expect(formatGuideDate("2026-10-24")).toBe("24 Oct 2026");
+  });
+});
+
+describe("publish blockers", () => {
+  const clean: Guide = { ...sample, hero: { ...sample.hero!, src: "/guides/dinner.jpg" } };
+
+  it("pass a guide with nothing to confirm and no provisional photo (the samples' placeholders are not /sample/)", () => {
+    expect(guidePublishProblems(clean)).toEqual([]);
+    expect(guidePublishProblems(sample)).toEqual([]);
+  });
+
+  it("flag every [CONFIRM: …] in the title, description, body and FAQ, also in the Japanese version", () => {
+    const problems = guidePublishProblems({
+      ...clean,
+      title: "Zazen [CONFIRM: name]",
+      description: "Mornings [CONFIRM: days]",
+      body: "Open daily [CONFIRM: ask].",
+      faq: [{ question: "Open on [CONFIRM: Mondays]?", answer: "Yes [CONFIRM: check]." }],
+      translations: { ja: { title: "題名", description: "説明", body: "本文 [CONFIRM: 確認]", faq: [{ question: "質問", answer: "\\[CONFIRM: escaped still counts]" }] } },
+    });
+    expect(problems).toEqual([
+      "title still has a [CONFIRM: …] to check",
+      "description still has a [CONFIRM: …] to check",
+      "body still has a [CONFIRM: …] to check",
+      "faq[0].question still has a [CONFIRM: …] to check",
+      "faq[0].answer still has a [CONFIRM: …] to check",
+      "translations.ja.body still has a [CONFIRM: …] to check",
+      "translations.ja.faq[0].answer still has a [CONFIRM: …] to check",
+    ]);
+  });
+
+  it("flag provisional /sample/ photos as the hero or in the body", () => {
+    expect(guidePublishProblems({
+      ...clean,
+      hero: { ...clean.hero!, src: "/sample/photos/zazen-hall.jpg" },
+      body: "![A hall](/sample/photos/hall.jpg)\n\n![A gate](/guides/gate.jpg)\n\n![Remote](https://cdn.example.com/sample/a.jpg)",
+    })).toEqual([
+      "body uses the provisional photo /sample/photos/hall.jpg",
+      "body uses the provisional photo https://cdn.example.com/sample/a.jpg",
+      "hero uses the provisional photo /sample/photos/zazen-hall.jpg",
+    ]);
   });
 });
 

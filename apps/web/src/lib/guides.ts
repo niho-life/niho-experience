@@ -1,5 +1,5 @@
 import type { Guide, GuideFaqItem, GuideHero, GuideTranslation } from "@/content/guides/types";
-import { guideLinkHref, parseGuideMarkdown } from "./guide-markdown";
+import { guideFigureSources, guideLinkHref, parseGuideAnswer, parseGuideMarkdown } from "./guide-markdown";
 
 /**
  * Checks and selections for guides (pure: no config, so tests can run them over every registered guide).
@@ -44,11 +44,13 @@ function text(problems: string[], label: string, value: unknown, max: number) {
   else if (value.length > max) problems.push(`${label} is longer than ${max} characters`);
 }
 
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 function body(problems: string[], label: string, source: string) {
   try {
     if (!parseGuideMarkdown(source).length) problems.push(`${label} is empty`);
   } catch (error) {
-    problems.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+    problems.push(`${label}: ${message(error)}`);
   }
 }
 
@@ -58,6 +60,11 @@ function faq(problems: string[], label: string, items: readonly GuideFaqItem[]) 
   items.forEach((item, index) => {
     text(problems, `${label}[${index}].question`, item.question, GUIDE_LIMITS.questionMaxLength);
     text(problems, `${label}[${index}].answer`, item.answer, GUIDE_LIMITS.answerMaxLength);
+    try {
+      parseGuideAnswer(item.answer);
+    } catch (error) {
+      problems.push(`${label}[${index}].answer: ${message(error)}`);
+    }
     const key = item.question.trim().toLowerCase();
     if (seen.has(key)) problems.push(`${label}[${index}] repeats a question`);
     seen.add(key);
@@ -106,6 +113,44 @@ export function guideProblems(guide: Guide): string[] {
   faq(problems, "faq", guide.faq);
   body(problems, "body", guide.body);
   if (guide.translations?.ja) translation(problems, "translations.ja", guide.translations.ja);
+  return problems;
+}
+
+const CONFIRM_MARK = /\[CONFIRM/i;
+/** Provisional photos under `public/sample/` (or any `/sample/` folder): fine in previews, never in a published guide. */
+const SAMPLE_PHOTO = /\/sample\//;
+
+function bodyPhotos(source: string): string[] {
+  try {
+    return guideFigureSources(parseGuideMarkdown(source));
+  } catch {
+    return []; // guideProblems reports the body itself.
+  }
+}
+
+/**
+ * What keeps a valid guide from being published (docs/content/guides.md): a `[CONFIRM: …]` left in its text, or a
+ * provisional `/sample/` photo as its hero or in its body. Drafts and the preview's samples may have both; the unit test
+ * runs this over every published guide.
+ */
+export function guidePublishProblems(guide: Guide): string[] {
+  const problems: string[] = [];
+  const confirm = (label: string, value: string | undefined) => {
+    if (value && CONFIRM_MARK.test(value)) problems.push(`${label} still has a [CONFIRM: …] to check`);
+  };
+  const content = (prefix: string, value: Pick<GuideTranslation, "title" | "description" | "body" | "faq">) => {
+    confirm(`${prefix}title`, value.title);
+    confirm(`${prefix}description`, value.description);
+    confirm(`${prefix}body`, value.body);
+    value.faq.forEach((item, index) => {
+      confirm(`${prefix}faq[${index}].question`, item.question);
+      confirm(`${prefix}faq[${index}].answer`, item.answer);
+    });
+    for (const src of bodyPhotos(value.body)) if (SAMPLE_PHOTO.test(src)) problems.push(`${prefix}body uses the provisional photo ${src}`);
+  };
+  content("", guide);
+  if (guide.hero && SAMPLE_PHOTO.test(guide.hero.src)) problems.push(`hero uses the provisional photo ${guide.hero.src}`);
+  if (guide.translations?.ja) content("translations.ja.", guide.translations.ja);
   return problems;
 }
 
