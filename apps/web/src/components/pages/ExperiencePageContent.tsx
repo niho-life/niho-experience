@@ -35,6 +35,10 @@ import { NO_JOURNEY_EXTRAS } from "@niho-experience/api-client";
 import { getJourneyExtras } from "@/lib/journey";
 import { askHostTarget, conditionRows } from "@/lib/journey-ui";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
+import { ReadBeforeYouGo } from "@/components/guides/ReadBeforeYouGo";
+import { guidesForExperience } from "@/lib/guides/guide";
+import { getGuides } from "@/lib/guides/server";
+import type { Guide } from "@/lib/guides/types";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -66,6 +70,17 @@ export async function japaneseExperienceMetadata({ params }: Omit<ExperiencePage
     const english = `${config.siteUrl}/experiences/${detail.experience.slug}`;
     return { title: detail.experience.title, description: seoDescription(detail.experience.lead), alternates: { canonical, languages: { en: english, ja: canonical, "x-default": english } }, robots: config.indexingAllowed ? undefined : { index: false, follow: false }, openGraph: { title: detail.experience.title, description: seoDescription(detail.experience.lead), url: canonical, locale: "ja_JP", images: [] } };
   } catch { return { title: "Japanese experience unavailable", robots: { index: false, follow: false } }; }
+}
+
+/** Guides that recommend this experience (English pages only: there are no Japanese guides yet). Never breaks the page. */
+async function readFirstGuides(slug: string, locale: SiteLocale): Promise<Guide[]> {
+  if (locale !== "en") return [];
+  try {
+    return guidesForExperience((await getGuides()).guides, slug);
+  } catch (error) {
+    console.error("[guides] unavailable on the experience page", error instanceof Error ? error.message : error);
+    return [];
+  }
 }
 
 /** Cover first, then the other photos, without repeating the cover. */
@@ -123,7 +138,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     throw error;
   }
   // Conditions and questions to the host have no NIHO contract yet: the mock serves them, a real API shows none (src/lib/journey.ts).
-  const journey = locale === "en" ? await getJourneyExtras(e.slug, query) : NO_JOURNEY_EXTRAS;
+  const [journey, readFirst] = await Promise.all([locale === "en" ? getJourneyExtras(e.slug, query) : NO_JOURNEY_EXTRAS, readFirstGuides(e.slug, locale)]);
   const checkoutCancelled = query.checkout === "cancelled";
   const browseContext = readBrowseContext(query);
   const preferredOfferId = typeof query.offer === "string" && e.offers.some((offer) => offer.id === query.offer) ? query.offer : undefined;
@@ -506,6 +521,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     <JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     <JsonLd data={experienceProductJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     {portableDetail()}
+    <ReadBeforeYouGo guides={readFirst} />
     <MobileBookingBar summary={booking} />
   </>;
 }

@@ -11,3 +11,5 @@
 docs
 *.md
 !packages/api-client/README.md
+# Published guide manuscripts are read by the server at request time (apps/web/src/lib/guides/server.ts).
+!apps/web/content/guides/*.md

@@ -122,3 +122,17 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...configured, SITE_URL: "http://localhost:3000", NIHO_EXPERIENCE_ADMIN_ORIGIN: "http://localhost:3000" }).adminOrigin).toBe("http://localhost:3000");
   });
 });
+
+describe("guide drafts folder", () => {
+  it("is read only in mock mode and only from an absolute path", () => {
+    expect(resolveConfig({}).guideDraftsDir).toBeNull();
+    expect(resolveConfig({ GUIDE_DRAFTS_DIR: "  " }).guideDraftsDir).toBeNull();
+    expect(resolveConfig({ GUIDE_DRAFTS_DIR: " /secret/guides " }).guideDraftsDir).toBe("/secret/guides");
+    expect(() => resolveConfig({ GUIDE_DRAFTS_DIR: "secret/guides" })).toThrow(/GUIDE_DRAFTS_DIR/);
+  });
+
+  it("is ignored in http mode, so drafts never reach staging or production", () => {
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_DRAFTS_DIR: "/secret/guides" }).guideDraftsDir).toBeNull();
+    expect(() => resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_DRAFTS_DIR: "relative" })).not.toThrow();
+  });
+});

@@ -11,6 +11,8 @@
 | `/experiences?q=…&theme=…&date=…&guests=…` | 検索・絞り込みURL | しない（`noindex, follow`。テーマ・開催日のAPI絞り込みはv1.2有効時だけ使用） | `/experiences` |
 | `/experiences/{slug}` | 体験詳細 | する | 自分自身 |
 | `/host` | 提供者向けの紹介（ログイン前） | する | `/host` |
+| `/guides` | ガイド記事の一覧（公開記事が 1 本以上ある時だけ。0 本なら 404） | する | `/guides` |
+| `/guides/{slug}` | ガイド記事（[guides.md](content/guides.md)）。下書きはプレビューだけで `noindex, nofollow` | する（公開記事） | 自分自身 |
 | `/help` | 予約のヘルプ（NIHOのヘルプと問い合わせ先への案内） | しない（`noindex, follow`。理由は下の「`/help` の扱い」） | — |
 | `/host/*` | ホストの画面（ログイン後） | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
 | `/experiences/{slug}/book` | 予約入力 | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
@@ -53,6 +55,7 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 ## 構造化データ
 
 - トップ：`Organization`（名称・URLだけ。ロゴは承認済み素材が出てから）と `WebSite`。
+- ガイド記事：`Article`（題名・説明・写真・公開日・更新日・著者 `Person` の名前と役割・発行者は `/#organization`）と `BreadcrumbList`（Home › Guides › 題名）。一覧は `BreadcrumbList`。記事の FAQ ブロックは表示だけで `FAQPage` は出さない（Google のリッチリザルト対象外）。記事はこのリポの原稿なので、API の mock／http にかかわらず出す。
 - 体験詳細（英語・日本語とも同じ条件）：`BreadcrumbList`、HTTP APIの実データの時だけ `TouristTrip` と `Product`。どちらも題名・要約・URL・公開写真を持ち、`TouristTrip` は言語・提供者、`Product` は提供者を `brand` に持つ。`TouristTrip` はGoogleのリッチリザルトの対象外なので、星や料金の表示を狙うのは `Product`。予約受付中なら画面に表示する最安の大人料金と販売者を `Offer` に含める。日本語版は自分のURL（`/ja/experiences/{slug}`）と `inLanguage: ja` で出し、レビューは日本語版に表示していないので出さない。
 - SSR詳細応答に残席がないため、構造化データに `availability` を入れない。残席はブラウザから取得し、予約時に再確認する。サイト全体の予約停止中も `Offer` を出さない。
 - トップ・一覧・提供者案内・詳細のcanonicalとOG URLを揃え、queryを引き継がない。詳細の正規URLはAPIが正本。未承認のOG画像は出さず、Twitterカードは画像不要の `summary` とする。

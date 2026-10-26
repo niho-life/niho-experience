@@ -63,6 +63,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `EXPERIENCE_API_MODE` | `mock` | `http` は NIHO 公開 Web origin の選別APIへ接続 |
 | `EXPERIENCE_PUBLIC_API_VERSION` | `1.0` | `1.1` は NIHO 側の v1.1 API（bio・写真alt・流入元項目）が stg/prod に配備・検証された後だけ有効化 |
 | `MOCK_CATALOG` | `synthetic` | mock時の体験一覧。`pilot` は掲載許可のある最初の5体験を推奨値で表示（[docs/content/README.md](content/README.md)）。検索には出ない |
+| `GUIDE_DRAFTS_DIR` | 未設定 | mock 時だけ読む。ガイド記事の下書きのフォルダ（絶対パス、git 管理しない非公開台帳）。`/guides` に「Draft」の印つきで出る（[docs/content/guides.md](content/guides.md)） |
 | `NEXT_PUBLIC_NIHO_WEB_ORIGIN` | `https://niho.life` | 公開Web APIのorigin。stgでは `https://app-stg.niho.life` |
 | `SITE_INDEXING` | 未設定＝検索除外 | `allow` かつ `EXPERIENCE_API_MODE=http` の時だけindex許可（合成データは設定を誤っても検索に出ない）。本番受入（#15）後に設定 |
 | `SITE_URL` | `http://localhost:3000` | canonical・sitemapの起点。正式ドメインは未定 |

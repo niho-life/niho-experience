@@ -17,6 +17,7 @@
 | [product-ledger.md](product-ledger.md) | 最初の候補5件と予備3件の台帳。確認済みの事実と確認待ちを分ける | #13 |
 | [registration-handoff.md](registration-handoff.md) | 5商品のテスト設定と本番登録前の確認表、担当1・2への引き渡し | #13 #12 #14 |
 | [editorial-review.md](editorial-review.md) | 英語の提供者紹介、写真枠ごとのalt案と権利確認欄 | #13 #12 |
+| [guides.md](guides.md) | ガイド記事（`/guides`）の原稿の書式・下書きの置き場所・公開手順 | #145 #147〜#151 |
 | [copy-guidelines.md](copy-guidelines.md) | 英語原稿の構成・表現ルール・事実確認 | #13 #12 |
 | [photo-requirements.md](photo-requirements.md) | 写真の技術要件・権利・同意・商品別の撮影リスト | #13 |
 | [booking-conditions.md](booking-conditions.md) | 料金・日時・言語・取消・天候・最少催行・遅刻の標準案（未適用） | #13 |

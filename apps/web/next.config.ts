@@ -69,6 +69,13 @@ const nextConfig: NextConfig = {
   output: "standalone",
   htmlLimitedBots: HTML_LIMITED_BOTS,
   outputFileTracingRoot: path.join(process.cwd(), "../.."),
+  // Published guides are read from content/guides at request time (src/lib/guides/server.ts), so the
+  // standalone server needs the folder next to it. Keys match route paths (picomatch, `contains`).
+  outputFileTracingIncludes: {
+    "/guides": ["./content/guides/**/*"],
+    "/experiences/*": ["./content/guides/**/*"],
+    "/sitemap.xml": ["./content/guides/**/*"],
+  },
   poweredByHeader: false,
   reactStrictMode: true,
   transpilePackages: ["@niho-experience/api-client"],

@@ -118,5 +118,41 @@ export function siteJsonLd(siteUrl: string, siteName: string): JsonLd {
   };
 }
 
+/** What a guide article's `Article` node needs; a subset of lib/guides/types.ts `Guide`. */
+export type ArticleJsonLdInput = {
+  slug: string;
+  title: string;
+  description: string;
+  hero: string;
+  published: string;
+  updated: string;
+  author: string;
+  authorRole: string;
+};
+
+/**
+ * A guide article (/guides/<slug>, #145): the facts the page shows (headline, lead, hero photo, byline and dates).
+ * The publisher points at the site's Organization node on the home page (siteJsonLd).
+ */
+export function articleJsonLd(guide: ArticleJsonLdInput, siteUrl: string, siteName: string, section: string): JsonLd {
+  const url = `${siteUrl}/guides/${guide.slug}`;
+  const image = guide.hero.startsWith("/") ? `${siteUrl}${guide.hero}` : safeHttpsUrl(guide.hero);
+  return {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: guide.title,
+    description: guide.description,
+    ...(image ? { image: [image] } : {}),
+    datePublished: guide.published,
+    dateModified: guide.updated,
+    author: { "@type": "Person", name: guide.author, jobTitle: guide.authorRole },
+    publisher: { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: siteName, url: `${siteUrl}/` },
+    mainEntityOfPage: { "@type": "WebPage", "@id": url },
+    url,
+    inLanguage: "en",
+    articleSection: section,
+  };
+}
+
 /** Escapes script-breaking characters before embedding JSON in HTML. */
 export const serializeJsonLd = (data: JsonLd) => JSON.stringify(data).replace(/</g, "\\u003c");

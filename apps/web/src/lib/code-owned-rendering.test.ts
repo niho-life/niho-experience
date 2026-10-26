@@ -7,6 +7,8 @@ const activePublicFiles = [
   "../app/(site)/page.tsx",
   "../app/(site)/experiences/(list)/page.tsx",
   "../app/(site)/help/page.tsx",
+  "../app/(site)/guides/page.tsx",
+  "../app/(site)/guides/[slug]/page.tsx",
   "../app/(ja)/ja/layout.tsx",
   "../app/(ja)/ja/page.tsx",
   "../app/(ja)/ja/experiences/(list)/page.tsx",

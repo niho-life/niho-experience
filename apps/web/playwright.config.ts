@@ -1,6 +1,9 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
+// Synthetic guide drafts (docs/content/guides.md), read by the first server only (mock mode).
+const GUIDE_DRAFTS_DIR = fileURLToPath(new URL("./e2e/fixtures/guides", import.meta.url));
 // A second server with the host console on (#86); the first keeps today's /host (console off).
 const HOST_PORT = Number(process.env.E2E_HOST_PORT ?? 3101);
 const ADMIN_READ_PORT = Number(process.env.E2E_ADMIN_READ_PORT ?? 3102);
@@ -52,7 +55,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${PORT}/experiences`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { ...serverEnv, PORT: String(PORT) },
+      env: { ...serverEnv, PORT: String(PORT), GUIDE_DRAFTS_DIR },
     },
     {
       command: "sh scripts/start-standalone.sh",

@@ -71,6 +71,9 @@ export function resolveConfig(env: Env) {
     )
     : "";
 
+  // Unpublished guide drafts (docs/content/guides.md) live outside this repo and are read only by the mock preview.
+  const guideDraftsDir = apiMode === "mock" ? guideDraftsDirectory(env.GUIDE_DRAFTS_DIR) : null;
+
   return {
     apiMode,
     // v1.2 is opt-in after NIHO deploys the approved catalog and checkout contract.
@@ -86,6 +89,8 @@ export function resolveConfig(env: Env) {
     mockLatencyMs: Number(env.MOCK_LATENCY_MS ?? 0) || 0,
     // "pilot" shows the permitted first experiences with provisional details (docs/content/README.md).
     mockCatalog: env.MOCK_CATALOG === "pilot" ? "pilot" : "synthetic",
+    // Absolute path of the drafts folder, or null. Always null in http mode: drafts never reach staging or production.
+    guideDraftsDir,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.
     indexingAllowed: env.SITE_INDEXING === "allow" && apiMode === "http",
@@ -116,6 +121,14 @@ export function resolveConfig(env: Env) {
     adminOrigin,
     nihoFirebaseWebApiKey,
   } as const;
+}
+
+/** An absolute folder path, or null when unset. Relative paths would depend on where the server was started. */
+function guideDraftsDirectory(value: string | undefined): string | null {
+  const dir = value?.trim();
+  if (!dir) return null;
+  if (!dir.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(dir)) throw new Error("GUIDE_DRAFTS_DIR must be an absolute path");
+  return dir;
 }
 
 /** Refuses to start a real host console with a missing or guessable cookie key. */
