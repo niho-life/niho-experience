@@ -17,6 +17,9 @@
 | `/host/*` | ホストの画面（ログイン後） | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
 | `/experiences/{slug}/book` | 予約入力 | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
 | `/booking/return` | 決済後 | しない（同上） | — |
+| `/ja/experiences/{slug}/book`・`/ja/booking/return` | 日本語版の予約入力・決済後 | しない（同上） | — |
+| `/admin` | 事務局の予約支援 | しない（`noindex, nofollow` ＋ `no-store`、robots.txtでも除外） | — |
+| `/indexnow-key.txt` | IndexNow の鍵（下の「IndexNow」） | 検索公開中だけ返す。それ以外は404 | — |
 | `/preview/*` | mock専用 | 本番には存在しない（404） | — |
 
 - slugは英小文字・数字・ハイフン。変更する時は旧URLからのリダイレクトをAPI側に持つ（#7で要望済み）。
@@ -43,6 +46,38 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 - `SITE_INDEXING=allow` **かつ** `EXPERIENCE_API_MODE=http` の時だけindexを許可する。それ以外（プレビュー・合成データ）は全ページ `noindex, nofollow`、robots.txtは全体を拒否、sitemapは空。
 - 値はリクエスト時に読むので、同じイメージのまま環境変数だけで切り替えられる。
 - 本番で有効にするのは公開受入（#15）の後。
+
+## クローラーと AI 検索（robots.txt）
+
+[#141](https://github.com/niho-life/niho-experience/issues/141)。実装は `apps/web/src/lib/robots-policy.ts`、検査は同じ場所の `robots-policy.test.ts`（各クローラーが公開ページを読め、予約・決済後・`/preview/`・`/host/`・`/admin` を読めないこと）と `e2e/seo.spec.ts`（プレビューでは全体拒否で、鍵ファイルも無いこと）。
+
+| 区分 | User-Agent | 扱い |
+| --- | --- | --- |
+| 検索・AI 検索 | `Googlebot`、`Bingbot`、`OAI-SearchBot`、`ChatGPT-User`、`Claude-SearchBot`、`Claude-User`、`PerplexityBot`、`Perplexity-User`、`Applebot` | 名指しで許可（予約などは除外） |
+| 学習用 | `GPTBot`、`Google-Extended`、`ClaudeBot`、`anthropic-ai`、`Applebot-Extended`、`CCBot` | **オーナー判断待ち**。今は `*` と同じ扱い（許可）。拒否する場合は `TRAINING_CRAWLER_POLICY` を `"disallow"` にする |
+| その他 | `*` | 許可（予約などは除外） |
+
+- 検索に出るために読ませる相手を名指しにしたのは、`*` の扱いを将来変えても検索・AI 検索の許可が巻き添えで消えないようにするため。名指しのグループを持つクローラーは `*` を読まないので、除外するパスは各グループに同じものを書く。
+- ChatGPT 検索は Bing の索引も使う（二次情報）。`OAI-SearchBot` を拒否すると ChatGPT 検索の回答に出なくなる（OpenAI の公開文書）。Anthropic の検索用は `Claude-SearchBot` で、`ClaudeBot` は学習用（Anthropic の公開文書）。Issue 本文の「ClaudeBot は検索用」は、この区分に直した。
+- 学習用を拒否しても検索結果・AI 検索の回答への表示には影響しない。許可すると、モデルが鎌倉の体験や NIHO を知っている状態になりうる。どちらを取るかはオーナーが決め、決定日をこの表に書く。
+- `*-User` は利用者が AI に頼んだ時にページを取りに来るもの。robots.txt に従わない場合があると OpenAI・Perplexity は書いているので、守りたいページは robots.txt でなく `noindex`・`no-store`・認証で守る（今の作り）。
+- `llms.txt` は作らない。Google は不要と明記しており、Ahrefs の調査では置かれたファイルの 97% に AI からの取得が無かった。
+
+## IndexNow
+
+公開ページの追加・更新を Bing など IndexNow 参加の検索エンジンへ知らせる（Google は参加していない）。効果の直接の証拠は無いので最小の作りにする。
+
+- 鍵は `apps/web/src/lib/indexnow.ts` の `INDEXNOW_KEY`。誰でも `/indexnow-key.txt` から読める前提の値で秘密ではないため、コードに置く（Secret Manager に入れない）。替える時はこの値を変えて配備する。
+- `/indexnow-key.txt` は検索公開中（`SITE_INDEXING=allow` かつ実 API）だけ鍵を返し、それ以外は404。
+- 送信は手動：検索公開の開始時、体験やページを公開・更新した時に `node scripts/indexnow-submit.mjs` を実行する。`--dry-run` で送る中身の確認、`--since YYYY-MM-DD` で sitemap の `lastmod` がその日以降の URL だけ、引数に URL を並べるとその URL だけを送る。鍵ファイルが404なら送らずに終わる。
+- 自動化（公開・更新のたびに送る）は、効果が見えてから NIHO 側の公開処理と合わせて考える。
+
+## 登録先（Search Console・Bing Webmaster Tools）
+
+- Search Console：ドメインプロパティ `experience.niho.life` を 2026-10-26 に追加した。親の `niho.life` のドメインプロパティを DNS で確認済みのため、所有権は自動で確認された。担当者を足す時は最小権限（閲覧だけなら「制限付き」）。
+- Bing Webmaster Tools：Search Console からの取り込みで登録する（オーナーのアカウントで行う）。
+- 検索公開（#15）の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
+- 月次で見るもの：Search Console の「生成 AI 機能」レポートと、Bing の AI Performance レポート（計測の Issue で扱う）。数値は公開 Issue に貼らない。
 
 ## 初期HTMLに入れるもの
 
@@ -79,4 +114,4 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 - 英語の題名・説明文・検索語（実商品の原稿確定時）
 - 写真の掲載許諾と代替文、Open Graph用画像（実写真ができてから。仮素材は出さない）
 - NIHO既存の企画ページとの重複時、どちらを正規URLにするか（連携A・#7）
-- 公開後のSearch Console確認：sitemap送信、代表URLのURL検査、カバレッジの確認手順と担当者（データは公開Issueに貼らない）
+- 公開後のSearch Console確認：手順は上の「登録先」。担当者（データは公開Issueに貼らない）
