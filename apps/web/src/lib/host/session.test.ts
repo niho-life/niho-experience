@@ -62,8 +62,12 @@ describe("host session cookie", () => {
 
   it("rejects a tampered cookie and a login cookie used as a session", () => {
     const sealed = encodeSession(sealer, session());
-    expect(decodeSession(sealer, `${sealed.slice(0, -2)}AA`, NOW)).toBeNull();
-    const login = encodeLoginState(loginSealer, { verifier: "v".repeat(43), state: "s".repeat(43), providerId: null, expiresAt: NOW + 10 * MIN });
+    const [version, keyId, data] = sealed.split(".");
+    // Change a full byte of the IV; replacing the last base64url character can
+    // alter only unused padding bits and leave the decoded cookie unchanged.
+    const tampered = `${version}.${keyId}.${data![0] === "A" ? "B" : "A"}${data!.slice(1)}`;
+    expect(decodeSession(sealer, tampered, NOW)).toBeNull();
+    const login = encodeLoginState(loginSealer, { verifier: "v".repeat(43), state: "s".repeat(43), providerId: null, preparationCaseId: null, expiresAt: NOW + 10 * MIN });
     expect(decodeSession(sealer, login, NOW)).toBeNull();
   });
 
@@ -114,7 +118,7 @@ describe("refresh timing", () => {
 });
 
 describe("login cookie", () => {
-  const login = { verifier: "v".repeat(43), state: "s".repeat(43), providerId: "provider_1", expiresAt: NOW + LOGIN_MAX_AGE_SECONDS * 1000 };
+  const login = { verifier: "v".repeat(43), state: "s".repeat(43), providerId: "provider_1", preparationCaseId: "case_1", expiresAt: NOW + LOGIN_MAX_AGE_SECONDS * 1000 };
 
   it("round-trips for 10 minutes", () => {
     const sealed = encodeLoginState(loginSealer, login);

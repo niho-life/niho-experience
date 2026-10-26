@@ -4,6 +4,7 @@ import { FieldRow, FieldSection } from "@/components/host/fields";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
+import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsPanel";
 import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
@@ -11,6 +12,7 @@ import { hostPageContext, loadHostConsoleData, loadHostPayout } from "@/host/dat
 import { config } from "@/lib/config";
 import { HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { isHostMock } from "@/lib/host/server";
+import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
 export const metadata: Metadata = { title: "設定" };
 
@@ -62,7 +64,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
 
   return (
     <HostPageBody>
-      <PageHead title="設定" />
+      <PageHead title="設定">{provider.memberRole === "OWNER" && providerOperationsEnabled() ? <a href="#settings-team" className={consoleButtonClass("secondary")}>サブホストを管理</a> : null}</PageHead>
       {/* Keyed by provider: switching providers starts from that provider's values. */}
       <HostSettingsForm
         key={provider.id}
@@ -73,7 +75,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         connectNotice={payout.notice}
         googleConnection={googleConnection}
         preview={isHostMock()}
-        account={<><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} />{accountPanel}</>}
+        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div><div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>
   );

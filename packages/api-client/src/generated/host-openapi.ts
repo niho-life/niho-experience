@@ -812,10 +812,10 @@ export type components = {
             meetingPoint: components["schemas"]["ExperienceProviderMeetingPoint"];
         };
         /**
-         * @description 提供者の中での本人の役割。EDITOR は紹介と原稿だけを直せる（予約・顧客・売上・受取口座・掲載の申請・審査の申請は OWNER だけ）。
+         * @description 提供者の中での本人の役割。role enumの正本は選別済み experience-provider-operations v1.0.0。元のhost draft exportはcore baselineに無いため、既存ページDTOを維持したままこのenumだけを同期する。EDITORは紹介と原稿だけ、COHOSTは日常運営、OWNERは販売者・法的同意・受取口座・メンバー管理も行う。
          * @enum {string}
          */
-        ExperienceProviderMemberRole: "OWNER" | "EDITOR";
+        ExperienceProviderMemberRole: "OWNER" | "EDITOR" | "COHOST";
         /**
          * @description 本文の部分更新（送ったトップレベルのキーだけを今の本文へ重ねる。`facts`・`meetingPoint` は送ると中身ごと置き換える）。null は空と同じ。
          *     上限は本文（`SpotCampaignPageExperienceContent`）と同じで、文字列は前後の空白を除き、配列の空の要素（当日の流れは時刻・題・一言の

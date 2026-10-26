@@ -4,6 +4,7 @@ import { SalesLines, SalesMonthNav, SalesPayoutNoticeView, SalesSummaryPanel } f
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostPayout, loadHostSales } from "@/host/data";
+import { notFound } from "next/navigation";
 import { salesPayoutNotice } from "@/host/payout";
 import { salesPage } from "@/host/sales";
 import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
@@ -24,6 +25,7 @@ export default async function HostSalesPage({ searchParams }: { searchParams: Pr
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="売上" />;
+  if (provider.memberRole !== "OWNER") notFound();
   const list = loadHostSales(provider);
   const payout = await loadHostPayout(provider, { candidates: false });
   const notice = salesPayoutNotice(payout.load);

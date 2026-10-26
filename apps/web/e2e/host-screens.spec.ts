@@ -77,17 +77,19 @@ test("console links carry ?providerId=, and each provider has its own data", asy
   await expect(todo.getByRole("link", { name: "メッセージを見る" })).toHaveAttribute("href", "/host/messages?providerId=sample-provider-studio");
   await expect(page.getByRole("region", { name: "明日の開催" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "これからの開催" })).toContainText("これからの開催はまだありません。");
-  for (const [label, path] of [["ホーム", "/host/home"], ["体験", "/host/experiences"], ["カレンダー", "/host/calendar"], ["予約", "/host/bookings"], ["売上", "/host/sales"], ["設定", "/host/settings"]]) {
+  for (const [label, path] of [["ホーム", "/host/home"], ["体験", "/host/experiences"], ["カレンダー", "/host/calendar"], ["設定", "/host/settings"]]) {
     await expect(menu(page).getByRole("link", { name: label }), label).toHaveAttribute("href", `${path}?providerId=sample-provider-studio`);
   }
+  await expect(menu(page).getByRole("link", { name: "予約" })).toHaveCount(0);
+  await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
   await menu(page).getByRole("link", { name: "設定" }).click();
   await page.waitForURL("**/host/settings?providerId=sample-provider-studio");
   const provider = page.getByRole("region", { name: "提供者情報" });
   await expect(provider.getByRole("textbox", { name: "掲載名" })).toHaveValue("サンプル工房");
   await expect(provider.getByRole("radio", { name: "店舗・事業者" })).toBeChecked();
   await expect(provider).toContainText("未申請");
-  // The payout account is the owner's to read (NIHO answers the owner only); the studio's host is an editor.
-  await expect(page.getByRole("region", { name: "売上受取口座" })).toContainText("口座の状態はオーナーが確認できます");
+  // The payout account is the owner's to read; the studio's host is an editor.
+  await expect(page.getByRole("region", { name: "売上受取口座" })).toHaveCount(0);
 });
 
 test("the menu is a sidebar on PC and six bottom tabs on phones", async ({ page }, testInfo) => {
@@ -174,12 +176,12 @@ test("体験: the list, one experience, and back", async ({ page }, testInfo) =>
   await expect(page.getByRole("heading", { name: "ページが見つかりません" })).toBeVisible();
 });
 
-test("設定 has seven panels, and 保存 checks the fields and keeps what NIHO has no API for on screen", async ({ page }, testInfo) => {
+test("設定 has eight panels, and 保存 checks the fields and keeps what NIHO has no API for on screen", async ({ page }, testInfo) => {
   await signIn(page);
   await menu(page).getByRole("link", { name: "設定" }).click();
   await page.waitForURL(/\/host\/settings$/);
   await expect(page.getByRole("heading", { level: 1, name: "設定" })).toBeVisible();
-  await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "NIHOサポート", "アカウント"]);
+  await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "運営チーム", "NIHOサポート", "アカウント"]);
 
   const provider = page.getByRole("region", { name: "提供者情報" });
   await expect(provider).toContainText("審査済み");

@@ -275,8 +275,7 @@ test("メッセージ lists the waiting threads first; it is a screen under ホ�
     await expect(menu(page)).toHaveCount(1);
   }
 
-  await page.goto("/host/messages?providerId=sample-provider-studio");
-  await expect(list(page)).toContainText("質問や連絡はまだありません");
+  expect((await page.goto("/host/messages?providerId=sample-provider-studio"))?.status()).toBe(404);
   await page.goto("/host/home?providerId=sample-provider-studio");
   await expect(todos(page).filter({ hasText: "返信待ち" })).toHaveCount(0);
 });

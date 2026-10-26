@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { hostMockScenario, MOCK_ID_TOKEN_PREFIX, mockHostDisplayName, mockToken } from "@/lib/host/mock-niho";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_HOME_PATH, hostPreparationPath, preparationCaseIdOrNull, withProvider } from "@/lib/host/routes";
 import { hostNotFound, isHostMock, MOCK_ID_TOKEN_TTL_MS, seeOther, setSessionCookie } from "@/lib/host/server";
 import { startSession } from "@/lib/host/session";
 
@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
     },
     now,
   );
-  const response = seeOther(withProvider(HOST_HOME_PATH, nihoIdOrNull(params.get("providerId"))));
+  const preparationCaseId = preparationCaseIdOrNull(params.get("preparationCaseId"));
+  const response = seeOther(preparationCaseId ? hostPreparationPath(preparationCaseId) : withProvider(HOST_HOME_PATH, nihoIdOrNull(params.get("providerId"))));
   setSessionCookie(response, session, now);
   return response;
 }

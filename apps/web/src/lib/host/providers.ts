@@ -23,7 +23,7 @@ export type HostProviderReviewStatus = ExperienceProviderReviewStatus;
 /** What the sidebar's and the phone menu's provider switch (client components) receive: the id for `?providerId=`, the name and the role. */
 export type HostProviderChoice = Pick<HostProvider, "id" | "displayName" | "memberRole">;
 
-const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", EDITOR: "編集者" };
+const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", EDITOR: "編集者", COHOST: "サブホスト" };
 
 export function providerRoleLabel(role: HostProviderRole | null): string | null {
   return role ? ROLE_LABELS[role] : null;

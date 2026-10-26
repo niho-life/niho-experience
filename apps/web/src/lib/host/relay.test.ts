@@ -6,10 +6,13 @@ import { HOST_MOCK_SCENARIOS, type HostMockScenario } from "./session";
 const SITE = "https://experience.example.test";
 
 describe("relay path allowlist", () => {
-  it("passes the provider API with any method and GET auth/me", () => {
+  it("passes only the selected provider routes and GET auth/me", () => {
     expect(relayUpstreamPath("GET", ["experience-providers"])).toBe("/api/experience-providers");
     expect(relayUpstreamPath("PATCH", ["experience-providers", "p_1", "pages", "page-2"])).toBe("/api/experience-providers/p_1/pages/page-2");
-    expect(relayUpstreamPath("DELETE", ["experience-providers", "p_1", "photos", "a.jpg"])).toBe("/api/experience-providers/p_1/photos/a.jpg");
+    expect(relayUpstreamPath("POST", ["experience-providers", "p_1", "uploads", "policies"])).toBe("/api/experience-providers/p_1/uploads/policies");
+    expect(relayUpstreamPath("DELETE", ["experience-providers", "p_1", "photos", "a.jpg"])).toBeNull();
+    expect(relayUpstreamPath("GET", ["experience-providers", "p_1", "members"])).toBeNull();
+    expect(relayUpstreamPath("GET", ["experience-providers", "p_1", "bookings"])).toBeNull();
     expect(relayUpstreamPath("GET", ["auth", "me"])).toBe("/api/auth/me");
   });
 
@@ -108,6 +111,7 @@ describe("synthetic provider API", () => {
     expect(await ids("default")).toEqual(["sample-provider-kitchen:OWNER", "sample-provider-studio:EDITOR"]);
     expect(await ids("payments-pending")).toEqual(["sample-provider-garden:OWNER"]);
     expect(await ids("calendar-revoked")).toEqual(["sample-provider-kitchen:OWNER", "sample-provider-studio:EDITOR"]);
+    expect(await ids("cohost")).toEqual(["sample-provider-kitchen:COHOST", "sample-provider-studio:EDITOR"]);
     expect(HOST_MOCK_SCENARIOS.map(hostMockScenario)).toEqual(HOST_MOCK_SCENARIOS);
     expect(hostMockScenario("two-providers")).toBe("default");
   });

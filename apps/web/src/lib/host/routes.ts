@@ -22,6 +22,8 @@ export const HOST_SUPPORT_PATH = "/host/support";
 export const HOST_MESSAGES_PATH = "/host/messages";
 /** レビュー (#108): a screen under ホーム, not in the menu. */
 export const HOST_REVIEWS_PATH = "/host/reviews";
+export const HOST_PREPARATIONS_PATH = "/host/preparations";
+export const HOST_PREPARATION_REVIEW_PATH = "/host/preparations/review";
 
 export const HOST_NAV = [
   { href: HOST_HOME_PATH, label: "ホーム" },
@@ -55,6 +57,21 @@ export function withQuery(href: string, values: Record<string, string | null | u
  */
 export function withProvider(path: string, providerId: string | null | undefined): string {
   return withQuery(path, { providerId });
+}
+
+/** Only an opaque case id is allowed to select the single assisted-launch return page. */
+export function preparationCaseIdOrNull(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
+}
+
+export function hostPreparationPath(caseId: string): string {
+  const safe = preparationCaseIdOrNull(caseId);
+  return safe ? `${HOST_PREPARATIONS_PATH}/${safe}` : HOST_PREPARATIONS_PATH;
+}
+
+export function hostPreparationLoginPath(caseId: string): string {
+  const safe = preparationCaseIdOrNull(caseId);
+  return safe ? withQuery(HOST_LOGIN_PATH, { preparationCaseId: safe }) : HOST_LOGIN_PATH;
 }
 
 export function hostSupportPath(kind?: "SPOT" | "EXPERIENCE_PROVIDER" | null, id?: string | null): string {

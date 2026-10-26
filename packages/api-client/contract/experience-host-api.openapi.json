@@ -2241,9 +2241,10 @@
         "type": "string",
         "enum": [
           "OWNER",
-          "EDITOR"
+          "EDITOR",
+          "COHOST"
         ],
-        "description": "提供者の中での本人の役割。EDITOR は紹介と原稿だけを直せる（予約・顧客・売上・受取口座・掲載の申請・審査の申請は OWNER だけ）。\n"
+        "description": "提供者の中での本人の役割。role enumの正本は選別済み experience-provider-operations v1.0.0。元のhost draft exportはcore baselineに無いため、既存ページDTOを維持したままこのenumだけを同期する。EDITORは紹介と原稿だけ、COHOSTは日常運営、OWNERは販売者・法的同意・受取口座・メンバー管理も行う。\n"
       },
       "ExperienceProviderPageContentInput": {
         "x-niho-experience-host-dto": true,

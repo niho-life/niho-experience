@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { HostBookings } from "@/components/host/HostBookings";
+import { HostLiveBookings } from "@/components/host/HostLiveBookings";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
@@ -8,6 +9,7 @@ import { hostPageContext, loadHostBookings } from "@/host/data";
 import { isHostMock } from "@/lib/host/server";
 import { isHostSupportHistoryEnabled } from "@/lib/host/support-history-server";
 import { isHostFeeSummaryUiEnabled } from "@/lib/host/fee-summary-server";
+import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
 export const metadata: Metadata = { title: "予約" };
 
@@ -38,8 +40,10 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="予約" />;
+  if (provider.memberRole === "EDITOR") notFound();
   // The first `?booking=`, as the screen reads it.
   const requested = [query.booking].flat()[0] || null;
+  if (providerOperationsEnabled()) return <HostLiveBookings key={provider.id} providerId={provider.id} initialBookingId={requested} />;
   const { list, requested: opened, experiences, today, now, conversations } = await loadHostBookings(provider, requested);
   if (list.status === "unavailable") return <BookingsUnavailable />;
   // Another provider's booking, or none at all.

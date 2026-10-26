@@ -15,7 +15,7 @@ export function mockToken(prefix: string): string {
 
 /** `?mock=` on /host/auth/mock-login → the session's scenario (anything else is the default). */
 export function hostMockScenario(value: unknown): HostMockScenario {
-  return value === "empty" || value === "payments-pending" || value === "calendar-revoked" ? value : "default";
+  return value === "empty" || value === "payments-pending" || value === "calendar-revoked" || value === "cohost" ? value : "default";
 }
 
 /**
@@ -27,6 +27,7 @@ export const HOST_MOCK_SCENARIO_MAP: Record<HostMockScenario, MockHostScenario> 
   empty: "empty",
   "payments-pending": "payments-pending",
   "calendar-revoked": "two-providers",
+  cohost: "cohost",
 };
 
 const loadMock = () => import("@niho-experience/api-client/host/mock");
