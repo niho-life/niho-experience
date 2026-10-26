@@ -18,7 +18,8 @@ export function YouTubeVideo({ video, poster, title }: { video: PublicVideo; pos
             loading="lazy"
             allow="autoplay; encrypted-media; picture-in-picture"
             allowFullScreen
-            referrerPolicy="no-referrer"
+            // YouTube requires the embedding site's origin as Referer; keep booking paths out of it.
+            referrerPolicy="strict-origin-when-cross-origin"
           />
         ) : (
           <button type="button" onClick={() => setPlaying(true)} aria-label={`Play video: ${video.caption}`} className="group absolute inset-0 w-full cursor-pointer">
