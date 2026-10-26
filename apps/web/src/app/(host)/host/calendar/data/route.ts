@@ -49,7 +49,8 @@ export async function GET(request: NextRequest) {
     if (google && google.blockingEnabled && (google.syncStatus !== "FRESH" || !google.freshUntilUtc || google.freshUntilUtc <= new Date().toISOString())) {
       try { await syncGoogleBusy(pool, store, result.actor.providerId); } catch { /* The store marks this provider failed; availability stays closed. */ }
     }
-    return noStoreJson(await readHostCalendar(pool, store, result.actor, fromDate, toDate));
+    const data = await readHostCalendar(pool, store, result.actor, fromDate, toDate);
+    return noStoreJson({ ...data, google: { ...data.google, canManage: data.google.canManage && result.nihoRole === "OWNER" } });
   } catch (error) {
     return failure(error);
   }
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
 
   const result = await hostActor(body.providerId);
   if ("response" in result) return result.response;
+  if (result.nihoRole !== "OWNER" && result.nihoRole !== "EDITOR") return noStoreJson({ error: "forbidden" }, 403);
   if (isHostMock()) return noStoreJson({ error: "preview_read_only" }, 403);
   const pool = experiencePool();
   const store = experienceStore();

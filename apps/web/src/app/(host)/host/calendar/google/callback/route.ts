@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   if (!code || code.length > 2048) return done("failed");
   const actor = await hostActor(saved.providerId);
-  if ("response" in actor || actor.actor.nihoUserId !== saved.nihoUserId) return done("failed");
+  if ("response" in actor || actor.actor.nihoUserId !== saved.nihoUserId || actor.nihoRole !== "OWNER") return done("failed");
   const pool = experiencePool();
   const store = experienceStore();
   const runtime = googleRuntimeConfig();

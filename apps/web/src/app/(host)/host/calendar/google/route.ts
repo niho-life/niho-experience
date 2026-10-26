@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const membership = await store.verifyActiveMembership(result.actor);
     if (!membership) return noStoreJson({ error: "forbidden" }, 403);
     if (body.action === "disconnect") {
-      if (membership.role !== "OWNER") return noStoreJson({ error: "forbidden" }, 403);
+      if (membership.role !== "OWNER" || result.nihoRole !== "OWNER") return noStoreJson({ error: "forbidden" }, 403);
       await disconnectGoogleCalendar(pool, result.actor);
       return noStoreJson({ ok: true });
     }

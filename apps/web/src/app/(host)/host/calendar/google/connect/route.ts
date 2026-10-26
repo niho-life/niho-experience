@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled || isHostMock()) return hostNotFound();
   const result = await hostActor(request.nextUrl.searchParams.get("providerId"));
   if ("response" in result) return result.response;
+  if (result.nihoRole !== "OWNER") return noStoreJson({ error: "forbidden" }, 403);
   const store = experienceStore();
   const google = googleRuntimeConfig();
   if (!store || !google) return noStoreJson({ error: "calendar_not_configured" }, 503);
