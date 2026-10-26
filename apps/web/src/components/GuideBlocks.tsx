@@ -46,7 +46,7 @@ export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "on
 export function GuideExperienceCta({ card, dates }: { card: CardModel; dates: CardDatesSource }) {
   return (
     <aside aria-label={`Experience: ${card.title}`} className="mt-8 rounded-[var(--radius-card)] border border-line bg-sand p-4 sm:p-5">
-      <div className="grid items-start gap-4 sm:grid-cols-[96px_1fr]">
+      <div className={`grid items-start gap-4${card.cover ? " sm:grid-cols-[96px_1fr]" : ""}`}>
         {card.cover ? (
           <NextImage src={card.cover.url} alt={imageAlt(card.cover, card.title)} width={192} height={144} unoptimized className="aspect-[4/3] w-24 rounded-xl object-cover" />
         ) : null}
