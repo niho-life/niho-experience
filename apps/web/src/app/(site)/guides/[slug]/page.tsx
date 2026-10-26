@@ -5,11 +5,12 @@ import { notFound } from "next/navigation";
 import { GuideBody } from "@/components/GuideBody";
 import { ExperienceCardGrid, GuideFaq, GuideTeasers } from "@/components/GuideBlocks";
 import { JsonLd } from "@/components/JsonLd";
+import { Notice } from "@/components/ui";
 import { config } from "@/lib/config";
 import { cardsFor, readListedExperiences } from "@/lib/experience-cards";
 import type { SearchParams } from "@/lib/filters";
 import { guideLinkHref, parseGuideMarkdown } from "@/lib/guide-markdown";
-import { availableGuides, findGuide } from "@/lib/guide-registry";
+import { findGuide, guideCatalog } from "@/lib/guide-registry";
 import { formatGuideDate, guideAlternates, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage } from "@/lib/guides";
 import { publicMetadata, SITE_NAME } from "@/lib/public-metadata";
 import { breadcrumbJsonLd, guideArticleJsonLd } from "@/lib/structured-data";
@@ -17,8 +18,9 @@ import { breadcrumbJsonLd, guideArticleJsonLd } from "@/lib/structured-data";
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const guide = findGuide((await params).slug);
-  if (!guide) notFound();
+  const found = await findGuide((await params).slug);
+  if (!found) notFound();
+  const { guide, draft } = found;
   const canonical = `${config.siteUrl}/guides/${guide.slug}`;
   const base = publicMetadata(guide.title, guide.description, canonical);
   // Only a hero whose rights cover sharing becomes the share image (docs/seo.md).
@@ -34,16 +36,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       publishedTime: guide.publishedAt, modifiedTime: guide.updatedAt, authors: [guide.author.name], images,
     },
     twitter: { card: "summary", title: guide.title, description: guide.description, images: image ? [image] : [] },
+    // A draft (mock preview only) is never indexed, whatever the deployment's indexing setting.
+    ...(draft ? { robots: { index: false, follow: false } } : {}),
   };
 }
 
-/** One guide, fully in the server HTML: title, author, dates, hero, body, FAQ, experiences to book and related guides. */
+/**
+ * One guide, fully in the server HTML: title, author, dates, hero, body, FAQ, experiences to book and related guides.
+ * A draft (mock preview only) opens with a notice that it is not published.
+ */
 export default async function GuidePage({ params, searchParams }: Props) {
-  const guide = findGuide((await params).slug);
-  if (!guide) notFound();
+  const found = await findGuide((await params).slug);
+  if (!found) notFound();
+  const { guide, draft } = found;
   const query = await searchParams;
   const blocks = parseGuideMarkdown(guide.body);
-  const related = relatedGuidesOf(availableGuides(), guide);
+  const catalog = await guideCatalog();
+  const related = relatedGuidesOf(catalog.guides, guide);
   // The call to action skips experiences the catalogue no longer lists, and disappears when the catalogue cannot be read.
   const listed = await readListedExperiences(query);
   const featured = listed ? listedExperienceSlugs(guide, listed).flatMap((slug) => listed.filter((item) => item.slug === slug)) : [];
@@ -56,6 +65,11 @@ export default async function GuidePage({ params, searchParams }: Props) {
       <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }, { name: guide.title, path: `/guides/${guide.slug}` }])} />
       <article className="container-page pt-6 sm:pt-9">
         <div className="mx-auto max-w-[46rem]">
+          {draft ? (
+            <div className="mb-5">
+              <Notice tone="warn" title="Draft · not published · visible only in this preview" />
+            </div>
+          ) : null}
           <nav aria-label="Breadcrumb" className="text-sm text-muted">
             <Link href="/guides" className="font-extrabold text-ink hover:underline">
               Guides
@@ -103,7 +117,7 @@ export default async function GuidePage({ params, searchParams }: Props) {
             <h2 id="guide-related-heading" className="mb-4 text-[1.75rem] lg:text-[2rem]">
               More guides
             </h2>
-            <GuideTeasers guides={related} />
+            <GuideTeasers guides={related} draftSlugs={catalog.draftSlugs} />
           </div>
         </section>
       ) : null}
