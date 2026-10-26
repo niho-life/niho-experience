@@ -108,3 +108,22 @@ test("authorized owner keeps readiness after the anonymous preview token expires
   await expect(page.getByRole("button", { name: "同意して受け入れる" })).toHaveCount(0);
   expect(anonymousRequests).toBe(0);
 });
+
+
+test("collaborators see progress without representative acceptance or payment actions", async ({ page }) => {
+  await page.route("**/host/api/preparations/case_1", async (route) => json(route, { case: {
+    id: "case_1", status: "MATERIALIZED", revision: 1, snapshotHash: "1".repeat(64), proposal, access: "COORDINATOR",
+    currentAcceptance: null, representativeVerifiedAt: "2026-10-26T02:00:00.000Z",
+    materialized: { providerId: "provider_1", pageJaId: "ja_1", pageEnId: "en_1", at: "2026-10-26T03:00:00.000Z" }, consents, images: [], updatedAt: "2026-10-26T03:00:00.000Z",
+  } }));
+  await page.route("**/host/api/preparations/case_1/readiness", async (route) => json(route, { readiness: {
+    ...readiness, representativeVerification: "VERIFIED", payment: "NOT_CONNECTED", providerId: "provider_1",
+    nextAction: "店舗本人の売上受取設定を待っています", editUrl: "/experiences/provider?providerId=provider_1",
+    paymentUrl: "/experiences/provider?providerId=provider_1&tab=payments",
+  } }));
+  await page.goto("/host/auth/mock-login?preparationCaseId=case_1");
+  await expect(page.getByRole("heading", { name: "必要な手続き" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "同意して受け入れる" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "売上受取を設定" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "NIHOで商品を確認" })).toHaveCount(0);
+});

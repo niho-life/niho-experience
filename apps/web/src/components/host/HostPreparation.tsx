@@ -111,7 +111,9 @@ export function HostPreparation({ caseId, nihoOrigin }: { caseId: string; nihoOr
     && hostCase.currentAcceptance.agreementVersion === review.consents.preparation.version
     && hostCase.currentAcceptance.listingConsentVersion === review.consents.listing.version
     && hostCase.currentAcceptance.providerConsentVersion === (review.consents.provider.required ? review.consents.provider.version : null);
-  const editUrl = safeNihoUrl(nihoOrigin, readiness?.editUrl ?? null); const paymentUrl = safeNihoUrl(nihoOrigin, readiness?.paymentUrl ?? null);
+  const mayManageProvider = hostCase?.access === "REPRESENTATIVE";
+  const editUrl = mayManageProvider ? safeNihoUrl(nihoOrigin, readiness?.editUrl ?? null) : null;
+  const paymentUrl = mayManageProvider ? safeNihoUrl(nihoOrigin, readiness?.paymentUrl ?? null) : null;
   return <div className="space-y-6">
     <header><p className="text-xs font-extrabold tracking-[0.12em] text-ink-soft">掲載準備・確認版 {review.revision}</p><h1 className="font-display text-3xl font-medium">{review.proposal.provider.displayName}</h1><p className="mt-2 text-ink-soft">内容の受入、事務局の確認、売上受取、掲載審査を順番に進めます。</p></header>
     {error ? <div role="alert" className="rounded-xl bg-danger-pale p-4 text-danger"><p>{error}</p><button type="button" className="mt-2 min-h-8 rounded-full border border-danger/40 px-4 font-extrabold" onClick={() => void load()}>最新内容を読み直す</button></div> : null}{notice ? <p role="status" className="rounded-xl bg-leaf-pale p-4 text-moss">{notice}</p> : null}
