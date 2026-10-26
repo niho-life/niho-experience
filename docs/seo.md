@@ -11,6 +11,8 @@
 | `/experiences?q=…&theme=…&date=…&guests=…` | 検索・絞り込みURL | しない（`noindex, follow`。テーマ・開催日のAPI絞り込みはv1.2有効時だけ使用） | `/experiences` |
 | `/experiences/{slug}` | 体験詳細 | する | 自分自身 |
 | `/host` | 提供者向けの紹介（ログイン前） | する | `/host` |
+| `/guides` | ガイド記事の一覧（公開記事が 1 本以上あるときだけ。無ければ 404） | する | `/guides` |
+| `/guides/{slug}` | ガイド記事（下の「ガイド記事」） | する | 自分自身 |
 | `/help` | 予約のヘルプ（NIHOのヘルプと問い合わせ先への案内） | しない（`noindex, follow`。理由は下の「`/help` の扱い」） | — |
 | `/host/*` | ホストの画面（ログイン後） | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
 | `/experiences/{slug}/book` | 予約入力 | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
@@ -59,6 +61,18 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 - 合成データ・仮素材の写真では出さない（プレビューでは `TouristTrip`・`Product` を出さず、合成のレビューも出さない）。販売実績は実データがあっても、このサイトが表示していない限り出さない。
 - レビュー：HTTP APIの実データで、**平均が画面に出ている（3 件以上）ときだけ** `aggregateRating`（`ratingValue`・`reviewCount`・1〜5）と、画面に出している新しい順の `review`（`reviewRating`・`author`＝表示名・`datePublished`・`reviewBody`）を `TouristTrip` と `Product` の両方に同じ値で載せる。1〜2 件・0 件・読めなかったときは何も出さない。提供者の返信・よかった点・予約の識別子は載せない。NIHO が確認して公開した、予約者のレビューだけを対象にする（[seo-content-policy.md](growth/seo-content-policy.md)）。
 - リッチリザルトやAIの回答に載ることは保証しない。
+
+## ガイド記事
+
+[#145](https://github.com/niho-life/niho-experience/issues/145)。原稿の置き場所は [ADR 0002](adr/0002-guide-content.md)、書き方と公開手順は [content/guides.md](content/guides.md)。
+
+- **データ**：公開済みの記事だけを `apps/web/src/content/guides/` に 1 記事 1 モジュールで置き、`index.ts` の `PUBLISHED_GUIDES` に足す。項目は `slug`・`title`（110 字まで）・`description`（160 字まで）・`author { name, role }`・`publishedAt`・`updatedAt`（`YYYY-MM-DD`）・任意の `hero { src, alt, width, height, licensed }`・`relatedExperienceSlugs`（2〜3）・`relatedGuideSlugs`・`faq`・`body`・`translations.ja`（構造だけ）。本文はリポ内のパーサーで読む Markdown のサブセットで、生の HTML を出さない。対応外の書き方・安全でないリンクは unit test（`guides.test.ts`）で落ちる。
+- **表示**：Server Component で、h1・著者（名前と役割）・公開日と更新日（画面の文字）・ヒーロー画像・本文・FAQ（h2 と質問ごとの h3）・予約できる体験のカード（2〜3 件。カタログに無いものは飛ばし、カタログが読めなければ節ごと出さない）・関連記事を最初の HTML に入れる。体験の詳細（英語版）には、その体験を `relatedExperienceSlugs` に持つ記事への枠（"Guides for your visit"）を出し、無ければ出さない。
+- **公開の範囲**：実 API（`EXPERIENCE_API_MODE=http`）では公開記事だけ。0 本の間は `/guides`・`/guides/{slug}` が 404、sitemap に載せず、フッターのリンクも出さない。mock のプレビューだけ合成のサンプル記事（`samples/`・題名と著者に `(sample)`）を足す。`robots` はほかの公開ページと同じ（検索公開のスイッチが off なら `noindex, nofollow`）。
+- **メタデータ**：`title`・`description`・自己参照の canonical・Open Graph（`type: article`・`publishedTime`・`modifiedTime`）を `<head>` に入れる（`htmlLimitedBots` の対象。`e2e/guides.spec.ts` が Googlebot・GPTBot の UA で確かめる）。OG 画像は `hero.licensed` が true のときだけ。Twitter カードは `summary`。
+- **構造化データ**：`Article`（`headline`・`description`・`url`・`mainEntityOfPage`・`inLanguage: en`・`author`＝`Person`〔`name`・`jobTitle`〕・`datePublished`・`dateModified`・`publisher`＝トップの `Organization` と同じ `@id`・名称・URL。`image` は `hero.licensed` のときだけ）と `BreadcrumbList`（Home › Guides › 題名）。一覧は `BreadcrumbList`（Home › Guides）だけ。FAQ の構造化データ（`FAQPage`）は出さない（Google のリッチリザルトの対象外。画面の FAQ と一致させるだけ）。`Article` は画面にある事実だけなので、プレビューのサンプル記事にも出す（プレビューは `noindex`）。
+- **sitemap**：公開記事があるときだけ `/guides`（最新の `updatedAt`）と各記事（`lastModified` = `updatedAt`）を足す。プレビューと検索公開 off の sitemap は従来どおり空。
+- **hreflang**：`en` と `x-default`（自分自身）。`ja` は、その記事に `translations.ja` があり**かつ**日本語の記事のページが実在するときだけ足す（`locale-metadata.ts` と同じ考え方）。`/ja/guides` はまだ無い（#59）ので、今はどの記事にも `ja` を出さない。
 
 ## 担当3と決めること
 

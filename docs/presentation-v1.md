@@ -68,6 +68,15 @@ schema 2 は home の2見出しを whole rich message として持つ。`{em}...
 - `DetailViewModelV1.reviews`（`{ title, content }`）：取消の前に置く節（`id="reviews"`・`scroll-margin` 付き）。見出しの文言と中身は consumer が渡す。
 - `ExperienceCardModelV1.reviewLine`（`{ text, label }`）：カードの所要時間・言語の行の末尾（見た目の文と読み上げの文）。
 
+## 体験ページの追加とフッターのリンク（2026-10-26・#145 #146）
+
+同じく `/v1` のまま、既定では今までと同じ表示になる任意の項目だけを足した。copy registry の key 集合は変えない（文言は consumer が渡す）。
+
+- `DetailViewModelV1.provider.bios`（`{ name, text }[]`）：「Your host(s)」のホストのチップの下に、ホスト紹介文を書式なしの文で出す。ホストが 2 人以上いるときだけ名前を前に付ける。
+- `DetailViewModelV1.upcoming`（ReactNode）：題名（とレビューの 1 行）の下、ホストの行の前の差し込み口。公開サイトはブラウザで読んだ次の開催日（`CardDates`）を置く。
+- `DetailViewModelV1.faq`（`{ title, items: { question, answer }[] }`）：取消の前の節（`id="faq"`・h2 と質問ごとの h3）。項目が空なら出さない。
+- `SiteFooterV1.links`（`{ href, label }[]`）：フッターの固定のリンク（体験・提供者・ヘルプ）の後に足すリンク。公開サイトはガイド記事があるときだけ `/guides` を渡す。
+
 ## 依存配布の分離
 
 workspaceとbuild scriptを持つサイトrepository自体をGit依存にすると、npmの準備処理がサイト全体の依存導入を起動する（[npm公式仕様](https://docs.npmjs.com/cli/v10/configuring-npm/package-json/#git-urls-as-dependencies)）。サイトの通常workflowを維持し、固定SHAで参照する生成済みtgzを配布する。中身は版固定distとREADMEと最小manifestのみで、scripts・workspaces・devDependenciesを含めない。生成器は全ファイルとtgzを決定的に比較し、通常のReact18 consumer installで不要runtimeが入らないことを確認する。

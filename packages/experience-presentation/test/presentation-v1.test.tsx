@@ -166,6 +166,34 @@ describe("v1 portable presentation", () => {
     expect(fresh).not.toContain('href="#reviews"');
   });
 
+  it("adds host introductions, an upcoming-dates slot and the FAQ only when the consumer supplies them", () => {
+    const plain = renderToStaticMarkup(<DetailViewV1 model={detailModel} />);
+    expect(plain).not.toContain('id="faq"');
+    expect(plain).not.toContain("Upcoming slot");
+    const one = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, provider: { ...detailModel.provider, bios: [{ name: "Sample Host", text: "An invented host.\nSecond line." }] }, upcoming: <p>Upcoming slot</p>, faq: { title: "Frequently asked questions", items: [{ question: "What should I wear?", answer: "Comfortable clothes." }, { question: "Is it <b>safe</b>?", answer: "Yes." }] } }} />);
+    // A single host's introduction carries no name prefix; plain text is escaped, never parsed as markup.
+    expect(one).toContain(">An invented host.\nSecond line.</p>");
+    expect(one).not.toContain("Sample Host</b> · ");
+    // Right under the title (and its review line), before the host row: high enough to be seen on a phone without scrolling.
+    expect(one.indexOf("Upcoming slot")).toBeGreaterThan(one.indexOf("</h1>"));
+    expect(one.indexOf("Upcoming slot")).toBeLessThan(one.indexOf("Hosted by"));
+    expect(one).toMatch(/<section id="faq" class="scroll-mt-24 pt-12"><h2[^>]*>Frequently asked questions<\/h2>/);
+    expect(one).toMatch(/<h3[^>]*>What should I wear\?<\/h3><p[^>]*>Comfortable clothes\.<\/p>/);
+    expect(one).toContain("Is it &lt;b&gt;safe&lt;/b&gt;?");
+    expect(one.indexOf('id="faq"')).toBeLessThan(one.indexOf(EN_STATIC_COPY_V1.text("detail.cancellation")));
+    const two = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, provider: { ...detailModel.provider, bios: [{ name: "Host A", text: "First." }, { name: "Host B", text: "Second." }] }, faq: { title: "FAQ", items: [] } }} />);
+    expect(two).toContain("Host A</b> · First.");
+    expect(two).toContain("Host B</b> · Second.");
+    expect(two).not.toContain('id="faq"');
+  });
+
+  it("adds footer links after the fixed ones only when given", () => {
+    expect(renderToStaticMarkup(<SiteFooterV1 />)).not.toContain('href="/guides"');
+    const html = renderToStaticMarkup(<SiteFooterV1 links={[{ href: "/guides", label: "Guides" }]} />);
+    expect(html).toContain('<a href="/guides" class="hover:underline">Guides</a>');
+    expect(html.indexOf('href="/help"')).toBeLessThan(html.indexOf('href="/guides"'));
+  });
+
   it("adds a review line to a card only when the consumer supplies one", () => {
     const model = { ...card, href: card.href };
     expect(renderToStaticMarkup(<ExperienceCardV1 card={model} />)).not.toContain("★");

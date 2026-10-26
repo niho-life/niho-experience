@@ -84,12 +84,18 @@ export declare function SiteHeaderV1({ primitives, copy, currentPath, labels, ex
     };
     experiencesLink?: ReactNode;
 }): import("react").JSX.Element;
-export declare function SiteFooterV1({ primitives, copy, previewNote, description, copyright }: {
+/** Extra footer links after the fixed ones (e.g. the guides, only while some exist). The consumer supplies the label. */
+export type FooterLinkV1 = Readonly<{
+    href: string;
+    label: string;
+}>;
+export declare function SiteFooterV1({ primitives, copy, previewNote, description, copyright, links }: {
     primitives?: Partial<PresentationPrimitivesV1>;
     copy?: StaticCopyAccessorV1;
     previewNote?: ReactNode;
     description?: string;
     copyright?: string;
+    links?: readonly FooterLinkV1[];
 }): import("react").JSX.Element;
 export declare function SiteFrameV1({ children, header, footer, copy }: {
     children: ReactNode;
@@ -186,6 +192,19 @@ export type DetailConditionV1 = Readonly<{
     headline: string;
     detail?: string;
 }>;
+/** A host's own introduction, shown as plain text under the host chips. The name is shown only when several hosts have one. */
+export type DetailHostBioV1 = Readonly<{
+    name: string;
+    text: string;
+}>;
+/** Questions and answers (anchor `#faq`): an h2, then one h3 per question and its plain-text answer, all in the server HTML. Placed before the cancellation terms. */
+export type DetailFaqV1 = Readonly<{
+    title: string;
+    items: readonly Readonly<{
+        question: string;
+        answer: string;
+    }>[];
+}>;
 export type DetailViewModelV1 = Readonly<{
     title: string;
     backHref: string;
@@ -217,6 +236,7 @@ export type DetailViewModelV1 = Readonly<{
         tagline?: string;
         photo?: DisplayImageV1 | null;
         hosts: readonly FaceV1[];
+        bios?: readonly DetailHostBioV1[];
     };
     included: readonly string[];
     notIncluded: readonly string[];
@@ -232,6 +252,8 @@ export type DetailViewModelV1 = Readonly<{
     askHost?: ReactNode;
     reviewHeadline?: DetailReviewHeadlineV1;
     reviews?: DetailReviewsV1;
+    upcoming?: ReactNode;
+    faq?: DetailFaqV1;
 }>;
 export declare function DetailViewV1({ model, primitives, copy, headings }: {
     model: DetailViewModelV1;

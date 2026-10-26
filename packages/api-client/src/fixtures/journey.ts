@@ -9,7 +9,7 @@
  *   条件の形に並べ直しただけで、新しい事実を足さない。オーナーが確認した原稿に置き換わるまでは推奨値。
  * - 条件の無い体験を残す（dinner など）。画面は「条件が空」でも崩れず、従来の Good to know の一覧へ戻ることを確かめる。
  */
-import type { ExperienceConditions, ExperienceReview, ExperienceReviewSummary, ExperienceReviewsResponse, JourneyDetailExtras } from "../journey.ts";
+import type { ExperienceConditions, ExperienceFaqItem, ExperienceReview, ExperienceReviewSummary, ExperienceReviewsResponse, JourneyDetailExtras } from "../journey.ts";
 
 const CONDITIONS: Readonly<Record<string, ExperienceConditions>> = {
   // 承認制・同意の対象あり（年齢・体の負担・段差）。
@@ -126,10 +126,33 @@ export function reviewsResponseFor(slug: string, limit: number): ExperienceRevie
 /** 詳細の SSR が読む件数（"Show all N reviews" でそれ以上を読む）。 */
 export const REVIEWS_ON_DETAIL = 3;
 
+/**
+ * よくある質問（#146・仮契約）。合成の体験だけに置く（pilot の FAQ はホストとオーナーの原稿が確定してから。AGENTS.md）。
+ * 答えは合成の dinner の fixture（experiences.ts）にある事実に合わせ、足した事実（エプロン等）も架空。
+ * 服装・言語・子ども・遅刻・雨・アレルギー・写真・持ち帰り・取消・支払いの 10 の話題を揃える。FAQ の無い体験も残す。
+ */
+const FAQ: Readonly<Record<string, readonly ExperienceFaqItem[]>> = {
+  "home-cooked-dinner-with-locals": [
+    { question: "What should I wear?", answer: "Comfortable everyday clothes. Shoes come off at the entrance, so wear socks you are happy to show. Aprons are provided." },
+    { question: "What language is the dinner in?", answer: "English and Japanese. Yui (sample) explains each step in English, and the other guests and neighbours often switch between both." },
+    { question: "Can I bring children?", answer: "Yes. Children aged 6 to 12 can join with an adult at the child price. The kitchen has knives and hot pans, so younger children cannot join this session." },
+    { question: "What if I'm running late?", answer: "Cooking starts at 6:20 PM. If you are running late, come in when you arrive and join the step the group is on. Reply to your booking email if you will be more than 30 minutes late." },
+    { question: "What happens if it rains?", answer: "The dinner is held indoors in the living room, so it goes ahead in any weather." },
+    { question: "Can you cater for allergies or a vegetarian diet?", answer: "Vegetarian dishes are available on request: tell the host in the booking question. The kitchen also uses wheat, so a fully gluten-free meal cannot be promised." },
+    { question: "Can I take photos?", answer: "Yes, of the food and the room. Please ask before you photograph other guests or neighbours." },
+    { question: "Do I take anything home?", answer: "You take home a recipe card in English for the dishes you cooked." },
+    { question: "What is the cancellation policy?", answer: "Free cancellation until 24 hours before the start. After that, the booking cannot be refunded." },
+    { question: "How do I pay?", answer: "You pay online when you book, in Japanese yen with tax included, through Stripe's secure checkout. Nothing else is charged on the day." },
+    { question: "Are drinks included?", answer: "Soft drinks are included. Alcohol is not included." },
+    { question: "Do I need to know how to cook?", answer: "No. Chopping, plating and tasting are all part of it, and the host shows each step." },
+    { question: "How do I find the meeting place?", answer: "It is about 10 minutes on foot from the nearest station (sample). Ring the bell at the wooden door." },
+  ],
+};
+
 /** 予約前の質問を受け付けない体験（予約を受けていない体験）。 */
 const QUESTIONS_CLOSED: ReadonlySet<string> = new Set(["evening-pottery-session"]);
 
 export function journeyExtrasFor(slug: string): JourneyDetailExtras {
   const { summary, reviews } = reviewsResponseFor(slug, REVIEWS_ON_DETAIL);
-  return { enabled: true, conditions: CONDITIONS[slug] ?? null, questionsOpen: !QUESTIONS_CLOSED.has(slug), reviews: { status: "ok", summary, items: reviews } };
+  return { enabled: true, conditions: CONDITIONS[slug] ?? null, questionsOpen: !QUESTIONS_CLOSED.has(slug), reviews: { status: "ok", summary, items: reviews }, faq: [...(FAQ[slug] ?? [])] };
 }

@@ -127,6 +127,9 @@
 - Good to know と質問（Epic #103・仮契約。`EXPERIENCE_API_MODE=mock` のときだけ出し、実 API の配備では出さない）：条件は種類ごとの行（§3 参加の条件）。質問のボタンは Good to know の下（Good to know が無い体験は、取消の前にボタンだけ）。予約を受けていない体験には出さない。条件が空の体験は従来の一覧だけで、崩れない。
 - 集合場所：PUBLIC なら名前・住所・アクセス・入口の案内・"Open in Maps"（https のみ）と、`exteriorPhotoIndex` の写真をアーチ形で。AFTER_BOOKING は「予約確定後に案内」。
 - 予約：PC は右の固定カード（"¥X / adult"、子ども料金、税込、開催曜日と時刻、ブラウザで読んだ次の開催日を最大3つ＝押すと `/book?date=&offer=` でその日を選んだ状態から、"Check dates and book"、取消の時間、承認制なら "Your hosts confirm each request — you're only charged if they accept"、"No account needed"、"Secure payment by Stripe"）。人数・合計は置かない（予約入力の役割）。スマホは下端の固定バー（価格＋次回日 or 曜日の要約＋"Check dates"。次回日は商品が1つなら "Next: Thu 22 Oct · 6:00 PM" と商品名を付けない）。予約停止中（`BOOKINGS_ENABLED=false` か `checkoutAvailable=false`）は停止の案内だけで、予約の入口を出さない。
+- 題名（とレビューの 1 行）の下、ホストの行の前に、ブラウザで読んだ次の開催日（カードと同じ "Next" と日付のピル。予約を受けている体験だけ。残席は出さない。契約に日ごとの締切の時刻が無いので「あと何日で締切」は出さない）。ホストの節には、ホスト紹介文（`hosts[].bio`）があれば書式なしの文で出す（#146）。
+- FAQ（#146・仮契約。mock のときだけ）：取消の前に "Frequently asked questions"（h2）と質問ごとの h3・答え。項目の間は細い線。無い体験は節ごと出さない。
+- 本文の後（ページの幅）：その体験を扱うガイド記事への枠 "Guides for your visit"（記事が無ければ出さない・#145）と、"More experiences in Kamakura"（ほかの体験 2〜3 件をカードで。同じテーマを先に。一覧が読めなければ出さない）。英語版だけ。
 - NIHO の公開 DTO から表示する。正規 URL は API の `canonicalUrl`。プレビューの fixture は構造化データとして出さない。
 
 ### 予約入力（`/experiences/[slug]/book`）

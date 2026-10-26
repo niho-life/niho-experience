@@ -9,6 +9,8 @@ const PAGES = [
   "/host",
   "/booking/return",
   "/preview/states",
+  "/guides",
+  "/guides/sample-first-evening-in-kamakura",
 ];
 
 test.describe("320px narrow phone", () => {

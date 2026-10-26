@@ -176,7 +176,9 @@ export function SiteHeaderV1({ primitives, copy = EN_STATIC_COPY_V1, currentPath
 </header>;
 }
 
-export function SiteFooterV1({ primitives, copy = EN_STATIC_COPY_V1, previewNote, description, copyright }: { primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1; previewNote?: ReactNode; description?: string; copyright?: string }) {
+/** Extra footer links after the fixed ones (e.g. the guides, only while some exist). The consumer supplies the label. */
+export type FooterLinkV1 = Readonly<{ href: string; label: string }>;
+export function SiteFooterV1({ primitives, copy = EN_STATIC_COPY_V1, previewNote, description, copyright, links = [] }: { primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1; previewNote?: ReactNode; description?: string; copyright?: string; links?: readonly FooterLinkV1[] }) {
   const { Link } = primitivesV1(primitives);
   return <footer className="mt-24 border-t border-line bg-white">
 <div className={`container-page grid gap-7 pt-11 sm:grid-cols-[2fr_1fr_auto] sm:items-start ${previewNote ? "pb-10" : "pb-14"}`}>
@@ -193,7 +195,9 @@ export function SiteFooterV1({ primitives, copy = EN_STATIC_COPY_V1, previewNote
 </li>
 <li>
 <Link href="/help" className="hover:underline">{copy.text("chrome.footerBookingHelp")}</Link>
-</li>
+</li>{links.map((link) => <li key={link.href}>
+<Link href={link.href} className="hover:underline">{link.label}</Link>
+</li>)}
 </ul>
 </nav>
 <RubberStamp className="size-[104px] rotate-[10deg] text-moss" />
@@ -303,7 +307,11 @@ export type DetailReviewHeadlineV1 = Readonly<{ label: string; accessibleLabel?:
 export type DetailReviewsV1 = Readonly<{ title: string; content: ReactNode }>;
 /** One structured participation condition ("Ages 10 and up" + a smaller line). The consumer supplies the display strings. */
 export type DetailConditionV1 = Readonly<{ icon: HandIconName; headline: string; detail?: string }>;
-export type DetailViewModelV1 = Readonly<{ title: string; backHref: string; gallery: DetailGalleryModelV1; schedule?: string; hosts: readonly FaceV1[]; hostLine: readonly RichTextSegmentV1[]; facts: readonly { icon: HandIconName; label: string; main: string; sub?: string | null }[]; lead: string; highlights: readonly { text: string; icon: HandIconName }[]; paragraphs: readonly string[]; timeline: readonly { time?: string; title: string; text: string; icon: HandIconName; photo?: DisplayImageV1 | null }[]; provider: { name: string; tagline?: string; photo?: DisplayImageV1 | null; hosts: readonly FaceV1[] }; included: readonly string[]; notIncluded: readonly string[]; emptyListLabel: string; meeting: DetailMeetingModelV1; know: readonly string[]; showAllKnowLabel: string; notSuitable: readonly string[]; cancellation: DetailCancellationModelV1; booking?: DetailBookingCardModelV1; checkoutCancelled?: ReactNode; conditions?: readonly DetailConditionV1[]; askHost?: ReactNode; reviewHeadline?: DetailReviewHeadlineV1; reviews?: DetailReviewsV1 }>;
+/** A host's own introduction, shown as plain text under the host chips. The name is shown only when several hosts have one. */
+export type DetailHostBioV1 = Readonly<{ name: string; text: string }>;
+/** Questions and answers (anchor `#faq`): an h2, then one h3 per question and its plain-text answer, all in the server HTML. Placed before the cancellation terms. */
+export type DetailFaqV1 = Readonly<{ title: string; items: readonly Readonly<{ question: string; answer: string }>[] }>;
+export type DetailViewModelV1 = Readonly<{ title: string; backHref: string; gallery: DetailGalleryModelV1; schedule?: string; hosts: readonly FaceV1[]; hostLine: readonly RichTextSegmentV1[]; facts: readonly { icon: HandIconName; label: string; main: string; sub?: string | null }[]; lead: string; highlights: readonly { text: string; icon: HandIconName }[]; paragraphs: readonly string[]; timeline: readonly { time?: string; title: string; text: string; icon: HandIconName; photo?: DisplayImageV1 | null }[]; provider: { name: string; tagline?: string; photo?: DisplayImageV1 | null; hosts: readonly FaceV1[]; bios?: readonly DetailHostBioV1[] }; included: readonly string[]; notIncluded: readonly string[]; emptyListLabel: string; meeting: DetailMeetingModelV1; know: readonly string[]; showAllKnowLabel: string; notSuitable: readonly string[]; cancellation: DetailCancellationModelV1; booking?: DetailBookingCardModelV1; checkoutCancelled?: ReactNode; conditions?: readonly DetailConditionV1[]; askHost?: ReactNode; reviewHeadline?: DetailReviewHeadlineV1; reviews?: DetailReviewsV1; upcoming?: ReactNode; faq?: DetailFaqV1 }>;
 export function DetailViewV1({ model, primitives, copy = EN_STATIC_COPY_V1, headings = {} }: { model: DetailViewModelV1; primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1; headings?: { overview?: string; details?: string } }) {
   const { Link } = primitivesV1(primitives);
   const Gallery = primitives?.Gallery;
@@ -314,7 +322,7 @@ export function DetailViewV1({ model, primitives, copy = EN_STATIC_COPY_V1, head
 <Link href={model.backHref} className="font-extrabold text-ink hover:underline">{copy.text("detail.breadcrumb")}</Link>
 <span aria-hidden> / </span>
 <span aria-current="page">{model.title}</span>
-</nav><header className="pt-5 lg:pt-3.5">{model.schedule ? <p className="eyebrow">{model.schedule}</p> : null}<h1 className="mt-1.5 text-[2.125rem] leading-[1.1] lg:max-w-[20ch] lg:text-[3.25rem]">{model.title}</h1>{model.reviewHeadline ? <p className="mt-3 text-[0.9375rem] font-extrabold text-ink">{model.reviewHeadline.isNew ? <span className="inline-flex items-center rounded-full bg-leaf-pale px-2.5 py-0.5 text-[0.78125rem] font-extrabold text-moss">{model.reviewHeadline.label}</span> : model.reviewHeadline.href ? <a href={model.reviewHeadline.href} aria-label={model.reviewHeadline.accessibleLabel} className="underline-offset-4 hover:underline">{model.reviewHeadline.label}</a> : <span>{model.reviewHeadline.label}</span>}</p> : null}
+</nav><header className="pt-5 lg:pt-3.5">{model.schedule ? <p className="eyebrow">{model.schedule}</p> : null}<h1 className="mt-1.5 text-[2.125rem] leading-[1.1] lg:max-w-[20ch] lg:text-[3.25rem]">{model.title}</h1>{model.reviewHeadline ? <p className="mt-3 text-[0.9375rem] font-extrabold text-ink">{model.reviewHeadline.isNew ? <span className="inline-flex items-center rounded-full bg-leaf-pale px-2.5 py-0.5 text-[0.78125rem] font-extrabold text-moss">{model.reviewHeadline.label}</span> : model.reviewHeadline.href ? <a href={model.reviewHeadline.href} aria-label={model.reviewHeadline.accessibleLabel} className="underline-offset-4 hover:underline">{model.reviewHeadline.label}</a> : <span>{model.reviewHeadline.label}</span>}</p> : null}{model.upcoming ?? null}
 <div className="mt-4 flex flex-wrap items-center gap-2.5 text-[0.9375rem] text-ink-soft">
 <span className="flex">{model.hosts.map((face, index) => <FaceBadgeV1 key={`${face.name}-${index}`} face={face} primitives={primitives} className={`size-[38px] rounded-full border-2 border-white text-sm ${index ? "-ml-2.5" : ""}`} sizes="38px" />)}</span><span><RichMessageV1 segments={model.hostLine} emphasisClassName="font-extrabold text-ink" /></span></div>
 <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:mt-[22px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">{model.facts.map((fact) => <li key={fact.label} className="flex items-center gap-2.5 text-[0.9375rem] leading-tight font-extrabold">
@@ -350,7 +358,7 @@ export function DetailViewV1({ model, primitives, copy = EN_STATIC_COPY_V1, head
 <RubberStamp className="absolute -right-3 -bottom-[26px] size-[100px] -rotate-[14deg] text-moss" />
 </div> : <RubberStamp className="size-[132px] -rotate-[10deg] justify-self-center text-moss sm:justify-self-start" />}
 <div>{model.provider.tagline ? <p className="hand text-[1.8125rem] leading-[1.12]">“{model.provider.tagline}”</p> : null}<p className="mt-3 text-ink-soft"><RichMessageV1 segments={copy.rich("detail.offeredByRich", { provider: model.provider.name })} emphasisClassName="font-extrabold text-ink" /></p>
-{model.provider.hosts.length ? <ul className="mt-4 flex flex-wrap gap-2">{model.provider.hosts.map((host, index) => <li key={`${host.name}-${index}`} className="flex items-center gap-2 rounded-full bg-sand py-1 pr-3.5 pl-1 text-sm font-extrabold"><FaceBadgeV1 face={host} primitives={primitives} className="size-8 rounded-full text-[0.8125rem]" sizes="32px" />{host.name}</li>)}</ul> : null}
+{model.provider.hosts.length ? <ul className="mt-4 flex flex-wrap gap-2">{model.provider.hosts.map((host, index) => <li key={`${host.name}-${index}`} className="flex items-center gap-2 rounded-full bg-sand py-1 pr-3.5 pl-1 text-sm font-extrabold"><FaceBadgeV1 face={host} primitives={primitives} className="size-8 rounded-full text-[0.8125rem]" sizes="32px" />{host.name}</li>)}</ul> : null}{model.provider.bios?.length ? <div className="mt-5 space-y-3 text-ink-soft">{model.provider.bios.map((bio, index) => <p key={`${bio.name}-${index}`} className="leading-relaxed whitespace-pre-line">{model.provider.bios!.length > 1 ? <><b className="font-extrabold text-ink">{bio.name}</b>{" · "}</> : null}{bio.text}</p>)}</div> : null}
 </div>
 </div>
 </DetailSectionV1>
@@ -363,7 +371,7 @@ export function DetailViewV1({ model, primitives, copy = EN_STATIC_COPY_V1, head
 <DetailSectionV1 title={copy.text("detail.meeting")}><DetailMeetingV1 model={model.meeting} primitives={primitives} copy={copy} /></DetailSectionV1>{model.know.length || model.notSuitable.length || model.conditions?.length ? <DetailSectionV1 title={copy.text("detail.goodToKnow")}>
 {model.conditions?.length ? <DetailConditionsV1 items={model.conditions} /> : null}{model.know.length || !model.conditions?.length ? <DetailDotListV1 items={model.know.slice(0, 3)} className={model.conditions?.length ? "mt-6" : ""} /> : null}{model.know.length > 3 ? <details className="group mt-3"><summary className="link-leaf w-max cursor-pointer list-none [&::-webkit-details-marker]:hidden"><span className="group-open:hidden">{model.showAllKnowLabel}</span><span className="hidden group-open:inline">{copy.text("detail.showFewer")}</span></summary><div className="mt-3"><DetailDotListV1 items={model.know.slice(3)} /></div></details> : null}{model.notSuitable.length ? <div className="mt-[26px]">
 <DetailListV1 title={copy.text("detail.notSuitable")} items={model.notSuitable} icon="cross" emptyLabel={model.emptyListLabel} />
-</div> : null}{model.askHost ? <div className="mt-6">{model.askHost}</div> : null}</DetailSectionV1> : model.askHost ? <div className="pt-8">{model.askHost}</div> : null}{model.reviews ? <DetailSectionV1 id="reviews" title={model.reviews.title}>{model.reviews.content}</DetailSectionV1> : null}<DetailSectionV1 title={copy.text("detail.cancellation")}><DetailCancellationV1 model={model.cancellation} copy={copy} /></DetailSectionV1>
+</div> : null}{model.askHost ? <div className="mt-6">{model.askHost}</div> : null}</DetailSectionV1> : model.askHost ? <div className="pt-8">{model.askHost}</div> : null}{model.reviews ? <DetailSectionV1 id="reviews" title={model.reviews.title}>{model.reviews.content}</DetailSectionV1> : null}{model.faq?.items.length ? <DetailSectionV1 id="faq" title={model.faq.title}><div className="border-t border-line">{model.faq.items.map((item, index) => <div key={`${item.question}-${index}`} className="border-b border-line py-4"><h3 className="font-sans text-[1.0625rem] leading-[1.5] font-extrabold tracking-normal">{item.question}</h3><p className="mt-1.5 whitespace-pre-line text-ink-soft">{item.answer}</p></div>)}</div></DetailSectionV1> : null}<DetailSectionV1 title={copy.text("detail.cancellation")}><DetailCancellationV1 model={model.cancellation} copy={copy} /></DetailSectionV1>
 </div>{model.booking ? <aside id="book" aria-labelledby="book-heading" className="hidden lg:sticky lg:top-[88px] lg:block lg:self-start lg:pt-12"><DetailBookingCardV1 model={model.booking} primitives={primitives} copy={copy} /></aside> : null}</div>
 </div>
 </div>;

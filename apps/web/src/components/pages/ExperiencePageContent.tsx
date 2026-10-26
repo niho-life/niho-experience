@@ -14,7 +14,7 @@ import { Notice } from "@/components/ui";
 import { getExperienceForSite } from "@/lib/api";
 import { faceOf, groupSizeLabel, hostNames, initialOf } from "@/lib/card-model";
 import { config, isPreview } from "@/lib/config";
-import { childParticipationCopy, imageAlt } from "@/lib/experience-copy";
+import { childParticipationCopy, hostBio, imageAlt } from "@/lib/experience-copy";
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import type { SearchParams } from "@/lib/filters";
 import { formatDuration, formatYen } from "@/lib/format";
@@ -35,6 +35,10 @@ import { NO_JOURNEY_EXTRAS } from "@niho-experience/api-client";
 import { getJourneyExtras } from "@/lib/journey";
 import { askHostTarget, conditionRows } from "@/lib/journey-ui";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
+import { CardDates } from "@/components/CardDates";
+import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
+import { relatedExperienceCards } from "@/lib/experience-cards";
+import { guidesAboutExperience } from "@/lib/guide-registry";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -122,8 +126,12 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     if (locale === "ja") return <JapaneseUnavailable />;
     throw error;
   }
-  // Conditions and questions to the host have no NIHO contract yet: the mock serves them, a real API shows none (src/lib/journey.ts).
-  const journey = locale === "en" ? await getJourneyExtras(e.slug, query) : NO_JOURNEY_EXTRAS;
+  // Conditions, questions to the host and the FAQ have no NIHO contract yet: the mock serves them, a real API shows none (src/lib/journey.ts).
+  // Related experiences and guides are English-only for now; both disappear when there are none or the catalogue cannot be read.
+  const [journey, relatedCards] = locale === "en"
+    ? await Promise.all([getJourneyExtras(e.slug, query), relatedExperienceCards(e.slug, query)])
+    : [NO_JOURNEY_EXTRAS, []];
+  const relatedGuides = locale === "en" ? guidesAboutExperience(e.slug) : [];
   const checkoutCancelled = query.checkout === "cancelled";
   const browseContext = readBrowseContext(query);
   const preferredOfferId = typeof query.offer === "string" && e.offers.some((offer) => offer.id === query.offer) ? query.offer : undefined;
@@ -480,7 +488,8 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       highlights: e.highlights.map((text) => ({ text, icon: iconForText(text) })),
       paragraphs,
       timeline: e.timeline.map((step) => ({ time: step.time ? formatClock(step.time, locale) : undefined, title: step.title, text: step.text, icon: iconForText(`${step.title} ${step.text}`, "clock"), photo: toImage(step.photoIndex !== null ? (e.photos[step.photoIndex] ?? null) : null, `${e.title}, ${step.title}`) })),
-      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })) },
+      // Host introductions (v1.1 `hosts[].bio`) as plain text, on the English page only: the Japanese release has no approved translation of them.
+      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined },
       included: e.included,
       notIncluded: e.notIncluded,
       emptyListLabel: copy.text("detail.noneListed"),
@@ -490,6 +499,10 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       askHost: journey.questionsOpen ? <AskHost slug={e.slug} target={askHostTarget(hostNames(e))} face={faceOf(e)} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> : undefined,
       reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews)) ?? undefined,
       reviews: journey.reviews ? { title: "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> } : undefined,
+      faq: journey.faq.length ? { title: "Frequently asked questions", items: journey.faq } : undefined,
+      // The next bookable dates near the title, read in the browser like the cards (the SSR response has no availability).
+      // The contract has no booking cutoff time per date, so no "closes in N days" line; seats left are never shown.
+      upcoming: locale === "en" && canBook ? <CardDates slug={e.slug} scheduleLabel={null} source={{ kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin }} /> : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
       cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
@@ -506,6 +519,16 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     <JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     <JsonLd data={experienceProductJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     {portableDetail()}
+    {relatedGuides.length || relatedCards.length ? <div className="container-page">
+      {relatedGuides.length ? <section aria-labelledby="related-guides-heading" className="pt-14">
+        <h2 id="related-guides-heading" className="mb-4 text-[1.75rem] lg:text-[2rem]">Guides for your visit</h2>
+        <div className="max-w-[46rem]"><GuideTeasers guides={relatedGuides} /></div>
+      </section> : null}
+      {relatedCards.length ? <section aria-labelledby="related-experiences-heading" className="pt-14">
+        <h2 id="related-experiences-heading" className="mb-6 text-[1.75rem] lg:text-[2rem]">More experiences in Kamakura</h2>
+        <ExperienceCardGrid cards={relatedCards} />
+      </section> : null}
+    </div> : null}
     <MobileBookingBar summary={booking} />
   </>;
 }
