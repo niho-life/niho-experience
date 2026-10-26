@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import { createExperiencePreparationAdminApiClient, createExperiencePreparationHostApiClient, createExperiencePreparationReviewApiClient } from "../src/experience-preparations/client.ts";
-import { decodeExperiencePreparationDraft, decodeExperiencePreparationEditorPatch, isExperiencePreparationSchema } from "../src/experience-preparations/schema.ts";
+import { decodeExperiencePreparationCohostPatch, decodeExperiencePreparationDraft, isExperiencePreparationSchema } from "../src/experience-preparations/schema.ts";
 
 const content = { lead: "合成の紹介", facts: { language: "日本語・英語" }, highlights: ["合成の見どころ"], timeline: [], description: "合成データです", included: [], notIncluded: [], notSuitableFor: [], meetingPoint: { entranceNote: "合成の入口", exteriorPhotoObjectKey: null }, knowBeforeYouGo: [], hostUserIds: [] };
 const proposal = {
@@ -9,8 +9,10 @@ const proposal = {
   pages: { ja: { title: "合成体験", content }, en: { title: "Synthetic experience", content } }, photos: [],
   offer: { nameJa: "合成商品", nameEn: "Synthetic offer", shortDescriptionJa: null, shortDescriptionEn: null, priceYen: 3000, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: true, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [6], startTime: "10:00", durationMinutes: 60, cutoffDays: 2, closedDates: [], cancellationPolicy: "MODERATE" as const, acceptanceMode: "REQUEST" as const },
   operatingRoles: [{ party: "PROVIDER" as const, responsibilities: ["実施"] }],
+  cohosts: [{ userId: "synthetic-cohost", displayName: "合成 サブホスト" }],
 };
-const draft = { ...proposal, provider: { ...proposal.provider, contactName: "合成担当", contactEmail: "synthetic@example.test" }, supportScopes: ["DRAFT_EDITING" as const] };
+const { cohosts: _approvedCohosts, ...draftProposalFields } = proposal;
+const draft = { ...draftProposalFields, provider: { ...proposal.provider, contactName: "合成担当", contactEmail: "synthetic@example.test" }, supportScopes: ["DRAFT_EDITING" as const] };
 const review = { caseId: "case_1", status: "REVIEW", revision: 1, snapshotHash: "a".repeat(64), proposal, consents: { preparation: { version: "v1", text: { content: "内容", salesTerms: "条件", support: "支援", representative: "代表" } }, provider: { required: true, version: "pv1", text: "提供者規約" }, listing: { version: "lv1", text: "掲載同意" } }, images: [], expiresAt: "2026-11-01T00:00:00.000Z" };
 const token = "t".repeat(43);
 
@@ -21,10 +23,9 @@ describe("experience preparation selected validation", () => {
     expect(isExperiencePreparationSchema("ReviewResponse", review)).toBe(true);
   });
 
-  it("limits DRAFT_EDITOR patches to pages and photos", () => {
-    expect(decodeExperiencePreparationEditorPatch({ expectedRevision: 1, draft: { pages: proposal.pages, photos: [] } })).not.toBeNull();
-    expect(decodeExperiencePreparationEditorPatch({ expectedRevision: 1, draft: { pages: proposal.pages, offer: proposal.offer } })).toBeNull();
-    expect(decodeExperiencePreparationEditorPatch({ expectedRevision: 1, draft: { provider: { contactEmail: "private@example.test" } } })).toBeNull();
+  it("limits COHOST patches to operational pages, photos and offer", () => {
+    expect(decodeExperiencePreparationCohostPatch({ expectedRevision: 1, draft: { pages: proposal.pages, photos: [], offer: proposal.offer } })).not.toBeNull();
+    expect(decodeExperiencePreparationCohostPatch({ expectedRevision: 1, draft: { provider: { contactEmail: "private@example.test" } } })).toBeNull();
   });
 });
 

@@ -256,7 +256,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
             )}
           </FieldSection>
 
-          <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} />
+          {owner ? <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} /> : null}
         </form>
 
         <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview={preview} />

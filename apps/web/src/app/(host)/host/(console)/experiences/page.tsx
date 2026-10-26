@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { HostIcon } from "@/components/host/HostIcon";
+import { HostLiveExperiences } from "@/components/host/HostLiveExperiences";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { consoleButtonClass, HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead, StatusPill } from "@/components/host/ui";
@@ -11,6 +12,7 @@ import { experiencePath } from "@/host/home";
 import { experienceRating, reviewsHref } from "@/host/reviews";
 import { LISTING_STATUS } from "@/host/status";
 import { withProvider } from "@/lib/host/routes";
+import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
 export const metadata: Metadata = { title: "体験" };
 
@@ -29,6 +31,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
+  if (providerOperationsEnabled()) return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} />;
   const { experiences } = await loadHostConsoleData(provider);
   const reviews = loadHostReviews(provider).list;
   const ratingOf = (id: string) => (reviews.status === "ready" ? experienceRating(reviews.reviews, id) : null);

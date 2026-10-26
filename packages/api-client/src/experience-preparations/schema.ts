@@ -5,7 +5,7 @@ import { toJsonSchema } from "../public-schema-validation.ts";
 import type {
   ExperiencePreparationAcceptanceInput,
   ExperiencePreparationDraft,
-  ExperiencePreparationEditorPatchInput,
+  ExperiencePreparationCohostPatchInput,
   ExperiencePreparationLockedAcceptanceInput,
   ExperiencePreparationUploadPolicyInput,
 } from "./types.ts";
@@ -46,8 +46,8 @@ export const isExperiencePreparationCorrection = (value: unknown): value is stri
 export const decodeExperiencePreparationDraft = (value: unknown): ExperiencePreparationDraft | null =>
   isExperiencePreparationSchema<ExperiencePreparationDraft>("Draft", value) ? value : null;
 
-export const decodeExperiencePreparationEditorPatch = (value: unknown): ExperiencePreparationEditorPatchInput | null =>
-  isExperiencePreparationSchema<ExperiencePreparationEditorPatchInput>("EditorPatchInput", value) ? value : null;
+export const decodeExperiencePreparationCohostPatch = (value: unknown): ExperiencePreparationCohostPatchInput | null =>
+  isExperiencePreparationSchema<ExperiencePreparationCohostPatchInput>("CohostPatchInput", value) ? value : null;
 
 export const decodeExperiencePreparationAcceptance = (value: unknown): ExperiencePreparationAcceptanceInput | null =>
   isExperiencePreparationSchema<ExperiencePreparationAcceptanceInput>("AcceptanceInput", value) ? value : null;

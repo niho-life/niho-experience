@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExperiencePreparationAdminCase } from "@niho-experience/api-client/experience-preparations";
-import { decodeExperiencePreparationDraft, decodeExperiencePreparationEditorPatch } from "@niho-experience/api-client/experience-preparations-schema";
+import { decodeExperiencePreparationCohostPatch, decodeExperiencePreparationDraft } from "@niho-experience/api-client/experience-preparations-schema";
 import { emptyPreparationDraft, preparationDraftFromAdminCase } from "./draft";
 
 describe("assisted-launch structured forms", () => {
@@ -25,8 +25,8 @@ describe("assisted-launch structured forms", () => {
 
   it("keeps collaborator edits limited to pages and case photos", () => {
     const draft = completedDraft();
-    expect(decodeExperiencePreparationEditorPatch({ expectedRevision: 1, draft: { pages: draft.pages, photos: draft.photos } })).not.toBeNull();
-    expect(decodeExperiencePreparationEditorPatch({ expectedRevision: 1, draft: { pages: draft.pages, contactEmail: "private@example.test" } })).toBeNull();
+    expect(decodeExperiencePreparationCohostPatch({ expectedRevision: 1, draft: { pages: draft.pages, photos: draft.photos, offer: draft.offer } })).not.toBeNull();
+    expect(decodeExperiencePreparationCohostPatch({ expectedRevision: 1, draft: { pages: draft.pages, contactEmail: "private@example.test" } })).toBeNull();
   });
 
   it("round-trips the Admin case slug, support scopes, target and private contact", () => {
@@ -37,7 +37,7 @@ describe("assisted-launch structured forms", () => {
     const { contactName, contactEmail, ...provider } = source.provider;
     const adminCase = {
       id: "case_1", status: "REVIEW", revision: 2, snapshotHash: "a".repeat(64),
-      proposal: { target: source.target, provider, pageSlugBase: source.pageSlugBase, pages: source.pages, photos: source.photos, offer: source.offer, operatingRoles: source.operatingRoles },
+      proposal: { target: source.target, provider, pageSlugBase: source.pageSlugBase, pages: source.pages, photos: source.photos, offer: source.offer, operatingRoles: source.operatingRoles, cohosts: [] },
       contact: { name: contactName, email: contactEmail }, currentAcceptance: null, acceptanceHistory: [], representativeVerifiedAt: null, representativeVerifiedAcceptanceId: null, materialized: null, assignments: [], images: [],
       createdAt: "2026-10-26T00:00:00.000Z", updatedAt: "2026-10-26T00:00:00.000Z", pageSlugBase: source.pageSlugBase, supportScopes: source.supportScopes,
     } satisfies ExperiencePreparationAdminCase;

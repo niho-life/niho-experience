@@ -49,6 +49,7 @@ describe("provider list", () => {
   it("labels roles in Japanese", () => {
     expect(providerRoleLabel("OWNER")).toBe("オーナー");
     expect(providerRoleLabel("EDITOR")).toBe("編集者");
+    expect(providerRoleLabel("COHOST")).toBe("サブホスト");
     expect(providerRoleLabel(null)).toBeNull();
   });
 });

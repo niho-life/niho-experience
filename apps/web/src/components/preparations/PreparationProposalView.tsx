@@ -88,6 +88,7 @@ export function PreparationProposalView({ proposal, images }: { proposal: Experi
       <section aria-labelledby="preparation-roles-heading" className="space-y-4 border-t border-line pt-7">
         <div><p className="text-xs font-extrabold tracking-[0.12em] text-ink-soft">運営分担</p><h2 id="preparation-roles-heading" className="font-display text-2xl font-medium">誰が何をするか</h2></div>
         <div className="grid gap-4 sm:grid-cols-2">{proposal.operatingRoles.map((role, index) => <div key={`${role.party}-${index}`}><h3 className="font-extrabold">{PARTY[role.party]}</h3><TextItems items={role.responsibilities} /></div>)}</div>
+        <div className="rounded-xl bg-sand p-4"><h3 className="font-extrabold">サブホスト</h3>{proposal.cohosts.length ? <ul className="mt-2 list-disc pl-5">{proposal.cohosts.map((cohost) => <li key={cohost.userId}>{cohost.displayName}</li>)}</ul> : <p className="mt-1 text-ink-soft">サブホストはいません。</p>}<p className="mt-2 text-sm text-ink-soft">表示されたサブホストは、この提供者のすべての体験・開催条件・予約、予約者情報と返信を継続して担当します。販売者名義・法的同意・Stripe・売上受取・メンバー管理はオーナー専用です。</p></div>
       </section>
     </div>
   );

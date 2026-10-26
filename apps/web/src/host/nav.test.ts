@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { HOST_NAV, withProvider, withQuery } from "@/lib/host/routes";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "./nav";
+import { hostNavForRole } from "@/components/host/HostNav";
 
 const selected = (location: string) => HOST_NAV.filter((item) => isHostNavActive(location, item.href)).map((item) => item.label);
 
 describe("host navigation", () => {
   it("lists the five destinations in order", () => {
     expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "予約", "売上", "設定"]);
+  });
+
+  it("hides sales from COHOST and EDITOR while keeping OWNER sales", () => {
+    expect(hostNavForRole("OWNER").map((item) => item.href)).toContain("/host/sales");
+    expect(hostNavForRole("COHOST").map((item) => item.href)).not.toContain("/host/sales");
+    expect(hostNavForRole("EDITOR").map((item) => item.href)).not.toContain("/host/sales");
+    expect(hostNavForRole("EDITOR").map((item) => item.href)).not.toContain("/host/bookings");
+    expect(hostNavForRole("COHOST").map((item) => item.href)).toContain("/host/bookings");
   });
 
   it("selects exactly one item on each top page", () => {

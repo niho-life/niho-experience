@@ -29,7 +29,7 @@ import type {
 
 export { isMockPhotoUrl, MOCK_LISTING_CONSENT } from "./mock-pages.ts";
 
-export const MOCK_HOST_SCENARIOS = ["empty", "two-providers", "payments-pending"] as const;
+export const MOCK_HOST_SCENARIOS = ["empty", "two-providers", "payments-pending", "cohost"] as const;
 /**
  * - `empty`: 提供者が 0 件（登録の入口）。
  * - `two-providers`: OWNER で審査が承認済み・口座が準備済みの「サンプルの台所」（申込があるので口座は切り替えられない）と、
@@ -37,6 +37,7 @@ export const MOCK_HOST_SCENARIOS = ["empty", "two-providers", "payments-pending"
  *   「Cook a seasonal home meal together (sample)」と、日本語の下書きで表紙・料金・曜日が足りない「（サンプル）朝市で買って、台所で作る」）。
  * - `payments-pending`: OWNER で下書き・口座が未接続の「サンプルの庭」。再利用の候補に、準備済みの拠点と本人確認待ちの拠点がある。
  *   体験ページは 0 件で、集合場所は未設定。
+ * - `cohost`: `two-providers` と同じ合成ページを、日常運営だけを担う COHOST として開く。
  */
 export type MockHostScenario = (typeof MOCK_HOST_SCENARIOS)[number];
 
@@ -174,7 +175,7 @@ function seed(scenario: MockHostScenario, base: Date): { providers: MockProvider
         meetingPoint: { ...MOCK_KITCHEN_MEETING_POINT },
         pages: kitchenPages.pages,
         photos: new Set(kitchenPages.photos),
-        memberRole: "OWNER",
+        memberRole: scenario === "cohost" ? "COHOST" : "OWNER",
         readiness: "READY",
         connected: true,
         hasBookings: true,
@@ -380,7 +381,7 @@ export function createMockExperienceHostFetch(options: MockExperienceHostFetchOp
     if (!entry) return notFound();
     if (tail === "" && method === "GET") return json(200, { provider: withRole(entry), platformAdmin: false, ...consents });
     if (tail === "" && method === "PATCH") return patch(entry, await readBody());
-    // 集合場所・体験ページ・写真は OWNER / EDITOR（掲載だけ OWNER）
+    // 集合場所・体験ページ・写真は OWNER / EDITOR / COHOST（掲載同意だけ OWNER）
     const pageResponse = await pageRoutes.route(entry, entry.memberRole === "OWNER", method, rest, request, readBody);
     if (pageResponse) return pageResponse;
     if (entry.memberRole !== "OWNER") return notFound();

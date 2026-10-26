@@ -30,6 +30,10 @@
       "types": "./src/host/mock.ts",
       "default": "./src/host/mock.ts"
     },
+    "./host-schema": {
+      "types": "./src/host/schema.ts",
+      "default": "./src/host/schema.ts"
+    },
     "./admin-auth": {
       "types": "./src/admin-auth/index.ts",
       "default": "./src/admin-auth/index.ts"
@@ -90,6 +94,14 @@
       "types": "./src/experience-preparations/schema.ts",
       "default": "./src/experience-preparations/schema.ts"
     },
+    "./experience-provider-operations": {
+      "types": "./src/experience-provider-operations/index.ts",
+      "default": "./src/experience-provider-operations/index.ts"
+    },
+    "./experience-provider-operations-schema": {
+      "types": "./src/experience-provider-operations/schema.ts",
+      "default": "./src/experience-provider-operations/schema.ts"
+    },
     "./contract/experience-public-api.openapi.json": "./contract/experience-public-api.openapi.json",
     "./contract/experience-host-api.openapi.json": "./contract/experience-host-api.openapi.json",
     "./contract/experience-admin-auth-api.openapi.json": "./contract/experience-admin-auth-api.openapi.json",
@@ -99,7 +111,8 @@
     "./contract/experience-host-support-history-api.openapi.json": "./contract/experience-host-support-history-api.openapi.json",
     "./contract/experience-host-support-settings-api.openapi.json": "./contract/experience-host-support-settings-api.openapi.json",
     "./contract/experience-fee-summary-api.openapi.json": "./contract/experience-fee-summary-api.openapi.json",
-    "./contract/experience-preparations-api.openapi.json": "./contract/experience-preparations-api.openapi.json"
+    "./contract/experience-preparations-api.openapi.json": "./contract/experience-preparations-api.openapi.json",
+    "./contract/experience-provider-operations-api.openapi.json": "./contract/experience-provider-operations-api.openapi.json"
   },
   "scripts": {
     "gen:types": "node ./scripts/gen-types.ts",

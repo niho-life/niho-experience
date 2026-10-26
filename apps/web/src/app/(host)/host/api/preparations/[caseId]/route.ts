@@ -1,4 +1,4 @@
-import { decodeExperiencePreparationEditorPatch, isExperiencePreparationPathId } from "@niho-experience/api-client/experience-preparations-schema";
+import { decodeExperiencePreparationCohostPatch, isExperiencePreparationPathId } from "@niho-experience/api-client/experience-preparations-schema";
 import { isPreparationHttpEnabled, loadPreparationHostClient, preparationFailureJson, preparationJson, preparationMutationAllowed, readBoundedJson } from "@/lib/preparations/server";
 
 type Context = { params: Promise<{ caseId: string }> };
@@ -17,7 +17,7 @@ export async function PATCH(request: Request, context: Context) {
   if (!isPreparationHttpEnabled() || !isExperiencePreparationPathId(caseId)) return preparationJson({ error: "not_found" }, 404);
   if (!preparationMutationAllowed(request)) return preparationJson({ error: "forbidden" }, 403);
   const body = await readBoundedJson(request, 192 * 1024);
-  const patch = body.ok ? decodeExperiencePreparationEditorPatch(body.value) : null;
+  const patch = body.ok ? decodeExperiencePreparationCohostPatch(body.value) : null;
   if (!patch) return preparationJson({ error: "invalid_input" }, 400);
   const loaded = await loadPreparationHostClient();
   if (!loaded.ok) return loaded.response;

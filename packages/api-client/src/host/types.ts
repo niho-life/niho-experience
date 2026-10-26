@@ -111,7 +111,8 @@ export type ExperienceProviderPhotoUploadForm = {
 export type ExperienceHostOperationId = keyof operations;
 
 export const EXPERIENCE_PROVIDER_KINDS: readonly ExperienceProviderKind[] = ["INDIVIDUAL", "BUSINESS"];
-export const EXPERIENCE_PROVIDER_MEMBER_ROLES: readonly ExperienceProviderMemberRole[] = ["OWNER", "EDITOR"];
+/** Canonical role enum is experience-provider-operations v1.0.0; the host draft reuses it for page access. */
+export const EXPERIENCE_PROVIDER_MEMBER_ROLES: readonly ExperienceProviderMemberRole[] = ["OWNER", "EDITOR", "COHOST"];
 export const EXPERIENCE_PROVIDER_REVIEW_STATUSES: readonly ExperienceProviderReviewStatus[] = ["DRAFT", "REQUESTED", "APPROVED", "SUSPENDED"];
 export const EXPERIENCE_PROVIDER_PAYMENT_READINESS_REASONS: readonly ExperienceProviderPaymentReadinessReason[] = [
   "NOT_CONNECTED",

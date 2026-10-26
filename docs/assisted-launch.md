@@ -31,9 +31,9 @@
 
 限定リンクでできることは、その版の閲覧と修正依頼まで。リンクを知っていることやメールの一致だけで管理権限を付与しない。認証済み本人の受入と事務局の代表者確認は別の記録にする。
 
-協力者には担当案件と仕事に必要な範囲だけを渡す。制作担当が決済設定・販売承認・他の店舗・予約者情報を操作できるようにはしない。正しい操作範囲と、その変更履歴は共通APIが検証・保存する。事務局の認証と店舗・協力者の認証を共有しない。
+COHOSTは案件だけの仮ロールではなく、その提供者の全体験・予約に対する日常運営担当である。原稿・写真・商品日程・定員・休止日、予約承認・辞退、予約者への返信を行える一方、販売者・法的同意・Stripe売上受取・メンバー管理はOWNERだけが行う。EDITORの既存範囲は広げない。共通APIが現在の操作範囲を毎回検証し、準備・メンバー変更の履歴と既存の商品・メッセージ監査を保持する。事務局の認証と店舗・協力者の認証を共有しない。
 
-素材利用、掲載内容、販売条件、予約対応の許可は意味を分けて表示する。承認する版と同意文を明示し、保存済みの事実を表示する。内容・価格・取消条件・分担が変わった場合は、古い承認で公開を進めず、再確認を案内する。
+素材利用、掲載内容、販売条件、予約対応の許可は意味を分けて表示する。承認する版と同意文を明示し、保存済みの事実を表示する。正式化前に内容・価格・取消条件・分担・サブホスト名簿が変わった場合は、古い承認で正式化を進めず、再確認を案内する。正式化後の通常編集は現在のOWNER/COHOSTが行い、初回の準備承認を毎回取り直さない。
 
 ## 準備状態の表示
 
@@ -72,16 +72,20 @@ Stripeから戻ったことや、設定リンクを開いたことを準備完�
 - 認証済み本人・担当：`/host/preparations/[caseId]`。ログインstateは固定の復帰先と妥当なcase IDだけをsealed cookieへ保持する。client IDは既存frontendと同じ`niho-experience`、確認画面はNIHOの`/connect/niho-experience`、callbackは`/host/auth/callback`である。
 - 固定BFF：`/admin/api/preparations*`、`/admin/api/preparation-assignees`、`/host/api/preparations*`。Adminは毎requestで専用`AdminHttpSession`と現在のADMINを再検証する。Host token、mock role、ブラウザ入力からAdminへ昇格しない。mutationはsame-origin、厳密JSON、body上限、固定method/path、契約schemaを検証する。
 
-選別契約は`packages/api-client/contract/experience-preparations-api.openapi.json` v2.0.0、source commit `e7887489bd6da46977a92cc500d24ab731f6e80e`、SHA-256 `0d011690d0ed80f0e922e819895cc1542a69809bead79f384bc499d0e4c041a4`、状態`agreed-not-deployed`に固定する。SDKは必要DTO・validator・固定transportだけを公開し、内部User、DB、認証schemaを含めない。
+準備の選別契約は`packages/api-client/contract/experience-preparations-api.openapi.json` v3.0.0、source commit `3c742592574e8d61377cb89a817b24b76917ff56`、SHA-256 `44aa492ede6bb40baddb7295c32f8828028177852f764d0369c0b9d6dfaa443c`、状態`agreed-not-deployed`に固定する。日常運営の選別契約は`experience-provider-operations-api.openapi.json` v1.0.0、同じsource commit、SHA-256 `5454e0097759d9d19a66e63f4cb63a3166eaf0d72c786e54e3828741733af2fb`に固定する。source contract agreementは`experience-assisted-launch-2026-10-27`で、日常運営と予約者情報を扱う明示的な許可を含む。SDKは必要DTO・validator・固定transportだけを公開し、内部User、DB、認証schemaを含めない。
 
-実HTTPは`EXPERIENCE_API_MODE=http`、`HOST_CONSOLE_ENABLED=true`、`ADMIN_SUPPORT_CONSOLE_ENABLED=true`、各session secret・Firebase key・正確なoriginに加え、`EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED=true`が揃った場合だけ開く。既定はOFFである。合成UI確認は別の`EXPERIENCE_ASSISTED_LAUNCH_PREVIEW_ENABLED=true`をmock modeで使い、BFFはmock成功へfallbackしない。HTTP flagをONにできるのは、共通基盤のWeb app-connect PR #19282、Admin接続PR #19353、このv2 APIがmerge・配備され、三者受入を終えた後である。
+元のfull host draft exportはこのcore baselineに存在しない。そのdraft extension自体を正本とはせず、`ProviderRole`だけを独立したoperations契約の`OWNER / EDITOR / COHOST`へ同期し、drift testで固定する。
+
+準備の実HTTPは`EXPERIENCE_API_MODE=http`、`HOST_CONSOLE_ENABLED=true`、`ADMIN_SUPPORT_CONSOLE_ENABLED=true`、各session secret・Firebase key・正確なoriginに加え、`EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED=true`が揃った場合だけ開く。日常運営はAdmin接続と独立し、`EXPERIENCE_API_MODE=http`、`HOST_CONSOLE_ENABLED=true`、`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED=true`で開く。いずれも既定はOFFである。合成UI確認は対応する`*_PREVIEW_ENABLED=true`をmock modeで使い、BFFはHTTP失敗をmock成功へfallbackしない。HTTP flagをONにできるのは、共通基盤のWeb app-connect PR #19282、Admin接続PR #19353、API PR #19405、このconsumer PR #170がmerge・配備され、受入を終えた後である。
 
 ## 画面とAPI操作
 
 - 事務局一覧は`GET /admin/cases`の`waitingOn`、`nextAction`、readinessを表示する。作成・構造化編集・写真policy発行とGCS signed POST・写真登録・限定リンク発行・代表者確認・正式化・担当追加/取消・履歴・中止を対応する固定APIへ接続する。
 - 店舗確認はAPIが返すsigned imagesを表示し、object keyの入力を求めない。「修正を依頼する」は匿名review cookieで送る。「この内容で進める」は本人認証後、掲載内容、販売条件、運営分担、代表権限、掲載許可を独立して明示し、新規Providerの場合だけ通常のProvider本人規約も受け入れる。
 - 受入BFFはreview cookieのtokenと最新review DTOからcase revision、snapshot hash、同意version、targetを再構成する。ブラウザにtokenを返さず、ブラウザが送ったrevisionや販売者を信用しない。
-- `DRAFT_EDITOR`のPATCHは`pages`と`photos`だけである。事務局連絡先、価格、販売者、運営権限は送らない。`COORDINATOR`は進行確認だけで、Provider-wide EDITORにはしない。
+- 準備中の`COHOST` PATCHは`pages`、`photos`、`offer`の日常運営項目だけである。事務局連絡先、target、販売者、法的同意、メンバー管理は送らない。正式化後は証跡をread-onlyにし、通常の`/host/experiences`と`/host/bookings`へ進む。
+- OWNERの運営チーム設定は登録済みNIHOアカウントをメール完全一致で解決し、候補の`displayName`だけを見せる。COHOST付与がその提供者の全体験・予約に及ぶことを確認し、複数人の追加・取消を行う。招待メール、OWNER移譲、一般ACLは提供しない。
+- OWNERとCOHOSTの日常運営は通常の体験・予約・返信APIへ接続する。予約結果や送信結果が不明な場合は自動再送せず、現在の詳細・履歴を再取得して確認を求める。COHOSTへ売上・Stripe・販売者・法的同意・メンバー管理を表示・送信しない。
 - 正式化後も公開済みとは表示しない。本人受入、事務局確認、売上受取、Provider審査、商品hash、掲載審査をreadinessの独立状態として表示する。`editUrl` / `paymentUrl`はNIHOの設定済みoriginかつ`/experiences/provider`だけを許可し、復帰後にもreadinessを再取得する。
 
 ## 受入手順

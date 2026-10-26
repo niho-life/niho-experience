@@ -28,7 +28,7 @@ const feeSummaryBaseURL = `http://127.0.0.1:${FEE_SUMMARY_PORT}`;
 export default defineConfig({
   testDir: "./e2e",
   // Assisted launch uses its one-server config; the default matrix starts five unrelated servers.
-  testIgnore: /assisted-launch\.spec\.ts/,
+  testIgnore: /(assisted-launch|provider-operations)\.spec\.ts/,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

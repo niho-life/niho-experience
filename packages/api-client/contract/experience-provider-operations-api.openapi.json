@@ -1,0 +1,143 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NIHO Experience Provider Operations API",
+    "version": "1.0.0",
+    "description": "体験providerの会員管理と運営予約操作だけを公開する選定契約。法的同意、決済口座、売上、fee distributionは含めない。"
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/api/experience-providers/{providerId}/members": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }],
+      "get": { "operationId": "listExperienceProviderMembers", "x-provider-roles": ["OWNER"], "responses": { "200": { "description": "active members", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MemberListResponse" } } } } } }
+    },
+    "/api/experience-providers/{providerId}/members/resolve": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }],
+      "post": {
+        "operationId": "resolveExperienceProviderMemberByEmail", "x-provider-roles": ["OWNER"],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResolveMemberInput" } } } },
+        "responses": { "200": { "description": "exactly one active registered account", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResolveMemberResponse" } } } } }
+      }
+    },
+    "/api/experience-providers/{providerId}/members/{userId}": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }, { "$ref": "#/components/parameters/UserId" }],
+      "put": {
+        "operationId": "putExperienceProviderCohost", "x-provider-roles": ["OWNER"],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PutMemberInput" } } } },
+        "responses": { "200": { "description": "upserted cohost", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MemberResponse" } } } } }
+      },
+      "delete": { "operationId": "deleteExperienceProviderCohost", "x-provider-roles": ["OWNER"], "responses": { "204": { "description": "cohost absent" } } }
+    },
+    "/api/experience-providers/{providerId}/bookings": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }],
+      "get": {
+        "operationId": "listExperienceProviderBookings", "x-provider-roles": ["OWNER", "COHOST"],
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string", "maxLength": 2048 } },
+          { "name": "pageId", "in": "query", "schema": { "type": "string", "maxLength": 200 } },
+          { "name": "fromDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "toDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "status", "in": "query", "schema": { "$ref": "#/components/schemas/KnownBookingStatus" } }
+        ],
+        "responses": { "200": { "description": "provider-scoped bookings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BookingListResponse" } } } } }
+      }
+    },
+    "/api/experience-providers/{providerId}/bookings/{requestId}": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "get": { "operationId": "getExperienceProviderBooking", "x-provider-roles": ["OWNER", "COHOST"], "responses": { "200": { "description": "canonical host booking DTO without Stripe identifiers", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BookingDetailResponse" } } } } } }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/approve": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }, { "$ref": "#/components/parameters/PageId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": { "operationId": "approveExperienceProviderBooking", "x-provider-roles": ["OWNER", "COHOST"], "responses": { "200": { "$ref": "#/components/responses/BookingStatus" } } }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/decline": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }, { "$ref": "#/components/parameters/PageId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": { "operationId": "declineExperienceProviderBooking", "x-provider-roles": ["OWNER", "COHOST"], "responses": { "200": { "$ref": "#/components/responses/BookingStatus" } } }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/cancel": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }, { "$ref": "#/components/parameters/PageId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": {
+        "operationId": "cancelExperienceProviderBooking", "x-provider-roles": ["OWNER", "COHOST"],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CancelBookingInput" } } } },
+        "responses": { "200": { "description": "existing booking cancellation service result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CancelBookingResponse" } } } } }
+      }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/message": {
+      "parameters": [{ "$ref": "#/components/parameters/ProviderId" }, { "$ref": "#/components/parameters/PageId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": {
+        "operationId": "messageExperienceProviderGuest", "x-provider-roles": ["OWNER", "COHOST"],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessageInput" } } } },
+        "responses": { "201": { "description": "queued host message", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessageResponse" } } } } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "parameters": {
+      "ProviderId": { "name": "providerId", "in": "path", "required": true, "schema": { "type": "string", "maxLength": 200 } },
+      "UserId": { "name": "userId", "in": "path", "required": true, "schema": { "type": "string", "maxLength": 200 } },
+      "PageId": { "name": "pageId", "in": "path", "required": true, "schema": { "type": "string", "maxLength": 200 } },
+      "RequestId": { "name": "requestId", "in": "path", "required": true, "schema": { "type": "string", "maxLength": 200 } }
+    },
+    "responses": {
+      "BookingStatus": { "description": "booking status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BookingStatusResponse" } } } }
+    },
+    "schemas": {
+      "ProviderRole": { "type": "string", "enum": ["OWNER", "EDITOR", "COHOST"] },
+      "OperationalProviderRole": { "type": "string", "enum": ["OWNER", "COHOST"] },
+      "PublicUser": { "type": "object", "additionalProperties": false, "required": ["userId", "displayName"], "properties": { "userId": { "type": "string" }, "displayName": { "type": "string" } } },
+      "Member": { "type": "object", "additionalProperties": false, "required": ["userId", "displayName", "role"], "properties": { "userId": { "type": "string" }, "displayName": { "type": "string" }, "role": { "$ref": "#/components/schemas/ProviderRole" } } },
+      "MemberListResponse": { "type": "object", "additionalProperties": false, "required": ["members"], "properties": { "members": { "type": "array", "items": { "$ref": "#/components/schemas/Member" } } } },
+      "ResolveMemberInput": { "type": "object", "additionalProperties": false, "required": ["email"], "properties": { "email": { "type": "string", "format": "email", "maxLength": 320 } } },
+      "ResolveMemberResponse": { "type": "object", "additionalProperties": false, "required": ["candidate"], "properties": { "candidate": { "$ref": "#/components/schemas/PublicUser" } } },
+      "PutMemberInput": { "type": "object", "additionalProperties": false, "required": ["role"], "properties": { "role": { "type": "string", "enum": ["COHOST"] } } },
+      "MemberResponse": { "type": "object", "additionalProperties": false, "required": ["member"], "properties": { "member": { "$ref": "#/components/schemas/Member" } } },
+      "KnownBookingStatus": { "type": "string", "enum": ["PENDING", "PAYMENT_PENDING", "PROVISIONAL", "CONFIRMED", "DECLINED", "EXPIRED", "CANCELLED", "REFUND_NEEDED"] },
+      "ProjectedBookingStatus": { "type": "string", "enum": ["PENDING", "PAYMENT_PENDING", "PROVISIONAL", "CONFIRMED", "DECLINED", "EXPIRED", "CANCELLED", "REFUND_NEEDED", "UNKNOWN"] },
+      "SalesChannel": { "type": ["string", "null"], "enum": ["NIHO_PAGE", "EMBED", "EXPERIENCE_SITE", null] },
+      "QuestionOption": { "type": "object", "additionalProperties": false, "required": ["id", "label"], "properties": { "id": { "type": "string" }, "label": { "type": "string" } } },
+      "AnswerSnapshot": {
+        "type": "object", "additionalProperties": false, "required": ["questionId", "prompt", "inputType", "text", "options"],
+        "properties": { "questionId": { "type": "string" }, "prompt": { "type": "string" }, "inputType": { "type": "string", "enum": ["SHORT_TEXT", "LONG_TEXT", "SINGLE_SELECT", "MULTI_SELECT"] }, "text": { "type": ["string", "null"] }, "options": { "type": "array", "items": { "$ref": "#/components/schemas/QuestionOption" } } }
+      },
+      "AnswerSnapshots": { "oneOf": [{ "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/AnswerSnapshot" } }, { "type": "null" }] },
+      "PageTitle": { "type": "object", "additionalProperties": false, "required": ["title"], "properties": { "title": { "type": "string" } } },
+      "BookingListItem": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "spotId", "pageId", "offerId", "occurrenceDate", "startAt", "endAt", "headCount", "adultCount", "childCount", "offerNameSnapshot", "totalYenSnapshot", "guestName", "guestEmail", "note", "questionAnswersJson", "paidAt", "authorizedAt", "cancelledAt", "refundedYen", "createdAt", "experienceSiteListingId", "sellerDisplayNameSnapshot", "page", "status", "salesChannel"],
+        "properties": {
+          "id": { "type": "string" }, "spotId": { "type": "string" }, "pageId": { "type": "string" }, "offerId": { "type": "string" },
+          "occurrenceDate": { "type": "string", "format": "date" }, "startAt": { "type": "string", "format": "date-time" }, "endAt": { "type": "string", "format": "date-time" },
+          "headCount": { "type": "integer" }, "adultCount": { "type": "integer" }, "childCount": { "type": "integer" }, "offerNameSnapshot": { "type": "string" }, "totalYenSnapshot": { "type": "integer" },
+          "guestName": { "type": "string" }, "guestEmail": { "type": "string" }, "note": { "type": ["string", "null"] }, "questionAnswersJson": { "$ref": "#/components/schemas/AnswerSnapshots" },
+          "paidAt": { "type": ["string", "null"], "format": "date-time" }, "authorizedAt": { "type": ["string", "null"], "format": "date-time" }, "cancelledAt": { "type": ["string", "null"], "format": "date-time" },
+          "refundedYen": { "type": "integer" }, "createdAt": { "type": "string", "format": "date-time" }, "experienceSiteListingId": { "type": ["string", "null"] }, "sellerDisplayNameSnapshot": { "type": ["string", "null"] },
+          "page": { "$ref": "#/components/schemas/PageTitle" }, "status": { "$ref": "#/components/schemas/ProjectedBookingStatus" }, "salesChannel": { "$ref": "#/components/schemas/SalesChannel" }
+        }
+      },
+      "BookingListResponse": { "type": "object", "additionalProperties": false, "required": ["bookings", "nextCursor"], "properties": { "bookings": { "type": "array", "maxItems": 100, "items": { "$ref": "#/components/schemas/BookingListItem" } }, "nextCursor": { "type": ["string", "null"] } } },
+      "HostMessage": {
+        "type": "object", "additionalProperties": false, "required": ["id", "subject", "createdAt", "sentAt", "failed", "deliveryStatus"],
+        "properties": { "id": { "type": "string" }, "subject": { "type": "string" }, "createdAt": { "type": "string", "format": "date-time" }, "sentAt": { "type": ["string", "null"], "format": "date-time" }, "failed": { "type": "boolean" }, "deliveryStatus": { "type": "string", "enum": ["QUEUED", "SENT", "FAILED", "UNKNOWN"] } }
+      },
+      "BookingDetail": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "offerId", "offerName", "occurrenceDate", "startAt", "endAt", "headCount", "adultCount", "childCount", "guestName", "guestEmail", "languageSnapshot", "note", "answers", "status", "unitPriceYen", "adultPriceYen", "childPriceYen", "totalYen", "paidAt", "authorizedAt", "approvalDeadlineAt", "travelerCancelRequestedAt", "cancelledAt", "cancelReason", "cancelMessage", "refundedYen", "createdAt", "salesChannel", "hostMessages", "pageId", "page"],
+        "properties": {
+          "id": { "type": "string" }, "offerId": { "type": "string" }, "offerName": { "type": "string" }, "occurrenceDate": { "type": "string", "format": "date" }, "startAt": { "type": "string", "format": "date-time" }, "endAt": { "type": "string", "format": "date-time" },
+          "headCount": { "type": "integer" }, "adultCount": { "type": "integer" }, "childCount": { "type": "integer" }, "guestName": { "type": "string" }, "guestEmail": { "type": "string" }, "languageSnapshot": { "type": "string" }, "note": { "type": ["string", "null"] },
+          "answers": { "$ref": "#/components/schemas/AnswerSnapshots" }, "status": { "$ref": "#/components/schemas/KnownBookingStatus" }, "unitPriceYen": { "type": "integer" }, "adultPriceYen": { "type": "integer" }, "childPriceYen": { "type": ["integer", "null"] }, "totalYen": { "type": "integer" },
+          "paidAt": { "type": ["string", "null"], "format": "date-time" }, "authorizedAt": { "type": ["string", "null"], "format": "date-time" }, "approvalDeadlineAt": { "type": ["string", "null"], "format": "date-time" }, "travelerCancelRequestedAt": { "type": ["string", "null"], "format": "date-time" }, "cancelledAt": { "type": ["string", "null"], "format": "date-time" },
+          "cancelReason": { "type": ["string", "null"] }, "cancelMessage": { "type": ["string", "null"] }, "refundedYen": { "type": "integer" }, "createdAt": { "type": "string", "format": "date-time" }, "salesChannel": { "type": "string" }, "hostMessages": { "type": "array", "items": { "$ref": "#/components/schemas/HostMessage" } }, "pageId": { "type": "string" }, "page": { "$ref": "#/components/schemas/PageTitle" }
+        }
+      },
+      "Sender": { "type": "object", "additionalProperties": false, "required": ["displayName", "replyToEmails"], "properties": { "displayName": { "type": "string" }, "replyToEmails": { "type": "array", "items": { "type": "string", "format": "email" } } } },
+      "BookingDetailResponse": { "type": "object", "additionalProperties": false, "required": ["booking", "sender"], "properties": { "booking": { "$ref": "#/components/schemas/BookingDetail" }, "sender": { "$ref": "#/components/schemas/Sender" } } },
+      "BookingStatusResponse": { "type": "object", "additionalProperties": false, "required": ["status"], "properties": { "status": { "$ref": "#/components/schemas/KnownBookingStatus" } } },
+      "CancelBookingInput": { "type": "object", "additionalProperties": false, "required": ["refund", "reason", "message"], "properties": { "refund": { "type": "string", "enum": ["FULL", "HALF", "NONE"] }, "reason": { "type": "string", "enum": ["HOST_CANNOT_HOST", "GUEST_REQUEST", "OTHER"] }, "message": { "type": "string", "minLength": 1, "maxLength": 2000 } } },
+      "CancelBookingResponse": { "type": "object", "additionalProperties": false, "required": ["status", "refundedYen"], "properties": { "status": { "$ref": "#/components/schemas/KnownBookingStatus" }, "refundedYen": { "type": "integer" } } },
+      "MessageInput": { "type": "object", "additionalProperties": false, "required": ["subject", "body"], "properties": { "subject": { "type": "string", "minLength": 1, "maxLength": 200 }, "body": { "type": "string", "minLength": 1, "maxLength": 4000 } } },
+      "MessageResponse": { "type": "object", "additionalProperties": false, "required": ["message"], "properties": { "message": { "$ref": "#/components/schemas/HostMessage" } } }
+    }
+  }
+}

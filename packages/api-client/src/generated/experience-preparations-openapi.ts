@@ -206,7 +206,7 @@ export type paths = {
         delete?: never;
         options?: never;
         head?: never;
-        /** 担当案件を改訂する */
+        /** サブホストが運営原稿を改訂する */
         patch: operations["editAssignedExperiencePreparationDraft"];
         trace?: never;
     };
@@ -359,7 +359,7 @@ export type components = {
             target: components["schemas"]["Target"];
         };
         /** @enum {string|null} */
-        Access: "REPRESENTATIVE" | "DRAFT_EDITOR" | "COORDINATOR" | null;
+        Access: "REPRESENTATIVE" | "COHOST" | null;
         AdminCase: {
             acceptanceHistory: components["schemas"]["Acceptance"][];
             assignments: components["schemas"]["Assignment"][];
@@ -401,7 +401,7 @@ export type components = {
             user: components["schemas"]["UserLabel"];
         };
         /** @enum {string} */
-        AssignmentRole: "DRAFT_EDITOR" | "COORDINATOR";
+        AssignmentRole: "COHOST";
         Audit: {
             action: string;
             actorUserId: string | null;
@@ -409,6 +409,15 @@ export type components = {
             id: string;
             revision: number | null;
             targetId: string | null;
+        };
+        CohostDraft: {
+            offer?: components["schemas"]["Offer"];
+            pages?: components["schemas"]["Pages"];
+            photos?: components["schemas"]["Photo"][];
+        };
+        CohostPatchInput: {
+            draft: components["schemas"]["CohostDraft"];
+            expectedRevision: number;
         };
         ConsentSet: {
             listing: components["schemas"]["ConsentText"];
@@ -451,14 +460,6 @@ export type components = {
             provider: components["schemas"]["ProviderDraft"];
             supportScopes: ("DRAFT_EDITING" | "TRANSLATION" | "SCHEDULING" | "ONBOARDING_GUIDANCE")[];
             target: components["schemas"]["Target"];
-        };
-        EditorDraft: {
-            pages?: components["schemas"]["Pages"];
-            photos?: components["schemas"]["Photo"][];
-        };
-        EditorPatchInput: {
-            draft: components["schemas"]["EditorDraft"];
-            expectedRevision: number;
         };
         ErrorResponse: {
             error: {
@@ -590,6 +591,7 @@ export type components = {
             token: components["schemas"]["ReviewToken"];
         };
         Proposal: {
+            cohosts: components["schemas"]["UserLabel"][];
             offer: components["schemas"]["Offer"];
             operatingRoles: components["schemas"]["OperatingRole"][];
             pages: components["schemas"]["Pages"];
@@ -1218,7 +1220,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EditorPatchInput"];
+                "application/json": components["schemas"]["CohostPatchInput"];
             };
         };
         responses: {

@@ -22,8 +22,8 @@ const ICON_URL_MAX = 1024;
  * Mock sessions only (`?mock=` on /host/auth/mock-login); mock-niho.ts maps them to the api-client mock's scenarios.
  * `calendar-revoked` is the default providers with the kitchen's Google Calendar access taken away in Google (#109).
  */
-export type HostMockScenario = "default" | "empty" | "payments-pending" | "calendar-revoked";
-export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked"];
+export type HostMockScenario = "default" | "empty" | "payments-pending" | "calendar-revoked" | "cohost";
+export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked", "cohost"];
 
 export interface HostSession {
   refreshToken: string;

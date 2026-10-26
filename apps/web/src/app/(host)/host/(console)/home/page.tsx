@@ -150,7 +150,7 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
           )}
         </section>
 
-        <section aria-labelledby="home-month" className={HOST_SURFACE}>
+        {provider.memberRole === "OWNER" ? <section aria-labelledby="home-month" className={HOST_SURFACE}>
           <div className="flex items-center justify-between gap-2.5 px-4 pt-4 pb-2 md:px-5">
             <SectionTitle id="home-month">{home.month?.label ?? "今月"}</SectionTitle>
             <MoreLink href={link(HOST_SALES_PATH)}>売上を見る</MoreLink>
@@ -172,7 +172,7 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
           ) : (
             <p className="px-4 pb-4 text-muted md:px-5">売上の集計は準備中です。</p>
           )}
-        </section>
+        </section> : null}
       </div>
     </HostPageBody>
   );

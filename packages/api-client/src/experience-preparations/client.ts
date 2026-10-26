@@ -3,7 +3,7 @@ import { normalizeOrigin, type FetchLike } from "../client.ts";
 import {
   decodeExperiencePreparationAcceptance,
   decodeExperiencePreparationDraft,
-  decodeExperiencePreparationEditorPatch,
+  decodeExperiencePreparationCohostPatch,
   decodeExperiencePreparationErrorReason,
   decodeExperiencePreparationLockedAcceptance,
   decodeExperiencePreparationUploadPolicyInput,
@@ -23,7 +23,7 @@ import type {
   ExperiencePreparationCaseListResponse,
   ExperiencePreparationCorrectionResponse,
   ExperiencePreparationDraft,
-  ExperiencePreparationEditorPatchInput,
+  ExperiencePreparationCohostPatchInput,
   ExperiencePreparationFailure,
   ExperiencePreparationHostCaseListResponse,
   ExperiencePreparationHostCaseResponse,
@@ -138,9 +138,9 @@ export function createExperiencePreparationHostApiClient(input: AuthOptions) {
       const id = pathId(caseId);
       return id ? request(`/host/cases/${id}`, { method: "GET" }, wrapped("case", "HostCase") as Decoder<ExperiencePreparationHostCaseResponse>) : Promise.resolve({ ok: false, kind: "invalid_request" } as const);
     },
-    patchDraft(caseId: string, body: ExperiencePreparationEditorPatchInput) {
+    patchDraft(caseId: string, body: ExperiencePreparationCohostPatchInput) {
       const id = pathId(caseId);
-      const decoded = decodeExperiencePreparationEditorPatch(body);
+      const decoded = decodeExperiencePreparationCohostPatch(body);
       return id && decoded ? request(`/host/cases/${id}`, json("PATCH", decoded), wrapped("case", "HostCase") as Decoder<ExperiencePreparationHostCaseResponse>) : Promise.resolve({ ok: false, kind: "invalid_request" } as const);
     },
     accept(caseId: string, body: ExperiencePreparationAcceptanceInput) {
@@ -196,7 +196,7 @@ export function createExperiencePreparationAdminApiClient(input: AuthOptions) {
     },
     assign(caseId: string, userId: string, role: ExperiencePreparationRole) {
       const id = pathId(caseId); const user = pathId(userId);
-      if (!id || !user || (role !== "DRAFT_EDITOR" && role !== "COORDINATOR")) return Promise.resolve({ ok: false, kind: "invalid_request" } as const);
+      if (!id || !user || role !== "COHOST") return Promise.resolve({ ok: false, kind: "invalid_request" } as const);
       return request(`/admin/cases/${id}/assignments/${user}`, json("PUT", { role }), wrapped("assignment", "Assignment") as Decoder<ExperiencePreparationAssignmentResponse>);
     },
     removeAssignment(caseId: string, userId: string) {

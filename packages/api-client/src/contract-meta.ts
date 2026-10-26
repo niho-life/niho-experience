@@ -80,9 +80,18 @@ export const EXPERIENCE_FEE_SUMMARY_API_CONTRACT = {
 
 /** 事務局と店舗本人の伴走立ち上げ契約。認証依存とAPIの配備・受入まではHTTPを開かない。 */
 export const EXPERIENCE_PREPARATIONS_API_CONTRACT = {
-  version: "2.0.0",
-  sourceCommit: "e7887489bd6da46977a92cc500d24ab731f6e80e",
-  sha256: "0d011690d0ed80f0e922e819895cc1542a69809bead79f384bc499d0e4c041a4",
+  version: "3.0.0",
+  sourceCommit: "3c742592574e8d61377cb89a817b24b76917ff56",
+  sha256: "44aa492ede6bb40baddb7295c32f8828028177852f764d0369c0b9d6dfaa443c",
+  status: "agreed-not-deployed",
+  deploymentStatus: "not-deployed",
+} as const;
+
+/** 提供者チームと日常の予約運営だけを選別した契約。配備・受入まではHTTPを既定OFFにする。 */
+export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
+  version: "1.0.0",
+  sourceCommit: "3c742592574e8d61377cb89a817b24b76917ff56",
+  sha256: "5454e0097759d9d19a66e63f4cb63a3166eaf0d72c786e54e3828741733af2fb",
   status: "agreed-not-deployed",
   deploymentStatus: "not-deployed",
 } as const;

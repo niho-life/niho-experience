@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import type { StatusLabel } from "@/host/status";
 import type { HostProviderKind } from "@/lib/host/providers";
 import { HOST_SURFACE } from "./host-ui";
@@ -20,11 +20,13 @@ export const FIELD_DISABLED = "disabled:cursor-not-allowed disabled:bg-sand disa
 export const NARROW = "md:max-w-[360px]";
 
 /** One group of settings in its own panel, with its state on the right of the title. */
-export function FieldSection({ id, title, status, children }: { id: string; title: string; status?: StatusLabel | null; children: ReactNode }) {
+export function FieldSection({ id, title, status, children }: { id?: string; title: string; status?: StatusLabel | null; children: ReactNode }) {
+  const generatedId = useId();
+  const headingId = id ?? generatedId;
   return (
-    <section aria-labelledby={id} className={`${HOST_SURFACE} p-4 md:px-5 md:py-[18px]`}>
+    <section aria-labelledby={headingId} className={`${HOST_SURFACE} p-4 md:px-5 md:py-[18px]`}>
       <div className="mb-3 flex min-h-6 items-center justify-between gap-2.5">
-        <SectionTitle id={id}>{title}</SectionTitle>
+        <SectionTitle id={headingId}>{title}</SectionTitle>
         {status ? <StatusPill status={status} /> : null}
       </div>
       <div>{children}</div>

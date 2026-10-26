@@ -33,6 +33,12 @@ export interface HostChromeProps {
   nihoAppUrl: string;
 }
 
+export function hostNavForRole(role: HostProviderChoice["memberRole"] | null | undefined) {
+  if (role === "OWNER") return HOST_NAV;
+  if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings");
+  return HOST_NAV.filter((item) => item.href !== "/host/sales");
+}
+
 /** The chosen provider lives in `?providerId=`; every console link carries it. */
 function useProviderId(): string | null {
   return nihoIdOrNull(useSearchParams().get("providerId"));
@@ -118,7 +124,7 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
           <SidebarProviderSwitcher providers={providers} />
           <nav aria-label={NAV_LABEL}>
             <ul className="flex flex-col gap-0.5">
-              {HOST_NAV.map((item) => {
+              {hostNavForRole(current?.memberRole).map((item) => {
                 const active = isHostNavActive(pathname, item.href);
                 return (
                   <li key={item.href}>
@@ -236,18 +242,19 @@ export function HostMobileHeader(props: HostChromeProps) {
 }
 
 /** Phones: the five sections as bottom tabs (icon and a 12px label). Hidden under a section or ホーム and on one booking, where the page has its back header. */
-export function HostTabBar() {
+export function HostTabBar({ providers }: { providers: readonly HostProviderChoice[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const providerId = useProviderId();
+  const { provider: current } = selectProvider(providers, providerId);
   if (hostBackLink(pathname, searchParams)) return null;
   return (
     <>
       {/* Keeps the end of the page clear of the fixed bar. */}
       <div aria-hidden="true" className="h-[var(--host-tabbar)] md:hidden" />
       <nav aria-label={NAV_LABEL} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-canvas px-1 pt-1.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:hidden">
-        <ul className="grid grid-cols-5">
-          {HOST_NAV.map((item) => {
+        <ul className={`grid ${current?.memberRole === "OWNER" ? "grid-cols-5" : "grid-cols-4"}`}>
+          {hostNavForRole(current?.memberRole).map((item) => {
             const active = isHostNavActive(pathname, item.href);
             return (
               <li key={item.href}>

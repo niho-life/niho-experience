@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NIHO Experience Assisted Launch API",
-    "version": "2.0.0",
-    "description": "niho-experience-host/admin向け選別契約。全objectは列挙したfieldだけを持つ。",
+    "version": "3.0.0",
+    "description": "niho-experience / niho-experience-admin向け選別契約。全objectは列挙したfieldだけを持つ。",
     "license": {
       "name": "Proprietary",
       "identifier": "LicenseRef-Proprietary"
@@ -131,14 +131,14 @@
         }
       },
       "patch": {
-        "summary": "担当案件を改訂する",
+        "summary": "サブホストが運営原稿を改訂する",
         "operationId": "editAssignedExperiencePreparationDraft",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EditorPatchInput"
+                "$ref": "#/components/schemas/CohostPatchInput"
               }
             }
           }
@@ -1071,8 +1071,7 @@
       "AssignmentRole": {
         "type": "string",
         "enum": [
-          "DRAFT_EDITOR",
-          "COORDINATOR"
+          "COHOST"
         ]
       },
       "Access": {
@@ -1082,8 +1081,7 @@
         ],
         "enum": [
           "REPRESENTATIVE",
-          "DRAFT_EDITOR",
-          "COORDINATOR",
+          "COHOST",
           null
         ]
       },
@@ -1650,7 +1648,8 @@
           "pages",
           "photos",
           "offer",
-          "operatingRoles"
+          "operatingRoles",
+          "cohosts"
         ],
         "properties": {
           "target": {
@@ -1679,6 +1678,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OperatingRole"
+            }
+          },
+          "cohosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserLabel"
             }
           }
         }
@@ -2750,7 +2755,7 @@
           }
         }
       },
-      "EditorDraft": {
+      "CohostDraft": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
@@ -2763,10 +2768,13 @@
             "items": {
               "$ref": "#/components/schemas/Photo"
             }
+          },
+          "offer": {
+            "$ref": "#/components/schemas/Offer"
           }
         }
       },
-      "EditorPatchInput": {
+      "CohostPatchInput": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -2779,7 +2787,7 @@
             "minimum": 1
           },
           "draft": {
-            "$ref": "#/components/schemas/EditorDraft"
+            "$ref": "#/components/schemas/CohostDraft"
           }
         }
       }

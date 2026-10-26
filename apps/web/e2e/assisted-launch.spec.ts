@@ -6,6 +6,7 @@ const proposal = {
   pages: { ja: { title: "合成の手仕事体験", content: content("日本語") }, en: { title: "Synthetic craft workshop", content: content("English") } }, photos: [],
   offer: { nameJa: "合成の体験商品", nameEn: "Synthetic experience", shortDescriptionJa: null, shortDescriptionEn: null, priceYen: 5000, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: true, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [6], startTime: "10:00", durationMinutes: 90, cutoffDays: 2, closedDates: [], cancellationPolicy: "MODERATE", acceptanceMode: "REQUEST" },
   operatingRoles: [{ party: "PROVIDER", responsibilities: ["体験を実施する"] }, { party: "NIHO", responsibilities: ["掲載準備を支援する"] }],
+  cohosts: [{ userId: "synthetic-cohost-1", displayName: "合成 サブホスト一郎" }, { userId: "synthetic-cohost-2", displayName: "合成 サブホスト二郎" }],
 };
 const consents = { preparation: { version: "v1", text: { content: "掲載内容", salesTerms: "販売条件", support: "支援", representative: "代表者" } }, provider: { required: true, version: "pv1", text: "提供者本人として掲載を許可します。" }, listing: { version: "lv1", text: "掲載許可" } };
 const review = (revision = 1) => ({ caseId: "case_1", status: "REVIEW", revision, snapshotHash: String(revision).repeat(64), proposal: { ...proposal, pages: { ...proposal.pages, ja: { ...proposal.pages.ja, title: revision === 1 ? proposal.pages.ja.title : "更新された合成体験" } } }, consents, images: [], expiresAt: "2026-11-02T00:00:00.000Z" });
@@ -90,7 +91,7 @@ test("expired or revoked review and forbidden host case fail closed", async ({ p
 });
 
 
-test("authorized owner keeps readiness after the anonymous preview token expires", async ({ page }) => {
+test("authorized owner uses ordinary operations after the anonymous preview token expires", async ({ page }) => {
   let anonymousRequests = 0;
   await page.route("**/host/api/preparations/review", async (route) => { anonymousRequests += 1; return json(route, { error: "not_found" }, 404); });
   await page.route("**/host/api/preparations/case_1", async (route) => json(route, { case: {
@@ -103,16 +104,19 @@ test("authorized owner keeps readiness after the anonymous preview token expires
     nextAction: "売上受取を設定する", paymentUrl: "/experiences/provider?providerId=provider_1&tab=payments",
   } }));
   await page.goto("/host/auth/mock-login?preparationCaseId=case_1");
-  await expect(page.getByRole("heading", { name: "この版を受け入れ済みです" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "売上受取を設定" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "通常の運営画面" })).toBeVisible();
+  await expect(page.getByText("合成 サブホスト一郎")).toBeVisible();
+  await expect(page.getByRole("link", { name: "体験を管理" })).toHaveAttribute("href", "/host/experiences?providerId=provider_1");
+  await expect(page.getByRole("link", { name: "予約を管理" })).toHaveAttribute("href", "/host/bookings?providerId=provider_1");
+  await expect(page.getByRole("link", { name: "オーナーが売上受取を設定" })).toBeVisible();
   await expect(page.getByRole("button", { name: "同意して受け入れる" })).toHaveCount(0);
   expect(anonymousRequests).toBe(0);
 });
 
 
-test("collaborators see progress without representative acceptance or payment actions", async ({ page }) => {
+test("cohost sees immutable roster and ordinary operations without representative or payment actions", async ({ page }) => {
   await page.route("**/host/api/preparations/case_1", async (route) => json(route, { case: {
-    id: "case_1", status: "MATERIALIZED", revision: 1, snapshotHash: "1".repeat(64), proposal, access: "COORDINATOR",
+    id: "case_1", status: "MATERIALIZED", revision: 1, snapshotHash: "1".repeat(64), proposal, access: "COHOST",
     currentAcceptance: null, representativeVerifiedAt: "2026-10-26T02:00:00.000Z",
     materialized: { providerId: "provider_1", pageJaId: "ja_1", pageEnId: "en_1", at: "2026-10-26T03:00:00.000Z" }, consents, images: [], updatedAt: "2026-10-26T03:00:00.000Z",
   } }));
@@ -122,8 +126,11 @@ test("collaborators see progress without representative acceptance or payment ac
     paymentUrl: "/experiences/provider?providerId=provider_1&tab=payments",
   } }));
   await page.goto("/host/auth/mock-login?preparationCaseId=case_1");
-  await expect(page.getByRole("heading", { name: "必要な手続き" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "通常の運営画面" })).toBeVisible();
+  await expect(page.getByText("初回の承認内容とサブホスト名簿を証跡として表示しています")).toBeVisible();
+  await expect(page.getByRole("link", { name: "体験を管理" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "予約を管理" })).toBeVisible();
   await expect(page.getByRole("button", { name: "同意して受け入れる" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "売上受取を設定" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /売上受取/ })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "NIHOで商品を確認" })).toHaveCount(0);
 });

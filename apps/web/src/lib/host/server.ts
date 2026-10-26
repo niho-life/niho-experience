@@ -115,7 +115,7 @@ export const MOCK_ID_TOKEN_TTL_MS = 60 * 60 * 1000;
 const NO_STORE = "private, no-store";
 
 export function noStoreJson(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { "cache-control": NO_STORE } });
+  return NextResponse.json(body, { status, headers: { "cache-control": NO_STORE, "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } });
 }
 
 /** Host routes answer 404 while the console is off (and mock-only routes in http mode). */

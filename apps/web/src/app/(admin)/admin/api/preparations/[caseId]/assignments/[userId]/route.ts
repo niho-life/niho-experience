@@ -12,7 +12,7 @@ export async function PUT(request: Request, context: Context) {
   const body = await readBoundedJson(request, 1024);
   if (!body.ok || typeof body.value !== "object" || body.value === null || Array.isArray(body.value) || Object.keys(body.value).length !== 1) return preparationJson({ error: "invalid_input" }, 400);
   const role = (body.value as { role?: unknown }).role;
-  if (role !== "DRAFT_EDITOR" && role !== "COORDINATOR") return preparationJson({ error: "invalid_input" }, 400);
+  if (role !== "COHOST") return preparationJson({ error: "invalid_input" }, 400);
   const loaded = await loadPreparationAdminClient();
   if (!loaded.ok) return loaded.response;
   const result = await loaded.client.assign(caseId, userId, role satisfies ExperiencePreparationRole);
