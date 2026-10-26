@@ -1,5 +1,5 @@
-import type { Guide, GuideFaqItem, GuideHero, GuideTranslation } from "@/content/guides/types";
-import { guideFigureSources, guideLinkHref, parseGuideAnswer, parseGuideMarkdown } from "./guide-markdown";
+import type { Guide, GuideFaqItem, GuideHero, GuidePillar, GuideTranslation } from "@/content/guides/types";
+import { guideFigureSources, guideInlineText, guideLinkHref, parseGuideAnswer, parseGuideMarkdown, type GuideBlock } from "./guide-markdown";
 import { publicVideoProblems } from "./videos";
 
 /**
@@ -14,7 +14,10 @@ export const GUIDE_LIMITS = {
   /** The meta description and the lead. */
   descriptionMaxLength: 160,
   authorMaxLength: 120,
+  authorBioMaxLength: 600,
   altMaxLength: 200,
+  captionMaxLength: 300,
+  readMinutesMax: 60,
   relatedExperiencesMin: 2,
   relatedExperiencesMax: 3,
   relatedGuidesMax: 3,
@@ -25,6 +28,22 @@ export const GUIDE_LIMITS = {
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export const GUIDE_PILLARS: readonly Readonly<{ key: GuidePillar; label: string; heading: string }>[] = [
+  { key: "evenings", label: "Evenings", heading: "Kamakura after 4 PM" },
+  { key: "zazen", label: "Zazen", heading: "A quiet morning in Kita-Kamakura" },
+  { key: "hands-on", label: "Hands-on", heading: "Mending, calligraphy and coffee" },
+  { key: "planning", label: "Planning", heading: "Kamakura from Tokyo" },
+  { key: "hosts", label: "Hosts", heading: "Meet the people of Kamakura" },
+] as const;
+
+export function isGuidePillar(value: unknown): value is GuidePillar {
+  return GUIDE_PILLARS.some((pillar) => pillar.key === value);
+}
+
+export function guidePillarDetails(pillar: GuidePillar | undefined) {
+  return GUIDE_PILLARS.find((candidate) => candidate.key === pillar) ?? null;
+}
 
 export function isGuideDate(value: string): boolean {
   if (!ISO_DATE.test(value)) return false;
@@ -77,6 +96,7 @@ function hero(problems: string[], value: GuideHero) {
   text(problems, "hero.alt", value.alt, GUIDE_LIMITS.altMaxLength);
   if (!Number.isInteger(value.width) || value.width <= 0 || !Number.isInteger(value.height) || value.height <= 0) problems.push("hero.width and hero.height must be positive integers");
   if (typeof value.licensed !== "boolean") problems.push("hero.licensed must be true or false");
+  if (value.caption !== undefined) text(problems, "hero.caption", value.caption, GUIDE_LIMITS.captionMaxLength);
 }
 
 function translation(problems: string[], label: string, value: GuideTranslation) {
@@ -97,11 +117,17 @@ export function guideProblems(guide: Guide): string[] {
   if (!SLUG.test(guide.slug) || guide.slug.length > GUIDE_LIMITS.slugMaxLength) problems.push("slug must be lower-case letters, digits and single hyphens");
   text(problems, "title", guide.title, GUIDE_LIMITS.titleMaxLength);
   text(problems, "description", guide.description, GUIDE_LIMITS.descriptionMaxLength);
+  if (guide.pillar !== undefined && !isGuidePillar(guide.pillar)) problems.push(`pillar must be one of ${GUIDE_PILLARS.map((pillar) => pillar.key).join(", ")}`);
   text(problems, "author.name", guide.author?.name, GUIDE_LIMITS.authorMaxLength);
   text(problems, "author.role", guide.author?.role, GUIDE_LIMITS.authorMaxLength);
+  if (guide.author?.bio !== undefined) text(problems, "author.bio", guide.author.bio, GUIDE_LIMITS.authorBioMaxLength);
   if (!isGuideDate(guide.publishedAt)) problems.push("publishedAt must be a YYYY-MM-DD date");
   if (!isGuideDate(guide.updatedAt)) problems.push("updatedAt must be a YYYY-MM-DD date");
   else if (isGuideDate(guide.publishedAt) && guide.updatedAt < guide.publishedAt) problems.push("updatedAt is before publishedAt");
+  if (guide.checkedAt !== undefined && !isGuideDate(guide.checkedAt)) problems.push("checkedAt must be a YYYY-MM-DD date");
+  if (guide.readMinutes !== undefined && (!Number.isInteger(guide.readMinutes) || guide.readMinutes < 1 || guide.readMinutes > GUIDE_LIMITS.readMinutesMax)) {
+    problems.push(`readMinutes must be an integer from 1 to ${GUIDE_LIMITS.readMinutesMax}`);
+  }
   if (guide.hero) hero(problems, guide.hero);
   if (guide.video) {
     if (!guide.hero) problems.push("video requires a hero photo as its poster");
@@ -140,6 +166,8 @@ function bodyPhotos(source: string): string[] {
  */
 export function guidePublishProblems(guide: Guide): string[] {
   const problems: string[] = [];
+  if (!guide.pillar) problems.push("pillar is required before publication");
+  if (!guide.author.bio) problems.push("author.bio is required before publication");
   const confirm = (label: string, value: string | undefined) => {
     if (value && CONFIRM_MARK.test(value)) problems.push(`${label} still has a [CONFIRM: …] to check`);
   };
@@ -154,6 +182,13 @@ export function guidePublishProblems(guide: Guide): string[] {
     for (const src of bodyPhotos(value.body)) if (SAMPLE_PHOTO.test(src)) problems.push(`${prefix}body uses the provisional photo ${src}`);
   };
   content("", guide);
+  confirm("author.bio", guide.author.bio);
+  confirm("hero.caption", guide.hero?.caption);
+  try {
+    if (!parseGuideMarkdown(guide.body).some((block) => block.type === "heading" && block.level === 2)) problems.push("body needs at least one ## heading for the table of contents");
+  } catch {
+    // guideProblems reports malformed bodies.
+  }
   if (guide.hero && SAMPLE_PHOTO.test(guide.hero.src)) problems.push(`hero uses the provisional photo ${guide.hero.src}`);
   if (guide.translations?.ja) content("translations.ja.", guide.translations.ja);
   return problems;
@@ -177,6 +212,47 @@ export function guideRegistryProblems(guides: readonly Guide[]): string[] {
 /** Newest update first, then by title. */
 export function sortGuides(guides: readonly Guide[]): Guide[] {
   return [...guides].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
+}
+
+/** A stable reading-time label even when old drafts have no explicit override. */
+export function guideReadMinutes(guide: Guide): number {
+  if (guide.readMinutes) return guide.readMinutes;
+  const words = [guide.title, guide.description, guide.body, ...guide.faq.flatMap((item) => [item.question, item.answer])]
+    .join(" ")
+    .replace(/\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return Math.max(1, Math.ceil(words / 200));
+}
+
+export type GuideOutlineItem = Readonly<{ blockIndex: number; id: string; title: string; level: 2 | 3; sectionNumber?: number }>;
+
+/** Stable, unique ids for every heading. The table of contents uses the numbered h2 entries only. */
+export function guideOutline(blocks: readonly GuideBlock[]): GuideOutlineItem[] {
+  const used = new Set<string>();
+  let sectionNumber = 0;
+  return blocks.flatMap((block, blockIndex) => {
+    if (block.type !== "heading") return [];
+    const title = guideInlineText(block.children);
+    const base = title.normalize("NFKD").toLocaleLowerCase("en-US").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || `heading-${blockIndex + 1}`;
+    let id = base;
+    for (let suffix = 2; used.has(id); suffix++) id = `${base}-${suffix}`;
+    used.add(id);
+    if (block.level === 2) sectionNumber++;
+    return [{ blockIndex, id, title, level: block.level, ...(block.level === 2 ? { sectionNumber } : {}) }];
+  });
+}
+
+/** Place the compact experience CTA after the section nearest the middle of the article. */
+export function guideCtaInsertAfter(blocks: readonly GuideBlock[], outline = guideOutline(blocks)): number | null {
+  if (!blocks.length) return null;
+  const sections = outline.filter((item) => item.level === 2);
+  if (!sections.length) return Math.floor((blocks.length - 1) / 2);
+  const section = sections[Math.max(0, Math.ceil(sections.length / 2) - 1)]!;
+  const next = sections.find((item) => item.blockIndex > section.blockIndex);
+  return next ? next.blockIndex - 1 : blocks.length - 1;
 }
 
 /** The guides that point at this experience (the detail page's "related guides" block), newest first. */

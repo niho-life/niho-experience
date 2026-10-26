@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { EN_STATIC_COPY_V1, HomeViewV1, type AssetBindingsV1, type DisplayImageV1, type DisplayVideoV1, type ExperienceCardModelV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { HomeFinder } from "@/components/HomeFinder";
 import { EmptyResults, ErrorState } from "@/components/States";
@@ -18,6 +19,8 @@ import { editorialOf, FEATURED_HOST, FEATURED_STORY, shortName, themeEntries, th
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
+import { GuideTeasers } from "@/components/GuideBlocks";
+import { guideCatalog } from "@/lib/guide-registry";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
 import { siteJsonLd } from "@/lib/structured-data";
 import { englishAlternates } from "@/lib/locale-metadata";
@@ -56,7 +59,7 @@ function hostRow(listed: ExperienceDetailForSite[], current: ExperienceDetailFor
   return rows;
 }
 
-function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardModel[], listed: ExperienceDetailForSite[], cardDates: CardDatesSource, days: ReturnType<typeof upcomingDays>, copy: StaticCopyAccessorV1, assets: AssetBindingsV1 | null): HomeViewModelV1 {
+function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardModel[], listed: ExperienceDetailForSite[], cardDates: CardDatesSource, days: ReturnType<typeof upcomingDays>, copy: StaticCopyAccessorV1, assets: AssetBindingsV1 | null, afterCards?: HomeViewModelV1["afterCards"]): HomeViewModelV1 {
   const themes = themeEntries(summaries);
   const story = isPilotPreview ? (listed.find((experience) => experience.slug === FEATURED_STORY.slug) ?? null) : null;
   const featured = story ? null : (listed.find((experience) => experience.photos.length >= 5) ?? null);
@@ -87,7 +90,7 @@ function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardMod
   return {
     hero: publishedImage(assets, "home.hero", HERO_PHOTO), finder: <HomeFinder days={days} />,
     themes: themes.map((theme) => ({ ...theme, href: `/experiences/${theme.slug}` })), cardsEyebrow: cards.length ? copy.text("home.cardsEyebrowCount", { countWord: numberWord(cards.length) }) : undefined,
-    cards: cards.map((card) => ({ model: cardModel(card), dates: <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={cardDates} /> })), empty: <EmptyResults clearHref={null} />, feature,
+    cards: cards.map((card) => ({ model: cardModel(card), dates: <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={cardDates} /> })), empty: <EmptyResults clearHref={null} />, afterCards, feature,
     strips: strips.map((strip) => ({ key: strip.theme.key, href: `/experiences/${strip.slug}`, verb: strip.theme.verb, name: strip.name, video: publishedVideo(assets, `home.strip.${strip.theme.key}` as keyof AssetBindingsV1, strip.video) })),
     stripsEyebrow: copy.text(strips.length === 1 ? "home.stripsEyebrowOne" : "home.stripsEyebrowMany", { countWord: numberWord(strips.length) }), banner: publishedVideo(assets, "home.banner", BANNER_VIDEO), hostFeature: host, figures,
     postcards: POSTCARDS.map((card, index) => ({ id: card.src, image: publishedImage(assets, (["home.postcard.crossing", "home.postcard.enoden", "home.postcard.buddha", "home.postcard.fuji", "home.postcard.bamboo"] as const)[index]!, card), place: card.place, rotate: card.rotate })), hostBand: publishedVideo(assets, "home.hostBand", HOST_BAND_VIDEO),
@@ -96,15 +99,25 @@ function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardMod
 
 export default async function Home({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
-  const [api, result] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query)]);
+  const [api, result, guideCatalogResult] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalog()]);
   if (!result.ok && result.kind !== "not_found") return <ErrorState title="We couldn't load experiences" />;
   const summaries = result.ok ? result.data.experiences : [];
   const details = await loadDetails(api, summaries, config.publicApiVersion !== "1.0");
   const cards = withReviewLines(buildCardModels(summaries, details, isPilotPreview), await getReviewSummaries(summaries.map((summary) => summary.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
+  const homeGuides = guideCatalogResult.guides.length >= 3 ? guideCatalogResult.guides.slice(0, 3) : [];
+  const guideEntry = homeGuides.length === 3 ? (
+    <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="home-guides-heading">
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div><p className="eyebrow">New</p><h2 id="home-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">Guides from people who live here</h2></div>
+        <Link href="/guides" className="link-leaf shrink-0 text-sm">See all guides</Link>
+      </div>
+      <GuideTeasers guides={homeGuides} draftSlugs={guideCatalogResult.draftSlugs} columns="three" descriptions={false} />
+    </section>
+  ) : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
-    <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, upcomingDays(new Date(), 14), EN_STATIC_COPY_V1, null)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />
+    <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, upcomingDays(new Date(), 14), EN_STATIC_COPY_V1, null, guideEntry)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />
   </>;
 }

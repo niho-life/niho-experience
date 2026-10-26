@@ -19,6 +19,8 @@ export type HomeViewModelV1 = Readonly<{
         dates?: ReactNode;
     }[];
     empty?: ReactNode;
+    /** Consumer-owned editorial entry placed directly after the experience-card section. */
+    afterCards?: ReactNode;
     feature?: {
         schedule?: string;
         heading: string;

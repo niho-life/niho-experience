@@ -8,11 +8,16 @@ import type { PublicVideo } from "@/lib/videos";
 
 export type GuideFaqItem = Readonly<{ question: string; answer: string }>;
 
+/** The five editorial shelves on `/guides`, in their fixed display order. Optional only for legacy preview drafts. */
+export type GuidePillar = "evenings" | "zazen" | "hands-on" | "planning" | "hosts";
+
 export type GuideAuthor = Readonly<{
   /** The writer's real name as shown on the page. */
   name: string;
   /** Their role, e.g. "Editor, NIHO Experience" or "Host of the community dinner". */
   role: string;
+  /** A short first-person or third-person introduction for the article footer. */
+  bio?: string;
 }>;
 
 export type GuideHero = Readonly<{
@@ -23,6 +28,8 @@ export type GuideHero = Readonly<{
   height: number;
   /** True only when the photo's rights cover sharing (Open Graph, `Article.image`). False shows it on the page only. */
   licensed: boolean;
+  /** Visible credit or context directly below the hero. */
+  caption?: string;
 }>;
 
 /** A translated version. The structure only: no `/ja/guides` route exists yet (Japanese site: #59). */
@@ -35,11 +42,17 @@ export type Guide = Readonly<{
   title: string;
   /** The meta description and the lead under the title (160 characters at most). */
   description: string;
+  /** Required before publication. Legacy external drafts may omit it and stay in an unclassified preview shelf. */
+  pillar?: GuidePillar;
   author: GuideAuthor;
   /** ISO dates (`YYYY-MM-DD`), shown on the page and in the structured data. */
   publishedAt: string;
   /** Changed on every content update; the sitemap's `lastModified`. */
   updatedAt: string;
+  /** Date on which time-sensitive facts were last checked. */
+  checkedAt?: string;
+  /** Editorial reading-time override. When omitted, the UI derives it from the article text. */
+  readMinutes?: number;
   hero?: GuideHero;
   /** Published YouTube video. The hero serves as its approved poster; no video is requested before play. */
   video?: PublicVideo;
@@ -47,7 +60,7 @@ export type Guide = Readonly<{
   relatedExperienceSlugs: readonly string[];
   /** Other guides in the same registry (0–3). */
   relatedGuideSlugs: readonly string[];
-  /** Questions and answers shown as a block (h2 + one h3 per question). No FAQPage structured data. */
+  /** Questions and answers shown as an h2 followed by native details/summary rows. No FAQPage structured data. */
   faq: readonly GuideFaqItem[];
   body: string;
   translations?: Readonly<{ ja?: GuideTranslation }>;

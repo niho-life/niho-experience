@@ -1,7 +1,7 @@
 import "server-only";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Guide, GuideFaqItem, GuideHero } from "@/content/guides/types";
+import type { Guide, GuideFaqItem, GuideHero, GuidePillar } from "@/content/guides/types";
 import { guideProblems } from "./guides";
 
 /**
@@ -19,8 +19,8 @@ export type GuideDraftResult = { ok: true; guide: Guide } | { ok: false; reasons
 export const GUIDE_DRAFTS_FOLDER = "GUIDE_DRAFTS_DIR";
 
 const FIELDS = [
-  "title", "description", "author", "authorRole", "publishedAt", "updatedAt",
-  "hero", "heroAlt", "heroWidth", "heroHeight", "heroLicensed", "relatedExperiences", "relatedGuides",
+  "title", "description", "pillar", "author", "authorRole", "authorBio", "publishedAt", "updatedAt", "checkedAt", "readMinutes",
+  "hero", "heroAlt", "heroWidth", "heroHeight", "heroLicensed", "heroCaption", "relatedExperiences", "relatedGuides",
 ] as const;
 type Field = (typeof FIELDS)[number];
 type Fields = Map<Field, string>;
@@ -55,7 +55,7 @@ function readFields(lines: readonly Line[], reasons: string[]): Fields {
 function readHero(fields: Fields, reasons: string[]): GuideHero | undefined {
   const present = HERO_FIELDS.filter((field) => fields.has(field));
   if (!present.length) {
-    if (fields.has("heroLicensed")) reasons.push(`"heroLicensed" goes with a hero: ${quoted(HERO_FIELDS)}`);
+    for (const companion of ["heroLicensed", "heroCaption"] as const) if (fields.has(companion)) reasons.push(`"${companion}" goes with a hero: ${quoted(HERO_FIELDS)}`);
     return undefined;
   }
   const missing = HERO_FIELDS.filter((field) => !fields.has(field));
@@ -67,7 +67,10 @@ function readHero(fields: Fields, reasons: string[]): GuideHero | undefined {
   if (licensed !== "true" && licensed !== "false") reasons.push(`"heroLicensed" must be true or false`);
   // Anything but digits becomes NaN, which guideProblems reports with the other size rules.
   const size = (field: Field) => (/^\d+$/.test(fields.get(field)!) ? Number(fields.get(field)) : Number.NaN);
-  return { src: fields.get("hero")!, alt: fields.get("heroAlt")!, width: size("heroWidth"), height: size("heroHeight"), licensed: licensed === "true" };
+  return {
+    src: fields.get("hero")!, alt: fields.get("heroAlt")!, width: size("heroWidth"), height: size("heroHeight"), licensed: licensed === "true",
+    ...(fields.has("heroCaption") ? { caption: fields.get("heroCaption")! } : {}),
+  };
 }
 
 /** `### question` then one paragraph of answer, repeated. */
@@ -144,9 +147,12 @@ export function parseGuideDraft(file: string, source: string): GuideDraftResult 
     slug: file.replace(/\.md$/, ""),
     title: get("title"),
     description: get("description"),
-    author: { name: get("author"), role: get("authorRole") },
+    ...(fields.has("pillar") ? { pillar: get("pillar") as GuidePillar } : {}),
+    author: { name: get("author"), role: get("authorRole"), ...(fields.has("authorBio") ? { bio: get("authorBio") } : {}) },
     publishedAt: get("publishedAt"),
     updatedAt: get("updatedAt"),
+    ...(fields.has("checkedAt") ? { checkedAt: get("checkedAt") } : {}),
+    ...(fields.has("readMinutes") ? { readMinutes: /^\d+$/.test(get("readMinutes")) ? Number(get("readMinutes")) : Number.NaN } : {}),
     ...(hero ? { hero } : {}),
     relatedExperienceSlugs: list("relatedExperiences"),
     relatedGuideSlugs: list("relatedGuides"),

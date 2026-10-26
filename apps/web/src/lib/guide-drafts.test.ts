@@ -64,10 +64,20 @@ describe("a draft file", () => {
     expect(licensed.ok && licensed.guide.hero?.licensed).toBe(true);
   });
 
+  it("reads the new editorial fields while keeping all of them optional for legacy drafts", () => {
+    const result = parseGuideDraft("test-draft.md", draft([...FIELDS, "pillar: planning", "authorBio: An invented local writer.", "checkedAt: 2026-10-25", "readMinutes: 8", "hero: /placeholders/dinner.svg", "heroAlt: A", "heroWidth: 10", "heroHeight: 10", "heroCaption: Synthetic caption"]));
+    expect(result.ok && result.guide).toMatchObject({
+      pillar: "planning", author: { bio: "An invented local writer." }, checkedAt: "2026-10-25", readMinutes: 8,
+      hero: { caption: "Synthetic caption" },
+    });
+    expect(reasonsOf(draft())).toEqual([]);
+  });
+
   it.each([
     ["no front matter", "Just a body.", /start the file with the fields/],
     ["an unclosed front matter", "---\ntitle: T\n\nBody", /start the file with the fields/],
-    ["an unknown field", draft([...FIELDS, "pillar: culture"]), /line 10: unknown field "pillar"/],
+    ["an unknown field", draft([...FIELDS, "topic: culture"]), /line 10: unknown field "topic"/],
+    ["an unknown pillar", draft([...FIELDS, "pillar: culture"]), /pillar must be one of/],
     ["a misspelt field", draft([...without("authorRole"), "authorrole: Editor"]), /unknown field "authorrole"/],
     ["a repeated field", draft([...FIELDS, "title: Again"]), /line 10: "title" is written twice/],
     ["a line that is not key: value", draft([...FIELDS, "just words"]), /line 10: write each field as "key: value"/],
@@ -77,6 +87,7 @@ describe("a draft file", () => {
     ["too few experiences", draft([...without("relatedExperiences"), "relatedExperiences: indigo-dyeing-with-an-artisan"]), /relatedExperienceSlugs needs 2–3 slugs/],
     ["an incomplete hero", draft([...FIELDS, "hero: /a.jpg", "heroAlt: A"]), /a hero needs "heroWidth", "heroHeight" too/],
     ["heroLicensed without a hero", draft([...FIELDS, "heroLicensed: true"]), /"heroLicensed" goes with a hero/],
+    ["heroCaption without a hero", draft([...FIELDS, "heroCaption: A caption"]), /"heroCaption" goes with a hero/],
     ["a bad heroLicensed", draft([...FIELDS, "hero: /a.jpg", "heroAlt: A", "heroWidth: 10", "heroHeight: 10", "heroLicensed: yes"]), /"heroLicensed" must be true or false/],
     ["a non-numeric hero size", draft([...FIELDS, "hero: /a.jpg", "heroAlt: A", "heroWidth: 10px", "heroHeight: 10"]), /hero.width and hero.height must be positive integers/],
     ["an unsafe hero", draft([...FIELDS, "hero: javascript:alert(1)", "heroAlt: A", "heroWidth: 10", "heroHeight: 10"]), /hero.src must be a site path or an https URL/],
@@ -124,7 +135,7 @@ describe("the drafts folder", () => {
     const drafts = await readGuideDrafts(dir);
     expect(drafts.guides.map((guide) => guide.slug)).toEqual(["good-draft"]);
     expect(drafts.problems).toEqual([
-      { file: "broken-draft.md", reasons: ['line 10: unknown field "pillar"'] },
+      { file: "broken-draft.md", reasons: ["pillar must be one of evenings, zazen, hands-on, planning, hosts"] },
       { file: "folder.md", reasons: [expect.stringMatching(/^the file could not be read/)] },
     ]);
   });
