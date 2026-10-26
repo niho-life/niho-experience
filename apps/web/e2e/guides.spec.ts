@@ -73,11 +73,11 @@ test("the article shows its body, FAQ and the experiences to book, and links to 
 
 test("the experience page links back to the guides about it", async ({ request }) => {
   const html = await (await request.get(dinner)).text();
-  expect(html).toMatch(/<h2[^>]*>Guides for your visit<\/h2>/);
+  expect(html).toMatch(/<h2[^>]*>Plan your evening in Kamakura<\/h2>/);
   expect(html).toContain(`href="${article}"`);
   // A second synthetic guide points at the cycling breakfast too.
   const cycling = await (await request.get("/experiences/seaside-cycling-and-market-breakfast")).text();
-  expect(cycling).toContain("Guides for your visit");
+  expect(cycling).toContain("Plan your morning in Kamakura");
   expect(cycling).toContain('href="/guides/sample-kamakura-day-plan"');
 });
 
@@ -201,7 +201,7 @@ test.describe("a guide draft in the mock preview", () => {
 
   test("the experience page marks the draft among its guides", async ({ page }) => {
     await page.goto("/experiences/indigo-dyeing-with-an-artisan");
-    const guides = page.getByRole("region", { name: "Guides for your visit" });
+    const guides = page.getByRole("region", { name: /^Plan your (morning|day|evening) in / });
     await expect(draftItem(guides, draftTitle).getByText("Draft", { exact: true })).toBeVisible();
     await expect(draftItem(guides, "Indoor crafts for a rainy day in Kamakura (sample guide)").getByText("Draft", { exact: true })).toHaveCount(0);
   });
