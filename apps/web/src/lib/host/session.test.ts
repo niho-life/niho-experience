@@ -26,6 +26,7 @@ const DAY = 24 * 60 * MIN;
 function session(overrides: Partial<HostSession> = {}): HostSession {
   return startSession(
     {
+      nihoUserId: "synthetic-host-user",
       refreshToken: "synthetic-refresh-token",
       idToken: "synthetic.id.token",
       idTokenExpiresAt: NOW + 60 * MIN,

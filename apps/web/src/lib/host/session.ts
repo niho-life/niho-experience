@@ -26,6 +26,8 @@ export type HostMockScenario = "default" | "empty" | "payments-pending" | "calen
 export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked"];
 
 export interface HostSession {
+  /** Stable NIHO account ID from the app-connect exchange; never sent to browser code. */
+  nihoUserId: string;
   refreshToken: string;
   idToken: string;
   /** Epoch ms. */
@@ -51,6 +53,7 @@ export interface HostLoginState {
 
 interface SessionWire {
   v: 1;
+  u: string;
   r: string;
   t: string;
   te: number;
@@ -120,6 +123,7 @@ export function cookieFits(name: string, value: string): boolean {
 export function encodeSession(sealer: CookieSealer, session: HostSession): string {
   const wire: SessionWire = {
     v: 1,
+    u: session.nihoUserId,
     r: session.refreshToken,
     t: session.idToken,
     te: session.idTokenExpiresAt,
@@ -144,10 +148,11 @@ export function encodeSession(sealer: CookieSealer, session: HostSession): strin
 export function decodeSession(sealer: CookieSealer, raw: string | undefined | null, now: number): HostSession | null {
   const wire = sealer.open(raw) as Partial<SessionWire> | null;
   if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
-  if (!isString(wire.r) || !isString(wire.t) || !isString(wire.c, 256) || !isTime(wire.te) || !isTime(wire.ce) || !isTime(wire.x)) return null;
+  if (!isString(wire.u, 128) || !isString(wire.r) || !isString(wire.t) || !isString(wire.c, 256) || !isTime(wire.te) || !isTime(wire.ce) || !isTime(wire.x)) return null;
   if (now >= wire.x || now >= wire.ce) return null;
   const scenario = HOST_MOCK_SCENARIOS.find((candidate) => candidate === wire.m);
   return {
+    nihoUserId: wire.u,
     refreshToken: wire.r,
     idToken: wire.t,
     idTokenExpiresAt: wire.te,

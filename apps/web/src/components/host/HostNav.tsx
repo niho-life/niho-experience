@@ -15,6 +15,7 @@ const NAV_LABEL = "ホストのメニュー";
 const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
   "/host/home": "home",
   "/host/experiences": "experiences",
+  "/host/calendar": "calendar",
   "/host/bookings": "bookings",
   "/host/sales": "sales",
   "/host/settings": "settings",
@@ -97,7 +98,7 @@ function SidebarProviderSwitcher({ providers }: { providers: readonly HostProvid
 }
 
 /**
- * PC (md and up): the 232px sidebar with the brand, the provider, the five sections,
+ * PC (md and up): the 232px sidebar with the brand, the provider, the six sections,
  * the way out to the traveler site and NIHO, and the NIHO account. Selected items
  * use the sand surface and ink text (no green).
  */
@@ -235,7 +236,7 @@ export function HostMobileHeader(props: HostChromeProps) {
   );
 }
 
-/** Phones: the five sections as bottom tabs (icon and a 12px label). Hidden under a section or ホーム and on one booking, where the page has its back header. */
+/** Phones: five frequent destinations as bottom tabs. 売上 remains available from ホーム. */
 export function HostTabBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -247,7 +248,7 @@ export function HostTabBar() {
       <div aria-hidden="true" className="h-[var(--host-tabbar)] md:hidden" />
       <nav aria-label={NAV_LABEL} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-canvas px-1 pt-1.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:hidden">
         <ul className="grid grid-cols-5">
-          {HOST_NAV.map((item) => {
+          {HOST_NAV.filter((item) => item.href !== "/host/sales").map((item) => {
             const active = isHostNavActive(pathname, item.href);
             return (
               <li key={item.href}>

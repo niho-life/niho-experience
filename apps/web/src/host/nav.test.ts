@@ -6,7 +6,7 @@ const selected = (location: string) => HOST_NAV.filter((item) => isHostNavActive
 
 describe("host navigation", () => {
   it("lists the five destinations in order", () => {
-    expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "予約", "売上", "設定"]);
+    expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]);
   });
 
   it("selects exactly one item on each top page", () => {

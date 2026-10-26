@@ -10,6 +10,7 @@ const PATHS = {
     </>
   ),
   bookings: <path d="M6 2a1 1 0 0 1 1 1v1h6V3a1 1 0 1 1 2 0v1h.5A2.5 2.5 0 0 1 18 6.5V8H2V6.5A2.5 2.5 0 0 1 4.5 4H5V3a1 1 0 0 1 1-1zM2 9.5h16v6a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 2 15.5z" />,
+  calendar: <path d="M5 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM3 9v8h14V9zm3 2h3v3H6z" />,
   sales: (
     <>
       <rect x="2.5" y="10" width="3.8" height="7.5" rx="1.2" />

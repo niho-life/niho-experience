@@ -42,6 +42,7 @@ describe("Admin HTTP session", () => {
     expect(decodeAdminHttpSession(new CookieSealer([secret], "admin-preview-session"), sealed, 1_001)).toBeNull();
 
     const host = startSession({
+      nihoUserId: "synthetic-host-user",
       refreshToken: "host-refresh",
       idToken: "host-token",
       idTokenExpiresAt: 60_000,

@@ -20,6 +20,7 @@ export type NihoAuthFailure = "rejected" | "unavailable";
 export type NihoAuthResult<T> = { ok: true; value: T } | { ok: false; reason: NihoAuthFailure };
 
 export interface ExchangeResult {
+  nihoUserId: string;
   customToken: string;
   refreshToken: string;
   connectionId: string;
@@ -84,10 +85,11 @@ export async function exchangeCode(deps: NihoAuthDeps, input: { code: string; co
   const body = result.value as Record<string, unknown> | null;
   const user = (body?.user ?? {}) as Record<string, unknown>;
   const connectionExpiresAt = parseTime(body?.connectionExpiresAt);
-  if (!isText(body?.customToken) || !isText(body?.refreshToken, 1024) || !isText(body?.connectionId, 256) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
+  if (!isText(body?.customToken) || !isText(body?.refreshToken, 1024) || !isText(body?.connectionId, 256) || !isText(user.id, 128) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
   return {
     ok: true,
     value: {
+      nihoUserId: user.id,
       customToken: body.customToken,
       refreshToken: body.refreshToken,
       connectionId: body.connectionId,

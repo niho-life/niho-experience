@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
   const now = Date.now();
   const session = startSession(
     {
+      nihoUserId: "synthetic-host-user",
       refreshToken: mockToken("mock-refresh-token."),
       idToken: mockToken(MOCK_ID_TOKEN_PREFIX),
       idTokenExpiresAt: params.get("expired") === "1" ? now - 1000 : now + MOCK_ID_TOKEN_TTL_MS,

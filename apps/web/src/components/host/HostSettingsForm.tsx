@@ -7,6 +7,7 @@ import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad
 import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
 import type { HostGoogleConnection, HostNotificationKey, HostSettings } from "@/host/types";
 import type { HostProviderRole } from "@/lib/host/providers";
+import { HOST_CALENDAR_PATH, withProvider } from "@/lib/host/routes";
 import { DISABLED } from "./editor-parts";
 import { FIELD_DISABLED, FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
 import { HostCalendarPanel } from "./HostCalendarPanel";
@@ -259,7 +260,12 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
           <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} />
         </form>
 
-        <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview={preview} />
+        {preview ? <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview /> :
+          <FieldSection id="settings-calendar" title="カレンダー" status={null}>
+            <FieldRow label="開催枠と Google の予定" labelId="settings-calendar-link">
+              <a href={withProvider(HOST_CALENDAR_PATH, providerId)} className="font-bold text-moss underline underline-offset-4">カレンダーを開く</a>
+            </FieldRow>
+          </FieldSection>}
 
         <FieldSection id="settings-meeting" title="既定の集合案内" status={onScreenOnly ? PREPARING_STATUS : null}>
           <FieldRow label="公開する集合エリア" htmlFor="settings-meeting-area">

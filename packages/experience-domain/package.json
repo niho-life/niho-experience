@@ -1,0 +1,28 @@
+{
+  "name": "@niho-experience/experience-domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure scheduling and availability rules for NIHO Experience.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#availability": "./src/availability.ts",
+    "#schedule": "./src/schedule.ts",
+    "#time": "./src/time.ts",
+    "#types": "./src/types.ts",
+    "#validation": "./src/validation.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
