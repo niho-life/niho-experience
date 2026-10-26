@@ -105,8 +105,9 @@ export declare function SiteFrameV1({ children, header, footer, copy }: {
     footer: ReactNode;
     copy?: StaticCopyAccessorV1;
 }): import("react").JSX.Element;
-export declare function CatalogueViewV1({ heading, content, copy }: {
+export declare function CatalogueViewV1({ heading, intro, content, copy }: {
     heading?: string;
+    intro?: string;
     content: ReactNode;
     copy?: StaticCopyAccessorV1;
 }): import("react").JSX.Element;
@@ -199,7 +200,16 @@ export type DetailHostBioV1 = Readonly<{
     name: string;
     text: string;
 }>;
-/** Questions and answers (anchor `#faq`): an h2, then one h3 per question and its plain-text answer, all in the server HTML. Placed before the cancellation terms. */
+export type DetailStoryLinkV1 = Readonly<{
+    href: string;
+    label: string;
+}>;
+export type DetailRelatedGuidesV1 = Readonly<{
+    eyebrow: string;
+    title: string;
+    content: ReactNode;
+}>;
+/** Questions and answers (anchor `#faq`): an h2, then native details/summary rows with one h3 per question, all in the server HTML. */
 export type DetailFaqV1 = Readonly<{
     title: string;
     items: readonly Readonly<{
@@ -209,6 +219,7 @@ export type DetailFaqV1 = Readonly<{
 }>;
 export type DetailViewModelV1 = Readonly<{
     title: string;
+    locationLine?: string;
     backHref: string;
     gallery: DetailGalleryModelV1;
     schedule?: string;
@@ -239,6 +250,7 @@ export type DetailViewModelV1 = Readonly<{
         photo?: DisplayImageV1 | null;
         hosts: readonly FaceV1[];
         bios?: readonly DetailHostBioV1[];
+        storyLink?: DetailStoryLinkV1;
     };
     included: readonly string[];
     notIncluded: readonly string[];
@@ -257,6 +269,7 @@ export type DetailViewModelV1 = Readonly<{
     upcoming?: ReactNode;
     video?: ReactNode;
     faq?: DetailFaqV1;
+    relatedGuides?: DetailRelatedGuidesV1;
 }>;
 export declare function DetailViewV1({ model, primitives, copy, headings }: {
     model: DetailViewModelV1;

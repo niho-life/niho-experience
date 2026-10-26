@@ -42,7 +42,7 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
   } catch { return <JapaneseUnavailable />; }
   const { copy, cards, searchQuery, initialDate, initialGuests, days } = data;
   const searchProps = { searchQuery, theme: undefined, date: initialDate ?? undefined, guests: initialGuests, filtersEnabled: false, filtersActive: Boolean(searchQuery || initialDate || initialGuests !== null) };
-  return <CatalogueViewV1 copy={copy.copy} heading={copy.copy.text("catalogue.title")} content={<ExperienceList
+  return <CatalogueViewV1 copy={copy.copy} heading={copy.copy.text("catalogue.title")} intro="鎌倉の少人数制の体験を探せます。料金は日本円、時刻は日本時間（JST）です。" content={<ExperienceList
       key={JSON.stringify([searchQuery, initialDate, initialGuests])} cards={cards} days={days} initialDate={initialDate} initialGuests={initialGuests} browseContext={{ q: searchQuery || undefined }} catalogDateFiltered={false} preview={false} nihoWebOrigin={config.nihoWebOrigin}
       search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />} inlineSearch={<ExperienceFiltersForm key="inline-search" {...searchProps} placement="inline" />} columns="three"
       empty={<EmptyResults key="empty-results" clearHref={searchQuery || initialDate || initialGuests !== null ? "/experiences" : null} searchActive={Boolean(searchQuery)} />}

@@ -60,7 +60,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     filtersActive: Boolean(searchQuery || theme || date || initialGuests !== null),
   };
   const listContent = (
-    <CatalogueViewV1 copy={copy} heading={copy.text("catalogue.title")} content={
+    <CatalogueViewV1 copy={copy} heading="Kamakura experiences with local hosts" intro="Small groups, hosted by people who live here. One hour from Tokyo, two minutes from Kamakura Station." content={
       <ExperienceList
         key={JSON.stringify([searchQuery, theme, initialDate, initialGuests])}
         cards={cards}

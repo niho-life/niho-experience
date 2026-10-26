@@ -73,11 +73,16 @@ schema 2 は home の2見出しを whole rich message として持つ。`{em}...
 同じく `/v1` のまま、既定では今までと同じ表示になる任意の項目だけを足した。copy registry の key 集合は変えない（文言は consumer が渡す）。
 
 - `DetailViewModelV1.provider.bios`（`{ name, text }[]`）：「Your host(s)」のホストのチップの下に、ホスト紹介文を書式なしの文で出す。ホストが 2 人以上いるときだけ名前を前に付ける。
-- `DetailViewModelV1.upcoming`（ReactNode）：題名（とレビューの 1 行）の下、ホストの行の前の差し込み口。公開サイトはブラウザで読んだ次の開催日（`CardDates`）を置く。
+- `DetailViewModelV1.locationLine`（string）：h1 直後の地域・東京からの距離・公開アクセス情報。公開サイトの `detail.fromTokyoLine` はページ所有の英日コピーとし、保存済み static-copy release の key 集合を変えない。
+- `DetailViewModelV1.upcoming`（ReactNode）：facts の直後、動画・gallery の前の差し込み口。公開サイトは public availability を no-store で SSR 読み取りし、最短の予約可能日時と追加3日を置く。取得失敗・空・予約不可では渡さない。
 - `DetailViewModelV1.video`（ReactNode）：facts の後、ギャラリーの前の差し込み口。公開サイトは掲載同意のある公開動画だけを置き、再生ボタンが押されるまで YouTube を読み込まない。
-- `DetailViewModelV1.faq`（`{ title, items: { question, answer }[] }`）：取消の前の節（`id="faq"`・h2 と質問ごとの h3）。項目が空なら出さない。
+- `DetailViewModelV1.faq`（`{ title, items: { question, answer }[] }`）：取消の前の節（`id="faq"`・h2 と質問ごとの native details/summary 内 h3）。項目が空なら出さない。
+- `DetailViewModelV1.provider.storyLink`：体験に結びついた公開済み hosts pillar の記事がある場合だけ、Your host 節末尾へ置く物語リンク。
+- `DetailViewModelV1.relatedGuides`：FAQ の直後・取消の前に置く eyebrow、h2、記事カードの差し込み口。公開 route がない日本語や記事0件では渡さない。
 - `SiteFooterV1.links`（`{ href, label }[]`）：フッターの固定のリンク（体験・提供者・ヘルプ）の後に足すリンク。公開サイトはガイド記事があるときだけ `/guides` を渡す。
 - `HomeViewModelV1.afterCards`（ReactNode）：体験カードの直後に置く consumer-owned の任意 slot。公開サイトはガイドが3本以上ある場合だけ、3枚のガイド入口を渡す。copy registry と価格・日程・在庫の責務は変えない。
+
+一覧の h1 と直下の導入文も consumer が `CatalogueViewV1.heading` / `intro` で渡す。これらはページ固有の編集コピーで、static-copy v1 の保存済み日本語 release を必須 key 追加で失効させない。
 
 ## 依存配布の分離
 

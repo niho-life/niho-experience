@@ -11,13 +11,13 @@ import { HandIcon, RubberStamp, type HandIconName } from "@/components/HandIcon"
 import { JsonLd } from "@/components/JsonLd";
 import { Photo } from "@/components/Photo";
 import { Notice } from "@/components/ui";
-import { getExperienceForSite } from "@/lib/api";
+import { getApi, getExperienceForSite } from "@/lib/api";
 import { faceOf, groupSizeLabel, hostNames, initialOf } from "@/lib/card-model";
 import { config, isPreview } from "@/lib/config";
 import { childParticipationCopy, hostBio, imageAlt } from "@/lib/experience-copy";
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import type { SearchParams } from "@/lib/filters";
-import { formatDuration, formatYen } from "@/lib/format";
+import { formatDuration, formatTime, formatYen } from "@/lib/format";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { addMinutesToClock, formatClock, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { seoDescription } from "@/lib/seo-description";
@@ -31,16 +31,17 @@ import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { LocalizedLink as Link } from "@/components/LocalizedLink";
 import { AskHost } from "@/components/AskHost";
 import { ReviewsSection } from "@/components/ReviewsSection";
-import { NO_JOURNEY_EXTRAS } from "@niho-experience/api-client";
+import { NO_JOURNEY_EXTRAS, type Occurrence } from "@niho-experience/api-client";
 import { getJourneyExtras } from "@/lib/journey";
 import { askHostTarget, conditionRows } from "@/lib/journey-ui";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
-import { CardDates } from "@/components/CardDates";
 import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
 import { relatedExperienceCards } from "@/lib/experience-cards";
 import { guidesAboutExperience } from "@/lib/guide-registry";
 import { videoForExperience } from "@/lib/videos";
 import { YouTubeVideo } from "@/components/YouTubeVideo";
+import { dayOption } from "@/lib/date-filter";
+import { detailFromTokyoLine, detailNextDates } from "@/lib/detail-page";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -54,6 +55,22 @@ async function readExperience(slug: string, query: SearchParams, locale: SiteLoc
     throw new Error("Public experience unavailable");
   }
   return result.data.experience;
+}
+
+/** Availability is authoritative and no-store in the public client. Failure or release mismatch means no band. */
+async function readInitialAvailability(slug: string, query: SearchParams, locale: SiteLocale, releaseId: string | null): Promise<Occurrence[]> {
+  try {
+    const api = await getApi(query);
+    if (locale === "ja") {
+      if (!releaseId) return [];
+      const result = await api.getJapaneseAvailability(slug);
+      return result.ok && result.data.releaseId === releaseId ? detailNextDates(result.data.occurrences) : [];
+    }
+    const result = await api.getAvailability(slug);
+    return result.ok ? detailNextDates(result.data.occurrences) : [];
+  } catch {
+    return [];
+  }
 }
 export async function englishExperienceMetadata({ params, searchParams }: Omit<ExperiencePageContentProps, "locale">): Promise<Metadata> {
   const e = await readExperience((await params).slug, await searchParams);
@@ -115,12 +132,12 @@ function accessFact(accessNote: string, placeName: string): { main: string; sub:
 export async function ExperiencePageContent({ params, searchParams, locale }: ExperiencePageContentProps) {
   const query = await searchParams;
   const slug = (await params).slug;
-  let e: ExperienceDetailForSite, copy = EN_STATIC_COPY_V1, japaneseBookingReady = true;
+  let e: ExperienceDetailForSite, copy = EN_STATIC_COPY_V1, japaneseBookingReady = true, japaneseReleaseId: string | null = null;
   try {
     if (locale === "ja") {
       const [selected, siteCopy] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy()]);
       assertSameJapaneseRelease(siteCopy.releaseId, selected);
-      e = selected.experience; copy = siteCopy.copy; japaneseBookingReady = japaneseBookingAllowed(selected);
+      e = selected.experience; copy = siteCopy.copy; japaneseBookingReady = japaneseBookingAllowed(selected); japaneseReleaseId = selected.releaseId;
     } else {
       e = await readExperience(slug, query);
     }
@@ -174,6 +191,8 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const adultPrices = e.offers.map((offer) => offer.pricing.adultPriceYen);
   const canBook = config.bookingsEnabled && e.booking.checkoutAvailable && japaneseBookingReady;
   const approval = e.offers.filter((offer) => offer.acceptanceMode === "APPROVAL").length;
+  const upcomingDates = canBook ? await readInitialAvailability(e.slug, query, locale, japaneseReleaseId) : [];
+  const hostStoryGuide = relatedGuides.guides.find((guide) => "pillar" in guide && guide.pillar === "hosts" && !relatedGuides.draftSlugs.includes(guide.slug));
 
   const assurances: BookingSummary["assurances"] = [];
   if (sharedPolicy) {
@@ -469,6 +488,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     const toImage = (photo: PublicImageForSite | null, fallback = "") => photo ? { src: photo.url, alt: imageAlt(photo, fallback) } : null;
     const model: DetailViewModelV1 = {
       title: e.title,
+      locationLine: detailFromTokyoLine(e.region.name, meeting?.accessNote, locale),
       backHref: browseHref("/experiences", browseContext),
       gallery: {
         title: e.title,
@@ -492,7 +512,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       paragraphs,
       timeline: e.timeline.map((step) => ({ time: step.time ? formatClock(step.time, locale) : undefined, title: step.title, text: step.text, icon: iconForText(`${step.title} ${step.text}`, "clock"), photo: toImage(step.photoIndex !== null ? (e.photos[step.photoIndex] ?? null) : null, `${e.title}, ${step.title}`) })),
       // Host introductions (v1.1 `hosts[].bio`) as plain text, on the English page only: the Japanese release has no approved translation of them.
-      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined },
+      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined, storyLink: hostStoryGuide ? { href: `/guides/${hostStoryGuide.slug}`, label: "Read the host story" } : undefined },
       included: e.included,
       notIncluded: e.notIncluded,
       emptyListLabel: copy.text("detail.noneListed"),
@@ -502,11 +522,11 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       askHost: journey.questionsOpen ? <AskHost slug={e.slug} target={askHostTarget(hostNames(e))} face={faceOf(e)} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> : undefined,
       reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews)) ?? undefined,
       reviews: journey.reviews ? { title: "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> } : undefined,
-      faq: journey.faq.length ? { title: "Frequently asked questions", items: journey.faq } : undefined,
-      // The next bookable dates near the title, read in the browser like the cards (the SSR response has no availability).
-      // The contract has no booking cutoff time per date, so no "closes in N days" line; seats left are never shown.
-      upcoming: locale === "en" && canBook ? <CardDates slug={e.slug} scheduleLabel={null} source={{ kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin }} /> : undefined,
+      faq: journey.faq.length ? { title: "Questions before you book", items: journey.faq } : undefined,
+      // Same no-store public availability as the booking controls. The API has no bookingClosesAt, so the band shows no cutoff or seat count.
+      upcoming: upcomingDates.length ? <NextDateBand dates={upcomingDates} locale={locale} bookingHref={bookingHref} /> : undefined,
       video: video && e.cover ? <YouTubeVideo video={video} poster={e.cover.url} title={e.title} /> : undefined,
+      relatedGuides: relatedGuides.guides.length ? { eyebrow: "Guides", title: "Stories behind this experience", content: <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} /> } : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
       cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
@@ -523,11 +543,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     <JsonLd data={experienceJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     <JsonLd data={experienceProductJsonLd(e, config.siteUrl, isPreview, canBook, reviewsForJsonLd(journey.reviews), locale)} />
     {portableDetail()}
-    {relatedGuides.guides.length || relatedCards.length ? <div className="container-page">
-      {relatedGuides.guides.length ? <section aria-labelledby="related-guides-heading" className="pt-14">
-        <h2 id="related-guides-heading" className="mb-4 text-[1.75rem] lg:text-[2rem]">Guides for your visit</h2>
-        <div className="max-w-[46rem]"><GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} /></div>
-      </section> : null}
+    {relatedCards.length ? <div className="container-page">
       {relatedCards.length ? <section aria-labelledby="related-experiences-heading" className="pt-14">
         <h2 id="related-experiences-heading" className="mb-6 text-[1.75rem] lg:text-[2rem]">More experiences in Kamakura</h2>
         <ExperienceCardGrid cards={relatedCards} />
@@ -535,6 +551,30 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     </div> : null}
     <MobileBookingBar summary={booking} />
   </>;
+}
+
+function NextDateBand({ dates, locale, bookingHref }: { dates: readonly Occurrence[]; locale: SiteLocale; bookingHref: string }) {
+  const [next, ...later] = dates;
+  if (!next) return null;
+  const label = locale === "ja"
+    ? { next: "次回", more: "ほかの日程", all: "すべての日程" }
+    : { next: "Next date", more: "More dates", all: "All dates" };
+  return (
+    <div data-next-date-band className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[18px] bg-leaf-pale px-4 py-3 text-[0.875rem] sm:px-5">
+      <p className="font-extrabold text-moss">
+        <span className="mr-2 text-[0.75rem] tracking-[0.08em] uppercase">{label.next}</span>
+        <time dateTime={next.startAt}>{dayOption(next.date, locale).label} · {formatTime(next.startAt, locale)} JST</time>
+      </p>
+      {later.length ? (
+        <p className="flex flex-wrap items-center gap-1.5 text-ink-soft">
+          <span className="sr-only">{label.more}: </span>
+          {later.map((occurrence) => <time key={`${occurrence.offerId}-${occurrence.date}`} dateTime={occurrence.startAt} className="rounded-full bg-white/75 px-2.5 py-1 font-bold">{dayOption(occurrence.date, locale).label}</time>)}
+        </p>
+      ) : null}
+      <a href="#book" className="link-leaf ml-auto hidden shrink-0 lg:inline">{label.all}</a>
+      <Link href={bookingHref} className="link-leaf ml-auto shrink-0 lg:hidden">{label.all}</Link>
+    </div>
+  );
 }
 
 function Fact({ icon, label, main, sub = null }: { icon: HandIconName; label: string; main: string; sub?: string | null }) {
