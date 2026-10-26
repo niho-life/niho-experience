@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
 
-export type ContractTarget = "public" | "host" | "admin-read" | "admin-support-case" | "admin-operations" | "host-support-history" | "host-support-settings" | "fee-summary";
+export type ContractTarget = "public" | "host" | "admin-read" | "admin-support-case" | "admin-operations" | "host-support-history" | "host-support-settings" | "fee-summary" | "experience-preparations";
 
 const TARGETS: Record<ContractTarget, { contract: string; output: string }> = {
   public: { contract: "experience-public-api.openapi.json", output: "openapi.ts" },
@@ -19,6 +19,7 @@ const TARGETS: Record<ContractTarget, { contract: string; output: string }> = {
   "host-support-history": { contract: "experience-host-support-history-api.openapi.json", output: "host-support-history-openapi.ts" },
   "host-support-settings": { contract: "experience-host-support-settings-api.openapi.json", output: "host-support-settings-openapi.ts" },
   "fee-summary": { contract: "experience-fee-summary-api.openapi.json", output: "fee-summary-openapi.ts" },
+  "experience-preparations": { contract: "experience-preparations-api.openapi.json", output: "experience-preparations-openapi.ts" },
 };
 
 function outputPath(target: ContractTarget): string {

@@ -116,6 +116,26 @@ describe("login and callback (http mode)", () => {
     expect(JSON.stringify(openSession(session.value))).not.toContain("firebase-refresh");
   });
 
+  it("keeps only a validated preparation case in sealed login state and returns to its fixed page", async () => {
+    const { location, cookie } = await startLogin("?preparationCaseId=case_19404&returnTo=https://evil.example.test");
+    expect(location.searchParams.has("preparationCaseId")).toBe(false);
+    expect(location.searchParams.has("returnTo")).toBe(false);
+    handler = (url, init) => {
+      if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } });
+      if (url.hostname === "identitytoolkit.googleapis.com") return json(200, { idToken: "id-1", expiresIn: "3600", refreshToken: "firebase-refresh" });
+      throw new Error(`unexpected ${url.href} ${String(init.method)}`);
+    };
+    const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
+    expect(response.headers.get("location")).toBe("/host/preparations/case_19404");
+
+    const unsafe = await startLogin("?preparationCaseId=..%2Fadmin&returnTo=%2Fadmin");
+    handler = (url) => url.pathname === "/api/auth/app-connect/exchange"
+      ? json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionId: "conn_2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } })
+      : json(200, { idToken: "id-2", expiresIn: "3600" });
+    const unsafeResponse = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-2&state=${unsafe.location.searchParams.get("state")}`, { headers: { cookie: unsafe.cookie } }));
+    expect(unsafeResponse.headers.get("location")).toBe("/host/home");
+  });
+
   it("stops before calling NIHO when the state does not match or the login cookie is missing", async () => {
     const { cookie } = await startLogin();
     const wrong = await callback(new NextRequest(`${SITE}/host/auth/callback?code=c&state=${"x".repeat(43)}`, { headers: { cookie } }));

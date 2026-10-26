@@ -1,0 +1,2788 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NIHO Experience Assisted Launch API",
+    "version": "2.0.0",
+    "description": "niho-experience-host/admin向け選別契約。全objectは列挙したfieldだけを持つ。",
+    "license": {
+      "name": "Proprietary",
+      "identifier": "LicenseRef-Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/experience-preparations"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/review": {
+      "post": {
+        "summary": "限定プレビューを読む",
+        "operationId": "reviewExperiencePreparation",
+        "security": [],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ReviewToken"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Review"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/review/correction-requests": {
+      "post": {
+        "summary": "匿名プレビューから修正を依頼する",
+        "operationId": "requestExperiencePreparationCorrectionAnonymously",
+        "security": [],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/AnonymousCorrection"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/CorrectionCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/host/cases": {
+      "get": {
+        "summary": "本人又は担当案件を一覧する",
+        "operationId": "listMyExperiencePreparationCases",
+        "responses": {
+          "200": {
+            "description": "本人又は担当案件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "cases"
+                  ],
+                  "properties": {
+                    "cases": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/components/schemas/HostCase"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/host/cases/{caseId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "get": {
+        "summary": "本人又は担当案件を読む",
+        "operationId": "getMyExperiencePreparationCase",
+        "responses": {
+          "200": {
+            "description": "案件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "case"
+                  ],
+                  "properties": {
+                    "case": {
+                      "$ref": "#/components/schemas/HostCase"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "summary": "担当案件を改訂する",
+        "operationId": "editAssignedExperiencePreparationDraft",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditorPatchInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "改訂済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "case"
+                  ],
+                  "properties": {
+                    "case": {
+                      "$ref": "#/components/schemas/HostCase"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/host/cases/{caseId}/accept": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "本人が案と各規約へ同意する",
+        "operationId": "acceptExperiencePreparation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptanceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "本人受入",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "acceptance"
+                  ],
+                  "properties": {
+                    "acceptance": {
+                      "$ref": "#/components/schemas/MyAcceptance"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/host/cases/{caseId}/correction-requests": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "本人又は担当者が修正を依頼する",
+        "operationId": "requestExperiencePreparationCorrection",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Correction"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/CorrectionCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/host/cases/{caseId}/revoke-acceptance": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "本人が現在の受入を取り消す",
+        "operationId": "revokeExperiencePreparationAcceptance",
+        "responses": {
+          "200": {
+            "description": "受入取消",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "revoked"
+                  ],
+                  "properties": {
+                    "revoked": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/host/cases/{caseId}/readiness": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "get": {
+        "summary": "販売準備状態を読む",
+        "operationId": "getExperiencePreparationReadiness",
+        "responses": {
+          "200": {
+            "description": "販売準備状態",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "readiness"
+                  ],
+                  "properties": {
+                    "readiness": {
+                      "$ref": "#/components/schemas/Readiness"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/admin/assignment-candidates": {
+      "get": {
+        "summary": "担当候補者を表示名で検索する",
+        "operationId": "searchExperiencePreparationAssignmentCandidates",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "候補（最大20件・PII最小）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "candidates"
+                  ],
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "$ref": "#/components/schemas/UserLabel"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/cases": {
+      "get": {
+        "summary": "準備案件を一覧する",
+        "operationId": "listExperiencePreparationCases",
+        "responses": {
+          "200": {
+            "description": "案件一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "cases"
+                  ],
+                  "properties": {
+                    "cases": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/components/schemas/AdminCaseListItem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "summary": "準備案件を作る",
+        "operationId": "createExperiencePreparationCase",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/CreateCase"
+        },
+        "responses": {
+          "201": {
+            "description": "作成済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "case"
+                  ],
+                  "properties": {
+                    "case": {
+                      "$ref": "#/components/schemas/AdminCase"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "get": {
+        "summary": "準備案件の詳細を読む",
+        "operationId": "getExperiencePreparationCase",
+        "responses": {
+          "200": {
+            "description": "管理者向け案件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCaseDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "summary": "準備案件を改訂する",
+        "operationId": "updateExperiencePreparationCase",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/PatchCase"
+        },
+        "responses": {
+          "200": {
+            "description": "改訂済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "case"
+                  ],
+                  "properties": {
+                    "case": {
+                      "$ref": "#/components/schemas/AdminCase"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      },
+      "delete": {
+        "summary": "取消済み案件のPIIを破棄する",
+        "operationId": "purgeExperiencePreparationCasePii",
+        "responses": {
+          "204": {
+            "description": "取消済み案件のPII本文をscrubし、同意version/hash履歴を保持"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}/preview-tokens": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "限定プレビューtokenを発行する",
+        "operationId": "issueExperiencePreparationPreviewToken",
+        "responses": {
+          "201": {
+            "description": "平文tokenを一度だけ返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTokenResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}/uploads/policies": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "案件写真のupload policyを発行する",
+        "operationId": "createExperiencePreparationImageUploadPolicy",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPolicyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "案件binding済みUpload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}/assignments/{userId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        },
+        {
+          "$ref": "#/components/parameters/UserId"
+        }
+      ],
+      "put": {
+        "summary": "案件担当者を割り当てる",
+        "operationId": "assignExperiencePreparationCollaborator",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "$ref": "#/components/schemas/AssignmentRole"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "付与",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "assignment"
+                  ],
+                  "properties": {
+                    "assignment": {
+                      "$ref": "#/components/schemas/Assignment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "summary": "案件担当者を外す",
+        "operationId": "removeExperiencePreparationCollaborator",
+        "responses": {
+          "204": {
+            "description": "取消"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}/representative-verification": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "受入本人と版を確認する",
+        "operationId": "verifyExperiencePreparationRepresentative",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/LockedAcceptance"
+        },
+        "responses": {
+          "200": {
+            "description": "画面で確認した本人・版を照合",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "case"
+                  ],
+                  "properties": {
+                    "case": {
+                      "$ref": "#/components/schemas/AdminCase"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}/materialize": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "承認済み案件を正式商品へ反映する",
+        "operationId": "materializeExperiencePreparation",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/LockedAcceptance"
+        },
+        "responses": {
+          "200": {
+            "description": "冪等な正式化又は承認済み改訂の反映",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "materialized"
+                  ],
+                  "properties": {
+                    "materialized": {
+                      "$ref": "#/components/schemas/MaterializeResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/admin/cases/{caseId}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CaseId"
+        }
+      ],
+      "post": {
+        "summary": "準備案件を取り消す",
+        "operationId": "cancelExperiencePreparation",
+        "responses": {
+          "200": {
+            "description": "token・担当・現在受入を失効し、未正式化PII/画像を回収",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "cancelled",
+                    "materialized"
+                  ],
+                  "properties": {
+                    "cancelled": {
+                      "const": true
+                    },
+                    "materialized": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "CaseId": {
+        "name": "caseId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "UserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "requestBodies": {
+      "ReviewToken": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "token"
+              ],
+              "properties": {
+                "token": {
+                  "$ref": "#/components/schemas/ReviewToken"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AnonymousCorrection": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "token",
+                "message"
+              ],
+              "properties": {
+                "token": {
+                  "$ref": "#/components/schemas/ReviewToken"
+                },
+                "message": {
+                  "$ref": "#/components/schemas/CorrectionMessage"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Correction": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "message"
+              ],
+              "properties": {
+                "message": {
+                  "$ref": "#/components/schemas/CorrectionMessage"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreateCase": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "draft"
+              ],
+              "properties": {
+                "draft": {
+                  "$ref": "#/components/schemas/Draft"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PatchCase": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expectedRevision",
+                "draft"
+              ],
+              "properties": {
+                "expectedRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "draft": {
+                  "$ref": "#/components/schemas/Draft"
+                }
+              }
+            }
+          }
+        }
+      },
+      "LockedAcceptance": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/LockedAcceptanceInput"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Review": {
+        "description": "限定preview",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ReviewResponse"
+            }
+          }
+        }
+      },
+      "CorrectionCreated": {
+        "description": "受付済み",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "request"
+              ],
+              "properties": {
+                "request": {
+                  "$ref": "#/components/schemas/CorrectionCreated"
+                }
+              }
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "入力不正",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "権限又は本人確認不足",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "不存在・権限外・token失効/期限切れを区別しない",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "revision・状態・受入競合",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "規約版・写真binding・同意不足",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Upload署名利用不可",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ReviewToken": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{43}$"
+      },
+      "Hash": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "DateTime": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "NullableDateTime": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "CorrectionMessage": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "REVIEW",
+          "ACCEPTED",
+          "REPRESENTATIVE_VERIFIED",
+          "MATERIALIZED",
+          "CANCELLED"
+        ]
+      },
+      "AssignmentRole": {
+        "type": "string",
+        "enum": [
+          "DRAFT_EDITOR",
+          "COORDINATOR"
+        ]
+      },
+      "Access": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "REPRESENTATIVE",
+          "DRAFT_EDITOR",
+          "COORDINATOR",
+          null
+        ]
+      },
+      "UserLabel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "displayName"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "Target": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "providerId"
+            ],
+            "properties": {
+              "mode": {
+                "const": "NEW_PROVIDER"
+              },
+              "providerId": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "providerId"
+            ],
+            "properties": {
+              "mode": {
+                "const": "EXISTING_PROVIDER"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        ]
+      },
+      "ProviderDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "displayName",
+          "bio",
+          "sellerDisclosureUrl",
+          "contactName",
+          "contactEmail"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "INDIVIDUAL",
+              "BUSINESS"
+            ]
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "bio": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "sellerDisclosureUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "contactName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "contactEmail": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          }
+        }
+      },
+      "ProviderProposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "displayName",
+          "bio",
+          "sellerDisclosureUrl"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "INDIVIDUAL",
+              "BUSINESS"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "sellerDisclosureUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        }
+      },
+      "TimelineItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "time",
+          "title",
+          "text",
+          "photoObjectKey"
+        ],
+        "properties": {
+          "time": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "photoObjectKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ExperienceContent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lead",
+          "facts",
+          "highlights",
+          "timeline",
+          "description",
+          "included",
+          "notIncluded",
+          "notSuitableFor",
+          "meetingPoint",
+          "knowBeforeYouGo",
+          "hostUserIds"
+        ],
+        "properties": {
+          "lead": {
+            "type": "string",
+            "maxLength": 400
+          },
+          "facts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "language"
+            ],
+            "properties": {
+              "language": {
+                "type": "string",
+                "maxLength": 60
+              }
+            }
+          },
+          "highlights": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          "timeline": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/components/schemas/TimelineItem"
+            }
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "included": {
+            "$ref": "#/components/schemas/ShortTextList"
+          },
+          "notIncluded": {
+            "$ref": "#/components/schemas/ShortTextList"
+          },
+          "notSuitableFor": {
+            "$ref": "#/components/schemas/ShortTextList"
+          },
+          "meetingPoint": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "entranceNote",
+              "exteriorPhotoObjectKey"
+            ],
+            "properties": {
+              "entranceNote": {
+                "type": "string",
+                "maxLength": 400
+              },
+              "exteriorPhotoObjectKey": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "knowBeforeYouGo": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "hostUserIds": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ShortTextList": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "PageDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "content"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 95
+          },
+          "content": {
+            "$ref": "#/components/schemas/ExperienceContent"
+          }
+        }
+      },
+      "Pages": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ja",
+          "en"
+        ],
+        "properties": {
+          "ja": {
+            "$ref": "#/components/schemas/PageDraft"
+          },
+          "en": {
+            "$ref": "#/components/schemas/PageDraft"
+          }
+        }
+      },
+      "Photo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "objectKey",
+          "alt"
+        ],
+        "properties": {
+          "objectKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "alt": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
+      },
+      "Offer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nameJa",
+          "nameEn",
+          "shortDescriptionJa",
+          "shortDescriptionEn",
+          "priceYen",
+          "childPriceYen",
+          "childMinAge",
+          "childMaxAge",
+          "adultRequiredForChild",
+          "capacity",
+          "maxPartySize",
+          "minimumParticipants",
+          "weekdays",
+          "startTime",
+          "durationMinutes",
+          "cutoffDays",
+          "closedDates",
+          "cancellationPolicy",
+          "acceptanceMode"
+        ],
+        "properties": {
+          "nameJa": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "shortDescriptionJa": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
+          },
+          "shortDescriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
+          },
+          "priceYen": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000
+          },
+          "childPriceYen": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10000000
+          },
+          "childMinAge": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 17
+          },
+          "childMaxAge": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 17
+          },
+          "adultRequiredForChild": {
+            "type": "boolean"
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "maxPartySize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "minimumParticipants": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "weekdays": {
+            "type": "array",
+            "maxItems": 7,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            }
+          },
+          "startTime": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 15,
+            "maximum": 720
+          },
+          "cutoffDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60
+          },
+          "closedDates": {
+            "type": "array",
+            "maxItems": 180,
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          "cancellationPolicy": {
+            "type": "string",
+            "enum": [
+              "FLEXIBLE",
+              "MODERATE",
+              "STRICT"
+            ]
+          },
+          "acceptanceMode": {
+            "type": "string",
+            "enum": [
+              "INSTANT",
+              "REQUEST"
+            ]
+          }
+        }
+      },
+      "OperatingRole": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "party",
+          "responsibilities"
+        ],
+        "properties": {
+          "party": {
+            "type": "string",
+            "enum": [
+              "PROVIDER",
+              "NIHO",
+              "COLLABORATOR"
+            ]
+          },
+          "responsibilities": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        }
+      },
+      "Draft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "provider",
+          "pageSlugBase",
+          "pages",
+          "photos",
+          "offer",
+          "operatingRoles",
+          "supportScopes"
+        ],
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderDraft"
+          },
+          "pageSlugBase": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+          },
+          "pages": {
+            "$ref": "#/components/schemas/Pages"
+          },
+          "photos": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/Photo"
+            }
+          },
+          "offer": {
+            "$ref": "#/components/schemas/Offer"
+          },
+          "operatingRoles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/OperatingRole"
+            }
+          },
+          "supportScopes": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": [
+                "DRAFT_EDITING",
+                "TRANSLATION",
+                "SCHEDULING",
+                "ONBOARDING_GUIDANCE"
+              ]
+            }
+          }
+        }
+      },
+      "Proposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "provider",
+          "pageSlugBase",
+          "pages",
+          "photos",
+          "offer",
+          "operatingRoles"
+        ],
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderProposal"
+          },
+          "pageSlugBase": {
+            "type": "string"
+          },
+          "pages": {
+            "$ref": "#/components/schemas/Pages"
+          },
+          "photos": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/Photo"
+            }
+          },
+          "offer": {
+            "$ref": "#/components/schemas/Offer"
+          },
+          "operatingRoles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatingRole"
+            }
+          }
+        }
+      },
+      "ConsentSet": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "preparation",
+          "provider",
+          "listing"
+        ],
+        "properties": {
+          "preparation": {
+            "$ref": "#/components/schemas/ConsentText"
+          },
+          "provider": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "required",
+              "version",
+              "text"
+            ],
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          "listing": {
+            "$ref": "#/components/schemas/ConsentText"
+          }
+        }
+      },
+      "ConsentText": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "text"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "text": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "content",
+                  "salesTerms",
+                  "support",
+                  "representative"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "salesTerms": {
+                    "type": "string"
+                  },
+                  "support": {
+                    "type": "string"
+                  },
+                  "representative": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "Image": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "objectKey",
+          "alt",
+          "signedUrl",
+          "expiresAt",
+          "thumbSignedUrl",
+          "thumbExpiresAt"
+        ],
+        "properties": {
+          "objectKey": {
+            "type": "string"
+          },
+          "alt": {
+            "type": "string"
+          },
+          "signedUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          },
+          "thumbSignedUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "thumbExpiresAt": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          }
+        }
+      },
+      "ReviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "status",
+          "revision",
+          "snapshotHash",
+          "proposal",
+          "consents",
+          "images",
+          "expiresAt"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REVIEW",
+              "ACCEPTED",
+              "REPRESENTATIVE_VERIFIED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/Proposal"
+          },
+          "consents": {
+            "$ref": "#/components/schemas/ConsentSet"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Image"
+            }
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/DateTime"
+          }
+        }
+      },
+      "AcceptanceInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reviewToken",
+          "caseVersion",
+          "snapshotHash",
+          "agreementVersion",
+          "providerConsent",
+          "listingConsentVersion",
+          "target",
+          "contentAccepted",
+          "salesTermsAccepted",
+          "supportAuthorized",
+          "representativeDeclared",
+          "listingAuthorized"
+        ],
+        "properties": {
+          "reviewToken": {
+            "$ref": "#/components/schemas/ReviewToken"
+          },
+          "caseVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "agreementVersion": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "providerConsent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "accepted"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "accepted": {
+                    "const": true
+                  }
+                }
+              }
+            ]
+          },
+          "listingConsentVersion": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "contentAccepted": {
+            "const": true
+          },
+          "salesTermsAccepted": {
+            "const": true
+          },
+          "supportAuthorized": {
+            "const": true
+          },
+          "representativeDeclared": {
+            "const": true
+          },
+          "listingAuthorized": {
+            "const": true
+          }
+        }
+      },
+      "Acceptance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "acceptedBy",
+          "revision",
+          "snapshotHash",
+          "agreementVersion",
+          "providerConsentVersion",
+          "listingConsentVersion",
+          "acceptedAt",
+          "revokedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "acceptedBy": {
+            "$ref": "#/components/schemas/UserLabel"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "agreementVersion": {
+            "type": "string"
+          },
+          "providerConsentVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "listingConsentVersion": {
+            "type": "string"
+          },
+          "acceptedAt": {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          "revokedAt": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          }
+        }
+      },
+      "MyAcceptance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "snapshotHash",
+          "agreementVersion",
+          "providerConsentVersion",
+          "listingConsentVersion",
+          "acceptedAt",
+          "revokedAt",
+          "acceptedByMe"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "agreementVersion": {
+            "type": "string"
+          },
+          "providerConsentVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "listingConsentVersion": {
+            "type": "string"
+          },
+          "acceptedAt": {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          "revokedAt": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          },
+          "acceptedByMe": {
+            "const": true
+          }
+        }
+      },
+      "Materialized": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "providerId",
+          "pageJaId",
+          "pageEnId",
+          "at"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string"
+          },
+          "pageJaId": {
+            "type": "string"
+          },
+          "pageEnId": {
+            "type": "string"
+          },
+          "at": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          }
+        }
+      },
+      "Assignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user",
+          "role",
+          "createdAt"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserLabel"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AssignmentRole"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/DateTime"
+          }
+        }
+      },
+      "HostCase": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "snapshotHash",
+          "proposal",
+          "access",
+          "currentAcceptance",
+          "representativeVerifiedAt",
+          "materialized",
+          "consents",
+          "images",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/Proposal"
+          },
+          "access": {
+            "$ref": "#/components/schemas/Access"
+          },
+          "currentAcceptance": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MyAcceptance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "representativeVerifiedAt": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          },
+          "materialized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Materialized"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consents": {
+            "$ref": "#/components/schemas/ConsentSet"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Image"
+            }
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/DateTime"
+          }
+        }
+      },
+      "AdminCase": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "snapshotHash",
+          "proposal",
+          "contact",
+          "currentAcceptance",
+          "acceptanceHistory",
+          "representativeVerifiedAt",
+          "representativeVerifiedAcceptanceId",
+          "materialized",
+          "assignments",
+          "images",
+          "createdAt",
+          "updatedAt",
+          "pageSlugBase",
+          "supportScopes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "proposal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "email"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currentAcceptance": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Acceptance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acceptanceHistory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Acceptance"
+            }
+          },
+          "representativeVerifiedAt": {
+            "$ref": "#/components/schemas/NullableDateTime"
+          },
+          "representativeVerifiedAcceptanceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materialized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Materialized"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Assignment"
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Image"
+            }
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          "pageSlugBase": {
+            "type": "string"
+          },
+          "supportScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AdminCaseListItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case",
+          "nextAction",
+          "waitingOn"
+        ],
+        "properties": {
+          "case": {
+            "$ref": "#/components/schemas/AdminCase"
+          },
+          "nextAction": {
+            "type": "string"
+          },
+          "waitingOn": {
+            "$ref": "#/components/schemas/WaitingOn"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/Readiness"
+          }
+        }
+      },
+      "WaitingOn": {
+        "type": "string",
+        "enum": [
+          "NIHO",
+          "REPRESENTATIVE",
+          "PAYMENT",
+          "PROVIDER_REVIEW",
+          "LISTING_REVIEW",
+          "NONE"
+        ]
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "representativeAcceptance",
+          "representativeVerification",
+          "payment",
+          "providerReview",
+          "products",
+          "listing",
+          "support",
+          "blockers",
+          "nextAction",
+          "waitingOn",
+          "providerId",
+          "editUrl",
+          "paymentUrl"
+        ],
+        "properties": {
+          "representativeAcceptance": {
+            "type": "string",
+            "enum": [
+              "WAITING",
+              "ACCEPTED",
+              "STALE"
+            ]
+          },
+          "representativeVerification": {
+            "type": "string",
+            "enum": [
+              "WAITING",
+              "VERIFIED",
+              "STALE"
+            ]
+          },
+          "payment": {
+            "type": "string",
+            "enum": [
+              "NOT_CONNECTED",
+              "VERIFICATION_REQUIRED",
+              "CHARGES_DISABLED",
+              "PAYOUTS_DISABLED",
+              "RESTRICTED",
+              "READY",
+              "NOT_MATERIALIZED"
+            ]
+          },
+          "providerReview": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "REQUESTED",
+              "APPROVED",
+              "SUSPENDED",
+              "NOT_MATERIALIZED",
+              "UNKNOWN"
+            ]
+          },
+          "products": {
+            "type": "string",
+            "enum": [
+              "NOT_MATERIALIZED",
+              "DRAFT_READY",
+              "DRAFT_INCOMPLETE",
+              "APPROVED_SNAPSHOT_CHANGED"
+            ]
+          },
+          "listing": {
+            "type": "string",
+            "enum": [
+              "NOT_REQUESTED",
+              "REQUESTED",
+              "ACTIVE",
+              "PAUSED",
+              "WITHDRAWN",
+              "NOT_MATERIALIZED",
+              "UNKNOWN"
+            ]
+          },
+          "support": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "authorized",
+              "roles"
+            ],
+            "properties": {
+              "authorized": {
+                "type": "boolean"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/OperatingRole"
+                }
+              }
+            }
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nextAction": {
+            "type": "string"
+          },
+          "waitingOn": {
+            "$ref": "#/components/schemas/WaitingOn"
+          },
+          "providerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "editUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paymentUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CorrectionCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/DateTime"
+          }
+        }
+      },
+      "CorrectionAdmin": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "message",
+          "requestedByUserId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/DateTime"
+          }
+        }
+      },
+      "Audit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "actorUserId",
+          "action",
+          "revision",
+          "targetId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "actorUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action": {
+            "type": "string"
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "targetId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/DateTime"
+          }
+        }
+      },
+      "AdminCaseDetailResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case",
+          "correctionRequests",
+          "audits",
+          "readiness"
+        ],
+        "properties": {
+          "case": {
+            "$ref": "#/components/schemas/AdminCase"
+          },
+          "correctionRequests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CorrectionAdmin"
+            }
+          },
+          "audits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Audit"
+            }
+          },
+          "readiness": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Readiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "LockedAcceptanceInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "snapshotHash",
+          "acceptedByUserId"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshotHash": {
+            "$ref": "#/components/schemas/Hash"
+          },
+          "acceptedByUserId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "PreviewTokenResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "expiresAt",
+          "revision"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/ReviewToken"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        }
+      },
+      "UploadPolicyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contentType",
+          "contentLength"
+        ],
+        "properties": {
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ]
+          },
+          "contentLength": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10485760
+          }
+        }
+      },
+      "UploadPolicyResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "uploadId",
+          "objectKey",
+          "upload",
+          "expiresAt",
+          "maxSizeBytes"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "upload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "fields"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/DateTime"
+          },
+          "maxSizeBytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "MaterializeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "providerId",
+          "pageJaId",
+          "pageEnId",
+          "created"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string"
+          },
+          "pageJaId": {
+            "type": "string"
+          },
+          "pageEnId": {
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "UNAUTHORIZED",
+                  "FORBIDDEN",
+                  "ACCOUNT_DELETED",
+                  "NOT_FOUND",
+                  "CONFLICT",
+                  "UNPROCESSABLE_ENTITY",
+                  "SERVICE_UNAVAILABLE",
+                  "INTERNAL"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "field": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "EditorDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pages": {
+            "$ref": "#/components/schemas/Pages"
+          },
+          "photos": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/Photo"
+            }
+          }
+        }
+      },
+      "EditorPatchInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "draft"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "draft": {
+            "$ref": "#/components/schemas/EditorDraft"
+          }
+        }
+      }
+    }
+  }
+}

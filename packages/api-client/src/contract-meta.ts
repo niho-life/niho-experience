@@ -78,6 +78,15 @@ export const EXPERIENCE_FEE_SUMMARY_API_CONTRACT = {
   deploymentStatus: "not-deployed",
 } as const;
 
+/** 事務局と店舗本人の伴走立ち上げ契約。認証依存とAPIの配備・受入まではHTTPを開かない。 */
+export const EXPERIENCE_PREPARATIONS_API_CONTRACT = {
+  version: "2.0.0",
+  sourceCommit: "e7887489bd6da46977a92cc500d24ab731f6e80e",
+  sha256: "0d011690d0ed80f0e922e819895cc1542a69809bead79f384bc499d0e4c041a4",
+  status: "agreed-not-deployed",
+  deploymentStatus: "not-deployed",
+} as const;
+
 /** 予約に関わる時刻の基準。表示も日本時間（Asia/Tokyo）で行う。 */
 export const EXPERIENCE_TIME_ZONE = "Asia/Tokyo";
 

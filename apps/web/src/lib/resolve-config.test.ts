@@ -104,6 +104,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED: "true" }).experienceFeeSummaryPreviewEnabled).toBe(false);
   });
 
+  it("separates assisted-launch HTTP and synthetic UI preview gates", () => {
+    expect(resolveConfig({})).toMatchObject({ experienceAssistedLaunchApiEnabled: false, experienceAssistedLaunchPreviewEnabled: false });
+    expect(resolveConfig({ EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED: "true" }).experienceAssistedLaunchApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED: "1" }).experienceAssistedLaunchApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED: "true" }).experienceAssistedLaunchApiEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_ASSISTED_LAUNCH_PREVIEW_ENABLED: "true" }).experienceAssistedLaunchPreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_ASSISTED_LAUNCH_PREVIEW_ENABLED: "true" }).experienceAssistedLaunchPreviewEnabled).toBe(false);
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {
