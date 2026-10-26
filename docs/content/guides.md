@@ -18,6 +18,7 @@
 | `author` | `{ name, role }` | 実名と役割（例：`Editor, NIHO Experience`） |
 | `publishedAt`・`updatedAt` | 公開日・更新日（`YYYY-MM-DD`） | 画面に出す。内容を直したら `updatedAt` を変える（sitemap の `lastModified`） |
 | `hero` | `{ src, alt, width, height, licensed }`（任意） | `src` は `public/` 配下のパスか https。`licensed: true` は共有（OG 画像・構造化データ）まで許諾がある写真だけ。仮素材は `false` |
+| `video` | `{ youtubeId, caption }`（任意） | 公開済み動画の 11 文字 ID と確認済みの説明。`hero` をポスターに使う。媒体別同意を得てから追加する（[動画の公開手順](videos.md)） |
 | `relatedExperienceSlugs` | 記事の最後で予約へ誘う体験 | 2〜3 件。カタログに無い slug は画面で飛ばす |
 | `relatedGuideSlugs` | 関連記事 | 0〜3 件。公開済みの記事だけを指す |
 | `faq` | `{ question, answer }[]` | 質問は見出し（h3）、答えは短く。20 問まで。FAQ の構造化データは出さない |

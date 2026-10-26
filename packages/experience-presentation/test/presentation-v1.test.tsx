@@ -187,6 +187,14 @@ describe("v1 portable presentation", () => {
     expect(two).not.toContain('id="faq"');
   });
 
+  it("puts an optional video after the facts and before the gallery", () => {
+    const plain = renderToStaticMarkup(<DetailViewV1 model={detailModel} />);
+    expect(plain).not.toContain("Watch the host");
+    const html = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, video: <p>Watch the host</p> }} />);
+    expect(html.indexOf("Watch the host")).toBeGreaterThan(html.indexOf("Group size"));
+    expect(html.indexOf("Watch the host")).toBeLessThan(html.indexOf("gallery"));
+  });
+
   it("adds footer links after the fixed ones only when given", () => {
     expect(renderToStaticMarkup(<SiteFooterV1 />)).not.toContain('href="/guides"');
     const html = renderToStaticMarkup(<SiteFooterV1 links={[{ href: "/guides", label: "Guides" }]} />);

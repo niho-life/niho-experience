@@ -253,6 +253,7 @@ export type DetailViewModelV1 = Readonly<{
     reviewHeadline?: DetailReviewHeadlineV1;
     reviews?: DetailReviewsV1;
     upcoming?: ReactNode;
+    video?: ReactNode;
     faq?: DetailFaqV1;
 }>;
 export declare function DetailViewV1({ model, primitives, copy, headings }: {

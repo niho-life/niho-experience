@@ -6,6 +6,7 @@ import { GuideBody } from "@/components/GuideBody";
 import { ExperienceCardGrid, GuideFaq, GuideTeasers } from "@/components/GuideBlocks";
 import { JsonLd } from "@/components/JsonLd";
 import { Notice } from "@/components/ui";
+import { YouTubeVideo } from "@/components/YouTubeVideo";
 import { config } from "@/lib/config";
 import { cardsFor, readListedExperiences } from "@/lib/experience-cards";
 import type { SearchParams } from "@/lib/filters";
@@ -97,6 +98,7 @@ export default async function GuidePage({ params, searchParams }: Props) {
               <NextImage src={hero.href} alt={hero.alt} width={hero.width} height={hero.height} priority unoptimized sizes="(min-width: 46rem) 736px, 100vw" className="h-auto w-full rounded-[var(--radius-card)] bg-sand" />
             </figure>
           ) : null}
+          {guide.video && hero?.href ? <div className="mt-7"><YouTubeVideo video={guide.video} poster={hero.href} title={guide.title} /></div> : null}
           <div className="pt-8">
             <GuideBody blocks={blocks} />
           </div>

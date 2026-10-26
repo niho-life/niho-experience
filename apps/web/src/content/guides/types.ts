@@ -1,3 +1,5 @@
+import type { PublicVideo } from "@/lib/videos";
+
 /**
  * A published guide (docs/content/guides.md, ADR 0002). One module per guide in this folder; only published guides are
  * committed. The body is the Markdown subset in `lib/guide-markdown.ts`; `lib/guides.ts` validates every field, and a unit
@@ -39,6 +41,8 @@ export type Guide = Readonly<{
   /** Changed on every content update; the sitemap's `lastModified`. */
   updatedAt: string;
   hero?: GuideHero;
+  /** Published YouTube video. The hero serves as its approved poster; no video is requested before play. */
+  video?: PublicVideo;
   /** 2–3 experience slugs for the call to action. Slugs missing from the catalogue are skipped on the page. */
   relatedExperienceSlugs: readonly string[];
   /** Other guides in the same registry (0–3). */
