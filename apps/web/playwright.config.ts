@@ -9,6 +9,7 @@ const ADMIN_CASE_PORT = Number(process.env.E2E_ADMIN_CASE_PORT ?? 3103);
 const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 // The host console and its preview tests run against the second server.
 const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|sales|messages|session|reviews|settings|support)|admin-support)\.spec\.ts/;
+const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;
@@ -28,7 +29,7 @@ const feeSummaryBaseURL = `http://127.0.0.1:${FEE_SUMMARY_PORT}`;
 export default defineConfig({
   testDir: "./e2e",
   // Assisted launch uses its one-server config; the default matrix starts five unrelated servers.
-  testIgnore: /(assisted-launch|provider-operations)\.spec\.ts/,
+  testIgnore: SEPARATE_PREVIEW_SPEC,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
@@ -39,17 +40,17 @@ export default defineConfig({
     launchOptions: { executablePath },
   },
   projects: [
-    { name: "mobile-360", testIgnore: [HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC], use: mobile },
-    { name: "desktop", testIgnore: [HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC], use: desktop },
-    { name: "host-mobile-360", testMatch: HOST_CONSOLE_SPEC, testIgnore: ADMIN_CASE_SPEC, use: { ...mobile, baseURL: hostBaseURL } },
-    { name: "host-support-mobile-320", testMatch: /host-support\.spec\.ts/, use: { ...mobile320, baseURL: hostBaseURL } },
-    { name: "host-desktop", testMatch: HOST_CONSOLE_SPEC, testIgnore: ADMIN_CASE_SPEC, use: { ...desktop, baseURL: hostBaseURL } },
-    { name: "admin-read-mobile-360", testMatch: ADMIN_READ_SPEC, testIgnore: ADMIN_CASE_SPEC, use: { ...mobile, baseURL: adminReadBaseURL } },
-    { name: "admin-read-desktop", testMatch: ADMIN_READ_SPEC, testIgnore: ADMIN_CASE_SPEC, use: { ...desktop, baseURL: adminReadBaseURL } },
-    { name: "admin-case-mobile-360", testMatch: ADMIN_CASE_SPEC, use: { ...mobile, baseURL: adminCaseBaseURL } },
-    { name: "admin-case-desktop", testMatch: ADMIN_CASE_SPEC, use: { ...desktop, baseURL: adminCaseBaseURL } },
-    { name: "fee-summary-mobile-360", testMatch: FEE_SUMMARY_SPEC, use: { ...mobile, baseURL: feeSummaryBaseURL } },
-    { name: "fee-summary-desktop", testMatch: FEE_SUMMARY_SPEC, use: { ...desktop, baseURL: feeSummaryBaseURL } },
+    { name: "mobile-360", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC], use: mobile },
+    { name: "desktop", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC], use: desktop },
+    { name: "host-mobile-360", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, baseURL: hostBaseURL } },
+    { name: "host-support-mobile-320", testMatch: /host-support\.spec\.ts/, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile320, baseURL: hostBaseURL } },
+    { name: "host-desktop", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, baseURL: hostBaseURL } },
+    { name: "admin-read-mobile-360", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, baseURL: adminReadBaseURL } },
+    { name: "admin-read-desktop", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, baseURL: adminReadBaseURL } },
+    { name: "admin-case-mobile-360", testMatch: ADMIN_CASE_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: adminCaseBaseURL } },
+    { name: "admin-case-desktop", testMatch: ADMIN_CASE_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...desktop, baseURL: adminCaseBaseURL } },
+    { name: "fee-summary-mobile-360", testMatch: FEE_SUMMARY_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: feeSummaryBaseURL } },
+    { name: "fee-summary-desktop", testMatch: FEE_SUMMARY_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...desktop, baseURL: feeSummaryBaseURL } },
   ],
   webServer: [
     {

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import type { ExperiencePreparationAdminCaseListItem, ExperiencePreparationDraft } from "@niho-experience/api-client/experience-preparations";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { PreparationDraftFields } from "@/components/preparations/PreparationDraftFields";
-import { emptyPreparationDraft } from "@/components/preparations/draft";
+import { emptyPreparationDraft, normalizePreparationDraft } from "@/components/preparations/draft";
 import { PREPARATION_STATUS_LABELS } from "@/components/preparations/readiness-labels";
 
 const WAITING = { NIHO: "事務局", REPRESENTATIVE: "店舗", PAYMENT: "売上受取設定", PROVIDER_REVIEW: "本人確認", LISTING_REVIEW: "掲載審査", NONE: "なし" } as const;
@@ -33,7 +33,7 @@ export function AdminPreparations() {
   async function create(event: React.FormEvent) {
     event.preventDefault(); setCreating(true); setError("");
     try {
-      const response = await fetch("/admin/api/preparations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ draft }) });
+      const response = await fetch("/admin/api/preparations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ draft: normalizePreparationDraft(draft) }) });
       const body = await response.json().catch(() => null) as { case?: { id: string }; error?: string } | null;
       if (!response.ok || !body?.case) throw new Error(response.status === 409 ? "内容が更新されています。読み直して確認してください。" : "案件を作成できませんでした。入力を確認してください。");
       router.push(`/admin/preparations/${encodeURIComponent(body.case.id)}`);

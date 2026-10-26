@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExperiencePreparationAdminCase } from "@niho-experience/api-client/experience-preparations";
 import { decodeExperiencePreparationCohostPatch, decodeExperiencePreparationDraft } from "@niho-experience/api-client/experience-preparations-schema";
-import { emptyPreparationDraft, preparationDraftFromAdminCase } from "./draft";
+import { emptyPreparationDraft, normalizePreparationDraft, preparationDraftFromAdminCase } from "./draft";
 
 describe("assisted-launch structured forms", () => {
   const completedDraft = () => {
@@ -21,6 +21,16 @@ describe("assisted-launch structured forms", () => {
     expect(decodeExperiencePreparationDraft(draft)).toEqual(draft);
     expect(draft.pages.ja.content).toMatchObject({ facts: { language: "日本語・英語" }, timeline: [], meetingPoint: { exteriorPhotoObjectKey: null } });
     expect(draft.offer).toMatchObject({ cancellationPolicy: "MODERATE", acceptanceMode: "REQUEST" });
+  });
+
+  it("keeps editable line breaks until submission and removes empty entries at the API boundary", () => {
+    const draft = completedDraft();
+    draft.pages.en.content.highlights = ["First ", "", " Second "];
+    draft.offer.closedDates = ["2026-10-30", ""];
+    const normalized = normalizePreparationDraft(draft);
+    expect(normalized.pages.en.content.highlights).toEqual(["First", "Second"]);
+    expect(normalized.offer.closedDates).toEqual(["2026-10-30"]);
+    expect(draft.pages.en.content.highlights).toEqual(["First ", "", " Second "]);
   });
 
   it("keeps collaborator edits limited to pages and case photos", () => {

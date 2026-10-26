@@ -28,3 +28,17 @@ export function preparationDraftFromAdminCase(value: ExperiencePreparationAdminC
     supportScopes: value.supportScopes.filter((item): item is ExperiencePreparationDraft["supportScopes"][number] => ["DRAFT_EDITING", "TRANSLATION", "SCHEDULING", "ONBOARDING_GUIDANCE"].includes(item)),
   };
 }
+
+/** Textareas keep unfinished lines while editing; the API receives only finished items. */
+export function normalizePreparationDraft(draft: ExperiencePreparationDraft): ExperiencePreparationDraft {
+  const lines = (values: readonly string[]) => values.map((value) => value.trim()).filter(Boolean);
+  return {
+    ...draft,
+    pages: {
+      ja: { ...draft.pages.ja, content: { ...draft.pages.ja.content, highlights: lines(draft.pages.ja.content.highlights), included: lines(draft.pages.ja.content.included), notIncluded: lines(draft.pages.ja.content.notIncluded), notSuitableFor: lines(draft.pages.ja.content.notSuitableFor), knowBeforeYouGo: lines(draft.pages.ja.content.knowBeforeYouGo) } },
+      en: { ...draft.pages.en, content: { ...draft.pages.en.content, highlights: lines(draft.pages.en.content.highlights), included: lines(draft.pages.en.content.included), notIncluded: lines(draft.pages.en.content.notIncluded), notSuitableFor: lines(draft.pages.en.content.notSuitableFor), knowBeforeYouGo: lines(draft.pages.en.content.knowBeforeYouGo) } },
+    },
+    offer: { ...draft.offer, closedDates: lines(draft.offer.closedDates) },
+    operatingRoles: draft.operatingRoles.map((role) => ({ ...role, responsibilities: lines(role.responsibilities) })),
+  };
+}

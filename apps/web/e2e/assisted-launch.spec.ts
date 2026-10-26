@@ -57,6 +57,27 @@ test("host explicitly accepts five items then waits for NIHO verification", asyn
   await expect(page.getByRole("heading", { name: "この版を受け入れ済みです" })).toBeVisible();
 });
 
+test("representative can accept a revised case after an older acceptance", async ({ page }) => {
+  let acceptedRevision: number | null = null;
+  const revised = review(2);
+  await page.route("**/host/api/preparations/case_1", async (route) => json(route, { case: {
+    id: "case_1", status: "REVIEW", revision: 2, snapshotHash: revised.snapshotHash, proposal: revised.proposal,
+    access: "REPRESENTATIVE", currentAcceptance: { ...acceptance, acceptedByMe: true, acceptedBy: undefined },
+    representativeVerifiedAt: null, materialized: null, consents, images: [], updatedAt: "2026-10-26T04:00:00.000Z",
+  } }));
+  await page.route("**/host/api/preparations/case_1/readiness", async (route) => json(route, { readiness }));
+  await page.route("**/host/api/preparations/case_1/accept", async (route) => {
+    acceptedRevision = route.request().postDataJSON().caseVersion;
+    return json(route, { acceptance: { ...acceptance, revision: 2, snapshotHash: revised.snapshotHash } });
+  });
+  await page.goto("/host/auth/mock-login?preparationCaseId=case_1");
+  await expect(page.getByText("更新された合成体験")).toBeVisible();
+  const section = page.getByRole("heading", { name: "本人として受け入れる" }).locator("..");
+  for (const checkbox of await section.getByRole("checkbox").all()) await checkbox.check();
+  await section.getByRole("button", { name: "同意して受け入れる" }).click();
+  await expect.poll(() => acceptedRevision).toBe(2);
+});
+
 test("Admin edits, issues a fragment link, verifies, materializes and refreshes readiness", async ({ page }) => {
   let current: Omit<typeof adminCase, "representativeVerifiedAt" | "currentAcceptance"> & { representativeVerifiedAt: string | null; currentAcceptance: typeof acceptance | null } = { ...structuredClone(adminCase), status: "REVIEW", currentAcceptance: null, acceptanceHistory: [] };
   await page.route("**/admin/api/preparations/case_1", async (route) => {

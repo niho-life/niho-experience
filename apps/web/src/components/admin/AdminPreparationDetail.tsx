@@ -13,7 +13,7 @@ import { HOST_SURFACE } from "@/components/host/host-ui";
 import { PreparationDraftFields } from "@/components/preparations/PreparationDraftFields";
 import { PreparationProposalView } from "@/components/preparations/PreparationProposalView";
 import { PREPARATION_STATUS_LABELS, READINESS_LABELS, readinessBlockerLabel } from "@/components/preparations/readiness-labels";
-import { preparationDraftFromAdminCase } from "@/components/preparations/draft";
+import { normalizePreparationDraft, preparationDraftFromAdminCase } from "@/components/preparations/draft";
 
 function nihoActionUrl(origin: string, value: string | null): string | null {
   if (!value) return null;
@@ -60,7 +60,7 @@ export function AdminPreparationDetail({ caseId, nihoOrigin }: { caseId: string;
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!detail || !draft) return;
-    const value = await request(`/admin/api/preparations/${encodeURIComponent(caseId)}`, "PATCH", { expectedRevision: detail.case.revision, draft });
+    const value = await request(`/admin/api/preparations/${encodeURIComponent(caseId)}`, "PATCH", { expectedRevision: detail.case.revision, draft: normalizePreparationDraft(draft) });
     if (value) { setNotice("改訂を保存しました。以前の確認リンクと古い受入は失効します。"); setPreviewUrl(""); await load(); }
   }
 
@@ -84,7 +84,7 @@ export function AdminPreparationDetail({ caseId, nihoOrigin }: { caseId: string;
       if (!uploaded.ok) throw new Error();
       const next = { ...draft, photos: [...draft.photos, { objectKey: policyValue.objectKey, alt: file.name.replace(/\.[^.]+$/, "") }] };
       setDraft(next);
-      const saved = await request(`/admin/api/preparations/${encodeURIComponent(caseId)}`, "PATCH", { expectedRevision: detail.case.revision, draft: next });
+      const saved = await request(`/admin/api/preparations/${encodeURIComponent(caseId)}`, "PATCH", { expectedRevision: detail.case.revision, draft: normalizePreparationDraft(next) });
       if (saved) { setNotice("写真を登録し、改訂を保存しました。"); await load(); }
     } catch { setError("写真をアップロードできませんでした。案件への登録は行っていません。"); }
   }

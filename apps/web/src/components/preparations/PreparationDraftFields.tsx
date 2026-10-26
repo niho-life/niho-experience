@@ -4,7 +4,8 @@ import type { ExperiencePreparationDraft } from "@niho-experience/api-client/exp
 
 const inputClass = "mt-1 min-h-10 w-full rounded-xl border border-line-strong bg-canvas px-3 py-2";
 const labelClass = "block text-sm font-extrabold";
-const lines = (value: string) => value.split("\n").map((item) => item.trim()).filter(Boolean);
+// Keep the in-progress line and spaces; normalize only when sending the draft.
+const lines = (value: string) => value.split("\n");
 const nullableNumber = (value: string) => value === "" ? null : Number(value);
 
 export function PreparationDraftFields({ draft, onChange, basicInfoDisabled = false }: { draft: ExperiencePreparationDraft; onChange: (draft: ExperiencePreparationDraft) => void; basicInfoDisabled?: boolean }) {
