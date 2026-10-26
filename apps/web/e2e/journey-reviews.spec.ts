@@ -8,7 +8,8 @@ const pottery = "/experiences/evening-pottery-session";
 const cycling = "/experiences/seaside-cycling-and-market-breakfast";
 const dinner = "/experiences/home-cooked-dinner-with-locals";
 const reviewsSection = (page: Page) => page.locator("section#reviews");
-const titleLine = (page: Page) => page.locator("h1 + p");
+// The location line sits directly below h1; the review summary follows it.
+const titleLine = (page: Page) => page.locator("main header h1 + p + p");
 
 test("twelve reviews: the rating under the title leads to the reviews, which show the average, what guests liked and the newest three", async ({ page }) => {
   await page.goto(indigo);
@@ -78,7 +79,7 @@ test("when reviews cannot be read the page says so and keeps working", async ({ 
   await expect(reviewsSection(page).getByRole("alert")).toContainText("Reviews can't be loaded right now");
   await expect(reviewsSection(page).getByRole("button", { name: "Try again" })).toBeVisible();
   // Neither a rating nor the New badge: a failed read is not "no reviews".
-  await expect(page.locator("h1 + p")).toHaveCount(0);
+  await expect(titleLine(page)).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Good to know", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /^Check dates/ }).first()).toBeAttached();
 });

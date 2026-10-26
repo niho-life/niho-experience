@@ -15,7 +15,7 @@ import { Notice, Pill } from "./ui";
  * A list of guides: the title (a link), the description, the updated date and the author. Used by /guides and the related
  * blocks. Guides shown from a draft (preview only) carry a "Draft" pill above the title.
  */
-export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "one", descriptions = true }: { guides: readonly Guide[]; level?: 2 | 3; draftSlugs?: readonly string[]; columns?: "one" | "three"; descriptions?: boolean }) {
+export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "one", descriptions = true, variant = "default" }: { guides: readonly Guide[]; level?: 2 | 3; draftSlugs?: readonly string[]; columns?: "one" | "three"; descriptions?: boolean; variant?: "default" | "detail" }) {
   const Heading = level === 2 ? "h2" : "h3";
   return (
     <ul className={columns === "three" ? "grid gap-3 md:grid-cols-3" : "grid gap-3"}>
@@ -26,16 +26,17 @@ export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "on
               <Pill tone="warn">Draft</Pill>
             </p>
           ) : null}
+          {variant === "detail" ? <p className="eyebrow mb-2">Guide · {guideReadMinutes(guide)} min</p> : null}
           <Heading className={level === 2 ? "text-[1.625rem] leading-[1.2]" : "font-sans text-[1.1875rem] leading-[1.35] font-extrabold tracking-normal"}>
             <Link href={`/guides/${guide.slug}`} className="underline-offset-4 hover:underline">
               {guide.title}
             </Link>
           </Heading>
           {descriptions ? <p className="mt-1.5 text-[0.9375rem] text-ink-soft">{guide.description}</p> : null}
-          <p className="mt-2 text-sm text-muted">
+          {variant !== "detail" ? <p className="mt-2 text-sm text-muted">
             {guideReadMinutes(guide)} min · {guide.checkedAt ? "Checked" : "Updated"}{" "}
             <time dateTime={guide.checkedAt ?? guide.updatedAt}>{formatGuideDate(guide.checkedAt ?? guide.updatedAt)}</time>
-          </p>
+          </p> : null}
         </li>
       ))}
     </ul>

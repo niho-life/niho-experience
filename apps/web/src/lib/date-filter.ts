@@ -90,3 +90,16 @@ export function nextBookable(occurrences: readonly Occurrence[], limit: number):
     .sort((a, b) => a.startAt.localeCompare(b.startAt))
     .slice(0, limit);
 }
+
+/** Earliest bookable occurrence on each distinct JST date, soonest first. */
+export function nextBookableDays(occurrences: readonly Occurrence[], limit: number): Occurrence[] {
+  const dates = new Set<string>();
+  const selected: Occurrence[] = [];
+  for (const occurrence of nextBookable(occurrences, Number.POSITIVE_INFINITY)) {
+    if (dates.has(occurrence.date)) continue;
+    dates.add(occurrence.date);
+    selected.push(occurrence);
+    if (selected.length === limit) break;
+  }
+  return selected;
+}

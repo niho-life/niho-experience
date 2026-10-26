@@ -166,25 +166,41 @@ describe("v1 portable presentation", () => {
     expect(fresh).not.toContain('href="#reviews"');
   });
 
-  it("adds host introductions, an upcoming-dates slot and the FAQ only when the consumer supplies them", () => {
+  it("adds the location line, host story, SSR next-date band, FAQ and guides only when supplied", () => {
     const plain = renderToStaticMarkup(<DetailViewV1 model={detailModel} />);
     expect(plain).not.toContain('id="faq"');
     expect(plain).not.toContain("Upcoming slot");
-    const one = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, provider: { ...detailModel.provider, bios: [{ name: "Sample Host", text: "An invented host.\nSecond line." }] }, upcoming: <p>Upcoming slot</p>, faq: { title: "Frequently asked questions", items: [{ question: "What should I wear?", answer: "Comfortable clothes." }, { question: "Is it <b>safe</b>?", answer: "Yes." }] } }} />);
+    const one = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, locationLine: "Kamakura · 1 hour from Tokyo · 2-minute walk from Kamakura Station", provider: { ...detailModel.provider, bios: [{ name: "Sample Host", text: "An invented host.\nSecond line." }], storyLink: { href: "/guides/sample-host", label: "Read the host story" } }, upcoming: <p>Upcoming slot</p>, faq: { title: "Questions before you book", items: [{ question: "What should I wear?", answer: "Comfortable clothes." }, { question: "Is it <b>safe</b>?", answer: "Yes." }] }, relatedGuides: { eyebrow: "Guides", title: "Stories behind this experience", content: <p>Synthetic guide cards</p> } }} />);
     // A single host's introduction carries no name prefix; plain text is escaped, never parsed as markup.
     expect(one).toContain(">An invented host.\nSecond line.</p>");
     expect(one).not.toContain("Sample Host</b> · ");
-    // Right under the title (and its review line), before the host row: high enough to be seen on a phone without scrolling.
-    expect(one.indexOf("Upcoming slot")).toBeGreaterThan(one.indexOf("</h1>"));
-    expect(one.indexOf("Upcoming slot")).toBeLessThan(one.indexOf("Hosted by"));
-    expect(one).toMatch(/<section id="faq" class="scroll-mt-24 pt-12"><h2[^>]*>Frequently asked questions<\/h2>/);
-    expect(one).toMatch(/<h3[^>]*>What should I wear\?<\/h3><p[^>]*>Comfortable clothes\.<\/p>/);
+    expect(one.indexOf("Kamakura · 1 hour from Tokyo")).toBeGreaterThan(one.indexOf("</h1>"));
+    expect(one.indexOf("Kamakura · 1 hour from Tokyo")).toBeLessThan(one.indexOf("Hosted by"));
+    // The band follows the facts and stays ahead of media.
+    expect(one.indexOf("Upcoming slot")).toBeGreaterThan(one.indexOf("Group size"));
+    expect(one.indexOf("Upcoming slot")).toBeLessThan(one.indexOf("gallery"));
+    expect(one).toContain('<a href="/guides/sample-host" class="link-leaf mt-6 inline-block">Read the host story</a>');
+    expect(one).toMatch(/<section id="faq" class="scroll-mt-24 pt-12"><h2[^>]*>Questions before you book<\/h2>/);
+    expect(one).toMatch(/<details[^>]*><summary[^>]*><h3[^>]*><span>What should I wear\?<\/span>/);
+    expect(one).toContain("Comfortable clothes.</p></details>");
     expect(one).toContain("Is it &lt;b&gt;safe&lt;/b&gt;?");
-    expect(one.indexOf('id="faq"')).toBeLessThan(one.indexOf(EN_STATIC_COPY_V1.text("detail.cancellation")));
+    expect(one.indexOf('id="faq"')).toBeLessThan(one.indexOf("Synthetic guide cards"));
+    expect(one.indexOf("Synthetic guide cards")).toBeLessThan(one.indexOf(EN_STATIC_COPY_V1.text("detail.cancellation")));
     const two = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, provider: { ...detailModel.provider, bios: [{ name: "Host A", text: "First." }, { name: "Host B", text: "Second." }] }, faq: { title: "FAQ", items: [] } }} />);
     expect(two).toContain("Host A</b> · First.");
     expect(two).toContain("Host B</b> · Second.");
     expect(two).not.toContain('id="faq"');
+  });
+
+  it("accepts a page-owned catalogue intro without changing the copy registry", () => {
+    const intro = "Small groups, hosted by people who live here. One hour from Tokyo, two minutes from Kamakura Station.";
+    const html = renderToStaticMarkup(<CatalogueViewV1 heading="Kamakura experiences with local hosts" intro={intro} content={<div>Cards</div>} />);
+    expect(html).toContain("Kamakura experiences with local hosts</h1>");
+    expect(html).toContain(`${intro}</p>`);
+    expect(html).not.toContain(EN_STATIC_COPY_V1.text("catalogue.priceTimeNote"));
+    const ja = renderToStaticMarkup(<CatalogueViewV1 heading="鎌倉の体験" intro="鎌倉の少人数制の体験を探せます。料金は日本円、時刻は日本時間（JST）です。" content={<div>カード</div>} />);
+    expect(ja.indexOf("鎌倉の体験</h1>")).toBeLessThan(ja.indexOf("鎌倉の少人数制の体験を探せます。"));
+    expect(ja.indexOf("鎌倉の少人数制の体験を探せます。")).toBeLessThan(ja.indexOf("カード"));
   });
 
   it("puts an optional video after the facts and before the gallery", () => {

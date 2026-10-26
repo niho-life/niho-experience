@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Occurrence } from "@niho-experience/api-client";
 import { readAvailability } from "@/lib/browser-availability";
-import { dayOption, nextBookable } from "@/lib/date-filter";
+import { dayOption, nextBookableDays } from "@/lib/date-filter";
 import { HandIcon } from "./HandIcon";
 import { useSiteCopy, useSiteLocale } from "./SiteLocale";
 
@@ -17,12 +17,7 @@ export type CardDatesSource =
 
 /** The next bookable dates (one per day), soonest first. Seats left are never shown. */
 export function nextDateKeys(occurrences: readonly Occurrence[], limit = NEXT_DATES): string[] {
-  const keys: string[] = [];
-  for (const occurrence of nextBookable(occurrences, Number.POSITIVE_INFINITY)) {
-    if (!keys.includes(occurrence.date)) keys.push(occurrence.date);
-    if (keys.length === limit) break;
-  }
-  return keys;
+  return nextBookableDays(occurrences, limit).map((occurrence) => occurrence.date);
 }
 
 function useOccurrences(slug: string, source: CardDatesSource): readonly Occurrence[] | null {

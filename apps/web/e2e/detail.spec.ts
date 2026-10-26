@@ -29,6 +29,15 @@ test("phones get a swipeable gallery and a booking bar that stays within reach",
   await expect(page).toHaveURL(/\/book$/);
 });
 
+test("the next-date band opens the booking page on phones", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-360");
+  await page.goto(dinner);
+  const band = page.locator("[data-next-date-band]");
+  await expect(band.getByRole("link", { name: "All dates" })).toBeVisible();
+  await band.getByRole("link", { name: "All dates" }).click();
+  await expect(page).toHaveURL(/\/book$/);
+});
+
 test("desktop shows every photo in a dialog and a next date opens the booking page with it selected", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop");
   await page.goto(dinner);
@@ -89,12 +98,13 @@ test("public meeting overview is visible without exposing the private meeting po
 test("the FAQ is an h2 with one h3 per question in the initial HTML, and only where an experience has one", async ({ request }) => {
   const html = await (await request.get(dinner)).text();
   const section = html.slice(html.indexOf('id="faq"'));
-  expect(html).toMatch(/<section id="faq"[^>]*><h2[^>]*>Frequently asked questions<\/h2>/);
-  const questions = [...section.slice(0, section.indexOf("</section>")).matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
+  expect(html).toMatch(/<section id="faq"[^>]*><h2[^>]*>Questions before you book<\/h2>/);
+  const questions = [...section.slice(0, section.indexOf("</section>")).matchAll(/<summary[^>]*><h3[^>]*><span>([^<]+)<\/span>/g)].map((match) => match[1]);
   expect(questions.length).toBeGreaterThanOrEqual(10);
   expect(questions).toContain("What should I wear?");
   expect(questions).toContain("How do I pay?");
   expect(html).toContain("Free cancellation until 24 hours before the start. After that, the booking cannot be refunded.");
+  expect(section).toMatch(/<details[^>]*><summary[^>]*><h3/);
   // The FAQ comes before the cancellation terms.
   expect(html.indexOf('id="faq"')).toBeLessThan(html.lastIndexOf(">Cancellation</h2>"));
   const indigo = await (await request.get("/experiences/indigo-dyeing-with-an-artisan")).text();
@@ -120,14 +130,20 @@ test("other experiences are linked from the detail page, same themes first, neve
   expect([...new Set(links)]).toEqual(["seaside-cycling-and-market-breakfast", "indigo-dyeing-with-an-artisan", "evening-pottery-session"]);
 });
 
-test("the next bookable dates show near the title once availability is read, without seats left", async ({ page }) => {
-  await page.goto(dinner);
-  const next = page.locator("main header [data-next-dates]");
-  await expect(next).toBeVisible();
-  await expect(next.getByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/).first()).toBeVisible();
-  await expect(next).not.toContainText(/left|seat/i);
-  // An experience that takes no bookings shows no dates there.
-  await page.goto("/experiences/evening-pottery-session");
-  await expect(page.locator("main h1")).toBeVisible();
-  await expect(page.locator("main header [data-next-dates]")).toHaveCount(0);
+test("two crawler UAs get the location, FAQ and next-date band in the initial HTML", async ({ request }) => {
+  for (const userAgent of ["Googlebot/2.1 (+http://www.google.com/bot.html)", "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"]) {
+    const html = (await (await request.get(dinner, { headers: { "user-agent": userAgent } })).text()).replaceAll("<!-- -->", "");
+    expect(html).toContain("Kamakura · 1 hour from Tokyo");
+    expect(html).toContain("data-next-date-band");
+    expect(html).toMatch(/Next date<\/span><time[^>]*>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} · .* JST<\/time>/);
+    expect(html).toContain('id="faq"');
+    expect(html.indexOf("data-next-date-band")).toBeLessThan(html.indexOf('aria-label="Photos of'));
+    expect(html.indexOf('id="faq"')).toBeLessThan(html.indexOf("Plan your evening in Kamakura"));
+    expect(html.indexOf("Plan your evening in Kamakura")).toBeLessThan(html.lastIndexOf(">Cancellation</h2>"));
+    expect(html).not.toMatch(/Book by|seats? left/i);
+  }
+
+  // No bookable occurrence means no band at all.
+  const unavailable = await (await request.get("/experiences/evening-pottery-session")).text();
+  expect(unavailable).not.toContain("data-next-date-band");
 });

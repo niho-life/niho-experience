@@ -720,6 +720,9 @@
   .max-w-\[46rem\] {
     max-width: 46rem;
   }
+  .max-w-\[52rem\] {
+    max-width: 52rem;
+  }
   .max-w-md {
     max-width: var(--container-md);
   }
@@ -1336,6 +1339,9 @@
   .pb-3\.5 {
     padding-bottom: calc(var(--spacing) * 3.5);
   }
+  .pb-4 {
+    padding-bottom: calc(var(--spacing) * 4);
+  }
   .pb-6 {
     padding-bottom: calc(var(--spacing) * 6);
   }
@@ -1698,6 +1704,11 @@
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
+  .transition-transform {
+    transition-property: transform, translate, scale, rotate;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
   .duration-300 {
     --tw-duration: 300ms;
     transition-duration: 300ms;
@@ -1717,6 +1728,9 @@
   }
   .group-open\:inline:is(:where(.group):is([open], :popover-open, :open) *) {
     display: inline;
+  }
+  .group-open\:rotate-45:is(:where(.group):is([open], :popover-open, :open) *) {
+    rotate: 45deg;
   }
   @media (hover: hover) {
     .group-hover\:bg-\[length\:100\%_3px\]:is(:where(.group):hover *) {
