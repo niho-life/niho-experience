@@ -5,7 +5,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 // (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts): the mock sign-in
 // makes a session for the synthetic NIHO, and nothing here talks to NIHO.
 
-const CONSOLE_PAGES = ["/host/home", "/host/experiences", "/host/experiences/community-dinner", "/host/bookings", "/host/messages", "/host/reviews", "/host/sales", "/host/settings", "/host/register"];
+const CONSOLE_PAGES = ["/host/home", "/host/experiences", "/host/experiences/community-dinner", "/host/calendar", "/host/bookings", "/host/messages", "/host/reviews", "/host/sales", "/host/settings", "/host/register"];
 const PREVIEW_NOTE = "プレビュー（合成データ）· 体験・予約・売上・口座は架空で、保存されません";
 
 /** The sidebar (PC) and the bottom tabs (phones) share one name; only the one for the width is exposed. */
@@ -77,7 +77,7 @@ test("console links carry ?providerId=, and each provider has its own data", asy
   await expect(todo.getByRole("link", { name: "メッセージを見る" })).toHaveAttribute("href", "/host/messages?providerId=sample-provider-studio");
   await expect(page.getByRole("region", { name: "明日の開催" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "これからの開催" })).toContainText("これからの開催はまだありません。");
-  for (const [label, path] of [["ホーム", "/host/home"], ["体験", "/host/experiences"], ["設定", "/host/settings"]]) {
+  for (const [label, path] of [["ホーム", "/host/home"], ["体験", "/host/experiences"], ["カレンダー", "/host/calendar"], ["設定", "/host/settings"]]) {
     await expect(menu(page).getByRole("link", { name: label }), label).toHaveAttribute("href", `${path}?providerId=sample-provider-studio`);
   }
   await expect(menu(page).getByRole("link", { name: "予約" })).toHaveCount(0);
@@ -92,11 +92,13 @@ test("console links carry ?providerId=, and each provider has its own data", asy
   await expect(page.getByRole("region", { name: "売上受取口座" })).toHaveCount(0);
 });
 
-test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page }, testInfo) => {
+test("the menu is a sidebar on PC and six bottom tabs on phones", async ({ page }, testInfo) => {
   await signIn(page);
   const nav = menu(page);
   await expect(nav).toHaveCount(1);
-  await expect(nav.getByRole("link")).toHaveText(["ホーム", "体験", "予約", "売上", "設定"]);
+  await expect(nav.getByRole("link")).toHaveText(isDesktop(testInfo.project.name)
+    ? ["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]
+    : ["ホーム", "体験", "予定", "予約", "売上", "設定"]);
   await expect(nav.getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
   const viewport = page.viewportSize()!;
   const navBox = (await nav.boundingBox())!;
@@ -120,7 +122,7 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     // A 52px row (and its hairline) with the brand and the account, and the tabs on the bottom edge (12px labels).
     expect(bannerBox).toMatchObject({ x: 0, y: 0, width: viewport.width, height: 53 });
     expect(Math.round(navBox.y + navBox.height)).toBe(viewport.height);
-    for (const label of ["ホーム", "体験", "予約", "売上", "設定"]) {
+    for (const label of ["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]) {
       expect(await nav.getByRole("link", { name: label }).evaluate((link) => getComputedStyle(link).fontSize), label).toBe("12px");
     }
     await nav.getByRole("link", { name: "売上" }).click();
@@ -329,7 +331,7 @@ test.describe("320px narrow phone", () => {
       expect(await overflowX(page), path).toBeLessThanOrEqual(0);
     }
     await page.goto("/host/home");
-    for (const name of ["ホーム", "体験", "予約", "売上", "設定"]) await inside(menu(page).getByRole("link", { name }), `tab ${name}`);
+    for (const name of ["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]) await inside(menu(page).getByRole("link", { name }), `tab ${name}`);
     await inside(page.getByRole("button", { name: "承認する" }).first(), "home: 承認する");
     await inside(page.getByRole("link", { name: "詳しく見る" }).first(), "home: 詳しく見る");
     await inside(page.getByRole("link", { name: "返信する" }).first(), "home: 返信する");

@@ -56,7 +56,7 @@ function setCookies(response: Response): Map<string, { value: string; attributes
 
 function sessionCookie(idTokenExpiresIn: number) {
   const now = Date.now();
-  const session = startSession({ refreshToken: "refresh-1", idToken: "id-1", idTokenExpiresAt: now + idTokenExpiresIn, connectionId: "conn_1", connectionExpiresAt: now + 90 * 24 * 60 * MIN, displayName: "合成 ホスト", iconUrl: null }, now);
+  const session = startSession({ nihoUserId: "u1", refreshToken: "refresh-1", idToken: "id-1", idTokenExpiresAt: now + idTokenExpiresIn, connectionId: "conn_1", connectionExpiresAt: now + 90 * 24 * 60 * MIN, displayName: "合成 ホスト", iconUrl: null }, now);
   return `${SESSION_COOKIE}=${encodeSession(cookieSealer(state.config.hostSessionSecret, "session"), session)}`;
 }
 

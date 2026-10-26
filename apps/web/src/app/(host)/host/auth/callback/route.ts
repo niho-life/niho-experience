@@ -36,8 +36,8 @@ export async function GET(request: NextRequest) {
   if (!signedIn.ok) return failed("unavailable", login.preparationCaseId);
 
   const now = Date.now();
-  const { refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl } = exchanged.value;
-  const session = startSession({ refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value }, now);
+  const { nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl } = exchanged.value;
+  const session = startSession({ nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value }, now);
   const response = seeOther(login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   try {

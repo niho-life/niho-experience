@@ -15,6 +15,7 @@ const NAV_LABEL = "ホストのメニュー";
 const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
   "/host/home": "home",
   "/host/experiences": "experiences",
+  "/host/calendar": "calendar",
   "/host/bookings": "bookings",
   "/host/sales": "sales",
   "/host/settings": "settings",
@@ -103,7 +104,7 @@ function SidebarProviderSwitcher({ providers }: { providers: readonly HostProvid
 }
 
 /**
- * PC (md and up): the 232px sidebar with the brand, the provider, the five sections,
+ * PC (md and up): the 232px sidebar with the brand, the provider, the six sections,
  * the way out to the traveler site and NIHO, and the NIHO account. Selected items
  * use the sand surface and ink text (no green).
  */
@@ -241,7 +242,7 @@ export function HostMobileHeader(props: HostChromeProps) {
   );
 }
 
-/** Phones: the five sections as bottom tabs (icon and a 12px label). Hidden under a section or ホーム and on one booking, where the page has its back header. */
+/** Phones: role-appropriate sections as bottom tabs, with a short label for カレンダー. */
 export function HostTabBar({ providers }: { providers: readonly HostProviderChoice[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -253,18 +254,19 @@ export function HostTabBar({ providers }: { providers: readonly HostProviderChoi
       {/* Keeps the end of the page clear of the fixed bar. */}
       <div aria-hidden="true" className="h-[var(--host-tabbar)] md:hidden" />
       <nav aria-label={NAV_LABEL} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-canvas px-1 pt-1.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:hidden">
-        <ul className={`grid ${current?.memberRole === "OWNER" ? "grid-cols-5" : "grid-cols-4"}`}>
+        <ul className={`grid ${current?.memberRole === "OWNER" ? "grid-cols-6" : current?.memberRole === "EDITOR" ? "grid-cols-4" : "grid-cols-5"}`}>
           {hostNavForRole(current?.memberRole).map((item) => {
             const active = isHostNavActive(pathname, item.href);
             return (
               <li key={item.href}>
                 <Link
                   href={withProvider(item.href, providerId)}
+                  aria-label={item.href === "/host/calendar" ? "予定（カレンダー）" : undefined}
                   aria-current={active ? "page" : undefined}
                   className={`flex h-[46px] flex-col items-center justify-center gap-0.5 rounded-[10px] text-xs leading-tight font-bold ${active ? "text-ink" : "text-muted hover:text-ink"}`}
                 >
                   <HostIcon name={NAV_ICONS[item.href]} className="size-[22px]" />
-                  <span>{item.label}</span>
+                  <span>{item.href === "/host/calendar" ? "予定" : item.label}</span>
                 </Link>
               </li>
             );

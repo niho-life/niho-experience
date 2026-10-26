@@ -1,5 +1,7 @@
 # 公開API契約（v1.2.0・合意済み／配備前）
 
+> **移行中（2026-10-27 決定）**: 以下は NIHO を体験予約の正本とする旧契約です。体験コンテンツ・開催枠・予約・体験取引は [ADR 0002](adr/0002-experience-domain-ownership.md) に従って niho-experience へ移します。NIHO の共通ログインと Stripe Connect 口座は引き続き共用します。旧契約の配備状況を新 API の実装・稼働状況と読み替えないでください。
+
 作成日：2026-10-19。担当：契約・NIHO連携（[#7](https://github.com/niho-life/niho-experience/issues/7)）。
 
 **状態：仕様合意済み（agreed）・v1.2.0、NIHO側PR #19160/#19161/#19267 の配備待ち。** 正本は NIHO 共通基盤の `contracts/openapi.yaml` です。このサイトでは NIHO の公開契約から、利用する path と項目だけを選んで `packages/api-client/contract/experience-public-api.openapi.json` に管理します。サイトで扱わない帰属計測項目や NIHO Web 文書APIは含めません。sha256 は選別済み契約ファイルの破損検知に使います。v1.1詳細の `meetingOverview` はNIHOの #19267 が追加した項目で、API配備後に `verify:live` で確認します。
