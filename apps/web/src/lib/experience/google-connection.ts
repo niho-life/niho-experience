@@ -45,7 +45,8 @@ export async function saveGoogleConnection(
        VALUES ($1,$2,true,'STALE')
        ON CONFLICT (provider_id) DO UPDATE SET
          opaque_calendar_id=EXCLUDED.opaque_calendar_id, blocking_enabled=true, sync_status='STALE',
-         fresh_until=NULL, version=provider_google_calendars.version+1, updated_at=clock_timestamp()`,
+         fresh_until=NULL, coverage_start=NULL, coverage_end=NULL,
+         version=provider_google_calendars.version+1, updated_at=clock_timestamp()`,
       [actor.providerId, busyCalendarId],
     );
     await client.query("DELETE FROM google_busy_intervals WHERE provider_id=$1", [actor.providerId]);
@@ -90,7 +91,8 @@ export async function syncGoogleBusy(pool: Pool, store: ExperienceStore, provide
     const busyIntervals = await queryGoogleBusy(runtime.google, token.accessToken, [connection.busy_calendar_id], fromUtc, toUtc);
     await store.recordGoogleBusySync({ providerId }, {
       opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString(),
-      freshUntilUtc: new Date(now.getTime() + 2 * 60_000).toISOString(), busyIntervals,
+      freshUntilUtc: new Date(now.getTime() + 2 * 60_000).toISOString(),
+      coverageStartUtc: fromUtc, coverageEndUtc: toUtc, busyIntervals,
     });
   } catch (error) {
     await store.recordGoogleSyncFailure({ providerId }, { opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString() });

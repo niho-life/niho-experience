@@ -124,6 +124,12 @@ export function googleCalendarFromRow(row: DbRow): GoogleCalendarConfiguration {
     ...(optionalString(row, "fresh_until") === undefined
       ? {}
       : { freshUntilUtc: optionalString(row, "fresh_until")! }),
+    ...(optionalString(row, "coverage_start") === undefined
+      ? {}
+      : { coverageStartUtc: optionalString(row, "coverage_start")! }),
+    ...(optionalString(row, "coverage_end") === undefined
+      ? {}
+      : { coverageEndUtc: optionalString(row, "coverage_end")! }),
     version: numberValue(row, "version"),
   };
 }

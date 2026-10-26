@@ -142,13 +142,13 @@ export function HostCalendarWorkspace({ providerId }: { providerId: string }) {
                     <span className="text-sm font-bold">{entry.item.status === "CLOSED" ? "休止" : entry.item.availabilityReason === "GOOGLE_BUSY" ? "予定と重複" : entry.item.availabilityReason === "GOOGLE_SYNC_UNAVAILABLE" ? "確認待ち" : `残り ${entry.item.availableSeats} 席`}</span>
                     {entry.item.status === "OPEN" ? <>
                       <button type="button" disabled={saving || data.preview} onClick={() => setEditingId(entry.item.id)} className="min-h-10 rounded-xl border border-line px-3 text-sm font-bold disabled:opacity-50">日時を変更</button>
-                      <button type="button" disabled={saving || data.preview} onClick={() => void mutate({ action: "closeOccurrence", occurrenceId: entry.item.id })} className="min-h-10 rounded-xl border border-line px-3 text-sm font-bold disabled:opacity-50">この回を休止</button>
+                      <button type="button" disabled={saving || data.preview} onClick={() => void mutate({ action: "closeOccurrence", occurrenceId: entry.item.id, expectedVersion: entry.item.overrideVersion ?? null })} className="min-h-10 rounded-xl border border-line px-3 text-sm font-bold disabled:opacity-50">この回を休止</button>
                     </> : null}
                   </span> : null}
                   {entry.kind === "experience" && editingId === entry.item.id ? <form className="flex w-full flex-wrap items-end gap-2 border-t border-line pt-3" onSubmit={(event) => {
                     event.preventDefault();
                     const fields = new FormData(event.currentTarget);
-                    void mutate({ action: "rescheduleOccurrence", occurrenceId: entry.item.id, localDate: String(fields.get("localDate")), localStartTime: String(fields.get("localStartTime")) }).then((saved) => { if (saved) setEditingId(null); });
+                    void mutate({ action: "rescheduleOccurrence", occurrenceId: entry.item.id, expectedVersion: entry.item.overrideVersion ?? null, localDate: String(fields.get("localDate")), localStartTime: String(fields.get("localStartTime")) }).then((saved) => { if (saved) setEditingId(null); });
                   }}>
                     <label className="grid gap-1 text-sm font-bold">変更後の日付<input type="date" name="localDate" defaultValue={entry.item.localDate} required className="min-h-10 rounded-xl border border-line px-3" /></label>
                     <label className="grid gap-1 text-sm font-bold">開始時刻<input type="time" name="localStartTime" defaultValue={entry.item.localStartTime} required className="min-h-10 rounded-xl border border-line px-3" /></label>

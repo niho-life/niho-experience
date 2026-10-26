@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "closeOccurrence" || body.action === "rescheduleOccurrence") {
       if (typeof body.occurrenceId !== "string" || body.occurrenceId.length > 256) return noStoreJson({ error: "invalid_body" }, 400);
+      if (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number) < 1)) return noStoreJson({ error: "invalid_body" }, 400);
       if (body.action === "rescheduleOccurrence" && (typeof body.localDate !== "string" || typeof body.localStartTime !== "string")) return noStoreJson({ error: "invalid_body" }, 400);
       const separator = body.occurrenceId.lastIndexOf("@");
       if (separator < 1) return noStoreJson({ error: "invalid_body" }, 400);
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
       const override = body.action === "closeOccurrence"
         ? { kind: "CLOSE" as const, occurrenceId: body.occurrenceId }
         : { kind: "RESCHEDULE" as const, occurrenceId: body.occurrenceId, localDate: body.localDate as string, localStartTime: body.localStartTime as string };
-      const saved = await store.saveOccurrenceOverride(result.actor, rule.rows[0].product_id, ruleId, override, null);
+      const saved = await store.saveOccurrenceOverride(result.actor, rule.rows[0].product_id, ruleId, override, body.expectedVersion as number | null);
       return noStoreJson({ occurrenceId: saved.override.occurrenceId, version: saved.version });
     }
     return noStoreJson({ error: "invalid_action" }, 400);

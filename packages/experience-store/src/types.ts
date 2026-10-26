@@ -70,6 +70,8 @@ export interface GoogleCalendarConfiguration {
   readonly lastAttemptedAtUtc?: string;
   readonly lastSucceededAtUtc?: string;
   readonly freshUntilUtc?: string;
+  readonly coverageStartUtc?: string;
+  readonly coverageEndUtc?: string;
   readonly version: number;
 }
 
@@ -135,6 +137,8 @@ export interface RecordGoogleBusySyncInput {
   readonly opaqueCalendarId: string;
   readonly attemptedAtUtc: string;
   readonly freshUntilUtc: string;
+  readonly coverageStartUtc: string;
+  readonly coverageEndUtc: string;
   readonly busyIntervals: readonly BusyInterval[];
 }
 

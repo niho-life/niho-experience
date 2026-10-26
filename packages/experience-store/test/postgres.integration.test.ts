@@ -20,6 +20,8 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       await pool.query(migration);
       const oauthMigration = await readFile(new URL("../migrations/0002_google_oauth.sql", import.meta.url), "utf8");
       await pool.query(oauthMigration);
+      const coverageMigration = await readFile(new URL("../migrations/0003_google_busy_coverage.sql", import.meta.url), "utf8");
+      await pool.query(coverageMigration);
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
       await pool.query(
         "INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ($1,$2,'OWNER')",
@@ -78,6 +80,7 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       await store.recordGoogleBusySync({ providerId: actor.providerId }, {
         opaqueCalendarId: "synthetic-calendar", attemptedAtUtc,
         freshUntilUtc: new Date(Date.now() + 120_000).toISOString(),
+        coverageStartUtc: "2099-01-01T00:00:00.000Z", coverageEndUtc: "2099-01-03T00:00:00.000Z",
         busyIntervals: [{ startUtc: "2099-01-02T01:00:00.000Z", endUtc: "2099-01-02T02:00:00.000Z" }],
       });
       await assert.rejects(
@@ -86,8 +89,13 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       );
       await store.recordGoogleBusySync({ providerId: actor.providerId }, {
         opaqueCalendarId: "synthetic-calendar", attemptedAtUtc: new Date().toISOString(),
-        freshUntilUtc: new Date(Date.now() + 120_000).toISOString(), busyIntervals: [],
+        freshUntilUtc: new Date(Date.now() + 120_000).toISOString(),
+        coverageStartUtc: "2099-01-01T00:00:00.000Z", coverageEndUtc: "2099-01-03T00:00:00.000Z", busyIntervals: [],
       });
+      await assert.rejects(
+        () => store.createBookingHold(actor, { productId: "tea", occurrenceId: occurrenceIdFor(rule.id, "2099-01-03"), seats: 1, idempotencyKey: "outside-coverage" }),
+        (error: unknown) => error instanceof BookingUnavailableError && error.reason === "GOOGLE_SYNC_UNAVAILABLE",
+      );
       const unblocked = await store.createBookingHold(actor, { productId: "tea", occurrenceId: nextOccurrenceId, seats: 1, idempotencyKey: "open-again" });
       assert.equal(unblocked.status, "HOLD");
       const payment = {
@@ -102,6 +110,11 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       const confirmed = await store.confirmBookingPayment({ providerId: actor.providerId }, payment);
       assert.equal(confirmed.booking.status, "CONFIRMED");
       assert.equal((await store.confirmBookingPayment({ providerId: actor.providerId }, payment)).duplicateEvent, true);
+      const fourthOccurrenceId = occurrenceIdFor(rule.id, "2099-01-04");
+      const firstOverride = await store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "RESCHEDULE", occurrenceId: fourthOccurrenceId, localDate: "2099-01-05", localStartTime: "11:00" }, null);
+      const secondOverride = await store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "CLOSE", occurrenceId: fourthOccurrenceId }, firstOverride.version);
+      assert.equal(secondOverride.version, firstOverride.version + 1);
+      await assert.rejects(() => store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "CLOSE", occurrenceId: fourthOccurrenceId }, firstOverride.version), StoreConflictError);
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
       await pool.end();

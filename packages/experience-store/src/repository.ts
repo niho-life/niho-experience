@@ -81,7 +81,7 @@ const BOOKING_COLUMNS = `
 
 const GOOGLE_COLUMNS = `
   provider_id, opaque_calendar_id, blocking_enabled, sync_status, last_attempted_at,
-  last_succeeded_at, fresh_until, version`;
+  last_succeeded_at, fresh_until, coverage_start, coverage_end, version`;
 
 interface ExperienceStoreOptions {
   readonly defaultHoldSeconds?: number;
@@ -512,6 +512,8 @@ export class ExperienceStore {
                 last_attempted_at=CASE WHEN opaque_calendar_id IS DISTINCT FROM $2 THEN NULL ELSE last_attempted_at END,
                 last_succeeded_at=CASE WHEN opaque_calendar_id IS DISTINCT FROM $2 THEN NULL ELSE last_succeeded_at END,
                 fresh_until=CASE WHEN opaque_calendar_id IS DISTINCT FROM $2 THEN NULL ELSE fresh_until END,
+                coverage_start=CASE WHEN opaque_calendar_id IS DISTINCT FROM $2 THEN NULL ELSE coverage_start END,
+                coverage_end=CASE WHEN opaque_calendar_id IS DISTINCT FROM $2 THEN NULL ELSE coverage_end END,
                 version=version+1, updated_at=clock_timestamp()
           WHERE provider_id=$1
           RETURNING ${GOOGLE_COLUMNS}`,
@@ -540,6 +542,9 @@ export class ExperienceStore {
     validateScope(scope);
     assertNonEmptyText(input.opaqueCalendarId, "opaqueCalendarId");
     const intervals = validateBusySync(input.attemptedAtUtc, input.freshUntilUtc, input.busyIntervals);
+    assertCanonicalInstant(input.coverageStartUtc, "coverageStartUtc");
+    assertCanonicalInstant(input.coverageEndUtc, "coverageEndUtc");
+    if (input.coverageEndUtc <= input.coverageStartUtc) throw new StoreValidationError("Google busy coverage must have a positive duration.");
     return withTransaction(this.#pool, async (client) => {
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars
@@ -558,10 +563,11 @@ export class ExperienceStore {
       const updated = await client.query<DbRow>(
         `UPDATE provider_google_calendars
             SET sync_status='FRESH', last_attempted_at=$3, last_succeeded_at=$3, fresh_until=$4,
+                coverage_start=$5, coverage_end=$6,
                 version=version+1, updated_at=clock_timestamp()
           WHERE provider_id=$1 AND opaque_calendar_id=$2
           RETURNING ${GOOGLE_COLUMNS}`,
-        [scope.providerId, input.opaqueCalendarId, input.attemptedAtUtc, input.freshUntilUtc],
+        [scope.providerId, input.opaqueCalendarId, input.attemptedAtUtc, input.freshUntilUtc, input.coverageStartUtc, input.coverageEndUtc],
       );
       const configuration = googleCalendarFromRow(oneRow(updated.rows, "Google calendar configuration"));
       await client.query("DELETE FROM google_busy_intervals WHERE provider_id=$1", [scope.providerId]);
@@ -955,12 +961,14 @@ export class ExperienceStore {
     const settingRow = settingResult.rows[0];
     if (settingRow === undefined) return { blockingEnabled: false, syncStatus: "STALE", busyIntervals: [] };
     const setting = googleCalendarFromRow(settingRow);
-    const syncStatus = effectiveGoogleSyncStatus(setting.syncStatus, setting.freshUntilUtc, nowUtc);
+    const rangeStart = addMinutes(occurrence.startUtc, -occurrence.busyBufferBeforeMinutes);
+    const rangeEnd = addMinutes(occurrence.endUtc, occurrence.busyBufferAfterMinutes);
+    const covered = setting.coverageStartUtc !== undefined && setting.coverageEndUtc !== undefined
+      && setting.coverageStartUtc <= rangeStart && setting.coverageEndUtc >= rangeEnd;
+    const syncStatus = covered ? effectiveGoogleSyncStatus(setting.syncStatus, setting.freshUntilUtc, nowUtc) : "STALE";
     if (!setting.blockingEnabled || syncStatus !== "FRESH") {
       return { blockingEnabled: setting.blockingEnabled, syncStatus, busyIntervals: [] };
     }
-    const rangeStart = addMinutes(occurrence.startUtc, -occurrence.busyBufferBeforeMinutes);
-    const rangeEnd = addMinutes(occurrence.endUtc, occurrence.busyBufferAfterMinutes);
     const busyResult = await client.query<DbRow>(
       `SELECT start_at, end_at FROM google_busy_intervals
         WHERE provider_id=$1 AND opaque_calendar_id=$2 AND end_at>$3 AND start_at<$4
