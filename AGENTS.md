@@ -3,6 +3,7 @@
 - オーナー向け報告、Issue、PR、仕様文書は日本語。旅行者向けUIは英語を先行する。
 - まず対象Issueと `docs/architecture.md`、UI変更では `docs/design-brief.md` を読む。優先順は顧客UX、開発・運用速度、コスト。
 - 担当Issue・触るファイル範囲・依存するAPI版を着手時に明示する。同じファイルの並行編集は担当を決める。対象外の差分を変更・破棄しない。
+- niho-experience の実装には固定の4 worktree `~/Documents/app/NIHO/niho-experience-paneB-1`、`niho-experience-paneB-2`、`niho-experience-paneB-3`、`niho-experience-paneB-4` を使う。作業ごとに空いている seat を選び、その worktree で branch を切り替えて再利用する。1 seat に1 worktreeとし、同じ worktree を複数の作業で同時編集しない。topic や修復のために worktree を追加せず、追加が必要な場合はオーナーの明示指示を受ける。既存の他 worktree や作業差分は勝手に変更・削除しない。
 - このリポの担当は公開サイト、SSR/SEO、表示用ロジック、限定された公開APIクライアント、ホスト（提供者）の画面 `/host`。認証元、DB、権限、価格・在庫の確定、決済・返金・台帳を重複実装しない。
 - ホストの画面は `/host` に作る（オーナー決定 2026-10-21・#84）。ログインはNIHOの確認画面と一度きりのコードで受け取り、権限の判断と正本はNIHOのAPIに任せる。トークンはサーバーだけが持ち、ブラウザのJavaScript・storageに渡さない。NIHOの認証cookieは共有しない。旅行者はゲスト予約。
 - 実データ、顧客・提供者の非公開情報、未公開原稿、内部スキーマ、秘密鍵、DB接続情報をコミットしない。fixtureは合成データに限る。素材の掲載許諾を確認する。
