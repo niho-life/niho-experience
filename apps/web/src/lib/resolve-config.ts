@@ -70,6 +70,14 @@ export function resolveConfig(env: Env) {
   // still requires its own console and server-side session; preview only opens browser UI.
   const experienceFeeSummaryApiEnabled = apiMode === "http" && env.EXPERIENCE_FEE_SUMMARY_API_ENABLED === "true";
   const experienceFeeSummaryPreviewEnabled = apiMode === "mock" && env.EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED === "true";
+  // Assisted launch is an independent, agreed-not-deployed API. Preview only exposes
+  // the UI for browser-stubbed acceptance; its BFF remains closed in mock mode.
+  const experienceAssistedLaunchApiEnabled = apiMode === "http" && env.EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED === "true";
+  const experienceAssistedLaunchPreviewEnabled = apiMode === "mock" && env.EXPERIENCE_ASSISTED_LAUNCH_PREVIEW_ENABLED === "true";
+  // Current provider membership and booking operations are independent from Admin and assisted launch.
+  // The real transport opens only after the selected v1 API is deployed and accepted.
+  const experienceProviderOperationsApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED === "true";
+  const experienceProviderOperationsPreviewEnabled = apiMode === "mock" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED === "true";
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
@@ -127,6 +135,10 @@ export function resolveConfig(env: Env) {
     hostSupportSettingsPreviewEnabled,
     experienceFeeSummaryApiEnabled,
     experienceFeeSummaryPreviewEnabled,
+    experienceAssistedLaunchApiEnabled,
+    experienceAssistedLaunchPreviewEnabled,
+    experienceProviderOperationsApiEnabled,
+    experienceProviderOperationsPreviewEnabled,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.
     hostSessionSecret,
     adminSessionSecret,

@@ -105,14 +105,12 @@ test("ホーム's month card has 入金予定, as 売上 counts it", async ({ pa
   await expect(month.locator("dd")).toHaveText(["¥390,000", "−¥60,000", "¥139,500", "8件"]);
 });
 
-test("an editor sees the provider's sales, and that the payout account is the owner's to check", async ({ page }) => {
+test("an editor cannot open sales or the payout account", async ({ page }) => {
   await signIn(page, "?providerId=sample-provider-studio");
-  await menu(page).getByRole("link", { name: "売上" }).click();
-  await page.waitForURL("**/host/sales?providerId=sample-provider-studio");
-  await expect(page.locator("main")).toContainText("口座の状態はオーナーが確認できます");
-  await expect(lines(page, "2026年10月")).toContainText("この月の売上はまだありません");
-  await expect(monthNav(page).getByRole("link", { name: "前の月" })).toHaveAttribute("href", "/host/sales?month=2026-09&providerId=sample-provider-studio");
+  await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
+  expect((await page.goto("/host/sales?providerId=sample-provider-studio"))?.status()).toBe(404);
 
+  await page.goto("/host/home?providerId=sample-provider-studio");
   await menu(page).getByRole("link", { name: "設定" }).click();
   await page.waitForURL("**/host/settings?providerId=sample-provider-studio");
   const provider = providerPanel(page);
@@ -121,8 +119,7 @@ test("an editor sees the provider's sales, and that the payout account is the ow
   await expect(provider).toContainText("特商法表示 URL はオーナーが変えられます。");
   await expect(provider.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
   await expect(provider).toContainText("審査の申請はオーナーが行います。");
-  await expect(payoutPanel(page)).toContainText("口座の状態はオーナーが確認できます");
-  await expect(payoutPanel(page).getByRole("button")).toHaveCount(0);
+  await expect(payoutPanel(page)).toHaveCount(0);
 });
 
 test("a new provider: registered through NIHO, led from 売上 to its payout account, shares a spot's account and asks for the review", async ({ page }) => {

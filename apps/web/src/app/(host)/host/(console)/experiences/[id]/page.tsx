@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { HostExperienceEditor } from "@/components/host/HostExperienceEditor";
+import { HostLiveExperienceEditor } from "@/components/host/HostLiveExperienceEditor";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSubHeader } from "@/components/host/HostSubHeader";
@@ -10,6 +11,7 @@ import { HostPageBody } from "@/components/host/ui";
 import { hostPageContext, loadHostExperienceEditor } from "@/host/data";
 import { config } from "@/lib/config";
 import { HOST_EXPERIENCES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
 export const metadata: Metadata = { title: "体験の編集" };
 
@@ -43,9 +45,10 @@ export default async function HostExperiencePage({ params, searchParams }: { par
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
+  const backHref = withProvider(HOST_EXPERIENCES_PATH, linkProviderId);
+  if (providerOperationsEnabled()) return <HostLiveExperienceEditor key={`${provider.id}/${id}`} providerId={provider.id} pageId={id} backHref={backHref} />;
   const { editor, host, today } = await loadHostExperienceEditor(provider, id);
   if (editor.status === "missing") notFound();
-  const backHref = withProvider(HOST_EXPERIENCES_PATH, linkProviderId);
   if (editor.status === "unavailable") return <EditorUnavailable backHref={backHref} />;
 
   return (

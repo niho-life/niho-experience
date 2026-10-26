@@ -23,7 +23,7 @@ export function HostShell({ account, providers, nihoAppUrl, preview, children }:
             プレビュー（合成データ）· 体験・予約・売上・口座は架空で、保存されません
           </p>
         ) : null}
-        {providers.length > 0 ? <HostTabBar /> : null}
+        {providers.length > 0 ? <HostTabBar providers={providers} /> : null}
       </div>
     </div>
   );

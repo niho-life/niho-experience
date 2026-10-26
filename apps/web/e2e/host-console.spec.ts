@@ -65,11 +65,12 @@ test("a host signs in from /host, switches provider, opens a section and signs o
   await page.waitForURL(/providerId=sample-provider-studio/);
   await expectProvider(page, "サンプル工房");
 
-  await page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: "予約" }).click();
-  await page.waitForURL("**/host/bookings?providerId=sample-provider-studio");
-  await expect(page.getByRole("heading", { level: 1, name: "予約" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "予約" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("region", { name: "予約の一覧" })).toContainText("まだ予約はありません");
+  const editorMenu = page.getByRole("navigation", { name: "ホストのメニュー" });
+  await expect(editorMenu.getByRole("link", { name: "予約" })).toHaveCount(0);
+  await expect(editorMenu.getByRole("link", { name: "売上" })).toHaveCount(0);
+  expect((await page.goto("/host/bookings?providerId=sample-provider-studio"))?.status()).toBe(404);
+  await page.goto("/host/experiences?providerId=sample-provider-studio");
+  await expect(page.getByRole("heading", { level: 1, name: "体験" })).toBeVisible();
 
   await openAccountMenu(page);
   await page.getByRole("button", { name: "ログアウト" }).click();

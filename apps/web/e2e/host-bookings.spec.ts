@@ -352,9 +352,7 @@ test("the screen's links keep ?providerId=, and a provider without bookings says
   await expect(page).toHaveURL(/\/host\/bookings\?providerId=sample-provider-kitchen&filter=past$/);
   await expect(menu(page).getByRole("link", { name: "予約" })).toHaveAttribute("href", "/host/bookings?providerId=sample-provider-kitchen");
 
-  await page.goto("/host/bookings?providerId=sample-provider-studio");
-  await expect(list(page)).toContainText("まだ予約はありません");
-  await expect(page.getByRole("region", { name: "Lucas & Mia Chen" })).toHaveCount(0);
+  expect((await page.goto("/host/bookings?providerId=sample-provider-studio"))?.status()).toBe(404);
 });
 
 test("bookings screens have no WCAG 2.2 AA violations", async ({ page }) => {
