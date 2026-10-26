@@ -107,3 +107,31 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | 英語文言・商品の事実 | 担当3（商品・集客）。現在の文言は合成例 |
 
 lockfileはrootの `package-lock.json` 1つだけ。パッケージのフォルダで `npm install` / `npm ci` をせず、rootで `npm install -w <パッケージ名> <依存>` のように入れる。依存を追加・更新する時は lockfile ごと担当1のPRにまとめる。`playwright-core` は `@axe-core/playwright` が別版を引き込まないよう root の `overrides` で `@playwright/test` と同じ版に揃えている。
+
+## PR とマージ
+
+`main` は ruleset「main」で守る（オーナー決定 2026-10-26。niho-app の `main` ruleset に倣い、マージキューは使わない）。CI が通り、未解決のレビュースレッドが無い PR は、承認を待たずにマージしてよい。
+
+| ルール | 設定 | 理由 |
+| --- | --- | --- |
+| PR 必須 | 直接 push・force push・ブランチ削除は不可。バイパスなし | 変更は必ず CI とレビュースレッドを通す |
+| 承認 | 0 件 | 開発者は1人。レビューは Codex のボットと作成セッションの自己確認 |
+| 未解決スレッド | すべて解決するまでマージできない | 指摘を直すか、見送る理由を返信してから解決する |
+| 必須チェック | `premerge-gate`（GitHub Actions）だけ。最新の `main` への追従は求めない | 追従を求めると、並行する PR が `main` が動くたびに CI をやり直すことになる |
+| auto-merge | 許可 | 条件が揃った時点で GitHub がマージする |
+| マージ済みブランチ | 自動で削除（リポジトリ設定） | `--delete-branch` は付けない。上に積んだ PR は GitHub が付け替える |
+
+運用：
+
+- PR を作ったセッションが、自己確認を済ませてから `ghN pr merge <PR> --auto --squash` を設定する。CI が通り、スレッドが全部解決した時点でマージされる。書き込み権限のあるアカウント（`ghN`）が修正を push しても auto-merge は外れない（権限のない人の push では外れる）。
+- Codex のレビュー（`chatgpt-codex-connector`）は PR を出して数分で届き、CI（7〜10分）より先に来るのが普通。届いた指摘には対応してから解決する。マージ後に届いた指摘は、追加の PR で直す。到着を待つための待機やポーリングはしない（niho-app と同じ）。
+- 止めたいとき：`ghN pr merge <PR> --disable-auto`、または PR を draft に戻す。
+- docs だけの PR（`docs/**`・`*.md`）はビルドを飛ばし、`premerge-gate` だけが成功を返す。
+
+CI を変えるとき（`.github/workflows/ci.yml`）：
+
+- 新しいチェックは `premerge-gate` の `needs` に足す。ruleset の必須チェックは増やさない。
+- `pull_request` のトリガーに `paths` / `paths-ignore` を付けない。パスで飛ばしたワークフローの必須チェックは「待機中」のまま止まる（[GitHub のドキュメント](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)）。ジョブを飛ばすときは、`changes` ジョブの出力とジョブの `if` を使う（`if` で飛ばしたジョブは成功扱いになる）。
+- `premerge-gate` は `if: always()` を外さない。外すと、前のジョブが失敗した時にこのジョブが飛ばされ、成功扱いで通ってしまう。
+
+マージキューについて：30日で `main` への push の CI は 67 回、失敗は 0 回（2026-10-26 時点）。並行マージの組み合わせで `main` が壊れるようになったら、ruleset にマージキューを足す。`ci.yml` は `merge_group` に対応済み。
