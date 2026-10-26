@@ -236,7 +236,7 @@ export function HostMobileHeader(props: HostChromeProps) {
   );
 }
 
-/** Phones: five frequent destinations as bottom tabs. 売上 remains available from ホーム. */
+/** Phones: the six sections as bottom tabs, with a short visual label for カレンダー. */
 export function HostTabBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -247,18 +247,19 @@ export function HostTabBar() {
       {/* Keeps the end of the page clear of the fixed bar. */}
       <div aria-hidden="true" className="h-[var(--host-tabbar)] md:hidden" />
       <nav aria-label={NAV_LABEL} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-canvas px-1 pt-1.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:hidden">
-        <ul className="grid grid-cols-5">
-          {HOST_NAV.filter((item) => item.href !== "/host/sales").map((item) => {
+        <ul className="grid grid-cols-6">
+          {HOST_NAV.map((item) => {
             const active = isHostNavActive(pathname, item.href);
             return (
               <li key={item.href}>
                 <Link
                   href={withProvider(item.href, providerId)}
+                  aria-label={item.href === "/host/calendar" ? "予定（カレンダー）" : undefined}
                   aria-current={active ? "page" : undefined}
                   className={`flex h-[46px] flex-col items-center justify-center gap-0.5 rounded-[10px] text-xs leading-tight font-bold ${active ? "text-ink" : "text-muted hover:text-ink"}`}
                 >
                   <HostIcon name={NAV_ICONS[item.href]} className="size-[22px]" />
-                  <span>{item.label}</span>
+                  <span>{item.href === "/host/calendar" ? "予定" : item.label}</span>
                 </Link>
               </li>
             );
