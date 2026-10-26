@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "メッセージ" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** http mode until NIHO's API has the questions and booking messages (#87; niho-app#19319/#19238): nothing that pretends to work. */
+/** HTTP rollout gate while the provider booking conversation contract is disabled. */
 function MessagesUnavailable({ homeHref }: { homeHref: string }) {
   return (
     <>
@@ -23,7 +23,7 @@ function MessagesUnavailable({ homeHref }: { homeHref: string }) {
         <PageHead title="メッセージ" />
         <section className={`${HOST_SURFACE} px-5 py-8 md:px-6 md:py-10`}>
           <p className="font-extrabold">この画面は準備中です</p>
-          <p className="mt-1 text-ink-soft">予約前の質問と予約者との連絡は、NIHO との接続ができしだいここから読み書きできるようになります。</p>
+          <p className="mt-1 text-ink-soft">予約後のWeb返信と予約者への個別連絡は、NIHO との接続を有効にしたあと、ここから読み書きできます。予約前の質問はまだ利用できません。</p>
         </section>
       </HostPageBody>
     </>
@@ -47,9 +47,10 @@ export default async function HostMessagesPage({ searchParams }: { searchParams:
   // The first `?thread=` (or `?booking=`), as the screen reads it.
   const thread = [query.thread].flat()[0] || null;
   const booking = [query.booking].flat()[0] || null;
-  if (providerOperationsEnabled()) return <HostLiveBookings key={`${provider.id}/messages`} providerId={provider.id} initialBookingId={booking} mode="messages" />;
+  const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
+  if (providerOperationsEnabled()) return <><HostSubHeader backHref={homeHref} backLabel="ホーム" title="" /><HostLiveBookings key={`${provider.id}/messages`} providerId={provider.id} initialBookingId={booking} mode="messages" /></>;
   const { list, requested, experiences, today, now } = await loadHostMessages(provider, { thread, booking });
-  if (list.status === "unavailable") return <MessagesUnavailable homeHref={withProvider(HOST_HOME_PATH, linkProviderId)} />;
+  if (list.status === "unavailable") return <MessagesUnavailable homeHref={homeHref} />;
   // Another provider's thread or booking, a booking that can no longer be written to, or none at all.
   if (requested?.status === "missing") notFound();
   return (

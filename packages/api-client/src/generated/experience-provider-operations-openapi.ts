@@ -205,6 +205,7 @@ export type components = {
             /** Format: date-time */
             endAt: string;
             guestEmail: string;
+            guestMessages: components["schemas"]["GuestMessage"][];
             guestName: string;
             headCount: number;
             hostMessages: components["schemas"]["HostMessage"][];
@@ -286,7 +287,14 @@ export type components = {
             refundedYen: number;
             status: components["schemas"]["KnownBookingStatus"];
         };
+        GuestMessage: {
+            body: string;
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+        };
         HostMessage: {
+            body: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -314,8 +322,16 @@ export type components = {
             body: string;
             subject: string;
         };
+        MessageReceipt: {
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            /** Format: date-time */
+            sentAt: string | null;
+            subject: string;
+        };
         MessageResponse: {
-            message: components["schemas"]["HostMessage"];
+            message: components["schemas"]["MessageReceipt"];
         };
         /** @enum {string} */
         OperationalProviderRole: "OWNER" | "COHOST";

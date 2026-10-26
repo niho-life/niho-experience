@@ -27,6 +27,14 @@ describe("experience provider operations selected contract", () => {
     expect(recorded.trim()).toBe(`${hash}  ${name}`);
     expect(hash).toBe(EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT.sha256);
     expect(document.info.version).toBe(EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT.version);
+    const manifest = JSON.parse(await readFile(new URL("../contract/experience-provider-operations-api.manifest.json", import.meta.url), "utf8")) as {
+      version: string; sourceCommit: string; sha256: string;
+    };
+    expect(manifest).toMatchObject({
+      version: EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT.version,
+      sourceCommit: EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT.sourceCommit,
+      sha256: hash,
+    });
     expect(EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT.status).toBe("agreed-not-deployed");
     expect(await readFile(new URL("../src/generated/experience-provider-operations-openapi.ts", import.meta.url), "utf8")).toBe(
       await generateContractTypes("experience-provider-operations"),

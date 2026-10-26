@@ -89,9 +89,9 @@ export const EXPERIENCE_PREPARATIONS_API_CONTRACT = {
 
 /** 提供者チームと日常の予約運営だけを選別した契約。配備・受入まではHTTPを既定OFFにする。 */
 export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
-  version: "1.0.0",
-  sourceCommit: "3c742592574e8d61377cb89a817b24b76917ff56",
-  sha256: "5454e0097759d9d19a66e63f4cb63a3166eaf0d72c786e54e3828741733af2fb",
+  version: "1.1.0",
+  sourceCommit: "e0f3bf8226f777eef421d534163b92ff9e5394f1",
+  sha256: "c5ffd259b811635eee0bcef7fa177ae96c02cafe0b752071364526b86416e749",
   status: "agreed-not-deployed",
   deploymentStatus: "not-deployed",
 } as const;

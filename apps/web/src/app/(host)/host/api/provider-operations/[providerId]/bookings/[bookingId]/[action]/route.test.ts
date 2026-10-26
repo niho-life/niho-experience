@@ -37,7 +37,7 @@ describe("provider booking action BFF", () => {
     mocks.allowed.mockReturnValue(true);
     mocks.approve.mockResolvedValue({ ok: true, data: { status: "CONFIRMED" } });
     mocks.decline.mockResolvedValue({ ok: true, data: { status: "DECLINED" } });
-    mocks.message.mockResolvedValue({ ok: true, data: { message: { id: "m1", subject: "確認", createdAt: "2026-10-27T00:00:00.000Z", sentAt: null, failed: false, deliveryStatus: "QUEUED" } } });
+    mocks.message.mockResolvedValue({ ok: true, data: { message: { id: "m1", subject: "確認", createdAt: "2026-10-27T00:00:00.000Z", sentAt: null } } });
     mocks.load.mockResolvedValue({ ok: true, client: { approveBooking: mocks.approve, declineBooking: mocks.decline, messageGuest: mocks.message } });
     mocks.failure.mockImplementation(() => Response.json({ error: "upstream" }, { status: 502 }));
   });
@@ -68,6 +68,7 @@ describe("provider booking action BFF", () => {
   it("sends only pageId, subject and body for a reply", async () => {
     const response = await POST(request({ pageId: "page_1", subject: "確認", body: "合成の本文" }), context("message"));
     expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ message: { id: "m1" } });
     expect(mocks.message).toHaveBeenCalledWith("provider_1", "page_1", "booking_1", { subject: "確認", body: "合成の本文" });
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");

@@ -31,26 +31,26 @@ const listPage = (detail = pageDetail) => ({ checkoutEnabled: true, pages: [{
 }] });
 
 const bookingListItem = (id: string, title: string, status: "PENDING" | "PROVISIONAL" = "PROVISIONAL") => ({
-  id, spotId: "synthetic-spot", pageId: PAGE, offerId: "offer-1", occurrenceDate: "2026-11-08", startAt: "2026-11-08T01:00:00.000Z", endAt: "2026-11-08T02:30:00.000Z",
-  headCount: 2, adultCount: 2, childCount: 0, offerNameSnapshot: "午前の合成商品", totalYenSnapshot: 10000,
-  guestName: `合成予約者 ${id}`, guestEmail: `${id}@example.test`, note: "アレルギーはありません（合成）", questionAnswersJson: null,
-  paidAt: null, authorizedAt: null, cancelledAt: null, refundedYen: 0, createdAt: now, experienceSiteListingId: null,
-  sellerDisplayNameSnapshot: "合成提供者", page: { title }, status, salesChannel: "EXPERIENCE_SITE",
+  id, occurrenceDate: "2026-11-08", startAt: "2026-11-08T01:00:00.000Z",
+  headCount: 2, offerName: "午前の合成商品", totalYen: 10000,
+  guestName: `合成予約者 ${id}`, pageTitle: title, status, salesChannel: "EXPERIENCE_SITE",
 });
-const bookingDetail = (item: ReturnType<typeof bookingListItem>, status: string, messages: unknown[] = []) => ({
+const bookingDetail = (item: ReturnType<typeof bookingListItem>, status: string, messages: unknown[] = [], guestMessages: unknown[] = []) => ({
   booking: {
-    id: item.id, offerId: item.offerId, offerName: item.offerNameSnapshot, occurrenceDate: item.occurrenceDate, startAt: item.startAt, endAt: item.endAt,
-    headCount: item.headCount, adultCount: item.adultCount, childCount: item.childCount, guestName: item.guestName, guestEmail: item.guestEmail,
-    languageSnapshot: "JA", note: item.note, answers: null, status, unitPriceYen: 5000, adultPriceYen: 5000, childPriceYen: 2500,
-    totalYen: item.totalYenSnapshot, paidAt: null, authorizedAt: null, approvalDeadlineAt: "2026-11-01T00:00:00.000Z",
-    travelerCancelRequestedAt: null, cancelledAt: null, cancelReason: null, cancelMessage: null, refundedYen: 0, createdAt: now,
-    salesChannel: "EXPERIENCE_SITE", hostMessages: messages, pageId: PAGE, page: item.page,
+    id: item.id, pageId: PAGE, pageTitle: item.pageTitle, offerName: item.offerName, occurrenceDate: item.occurrenceDate, startAt: item.startAt, endAt: "2026-11-08T02:30:00.000Z",
+    adultCount: item.headCount, childCount: 0, guestName: item.guestName,
+    languageSnapshot: "EN", note: "アレルギーはありません（合成）", answers: null, status,
+    totalYen: item.totalYen,
+    salesChannel: "EXPERIENCE_SITE", hostMessages: messages, guestMessages,
   },
-  sender: { displayName: "合成提供者", replyToEmails: ["synthetic-provider@example.test"] },
 });
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body), headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" } });
 const noOverflow = async (page: Page) => { expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); await page.screenshot({ path: test.info().outputPath("screen.png"), scale: "css" }); };
+const backToLiveList = async (page: Page, label: "予約一覧" | "会話一覧") => {
+  const back = page.getByRole("button", { name: `‹ ${label}` });
+  if (await back.isVisible()) await back.click();
+};
 
 test("owner adds two exact-email cohosts and removes one from the current backend roster", async ({ page }) => {
   const members = [{ userId: "sample-user", displayName: "サンプル ホスト", role: "OWNER" }];
@@ -154,6 +154,7 @@ test("cohost approves, declines and replies only after authoritative booking re-
   const allBookings = [first, second, pending];
   const statuses = new Map<string, string>(allBookings.map((item) => [item.id, item.status]));
   const messages = new Map<string, unknown[]>(allBookings.map((item) => [item.id, []]));
+  const guestMessages = new Map<string, unknown[]>(allBookings.map((item) => [item.id, item.id === first.id ? [{ id: "guest-message-1", body: "Thank you. We will be there.", createdAt: now }] : []]));
   let revoked = false; let approveAttempts = 0; let failDetailAfterMessage = false;
   await page.route(`**/host/api/provider-operations/${PROVIDER}/bookings**`, async (route) => {
     if (revoked) return json(route, { error: "permission_ended" }, 404);
@@ -162,17 +163,20 @@ test("cohost approves, declines and replies only after authoritative booking re-
     if (request.method() === "GET") {
       if (failDetailAfterMessage) { failDetailAfterMessage = false; return json(route, { error: "upstream_unavailable" }, 502); }
       const item = allBookings.find((candidate) => candidate.id === bookingId)!;
-      return json(route, bookingDetail(item, statuses.get(item.id)!, messages.get(item.id)));
+      return json(route, bookingDetail(item, statuses.get(item.id)!, messages.get(item.id), guestMessages.get(item.id)));
     }
     const action = bookingId; const id = parts.at(-2)!; const item = allBookings.find((candidate) => candidate.id === id)!;
     if (action === "approve") { approveAttempts += 1; if (approveAttempts === 1) return route.abort("failed"); statuses.set(id, "CONFIRMED"); return json(route, { status: "CONFIRMED" }); }
     if (action === "decline") { statuses.set(id, "DECLINED"); return json(route, { status: "DECLINED" }); }
-    if (action === "message") { const sent = { id: "message-1", subject: request.postDataJSON().subject, createdAt: later, sentAt: null, failed: false, deliveryStatus: "QUEUED" }; messages.get(id)!.push(sent); failDetailAfterMessage = true; return json(route, { message: sent }, 201); }
-    return json(route, bookingDetail(item, statuses.get(id)!, messages.get(id)));
+    if (action === "message") { const sent = { id: "message-1", subject: request.postDataJSON().subject, body: request.postDataJSON().body, createdAt: later, sentAt: null, failed: false, deliveryStatus: "QUEUED" }; messages.get(id)!.push(sent); failDetailAfterMessage = true; return json(route, { message: { id: sent.id } }, 201); }
+    return json(route, bookingDetail(item, statuses.get(id)!, messages.get(id), guestMessages.get(id)));
   });
   await page.goto("/host/auth/mock-login?mock=cohost");
   await page.goto(`/host/bookings?providerId=${PROVIDER}`);
   await page.getByRole("button", { name: /合成の手仕事体験/ }).click();
+  await expect(page.getByText("Thank you. We will be there.")).toBeVisible();
+  await expect(page.getByText("予約者（Web）・原文")).toBeVisible();
+  await expect(page.getByText(/@example\.test/)).toHaveCount(0);
   await page.getByRole("button", { name: "承認する" }).click();
   const approvalDialog = page.getByRole("dialog");
   await expect(approvalDialog.getByText("カードに請求し、決済できたら予約が確定します。")).toBeVisible();
@@ -187,18 +191,24 @@ test("cohost approves, declines and replies only after authoritative booking re-
   await page.getByRole("button", { name: "承認する" }).click();
   await page.getByRole("button", { name: "決済して承認" }).click();
   await expect(page.getByRole("status").filter({ hasText: "予約を承認しました" })).toBeVisible();
+  await backToLiveList(page, "予約一覧");
   await page.getByRole("button", { name: /支払い確認中の合成体験/ }).click();
   await expect(page.getByRole("button", { name: "承認する" })).toHaveCount(0);
+  await backToLiveList(page, "予約一覧");
   await page.getByRole("button", { name: /午後の合成体験/ }).click();
   await page.getByRole("button", { name: "お断りする" }).click();
   await page.getByRole("button", { name: "申込を断る" }).click();
   await expect(page.getByRole("status").filter({ hasText: "予約をお断りしました" })).toBeVisible();
   await page.getByLabel("件名").fill("合成の開催案内");
   await page.getByLabel("本文").fill("集合時刻をご確認ください（合成）。");
-  await page.getByRole("button", { name: "返信を送る" }).click();
+  await page.getByRole("button", { name: "送信内容を確認" }).click();
+  const messageDialog = page.getByRole("dialog");
+  await expect(messageDialog).toContainText("合成の開催案内");
+  await expect(messageDialog).toContainText("集合時刻をご確認ください（合成）。");
+  await page.getByRole("button", { name: "この内容で送る" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "履歴を確認するまで次の送信はできません" })).toBeVisible();
   await expect(page.getByLabel("件名")).toHaveValue("合成の開催案内");
-  await expect(page.getByRole("button", { name: "返信を送る" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "送信内容を確認" })).toBeDisabled();
   await page.getByRole("button", { name: "最新状態を確認" }).click();
   await expect(page.getByText("合成の開催案内")).toBeVisible();
   await expect(page.getByText(/配信待ち/)).toBeVisible();
@@ -207,7 +217,7 @@ test("cohost approves, declines and replies only after authoritative booking re-
   await page.getByRole("region", { name: "予約の詳細" }).evaluate((element) => element.scrollIntoView({ block: "start" }));
   await page.screenshot({ path: test.info().outputPath("booking-reply.png"), scale: "css" });
   revoked = true; await page.reload();
-  await expect(page.getByRole("alert").filter({ hasText: "権限が終了しています" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "権限がありません" })).toBeVisible();
   await noOverflow(page);
 });
 
@@ -236,18 +246,21 @@ test("a late booking response cannot replace the selected recipient and reply dr
   await page.goto(`/host/messages?providerId=${PROVIDER}`);
   await page.getByRole("button", { name: /遅い合成予約/ }).click();
   await slowStarted;
+  await backToLiveList(page, "会話一覧");
   await page.getByRole("button", { name: /選択中の合成予約/ }).click();
-  const detailRegion = page.getByRole("region", { name: "予約の詳細" });
+  const detailRegion = page.getByRole("region", { name: "予約者との会話" });
   await expect(detailRegion.getByText("合成予約者 booking-fast")).toBeVisible();
   releaseSlow();
   await slowFinished;
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(detailRegion.getByText("合成予約者 booking-fast")).toBeVisible();
-  await expect(page.getByRole("region", { name: "予約の詳細" }).getByText("合成予約者 booking-slow")).toHaveCount(0);
+  await expect(detailRegion.getByText("合成予約者 booking-slow")).toHaveCount(0);
   await page.getByLabel("件名").fill("fastだけの下書き");
   await page.getByLabel("本文").fill("別の予約には表示しない合成本文");
+  await backToLiveList(page, "会話一覧");
   await page.getByRole("button", { name: /遅い合成予約/ }).click();
   await expect(page.getByLabel("件名")).toHaveValue("");
+  await backToLiveList(page, "会話一覧");
   await page.getByRole("button", { name: /選択中の合成予約/ }).click();
   await expect(page.getByLabel("件名")).toHaveValue("fastだけの下書き");
   await noOverflow(page);

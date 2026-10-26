@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canDecideLiveBooking, findUncertainMessage } from "./live-booking-state";
 
-const message = (id: string, subject: string) => ({ id, subject, createdAt: "2026-10-27T00:00:00.000Z", sentAt: null, failed: false, deliveryStatus: "QUEUED" as const });
+const message = (id: string, subject: string) => ({ id, subject, body: "Synthetic body", createdAt: "2026-10-27T00:00:00.000Z", sentAt: null, failed: false, deliveryStatus: "QUEUED" as const });
 
 describe("live booking state", () => {
   it("allows decisions only for the canonical provisional state", () => {
