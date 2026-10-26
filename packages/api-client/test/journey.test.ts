@@ -19,6 +19,8 @@ import {
   isValidGuestPhone,
   normalizeGuestPhone,
   usableConditions,
+  usableFaq,
+  EXPERIENCE_FAQ_LIMITS,
   type AskHostRequest,
   type ExperienceCheckoutJourneyFields,
 } from "../src/journey.ts";
@@ -105,7 +107,7 @@ describe("参加の条件の fixture", () => {
   it("mock の体験すべてで参照でき、実在しない slug でも壊れない", () => {
     const all = [...buildFixtureExperiences(), ...buildPilotExperiences()];
     for (const experience of all) expect(() => journeyExtrasFor(experience.slug)).not.toThrow();
-    expect(journeyExtrasFor("no-such-slug")).toEqual({ enabled: true, conditions: null, questionsOpen: true, reviews: { status: "ok", summary: { count: 0, average: null, tags: [] }, items: [] } });
+    expect(journeyExtrasFor("no-such-slug")).toEqual({ enabled: true, conditions: null, questionsOpen: true, reviews: { status: "ok", summary: { count: 0, average: null, tags: [] }, items: [] }, faq: [] });
   });
 
   it("条件が空・版が空なら使えない条件として扱う", () => {
@@ -113,7 +115,66 @@ describe("参加の条件の fixture", () => {
     expect(usableConditions({ version: "", items: [{ kind: "AGE", headline: "x", detail: null, consentText: null }] })).toBeNull();
     expect(usableConditions({ version: "v1", items: [] })).toBeNull();
     expect(usableConditions(journeyExtrasFor(ZEN).conditions)).not.toBeNull();
-    expect(NO_JOURNEY_EXTRAS).toEqual({ enabled: false, conditions: null, questionsOpen: false, reviews: null });
+    expect(NO_JOURNEY_EXTRAS).toEqual({ enabled: false, conditions: null, questionsOpen: false, reviews: null, faq: [] });
+  });
+});
+
+describe("よくある質問（#146・仮契約）", () => {
+  it("合成の dinner に 10 の話題を含む 10 問以上があり、上限に収まり、usableFaq を通しても減らない", () => {
+    const faq = journeyExtrasFor(DINNER).faq;
+    expect(faq.length).toBeGreaterThanOrEqual(10);
+    expect(faq.length).toBeLessThanOrEqual(EXPERIENCE_FAQ_LIMITS.maxItems);
+    expect(usableFaq(faq)).toEqual(faq);
+    for (const item of faq) {
+      expect(item.question.length).toBeLessThanOrEqual(EXPERIENCE_FAQ_LIMITS.questionMaxLength);
+      expect(item.answer.length).toBeLessThanOrEqual(EXPERIENCE_FAQ_LIMITS.answerMaxLength);
+    }
+    const text = faq.map((item) => `${item.question} ${item.answer}`).join(" ").toLowerCase();
+    for (const topic of ["wear", "language", "children", "late", "rain", "allergies", "photos", "take home", "cancellation", "pay"]) expect(text, topic).toContain(topic);
+    expect(findSensitiveValues(faq)).toEqual([]);
+  });
+
+  it("pilot（実在のホスト）と FAQ の無い合成の体験は空", () => {
+    for (const experience of buildPilotExperiences()) expect(journeyExtrasFor(experience.slug).faq).toEqual([]);
+    expect(journeyExtrasFor(INDIGO).faq).toEqual([]);
+  });
+
+  it("空・上限超え・重複・読めない形の問いを落とし、件数を上限で切る", () => {
+    const long = (n: number) => "x".repeat(n);
+    expect(usableFaq(null)).toEqual([]);
+    expect(usableFaq(undefined)).toEqual([]);
+    expect(usableFaq([
+      { question: "  Is it OK?  ", answer: "  Yes.  " },
+      { question: "is it ok?", answer: "A duplicate question." },
+      { question: " ", answer: "No question." },
+      { question: "No answer?", answer: "" },
+      { question: long(EXPERIENCE_FAQ_LIMITS.questionMaxLength + 1), answer: "Too long a question." },
+      { question: "Too long an answer?", answer: long(EXPERIENCE_FAQ_LIMITS.answerMaxLength + 1) },
+      { question: long(EXPERIENCE_FAQ_LIMITS.questionMaxLength), answer: long(EXPERIENCE_FAQ_LIMITS.answerMaxLength) },
+      { question: 1, answer: "Not text." },
+      null,
+      "text",
+    ])).toEqual([
+      { question: "Is it OK?", answer: "Yes." },
+      { question: long(EXPERIENCE_FAQ_LIMITS.questionMaxLength), answer: long(EXPERIENCE_FAQ_LIMITS.answerMaxLength) },
+    ]);
+    const many = Array.from({ length: EXPERIENCE_FAQ_LIMITS.maxItems + 5 }, (_, index) => ({ question: `Question ${index}?`, answer: "Answer." }));
+    expect(usableFaq(many)).toHaveLength(EXPERIENCE_FAQ_LIMITS.maxItems);
+    expect(usableFaq(many)[0]).toEqual({ question: "Question 0?", answer: "Answer." });
+  });
+});
+
+describe("合成のホスト紹介文（v1.1 の hosts[].bio）", () => {
+  it("合成のホストだけに紹介文があり、pilot のホストは null", async () => {
+    const client = createExperienceApiClient({ nihoWebOrigin: ORIGIN, fetch: createMockExperienceFetch({ catalog: "all", now: () => NOW }) });
+    const dinner = await client.getExperienceV11(DINNER);
+    expect(dinner.ok && dinner.data.experience.hosts[0]?.bio).toContain("(sample)");
+    const cycling = await client.getExperienceV11(CYCLING);
+    expect(cycling.ok && cycling.data.experience.hosts.every((host) => host.bio === null)).toBe(true);
+    for (const experience of buildPilotExperiences()) {
+      const pilot = await client.getExperienceV11(experience.slug);
+      expect(pilot.ok && pilot.data.experience.hosts.every((host) => host.bio === null), experience.slug).toBe(true);
+    }
   });
 });
 

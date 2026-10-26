@@ -21,6 +21,7 @@
 | [photo-requirements.md](photo-requirements.md) | 写真の技術要件・権利・同意・商品別の撮影リスト | #13 |
 | [booking-conditions.md](booking-conditions.md) | 料金・日時・言語・取消・天候・最少催行・遅刻の標準案（未適用） | #13 |
 | [operations.md](operations.md) | NIHOと提供者の運営分担を一枚にまとめたもの | #13 |
+| [guides.md](guides.md) | ガイド記事の項目・本文の書き方・公開手順（公開済みの記事だけをコミット） | #145 |
 | [../growth/funnel-measurement.md](../growth/funnel-measurement.md) | 予約ファネルのイベント契約と指標定義 | #14 |
 | [../growth/analytics-decision.md](../growth/analytics-decision.md) | 計測ツール・同意の方式・保存期間の決定案 | #14 |
 | [../growth/launch-kit.md](../growth/launch-kit.md) | 30日検証の文案・UTM付きリンク・QRの仕様（未承認の下書き） | #14 |

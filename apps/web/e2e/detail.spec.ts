@@ -84,3 +84,50 @@ test("public meeting overview is visible without exposing the private meeting po
   await expect(meeting.getByText("The meeting point is shared after your booking is confirmed.", { exact: true })).toBeVisible();
   await expect(meeting.getByRole("link", { name: "Open in Maps" })).toHaveCount(0);
 });
+
+// #146: the FAQ, the host's introduction and other experiences, all in the first HTML (mock data only).
+test("the FAQ is an h2 with one h3 per question in the initial HTML, and only where an experience has one", async ({ request }) => {
+  const html = await (await request.get(dinner)).text();
+  const section = html.slice(html.indexOf('id="faq"'));
+  expect(html).toMatch(/<section id="faq"[^>]*><h2[^>]*>Frequently asked questions<\/h2>/);
+  const questions = [...section.slice(0, section.indexOf("</section>")).matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
+  expect(questions.length).toBeGreaterThanOrEqual(10);
+  expect(questions).toContain("What should I wear?");
+  expect(questions).toContain("How do I pay?");
+  expect(html).toContain("Free cancellation until 24 hours before the start. After that, the booking cannot be refunded.");
+  // The FAQ comes before the cancellation terms.
+  expect(html.indexOf('id="faq"')).toBeLessThan(html.lastIndexOf(">Cancellation</h2>"));
+  const indigo = await (await request.get("/experiences/indigo-dyeing-with-an-artisan")).text();
+  expect(indigo).not.toContain('id="faq"');
+});
+
+test("the host's own introduction shows as text in the host section, and nothing when there is none", async ({ request }) => {
+  const html = await (await request.get(dinner)).text();
+  const host = html.slice(html.indexOf(">Your host</h2>"), html.indexOf(">What&#x27;s included</h2>"));
+  expect(host).toContain("Yui (sample) cooks for the regulars of a neighbourhood living room");
+  const cycling = await (await request.get("/experiences/seaside-cycling-and-market-breakfast")).text();
+  expect(cycling).not.toContain("An invented host for previews.");
+});
+
+test("other experiences are linked from the detail page, same themes first, never the page itself", async ({ request }) => {
+  const html = await (await request.get(dinner)).text();
+  const start = html.indexOf('id="related-experiences-heading"');
+  expect(start).toBeGreaterThan(-1);
+  const related = html.slice(start, html.indexOf("</section>", start));
+  expect(related).toContain(">More experiences in Kamakura</h2>");
+  const links = [...related.matchAll(/href="\/experiences\/([a-z0-9-]+)"/g)].map((match) => match[1]);
+  // Dinner is FOOD and LOCAL_LIFE: the cycling breakfast (FOOD) comes first.
+  expect([...new Set(links)]).toEqual(["seaside-cycling-and-market-breakfast", "indigo-dyeing-with-an-artisan", "evening-pottery-session"]);
+});
+
+test("the next bookable dates show near the title once availability is read, without seats left", async ({ page }) => {
+  await page.goto(dinner);
+  const next = page.locator("main header [data-next-dates]");
+  await expect(next).toBeVisible();
+  await expect(next.getByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/).first()).toBeVisible();
+  await expect(next).not.toContainText(/left|seat/i);
+  // An experience that takes no bookings shows no dates there.
+  await page.goto("/experiences/evening-pottery-session");
+  await expect(page.locator("main h1")).toBeVisible();
+  await expect(page.locator("main header [data-next-dates]")).toHaveCount(0);
+});

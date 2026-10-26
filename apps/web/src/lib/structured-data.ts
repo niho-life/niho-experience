@@ -1,5 +1,7 @@
 import type { JourneyReviews } from "@niho-experience/api-client";
+import type { Guide } from "@/content/guides/types";
 import type { ExperienceDetailForSite } from "./experience-types";
+import { shareableGuideImage } from "./guides";
 import { reviewDisplay } from "./reviews-ui";
 import { safeHttpsUrl } from "./safe-url";
 
@@ -115,6 +117,31 @@ export function siteJsonLd(siteUrl: string, siteName: string): JsonLd {
       { "@type": "Organization", "@id": organization, name: siteName, url: `${siteUrl}/` },
       { "@type": "WebSite", "@id": `${siteUrl}/#website`, name: siteName, url: `${siteUrl}/`, inLanguage: "en", publisher: { "@id": organization } },
     ],
+  };
+}
+
+/**
+ * A guide as an `Article`, saying only what the page shows: the title, description, author (name and role), the published and
+ * updated dates and the URL. The publisher is the site's `Organization` (the same `@id`, name and URL as the home page's).
+ * The hero is included only when its rights cover sharing (`hero.licensed`). Unlike experiences, the sample guides of the
+ * mock preview carry it too: the article says nothing beyond the page, and preview pages are `noindex`.
+ */
+export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: string): JsonLd {
+  const url = `${siteUrl}/guides/${guide.slug}`;
+  const image = shareableGuideImage(guide, siteUrl);
+  return {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: guide.title,
+    description: guide.description,
+    url,
+    mainEntityOfPage: { "@type": "WebPage", "@id": url },
+    inLanguage: "en",
+    author: { "@type": "Person", name: guide.author.name, jobTitle: guide.author.role },
+    datePublished: guide.publishedAt,
+    dateModified: guide.updatedAt,
+    publisher: { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: siteName, url: `${siteUrl}/` },
+    ...(image ? { image: [image] } : {}),
   };
 }
 

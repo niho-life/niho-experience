@@ -8,6 +8,9 @@
  * - 参加の条件・同意・電話番号・決済後の戻り先は niho-coliving/niho-app#19335 に下書きの契約（公開契約 1.4.0・詳細は
  *   `GET /api/public/experiences/v1.4/{experienceSlug}` の `conditions`）があり、下の型と限度はそれに合わせてある。
  *   版が他の PR（#19330 の電話番号、#19168 の v1.2 一覧）と重なっているので、NIHO 側で版が決まって main に入ってから契約を写す。
+ * - 体験の FAQ（`faq`・#146）は NIHO 側にまだ Issue も契約も無い。公開 API へ質問と答えの配列を足す依頼を連携A（担当2）から
+ *   NIHO 側へ出す必要がある（ホスト紹介文 `hosts[].bio` は v1.1 の契約に既にある）。それまでは mock だけが合成の FAQ を返し、
+ *   実 API の配備では節を出さない。
  * - 契約が出たら、この型を生成された型の別名へ置き換え、`fixtures/journey.ts` と mock の経路を消す。
  *   画面は `JourneyDetailExtras` を作る 1 か所（apps/web の `lib/journey.ts`）だけが契約の形を知る。
  */
@@ -64,10 +67,44 @@ export type JourneyDetailExtras = {
   questionsOpen: boolean;
   /** レビュー。null はこの配備にレビューの機能が無い（"New" の印も節も出さない）。 */
   reviews: JourneyReviews | null;
+  /** よくある質問（{@link usableFaq} を通したもの）。空なら節を出さない。 */
+  faq: ExperienceFaqItem[];
 };
 
 /** 実 API に無い間の値。画面は新しい部品を出さない。 */
-export const NO_JOURNEY_EXTRAS: JourneyDetailExtras = { enabled: false, conditions: null, questionsOpen: false, reviews: null };
+export const NO_JOURNEY_EXTRAS: JourneyDetailExtras = { enabled: false, conditions: null, questionsOpen: false, reviews: null, faq: [] };
+
+/* ---------- よくある質問（#146・NIHO 側の契約は未依頼：連携A） ---------- */
+
+/** 体験の FAQ の 1 問。文はホスト・NIHO が書いた体験の言語のもので、画面は組み立てない。どちらも書式なしの文。 */
+export type ExperienceFaqItem = { question: string; answer: string };
+
+/** 案の上限。質問は見出し（h3）になるので短く、答えは数段落まで。 */
+export const EXPERIENCE_FAQ_LIMITS = { maxItems: 30, questionMaxLength: 200, answerMaxLength: 1200 } as const;
+
+/**
+ * 画面に出せる FAQ。前後の空白を落とし、空・上限を超える問い（途中で切った文は見せない）と同じ質問の 2 回目を除き、
+ * 先頭から上限の件数までにする。読めない形（配列でない・文字列でない）は空として扱う。
+ */
+export function usableFaq(faq: readonly unknown[] | null | undefined): ExperienceFaqItem[] {
+  if (!Array.isArray(faq)) return [];
+  const items: ExperienceFaqItem[] = [];
+  const seen = new Set<string>();
+  for (const entry of faq) {
+    if (items.length === EXPERIENCE_FAQ_LIMITS.maxItems) break;
+    if (typeof entry !== "object" || entry === null) continue;
+    const { question, answer } = entry as Record<string, unknown>;
+    if (typeof question !== "string" || typeof answer !== "string") continue;
+    const q = question.trim();
+    const a = answer.trim();
+    if (!q || !a || q.length > EXPERIENCE_FAQ_LIMITS.questionMaxLength || a.length > EXPERIENCE_FAQ_LIMITS.answerMaxLength) continue;
+    const key = q.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({ question: q, answer: a });
+  }
+  return items;
+}
 
 /** 同意の対象にする条件の文（`consentText`）。空なら「Before you book」は出さない。 */
 export function conditionConsentTexts(conditions: ExperienceConditions | null): string[] {

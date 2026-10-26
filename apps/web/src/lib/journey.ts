@@ -1,12 +1,12 @@
 import "server-only";
-import { NO_JOURNEY_EXTRAS, usableConditions, type ExperienceReviewSummary, type JourneyDetailExtras } from "@niho-experience/api-client";
+import { NO_JOURNEY_EXTRAS, usableConditions, usableFaq, type ExperienceReviewSummary, type JourneyDetailExtras } from "@niho-experience/api-client";
 import { config } from "./config";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
  * The guest-journey data that the NIHO contract does not carry yet (Epic #103): participation conditions, whether questions
- * to the host are open, and the reviews. Only the mock serves it; with a real API this is empty and the screens show none of
+ * to the host are open, the reviews, and the FAQ (#146; the NIHO-side contract still has to be requested). Only the mock serves it; with a real API this is empty and the screens show none of
  * the new parts. When NIHO's contract lands, read and validate it here so the screens keep using `JourneyDetailExtras`.
  * `?mock=reviews-error` makes the reviews read fail (the mock preview only), to see the page without them.
  */
@@ -19,6 +19,7 @@ export async function getJourneyExtras(slug: string, searchParams?: SearchParams
     conditions: usableConditions(extras.conditions),
     questionsOpen: extras.questionsOpen,
     reviews: searchParams?.mock === "reviews-error" ? { status: "unavailable" } : extras.reviews,
+    faq: usableFaq(extras.faq),
   };
 }
 

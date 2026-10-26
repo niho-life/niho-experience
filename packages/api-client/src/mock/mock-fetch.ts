@@ -88,6 +88,16 @@ const MOCK_THEMES: Readonly<Record<string, readonly ExperienceSiteTheme[]>> = {
 const MOCK_MEETING_OVERVIEWS: Readonly<Record<string, string>> = {
   "indigo-dyeing-with-an-artisan": "A small indigo studio in Kamakura.",
 };
+// Synthetic host introductions (v1.1 `hosts[].bio`) for the invented hosts only. Pilot hosts keep `bio: null`
+// until their own approved wording exists (AGENTS.md); the cycling host keeps null to show the page without one.
+const MOCK_HOST_BIOS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "home-cooked-dinner-with-locals": {
+    "Yui (sample)": "Yui (sample) cooks for the regulars of a neighbourhood living room and likes simple dishes made from what nearby farmers bring in. An invented host for previews.",
+  },
+  "indigo-dyeing-with-an-artisan": {
+    "Aiko (sample)": "Aiko (sample) dyes cloth with natural indigo in a small home studio and teaches beginners one step at a time. An invented host for previews.",
+  },
+};
 
 function json(status: number, body: unknown, cacheControl: string, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -163,7 +173,7 @@ function toV11(experience: ExperienceDetail): ExperienceDetailV11 {
     ...experience,
     cover: withAlt(experience.cover, experience.title),
     photos: experience.photos.map((image, index) => ({ ...image, alt: `${experience.title} ${index + 1}` })),
-    hosts: experience.hosts.map((host) => ({ ...host, avatar: withAlt(host.avatar, null), bio: null })),
+    hosts: experience.hosts.map((host) => ({ ...host, avatar: withAlt(host.avatar, null), bio: MOCK_HOST_BIOS[experience.slug]?.[host.displayName] ?? null })),
     provider: { ...experience.provider, logo: withAlt(experience.provider.logo, null) },
     meetingOverview: MOCK_MEETING_OVERVIEWS[experience.slug] ?? null,
   };
