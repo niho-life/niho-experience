@@ -54,6 +54,7 @@ for (const [crawler, userAgent] of Object.entries(CRAWLERS)) {
 test("the home page names the organization and the website for crawlers", async ({ request }) => {
   const html = await (await request.get("/")).text();
   expect(html).toContain('"@type":"Organization"');
+  expect(html).toContain('"alternateName":"NIHO Experience, Kamakura"');
   expect(html).toContain('"@type":"WebSite"');
   expect(html).not.toContain('"logo"');
 });

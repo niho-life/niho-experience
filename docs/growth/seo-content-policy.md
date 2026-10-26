@@ -69,6 +69,22 @@
 
 英語版は自分自身（`en`）と `x-default` のhreflangを出す。日本語版が公開されたページだけ、各言語版に自己参照canonicalと相互のhreflang（`en`・`ja`・`x-default`）を付ける（[#139](https://github.com/niho-life/niho-experience/issues/139)。日本語版（#59）の準備として先に出す側に寄せた）。実在しない言語版をhreflangに書かない。
 
+### 日本語版の題名と検索語（案・[#154](https://github.com/niho-life/niho-experience/issues/154)）
+
+日本語の「鎌倉 体験」は英語の「kamakura experience」より2桁多く検索され、上位は集約サイトと媒体記事で、運営者本人の詳細ページが無い（[seo-growth-strategy.md](seo-growth-strategy.md)）。日本語版は英語の原稿を人が確認した翻訳が揃ってから公開する（[copy-guidelines.md](../content/copy-guidelines.md)、[#59](https://github.com/niho-life/niho-experience/issues/59)）。日本語の題名・説明文はNIHOの公開文書が正本で、画面側では作らない。次は翻訳と確認をする人が使う目安。
+
+| ページ | 狙う語（Keyword Planner・全地域） | 題名・本文で守ること |
+| --- | --- | --- |
+| `/ja/experiences` | 鎌倉 体験（1,000〜1万）、鎌倉 ワークショップ（100〜1,000） | 題名に「鎌倉」と「体験」を入れる。提供者本人が書いた詳細と、少人数・英語対応であることを説明文に |
+| `/ja/experiences/kamakura-community-dinner` | 鎌倉 夜（100〜1,000）、鎌倉 夜 ごはん | 寺社が閉まる17時以降の過ごし方として書く。少人数・予約制 |
+| `/ja/experiences/kamakura-coffee-roasting` | 鎌倉 焙煎 体験（未取得） | 焙煎した豆を持ち帰れること |
+| `/ja/experiences/engakuji-zen-meditation` | 鎌倉 座禅（100〜1,000）、座禅 体験 初心者 | 検索は「座禅」、寺は「坐禅」と書くので、本文で両方を自然に使う。円覚寺・建長寺に無料の坐禅会があることを書き、違い（英語の案内・少人数・予約制）を正直に。無料会の現況は寺に確認してから書く |
+| `/ja/experiences/kamakura-ceramic-mending` | 鎌倉 金継ぎ（100〜1,000）＋「体験」 | 漆ではなく接着剤で継ぐことを冒頭に書く（[product-ledger.md](../content/product-ledger.md)）。「本漆」「伝統的な金継ぎ」と書かない。英語の kintsugi-inspired に当たる日本語は翻訳の確認で決める |
+| `/ja/experiences/kamakura-calligraphy` | 鎌倉 書道（10〜100）＋「体験」 | 選んだ言葉を書いて持ち帰れること |
+
+- 日本語の記事（「鎌倉 座禅 体験 初心者」「鎌倉 夜 ごはん 地元の人と」など）は、記事の基盤（[#145](https://github.com/niho-life/niho-experience/issues/145)）と英語の記事（[#147](https://github.com/niho-life/niho-experience/issues/147)・[#148](https://github.com/niho-life/niho-experience/issues/148)）の後に、同じ論理ページの日本語版として作る。
+- 日本語版の順位は日本の検索環境で見る（[funnel-measurement.md](funnel-measurement.md) の「検索・AI 回答の月次観測」）。
+
 ## 内部リンク
 
 - トップ→体験一覧→体験詳細の順にたどれる。どの体験詳細もトップから2クリック以内。

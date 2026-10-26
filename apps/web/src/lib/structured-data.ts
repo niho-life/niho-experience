@@ -108,13 +108,16 @@ export function experienceProductJsonLd(e: ExperienceDetailForSite, siteUrl: str
   };
 }
 
-/** The site and its operator, for the home page. No logo until approved artwork exists. */
-export function siteJsonLd(siteUrl: string, siteName: string): JsonLd {
+/**
+ * The site and its operator, for the home page. No logo until approved artwork exists.
+ * `listingName` is the name used on listings, so search and AI answers can match them to this site (#152).
+ */
+export function siteJsonLd(siteUrl: string, siteName: string, listingName: string): JsonLd {
   const organization = `${siteUrl}/#organization`;
   return {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": "Organization", "@id": organization, name: siteName, url: `${siteUrl}/` },
+      { "@type": "Organization", "@id": organization, name: siteName, alternateName: listingName, url: `${siteUrl}/` },
       { "@type": "WebSite", "@id": `${siteUrl}/#website`, name: siteName, url: `${siteUrl}/`, inLanguage: "en", publisher: { "@id": organization } },
     ],
   };

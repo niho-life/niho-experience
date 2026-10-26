@@ -1,6 +1,6 @@
 # 30日検証のローンチキット（文案・リンク・QR）
 
-最終更新：2026-10-19（担当3）。対象：[#14](https://github.com/niho-life/niho-experience/issues/14)、[pilot-30day-plan.md](pilot-30day-plan.md)。
+最終更新：2026-10-26（名前の表記と YouTube のリンクを追加）。対象：[#14](https://github.com/niho-life/niho-experience/issues/14)、[#152](https://github.com/niho-life/niho-experience/issues/152)、[pilot-30day-plan.md](pilot-30day-plan.md)。
 **すべて未承認の下書き。** 配布・掲示・投稿・連絡は、本番運用の開始後にオーナーが行う（2026-10-19のオーナー決定）。印刷物に価格と日程を載せない。現在は予約不可のテストサイトで5商品の雰囲気を確認する段階である。下のURLは本番ドメインの予定値で、2026-10-19時点ではDNSが引けないため配布できない。
 
 ## 使う前のチェック
@@ -10,6 +10,22 @@
 - [ ] `https://experience.niho.life` のDNS・TLS・本番ページが開き、5商品のうち案内する商品が実際に販売可能である
 - [ ] QRを実機（iPhone・Android）で読み取り、UTMが計測ツールに記録されることを確かめた
 - [ ] 文面をオーナーが承認した
+- [ ] 各媒体のプロフィール名と説明文の1文目が、下の「名前の表記」と同じになっている
+- [ ] 動画に出る人の掲載同意と利用範囲（切り出し・声と字幕・サムネイル）が非公開台帳に記録されている（[photo-requirements.md](../content/photo-requirements.md)）
+
+## 名前の表記（全媒体で同じにする）
+
+[#152](https://github.com/niho-life/niho-experience/issues/152)。AI 検索や地図は、媒体ごとの名前と事実を突き合わせて同じ事業者かを判断する。表記が揺れると結び付きにくいので、次にそろえる（[seo-growth-strategy.md](seo-growth-strategy.md) の「指名（ブランド）を育てる」）。
+
+| 用途 | 表記 | 使う場所 |
+| --- | --- | --- |
+| サイト名 | `NIHO Experience` | サイトの title・`og:site_name`・構造化データの `name`、記事の発行者 |
+| 掲載名 | `NIHO Experience, Kamakura` | Google ビジネスプロフィール、Tripadvisor、OTA の事業者名、YouTube のチャンネル名、構造化データの `alternateName` |
+| 説明文の1文目（英語） | `Discover small experiences in Kamakura, offered by independent hosts and local businesses.` | 各媒体のプロフィール・チャンネルの説明・動画の説明欄の1文目。サイトの meta description の1文目と同じ文 |
+
+- 書かない表記：`NIHO Experiences`（複数形）、`Niho Experience`、`NIHO experience`、`NIHO Kamakura Experience`。日本語の文中でも `NIHO Experience` と書く。
+- `NIHO kamakura` は鎌倉駅近くのシェアリビング（会場・運営者）の名前として残す。体験の会場や運営者の説明では使ってよいが、サイト名・掲載名の代わりにしない。
+- 決まっていないこと（オーナー判断）：Instagram を NIHO の既存アカウントで続けるか、掲載名のアカウントを作るか。各媒体の @ハンドル。決まったら、この表とサイトの構造化データ（`sameAs`）に足す。
 
 ## リンクとUTM
 
@@ -23,6 +39,7 @@
 | A2-2 | Instagramのストーリーのリンク | `https://experience.niho.life/experiences/{slug}?utm_source=niho_instagram&utm_medium=social&utm_campaign=pilot_2026q4&utm_content=story_{MMDD}`。実際の投稿前に掲載中のslugと日付で置換 |
 | A3-1 | 会員が友人に渡すカード | `https://experience.niho.life/experiences/kamakura-community-dinner?utm_source=niho_space&utm_medium=print&utm_campaign=pilot_2026q4&utm_content=member_card` |
 | A4-1 | 公式サイト（kamakura.niho.life）のディナーのページ | `https://experience.niho.life/experiences/kamakura-community-dinner?utm_source=niho_site&utm_medium=referral&utm_campaign=pilot_2026q4` |
+| A5-1 | YouTube の長尺動画の説明欄（体験ごと） | `https://experience.niho.life/experiences/{slug}?utm_source=niho_youtube&utm_medium=video&utm_campaign=pilot_2026q4&utm_content=long`。Shorts は説明欄・コメントのリンクを押せないので、関連動画に長尺をつなぐ |
 | B1-n | 宿泊施設のフロントのカード（提携先ごと） | `https://experience.niho.life/experiences?utm_source=partner_a0n&utm_medium=qr&utm_campaign=pilot_2026q4&utm_content=front_desk`。`n`を実際の匿名コードに置換 |
 
 - 提携先のコード（`partner_a01` など）と施設名の対応表は非公開台帳に置く。
