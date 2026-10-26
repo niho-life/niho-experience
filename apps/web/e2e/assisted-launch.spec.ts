@@ -75,7 +75,7 @@ test("Admin edits, issues a fragment link, verifies, materializes and refreshes 
   await expect(page.getByRole("button", { name: "限定リンクを発行" })).toBeDisabled();
   await page.getByRole("button", { name: "代表者を確認" }).click();
   await page.getByRole("button", { name: "正式な店舗・商品へ反映" }).click();
-  await expect(page.getByText(/正式な店舗・非公開商品へ反映/)).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("店舗・商品に承認済みの内容を反映しました。");
 });
 
 test("expired or revoked review and forbidden host case fail closed", async ({ page }) => {
