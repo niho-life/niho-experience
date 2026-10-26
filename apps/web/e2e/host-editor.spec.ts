@@ -454,7 +454,7 @@ test("プレビュー leads to the live experience's public page", async ({ page
   expect(href).toBe("/experiences/kamakura-community-dinner");
   // The host server runs the pilot catalog (playwright.config.ts), as the mock preview does.
   await page.goto(href!);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kamakura Community Dinner with Locals");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kamakura Home Cooking Dinner with Locals");
 });
 
 test("another provider's experience keeps ?providerId= on its links", async ({ page }) => {

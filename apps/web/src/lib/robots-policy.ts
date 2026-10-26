@@ -39,8 +39,8 @@ export const SEARCH_CRAWLERS = [
 export const TRAINING_CRAWLERS = ["GPTBot", "Google-Extended", "ClaudeBot", "anthropic-ai", "Applebot-Extended", "CCBot"] as const;
 
 /**
- * Whether training crawlers may read the public pages: an owner decision (#141, docs/seo.md).
- * "allow" keeps today's behaviour, where they fall under `*`.
+ * Whether training crawlers may read the public pages. The owner chose "allow" (2026-10-26, #141, docs/seo.md):
+ * they fall under `*`, like any other crawler.
  */
 export const TRAINING_CRAWLER_POLICY: "allow" | "disallow" = "allow";
 

@@ -54,12 +54,12 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 | 区分 | User-Agent | 扱い |
 | --- | --- | --- |
 | 検索・AI 検索 | `Googlebot`、`Bingbot`、`OAI-SearchBot`、`ChatGPT-User`、`Claude-SearchBot`、`Claude-User`、`PerplexityBot`、`Perplexity-User`、`Applebot` | 名指しで許可（予約などは除外） |
-| 学習用 | `GPTBot`、`Google-Extended`、`ClaudeBot`、`anthropic-ai`、`Applebot-Extended`、`CCBot` | **オーナー判断待ち**。今は `*` と同じ扱い（許可）。拒否する場合は `TRAINING_CRAWLER_POLICY` を `"disallow"` にする |
+| 学習用 | `GPTBot`、`Google-Extended`、`ClaudeBot`、`anthropic-ai`、`Applebot-Extended`、`CCBot` | 許可（オーナー決定 2026-10-26）。`*` と同じ扱い。方針を変える時は `TRAINING_CRAWLER_POLICY` を `"disallow"` にする |
 | その他 | `*` | 許可（予約などは除外） |
 
 - 検索に出るために読ませる相手を名指しにしたのは、`*` の扱いを将来変えても検索・AI 検索の許可が巻き添えで消えないようにするため。名指しのグループを持つクローラーは `*` を読まないので、除外するパスは各グループに同じものを書く。
 - ChatGPT 検索は Bing の索引も使う（二次情報）。`OAI-SearchBot` を拒否すると ChatGPT 検索の回答に出なくなる（OpenAI の公開文書）。Anthropic の検索用は `Claude-SearchBot` で、`ClaudeBot` は学習用（Anthropic の公開文書）。Issue 本文の「ClaudeBot は検索用」は、この区分に直した。
-- 学習用を拒否しても検索結果・AI 検索の回答への表示には影響しない。許可すると、モデルが鎌倉の体験や NIHO を知っている状態になりうる。どちらを取るかはオーナーが決め、決定日をこの表に書く。
+- 学習用を拒否しても検索結果・AI 検索の回答への表示には影響しない。許可すると、モデルが鎌倉の体験や NIHO を知っている状態になりうる。オーナーは許可を選んだ（2026-10-26）。
 - `*-User` は利用者が AI に頼んだ時にページを取りに来るもの。robots.txt に従わない場合があると OpenAI・Perplexity は書いているので、守りたいページは robots.txt でなく `noindex`・`no-store`・認証で守る（今の作り）。
 - `llms.txt` は作らない。Google は不要と明記しており、Ahrefs の調査では置かれたファイルの 97% に AI からの取得が無かった。
 
@@ -75,7 +75,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 ## 登録先（Search Console・Bing Webmaster Tools）
 
 - Search Console：ドメインプロパティ `experience.niho.life` を 2026-10-26 に追加した。親の `niho.life` のドメインプロパティを DNS で確認済みのため、所有権は自動で確認された。担当者を足す時は最小権限（閲覧だけなら「制限付き」）。
-- Bing Webmaster Tools：Search Console からの取り込みで登録する（オーナーのアカウントで行う）。
+- Bing Webmaster Tools：オーナーのアカウントで登録済み（2026-10-26）。
 - 検索公開（#15）の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
 - 月次で見るもの：Search Console の「生成 AI 機能」レポートと、Bing の AI Performance レポート（計測の Issue で扱う）。数値は公開 Issue に貼らない。
 

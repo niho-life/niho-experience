@@ -5,17 +5,19 @@
 
 **オーナーの決定（2026-10-19）**：P-01〜P-05の各事業者から掲載の許可を得ている。テストサイトに組み込んでよい。原稿・提供者の紹介・価格・日程は担当3の推奨値としてテスト設定に仮置きし、後でオーナーがまとめて修正する。事業者への連絡とSNS等への投稿は、本番運用の開始後にオーナーが行う。
 
+**オーナーの決定（2026-10-26・[#146](https://github.com/niho-life/niho-experience/issues/146)）**：P-01〜P-05 の題名を、検索語（[seo-content-policy.md](../growth/seo-content-policy.md) の体験別の語）を入れた案に替える。テストサイトの pilot fixture は替えた。本番の正本（NIHO 側の原稿）は別に直す。
+
 ## 一覧
 
 状態の凡例：済＝確認できた／試＝担当3の推奨値をテスト設定として仮置き（オーナーが後で修正）／待＝オーナーまたは提供者の回答待ち／未＝未着手。公開ページについての「済」は記載を確認できたという意味で、提供実態を確認したという意味ではない。
 
 | コード | 商品案（仮題） | 提供者 | 必要な連携 | 候補 | 提供可否 | 掲載許諾 | 条件確定 | 公開可能 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-01 | Kamakura Community Dinner with Locals | NIHO kamakura（既存拠点） | 連携A | 済 | 済（既存チャネルで販売中） | 済（オーナー） | 試 | テストサイトのみ |
-| P-02 | Roast Your Own Coffee in a Kamakura Living Room | NIHO kamakura（既存拠点） | 連携A | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
-| P-03 | Zen Meditation and a Temple Walk at Engakuji | Synk LLC・円覚寺（NIHO会員の企画） | 連携B | 済 | 済（登録予定） | 済（オーナー） | 試 | テストサイトのみ |
-| P-04 | Mend a Broken Bowl with a Kamakura Restorer | 継ぎ師 ゆきの（YUKINO Restorer） | 連携B | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
-| P-05 | Write Your Own Kanji with a Kamakura Calligrapher | 書家 志龍 | 連携B | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
+| P-01 | Kamakura Home Cooking Dinner with Locals | NIHO kamakura（既存拠点） | 連携A | 済 | 済（既存チャネルで販売中） | 済（オーナー） | 試 | テストサイトのみ |
+| P-02 | Kamakura Coffee Roasting Workshop | NIHO kamakura（既存拠点） | 連携A | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
+| P-03 | Zazen at Engakuji Temple, Kamakura | Synk LLC・円覚寺（NIHO会員の企画） | 連携B | 済 | 済（登録予定） | 済（オーナー） | 試 | テストサイトのみ |
+| P-04 | Kintsugi-Inspired Bowl Mending, Kamakura | 継ぎ師 ゆきの（YUKINO Restorer） | 連携B | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
+| P-05 | Shodo: Japanese Calligraphy in Kamakura | 書家 志龍 | 連携B | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
 | R-01 | 土曜朝のまち歩きとゴミ拾い | 地域の活動（主催者は外部） | 未定 | 予備 | 未 | 未 | 未 | 未 |
 | R-02 | 初心者向け囲碁会 | 地域の活動（主催者は外部） | 未定 | 予備 | 未 | 未 | 未 | 未 |
 | R-03 | オーガニック料理教室 | 外部事業者 | 連携B | 予備 | 未 | 未 | 未 | 未 |
@@ -29,7 +31,7 @@
 
 外部提供者の商品を既存拠点の商品として代理掲載しない。外部の個人提供者にダミーの拠点や他拠点の管理権限を付与しない（[構成](../architecture.md)）。
 
-## P-01 Kamakura Community Dinner with Locals
+## P-01 Kamakura Home Cooking Dinner with Locals
 
 ### 確認済み（公開情報）
 
@@ -68,7 +70,7 @@
 12. 食品衛生上の手続きの要否、賠償責任保険の加入状況
 13. ホストの紹介文・写真を新サイトに掲載することの同意
 
-## P-02 Roast Your Own Coffee in a Kamakura Living Room
+## P-02 Kamakura Coffee Roasting Workshop
 
 ### 確認済み（公開情報）
 
@@ -88,7 +90,7 @@
 5. 仕入先名を原稿に書いてよいか
 6. 焙煎直後の豆は数日置くと味が落ち着くため、当日の試飲に何を出すか
 
-## P-03 Zen Meditation and a Temple Walk at Engakuji
+## P-03 Zazen at Engakuji Temple, Kamakura
 
 NIHO会員が企画し、外部の体験予約サイトで販売中の商品。オーナーによればniho-experienceへ登録予定で、掲載の許可を得ている（2026-10-19）。
 
@@ -114,7 +116,7 @@ NIHO会員が企画し、外部の体験予約サイトで販売中の商品。�
 6. 寺院から掲載の同意を得ているか、写真の権利
 7. 英語ガイドの担当者、遅刻時の扱い、服装の条件
 
-## P-04 Mend a Broken Bowl / P-05 Write Your Own Kanji
+## P-04 Kintsugi-Inspired Bowl Mending / P-05 Shodo: Japanese Calligraphy
 
 NIHOの公式サイトで作り手として紹介されている人の企画。掲載の許可はオーナーが得ている（2026-10-19）。ワークショップの内容・時間・価格はテストサイト用の設定値。
 

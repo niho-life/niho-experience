@@ -4,6 +4,8 @@
  * 合成 fixture（experiences.ts）と違い、実在の提供者の体験を載せる。オーナーが各事業者から掲載の許可を得ており、
  * テストサイトへ組み込むことを決めた（2026-10-19、docs/content/README.md）。
  * - 価格・曜日・時刻・人数・取消・受付方式は担当3の推奨値で、販売条件として確定していない（docs/content/product-ledger.md）。
+ * - 題名は検索語（docs/growth/seo-content-policy.md の体験別の語）を入れた案で、オーナー承認（2026-10-26・#146）。本番の正本は
+ *   NIHO 側の原稿なので、そちらは別に直す。ホストの画面の mock（apps/web/src/host/mock）は旧い題名のまま（ホストがまだ直していない状態）。
  * - 写真は撮影前の仮素材（apps/web/public/sample/、出典・内容は同フォルダの CREDITS.md）。オーナー判断（2026-10-20、
  *   スマホの試作モックに見た目を合わせる）で、次のとおり使う。撮り直した写真が届いたら差し替える（docs/release-acceptance.md）。
  *   - コミュニティディナーと集合場所の外観は NIHO kamakura の自前の写真（niho-*.jpg）。NIHO の集合場所の外観は実物の建物。
@@ -192,7 +194,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
   return [
     {
       slug: "kamakura-community-dinner",
-      title: "Kamakura Community Dinner with Locals",
+      title: "Kamakura Home Cooking Dinner with Locals",
       contentLanguage: "EN",
       region: { ...KAMAKURA },
       canonicalUrl: canonical("kamakura-community-dinner"),
@@ -285,7 +287,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
     },
     {
       slug: "kamakura-coffee-roasting",
-      title: "Roast Your Own Coffee in a Kamakura Living Room",
+      title: "Kamakura Coffee Roasting Workshop",
       contentLanguage: "EN",
       region: { ...KAMAKURA },
       canonicalUrl: canonical("kamakura-coffee-roasting"),
@@ -360,7 +362,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
     },
     {
       slug: "engakuji-zen-meditation",
-      title: "Zen Meditation and a Temple Walk at Engakuji",
+      title: "Zazen at Engakuji Temple, Kamakura",
       contentLanguage: "EN",
       region: { ...KAMAKURA },
       canonicalUrl: canonical("engakuji-zen-meditation"),
@@ -440,7 +442,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
     },
     {
       slug: "kamakura-ceramic-mending",
-      title: "Mend a Broken Bowl with a Kamakura Restorer",
+      title: "Kintsugi-Inspired Bowl Mending, Kamakura",
       contentLanguage: "EN",
       region: { ...KAMAKURA },
       canonicalUrl: canonical("kamakura-ceramic-mending"),
@@ -513,7 +515,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
     },
     {
       slug: "kamakura-calligraphy",
-      title: "Write Your Own Kanji with a Kamakura Calligrapher",
+      title: "Shodo: Japanese Calligraphy in Kamakura",
       contentLanguage: "EN",
       region: { ...KAMAKURA },
       canonicalUrl: canonical("kamakura-calligraphy"),

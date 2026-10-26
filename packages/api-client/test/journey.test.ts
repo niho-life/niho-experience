@@ -134,8 +134,20 @@ describe("よくある質問（#146・仮契約）", () => {
     expect(findSensitiveValues(faq)).toEqual([]);
   });
 
-  it("pilot（実在のホスト）と FAQ の無い合成の体験は空", () => {
-    for (const experience of buildPilotExperiences()) expect(journeyExtrasFor(experience.slug).faq).toEqual([]);
+  it("pilot の 5 体験に 10 問以上があり、取消の時間と支払いの案内が各体験の商品と一致する", () => {
+    for (const experience of buildPilotExperiences()) {
+      const faq = journeyExtrasFor(experience.slug).faq;
+      expect(faq.length, experience.slug).toBeGreaterThanOrEqual(10);
+      expect(usableFaq(faq), experience.slug).toEqual(faq);
+      expect(findSensitiveValues(faq)).toEqual([]);
+      const answer = (question: string) => faq.find((item) => item.question === question)?.answer ?? "";
+      const offer = experience.offers[0]!;
+      expect(answer("What is the cancellation policy?"), experience.slug).toContain(`until ${offer.cancellationPolicy.freeCancellationHoursBefore} hours before`);
+      expect(answer("How do I pay?"), experience.slug).toContain(offer.acceptanceMode === "APPROVAL" ? "charged only if approved" : "confirmed as soon as you pay");
+    }
+  });
+
+  it("FAQ の無い合成の体験は空", () => {
     expect(journeyExtrasFor(INDIGO).faq).toEqual([]);
   });
 

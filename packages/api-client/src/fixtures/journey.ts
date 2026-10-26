@@ -127,10 +127,21 @@ export function reviewsResponseFor(slug: string, limit: number): ExperienceRevie
 export const REVIEWS_ON_DETAIL = 3;
 
 /**
- * よくある質問（#146・仮契約）。合成の体験だけに置く（pilot の FAQ はホストとオーナーの原稿が確定してから。AGENTS.md）。
- * 答えは合成の dinner の fixture（experiences.ts）にある事実に合わせ、足した事実（エプロン等）も架空。
- * 服装・言語・子ども・遅刻・雨・アレルギー・写真・持ち帰り・取消・支払いの 10 の話題を揃える。FAQ の無い体験も残す。
+ * よくある質問（#146・仮契約）。
+ * - 合成の dinner：答えは合成の fixture（experiences.ts）にある事実に合わせ、足した事実（エプロン等）も架空。
+ *   服装・言語・子ども・遅刻・雨・アレルギー・写真・持ち帰り・取消・支払いの 10 の話題を揃える。FAQ の無い合成の体験も残す。
+ * - pilot の 5 体験：参加の条件と同じく、fixture に既にある事実（pilot-experiences.ts の本文・含むもの・向かない人・
+ *   knowBeforeYouGo・集合案内・取消と受付の方式・予約の質問）と、サイト共通の支払い・取消の案内（static copy）を
+ *   問いと答えに並べ直しただけで、新しい事実を足さない。fixture に無い話題（例：ディナーの写真、焙煎の雨天）は問いを作らない。
+ *   オーナー・提供者が確認した原稿に置き換わるまでは推奨値。
  */
+const NIHO_DIRECTIONS =
+  "NIHO kamakura is a 2-minute walk from Kamakura Station West Exit, on the second floor of the blue building. Use the side entrance on the right along the blue wall, not the main entrance, and look for the small NIHO sign.";
+const PAY_ON_APPROVAL = "By card through Stripe when you book, in Japanese yen with tax included. Your card is authorized, then the host reviews your request. You are charged only if approved.";
+const PAY_INSTANT = "By card through Stripe when you book, in Japanese yen with tax included. Your booking is confirmed as soon as you pay.";
+const freeCancellation = (hours: number) =>
+  `Free cancellation until ${hours} hours before the start. Your confirmation link shows the cancellation options for your booking. To request a change, reply to the confirmation email.`;
+
 const FAQ: Readonly<Record<string, readonly ExperienceFaqItem[]>> = {
   "home-cooked-dinner-with-locals": [
     { question: "What should I wear?", answer: "Comfortable everyday clothes. Shoes come off at the entrance, so wear socks you are happy to show. Aprons are provided." },
@@ -146,6 +157,85 @@ const FAQ: Readonly<Record<string, readonly ExperienceFaqItem[]>> = {
     { question: "Are drinks included?", answer: "Soft drinks are included. Alcohol is not included." },
     { question: "Do I need to know how to cook?", answer: "No. Chopping, plating and tasting are all part of it, and the host shows each step." },
     { question: "How do I find the meeting place?", answer: "It is about 10 minutes on foot from the nearest station (sample). Ring the bell at the wooden door." },
+  ],
+  "kamakura-community-dinner": [
+    { question: "What should I wear?", answer: "Comfortable everyday clothes. You'll wear slippers inside, as in a Japanese home." },
+    { question: "What language is the dinner in?", answer: "English and Japanese. Some community members speak English fluently, others a little, and everyone is happy to try." },
+    { question: "Can I bring children?", answer: "Children aged 6 to 17 are welcome with an adult, at the child price. The dinner is not suitable for children under 6." },
+    { question: "What if I'm running late?", answer: "Please arrive on time. We start cooking no later than 15 minutes after the start time." },
+    { question: "What happens if it rains?", answer: "The dinner goes ahead in any weather. If a storm or emergency warning is in effect for Kamakura three hours before the start, we cancel and offer a full refund or another date." },
+    { question: "I have a food allergy. Can I join?", answer: "We're sorry, but we can't cater for food allergies: we cook in a shared kitchen and can't prevent cross-contact. If you are vegetarian or avoid certain foods, let us know in the booking question about dietary preferences." },
+    { question: "Do I need cooking experience?", answer: "No. Your hosts show you each step as you cook four or five seasonal dishes together." },
+    { question: "What will we cook?", answer: "The menu follows the season. You might make vegetable tempura, miso soup, grilled fish, a salad with local vegetables or a fruit dessert." },
+    { question: "Are drinks included?", answer: "A welcome drink (tea or juice) is included. Alcoholic drinks are not included." },
+    { question: "Who will I meet?", answer: "The community members who join vary by date, so we can't guarantee who you will meet. You may meet longtime residents, people working in arts and culture, or international neighbors who have made Kamakura home." },
+    { question: "How do I find NIHO?", answer: NIHO_DIRECTIONS },
+    { question: "Is it wheelchair accessible?", answer: "No. The living room is on the second floor." },
+    { question: "How do I pay?", answer: PAY_ON_APPROVAL },
+    { question: "What is the cancellation policy?", answer: freeCancellation(24) },
+  ],
+  "kamakura-coffee-roasting": [
+    { question: "What should I wear?", answer: "Everyday clothes are fine, but roasting makes some smoke and papery chaff, so your clothes may smell a little of coffee. You'll wear slippers inside, as in a Japanese home." },
+    { question: "What language is the session in?", answer: "English and Japanese." },
+    { question: "Can children join?", answer: "No. Guests must be 18 or over, because the roaster gets very hot." },
+    { question: "Do I need any experience?", answer: "No. You roast on a beginner-friendly roaster set up from a smartphone, and your host explains what happens inside the bean as it heats." },
+    { question: "What do I take home?", answer: "100 g of the beans you roasted, packed in a bag to take home." },
+    { question: "When will my coffee taste best?", answer: "Freshly roasted beans usually taste best after resting for a few days. That's why the cup you drink at NIHO is brewed from beans roasted earlier." },
+    { question: "Can I take the beans to another country?", answer: "Check your home country's rules on bringing in food before you travel." },
+    { question: "How long does it take?", answer: "About 75 minutes. Each roast takes about 10 to 15 minutes." },
+    { question: "How many guests join a session?", answer: "Up to 3 guests, and each guest roasts their own batch." },
+    { question: "Where do the beans come from?", answer: "NIHO buys its green specialty beans from a supplier that focuses on fair trade." },
+    { question: "How do I find NIHO?", answer: NIHO_DIRECTIONS },
+    { question: "Is it wheelchair accessible?", answer: "No. The living room is on the second floor." },
+    { question: "How do I pay?", answer: PAY_INSTANT },
+    { question: "What is the cancellation policy?", answer: freeCancellation(24) },
+  ],
+  "engakuji-zen-meditation": [
+    { question: "What should I wear?", answer: "Loose, comfortable clothing, with trousers or a skirt that cover your knees. Please wear socks or stockings, as you will not walk barefoot." },
+    { question: "What language is the session in?", answer: "English. An English-speaking guide walks the grounds with you, and interpretation is included." },
+    { question: "Do I need meditation experience?", answer: "No experience is needed. The priest guides your group through zazen and other meditation postures." },
+    { question: "I can't sit on the floor. Can I still join?", answer: "Yes. A chair can be provided. When you book, tell us whether you would like one." },
+    { question: "Can children join?", answer: "Guests must be 12 or over." },
+    { question: "Is the session private?", answer: "Yes. It is for your group only, from 2 to 4 guests." },
+    { question: "What if I'm running late?", answer: "Please arrive on time. Arriving more than 15 minutes late may mean the session cannot go ahead." },
+    { question: "What happens if it rains?", answer: "The temple walk goes ahead in light rain. If a heavy rain, storm or emergency warning is in effect for Kamakura three hours before the start, we cancel and offer a full refund or another date." },
+    { question: "Can I take photos?", answer: "Photography may be restricted in some halls. Your guide will tell you where you can take photos." },
+    { question: "Is there much walking?", answer: "The temple grounds are hilly, with stairs and slopes, so the session is not suitable for guests who can't manage them." },
+    { question: "Where do we meet?", answer: "At Engakuji Temple, a 1-minute walk from Kita-Kamakura Station. Your guide will confirm the exact meeting spot at the temple after booking." },
+    { question: "How far ahead do I need to book?", answer: "Please book at least 2 days in advance." },
+    { question: "Are temple fees included?", answer: "Yes. Temple facility fees, interpretation and taxes are included. Transport to the temple is not." },
+    { question: "How do I pay?", answer: PAY_ON_APPROVAL },
+    { question: "What is the cancellation policy?", answer: freeCancellation(48) },
+  ],
+  "kamakura-ceramic-mending": [
+    { question: "What should I wear?", answer: "Clothes you don't mind getting a little dirty. You'll wear slippers inside, as in a Japanese home." },
+    { question: "What language is the workshop in?", answer: "Japanese and basic English." },
+    { question: "Is this traditional kintsugi?", answer: "No. Traditional kintsugi uses urushi lacquer. This workshop uses wglue®, a modern clay-like adhesive, as a hands-on way to experience the idea behind kintsugi: valuing everyday things enough to repair them." },
+    { question: "Do I need to bring something to mend?", answer: "No. A small piece of pottery to mend is included, along with all materials and tools." },
+    { question: "How does the workshop work?", answer: "Your host shows you mended pieces and the tools first. You then fill and join the broken parts step by step with your host's help, and choose the color of the repaired line." },
+    { question: "Can I use my mended piece for food and drink?", answer: "It depends on the material. Your host will explain how to use it." },
+    { question: "What do I take home?", answer: "The piece you mended, wrapped to take home. It may need time to set before use, and your host will explain how to take it home." },
+    { question: "Can children join?", answer: "No. Guests must be 18 or over." },
+    { question: "How many guests join a workshop?", answer: "Up to 4 guests." },
+    { question: "How do I find NIHO?", answer: NIHO_DIRECTIONS },
+    { question: "Is it wheelchair accessible?", answer: "No. The venue is on the second floor." },
+    { question: "How do I pay?", answer: PAY_ON_APPROVAL },
+    { question: "What is the cancellation policy?", answer: freeCancellation(48) },
+  ],
+  "kamakura-calligraphy": [
+    { question: "What should I wear?", answer: "Ink can stain clothes. Aprons are provided. You'll wear slippers inside, as in a Japanese home." },
+    { question: "What language is the workshop in?", answer: "Japanese and basic English." },
+    { question: "Do I need any experience?", answer: "No experience is needed. Your host shows you how to hold the brush, prepare the ink and write the basic strokes." },
+    { question: "Can children join?", answer: "Children aged 8 to 17 are welcome with an adult, at the child price. The workshop is not suitable for children under 8." },
+    { question: "What will I write?", answer: "You choose a word or kanji that means something to you with your host, learn what it means, practice it and write a final piece." },
+    { question: "What do I take home?", answer: "Your final piece, in a folder to carry it home. It needs a few minutes to dry before you carry it. Framing is not included." },
+    { question: "Are materials included?", answer: "Yes: a brush, ink and practice paper, and paper for your final piece." },
+    { question: "Who is the host?", answer: "Shiryu, a calligrapher, MC and event producer who started shodo in 2017. Shiryu's work was exhibited in New York in 2025." },
+    { question: "How many guests join a workshop?", answer: "Up to 6 guests." },
+    { question: "How do I find NIHO?", answer: NIHO_DIRECTIONS },
+    { question: "Is it wheelchair accessible?", answer: "No. The venue is on the second floor." },
+    { question: "How do I pay?", answer: PAY_INSTANT },
+    { question: "What is the cancellation policy?", answer: freeCancellation(48) },
   ],
 };
 
