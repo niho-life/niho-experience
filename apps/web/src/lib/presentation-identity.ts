@@ -6,7 +6,7 @@ export const EXPERIENCE_PRESENTATION_IDENTITY = Object.freeze({
   copy: { schemaVersion: 2, keyCount: 342, sha256: "242e2111e705a14755d10f13d8d16820792ea1aeac3f337b9b01babbfdb106a9" },
   legacyCopy: { schemaVersion: 1, keyCount: 239, sha256: "1d73b4c80ae1025321532ff3be81430a5e43abfa6ca72d6aef8f57dc2da2a307" },
   // style/copy/assets follow this repo's package (a test pins them to the manifest); sourceCommit and tgzSha256 name the tgz NIHO reviewed and pinned.
-  style: { id: "niho-experience-presentation/v1/scoped-css", sha256: "e7c070f2f963eefae77734c7d64617fcc1ab1dac2176328a03841f7b9bc41d7e" },
+  style: { id: "niho-experience-presentation/v1/scoped-css", sha256: "881e580c74850b64c8aa377604c9b05620befcc4af40f2773d270ad6ce00aa7f" },
   assets: { schemaVersion: 1, sha256: "2ba41a362cbd003319506f1b53ae6b910205304adbd000aab49fca4dce55d7fa" },
 } as const);
 

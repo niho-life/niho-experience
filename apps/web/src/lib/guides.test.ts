@@ -62,6 +62,8 @@ describe("guide validation", () => {
     [{ hero: { src: "javascript:x", alt: "A", width: 10, height: 10, licensed: false } }, /hero.src/],
     [{ hero: { src: "/a.jpg", alt: "", width: 10, height: 10, licensed: false } }, /hero.alt is empty/],
     [{ hero: { src: "/a.jpg", alt: "A", width: 0, height: 10, licensed: false } }, /positive integers/],
+    [{ hero: undefined, video: { youtubeId: "abcDEF123_-", caption: "Host" } }, /video requires a hero photo/],
+    [{ video: { youtubeId: "bad?autoplay=1", caption: "Host" } }, /video.youtubeId/],
     [{ relatedExperienceSlugs: ["only-one"] }, /needs 2–3 slugs/],
     [{ relatedExperienceSlugs: ["a", "b", "c", "d"] }, /needs 2–3 slugs/],
     [{ relatedExperienceSlugs: ["a", "a"] }, /repeats a slug/],

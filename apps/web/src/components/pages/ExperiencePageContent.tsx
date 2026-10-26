@@ -39,6 +39,8 @@ import { CardDates } from "@/components/CardDates";
 import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
 import { relatedExperienceCards } from "@/lib/experience-cards";
 import { guidesAboutExperience } from "@/lib/guide-registry";
+import { videoForExperience } from "@/lib/videos";
+import { YouTubeVideo } from "@/components/YouTubeVideo";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -149,6 +151,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       : locale === "ja" ? `開始${sharedPolicy.freeCancellationHoursBefore}時間前までキャンセル無料` : `Free cancellation until ${sharedPolicy.freeCancellationHoursBefore} hours before the start`
     : null;
   const photos = galleryPhotos(e);
+  const video = locale === "en" && e.cover ? videoForExperience(e.slug) : null;
   const line = scheduleLine(e.offers, { locale });
   const duration = durationFact(e, locale, copy);
   const children = childParticipationCopy(e.offers, locale);
@@ -503,6 +506,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       // The next bookable dates near the title, read in the browser like the cards (the SSR response has no availability).
       // The contract has no booking cutoff time per date, so no "closes in N days" line; seats left are never shown.
       upcoming: locale === "en" && canBook ? <CardDates slug={e.slug} scheduleLabel={null} source={{ kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin }} /> : undefined,
+      video: video && e.cover ? <YouTubeVideo video={video} poster={e.cover.url} title={e.title} /> : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
       cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },

@@ -1,5 +1,6 @@
 import type { Guide, GuideFaqItem, GuideHero, GuideTranslation } from "@/content/guides/types";
 import { guideFigureSources, guideLinkHref, parseGuideAnswer, parseGuideMarkdown } from "./guide-markdown";
+import { publicVideoProblems } from "./videos";
 
 /**
  * Checks and selections for guides (pure: no config, so tests can run them over every registered guide).
@@ -102,6 +103,10 @@ export function guideProblems(guide: Guide): string[] {
   if (!isGuideDate(guide.updatedAt)) problems.push("updatedAt must be a YYYY-MM-DD date");
   else if (isGuideDate(guide.publishedAt) && guide.updatedAt < guide.publishedAt) problems.push("updatedAt is before publishedAt");
   if (guide.hero) hero(problems, guide.hero);
+  if (guide.video) {
+    if (!guide.hero) problems.push("video requires a hero photo as its poster");
+    problems.push(...publicVideoProblems(guide.video).map((problem) => `video.${problem}`));
+  }
   const experiences = guide.relatedExperienceSlugs;
   if (experiences.length < GUIDE_LIMITS.relatedExperiencesMin || experiences.length > GUIDE_LIMITS.relatedExperiencesMax) {
     problems.push(`relatedExperienceSlugs needs ${GUIDE_LIMITS.relatedExperiencesMin}–${GUIDE_LIMITS.relatedExperiencesMax} slugs`);

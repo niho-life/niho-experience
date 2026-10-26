@@ -74,6 +74,7 @@ schema 2 は home の2見出しを whole rich message として持つ。`{em}...
 
 - `DetailViewModelV1.provider.bios`（`{ name, text }[]`）：「Your host(s)」のホストのチップの下に、ホスト紹介文を書式なしの文で出す。ホストが 2 人以上いるときだけ名前を前に付ける。
 - `DetailViewModelV1.upcoming`（ReactNode）：題名（とレビューの 1 行）の下、ホストの行の前の差し込み口。公開サイトはブラウザで読んだ次の開催日（`CardDates`）を置く。
+- `DetailViewModelV1.video`（ReactNode）：facts の後、ギャラリーの前の差し込み口。公開サイトは掲載同意のある公開動画だけを置き、再生ボタンが押されるまで YouTube を読み込まない。
 - `DetailViewModelV1.faq`（`{ title, items: { question, answer }[] }`）：取消の前の節（`id="faq"`・h2 と質問ごとの h3）。項目が空なら出さない。
 - `SiteFooterV1.links`（`{ href, label }[]`）：フッターの固定のリンク（体験・提供者・ヘルプ）の後に足すリンク。公開サイトはガイド記事があるときだけ `/guides` を渡す。
 
