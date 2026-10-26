@@ -7,9 +7,10 @@ import { guideCatalog, hasGuidesPage } from "@/lib/guide-registry";
 import { englishAlternates } from "@/lib/locale-metadata";
 import { publicMetadata } from "@/lib/public-metadata";
 import { breadcrumbJsonLd } from "@/lib/structured-data";
+import { GUIDE_PILLARS } from "@/lib/guides";
 
-const GUIDES_TITLE = "Kamakura Guides";
-const GUIDES_DESCRIPTION = "Guides from NIHO Experience for planning your time in Kamakura with the people who live here.";
+const GUIDES_TITLE = "Kamakura, from people who live here";
+const GUIDES_DESCRIPTION = "Short, first-hand guides by our hosts. No sponsored lists, no ‘top 15’. Each one says who wrote it and when it was last checked.";
 
 export async function generateMetadata(): Promise<Metadata> {
   if (!hasGuidesPage(await guideCatalog())) notFound();
@@ -23,12 +24,13 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function GuidesPage() {
   const catalog = await guideCatalog();
   if (!hasGuidesPage(catalog)) notFound();
+  const unclassified = catalog.guides.filter((guide) => !guide.pillar);
   return (
     <div className="container-page pt-9 sm:pt-14">
       <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }])} />
       <header className="max-w-[46rem]">
-        <p className="eyebrow">plan your visit</p>
-        <h1 className="mt-1.5 text-[2.5rem] sm:text-[3.625rem]">Guides to Kamakura</h1>
+        <p className="eyebrow">Guides</p>
+        <h1 className="mt-1.5 text-[2.5rem] sm:text-[3.625rem]">{GUIDES_TITLE}</h1>
         <p className="mt-3 text-lg leading-relaxed text-ink-soft">{GUIDES_DESCRIPTION}</p>
       </header>
       {catalog.draftProblems.length ? (
@@ -36,11 +38,25 @@ export default async function GuidesPage() {
           <GuideDraftProblems problems={catalog.draftProblems} />
         </div>
       ) : null}
-      {catalog.guides.length ? (
-        <div className="mt-10 max-w-[46rem]">
-          <GuideTeasers guides={catalog.guides} level={2} draftSlugs={catalog.draftSlugs} />
-        </div>
-      ) : null}
+      <div className="mt-12 grid max-w-[46rem] gap-14">
+        {GUIDE_PILLARS.map((pillar) => {
+          const guides = catalog.guides.filter((guide) => guide.pillar === pillar.key);
+          return guides.length ? (
+            <section key={pillar.key} id={pillar.key} aria-labelledby={`${pillar.key}-heading`} className="scroll-mt-24">
+              <p className="eyebrow">{pillar.label}</p>
+              <h2 id={`${pillar.key}-heading`} className="mb-5 mt-1 text-[2rem] sm:text-[2.375rem]">{pillar.heading}</h2>
+              <GuideTeasers guides={guides} draftSlugs={catalog.draftSlugs} descriptions={false} />
+            </section>
+          ) : null;
+        })}
+        {unclassified.length ? (
+          <section id="draft-previews" aria-labelledby="draft-previews-heading" className="scroll-mt-24">
+            <p className="eyebrow">Preview only</p>
+            <h2 id="draft-previews-heading" className="mb-5 mt-1 text-[2rem] sm:text-[2.375rem]">Drafts awaiting a pillar</h2>
+            <GuideTeasers guides={unclassified} draftSlugs={catalog.draftSlugs} descriptions={false} />
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }

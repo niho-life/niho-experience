@@ -13,6 +13,8 @@ export type HomeViewModelV1 = Readonly<{
   cardsEyebrow?: string;
   cards: readonly { model: ExperienceCardModelV1; dates?: ReactNode }[];
   empty?: ReactNode;
+  /** Consumer-owned editorial entry placed directly after the experience-card section. */
+  afterCards?: ReactNode;
   feature?: { schedule?: string; heading: string; body: string; cta: string; href: string; photos: readonly DisplayImageV1[] };
   strips: readonly { key: string; href: string; verb: string; name: string; video: DisplayVideoV1 }[];
   stripsEyebrow: string;
@@ -50,7 +52,7 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 <InviteCardV1 primitives={primitives} copy={copy} />
 </li>
 </ul> : model.empty ?? null}
-    </section>
+    </section>{model.afterCards ?? null}
     {model.feature ? <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="featured-heading-v1">
 <div className="grid items-center gap-7 lg:grid-cols-[0.9fr_1.3fr] lg:gap-16">
 <div>{model.feature.schedule ? <p className="eyebrow">{model.feature.schedule}</p> : null}<h2 id="featured-heading-v1" className="mt-2 text-[2rem] lg:text-[2.75rem]">{model.feature.heading}</h2>

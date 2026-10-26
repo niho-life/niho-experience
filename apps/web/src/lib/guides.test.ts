@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildFixtureExperiences } from "@niho-experience/api-client/mock";
 import { PUBLISHED_GUIDES, SAMPLE_GUIDES, guideRegistry, type Guide } from "@/content/guides";
-import { formatGuideDate, guideAlternates, guideProblems, guidePublishProblems, guideRegistryProblems, guidesForExperience, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
+import { formatGuideDate, guideAlternates, guideCtaInsertAfter, guideOutline, guideProblems, guidePublishProblems, guideReadMinutes, guideRegistryProblems, guidesForExperience, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
+import { parseGuideMarkdown } from "./guide-markdown";
 import { pickRelatedExperiences } from "./related-experiences";
 import { guideArticleJsonLd } from "./structured-data";
 
@@ -54,10 +55,14 @@ describe("guide validation", () => {
     [{ title: " Padded" }, /leading or trailing spaces/],
     [{ title: "x".repeat(111) }, /title is longer than 110/],
     [{ description: "x".repeat(161) }, /description is longer than 160/],
+    [{ pillar: "culture" as never }, /pillar must be one of/],
     [{ author: { name: "", role: "Editor" } }, /author.name is empty/],
     [{ author: { name: "A", role: "" } }, /author.role is empty/],
+    [{ author: { name: "A", role: "Editor", bio: "" } }, /author.bio is empty/],
     [{ publishedAt: "2026-02-30" }, /publishedAt must be/],
     [{ updatedAt: "26-10-24" }, /updatedAt must be/],
+    [{ checkedAt: "26-10-24" }, /checkedAt must be/],
+    [{ readMinutes: 0 }, /readMinutes must be/],
     [{ publishedAt: "2026-10-25", updatedAt: "2026-10-24" }, /before publishedAt/],
     [{ hero: { src: "javascript:x", alt: "A", width: 10, height: 10, licensed: false } }, /hero.src/],
     [{ hero: { src: "/a.jpg", alt: "", width: 10, height: 10, licensed: false } }, /hero.alt is empty/],
@@ -112,6 +117,25 @@ describe("publish blockers", () => {
     expect(guidePublishProblems(sample)).toEqual([]);
   });
 
+  it("requires a pillar, author bio and a table-of-contents heading before publication", () => {
+    expect(guidePublishProblems({ ...clean, pillar: undefined, author: { ...clean.author, bio: undefined }, body: "A paragraph only." })).toEqual([
+      "pillar is required before publication",
+      "author.bio is required before publication",
+      "body needs at least one ## heading for the table of contents",
+    ]);
+  });
+
+  it("blocks unchecked claims in the author bio and hero caption", () => {
+    expect(guidePublishProblems({
+      ...clean,
+      author: { ...clean.author, bio: "Editor [CONFIRM: title]" },
+      hero: { ...clean.hero!, caption: "Photo [CONFIRM: credit]" },
+    })).toEqual([
+      "author.bio still has a [CONFIRM: …] to check",
+      "hero.caption still has a [CONFIRM: …] to check",
+    ]);
+  });
+
   it("flag every [CONFIRM: …] in the title, description, body and FAQ, also in the Japanese version", () => {
     const problems = guidePublishProblems({
       ...clean,
@@ -127,6 +151,7 @@ describe("publish blockers", () => {
       "body still has a [CONFIRM: …] to check",
       "faq[0].question still has a [CONFIRM: …] to check",
       "faq[0].answer still has a [CONFIRM: …] to check",
+      "body needs at least one ## heading for the table of contents",
       "translations.ja.body still has a [CONFIRM: …] to check",
       "translations.ja.faq[0].answer still has a [CONFIRM: …] to check",
     ]);
@@ -140,6 +165,7 @@ describe("publish blockers", () => {
     })).toEqual([
       "body uses the provisional photo /sample/photos/hall.jpg",
       "body uses the provisional photo https://cdn.example.com/sample/a.jpg",
+      "body needs at least one ## heading for the table of contents",
       "hero uses the provisional photo /sample/photos/zazen-hall.jpg",
     ]);
   });
@@ -147,18 +173,27 @@ describe("publish blockers", () => {
 
 describe("guide selection", () => {
   it("sorts by the newest update, then the title", () => {
-    expect(sortGuides(SAMPLE_GUIDES).map((guide) => guide.updatedAt)).toEqual(["2026-10-24", "2026-10-18"]);
+    expect(sortGuides(SAMPLE_GUIDES).map((guide) => guide.updatedAt)).toEqual(["2026-10-24", "2026-10-22", "2026-10-18"]);
+  });
+
+  it("derives reading time and unique heading ids, including duplicate headings", () => {
+    expect(guideReadMinutes({ ...sample, readMinutes: 9 })).toBe(9);
+    expect(guideReadMinutes({ ...sample, readMinutes: undefined, title: "Short", description: "Short", body: "## One\n\nA few words.", faq: [] })).toBe(1);
+    const blocks = parseGuideMarkdown("## Same heading\n\nText.\n\n### Same heading\n\n## Same heading\n\nMore.");
+    const outline = guideOutline(blocks);
+    expect(outline.map(({ id, sectionNumber }) => [id, sectionNumber])).toEqual([["same-heading", 1], ["same-heading-2", undefined], ["same-heading-3", 2]]);
+    expect(guideCtaInsertAfter(blocks, outline)).toBe(2);
   });
 
   it("finds the guides about an experience, and none for an experience no guide mentions", () => {
     expect(guidesForExperience(SAMPLE_GUIDES, "evening-pottery-session").map((guide) => guide.slug)).toEqual(["sample-first-evening-in-kamakura", "sample-rainy-day-in-kamakura"]);
-    expect(guidesForExperience(SAMPLE_GUIDES, "home-cooked-dinner-with-locals").map((guide) => guide.slug)).toEqual(["sample-first-evening-in-kamakura"]);
-    expect(guidesForExperience(SAMPLE_GUIDES, "seaside-cycling-and-market-breakfast")).toEqual([]);
+    expect(guidesForExperience(SAMPLE_GUIDES, "home-cooked-dinner-with-locals").map((guide) => guide.slug)).toEqual(["sample-first-evening-in-kamakura", "sample-kamakura-day-plan"]);
+    expect(guidesForExperience(SAMPLE_GUIDES, "seaside-cycling-and-market-breakfast").map((guide) => guide.slug)).toEqual(["sample-kamakura-day-plan"]);
     expect(guidesForExperience(PUBLISHED_GUIDES, "home-cooked-dinner-with-locals")).toEqual([]);
   });
 
   it("keeps related guides that exist and listed experiences, in the guide's order", () => {
-    expect(relatedGuidesOf(SAMPLE_GUIDES, sample).map((guide) => guide.slug)).toEqual(["sample-rainy-day-in-kamakura"]);
+    expect(relatedGuidesOf(SAMPLE_GUIDES, sample).map((guide) => guide.slug)).toEqual(["sample-rainy-day-in-kamakura", "sample-kamakura-day-plan"]);
     expect(relatedGuidesOf([sample], sample)).toEqual([]);
     expect(listedExperienceSlugs(sample, [{ slug: "evening-pottery-session" }, { slug: "home-cooked-dinner-with-locals" }])).toEqual(["home-cooked-dinner-with-locals", "evening-pottery-session"]);
     expect(listedExperienceSlugs(sample, [{ slug: "kamakura-calligraphy" }])).toEqual([]);

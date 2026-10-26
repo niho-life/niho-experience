@@ -77,6 +77,7 @@ schema 2 は home の2見出しを whole rich message として持つ。`{em}...
 - `DetailViewModelV1.video`（ReactNode）：facts の後、ギャラリーの前の差し込み口。公開サイトは掲載同意のある公開動画だけを置き、再生ボタンが押されるまで YouTube を読み込まない。
 - `DetailViewModelV1.faq`（`{ title, items: { question, answer }[] }`）：取消の前の節（`id="faq"`・h2 と質問ごとの h3）。項目が空なら出さない。
 - `SiteFooterV1.links`（`{ href, label }[]`）：フッターの固定のリンク（体験・提供者・ヘルプ）の後に足すリンク。公開サイトはガイド記事があるときだけ `/guides` を渡す。
+- `HomeViewModelV1.afterCards`（ReactNode）：体験カードの直後に置く consumer-owned の任意 slot。公開サイトはガイドが3本以上ある場合だけ、3枚のガイド入口を渡す。copy registry と価格・日程・在庫の責務は変えない。
 
 ## 依存配布の分離
 

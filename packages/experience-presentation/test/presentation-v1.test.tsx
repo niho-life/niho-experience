@@ -202,6 +202,15 @@ describe("v1 portable presentation", () => {
     expect(html.indexOf('href="/help"')).toBeLessThan(html.indexOf('href="/guides"'));
   });
 
+  it("places the optional home editorial slot directly after experience cards", () => {
+    const plain = renderToStaticMarkup(<HomeViewV1 model={home} />);
+    expect(plain).not.toContain("Synthetic guide shelf");
+    const extended = renderToStaticMarkup(<HomeViewV1 model={{ ...home, afterCards: <section>Synthetic guide shelf</section> }} />);
+    expect(extended).toContain("Synthetic guide shelf");
+    expect(extended.indexOf("Synthetic guide shelf")).toBeGreaterThan(extended.indexOf("A synthetic workshop"));
+    expect(extended.indexOf("Synthetic guide shelf")).toBeLessThan(extended.indexOf("A synthetic feature"));
+  });
+
   it("adds a review line to a card only when the consumer supplies one", () => {
     const model = { ...card, href: card.href };
     expect(renderToStaticMarkup(<ExperienceCardV1 card={model} />)).not.toContain("★");

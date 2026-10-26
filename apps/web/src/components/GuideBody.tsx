@@ -1,30 +1,38 @@
 import NextImage from "next/image";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { GuideBlock, GuideInline } from "@/lib/guide-markdown";
+import type { GuideOutlineItem } from "@/lib/guides";
 
 /** Renders the parsed guide body (lib/guide-markdown.ts) as React elements. Text is always escaped by React: no HTML is injected. */
-export function GuideBody({ blocks }: { blocks: readonly GuideBlock[] }) {
+export function GuideBody({ blocks, outline = [], insertAfter = null, insertion = null }: { blocks: readonly GuideBlock[]; outline?: readonly GuideOutlineItem[]; insertAfter?: number | null; insertion?: ReactNode }) {
   return (
     <div className="text-[1.0625rem] leading-[1.75] [&>:first-child]:mt-0">
-      <Blocks blocks={blocks} />
+      <Blocks blocks={blocks} outline={outline} insertAfter={insertAfter} insertion={insertion} />
     </div>
   );
 }
 
-function Blocks({ blocks }: { blocks: readonly GuideBlock[] }): ReactNode {
-  return blocks.map((block, index) => <Block key={index} block={block} />);
+function Blocks({ blocks, outline = [], insertAfter = null, insertion = null }: { blocks: readonly GuideBlock[]; outline?: readonly GuideOutlineItem[]; insertAfter?: number | null; insertion?: ReactNode }): ReactNode {
+  const headings = new Map(outline.map((item) => [item.blockIndex, item]));
+  return blocks.map((block, index) => (
+    <Fragment key={index}>
+      <Block block={block} heading={headings.get(index)} />
+      {insertAfter === index ? insertion : null}
+    </Fragment>
+  ));
 }
 
-function Block({ block }: { block: GuideBlock }) {
+function Block({ block, heading }: { block: GuideBlock; heading?: GuideOutlineItem }) {
   switch (block.type) {
     case "heading":
       return block.level === 2 ? (
-        <h2 className="mt-11 text-[1.75rem] lg:text-[2rem]">
+        <h2 id={heading?.id} className="mt-11 scroll-mt-24 text-[1.75rem] lg:text-[2rem]">
+          {heading?.sectionNumber ? <span aria-hidden>{heading.sectionNumber}. </span> : null}
           <GuideInlines items={block.children} />
         </h2>
       ) : (
-        <h3 className="mt-8 font-sans text-[1.1875rem] leading-[1.4] font-extrabold tracking-normal">
+        <h3 id={heading?.id} className="mt-8 scroll-mt-24 font-sans text-[1.1875rem] leading-[1.4] font-extrabold tracking-normal">
           <GuideInlines items={block.children} />
         </h3>
       );

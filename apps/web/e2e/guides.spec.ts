@@ -27,13 +27,15 @@ for (const [crawler, userAgent] of Object.entries(CRAWLERS)) {
     expect(head).toMatch(/<meta name="robots" content="noindex, nofollow"/);
     expect(head).toContain('hrefLang="x-default"');
 
-    const body = html.slice(headEnd);
+    // React inserts empty comments between adjacent server-rendered text nodes.
+    const body = html.slice(headEnd).replaceAll("<!-- -->", "");
     expect(body).toMatch(new RegExp(`<h1[^>]*>${title.replace(/[()]/g, "\\$&")}</h1>`));
     expect(body).toContain("Mika Sato (sample)");
     expect(body).toContain("Sample editor, NIHO Experience (invented for previews)");
     // React may separate adjacent text with an empty comment; crawlers read it as one line of text.
-    expect(body).toMatch(/Updated(?:<!-- -->)? <time dateTime="2026-10-24">24 Oct 2026<\/time>/i);
-    expect(body).toMatch(/Published(?:<!-- -->)? <time dateTime="2026-10-20">20 Oct 2026<\/time>/i);
+    expect(body).toMatch(/Updated <time dateTime="2026-10-24">24 Oct 2026<\/time>/i);
+    expect(body).toContain("5 min read");
+    expect(body).toMatch(/Published <time dateTime="2026-10-20">20 Oct 2026<\/time>/i);
     expect(html).toContain('"@type":"Article"');
     expect(html).toContain('"headline":"A first evening in Kamakura with local hosts (sample guide)"');
     expect(html).toContain('"dateModified":"2026-10-24"');
@@ -43,14 +45,21 @@ for (const [crawler, userAgent] of Object.entries(CRAWLERS)) {
 }
 
 test("the article shows its body, FAQ and the experiences to book, and links to them without JavaScript", async ({ request }) => {
-  const html = await (await request.get(article)).text();
-  expect(html).toMatch(/<h2[^>]*>How an evening works<\/h2>/);
+  const html = (await (await request.get(article)).text()).replaceAll("<!-- -->", "");
+  expect(html).toMatch(/<h2[^>]*id="how-an-evening-works"[^>]*><span[^>]*>1\. <\/span>How an evening works<\/h2>/);
   expect(html).toMatch(/<h3[^>]*>What to bring<\/h3>/);
-  expect(html).toMatch(/<h2[^>]*>Frequently asked questions<\/h2>/);
-  expect(html).toMatch(/<h3[^>]*>Do I need to speak Japanese\?<\/h3>/);
-  expect(html).toMatch(/<h2[^>]*>Book an experience from this guide<\/h2>/);
+  expect(html).toMatch(/<h2[^>]*>Questions people ask<\/h2>/);
+  expect(html).toMatch(/<summary[^>]*>[\s\S]*Do I need to speak Japanese\?/);
+  expect(html).toMatch(/<h3[^>]*>[\s\S]*Do I need to speak Japanese\?/);
+  expect(html).toContain("In this guide");
+  expect(html).toContain(`href="#how-an-evening-works"`);
+  expect(html).toContain(`aria-label="Experience: Home-cooked dinner with locals in a shared living room"`);
+  expect(html).toContain("More experiences from this guide");
+  expect(html).toContain('aria-label="Experience: Evening pottery session"');
   expect(html).toContain(`href="${dinner}"`);
   expect(html).toContain('href="/experiences/evening-pottery-session"');
+  expect(html).toContain("Keep planning");
+  expect(html).toContain("About the author.");
   // Related guide, and the hero shown on the page but never shared (not licensed).
   expect(html).toContain('href="/guides/sample-rainy-day-in-kamakura"');
   expect(html).toContain('src="/placeholders/dinner.svg"');
@@ -66,26 +75,42 @@ test("the experience page links back to the guides about it", async ({ request }
   const html = await (await request.get(dinner)).text();
   expect(html).toMatch(/<h2[^>]*>Guides for your visit<\/h2>/);
   expect(html).toContain(`href="${article}"`);
-  // No guide mentions the cycling breakfast: no guides block there.
+  // A second synthetic guide points at the cycling breakfast too.
   const cycling = await (await request.get("/experiences/seaside-cycling-and-market-breakfast")).text();
-  expect(cycling).not.toContain("Guides for your visit");
+  expect(cycling).toContain("Guides for your visit");
+  expect(cycling).toContain('href="/guides/sample-kamakura-day-plan"');
 });
 
 test("the guides list has its own title, description and canonical, and links every guide", async ({ request }) => {
   const html = await (await request.get("/guides?utm_source=sample")).text();
-  expect(html).toContain("<title>Kamakura Guides | NIHO Experience</title>");
-  expect(html).toContain('<meta name="description" content="Guides from NIHO Experience for planning your time in Kamakura with the people who live here."');
+  expect(html).toContain("<title>Kamakura, from people who live here | NIHO Experience</title>");
+  expect(html).toContain('<meta name="description" content="Short, first-hand guides by our hosts.');
   expect(html).toContain('<link rel="canonical" href="http://localhost:3000/guides"');
-  expect(html).toMatch(/<h1[^>]*>Guides to Kamakura<\/h1>/);
+  expect(html).toMatch(/<h1[^>]*>Kamakura, from people who live here<\/h1>/);
   expect(html).toContain(`href="${article}"`);
   expect(html).toContain('href="/guides/sample-rainy-day-in-kamakura"');
-  expect(html).toMatch(/Updated(?:<!-- -->)? <time dateTime="2026-10-24">/i);
+  expect(html).toContain('href="/guides/sample-kamakura-day-plan"');
+  expect(html).toMatch(/Checked(?:<!-- -->)? <time dateTime="2026-10-24">/i);
+  expect(html).toMatch(/<h2[^>]*>Kamakura after 4 PM<\/h2>/);
+  expect(html).toMatch(/<h2[^>]*>Mending, calligraphy and coffee<\/h2>/);
 });
 
 test("the footer links to the guides while some exist, and unknown guides are not found", async ({ page, request }) => {
   await page.goto("/");
   await expect(page.getByRole("contentinfo").getByRole("link", { name: "Guides", exact: true })).toHaveAttribute("href", "/guides");
   expect((await request.get("/guides/no-such-guide")).status()).toBe(404);
+});
+
+test("the home and experience list expose three guide cards in their requested positions", async ({ page }) => {
+  await page.goto("/");
+  const homeGuides = page.getByRole("region", { name: "Guides from people who live here" });
+  await expect(homeGuides.getByRole("listitem")).toHaveCount(3);
+  const homeOrder = await page.locator("#home-cards-v1, #home-guides-heading-v1, #home-guides-heading, #featured-heading-v1").evaluateAll((nodes) => nodes.map((node) => node.id));
+  expect(homeOrder.indexOf("home-guides-heading")).toBeGreaterThan(homeOrder.indexOf("home-cards-v1"));
+
+  await page.goto("/experiences");
+  const plan = page.getByRole("region", { name: "Plan your day" });
+  await expect(plan.getByRole("listitem")).toHaveCount(3);
 });
 
 test("the article keeps heading levels in order and has one h1", async ({ page }) => {
@@ -147,10 +172,13 @@ test.describe("a guide draft in the mock preview", () => {
       "To confirm: an invented price",
     ]);
 
-    const faq = main.getByRole("region", { name: "Frequently asked questions" });
-    await expect(faq.getByRole("heading", { level: 3 })).toHaveText(["Is anything in this draft real?", "Can children come?"]);
+    const faq = main.getByRole("region", { name: "Questions people ask" });
+    // The browser exposes the summary as a single control in the accessibility tree.
+    await expect(faq.locator("summary h3")).toHaveText(["Is anything in this draft real?+", "Can children come?+"]);
+    await expect(faq.locator("summary")).toHaveText(["Is anything in this draft real?+", "Can children come?+"]);
     await expect(faq.locator("strong")).toHaveText("invented");
     await expect(faq.locator("mark")).toHaveText("To confirm: an invented price");
+    await faq.locator("summary").nth(1).click();
     await expect(faq.getByRole("link", { name: "pottery page" })).toHaveAttribute("href", "/experiences/evening-pottery-session");
     await expect(faq).not.toContainText("**");
   });

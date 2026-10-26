@@ -1,9 +1,12 @@
+import NextImage from "next/image";
 import Link from "next/link";
 import type { Guide, GuideFaqItem } from "@/content/guides";
 import type { CardModel } from "@/lib/card-model";
 import type { GuideDraftProblem } from "@/lib/guide-drafts";
+import { imageAlt } from "@/lib/experience-copy";
 import { parseGuideAnswer } from "@/lib/guide-markdown";
-import { formatGuideDate } from "@/lib/guides";
+import { formatGuideDate, guideReadMinutes } from "@/lib/guides";
+import { CardDates, type CardDatesSource } from "./CardDates";
 import { ExperienceCard } from "./ExperienceCard";
 import { GuideInlines } from "./GuideBody";
 import { Notice, Pill } from "./ui";
@@ -12,12 +15,12 @@ import { Notice, Pill } from "./ui";
  * A list of guides: the title (a link), the description, the updated date and the author. Used by /guides and the related
  * blocks. Guides shown from a draft (preview only) carry a "Draft" pill above the title.
  */
-export function GuideTeasers({ guides, level = 3, draftSlugs = [] }: { guides: readonly Guide[]; level?: 2 | 3; draftSlugs?: readonly string[] }) {
+export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "one", descriptions = true }: { guides: readonly Guide[]; level?: 2 | 3; draftSlugs?: readonly string[]; columns?: "one" | "three"; descriptions?: boolean }) {
   const Heading = level === 2 ? "h2" : "h3";
   return (
-    <ul className="border-b border-line">
+    <ul className={columns === "three" ? "grid gap-3 md:grid-cols-3" : "grid gap-3"}>
       {guides.map((guide) => (
-        <li key={guide.slug} className="border-t border-line py-5">
+        <li key={guide.slug} className="rounded-[var(--radius-card)] border border-line bg-white p-4 shadow-[0_1px_2px_rgb(28_28_26/0.03)] sm:p-5">
           {draftSlugs.includes(guide.slug) ? (
             <p className="mb-2">
               <Pill tone="warn">Draft</Pill>
@@ -28,13 +31,38 @@ export function GuideTeasers({ guides, level = 3, draftSlugs = [] }: { guides: r
               {guide.title}
             </Link>
           </Heading>
-          <p className="mt-1.5 text-ink-soft">{guide.description}</p>
+          {descriptions ? <p className="mt-1.5 text-[0.9375rem] text-ink-soft">{guide.description}</p> : null}
           <p className="mt-2 text-sm text-muted">
-            Updated <time dateTime={guide.updatedAt}>{formatGuideDate(guide.updatedAt)}</time> · by {guide.author.name}
+            {guideReadMinutes(guide)} min · {guide.checkedAt ? "Checked" : "Updated"}{" "}
+            <time dateTime={guide.checkedAt ?? guide.updatedAt}>{formatGuideDate(guide.checkedAt ?? guide.updatedAt)}</time>
           </p>
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A compact in-article CTA. Every variable fact comes from the same CardModel/CardDates path as public experience cards. */
+export function GuideExperienceCta({ card, dates }: { card: CardModel; dates: CardDatesSource }) {
+  return (
+    <aside aria-label={`Experience: ${card.title}`} className="mt-8 rounded-[var(--radius-card)] border border-line bg-sand p-4 sm:p-5">
+      <div className="grid items-start gap-4 sm:grid-cols-[96px_1fr]">
+        {card.cover ? (
+          <NextImage src={card.cover.url} alt={imageAlt(card.cover, card.title)} width={192} height={144} unoptimized className="aspect-[4/3] w-24 rounded-xl object-cover" />
+        ) : null}
+        <div className="min-w-0">
+          <p className="eyebrow text-[1.25rem]">Experience</p>
+          <h3 className="mt-1 font-sans text-[1.0625rem] leading-snug font-extrabold tracking-normal">
+            <Link href={`/experiences/${card.slug}`} className="hover:underline">{card.title}</Link>
+          </h3>
+          <p className="mt-1 text-sm text-ink-soft">
+            {card.priceIsFrom ? "From " : ""}{card.priceLabel} / adult · {card.durationLabel}{card.language ? ` · ${card.language.short}` : ""}
+          </p>
+          <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={dates} />
+          <Link href={`/experiences/${card.slug}`} className="link-leaf mt-2 inline-block text-sm">See experience</Link>
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -51,7 +79,7 @@ export function ExperienceCardGrid({ cards }: { cards: readonly CardModel[] }) {
   );
 }
 
-/** Questions and answers: an h2, then one h3 per question and its short answer (inline formatting only), all in the server HTML. */
+/** Questions and answers: an h2, then native details/summary rows (inline formatting only), all in the server HTML. */
 export function GuideFaq({ title, items }: { title: string; items: readonly GuideFaqItem[] }) {
   if (!items.length) return null;
   return (
@@ -61,12 +89,16 @@ export function GuideFaq({ title, items }: { title: string; items: readonly Guid
       </h2>
       <div className="border-t border-line">
         {items.map((item) => (
-          <div key={item.question} className="border-b border-line py-4">
-            <h3 className="font-sans text-[1.0625rem] leading-[1.5] font-extrabold tracking-normal">{item.question}</h3>
-            <p className="mt-1.5 text-ink-soft">
+          <details key={item.question} className="group border-b border-line">
+            <summary className="cursor-pointer list-none py-4 text-ink [&::-webkit-details-marker]:hidden">
+              <h3 className="flex items-center justify-between gap-4 font-sans text-[1.0625rem] leading-[1.5] font-extrabold tracking-normal">
+                <span>{item.question}</span><span aria-hidden className="text-xl text-moss group-open:rotate-45">+</span>
+              </h3>
+            </summary>
+            <p className="pb-4 text-ink-soft">
               <GuideInlines items={parseGuideAnswer(item.answer)} />
             </p>
-          </div>
+          </details>
         ))}
       </div>
     </section>

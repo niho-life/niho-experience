@@ -15,13 +15,16 @@
 | `slug` | URL `/guides/{slug}` | 英小文字・数字・ハイフン。公開後は変えない |
 | `title` | h1・`<title>`・`Article.headline` | 110 字まで |
 | `description` | meta description と、題名の下のリード | 160 字まで |
-| `author` | `{ name, role }` | 実名と役割（例：`Editor, NIHO Experience`） |
+| `pillar` | `evenings` / `zazen` / `hands-on` / `planning` / `hosts` | 公開記事は必須。`/guides` はこの順で記事がある柱だけ出す |
+| `author` | `{ name, role, bio }` | 実名・役割・短い著者紹介。公開記事は `bio` 必須 |
 | `publishedAt`・`updatedAt` | 公開日・更新日（`YYYY-MM-DD`） | 画面に出す。内容を直したら `updatedAt` を変える（sitemap の `lastModified`） |
-| `hero` | `{ src, alt, width, height, licensed }`（任意） | `src` は `public/` 配下のパスか https。`licensed: true` は共有（OG 画像・構造化データ）まで許諾がある写真だけ。仮素材は `false` |
+| `checkedAt` | 事実確認日（`YYYY-MM-DD`、任意） | 一覧カードではあれば `Checked`、なければ `Updated` を表示 |
+| `readMinutes` | 読了分数（1〜60、任意） | 省略時は本文等から自動算出 |
+| `hero` | `{ src, alt, width, height, licensed, caption? }`（任意） | `src` は `public/` 配下のパスか https。`licensed: true` は共有（OG 画像・構造化データ）まで許諾がある写真だけ。`caption` は写真直下の説明・クレジット |
 | `video` | `{ youtubeId, caption }`（任意） | 公開済み動画の 11 文字 ID と確認済みの説明。`hero` をポスターに使う。媒体別同意を得てから追加する（[動画の公開手順](videos.md)） |
-| `relatedExperienceSlugs` | 記事の最後で予約へ誘う体験 | 2〜3 件。カタログに無い slug は画面で飛ばす |
+| `relatedExperienceSlugs` | 本文途中の主 CTA と、その後の関連体験 | 2〜3 件。カタログに無い slug は画面で飛ばす |
 | `relatedGuideSlugs` | 関連記事 | 0〜3 件。公開済みの記事だけを指す |
-| `faq` | `{ question, answer }[]` | 質問は見出し（h3）、答えは短く。20 問まで。FAQ の構造化データは出さない |
+| `faq` | `{ question, answer }[]` | `details/summary` 内の質問は h3、答えは短く。20 問まで。FAQ の構造化データは出さない |
 | `body` | 本文（下の書き方） | |
 | `translations.ja` | 日本語版（題名・説明・本文・FAQ） | 構造だけ。`/ja/guides` ができるまで画面にも hreflang にも出ない（#59） |
 
@@ -85,13 +88,18 @@ title: Zazen in Kamakura: Public Sessions vs a Guided Morning at Engaku-ji
 description: 160 字までの説明
 author: Takuya
 authorRole: NIHO kamakura
+authorBio: Kamakura host and local guide.
+pillar: zazen
 publishedAt: 2026-10-26
 updatedAt: 2026-10-26
+checkedAt: 2026-10-26
+readMinutes: 7
 hero: /sample/photos/zazen-hall.jpg
 heroAlt: A quiet temple hall laid out for seated meditation
 heroWidth: 1600
 heroHeight: 1067
 heroLicensed: false
+heroCaption: Preview photo only; replace it before publishing.
 relatedExperiences: engakuji-zen-meditation, kamakura-calligraphy
 relatedGuides: kamakura-day-trip-from-tokyo, hands-on-kamakura
 ---
@@ -108,13 +116,22 @@ relatedGuides: kamakura-day-trip-from-tokyo, hands-on-kamakura
 | --- | --- | --- |
 | ファイル名 | `slug` | `{slug}.md` |
 | `title`・`description` | 同じ | 公開記事と同じ字数 |
-| `author`・`authorRole` | `author.name`・`author.role` | |
+| `pillar` | `pillar` | 5種類のいずれか。既存下書きでは省略可で、その場合は誤分類せず preview-only の「Drafts awaiting a pillar」に出す。公開前に必ず加える |
+| `author`・`authorRole`・`authorBio` | `author.name`・`author.role`・`author.bio` | `authorBio` は既存下書きでは省略可、公開時は必須 |
 | `publishedAt`・`updatedAt` | 同じ | `YYYY-MM-DD` |
-| `hero`・`heroAlt`・`heroWidth`・`heroHeight`・`heroLicensed` | `hero` の `src`・`alt`・`width`・`height`・`licensed` | 任意。書くなら `heroLicensed` 以外はそろえる。`heroLicensed` の既定は `false` |
+| `checkedAt`・`readMinutes` | 同じ | 任意。日付と1〜60の整数 |
+| `hero`・`heroAlt`・`heroWidth`・`heroHeight`・`heroLicensed`・`heroCaption` | `hero` の `src`・`alt`・`width`・`height`・`licensed`・`caption` | 任意。書くなら `heroLicensed`・`heroCaption` 以外はそろえる。`heroLicensed` の既定は `false` |
 | `relatedExperiences`・`relatedGuides` | `relatedExperienceSlugs`・`relatedGuideSlugs` | カンマ区切り。数の決まりは公開記事と同じ |
 | `:::faq` 〜 `:::` | `faq` | 1 つだけ。`### 質問` の次の段落が答え |
 
-公開するときは、下書きを `apps/web/src/content/guides/{slug}.ts` のモジュールに写し（項目は上の表のとおり、本文は `body`、`:::faq` は `faq`）、`[CONFIRM]` と `/sample/` の写真を無くしてから次の手順で PR にする。
+公開するときは、下書きを `apps/web/src/content/guides/{slug}.ts` のモジュールに写し（項目は上の表のとおり、本文は `body`、`:::faq` は `faq`）、`pillar` と `author.bio` を加え、本文に目次用の `##` を1つ以上置き、`[CONFIRM]` と `/sample/` の写真を無くしてから次の手順で PR にする。
+
+## 画面での使われ方
+
+- `/guides` は柱順にカードを並べ、0本の柱は出さない。カードの読了分数は `readMinutes` または自動算出値、日付は `checkedAt` または `updatedAt` を使う。
+- 記事の目次と番号は本文の `##` から作る。同じ見出しが複数あってもリンク先IDは重複させない。本文は構文木からReact要素へ描画し、HTML文字列を注入しない。
+- 本文途中の体験案内は `relatedExperienceSlugs` の先頭から、公開カタログに現在ある最初の1件を選ぶ。価格・所要時間・日程は公開API由来のカード表示値を使い、記事へ固定値を写さない。カタログ取得失敗・未掲載では出さない。
+- トップの入口はガイドが3本以上あるときだけ3枚を出す。体験一覧末尾の `Plan your day` は1本以上で最大3枚を出す。httpモードでは `PUBLISHED_GUIDES` だけを使う。
 
 ## 公開の手順
 

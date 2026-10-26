@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { CatalogueViewV1, EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 import { TrackView } from "@/components/Analytics";
 import { ExperienceList } from "@/components/ExperienceList";
 import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
 import { EmptyResults, ErrorState } from "@/components/States";
+import { GuideTeasers } from "@/components/GuideBlocks";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
@@ -14,6 +16,7 @@ import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib
 import { filterExperienceSummaries, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
 import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } from "@/lib/public-metadata";
 import { englishAlternates } from "@/lib/locale-metadata";
+import { guideCatalog } from "@/lib/guide-registry";
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   const query = await searchParams;
@@ -31,7 +34,7 @@ const FINDER_DAYS = 14;
 export default async function ExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
   const searchQuery = normalizeExperienceQuery(query.q);
-  const [api, result] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query)]);
+  const [api, result, guideCatalogResult] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalog()]);
   const copy = EN_STATIC_COPY_V1;
   if (!result.ok && result.kind !== "not_found") return <ErrorState title="We couldn't load experiences" />;
   const catalog = result.ok ? result.data.experiences : [];
@@ -78,5 +81,14 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   return <>
     <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: items.length }} />
     {listContent}
+    {guideCatalogResult.guides.length ? (
+      <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">
+        <div className="mb-5 flex items-end justify-between gap-4">
+          <div><p className="eyebrow">Guides</p><h2 id="catalogue-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">Plan your day</h2></div>
+          <Link href="/guides" className="link-leaf shrink-0 text-sm">See all guides</Link>
+        </div>
+        <GuideTeasers guides={guideCatalogResult.guides.slice(0, 3)} draftSlugs={guideCatalogResult.draftSlugs} columns="three" descriptions={false} />
+      </section>
+    ) : null}
   </>;
 }
