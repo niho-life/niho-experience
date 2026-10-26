@@ -1,6 +1,6 @@
 import type { Occurrence } from "@niho-experience/api-client";
 import { describe, expect, it } from "vitest";
-import { detailFromTokyoLine, detailNextDates, publicStationAccess } from "./detail-page";
+import { detailFromTokyoLine, detailGuideHeading, detailNextDates, publicStationAccess } from "./detail-page";
 
 const occurrence = (date: string, startAt: string, bookable = true): Occurrence => ({
   offerId: `offer-${date}-${startAt}`,
@@ -26,6 +26,14 @@ describe("detail page facts", () => {
     expect(engakuji).not.toContain("2-minute walk from Kamakura Station");
     expect(detailFromTokyoLine("鎌倉", "北鎌倉駅から徒歩1分です。", "ja")).toBe("鎌倉・東京から1時間・北鎌倉駅から徒歩1分");
     expect(detailFromTokyoLine("Kamakura", "Directions are shared later.", "en")).toBe("Kamakura · 1 hour from Tokyo");
+  });
+
+  it("uses public access and offered times for the related-guide heading", () => {
+    expect(detailGuideHeading("Kamakura", "1-minute walk from Kita-Kamakura Station.", ["09:00", "10:30"]))
+      .toBe("Plan your morning in Kita-Kamakura");
+    expect(detailGuideHeading("Kamakura", "2-minute walk from Kamakura Station West Exit.", ["18:00"]))
+      .toBe("Plan your evening in Kamakura");
+    expect(detailGuideHeading("Kamakura", null, ["14:00"])).toBe("Plan your day in Kamakura");
   });
 
   it("selects the earliest bookable occurrence on four distinct JST dates", () => {

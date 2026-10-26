@@ -45,6 +45,15 @@ export function detailFromTokyoLine(regionName: string, accessNote: string | nul
   return DETAIL_PAGE_COPY[locale]["detail.fromTokyoLine"]({ region: regionName, ...(access ?? {}) });
 }
 
+/** A contextual heading from the public meeting station and offered start times. */
+export function detailGuideHeading(regionName: string, accessNote: string | null | undefined, startTimes: readonly string[]): string {
+  const station = publicStationAccess(accessNote, "en")?.station;
+  const place = station?.replace(/ Station$/, "") || regionName;
+  const hours = startTimes.map((time) => Number(time.slice(0, 2))).filter((hour) => Number.isInteger(hour) && hour >= 0 && hour < 24);
+  const timeOfDay = hours.length && hours.every((hour) => hour < 12) ? "morning" : hours.length && hours.every((hour) => hour >= 17) ? "evening" : "day";
+  return `Plan your ${timeOfDay} in ${place}`;
+}
+
 /** The first bookable occurrence on each of the next four JST dates. */
 export function detailNextDates(occurrences: readonly Occurrence[]): Occurrence[] {
   return nextBookableDays(occurrences, DETAIL_NEXT_DATE_COUNT);

@@ -29,6 +29,15 @@ test("phones get a swipeable gallery and a booking bar that stays within reach",
   await expect(page).toHaveURL(/\/book$/);
 });
 
+test("the next-date band opens the booking page on phones", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-360");
+  await page.goto(dinner);
+  const band = page.locator("[data-next-date-band]");
+  await expect(band.getByRole("link", { name: "All dates" })).toBeVisible();
+  await band.getByRole("link", { name: "All dates" }).click();
+  await expect(page).toHaveURL(/\/book$/);
+});
+
 test("desktop shows every photo in a dialog and a next date opens the booking page with it selected", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop");
   await page.goto(dinner);
@@ -129,8 +138,8 @@ test("two crawler UAs get the location, FAQ and next-date band in the initial HT
     expect(html).toMatch(/Next date<\/span><time[^>]*>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} · .* JST<\/time>/);
     expect(html).toContain('id="faq"');
     expect(html.indexOf("data-next-date-band")).toBeLessThan(html.indexOf('aria-label="Photos of'));
-    expect(html.indexOf('id="faq"')).toBeLessThan(html.indexOf("Stories behind this experience"));
-    expect(html.indexOf("Stories behind this experience")).toBeLessThan(html.lastIndexOf(">Cancellation</h2>"));
+    expect(html.indexOf('id="faq"')).toBeLessThan(html.indexOf("Plan your evening in Kamakura"));
+    expect(html.indexOf("Plan your evening in Kamakura")).toBeLessThan(html.lastIndexOf(">Cancellation</h2>"));
     expect(html).not.toMatch(/Book by|seats? left/i);
   }
 

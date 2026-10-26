@@ -41,7 +41,7 @@ import { guidesAboutExperience } from "@/lib/guide-registry";
 import { videoForExperience } from "@/lib/videos";
 import { YouTubeVideo } from "@/components/YouTubeVideo";
 import { dayOption } from "@/lib/date-filter";
-import { detailFromTokyoLine, detailNextDates } from "@/lib/detail-page";
+import { detailFromTokyoLine, detailGuideHeading, detailNextDates } from "@/lib/detail-page";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -526,7 +526,11 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       // Same no-store public availability as the booking controls. The API has no bookingClosesAt, so the band shows no cutoff or seat count.
       upcoming: upcomingDates.length ? <NextDateBand dates={upcomingDates} locale={locale} bookingHref={bookingHref} /> : undefined,
       video: video && e.cover ? <YouTubeVideo video={video} poster={e.cover.url} title={e.title} /> : undefined,
-      relatedGuides: relatedGuides.guides.length ? { eyebrow: "Guides", title: "Stories behind this experience", content: <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} /> } : undefined,
+      relatedGuides: relatedGuides.guides.length ? {
+        eyebrow: "Guides",
+        title: detailGuideHeading(e.region.name, meeting?.accessNote, e.offers.map((offer) => offer.startTime)),
+        content: <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} columns="three" variant="detail" />,
+      } : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
       cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
