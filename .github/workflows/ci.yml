@@ -1,13 +1,18 @@
 # Public CI: synthetic data only, no secrets, GitHub-hosted runners.
 # Fork PRs run with a read-only token. Images are built and tested but never pushed or deployed here
 # (see docs/adr/0001-web-stack.md).
+#
+# `premerge-gate` is the one check the `main` ruleset requires (docs/development.md「PR とマージ」).
+# Pull requests have no path filter on purpose: a workflow skipped by `paths` leaves a required check
+# pending forever, while a job skipped by `if` reports success. So `changes` decides what a PR needs,
+# the jobs skip themselves, and the gate accepts a skip only where `changes` allowed it.
 name: CI
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
+  # Not used yet: lets a merge queue run this workflow if `main` ever requires one.
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
     paths-ignore:
@@ -27,7 +32,45 @@ env:
   SITE_INDEXING: block
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.files.outputs.docs_only }}
+      api_client: ${{ steps.files.outputs.api_client }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          # The PR's merge commit and its first parent (the base it merges into).
+          fetch-depth: 2
+          persist-credentials: false
+      - id: files
+        run: |
+          set -euo pipefail
+          # Pushes to main and merge queue entries always run everything.
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "api_client=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --no-renames --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          echo "Changed files:"; cat "$RUNNER_TEMP/changed"
+          # Same set the old `paths-ignore` skipped. An empty diff runs everything.
+          if [ -s "$RUNNER_TEMP/changed" ] && ! grep -Ev '(^docs/|\.md$)' "$RUNNER_TEMP/changed" > /dev/null; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '^(packages/api-client/|package-lock\.json$|\.github/workflows/ci\.yml$)' "$RUNNER_TEMP/changed"; then
+            echo "api_client=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api_client=false" >> "$GITHUB_OUTPUT"
+          fi
+
   stg-document-readback:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -40,7 +83,10 @@ jobs:
         run: python3 scripts/test_stg_booking_preflight.py
 
   web:
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # Playwright 1.56.1 cannot install Chromium dependencies on ubuntu-26.04 (the current ubuntu-latest image).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,6 +115,8 @@ jobs:
 
   container:
     # Builds the image that would be deployed (not pushed anywhere) and smoke-tests it.
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -79,3 +127,43 @@ jobs:
         run: docker build -t niho-experience:ci .
       - name: Smoke test
         run: sh scripts/container-smoke.sh niho-experience:ci
+
+  api-client:
+    # The contract checks (generated types) only when the client or the lockfile changes.
+    needs: changes
+    if: needs.changes.outputs.api_client == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # One lockfile for the whole repo (npm workspaces).
+      - run: npm ci
+      - run: npm -w @niho-experience/api-client run check
+
+  premerge-gate:
+    # `always()`: without it a failed job would skip this one, and a skipped required check passes.
+    if: always()
+    needs: [changes, stg-document-readback, web, container, api-client]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to succeed, skipped only where `changes` allowed it
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          API_CLIENT: ${{ needs.changes.outputs.api_client }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"'
+          echo "$RESULTS" | jq -e --arg docs "$DOCS_ONLY" --arg api "$API_CLIENT" '
+            to_entries | all(
+              .value.result == "success"
+              or (.value.result == "skipped" and .key != "changes"
+                  and ($docs == "true" or (.key == "api-client" and $api != "true")))
+            )' > /dev/null

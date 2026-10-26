@@ -55,19 +55,19 @@
 
 表示している内容と一致するデータだけを出す。v1の段階的な案：
 
-1. **最初**：`Organization`、`BreadcrumbList`
+1. **最初**：`Organization`（＋`WebSite`、トップのみ。名称とURLだけでロゴは承認済み素材が出てから）、`BreadcrumbList`
 2. **API契約と表示の実装後**：体験詳細に `Product` と `Offer` を出すか、開催日ごとの `Event` を出すかを、Googleのガイドラインを確認したうえで担当1と決める。価格・在庫・日時は画面と同じAPIの値を使う。実際に開催が決まっていない日を「毎日開催」として大量に出さない
 3. **レビュー（`AggregateRating`・`Review`）**（2026-10-22 更新・[#104](https://github.com/niho-life/niho-experience/issues/104)）：実際のレビューを集める仕組みの方針が決まったので、次の条件がすべて揃うときだけ出す。
    - 対象は、NIHOで予約した人だけが書き、NIHOが確認してから公開したレビュー（owner決定 2026-10-22）。OTAや拠点への評価、提供者が自分で書いたもの、予約を経由しないものは転用しない。
    - 実データ（HTTP API）のときだけ。プレビューの合成のレビューは出さない。
    - **画面に出している内容と一致させる**：平均は3件から画面に出すので、`aggregateRating` と `review` も3件以上のときだけ。1〜2件・0件・読めなかったときは何も出さない。出す `review` は画面の新しい順の件だけ。
    - 提供者の返信・よかった点の集計・予約や利用者の識別子は載せない。表示名は「名＋国・地域」だけ。
-   - 型は `TouristTrip` のまま `aggregateRating` と `review` を足す。Google のレビューのリッチリザルトの対象型（`Product` など）ではないので、検索結果に星が出ることは狙わない（表示と一致する構造化データとして置くだけ）。`Product` を併記するかは、実データが出る前に担当3と決める。
+   - `TouristTrip` に `aggregateRating` と `review` を足し、同じ値を `Product` にも載せる（[#139](https://github.com/niho-life/niho-experience/issues/139)。`TouristTrip` はGoogleのリッチリザルトの対象外で、星が出るのは `Product`）。星が必ず出るとは限らない。表示と一致する構造化データとして置く。
    - 「0件」の `New` や「読めなかった」状態を、評価としては出さない。
 
 ## 言語版とhreflang
 
-v1は英語版だけなので、hreflangを出さない。日本語版を公開するときに、各言語版に自己参照canonicalと相互のhreflang、`x-default` を付ける。実在しない言語版をhreflangに書かない。
+英語版は自分自身（`en`）と `x-default` のhreflangを出す。日本語版が公開されたページだけ、各言語版に自己参照canonicalと相互のhreflang（`en`・`ja`・`x-default`）を付ける（[#139](https://github.com/niho-life/niho-experience/issues/139)。日本語版（#59）の準備として先に出す側に寄せた）。実在しない言語版をhreflangに書かない。
 
 ## 内部リンク
 
