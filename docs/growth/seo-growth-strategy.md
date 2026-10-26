@@ -95,7 +95,7 @@
 | 11 | YouTube（体験 1 本 2〜3 分、英語字幕、ホストが話す） | 中〜高 | 制作費 | AI Mode の 76/100 回答に YouTube |
 | 12 | Reddit r/JapanTravel | 中（長期） | 0 | 事業者名義の宣伝はしない。参加者の自然な言及と開示つきの回答のみ |
 | 13 | Bing Webmaster Tools 登録・IndexNow | 低（前提） | 0 | ChatGPT 検索は Bing の索引を使う（二次） |
-| 14 | robots.txt で OAI-SearchBot／PerplexityBot／ClaudeBot を許可、学習用は別途判断 | 中（前提） | 0 | OAI-SearchBot 拒否 = ChatGPT 検索に出ない |
+| 14 | robots.txt で OAI-SearchBot／PerplexityBot／Claude-SearchBot を許可、学習用は別途判断 | 中（前提） | 0 | OAI-SearchBot 拒否 = ChatGPT 検索に出ない |
 | 15 | llms.txt | 低 | 0 | Google は「不要」と明記。97% のファイルは AI から 0 リクエスト。やらない |
 
 ## コンテンツ地図（柱 5 本）
