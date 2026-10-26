@@ -7,7 +7,7 @@ import { createExperienceHostApiClient, type ExperienceHostApiClient } from "@ni
 import { config } from "@/lib/config";
 import { cookieSealer } from "./cookie-seal";
 import { createMockHostFetch, MOCK_ID_TOKEN_PREFIX, mockToken } from "./mock-niho";
-import { refreshConnection, signInWithCustomToken, type NihoAuthDeps } from "./niho-auth";
+import { refreshConnection, type NihoAuthDeps } from "./niho-auth";
 import { usableProviders, type HostProvider } from "./providers";
 import {
   decodeSession,
@@ -44,7 +44,7 @@ export const readHostSession = cache(async (): Promise<HostSession | null> => {
 });
 
 export function nihoAuthDeps(): NihoAuthDeps {
-  return { fetch, nihoOrigin: config.nihoWebOrigin, firebaseWebApiKey: config.nihoFirebaseWebApiKey };
+  return { fetch, nihoOrigin: config.nihoWebOrigin };
 }
 
 /** NIHO's API for this session: the real origin in http mode, the synthetic one in mock mode. */
@@ -55,7 +55,7 @@ export function nihoApiFetch(session: HostSession): typeof fetch {
 export type ProvidersLoad =
   | { status: "ok"; providers: HostProvider[] }
   | { status: "signed-out" }
-  /** The ID token is (nearly) expired: the browser refreshes, then reloads. */
+  /** The NIHO API bearer is (nearly) expired: the browser refreshes, then reloads. */
   | { status: "refresh" }
   /** NIHO refused a token we thought valid (connection ended elsewhere). */
   | { status: "rejected" }
@@ -63,7 +63,7 @@ export type ProvidersLoad =
 
 /**
  * NIHO's host API for this session, typed by the host contract (#87). Server
- * only: it sends the session's ID token. Browser code calls /host/api/* instead.
+ * only: it sends the session's API bearer. Browser code calls /host/api/* instead.
  */
 export function hostApiClient(session: HostSession): ExperienceHostApiClient {
   return createExperienceHostApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: session.idToken, fetch: nihoApiFetch(session) });
@@ -93,7 +93,7 @@ export type Renewal =
   | { outcome: "unavailable"; session: HostSession };
 
 /**
- * Exchanges the connection's refresh token for a new one and a new ID token.
+ * Exchanges the connection's refresh token for a new one and a new NIHO API token.
  * Only /host/auth/refresh (serialised by the browser across tabs) and logout call this.
  */
 export async function renewSession(session: HostSession): Promise<Renewal> {
@@ -105,9 +105,9 @@ export async function renewSession(session: HostSession): Promise<Renewal> {
   const refreshed = await refreshConnection(deps, session.refreshToken);
   if (!refreshed.ok) return refreshed.reason === "rejected" ? { outcome: "rejected" } : { outcome: "unavailable", session };
   const rotated: HostSession = { ...session, refreshToken: refreshed.value.refreshToken, connectionExpiresAt: refreshed.value.connectionExpiresAt };
-  const signedIn = await signInWithCustomToken(deps, refreshed.value.customToken, Date.now());
-  if (!signedIn.ok) return { outcome: "unavailable", session: rotated };
-  return { outcome: "refreshed", session: startSession({ ...rotated, ...signedIn.value }, Date.now()) };
+  const now = Date.now();
+  if (refreshed.value.accessTokenExpiresAt <= now) return { outcome: "unavailable", session: rotated };
+  return { outcome: "refreshed", session: startSession({ ...rotated, idToken: refreshed.value.accessToken, idTokenExpiresAt: refreshed.value.accessTokenExpiresAt }, now) };
 }
 
 export const MOCK_ID_TOKEN_TTL_MS = 60 * 60 * 1000;

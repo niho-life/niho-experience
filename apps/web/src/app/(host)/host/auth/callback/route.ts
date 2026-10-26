@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
-import { exchangeCode, signInWithCustomToken } from "@/lib/host/niho-auth";
+import { exchangeCode } from "@/lib/host/niho-auth";
 import { loginStatesMatch } from "@/lib/host/pkce";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostPreparationPath, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
 import { clearLoginCookie, hostNotFound, loginSealer, nihoAuthDeps, seeOther, setSessionCookie } from "@/lib/host/server";
@@ -31,13 +31,10 @@ export async function GET(request: NextRequest) {
   const deps = nihoAuthDeps();
   const exchanged = await exchangeCode(deps, { code, codeVerifier: login.verifier });
   if (!exchanged.ok) return failed(exchanged.reason, login.preparationCaseId);
-  // A fresh custom token that Firebase refuses is NIHO's or Firebase's problem, not the host's.
-  const signedIn = await signInWithCustomToken(deps, exchanged.value.customToken, Date.now());
-  if (!signedIn.ok) return failed("unavailable", login.preparationCaseId);
-
   const now = Date.now();
-  const { refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl } = exchanged.value;
-  const session = startSession({ refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value }, now);
+  const { refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, accessToken, accessTokenExpiresAt } = exchanged.value;
+  if (accessTokenExpiresAt <= now) return failed("unavailable", login.preparationCaseId);
+  const session = startSession({ refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, idToken: accessToken, idTokenExpiresAt: accessTokenExpiresAt }, now);
   const response = seeOther(login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   try {

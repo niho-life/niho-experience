@@ -44,14 +44,13 @@ describe("host console settings", () => {
     expect(() => resolveConfig({ EXPERIENCE_API_MODE: "http" })).not.toThrow();
   });
 
-  it("fails at start-up when an enabled http console lacks its secret or Firebase key", () => {
-    expect(() => resolveConfig({ ...http, NIHO_FIREBASE_WEB_API_KEY: "key" })).toThrow(/HOST_SESSION_SECRET/);
-    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: "short", NIHO_FIREBASE_WEB_API_KEY: "key" })).toThrow(/HOST_SESSION_SECRET/);
-    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: DEV_ONLY_HOST_SESSION_SECRET, NIHO_FIREBASE_WEB_API_KEY: "key" })).toThrow(/HOST_SESSION_SECRET/);
-    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: `${secret},short`, NIHO_FIREBASE_WEB_API_KEY: "key" })).toThrow(/HOST_SESSION_SECRET/);
-    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: secret })).toThrow(/NIHO_FIREBASE_WEB_API_KEY/);
-    const ok = resolveConfig({ ...http, HOST_SESSION_SECRET: ` ${secret} `, NIHO_FIREBASE_WEB_API_KEY: " key " });
-    expect(ok).toMatchObject({ hostConsoleEnabled: true, hostSessionSecret: secret, nihoFirebaseWebApiKey: "key" });
+  it("requires a strong host cookie secret; the Admin Firebase key is independent", () => {
+    expect(() => resolveConfig(http)).toThrow(/HOST_SESSION_SECRET/);
+    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: "short" })).toThrow(/HOST_SESSION_SECRET/);
+    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: DEV_ONLY_HOST_SESSION_SECRET })).toThrow(/HOST_SESSION_SECRET/);
+    expect(() => resolveConfig({ ...http, HOST_SESSION_SECRET: `${secret},short` })).toThrow(/HOST_SESSION_SECRET/);
+    const ok = resolveConfig({ ...http, HOST_SESSION_SECRET: ` ${secret} ` });
+    expect(ok).toMatchObject({ hostConsoleEnabled: true, hostSessionSecret: secret, nihoFirebaseWebApiKey: "" });
   });
 });
 

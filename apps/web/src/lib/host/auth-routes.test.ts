@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-/** The http-mode login, refresh and relay routes against a synthetic NIHO and Firebase. */
+/** The http-mode login, refresh and relay routes against a synthetic NIHO API. */
 const state = vi.hoisted(() => ({
   config: {
     apiMode: "http",
     hostConsoleEnabled: true,
     hostSessionSecret: "synthetic-route-test-secret-0123456789abcdef",
-    nihoFirebaseWebApiKey: "synthetic-web-key",
+    nihoFirebaseWebApiKey: "",
     nihoWebOrigin: "https://niho.example.test",
     siteUrl: "https://experience.example.test",
   },
@@ -89,16 +89,15 @@ describe("login and callback (http mode)", () => {
     expect(cookie).not.toContain(location.searchParams.get("state")!);
   });
 
-  it("exchanges the code, signs in with the custom token and opens the requested provider", async () => {
+  it("exchanges the code for an API-only token and opens the requested provider", async () => {
     const { location, cookie } = await startLogin("?providerId=p_1");
     handler = (url, init) => {
       if (url.pathname === "/api/auth/app-connect/exchange") {
         const body = JSON.parse(String(init.body));
         expect(body).toMatchObject({ clientId: "niho-experience", code: "code-1" });
         expect(body.codeVerifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
-        return json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } });
+        return json(200, { accessToken: "api-only-1", expiresAt: new Date(Date.now() + 60 * MIN).toISOString(), refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { displayName: "合成 ホスト", iconImage: null } });
       }
-      if (url.hostname === "identitytoolkit.googleapis.com") return json(200, { idToken: "id-1", expiresIn: "3600", refreshToken: "firebase-refresh" });
       throw new Error(`unexpected ${url.href}`);
     };
     const state = location.searchParams.get("state")!;
@@ -110,10 +109,9 @@ describe("login and callback (http mode)", () => {
     const session = cookies.get(SESSION_COOKIE)!;
     expect(session.attributes).toMatch(/Path=\/host;/);
     expect(session.attributes).toMatch(/Max-Age=2592000/);
-    expect(session.value).not.toContain("id-1");
-    expect(openSession(session.value)).toMatchObject({ refreshToken: "refresh-1", idToken: "id-1", connectionId: "conn_1", displayName: "合成 ホスト" });
-    // Firebase's own refresh token is not kept.
-    expect(JSON.stringify(openSession(session.value))).not.toContain("firebase-refresh");
+    expect(session.value).not.toContain("api-only-1");
+    expect(openSession(session.value)).toMatchObject({ refreshToken: "refresh-1", idToken: "api-only-1", connectionId: "conn_1", displayName: "合成 ホスト" });
+    expect(calls).toHaveLength(1);
   });
 
   it("keeps only a validated preparation case in sealed login state and returns to its fixed page", async () => {
@@ -121,8 +119,7 @@ describe("login and callback (http mode)", () => {
     expect(location.searchParams.has("preparationCaseId")).toBe(false);
     expect(location.searchParams.has("returnTo")).toBe(false);
     handler = (url, init) => {
-      if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } });
-      if (url.hostname === "identitytoolkit.googleapis.com") return json(200, { idToken: "id-1", expiresIn: "3600", refreshToken: "firebase-refresh" });
+      if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: "api-only-1", expiresAt: new Date(Date.now() + 60 * MIN).toISOString(), refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { displayName: "合成 ホスト", iconImage: null } });
       throw new Error(`unexpected ${url.href} ${String(init.method)}`);
     };
     const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
@@ -130,8 +127,8 @@ describe("login and callback (http mode)", () => {
 
     const unsafe = await startLogin("?preparationCaseId=..%2Fadmin&returnTo=%2Fadmin");
     handler = (url) => url.pathname === "/api/auth/app-connect/exchange"
-      ? json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionId: "conn_2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } })
-      : json(200, { idToken: "id-2", expiresIn: "3600" });
+      ? json(200, { accessToken: "api-only-2", expiresAt: new Date(Date.now() + 60 * MIN).toISOString(), refreshToken: "refresh-2", connectionId: "conn_2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { displayName: "合成 ホスト", iconImage: null } })
+      : json(503, {});
     const unsafeResponse = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-2&state=${unsafe.location.searchParams.get("state")}`, { headers: { cookie: unsafe.cookie } }));
     expect(unsafeResponse.headers.get("location")).toBe("/host/home");
   });
@@ -177,24 +174,26 @@ describe("refresh (http mode)", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("rotates the refresh token and stores the new ID token", async () => {
+  it("rotates the refresh token and stores the new API bearer", async () => {
     handler = (url) => url.pathname === "/api/auth/app-connect/refresh"
-      ? json(200, { customToken: "custom-2", expiresAt: new Date().toISOString(), refreshToken: "refresh-2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString() })
-      : json(200, { idToken: "id-2", expiresIn: "3600" });
+      ? json(200, { accessToken: "api-only-2", expiresAt: new Date(Date.now() + 60 * MIN).toISOString(), refreshToken: "refresh-2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString() })
+      : json(503, {});
     const response = await post(sessionCookie(4 * MIN));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ refreshed: true });
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ clientId: "niho-experience", refreshToken: "refresh-1" });
-    expect(openSession(setCookies(response).get(SESSION_COOKIE)?.value)).toMatchObject({ refreshToken: "refresh-2", idToken: "id-2" });
+    expect(openSession(setCookies(response).get(SESSION_COOKIE)?.value)).toMatchObject({ refreshToken: "refresh-2", idToken: "api-only-2" });
+    expect(calls).toHaveLength(1);
   });
 
-  it("keeps the rotated refresh token even when Firebase is down", async () => {
+  it("reports a malformed NIHO refresh response without calling Firebase", async () => {
     handler = (url) => url.pathname === "/api/auth/app-connect/refresh"
-      ? json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString() })
+      ? json(200, { customToken: "legacy-custom", refreshToken: "refresh-2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString() })
       : json(503, {});
     const response = await post(sessionCookie(4 * MIN));
     expect(response.status).toBe(503);
-    expect(openSession(setCookies(response).get(SESSION_COOKIE)?.value)).toMatchObject({ refreshToken: "refresh-2", idToken: "id-1" });
+    expect(openSession(setCookies(response).get(SESSION_COOKIE)?.value)).toMatchObject({ refreshToken: "refresh-1", idToken: "id-1" });
+    expect(calls).toHaveLength(1);
   });
 
   it("signs out when NIHO has ended the connection", async () => {

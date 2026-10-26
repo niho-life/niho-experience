@@ -3,8 +3,8 @@ import { ID_TOKEN_MIN_REMAINING_MS, REFRESH_WINDOW_MS } from "./timing";
 
 /**
  * The host console session (#86): NIHO's app-connect refresh token and the
- * current Firebase ID token, sealed in an HttpOnly cookie. The browser never
- * sees either token; client code only learns when the ID token expires.
+ * current NIHO API-only bearer, sealed in an HttpOnly cookie. The browser never
+ * sees either token; client code only learns when the API bearer expires.
  */
 export const SESSION_COOKIE = "__Secure-niho_host_session";
 export const LOGIN_COOKIE = "__Secure-niho_host_login";
@@ -27,6 +27,7 @@ export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "emp
 
 export interface HostSession {
   refreshToken: string;
+  /** Legacy field name in host consumers; HTTP mode stores only a NIHO API bearer here. */
   idToken: string;
   /** Epoch ms. */
   idTokenExpiresAt: number;
@@ -51,7 +52,7 @@ export interface HostLoginState {
 }
 
 interface SessionWire {
-  v: 1;
+  v: 2;
   r: string;
   t: string;
   te: number;
@@ -105,12 +106,12 @@ export function sessionMaxAgeSeconds(session: HostSession, now: number): number 
   return Math.max(0, Math.floor((session.expiresAt - now) / 1000));
 }
 
-/** True while NIHO can still be called with the stored ID token. */
+/** True while NIHO can still be called with the stored API bearer. */
 export function idTokenUsable(session: HostSession, now: number): boolean {
   return session.idTokenExpiresAt - now > ID_TOKEN_MIN_REMAINING_MS;
 }
 
-/** True when /host/auth/refresh should exchange the refresh token for a new ID token. */
+/** True when /host/auth/refresh should exchange the refresh token for a new API bearer. */
 export function shouldRefresh(session: HostSession, now: number): boolean {
   return session.idTokenExpiresAt - now < REFRESH_WINDOW_MS;
 }
@@ -121,7 +122,7 @@ export function cookieFits(name: string, value: string): boolean {
 
 export function encodeSession(sealer: CookieSealer, session: HostSession): string {
   const wire: SessionWire = {
-    v: 1,
+    v: 2,
     r: session.refreshToken,
     t: session.idToken,
     te: session.idTokenExpiresAt,
@@ -145,7 +146,8 @@ export function encodeSession(sealer: CookieSealer, session: HostSession): strin
 /** A session that opens, has a connection and has not expired; otherwise null. */
 export function decodeSession(sealer: CookieSealer, raw: string | undefined | null, now: number): HostSession | null {
   const wire = sealer.open(raw) as Partial<SessionWire> | null;
-  if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
+  // v1 cookies held Firebase ID tokens. Require a new NIHO connection after the cutover.
+  if (!wire || typeof wire !== "object" || wire.v !== 2) return null;
   if (!isString(wire.r) || !isString(wire.t) || !isString(wire.c, 256) || !isTime(wire.te) || !isTime(wire.ce) || !isTime(wire.x)) return null;
   if (now >= wire.x || now >= wire.ce) return null;
   const scenario = HOST_MOCK_SCENARIOS.find((candidate) => candidate === wire.m);

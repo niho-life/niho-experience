@@ -66,6 +66,11 @@ describe("host session cookie", () => {
     expect(decodeSession(sealer, login, NOW)).toBeNull();
   });
 
+  it("rejects v1 cookies that held Firebase ID tokens before the API bearer cutover", () => {
+    const legacy = sealer.seal({ v: 1, r: "refresh", t: "firebase-id", te: NOW + 60 * MIN, c: "conn_1", ce: NOW + DAY, x: NOW + DAY, n: "Host" });
+    expect(decodeSession(sealer, legacy, NOW)).toBeNull();
+  });
+
   it("fits in one 4 KB cookie with realistic NIHO and Firebase values", () => {
     const value = session({
       // Firebase ID tokens are about 1 KB; this one leaves room for custom claims.
