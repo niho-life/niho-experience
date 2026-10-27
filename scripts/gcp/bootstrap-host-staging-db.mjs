@@ -32,7 +32,7 @@ const updateTables = [
   "schedule_occurrences", "provider_google_calendars", "bookings",
   "outbox_messages", "provider_google_connections",
 ];
-const deleteTables = ["google_busy_intervals", "provider_google_connections"];
+const deleteTables = ["google_busy_intervals", "provider_google_connections", "provider_google_calendars"];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -94,6 +94,14 @@ try {
   assert(existing.rowCount === 0, "Experience DB roles already exist; inspect before retrying");
 
   const password = randomBytes(48).toString("base64url");
+  const cloudUrl = new URL(`postgresql://${runtimeRole}@localhost/${database}`);
+  cloudUrl.password = password;
+  cloudUrl.searchParams.set("host", `/cloudsql/${instance}`);
+  step = "register recoverable runtime credential";
+  const versionName = await runGcloudWithStdin(cloudUrl.toString());
+  const match = versionName.match(/(?:^|\/versions\/)(\d+)$/);
+  assert(match, "Secret version could not be read back");
+
   step = "create dedicated roles";
   await admin.query("BEGIN");
   try {
@@ -165,13 +173,6 @@ try {
     await otherDb.end().catch(() => {});
   }
 
-  const cloudUrl = new URL(`postgresql://${runtimeRole}@localhost/${database}`);
-  cloudUrl.password = password;
-  cloudUrl.searchParams.set("host", `/cloudsql/${instance}`);
-  step = "register runtime database URL";
-  const versionName = await runGcloudWithStdin(cloudUrl.toString());
-  const match = versionName.match(/(?:^|\/versions\/)(\d+)$/);
-  assert(match, "Secret version could not be read back");
   console.log(`Experience DB bootstrap complete: ${migrations.length} migrations, 13 tables, restricted runtime role.`);
   console.log(`STG_HOST_DATABASE_URL_REF=${secret}:${match[1]}`);
 } catch (error) {
