@@ -221,8 +221,10 @@ jobs:
           for path in / /host; do
             curl -fsS --retry 4 --retry-all-errors --max-time 30 -H "Authorization: Bearer $ID_TOKEN" -o /dev/null "${URL}${path}"
           done
-          curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/robots.txt" | grep -qF 'Disallow: /'
-          curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/host" | grep -qF 'href="/host/auth/login"'
+          robots="$(curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/robots.txt")"
+          grep -qF 'Disallow: /' <<< "$robots"
+          host_page="$(curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/host")"
+          grep -qF 'href="/host/auth/login"' <<< "$host_page"
           # Authentication/Google acceptance uses the stable origin only, after promotion.
       - name: Promote exact revision and verify stable origin with rollback
         if: inputs.action == 'promote'
@@ -258,8 +260,10 @@ jobs:
           gcloud run services update "$SERVICE" --project "$PROJECT" --region "$REGION" --no-invoker-iam-check --quiet
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
           jq -e --arg revision "$REVISION" '[.status.traffic[] | select((.percent // 0) > 0)] | length == 1 and .[0].revisionName == $revision and .[0].percent == 100' <<< "$state" >/dev/null
-          curl -fsS --retry 4 --retry-all-errors --max-time 30 "$SITE_URL/robots.txt" | grep -qF 'Disallow: /'
-          curl -fsS --max-time 30 "$SITE_URL/host" | grep -qF 'href="/host/auth/login"'
+          robots="$(curl -fsS --retry 4 --retry-all-errors --max-time 30 "$SITE_URL/robots.txt")"
+          grep -qF 'Disallow: /' <<< "$robots"
+          host_page="$(curl -fsS --max-time 30 "$SITE_URL/host")"
+          grep -qF 'href="/host/auth/login"' <<< "$host_page"
           gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --remove-tags "$tags" --quiet
           echo "Stable staging origin: $SITE_URL; bookings=false; indexing=block. OAuth acceptance remains manual." >> "$GITHUB_STEP_SUMMARY"
       - name: Remove this failed candidate tag
