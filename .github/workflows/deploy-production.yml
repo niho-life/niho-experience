@@ -161,11 +161,12 @@ jobs:
             [[ "$CLOUDSQL_INSTANCE" =~ ^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$ ]]
             test "${CLOUDSQL_INSTANCE%%:*}" = "$PROJECT_ID"
             env_vars+=',HOST_CONSOLE_ENABLED=true'
+            runtime_options+=(--network default --subnet default --vpc-egress private-ranges-only)
             runtime_options+=(--add-cloudsql-instances "$CLOUDSQL_INSTANCE")
             runtime_options+=(--set-secrets "HOST_SESSION_SECRET=${HOST_SESSION_SECRET_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY_REF},EXPERIENCE_DATABASE_URL=${DATABASE_URL_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_TOKEN_KEY_SECRET_REF}")
           else
             env_vars+=',HOST_CONSOLE_ENABLED=false'
-            runtime_options+=(--clear-secrets --clear-cloudsql-instances)
+            runtime_options+=(--clear-secrets --clear-cloudsql-instances --clear-network)
           fi
           gcloud run deploy "$SERVICE" \
             --project "$PROJECT_ID" --region "$REGION" --image "$image" \
@@ -206,8 +207,14 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
+            jq -e --arg sql "$CLOUDSQL_INSTANCE" '
+              .metadata.annotations["run.googleapis.com/cloudsql-instances"] == $sql and
+              .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
+              (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default"))
+            ' <<< "$revision_json" >/dev/null
             curl -fsSL -o /dev/null "${URL}/host/calendar"
           else
+            jq -e '.metadata.annotations["run.googleapis.com/cloudsql-instances"] == null and .metadata.annotations["run.googleapis.com/network-interfaces"] == null' <<< "$revision_json" >/dev/null
             test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/host/calendar")" = 404
           fi
           for path in / /experiences /host; do
@@ -249,6 +256,7 @@ jobs:
       CANDIDATE_IMAGE_DIGEST: ${{ inputs.candidate_image_digest }}
       HOST_CALENDAR_ENABLED: ${{ inputs.enable_host_calendar }}
       HOST_CALENDAR_READY: ${{ vars.PROD_HOST_CALENDAR_READY }}
+      CLOUDSQL_INSTANCE: ${{ vars.PROD_EXPERIENCE_CLOUDSQL_INSTANCE }}
     steps:
       - name: Validate the selected candidate and protected settings
         run: |
@@ -292,6 +300,13 @@ jobs:
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             test "$HOST_CALENDAR_READY" = true
             jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
+            jq -e --arg sql "$CLOUDSQL_INSTANCE" '
+              .metadata.annotations["run.googleapis.com/cloudsql-instances"] == $sql and
+              .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
+              (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default"))
+            ' <<< "$revision_json" >/dev/null
+          else
+            jq -e '.metadata.annotations["run.googleapis.com/cloudsql-instances"] == null and .metadata.annotations["run.googleapis.com/network-interfaces"] == null' <<< "$revision_json" >/dev/null
           fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           tag="candidate-${CANDIDATE_SHA}"
