@@ -17,6 +17,11 @@ on:
           - candidate
           - promote
         default: candidate
+      enable_host_calendar:
+        description: Enable NIHO host login and the experience-owned Google calendar on this revision
+        required: true
+        type: boolean
+        default: false
       candidate_revision:
         description: Existing revision name from the successful candidate run (promote only)
         required: false
@@ -92,6 +97,15 @@ jobs:
       SERVICE: niho-experience
       ARTIFACT_NAME: production-image-${{ github.run_id }}-${{ github.run_attempt }}
       CANDIDATE_SHA: ${{ inputs.commit_sha }}
+      HOST_CALENDAR_ENABLED: ${{ inputs.enable_host_calendar }}
+      HOST_CALENDAR_READY: ${{ vars.PROD_HOST_CALENDAR_READY }}
+      HOST_SESSION_SECRET_REF: ${{ vars.PROD_HOST_SESSION_SECRET_REF }}
+      FIREBASE_WEB_API_KEY_REF: ${{ vars.PROD_NIHO_FIREBASE_WEB_API_KEY_REF }}
+      DATABASE_URL_SECRET_REF: ${{ vars.PROD_EXPERIENCE_DATABASE_URL_REF }}
+      GOOGLE_CLIENT_ID_SECRET_REF: ${{ vars.PROD_EXPERIENCE_GOOGLE_CLIENT_ID_REF }}
+      GOOGLE_CLIENT_SECRET_REF: ${{ vars.PROD_EXPERIENCE_GOOGLE_CLIENT_SECRET_REF }}
+      GOOGLE_TOKEN_KEY_SECRET_REF: ${{ vars.PROD_EXPERIENCE_GOOGLE_TOKEN_KEY_REF }}
+      CLOUDSQL_INSTANCE: ${{ vars.PROD_EXPERIENCE_CLOUDSQL_INSTANCE }}
     steps:
       - name: Require protected production settings
         run: |
@@ -137,12 +151,28 @@ jobs:
           image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${{ steps.pushed_image.outputs.digest }}"
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
+          env_vars='EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider'
+          runtime_options=()
+          if [ "$HOST_CALENDAR_ENABLED" = true ]; then
+            test "$HOST_CALENDAR_READY" = true
+            for secret_ref in "$HOST_SESSION_SECRET_REF" "$FIREBASE_WEB_API_KEY_REF" "$DATABASE_URL_SECRET_REF" "$GOOGLE_CLIENT_ID_SECRET_REF" "$GOOGLE_CLIENT_SECRET_REF" "$GOOGLE_TOKEN_KEY_SECRET_REF"; do
+              [[ "$secret_ref" =~ ^[A-Za-z0-9_-]+:[1-9][0-9]*$ ]]
+            done
+            [[ "$CLOUDSQL_INSTANCE" =~ ^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$ ]]
+            test "${CLOUDSQL_INSTANCE%%:*}" = "$PROJECT_ID"
+            env_vars+=',HOST_CONSOLE_ENABLED=true'
+            runtime_options+=(--add-cloudsql-instances "$CLOUDSQL_INSTANCE")
+            runtime_options+=(--set-secrets "HOST_SESSION_SECRET=${HOST_SESSION_SECRET_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY_REF},EXPERIENCE_DATABASE_URL=${DATABASE_URL_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_TOKEN_KEY_SECRET_REF}")
+          else
+            env_vars+=',HOST_CONSOLE_ENABLED=false'
+            runtime_options+=(--clear-secrets --clear-cloudsql-instances)
+          fi
           gcloud run deploy "$SERVICE" \
             --project "$PROJECT_ID" --region "$REGION" --image "$image" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
             --no-invoker-iam-check --port 8080 --cpu 1 --memory 512Mi \
             --min-instances 0 --max-instances 2 --no-traffic --tag "$tag" \
-            --set-env-vars 'EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider' \
+            --set-env-vars "$env_vars" "${runtime_options[@]}" \
             --labels "app=niho-experience,env=production,commit=${GITHUB_SHA:0:12}" --quiet
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           revision="$(jq -r '.status.latestReadyRevisionName' <<< "$state")"
@@ -173,12 +203,23 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
+          if [ "$HOST_CALENDAR_ENABLED" = true ]; then
+            jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
+            curl -fsSL -o /dev/null "${URL}/host/calendar"
+          else
+            test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/host/calendar")" = 404
+          fi
           for path in / /experiences /host; do
             curl -fsS -o /dev/null --retry 5 --retry-all-errors "${URL}${path}"
             echo "ok   ${path}"
           done
           host_page="$(curl -fsS --retry 5 --retry-all-errors "${URL}/host")"
-          grep -qF 'href="https://niho.life/experiences/provider"' <<< "$host_page"
+          if [ "$HOST_CALENDAR_ENABLED" = true ]; then
+            grep -qF 'href="/host/auth/login"' <<< "$host_page"
+          else
+            grep -qF 'href="https://niho.life/experiences/provider"' <<< "$host_page"
+          fi
           page="$(curl -fsS "${URL}/experiences")"
           if grep -qF 'Preview with sample data' <<< "$page"; then exit 1; fi
           if grep -qF 'Details to be confirmed' <<< "$page"; then exit 1; fi
@@ -186,7 +227,7 @@ jobs:
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
           echo "Candidate: ${REVISION} ${URL}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=block; host signup=pilot" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=block; host signup=pilot; host calendar=${HOST_CALENDAR_ENABLED}" >> "$GITHUB_STEP_SUMMARY"
 
   promote:
     if: vars.PRODUCTION_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.action == 'promote'
@@ -206,6 +247,8 @@ jobs:
       CANDIDATE_SHA: ${{ inputs.commit_sha }}
       CANDIDATE_REVISION: ${{ inputs.candidate_revision }}
       CANDIDATE_IMAGE_DIGEST: ${{ inputs.candidate_image_digest }}
+      HOST_CALENDAR_ENABLED: ${{ inputs.enable_host_calendar }}
+      HOST_CALENDAR_READY: ${{ vars.PROD_HOST_CALENDAR_READY }}
     steps:
       - name: Validate the selected candidate and protected settings
         run: |
@@ -245,6 +288,11 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_PUBLIC_API_VERSION") | .value' <<< "$revision_json")" = 1.0
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
+          if [ "$HOST_CALENDAR_ENABLED" = true ]; then
+            test "$HOST_CALENDAR_READY" = true
+            jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
+          fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
@@ -266,7 +314,13 @@ jobs:
             curl -fsS -o /dev/null --retry 5 --retry-all-errors "${URL}${path}"
           done
           host_page="$(curl -fsS --retry 5 --retry-all-errors "${URL}/host")"
-          grep -qF 'href="https://niho.life/experiences/provider"' <<< "$host_page"
+          if [ "$HOST_CALENDAR_ENABLED" = true ]; then
+            grep -qF 'href="/host/auth/login"' <<< "$host_page"
+            curl -fsSL -o /dev/null "${URL}/host/calendar"
+          else
+            grep -qF 'href="https://niho.life/experiences/provider"' <<< "$host_page"
+            test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/host/calendar")" = 404
+          fi
           page="$(curl -fsS "${URL}/experiences")"
           if grep -qF 'Preview with sample data' <<< "$page"; then exit 1; fi
           if grep -qF 'Details to be confirmed' <<< "$page"; then exit 1; fi

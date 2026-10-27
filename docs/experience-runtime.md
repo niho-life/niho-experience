@@ -19,7 +19,7 @@
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | 既存 NIHO プラットフォームの Stripe 秘密鍵を、体験処理用の実行 ID に限定して渡す |
 | `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 体験 Connect webhook destination の署名鍵。NIHO の既存 endpoint の鍵と混用しない |
 
-DB migration は `packages/experience-store/migrations/0001_experience_store.sql`、次に `0002_google_oauth.sql`、`0003_google_busy_coverage.sql` を順に適用する。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。配備 workflow はまだこれらの Secret と migration を適用しないため、未設定環境ではカレンダー API は 503 で閉じる。
+DB migration は `packages/experience-store/migrations/0001_experience_store.sql`、次に `0002_google_oauth.sql`、`0003_google_busy_coverage.sql` を順に適用する。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` は画面とAPIを404で閉じ、画面だけ有効でもDB未設定ならカレンダーAPIは503で閉じる。
 
 ## 切替前の残作業
 
