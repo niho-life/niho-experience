@@ -34,6 +34,8 @@ PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNum
 [[ "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]
 # Existing instance only. This script never changes its settings or database.
 [[ "$(gcloud sql instances describe niho-app-db-stg --project "$PROJECT" --format='value(region)')" == "$REGION" ]]
+[[ "$(gcloud compute networks describe default --project "$PROJECT" --format='value(name)')" == default ]]
+[[ "$(gcloud compute networks subnets describe default --project "$PROJECT" --region "$REGION" --format='value(name)')" == default ]]
 
 gcloud services enable --project "$PROJECT" run.googleapis.com artifactregistry.googleapis.com \
   iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \

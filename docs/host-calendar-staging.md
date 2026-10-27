@@ -14,7 +14,7 @@ API契約は、このリポの体験業務 v1 と、固定された NIHO host/ac
 | Runtime SA | `experience-host-stg-runtime`。6個の対象SecretだけAccessor、既存SQL instanceだけ条件付きClient |
 | Deployer SA | `experience-host-stg-deployer`。対象Cloud Run serviceだけ `run.admin` / `run.invoker`、runtime SAだけ `serviceAccountUser` |
 | OIDC | 専用pool `experience-host-staging` / provider `github`。固定repo ID・repo名・main・手動workflow・`host-staging` Environmentを検査 |
-| Cloud SQL | 既存 `niho-app-db-stg` を使用するが、Experience専用DB・DBユーザーを別途作る。NIHO業務DBへ接続しない |
+| Cloud SQL / VPC | 既存のprivate IPのみ・connector必須の `niho-app-db-stg` を使用するが、Experience専用DB・DBユーザーを別途作る。Cloud Runは既存 `default` VPC/subnetへのDirect VPC egress（private rangesのみ）とCloud SQL接続を併用する。NIHO業務DBへ接続しない |
 
 Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA鍵は付けない。deployerはSecretの値を読めず、DBにも接続しない。RuntimeのCloud SQL Clientは [Google公式のIAM条件](https://docs.cloud.google.com/sql/docs/postgres/iam-conditions) で既存instanceだけを許す。SQLのDB権限は別途制限する。
 
@@ -41,7 +41,7 @@ Secretはすべて `niho-app-stg` に新規のExperience専用品として作成
 
 各Variableには上表のSecret名と有効な数字versionを `secret-name:VERSION_NUMBER` 形式で指定する。秘密値をGitHub Variablesへ登録しない。session keyは32文字以上の専用乱数、Google token keyは32 bytesの専用乱数を標準base64へ変換した値とする。鍵の作成・登録は安全な管理端末で行い、標準出力・shell履歴へ値を出さない。
 
-DB URLはExperience専用DB・限定ユーザーを使い、[Cloud RunのUnix socket接続](https://docs.cloud.google.com/sql/docs/postgres/connect-run) に合わせて `/cloudsql/niho-app-stg:asia-northeast1:niho-app-db-stg` をhostとして `pg` が解釈できる形で設定する。資格情報のURL encode、DB名、socket指定、接続とDMLの可否を非公開の管理経路で確認する。workflowは値を取得・表示しない。
+DB URLはExperience専用DB・限定ユーザーを使い、[Cloud RunのUnix socket接続](https://docs.cloud.google.com/sql/docs/postgres/connect-run) に合わせて `/cloudsql/niho-app-stg:asia-northeast1:niho-app-db-stg` をhostとして `pg` が解釈できる形で設定する。既存NIHO backendと同じくCloud SQL接続とDirect VPC egressを併用し、connector必須の共有instanceへ到達させる。資格情報のURL encode、DB名、socket指定、接続とDMLの可否を非公開の管理経路で確認する。workflowは値を取得・表示しない。
 
 管理者は各Secretに対して、次のresource単位のbindingを6件だけ追加する（`SECRET_NAME` は上表のいずれかへ置換）。既存NIHOのSecretへの権限は追加しない。
 
