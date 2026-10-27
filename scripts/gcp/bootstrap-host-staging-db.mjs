@@ -128,6 +128,9 @@ try {
   step = "grant runtime DML";
   await target.query(`GRANT USAGE ON SCHEMA public TO ${runtimeRole}`);
   await target.query(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${runtimeRole}`);
+  // PostgreSQL requires one UPDATE-capable column even for SELECT FOR SHARE.
+  // Keep role and active immutable to the runtime by granting only this timestamp.
+  await target.query(`GRANT UPDATE (updated_at) ON provider_memberships TO ${runtimeRole}`);
   await target.query(`GRANT INSERT ON ${writeTables.join(", ")} TO ${runtimeRole}`);
   await target.query(`GRANT UPDATE ON ${updateTables.join(", ")} TO ${runtimeRole}`);
   await target.query(`GRANT DELETE ON ${deleteTables.join(", ")} TO ${runtimeRole}`);
@@ -148,6 +151,13 @@ try {
     assert(result.rows[0].username === runtimeRole && result.rows[0].db === database &&
       !result.rows[0].can_ddl && !result.rows[0].can_create_role && result.rows[0].table_count === 13,
     "Runtime connection or privilege check failed");
+    await runtime.query("SELECT role FROM provider_memberships WHERE false FOR SHARE");
+    const membershipGrant = await runtime.query(`
+      SELECT has_column_privilege(current_user, 'provider_memberships', 'updated_at', 'UPDATE') AS can_lock,
+             has_column_privilege(current_user, 'provider_memberships', 'role', 'UPDATE') AS can_change_role,
+             has_column_privilege(current_user, 'provider_memberships', 'active', 'UPDATE') AS can_change_active`);
+    assert(membershipGrant.rows[0].can_lock && !membershipGrant.rows[0].can_change_role &&
+      !membershipGrant.rows[0].can_change_active, "Membership grant boundary failed");
   } finally {
     await runtime.end();
   }

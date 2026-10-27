@@ -30,6 +30,8 @@ Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA�
 
 空の `experience_stg` DBと既存stgのIAP bastion、空のSecret resource `experience-stg-database-url` を確認した後、`scripts/gcp/bootstrap-host-staging-db.mjs` を `niho-app` の `niho-db.sh stg --via-bastion` の子プロセスとして1回だけ実行する。`CONFIRM_EXPERIENCE_STG_DB_BOOTSTRAP=niho-app-stg` が必要。scriptは接続先・管理ID・空DB・既存role不在を検査し、新しいruntime資格情報をSecret Managerへ先に保管する。その後NOLOGINのmigration roleと限定runtime roleを作り、migration 0001〜0003を適用する。runtimeのDMLだけをgrantして接続・DDL拒否・NIHO側テーブル読取拒否を確認したら、数字versionの `STG_HOST_DATABASE_URL_REF` だけを出力する。これをEnvironment Variableへ設定する。DB接続URL・パスワードは標準出力やファイルへ出さない。
 
+`provider_memberships` の `SELECT ... FOR SHARE` にPostgreSQLがUPDATE権限を要求するため、runtimeには `updated_at` 列だけのUPDATEを付ける。`role` と `active` のUPDATE権限は付けず、bootstrapで両方の拒否と行ロックの成立を検証する。
+
 ```sh
 # niho-experience の checkout から。NIHO_APP_REPO は niho-app checkout の絶対パス。
 CONFIRM_EXPERIENCE_STG_DB_BOOTSTRAP=niho-app-stg \
