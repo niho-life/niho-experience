@@ -41,7 +41,9 @@ class BookingRequestError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-function sameDraft(left: ReplyDraft, right: ReplyDraft): boolean { return left.subject === right.subject && left.body === right.body; }
+function sameDraft(left: ReplyDraft, right: ReplyDraft): boolean {
+  return left.subject.trim() === right.subject.trim() && left.body.trim() === right.body.trim();
+}
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
@@ -193,6 +195,7 @@ export function HostLiveBookings({ providerId, initialBookingId, mode = "booking
   }, [selected, loadDetail]);
 
   function chooseBooking(bookingId: string | null) {
+    if (acting || uncertain) return;
     setSelected(bookingId); setError(""); setNotice("");
     if (!bookingId) { detailAbort.current?.abort(); setDetail(null); setDetailState("empty"); }
     const url = new URL(window.location.href);
@@ -351,7 +354,7 @@ export function HostLiveBookings({ providerId, initialBookingId, mode = "booking
         {cursor && listState === "ready" ? <div className="border-t border-line p-3"><button type="button" disabled={listBusy || acting || Boolean(uncertain)} onClick={() => void loadList(cursor)} className={consoleButtonClass("secondary", "sm")}>{listBusy ? "読み込み中…" : "続きを見る"}</button></div> : null}
       </section>
       <section aria-label={mode === "messages" ? "予約者との会話" : "予約の詳細"} className={`${HOST_SURFACE} min-w-0 p-4 sm:p-5 ${selected ? "" : "max-lg:hidden"}`}>
-        {selected ? <button type="button" onClick={() => chooseBooking(null)} className={`${consoleButtonClass("ghost", "sm")} mb-3 lg:hidden`}>‹ {mode === "messages" ? "会話一覧" : "予約一覧"}</button> : null}
+        {selected ? <button type="button" disabled={acting || Boolean(uncertain)} onClick={() => chooseBooking(null)} className={`${consoleButtonClass("ghost", "sm")} mb-3 lg:hidden`}>‹ {mode === "messages" ? "会話一覧" : "予約一覧"}</button> : null}
         {detailState === "loading" ? <p role="status" className="text-ink-soft">予約を読み込み中…</p> : null}
         {detailState === "error" ? <div><p className="text-ink-soft">予約の詳細を表示できません。</p>{selected ? <button type="button" onClick={() => void loadDetail(selected)} className={`${consoleButtonClass("secondary", "sm")} mt-2`}>もう一度読み込む</button> : null}</div> : null}
         {detailState === "missing" ? <div><p className="text-ink-soft">この予約は表示できません。</p><button type="button" onClick={() => chooseBooking(null)} className={`${consoleButtonClass("secondary", "sm")} mt-2`}>一覧に戻る</button></div> : null}
