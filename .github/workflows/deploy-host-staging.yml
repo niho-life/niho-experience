@@ -1,0 +1,284 @@
+# Manual, reviewed main only. Build has no deployment credentials.
+name: Deploy host staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Reviewed main commit (40 lowercase hexadecimal characters)
+        required: true
+        type: string
+      action:
+        description: Create a candidate or promote an accepted candidate
+        type: choice
+        required: true
+        options: [candidate, promote]
+        default: candidate
+      candidate_revision:
+        description: Revision from the successful candidate run (promote only)
+        type: string
+      candidate_image_digest:
+        description: sha256 digest from the successful candidate run (promote only)
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-host-staging
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require explicitly enabled main deployment
+        env:
+          ENABLED: ${{ vars.STG_HOST_DEPLOY_ENABLED }}
+          SHA: ${{ inputs.commit_sha }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$ENABLED" = true
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$ACTION" = candidate ]; then test "$SHA" = "$GITHUB_SHA"; fi
+
+  build:
+    needs: validate
+    if: inputs.action == 'candidate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: host-staging:${{ github.sha }}
+    outputs:
+      archive_sha256: ${{ steps.archive.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and smoke with staging CSP
+        run: |
+          docker build --build-arg NIHO_WEB_CSP_ORIGIN=https://app-stg.niho.life -t "$IMAGE" .
+          sh scripts/container-smoke.sh "$IMAGE" https://app-stg.niho.life
+      - name: Save image without credentials
+        id: archive
+        run: |
+          docker save --output image.tar "$IMAGE"
+          echo "sha256=$(sha256sum image.tar | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: host-staging-${{ github.run_id }}-${{ github.run_attempt }}
+          path: image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    needs: [validate, build]
+    if: always() && needs.validate.result == 'success' && (needs.build.result == 'success' || (inputs.action == 'promote' && needs.build.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: host-staging
+      url: ${{ vars.STG_HOST_SERVICE_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: niho-app-stg
+      REGION: asia-northeast1
+      SERVICE: niho-experience-host-stg
+      REPOSITORY: experience-host-stg
+      RUNTIME: experience-host-stg-runtime@niho-app-stg.iam.gserviceaccount.com
+      ACTION: ${{ inputs.action }}
+      SHA: ${{ inputs.commit_sha }}
+      REVISION: ${{ inputs.candidate_revision }}
+      DIGEST: ${{ inputs.candidate_image_digest }}
+      SITE_URL: ${{ vars.STG_HOST_SERVICE_URL }}
+      READY: ${{ vars.STG_HOST_CALENDAR_READY }}
+      CLOUDSQL: ${{ vars.STG_HOST_CLOUDSQL_INSTANCE }}
+      SESSION_REF: ${{ vars.STG_HOST_SESSION_SECRET_REF }}
+      FIREBASE_REF: ${{ vars.STG_HOST_FIREBASE_WEB_API_KEY_REF }}
+      DATABASE_REF: ${{ vars.STG_HOST_DATABASE_URL_REF }}
+      GOOGLE_ID_REF: ${{ vars.STG_HOST_GOOGLE_CLIENT_ID_REF }}
+      GOOGLE_SECRET_REF: ${{ vars.STG_HOST_GOOGLE_CLIENT_SECRET_REF }}
+      GOOGLE_KEY_REF: ${{ vars.STG_HOST_GOOGLE_TOKEN_KEY_REF }}
+    steps:
+      - name: Require protected readiness and numeric staging secret versions
+        env:
+          DEPLOYER: ${{ vars.STG_HOST_DEPLOY_SERVICE_ACCOUNT }}
+          WIF: ${{ vars.STG_HOST_WIF_PROVIDER }}
+        run: |
+          test "$READY" = true
+          test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
+          [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
+          [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ ]]
+          test "$CLOUDSQL" = niho-app-stg:asia-northeast1:niho-app-db-stg
+          [[ "$SESSION_REF" =~ ^experience-stg-host-session:[1-9][0-9]*$ ]]
+          [[ "$FIREBASE_REF" =~ ^experience-stg-niho-firebase-web-api-key:[1-9][0-9]*$ ]]
+          [[ "$DATABASE_REF" =~ ^experience-stg-database-url:[1-9][0-9]*$ ]]
+          [[ "$GOOGLE_ID_REF" =~ ^experience-stg-google-client-id:[1-9][0-9]*$ ]]
+          [[ "$GOOGLE_SECRET_REF" =~ ^experience-stg-google-client-secret:[1-9][0-9]*$ ]]
+          [[ "$GOOGLE_KEY_REF" =~ ^experience-stg-google-token-key:[1-9][0-9]*$ ]]
+          if [ "$ACTION" = promote ]; then
+            [[ "$REVISION" =~ ^niho-experience-host-stg-[a-z0-9-]+$ ]]
+            [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require reviewed commit on main
+        run: git merge-base --is-ancestor "$SHA" origin/main
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: inputs.action == 'candidate'
+        with:
+          name: host-staging-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify and load image before authentication
+        if: inputs.action == 'candidate'
+        env:
+          ARCHIVE_SHA: ${{ needs.build.outputs.archive_sha256 }}
+        run: |
+          printf '%s  image.tar\n' "$ARCHIVE_SHA" | sha256sum --check --status
+          docker load --input image.tar
+      # No repository scripts, builds or containers execute after authentication.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        id: deploy_auth
+        with:
+          workload_identity_provider: ${{ vars.STG_HOST_WIF_PROVIDER }}
+          service_account: ${{ vars.STG_HOST_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Create or verify isolated candidate
+        id: candidate
+        run: |
+          state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+          test "$(jq -r '.status.url' <<< "$state")" = "$SITE_URL"
+          test "$(jq -r '.metadata.labels.app' <<< "$state")" = niho-experience
+          test "$(jq -r '.metadata.labels.env' <<< "$state")" = host-staging
+          traffic="$(jq -c '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName)' <<< "$state")"
+          jq -e 'length > 0 and (map(.percent) | add) == 100 and all(.[]; .revisionName != null)' <<< "$traffic" >/dev/null
+          if [ "$ACTION" = candidate ]; then
+            image="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web:${SHA}"
+            gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+            docker tag "host-staging:${SHA}" "$image"
+            push_output="$(docker push "$image" 2>&1)" || { printf '%s\n' "$push_output"; exit 1; }
+            DIGEST="$(sed -nE 's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' <<< "$push_output" | tail -n1)"
+            [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+            gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" \
+              --image "${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${DIGEST}" \
+              --service-account "$RUNTIME" --execution-environment gen2 \
+              --port 8080 --cpu 1 --memory 512Mi --min-instances 0 --max-instances 2 \
+              --no-traffic --tag "candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --network default --subnet default --vpc-egress private-ranges-only \
+              --set-cloudsql-instances "$CLOUDSQL" \
+              --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,DEPLOY_COMMIT_SHA=${SHA}" \
+              --set-secrets "HOST_SESSION_SECRET=${SESSION_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_REF},EXPERIENCE_DATABASE_URL=${DATABASE_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_ID_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_KEY_REF}" \
+              --labels "app=niho-experience,env=host-staging,commit=${SHA:0:12}" --quiet
+            state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+            REVISION="$(jq -r --arg tag "candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<< "$state")"
+            after="$(jq -c '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName)' <<< "$state")"
+            test "$traffic" = "$after"
+          fi
+          revision="$(gcloud run revisions describe "$REVISION" --project "$PROJECT" --region "$REGION" --format=json)"
+          expected_image="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${DIGEST}"
+          jq -e --arg image "$expected_image" --arg runtime "$RUNTIME" --arg sql "$CLOUDSQL" '
+            .spec.containers[0].image == $image and .spec.serviceAccountName == $runtime and
+            .metadata.annotations["run.googleapis.com/cloudsql-instances"] == $sql and
+            .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
+            (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default")) and
+            any(.status.conditions[]; .type == "Ready" and .status == "True")' <<< "$revision" >/dev/null
+          expected_env="$(jq -cn --arg origin "$SITE_URL" --arg sha "$SHA" '{EXPERIENCE_API_MODE:"http",EXPERIENCE_PUBLIC_API_VERSION:"1.0",NEXT_PUBLIC_NIHO_WEB_ORIGIN:"https://app-stg.niho.life",SITE_URL:$origin,SITE_INDEXING:"block",BOOKINGS_ENABLED:"false",HOST_SIGNUP_MODE:"pilot",HOST_CONSOLE_ENABLED:"true",NIHO_HOST_START_URL:"https://app-stg.niho.life/experiences/provider",DEPLOY_COMMIT_SHA:$sha}')"
+          expected_secrets="$(jq -cn --arg a "$SESSION_REF" --arg b "$FIREBASE_REF" --arg c "$DATABASE_REF" --arg d "$GOOGLE_ID_REF" --arg e "$GOOGLE_SECRET_REF" --arg f "$GOOGLE_KEY_REF" '{HOST_SESSION_SECRET:$a,NIHO_FIREBASE_WEB_API_KEY:$b,EXPERIENCE_DATABASE_URL:$c,EXPERIENCE_GOOGLE_CLIENT_ID:$d,EXPERIENCE_GOOGLE_CLIENT_SECRET:$e,EXPERIENCE_GOOGLE_TOKEN_KEY:$f}')"
+          jq -e --argjson expected "$expected_env" --argjson secrets "$expected_secrets" '
+            (.spec.containers[0].env | map(select(has("value")) | {key:.name,value:.value}) | from_entries) == $expected and
+            (.spec.containers[0].env | map(select(has("valueFrom")) | {key:.name,value:(.valueFrom.secretKeyRef.name + ":" + .valueFrom.secretKeyRef.key)}) | from_entries) == $secrets
+          ' <<< "$revision" >/dev/null
+          url="$(jq -r --arg revision "$REVISION" '[.status.traffic[] | select(.revisionName == $revision and .url != null) | .url][0] // empty' <<< "$state")"
+          [[ "$url" =~ ^https://[a-z0-9-]+\.a\.run\.app$ ]]
+          {
+            echo "revision=$REVISION"
+            echo "digest=$DIGEST"
+            echo "url=$url"
+          } >> "$GITHUB_OUTPUT"
+          { echo "Reviewed SHA: $SHA"; echo "Revision: $REVISION"; echo "Digest: $DIGEST"; echo "Candidate created with sales disabled and indexing blocked."; } >> "$GITHUB_STEP_SUMMARY"
+      # ID tokens expire quickly; mint immediately before the authenticated GETs.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        id: smoke_auth
+        with:
+          workload_identity_provider: ${{ vars.STG_HOST_WIF_PROVIDER }}
+          service_account: ${{ vars.STG_HOST_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ vars.STG_HOST_SERVICE_URL }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Smoke candidate without logging login responses
+        env:
+          URL: ${{ steps.candidate.outputs.url }}
+          ID_TOKEN: ${{ steps.smoke_auth.outputs.id_token }}
+        run: |
+          for path in / /host; do
+            curl -fsS --retry 4 --retry-all-errors --max-time 30 -H "Authorization: Bearer $ID_TOKEN" -o /dev/null "${URL}${path}"
+          done
+          robots="$(curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/robots.txt")"
+          grep -qF 'Disallow: /' <<< "$robots"
+          host_page="$(curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/host")"
+          grep -qF 'href="/host/auth/login"' <<< "$host_page"
+          # Authentication/Google acceptance uses the stable origin only, after promotion.
+      - name: Promote exact revision and verify stable origin with rollback
+        if: inputs.action == 'promote'
+        env:
+          REVISION: ${{ steps.candidate.outputs.revision }}
+        run: |
+          state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+          previous="$(jq -r '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName) | map("\(.revisionName)=\(.percent)") | join(",")' <<< "$state")"
+          was_public="$(jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"' <<< "$state")"
+          tags="$(jq -r --arg revision "$REVISION" '[.status.traffic[] | select(.revisionName == $revision and ((.tag // "") | startswith("candidate-"))) | .tag] | join(",")' <<< "$state")"
+          test -n "$tags"
+          rollback() {
+            code=$?
+            trap - EXIT
+            if [ "$code" -ne 0 ]; then
+              rollback_failed=false
+              if [ "$was_public" != true ]; then
+                gcloud run services update "$SERVICE" --project "$PROJECT" --region "$REGION" --invoker-iam-check --quiet || rollback_failed=true
+              fi
+              gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --to-revisions "$previous" --quiet || rollback_failed=true
+              gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --remove-tags "$tags" --quiet || rollback_failed=true
+              restored="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)" || rollback_failed=true
+              actual="$(jq -r '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName) | map("\(.revisionName)=\(.percent)") | join(",")' <<< "$restored")" || rollback_failed=true
+              if [ "$actual" != "$previous" ]; then rollback_failed=true; fi
+              if [ "$rollback_failed" = true ]; then echo 'Rollback requires manual recovery.' >&2; fi
+              echo 'Promotion verification failed; rollback and candidate tag removal requested. Read back service traffic before retrying.' >&2
+            fi
+            exit "$code"
+          }
+          trap rollback EXIT
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --to-revisions "${REVISION}=100" --quiet
+          # The initial placeholder stays private until the accepted app serves 100%.
+          gcloud run services update "$SERVICE" --project "$PROJECT" --region "$REGION" --no-invoker-iam-check --quiet
+          state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+          jq -e --arg revision "$REVISION" '[.status.traffic[] | select((.percent // 0) > 0)] | length == 1 and .[0].revisionName == $revision and .[0].percent == 100' <<< "$state" >/dev/null
+          robots="$(curl -fsS --retry 4 --retry-all-errors --max-time 30 "$SITE_URL/robots.txt")"
+          grep -qF 'Disallow: /' <<< "$robots"
+          host_page="$(curl -fsS --max-time 30 "$SITE_URL/host")"
+          grep -qF 'href="/host/auth/login"' <<< "$host_page"
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --remove-tags "$tags" --quiet
+          echo "Stable staging origin: $SITE_URL; bookings=false; indexing=block. OAuth acceptance remains manual." >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove this failed candidate tag
+        if: failure() && inputs.action == 'candidate' && steps.deploy_auth.outcome == 'success'
+        run: |
+          tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+          if jq -e --arg tag "$tag" 'any(.status.traffic[]; .tag == $tag)' <<< "$state" >/dev/null; then
+            gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --remove-tags "$tag" --quiet
+          fi
+      - name: Remove selected tags after failed promotion checks
+        if: failure() && inputs.action == 'promote' && steps.deploy_auth.outcome == 'success'
+        run: |
+          state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+          tags="$(jq -r --arg revision "$REVISION" '[.status.traffic[] | select(.revisionName == $revision and ((.tag // "") | startswith("candidate-"))) | .tag] | join(",")' <<< "$state")"
+          if [ -n "$tags" ]; then
+            gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --remove-tags "$tags" --quiet
+          fi
