@@ -26,6 +26,19 @@ Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA�
 4. 特権を持つmigration専用IDでExperience専用DB・専用DBユーザー・バックアップ方針を用意する。NIHO業務DBを使わない。`packages/experience-store/migrations/` のSQLを名前順に適用する。RuntimeにDDL・role作成権限を渡さず、必要なtable/sequence DMLだけを付ける。共有instance内の他DBへの接続/読取を拒否できるか確認する。ここはこのscript/workflowでは実行しない。
 5. 合成提供者と専用のテストNIHOアカウントを、正当な権限を持つ非公開のprovisioning経路で結ぶ。`provider_memberships` を含む実ID・SQL応答・接続URL・Google資格情報はGit、公開Issue、PR、CIログへ記録しない。実顧客・実提供者・本番DBの複製は使わない。
 
+### 専用DBの初回bootstrap
+
+空の `experience_stg` DBと既存stgのIAP bastionを確認した後、`scripts/gcp/bootstrap-host-staging-db.mjs` を `niho-app` の `niho-db.sh stg --via-bastion` の子プロセスとして1回だけ実行する。`CONFIRM_EXPERIENCE_STG_DB_BOOTSTRAP=niho-app-stg` が必要。scriptは接続先・管理ID・空DB・既存role不在を検査し、NOLOGINのmigration roleと限定runtime roleを作る。migration 0001〜0003を適用し、runtimeのDMLだけをgrantして接続・DDL拒否・NIHO側テーブル読取拒否を確認する。成功時にDB接続URLをSecret Managerへ直接登録し、出力された数字versionの `STG_HOST_DATABASE_URL_REF` だけをEnvironment Variableへ設定する。DB接続URL・パスワードは標準出力やファイルへ出さない。
+
+```sh
+# niho-experience の checkout から。NIHO_APP_REPO は niho-app checkout の絶対パス。
+CONFIRM_EXPERIENCE_STG_DB_BOOTSTRAP=niho-app-stg \
+  "$NIHO_APP_REPO/scripts/dev/niho-db.sh" stg --via-bastion -- \
+  node "$PWD/scripts/gcp/bootstrap-host-staging-db.mjs"
+```
+
+途中失敗時はroleやtableが残り得るため、再実行は拒否される。readinessは無効のまま、専用DBの実状態とSecret versionを管理経路で調べてから復旧する。共有NIHO DBのPUBLIC CONNECTを剥がす操作はこの手順では行わない。runtimeがNIHO側の業務テーブルを読めないことを確認する。将来のmigrationはNOLOGIN roleへ明示的に切り替えて行い、変更したtableのruntime grantを個別に見直す。
+
 ## Secret Manager（値は管理者だけが登録）
 
 Secretはすべて `niho-app-stg` に新規のExperience専用品として作成する。Firebase keyもNIHO **stg** の値を使う。versionは数字へ固定し、`latest` やaliasを使わない。
