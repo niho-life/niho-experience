@@ -72,4 +72,26 @@ describe("experience provider operations transport", () => {
     expect(await api.approveBooking("provider_1", "page_1", "booking_1")).toEqual({ ok: false, kind: "network_error" });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it("parses the canonical two-way booking conversation and the smaller send receipt as different real responses", async () => {
+    const detail = {
+      booking: {
+        id: "booking_1", offerId: "offer_1", offerName: "Walk", occurrenceDate: "2027-01-02",
+        startAt: "2027-01-02T01:00:00.000Z", endAt: "2027-01-02T03:00:00.000Z", headCount: 2, adultCount: 2, childCount: 0,
+        guestName: "Guest", guestEmail: "guest@example.test", languageSnapshot: "EN", note: null, answers: null, status: "CONFIRMED",
+        unitPriceYen: 6000, adultPriceYen: 6000, childPriceYen: null, totalYen: 12000, paidAt: null, authorizedAt: null,
+        approvalDeadlineAt: null, travelerCancelRequestedAt: null, cancelledAt: null, cancelReason: null, cancelMessage: null, refundedYen: 0,
+        createdAt: "2026-12-01T00:00:00.000Z", salesChannel: "EXPERIENCE_SITE", pageId: "page_1", page: { title: "Kamakura walk" },
+        hostMessages: [{ id: "host_1", subject: "Meeting point", body: "Meet at the gate", createdAt: "2026-12-01T01:00:00.000Z", sentAt: null, failed: false, deliveryStatus: "QUEUED" }],
+        guestMessages: [{ id: "guest_1", body: "Thank you", createdAt: "2026-12-01T02:00:00.000Z" }],
+      },
+      sender: { displayName: "Provider", replyToEmails: ["provider@example.test"] },
+    };
+    const detailApi = createExperienceProviderOperationsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, detail) });
+    expect(await detailApi.getBooking("provider_1", "booking_1")).toEqual({ ok: true, data: detail });
+
+    const receipt = { message: { id: "host_2", subject: "Directions", createdAt: "2026-12-01T03:00:00.000Z", sentAt: null } };
+    const messageApi = createExperienceProviderOperationsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(201, receipt) });
+    expect(await messageApi.messageGuest("provider_1", "page_1", "booking_1", { subject: "Directions", body: "Use the east gate" })).toEqual({ ok: true, data: receipt });
+  });
 });

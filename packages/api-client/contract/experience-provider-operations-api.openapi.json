@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NIHO Experience Provider Operations API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "体験providerの会員管理と運営予約操作だけを公開する選定契約。法的同意、決済口座、売上、fee distributionは含めない。"
   },
   "security": [{ "bearerAuth": [] }],
@@ -117,18 +117,26 @@
       },
       "BookingListResponse": { "type": "object", "additionalProperties": false, "required": ["bookings", "nextCursor"], "properties": { "bookings": { "type": "array", "maxItems": 100, "items": { "$ref": "#/components/schemas/BookingListItem" } }, "nextCursor": { "type": ["string", "null"] } } },
       "HostMessage": {
-        "type": "object", "additionalProperties": false, "required": ["id", "subject", "createdAt", "sentAt", "failed", "deliveryStatus"],
-        "properties": { "id": { "type": "string" }, "subject": { "type": "string" }, "createdAt": { "type": "string", "format": "date-time" }, "sentAt": { "type": ["string", "null"], "format": "date-time" }, "failed": { "type": "boolean" }, "deliveryStatus": { "type": "string", "enum": ["QUEUED", "SENT", "FAILED", "UNKNOWN"] } }
+        "type": "object", "additionalProperties": false, "required": ["id", "subject", "body", "createdAt", "sentAt", "failed", "deliveryStatus"],
+        "properties": { "id": { "type": "string" }, "subject": { "type": "string" }, "body": { "type": ["string", "null"] }, "createdAt": { "type": "string", "format": "date-time" }, "sentAt": { "type": ["string", "null"], "format": "date-time" }, "failed": { "type": "boolean" }, "deliveryStatus": { "type": "string", "enum": ["QUEUED", "SENT", "FAILED", "UNKNOWN"] } }
+      },
+      "GuestMessage": {
+        "type": "object", "additionalProperties": false, "required": ["id", "body", "createdAt"],
+        "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "createdAt": { "type": "string", "format": "date-time" } }
+      },
+      "MessageReceipt": {
+        "type": "object", "additionalProperties": false, "required": ["id", "subject", "createdAt", "sentAt"],
+        "properties": { "id": { "type": "string" }, "subject": { "type": "string" }, "createdAt": { "type": "string", "format": "date-time" }, "sentAt": { "type": ["string", "null"], "format": "date-time" } }
       },
       "BookingDetail": {
         "type": "object", "additionalProperties": false,
-        "required": ["id", "offerId", "offerName", "occurrenceDate", "startAt", "endAt", "headCount", "adultCount", "childCount", "guestName", "guestEmail", "languageSnapshot", "note", "answers", "status", "unitPriceYen", "adultPriceYen", "childPriceYen", "totalYen", "paidAt", "authorizedAt", "approvalDeadlineAt", "travelerCancelRequestedAt", "cancelledAt", "cancelReason", "cancelMessage", "refundedYen", "createdAt", "salesChannel", "hostMessages", "pageId", "page"],
+        "required": ["id", "offerId", "offerName", "occurrenceDate", "startAt", "endAt", "headCount", "adultCount", "childCount", "guestName", "guestEmail", "languageSnapshot", "note", "answers", "status", "unitPriceYen", "adultPriceYen", "childPriceYen", "totalYen", "paidAt", "authorizedAt", "approvalDeadlineAt", "travelerCancelRequestedAt", "cancelledAt", "cancelReason", "cancelMessage", "refundedYen", "createdAt", "salesChannel", "hostMessages", "guestMessages", "pageId", "page"],
         "properties": {
           "id": { "type": "string" }, "offerId": { "type": "string" }, "offerName": { "type": "string" }, "occurrenceDate": { "type": "string", "format": "date" }, "startAt": { "type": "string", "format": "date-time" }, "endAt": { "type": "string", "format": "date-time" },
           "headCount": { "type": "integer" }, "adultCount": { "type": "integer" }, "childCount": { "type": "integer" }, "guestName": { "type": "string" }, "guestEmail": { "type": "string" }, "languageSnapshot": { "type": "string" }, "note": { "type": ["string", "null"] },
           "answers": { "$ref": "#/components/schemas/AnswerSnapshots" }, "status": { "$ref": "#/components/schemas/KnownBookingStatus" }, "unitPriceYen": { "type": "integer" }, "adultPriceYen": { "type": "integer" }, "childPriceYen": { "type": ["integer", "null"] }, "totalYen": { "type": "integer" },
           "paidAt": { "type": ["string", "null"], "format": "date-time" }, "authorizedAt": { "type": ["string", "null"], "format": "date-time" }, "approvalDeadlineAt": { "type": ["string", "null"], "format": "date-time" }, "travelerCancelRequestedAt": { "type": ["string", "null"], "format": "date-time" }, "cancelledAt": { "type": ["string", "null"], "format": "date-time" },
-          "cancelReason": { "type": ["string", "null"] }, "cancelMessage": { "type": ["string", "null"] }, "refundedYen": { "type": "integer" }, "createdAt": { "type": "string", "format": "date-time" }, "salesChannel": { "type": "string" }, "hostMessages": { "type": "array", "items": { "$ref": "#/components/schemas/HostMessage" } }, "pageId": { "type": "string" }, "page": { "$ref": "#/components/schemas/PageTitle" }
+          "cancelReason": { "type": ["string", "null"] }, "cancelMessage": { "type": ["string", "null"] }, "refundedYen": { "type": "integer" }, "createdAt": { "type": "string", "format": "date-time" }, "salesChannel": { "type": "string" }, "hostMessages": { "type": "array", "items": { "$ref": "#/components/schemas/HostMessage" } }, "guestMessages": { "type": "array", "items": { "$ref": "#/components/schemas/GuestMessage" } }, "pageId": { "type": "string" }, "page": { "$ref": "#/components/schemas/PageTitle" }
         }
       },
       "Sender": { "type": "object", "additionalProperties": false, "required": ["displayName", "replyToEmails"], "properties": { "displayName": { "type": "string" }, "replyToEmails": { "type": "array", "items": { "type": "string", "format": "email" } } } },
@@ -137,7 +145,7 @@
       "CancelBookingInput": { "type": "object", "additionalProperties": false, "required": ["refund", "reason", "message"], "properties": { "refund": { "type": "string", "enum": ["FULL", "HALF", "NONE"] }, "reason": { "type": "string", "enum": ["HOST_CANNOT_HOST", "GUEST_REQUEST", "OTHER"] }, "message": { "type": "string", "minLength": 1, "maxLength": 2000 } } },
       "CancelBookingResponse": { "type": "object", "additionalProperties": false, "required": ["status", "refundedYen"], "properties": { "status": { "$ref": "#/components/schemas/KnownBookingStatus" }, "refundedYen": { "type": "integer" } } },
       "MessageInput": { "type": "object", "additionalProperties": false, "required": ["subject", "body"], "properties": { "subject": { "type": "string", "minLength": 1, "maxLength": 200 }, "body": { "type": "string", "minLength": 1, "maxLength": 4000 } } },
-      "MessageResponse": { "type": "object", "additionalProperties": false, "required": ["message"], "properties": { "message": { "$ref": "#/components/schemas/HostMessage" } } }
+      "MessageResponse": { "type": "object", "additionalProperties": false, "required": ["message"], "properties": { "message": { "$ref": "#/components/schemas/MessageReceipt" } } }
     }
   }
 }

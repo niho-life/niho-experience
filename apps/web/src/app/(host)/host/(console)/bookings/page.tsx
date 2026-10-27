@@ -15,14 +15,14 @@ export const metadata: Metadata = { title: "予約" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** http mode until the provider API can read and answer bookings (#87): nothing that pretends to work. */
+/** HTTP rollout gate while the provider booking contract is disabled: nothing that pretends to work. */
 function BookingsUnavailable() {
   return (
     <HostPageBody>
       <PageHead title="予約" />
       <section className={`${HOST_SURFACE} px-5 py-8 md:px-6 md:py-10`}>
         <p className="font-extrabold">この画面は準備中です</p>
-        <p className="mt-1 text-ink-soft">予約の確認・承認・取消と返金・ゲストへの連絡は、NIHO との接続ができしだいここから行えるようになります。</p>
+        <p className="mt-1 text-ink-soft">本番予約の確認・承認と予約者への個別連絡は、NIHO との接続を有効にしたあと、ここから行えます。</p>
       </section>
     </HostPageBody>
   );

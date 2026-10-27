@@ -97,10 +97,13 @@ describe("provider operations server boundary", () => {
     expect(await readProviderOperationsJson(request("{"), 64)).toEqual({ ok: false });
   });
 
-  it("clears the host cookie on 401 and reports revoked 404 as ended permission", async () => {
+  it("clears the host cookie on 401 and reports 403/404 as ended permission", async () => {
     const unauthenticated = providerOperationsFailure({ ok: false, kind: "rejected", status: 401 });
     expect(unauthenticated.status).toBe(401);
     expect(mocks.clear).toHaveBeenCalledWith(unauthenticated);
+    const forbidden = providerOperationsFailure({ ok: false, kind: "rejected", status: 403 });
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toEqual({ error: "permission_ended" });
     const revoked = providerOperationsFailure({ ok: false, kind: "not_found" });
     expect(revoked.status).toBe(404);
     expect(await revoked.json()).toEqual({ error: "permission_ended" });

@@ -134,7 +134,7 @@
 
 ### 9.1 ホスト API の契約（[#87](https://github.com/niho-life/niho-experience/issues/87)）
 
-- 置き場：`packages/api-client/contract/experience-host-api.openapi.json`（＋ `.sha256`）。NIHO が `npm -C contracts run export:experience-host-contract` で書き出したものを、中身を変えずに写す（手順は §12 と同じ）。版は `0.2.0`・状態は draft・操作は 29。NIHO 側に画面の段ごとの操作が揃ったら agreed にする。
+- 置き場：ページ編集等は `packages/api-client/contract/experience-host-api.openapi.json`（＋ `.sha256`）。提供者チームと予約運営は独立した `experience-provider-operations-api.openapi.json` v1.1.0（`agreed-not-deployed`）で選別する。NIHO 側の実装と突き合わせた固定契約を写し、型を生成する（手順は §12 と同じ）。
 - 範囲：
   - 提供者：一覧・登録・取得・更新・審査の申請
   - 受取口座：準備・既存口座の再利用・接続
@@ -143,7 +143,10 @@
   - 体験サイトへの掲載：取得・申請・取り下げ（OWNER だけ）
   - 写真の上げ口：署名つき POST と、表示用の署名つき URL
   - `GET /api/auth/me`（表示名と顔写真だけ）
-  - 予約・顧客・売上（#90・#91）は、NIHO 側が足した段で写す。
+  - 予約：provider scope の一覧と詳細、承認・辞退、予約者1人へのメール送信。詳細はホストの送信本文と、予約者が認証済みWeb画面から送った返信本文を含む。予約前質問、メール返信の取込、自動翻訳は契約に無い。
+  - 顧客・売上（#91）は、NIHO 側が足した段で写す。
+- 予約BFF：NIHOの一覧・詳細は `guestEmail` 等を含むため、ブラウザへそのまま中継しない。`/host/api/provider-operations/{providerId}/bookings/**` が固定DTOへサーバー側投影し、予約者メール、送信元の `replyToEmails`、provider内部IDを除外する。401/403を権限終了として扱い、別providerの予約は404のままにする。レスポンスは `private, no-store`。
+- 予約の送信：本文を画面内でそのまま確認してから1件ずつ送る。結果不明時は自動再送せず、最新詳細の送信履歴を読み直す。承認・辞退は確認の直前に最新詳細を読み、金額と結果を示す。取消・返金は専用の最新snapshot・確認UIを備えるまでこのBFFでは公開しない。
 - 失敗の本文：閉じた `ExperienceHostErrorResponse`。`error.code` と `error.details.reason` は enum で、`details` は理由ごとに決まった項目の組（oneOf）。400 以外は `supportId` を持つ。
 - 版の確かめ方：体験ページの保存と公開は header `x-niho-page-updated-at`（違えば 409 `PAGE_UPDATED`）、ページの集合場所は本文の `expectedUpdatedAt`（違えば 409 `PROVIDER_PAGE_CONFLICT`）。ページの集合場所を保存するとページの版が進むので、続く保存はその応答の `updatedAt` を使う。
 - 写真の流れ：

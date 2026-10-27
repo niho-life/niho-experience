@@ -1,5 +1,6 @@
 import { EXPERIENCE_PROVIDER_BOOKING_STATUSES, type ExperienceProviderBookingListQuery } from "@niho-experience/api-client/experience-provider-operations";
 import { isExperienceProviderBookingCursor, isExperienceProviderOperationPathId } from "@niho-experience/api-client/experience-provider-operations-schema";
+import { projectHostBookingList } from "@/host/live-bookings";
 import { loadProviderOperationsClient, providerOperationsFailure, providerOperationsJson } from "@/lib/host/provider-operations-server";
 
 type Context = { params: Promise<{ providerId: string }> };
@@ -18,5 +19,5 @@ export async function GET(request: Request, context: Context) {
   if (status !== null) { if (!EXPERIENCE_PROVIDER_BOOKING_STATUSES.includes(status as typeof EXPERIENCE_PROVIDER_BOOKING_STATUSES[number])) return providerOperationsJson({ error: "invalid_query" }, 400); query.status = status as typeof EXPERIENCE_PROVIDER_BOOKING_STATUSES[number]; }
   const loaded = await loadProviderOperationsClient(); if (!loaded.ok) return loaded.response;
   const result = await loaded.client.listBookings(providerId, query);
-  return result.ok ? providerOperationsJson(result.data) : providerOperationsFailure(result);
+  return result.ok ? providerOperationsJson(projectHostBookingList(result.data)) : providerOperationsFailure(result);
 }

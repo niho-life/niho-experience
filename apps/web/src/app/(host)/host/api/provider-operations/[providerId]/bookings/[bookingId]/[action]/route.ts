@@ -1,4 +1,5 @@
 import { decodeExperienceProviderMessageInput, isExperienceProviderOperationPathId } from "@niho-experience/api-client/experience-provider-operations-schema";
+import { projectHostMessageReceipt } from "@/host/live-bookings";
 import { loadProviderOperationsClient, providerOperationsFailure, providerOperationsJson, providerOperationsMutationAllowed, readProviderOperationsJson } from "@/lib/host/provider-operations-server";
 
 type Context = { params: Promise<{ providerId: string; bookingId: string; action: string }> };
@@ -20,5 +21,5 @@ export async function POST(request: Request, context: Context) {
   const input = decodeExperienceProviderMessageInput({ subject: value.subject, body: value.body });
   if (!input) return providerOperationsJson({ error: "invalid_input" }, 400);
   const result = await loaded.client.messageGuest(providerId, pageId, bookingId, input);
-  return result.ok ? providerOperationsJson(result.data, 201) : providerOperationsFailure(result);
+  return result.ok ? providerOperationsJson(projectHostMessageReceipt(result.data), 201) : providerOperationsFailure(result);
 }
