@@ -150,9 +150,22 @@
 | KKday | [rezioのKKday連携手順](https://help.rezio.io/en/support/solutions/articles/67000685929-channel-management-kkday-connect-channel)がある | KKday供給者アカウントとrezioでの接続を前提とする例。NIHOが使える方式・残席連携の条件は個別確認 |
 | アソビュー！ | [掲載手順](https://biz.asoview.com/asoview)は管理画面での在庫枠設定を案内。別製品[ウラカタ](https://biz.asoview.com/urakata-webinar-1)は複数媒体との在庫連動を掲げる | ウラカタで**どの販路が実際に対象か**、費用と小規模講座への適合を確認。アソビュー！の掲載だけで他社同期できるとは扱わない |
 | じゃらん遊び・体験 | [じゃらんリサーチセンターの事例](https://jrc.jalan.net/case/2032/)に個別のAPI連携と在庫一元化がある | 一般掲載者向けのセルフサービス在庫APIは今回の公開資料では確認できない。営業窓口へ対応システムを照会 |
-| アクティビティジャパン | [事業者案内](https://activityjapan.com/publish_info)には自社の予約管理システムを案内 | 一般掲載者が外部から枠を更新する公開APIは今回確認できない。契約・接続方式を個別照会 |
+| アクティビティジャパン | [事業者案内](https://activityjapan.com/publish_info)には自社の予約管理システムを案内。[rezioの連携手順](https://kb.rezio.io/ja/article/44ki44kv44og44kj44ot44og44kj44k444oj44or44oz77ya5zwg5zob6kit5a6a-r8hi6i/)には商品対応付けと予約取込みの記載がある | 連携システム経由の接続例は実在する。一般掲載者が自作システムから枠を更新する公開API・rezioでの残席同期範囲は個別照会 |
 
 OTAをまたぐ販売量が増えたら、[RezdyConnect](https://developers.rezdy.com/rezdyconnect/index.html)のように**既存の予約システムを供給側の正本に保ち**、チャネルマネージャーへ空き・価格を渡して予約・取消を戻す方式も検討できる。ただし技術実装、接続先ごとの契約・審査、手数料、同期遅延、取消の整合、個人情報の範囲を事前に確認する。Rezdyを採用する場合も、NIHO ExperienceからRezdyへの接続方式と正本の責任を決めずに二重管理を始めない。
+
+### 横断管理ツールの候補
+
+体験・ツアー向けの「予約管理システム／チャネルマネージャー」は、開催回と席数を一つの管理画面で設定し、接続済みのOTAへ空き状況を伝え、予約・取消を取り込む製品群。**商品説明や写真まで全OTAへ一括掲載できるとは限らない**。[Bókunの説明](https://www.bokun.io/getyourguide-manage-bookings)もGetYourGuideの商品作成・説明編集はGetYourGuide側で行うと明記する。以下は公開資料で確認した候補であり、各社すべての販路への契約・接続を保証するものではない。
+
+| ツール | 公開資料で確認できる対象・機能 | NIHOでの評価点 |
+| --- | --- | --- |
+| [Rezdy](https://rezdy.com/channel-manager-for-suppliers/) | Airbnb体験は[専用の接続手順](https://support.rezdy.com/hc/en-us/articles/21332024593564-Airbnb-How-to-connect-to-Airbnb)があり、GetYourGuide・Viator・Klookも販路網に表示。空き・料金・予約を双方向で扱う。自社システムを残す[RezdyConnect](https://developers.rezdy.com/rezdyconnect/index.html)がある | 海外OTAとNIHO Experienceの正本をつなぐ候補。Airbnbのホスト審査、商品適合、外部Google Calendar接続を外す条件、接続料・実装費を確認。国内のじゃらん・アソビュー！・アクティビティジャパンへの対応は未確認 |
+| [Bókun](https://www.bokun.io/grow/bokun-and-airbnb-connection) | Airbnb体験の予約・空き同期を明記。[GetYourGuide・Viator・Klook等](https://www.bokun.io/getyourguide-manage-bookings)にも接続。既存の基幹予約システムからAPI接続する[Channel Managerプラン](https://www.bokun.io/pricing)がある | 海外OTA中心の比較対象。通常のSTARTは公開価格で月49米ドル＋対象予約に1.5%の手数料。**既存基幹システムを残すChannel Managerは個別見積り**。国内OTAへの対応は未確認 |
+| [rezio](https://kb.rezio.io/ja/article/44ob44oj44on44or6kit5a6a-sn6f7a/) | KKday・Viator・GetYourGuideと予約・在庫を管理。[アクティビティジャパンとの商品連携手順](https://kb.rezio.io/ja/article/44ki44kv44og44kj44ot44og44kj44k444oj44or44oz77ya5zwg5zob6kit5a6a-r8hi6i/)も公開 | 日本の販路を含む候補。ただし日本語のチャネル一覧にアクティビティジャパンが見えない版もあり、現行プランでの利用可否・枠同期の方向・追加費用を確認。Airbnb体験、Klook、じゃらん、アソビュー！の接続は今回確認できない |
+| [アソビュー！のウラカタ予約](https://biz.asoview.com/urakata-webinar-1) | 複数の体験予約サイトの在庫連動と予約台帳を案内 | 国内講座向けに問合せる価値がある。具体的な対応OTA・契約費用・定員制ワークショップへの適用を確認。大規模イベント向けの**ウラカタチケット**と同じ対応販路だと推定しない |
+
+**現時点で、Airbnb・Klook・じゃらん・アソビュー！・アクティビティジャパンをすべて同じ4席へ自動同期できる製品は確認できない。** 各ツールは「対応販路」と書いていても、商品形式、所在国、契約、プラン、既存アカウントの審査で使える接続が変わる。NIHOの比較では、実際に売りたい2～3サイトを先に決め、各社へ「水引の定員4名・毎週固定枠・取消・NIHO直販を同一在庫で扱えるか」をデモで確認する。NIHO Experienceを正本にする場合は外部ツールが正本を奪わずAPIで接続できるか、逆に外部ツールを正本に変えるなら既存の予約・決済・返金の所有権をどう移すかまで決める。
 
 ### あかねさんの水引講座で始める枠管理案
 
