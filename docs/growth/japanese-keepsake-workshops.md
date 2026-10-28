@@ -1,6 +1,6 @@
 # 水引と日本の小物づくり：Airbnb掲載比較と鎌倉での企画案
 
-調査日：2026-10-28（日本時間）／関連：[鎌倉の体験市場とNIHOの商品機会](kamakura-experience-market-opportunities.md)
+調査日：2026-10-28（日本時間）／関連：[鎌倉の体験市場とNIHOの商品機会](kamakura-experience-market-opportunities.md)・[鎌倉の市場規模と水引の販路比較](kamakura-experience-market-and-channels.md)
 
 > 公開掲載と公開レビューから作った企画判断の材料。レビュー件数は販売数・直近の予約数・収益を示さない。掲載時期、表示言語、検索条件、取得時点によって件数と料金は変わる。実在する提供者の掲載は比較のために挙げており、NIHOとの提携や参加意思を示さない。
 
