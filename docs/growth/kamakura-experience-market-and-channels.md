@@ -151,6 +151,24 @@
 
 したがって「Google連携できるOTAを全部つなぐ」方式で、今回の8つの体験掲載サイトを同じ回に自動公開できるとは言えない。**公開仕様で直接確認できる核はAirbnb体験**。試験としてはAirbnbの貸切回＋Google予約ページを先に検討できるが、双方の予約が他方の販売画面から消えるまでを実測し、遅延中の同時申込みを扱う運用を決める。Airbnbの[宿泊用iCal同期](https://www.airbnb.com/help/article/99)に記載された更新間隔を、体験向けGoogle連携の保証値へ流用しない。
 
+### Google以外のカレンダー・API・管理画面操作を組み合わせる案（2026-10-29追記）
+
+**NIHOの画面を枠操作の入口にする最短の有力候補は、既存チャネルマネージャーの在庫更新APIを使う方式。** [Rezdy供給者API](https://developers.rezdy.com/rezdyapi/index-supplier.html)には、開催回単位の空き更新と、既存開催回の期間指定一括更新（`POST /v1/availability/batch`）があり、`seatsAvailable: 0`で売止めできる。一括更新の対象は`SESSION_SEATS`方式の既存開催回。公開仕様に基づく候補であり、NIHOがAPIキー・対象プラン・OTA接続を取得済みという意味ではない。NIHOの「開く」は単に1へ戻す処理にせず、実予約、締切、講師・会場の休止、他販路の状況を照合してから残席を計算する。1枠1組であっても、OTAの「席」が1組か参加者1人かを商品ごとに検証する。
+
+| 操作の入口と経路 | 今回確認できた方向 | 実施条件・限界 |
+| --- | --- | --- |
+| Google Calendar → Airbnb体験 | Googleの`busy`がAirbnb体験の時間をブロックし、予約がGoogleへ戻る。[Airbnb公式](https://www.airbnb.com/help/article/2822) | Airbnb体験へ直接Google接続する場合の方式。RezdyのAirbnb接続は[外部カレンダー未接続](https://support.rezdy.com/hc/en-us/articles/21332024593564-Airbnb-How-to-connect-to-Airbnb)を条件とするため、同一商品で二重接続しない |
+| NIHO画面／Googleの操作 → NIHOの変換処理 → Rezdy供給者API → 対応OTA | Rezdy APIは開催回の在庫を更新でき、[Airbnb接続](https://support.rezdy.com/hc/en-us/articles/21332024593564-Airbnb-How-to-connect-to-Airbnb)はRezdyから空き・予約を同期する。予約・取消の[webhook](https://developers.rezdy.com/rezdywebhooks/index.html)も公開 | **Rezdyをその開催回の予約・在庫正本とする試験案**。現行の[NIHO Experience正本方針](../adr/0002-experience-domain-ownership.md)から切り替える場合は販売前に方針とデータ移行を決める。対象OTA・料金・API権限の契約確認、NIHO直販からRezdyへの予約登録、webhook失敗時の定期照合が必要。公開資料だけで全OTAの反映時間は保証できない |
+| NIHO Experienceの在庫API ↔ RezdyConnect → 対応OTA | [RezdyConnect](https://developers.rezdy.com/rezdyconnect/index.html)は供給者の既存システムから空き・価格を取り、予約・取消を返す。変更通知を受けたRezdyが再取得する仕様 | **NIHO Experienceを正本に保つ中期案**。接続審査、予約の原子的な確保、双方向対応、取消・再送・障害時復旧が必要。対象商品のAirbnb接続可否も個別確認 |
+| Rezdy／BókunのiCal・Google表示 | [RezdyのiCal](https://support.rezdy.com/hc/en-us/articles/19867768623900-How-to-Integrate-Rezdy-With-Google-Calendar-or-iCal)と[BókunのGoogle Calendar App](https://docs.bokun.io/en/articles/19-google-calendar-app)は予約システム**から**個人カレンダーへ予定を出す片方向 | Google上の予定を書き換えてRezdy／Bókunの在庫を開閉する機能ではない。RezdyはGoogleの購読更新が約24時間と案内。ICSの発行や購読だけで販売制御・二重予約防止は成立しない |
+| NIHOの変更信号 → 各OTAの管理画面をAI／RPAで操作 | API未接続の販路へ枠操作を届ける技術的な補助手段 | 各社の利用規約・許諾、ログイン・MFA、画面変更、CAPTCHA、反映確認に依存。**Airbnb規約はbot等によるプラットフォームへの自動アクセス・操作を禁じる**ため、Airbnbをこの方式の対象にしない。[Airbnb規約](https://www.airbnb.com/help/article/2857) |
+
+GoogleをNIHOの**操作画面**にしたい場合、NIHOが専用カレンダーの変更を[Google Calendarのpush通知](https://developers.google.com/workspace/calendar/api/guides/push)で受け、変更内容を読み直し、開催回IDと開始・終了・タイムゾーンを照合してNIHOの売止め／再開指示へ変換する。Googleの通知自体は変更内容を含まず、取りこぼしがあり得るため、定期的な差分照合と通知チャネル更新も必要。「毎週土曜昼」はNIHOまたは予約システム側で開催ルールを作り、Google予定は臨時休止などの**例外入力**に使う。予定削除での再開は、確定予約や他の休止理由がないことを確認してから行う。通常のGoogle `busy`をOTAが直接読んでくれるという意味ではない。
+
+**AIブラウザ操作は、許諾の取れた販路の補助運用としてなら検討できる。** NIHOで「閉じる」を押す→販路別の処理待ちを作る→対象サイトの管理画面で変更→同じ枠を再読込して結果を確認→NIHOに「反映済み／失敗」を記録する。予約成立・取消の逆方向は通知メール、予約システムのwebhook、または人の確認から取り込む。操作が失敗した枠は「全販路で閉じた」と表示せず、担当者へ即通知して手動処理する。画面操作には同時予約を原子的に止める保証がなく、未許諾の自動操作やログイン障害を越える設計にしない。ClaudeのようなAIは画面変更時の判読・例外確認には使えるが、日時・在庫数の入力と完了判定は共通の開催回ID、明示的な照合、操作記録で固定する。
+
+**推奨する検証順序**：①Airbnbだけは公式Google連携で貸切の実枠を試す。②同じ回を海外OTAへ広げるならRezdy等の接続先とAPI権限を実アカウントで確認し、1商品・数枠でNIHO画面→API→販売画面、予約→NIHO、取消→再開を往復試験する。③国内OTAは公式API／既存管理ツールの対象を先に照会し、接続できないものだけ規約を確認した上で人の確認を伴う管理画面操作か、販路別割当枠・リクエスト予約で扱う。**同一開催回に二つの在庫正本を置かず、Rezdy接続するAirbnb商品ではGoogle直接連携から切り替える。**
+
 ### 各社に枠・残席を連携する手段はあるか
 
 「外部APIは存在しない」とは言えない。一方、**一般のホストが各社のAPIキーを取得して一度に全サイトを更新できる**という状態でもない。2026-10-28時点の公式資料と連携事業者資料で確認できる範囲は次の通り。
