@@ -6,7 +6,7 @@ vi.mock("@/lib/config", () => ({ config: state.config, isPreview: true }));
 
 import { GET as manifestRoute } from "@/app/(host)/host/manifest.webmanifest/route";
 import { GET as workerRoute } from "@/app/(host)/host/sw.js/route";
-import { hostInstallGuide, hostWebManifest, type HostInstallDevice } from "./pwa";
+import { hostInstallGuide, hostPushAvailability, hostWebManifest, type HostInstallDevice } from "./pwa";
 
 afterEach(() => {
   state.config.hostConsoleEnabled = true;
@@ -95,5 +95,16 @@ describe("設定 › この端末 › アプリ", () => {
   it("stays neutral elsewhere", () => {
     expect(hostInstallGuide(device({ userAgent: ua.macChrome, platform: "MacIntel" }))).toEqual({ kind: "other" });
     expect(hostInstallGuide(device({ userAgent: ua.firefox, platform: "Win32" }))).toEqual({ kind: "other" });
+  });
+
+  it("offers push only where the device can take it (#177 P2)", () => {
+    const push = (overrides: Partial<HostInstallDevice> & { hasPush?: boolean; permission?: NotificationPermission | null }) =>
+      hostPushAvailability({ ...device(overrides), hasPush: overrides.hasPush ?? true, permission: overrides.permission ?? "default" });
+    expect(push({ userAgent: ua.iphone, platform: "iPhone", maxTouchPoints: 5, hasPush: false })).toBe("ios-install");
+    expect(push({ userAgent: ua.ipadDesktop, platform: "MacIntel", maxTouchPoints: 5 })).toBe("ios-install");
+    expect(push({ userAgent: ua.iphone, platform: "iPhone", maxTouchPoints: 5, standalone: true })).toBe("available");
+    expect(push({ userAgent: ua.firefox, platform: "Win32", hasPush: false })).toBe("unsupported");
+    expect(push({ userAgent: ua.android, permission: "denied" })).toBe("denied");
+    expect(push({ userAgent: ua.macSafari, platform: "MacIntel" })).toBe("available");
   });
 });

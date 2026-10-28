@@ -72,7 +72,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(process.cwd(), "../.."),
   poweredByHeader: false,
   reactStrictMode: true,
-  transpilePackages: ["@niho-experience/api-client", "@niho-experience/experience-domain", "@niho-experience/experience-store", "@niho-experience/experience-payments", "@niho-experience/google-calendar"],
+  transpilePackages: ["@niho-experience/api-client", "@niho-experience/experience-domain", "@niho-experience/experience-store", "@niho-experience/experience-payments", "@niho-experience/google-calendar", "@niho-experience/web-push"],
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

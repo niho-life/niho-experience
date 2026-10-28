@@ -72,6 +72,9 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `NIHO_HOST_START_URL` / `HOST_PILOT_CONTACT_URL` / `NIHO_BOOKING_HELP_URL` | なし | NIHO側の遷移先。固定URLのみ。利用者入力で戻り先を変えない |
 | `HOST_CONSOLE_ENABLED` | `false` | `true` でホストの画面（`/host/*`）とログインを開く（#84）。off の間は今の紹介ページのまま。mock のプレビュー（`deploy-preview.yml`）は `true` で、合成のログインで見られる |
 | `HOST_PWA_ENABLED` | `false` | `true` でホストの画面をホーム画面・Dock に追加できるようにする（manifest・Service Worker・設定「この端末」。#177）。`HOST_CONSOLE_ENABLED=true` のときだけ効く。`false` に戻すと自分を解除する Service Worker を返す（[host-pwa.md](host-pwa.md)）。mock のプレビューと stg は `true` |
+| `HOST_PUSH_ENABLED` | `false` | `true` でアプリへのプッシュ通知（設定 › この端末 › 通知と `/host/api/push-subscriptions`。#177 P2）を開く。`HOST_PWA_ENABLED=true` のときだけ効く。送信はまだ通知 job につないでいない（[host-pwa.md](host-pwa.md#プッシュ通知p2)）。どの workflow でも未設定 |
+| `HOST_PUSH_VAPID_PUBLIC_KEY` / `HOST_PUSH_VAPID_SUBJECT` | なし（mock は開発用の公開鍵） | VAPID の公開鍵（base64url）と連絡先（`mailto:` か `https:`）。http mode で `HOST_PUSH_ENABLED=true` なら必須 |
+| `HOST_PUSH_VAPID_PRIVATE_KEY` | なし | VAPID の秘密鍵。Secret Manager からだけ渡す。公開鍵と対でないと起動しない |
 | `HOST_SESSION_SECRET` | なし（mock は開発用の固定値） | ホストのセッション cookie の暗号化の鍵。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
 | `NIHO_FIREBASE_WEB_API_KEY` | なし | NIHO の custom token を ID token に替えるための公開 Web API key。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
 | `HOST_SUPPORT_SETTINGS_API_ENABLED` | `false` | NIHO側の本人OWNER支援設定 v1.0.1 を配備・受入後にだけ開くHTTP BFF。mockではtrueにしても開かない |

@@ -10,10 +10,14 @@ const state = vi.hoisted(() => ({
     nihoFirebaseWebApiKey: "synthetic-web-key",
     nihoWebOrigin: "https://niho.example.test",
     siteUrl: "https://experience.example.test",
+    hostPushEnabled: false,
   },
+  /** The experience DB's pool for push bookkeeping (#177 P2); null = not configured. */
+  pool: null as { query: (sql: string, params: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }> } | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
+vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool }));
 
 import { GET as login } from "@/app/(host)/host/auth/login/route";
 import { GET as callback } from "@/app/(host)/host/auth/callback/route";
@@ -309,5 +313,50 @@ describe("mock mode sign-in from the installed app (#177)", () => {
     expect(openSession(setCookies(app).get(SESSION_COOKIE)?.value)).toMatchObject({ nihoUserId: "synthetic-host-user", surface: "app" });
     const browser = await GET(new NextRequest(`${SITE}/host/auth/mock-login`));
     expect(openSession(setCookies(browser).get(SESSION_COOKIE)?.value)).not.toHaveProperty("surface");
+  });
+});
+
+describe("push follows the NIHO connection (#177 P2)", () => {
+  const queries: { sql: string; params: unknown[] }[] = [];
+  beforeEach(() => {
+    queries.length = 0;
+    state.config.hostPushEnabled = true;
+    state.pool = { query: async (sql, params) => { queries.push({ sql, params }); return { rowCount: 1, rows: [] }; } };
+  });
+  afterEach(() => {
+    state.config.hostPushEnabled = false;
+    state.pool = null;
+  });
+  const post = (route: typeof refresh, path: string, cookie: string) => route(new NextRequest(`${SITE}${path}`, { method: "POST", headers: { ...sameOrigin, cookie } }));
+
+  it("logout removes the connection's devices", async () => {
+    handler = () => new Response(null, { status: 204 });
+    const response = await post(logout, "/host/auth/logout", sessionCookie(30 * MIN));
+    expect(response.status).toBe(303);
+    expect(queries).toEqual([{ sql: expect.stringMatching(/^DELETE FROM host_push_subscriptions WHERE connection_id = \$1$/), params: ["conn_1"] }]);
+  });
+
+  it("a refresh keeps the devices current, and an ended connection removes them", async () => {
+    handler = (url) => url.pathname === "/api/auth/app-connect/refresh"
+      ? json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString() })
+      : json(200, { idToken: "id-2", expiresIn: "3600" });
+    expect((await post(refresh, "/host/auth/refresh", sessionCookie(4 * MIN))).status).toBe(200);
+    expect(queries.map((query) => [query.sql.split(" ")[0], query.params])).toEqual([["UPDATE", ["conn_1"]]]);
+    queries.length = 0;
+    handler = () => json(401, { error: "connection_revoked" });
+    expect((await post(refresh, "/host/auth/refresh", sessionCookie(4 * MIN))).status).toBe(401);
+    expect(queries.map((query) => [query.sql.split(" ")[0], query.params])).toEqual([["DELETE", ["conn_1"]]]);
+  });
+
+  it("never fails or touches push while it is off, without a database or when the database fails", async () => {
+    handler = () => new Response(null, { status: 204 });
+    state.pool = { query: async () => { throw new Error("db down"); } };
+    expect((await post(logout, "/host/auth/logout", sessionCookie(30 * MIN))).status).toBe(303);
+    state.pool = null;
+    expect((await post(logout, "/host/auth/logout", sessionCookie(30 * MIN))).status).toBe(303);
+    state.config.hostPushEnabled = false;
+    state.pool = { query: async (sql, params) => { queries.push({ sql, params }); return { rowCount: 0, rows: [] }; } };
+    expect((await post(logout, "/host/auth/logout", sessionCookie(30 * MIN))).status).toBe(303);
+    expect(queries).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { HOST_APP_SIGN_IN_REQUIRED, HOST_DISPLAY_HEADER, HOST_DISPLAY_STANDALONE } from "@/lib/host/display";
+import { forgetHostPushConnection, touchHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { clearSessionCookie, hostNotFound, noStoreJson, renewSession, sessionSealer, setSessionCookie, siteOrigin } from "@/lib/host/server";
 import { decodeSession, SESSION_COOKIE, shouldRefresh } from "@/lib/host/session";
@@ -30,6 +31,9 @@ export async function POST(request: NextRequest) {
   if (!shouldRefresh(session, now)) return noStoreJson({ refreshed: false, idTokenExpiresAt: session.idTokenExpiresAt });
 
   const renewal = await renewSession(session);
+  // Push follows the connection (#177 P2): an ended one loses its devices, a refreshed one keeps them current. Never blocks.
+  if (renewal.outcome === "rejected") await forgetHostPushConnection(session.connectionId);
+  if (renewal.outcome === "refreshed") await touchHostPushConnection(renewal.session.connectionId);
   if (renewal.outcome === "rejected") {
     const response = noStoreJson({ error: "session_expired" }, 401);
     clearSessionCookie(response);

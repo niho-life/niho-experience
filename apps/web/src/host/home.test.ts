@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addDays, agoJa, dateWithWeekdayJa, durationJa, experienceMeta, minutesBetween, remainingJa, shortDateWithWeekdayJa, todayInJapan, yen } from "./format";
-import { homeMonth, homeSessions, homeTodos, type HomeUpcoming } from "./home";
+import { homeBadgeCount, homeMonth, homeSessions, homeTodos, type HomeUpcoming } from "./home";
 import { MOCK_KITCHEN_BOOKINGS, MOCK_NOW, MOCK_TODAY } from "./mock/bookings";
 import { MOCK_KITCHEN_EXPERIENCES } from "./mock/experiences";
 import { MOCK_KITCHEN_REVIEWS } from "./mock/reviews";
@@ -83,6 +83,11 @@ describe("host home", () => {
     expect(threads["thread-th-3010"]).toMatchObject({ title: "「안녕하세요. 휠체어로도 참가할 수 있을까요? 엘리베이터가…」", detail: "Jiwoo Han さん · 6 時間前 · 翻訳できませんでした" });
     // The answered question waits for nobody.
     expect(threads["thread-th-3007"]).toBeUndefined();
+  });
+
+  it("counts the requests and the waiting threads for the app icon, not reviews or drafts (#177)", () => {
+    expect(homeBadgeCount(homeTodos(MOCK_KITCHEN_EXPERIENCES, MOCK_KITCHEN_BOOKINGS, MOCK_KITCHEN_THREADS, MOCK_TODAY, MOCK_NOW, MOCK_KITCHEN_REVIEWS))).toBe(5);
+    expect(homeBadgeCount(homeTodos(MOCK_KITCHEN_EXPERIENCES, [], [], MOCK_TODAY, MOCK_NOW, MOCK_KITCHEN_REVIEWS))).toBe(0);
   });
 
   it("brings up the published reviews without a reply, the newest first, then the ones NIHO is checking, after the threads (#108)", () => {

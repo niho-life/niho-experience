@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { FieldRow, FieldSection } from "@/components/host/fields";
 import { HostAppInstall } from "@/components/host/HostAppInstall";
+import { HostPushToggle } from "@/components/host/HostPushToggle";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
@@ -26,7 +27,7 @@ function connectStep(value: string | string[] | undefined): "return" | "refresh"
 
 /**
  * 設定 (mock v2): provider (and its review), payout account, calendar (#109), default meeting point,
- * notifications (#109), this device as an app (#177, HOST_PWA_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
+ * notifications (#109), this device as an app and its push (#177, HOST_PWA_ENABLED / HOST_PUSH_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
  * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one.
  */
 export default async function HostSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -41,12 +42,17 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   if (payout.redirectTo) redirect(payout.redirectTo);
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
 
-  // P2 of #177 adds 通知 (this device's push) as a second row.
+  // この端末 (#177): the app, and push on this device while HOST_PUSH_ENABLED is on (P2).
   const devicePanel = config.hostPwaEnabled ? (
     <FieldSection id="settings-device" title="この端末">
       <FieldRow label="アプリ" labelId="settings-device-app-label">
         <HostAppInstall labelId="settings-device-app-label" />
       </FieldRow>
+      {config.hostPushEnabled ? (
+        <FieldRow label="通知" labelId="settings-device-push-label">
+          <HostPushToggle labelId="settings-device-push-label" vapidPublicKey={config.hostPushVapidPublicKey} />
+        </FieldRow>
+      ) : null}
     </FieldSection>
   ) : null;
 

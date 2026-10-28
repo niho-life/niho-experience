@@ -23,4 +23,22 @@ describe("database invariants", () => {
     assert.match(busyTable, /start_at/);
     assert.match(busyTable, /end_at/);
   });
+
+  it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
+    const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.doesNotMatch(sql, /CREATE EXTENSION/);
+    const table = sql.match(/CREATE TABLE host_push_subscriptions \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY/);
+    assert.match(table, /endpoint text NOT NULL UNIQUE/);
+    assert.match(table, /\{87\}/);
+    assert.match(table, /\{22\}/);
+    assert.match(table, /device_label IN \('iphone', 'ipad', 'android', 'mac', 'windows', 'other'\)/);
+    assert.match(table, /failure_count integer NOT NULL DEFAULT 0 CHECK \(failure_count >= 0\)/);
+    // No names, message text, amounts or browser details beyond the coarse device.
+    assert.doesNotMatch(table, /name\b|message|amount|user_agent/i);
+    assert.match(sql, /ON host_push_subscriptions \(niho_user_id\)/);
+    assert.match(sql, /ON host_push_subscriptions \(connection_id\)/);
+  });
 });

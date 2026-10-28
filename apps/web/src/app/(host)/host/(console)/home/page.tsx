@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { HostAppBadge } from "@/components/host/HostAppWindow";
 import { HostHomeTodos } from "@/components/host/HostHomeTodos";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
@@ -7,7 +8,8 @@ import { consoleButtonClass, HOST_SURFACE, LIST_ROW, LIST_ROW_DETAIL, LIST_ROW_T
 import { HostPageBody, MoreLink, PageHead, SectionTitle } from "@/components/host/ui";
 import { homeCalendarPrompt, type HomeCalendarPrompt } from "@/host/calendar";
 import { hostPageContext, loadHostConsoleData } from "@/host/data";
-import type { HomeUpcoming } from "@/host/home";
+import { homeBadgeCount, type HomeUpcoming } from "@/host/home";
+import { config } from "@/lib/config";
 import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import { isHostMock } from "@/lib/host/server";
 
@@ -115,6 +117,7 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
 
       {/* Keyed by provider: another provider's rows start from their own list. */}
       <HostHomeTodos key={provider.id} todos={home.todos} providerId={linkProviderId} />
+      <HostAppBadge enabled={config.hostPwaEnabled} count={homeBadgeCount(home.todos)} />
       <DaySessions id="home-today" title="今日の開催" sessions={home.sessions.today} link={link} />
       <DaySessions id="home-tomorrow" title="明日の開催" sessions={home.sessions.tomorrow} link={link} />
       {/* Under the day's sessions: what needs doing and who comes first, the calendar after them. */}
