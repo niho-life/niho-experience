@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { isStandaloneDisplay, subscribeDisplayMode } from "@/lib/host/display";
 import { HOST_LAUNCH_PATH, withQuery } from "@/lib/host/routes";
@@ -39,11 +38,11 @@ export function HostAppSurfaceGuard({ enabled, appSurface }: { enabled: boolean;
 const RESUME_AFTER_MS = 60_000;
 
 /**
- * The app has no reload button: back from a minute or more in the background, the page is read
- * from the server again, unless something on it is not saved yet (the leave guard's state).
+ * The app has no reload button: back from a minute or more in the background, the page loads again,
+ * unless something on it is not saved yet (the leave guard's state). A full load rather than
+ * router.refresh(): 予約 and メッセージ keep their lists in client state, which a refresh leaves as is.
  */
 export function HostResumeRefresh({ enabled }: { enabled: boolean }) {
-  const router = useRouter();
   const standalone = useStandaloneDisplay();
   useEffect(() => {
     if (!enabled || !standalone) return;
@@ -55,10 +54,10 @@ export function HostResumeRefresh({ enabled }: { enabled: boolean }) {
       }
       const away = hiddenAt === null ? 0 : Date.now() - hiddenAt;
       hiddenAt = null;
-      if (away >= RESUME_AFTER_MS && !window.__nihoHostHistoryGuard?.dirty) router.refresh();
+      if (away >= RESUME_AFTER_MS && !window.__nihoHostHistoryGuard?.dirty) window.location.reload();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [enabled, standalone, router]);
+  }, [enabled, standalone]);
   return null;
 }
