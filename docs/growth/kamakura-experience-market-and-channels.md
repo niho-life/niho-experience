@@ -1,6 +1,6 @@
 # 鎌倉の有料体験市場と水引ワークショップの販路
 
-調査日：2026-10-28（日本時間）／関連：[体験商品機会](kamakura-experience-market-opportunities.md)・[水引の体験設計と満足度](japanese-keepsake-workshops.md)
+調査日：2026-10-28（日本時間）／関連：[体験商品機会](kamakura-experience-market-opportunities.md)・[水引の体験設計と満足度](japanese-keepsake-workshops.md)・[NIHOの横断チャネルマネージャー化](niho-channel-manager-feasibility.md)
 
 ## 要旨
 
