@@ -137,6 +137,20 @@
 
 [NIHO Experienceの業務境界の決定](../adr/0002-experience-domain-ownership.md)では、NIHO直販の開催枠と予約の正本をniho-experienceに置き、Google Calendarを予定表示・新規受付停止の入力とする。外部OTAからの予約・残席を同じ正本へ取り込む機能がない間は、外部予約を確認する運営台帳を設けて突き合わせる。Google Calendarにゲストの個人情報を広く共有しない。
 
+### 1枠1組ならGoogle Calendarでどこまで共有できるか（2026-10-29追記）
+
+**「Google Calendarに予約が表示される」だけでは足りない。** 同じ日時を複数販路へ掲載し、最初の1組で残りを閉じるには、各販路が①予約成立をGoogleへ反映し、②Googleの`busy`を**新規予約の可否判定へ取り込み**、③取消時に再開し、④これらを次の購入より早く反映する必要がある。Google Calendar側に予約を集める機能と、OTAの販売枠を止める機能は別。後者が片方向だけなら自動の過剰販売防止は成立しない。
+
+| 掲載先・予約経路 | Googleの`busy`でそのサイトの新規受付を閉じる公開根拠 | 「1枠1組」での扱い |
+| --- | --- | --- |
+| **Airbnb体験** | [公式ヘルプ](https://www.airbnb.com/help/article/2822)はGoogleの`busy`をAirbnbの受付停止時間にし、Airbnbの確定予約をGoogleへ同期すると明記 | 直接接続を確認。各回を[貸切型](https://www.airbnb.com/help/article/2645)にするか1組で締める仕組みが別途必要。通常の公開グループ開催は[1組目の予約後も他の人が申し込める](https://www.airbnb.com/help/article/2644)。同期の遅延と既存予約がある回への`busy`の効き方は実枠で検証する |
+| **Googleカレンダーの予約ページ**（NIHOからリンク可能。OTAではない） | [Google公式](https://support.google.com/calendar/answer/16287054?hl=ja-JP)は選択したカレンダーの`busy`で予約ページの枠を閉じ、1枠1予約にする。Airbnbの予定を含む**登録済みの別カレンダー**の確認には対象のWorkspace／Google Oneプランが必要 | Airbnbの予定を確認対象に選び、Googleの予約をAirbnbへ`busy`として送れば、**2経路の試験候補**。プラン、カレンダー選択、同期遅延を実予約前に試す。Google予約ページ自体にOTAの集客はない |
+| **NIHO Experience直販** | [業務境界](../adr/0002-experience-domain-ownership.md)ではGoogle `busy`を受付停止の入力にする。コードには[busy同期](../../apps/web/src/lib/experience/google-connection.ts)があるが、[確定予約のGoogle書込み関数](../../packages/google-calendar/src/index.ts)は現行の販売フローから呼ばれていない。[staging受入手順](../host-calendar-staging.md)も本番Google接続・予約販売を受入済みとしていない | **現時点でAirbnbとの完成した双方向自動同期とは言えない**。接続、定期同期、確定・取消の書込み、販売中の衝突試験を終えてから対象に含める |
+| **Klook、GetYourGuide、Viator、KKday** | 確認した供給者向け公開資料では、各OTAが通常のGoogle Calendarの`busy`を直接取り込んで予約枠を閉じる設定を確認できない。[Klook API](https://klook.gitbook.io/openapi)、[GetYourGuide接続](https://www.getyourguide.supply/connectivity)、[Viator Supplier API](https://docs.viator.com/supplier-api/technical/)、[rezioのKKday連携](https://kb.rezio.io/ja/article/44ob44oj44on44or6kit5a6a-sn6f7a/) | **Googleだけでの自動売止めは未確認**。予約システム／チャネルマネージャーとの在庫API接続、またはサイト別枠が必要。KKdayの[旅行者向け「カレンダーに追加」](https://www.kkday.com/ja/blog/29463/how-to-use-kkday/)は供給者の売止めではない |
+| **じゃらん遊び・体験、アソビュー！、アクティビティジャパン** | 一般掲載者がGoogleの`busy`を取り込んで予約枠を閉じる公式設定は今回確認できない。[じゃらんの個別API事例](https://jrc.jalan.net/case/2032/)、[アソビュー！のウラカタ予約](https://biz.asoview.com/urakata-webinar-1)、[アクティビティジャパンの事業者案内](https://www.activityjapan.co.jp/reservation-system/)はGoogleへの直接接続とは別 | **Googleだけでの自動売止めは未確認**。後述の連携システムかサイト別枠を使う。[じゃらん](https://www.jalan.net/jalan/doc/howto/activity_cardkessai.html)、[アソビュー！](https://faq.asoview.karakuri.ai/answer/61ed1651fe7cba001af14cfa/)、[アクティビティジャパン](https://activityjapan.com/faq)には申込後の受入判断を行う予約方式があるが、商品・契約で選べるか確認し、手動照合が必要 |
+
+したがって「Google連携できるOTAを全部つなぐ」方式で、今回の8つの体験掲載サイトを同じ回に自動公開できるとは言えない。**公開仕様で直接確認できる核はAirbnb体験**。試験としてはAirbnbの貸切回＋Google予約ページを先に検討できるが、双方の予約が他方の販売画面から消えるまでを実測し、遅延中の同時申込みを扱う運用を決める。Airbnbの[宿泊用iCal同期](https://www.airbnb.com/help/article/99)に記載された更新間隔を、体験向けGoogle連携の保証値へ流用しない。
+
 ### 各社に枠・残席を連携する手段はあるか
 
 「外部APIは存在しない」とは言えない。一方、**一般のホストが各社のAPIキーを取得して一度に全サイトを更新できる**という状態でもない。2026-10-28時点の公式資料と連携事業者資料で確認できる範囲は次の通り。
