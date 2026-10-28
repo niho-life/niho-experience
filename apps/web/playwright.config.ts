@@ -8,7 +8,7 @@ const ADMIN_READ_PORT = Number(process.env.E2E_ADMIN_READ_PORT ?? 3102);
 const ADMIN_CASE_PORT = Number(process.env.E2E_ADMIN_CASE_PORT ?? 3103);
 const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 // The host console and its preview tests run against the second server.
-const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|sales|messages|session|reviews|settings|support)|admin-support)\.spec\.ts/;
+const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|sales|messages|session|reviews|settings|support|pwa)|admin-support)\.spec\.ts/;
 const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
@@ -22,6 +22,9 @@ const mobile = { ...devices["Pixel 5"], viewport: { width: 360, height: 780 }, l
 const mobile320 = { ...devices["Pixel 5"], viewport: { width: 320, height: 720 }, launchOptions: { executablePath } };
 const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 }, launchOptions: { executablePath } };
 const hostBaseURL = `http://127.0.0.1:${HOST_PORT}`;
+// The second server offers the console as an app (#177), so its pages register /host/sw.js. Only host-pwa.spec.ts
+// lets it register: a worker answering page loads would sit between the other specs and their page.route stubs.
+const hostUse = { baseURL: hostBaseURL, serviceWorkers: "block" as const };
 const adminReadBaseURL = `http://127.0.0.1:${ADMIN_READ_PORT}`;
 const adminCaseBaseURL = `http://127.0.0.1:${ADMIN_CASE_PORT}`;
 const feeSummaryBaseURL = `http://127.0.0.1:${FEE_SUMMARY_PORT}`;
@@ -42,9 +45,9 @@ export default defineConfig({
   projects: [
     { name: "mobile-360", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC], use: mobile },
     { name: "desktop", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC], use: desktop },
-    { name: "host-mobile-360", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, baseURL: hostBaseURL } },
-    { name: "host-support-mobile-320", testMatch: /host-support\.spec\.ts/, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile320, baseURL: hostBaseURL } },
-    { name: "host-desktop", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, baseURL: hostBaseURL } },
+    { name: "host-mobile-360", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, ...hostUse } },
+    { name: "host-support-mobile-320", testMatch: /host-support\.spec\.ts/, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile320, ...hostUse } },
+    { name: "host-desktop", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, ...hostUse } },
     { name: "admin-read-mobile-360", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, baseURL: adminReadBaseURL } },
     { name: "admin-read-desktop", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, baseURL: adminReadBaseURL } },
     { name: "admin-case-mobile-360", testMatch: ADMIN_CASE_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: adminCaseBaseURL } },
@@ -68,7 +71,7 @@ export default defineConfig({
       // SITE_URL is this server's origin: the console's same-origin check compares against it.
       // MOCK_CATALOG=pilot, as in the mock preview deployment: the console's experiences are the
       // pilot listings, so their public pages (the editor's プレビュー) open here too.
-      env: { ...serverEnv, PORT: String(HOST_PORT), HOST_CONSOLE_ENABLED: "true", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: hostBaseURL, MOCK_CATALOG: "pilot" },
+      env: { ...serverEnv, PORT: String(HOST_PORT), HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: hostBaseURL, MOCK_CATALOG: "pilot" },
     },
     {
       command: "sh scripts/start-standalone.sh",

@@ -8,6 +8,14 @@ export const HOST_REFRESH_PATH = "/host/auth/refresh";
 export const HOST_LOGOUT_PATH = "/host/auth/logout";
 export const HOST_AUTH_ERROR_PATH = "/host/auth/error";
 export const HOST_API_PREFIX = "/host/api/";
+/**
+ * The console as an installed app (#177). The app's scope is `/host/` (the English
+ * introduction at /host stays outside it), and it opens on /host/launch.
+ */
+export const HOST_LAUNCH_PATH = "/host/launch";
+export const HOST_APP_SCOPE = "/host/";
+export const HOST_MANIFEST_PATH = "/host/manifest.webmanifest";
+export const HOST_SW_PATH = "/host/sw.js";
 /** Console sections (#84). HOST_NAV below lists the same paths for the menu. */
 export const HOST_EXPERIENCES_PATH = "/host/experiences";
 export const HOST_CALENDAR_PATH = "/host/calendar";

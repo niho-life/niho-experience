@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { deleteConnection } from "@/lib/host/niho-auth";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
-import { HOST_INTRO_PATH } from "@/lib/host/routes";
+import { HOST_INTRO_PATH, HOST_LAUNCH_PATH } from "@/lib/host/routes";
 import { clearLoginCookie, clearSessionCookie, hostNotFound, isHostMock, nihoAuthDeps, noStoreJson, renewSession, seeOther, sessionSealer, siteOrigin } from "@/lib/host/server";
 import { decodeSession, idTokenUsable, SESSION_COOKIE } from "@/lib/host/session";
 
@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
     if (idToken) await deleteConnection(nihoAuthDeps(), session.connectionId, idToken);
   }
 
-  const response = seeOther(HOST_INTRO_PATH);
+  // The installed app stays inside its own pages (#177).
+  const response = seeOther(session?.surface === "app" ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
   clearSessionCookie(response);
   clearLoginCookie(response);
   return response;

@@ -44,7 +44,7 @@ sh scripts/container-smoke.sh niho-experience       # 表示と、設定によ�
 ```text
 apps/web/                 Next.js 16（App Router）。画面・SSR・SEO・予約入力
   src/app/(site)/         旅行者向けページ（/, /experiences, /experiences/[slug], /book, /booking/return, /host（紹介）, /preview/*）。英語の root layout
-  src/app/(host)/host/    ホストの画面（/host/home など。#84）とログイン・中継（/host/auth/*・/host/api/*。#86）。別の root layout（日本語・計測なし・noindex）
+  src/app/(host)/host/    ホストの画面（/host/home など。#84）とログイン・中継（/host/auth/*・/host/api/*。#86）。別の root layout（日本語・計測なし・noindex）。アプリとして追加する入口（/host/launch・manifest・sw.js。#177）は [host-pwa.md](host-pwa.md)
   src/components/         表示部品（ホストの画面の部品は src/components/host/）
   src/host/               ホストの画面のデータの入口（data.ts）・表示用の整形・合成データ（mock/。mock mode だけ）
   src/lib/                SSR公開API・ブラウザ用API・表示用の整形（ホストのセッション・中継は src/lib/host/）
@@ -71,6 +71,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `HOST_SIGNUP_MODE` | `pilot` | `open` はNIHO側のセルフ登録（連携B）が使えるようになってから |
 | `NIHO_HOST_START_URL` / `HOST_PILOT_CONTACT_URL` / `NIHO_BOOKING_HELP_URL` | なし | NIHO側の遷移先。固定URLのみ。利用者入力で戻り先を変えない |
 | `HOST_CONSOLE_ENABLED` | `false` | `true` でホストの画面（`/host/*`）とログインを開く（#84）。off の間は今の紹介ページのまま。mock のプレビュー（`deploy-preview.yml`）は `true` で、合成のログインで見られる |
+| `HOST_PWA_ENABLED` | `false` | `true` でホストの画面をホーム画面・Dock に追加できるようにする（manifest・Service Worker・設定「この端末」。#177）。`HOST_CONSOLE_ENABLED=true` のときだけ効く。`false` に戻すと自分を解除する Service Worker を返す（[host-pwa.md](host-pwa.md)）。mock のプレビューと stg は `true` |
 | `HOST_SESSION_SECRET` | なし（mock は開発用の固定値） | ホストのセッション cookie の暗号化の鍵。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
 | `NIHO_FIREBASE_WEB_API_KEY` | なし | NIHO の custom token を ID token に替えるための公開 Web API key。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
 | `HOST_SUPPORT_SETTINGS_API_ENABLED` | `false` | NIHO側の本人OWNER支援設定 v1.0.1 を配備・受入後にだけ開くHTTP BFF。mockではtrueにしても開かない |

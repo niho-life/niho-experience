@@ -77,8 +77,9 @@ test("a host signs in from /host, switches provider, opens a section and signs o
   await page.waitForURL(/\/host$/);
   await expect(page.getByRole("link", { name: "NIHO でログイン" })).toBeVisible();
   expect((await context.cookies()).some((c) => c.name === SESSION_COOKIE)).toBe(false);
+  // The console's own sign-in page while the app is offered (#177; HOST_PWA_ENABLED on this server).
   await page.goto("/host/home");
-  await expect(page).toHaveURL(/\/host$/);
+  await expect(page).toHaveURL(/\/host\/launch$/);
 });
 
 test("an account without providers sees registration and the normal Spot support entry", async ({ page }) => {
@@ -140,7 +141,8 @@ test("the API relay serves the provider API to this site only", async ({ page })
 
 test("signed-out visitors cannot open the console", async ({ page }) => {
   await page.goto("/host/home");
-  await expect(page).toHaveURL(/\/host$/);
+  await expect(page).toHaveURL(/\/host\/launch$/);
+  await expect(page.getByRole("link", { name: "NIHO でログイン" })).toBeVisible();
   const missing = await page.goto("/host/no-such-page");
   expect(missing?.status()).toBe(404);
   await expect(page.getByRole("heading", { name: "ページが見つかりません" })).toBeVisible();

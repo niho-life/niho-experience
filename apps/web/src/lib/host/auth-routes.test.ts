@@ -54,9 +54,9 @@ function setCookies(response: Response): Map<string, { value: string; attributes
   return cookies;
 }
 
-function sessionCookie(idTokenExpiresIn: number) {
+function sessionCookie(idTokenExpiresIn: number, surface?: "app") {
   const now = Date.now();
-  const session = startSession({ nihoUserId: "u1", refreshToken: "refresh-1", idToken: "id-1", idTokenExpiresAt: now + idTokenExpiresIn, connectionId: "conn_1", connectionExpiresAt: now + 90 * 24 * 60 * MIN, displayName: "合成 ホスト", iconUrl: null }, now);
+  const session = startSession({ nihoUserId: "u1", refreshToken: "refresh-1", idToken: "id-1", idTokenExpiresAt: now + idTokenExpiresIn, connectionId: "conn_1", connectionExpiresAt: now + 90 * 24 * 60 * MIN, displayName: "合成 ホスト", iconUrl: null, ...(surface ? { surface } : {}) }, now);
   return `${SESSION_COOKIE}=${encodeSession(cookieSealer(state.config.hostSessionSecret, "session"), session)}`;
 }
 
@@ -136,6 +136,23 @@ describe("login and callback (http mode)", () => {
     expect(unsafeResponse.headers.get("location")).toBe("/host/home");
   });
 
+  it("marks the session as the app's only when the sign-in started inside the installed app (#177)", async () => {
+    handler = (url) => url.pathname === "/api/auth/app-connect/exchange"
+      ? json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } })
+      : json(200, { idToken: "id-1", expiresIn: "3600" });
+    const signIn = async (query: string) => {
+      const { location, cookie } = await startLogin(query);
+      // NIHO's confirmation page is the same for both: the mark stays in the sealed login cookie.
+      expect(location.searchParams.has("surface")).toBe(false);
+      const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
+      expect(response.headers.get("location")).toBe("/host/home");
+      return openSession(setCookies(response).get(SESSION_COOKIE)?.value);
+    };
+    expect(await signIn("?surface=app")).toMatchObject({ surface: "app", refreshToken: "refresh-1" });
+    expect(await signIn("")).not.toHaveProperty("surface");
+    expect(await signIn("?surface=browser")).not.toHaveProperty("surface");
+  });
+
   it("stops before calling NIHO when the state does not match or the login cookie is missing", async () => {
     const { cookie } = await startLogin();
     const wrong = await callback(new NextRequest(`${SITE}/host/auth/callback?code=c&state=${"x".repeat(43)}`, { headers: { cookie } }));
@@ -208,6 +225,24 @@ describe("refresh (http mode)", () => {
     expect((await post(sessionCookie(4 * MIN), { origin: "https://evil.example.test", "sec-fetch-site": "cross-site" })).status).toBe(403);
     expect(calls).toHaveLength(0);
   });
+
+  it("never spends a browser session's refresh token inside the installed app, and leaves its cookie (#177)", async () => {
+    const response = await post(sessionCookie(4 * MIN), { ...sameOrigin, "x-niho-host-display": "standalone" });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "app_sign_in_required" });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refreshes the app's own session inside the app and keeps its mark", async () => {
+    handler = (url) => url.pathname === "/api/auth/app-connect/refresh"
+      ? json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString() })
+      : json(200, { idToken: "id-2", expiresIn: "3600" });
+    const response = await post(sessionCookie(4 * MIN, "app"), { ...sameOrigin, "x-niho-host-display": "standalone" });
+    expect(response.status).toBe(200);
+    expect(openSession(setCookies(response).get(SESSION_COOKIE)?.value)).toMatchObject({ refreshToken: "refresh-2", idToken: "id-2", surface: "app" });
+  });
 });
 
 describe("API relay (http mode)", () => {
@@ -248,5 +283,31 @@ describe("logout (http mode)", () => {
     expect(calls[0]!.url.href).toBe(`${NIHO}/api/auth/app-connections/conn_1?reason=logout`);
     expect(calls[0]!.init.method).toBe("DELETE");
     expect(setCookies(response).get(SESSION_COOKIE)?.attributes).toMatch(/Max-Age=0/);
+  });
+
+  it("keeps the installed app inside its own pages (#177)", async () => {
+    handler = () => new Response(null, { status: 204 });
+    const response = await logout(new NextRequest(`${SITE}/host/auth/logout`, { method: "POST", headers: { ...sameOrigin, cookie: sessionCookie(30 * MIN, "app") } }));
+    expect(response.headers.get("location")).toBe("/host/launch");
+    expect(setCookies(response).get(SESSION_COOKIE)?.attributes).toMatch(/Max-Age=0/);
+  });
+});
+
+describe("mock mode sign-in from the installed app (#177)", () => {
+  beforeEach(() => {
+    state.config.apiMode = "mock";
+  });
+  afterEach(() => {
+    state.config.apiMode = "http";
+  });
+
+  it("forwards the app's mark to the synthetic sign-in, which makes an app session", async () => {
+    const started = login(new NextRequest(`${SITE}/host/auth/login?surface=app&providerId=p_1`));
+    expect(started.headers.get("location")).toBe("/host/auth/mock-login?providerId=p_1&surface=app");
+    const { GET } = await import("@/app/(host)/host/auth/mock-login/route");
+    const app = await GET(new NextRequest(`${SITE}/host/auth/mock-login?surface=app`));
+    expect(openSession(setCookies(app).get(SESSION_COOKIE)?.value)).toMatchObject({ nihoUserId: "synthetic-host-user", surface: "app" });
+    const browser = await GET(new NextRequest(`${SITE}/host/auth/mock-login`));
+    expect(openSession(setCookies(browser).get(SESSION_COOKIE)?.value)).not.toHaveProperty("surface");
   });
 });

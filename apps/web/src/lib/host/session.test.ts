@@ -46,6 +46,21 @@ describe("host session cookie", () => {
     expect(decodeSession(sealer, encodeSession(sealer, value), NOW)).toEqual(value);
   });
 
+  it("keeps the app mark (#177) through the cookie and a new sign-in window", () => {
+    const app = session({ surface: "app" });
+    expect(decodeSession(sealer, encodeSession(sealer, app), NOW)).toEqual(app);
+    // A refresh rebuilds the session from the old one; the mark goes with it.
+    expect(startSession({ ...app, idToken: "synthetic.id.token.2" }, NOW + DAY).surface).toBe("app");
+    expect(decodeSession(sealer, encodeSession(sealer, session()), NOW)).not.toHaveProperty("surface");
+  });
+
+  it("reads cookies from before the app mark, and any other mark, as browser sessions", () => {
+    const value = session();
+    const wire = { v: 1, u: value.nihoUserId, r: value.refreshToken, t: value.idToken, te: value.idTokenExpiresAt, c: value.connectionId, ce: value.connectionExpiresAt, x: value.expiresAt, n: value.displayName };
+    expect(decodeSession(sealer, sealer.seal(wire), NOW)).toEqual({ ...value, iconUrl: null });
+    for (const a of [true, "app", 2, 0]) expect(decodeSession(sealer, sealer.seal({ ...wire, a }), NOW)).not.toHaveProperty("surface");
+  });
+
   it("keeps the session for 30 days from the last sign-in or refresh, never past the connection", () => {
     expect(session().expiresAt).toBe(NOW + SESSION_MAX_AGE_SECONDS * 1000);
     expect(sessionMaxAgeSeconds(session(), NOW)).toBe(SESSION_MAX_AGE_SECONDS);
@@ -124,6 +139,14 @@ describe("login cookie", () => {
     const sealed = encodeLoginState(loginSealer, login);
     expect(decodeLoginState(loginSealer, sealed, NOW + 9 * MIN)).toEqual(login);
     expect(decodeLoginState(loginSealer, sealed, NOW + 10 * MIN)).toBeNull();
+  });
+
+  it("carries a sign-in started inside the installed app, and nothing for older login cookies", () => {
+    const app = { ...login, surface: "app" as const };
+    expect(decodeLoginState(loginSealer, encodeLoginState(loginSealer, app), NOW)).toEqual(app);
+    expect(decodeLoginState(loginSealer, encodeLoginState(loginSealer, login), NOW)).not.toHaveProperty("surface");
+    const older = loginSealer.seal({ v: 1, pv: login.verifier, s: login.state, x: login.expiresAt });
+    expect(decodeLoginState(loginSealer, older, NOW)).toEqual({ ...login, providerId: null, preparationCaseId: null });
   });
 
   it("is not accepted from the session sealer", () => {

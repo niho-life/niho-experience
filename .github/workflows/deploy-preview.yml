@@ -195,7 +195,8 @@ jobs:
           url="$(describe_url)"
           case "$MOCK_CATALOG" in pilot|synthetic) ;; *) MOCK_CATALOG=synthetic ;; esac
           # HOST_CONSOLE_ENABLED: the host console (#84) opens with the synthetic sign-in; mock mode only.
-          env_vars="EXPERIENCE_API_MODE=mock,MOCK_CATALOG=${MOCK_CATALOG},SITE_INDEXING=block,BOOKINGS_ENABLED=true,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider,HOST_CONSOLE_ENABLED=true"
+          # HOST_PWA_ENABLED: the console can be added as an app (#177, docs/host-pwa.md).
+          env_vars="EXPERIENCE_API_MODE=mock,MOCK_CATALOG=${MOCK_CATALOG},SITE_INDEXING=block,BOOKINGS_ENABLED=true,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider,HOST_CONSOLE_ENABLED=true,HOST_PWA_ENABLED=true"
           if [ -n "$url" ]; then env_vars="${env_vars},SITE_URL=${url}"; fi
           gcloud run deploy "$SERVICE" \
             --project "$PROJECT_ID" \
@@ -328,6 +329,7 @@ jobs:
           test "$(jq -r '.metadata.labels.commit' <<< "$revision_json")" = "${GITHUB_SHA:0:12}"
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = true
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_PWA_ENABLED") | .value' <<< "$revision_json")" = true
           # With the console on, /host offers the (synthetic) sign-in instead of the link to NIHO's provider page.
           host_page="$(curl -fsS --retry 5 --retry-all-errors "${URL}/host")"
           grep -qF 'href="/host/auth/login"' <<< "$host_page"

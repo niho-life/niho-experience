@@ -25,6 +25,13 @@ const ICON_URL_MAX = 1024;
 export type HostMockScenario = "default" | "empty" | "payments-pending" | "calendar-revoked" | "cohost";
 export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked", "cohost"];
 
+/**
+ * Where the sign-in started (#177). iOS and macOS Safari copy the browser's cookies into a home-screen
+ * or Dock app when it is added, and NIHO ends the whole connection when an old refresh token is reused,
+ * so inside the app only a session signed in there (`"app"`) is ever refreshed.
+ */
+export type HostSessionSurface = "app";
+
 export interface HostSession {
   /** Stable NIHO account ID from the app-connect exchange; never sent to browser code. */
   nihoUserId: string;
@@ -41,6 +48,8 @@ export interface HostSession {
   iconUrl: string | null;
   /** Synthetic sessions only (mock mode): which provider list the mock API returns. */
   mockScenario?: HostMockScenario;
+  /** Signed in inside the installed app. Absent: a browser session, as every cookie from before #177. */
+  surface?: HostSessionSurface;
 }
 
 export interface HostLoginState {
@@ -48,6 +57,8 @@ export interface HostLoginState {
   state: string;
   providerId: string | null;
   preparationCaseId: string | null;
+  /** `/host/auth/login?surface=app`: the sign-in was started inside the installed app. */
+  surface?: HostSessionSurface;
   /** Epoch ms; the login cookie lives 10 minutes. */
   expiresAt: number;
 }
@@ -64,6 +75,8 @@ interface SessionWire {
   n: string;
   p?: string;
   m?: HostMockScenario;
+  /** surface "app"; absent for browser sessions. */
+  a?: 1;
 }
 
 interface LoginWire {
@@ -72,6 +85,7 @@ interface LoginWire {
   s: string;
   pid?: string;
   pc?: string;
+  sf?: 1;
   x: number;
 }
 
@@ -135,6 +149,7 @@ export function encodeSession(sealer: CookieSealer, session: HostSession): strin
     n: session.displayName,
     ...(session.iconUrl ? { p: session.iconUrl } : {}),
     ...(session.mockScenario ? { m: session.mockScenario } : {}),
+    ...(session.surface === "app" ? { a: 1 as const } : {}),
   };
   let value = sealer.seal(wire);
   if (!cookieFits(SESSION_COOKIE, value) && wire.p) {
@@ -164,11 +179,12 @@ export function decodeSession(sealer: CookieSealer, raw: string | undefined | nu
     displayName: cleanDisplayName(wire.n),
     iconUrl: cleanIconUrl(wire.p),
     ...(scenario ? { mockScenario: scenario } : {}),
+    ...(wire.a === 1 ? { surface: "app" as const } : {}),
   };
 }
 
 export function encodeLoginState(sealer: CookieSealer, login: HostLoginState): string {
-  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}) };
+  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}) };
   return sealer.seal(wire);
 }
 
@@ -177,7 +193,7 @@ export function decodeLoginState(sealer: CookieSealer, raw: string | undefined |
   if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
   if (!isString(wire.pv, 128) || !isString(wire.s, 128) || !isTime(wire.x) || now >= wire.x) return null;
   const preparationCaseId = typeof wire.pc === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(wire.pc) ? wire.pc : null;
-  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, expiresAt: wire.x };
+  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(wire.sf === 1 ? { surface: "app" as const } : {}), expiresAt: wire.x };
 }
 
 /** HttpOnly, Secure, SameSite=Lax; scoped to the host console path. */

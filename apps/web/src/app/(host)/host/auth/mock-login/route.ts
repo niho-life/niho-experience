@@ -14,7 +14,8 @@ const MOCK_CONNECTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
  * one whose payout account is not connected and `?mock=calendar-revoked` the
  * usual two with the kitchen's Google Calendar access taken away in Google
  * (#109); `?expired=1` starts with an
- * expired ID token to exercise the refresh-then-reload path. 404 in http mode.
+ * expired ID token to exercise the refresh-then-reload path, and `?surface=app`
+ * signs in as the installed app does (#177). 404 in http mode.
  */
 export async function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled || !isHostMock()) return hostNotFound();
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
       displayName: await mockHostDisplayName(),
       iconUrl: null,
       mockScenario: hostMockScenario(params.get("mock")),
+      ...(params.get("surface") === "app" ? { surface: "app" as const } : {}),
     },
     now,
   );

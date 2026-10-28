@@ -1,15 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { refreshHostSession, type RefreshOutcome } from "@/lib/host/client-session";
-import { HOST_INTRO_PATH } from "@/lib/host/routes";
+import { hostSignedOutPath, refreshHostSession, type RefreshOutcome } from "@/lib/host/client-session";
+import { HOST_LAUNCH_PATH } from "@/lib/host/routes";
 import { REFRESH_WINDOW_MS } from "@/lib/host/timing";
 import { hostButtonClass } from "./host-ui";
 
 const RETRY_MS = 30_000;
 
+/** The installed app goes back to its start page, a browser to the introduction (#177). */
 function signOut() {
-  window.location.assign(HOST_INTRO_PATH);
+  window.location.assign(hostSignedOutPath());
+}
+
+/** The app holds a session signed in elsewhere (#177): its start page signs in again inside the app. */
+function signInInApp() {
+  window.location.assign(HOST_LAUNCH_PATH);
 }
 
 /**
@@ -31,6 +37,7 @@ export function HostSessionKeeper({ idTokenExpiresAt }: { idTokenExpiresAt: numb
       const outcome = await refreshHostSession();
       if (stopped) return;
       if (outcome.status === "signed-out") return signOut();
+      if (outcome.status === "app-sign-in") return signInInApp();
       if (outcome.status === "ok") {
         expiresAt = outcome.idTokenExpiresAt;
         // Never loop faster than the retry interval, even if NIHO hands out short-lived tokens.
@@ -69,6 +76,7 @@ export function HostRefreshGate() {
     void refreshHostSession().then((result) => {
       if (stopped) return;
       if (result.status === "signed-out") return signOut();
+      if (result.status === "app-sign-in") return signInInApp();
       if (result.status === "ok") return window.location.reload();
       setOutcome(result.status);
     });

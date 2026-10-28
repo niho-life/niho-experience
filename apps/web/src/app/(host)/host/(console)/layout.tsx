@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
+import { HostAppSurfaceGuard, HostLoginLink, HostResumeRefresh } from "@/components/host/HostAppWindow";
 import { HostRefreshGate, HostSessionKeeper } from "@/components/host/HostSessionKeeper";
 import { HostShell } from "@/components/host/HostShell";
 import { hostButtonClass, HOST_HEADING, HOST_PAGE } from "@/components/host/host-ui";
 import { HostPageBody } from "@/components/host/ui";
 import { config } from "@/lib/config";
 import { toProviderChoice } from "@/lib/host/providers";
-import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
+import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
 
 function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"], "ok" | "refresh" | "signed-out"> }) {
@@ -15,7 +16,7 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
         <h1 className={`${HOST_HEADING} text-2xl`}>もう一度ログインしてください</h1>
         <p className="text-ink-soft">NIHO との接続が終了しています。ほかの端末でログアウトした場合などに起こります。</p>
         <div className="flex flex-wrap gap-3">
-          <a href={HOST_LOGIN_PATH} className={hostButtonClass("primary")}>NIHO でログイン</a>
+          <HostLoginLink href={HOST_LOGIN_PATH} className={hostButtonClass("primary")}>NIHO でログイン</HostLoginLink>
           <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form>
             <button type="submit" className={hostButtonClass("secondary")}>ログアウト</button>
           </form>
@@ -41,12 +42,16 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
 export default async function HostConsoleLayout({ children }: { children: React.ReactNode }) {
   requireHostConsole();
   const session = await readHostSession();
-  if (!session) redirect(HOST_INTRO_PATH);
+  // With the app on, a host without a session signs in on the app's start page, inside its window (#177).
+  if (!session) redirect(config.hostPwaEnabled ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
   const load = await loadHostProviders();
+  // Inside the installed app, only a session signed in there is used (#177).
+  const appGuard = <HostAppSurfaceGuard enabled={config.hostPwaEnabled} appSurface={session.surface === "app"} />;
 
   if (load.status === "refresh" || load.status === "signed-out") {
     return (
       <main id="main" className={HOST_PAGE}>
+        {appGuard}
         <HostRefreshGate />
       </main>
     );
@@ -55,7 +60,9 @@ export default async function HostConsoleLayout({ children }: { children: React.
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
   return (
     <>
+      {appGuard}
       <HostSessionKeeper idTokenExpiresAt={session.idTokenExpiresAt} />
+      <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
       <HostShell account={account} providers={load.status === "ok" ? load.providers.map(toProviderChoice) : []} nihoAppUrl={config.nihoWebOrigin} preview={isHostMock()}>
         {load.status === "ok" ? (

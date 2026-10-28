@@ -4,18 +4,36 @@ import "../../globals.css";
 import "@niho/experience-presentation/v1/styles.css";
 import Script from "next/script";
 import type { Metadata, Viewport } from "next";
+import { HostPwaRegistrar } from "@/components/host/HostPwaRegistrar";
+import { config } from "@/lib/config";
+import { HOST_APP_ICONS, HOST_APP_SHORT_NAME, HOST_APP_THEME_COLOR } from "@/lib/host/pwa";
+import { HOST_MANIFEST_PATH } from "@/lib/host/routes";
 
 // The host console (#86) has its own root: Japanese, no analytics, no site chrome,
 // never indexed. Moving between it and the traveler site reloads the whole page.
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: { default: "ホスト | NIHO Experience", template: "%s | NIHO Experience ホスト" },
-  robots: { index: false, follow: false },
-};
+/**
+ * Read per request: HOST_PWA_ENABLED (#177) adds the app's manifest and icons here, and only here,
+ * so traveler pages never link them. The icons replace the site's file-based ones (app/icon.svg
+ * keeps the browser tab's). No viewportFit: the console's top edge stays as it is.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const base: Metadata = {
+    title: { default: "ホスト | NIHO Experience", template: "%s | NIHO Experience ホスト" },
+    robots: { index: false, follow: false },
+  };
+  if (!config.hostPwaEnabled) return base;
+  return {
+    ...base,
+    manifest: HOST_MANIFEST_PATH,
+    appleWebApp: { capable: true, title: HOST_APP_SHORT_NAME, statusBarStyle: "default" },
+    icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }], apple: [{ url: HOST_APP_ICONS.apple, sizes: "180x180", type: "image/png" }] },
+  };
+}
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  themeColor: HOST_APP_THEME_COLOR,
   width: "device-width",
   initialScale: 1,
 };
@@ -25,6 +43,7 @@ export default function HostRootLayout({ children }: { children: React.ReactNode
     <html lang="ja">
       <body className="flex min-h-dvh flex-col bg-canvas">
         <Script src="/host-history-guard.js" strategy="beforeInteractive" />
+        <HostPwaRegistrar enabled={config.hostPwaEnabled} />
         <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-white">
           本文へ移動
         </a>

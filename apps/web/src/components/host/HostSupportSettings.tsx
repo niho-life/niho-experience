@@ -18,6 +18,7 @@ import {
   type HostSupportTarget,
 } from "@/lib/host/support-settings-ui";
 import { FieldRow, FieldSection } from "./fields";
+import { HostLoginLink } from "./HostAppWindow";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
@@ -287,7 +288,7 @@ export function HostSupportSettings({ enabled, requestedKind, requestedId, malfo
       <PageHead title="NIHOサポート" />
       <p className="mb-4 max-w-3xl text-ink-soft">ご本人が現在管理している通常拠点または外部提供者ごとに、NIHO事務局のサポートを設定します。</p>
       {listPhase === "loading" ? <p role="status">設定できる対象を読み込んでいます…</p> : null}
-      {listPhase === "signed-out" ? <section role="alert" className={`${HOST_SURFACE} p-5`}><h2 className="font-bold">もう一度ログインしてください</h2><p className="mt-2 text-ink-soft">NIHOとの接続が終了したため、読み込んだ設定と入力を消去しました。</p><a href={HOST_LOGIN_PATH} className={`${consoleButtonClass("primary")} mt-4`}>NIHOでログイン</a></section> : null}
+      {listPhase === "signed-out" ? <section role="alert" className={`${HOST_SURFACE} p-5`}><h2 className="font-bold">もう一度ログインしてください</h2><p className="mt-2 text-ink-soft">NIHOとの接続が終了したため、読み込んだ設定と入力を消去しました。</p><HostLoginLink href={HOST_LOGIN_PATH} className={`${consoleButtonClass("primary")} mt-4`}>NIHOでログイン</HostLoginLink></section> : null}
       {listPhase === "forbidden" ? <section role="alert" className={`${HOST_SURFACE} p-5`}><h2 className="font-bold">設定対象を確認できません</h2><p className="mt-2 text-ink-soft">NIHOでご本人が現在管理している対象を確認できませんでした。事務局の権限で代わりに変更することはありません。</p></section> : null}
       {listPhase === "error" ? <section role="alert" className={`${HOST_SURFACE} p-5`}><h2 className="font-bold">設定対象を読み込めませんでした</h2><p className="mt-2 text-ink-soft">対象が0件なのではなく、NIHOへの接続に失敗しています。</p><button type="button" onClick={() => window.location.reload()} className={`${consoleButtonClass("secondary")} mt-4`}>もう一度読み込む</button></section> : null}
       {listPhase === "ready" && hosts?.hosts.length === 0 ? <section className={`${HOST_SURFACE} p-5`}><h2 className="font-bold">設定できる対象はありません</h2><p className="mt-2 text-ink-soft">現在管理している通常拠点または外部提供者がありません。通常拠点の設定確認に提供者登録は必要ありません。</p>{hosts.truncated ? <p className="mt-2 font-bold text-warn">一覧は上限に達しています。表示外の対象がある可能性があります。</p> : null}</section> : null}
