@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { FieldRow, FieldSection } from "@/components/host/fields";
+import { HostAppInstall } from "@/components/host/HostAppInstall";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
@@ -25,7 +26,7 @@ function connectStep(value: string | string[] | undefined): "return" | "refresh"
 
 /**
  * 設定 (mock v2): provider (and its review), payout account, calendar (#109), default meeting point,
- * notifications (#109) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
+ * notifications (#109), this device as an app (#177, HOST_PWA_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
  * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one.
  */
 export default async function HostSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -39,6 +40,15 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   const [{ settings, googleConnection }, payout] = await Promise.all([loadHostConsoleData(provider), loadHostPayout(provider, { connect })]);
   if (payout.redirectTo) redirect(payout.redirectTo);
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
+
+  // P2 of #177 adds 通知 (this device's push) as a second row.
+  const devicePanel = config.hostPwaEnabled ? (
+    <FieldSection id="settings-device" title="この端末">
+      <FieldRow label="アプリ" labelId="settings-device-app-label">
+        <HostAppInstall labelId="settings-device-app-label" />
+      </FieldRow>
+    </FieldSection>
+  ) : null;
 
   const accountPanel = (
     <FieldSection id="settings-account" title="アカウント">
@@ -75,7 +85,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         connectNotice={payout.notice}
         googleConnection={googleConnection}
         preview={isHostMock()}
-        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div><div className="mt-3.5">{accountPanel}</div></>}
+        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>
   );

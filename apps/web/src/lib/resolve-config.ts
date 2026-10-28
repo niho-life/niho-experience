@@ -41,6 +41,9 @@ export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
   // The host console (/host/home and below, #86) stays off unless explicitly enabled.
   const hostConsoleEnabled = env.HOST_CONSOLE_ENABLED === "true";
+  // The console as an installable app (#177): manifest, service worker and 設定's この端末. Off by default;
+  // turning it off serves a service worker that removes itself.
+  const hostPwaEnabled = hostConsoleEnabled && env.HOST_PWA_ENABLED === "true";
   // The support console has no NIHO admin contract yet. Its explicit gate is useful only for
   // the synthetic preview; http mode renders a preparation boundary and never accepts a mock role.
   const adminSupportConsoleEnabled = env.ADMIN_SUPPORT_CONSOLE_ENABLED === "true";
@@ -123,6 +126,7 @@ export function resolveConfig(env: Env) {
     // Only the production runtime receives this public Umami website ID.
     umamiWebsiteId: env.UMAMI_WEBSITE_ID?.trim() ?? "",
     hostConsoleEnabled,
+    hostPwaEnabled,
     adminSupportConsoleEnabled,
     adminSupportReadApiEnabled,
     adminSupportReadPreviewEnabled,

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
+import { HOST_APP_SIGN_IN_REQUIRED, HOST_DISPLAY_HEADER, HOST_DISPLAY_STANDALONE } from "@/lib/host/display";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { clearSessionCookie, hostNotFound, noStoreJson, renewSession, sessionSealer, setSessionCookie, siteOrigin } from "@/lib/host/server";
 import { decodeSession, SESSION_COOKIE, shouldRefresh } from "@/lib/host/session";
@@ -19,6 +20,11 @@ export async function POST(request: NextRequest) {
     const response = noStoreJson({ error: "session_expired" }, 401);
     clearSessionCookie(response);
     return response;
+  }
+  // Inside the installed app, a session signed in elsewhere is the browser's, copied in by iOS or macOS
+  // Safari (#177). Its refresh token is never spent here, and the cookie is left for the app's own sign-in.
+  if (request.headers.get(HOST_DISPLAY_HEADER) === HOST_DISPLAY_STANDALONE && session.surface !== "app") {
+    return noStoreJson({ error: HOST_APP_SIGN_IN_REQUIRED }, 401);
   }
   // Another tab may have refreshed while this one waited for the lock.
   if (!shouldRefresh(session, now)) return noStoreJson({ refreshed: false, idTokenExpiresAt: session.idTokenExpiresAt });

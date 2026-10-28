@@ -37,7 +37,8 @@ export async function GET(request: NextRequest) {
 
   const now = Date.now();
   const { nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl } = exchanged.value;
-  const session = startSession({ nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value }, now);
+  // Only a sign-in started inside the installed app makes an app session (#177).
+  const session = startSession({ nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value, ...(login.surface === "app" ? { surface: "app" as const } : {}) }, now);
   const response = seeOther(login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   try {

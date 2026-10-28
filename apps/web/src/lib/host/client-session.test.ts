@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { HOST_REFRESH_LOCK, hostFetch, refreshHostSession, type HostClientDeps } from "./client-session";
+import { HOST_REFRESH_LOCK, hostFetch, hostSignedOutPath, refreshHostSession, type HostClientDeps } from "./client-session";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -47,6 +47,23 @@ describe("refreshHostSession", () => {
     expect(await refreshHostSession(deps)).toEqual({ status: "failed" });
   });
 
+  it("says when it runs inside the installed app, and only then (#177)", async () => {
+    const sent: Headers[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) => {
+      sent.push(new Headers(init.headers));
+      return json(200, { refreshed: false, idTokenExpiresAt: 5 });
+    });
+    const deps: HostClientDeps = { fetch: fetchMock as unknown as typeof fetch, locks: undefined, onSignedOut: vi.fn() };
+    await refreshHostSession({ ...deps, standalone: true });
+    await refreshHostSession(deps);
+    expect(sent.map((headers) => headers.get("x-niho-host-display"))).toEqual(["standalone", null]);
+  });
+
+  it("tells a copied browser session in the app apart from an ended one", async () => {
+    const { deps } = setup({ "/host/auth/refresh": [() => json(401, { error: "app_sign_in_required" })] });
+    expect(await refreshHostSession({ ...deps, standalone: true })).toEqual({ status: "app-sign-in" });
+  });
+
   it("still serialises in browsers without Web Locks", async () => {
     const { deps, calls } = setup({ "/host/auth/refresh": [() => json(200, { refreshed: false, idTokenExpiresAt: 9 })] });
     const result = await Promise.all([refreshHostSession({ ...deps, locks: undefined }), refreshHostSession({ ...deps, locks: undefined })]);
@@ -82,6 +99,15 @@ describe("hostFetch", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("leaves the console when the app has to sign in on its own", async () => {
+    const { deps, onSignedOut } = setup({
+      "/host/api/auth/me": [() => json(401, { error: "session_refresh_required" })],
+      "/host/auth/refresh": [() => json(401, { error: "app_sign_in_required" })],
+    });
+    expect((await hostFetch("auth/me", {}, { ...deps, standalone: true })).status).toBe(401);
+    expect(onSignedOut).toHaveBeenCalledOnce();
+  });
+
   it("returns the first answer when the refresh fails", async () => {
     const { deps, calls } = setup({
       "/host/api/auth/me": [() => json(401, { error: "session_refresh_required" })],
@@ -89,5 +115,12 @@ describe("hostFetch", () => {
     });
     expect((await hostFetch("auth/me", {}, deps)).status).toBe(401);
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("hostSignedOutPath", () => {
+  it("keeps the installed app inside its own pages and browsers on the introduction", () => {
+    expect(hostSignedOutPath(true)).toBe("/host/launch");
+    expect(hostSignedOutPath(false)).toBe("/host");
   });
 });

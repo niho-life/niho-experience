@@ -1,4 +1,5 @@
-import { HOST_API_PREFIX, HOST_INTRO_PATH, HOST_REFRESH_PATH } from "./routes";
+import { HOST_APP_SIGN_IN_REQUIRED, HOST_DISPLAY_HEADER, HOST_DISPLAY_STANDALONE, isStandaloneDisplay } from "./display";
+import { HOST_API_PREFIX, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_REFRESH_PATH } from "./routes";
 
 /**
  * Browser side of the host session (#86). The tokens stay in an HttpOnly cookie;
@@ -7,27 +8,50 @@ import { HOST_API_PREFIX, HOST_INTRO_PATH, HOST_REFRESH_PATH } from "./routes";
  */
 export const HOST_REFRESH_LOCK = "niho-host-refresh";
 
-export type RefreshOutcome = { status: "ok"; idTokenExpiresAt: number } | { status: "signed-out" } | { status: "failed" };
+export type RefreshOutcome =
+  | { status: "ok"; idTokenExpiresAt: number }
+  | { status: "signed-out" }
+  /** Inside the installed app with a session signed in elsewhere (cookies the OS copied in): sign in again here (#177). */
+  | { status: "app-sign-in" }
+  | { status: "failed" };
 
 export interface HostClientDeps {
   fetch: typeof fetch;
   /** Web Locks when the browser has them; otherwise only this tab is serialised. */
   locks?: Pick<LockManager, "request"> | undefined;
+  /** Inside the installed app (#177). The refresh call says so; the server then refreshes only a session signed in there. */
+  standalone?: boolean;
   onSignedOut: () => void;
+}
+
+/** Where a host goes when the session ends: the app's start page inside the app, the introduction in a browser. */
+export function hostSignedOutPath(standalone = isStandaloneDisplay()): string {
+  return standalone ? HOST_LAUNCH_PATH : HOST_INTRO_PATH;
 }
 
 function browserDeps(): HostClientDeps {
   return {
     fetch: (...args) => fetch(...args),
     locks: typeof navigator !== "undefined" && "locks" in navigator ? navigator.locks : undefined,
-    onSignedOut: () => window.location.assign(HOST_INTRO_PATH),
+    standalone: isStandaloneDisplay(),
+    onSignedOut: () => window.location.assign(hostSignedOutPath()),
   };
 }
 
-async function postRefresh(fetchImpl: typeof fetch): Promise<RefreshOutcome> {
+async function errorCode(response: Response): Promise<unknown> {
   try {
-    const response = await fetchImpl(HOST_REFRESH_PATH, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { accept: "application/json" } });
-    if (response.status === 401) return { status: "signed-out" };
+    return ((await response.clone().json()) as { error?: unknown }).error;
+  } catch {
+    return undefined;
+  }
+}
+
+async function postRefresh(fetchImpl: typeof fetch, standalone: boolean): Promise<RefreshOutcome> {
+  try {
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (standalone) headers[HOST_DISPLAY_HEADER] = HOST_DISPLAY_STANDALONE;
+    const response = await fetchImpl(HOST_REFRESH_PATH, { method: "POST", credentials: "same-origin", cache: "no-store", headers });
+    if (response.status === 401) return (await errorCode(response)) === HOST_APP_SIGN_IN_REQUIRED ? { status: "app-sign-in" } : { status: "signed-out" };
     if (!response.ok) return { status: "failed" };
     const body = (await response.json()) as { idTokenExpiresAt?: unknown };
     const idTokenExpiresAt = Number(body.idTokenExpiresAt);
@@ -46,7 +70,7 @@ let inFlight: Promise<RefreshOutcome> | null = null;
  */
 export function refreshHostSession(deps: HostClientDeps = browserDeps()): Promise<RefreshOutcome> {
   if (!inFlight) {
-    const run = () => postRefresh(deps.fetch);
+    const run = () => postRefresh(deps.fetch, deps.standalone === true);
     const underLock = async (): Promise<RefreshOutcome> => (deps.locks ? await deps.locks.request(HOST_REFRESH_LOCK, run) : run());
     inFlight = underLock().finally(() => {
       inFlight = null;
@@ -56,13 +80,7 @@ export function refreshHostSession(deps: HostClientDeps = browserDeps()): Promis
 }
 
 async function needsRefresh(response: Response): Promise<boolean> {
-  if (response.status !== 401) return false;
-  try {
-    const body = (await response.clone().json()) as { error?: unknown };
-    return body.error === "session_refresh_required";
-  } catch {
-    return false;
-  }
+  return response.status === 401 && (await errorCode(response)) === "session_refresh_required";
 }
 
 /**
@@ -76,7 +94,7 @@ export async function hostFetch(path: string, init: RequestInit = {}, deps: Host
   const first = await send();
   if (!(await needsRefresh(first))) return first;
   const outcome = await refreshHostSession(deps);
-  if (outcome.status === "signed-out") {
+  if (outcome.status === "signed-out" || outcome.status === "app-sign-in") {
     deps.onSignedOut();
     return first;
   }

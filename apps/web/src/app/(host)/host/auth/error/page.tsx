@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { HostLoginLink } from "@/components/host/HostAppWindow";
 import { hostButtonClass, HOST_HEADING } from "@/components/host/host-ui";
 import { HOST_INTRO_PATH, HOST_LOGIN_PATH, LOGIN_ERROR_REASONS, hostPreparationLoginPath, preparationCaseIdOrNull, type LoginErrorReason } from "@/lib/host/routes";
 import { requireHostConsole } from "@/lib/host/server";
@@ -24,7 +25,7 @@ export default async function HostLoginErrorPage({ searchParams }: { searchParam
       <p role="alert" className="mt-3 text-ink-soft">{MESSAGES[known]}</p>
       {/* Plain links: login is a route handler, and /host belongs to the traveler site's root. */}
       <div className="mt-8 flex flex-wrap gap-3">
-        <a href={preparationCaseId ? hostPreparationLoginPath(preparationCaseId) : HOST_LOGIN_PATH} className={hostButtonClass("primary")}>もう一度ログイン</a>
+        <HostLoginLink href={preparationCaseId ? hostPreparationLoginPath(preparationCaseId) : HOST_LOGIN_PATH} className={hostButtonClass("primary")}>もう一度ログイン</HostLoginLink>
         <a href={HOST_INTRO_PATH} className={hostButtonClass("secondary")}>体験の提供について</a>
       </div>
     </main>

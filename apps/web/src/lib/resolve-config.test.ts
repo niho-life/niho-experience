@@ -35,6 +35,13 @@ describe("host console settings", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true" }).hostConsoleEnabled).toBe(true);
   });
 
+  it("offers the console as an app only when the console is on and HOST_PWA_ENABLED is exactly true", () => {
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true" }).hostPwaEnabled).toBe(false);
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "1" }).hostPwaEnabled).toBe(false);
+    expect(resolveConfig({ HOST_PWA_ENABLED: "true" }).hostPwaEnabled).toBe(false);
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true" }).hostPwaEnabled).toBe(true);
+  });
+
   it("allows the labelled development key in mock mode only", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true" }).hostSessionSecret).toBe(DEV_ONLY_HOST_SESSION_SECRET);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http" }).hostSessionSecret).toBe("");

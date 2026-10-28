@@ -172,7 +172,7 @@ jobs:
               --no-traffic --tag "candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
               --network default --subnet default --vpc-egress private-ranges-only \
               --set-cloudsql-instances "$CLOUDSQL" \
-              --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,DEPLOY_COMMIT_SHA=${SHA}" \
+              --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,HOST_PWA_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,DEPLOY_COMMIT_SHA=${SHA}" \
               --set-secrets "HOST_SESSION_SECRET=${SESSION_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_REF},EXPERIENCE_DATABASE_URL=${DATABASE_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_ID_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_KEY_REF}" \
               --labels "app=niho-experience,env=host-staging,commit=${SHA:0:12}" --quiet
             state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
@@ -188,7 +188,7 @@ jobs:
             .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
             (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default")) and
             any(.status.conditions[]; .type == "Ready" and .status == "True")' <<< "$revision" >/dev/null
-          expected_env="$(jq -cn --arg origin "$SITE_URL" --arg sha "$SHA" '{EXPERIENCE_API_MODE:"http",EXPERIENCE_PUBLIC_API_VERSION:"1.0",NEXT_PUBLIC_NIHO_WEB_ORIGIN:"https://app-stg.niho.life",SITE_URL:$origin,SITE_INDEXING:"block",BOOKINGS_ENABLED:"false",HOST_SIGNUP_MODE:"pilot",HOST_CONSOLE_ENABLED:"true",NIHO_HOST_START_URL:"https://app-stg.niho.life/experiences/provider",DEPLOY_COMMIT_SHA:$sha}')"
+          expected_env="$(jq -cn --arg origin "$SITE_URL" --arg sha "$SHA" '{EXPERIENCE_API_MODE:"http",EXPERIENCE_PUBLIC_API_VERSION:"1.0",NEXT_PUBLIC_NIHO_WEB_ORIGIN:"https://app-stg.niho.life",SITE_URL:$origin,SITE_INDEXING:"block",BOOKINGS_ENABLED:"false",HOST_SIGNUP_MODE:"pilot",HOST_CONSOLE_ENABLED:"true",HOST_PWA_ENABLED:"true",NIHO_HOST_START_URL:"https://app-stg.niho.life/experiences/provider",DEPLOY_COMMIT_SHA:$sha}')"
           expected_secrets="$(jq -cn --arg a "$SESSION_REF" --arg b "$FIREBASE_REF" --arg c "$DATABASE_REF" --arg d "$GOOGLE_ID_REF" --arg e "$GOOGLE_SECRET_REF" --arg f "$GOOGLE_KEY_REF" '{HOST_SESSION_SECRET:$a,NIHO_FIREBASE_WEB_API_KEY:$b,EXPERIENCE_DATABASE_URL:$c,EXPERIENCE_GOOGLE_CLIENT_ID:$d,EXPERIENCE_GOOGLE_CLIENT_SECRET:$e,EXPERIENCE_GOOGLE_TOKEN_KEY:$f}')"
           jq -e --argjson expected "$expected_env" --argjson secrets "$expected_secrets" '
             (.spec.containers[0].env | map(select(has("value")) | {key:.name,value:.value}) | from_entries) == $expected and
