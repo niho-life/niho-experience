@@ -23,7 +23,7 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       await pool.query(oauthMigration);
       const coverageMigration = await readFile(new URL("../migrations/0003_google_busy_coverage.sql", import.meta.url), "utf8");
       await pool.query(coverageMigration);
-      for (const name of ["0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql", "0010_shared_inventory.sql", "0011_product_operators.sql"]) {
+      for (const name of ["0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql", "0010_shared_inventory.sql", "0013_product_operators.sql"]) {
         await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       }
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
