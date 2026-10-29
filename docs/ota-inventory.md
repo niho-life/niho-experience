@@ -35,6 +35,6 @@ providerごとのtickはDBに1件だけ置き、pending commandがある間は�
 
 ## 配備と検証
 
-`0009_shared_inventory.sql` を先に反映し、このスキーマを参照するAPIを配備する。既存商品は設定未登録の席制を保つ。全APIを新コードへ切り替え、旧writerのrevisionを停止した後にのみPRIVATE_GROUPと資源割当を有効にする。旧writerは新しいmutex・占有を扱えないため、設定を有効にしたまま旧新writerを混在させない。source codeの実装と本番有効化は分けて受け入れる。
+`0010_shared_inventory.sql` を先に反映し、このスキーマを参照するAPIを配備する。既存商品は設定未登録の席制を保つ。全APIを新コードへ切り替え、旧writerのrevisionを停止した後にのみPRIVATE_GROUPと資源割当を有効にする。旧writerは新しいmutex・占有を扱えないため、設定を有効にしたまま旧新writerを混在させない。source codeの実装と本番有効化は分けて受け入れる。
 
 実PostgreSQLで、2名／6名の同時HOLD、同室・同講師と準備片付け、別室／隣接、保存失敗のrollback、失効後の実支払によるPAYMENT_REVIEW、古いOPENの拒否、並行HOLDとOPEN resultの受理順、tick/cursor/通知outbox分離を確認した。結果受理中にHOLDがDBのロック待ちになることと、receipt保存→HOLD作成の順序を実DBで確認する。

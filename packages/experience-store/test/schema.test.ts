@@ -55,7 +55,7 @@ describe("database invariants", () => {
   });
 
   it("scopes shared resources by provider and keeps booking occupancy snapshots immutable", async () => {
-    const sql = await readFile(new URL("../migrations/0009_shared_inventory.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../migrations/0010_shared_inventory.sql", import.meta.url), "utf8");
     assert.match(sql, /PRIMARY KEY \(provider_id, id\)/);
     assert.match(sql, /FOREIGN KEY \(provider_id, resource_id\)[\s\S]*REFERENCES inventory_resources\(provider_id, id\)/);
     assert.match(sql, /booking_resource_occupancies_overlap_idx/);
