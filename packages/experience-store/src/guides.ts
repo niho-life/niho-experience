@@ -1274,9 +1274,10 @@ export class GuideRepository {
     });
   }
 
-  async revokeLinkInvitation(actor: GuideActor, invitationId: string): Promise<GuideLinkInvitation> {
+  async revokeLinkInvitation(actor: GuideActor, invitationId: string, generation: number): Promise<GuideLinkInvitation> {
     validateActor(actor);
     validateInvitationId(invitationId);
+    validateInvitationGeneration(generation);
     return withTransaction(this.#pool, async (client) => {
       const pairResult = await client.query<DbRow>(
         `SELECT provider_id, writer_niho_user_id
@@ -1297,13 +1298,15 @@ export class GuideRepository {
       if (invitationRow === undefined) throw new StoreAccessDeniedError();
       const invitation = invitationFromRow(invitationRow);
       await requireCurrentOwner(client, invitation.providerId, actor.nihoUserId);
+      if (invitation.generation !== generation) throw new StoreConflictError("Guide link invitation generation mismatch.");
+      if (invitation.state === "DECLINED") throw new StoreConflictError("A declined guide link invitation cannot be revoked.");
+      if (invitation.state === "REVOKED") return invitation;
       await client.query(
         `UPDATE guide_product_link_memberships
             SET active=false, updated_at=clock_timestamp()
           WHERE provider_id=$1 AND niho_user_id=$2 AND active=true`,
         [invitation.providerId, invitation.writerNihoUserId],
       );
-      if (invitation.state === "REVOKED") return invitation;
       const revoked = await client.query<DbRow>(
         `UPDATE guide_product_link_invitations
             SET state='REVOKED', declined_at=NULL, revoked_at=clock_timestamp(), updated_at=clock_timestamp()

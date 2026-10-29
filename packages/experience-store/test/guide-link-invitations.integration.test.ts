@@ -221,8 +221,9 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
         { providerId: "provider-a", productId: "published-a", productSlug: "published-a" },
       ]);
 
-      const revoked = await store.revokeLinkInvitation(owner, pending.id);
+      const revoked = await store.revokeLinkInvitation(owner, pending.id, pending.generation);
       assert.equal(revoked.state, "REVOKED");
+      assert.deepEqual(await store.revokeLinkInvitation(owner, pending.id, pending.generation), revoked);
       assert.deepEqual(await store.listLinkableProducts(writer), []);
       assert.deepEqual((await store.getPublicArticleBySlug(article.slug))?.productLinks, []);
       assert.equal(
@@ -236,6 +237,10 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
       const reinvited = await store.inviteProductLinkWriter(owner, "provider-a", "writer-a");
       assert.equal(reinvited.id, pending.id);
       assert.equal(reinvited.generation, 2);
+      await assert.rejects(
+        () => store.revokeLinkInvitation(owner, pending.id, pending.generation),
+        StoreConflictError,
+      );
       await assert.rejects(
         () => store.acceptLinkInvitation(writer, pending.id, pending.generation),
         StoreConflictError,
@@ -261,6 +266,10 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
         (await store.declineLinkInvitation(otherWriter, writerBPending.id, writerBPending.generation)).state,
         "DECLINED",
       );
+      await assert.rejects(
+        () => store.revokeLinkInvitation(owner, writerBPending.id, writerBPending.generation),
+        StoreConflictError,
+      );
       const writerBReinvited = await store.inviteProductLinkWriter(owner, "provider-a", "writer-b");
       assert.equal(writerBReinvited.generation, 2);
       await assert.rejects(
@@ -268,11 +277,11 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
         StoreConflictError,
       );
 
-      await store.revokeLinkInvitation(owner, reinvited.id);
+      await store.revokeLinkInvitation(owner, reinvited.id, reinvited.generation);
       const concurrent = await store.inviteProductLinkWriter(owner, "provider-a", "writer-a");
       const race = await Promise.allSettled([
         store.acceptLinkInvitation(writer, concurrent.id, concurrent.generation),
-        store.revokeLinkInvitation(owner, concurrent.id),
+        store.revokeLinkInvitation(owner, concurrent.id, concurrent.generation),
       ]);
       assert.ok(race.some((result) => result.status === "fulfilled"));
       const finalInvitation = (await store.listProviderLinkInvitations(owner, "provider-a"))

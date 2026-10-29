@@ -35,6 +35,12 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 - coverと本文figureのURLはopaque asset IDのrouteだけ。Markdownの内部asset参照は現在READYのsnapshot placementと交差したものだけ解決し、取消直後の次requestで画像を消す。Web掲載確認をSNS/OG許諾へ拡張せず、DB写真はOG metadataと`Article.image`へ出さない。
 - 記事→体験はpublication linkの現在権限、現在`PUBLISHED` productと現在slugを再評価し、さらに旅行者向け公開catalogと交差する。体験→記事も同じ現在有効linkを持つ`PUBLIC` publicationだけを使う。
 
+## 関連体験への招待 API（#190）
+
+`/editor/api/guide-link-invitations` はログイン中のwriter本人に未応答の招待だけを返す。`/{id}/accept`・`/{id}/decline` は同一originのPOSTで`{generation}`を受け、Storeが現在のwriter grant・招待したOWNER・世代・状態を同一transactionで再検査する。`/host/api/guide-link-invitations/providers/{providerId}` は現行OWNERの招待一覧、`/{id}/revoke` は`{generation}`を受けて現在のOWNER・世代・状態を再検査する。host BFFは各要求でNIHO `GET /api/auth/me`のuser IDをsealed sessionと照合し、401・ID不一致ではcookieを消す。DTOにはwriter・招待者のNIHO user ID、名前、メールを出さず、すべて`private, no-store`で返す。
+
+ホストの新規招待POSTは、NIHO側がverified emailまたはアカウントからwriter本人を解決する契約（niho-app #19462）が揃ってから接続する。ブラウザの任意user IDを招待先として受けない。既存hostのCOHOST権限は流用せず、招待を受諾しても商品編集・予約・顧客・売上への権限は生まれない。
+
 ## database flagを開く前のゲート
 
 1. `0005`、`0008`、`0009`、両方の`0010`、`0011`、`0012`を含む全migrationをファイル名順にstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
