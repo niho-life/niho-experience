@@ -20,19 +20,22 @@ const migrations = [
   "0001_experience_store.sql",
   "0002_google_oauth.sql",
   "0003_google_busy_coverage.sql",
+  "0004_host_push_subscriptions.sql",
 ];
 const writeTables = [
   "experience_products", "schedule_rules", "schedule_occurrence_overrides",
   "schedule_occurrences", "provider_google_calendars", "google_busy_intervals",
   "bookings", "stripe_webhook_events", "payment_ledger_entries",
-  "outbox_messages", "provider_google_connections",
+  "outbox_messages", "provider_google_connections", "host_push_subscriptions",
 ];
 const updateTables = [
   "experience_products", "schedule_rules", "schedule_occurrence_overrides",
   "schedule_occurrences", "provider_google_calendars", "bookings",
-  "outbox_messages", "provider_google_connections",
+  "outbox_messages", "provider_google_connections", "host_push_subscriptions",
 ];
-const deleteTables = ["google_busy_intervals", "provider_google_connections", "provider_google_calendars"];
+const deleteTables = ["google_busy_intervals", "provider_google_connections", "provider_google_calendars", "host_push_subscriptions"];
+// Tables the migrations above create; the runtime check below expects exactly these.
+const tableCount = 14;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -134,6 +137,7 @@ try {
   await target.query(`GRANT INSERT ON ${writeTables.join(", ")} TO ${runtimeRole}`);
   await target.query(`GRANT UPDATE ON ${updateTables.join(", ")} TO ${runtimeRole}`);
   await target.query(`GRANT DELETE ON ${deleteTables.join(", ")} TO ${runtimeRole}`);
+  // Includes host_push_subscriptions' identity sequence (granted after the migrations created it).
   await target.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${runtimeRole}`);
 
   step = "verify runtime permissions";
@@ -149,7 +153,7 @@ try {
              (SELECT rolcreaterole FROM pg_roles WHERE rolname=current_user) AS can_create_role,
              (SELECT count(*)::int FROM pg_tables WHERE schemaname='public') AS table_count`);
     assert(result.rows[0].username === runtimeRole && result.rows[0].db === database &&
-      !result.rows[0].can_ddl && !result.rows[0].can_create_role && result.rows[0].table_count === 13,
+      !result.rows[0].can_ddl && !result.rows[0].can_create_role && result.rows[0].table_count === tableCount,
     "Runtime connection or privilege check failed");
     await runtime.query("SELECT role FROM provider_memberships WHERE false FOR SHARE");
     const membershipGrant = await runtime.query(`
@@ -183,7 +187,7 @@ try {
     await otherDb.end().catch(() => {});
   }
 
-  console.log(`Experience DB bootstrap complete: ${migrations.length} migrations, 13 tables, restricted runtime role.`);
+  console.log(`Experience DB bootstrap complete: ${migrations.length} migrations, ${tableCount} tables, restricted runtime role.`);
   console.log(`STG_HOST_DATABASE_URL_REF=${secret}:${match[1]}`);
 } catch (error) {
   console.error(`Experience DB bootstrap stopped during ${step}: ${error?.code || "check failed"}`);

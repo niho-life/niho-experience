@@ -115,3 +115,156 @@ test("/host/launch has no WCAG 2.2 AA violations, in a browser and inside the ap
     expect(results.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
   }
 });
+
+// Push (#177 P2) in the preview: HOST_PUSH_ENABLED=true on this server; mock mode checks and answers, never stores or sends.
+const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+const pushRow = (page: Page) => page.getByRole("region", { name: "この端末" }).getByRole("group", { name: "通知" });
+
+/** A stand-in for the browser's Notification and PushManager; the subscription survives reloads in sessionStorage. */
+async function stubPush(page: Page) {
+  await page.addInitScript(() => {
+    const KEY = "e2e-push-subscription";
+    let permission: NotificationPermission = sessionStorage.getItem(KEY) ? "granted" : "default";
+    const subscription = (key: number[]) => ({
+      endpoint: "https://fcm.googleapis.com/fcm/send/e2e-device",
+      options: { applicationServerKey: new Uint8Array(key).buffer, userVisibleOnly: true },
+      toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/e2e-device", expirationTime: null, keys: { p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" } }),
+      unsubscribe: async () => {
+        if (sessionStorage.getItem("e2e-push-unsubscribe-fails") === "1") throw new Error("unsubscribe unavailable");
+        sessionStorage.removeItem(KEY);
+        return true;
+      },
+    });
+    const stored = () => {
+      const raw = sessionStorage.getItem(KEY);
+      return raw ? subscription(JSON.parse(raw) as number[]) : null;
+    };
+    class StubNotification {
+      static get permission() { return permission; }
+      static async requestPermission() { permission = "granted"; return permission; }
+    }
+    Object.defineProperty(window, "Notification", { configurable: true, writable: true, value: StubNotification });
+    if (!("PushManager" in window)) Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
+    const manager = {
+      getSubscription: async () => stored(),
+      subscribe: async (options: { applicationServerKey: Uint8Array }) => {
+        sessionStorage.setItem(KEY, JSON.stringify(Array.from(new Uint8Array(options.applicationServerKey))));
+        return stored();
+      },
+    };
+    Object.defineProperty(ServiceWorkerRegistration.prototype, "pushManager", { configurable: true, get: () => manager });
+  });
+}
+
+function pushCalls(page: Page): string[] {
+  const calls: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/host/api/push-subscriptions")) calls.push(`${request.method()} ${url.pathname}`);
+  });
+  return calls;
+}
+
+test.describe("通知 on an iPhone's browser tab", () => {
+  test.use({ userAgent: IPHONE });
+
+  test("points to the home-screen app instead of asking", async ({ page }) => {
+    await page.goto("/host/auth/mock-login");
+    await page.waitForURL(/\/host\/home$/);
+    await page.goto("/host/settings");
+    await expect(pushRow(page)).toHaveText("ホーム画面に追加したアプリから通知を受け取れます。");
+    await expect(page.getByRole("region", { name: "この端末" })).toContainText("ロック画面には体験名・日時・人数だけを表示します。");
+  });
+});
+
+test("通知 inside the app: on, checked again after a reload, a test, and off, each through the BFF", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  const calls = pushCalls(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+  expect(calls).toEqual(["POST /host/api/push-subscriptions"]);
+
+  // On every visit the server says whether this device is still the host's.
+  await page.reload();
+  await expect(row).toContainText("この端末に通知が届きます");
+  expect(calls.at(-1)).toBe("POST /host/api/push-subscriptions/status");
+
+  await row.getByRole("button", { name: "テスト通知を送る" }).click();
+  await expect(page.getByText("プレビューでは通知を送りません。")).toBeVisible();
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(results.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+
+  await row.getByRole("button", { name: "この端末の通知を止める" }).click();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toBeVisible();
+  expect(calls).toEqual(["POST /host/api/push-subscriptions", "POST /host/api/push-subscriptions/status", "POST /host/api/push-subscriptions/test", "DELETE /host/api/push-subscriptions"]);
+});
+
+test("VAPID 鍵が変わった端末はオンと表示せず、再登録できる", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+
+  await page.evaluate(() => sessionStorage.setItem("e2e-push-subscription", JSON.stringify([1, 2, 3])));
+  await page.reload();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toBeVisible();
+  await expect(page.getByText("通知の鍵が更新されました。もう一度オンにしてください。")).toBeVisible();
+  await expect(row).not.toContainText("この端末に通知が届きます");
+
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+});
+
+test("ブラウザとサーバーの解除が両方失敗したらオンを維持して再試行を案内する", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+
+  await page.evaluate(() => sessionStorage.setItem("e2e-push-unsubscribe-fails", "1"));
+  const url = "**/host/api/push-subscriptions";
+  await page.route(url, (route) => route.request().method() === "DELETE"
+    ? route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' })
+    : route.continue());
+  await row.getByRole("button", { name: "この端末の通知を止める" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+  await expect(page.getByText("通知を止められませんでした。もう一度お試しください。")).toBeVisible();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toHaveCount(0);
+
+  await page.evaluate(() => sessionStorage.removeItem("e2e-push-unsubscribe-fails"));
+  await page.unroute(url);
+  await row.getByRole("button", { name: "この端末の通知を止める" }).click();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toBeVisible();
+});
+
+test("状態確認が失敗した場合は通知をオフと断定しない", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+
+  await page.route("**/host/api/push-subscriptions/status", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' }));
+  await page.reload();
+  await expect(row).toContainText("通知の状態を確認できません。");
+  await expect(page.getByText("通知の状態を確認できません。通信を確認してページを再読み込みしてください。")).toBeVisible();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "この端末の通知を止める" })).toHaveCount(0);
+});

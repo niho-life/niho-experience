@@ -7,6 +7,8 @@ export {
   StoreValidationError,
 } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
+export { HostPushSubscriptions } from "./push-subscriptions.ts";
+export type { HostPushDeviceLabel, HostPushRecipient, HostPushSubscriptionInput } from "./push-subscriptions.ts";
 export type {
   BookingRecord,
   BookingStatus,

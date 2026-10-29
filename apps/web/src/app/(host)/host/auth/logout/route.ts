@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { deleteConnection } from "@/lib/host/niho-auth";
+import { forgetHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { HOST_INTRO_PATH, HOST_LAUNCH_PATH } from "@/lib/host/routes";
 import { clearLoginCookie, clearSessionCookie, hostNotFound, isHostMock, nihoAuthDeps, noStoreJson, renewSession, seeOther, sessionSealer, siteOrigin } from "@/lib/host/server";
@@ -21,6 +22,8 @@ export async function POST(request: NextRequest) {
     }
     if (idToken) await deleteConnection(nihoAuthDeps(), session.connectionId, idToken);
   }
+  // The connection's devices stop receiving push (#177 P2). Best effort, like the call above.
+  if (session) await forgetHostPushConnection(session.connectionId);
 
   // The installed app stays inside its own pages (#177).
   const response = seeOther(session?.surface === "app" ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);

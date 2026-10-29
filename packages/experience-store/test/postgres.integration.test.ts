@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { BookingUnavailableError, StoreConflictError } from "../src/errors.ts";
+import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
 import { ExperienceStore } from "../src/repository.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -22,6 +23,8 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       await pool.query(oauthMigration);
       const coverageMigration = await readFile(new URL("../migrations/0003_google_busy_coverage.sql", import.meta.url), "utf8");
       await pool.query(coverageMigration);
+      const pushMigration = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
+      await pool.query(pushMigration);
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
       await pool.query(
         "INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ($1,$2,'OWNER')",
@@ -115,6 +118,58 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       const secondOverride = await store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "CLOSE", occurrenceId: fourthOccurrenceId }, firstOverride.version);
       assert.equal(secondOverride.version, firstOverride.version + 1);
       await assert.rejects(() => store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "CLOSE", occurrenceId: fourthOccurrenceId }, firstOverride.version), StoreConflictError);
+    } finally {
+      await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
+      await pool.end();
+    }
+  });
+
+  it("keeps host push subscriptions per endpoint and per connection (#177)", async () => {
+    const { Pool } = await import("pg");
+    const schema = `experience_push_test_${randomUUID().replaceAll("-", "")}`;
+    const pool = new Pool({ connectionString: databaseUrl, max: 2, options: `-c search_path=${schema}` });
+    const quotedSchema = `"${schema}"`;
+    try {
+      await pool.query(`CREATE SCHEMA ${quotedSchema}`);
+      for (const name of ["0001_experience_store.sql", "0002_google_oauth.sql", "0003_google_busy_coverage.sql", "0004_host_push_subscriptions.sql"]) {
+        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+      }
+      await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
+      await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ($1,'user-a','OWNER'), ($1,'user-b','EDITOR')", ["provider-a"]);
+      const store = new HostPushSubscriptions(pool);
+      const keys = { p256dh: `B${"A".repeat(86)}`, auth: "A".repeat(22) };
+      const phone = "https://web.push.apple.com/synthetic-phone";
+      await store.save({ nihoUserId: "user-a", connectionId: "conn-a", endpoint: phone, ...keys, deviceLabel: "iphone" });
+      await store.save({ nihoUserId: "user-b", connectionId: "conn-b", endpoint: "https://fcm.googleapis.com/fcm/send/synthetic", ...keys, deviceLabel: "android" });
+      assert.equal(await store.has("user-a", phone), true);
+      assert.equal(await store.has("user-b", phone), false);
+      // A later sign-in on the same device takes the row over; another user's endpoint stays theirs.
+      assert.equal(await store.claim("user-a", phone, "conn-a2"), true);
+      assert.equal(await store.claim("user-b", phone, "conn-b"), false);
+      assert.equal(await store.removeConnection("conn-a"), 0);
+      assert.equal(await store.claim("user-a", phone, "conn-a"), true);
+
+      const recent = new Date(Date.now() - 60_000);
+      const [first] = await store.recipients("provider-a", recent);
+      assert.ok(first);
+      await store.recordFailure(first.id);
+      await store.recordFailure(first.id);
+      // The same device subscribed again by another user: it is theirs now, failures forgotten.
+      await store.save({ nihoUserId: "user-b", connectionId: "conn-b", endpoint: phone, ...keys, deviceLabel: "iphone" });
+      assert.equal(await store.has("user-a", phone), false);
+      const rows = await pool.query<{ failure_count: number; niho_user_id: string }>("SELECT failure_count, niho_user_id FROM host_push_subscriptions WHERE endpoint=$1", [phone]);
+      assert.deepEqual(rows.rows[0], { failure_count: 0, niho_user_id: "user-b" });
+
+      assert.equal((await store.recipients("provider-a", recent)).length, 2);
+      assert.equal((await store.recipients("provider-a", new Date(Date.now() + 60_000))).length, 0);
+      await store.touchConnection("conn-b");
+      await pool.query("UPDATE provider_memberships SET active=false WHERE niho_user_id='user-b'");
+      assert.equal((await store.recipients("provider-a", recent)).length, 0);
+
+      assert.equal(await store.remove("user-a", phone), false);
+      assert.equal(await store.removeConnection("conn-b"), 2);
+      assert.equal((await pool.query("SELECT 1 FROM host_push_subscriptions")).rowCount, 0);
+      await assert.rejects(() => store.save({ nihoUserId: "user-a", connectionId: "conn-a", endpoint: "http://web.push.apple.com/x", ...keys, deviceLabel: "iphone" }));
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
       await pool.end();

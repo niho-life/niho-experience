@@ -6,6 +6,15 @@ type Env = Record<string, string | undefined>;
  */
 export const DEV_ONLY_HOST_SESSION_SECRET = "dev-only/niho-experience/host-session/not-a-secret-never-deploy";
 
+/**
+ * Mock previews only (#177 P2): a browser needs an application server key to subscribe, and the mock
+ * never sends, so the private half was discarded when this was generated. Never accepted in http mode.
+ */
+export const DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY = "BJWY_HMlymTEFRF78WYjPHnZOQxGNtNWqszkz8y3srKGLBuKF8KQhyce8tx2APhY6Ps4WT1EPAQIGyydJ7L0O8M";
+/** base64url without padding: an uncompressed P-256 point (65 octets) and its 32-octet private scalar. */
+const VAPID_PUBLIC_KEY = /^B[A-Za-z0-9_-]{86}$/;
+const VAPID_PRIVATE_KEY = /^[A-Za-z0-9_-]{43}$/;
+
 const MIN_HOST_SESSION_SECRET_LENGTH = 32;
 const MIN_ADMIN_SESSION_SECRET_LENGTH = 32;
 
@@ -44,6 +53,9 @@ export function resolveConfig(env: Env) {
   // The console as an installable app (#177): manifest, service worker and 設定's この端末. Off by default;
   // turning it off serves a service worker that removes itself.
   const hostPwaEnabled = hostConsoleEnabled && env.HOST_PWA_ENABLED === "true";
+  // Web Push to the app (#177 P2), next to email. Its VAPID private key is server-only, like the session key.
+  const hostPushEnabled = hostPwaEnabled && env.HOST_PUSH_ENABLED === "true";
+  const hostPush = hostPushSettings(apiMode, hostPushEnabled, env);
   // The support console has no NIHO admin contract yet. Its explicit gate is useful only for
   // the synthetic preview; http mode renders a preparation boundary and never accepts a mock role.
   const adminSupportConsoleEnabled = env.ADMIN_SUPPORT_CONSOLE_ENABLED === "true";
@@ -130,6 +142,12 @@ export function resolveConfig(env: Env) {
     umamiWebsiteId: env.UMAMI_WEBSITE_ID?.trim() ?? "",
     hostConsoleEnabled,
     hostPwaEnabled,
+    hostPushEnabled,
+    // The browser's applicationServerKey (public). Empty while push is off.
+    hostPushVapidPublicKey: hostPush.publicKey,
+    // Server only: signs VAPID tokens. Empty in mock mode, which never sends.
+    hostPushVapidPrivateKey: hostPush.privateKey,
+    hostPushVapidSubject: hostPush.subject,
     adminSupportConsoleEnabled,
     adminSupportReadApiEnabled,
     adminSupportReadPreviewEnabled,
@@ -153,6 +171,21 @@ export function resolveConfig(env: Env) {
     adminOrigin,
     nihoFirebaseWebApiKey,
   } as const;
+}
+
+/** Push settings; http mode refuses to start without a usable key pair shape and a subject (the pair itself: startup-check.ts). */
+function hostPushSettings(apiMode: "mock" | "http", enabled: boolean, env: Env): { publicKey: string; privateKey: string; subject: string } {
+  if (!enabled) return { publicKey: "", privateKey: "", subject: "" };
+  if (apiMode === "mock") return { publicKey: DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, privateKey: "", subject: "" };
+  const publicKey = env.HOST_PUSH_VAPID_PUBLIC_KEY?.trim() ?? "";
+  const privateKey = env.HOST_PUSH_VAPID_PRIVATE_KEY?.trim() ?? "";
+  const subject = env.HOST_PUSH_VAPID_SUBJECT?.trim() ?? "";
+  if (!VAPID_PUBLIC_KEY.test(publicKey) || publicKey === DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY) {
+    throw new Error("HOST_PUSH_ENABLED=true needs HOST_PUSH_VAPID_PUBLIC_KEY (an uncompressed P-256 public key, base64url) in http mode");
+  }
+  if (!VAPID_PRIVATE_KEY.test(privateKey)) throw new Error("HOST_PUSH_ENABLED=true needs HOST_PUSH_VAPID_PRIVATE_KEY (a P-256 private key, base64url) in http mode");
+  if (!/^(mailto:[^\s@/]+@[^\s@/]+|https:\/\/[^\s/]+(\/\S*)?)$/.test(subject)) throw new Error("HOST_PUSH_ENABLED=true needs HOST_PUSH_VAPID_SUBJECT (mailto: or https:) in http mode");
+  return { publicKey, privateKey, subject };
 }
 
 /** Refuses to start a real host console with a missing or guessable cookie key. */

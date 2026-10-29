@@ -1,10 +1,13 @@
-import { HOST_APP_SCOPE } from "./routes";
+import { HOST_PUSH_MESSAGE } from "./display";
+import { HOST_APP_ICONS } from "./pwa";
+import { HOST_API_PREFIX, HOST_APP_SCOPE, HOST_HOME_PATH } from "./routes";
 
 /**
  * /host/sw.js (#177, docs/host-pwa.md). It answers page loads under the app's scope from the
  * network and shows a fixed offline page when there is none. It never uses Cache Storage, so no
  * booking, guest, message or sales page is kept on the device, and it stays out of the sign-in and
- * Google round trips and the API relay. P2 adds push here.
+ * Google round trips and the API relay. P2: it shows pushes (lib/host/push/payload.ts) as
+ * notifications that open a page under /host/, and re-subscribes when the browser rotates a subscription.
  */
 export const HOST_SW_PASSTHROUGH = ["/host/auth", "/host/calendar/google", "/host/api"] as const;
 
@@ -48,6 +51,11 @@ const SCOPE = ${JSON.stringify(HOST_APP_SCOPE)};
 const PASSTHROUGH = ${JSON.stringify(HOST_SW_PASSTHROUGH)};
 const OFFLINE_HTML = ${JSON.stringify(OFFLINE_HTML)};
 const OFFLINE_HEADERS = ${JSON.stringify(OFFLINE_HEADERS)};
+const HOME = ${JSON.stringify(HOST_HOME_PATH)};
+const ICON = ${JSON.stringify(HOST_APP_ICONS.icon192)};
+const FALLBACK_TITLE = "NIHO 体験ホストにお知らせがあります";
+const SUBSCRIPTIONS = ${JSON.stringify(`${HOST_API_PREFIX}push-subscriptions`)};
+const PUSH_MESSAGE = ${JSON.stringify(HOST_PUSH_MESSAGE)};
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -62,6 +70,81 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin || !url.pathname.startsWith(SCOPE)) return;
   if (PASSTHROUGH.some((path) => url.pathname === path || url.pathname.startsWith(path + "/"))) return;
   event.respondWith(fetch(request).catch(() => new Response(OFFLINE_HTML, { status: 503, headers: OFFLINE_HEADERS })));
+});
+
+// An absolute URL on this site under /host/, or null: a notification never leads out of the app.
+function inScope(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value, self.location.origin);
+    return url.origin === self.location.origin && url.pathname.startsWith(SCOPE) ? url.href : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function windows() {
+  return self.clients.matchAll({ type: "window", includeUncontrolled: true });
+}
+
+self.addEventListener("push", (event) => {
+  let data = null;
+  try {
+    data = event.data ? event.data.json() : null;
+  } catch (error) {
+    data = null;
+  }
+  // A push must always show something: iOS and Chrome withdraw subscriptions that receive silent ones.
+  // One that cannot be read, or would lead out of the app, becomes a plain notice that opens ホーム.
+  const url = data && data.v === 1 && typeof data.title === "string" ? inScope(data.url) : null;
+  if (!url) {
+    event.waitUntil(self.registration.showNotification(FALLBACK_TITLE, { data: { url: new URL(HOME, self.location.origin).href }, icon: ICON }));
+    return;
+  }
+  event.waitUntil((async () => {
+    await self.registration.showNotification(data.title, {
+      body: typeof data.body === "string" ? data.body : "",
+      tag: typeof data.tag === "string" ? data.tag : undefined,
+      data: { url },
+      icon: ICON,
+    });
+    const nav = self.navigator;
+    if (typeof data.badge === "number" && nav && typeof nav.setAppBadge === "function") {
+      await (data.badge > 0 ? nav.setAppBadge(data.badge) : nav.clearAppBadge()).catch(() => undefined);
+    }
+    for (const client of await windows()) client.postMessage({ type: PUSH_MESSAGE });
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  const url = inScope(data && data.url) || new URL(HOME, self.location.origin).href;
+  event.waitUntil((async () => {
+    const open = (await windows()).find((client) => inScope(client.url));
+    if (open) {
+      await open.focus();
+      try {
+        await open.navigate(url);
+        return;
+      } catch (error) {
+        // A page this worker does not control cannot be moved; open the address instead.
+      }
+    }
+    await self.clients.openWindow(url);
+  })());
+});
+
+// The browser replaced the subscription: subscribe again with the same key, tell the server, drop the old one.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil((async () => {
+    const previous = event.oldSubscription || null;
+    const key = previous && previous.options ? previous.options.applicationServerKey : null;
+    const next = event.newSubscription || (key ? await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }) : null);
+    const send = (method, body) => fetch(SUBSCRIPTIONS, { method, credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (next) await send("POST", next);
+    if (previous && (!next || previous.endpoint !== next.endpoint)) await send("DELETE", { endpoint: previous.endpoint }).catch(() => undefined);
+  })().catch(() => undefined));
 });
 `;
 

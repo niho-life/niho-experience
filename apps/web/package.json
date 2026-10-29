@@ -26,6 +26,7 @@
     "@niho-experience/experience-payments": "*",
     "@niho-experience/experience-store": "*",
     "@niho-experience/google-calendar": "*",
+    "@niho-experience/web-push": "*",
     "@niho/experience-presentation": "*",
     "@niho/web": "git+https://github.com/niho-coliving/niho-web.git#ac98e3068a5c13d817c390ff164fb37eab42f6ee",
     "next": "16.3.8",

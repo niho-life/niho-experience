@@ -183,6 +183,11 @@ export function homeTodos(
   return [...requestTodos(experiences, bookings, today, now), ...threadTodos(threads, now), ...reviewTodos(experiences, reviews), ...drafts, ...listingReviews];
 }
 
+/** The app icon's count (#177 P2): requests waiting for approval and threads waiting for an answer. */
+export function homeBadgeCount(todos: readonly HomeTodo[]): number {
+  return todos.filter((todo) => todo.key.startsWith("booking-") || todo.key.startsWith("thread-")).length;
+}
+
 /** Today's word for a session: where it stands, and whether attendance is still to record once it is over. */
 function todayPhase(session: BookingSession, own: readonly HostBooking[], now: string): HomeUpcoming["phase"] {
   const phase = sessionPhase(session, now);

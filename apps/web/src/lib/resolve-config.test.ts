@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEV_ONLY_HOST_SESSION_SECRET, resolveConfig } from "./resolve-config";
+import { DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, DEV_ONLY_HOST_SESSION_SECRET, resolveConfig } from "./resolve-config";
 
 describe("public API version rollout gate", () => {
   it("keeps v1.0 when the runtime flag is absent", () => {
@@ -40,6 +40,28 @@ describe("host console settings", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "1" }).hostPwaEnabled).toBe(false);
     expect(resolveConfig({ HOST_PWA_ENABLED: "true" }).hostPwaEnabled).toBe(false);
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true" }).hostPwaEnabled).toBe(true);
+  });
+
+  it("sends push to the app only on top of the app, and keeps the private key out of mock mode (#177 P2)", () => {
+    const app = { HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true" };
+    expect(resolveConfig({ ...app, HOST_PUSH_ENABLED: "1" }).hostPushEnabled).toBe(false);
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", HOST_PUSH_ENABLED: "true" }).hostPushEnabled).toBe(false);
+    expect(resolveConfig(app)).toMatchObject({ hostPushEnabled: false, hostPushVapidPublicKey: "", hostPushVapidPrivateKey: "" });
+    const mock = resolveConfig({ ...app, HOST_PUSH_ENABLED: "true", HOST_PUSH_VAPID_PRIVATE_KEY: "p".repeat(43), HOST_PUSH_VAPID_PUBLIC_KEY: `B${"x".repeat(86)}` });
+    expect(mock).toMatchObject({ hostPushEnabled: true, hostPushVapidPublicKey: DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, hostPushVapidPrivateKey: "", hostPushVapidSubject: "" });
+  });
+
+  it("fails at start-up when http push lacks its VAPID keys or subject", () => {
+    const push = { ...http, HOST_SESSION_SECRET: secret, NIHO_FIREBASE_WEB_API_KEY: "key", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true" };
+    const keys = { HOST_PUSH_VAPID_PUBLIC_KEY: `B${"x".repeat(86)}`, HOST_PUSH_VAPID_PRIVATE_KEY: "p".repeat(43), HOST_PUSH_VAPID_SUBJECT: "mailto:host-push@example.test" };
+    expect(() => resolveConfig({ ...push, ...keys, HOST_PUSH_VAPID_PUBLIC_KEY: "" })).toThrow(/HOST_PUSH_VAPID_PUBLIC_KEY/);
+    expect(() => resolveConfig({ ...push, ...keys, HOST_PUSH_VAPID_PUBLIC_KEY: DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY })).toThrow(/HOST_PUSH_VAPID_PUBLIC_KEY/);
+    expect(() => resolveConfig({ ...push, ...keys, HOST_PUSH_VAPID_PRIVATE_KEY: "short" })).toThrow(/HOST_PUSH_VAPID_PRIVATE_KEY/);
+    expect(() => resolveConfig({ ...push, ...keys, HOST_PUSH_VAPID_SUBJECT: "http://example.test" })).toThrow(/HOST_PUSH_VAPID_SUBJECT/);
+    expect(() => resolveConfig({ ...push, ...keys, HOST_PUSH_VAPID_SUBJECT: "" })).toThrow(/HOST_PUSH_VAPID_SUBJECT/);
+    expect(resolveConfig({ ...push, ...keys })).toMatchObject({ hostPushEnabled: true, hostPushVapidPrivateKey: "p".repeat(43), hostPushVapidSubject: "mailto:host-push@example.test" });
+    // Off, nothing is required.
+    expect(() => resolveConfig({ ...push, HOST_PUSH_ENABLED: "false" })).not.toThrow();
   });
 
   it("allows the labelled development key in mock mode only", () => {

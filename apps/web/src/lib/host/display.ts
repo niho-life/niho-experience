@@ -7,6 +7,8 @@ export const HOST_DISPLAY_HEADER = "x-niho-host-display";
 export const HOST_DISPLAY_STANDALONE = "standalone";
 /** The refresh call's 401 when the app holds a session signed in elsewhere: sign in inside the app instead. */
 export const HOST_APP_SIGN_IN_REQUIRED = "app_sign_in_required";
+/** What /host/sw.js posts to open console pages when a push arrives (#177 P2): read the server again. */
+export const HOST_PUSH_MESSAGE = "niho-host-push";
 
 const STANDALONE_QUERY = "(display-mode: standalone)";
 

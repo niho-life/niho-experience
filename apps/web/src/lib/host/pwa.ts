@@ -65,11 +65,32 @@ export interface HostInstallDevice {
   maxTouchPoints: number;
 }
 
+/** iPhone or iPad; iPadOS reports itself as a Mac with a touch screen. */
+function isAppleMobile({ userAgent, platform, maxTouchPoints }: Pick<HostInstallDevice, "userAgent" | "platform" | "maxTouchPoints">): boolean {
+  return /iPad|iPhone|iPod/.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1);
+}
+
 export function hostInstallGuide({ standalone, canPrompt, userAgent, platform, maxTouchPoints }: HostInstallDevice): HostInstallGuide {
   if (standalone) return { kind: "installed" };
   if (canPrompt) return { kind: "prompt", label: /Android/.test(userAgent) ? "ホーム画面に追加" : "アプリとして追加" };
-  // iPadOS reports itself as a Mac with a touch screen.
-  if (/iPad|iPhone|iPod/.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1)) return { kind: "ios" };
+  if (isAppleMobile({ userAgent, platform, maxTouchPoints })) return { kind: "ios" };
   if (/Macintosh/.test(userAgent) && /Safari\//.test(userAgent) && !/Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS/.test(userAgent)) return { kind: "mac-safari" };
   return { kind: "other" };
+}
+
+/** Whether 設定 › この端末 › 通知 can offer push here (#177 P2). */
+export type HostPushAvailability = "available" | "ios-install" | "unsupported" | "denied";
+
+export interface HostPushDevice extends Omit<HostInstallDevice, "canPrompt"> {
+  /** Service worker, PushManager and Notification all exist. */
+  hasPush: boolean;
+  permission: NotificationPermission | null;
+}
+
+export function hostPushAvailability(device: HostPushDevice): HostPushAvailability {
+  // iOS and iPadOS give push only to an app added to the home screen, and only after a tap there.
+  if (isAppleMobile(device) && !device.standalone) return "ios-install";
+  if (!device.hasPush) return "unsupported";
+  if (device.permission === "denied") return "denied";
+  return "available";
 }
