@@ -100,7 +100,7 @@ describe("schedule expansion", () => {
     assert.equal(newRange.some((item) => item.id === movedId), true);
   });
 
-  it("closes or reschedules one occurrence without changing its stable identity", () => {
+  it("keeps selling state orthogonal to a reschedule without changing stable identity", () => {
     const closeId = occurrenceIdFor(baseRule.id, "2026-11-02");
     const moveId = occurrenceIdFor(baseRule.id, "2026-11-03");
     const expanded = expandOccurrences({
@@ -108,7 +108,6 @@ describe("schedule expansion", () => {
       fromDate: "2026-11-01",
       toDate: "2026-11-05",
       overrides: [
-        { occurrenceId: closeId, kind: "CLOSE" },
         {
           occurrenceId: moveId,
           kind: "RESCHEDULE",
@@ -117,6 +116,7 @@ describe("schedule expansion", () => {
           durationMinutes: 120,
         },
       ],
+      salesStates: [{ occurrenceId: closeId, desiredState: "CLOSED" }],
     });
     assert.equal(expanded.find((item) => item.id === closeId)?.status, "CLOSED");
     assert.deepEqual(
@@ -139,6 +139,24 @@ describe("schedule expansion", () => {
         rescheduled: true,
       },
     );
+    const movedAndClosed = expandOccurrences({
+      rule: baseRule,
+      overrides: [{ occurrenceId: moveId, kind: "RESCHEDULE", localDate: "2026-11-05", localStartTime: "14:30" }],
+      salesStates: [{ occurrenceId: moveId, desiredState: "CLOSED" }],
+      fromDate: "2026-11-05",
+      toDate: "2026-11-05",
+    }).find((item) => item.id === moveId);
+    assert.equal(movedAndClosed?.localDate, "2026-11-05");
+    assert.equal(movedAndClosed?.status, "CLOSED");
+    const reopened = expandOccurrences({
+      rule: baseRule,
+      overrides: [{ occurrenceId: moveId, kind: "RESCHEDULE", localDate: "2026-11-05", localStartTime: "14:30" }],
+      salesStates: [{ occurrenceId: moveId, desiredState: "OPEN" }],
+      fromDate: "2026-11-05",
+      toDate: "2026-11-05",
+    }).find((item) => item.id === moveId);
+    assert.equal(reopened?.localDate, "2026-11-05");
+    assert.equal(reopened?.status, "OPEN");
   });
 
   it("keeps an accepted booking snapshot independent from later rule edits", () => {

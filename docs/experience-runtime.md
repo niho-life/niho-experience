@@ -9,6 +9,13 @@
 - `experience-domain` と `experience-store` は予約枠の判定、席の原子的な仮押さえ、支払 webhook による確定・台帳記入を提供する。`experience-payments` は共通 Stripe Connect 上の Direct charge Checkout と体験イベントの署名検証を提供する。webhook の受信経路は `/api/experience/stripe/webhook`。
 - 現行の旅行者向け availability と checkout、旧 `/host/experiences` の編集、既存予約一覧はまだ NIHO API を使う。**このカレンダーの Google busy 判定は、現在販売中の旧予約枠には効かない。** 現行の枠を止める操作は NIHO 側でも行う。
 
+## カレンダー変更の整合性
+
+- 日時変更は `schedule_occurrence_overrides`、受付の休止・再開は `schedule_occurrence_sales_states` に分ける。休止しても移動済み日時を失わず、再開は `OPEN` 行を version 更新して残す。
+- 変更要求は UUID v4 の command ID と期待 version を持つ。同じ command の再送は同じ結果を返し、異なる入力への使い回しは拒否する。
+- 保存、`calendar_commands`、専用 `calendar_outbox_events` は同じ DB transaction。通知用 `outbox_messages.processed_at` と処理位置を共有しない。OTA consumer は未接続であり、画面は外部反映済み・反映待ちを表示しない。
+- `0006` は旧writerと互換でないため、rolling migrationを禁止する。停止・旧revision drain・復元済みsnapshot・migration・新revisionの順序は [`experience-store` の 0006の配備順序](../packages/experience-store/README.md#0006の配備順序) を必須とする。
+
 ## 必要な実行時設定
 
 | 設定 | 用途 |
@@ -19,7 +26,7 @@
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | 既存 NIHO プラットフォームの Stripe 秘密鍵を、体験処理用の実行 ID に限定して渡す |
 | `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 体験 Connect webhook destination の署名鍵。NIHO の既存 endpoint の鍵と混用しない |
 
-DB migration は `packages/experience-store/migrations/0001_experience_store.sql`、次に `0002_google_oauth.sql`、`0003_google_busy_coverage.sql` を順に適用する。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` は画面とAPIを404で閉じ、画面だけ有効でもDB未設定ならカレンダーAPIは503で閉じる。
+DB migration は `packages/experience-store/migrations/` の `0001`〜`0006` を番号順に適用する。`0006` は上記の停止・移行手順を先に満たす。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` は画面とAPIを404で閉じ、画面だけ有効でもDB未設定ならカレンダーAPIは503で閉じる。
 
 ## 切替前の残作業
 

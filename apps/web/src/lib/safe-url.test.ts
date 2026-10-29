@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeNihoHelpUrl } from "./safe-url";
+import { safeNihoHelpUrl, safeNihoProviderUrl } from "./safe-url";
 
 describe("NIHO support destination", () => {
   it("accepts an operator-configured destination on the NIHO origin", () => {
@@ -10,5 +10,14 @@ describe("NIHO support destination", () => {
   });
   it("handles an invalid NIHO origin by using the existing support fallback", () => {
     expect(safeNihoHelpUrl("https://niho.life/contact", "invalid")).toBeNull();
+  });
+});
+
+describe("safeNihoProviderUrl", () => {
+  it("accepts only the configured NIHO origin's fixed provider screen", () => {
+    expect(safeNihoProviderUrl("https://niho.life/experiences/provider", "https://niho.life")).toBe("https://niho.life/experiences/provider");
+    expect(safeNihoProviderUrl("https://niho.life/experiences/provider?token=x", "https://niho.life")).toBeNull();
+    expect(safeNihoProviderUrl("https://evil.example/experiences/provider", "https://niho.life")).toBeNull();
+    expect(safeNihoProviderUrl("https://niho.life/experiences/other", "https://niho.life")).toBeNull();
   });
 });

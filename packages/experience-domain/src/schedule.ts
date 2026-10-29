@@ -5,6 +5,7 @@ import {
   type Occurrence,
   type OccurrenceId,
   type OccurrenceOverride,
+  type OccurrenceSalesState,
   type ScheduleRule,
   type UtcInstant,
 } from "#types";
@@ -42,7 +43,12 @@ function recursOn(rule: ScheduleRule, localDate: string): boolean {
   }
 }
 
-function toOccurrence(rule: ScheduleRule, sourceLocalDate: string, override: OccurrenceOverride | undefined): Occurrence {
+function toOccurrence(
+  rule: ScheduleRule,
+  sourceLocalDate: string,
+  override: OccurrenceOverride | undefined,
+  salesState: OccurrenceSalesState | undefined,
+): Occurrence {
   const occurrenceId = occurrenceIdFor(rule.id, sourceLocalDate);
   const reschedule = override?.kind === "RESCHEDULE" ? override : undefined;
   const localDate = reschedule?.localDate ?? sourceLocalDate;
@@ -63,7 +69,8 @@ function toOccurrence(rule: ScheduleRule, sourceLocalDate: string, override: Occ
     bookingCutoffMinutes: rule.bookingCutoffMinutes,
     busyBufferBeforeMinutes: rule.busyBufferBeforeMinutes,
     busyBufferAfterMinutes: rule.busyBufferAfterMinutes,
-    status: override?.kind === "CLOSE" ? "CLOSED" : "OPEN",
+    // CLOSE is read only for pre-migration compatibility. New writes use the orthogonal sales state.
+    status: salesState?.desiredState ?? (override?.kind === "CLOSE" ? "CLOSED" : "OPEN"),
     rescheduled: reschedule !== undefined,
   };
 }
@@ -79,6 +86,7 @@ export function expandOccurrences(input: ExpandOccurrencesInput): readonly Occur
   }
   const overrides = parseOccurrenceOverrides(input.overrides ?? []);
   const overridesById = new Map(overrides.map((override) => [override.occurrenceId, override]));
+  const salesStatesById = new Map((input.salesStates ?? []).map((state) => [state.occurrenceId, state]));
   const firstDate = input.fromDate < rule.startsOn ? rule.startsOn : input.fromDate;
   const lastDate = rule.endsOn !== undefined && rule.endsOn < input.toDate ? rule.endsOn : input.toDate;
   const sourceDates = new Set<string>();
@@ -101,7 +109,7 @@ export function expandOccurrences(input: ExpandOccurrencesInput): readonly Occur
   }
   for (const sourceLocalDate of sourceDates) {
     const id = occurrenceIdFor(rule.id, sourceLocalDate);
-    const occurrence = toOccurrence(rule, sourceLocalDate, overridesById.get(id));
+    const occurrence = toOccurrence(rule, sourceLocalDate, overridesById.get(id), salesStatesById.get(id));
     if (occurrence.localDate >= input.fromDate && occurrence.localDate <= input.toDate) occurrences.push(occurrence);
   }
   return occurrences.sort((left, right) => left.startUtc.localeCompare(right.startUtc) || left.id.localeCompare(right.id));

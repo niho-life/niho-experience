@@ -19,8 +19,20 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
   const rules = schedule.flatMap(({ product, views }) => views.map((view) => ({ ...view.rule.rule, experienceId: product.id })));
   const expanded = schedule.flatMap(({ product, views }) => views.flatMap((view) => {
     const overrideVersions = new Map(view.overrides.map((entry) => [entry.override.occurrenceId, entry.version]));
-    return expandOccurrences({ rule: view.rule.rule, overrides: view.overrides.map((entry) => entry.override), fromDate, toDate })
-      .map((occurrence) => ({ occurrence, experienceId: product.id, experienceTitle: product.public_title, overrideVersion: overrideVersions.get(occurrence.id) }));
+    const salesStateVersions = new Map(view.salesStates.map((entry) => [entry.state.occurrenceId, entry.version]));
+    return expandOccurrences({
+      rule: view.rule.rule,
+      overrides: view.overrides.map((entry) => entry.override),
+      salesStates: view.salesStates.map((entry) => entry.state),
+      fromDate,
+      toDate,
+    }).map((occurrence) => ({
+      occurrence,
+      experienceId: product.id,
+      experienceTitle: product.public_title,
+      overrideVersion: overrideVersions.get(occurrence.id),
+      salesStateVersion: salesStateVersions.get(occurrence.id),
+    }));
   }));
   if (expanded.length > 2_000) throw new RangeError("Too many occurrences in the requested range");
 
@@ -52,7 +64,7 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
     [actor.providerId, actor.nihoUserId, occurrenceIds],
   ) : { rows: [] };
   const seatsByOccurrence = new Map(seats.rows.map((row) => [row.occurrence_id, { confirmed: Number(row.confirmed_seats), held: Number(row.held_seats) }]));
-  const occurrences = expanded.map(({ occurrence, experienceId, experienceTitle, overrideVersion }) => {
+  const occurrences = expanded.map(({ occurrence, experienceId, experienceTitle, overrideVersion, salesStateVersion }) => {
     const reserved = seatsByOccurrence.get(occurrence.id) ?? { confirmed: 0, held: 0 };
     const rangeStart = addMinutes(occurrence.startUtc, -occurrence.busyBufferBeforeMinutes);
     const rangeEnd = addMinutes(occurrence.endUtc, occurrence.busyBufferAfterMinutes);
@@ -61,11 +73,22 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
     const occurrenceSyncStatus = google?.syncStatus === "FAILED" ? "FAILED" : fresh && occurrenceCovered ? "FRESH" : "STALE";
     const result = evaluateAvailability({ occurrence, requestedSeats: 1, confirmedSeats: reserved.confirmed, heldSeats: reserved.held, nowUtc,
       googleCalendar: { blockingEnabled: google?.blockingEnabled ?? false, syncStatus: occurrenceSyncStatus, busyIntervals } });
-    return { ...occurrence, experienceId, experienceTitle, ...(overrideVersion === undefined ? {} : { overrideVersion }), availableSeats: result.availableSeats, availabilityReason: result.reason };
+    return {
+      ...occurrence,
+      experienceId,
+      experienceTitle,
+      ...(overrideVersion === undefined ? {} : { overrideVersion }),
+      ...(salesStateVersion === undefined ? {} : { salesStateVersion }),
+      availableSeats: result.availableSeats,
+      availabilityReason: result.reason,
+      confirmedSeats: reserved.confirmed,
+      heldSeats: reserved.held,
+    };
   }).sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 
   return {
     preview: false,
+    canEdit: membership.role === "OWNER" || membership.role === "EDITOR",
     experiences: products.rows.map((product) => ({ id: product.id, title: product.public_title })),
     rules, occurrences, busyIntervals,
     google: { connected: google !== null, canManage: membership.role === "OWNER", blockingEnabled: google?.blockingEnabled ?? false, syncStatus },

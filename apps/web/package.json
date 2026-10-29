@@ -13,6 +13,7 @@
     "typecheck:presentation": "tsc --noEmit -p tsconfig.presentation.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:host-calendar": "playwright test --config playwright.host-calendar.config.ts",
     "test:e2e:assisted-launch": "playwright test --config playwright.assisted-launch.config.ts --workers=1",
     "test:e2e:provider-operations": "playwright test --config playwright.provider-operations.config.ts --workers=1",
     "test:e2e:documents": "playwright test --config playwright.documents.config.ts"

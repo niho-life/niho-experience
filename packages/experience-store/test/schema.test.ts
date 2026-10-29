@@ -24,6 +24,19 @@ describe("database invariants", () => {
     assert.match(busyTable, /end_at/);
   });
 
+  it("separates occurrence timing from selling and records idempotent calendar commands", async () => {
+    const sql = await readFile(new URL("../migrations/0006_calendar_commands_and_sales_state.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE schedule_occurrence_sales_states/);
+    assert.match(sql, /LOCK TABLE schedule_occurrence_overrides IN ACCESS EXCLUSIVE MODE/);
+    assert.match(sql, /desired_state IN \('OPEN', 'CLOSED'\)/);
+    assert.match(sql, /INSERT INTO schedule_occurrence_sales_states[\s\S]*WHERE kind = 'CLOSE'/);
+    assert.match(sql, /CREATE TABLE calendar_commands/);
+    assert.match(sql, /PRIMARY KEY \(provider_id, command_id\)/);
+    assert.match(sql, /CREATE TABLE calendar_outbox_events/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, command_id\) REFERENCES calendar_commands/);
+    assert.doesNotMatch(sql, /UPDATE outbox_messages|INSERT INTO outbox_messages/);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

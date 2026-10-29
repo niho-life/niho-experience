@@ -3,6 +3,7 @@ import type {
   BusyInterval,
   GoogleSyncStatus,
   OccurrenceOverride,
+  OccurrenceSalesState,
   ScheduleRule,
 } from "@niho-experience/experience-domain";
 
@@ -60,6 +61,17 @@ export interface StoredScheduleRule {
 export interface StoredOccurrenceOverride {
   readonly override: OccurrenceOverride;
   readonly version: number;
+}
+
+export interface StoredOccurrenceSalesState {
+  readonly state: OccurrenceSalesState;
+  readonly version: number;
+}
+
+export interface CalendarCommandReceipt {
+  readonly aggregateId: string;
+  readonly version: number;
+  readonly repeated: boolean;
 }
 
 export interface GoogleCalendarConfiguration {
@@ -145,4 +157,5 @@ export interface RecordGoogleBusySyncInput {
 export interface ScheduleView {
   readonly rule: StoredScheduleRule;
   readonly overrides: readonly StoredOccurrenceOverride[];
+  readonly salesStates: readonly StoredOccurrenceSalesState[];
 }

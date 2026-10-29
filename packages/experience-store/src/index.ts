@@ -30,6 +30,7 @@ export type { HostPushDeviceLabel, HostPushRecipient, HostPushSubscriptionInput 
 export type {
   BookingRecord,
   BookingStatus,
+  CalendarCommandReceipt,
   ConfirmBookingInput,
   ConfirmBookingResult,
   CreateBookingHoldInput,
@@ -47,5 +48,6 @@ export type {
   ScheduleView,
   SellerSnapshot,
   StoredOccurrenceOverride,
+  StoredOccurrenceSalesState,
   StoredScheduleRule,
 } from "./types.ts";

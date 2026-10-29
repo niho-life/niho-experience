@@ -10,6 +10,7 @@ import {
   type GoogleSyncStatus,
   type Occurrence,
   type OccurrenceOverride,
+  type OccurrenceSalesState,
   type ScheduleRule,
 } from "@niho-experience/experience-domain";
 import type { Pool, PoolClient } from "pg";
@@ -26,12 +27,14 @@ import {
   isoValue,
   overrideFromRow,
   productFromRow,
+  salesStateFromRow,
   scheduleRuleFromRow,
   type DbRow,
 } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type {
   BookingRecord,
+  CalendarCommandReceipt,
   ConfirmBookingInput,
   ConfirmBookingResult,
   CreateBookingHoldInput,
@@ -44,8 +47,6 @@ import type {
   ProviderScope,
   RecordGoogleBusySyncInput,
   ScheduleView,
-  StoredOccurrenceOverride,
-  StoredScheduleRule,
 } from "./types.ts";
 import {
   assertCanonicalInstant,
@@ -74,6 +75,9 @@ const OVERRIDE_COLUMNS = `
   occurrence_id, kind, local_date::text AS local_date,
   to_char(local_start_time, 'HH24:MI') AS local_start_time, duration_minutes, version`;
 
+const SALES_STATE_COLUMNS = `occurrence_id, desired_state, version`;
+const COMMAND_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const BOOKING_COLUMNS = `
   public_booking_id::text AS public_booking_id, provider_id, product_id, occurrence_id,
   status, seats, idempotency_key, hold_expires_at, occurrence_snapshot, pricing_snapshot,
@@ -100,6 +104,63 @@ function validateActor(actor: HostActor): void {
 
 function validateScope(scope: ProviderScope): void {
   assertStoreIdentifier(scope.providerId, "scope.providerId");
+}
+
+function validateCommandId(commandId: string): void {
+  if (!COMMAND_ID_PATTERN.test(commandId)) throw new StoreValidationError("commandId must be a UUID v4.");
+}
+
+function commandReceipt(value: unknown, repeated: boolean): CalendarCommandReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new StoreConflictError("Calendar command result is invalid.");
+  const result = value as Record<string, unknown>;
+  if (typeof result.aggregateId !== "string" || !Number.isSafeInteger(result.version) || (result.version as number) < 1) {
+    throw new StoreConflictError("Calendar command result is invalid.");
+  }
+  return { aggregateId: result.aggregateId, version: result.version as number, repeated };
+}
+
+async function previousCalendarCommand(
+  client: PoolClient,
+  providerId: string,
+  commandId: string,
+  action: string,
+  requestFingerprint: string,
+): Promise<CalendarCommandReceipt | null> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 2))", [`${providerId}:${commandId}`]);
+  const previous = await client.query<DbRow>(
+    "SELECT action, request_fingerprint, result FROM calendar_commands WHERE provider_id=$1 AND command_id=$2::uuid",
+    [providerId, commandId],
+  );
+  const row = previous.rows[0];
+  if (row === undefined) return null;
+  if (row.action !== action || row.request_fingerprint !== requestFingerprint) {
+    throw new StoreConflictError("The calendar command ID was already used with different input.");
+  }
+  return commandReceipt(row.result, true);
+}
+
+async function completeCalendarCommand(
+  client: PoolClient,
+  providerId: string,
+  commandId: string,
+  action: string,
+  requestFingerprint: string,
+  aggregateType: "schedule_rule" | "schedule_occurrence",
+  receipt: CalendarCommandReceipt,
+): Promise<CalendarCommandReceipt> {
+  const result = { aggregateId: receipt.aggregateId, version: receipt.version };
+  await client.query(
+    `INSERT INTO calendar_commands (provider_id, command_id, action, request_fingerprint, result)
+     VALUES ($1,$2::uuid,$3,$4,$5::jsonb)`,
+    [providerId, commandId, action, requestFingerprint, JSON.stringify(result)],
+  );
+  await client.query(
+    `INSERT INTO calendar_outbox_events
+       (provider_id, command_id, aggregate_type, aggregate_id, topic, payload)
+     VALUES ($1,$2::uuid,$3,$4,'calendar.changed',$5::jsonb)`,
+    [providerId, commandId, aggregateType, receipt.aggregateId, JSON.stringify({ providerId, aggregateType, aggregateId: receipt.aggregateId, action, version: receipt.version })],
+  );
+  return { ...receipt, repeated: false };
 }
 
 async function requireMembership(
@@ -165,6 +226,7 @@ function sourceDateFromOccurrence(ruleId: string, occurrenceId: string): string 
 function occurrenceForSource(
   rule: ScheduleRule,
   override: OccurrenceOverride | undefined,
+  salesState: OccurrenceSalesState | undefined,
   occurrenceId: string,
 ): Occurrence {
   const sourceDate = sourceDateFromOccurrence(rule.id, occurrenceId);
@@ -172,6 +234,7 @@ function occurrenceForSource(
   const occurrence = expandOccurrences({
     rule,
     overrides: override === undefined ? [] : [override],
+    salesStates: salesState === undefined ? [] : [salesState],
     fromDate: targetDate,
     toDate: targetDate,
   }).find((candidate) => candidate.id === occurrenceId);
@@ -311,15 +374,20 @@ export class ExperienceStore {
     productId: string,
     rawRule: ScheduleRule,
     expectedVersion: number | null,
-  ): Promise<StoredScheduleRule> {
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
     validateActor(actor);
     assertStoreIdentifier(productId, "productId");
     const rule = parseScheduleRule(rawRule);
+    validateCommandId(commandId);
     if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) {
       throw new StoreValidationError("expectedVersion must be null or a positive integer.");
     }
+    const requestFingerprint = JSON.stringify({ productId, rule, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "schedule_rule.save", requestFingerprint);
+      if (previous) return previous;
       const product = await client.query<DbRow>(
         "SELECT id FROM experience_products WHERE provider_id = $1 AND id = $2 FOR SHARE",
         [actor.providerId, productId],
@@ -377,7 +445,12 @@ export class ExperienceStore {
               RETURNING ${RULE_COLUMNS}`,
             values,
           );
-      return scheduleRuleFromRow(oneRow(result.rows, "schedule rule"));
+      const saved = scheduleRuleFromRow(oneRow(result.rows, "schedule rule"));
+      return completeCalendarCommand(client, actor.providerId, commandId, "schedule_rule.save", requestFingerprint, "schedule_rule", {
+        aggregateId: saved.rule.id,
+        version: saved.version,
+        repeated: false,
+      });
     });
   }
 
@@ -409,7 +482,18 @@ export class ExperienceStore {
           ORDER BY o.occurrence_id`,
         [actor.providerId, actor.nihoUserId, storedRule.rule.id],
       );
-      views.push({ rule: storedRule, overrides: overrides.rows.map(overrideFromRow) });
+      const salesStates = await this.#pool.query<DbRow>(
+        `SELECT ${SALES_STATE_COLUMNS}
+           FROM schedule_occurrence_sales_states s
+          WHERE s.provider_id=$1 AND s.rule_id=$3
+            AND EXISTS (
+              SELECT 1 FROM provider_memberships m
+               WHERE m.provider_id=s.provider_id AND m.niho_user_id=$2 AND m.active=true
+            )
+          ORDER BY s.occurrence_id`,
+        [actor.providerId, actor.nihoUserId, storedRule.rule.id],
+      );
+      views.push({ rule: storedRule, overrides: overrides.rows.map(overrideFromRow), salesStates: salesStates.rows.map(salesStateFromRow) });
     }
     return views;
   }
@@ -420,22 +504,29 @@ export class ExperienceStore {
     ruleId: string,
     rawOverride: OccurrenceOverride,
     expectedVersion: number | null,
-  ): Promise<StoredOccurrenceOverride> {
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
     validateActor(actor);
     assertStoreIdentifier(productId, "productId");
     const override = parseOccurrenceOverrides([rawOverride])[0];
     if (override === undefined) throw new StoreValidationError("override is required.");
+    if (override.kind !== "RESCHEDULE") throw new StoreValidationError("Only a reschedule may be stored as an occurrence override.");
+    validateCommandId(commandId);
     sourceDateFromOccurrence(ruleId, override.occurrenceId);
     if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) {
       throw new StoreValidationError("expectedVersion must be null or a positive integer.");
     }
+    const requestFingerprint = JSON.stringify({ productId, ruleId, override, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.reschedule", requestFingerprint);
+      if (previous) return previous;
       const ruleResult = await client.query<DbRow>(
-        "SELECT id FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 AND id=$3 FOR UPDATE",
+        `SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 AND id=$3 FOR UPDATE`,
         [actor.providerId, productId, ruleId],
       );
-      if (ruleResult.rows[0] === undefined) throw new StoreNotFoundError("schedule rule");
+      const storedRule = scheduleRuleFromRow(oneRow(ruleResult.rows, "schedule rule"));
+      occurrenceForSource(storedRule.rule, undefined, undefined, override.occurrenceId);
       await this.#assertOccurrenceHasNoReservations(client, actor.providerId, override.occurrenceId);
       const current = await client.query<DbRow>(
         `SELECT version FROM schedule_occurrence_overrides
@@ -447,9 +538,9 @@ export class ExperienceStore {
       if (currentRow !== undefined && Number(currentRow.version) !== expectedVersion) {
         throw new StoreConflictError("Occurrence override version mismatch.");
       }
-      const localDate = override.kind === "RESCHEDULE" ? override.localDate : null;
-      const localStartTime = override.kind === "RESCHEDULE" ? override.localStartTime : null;
-      const durationMinutes = override.kind === "RESCHEDULE" ? override.durationMinutes ?? null : null;
+      const localDate = override.localDate;
+      const localStartTime = override.localStartTime;
+      const durationMinutes = override.durationMinutes ?? null;
       const values = [actor.providerId, ruleId, override.occurrenceId, override.kind, localDate, localStartTime, durationMinutes];
       const result = currentRow === undefined
         ? await client.query<DbRow>(
@@ -467,7 +558,73 @@ export class ExperienceStore {
               RETURNING ${OVERRIDE_COLUMNS}`,
             values,
           );
-      return overrideFromRow(oneRow(result.rows, "occurrence override"));
+      const saved = overrideFromRow(oneRow(result.rows, "occurrence override"));
+      return completeCalendarCommand(client, actor.providerId, commandId, "occurrence.reschedule", requestFingerprint, "schedule_occurrence", {
+        aggregateId: saved.override.occurrenceId,
+        version: saved.version,
+        repeated: false,
+      });
+    });
+  }
+
+  async setOccurrenceSalesState(
+    actor: HostActor,
+    productId: string,
+    ruleId: string,
+    rawState: OccurrenceSalesState,
+    expectedVersion: number | null,
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
+    validateActor(actor);
+    assertStoreIdentifier(productId, "productId");
+    sourceDateFromOccurrence(ruleId, rawState.occurrenceId);
+    if (rawState.desiredState !== "OPEN" && rawState.desiredState !== "CLOSED") throw new StoreValidationError("desiredState is invalid.");
+    if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) throw new StoreValidationError("expectedVersion must be null or a positive integer.");
+    validateCommandId(commandId);
+    const requestFingerprint = JSON.stringify({ productId, ruleId, state: rawState, expectedVersion });
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.sales_state", requestFingerprint);
+      if (previous) return previous;
+      const rule = await client.query<DbRow>(
+        `SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 AND id=$3 FOR UPDATE`,
+        [actor.providerId, productId, ruleId],
+      );
+      const storedRule = scheduleRuleFromRow(oneRow(rule.rows, "schedule rule"));
+      const timing = await client.query<DbRow>(
+        `SELECT ${OVERRIDE_COLUMNS} FROM schedule_occurrence_overrides
+          WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3`,
+        [actor.providerId, ruleId, rawState.occurrenceId],
+      );
+      const storedOverride = timing.rows[0] === undefined ? undefined : overrideFromRow(timing.rows[0]).override;
+      occurrenceForSource(storedRule.rule, storedOverride, rawState, rawState.occurrenceId);
+      const current = await client.query<DbRow>(
+        `SELECT ${SALES_STATE_COLUMNS} FROM schedule_occurrence_sales_states
+          WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3 FOR UPDATE`,
+        [actor.providerId, ruleId, rawState.occurrenceId],
+      );
+      const currentRow = current.rows[0];
+      if (currentRow === undefined && expectedVersion !== null) throw new StoreConflictError("Occurrence sales state was not found.");
+      if (currentRow !== undefined && Number(currentRow.version) !== expectedVersion) throw new StoreConflictError("Occurrence sales state version mismatch.");
+      const savedResult = currentRow === undefined
+        ? await client.query<DbRow>(
+            `INSERT INTO schedule_occurrence_sales_states (provider_id, rule_id, occurrence_id, desired_state)
+             VALUES ($1,$2,$3,$4) RETURNING ${SALES_STATE_COLUMNS}`,
+            [actor.providerId, ruleId, rawState.occurrenceId, rawState.desiredState],
+          )
+        : await client.query<DbRow>(
+            `UPDATE schedule_occurrence_sales_states
+                SET desired_state=$4, version=version+1, updated_at=clock_timestamp()
+              WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3
+              RETURNING ${SALES_STATE_COLUMNS}`,
+            [actor.providerId, ruleId, rawState.occurrenceId, rawState.desiredState],
+          );
+      const saved = salesStateFromRow(oneRow(savedResult.rows, "occurrence sales state"));
+      return completeCalendarCommand(client, actor.providerId, commandId, "occurrence.sales_state", requestFingerprint, "schedule_occurrence", {
+        aggregateId: saved.state.occurrenceId,
+        version: saved.version,
+        repeated: false,
+      });
     });
   }
 
@@ -897,7 +1054,13 @@ export class ExperienceStore {
       [scope.providerId, ruleId, occurrenceId],
     );
     const storedOverride = overrideResult.rows[0] === undefined ? undefined : overrideFromRow(overrideResult.rows[0]).override;
-    const occurrence = occurrenceForSource(storedRule.rule, storedOverride, occurrenceId);
+    const salesStateResult = await client.query<DbRow>(
+      `SELECT ${SALES_STATE_COLUMNS} FROM schedule_occurrence_sales_states
+        WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3`,
+      [scope.providerId, ruleId, occurrenceId],
+    );
+    const storedSalesState = salesStateResult.rows[0] === undefined ? undefined : salesStateFromRow(salesStateResult.rows[0]).state;
+    const occurrence = occurrenceForSource(storedRule.rule, storedOverride, storedSalesState, occurrenceId);
     await client.query(
       `INSERT INTO schedule_occurrences (
          provider_id, occurrence_id, product_id, rule_id, source_local_date, local_date,

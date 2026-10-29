@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { DomainValidationError, assertLocalDate, expandOccurrences, localDateDistance, parseScheduleRule, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
@@ -13,6 +12,7 @@ import { config } from "@/lib/config";
 
 export const runtime = "nodejs";
 const MAX_BODY_BYTES = 16 * 1024;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function failure(error: unknown): Response {
   if (error instanceof StoreAccessDeniedError) return noStoreJson({ error: "forbidden" }, 403);
@@ -28,7 +28,7 @@ function preview(providerId: string, fromDate: string, toDate: string): HostCale
     capacity: 4, bookingCutoffMinutes: 120, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "WEEKLY" },
   };
   const occurrences = expandOccurrences({ rule, fromDate, toDate }).map((item) => ({ ...item, experienceId: "synthetic-experience", experienceTitle: "合成データの体験", availableSeats: 4, availabilityReason: "AVAILABLE" as const }));
-  return { preview: true, experiences: [{ id: "synthetic-experience", title: "合成データの体験" }], rules: [{ ...rule, experienceId: "synthetic-experience" }], occurrences, busyIntervals: [], google: { connected: false, canManage: false, blockingEnabled: false, syncStatus: "STALE" } };
+  return { preview: true, canEdit: false, experiences: [{ id: "synthetic-experience", title: "合成データの体験" }], rules: [{ ...rule, experienceId: "synthetic-experience" }], occurrences: occurrences.map((item) => ({ ...item, confirmedSeats: 0, heldSeats: 0 })), busyIntervals: [], google: { connected: false, canManage: false, blockingEnabled: false, syncStatus: "STALE" } };
 }
 
 export async function GET(request: NextRequest) {
@@ -50,7 +50,8 @@ export async function GET(request: NextRequest) {
       try { await syncGoogleBusy(pool, store, result.actor.providerId); } catch { /* The store marks this provider failed; availability stays closed. */ }
     }
     const data = await readHostCalendar(pool, store, result.actor, fromDate, toDate);
-    return noStoreJson({ ...data, google: { ...data.google, canManage: data.google.canManage && result.nihoRole === "OWNER" } });
+    const nihoCanEdit = result.nihoRole === "OWNER" || result.nihoRole === "EDITOR";
+    return noStoreJson({ ...data, canEdit: data.canEdit && nihoCanEdit, google: { ...data.google, canManage: data.google.canManage && result.nihoRole === "OWNER" } });
   } catch (error) {
     return failure(error);
   }
@@ -78,13 +79,14 @@ export async function POST(request: NextRequest) {
   const store = experienceStore();
   if (!pool || !store) return noStoreJson({ error: "calendar_not_configured" }, 503);
   try {
+    if (typeof body.commandId !== "string" || !UUID_V4.test(body.commandId)) return noStoreJson({ error: "invalid_command_id" }, 400);
     if (body.action === "createRule") {
       if (typeof body.experienceId !== "string" || !body.rule || typeof body.rule !== "object" || Array.isArray(body.rule)) return noStoreJson({ error: "invalid_body" }, 400);
-      const rule = parseScheduleRule({ ...body.rule, id: randomUUID() });
-      const saved = await store.saveScheduleRule(result.actor, body.experienceId, rule, null);
-      return noStoreJson({ id: saved.rule.id, version: saved.version }, 201);
+      const rule = parseScheduleRule({ ...body.rule, id: body.commandId });
+      const saved = await store.saveScheduleRule(result.actor, body.experienceId, rule, null, body.commandId);
+      return noStoreJson({ id: saved.aggregateId, version: saved.version }, saved.repeated ? 200 : 201);
     }
-    if (body.action === "closeOccurrence" || body.action === "rescheduleOccurrence") {
+    if (body.action === "setSalesState" || body.action === "rescheduleOccurrence") {
       if (typeof body.occurrenceId !== "string" || body.occurrenceId.length > 256) return noStoreJson({ error: "invalid_body" }, 400);
       if (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number) < 1)) return noStoreJson({ error: "invalid_body" }, 400);
       if (body.action === "rescheduleOccurrence" && (typeof body.localDate !== "string" || typeof body.localStartTime !== "string")) return noStoreJson({ error: "invalid_body" }, 400);
@@ -97,11 +99,27 @@ export async function POST(request: NextRequest) {
         [result.actor.providerId, result.actor.nihoUserId, ruleId],
       );
       if (!rule.rows[0]) return noStoreJson({ error: "not_found" }, 404);
-      const override = body.action === "closeOccurrence"
-        ? { kind: "CLOSE" as const, occurrenceId: body.occurrenceId }
-        : { kind: "RESCHEDULE" as const, occurrenceId: body.occurrenceId, localDate: body.localDate as string, localStartTime: body.localStartTime as string };
-      const saved = await store.saveOccurrenceOverride(result.actor, rule.rows[0].product_id, ruleId, override, body.expectedVersion as number | null);
-      return noStoreJson({ occurrenceId: saved.override.occurrenceId, version: saved.version });
+      if (body.action === "setSalesState") {
+        if (body.desiredState !== "OPEN" && body.desiredState !== "CLOSED") return noStoreJson({ error: "invalid_body" }, 400);
+        const saved = await store.setOccurrenceSalesState(
+          result.actor,
+          rule.rows[0].product_id,
+          ruleId,
+          { occurrenceId: body.occurrenceId, desiredState: body.desiredState },
+          body.expectedVersion as number | null,
+          body.commandId,
+        );
+        return noStoreJson({ occurrenceId: saved.aggregateId, version: saved.version });
+      }
+      const saved = await store.saveOccurrenceOverride(
+        result.actor,
+        rule.rows[0].product_id,
+        ruleId,
+        { kind: "RESCHEDULE", occurrenceId: body.occurrenceId, localDate: body.localDate as string, localStartTime: body.localStartTime as string },
+        body.expectedVersion as number | null,
+        body.commandId,
+      );
+      return noStoreJson({ occurrenceId: saved.aggregateId, version: saved.version });
     }
     return noStoreJson({ error: "invalid_action" }, 400);
   } catch (error) {

@@ -13,6 +13,7 @@ export {
   type Occurrence,
   type OccurrenceId,
   type OccurrenceOverride,
+  type OccurrenceSalesState,
   type Recurrence,
   type ScheduleRule,
   type UtcInstant,

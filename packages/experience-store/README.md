@@ -26,6 +26,20 @@ The migration does not change the current code-backed `/guides` pages. Editor au
 
 Schedule rules use optimistic versions. Booking hold creation derives the requested occurrence with `@niho-experience/experience-domain`, materializes it, and locks both its schedule rule and occurrence row. All hold creators therefore serialize on one occurrence before counting active holds and confirmed seats.
 
+`0006_calendar_commands_and_sales_state.sql` は旧 `CLOSE` 行をversion付き販売状態へ移し、日時変更を別に保持する。カレンダー保存・UUID command・専用 `calendar_outbox_events` を同じtransactionで記録する。同じcommandの再送は保存済みの結果を返し、異なる入力への使い回しは拒否する。通知outboxの処理位置とは独立している。
+
+### 0006の配備順序
+
+`0006` は停止を伴う移行とする。旧アプリは `schedule_occurrence_overrides` へ `CLOSE` を書くため、移行後に旧writerを使えない。また、旧readerは「日時を移動したうえで休止」を表現できない。
+
+1. カレンダー・予約の更新受付を停止し、旧revisionとworkerの処理終了を待つ。対象表を使用中のtransactionがないことを確認する。
+2. 復元確認済みのsnapshotまたはPITR復元点を確保する。顧客データをログへ出さず、旧 `CLOSE` と `RESCHEDULE` の件数を記録する。
+3. migration専用権限で `0006` を適用する。旧 `CLOSE` のoccurrence ID・version・作成更新時刻が販売状態表へ引き継がれ、日時表には `RESCHEDULE` だけが残ることを確認する。
+4. runtime roleへ新規3表の必要最小権限を付与する。販売状態表はSELECT/INSERT/UPDATE、command表はSELECT/INSERT、outbox表はINSERTとidentity sequenceの利用。将来のconsumerの読取・更新権限は別に設定する。
+5. 対応する新revisionだけを配備し、読取・追加・日時変更・休止・再開を確認してから受付を戻す。旧新writerを同時稼働させない。
+
+受付再開前の切戻しは、新revisionを停止し、移行前snapshotを復元して旧revisionへ戻す。新しいカレンダー更新・予約が発生した後は、アプリだけを戻してはいけない。受付を止め、新revisionで修正するか、command・outbox・日時・販売状態を照合する復旧計画を作る。後から入った予約を失うsnapshot上書きは行わない。
+
 ## Tests
 
 `npm test` runs tests that do not require a database. When `TEST_DATABASE_URL` points to a disposable PostgreSQL database, integration tests create and drop isolated schemas. They exercise concurrent capacity enforcement and guide draft privacy, optimistic revision conflicts, atomic snapshot/link switching, immutable history, unlisted/listed reads, permission rechecks, and publication stopping.

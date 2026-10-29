@@ -22,6 +22,7 @@ http://localhost:3000 を開く。フッター最下部の1行「Preview with sa
 | `npm test` | 単体テスト（契約・mock・表示ロジック） |
 | `npm run build` | 本番ビルド（`output: "standalone"`） |
 | `npm start` | ビルド済みのサーバーをコンテナと同じ方法で起動（`PORT`・`HOSTNAME` で待受先を指定） |
+| `npm -C apps/web run test:e2e:host-calendar` | カレンダー操作の対象E2E。ローカルは1台の開発サーバー、CIは既存のbuildを使う。320px・360px・PCで検証する |
 | `npm run test:e2e` | Playwright。先に `npm run build` が必要。初回は `npx -w @niho-experience/web playwright install chromium` |
 | `npm run check` | lint + typecheck + test + build |
 
