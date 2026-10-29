@@ -4,7 +4,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 
 const CONFIG_KEYS = ["cloudOrigin", "tokenFile", "privateDir", "accountProfiles", "browserExecutable", "mode"];
-const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots"];
+const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles"];
+const SITE_PROFILE_NAMESPACES = Object.freeze({ Viator: "viator", Jalan: "jalan" });
 
 async function assertPrivatePath(path, expectedType, mode) {
   const absolute = resolve(path);
@@ -12,6 +13,7 @@ async function assertPrivatePath(path, expectedType, mode) {
   if (expectedType === "file" ? !stat.isFile() : !stat.isDirectory()) throw new ContractError("INSECURE_PRIVATE_PATH");
   if ((stat.mode & 0o777) !== mode || stat.uid !== process.getuid()) throw new ContractError("INSECURE_PRIVATE_PATH");
   const canonical = await realpath(absolute);
+  if (canonical !== absolute) throw new ContractError("INSECURE_PRIVATE_PATH");
   return absolute;
 }
 
@@ -24,7 +26,8 @@ export async function loadConfig(configPath, options = {}) {
   } catch {
     throw new ContractError("INVALID_CONFIG");
   }
-  if (!exactKeys(raw, CONFIG_KEYS, OPTIONAL_KEYS) || !isPlainObject(raw.accountProfiles)) throw new ContractError("INVALID_CONFIG");
+  if (!exactKeys(raw, CONFIG_KEYS, OPTIONAL_KEYS) || !isPlainObject(raw.accountProfiles)
+    || (raw.siteAccountProfiles !== undefined && !isPlainObject(raw.siteAccountProfiles))) throw new ContractError("INVALID_CONFIG");
   const origin = new URL(raw.cloudOrigin);
   const localTest = options.allowLocalTestOrigin === true && origin.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname);
   if ((!localTest && origin.protocol !== "https:") || origin.username || origin.password || origin.search || origin.hash || origin.pathname !== "/") {
@@ -34,12 +37,31 @@ export async function loadConfig(configPath, options = {}) {
   const tokenFile = await realpath(await assertPrivatePath(raw.tokenFile, "file", 0o600));
   if (privateDir !== configDirectory || dirname(tokenFile) !== privateDir) throw new ContractError("INVALID_PRIVATE_LAYOUT");
   const profiles = {};
+  const profilesRoot = await realpath(await assertPrivatePath(join(privateDir, "profiles"), "directory", 0o700));
   for (const [accountId, profilePath] of Object.entries(raw.accountProfiles)) {
     if (!/^\d+$/.test(accountId) || typeof profilePath !== "string") throw new ContractError("INVALID_CONFIG");
     const expected = resolve(privateDir, "profiles", accountId);
-    const candidate = join(await realpath(dirname(resolve(profilePath))), basename(profilePath));
+    const parent = await assertPrivatePath(dirname(resolve(profilePath)), "directory", 0o700);
+    const candidate = join(parent, basename(profilePath));
     if (candidate !== expected) throw new ContractError("INVALID_PROFILE_MAPPING");
     profiles[accountId] = expected;
+  }
+  const siteAccountProfiles = {};
+  for (const [site, mapping] of Object.entries(raw.siteAccountProfiles ?? {})) {
+    const namespace = SITE_PROFILE_NAMESPACES[site];
+    if (!namespace || !isPlainObject(mapping)) throw new ContractError("INVALID_CONFIG");
+    const namespaceRoot = await realpath(await assertPrivatePath(join(profilesRoot, namespace), "directory", 0o700));
+    const entries = {};
+    for (const [accountId, profilePath] of Object.entries(mapping)) {
+      const accountValid = site === "Viator" ? /^\d+$/.test(accountId) : /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(accountId);
+      if (!accountValid || typeof profilePath !== "string") throw new ContractError("INVALID_CONFIG");
+      const expected = resolve(namespaceRoot, accountId);
+      const parent = await assertPrivatePath(dirname(resolve(profilePath)), "directory", 0o700);
+      const candidate = join(parent, basename(profilePath));
+      if (candidate !== expected) throw new ContractError("INVALID_PROFILE_MAPPING");
+      entries[accountId] = expected;
+    }
+    siteAccountProfiles[site] = Object.freeze(entries);
   }
   if (typeof raw.browserExecutable !== "string" || raw.browserExecutable.length < 1
     || !["deterministic", "claude-code"].includes(raw.mode)
@@ -53,11 +75,20 @@ export async function loadConfig(configPath, options = {}) {
     tokenFile,
     privateDir,
     accountProfiles: Object.freeze(profiles),
+    siteAccountProfiles: Object.freeze(siteAccountProfiles),
     browserExecutable: resolve(raw.browserExecutable),
     mode: raw.mode,
     ...(raw.claudeExecutable ? { claudeExecutable: resolve(raw.claudeExecutable) } : {}),
     debugScreenshots: raw.debugScreenshots === true,
   });
+}
+
+export function selectAccountProfile(config, target) {
+  const profile = target.site === "GetYourGuide"
+    ? config.accountProfiles?.[target.externalAccountId]
+    : config.siteAccountProfiles?.[target.site]?.[target.externalAccountId];
+  if (!profile) throw new ContractError("PROFILE_MAPPING_MISSING");
+  return profile;
 }
 
 export async function readBearerToken(tokenFile) {

@@ -3,6 +3,13 @@ export const CDN_ORIGIN = "https://cdn.getyourguide.com";
 export const ADAPTER = "gyg-browser";
 export const ADAPTER_VERSION = "1";
 export const SITE = "GetYourGuide";
+export const VIATOR_ORIGIN = "https://supplier.viator.com";
+export const JALAN_ORIGIN = "https://activityboard.jp";
+export const ADAPTER_REGISTRY = Object.freeze({
+  GetYourGuide: Object.freeze({ site: "GetYourGuide", adapter: "gyg-browser", adapterVersion: "1", profileNamespace: null }),
+  Viator: Object.freeze({ site: "Viator", adapter: "viator-browser", adapterVersion: "1", profileNamespace: "viator" }),
+  Jalan: Object.freeze({ site: "Jalan", adapter: "jalan-browser", adapterVersion: "1", profileNamespace: "jalan" }),
+});
 export const CONNECTION_MODE = "BROWSER";
 export const TIME_ZONE = "Asia/Tokyo";
 export const MAX_JOB_MS = 180_000;

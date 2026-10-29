@@ -8,6 +8,7 @@ if (packageJson.type !== "module" || packageJson.engines.node !== "24.x" || pack
   throw new Error("package metadata drift");
 }
 await Promise.all([
-  "src/index.mjs", "src/supervisor.mjs", "src/gyg-driver.mjs", "src/network-guard.mjs", "src/worker.mjs",
+  "src/index.mjs", "src/supervisor.mjs", "src/driver-registry.mjs", "src/gyg-driver.mjs", "src/viator-driver.mjs", "src/jalan-driver.mjs",
+  "src/network-guard.mjs", "src/viator-network-guard.mjs", "src/jalan-network-guard.mjs", "src/worker.mjs",
   "src/mcp-stdio.mjs", "src/healthcheck.mjs",
 ].map((path) => import(join(root, path))));

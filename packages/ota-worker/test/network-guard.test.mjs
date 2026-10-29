@@ -64,6 +64,19 @@ test("write permit is one-shot and performs interception-time preflight", async 
   assert.equal(guard.endUiAction().writes, 1);
 });
 
+test("a new UI permit cannot authorize a second GYG business write in one job", async () => {
+  const guard = createNetworkGuard({ job, cloud: { async preflight() {} }, supplierOrigin: "http://127.0.0.1:1234", cdnOrigin: "http://127.0.0.1:1234" });
+  const calls = [];
+  guard.beginUiAction();
+  await guard.handle(graphqlRoute(validBody(), calls));
+  assert.equal(guard.endUiAction().writes, 1);
+  guard.beginUiAction();
+  await guard.handle(graphqlRoute(validBody(), calls));
+  assert.throws(() => guard.endUiAction(), (error) => error.code === "WRITE_REFUSED");
+  assert.deepEqual(calls, ["continue", "abort"]);
+  assert.equal(guard.writes, 1);
+});
+
 test("concurrent exact requests reserve one permit and a frozen preflight never writes", async () => {
   let release;
   const cloud = { preflight: () => new Promise((resolve) => { release = resolve; }) };

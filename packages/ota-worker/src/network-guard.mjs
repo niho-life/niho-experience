@@ -173,6 +173,7 @@ export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGI
     // Re-requests reaching this interceptor are blocked; Chromium can still retry
     // below this layer. Only idempotent Boolean SET is supported, then read back.
     if (permit.used) { refused += 1; return route.abort("blockedbyclient"); }
+    if (writes >= 1) { refused += 1; fatalWrite = new ContractError("WRITE_REFUSED"); return route.abort("blockedbyclient"); }
     const reservedPermit = permit;
     reservedPermit.used = true;
     try {
