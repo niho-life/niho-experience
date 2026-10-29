@@ -150,6 +150,8 @@ export function AdminLeaveGuardProvider({ children }: { children: ReactNode }) {
     };
     const onSubmit = (event: SubmitEvent) => {
       if ((!protectionRef.current.dirty && !protectionRef.current.saving) || leaving.current || event.defaultPrevented || !(event.target instanceof HTMLFormElement)) return;
+      // Inline React saves stay on this page; navigation/logout forms still use the leave guard.
+      if (event.target.hasAttribute("data-admin-inline-save") && !event.target.hasAttribute("action")) return;
       event.preventDefault();
       event.stopPropagation();
       ask({ kind: "form", form: event.target, submitter: event.submitter });

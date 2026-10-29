@@ -6,7 +6,7 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /host-calendar\.spec\.ts/,
+  testMatch: /(?:host-calendar|admin-channel-workspace)\.spec\.ts/,
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   workers: 1,
@@ -24,7 +24,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     env: {
       HOSTNAME: "127.0.0.1", PORT: String(PORT), SITE_URL: baseURL, NEXT_TELEMETRY_DISABLED: "1",
-      EXPERIENCE_API_MODE: "mock", HOST_CONSOLE_ENABLED: "true", SITE_INDEXING: "block",
+      EXPERIENCE_API_MODE: "mock", HOST_CONSOLE_ENABLED: "true", SITE_INDEXING: "block", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", EXPERIENCE_CHANNEL_WORKSPACE_PREVIEW_ENABLED: "true",
       NIHO_HOST_START_URL: "https://niho.life/experiences/provider",
     },
   },

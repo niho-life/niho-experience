@@ -55,4 +55,19 @@ describe("Admin channel BFF", () => {
     expect(JSON.stringify(data)).not.toContain("must-not-leak");
     expect(mocks.runtime!.listExternalAccounts!).toHaveBeenCalledWith({ nihoUserId: "verified-admin" }, "provider-a");
   });
+
+  it("updates the account target explicitly and rejects private profile input", async () => {
+    const account = {
+      id: "account-a", providerId: "provider-a", site: "Airbnb", externalAccountId: "external-b", displayName: "Account",
+      operatingModel: 2, active: false, version: 2, quarantined: false, createdAtUtc: "2099-01-01T00:00:00.000Z", updatedAtUtc: "2099-01-01T00:00:00.000Z",
+    };
+    mocks.runtime!.updateExternalAccount = vi.fn().mockResolvedValue(account);
+    const input = { id: "account-a", providerId: "provider-a", site: "Airbnb", externalAccountId: "external-b", displayName: "Account", operatingModel: 2, active: false };
+    const response = await POST(request({ action: "updateAccount", commandId: "00000000-0000-4000-8000-000000000235", accountId: "account-a", expectedVersion: 1, account: input }));
+    expect(response.status).toBe(200);
+    expect(mocks.runtime!.updateExternalAccount).toHaveBeenCalledWith({ nihoUserId: "verified-admin" }, "account-a", {
+      site: "Airbnb", externalAccountId: "external-b", displayName: "Account", operatingModel: 2, active: false,
+    }, 1, "00000000-0000-4000-8000-000000000235");
+    expect((await POST(request({ action: "createAccount", commandId: "00000000-0000-4000-8000-000000000236", account: { ...input, privateProfileRef: "profile-secret" } }))).status).toBe(400);
+  });
 });

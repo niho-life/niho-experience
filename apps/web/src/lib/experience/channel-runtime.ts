@@ -6,6 +6,8 @@ import { channelRuntime } from "./store-server";
 
 export const CHANNEL_BODY_LIMIT = 16 * 1024;
 export const channelManagerEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_MANAGER_ENABLED === "true";
+/** Synthetic UI only. This never opens channel/inventory mutation routes. */
+export const channelWorkspacePreviewEnabled = () => config.apiMode === "mock" && config.adminSupportConsoleEnabled && process.env.EXPERIENCE_CHANNEL_WORKSPACE_PREVIEW_ENABLED === "true";
 export const channelWorkerEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED === "true";
 
 export function channelJson(body: unknown, status = 200): Response {

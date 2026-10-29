@@ -52,11 +52,29 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
         id: "account-b", providerId: "provider-b", site: "Airbnb", externalAccountId: "external-a", displayName: "Other tenant",
         operatingModel: 1,
       }, command("3")));
-      const listing = await runtime.createListing(admin, {
+      let listing = await runtime.createListing(admin, {
         id: "listing-a", providerId: "provider-a", accountId: "account-a", productId: "tea", externalProductId: "external-tea",
         externalOptionId: "morning", adapter: "browser-v1", adapterVersion: "1", connectionMode: "BROWSER",
         capabilities: { canObserve: true, canClose: true, canOpen: true }, active: true,
       }, command("4"));
+      const movedAccount = await runtime.updateExternalAccount(admin, account.id, {
+        site: account.site, externalAccountId: "external-a-moved", displayName: account.displayName,
+        operatingModel: account.operatingModel, active: account.active,
+        ...(account.delegatedUntilUtc === undefined ? {} : { delegatedUntilUtc: account.delegatedUntilUtc }),
+      }, account.version, command("40"));
+      assert.equal(movedAccount.externalAccountId, "external-a-moved");
+      assert.equal("privateProfileRef" in movedAccount, false);
+      assert.equal((await pool.query("SELECT private_profile_ref FROM channel_external_accounts WHERE id='account-a'")).rows[0]?.private_profile_ref, "profile-ref-synthetic");
+      const unverifiedListing = (await runtime.listListings(admin, "provider-a"))[0]!;
+      assert.equal(unverifiedListing.active, false);
+      assert.deepEqual(unverifiedListing.capabilities, { canObserve: false, canClose: false, canOpen: false, canCreate: false });
+      listing = await runtime.updateListing(admin, unverifiedListing.id, {
+        externalProductId: unverifiedListing.externalProductId,
+        ...(unverifiedListing.externalOptionId === undefined ? {} : { externalOptionId: unverifiedListing.externalOptionId }),
+        adapter: unverifiedListing.adapter, adapterVersion: unverifiedListing.adapterVersion,
+        connectionMode: unverifiedListing.connectionMode,
+        capabilities: { canObserve: true, canClose: true, canOpen: true }, active: true,
+      }, unverifiedListing.mappingVersion, command("41"));
       await assert.rejects(() => runtime.createListing(admin, {
         id: "cross-tenant", providerId: "provider-b", accountId: "account-a", productId: "tea", externalProductId: "bad",
         adapter: "browser-v1", adapterVersion: "1", connectionMode: "BROWSER",
