@@ -52,6 +52,32 @@ describe("editor guide API input", () => {
       expectedRevision: 3,
       visibility: "PUBLIC",
     })).toBeNull();
+    expect(parseGuidePatchBody({
+      slug: "synthetic-walk",
+      title: "Synthetic walk",
+      description: "",
+      content: { markdown: "" },
+      cover: {
+        assetId: "00000000-0000-4000-8000-000000000215",
+        alt: "Synthetic cover",
+        credit: "Synthetic fixture",
+        webConfirmed: true,
+      },
+      expectedRevision: 3,
+    })?.draft.cover).toEqual({
+      assetId: "00000000-0000-4000-8000-000000000215",
+      alt: "Synthetic cover",
+      credit: "Synthetic fixture",
+      webConfirmed: true,
+    });
+    expect(parseGuidePatchBody({
+      slug: "synthetic-walk",
+      title: "Synthetic walk",
+      description: "",
+      content: { markdown: "" },
+      cover: { assetId: "x", alt: "x", credit: "x", webConfirmed: true, objectKey: "private" },
+      expectedRevision: 3,
+    })).toBeNull();
   });
 
   it("accepts only exact positive-revision publication commands", () => {

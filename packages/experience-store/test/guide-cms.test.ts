@@ -6,6 +6,18 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
+  it("adds private media assets and immutable publication snapshots without editing the CMS base migration", async () => {
+    const sql = await readFile(new URL("../migrations/0009_guide_media.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /CREATE TABLE guide_media_assets/);
+    assert.match(sql, /state IN \('UPLOADING', 'READY', 'REVOKED'\)/);
+    assert.match(sql, /CREATE TABLE guide_publication_media/);
+    assert.match(sql, /guide publication media snapshots are immutable/);
+    assert.match(sql, /cover_web_confirmed/);
+    assert.doesNotMatch(sql, /https?:\/\/|signed_url|gcs_url/i);
+  });
+
   it("stores article-link invitation consent without private identity fields", async () => {
     const sql = await readFile(new URL("../migrations/0008_guide_link_invitations.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

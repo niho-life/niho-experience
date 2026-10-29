@@ -16,6 +16,7 @@ const migrations = [
   "0006_calendar_commands_and_sales_state.sql",
   "0007_channel_runtime.sql",
   "0008_guide_link_invitations.sql",
+  "0009_guide_media.sql",
 ] as const;
 
 const content = {

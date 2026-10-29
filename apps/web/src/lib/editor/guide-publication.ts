@@ -9,7 +9,7 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
-export type GuidePublicationProblemField = "title" | "body" | "category" | "description" | "author";
+export type GuidePublicationProblemField = "title" | "body" | "category" | "description" | "author" | "cover";
 
 export type GuidePublicationProblem = {
   readonly field: GuidePublicationProblemField;
@@ -97,6 +97,10 @@ export function guidePublicationProblems(
     const authorText = `${author.name}\n${author.role}\n${author.bio}`;
     if (hasConfirmMarker(authorText)) addProblem(problems, "author", "著者情報の確認待ちを解消してください。");
     if (hasSamplePlaceholder(authorText)) addProblem(problems, "author", "著者情報のサンプル用参照を削除してください。");
+  }
+
+  if (article.cover && !article.cover.webConfirmed) {
+    addProblem(problems, "cover", "カバー写真のWeb掲載許諾を確認してください。");
   }
 
   if (!markdown.trim()) {

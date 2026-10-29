@@ -1,4 +1,4 @@
-/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-location-assign-relative-destination -- Editor navigation must be a full document load so beforeunload can protect drafts. */
+/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-location-assign-relative-destination, @next/next/no-img-element -- Editor navigation must be a full document load; private cover images are served by an authenticated no-store route. */
 "use client";
 
 import type { JSONContent } from "@tiptap/core";
@@ -11,6 +11,7 @@ import {
   EditorApiError,
   type EditorGuideArticle,
   type GuideCategoriesResponse,
+  type GuideCoverUploadResponse,
   type GuideMutationResponse,
   type GuidePublicationPreflightResponse,
   type GuideResponse,
@@ -40,6 +41,10 @@ type FormState = {
   authorRole: string;
   authorBio: string;
   checkedOn: string;
+  coverAssetId: string;
+  coverAlt: string;
+  coverCredit: string;
+  coverWebConfirmed: boolean;
 };
 
 type SaveMessage = {
@@ -62,6 +67,7 @@ type PublicationState =
 
 const emptyForm: FormState = {
   title: "", slug: "", description: "", categorySlug: "", authorName: "", authorRole: "", authorBio: "", checkedOn: "",
+  coverAssetId: "", coverAlt: "", coverCredit: "", coverWebConfirmed: false,
 };
 const emptyDocument: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
 
@@ -75,6 +81,10 @@ function formFromGuide(guide: EditorGuideArticle): FormState {
     authorRole: guide.content.author?.role ?? "",
     authorBio: guide.content.author?.bio ?? "",
     checkedOn: guide.content.checkedOn ?? "",
+    coverAssetId: guide.cover?.assetId ?? "",
+    coverAlt: guide.cover?.alt ?? "",
+    coverCredit: guide.cover?.credit ?? "",
+    coverWebConfirmed: guide.cover?.webConfirmed ?? false,
   };
 }
 
@@ -136,9 +146,14 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const [publicationState, setPublicationState] = useState<PublicationState | null>(null);
   const [publicationVisibility, setPublicationVisibility] = useState<GuidePublicationVisibility>("PUBLIC");
   const [publicationBusy, setPublicationBusy] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverOperationCompleted, setCoverOperationCompleted] = useState(0);
+  const [coverMessage, setCoverMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [coverPreviewVersion, setCoverPreviewVersion] = useState(0);
   const navigationGuardRef = useRef(false);
   const savingRef = useRef(false);
   const publicationBusyRef = useRef(false);
+  const coverBusyRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -203,8 +218,12 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   }, [load]);
 
   useEffect(() => {
-    navigationGuardRef.current = dirty || saving || publicationBusy;
-  }, [dirty, publicationBusy, saving]);
+    navigationGuardRef.current = dirty || saving || publicationBusy || coverBusy;
+  }, [coverBusy, dirty, publicationBusy, saving]);
+
+  useEffect(() => {
+    if (!coverBusy) coverBusyRef.current = false;
+  }, [coverBusy, coverOperationCompleted]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -260,7 +279,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const save = async (expectedRevisionOverride?: number) => {
-    if (savingRef.current || (conflict && expectedRevisionOverride === undefined) || unsupported) return;
+    if (savingRef.current || publicationBusyRef.current || coverBusyRef.current || (conflict && expectedRevisionOverride === undefined) || unsupported) return;
     setSaveMessage(null);
     if (!form.title.trim()) {
       setSaveMessage({ text: "タイトルを入力してください。", error: true });
@@ -290,6 +309,19 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       ...(authorValues.every(Boolean) ? { author: { name: authorValues[0]!, role: authorValues[1]!, bio: authorValues[2]! } } : {}),
       ...(form.checkedOn ? { checkedOn: form.checkedOn } : {}),
     };
+    const cover = form.coverAssetId
+      ? {
+          assetId: form.coverAssetId,
+          alt: form.coverAlt.trim(),
+          credit: form.coverCredit.trim(),
+          webConfirmed: form.coverWebConfirmed,
+        }
+      : null;
+    if (cover && (!cover.alt || !cover.credit)) {
+      setSaveMessage({ text: "カバー写真の英語altと公開クレジットを入力してください。", error: true });
+      window.document.getElementById(!cover.alt ? "guide-cover-alt" : "guide-cover-credit")?.focus();
+      return;
+    }
 
     savingRef.current = true;
     navigationGuardRef.current = true;
@@ -325,6 +357,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
             description: form.description,
             ...(form.categorySlug ? { categorySlug: form.categorySlug } : {}),
             content,
+            cover,
             expectedRevision,
           }),
         });
@@ -336,6 +369,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
           description: form.description,
           ...(form.categorySlug ? { categorySlug: form.categorySlug } : { categorySlug: undefined }),
           content,
+          ...(cover ? { cover } : { cover: undefined }),
           revision: response.revision,
         } : current);
         setDirty(false);
@@ -359,12 +393,80 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     }
   };
 
+  const uploadCover = async (file: File | undefined) => {
+    if (!articleId || !file || coverBusyRef.current || savingRef.current || publicationBusyRef.current) return;
+    coverBusyRef.current = true;
+    setCoverBusy(true);
+    setCoverMessage(null);
+    navigationGuardRef.current = true;
+    try {
+      const response = await editorApiRequest<GuideCoverUploadResponse>(
+        `/editor/api/guides/${encodeURIComponent(articleId)}/cover`,
+        { method: "POST", headers: { "content-type": file.type }, body: file },
+      );
+      setForm((current) => ({
+        ...current,
+        coverAssetId: response.asset.id,
+        coverAlt: "",
+        coverCredit: "",
+        coverWebConfirmed: false,
+      }));
+      setCoverPreviewVersion((version) => version + 1);
+      setCoverMessage({ text: "写真を処理しました。alt・クレジット・掲載確認を入力して保存してください。" });
+      markDirty();
+    } catch (error) {
+      const result = errorMessage(error, mode);
+      setCoverMessage({
+        text: error instanceof EditorApiError && error.kind === "invalid"
+          ? "JPEGまたはPNGを選んでください（10MB・16MPまで）。HEICには対応していません。"
+          : result.text,
+        error: true,
+      });
+    } finally {
+      setCoverBusy(false);
+      setCoverOperationCompleted((count) => count + 1);
+    }
+  };
+
+  const revokeCover = async () => {
+    if (!articleId || !form.coverAssetId || revision === null || coverBusyRef.current || savingRef.current || publicationBusyRef.current) return;
+    if (!window.confirm("この写真の掲載権利を取り消しますか？公開中の版からも直ちに外れます。")) return;
+    coverBusyRef.current = true;
+    setCoverBusy(true);
+    setCoverMessage(null);
+    navigationGuardRef.current = true;
+    try {
+      const response = await editorApiRequest<GuideResponse>(
+        `/editor/api/guides/${encodeURIComponent(articleId)}/cover/assets/${encodeURIComponent(form.coverAssetId)}`,
+        { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedRevision: revision }) },
+      );
+      setSavedGuide(response.guide);
+      setRevision(response.guide.revision);
+      setForm((current) => ({
+        ...current,
+        coverAssetId: "",
+        coverAlt: "",
+        coverCredit: "",
+        coverWebConfirmed: false,
+      }));
+      setPublicationState(null);
+      setCoverMessage({ text: "写真の掲載権利を取り消しました。" });
+    } catch (error) {
+      if (error instanceof EditorApiError && error.kind === "conflict") void fetchLatestForConflict();
+      setCoverMessage({ text: errorMessage(error, mode).text, error: true });
+    } finally {
+      setCoverBusy(false);
+      setCoverOperationCompleted((count) => count + 1);
+    }
+  };
+
   const focusPublicationField = (field: GuidePublicationProblemField) => {
     const idByField: Partial<Record<GuidePublicationProblemField, string>> = {
       title: "guide-title",
       category: "guide-category",
       description: "guide-description",
       author: "guide-author-name",
+      cover: "guide-cover-alt",
     };
     const target = field === "body"
       ? window.document.querySelector<HTMLElement>(".guide-prosemirror")
@@ -374,7 +476,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const loadPublicationPreflight = async (message?: string) => {
-    if (!articleId || revision === null) return;
+    if (!articleId || revision === null || coverBusyRef.current) return;
     setPublicationOpen(true);
     if (dirty) {
       setPublicationState({ status: "error", text: "プレビューまたは公開の前に、変更を保存してください。" });
@@ -413,6 +515,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       || revision === null
       || dirty
       || publicationBusyRef.current
+      || coverBusyRef.current
       || publicationState?.status !== "ready"
       || publicationState.problems.length > 0
     ) return;
@@ -452,7 +555,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const stopPublication = async () => {
-    if (!articleId || revision === null || dirty || publicationBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
+    if (!articleId || revision === null || dirty || publicationBusyRef.current || coverBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
     if (!window.confirm("この記事の公開を停止しますか？公開済みの版は履歴に残ります。")) return;
     publicationBusyRef.current = true;
     navigationGuardRef.current = true;
@@ -481,12 +584,12 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
 
   const conflicted = conflict !== null;
   const saveLabel = mode === "new" ? (saving ? "作成中" : "下書きを作成") : (saving ? "保存中" : "保存");
-  const saveDisabled = saving || publicationBusy || conflicted || (mode === "new" && subjects.length === 0);
+  const saveDisabled = saving || publicationBusy || coverBusy || conflicted || (mode === "new" && subjects.length === 0);
   const publicationNeedsSave = guidePublicationNeedsSave(dirty, revision);
   const publicationStatus = savedGuide
     ? guidePublicationStatusLabel(savedGuide.status, savedGuide.currentPublication?.visibility)
     : "未公開";
-  const editorBusy = saving || publicationBusy;
+  const editorBusy = saving || publicationBusy || coverBusy;
 
   return (
     <>
@@ -568,6 +671,53 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
               <label htmlFor="guide-description">説明（英語） <span>{form.description.length}/160</span>
                 <textarea id="guide-description" disabled={editorBusy} rows={4} maxLength={160} value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
               </label>
+
+              {mode === "edit" && (
+                <div className="editor-settings-section editor-cover-section">
+                  <h3>カバー写真</h3>
+                  {form.coverAssetId && (
+                    <img
+                      key={coverPreviewVersion}
+                      className="editor-cover-preview"
+                      src={`/editor/api/guides/${encodeURIComponent(articleId!)}/cover/assets/${encodeURIComponent(form.coverAssetId)}`}
+                      alt="編集中のカバー写真"
+                    />
+                  )}
+                  <label className="editor-cover-upload">JPEG / PNG（10MBまで）
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      disabled={editorBusy}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        void uploadCover(file);
+                      }}
+                    />
+                  </label>
+                  {form.coverAssetId && (
+                    <>
+                      <label htmlFor="guide-cover-alt">英語alt
+                        <input id="guide-cover-alt" maxLength={300} disabled={editorBusy} value={form.coverAlt} onChange={(event) => updateForm("coverAlt", event.target.value)} />
+                      </label>
+                      <label htmlFor="guide-cover-credit">公開クレジット
+                        <input id="guide-cover-credit" maxLength={300} disabled={editorBusy} value={form.coverCredit} onChange={(event) => updateForm("coverCredit", event.target.value)} />
+                      </label>
+                      <label className="editor-cover-confirm">
+                        <input type="checkbox" disabled={editorBusy} checked={form.coverWebConfirmed} onChange={(event) => updateForm("coverWebConfirmed", event.target.checked)} />
+                        Webサイトへの掲載許諾を確認済み
+                      </label>
+                      <p className="editor-cover-note">SNS・OG画像には使用しません。</p>
+                      <button type="button" className="editor-cover-revoke" disabled={editorBusy} onClick={() => {
+                        setForm((current) => ({ ...current, coverAssetId: "", coverAlt: "", coverCredit: "", coverWebConfirmed: false }));
+                        markDirty();
+                      }}>記事から外す</button>
+                      <button type="button" className="editor-cover-revoke" disabled={editorBusy} onClick={() => void revokeCover()}>掲載権利を取り消す</button>
+                    </>
+                  )}
+                  {coverMessage && <p className={coverMessage.error ? "editor-cover-message editor-cover-error" : "editor-cover-message"} role={coverMessage.error ? "alert" : "status"}>{coverMessage.text}</p>}
+                </div>
+              )}
 
               <div className="editor-settings-section">
                 <h3>著者</h3>

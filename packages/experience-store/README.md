@@ -14,6 +14,7 @@ PostgreSQL is the source of truth for provider-scoped experience products, recur
 - Provider article-link invitations are separate from `provider_memberships`. Only a current provider `OWNER` can invite or revoke, only the target with a current writer grant can accept, and acceptance activates the existing `guide_product_link_memberships` projection. Re-invitation after decline/revoke advances a generation so stale acceptance requests cannot reactivate access.
 - The future HTTP caller must obtain the stable writer ID through the separately deployed NIHO identity/display contract (#19462). This package is not a substitute for that resolution flow, and no browser user-ID input shortcut should be added.
 - `getArticle` is the authenticated creator-only draft/preview read. Public reads select only a sealed `current_publication_id`; they never select draft columns. `UNLISTED` is still public to anyone who knows its slug and must be emitted as `noindex` by the later SSR layer. It is excluded from `listPublicArticles`. Stopping publication clears only the current pointer and preserves prior immutable snapshots.
+- Guide cover assets are creator/article-scoped opaque UUIDs. Publication locks and rechecks the current `READY` asset and Web permission, then snapshots only alt/credit/asset ID. Public reads dynamically omit that snapshot after the asset becomes `REVOKED`.
 - Guide `content` is a selected JSON object containing Markdown and public author metadata, never rendered HTML. This package does not render it. The editor/API must run the full Markdown, fact, image-rights, and related-record inspection before calling `commitPublication`; that server inspection and all HTTP exposure are intentionally outside this migration.
 
 ## Migrations
@@ -24,9 +25,11 @@ Apply `migrations/*.sql` in lexical order with the deployment migration identity
 
 `0008_guide_link_invitations.sql` additively creates the provider/writer consent state machine after calendar `0006` and channel `0007`. Invitation transitions serialize on the provider/writer pair, then lock invitation, owner, writer-grant, and projection rows in that order. Public link reads and `listLinkableProducts` require both an active accepted link projection and a current writer grant, so either provider revocation or writer-grant loss hides links without removing the public article body.
 
+`0009_guide_media.sql` adds private cover assets, draft cover fields, and immutable publication-media snapshots. Asset identity/object location cannot change; rights can only advance from `UPLOADING` to `READY`/`REVOKED`, or from `READY` to `REVOKED`. Storage bytes remain outside PostgreSQL and object keys never enter browser DTOs.
+
 The code-backed `kamakura-after-4-pm` slug is reserved at the database boundary until #189 imports that article. The import must delete its reservation and create the matching database article in one transaction before switching public readers.
 
-The migration does not change the current code-backed `/guides` pages. Editor authentication, HTTP invitation routes, category admin APIs, upload storage, complete pre-publication inspection, HTTP contracts, SSR/SEO/sitemap reads, cache invalidation, and migration of existing code-backed guides remain follow-up work.
+The migrations do not change the current code-backed `/guides` pages. HTTP invitation routes, category admin APIs, SSR/SEO/sitemap reads, cache invalidation, and migration of existing code-backed guides remain follow-up work.
 
 Schedule rules use optimistic versions. Booking hold creation derives the requested occurrence with `@niho-experience/experience-domain`, materializes it, and locks both its schedule rule and occurrence row. All hold creators therefore serialize on one occurrence before counting active holds and confirmed seats.
 

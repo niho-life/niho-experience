@@ -2,6 +2,7 @@ import type {
   GuideArticleStatus,
   GuideCategory,
   GuideContent,
+  GuideDraftCover,
   GuidePublicationVisibility,
   GuideSubject,
 } from "@niho-experience/experience-store";
@@ -16,6 +17,7 @@ export interface EditorGuideArticle {
   readonly description: string;
   readonly categorySlug?: string;
   readonly content: GuideContent;
+  readonly cover?: GuideDraftCover;
   readonly status: GuideArticleStatus;
   readonly revision: number;
   readonly currentPublication?: {
@@ -66,7 +68,9 @@ function responseError(response: Response): EditorApiError {
   if (response.status === 403) return new EditorApiError("forbidden", 403);
   if (response.status === 409) return new EditorApiError("conflict", 409);
   if (response.status === 404) return new EditorApiError("not-found", 404);
-  if (response.status === 400) return new EditorApiError("invalid", 400);
+  if (response.status === 400 || response.status === 413 || response.status === 415) {
+    return new EditorApiError("invalid", response.status);
+  }
   return new EditorApiError("unavailable", response.status);
 }
 
@@ -105,6 +109,9 @@ export type GuideResponse = { readonly guide: EditorGuideArticle };
 export type GuideCategoriesResponse = { readonly categories: readonly GuideCategory[] };
 export type GuideSubjectsResponse = { readonly subjects: readonly GuideSubject[] };
 export type GuideMutationResponse = { readonly id: string; readonly revision: number };
+export type GuideCoverUploadResponse = {
+  readonly asset: { readonly id: string; readonly width: number; readonly height: number };
+};
 export type GuidePublicationPreflightResponse = {
   readonly guide: EditorGuideArticle;
   readonly problems: readonly GuidePublicationProblem[];

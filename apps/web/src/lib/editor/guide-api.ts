@@ -3,6 +3,7 @@ import type {
   GuideArticleRecord,
   GuideAuthor,
   GuideContent,
+  GuideDraftCover,
   GuideSubject,
   SaveGuideDraftInput,
 } from "@niho-experience/experience-store";
@@ -56,6 +57,23 @@ function parseSubject(value: unknown): GuideSubject | null {
   return null;
 }
 
+function parseCover(value: unknown): GuideDraftCover | null {
+  const cover = objectWithKeys(value, ["assetId", "alt", "credit", "webConfirmed"]);
+  if (!cover || Object.keys(cover).length !== 4) return null;
+  if (
+    typeof cover.assetId !== "string"
+    || typeof cover.alt !== "string"
+    || typeof cover.credit !== "string"
+    || typeof cover.webConfirmed !== "boolean"
+  ) return null;
+  return {
+    assetId: cover.assetId,
+    alt: cover.alt,
+    credit: cover.credit,
+    webConfirmed: cover.webConfirmed,
+  };
+}
+
 export function parseGuideCreateBody(value: unknown): GuideCreateBody | null {
   const body = objectWithKeys(value, ["slug", "title", "subject", "description", "categorySlug", "content"]);
   if (!body || typeof body.slug !== "string" || typeof body.title !== "string") return null;
@@ -80,12 +98,18 @@ export function parseGuideCreateBody(value: unknown): GuideCreateBody | null {
 }
 
 export function parseGuidePatchBody(value: unknown): GuidePatchBody | null {
-  const body = objectWithKeys(value, ["slug", "title", "description", "categorySlug", "content", "expectedRevision"]);
+  const body = objectWithKeys(value, ["slug", "title", "description", "categorySlug", "content", "cover", "expectedRevision"]);
   if (!body || typeof body.slug !== "string" || typeof body.title !== "string" || typeof body.description !== "string") return null;
   if (body.categorySlug !== undefined && typeof body.categorySlug !== "string") return null;
   if (typeof body.expectedRevision !== "number") return null;
   const content = parseContent(body.content);
   if (!content) return null;
+  let cover: GuideDraftCover | null | undefined;
+  if (body.cover === null) cover = null;
+  else if (body.cover !== undefined) {
+    cover = parseCover(body.cover);
+    if (!cover) return null;
+  }
   return {
     draft: {
       slug: body.slug,
@@ -93,6 +117,7 @@ export function parseGuidePatchBody(value: unknown): GuidePatchBody | null {
       description: body.description,
       ...(body.categorySlug === undefined ? {} : { categorySlug: body.categorySlug }),
       content,
+      ...(cover === undefined ? {} : { cover }),
     },
     expectedRevision: body.expectedRevision,
   };
@@ -107,6 +132,7 @@ export function privateGuideArticle(article: GuideArticleRecord) {
     description: article.description,
     ...(article.categorySlug === undefined ? {} : { categorySlug: article.categorySlug }),
     content: article.content,
+    ...(article.cover === undefined ? {} : { cover: article.cover }),
     status: article.status,
     revision: article.revision,
     ...(article.currentPublication === undefined ? {} : { currentPublication: article.currentPublication }),
