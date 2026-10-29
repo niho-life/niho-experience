@@ -7,6 +7,7 @@ export const HOST_MOCK_LOGIN_PATH = "/host/auth/mock-login";
 export const HOST_REFRESH_PATH = "/host/auth/refresh";
 export const HOST_LOGOUT_PATH = "/host/auth/logout";
 export const HOST_AUTH_ERROR_PATH = "/host/auth/error";
+export const HOST_INVITATIONS_PATH = "/host/invitations";
 export const HOST_API_PREFIX = "/host/api/";
 /**
  * The console as an installed app (#177). The app's scope is `/host/` (the English
@@ -80,6 +81,20 @@ export function hostPreparationPath(caseId: string): string {
 export function hostPreparationLoginPath(caseId: string): string {
   const safe = preparationCaseIdOrNull(caseId);
   return safe ? withQuery(HOST_LOGIN_PATH, { preparationCaseId: safe }) : HOST_LOGIN_PATH;
+}
+
+export function invitationIdOrNull(value: unknown): string | null {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : null;
+}
+
+export function hostInvitationPath(invitationId: string): string {
+  const safe = invitationIdOrNull(invitationId);
+  return safe ? `${HOST_INVITATIONS_PATH}/${safe}` : HOST_INVITATIONS_PATH;
+}
+
+export function hostInvitationLoginPath(invitationId: string): string {
+  const safe = invitationIdOrNull(invitationId);
+  return safe ? withQuery(HOST_LOGIN_PATH, { invitationId: safe }) : HOST_LOGIN_PATH;
 }
 
 export function hostSupportPath(kind?: "SPOT" | "EXPERIENCE_PROVIDER" | null, id?: string | null): string {

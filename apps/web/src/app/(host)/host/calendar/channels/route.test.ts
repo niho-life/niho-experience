@@ -7,7 +7,7 @@ vi.mock("@/lib/experience/channel-runtime", () => ({
   channelManagerEnabled: () => mocks.enabled,
   channelJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }),
 }));
-vi.mock("@/lib/experience/host-actor", () => ({ hostActor: mocks.actor }));
+vi.mock("@/lib/experience/calendar-actor", () => ({ calendarActor: mocks.actor }));
 vi.mock("@/lib/experience/store-server", () => ({ channelRuntime: () => ({ hostStatuses: mocks.statuses }) }));
 
 import { GET } from "./route";

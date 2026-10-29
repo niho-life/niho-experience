@@ -2,14 +2,14 @@ import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { exchangeCode, signInWithCustomToken } from "@/lib/host/niho-auth";
 import { loginStatesMatch } from "@/lib/host/pkce";
-import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostPreparationPath, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
+import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
 import { clearLoginCookie, hostNotFound, loginSealer, nihoAuthDeps, seeOther, setSessionCookie } from "@/lib/host/server";
 import { decodeLoginState, LOGIN_COOKIE, startSession } from "@/lib/host/session";
 
 const MAX_CODE_LENGTH = 2048;
 
-function failed(reason: LoginErrorReason, preparationCaseId: string | null = null) {
-  const response = seeOther(withQuery(HOST_AUTH_ERROR_PATH, { reason, preparationCaseId }));
+function failed(reason: LoginErrorReason, preparationCaseId: string | null = null, invitationId: string | null = null) {
+  const response = seeOther(withQuery(HOST_AUTH_ERROR_PATH, { reason, preparationCaseId, invitationId }));
   clearLoginCookie(response);
   return response;
 }
@@ -23,28 +23,28 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const login = decodeLoginState(loginSealer(), request.cookies.get(LOGIN_COOKIE)?.value, Date.now());
   if (!login) return failed("expired");
-  if (!loginStatesMatch(login.state, params.get("state"))) return failed("state", login.preparationCaseId);
-  if (params.has("error")) return failed("denied", login.preparationCaseId);
+  if (!loginStatesMatch(login.state, params.get("state"))) return failed("state", login.preparationCaseId, login.invitationId ?? null);
+  if (params.has("error")) return failed("denied", login.preparationCaseId, login.invitationId ?? null);
   const code = params.get("code");
-  if (!code || code.length > MAX_CODE_LENGTH) return failed("rejected", login.preparationCaseId);
+  if (!code || code.length > MAX_CODE_LENGTH) return failed("rejected", login.preparationCaseId, login.invitationId ?? null);
 
   const deps = nihoAuthDeps();
   const exchanged = await exchangeCode(deps, { code, codeVerifier: login.verifier });
-  if (!exchanged.ok) return failed(exchanged.reason, login.preparationCaseId);
+  if (!exchanged.ok) return failed(exchanged.reason, login.preparationCaseId, login.invitationId ?? null);
   // A fresh custom token that Firebase refuses is NIHO's or Firebase's problem, not the host's.
   const signedIn = await signInWithCustomToken(deps, exchanged.value.customToken, Date.now());
-  if (!signedIn.ok) return failed("unavailable", login.preparationCaseId);
+  if (!signedIn.ok) return failed("unavailable", login.preparationCaseId, login.invitationId ?? null);
 
   const now = Date.now();
   const { nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl } = exchanged.value;
   // Only a sign-in started inside the installed app makes an app session (#177).
   const session = startSession({ nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value, ...(login.surface === "app" ? { surface: "app" as const } : {}) }, now);
-  const response = seeOther(login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));
+  const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   try {
     setSessionCookie(response, session, now);
   } catch {
-    return failed("unavailable", login.preparationCaseId);
+    return failed("unavailable", login.preparationCaseId, login.invitationId ?? null);
   }
   return response;
 }

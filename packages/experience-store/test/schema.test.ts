@@ -81,4 +81,20 @@ describe("database invariants", () => {
     assert.match(sql, /ON host_push_subscriptions \(niho_user_id\)/);
     assert.match(sql, /ON host_push_subscriptions \(connection_id\)/);
   });
+
+  it("stores product operator invitation secrets only as hashes and keeps commands separate", async () => {
+    const sql = await readFile(new URL("../migrations/0010_product_operators.sql", import.meta.url), "utf8");
+    const invitations = sql.match(/CREATE TABLE product_operator_invitations \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(invitations, /token_hash bytea NOT NULL CHECK \(octet_length\(token_hash\) = 32\)/);
+    assert.doesNotMatch(invitations, /plain|secret|token_value/i);
+    assert.match(invitations, /FOREIGN KEY \(provider_id, product_id\)/);
+    assert.match(sql, /expires_at <= created_at \+ interval '7 days'/);
+    assert.match(sql, /CREATE TABLE product_operator_grants/);
+    assert.match(sql, /PRIMARY KEY \(provider_id, product_id, niho_user_id\)/);
+    assert.match(sql, /CHECK \(\(accepted_niho_user_id IS NULL\) = \(accepted_at IS NULL\)\)/);
+    assert.match(sql, /FOREIGN KEY \(invitation_id, provider_id, product_id, niho_user_id\)/);
+    assert.match(sql, /CREATE TABLE product_operator_commands/);
+    assert.match(sql, /CREATE TABLE product_operator_audit_events/);
+    assert.doesNotMatch(sql, /calendar_commands|calendar_outbox_events/);
+  });
 });

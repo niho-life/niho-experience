@@ -8,6 +8,7 @@ import { config } from "@/lib/config";
 import { toProviderChoice } from "@/lib/host/providers";
 import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
+import { productOperatorRepository } from "@/lib/experience/store-server";
 
 function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"], "ok" | "refresh" | "signed-out"> }) {
   if (status === "rejected") {
@@ -58,13 +59,28 @@ export default async function HostConsoleLayout({ children }: { children: React.
   }
 
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
+  const memberChoices = load.status === "ok" ? load.providers.map(toProviderChoice) : [];
+  let operatorChoices: { kind: "OPERATOR"; id: string; displayName: string; memberRole: null }[] = [];
+  if (load.status === "ok" && !isHostMock()) {
+    const repository = productOperatorRepository();
+    if (repository) {
+      try {
+        const assignments = await repository.listAssignments(session.nihoUserId);
+        const memberIds = new Set(memberChoices.map((choice) => choice.id));
+        operatorChoices = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
+          kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null,
+        }])).values()];
+      } catch { /* The provider-wide console remains usable; operator access fails closed. */ }
+    }
+  }
+  const choices = [...memberChoices, ...operatorChoices];
   return (
     <>
       {appGuard}
       <HostSessionKeeper idTokenExpiresAt={session.idTokenExpiresAt} />
       <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
-      <HostShell account={account} providers={load.status === "ok" ? load.providers.map(toProviderChoice) : []} nihoAppUrl={config.nihoWebOrigin} preview={isHostMock()}>
+      <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} preview={isHostMock()}>
         {load.status === "ok" ? (
           children
         ) : (

@@ -12,6 +12,7 @@ import { isoValue, overrideFromRow, salesStateFromRow, scheduleRuleFromRow, type
 import { withTransaction } from "./transaction.ts";
 import { evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 
 export const CHANNEL_SITES = [
@@ -1338,11 +1339,8 @@ export class ChannelRuntime {
   async hostStatuses(actor: { readonly providerId: string; readonly nihoUserId: string }): Promise<readonly HostChannelStatus[]> {
     assertStoreIdentifier(actor.providerId, "actor.providerId");
     assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
-    const membership = await this.#pool.query(
-      "SELECT 1 FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2 AND active=true",
-      [actor.providerId, actor.nihoUserId],
-    );
-    if (!membership.rows[0]) throw new StoreAccessDeniedError();
+    const products = await listCalendarProductsForActor(this.#pool, actor);
+    if (products.length === 0) throw new StoreAccessDeniedError();
     const result = await this.#pool.query<DbRow>(
       `SELECT d.occurrence_id,a.site,d.desired_state,d.desired_version,d.mapping_version,d.observed_state,
               d.observed_desired_version,d.observed_mapping_version,d.last_verified_at,d.last_error,
@@ -1352,7 +1350,8 @@ export class ChannelRuntime {
          FROM channel_desired_states d JOIN channel_listings l ON l.id=d.listing_id
          JOIN channel_external_accounts a ON a.id=l.account_id
          JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-        WHERE d.provider_id=$1 ORDER BY d.source_start_at,a.site,l.id`, [actor.providerId, this.#nowIso()],
+        WHERE d.provider_id=$1 AND l.product_id=ANY($3::text[])
+        ORDER BY d.source_start_at,a.site,l.id`, [actor.providerId, this.#nowIso(), products.map((product) => product.id)],
     );
     return result.rows.map((row) => {
       const desired = text(row, "desired_state") as ChannelDesiredState;

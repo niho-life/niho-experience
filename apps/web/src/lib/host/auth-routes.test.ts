@@ -140,6 +140,20 @@ describe("login and callback (http mode)", () => {
     expect(unsafeResponse.headers.get("location")).toBe("/host/home");
   });
 
+  it("keeps only an invitation UUID and returns to its fixed invitation page", async () => {
+    const invitationId = "00000000-0000-4000-8000-000000000196";
+    const { location, cookie } = await startLogin(`?invitationId=${invitationId}&returnTo=https://evil.example.test`);
+    expect(location.searchParams.has("invitationId")).toBe(false);
+    expect(location.searchParams.has("returnTo")).toBe(false);
+    handler = (url) => url.pathname === "/api/auth/app-connect/exchange"
+      ? json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } })
+      : json(200, { idToken: "id-1", expiresIn: "3600" });
+    const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
+    expect(response.headers.get("location")).toBe(`/host/invitations/${invitationId}`);
+    const conflict = login(new NextRequest(`${SITE}/host/auth/login?invitationId=${invitationId}&preparationCaseId=case_1`));
+    expect(conflict.status).toBe(400);
+  });
+
   it("marks the session as the app's only when the sign-in started inside the installed app (#177)", async () => {
     handler = (url) => url.pathname === "/api/auth/app-connect/exchange"
       ? json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } })
@@ -313,6 +327,17 @@ describe("mock mode sign-in from the installed app (#177)", () => {
     expect(openSession(setCookies(app).get(SESSION_COOKIE)?.value)).toMatchObject({ nihoUserId: "synthetic-host-user", surface: "app" });
     const browser = await GET(new NextRequest(`${SITE}/host/auth/mock-login`));
     expect(openSession(setCookies(browser).get(SESSION_COOKIE)?.value)).not.toHaveProperty("surface");
+  });
+
+  it("returns mock invitation login to the fixed page and rejects mixed intents", async () => {
+    const invitationId = "00000000-0000-4000-8000-000000000196";
+    const started = login(new NextRequest(`${SITE}/host/auth/login?invitationId=${invitationId}&returnTo=https://evil.example.test`));
+    expect(started.headers.get("location")).toBe(`/host/auth/mock-login?invitationId=${invitationId}`);
+    const { GET } = await import("@/app/(host)/host/auth/mock-login/route");
+    const accepted = await GET(new NextRequest(`${SITE}/host/auth/mock-login?invitationId=${invitationId}`));
+    expect(accepted.headers.get("location")).toBe(`/host/invitations/${invitationId}`);
+    const conflict = await GET(new NextRequest(`${SITE}/host/auth/mock-login?invitationId=${invitationId}&preparationCaseId=case_1`));
+    expect(conflict.status).toBe(400);
   });
 });
 

@@ -34,6 +34,8 @@ flowchart LR
 
 提供者（ホスト）は、このサイトの `/host` で登録・体験ページ・予約対応・売上を扱う（オーナー決定 2026-10-21・[#84](https://github.com/niho-life/niho-experience/issues/84)）。ログインはNIHOに任せ、NIHOの確認画面で「接続する」を押すと一度きりのコードでこのサイトへ戻る。このサイトのサーバーがコードをトークンに替え、HttpOnly cookie に暗号化して持つ。ブラウザのJavaScriptにはトークンを渡さず、画面からの操作は `/host/api/*` からサーバーがNIHOの提供者APIを呼ぶ。このトークンで呼べるのは提供者APIと本人の表示に要るものだけで、権限（OWNER / EDITOR / COHOST）の判断はNIHOのAPIが毎回行う。OWNERは販売者・法的同意・Stripe売上受取・メンバー管理を担い、COHOSTはその提供者の全体験・予約に対する原稿、写真、日程、定員、予約承認・辞退、返信を担う。EDITORの既存範囲は広げない。既存ログイン、権限のある販売者、接続済みStripe口座を再利用する。NIHOが原稿作成や公開を手伝い、提供者には開催・受入に必要な操作を中心に見せる。口座未接続者の必要な本人確認は残る。
 
+NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ昇格させず、Experience内の[商品限定運営者](product-operators.md) grantでカレンダーだけを扱う。NIHOのfresh identityとhost API接続確認は省略せず、予約・売上・Google管理などprovider-wide情報は公開しない。
+
 コンテンツの所有者、決済上の販売者、地域・掲載先は別の概念とする。外部の個人提供者にダミーの拠点や他拠点の管理権限を付与しない。
 
 ## 対面通訳（[#181](https://github.com/niho-life/niho-experience/issues/181)）

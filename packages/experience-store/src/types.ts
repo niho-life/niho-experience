@@ -18,6 +18,59 @@ export interface HostActor {
   readonly nihoUserId: string;
 }
 
+export type CalendarAccess =
+  | { readonly basis: "MEMBER"; readonly role: MembershipRole }
+  | { readonly basis: "OPERATOR"; readonly version: number; readonly assignmentLabel: string };
+
+export interface CalendarProduct {
+  readonly id: string;
+  readonly publicTitle: string;
+  readonly sellerDisplayName: string;
+  readonly access: CalendarAccess;
+}
+
+export type ProductOperatorInvitationState = "PENDING" | "ACCEPTED" | "REVOKED";
+
+export interface ProductOperatorAssignment {
+  readonly providerId: string;
+  readonly productId: string;
+  readonly productTitle: string;
+  readonly sellerDisplayName: string;
+  readonly assignmentLabel: string;
+  readonly grantVersion: number;
+  readonly grantExpiresAtUtc?: string;
+}
+
+export interface ProductOperatorInvitationRecord {
+  readonly id: string;
+  readonly providerId: string;
+  readonly productId: string;
+  readonly productTitle: string;
+  readonly sellerDisplayName: string;
+  readonly assignmentLabel: string;
+  readonly state: ProductOperatorInvitationState;
+  readonly expiresAtUtc: string;
+  readonly acceptedNihoUserId?: string;
+  readonly acceptedAtUtc?: string;
+  readonly revokedAtUtc?: string;
+  readonly revision: number;
+  readonly createdAtUtc: string;
+}
+
+export interface ProductOperatorGrantRecord {
+  readonly providerId: string;
+  readonly productId: string;
+  readonly productTitle: string;
+  readonly sellerDisplayName: string;
+  readonly nihoUserId: string;
+  readonly assignmentLabel: string;
+  readonly active: boolean;
+  readonly expiresAtUtc?: string;
+  readonly version: number;
+  readonly grantedAtUtc: string;
+  readonly revokedAtUtc?: string;
+}
+
 export interface InventoryResourceInput {
   readonly id: string;
   readonly kind: InventoryResourceKind;

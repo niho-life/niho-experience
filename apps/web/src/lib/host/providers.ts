@@ -22,6 +22,9 @@ export type HostProviderReviewStatus = ExperienceProviderReviewStatus;
 
 /** What the sidebar's and the phone menu's provider switch (client components) receive: the id for `?providerId=`, the name and the role. */
 export type HostProviderChoice = Pick<HostProvider, "id" | "displayName" | "memberRole">;
+export type HostConsoleChoice =
+  | (HostProviderChoice & { readonly kind: "MEMBER" })
+  | { readonly kind: "OPERATOR"; readonly id: string; readonly displayName: string; readonly memberRole: null };
 
 const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", EDITOR: "編集者", COHOST: "サブホスト" };
 
@@ -37,8 +40,8 @@ export function usableProviders<T extends Pick<HostProvider, "id" | "displayName
   return providers.filter((provider) => nihoIdOrNull(provider.id) !== null && provider.displayName.trim() !== "");
 }
 
-export function toProviderChoice({ id, displayName, memberRole }: HostProviderChoice): HostProviderChoice {
-  return { id, displayName: displayName.trim(), memberRole };
+export function toProviderChoice({ id, displayName, memberRole }: HostProviderChoice): HostConsoleChoice {
+  return { kind: "MEMBER", id, displayName: displayName.trim(), memberRole };
 }
 
 /** The provider to open: the one asked for if this account has it, else the first. */
