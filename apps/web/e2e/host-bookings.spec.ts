@@ -499,3 +499,24 @@ test("通訳を始める shows the guest's QR, the host's own way in, who has jo
   await expect(start).toBeVisible();
   expect(await overflowX(page)).toBe(0);
 });
+
+test("通訳の参加状況で権限が失効したら招待 QR を消してポーリングを止める (#181)", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/bookings?booking=bk-2038");
+  const booking = detail(page, "Emma Larsson");
+  let statusReads = 0;
+  await page.route((url) => /^\/host\/api\/translate\/providers\/[^/]+\/bookings\/[^/]+\/rooms\/[^/]+$/.test(url.pathname), async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    statusReads += 1;
+    await route.fulfill({ status: 403, contentType: "application/json", body: '{"error":"permission_ended"}' });
+  });
+
+  await booking.getByRole("button", { name: "通訳を始める" }).click();
+  await expect(booking.getByRole("alert")).toContainText("権限を確認してください");
+  await expect(booking.getByRole("region", { name: "対面通訳" })).toHaveCount(0);
+  await expect(booking.getByRole("img", { name: /招待 QR コード/ })).toHaveCount(0);
+  await expect(booking.getByRole("button", { name: "通訳を始める" })).toHaveCount(0);
+  expect(statusReads).toBe(1);
+  await page.waitForTimeout(3500); // The next 3-second poll must not happen after access was revoked.
+  expect(statusReads).toBe(1);
+});

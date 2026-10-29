@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   NOT_JOINED,
   participantStatus,
@@ -68,13 +68,16 @@ export interface HostTranslatePanelProps {
   /** While another action on the booking is running. */
   disabled?: boolean;
   className?: string;
+  /** The live booking screen also clears its booking details when NIHO revokes access. */
+  onAuthorizationEnded?: (status: 401 | 403) => void;
 }
 
-export function HostTranslatePanel({ providerId, bookingId, disabled = false, className = "" }: HostTranslatePanelProps) {
+export function HostTranslatePanel({ providerId, bookingId, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
   const base = `translate/providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(bookingId)}/rooms`;
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [authorizationEnded, setAuthorizationEnded] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   /** The last 参加状況 could not be read; the one shown is the last that could. */
@@ -88,6 +91,17 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
   const errorRef = useRef<HTMLParagraphElement>(null);
   const ended = status?.state === "ended";
   const live = room !== null && !ended;
+  const revokeAccess = useCallback((responseStatus: 401 | 403) => {
+    setAuthorizationEnded(true);
+    setRoom(null);
+    setStatus(null);
+    setStale(false);
+    setOwnQr(false);
+    setAsking(false);
+    setNotice("");
+    setError(startError(responseStatus));
+    onAuthorizationEnded?.(responseStatus);
+  }, [onAuthorizationEnded]);
 
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
   // A room was just made: its heading takes focus (the button that was pressed is gone).
@@ -105,6 +119,13 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
       let response: Response;
       try { response = await hostFetch(path, { signal: controller.signal }); } catch { if (active) setStale(true); return; }
       if (!active) return;
+      if (response.status === 401 || response.status === 403) {
+        active = false;
+        controller.abort();
+        window.clearTimeout(timer);
+        revokeAccess(response.status);
+        return;
+      }
       if (response.status === 404) {
         // NIHO no longer has the room: it ended or expired on its side.
         setStatus((current) => ({ state: "ended", host: current?.host ?? NOT_JOINED, guest: current?.guest ?? NOT_JOINED, usageMinutes: current?.usageMinutes ?? 0 }));
@@ -118,7 +139,7 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
       setStatus(value); setStale(false);
     };
     const tick = async () => {
-      if (running) return;
+      if (!active || running) return;
       running = true;
       try { await read(); } finally { running = false; }
       if (active && document.visibilityState === "visible") {
@@ -127,6 +148,7 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
       }
     };
     const onVisibility = () => {
+      if (!active) return;
       window.clearTimeout(timer);
       if (document.visibilityState === "visible") void tick();
     };
@@ -138,12 +160,13 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [base, room, ended]);
+  }, [base, room, ended, revokeAccess]);
 
   const start = async () => {
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await hostFetch(base, { method: "POST" });
+      if (response.status === 401 || response.status === 403) { revokeAccess(response.status); return; }
       if (!response.ok) { setError(startError(response.status)); return; }
       const value = await response.json() as HostTranslateRoomResponse;
       setRoom(value.room); setStatus(null); setStale(false); setOwnQr(false);
@@ -159,6 +182,7 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
     setBusy(true); setError("");
     try {
       const response = await hostFetch(`${base}/${encodeURIComponent(room.id)}/end`, { method: "POST" });
+      if (response.status === 401 || response.status === 403) { revokeAccess(response.status); return; }
       if (!response.ok) { setError(endError(response.status)); return; }
       const value = await response.json() as HostTranslateRoomEndResponse;
       setStatus((current) => ({ state: value.state, host: current?.host ?? NOT_JOINED, guest: current?.guest ?? NOT_JOINED, usageMinutes: current?.usageMinutes ?? 0 }));
@@ -174,14 +198,14 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
     <div className={className}>
       {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="mb-2.5 rounded-xl bg-danger-pale px-3 py-2 text-[0.8125rem] leading-normal font-bold text-danger focus:outline-none">{error}</p> : null}
       {notice ? <p role="status" className="mb-2.5 rounded-xl bg-leaf-pale px-3 py-2 text-[0.8125rem] leading-normal font-bold text-moss">{notice}</p> : null}
-      {!live ? (
+      {!live && !authorizationEnded ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <button type="button" disabled={disabled || busy} onClick={() => void start()} className={consoleButtonClass("primary")}>
             {busy ? "準備しています…" : "通訳を始める"}
           </button>
           <p className="text-[0.78125rem] leading-normal text-muted">日英の対面通訳。2 人とも iPhone とマイク付きイヤフォンを使います。</p>
         </div>
-      ) : (
+      ) : live ? (
         <section aria-labelledby={headingId} className="rounded-xl border border-line p-3.5">
           <div className="flex items-center justify-between gap-2">
             <h3 id={headingId} ref={headingRef} tabIndex={-1} className="font-sans text-[0.9375rem] leading-normal font-extrabold tracking-normal focus:outline-none">
@@ -231,7 +255,7 @@ export function HostTranslatePanel({ providerId, bookingId, disabled = false, cl
             <button type="button" disabled={busy} onClick={() => setAsking(true)} className={DANGER_BUTTON}>通訳を終了</button>
           </div>
         </section>
-      )}
+      ) : null}
       {asking ? <EndDialog onConfirm={() => void end()} onClose={() => setAsking(false)} /> : null}
     </div>
   );
