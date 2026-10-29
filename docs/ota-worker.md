@@ -88,5 +88,6 @@ LaunchAgent は `packages/ota-worker/examples/com.niho.ota-worker.plist.example`
 
 - actual private browser: Studioの実GetYourGuide専用profileで、既存の空き枠を5往復（停止・再読込・再開・再読込、計10書込み）して受付可能へ復元。Gitには実target/画像を入れない。
 - synthetic: このpackageの45件のunitと、合成ページを使う実ブラウザ5件がskipなし合格。20回交互open/close、header前／後の応答喪失、誤商品、認証失効、古いpreflight、CDNのNuxt modulepreload許可を含む。UI回数・raw delivery数・論理状態変更数は別に計測する。外部auth/model invocationはなく、実GetYourGuideの20回試験ではない。CIはChromium導入後に別の`test:browser`を実行する。
-- cloud end-to-end: 未実施。public cloud origin、実 lease/result durability の受入を別途行う。
+- private API integration: 合成専用DB・実認証APIを暗号化SSHのloopback転送でStudioへ接続し、このworkerの固定SHA `5db31eef807b66707a3ca07cd246d4f4cc0689d7` で実GetYourGuideのOBSERVE→SET_CLOSED→SET_OPENを実行。すべてstopped=true・acceptedAsCurrent=true、書込みは停止1回／再開1回、最終OPENと希望version／観測versionの一致をDBで確認。claimからreceiptまで25.103秒／37.741秒／34.342秒。単一枠の実測であり一般的なp95を示さない。入口は実storeの予定変更で、PWA操作は含まない。
+- public cloud end-to-end: 未実施。公開originへの正式配備、PWAの本人操作、常駐・再起動の受入を別途行う。
 - Claude/Max: CLI login は確認済みだが weekly limit 中。20件試験と quota回復後の bounded tool実行は未実施。
