@@ -30,6 +30,7 @@
     "@niho/web": "git+https://github.com/niho-coliving/niho-web.git#ac98e3068a5c13d817c390ff164fb37eab42f6ee",
     "next": "16.3.8",
     "pg": "8.23.1",
+    "qrcode": "1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "server-only": "^0.0.1"

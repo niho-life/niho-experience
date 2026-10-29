@@ -418,5 +418,105 @@ test.describe("320px narrow phone", () => {
     await inside(ask.getByRole("button", { name: "¥60,000 を返金して取り消す" }), "取消の確定");
     await inside(ask.getByRole("button", { name: "やめる" }), "やめる");
     expect(await overflowX(page), "cancel dialog").toBeLessThanOrEqual(0);
+    await page.keyboard.press("Escape");
+
+    // 通訳 (#181): the QR, the host's own way in, 参加状況 and 終了 fit as well.
+    const emma = detail(page, "Emma Larsson");
+    await inside(emma.getByRole("button", { name: "通訳を始める" }), "通訳を始める");
+    await emma.getByRole("button", { name: "通訳を始める" }).click();
+    const room = emma.getByRole("region", { name: "対面通訳" });
+    await inside(room.getByRole("img", { name: "ゲスト用の招待 QR コード" }), "guest QR");
+    await inside(room.getByRole("button", { name: "自分の iPhone で開く" }), "自分の iPhone で開く");
+    await inside(room.getByRole("button", { name: "通訳を終了" }), "通訳を終了");
+    expect(await overflowX(page), "translate room").toBeLessThanOrEqual(0);
+    await page.screenshot({ path: test.info().outputPath("translate-320.png"), fullPage: true });
+    await room.getByRole("button", { name: "通訳を終了" }).click();
+    await inside(page.getByRole("dialog").getByRole("button", { name: "通訳を終了する" }), "通訳を終了する");
+    expect(await overflowX(page), "end dialog").toBeLessThanOrEqual(0);
   });
+});
+
+test("通訳を始める shows the guest's QR, the host's own way in, who has joined, and ends in a dialog (#181)", async ({ page }, testInfo) => {
+  await signIn(page);
+  // A request still waiting for approval (Lucas) and a Japanese guest (Aiko) have no 通訳.
+  await page.goto("/host/bookings?booking=bk-2041");
+  await expect(detail(page, "Lucas & Mia Chen").getByRole("button", { name: "承認する" })).toBeVisible();
+  await expect(detail(page, "Lucas & Mia Chen").getByRole("button", { name: "通訳を始める" })).toHaveCount(0);
+  await page.goto("/host/bookings?booking=bk-2006");
+  await expect(detail(page, "Aiko Tanaka")).toBeVisible();
+  await expect(detail(page, "Aiko Tanaka").getByRole("button", { name: "通訳を始める" })).toHaveCount(0);
+
+  // Emma: confirmed, English, tomorrow.
+  await page.goto("/host/bookings?booking=bk-2038");
+  const booking = detail(page, "Emma Larsson");
+  const start = booking.getByRole("button", { name: "通訳を始める" });
+  await expect(start).toBeVisible();
+  await expect(booking.getByRole("button", { name: "取り消して返金する" })).toBeVisible();
+  await start.click();
+
+  const room = booking.getByRole("region", { name: "対面通訳" });
+  await expect(room).toBeVisible();
+  await expect(room.getByRole("heading", { level: 3, name: "対面通訳" })).toBeFocused();
+  await expect(room.getByRole("img", { name: "ゲスト用の招待 QR コード" })).toBeVisible();
+  await expect(room).toContainText("相手に読み取ってもらってください");
+  await expect(room).toContainText(/QR は \d{2}:\d{2} まで使えます/);
+  // The invite code is only inside the QR's URL, never in the page's text.
+  await expect(page.locator("main")).not.toContainText("/i/");
+  await expect(page.locator("main")).not.toContainText("mock-guest-");
+  await expect(start).toHaveCount(0);
+  expect(await overflowX(page)).toBe(0);
+
+  // ③ The synthetic host joins first, then the guest.
+  const who = room.getByRole("definition");
+  await expect(who).toHaveText(["未参加", "未参加"]);
+  await expect(who.nth(0)).toHaveText("接続中", { timeout: 15_000 });
+  await expect(room.getByText("通訳中")).toBeVisible();
+  await expect(who.nth(1)).toHaveText("接続中", { timeout: 15_000 });
+  await page.screenshot({ path: testInfo.outputPath("translate-live.png"), fullPage: true });
+
+  // ② Not on an iPhone here: 自分の iPhone で開く switches to the host's own QR.
+  const own = room.getByRole("button", { name: "自分の iPhone で開く" });
+  await own.click();
+  await expect(room.getByRole("img", { name: "自分用の招待 QR コード" })).toBeVisible();
+  await expect(room).toContainText("自分の iPhone で読み取ってください");
+  await room.getByRole("button", { name: "ゲスト用 QR に戻す" }).click();
+  await expect(room.getByRole("img", { name: "ゲスト用の招待 QR コード" })).toBeVisible();
+  await audit(page, "translate room");
+
+  // ④ 終了 asks first; やめる changes nothing.
+  await room.getByRole("button", { name: "通訳を終了" }).click();
+  const ask = page.getByRole("dialog", { name: "通訳を終了しますか？" });
+  await expect(ask).toBeVisible();
+  await expect(ask.getByRole("button", { name: "やめる" })).toBeFocused();
+  await ask.getByRole("button", { name: "やめる" }).click();
+  await expect(ask).toHaveCount(0);
+  await expect(room).toBeVisible();
+  await room.getByRole("button", { name: "通訳を終了" }).click();
+  await ask.getByRole("button", { name: "通訳を終了する" }).click();
+  await expect(ask).toHaveCount(0);
+  await expect(booking.getByRole("status").filter({ hasText: "通訳を終了しました" })).toBeVisible();
+  await expect(room).toHaveCount(0);
+  await expect(start).toBeVisible();
+  expect(await overflowX(page)).toBe(0);
+});
+
+test("通訳の参加状況で権限が失効したら招待 QR を消してポーリングを止める (#181)", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/bookings?booking=bk-2038");
+  const booking = detail(page, "Emma Larsson");
+  let statusReads = 0;
+  await page.route((url) => /^\/host\/api\/translate\/providers\/[^/]+\/bookings\/[^/]+\/rooms\/[^/]+$/.test(url.pathname), async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    statusReads += 1;
+    await route.fulfill({ status: 403, contentType: "application/json", body: '{"error":"permission_ended"}' });
+  });
+
+  await booking.getByRole("button", { name: "通訳を始める" }).click();
+  await expect(booking.getByRole("alert")).toContainText("権限を確認してください");
+  await expect(booking.getByRole("region", { name: "対面通訳" })).toHaveCount(0);
+  await expect(booking.getByRole("img", { name: /招待 QR コード/ })).toHaveCount(0);
+  await expect(booking.getByRole("button", { name: "通訳を始める" })).toHaveCount(0);
+  expect(statusReads).toBe(1);
+  await page.waitForTimeout(3500); // The next 3-second poll must not happen after access was revoked.
+  expect(statusReads).toBe(1);
 });

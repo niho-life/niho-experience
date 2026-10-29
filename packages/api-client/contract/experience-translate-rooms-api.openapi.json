@@ -1,0 +1,313 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NIHO Experience Translate Rooms API",
+    "version": "0.1.0",
+    "description": "体験の予約から対面通訳（niho-translate）の部屋を作り、参加状況を読み、終えるだけの選別契約。shape は niho-coliving/niho-app#19446 の契約節で固定し、N1b（niho-coliving/niho-app#19447）が contracts/openapi.yaml に載せるまでの下書き。入室券・relay・予算・使用料金・ゲストの個人情報は含めない。招待 code は URL の中だけに置き、画面の本文・ログ・計測に出さない。",
+    "x-niho-contract-status": "draft",
+    "x-niho-contract-source": "niho-coliving/niho-app#19446",
+    "x-niho-contract-sha256-file": "experience-translate-rooms-api.openapi.json.sha256"
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/RequestId"
+        }
+      ],
+      "post": {
+        "operationId": "createExperienceProviderTranslateRoom",
+        "x-provider-roles": [
+          "OWNER",
+          "COHOST"
+        ],
+        "description": "予約の languageSnapshot から言語を決め（EN → guest en・host ja）、host / guest の participant と 15 分有効の招待 code を作る。本文は空のオブジェクト。",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTranslateRoomInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "the room and both invite URLs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomCreatedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms/{roomId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/RequestId"
+        },
+        {
+          "$ref": "#/components/parameters/RoomId"
+        }
+      ],
+      "get": {
+        "operationId": "getExperienceProviderTranslateRoom",
+        "x-provider-roles": [
+          "OWNER",
+          "COHOST"
+        ],
+        "description": "ホスト画面の 3 秒 polling。参加者ごとの joined / ready と使用分。",
+        "responses": {
+          "200": {
+            "description": "room state, participants and usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms/{roomId}/end": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/RequestId"
+        },
+        {
+          "$ref": "#/components/parameters/RoomId"
+        }
+      ],
+      "post": {
+        "operationId": "endExperienceProviderTranslateRoom",
+        "x-provider-roles": [
+          "OWNER",
+          "COHOST"
+        ],
+        "description": "ホストが部屋を終える。招待 code は使えなくなる。",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndTranslateRoomInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the final state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomEndResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "ProviderId": {
+        "name": "providerId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "RequestId": {
+        "name": "requestId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "RoomId": {
+        "name": "roomId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "schemas": {
+      "TranslateRoomState": {
+        "type": "string",
+        "enum": [
+          "created",
+          "active",
+          "paused",
+          "ended"
+        ]
+      },
+      "TranslateParticipantRole": {
+        "type": "string",
+        "enum": [
+          "host",
+          "guest"
+        ]
+      },
+      "CreateTranslateRoomInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "EndTranslateRoomInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "TranslateInvite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participantId",
+          "inviteCode",
+          "inviteUrl"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "inviteCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "inviteUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        }
+      },
+      "TranslateRoomCreatedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
+          "state",
+          "host",
+          "guest",
+          "expiresAt"
+        ],
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "state": {
+            "$ref": "#/components/schemas/TranslateRoomState"
+          },
+          "host": {
+            "$ref": "#/components/schemas/TranslateInvite"
+          },
+          "guest": {
+            "$ref": "#/components/schemas/TranslateInvite"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TranslateRoomParticipant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "joined",
+          "ready"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/TranslateParticipantRole"
+          },
+          "joined": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TranslateRoomStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "participants",
+          "usageMinutes"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/TranslateRoomState"
+          },
+          "participants": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/TranslateRoomParticipant"
+            }
+          },
+          "usageMinutes": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      },
+      "TranslateRoomEndResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/TranslateRoomState"
+          }
+        }
+      }
+    }
+  }
+}

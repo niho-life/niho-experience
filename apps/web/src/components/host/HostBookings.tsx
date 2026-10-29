@@ -58,6 +58,8 @@ export interface HostBookingsProps {
   supportPreview: boolean;
   supportHistoryEnabled: boolean;
   feeSummaryEnabled: boolean;
+  /** 通訳を始める (#181): whether the translate BFF is open. */
+  translateEnabled: boolean;
   /** The last message of each booking's thread (メッセージ, #106). */
   conversations: readonly BookingConversation[];
 }
@@ -73,7 +75,7 @@ export interface HostBookingsProps {
  * メッセージ leads to the booking's thread (#106). TODO(#87): send the actions to NIHO and show
  * the booking it reads back. A session's heading opens its own screen (この回, #107).
  */
-export function HostBookings({ bookings: initialBookings, experiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, conversations }: HostBookingsProps) {
+export function HostBookings({ bookings: initialBookings, experiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, conversations }: HostBookingsProps) {
   const searchParams = useSearchParams();
   const [bookings, setBookings] = useState<readonly HostBooking[]>(initialBookings);
   const [notice, setNotice] = useState<{ bookingId: string; text: string } | null>(null);
@@ -261,6 +263,7 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
                 supportPreview={supportPreview}
                 supportHistoryEnabled={supportHistoryEnabled}
                 feeSummaryEnabled={feeSummaryEnabled}
+                translateEnabled={translateEnabled}
                 onApprove={() => {
                   if (change(shown.id, approveBooking)) report(shown.id, "申込を承認しました。予約が確定しました");
                 }}

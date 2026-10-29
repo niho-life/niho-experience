@@ -10,6 +10,7 @@ import { isHostMock } from "@/lib/host/server";
 import { isHostSupportHistoryEnabled } from "@/lib/host/support-history-server";
 import { isHostFeeSummaryUiEnabled } from "@/lib/host/fee-summary-server";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
+import { translateRoomsEnabled, translateRoomsEntry } from "@/lib/host/translate-rooms-server";
 
 export const metadata: Metadata = { title: "予約" };
 
@@ -43,11 +44,11 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   if (provider.memberRole === "EDITOR") notFound();
   // The first `?booking=`, as the screen reads it.
   const requested = [query.booking].flat()[0] || null;
-  if (providerOperationsEnabled()) return <HostLiveBookings key={provider.id} providerId={provider.id} initialBookingId={requested} />;
+  if (providerOperationsEnabled()) return <HostLiveBookings key={provider.id} providerId={provider.id} initialBookingId={requested} translate={translateRoomsEntry()} />;
   const { list, requested: opened, experiences, today, now, conversations } = await loadHostBookings(provider, requested);
   if (list.status === "unavailable") return <BookingsUnavailable />;
   // Another provider's booking, or none at all.
   if (opened?.status === "missing") notFound();
   // Keyed by provider: another provider's bookings start from their own list.
-  return <HostBookings key={provider.id} bookings={list.bookings} experiences={experiences} today={today} now={now} providerId={linkProviderId} providerDataId={provider.id} supportPreview={isHostMock()} supportHistoryEnabled={isHostSupportHistoryEnabled()} feeSummaryEnabled={isHostFeeSummaryUiEnabled()} conversations={conversations} />;
+  return <HostBookings key={provider.id} bookings={list.bookings} experiences={experiences} today={today} now={now} providerId={linkProviderId} providerDataId={provider.id} supportPreview={isHostMock()} supportHistoryEnabled={isHostSupportHistoryEnabled()} feeSummaryEnabled={isHostFeeSummaryUiEnabled()} translateEnabled={translateRoomsEnabled()} conversations={conversations} />;
 }

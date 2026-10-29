@@ -96,6 +96,19 @@ export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
   deploymentStatus: "not-deployed",
 } as const;
 
+/**
+ * 対面通訳の部屋（#181）。shape は niho-app Epic #19446 の契約節で固定した下書き（draft）で、NIHO の export を写したものではない。
+ * N1b（niho-app #19447）が contracts/openapi.yaml に載せたら写し直し、sourceCommit・sha256・status を更新する。
+ * http mode の BFF は EXPERIENCE_TRANSLATE_API_ENABLED=true まで開かない。
+ */
+export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
+  version: "0.1.0",
+  sourceIssue: "niho-coliving/niho-app#19446",
+  sha256: "3aec3f313ca3f9d57a1e3169b297c5aecf8ae440cf46216d046f2afdb167ba5d",
+  status: "draft",
+  deploymentStatus: "not-deployed",
+} as const;
+
 /** 予約に関わる時刻の基準。表示も日本時間（Asia/Tokyo）で行う。 */
 export const EXPERIENCE_TIME_ZONE = "Asia/Tokyo";
 

@@ -14,11 +14,13 @@ import {
   type BookingRow,
 } from "@/host/bookings";
 import { monthDayJa, yen } from "@/host/format";
+import { translationOffered } from "@/host/translate";
 import type { HostBooking } from "@/host/types";
 import { BookingCancelDialog, BookingDecisionDialog, DANGER_BUTTON } from "./HostBookingDialogs";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { HostBookingSupportPanel } from "./HostBookingSupportPanel";
+import { HostTranslatePanel } from "./HostTranslatePanel";
 import { StatusPill } from "./ui";
 import { FeeSummaryPanel } from "@/components/FeeSummaryPanel";
 
@@ -108,6 +110,8 @@ export interface HostBookingDetailProps {
   supportPreview: boolean;
   supportHistoryEnabled: boolean;
   feeSummaryEnabled: boolean;
+  /** 通訳を始める (#181): whether the translate BFF is open (the mock always is). */
+  translateEnabled: boolean;
   onApprove: () => void;
   onDecline: () => void;
   onCancel: (cancellation: BookingCancellation) => void;
@@ -118,9 +122,11 @@ export interface HostBookingDetailProps {
  * host can do now, メッセージ (the way into its thread) and 時系列. 承認・お断り・取消 are
  * asked in a dialog first.
  */
-export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, onApprove, onDecline, onCancel }: HostBookingDetailProps) {
+export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | null>(null);
   const actions = bookingActions(booking.status);
+  // 通訳を始める: a confirmed booking of an English-speaking guest whose day has not passed (#181).
+  const translate = translateEnabled && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
 
   let next: ReactNode = null;
   if (actions.approve) {
@@ -182,7 +188,12 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       </DetailSection>
       <HostBookingSupportPanel providerId={providerId} bookingId={booking.id} preview={supportPreview} historyEnabled={supportHistoryEnabled} />
       <FeeSummaryPanel key={`host-fee-${booking.id}`} audience="host" bookingId={booking.id} actorKey={providerId} enabled={feeSummaryEnabled} />
-      {next ? <div className="mt-3.5 border-t border-line pt-3.5">{next}</div> : null}
+      {next || translate ? (
+        <div className="mt-3.5 border-t border-line pt-3.5">
+          {next}
+          {translate ? <HostTranslatePanel key={booking.id} providerId={providerId} bookingId={booking.id} className={next ? "mt-3" : ""} /> : null}
+        </div>
+      ) : null}
       {conversation ? <ConversationSection conversation={conversation} /> : null}
       <DetailSection title="時系列">
         <ol>

@@ -35,6 +35,7 @@ npm -C packages/api-client run verify:live -- --origin https://app-stg.niho.life
 - `contract/experience-admin-read-api.openapi.json`（＋`.sha256`・manifest）：Admin予約一覧・詳細・通知・既読だけのv1.0.0選別契約。NIHO側source commit `08736836328976b130b919bef0ebcdad7d5ba7bb` で合意済みだが未配備。`src/generated/admin-read-openapi.ts` はここから生成する。
 - `contract/experience-admin-support-case-api.openapi.json`（＋`.sha256`・manifest）：予約別の担当・内部メモ・CAS revision・書込可否と担当候補だけのv1.0.0選別契約。NIHO側source commit `9ddb79c3a62bafca6896a06fa2f364f1fb089ff3` で合意済みだが未配備。`src/generated/admin-support-case-openapi.ts` はここから生成する。
 - `contract/experience-host-support-settings-api.openapi.json`（＋`.sha256`・manifest）：Host本人OWNERの通常Spot／外部Provider支援設定だけの独立v1.0.0選別契約。source commit `243ff383fdd182f4d053fce9995e4f1616206720`、SHA256 `6ae96e7b0ad92b5effc145310ff45c005913913a4f903bdceef250c3c257362f`。合意済み・未配備で、料金producer・精算は含めない。`src/generated/host-support-settings-openapi.ts` はここから生成する。
+- `contract/experience-translate-rooms-api.openapi.json`（＋`.sha256`・manifest）：体験の予約から対面通訳の部屋を作る・読む・終えるだけの v0.1.0 契約（**状態：draft**）。niho-app Epic #19446 の契約節の shape を先に pin した下書きで、N1b（niho-app #19447）が `contracts/openapi.yaml` に載せたら NIHO の export を写し直す。入室券・relay・予算は含めない。`src/generated/experience-translate-rooms-openapi.ts` はここから生成する。
 
 ### ホスト API
 
