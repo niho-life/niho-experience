@@ -273,6 +273,50 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
         observedState: "CLOSED", observedBookable: false, observedManuallyBlocked: true, observedAtUtc: now.toISOString(),
       })).acceptedAsCurrent, false);
       await runtime.consumeCalendarOutbox();
+      const stopRecovery = await runtime.recoverQuarantinedLease(admin, "account", true, command("115"));
+      const recoveryRead = await runtime.claim(worker);
+      assert.equal(recoveryRead?.id, stopRecovery.observeJobId); assert.ok(recoveryRead);
+      await runtime.submitResult(worker, recoveryRead.id, { resultId: command("116"), leaseToken: recoveryRead.leaseToken,
+        outcome: "VERIFIED", stopped: true, target: recoveryRead.target, occurrenceId: recoveryRead.occurrenceId,
+        sourceStartAtUtc: recoveryRead.sourceStartAtUtc, sourceEndAtUtc: recoveryRead.sourceEndAtUtc,
+        observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString() });
+      const synced = await runtime.claim(worker); assert.ok(synced);
+      await runtime.submitResult(worker, synced.id, { resultId: command("117"), leaseToken: synced.leaseToken,
+        outcome: "VERIFIED", stopped: true, target: synced.target, occurrenceId: synced.occurrenceId,
+        sourceStartAtUtc: synced.sourceStartAtUtc, sourceEndAtUtc: synced.sourceEndAtUtc,
+        observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString() });
+      assert.equal((await runtime.hostStatuses(actor)).find((item) => item.occurrenceId === synced.occurrenceId)?.label, "SYNCED");
+      await runtime.updateListing(admin, "listing-00", { externalProductId: "synthetic-remapped-product", adapter: "gyg-browser", adapterVersion: "1",
+        connectionMode: "BROWSER", capabilities: { canObserve: true, canClose: true, canOpen: true }, active: true }, 1, command("118"));
+      assert.equal((await runtime.hostStatuses(actor)).find((item) => item.occurrenceId === synced.occurrenceId)?.label, "PENDING");
+
+      const extended = new ChannelRuntime(pool, { now: () => now, supportedAdapters: {
+        "GetYourGuide/gyg-browser@1": { canObserve: true, canClose: true, canOpen: true },
+        "GetYourGuide/retired-browser@1": { canObserve: true, canClose: true, canOpen: true },
+      } });
+      for (const [id, adapter, suffix] of [["retired-first", "retired-browser", "119"], ["supported-later", "gyg-browser", "120"]]) {
+        await extended.createListing(admin, { id: id!, providerId: "provider", accountId: "account", productId: "tea",
+          externalProductId: `synthetic-${id}`, adapter: adapter!, adapterVersion: "1", connectionMode: "BROWSER",
+          capabilities: { canObserve: true, canClose: true, canOpen: true }, active: true }, command(suffix!));
+      }
+      await extended.reconcileListing(admin, "retired-first", command("121"));
+      await pool.query("UPDATE channel_jobs SET priority=100 WHERE listing_id='retired-first'");
+      await extended.reconcileListing(admin, "supported-later", command("122"));
+      const supported = await runtime.claim(worker); assert.ok(supported);
+      assert.equal(supported.target.adapter, "gyg-browser");
+      assert.equal(Number((await pool.query("SELECT count(*) FROM channel_jobs WHERE listing_id='retired-first' AND status='QUEUED'")).rows[0]?.count), 56);
+      now.setTime(now.getTime() + 121_000);
+      await runtime.submitResult(worker, supported.id, { resultId: command("123"), leaseToken: supported.leaseToken,
+        outcome: "SUPERSEDED", stopped: false, target: supported.target });
+      assert.equal((await pool.query("SELECT status FROM channel_jobs WHERE id=$1", [supported.id])).rows[0]?.status, "LEASED");
+      await runtime.submitResult(worker, supported.id, { resultId: command("124"), leaseToken: supported.leaseToken,
+        outcome: "SUPERSEDED", stopped: true, target: supported.target });
+      assert.equal((await pool.query("SELECT status FROM channel_jobs WHERE id=$1", [supported.id])).rows[0]?.status, "FINISHED");
+      assert.equal((await pool.query("SELECT quarantined_at IS NOT NULL AS quarantined FROM channel_external_accounts WHERE id='account'")).rows[0]?.quarantined, true);
+      for (const [id, adapter, suffix] of [["retired-first", "retired-browser", "125"], ["supported-later", "gyg-browser", "126"]]) {
+        await extended.updateListing(admin, id!, { externalProductId: `synthetic-${id}`, adapter: adapter!, adapterVersion: "1", connectionMode: "BROWSER",
+          capabilities: { canObserve: true, canClose: true, canOpen: true }, active: false }, 1, command(suffix!));
+      }
       await pool.query(`INSERT INTO channel_listings
         (id,provider_id,account_id,product_id,external_product_id,adapter,adapter_version,connection_mode,can_observe,can_close,can_open,active)
         SELECT 'listing-'||lpad(n::text,2,'0'),'provider','account','tea','synthetic-product-'||n,'gyg-browser','1','BROWSER',true,true,true,true
@@ -284,7 +328,7 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       assert.ok(cursor.rows[0]?.channel_dispatch_cursor); assert.equal(cursor.rows[0]?.processed_at, null);
       const second = await runtime.consumeCalendarOutbox(1);
       assert.equal(second.occurrences, 16); assert.equal(second.events, 1);
-      assert.equal(Number((await pool.query("SELECT count(*) FROM channel_desired_states")).rows[0]?.count), 2_016);
+      assert.equal(Number((await pool.query("SELECT count(*) FROM channel_desired_states d JOIN channel_listings l ON l.id=d.listing_id WHERE l.active")).rows[0]?.count), 2_016);
       assert.equal((await runtime.consumeCalendarOutbox()).events, 0);
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

@@ -859,6 +859,11 @@ export class ChannelRuntime {
           RETURNING j.account_id`, [nowUtc],
       );
       for (const row of expired.rows) await this.#quarantine(client, text(row, "account_id"), "RETRY_DEADLINE");
+      const deployedActions = Object.entries(this.#supportedAdapters).flatMap(([key, capability]) => [
+        ...(capability.canOpen === true ? [`${key}/SET_OPEN`] : []),
+        ...(capability.canClose === true ? [`${key}/SET_CLOSED`] : []),
+        ...(capability.canObserve === true ? [`${key}/OBSERVE`] : []),
+      ]);
       const result = await client.query<DbRow>(
         `SELECT j.*,wa.version AS assignment_version FROM channel_jobs j
           JOIN channel_external_accounts a ON a.id=j.account_id
@@ -873,8 +878,9 @@ export class ChannelRuntime {
            AND d.desired_version=j.desired_version AND d.mapping_version=j.mapping_version
            AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED'))
            AND ((j.action='SET_OPEN' AND l.can_open) OR (j.action='SET_CLOSED' AND l.can_close) OR (j.action='OBSERVE' AND l.can_observe))
-         ORDER BY j.priority DESC,j.next_attempt_at,j.created_at LIMIT 20 FOR UPDATE OF j SKIP LOCKED`,
-        [identity.workerId, nowUtc],
+           AND (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version || '/' || j.action)=ANY($3::text[])
+         ORDER BY j.priority DESC,j.next_attempt_at,j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`,
+        [identity.workerId, nowUtc, deployedActions],
       );
       const job = result.rows.find((candidate) => this.#adapterSupports(candidate, text(candidate, "action") as ChannelAction));
       if (!job) return null;
@@ -1146,6 +1152,7 @@ export class ChannelRuntime {
       );
       if (!withinLease) {
         await this.#quarantine(client, text(job, "account_id"), "LATE_RESULT");
+        if (input.stopped) await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "LATE_RESULT_STOPPED");
         return { acceptedAsCurrent: false, repeated: false };
       }
       if (!input.stopped) {
@@ -1287,7 +1294,7 @@ export class ChannelRuntime {
       `SELECT d.occurrence_id,a.site,d.desired_state,d.desired_version,d.mapping_version,d.observed_state,
               d.observed_desired_version,d.observed_mapping_version,d.last_verified_at,d.last_error,
               a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,
-              l.active AS listing_active,l.adapter,l.adapter_version,l.can_open,l.can_close,p.status AS product_status,
+              l.active AS listing_active,l.adapter,l.adapter_version,l.can_open,l.can_close,l.mapping_version AS current_mapping_version,p.status AS product_status,
               EXISTS (SELECT 1 FROM calendar_outbox_events e WHERE e.provider_id=d.provider_id AND e.processed_at IS NULL) AS calendar_pending
          FROM channel_desired_states d JOIN channel_listings l ON l.id=d.listing_id
          JOIN channel_external_accounts a ON a.id=l.account_id
@@ -1310,7 +1317,8 @@ export class ChannelRuntime {
       else if (row.last_error !== null) error = "RUNTIME_ERROR";
       const currentObservation = observed !== undefined && row.observed_desired_version !== null && row.observed_mapping_version !== null
         && integer(row, "observed_desired_version") === integer(row, "desired_version")
-        && integer(row, "observed_mapping_version") === integer(row, "mapping_version");
+        && integer(row, "observed_mapping_version") === integer(row, "mapping_version")
+        && integer(row, "observed_mapping_version") === integer(row, "current_mapping_version");
       return {
         occurrenceId: text(row, "occurrence_id"), site: text(row, "site"), desired, ...(observed ? { observed } : {}),
         label: error ? "ERROR" : row.calendar_pending === true ? "PENDING" : observed === undefined ? "UNVERIFIED" : currentObservation && observed === desired ? "SYNCED" : "PENDING",

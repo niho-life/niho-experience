@@ -38,7 +38,7 @@ desired は schedule rule、reschedule override、直交した sales state を `
 - credential は random 32 bytes 以上の bearer を mint 時に一度だけ返し、DB には SHA-256 digest、期限、失効だけを保存する。GET、job target、URL、log 用 DTO には含めない。
 - worker は明示 assignment のある account だけを claim できる。claim時のassignment versionをleaseへ固定し、renew/preflight/resultで一致を確認する。失効後に同じworkerへ再付与しても、古いleaseは復活しない。browser claim は全体 concurrency 1、account exclusivity 1。transaction advisory lock、row lock、partial unique index を併用する。
 - lease は 120 秒、job deadline は初回claimから 180 秒で、retryしても延長しない。executor は30秒以内の間隔でrenewし、serverは最後の更新から60秒を越えたrenewを成功させない。CLOSED は OPEN より優先する。
-- expired lease は lock を解放しない。account を quarantine し、古い job は `LEASED` のまま残す。認証済み executor が `stopped=true` を返すか、Admin が executor 停止を明示確認した recovery だけが lock を解放できる。
+- expired lease は自動で lock を解放しない。account を quarantine し、古い job は `LEASED` のまま残す。認証済み executor が `stopped=true` を返すか、Admin が executor 停止を明示確認した recovery だけが lock を解放できる。期限後に届いた停止確認は成功表示に使わず、隔離を維持したまま当該jobを終了して、他accountの処理を再開できるようにする。
 - manual recovery は supported `OBSERVE` capability を必須とし、まず OBSERVE job を作る。exact target の fresh readback が VERIFIED になるまで quarantine を解除せず、OPEN を再作成しない。
 
 worker endpoints は次の versioned route だけで、すべて `POST`、JSON 16 KiB 以下、`private, no-store` である。
@@ -64,6 +64,6 @@ Admin の `/admin/api/channels` は action allowlist だけを受け、任意 qu
 
 StudioではChrome 156 + Node 24のdeterministic browser driverでsynthetic 24 cases（通常20、stale、応答喪失、認証期限、誤product拒否）を確認し、model invocationは0回だった。実GetYourGuideはlocal UIの2往復に加え、Studioの専用profileでも5往復（停止・再読込・再開・再読込、計10書込み）に成功し、元の受付可能な状態へ復元した。指定以外の書込みは遮断した。実ID・ログイン情報・画面証跡は公開リポへ保存しない。
 
-実DBの対象検証は9件、Webの境界検証は12件が合格した。認可の解除・再付与、再開直後の古いCLOSE、2,016 occurrenceの2ページ展開も含む。独立read-onlyレビューの3 findingを修正し、対応する実DB回帰テストで確認した。
+実DBの対象検証は9件、Webの境界検証は12件が合格した。認可の解除・再付与、再開直後の古いCLOSE、2,016 occurrenceの2ページ展開、期限後の停止確認、未対応adapterが先頭56件を占める場合、mapping変更直後の未確認表示も含む。独立read-onlyレビュー3件とGitHubレビュー3件のfindingを修正し、対応する実DB回帰テストで確認した。
 
 これらはClaude end-to-endまたはP0完了の証跡ではない。Claude/Maxはweekly limit中（2026-11-03 13:00 JST reset）であり、有料API fallbackは使用しない。worker adapter統合と本番有効化は後続sliceである。
