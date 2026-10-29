@@ -68,6 +68,11 @@ export type HomeViewModelV1 = Readonly<{
         rotate: number;
     }[];
     hostBand: DisplayVideoV1;
+    /**
+     * "journal" (2026-10-29): a shorter hero, the booking steps directly under the cards, then `afterCards` and the host band.
+     * The editorial feature, video strips, host feature, figures and postcards are left out. Omitted = the classic home.
+     */
+    layout?: "classic" | "journal";
 }>;
 export declare function HomeViewV1({ model, primitives, copy }: {
     model: HomeViewModelV1;

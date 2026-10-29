@@ -227,6 +227,22 @@ describe("v1 portable presentation", () => {
     expect(extended.indexOf("Synthetic guide shelf")).toBeLessThan(extended.indexOf("A synthetic feature"));
   });
 
+  it("renders the journal home: steps under the cards, then the editorial slot and the host band, without the classic blocks", () => {
+    const classic = renderToStaticMarkup(<HomeViewV1 model={{ ...home, afterCards: <section>Synthetic guide shelf</section> }} />);
+    const journal = renderToStaticMarkup(<HomeViewV1 model={{ ...home, layout: "journal", afterCards: <section>Synthetic guide shelf</section> }} />);
+    expect(renderToStaticMarkup(<HomeViewV1 model={{ ...home, layout: "classic" }} />)).toBe(renderToStaticMarkup(<HomeViewV1 model={home} />));
+    for (const id of ["featured-heading-v1", "strips-heading-v1", "hosts-heading-v1", "numbers-heading-v1", "steps-heading-v1", "walk-heading-v1"]) {
+      expect(classic).toContain(`id="${id}"`);
+      expect(journal).not.toContain(`id="${id}"`);
+    }
+    // The classic strips heading keeps its title and count line apart as text (moved from e2e/seo.spec.ts).
+    expect(classic).toContain("among neighbors <span");
+    const order = ["A synthetic workshop", 'aria-label="Simple, in yen, in your inbox"', "Synthetic guide shelf", 'id="host-band-heading-v1"'].map((marker) => journal.indexOf(marker));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(journal).toContain("h-[460px]");
+  });
+
   it("adds a review line to a card only when the consumer supplies one", () => {
     const model = { ...card, href: card.href };
     expect(renderToStaticMarkup(<ExperienceCardV1 card={model} />)).not.toContain("★");

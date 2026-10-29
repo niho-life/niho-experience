@@ -114,11 +114,6 @@ test("the list keeps heading levels in order: h1, then h2, then the cards' h3", 
   levels.slice(1).forEach((level, index) => expect(level, `heading ${index + 2} skips a level`).toBeLessThanOrEqual(levels[index]! + 1));
 });
 
-test("the home heading keeps its title and count line apart as text", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.locator("#strips-heading-v1")).toHaveText(/among neighbors\s+\S/);
-});
-
 test("legacy filter query URLs point to the main list and stay out of the index", async ({ request }) => {
   const html = await (await request.get("/experiences?theme=craft")).text();
   expect(html).toContain('<link rel="canonical" href="http://localhost:3000/experiences"');

@@ -23,14 +23,27 @@ export type HomeViewModelV1 = Readonly<{
   figures: readonly { value: string; unit: string; note: string }[];
   postcards: readonly { id: string; image: DisplayImageV1; place: string; rotate: number }[];
   hostBand: DisplayVideoV1;
+  /**
+   * "journal" (2026-10-29): a shorter hero, the booking steps directly under the cards, then `afterCards` and the host band.
+   * The editorial feature, video strips, host feature, figures and postcards are left out. Omitted = the classic home.
+   */
+  layout?: "classic" | "journal";
 }>;
 
 export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { model: HomeViewModelV1; primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1 }) {
   const { Link, Image } = primitivesV1(primitives);
   const steps = [["cal", "home.pickDateTitle", "home.pickDateBody"], ["card", "home.payTitle", "home.payBody"], ["mail", "home.meetTitle", "home.meetBody"]] as const;
+  const journal = model.layout === "journal";
+  const stepList = (label?: string) => <ol aria-label={label} className="grid gap-3 lg:grid-cols-3 lg:gap-4">{steps.map(([icon, title, body]) => <li key={title} className="flex items-start gap-4 rounded-[22px] bg-sand p-[22px]">
+<HandIcon name={icon} className="size-[46px]" />
+<div>
+<b className="block text-[1.0625rem]">{copy.text(title)}</b>
+<p className="mt-0.5 text-[0.9375rem] text-ink-soft">{copy.text(body)}</p>
+</div>
+</li>)}</ol>;
   return <>
     <section className="relative" aria-label={copy.text("home.welcome")}>
-<div className="relative h-[560px] overflow-hidden bg-[#222] lg:h-[680px]">
+<div className={`relative overflow-hidden bg-[#222] ${journal ? "h-[460px] lg:h-[560px]" : "h-[560px] lg:h-[680px]"}`}>
       <Image src={model.hero.src} srcSet={model.hero.srcset} alt={model.hero.alt} priority sizes="100vw" className="absolute inset-0 h-full w-full object-cover" style={{ objectPosition: model.hero.position }} />
       <div aria-hidden className="absolute inset-0 bg-[linear-gradient(180deg,rgb(0_0_0/0)_32%,rgb(0_0_0/0.64)_100%)] lg:bg-[linear-gradient(90deg,rgb(0_0_0/0.42),rgb(0_0_0/0)_62%),linear-gradient(180deg,rgb(0_0_0/0)_40%,rgb(0_0_0/0.5)_100%)]" />
       <div className="absolute inset-x-0 bottom-16 z-[2] text-white lg:bottom-[116px]">
@@ -52,8 +65,9 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 <InviteCardV1 primitives={primitives} copy={copy} />
 </li>
 </ul> : model.empty ?? null}
+      {journal && model.cards.length ? <div className="mt-2 lg:mt-12">{stepList(copy.text("home.bookingTitle"))}</div> : null}
     </section>{model.afterCards ?? null}
-    {model.feature ? <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="featured-heading-v1">
+    {!journal && model.feature ? <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="featured-heading-v1">
 <div className="grid items-center gap-7 lg:grid-cols-[0.9fr_1.3fr] lg:gap-16">
 <div>{model.feature.schedule ? <p className="eyebrow">{model.feature.schedule}</p> : null}<h2 id="featured-heading-v1" className="mt-2 text-[2rem] lg:text-[2.75rem]">{model.feature.heading}</h2>
 <p className="mt-3.5 max-w-[30rem] text-ink-soft">{model.feature.body}</p>
@@ -64,7 +78,7 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 </div>)}</div>
 </div>
 </section> : null}
-    {model.strips.length ? <section className="pt-[72px] lg:pt-[104px]" aria-labelledby="strips-heading-v1">
+    {!journal && model.strips.length ? <section className="pt-[72px] lg:pt-[104px]" aria-labelledby="strips-heading-v1">
 <div className="relative h-[340px] overflow-hidden bg-[#222] lg:h-[500px]">
 <DecorativeVideoV1 video={model.banner} primitives={primitives} />
 <div aria-hidden className="absolute inset-0 bg-black/35" />
@@ -82,26 +96,20 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 </Link>
 </li>)}</ul>
 </section> : null}
-    {model.hostFeature ? <HostFeatureV1 model={model.hostFeature} primitives={primitives} /> : null}
-    {model.cards.length ? <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="numbers-heading-v1">
+    {!journal && model.hostFeature ? <HostFeatureV1 model={model.hostFeature} primitives={primitives} /> : null}
+    {!journal && model.cards.length ? <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="numbers-heading-v1">
 <SectionHeadingV1 align="center" eyebrow={copy.text("home.differentEyebrow")} title={copy.text("home.differentTitle")} id="numbers-heading-v1" />
 <ul className="grid grid-cols-2 gap-x-3 gap-y-11 text-center lg:grid-cols-4">{model.figures.map((figure, index) => <FigureV1 key={`${figure.value}-${index}`} {...figure} />)}</ul>
 </section> : null}
-    <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="steps-heading-v1">
+    {!journal ? <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="steps-heading-v1">
 <SectionHeadingV1 eyebrow={copy.text("home.bookingEyebrow")} title={copy.text("home.bookingTitle")} id="steps-heading-v1" />
-<ol className="grid gap-3 lg:grid-cols-3 lg:gap-4">{steps.map(([icon, title, body]) => <li key={title} className="flex items-start gap-4 rounded-[22px] bg-sand p-[22px]">
-<HandIcon name={icon} className="size-[46px]" />
-<div>
-<b className="block text-[1.0625rem]">{copy.text(title)}</b>
-<p className="mt-0.5 text-[0.9375rem] text-ink-soft">{copy.text(body)}</p>
-</div>
-</li>)}</ol>
+{stepList()}
 <p className="mt-[18px] flex flex-wrap items-center justify-center gap-1 text-center">
 <span className="hand text-[1.5625rem]">{copy.text("home.noAccount")}</span>
 <HandIcon name="arrow" className="h-[34px] w-[60px] text-moss" />
 </p>
-</section>
-    <section className="pt-[88px]" aria-labelledby="walk-heading-v1">
+</section> : null}
+    {!journal ? <section className="pt-[88px]" aria-labelledby="walk-heading-v1">
 <div className="container-page">
 <SectionHeadingV1 align="center" eyebrow={copy.text("home.aroundEyebrow")} title={copy.text("home.aroundTitle")} id="walk-heading-v1" />
 </div>
@@ -115,7 +123,7 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 <figcaption className="mt-3 text-center font-hand text-2xl leading-[1.1] font-semibold">{card.place}</figcaption>
 </figure>
 </li>)}</ul>
-</section>
+</section> : null}
     <section className="container-page pt-16" aria-labelledby="host-band-heading-v1">
 <div className="grid items-center gap-7 overflow-hidden rounded-[28px] bg-sand px-6 py-8 lg:grid-cols-[1.2fr_0.8fr] lg:px-16 lg:py-14">
 <div>

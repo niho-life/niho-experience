@@ -93,7 +93,11 @@
 
 ### トップ（`/`）
 
-上から：ヘッダー → ヒーロー → テーマ → カード → 特集 → 動画の帯 → ホスト紹介 → 数字 → 予約の流れ → 絵はがき → ホスト募集の帯 → フッター（プレビューだけ最下部に1行の表記）。
+2026-10-29 にオーナー承認のモック A（<https://niho-experience-top-mock.pages.dev/a-journal-grid.html>）の構成に変えた（オーナー判断「体験が最優先。体験を先に出して、その下に記事も。記事は今後たくさん増えるので、サムネイル画像とセットで一覧できるように」）。presentation の `HomeViewModelV1.layout: "journal"` で組む。
+
+上から：ヘッダー → ヒーロー（従来より低い 460px / PC 560px）→ テーマ → カード → 予約の流れ（カードの直下）→ 記事（Kamakura Journal）→ ホスト募集の帯 → フッター（プレビューだけ最下部に1行の表記）。
+
+特集・動画の帯・ホスト紹介・数字・絵はがきは `layout` を渡さない従来の構成（日本語版トップ）にだけ残る。下の表のそれらの行は従来の構成の説明。
 
 | 節 | 内容 |
 | --- | --- |
@@ -105,6 +109,7 @@
 | 動画の帯 | "Slow down, you're among neighbors" と手書きの副題。下に縦長の動画カード（掲載中のテーマだけ）。ラベルは手書きの動詞＋編集用の短い名前（"Cook / Community dinner"。表に無ければ題名の短縮）。書道は書道の動画で上書き。ホストの実名は書かない |
 | ホスト紹介 | sand の面。書道の slug が掲載中ならモックどおり（`FEATURED_HOST`）：データの hosts[0] の名前を手書き、役割 "Calligrapher, MC and event producer"、本文、切手の縁の中に書道の動画＋丸スタンプ、"See Shiryu's workshop"。掲載されていなければ個人の提供者（`provider.kind = INDIVIDUAL`）の体験の表紙・`provider.tagline`・リード。下にホストの顔（写真、無ければ頭文字。名前のあるホストを先に、ホストのいない体験は編集用の顔）を各体験へのリンクで並べ、紹介中の人を緑の縁で強調 |
 | 数字 | "Small on purpose"：駅からの分数（"From Kamakura Station West Exit to the living room door."）、最大定員（計算）、体験数（計算。掲載中の全体験にテーマがあれば "Food, coffee, Zen, mending and calligraphy." のように並べる）、言語数（"English and Japanese, often both at the same table."）。Fraunces 300 の数字＋手書きの単位 |
+| 記事 | 手書き "then, wander the town"、h2 "Kamakura Journal"、説明 "Notes on the streets, food and everyday life of Kamakura, from people who live here."、`/guides` があれば See all。1本目（#147 の Editorial preview があればそれ）を大きく、右に次の3本（PC。スマホは縦に並ぶ行）、その下に3列のサムネイル（タブレット2列、スマホは左に正方形のサムネイルの行）。トップに出すのは10本まで、それより多ければ下に "More guides"（`/guides` へ）。カードはカテゴリ（DB の記事は CMS のカテゴリ、静的な記事は柱）・Draft / Editorial preview の表記、題名、2行の説明、読了分数と Checked / Updated の日付。写真（`hero`）が無い記事は sand の面に手書きのカテゴリ名。カテゴリが2つ以上あれば上にチップ（All と各カテゴリ。サーバーの HTML にある全カードをその場で絞るだけ）。`components/HomeJournal.tsx`・`lib/home-journal.ts` |
 | 予約の流れ | Pick a date（"See the next dates on every card. Times are Japan time."）/ Pay securely（"Checkout by Stripe in Japanese yen, tax included."）/ Meet your hosts（"The meeting point and your booking arrive by email."）、手書き "no account needed — book as a guest" |
 | 絵はがき | "Kamakura is small. Walk it."。切手の縁で少し傾け、手書きの地名。リンクなし |
 | ホスト募集 | アーチ形の動画、"Share what you love about Kamakura"、`/host` へ |
