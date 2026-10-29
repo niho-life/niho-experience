@@ -5,9 +5,9 @@ import { config } from "@/lib/config";
 import { guideRepository } from "@/lib/experience/store-server";
 import { isEditorConsole } from "@/lib/editor/server";
 import { clearSessionCookie, hostApiClient, noStoreJson, readHostSession } from "./server";
-import { idTokenUsable } from "./session";
+import { idTokenUsable, type HostSession } from "./session";
 
-type HostGuideLinkContext = { actor: GuideActor; repository: GuideRepository };
+type HostGuideLinkContext = { actor: GuideActor; repository: GuideRepository; session: HostSession };
 
 /** NIHO session liveness and account identity are checked on every host invitation request. */
 export async function loadHostGuideLinkContext(): Promise<
@@ -47,5 +47,5 @@ export async function loadHostGuideLinkContext(): Promise<
   }
   const repository = guideRepository();
   if (!repository) return { ok: false, response: noStoreJson({ error: "unavailable" }, 503) };
-  return { ok: true, value: { actor: { nihoUserId: session.nihoUserId }, repository } };
+  return { ok: true, value: { actor: { nihoUserId: session.nihoUserId }, repository, session } };
 }
