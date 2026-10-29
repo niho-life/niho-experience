@@ -393,3 +393,29 @@ test("invitation clears the secret from the URL and shows a readable invalid sta
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await testInfo.attach("invitation-invalid-synthetic", { body: await page.screenshot({ path: testInfo.outputPath("invitation-invalid.png") }), contentType: "image/png" });
 });
+
+
+test("short adjacent slots keep separate clickable lanes", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "calendar-desktop", "Desktop time grid only");
+  await signIn(page);
+  await stubCalendar(page, async (route) => {
+    const item = occurrence();
+    const start = Date.parse(item.startUtc);
+    await route.fulfill({ status: 200, json: { ...calendarData(), occurrences: [
+      { ...item, id: "short-a", experienceTitle: "短い枠A", durationMinutes: 30, endUtc: new Date(start + 30 * 60_000).toISOString() },
+      { ...item, id: "short-b", experienceTitle: "短い枠B", durationMinutes: 30, startUtc: new Date(start + 30 * 60_000).toISOString() },
+    ] } });
+  });
+  await page.goto("/host/calendar");
+  const a = page.getByRole("button", { name: /短い枠A/ });
+  const b = page.getByRole("button", { name: /短い枠B/ });
+  await expect(a).toBeVisible();
+  await expect(b).toBeVisible();
+  const boxA = (await a.boundingBox())!;
+  const boxB = (await b.boundingBox())!;
+  expect(boxA.height).toBeGreaterThanOrEqual(44);
+  expect(boxB.height).toBeGreaterThanOrEqual(44);
+  expect(boxA.x + boxA.width <= boxB.x || boxB.x + boxB.width <= boxA.x || boxA.y + boxA.height <= boxB.y || boxB.y + boxB.height <= boxA.y).toBe(true);
+  await a.click();
+  await expect(page.getByRole("dialog", { name: "短い枠A" })).toBeVisible();
+});

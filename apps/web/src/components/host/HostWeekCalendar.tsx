@@ -59,13 +59,14 @@ export function HostWeekCalendar({ days, today, occurrences, busyIntervals, prod
         {days.map((day) => <button key={day} type="button" data-calendar-day={day} onClick={() => onSelectDay(day)} aria-label={`${dateLabel(day)}の日表示`} aria-current={day === today ? "date" : undefined} className={`min-h-14 border-l border-line px-1 text-center hover:bg-sand ${day === today ? "bg-leaf-pale" : ""}`}><span className="block text-xs text-muted">{"月火水木金土日"[days.indexOf(day)]}</span><strong className={`mx-auto mt-0.5 grid size-7 place-items-center rounded-full font-sans text-sm ${day === today ? "bg-ink text-canvas" : ""}`}>{Number(day.slice(8))}</strong></button>)}
       </div>
       <div className="grid grid-cols-[52px_repeat(7,minmax(0,1fr))]">
-        <div aria-hidden="true" className="relative border-r border-line bg-canvas" style={{ height: totalHeight }}>
+        <div aria-hidden="true" className="relative border-r border-line bg-canvas" style={{ height: totalHeight + 44 }}>
           {hours.map((minutes) => <span key={minutes} className="absolute right-2 -translate-y-1/2 text-[0.6875rem] leading-none text-muted tabular-nums" style={{ top: ((minutes - range.startMinutes) / 60) * hourHeight }}>{minutesLabel(minutes)}</span>)}
         </div>
         {days.map((day) => {
           const items = dayItems.get(day) ?? [];
-          const layout = overlapLayout(items.map((item) => ({ id: item.id, ...item.interval })));
-          return <div key={day} className="relative border-r border-line last:border-r-0" style={{ height: totalHeight, backgroundImage: "linear-gradient(to bottom, transparent calc(100% - 1px), var(--color-line) 1px)", backgroundSize: `100% ${hourHeight}px` }}>
+          // Reserve each button's full hit area when assigning lanes, including short adjacent slots.
+          const layout = overlapLayout(items.map((item) => ({ id: item.id, ...item.interval, endMinutes: Math.max(item.interval.endMinutes, item.interval.startMinutes + (44 / hourHeight) * 60) })));
+          return <div key={day} className="relative border-r border-line last:border-r-0" style={{ height: totalHeight + 44, backgroundImage: "linear-gradient(to bottom, transparent calc(100% - 1px), var(--color-line) 1px)", backgroundSize: `100% ${hourHeight}px` }}>
             {items.map((item) => {
               const placement = layout.get(item.id) ?? { column: 0, columns: 1 };
               const top = ((item.interval.startMinutes - range.startMinutes) / 60) * hourHeight;
