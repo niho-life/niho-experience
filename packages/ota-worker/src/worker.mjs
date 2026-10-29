@@ -6,8 +6,12 @@ import { restartDisposition } from "./journal.mjs";
 import { createHaltLatch } from "./halt-latch.mjs";
 
 const sleep = (ms, signal) => new Promise((resolve) => {
-  const timer = setTimeout(resolve, ms); timer.unref?.();
-  signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+  if (signal?.aborted) return resolve();
+  const cleanup = () => signal?.removeEventListener("abort", abort);
+  // The polling wait owns the daemon's lifetime when the API is idle.
+  const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+  const abort = () => { clearTimeout(timer); cleanup(); resolve(); };
+  signal?.addEventListener("abort", abort, { once: true });
 });
 
 export async function resumeJournal(journal, cloud, haltLatch = null) {

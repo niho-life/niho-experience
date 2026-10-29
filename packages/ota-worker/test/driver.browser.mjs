@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { validateUpdateMutation } from "../src/network-guard.mjs";
 import { createGygDriver } from "../src/gyg-driver.mjs";
-import { syntheticGyg, makeJob } from "./helpers/synthetic-gyg.mjs";
+import { CHROME, syntheticGyg, makeJob } from "./helpers/synthetic-gyg.mjs";
 
 const requireBrowser = (t) => {
   if (process.env.CODEX_SANDBOX === "seatbelt") { t.skip("Codex seatbelt blocks Chrome process control; run on the reviewed Studio executor."); return false; }
-  if (!existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")) { t.skip("Pinned Studio Chrome is not installed on this runner."); return false; }
+  if (!existsSync(CHROME)) {
+    assert.ok(!process.env.CI, "CI must install the selected Chromium executable before browser tests");
+    t.skip("Selected Chrome executable is not installed on this runner."); return false;
+  }
   return true;
 };
 
