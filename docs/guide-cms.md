@@ -37,9 +37,9 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## 関連体験への招待 API（#190）
 
-`/editor/api/guide-link-invitations` はログイン中のwriter本人に未応答の招待だけを返す。`/{id}/accept`・`/{id}/decline` は同一originのPOSTで`{generation}`を受け、Storeが現在のwriter grant・招待したOWNER・世代・状態を同一transactionで再検査する。`/host/api/guide-link-invitations/providers/{providerId}` は現行OWNERの招待一覧、`/{id}/revoke` は`{generation}`を受けて現在のOWNER・世代・状態を再検査する。host BFFは各要求でNIHO `GET /api/auth/me`のuser IDをsealed sessionと照合し、401・ID不一致ではcookieを消す。DTOにはwriter・招待者のNIHO user ID、名前、メールを出さず、すべて`private, no-store`で返す。
+`/editor/api/guide-link-invitations` はログイン中のwriter本人に未応答の招待だけを返す。`/{id}/accept`・`/{id}/decline` は同一originのPOSTで`{generation}`を受け、Storeが現在のwriter grant・招待したOWNER・世代・状態を同一transactionで再検査する。`/host/api/guide-link-invitations/providers/{providerId}` は現行OWNERの招待一覧と新規招待、`/{id}/revoke` は`{generation}`を受けて現在のOWNER・世代・状態を再検査する。host BFFは各要求でNIHO `GET /api/auth/me`のuser IDをsealed sessionと照合し、401・ID不一致ではcookieを消す。DTOにはwriter・招待者のNIHO user ID、名前、メールを出さず、すべて`private, no-store`で返す。
 
-ホストの新規招待POSTは、NIHO側がverified emailまたはアカウントからwriter本人を解決する契約（niho-app #19462）が揃ってから接続する。ブラウザの任意user IDを招待先として受けない。既存hostのCOHOST権限は流用せず、招待を受諾しても商品編集・予約・顧客・売上への権限は生まれない。
+ホストの新規招待POSTは同一originのJSON `{email}` または `{nihoUserId}` を受ける。先にStoreで現行OWNERを検査し、その後NIHO #19462の `POST /api/experience-guide-writers/resolve` へserver-held host AppConnection tokenとExperience runtime service accountのGoogle ID tokenを送る。NIHOは両方を検証してverified email・有効アカウントを解決するだけで、Experience Storeが現行writer grantとOWNERをtransactionで再検査して招待を保存する。NIHOの対象不適格404は`X-NIHO-Guide-Writer-Resolver: v1`で未配備・flag OFFの404と区別する。resolverの401・403ではhost cookieを消さず503にし、host tokenの失効は先行する`/api/auth/me`で判断する。NIHO APIが未配備、service identityが取得不能、またはhost app-connect #19277が未配備なら招待は開かない。editor/host flagがOFFなら404。ブラウザが指定したuser IDをStoreへ直接通さない。既存hostのCOHOST権限は流用せず、招待を受諾しても商品編集・予約・顧客・売上への権限は生まれない。
 
 ## database flagを開く前のゲート
 

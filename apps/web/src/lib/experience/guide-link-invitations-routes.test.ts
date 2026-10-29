@@ -4,12 +4,14 @@ import { StoreAccessDeniedError, StoreConflictError } from "@niho-experience/exp
 const mocks = vi.hoisted(() => ({
   editorContext: vi.fn(),
   hostContext: vi.fn(),
+  resolveWriter: vi.fn(),
   editorAllowed: vi.fn(() => true),
   repository: {
     listOwnPendingLinkInvitations: vi.fn(),
     acceptLinkInvitation: vi.fn(),
     declineLinkInvitation: vi.fn(),
     listProviderLinkInvitations: vi.fn(),
+    inviteProductLinkWriter: vi.fn(),
     revokeLinkInvitation: vi.fn(),
   },
 }));
@@ -33,6 +35,7 @@ vi.mock("@/lib/editor/guide-api-server", async () => {
   };
 });
 vi.mock("@/lib/host/guide-link-api-server", () => ({ loadHostGuideLinkContext: mocks.hostContext }));
+vi.mock("@/lib/host/guide-writer-resolver", () => ({ resolveGuideWriter: mocks.resolveWriter }));
 vi.mock("@/lib/host/server", () => ({
   noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } }),
   siteOrigin: () => "https://experience.example.test",
@@ -40,7 +43,7 @@ vi.mock("@/lib/host/server", () => ({
 
 import { GET as writerList } from "@/app/(editor)/editor/api/guide-link-invitations/route";
 import { POST as writerRespond } from "@/app/(editor)/editor/api/guide-link-invitations/[invitationId]/[action]/route";
-import { GET as hostList } from "@/app/(host)/host/api/guide-link-invitations/providers/[providerId]/route";
+import { GET as hostList, POST as hostInvite } from "@/app/(host)/host/api/guide-link-invitations/providers/[providerId]/route";
 import { POST as hostRevoke } from "@/app/(host)/host/api/guide-link-invitations/[invitationId]/revoke/route";
 
 const SITE = "https://experience.example.test";
@@ -61,9 +64,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.editorAllowed.mockReturnValue(true);
   mocks.editorContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "writer-secret" }, repository: mocks.repository } });
-  mocks.hostContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "owner-secret" }, repository: mocks.repository } });
+  mocks.hostContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "owner-secret" }, repository: mocks.repository, session: { idToken: "sealed-token" } } });
   mocks.repository.listOwnPendingLinkInvitations.mockResolvedValue([invitation]);
   mocks.repository.listProviderLinkInvitations.mockResolvedValue([invitation]);
+  mocks.repository.inviteProductLinkWriter.mockResolvedValue(invitation);
+  mocks.resolveWriter.mockResolvedValue({ status: "ok", writerNihoUserId: "writer-secret" });
   mocks.repository.acceptLinkInvitation.mockResolvedValue({ ...invitation, state: "ACCEPTED", acceptedAtUtc: "2026-10-29T01:00:00.000Z" });
   mocks.repository.declineLinkInvitation.mockResolvedValue({ ...invitation, state: "DECLINED", declinedAtUtc: "2026-10-29T01:00:00.000Z" });
   mocks.repository.revokeLinkInvitation.mockResolvedValue({ ...invitation, state: "REVOKED", revokedAtUtc: "2026-10-29T01:00:00.000Z" });
@@ -104,5 +109,46 @@ describe("guide link invitation BFF", () => {
     mocks.repository.revokeLinkInvitation.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect((await hostRevoke(jsonRequest(route, { generation: 2 }), context)).status).toBe(404);
     expect(mocks.repository.revokeLinkInvitation).toHaveBeenCalledWith({ nihoUserId: "owner-secret" }, id, 2);
+  });
+
+  it("checks provider ownership before NIHO lookup and returns only the invitation DTO", async () => {
+    const path = "/host/api/guide-link-invitations/providers/provider-test";
+    const context = { params: Promise.resolve({ providerId: "provider-test" }) };
+    mocks.repository.listProviderLinkInvitations.mockRejectedValueOnce(new StoreAccessDeniedError());
+    expect((await hostInvite(jsonRequest(path, { email: "Writer@Example.com" }), context)).status).toBe(404);
+    expect(mocks.resolveWriter).not.toHaveBeenCalled();
+
+    const response = await hostInvite(jsonRequest(path, { email: " Writer@Example.com " }), context);
+    expect(response.status).toBe(200);
+    expect(mocks.resolveWriter).toHaveBeenCalledWith({ idToken: "sealed-token" }, { email: "writer@example.com" });
+    expect(mocks.repository.inviteProductLinkWriter).toHaveBeenCalledWith({ nihoUserId: "owner-secret" }, "provider-test", "writer-secret");
+    expect(JSON.stringify(await response.json())).not.toMatch(/writer-secret|owner-secret|provider-test/);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("rejects cross-origin and malformed invitations before resolving an account", async () => {
+    const path = "/host/api/guide-link-invitations/providers/provider-test";
+    const context = { params: Promise.resolve({ providerId: "provider-test" }) };
+    expect((await hostInvite(jsonRequest(path, { email: "writer@example.com" }, { ...headers, origin: "https://evil.test" }), context)).status).toBe(403);
+    expect((await hostInvite(jsonRequest(path, { email: "writer@example.com", nihoUserId: "writer-secret" }), context)).status).toBe(400);
+    expect((await hostInvite(jsonRequest(path, { email: "writer@example.com" }, { ...headers, "content-type": "text/plain" }), context)).status).toBe(400);
+    expect(mocks.resolveWriter).not.toHaveBeenCalled();
+  });
+
+  it("keeps resolver and Store failures private", async () => {
+    const path = "/host/api/guide-link-invitations/providers/provider-test";
+    const context = { params: Promise.resolve({ providerId: "provider-test" }) };
+    mocks.resolveWriter.mockResolvedValueOnce({ status: "not_found" });
+    expect((await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context)).status).toBe(404);
+    mocks.resolveWriter.mockResolvedValueOnce({ status: "unavailable" });
+    const unavailable = await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context);
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("set-cookie")).toBeNull();
+    mocks.resolveWriter.mockResolvedValueOnce({ status: "rate_limited", retryAfterSeconds: 60 });
+    const limited = await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("60");
+    mocks.repository.inviteProductLinkWriter.mockRejectedValueOnce(new StoreAccessDeniedError());
+    expect((await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context)).status).toBe(404);
   });
 });
