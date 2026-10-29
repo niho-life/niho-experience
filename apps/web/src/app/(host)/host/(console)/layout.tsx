@@ -5,7 +5,8 @@ import { HostShell } from "@/components/host/HostShell";
 import { hostButtonClass, HOST_HEADING, HOST_PAGE } from "@/components/host/host-ui";
 import { HostPageBody } from "@/components/host/ui";
 import { config } from "@/lib/config";
-import { toProviderChoice } from "@/lib/host/providers";
+import { calendarConsoleChoices } from "@/lib/experience/calendar-actor";
+import type { ProductOperatorAssignment } from "@niho-experience/experience-store";
 import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
 import { productOperatorRepository } from "@/lib/experience/store-server";
@@ -59,21 +60,15 @@ export default async function HostConsoleLayout({ children }: { children: React.
   }
 
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
-  const memberChoices = load.status === "ok" ? load.providers.map(toProviderChoice) : [];
-  let operatorChoices: { kind: "OPERATOR"; id: string; displayName: string; memberRole: null }[] = [];
+  let assignments: readonly ProductOperatorAssignment[] = [];
   if (load.status === "ok" && !isHostMock()) {
     const repository = productOperatorRepository();
     if (repository) {
-      try {
-        const assignments = await repository.listAssignments(session.nihoUserId);
-        const memberIds = new Set(memberChoices.map((choice) => choice.id));
-        operatorChoices = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
-          kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null,
-        }])).values()];
-      } catch { /* The provider-wide console remains usable; operator access fails closed. */ }
+      try { assignments = await repository.listAssignments(session.nihoUserId); }
+      catch { /* Current NIHO members retain their existing read access; grants fail closed. */ }
     }
   }
-  const choices = [...memberChoices, ...operatorChoices];
+  const choices = calendarConsoleChoices(load.status === "ok" ? load.providers : [], assignments);
   return (
     <>
       {appGuard}

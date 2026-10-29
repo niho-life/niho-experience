@@ -1,6 +1,6 @@
 import "server-only";
 import type { HostActor, ProductOperatorAssignment } from "@niho-experience/experience-store";
-import { nihoIdOrNull, selectProvider, toProviderChoice, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
+import { nihoIdOrNull, selectProvider, toProviderChoice, type HostConsoleChoice, type HostProvider, type HostProviderRole } from "@/lib/host/providers";
 import { loadHostProviders, noStoreJson, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
 import { productOperatorRepository } from "./store-server";
@@ -42,15 +42,20 @@ export async function resolveCalendarContext(query: Record<string, string | stri
   if (load.status !== "ok") return null;
   const repository = productOperatorRepository();
   const assignments = repository ? await repository.listAssignments(session.nihoUserId) : [];
-  const assignedIds = new Set(assignments.map((item) => item.providerId));
-  const members = load.providers.filter((provider) => provider.memberRole === "OWNER" || provider.memberRole === "EDITOR" || !assignedIds.has(provider.id)).map(toProviderChoice);
-  const memberIds = new Set(members.map((choice) => choice.id));
-  const operators: HostConsoleChoice[] = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
-    kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null,
-  }])).values()];
-  const choices = [...members, ...operators];
+  const choices = calendarConsoleChoices(load.providers, assignments);
   const raw = typeof query.providerId === "string" ? query.providerId : null;
   const requested = nihoIdOrNull(raw);
   const selected = selectProvider(choices, requested);
   return { choices, choice: selected.provider, providerNotFound: raw !== null && (!requested || selected.requestedMissing) };
+}
+
+/** The page selector and HostShell must use the same product authority projection. */
+export function calendarConsoleChoices(providers: readonly HostProvider[], assignments: readonly ProductOperatorAssignment[]): readonly HostConsoleChoice[] {
+  const assignedIds = new Set(assignments.map((item) => item.providerId));
+  const members = providers.filter((provider) => provider.memberRole === "OWNER" || provider.memberRole === "EDITOR" || !assignedIds.has(provider.id)).map(toProviderChoice);
+  const memberIds = new Set(members.map((choice) => choice.id));
+  const operators: HostConsoleChoice[] = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
+    kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null,
+  }])).values()];
+  return [...members, ...operators];
 }
