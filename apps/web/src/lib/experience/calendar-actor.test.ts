@@ -21,7 +21,7 @@ beforeEach(() => {
 describe("calendar actor", () => {
   it("allows an operator calendar when NIHO returns a verified empty provider list", async () => {
     const result = await calendarActor("provider-a");
-    expect(result).toMatchObject({ actor: { providerId: "provider-a", nihoUserId: "operator-a" }, access: { kind: "OPERATOR" } });
+    expect(result).toMatchObject({ actor: { providerId: "provider-a", nihoUserId: "operator-a", calendarScope: "OPERATOR" }, access: { kind: "OPERATOR" } });
     expect(await resolveCalendarContext({ providerId: "provider-a" })).toMatchObject({ choice: { kind: "OPERATOR", id: "provider-a", memberRole: null } });
   });
 
@@ -37,5 +37,14 @@ describe("calendar actor", () => {
     const result = await calendarActor("provider-a");
     expect(result).toMatchObject({ access: { kind: "MEMBER", nihoRole: "OWNER" } });
     expect(mocks.assignments).not.toHaveBeenCalled();
+  });
+
+  it("uses the product grant ceiling when current NIHO membership was downgraded", async () => {
+    mocks.load = { status: "ok", providers: [{ id: "provider-a", displayName: "Member provider", memberRole: "COHOST" }] };
+    expect(await calendarActor("provider-a")).toMatchObject({
+      actor: { calendarScope: "OPERATOR" }, access: { kind: "OPERATOR" },
+    });
+    mocks.assignments.mockResolvedValue([]);
+    expect(await calendarActor("provider-a")).toMatchObject({ access: { kind: "MEMBER", nihoRole: "COHOST" } });
   });
 });

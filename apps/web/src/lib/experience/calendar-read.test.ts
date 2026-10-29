@@ -9,6 +9,17 @@ vi.mock("@niho-experience/experience-store", async () => {
 import { readHostCalendar } from "./calendar-read";
 
 describe("operator calendar read model", () => {
+  it("keeps an authorized member's new empty calendar usable", async () => {
+    const store = {
+      listCalendarProducts: vi.fn().mockResolvedValue([]),
+      verifyActiveMembership: vi.fn().mockResolvedValue({ role: "OWNER" }),
+      getGoogleCalendar: vi.fn().mockResolvedValue(null),
+    };
+    const data = await readHostCalendar({ query: vi.fn() } as never, store as never,
+      { providerId: "provider-a", nihoUserId: "owner-a" }, "2099-01-01", "2099-01-01");
+    expect(data).toMatchObject({ scope: "MEMBER", canEdit: true, experiences: [], occurrences: [] });
+  });
+
   it("uses reservation data only for canReschedule and omits counts, free seats, busy intervals, and Google identity", async () => {
     const rule = { id: "rule-a", timeZone: "Asia/Tokyo" as const, startsOn: "2099-01-01", endsOn: "2099-01-01", localStartTime: "10:00", durationMinutes: 60,
       capacity: 4, bookingCutoffMinutes: 0, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "WEEKLY" as const } };

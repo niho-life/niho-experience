@@ -1,4 +1,5 @@
 import "server-only";
+import { config } from "@/lib/config";
 import { Pool } from "pg";
 import { ChannelRuntime, ExperienceStore, GuideAdminRepository, GuideRepository, ProductOperatorRepository, type ChannelCapabilities } from "@niho-experience/experience-store";
 
@@ -20,6 +21,7 @@ export function experienceStore(): ExperienceStore | null {
 }
 
 export function productOperatorRepository(): ProductOperatorRepository | null {
+  if (config.apiMode !== "http") return null;
   const pool = experiencePool();
   return pool ? new ProductOperatorRepository(pool) : null;
 }

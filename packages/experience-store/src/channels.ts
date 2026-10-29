@@ -1,3 +1,4 @@
+import type { HostActor } from "./types.ts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   addLocalDays,
@@ -12,7 +13,7 @@ import { isoValue, overrideFromRow, salesStateFromRow, scheduleRuleFromRow, type
 import { withTransaction } from "./transaction.ts";
 import { evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
-import { listCalendarProductsForActor } from "./product-calendar-authorization.ts";
+import { calendarMembershipRole, listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 
 export const CHANNEL_SITES = [
@@ -1336,11 +1337,11 @@ export class ChannelRuntime {
     });
   }
 
-  async hostStatuses(actor: { readonly providerId: string; readonly nihoUserId: string }): Promise<readonly HostChannelStatus[]> {
+  async hostStatuses(actor: HostActor): Promise<readonly HostChannelStatus[]> {
     assertStoreIdentifier(actor.providerId, "actor.providerId");
     assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
-    const products = await listCalendarProductsForActor(this.#pool, actor);
-    if (products.length === 0) throw new StoreAccessDeniedError();
+    const products = await listCalendarProductsForActor(this.#pool, actor, true);
+    if (products.length === 0 && !await calendarMembershipRole(this.#pool, actor)) throw new StoreAccessDeniedError();
     const result = await this.#pool.query<DbRow>(
       `SELECT d.occurrence_id,a.site,d.desired_state,d.desired_version,d.mapping_version,d.observed_state,
               d.observed_desired_version,d.observed_mapping_version,d.last_verified_at,d.last_error,

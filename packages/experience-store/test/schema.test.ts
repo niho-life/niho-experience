@@ -83,7 +83,7 @@ describe("database invariants", () => {
   });
 
   it("stores product operator invitation secrets only as hashes and keeps commands separate", async () => {
-    const sql = await readFile(new URL("../migrations/0010_product_operators.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../migrations/0011_product_operators.sql", import.meta.url), "utf8");
     const invitations = sql.match(/CREATE TABLE product_operator_invitations \(([\s\S]*?)\n\);/)?.[1] ?? "";
     assert.match(invitations, /token_hash bytea NOT NULL CHECK \(octet_length\(token_hash\) = 32\)/);
     assert.doesNotMatch(invitations, /plain|secret|token_value/i);

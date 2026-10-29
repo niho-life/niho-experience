@@ -6,7 +6,7 @@ import { decodeOperatorInvitationCookie, OPERATOR_INVITATION_COOKIE } from "@/li
 import { hostInvitationLoginPath, invitationIdOrNull } from "@/lib/host/routes";
 import { loadHostProviders, readHostSession, requireHostConsole } from "@/lib/host/server";
 
-export const metadata: Metadata = { title: "商品運営への招待", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "体験への招待", robots: { index: false, follow: false } };
 
 export default async function InvitationPage({ params }: { params: Promise<{ invitationId: string }> }) {
   requireHostConsole();

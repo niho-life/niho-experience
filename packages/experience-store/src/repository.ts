@@ -106,7 +106,8 @@ function oneRow(rows: readonly DbRow[], resource: string): DbRow {
   return row;
 }
 
-function validateActor(actor: HostActor): void {
+function validateActor(actor: HostActor, allowOperator = false): void {
+  if (actor.calendarScope === "OPERATOR" && !allowOperator) throw new StoreAccessDeniedError();
   assertStoreIdentifier(actor.providerId, "actor.providerId");
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
 }
@@ -291,12 +292,12 @@ export class ExperienceStore {
   }
 
   async listCalendarProducts(actor: HostActor): Promise<readonly CalendarProduct[]> {
-    validateActor(actor);
+    validateActor(actor, true);
     return listCalendarProductsForActor(this.#pool, actor);
   }
 
   async resolveScheduleRuleProduct(actor: HostActor, ruleId: string, write = false): Promise<string> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(ruleId, "ruleId");
     const result = await this.#pool.query<DbRow>(
       "SELECT product_id FROM schedule_rules WHERE provider_id=$1 AND id=$2",
@@ -572,7 +573,7 @@ export class ExperienceStore {
     expectedVersion: number | null,
     commandId: string,
   ): Promise<CalendarCommandReceipt> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     const rule = parseScheduleRule(rawRule);
     validateCommandId(commandId);
@@ -652,7 +653,7 @@ export class ExperienceStore {
   }
 
   async listSchedule(actor: HostActor, productId: string): Promise<readonly ScheduleView[]> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     await requireProductCalendarAccess(this.#pool, actor, productId, ["OWNER", "EDITOR", "VIEWER"]);
     const rules = await this.#pool.query<DbRow>(
@@ -692,7 +693,7 @@ export class ExperienceStore {
     expectedVersion: number | null,
     commandId: string,
   ): Promise<CalendarCommandReceipt> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     const override = parseOccurrenceOverrides([rawOverride])[0];
     if (override === undefined) throw new StoreValidationError("override is required.");
@@ -762,7 +763,7 @@ export class ExperienceStore {
     expectedVersion: number | null,
     commandId: string,
   ): Promise<CalendarCommandReceipt> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     sourceDateFromOccurrence(ruleId, rawState.occurrenceId);
     if (rawState.desiredState !== "OPEN" && rawState.desiredState !== "CLOSED") throw new StoreValidationError("desiredState is invalid.");

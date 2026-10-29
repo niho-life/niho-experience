@@ -1,6 +1,6 @@
 # 商品限定運営者
 
-Issue #196 の商品限定運営者は、NIHO の provider member とは別の Experience 内認可である。NIHO は毎回、現在のアカウント identity と host API の接続状態を検証する。Experience はその後に `(provider, product, NIHO user)` の有効な grant を検証する。`OPERATOR` はフロントエンドの calendar choice にだけ存在し、NIHO の `HostProvider`、OWNER / EDITOR / COHOST、通常の provider-wide API を拡張しない。
+Issue #196 の商品限定運営者は、NIHO の provider member とは別の Experience 内認可である。NIHO は毎回、現在のアカウント identity と host API の接続状態を検証する。Experience はその後に `(provider, product, NIHO user)` の有効な grant を検証する。`OPERATOR` はExperience内のカレンダー用区分であり、NIHO の `HostProvider`、OWNER / EDITOR / COHOST、通常の provider-wide API を拡張しない。
 
 ## 招待
 
@@ -16,3 +16,5 @@ calendar read/write は共通の商品predicateを使う。mutationのlock順は
 operator response は許可商品だけを返す。予約人数、空席数、Google busy interval、外部account/calendar IDを返さない。日時変更可否は内部の予約状態から `canReschedule` として返し、availability判定はproviderと同じinventory evaluatorをサーバー内で使う。予約、CSV、通知、売上、返金、Google管理、商品原稿は従来どおりprovider membershipを必要とする。
 
 grant失効は新しいcalendar変更を止めるだけで、providerが所有する既存枠、予約、channel jobを削除しない。external account/listingの委任解除とversion fenceは別の台帳契約として維持する。
+
+現在のNIHO provider一覧にない運営者と、NIHOで権限を下げられた担当者には、サーバーで `calendarScope=OPERATOR` を設定する。この値はリクエストから採らず、Storeの全カレンダー認可でもprovider所属を根拠に使わない。Experience側に古いOWNER行が残っていても担当外商品へ広がらず、カレンダー以外のStore操作も拒否する。

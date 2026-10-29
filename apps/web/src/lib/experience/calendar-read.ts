@@ -7,8 +7,8 @@ import type { HostCalendarData } from "@/experience/calendar-contract";
 /** A private host read model. Mutations and booking decisions remain in ExperienceStore. */
 export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor: HostActor, fromDate: string, toDate: string): Promise<HostCalendarData> {
   const products = await store.listCalendarProducts(actor);
-  if (products.length === 0) throw new StoreAccessDeniedError();
-  const scope = products.some((product) => product.access.basis === "OPERATOR") ? "OPERATOR" : "MEMBER";
+  const scope = actor.calendarScope === "OPERATOR" || products.some((product) => product.access.basis === "OPERATOR") ? "OPERATOR" : "MEMBER";
+  if (scope === "OPERATOR" && products.length === 0) throw new StoreAccessDeniedError();
   const membership = scope === "MEMBER" ? await store.verifyActiveMembership(actor) : null;
   if (scope === "MEMBER" && !membership) throw new StoreAccessDeniedError();
   const schedule = await Promise.all(products.map(async (product) => ({ product, views: await store.listSchedule(actor, product.id) })));

@@ -216,18 +216,17 @@ export class ProductOperatorRepository {
       if (!product.rows[0]) throw new StoreNotFoundError("product");
       const id = randomUUID();
       const token = randomBytes(32).toString("base64url");
-      const expiresAtUtc = new Date(Date.now() + expiresInDays * 86_400_000).toISOString();
       const saved = await client.query<DbRow>(
         `INSERT INTO product_operator_invitations
            (id,provider_id,product_id,token_hash,assignment_label,invited_by_niho_user_id,expires_at)
-         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [id, input.providerId, input.productId, tokenDigest(token), assignmentLabel, actor.nihoUserId, expiresAtUtc],
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,statement_timestamp()+make_interval(days=>$7::integer)) RETURNING *`,
+        [id, input.providerId, input.productId, tokenDigest(token), assignmentLabel, actor.nihoUserId, expiresInDays],
       );
       const row = { ...saved.rows[0]!, public_title: "", seller_display_name: "" };
       const hydrated = await client.query<DbRow>(`${INVITATION_SELECT} WHERE i.id=$1::uuid`, [id]);
       const record = invitation(hydrated.rows[0] ?? row);
       await completeCommand(client, actor, commandId, "INVITATION_CREATE", requestFingerprint, { invitation: record });
-      await audit(client, { providerId: input.providerId, productId: input.productId, invitationId: id, actorNihoUserId: actor.nihoUserId, action: "INVITATION_CREATED", metadata: { expiresAtUtc } });
+      await audit(client, { providerId: input.providerId, productId: input.productId, invitationId: id, actorNihoUserId: actor.nihoUserId, action: "INVITATION_CREATED", metadata: { expiresAtUtc: record.expiresAtUtc } });
       return { invitation: record, token, repeated: false };
     });
   }

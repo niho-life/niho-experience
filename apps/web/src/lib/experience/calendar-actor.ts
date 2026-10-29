@@ -20,12 +20,12 @@ export async function calendarActor(providerId: unknown): Promise<CalendarActorR
   if (providers.status === "rejected" || providers.status === "refresh" || providers.status === "signed-out") return { response: noStoreJson({ error: "unauthenticated" }, 401) };
   if (providers.status !== "ok") return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
   const provider = providers.providers.find((entry) => entry.id === id);
-  if (provider) return { actor: { providerId: id, nihoUserId: session.nihoUserId }, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
+  if (provider && (provider.memberRole === "OWNER" || provider.memberRole === "EDITOR")) return { actor: { providerId: id, nihoUserId: session.nihoUserId }, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
   const repository = productOperatorRepository();
-  if (!repository) return { response: noStoreJson({ error: "calendar_not_configured" }, 503) };
-  const assignments = (await repository.listAssignments(session.nihoUserId)).filter((entry) => entry.providerId === id);
-  if (assignments.length === 0) return { response: noStoreJson({ error: "forbidden" }, 403) };
-  return { actor: { providerId: id, nihoUserId: session.nihoUserId }, access: { kind: "OPERATOR", assignments } };
+  const assignments = repository ? (await repository.listAssignments(session.nihoUserId)).filter((entry) => entry.providerId === id) : [];
+  if (assignments.length > 0) return { actor: { providerId: id, nihoUserId: session.nihoUserId, calendarScope: "OPERATOR" }, access: { kind: "OPERATOR", assignments } };
+  if (provider) return { actor: { providerId: id, nihoUserId: session.nihoUserId }, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
+  return { response: noStoreJson({ error: repository ? "forbidden" : "calendar_not_configured" }, repository ? 403 : 503) };
 }
 
 export interface CalendarPageContext {

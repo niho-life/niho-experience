@@ -14,6 +14,8 @@ export type BookingMode = "SEAT" | "PRIVATE_GROUP";
 export type InventoryResourceKind = "VENUE" | "INSTRUCTOR" | "EQUIPMENT";
 
 export interface HostActor {
+  /** Server-established ceiling: current NIHO membership cannot widen an operator grant. */
+  readonly calendarScope?: "OPERATOR";
   readonly providerId: string;
   readonly nihoUserId: string;
 }

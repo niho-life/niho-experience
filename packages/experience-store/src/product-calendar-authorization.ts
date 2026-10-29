@@ -23,12 +23,8 @@ export async function requireProductCalendarAccess(
   allowedMembershipRoles: readonly MembershipRole[],
 ): Promise<CalendarAccess> {
   validate(actor, productId);
-  const member = await client.query<DbRow>(
-    `SELECT role FROM provider_memberships
-      WHERE provider_id=$1 AND niho_user_id=$2 AND active=true AND role=ANY($3::text[]) FOR SHARE`,
-    [actor.providerId, actor.nihoUserId, allowedMembershipRoles],
-  );
-  if (member.rows[0]) return { basis: "MEMBER", role: String(member.rows[0].role) as MembershipRole };
+  const role = await calendarMembershipRole(client, actor, allowedMembershipRoles);
+  if (role) return { basis: "MEMBER", role };
   const grant = await client.query<DbRow>(
     `SELECT version,assignment_label FROM product_operator_grants
       WHERE provider_id=$1 AND product_id=$3 AND niho_user_id=$2 AND active=true
@@ -39,18 +35,29 @@ export async function requireProductCalendarAccess(
   return { basis: "OPERATOR", version: Number(grant.rows[0].version), assignmentLabel: String(grant.rows[0].assignment_label) };
 }
 
-export async function listCalendarProductsForActor(client: Queryable, actor: HostActor): Promise<readonly { id: string; publicTitle: string; sellerDisplayName: string; access: CalendarAccess }[]> {
+/** A current server-side product ceiling always suppresses stale provider membership. */
+export async function calendarMembershipRole(client: Queryable, actor: HostActor, allowedRoles: readonly MembershipRole[] = ["OWNER", "EDITOR", "VIEWER"]): Promise<MembershipRole | null> {
+  if (actor.calendarScope === "OPERATOR") return null;
+  const result = await client.query<DbRow>(
+    `SELECT role FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2
+       AND active=true AND role=ANY($3::text[]) FOR SHARE`,
+    [actor.providerId, actor.nihoUserId, allowedRoles],
+  );
+  return result.rows[0] ? String(result.rows[0].role) as MembershipRole : null;
+}
+
+export async function listCalendarProductsForActor(client: Queryable, actor: HostActor, includeArchived = false): Promise<readonly { id: string; publicTitle: string; sellerDisplayName: string; access: CalendarAccess }[]> {
   assertStoreIdentifier(actor.providerId, "actor.providerId");
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
   const result = await client.query<DbRow>(
     `SELECT p.id,p.public_title,p.seller_display_name,m.role,g.version AS grant_version,g.assignment_label
        FROM experience_products p
-       LEFT JOIN provider_memberships m ON m.provider_id=p.provider_id AND m.niho_user_id=$2 AND m.active=true
+       LEFT JOIN provider_memberships m ON m.provider_id=p.provider_id AND m.niho_user_id=$2 AND m.active=true AND $3::boolean
        LEFT JOIN product_operator_grants g ON g.provider_id=p.provider_id AND g.product_id=p.id
          AND g.niho_user_id=$2 AND g.active=true AND (g.expires_at IS NULL OR g.expires_at>clock_timestamp())
-      WHERE p.provider_id=$1 AND p.status<>'ARCHIVED' AND (m.provider_id IS NOT NULL OR g.provider_id IS NOT NULL)
+      WHERE p.provider_id=$1 AND (p.status<>'ARCHIVED' OR $4::boolean) AND (m.provider_id IS NOT NULL OR g.provider_id IS NOT NULL)
       ORDER BY p.public_title COLLATE "C",p.id COLLATE "C" LIMIT 200`,
-    [actor.providerId, actor.nihoUserId],
+    [actor.providerId, actor.nihoUserId, actor.calendarScope !== "OPERATOR", includeArchived],
   );
   return result.rows.map((row) => ({
     id: String(row.id), publicTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name),

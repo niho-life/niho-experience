@@ -54,12 +54,16 @@ describe("PostgreSQL product operators", { skip: databaseUrl === undefined }, ()
       assert.equal(accepted.active, true);
       assert.equal((await operators.accept(created.invitation.id, invitationToken, "operator-a")).version, accepted.version);
       await assert.rejects(() => operators.accept(created.invitation.id, invitationToken, "operator-b"), StoreConflictError);
-      const actor = { providerId: "provider-a", nihoUserId: "operator-a" } as const;
+      const actor = { providerId: "provider-a", nihoUserId: "operator-a", calendarScope: "OPERATOR" } as const;
+      // Current NIHO identity no longer has this provider. A stale local OWNER must not widen its product grant.
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','operator-a','OWNER')");
       assert.deepEqual((await store.listCalendarProducts(actor)).map((product) => product.id), ["tea-a"]);
       assert.equal((await store.listSchedule(actor, "tea-a")).length, 1);
       await assert.rejects(() => store.listSchedule(actor, "tea-b"), StoreAccessDeniedError);
+      await assert.rejects(() => store.saveScheduleRule(actor, "tea-b", rule("foreign-rule"), null, command(18)), StoreAccessDeniedError);
       await assert.rejects(() => store.listSchedule({ providerId: "provider-b", nihoUserId: "operator-a" }, "tea-c"), StoreAccessDeniedError);
       await assert.rejects(() => store.getProduct(actor, "tea-a"), StoreAccessDeniedError);
+      await assert.rejects(() => store.getBooking(actor, "synthetic-other-booking"), StoreAccessDeniedError);
       await assert.rejects(() => store.getGoogleCalendar(actor), StoreAccessDeniedError);
       await assert.rejects(() => store.listInventoryResources(actor), StoreAccessDeniedError);
       await pool.query(
@@ -116,6 +120,12 @@ describe("PostgreSQL product operators", { skip: databaseUrl === undefined }, ()
       await assert.rejects(() => operators.prepare(pending.invitation.id, pending.token!), StoreAccessDeniedError);
       assert.equal((await operators.revokeInvitation(admin, pending.invitation.id, pending.invitation.revision, command(32))).state, "REVOKED");
       await assert.rejects(() => operators.revokeInvitation(admin, pending.invitation.id, pending.invitation.revision + 1, command(32)), StoreConflictError);
+      const limited = await operators.createInvitation(admin, { providerId: "provider-a", productId: "tea-a", assignmentLabel: "Limited teacher" }, command(33));
+      await operators.accept(limited.invitation.id, limited.token!, "operator-c");
+      await pool.query("UPDATE product_operator_grants SET granted_at=statement_timestamp()-interval '2 days',expires_at=statement_timestamp()-interval '1 day' WHERE niho_user_id='operator-c'");
+      const expiredActor = { providerId: "provider-a", nihoUserId: "operator-c", calendarScope: "OPERATOR" } as const;
+      assert.deepEqual(await store.listCalendarProducts(expiredActor), []);
+      await assert.rejects(() => store.listSchedule(expiredActor, "tea-a"), StoreAccessDeniedError);
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await pool.end();
