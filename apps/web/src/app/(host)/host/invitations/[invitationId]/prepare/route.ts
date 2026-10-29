@@ -1,3 +1,4 @@
+import { readBoundedJson, ResponseBodyTooLarge } from "@/lib/read-bounded-json";
 import { NextResponse, type NextRequest } from "next/server";
 import { StoreAccessDeniedError, StoreValidationError } from "@niho-experience/experience-store";
 import { productOperatorRepository } from "@/lib/experience/store-server";
@@ -18,7 +19,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const invitationId = invitationIdOrNull((await params).invitationId);
   if (!invitationId) return noStoreJson({ error: "not_found" }, 404);
   let body: unknown;
-  try { const raw = await request.arrayBuffer(); if (raw.byteLength > MAX_BODY_BYTES) return noStoreJson({ error: "payload_too_large" }, 413); body = JSON.parse(new TextDecoder().decode(raw)); } catch { return noStoreJson({ error: "invalid_input" }, 400); }
+  try { body = await readBoundedJson(request, MAX_BODY_BYTES, { fatalUtf8: true }); }
+  catch (error) { return noStoreJson({ error: error instanceof ResponseBodyTooLarge ? "payload_too_large" : "invalid_input" }, error instanceof ResponseBodyTooLarge ? 413 : 400); }
   const token = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? (body as { token?: unknown }).token : null;
   if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) return noStoreJson({ error: "invalid_input" }, 400);
   const repository = productOperatorRepository();

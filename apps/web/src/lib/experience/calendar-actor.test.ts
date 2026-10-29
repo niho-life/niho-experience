@@ -44,7 +44,8 @@ describe("calendar actor", () => {
     expect(await calendarActor("provider-a")).toMatchObject({
       actor: { calendarScope: "OPERATOR" }, access: { kind: "OPERATOR" },
     });
+    expect(await resolveCalendarContext({ providerId: "provider-a" })).toMatchObject({ choice: { kind: "OPERATOR", memberRole: null } });
     mocks.assignments.mockResolvedValue([]);
-    expect(await calendarActor("provider-a")).toMatchObject({ access: { kind: "MEMBER", nihoRole: "COHOST" } });
+    expect(await calendarActor("provider-a")).toMatchObject({ actor: { calendarRoleCeiling: "VIEWER" }, access: { kind: "MEMBER", nihoRole: "COHOST" } });
   });
 });

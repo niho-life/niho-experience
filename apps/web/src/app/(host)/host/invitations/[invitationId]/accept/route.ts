@@ -1,3 +1,4 @@
+import { readBoundedJson, ResponseBodyTooLarge } from "@/lib/read-bounded-json";
 import { type NextRequest } from "next/server";
 import { StoreAccessDeniedError, StoreConflictError } from "@niho-experience/experience-store";
 import { productOperatorRepository } from "@/lib/experience/store-server";
@@ -15,8 +16,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!mutationFromSameOrigin("POST", request.headers, siteOrigin())) return noStoreJson({ error: "cross_site_request" }, 403);
   if (request.headers.get("content-type")?.split(";", 1)[0] !== "application/json") return noStoreJson({ error: "invalid_content_type" }, 415);
   if (Number(request.headers.get("content-length") ?? 0) > 1024) return noStoreJson({ error: "payload_too_large" }, 413);
-  try { const raw = await request.arrayBuffer(); if (raw.byteLength > 1024 || new TextDecoder().decode(raw).trim() !== "{}") return noStoreJson({ error: "invalid_input" }, 400); }
-  catch { return noStoreJson({ error: "invalid_input" }, 400); }
+  try {
+    const body = await readBoundedJson(request, 1024, { fatalUtf8: true });
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) return noStoreJson({ error: "invalid_input" }, 400);
+  } catch (error) { return noStoreJson({ error: error instanceof ResponseBodyTooLarge ? "payload_too_large" : "invalid_input" }, error instanceof ResponseBodyTooLarge ? 413 : 400); }
   const invitationId = invitationIdOrNull((await params).invitationId);
   if (!invitationId) return noStoreJson({ error: "not_found" }, 404);
   const prepared = decodeOperatorInvitationCookie(request.cookies.get(OPERATOR_INVITATION_COOKIE)?.value);

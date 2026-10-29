@@ -20,11 +20,12 @@ export async function calendarActor(providerId: unknown): Promise<CalendarActorR
   if (providers.status === "rejected" || providers.status === "refresh" || providers.status === "signed-out") return { response: noStoreJson({ error: "unauthenticated" }, 401) };
   if (providers.status !== "ok") return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
   const provider = providers.providers.find((entry) => entry.id === id);
-  if (provider && (provider.memberRole === "OWNER" || provider.memberRole === "EDITOR")) return { actor: { providerId: id, nihoUserId: session.nihoUserId }, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
+  const memberActor: HostActor = { providerId: id, nihoUserId: session.nihoUserId, calendarRoleCeiling: provider?.memberRole === "OWNER" ? "OWNER" : provider?.memberRole === "EDITOR" ? "EDITOR" : "VIEWER" };
+  if (provider && (provider.memberRole === "OWNER" || provider.memberRole === "EDITOR")) return { actor: memberActor, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
   const repository = productOperatorRepository();
   const assignments = repository ? (await repository.listAssignments(session.nihoUserId)).filter((entry) => entry.providerId === id) : [];
   if (assignments.length > 0) return { actor: { providerId: id, nihoUserId: session.nihoUserId, calendarScope: "OPERATOR" }, access: { kind: "OPERATOR", assignments } };
-  if (provider) return { actor: { providerId: id, nihoUserId: session.nihoUserId }, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
+  if (provider) return { actor: memberActor, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
   return { response: noStoreJson({ error: repository ? "forbidden" : "calendar_not_configured" }, repository ? 403 : 503) };
 }
 
@@ -39,16 +40,14 @@ export async function resolveCalendarContext(query: Record<string, string | stri
   if (!session || !idTokenUsable(session, Date.now())) return null;
   const load = await loadHostProviders();
   if (load.status !== "ok") return null;
-  const members = load.providers.map(toProviderChoice);
-  let operators: HostConsoleChoice[] = [];
   const repository = productOperatorRepository();
-  if (repository) {
-    const memberIds = new Set(members.map((choice) => choice.id));
-    const assignments = await repository.listAssignments(session.nihoUserId);
-    operators = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
-      kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null,
-    }])).values()];
-  }
+  const assignments = repository ? await repository.listAssignments(session.nihoUserId) : [];
+  const assignedIds = new Set(assignments.map((item) => item.providerId));
+  const members = load.providers.filter((provider) => provider.memberRole === "OWNER" || provider.memberRole === "EDITOR" || !assignedIds.has(provider.id)).map(toProviderChoice);
+  const memberIds = new Set(members.map((choice) => choice.id));
+  const operators: HostConsoleChoice[] = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
+    kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null,
+  }])).values()];
   const choices = [...members, ...operators];
   const raw = typeof query.providerId === "string" ? query.providerId : null;
   const requested = nihoIdOrNull(raw);

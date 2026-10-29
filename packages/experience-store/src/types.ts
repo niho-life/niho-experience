@@ -16,6 +16,8 @@ export type InventoryResourceKind = "VENUE" | "INSTRUCTOR" | "EQUIPMENT";
 export interface HostActor {
   /** Server-established ceiling: current NIHO membership cannot widen an operator grant. */
   readonly calendarScope?: "OPERATOR";
+  /** Current NIHO role, normalized to the local read/write role ceiling. */
+  readonly calendarRoleCeiling?: MembershipRole;
   readonly providerId: string;
   readonly nihoUserId: string;
 }

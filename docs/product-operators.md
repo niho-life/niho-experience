@@ -24,3 +24,5 @@ grant失効は新しいcalendar変更を止めるだけで、providerが所有�
 `0011_product_operators.sql` をAPIより先に適用する。migrationは数値prefixだけでなく完全なファイル名で識別し、名前順で適用する。既存の `0010_guide_body_media.sql` と `0010_shared_inventory.sql` は独立した2ファイルであり、両方必要になる。適用済みファイルの改名・再実行はしない。
 
 runtimeにはinvitation/grantのSELECT・INSERT・UPDATEと、command/auditのSELECT・INSERTだけを付ける。command/auditのUPDATE・DELETEやprovider所属の権限変更は付けない。初期bootstrap scriptは0001〜0004だけを対象にするため、それを実行済みであっても新しいmigration・DML権限の受入を省略しない。HTTPの既定OFF flag、NIHO認証連携、本番切替のゲートは維持する。
+
+NIHOの既存COHOSTが持つprovider全体の閲覧は維持する。カレンダーActorは現在のNIHO役割を `calendarRoleCeiling` に正規化し、local OWNERが古い場合でも有効なローカル役割との低い方を使う。COHOSTはVIEWERを上限とし、担当grantなしではStore内部の保存も拒否する。担当grantがあるCOHOSTは商品限定のActor・choice・ホーム遷移に揃え、カレンダーだけを見せる。

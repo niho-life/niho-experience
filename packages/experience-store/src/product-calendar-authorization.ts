@@ -35,6 +35,13 @@ export async function requireProductCalendarAccess(
   return { basis: "OPERATOR", version: Number(grant.rows[0].version), assignmentLabel: String(grant.rows[0].assignment_label) };
 }
 
+export function effectiveCalendarRole(actor: HostActor, localRole: MembershipRole): MembershipRole | null {
+  if (actor.calendarScope === "OPERATOR") return null;
+  const rank = { VIEWER: 1, EDITOR: 2, OWNER: 3 };
+  const ceiling = actor.calendarRoleCeiling;
+  return ceiling && rank[ceiling] < rank[localRole] ? ceiling : localRole;
+}
+
 /** A current server-side product ceiling always suppresses stale provider membership. */
 export async function calendarMembershipRole(client: Queryable, actor: HostActor, allowedRoles: readonly MembershipRole[] = ["OWNER", "EDITOR", "VIEWER"]): Promise<MembershipRole | null> {
   if (actor.calendarScope === "OPERATOR") return null;
@@ -43,7 +50,8 @@ export async function calendarMembershipRole(client: Queryable, actor: HostActor
        AND active=true AND role=ANY($3::text[]) FOR SHARE`,
     [actor.providerId, actor.nihoUserId, allowedRoles],
   );
-  return result.rows[0] ? String(result.rows[0].role) as MembershipRole : null;
+  const role = result.rows[0] ? effectiveCalendarRole(actor, String(result.rows[0].role) as MembershipRole) : null;
+  return role && allowedRoles.includes(role) ? role : null;
 }
 
 export async function listCalendarProductsForActor(client: Queryable, actor: HostActor, includeArchived = false): Promise<readonly { id: string; publicTitle: string; sellerDisplayName: string; access: CalendarAccess }[]> {
@@ -61,7 +69,7 @@ export async function listCalendarProductsForActor(client: Queryable, actor: Hos
   );
   return result.rows.map((row) => ({
     id: String(row.id), publicTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name),
-    access: row.role ? { basis: "MEMBER", role: String(row.role) as MembershipRole }
+    access: row.role ? { basis: "MEMBER", role: effectiveCalendarRole(actor, String(row.role) as MembershipRole)! }
       : { basis: "OPERATOR", version: Number(row.grant_version), assignmentLabel: String(row.assignment_label) },
   }));
 }

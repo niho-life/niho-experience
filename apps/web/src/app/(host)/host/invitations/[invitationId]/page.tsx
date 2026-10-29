@@ -26,5 +26,5 @@ export default async function InvitationPage({ params }: { params: Promise<{ inv
     const record = repository ? await repository.inspectForIdentity(invitationId, prepared.token, session.nihoUserId) : null;
     if (record) detail = { productTitle: record.productTitle, sellerDisplayName: record.sellerDisplayName, assignmentLabel: record.assignmentLabel };
   } catch { /* The client renders the safe unavailable state without private product data. */ }
-  return <ProductOperatorInvitation invitationId={invitationId} prepared loginHref={null} detail={detail} />;
+  return <ProductOperatorInvitation invitationId={invitationId} prepared loginHref={null} detail={detail} accountName={session.displayName} />;
 }

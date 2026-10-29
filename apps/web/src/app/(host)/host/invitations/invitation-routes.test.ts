@@ -36,6 +36,25 @@ beforeEach(() => {
 });
 
 describe("product operator invitation HTTP boundary", () => {
+  it.each(["prepare", "accept"] as const)("cancels an oversized chunked %s body before consuming it", async (action) => {
+    let pulled = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled < 10) controller.enqueue(new Uint8Array(1024).fill(97)); else controller.close(); },
+      cancel() { cancelled = true; },
+    });
+    const init = {
+      method: "POST", duplex: "half" as const, body: stream,
+      headers: { "content-type": "application/json", origin: "https://experience.example" },
+    };
+    const response = await (action === "prepare" ? prepare : accept)(new NextRequest(`https://experience.example/host/invitations/${ID}/${action}`, init), context);
+    expect(response.status).toBe(413);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(10);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.accept).not.toHaveBeenCalled();
+  });
+
   it("requires same-origin and a canonical 32-byte base64url token", async () => {
     mocks.csrf = false;
     expect((await prepare(request(`/host/invitations/${ID}/prepare`, { token: TOKEN }), context)).status).toBe(403);

@@ -29,7 +29,7 @@ import {
 } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
-import { listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
+import { effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
 import {
   evaluateStoredInventory,
   lockProviderInventory,
@@ -194,11 +194,12 @@ async function requireMembership(
     [actor.providerId, actor.nihoUserId, allowedRoles],
   );
   const row = result.rows[0];
-  if (row === undefined) throw new StoreAccessDeniedError();
+  const role = row ? effectiveCalendarRole(actor, String(row.role) as MembershipRole) : null;
+  if (!row || !role || !allowedRoles.includes(role)) throw new StoreAccessDeniedError();
   return {
     providerId: String(row.provider_id),
     nihoUserId: String(row.niho_user_id),
-    role: String(row.role) as MembershipRole,
+    role,
     active: row.active === true,
   };
 }
@@ -282,7 +283,7 @@ export class ExperienceStore {
       : {
           providerId: String(row.provider_id),
           nihoUserId: String(row.niho_user_id),
-          role: String(row.role) as MembershipRole,
+          role: effectiveCalendarRole(actor, String(row.role) as MembershipRole)!,
           active: true,
         };
   }

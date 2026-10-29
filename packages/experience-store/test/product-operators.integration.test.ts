@@ -37,6 +37,12 @@ describe("PostgreSQL product operators", { skip: databaseUrl === undefined }, ()
       await store.saveScheduleRule(ownerA, "tea-b", rule("rule-b"), null, command(2));
       await store.saveScheduleRule(ownerB, "tea-c", rule("rule-c"), null, command(3));
 
+      // A genuine NIHO COHOST keeps provider-wide read access, but stale local OWNER cannot authorize writes.
+      const downgraded = { ...ownerA, calendarRoleCeiling: "VIEWER" } as const;
+      assert.equal((await store.verifyActiveMembership(downgraded))?.role, "VIEWER");
+      assert.equal((await store.listCalendarProducts(downgraded)).length, 2);
+      assert.ok((await store.listCalendarProducts(downgraded)).every((product) => product.access.basis === "MEMBER" && product.access.role === "VIEWER"));
+      await assert.rejects(() => store.saveScheduleRule(downgraded, "tea-b", rule("cohost-rule"), null, command(9)), StoreAccessDeniedError);
       const operators = new ProductOperatorRepository(pool);
       const admin = { nihoUserId: "synthetic-admin" };
       const created = await operators.createInvitation(admin, { providerId: "provider-a", productId: "tea-a", assignmentLabel: "Synthetic teacher" }, command(10));

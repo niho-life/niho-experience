@@ -6,7 +6,8 @@ import { hostButtonClass, HOST_SURFACE } from "./host-ui";
 
 declare global { interface Window { __nihoOperatorInvitationSecret?: string } }
 
-export function ProductOperatorInvitation({ invitationId, prepared, loginHref, detail }: {
+export function ProductOperatorInvitation({ invitationId, prepared, loginHref, detail, accountName }: {
+  accountName?: string | null;
   invitationId: string;
   prepared: boolean;
   loginHref: string | null;
@@ -45,7 +46,7 @@ export function ProductOperatorInvitation({ invitationId, prepared, loginHref, d
       {status === "preparing" ? <p role="status" className="mt-4 text-ink-soft">招待を確認しています…</p> : null}
       {status === "invalid" ? <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-warn">この招待リンクは無効か、期限が切れています。管理者へ新しいリンクを依頼してください。</p> : null}
       {prepared && loginHref ? <><p className="mt-4 text-ink-soft">参加するNIHOアカウントでログインしてください。</p><HostLoginLink href={loginHref} className={`${hostButtonClass("primary")} mt-6 w-full justify-center`}>NIHOでログイン</HostLoginLink></> : null}
-      {detail ? <div className="mt-5 space-y-4"><div className="rounded-xl bg-sand p-4"><p className="text-xs font-bold text-muted">担当する体験</p><p className="mt-1 font-extrabold">{detail.productTitle}</p><p className="text-sm text-ink-soft">{detail.sellerDisplayName}</p><p className="mt-2 text-sm">担当名: {detail.assignmentLabel}</p></div><p className="text-sm text-ink-soft">この体験のカレンダーを管理します。</p><button type="button" disabled={saving} onClick={() => void accept()} className={`${hostButtonClass("primary")} w-full justify-center disabled:opacity-50`}>{saving ? "参加しています…" : "参加する"}</button></div> : null}
+      {detail ? <div className="mt-5 space-y-4"><div className="rounded-xl bg-sand p-4"><p className="text-xs font-bold text-muted">担当する体験</p><p className="mt-1 font-extrabold">{detail.productTitle}</p><p className="text-sm text-ink-soft">{detail.sellerDisplayName}</p><p className="mt-2 text-sm">担当名: {detail.assignmentLabel}</p></div><p className="text-sm text-ink-soft">この体験のカレンダーを管理します。</p>{accountName ? <p className="break-words text-sm text-ink-soft">NIHOアカウント: <strong>{accountName}</strong></p> : null}<button type="button" disabled={saving} onClick={() => void accept()} className={`${hostButtonClass("primary")} w-full justify-center disabled:opacity-50`}>{saving ? "参加しています…" : "参加する"}</button></div> : null}
       {status === "accept-error" ? <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-warn">参加を完了できませんでした。招待の状態を確認して、もう一度お試しください。</p> : null}
     </section>
   </main>;

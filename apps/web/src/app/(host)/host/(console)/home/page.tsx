@@ -100,9 +100,9 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   // The console layout shows sign-in, refresh and error states.
   if (!context) return null;
   const { provider, providerNotFound, linkProviderId } = context;
+  const calendar = await resolveCalendarContext(query);
+  if (calendar?.choice?.kind === "OPERATOR") redirect(withProvider("/host/calendar", calendar.choice.id));
   if (!provider) {
-    const calendar = await resolveCalendarContext(query);
-    if (calendar?.choice?.kind === "OPERATOR") redirect(withProvider("/host/calendar", calendar.choice.id));
     return <HostRegisterPrompt title="ホーム" />;
   }
   const { home, settings } = await loadHostConsoleData(provider);
