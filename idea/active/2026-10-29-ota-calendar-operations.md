@@ -1,8 +1,8 @@
 # NIHO Experience：講師別カレンダーと外部予約サイトの運営設計
 
-作成・一次資料確認：2026-10-29。状態：**詳細設計案。実装・外部アカウント作成・自動操作は未実施**。
+作成・一次資料確認：2026-10-29。状態：**詳細設計と段階実装。現在の実装・実証はStudio worker設計の冒頭を正とする**。
 
-同日追記：オーナーから本方式と規約上の許可取得を確認済み。Studioの常駐構成・API・排他・実証手順は[Studio worker詳細設計](../../docs/ota-studio-worker-design.md)を正とする。実機の到達確認は済み、OTA操作の実証は後続Issueで行う。
+同日追記：オーナーから本方式と規約上の許可取得を確認済み。Studioの常駐構成・API・排他・実証手順は[Studio worker詳細設計](../../docs/ota-studio-worker-design.md)を正とする。初期案のMessages API方式は採用せず、Claude Code／Max契約内で実行する。カレンダー基盤はPR #207でマージ済み、GetYourGuideはStudioの専用profileで5往復し元へ復元済み。PWAからの結合・Claude推論・共有資源と外部予約取込みは未完了。以下の現状欄は初稿のコード調査基点を示す。
 
 関連：[#84 ホスト画面](https://github.com/niho-life/niho-experience/issues/84)、[#177 PWA](https://github.com/niho-life/niho-experience/issues/177)、[ADR 0002](../../docs/adr/0002-experience-domain-ownership.md)、[市場・販路調査](../../docs/growth/kamakura-experience-market-and-channels.md)、[API接続の調査](../../docs/growth/niho-channel-manager-feasibility.md)。現状コードの確認基点：`0f4bd96c1d948d426a32112ee99eb327361586fa`。
 

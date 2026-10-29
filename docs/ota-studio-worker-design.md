@@ -1,8 +1,18 @@
 # NIHO Experienceの予定変更をMac StudioとClaudeで外部サイトへ反映する設計
 
-作成日：2026-10-29。状態：実装・実機実証へ進むための詳細設計。オーナーは本方式と規約上の許可取得を明示済み。許可の取り直しを着手条件にせず、対象アカウント・商品・操作範囲を設定として記録する。本書のAPI・テーブル・workerは未実装。
+作成日：2026-10-29。状態：実装・実機実証へ進むための詳細設計。オーナーは本方式と規約上の許可取得を明示済み。許可の取り直しを着手条件にせず、対象アカウント・商品・操作範囲を設定として記録する。初稿時点の構成を記録し、実装・実証の現在値は次節を正とする。
 
 関連：[全体の運営設計](../idea/active/2026-10-29-ota-calendar-operations.md)、[サイト別の登録方式](growth/ota-account-registration-and-operating-models.md)、[ADR 0002](adr/0002-experience-domain-ownership.md)、[設計PR #183](https://github.com/niho-life/niho-experience/pull/183)、[実装Epic #194](https://github.com/niho-life/niho-experience/issues/194)。実装Issueの一覧は末尾。
+
+## 2026-10-29の確定事項と実証
+
+- オーナー決定：**Claude Code／Maxの既存契約内で実行し、従量APIへ切り替えない**。通常の既知の枠開閉はNIHOのbrowser driverで実行し、Claude modeも同じ限定操作だけを利用する。
+- ホストカレンダーの単発・繰返し枠、日時変更と販売状態の分離、保存とoutboxは[PR #207](https://github.com/niho-life/niho-experience/pull/207)でマージ済み。掲載先registry、worker認証、耐久job、lease、readbackは[PR #209](https://github.com/niho-life/niho-experience/pull/209)で実装・レビュー中。本番runtimeはOFFのまま。
+- Studioの専用Chromeへ本人がログイン済み。許可済みのGetYourGuideの空き枠を、停止→再読込→再開→再読込で**5往復、計10書込み**し、元の受付可能な状態へ復元した。これはdriver単体の実証であり、PWAからの結合やClaude推論を通した実証ではない。
+- StudioのNode 24／Chrome 156で合成24ケースを確認。加えて主担当の実ブラウザテストで20回の連続開閉、応答喪失後の読戻し、誤商品・認証失効・古いpreflightの拒否を確認した。モデル呼出しは0回。
+- Claude Code 2.1.292のMaxログインは確認済みだが、推論は週間上限で停止した。quota回復前にClaude経由の20件成功とは扱わず、従量API fallbackもしない。
+- Studioから公開originへの再確認はGET 200、新job APIは未配備の404。独立した合成DBの検証APIでは認証なし401、無関係jobの操作403を確認。公開cloudでの認証付きjob処理は別の受入項目である。
+- 体験限定の運営者招待、1回1組・講師／会場の共有在庫、外部予約取込み、第二サイト、旧外部枠の退役、本番有効化は未完了。実アカウントID・資格情報・画面証跡は公開リポへ置かない。
 
 ## 1. Goal：成立させる操作
 
@@ -10,7 +20,7 @@
 
 初期は1回1組、人数可変。水引・書道・料理が同じ部屋を使う場合、別商品でも同時刻の予約は競合する。外部サイトで予約が入ったときもNIHOへ取り込み、他販路・共用資源の販売を止める。
 
-**実現可能性の結論**：公式SDKと自前のブラウザ実行部で構成できる。既存のClaude Desktop画面や未確認の「Claude app server」にイベントを投げるだけでは完成しない。NIHO専用の常駐worker、永続ジョブ、ブラウザdriver、サイト別adapter、反映確認が必要。各OTAの実画面での安定性はPoCで実証する。
+**実現可能性の結論**：Claude Code／Maxと自前の限定ブラウザ実行部で構成する。既存のClaude Desktop画面や未確認の「Claude app server」にイベントを投げるだけでは完成しない。NIHO専用の常駐worker、永続ジョブ、ブラウザdriver、サイト別adapter、反映確認が必要。各OTAの実画面での安定性はPoCで実証する。
 
 ## 2. Current system：確認できたこと
 
@@ -38,31 +48,32 @@
 | --- | --- | --- |
 | 実行機 | macOS ARM64 | Studio上での実行環境は存在する |
 | Chrome | インストール済み | 専用profileでの起動・ログイン維持は未検証 |
-| Claude Code | 2.1.292を確認 | 今回採用するMessages API SDKの疎通・モデル権限を保証しない |
+| Claude Code | 2.1.292、Maxの公式ログインを確認 | 推論は週間上限。APIキーを抽出・転用せず、追加課金へfallbackしない |
 | Node | PATH候補で26.7.0を確認 | リポのNode 24指定に合わせたworker runtimeを別途固定する。システムNodeを変更しない |
 | GUIドメイン・既存agent hub | 存在を確認 | 専用運用アカウント・再起動後の利用可否は未検証 |
 | Studio→体験サイトの公開origin | TLS/HTTP応答あり、HEADは403 | 機械向けAPIの認証成功ではない。403の原因は未確定 |
 | Studio→Claude APIのorigin | TLS/HTTP応答あり、ルートHEADは404 | ネットワーク到達だけ。API認証・課金・tool呼出しは未検証 |
 
-**未実証**：クラウドジョブの取得、Claude APIでの推論、専用ブラウザの操作、OTAログイン、枠保存、保存結果の確認。これらを最初のPoC Issueの成果物にする。常駐サービスの追加・再起動・本番枠変更は本調査では行っていない。
+**初稿時点の未実証項目**：クラウドジョブの取得、Claude推論、専用ブラウザの操作、OTAログイン、枠保存、保存結果の確認。上の更新節のdriver単体実証と区別する。常駐サービスの設置・再起動・public cloudとの結合は引き続き受入が必要。
 
 ## 3. Options：Claudeの実行方式
 
 | 案 | 構成 | 判断 |
 | --- | --- | --- |
-| A | **Messages APIの公式SDK＋ブラウザtoolset＋NIHOのdriver** | 初期採用。APIキーと対象ブラウザだけで動かし、対話アプリや一般開発用shellから分離できる |
-| B | Claude Agent SDK／CLI＋限定ブラウザMCP | 代替。カスタムtool・権限管理は可能だが、CLI認証・GUI keychain・既存設定の読込みを別途管理する必要がある |
+| A | Messages APIの公式SDK＋ブラウザtoolset＋NIHOのdriver | 初期非採用。従量APIキーが必要で、今回の追加API課金なしという決定に合わない |
+| B | **Claude Code／Max＋限定MCP＋NIHOのdriver** | 採用。公式ログインをGUI実行環境で利用。shell・任意URL・任意JavaScriptを渡さず、3つの固定toolに限定 |
+| Bの通常処理 | NIHOのdeterministic browser driver | 既知の開閉ではモデルを呼ばず同じ認可・保存直前検証・再読込を使う。Claude modeもこのdriverの外へ操作を広げない |
 | C | Claude Desktopを画面操作して仕事を投入 | 採らない。会話の送信と仕事の受付・完了を機械的に管理しにくい |
 
 Anthropic公式は、Python／TypeScript SDKのbrowser toolset、tool runner、および利用者が用意するdriverという境界を説明する。CDPを使うサンプルもあるが、サンプル自体は本番用コードではない。Agent SDKは別のライブラリであり、自動的に既存のChromeへつながるものではない。[Browser SDK](https://platform.claude.com/docs/en/agents-and-tools/tool-use/browser-use-sdk)、[Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)
 
 ### 採用する実行部
 
-- Node 24のworker packageを同じリポへ追加する案とする。SDK、ブラウザdriver、ブラウザ版、モデルIDをPoCで検証し固定する。可変latestを本番で自動追従しない。
+- Node 24のworker packageを同じリポへ追加する案とする。CLI、ブラウザdriver、ブラウザ版をPoCで検証し固定する。可変latestを本番で自動追従しない。
 - Claudeの仕事は画面を読み、許可した操作を選ぶこと。jobの対象・期限・権限・成功判定は通常コードが管理する。
 - browser toolsetのdriverは専用Chrome/Chromiumを操作する。DOMで安定して識別できる部品は意味の分かるlocatorを使い、必要な部分だけ画像・座標操作にする。任意コード実行をClaudeへ渡さない。
 - モデルを起動するのは実行が必要な差分がある場合だけ。空のpoll、版比較、予約の重複排除、通知振分けでは呼ばない。
-- 契約済みの利用方式に合わせて認証する。初期の技術案はMessages API用の専用資格情報。既存CLIのログイン情報を抽出・転用しない。利用料は実測し、既存サブスクリプションに当然含まれるとは扱わない。
+- Maxの公式ログインをClaude Code自身に利用させる。CLIの認証情報を抽出・APIへ転用しない。`--tools ''`、strict MCP、hooks無効、固定3toolを設定し、追加API課金へのfallbackを拒否する。quota・利用条件に従い、上限時は停止する。[CLI](https://code.claude.com/docs/en/cli-reference)、[MCP](https://code.claude.com/docs/en/mcp)、[Claudeプランでの利用](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
 
 ## 4. User journey：保存と反映を分ける
 
@@ -81,7 +92,7 @@ sequenceDiagram
   participant H as 講師のPWA
   participant A as Experience APIとDB
   participant W as Studio worker
-  participant C as Claude API
+  participant C as Claude Code / Max
   participant B as 専用ブラウザとOTA
   H->>A: 予定変更＋期待version
   A->>A: 予定・資源・outboxを同時保存
@@ -89,7 +100,7 @@ sequenceDiagram
   W->>A: 認証付きpoll／claim
   A-->>W: 対象を限定したjob＋lease
   W->>B: アカウント・商品・回の現在値を読む
-  W->>C: 対象情報＋必要な画面＋許可tool
+  W->>C: 対象に限定した構造化情報＋固定tool
   C-->>W: ブラウザ操作要求
   W->>A: 保存直前の再検証
   W->>B: 許可された変更を保存
@@ -195,7 +206,7 @@ OTAに共通トランザクションやfencing機能はない。内部の排他�
 
 ### 7.1 常駐構成
 
-`supervisor → job executor → Claude SDK＋browser driver` の3境界にする。supervisorはpoll・lease・再試行・予算・process停止を管理し、モデルへshellを渡さない。
+`supervisor → job executor → Claude Code／Max（必要時）＋browser driver` の3境界にする。supervisorはpoll・lease・再試行・予算・process停止を管理し、モデルへshellを渡さない。
 
 初期案は**専用OSユーザーと専用作業ディレクトリ**。既存の開発・配備ユーザーの鍵、リポジトリ、個人Chrome、既存CIのブラウザを共有しない。既存のmachine execution registryには本用途の常駐ブラウザworkerは未定義なので、配備Issueで実行クラス・所有者・trust boundaryを追加する。
 
@@ -277,7 +288,7 @@ NIHOから予定を編集しない間も予約検知は動く必要がある。�
 
 watchdogはStudioとは独立したクラウドの実運用jobとして設計する（例：1分間隔）。この設計作業でCodexの定期タスクや本番schedulerを作成するものではない。通知consumerは滞留時間・未閉鎖数・担当を持ち、同じ障害の通知を重複連発しない。
 
-費用は `変更job数 × 平均試行数 × 1試行のAPI実費 ＋ 基盤費 ＋ 手動保守` で測る。PoCではtoken・画像・tool回数・秒数・費用をjob別に計測。API料金を固定値で仮定しない。月額CMを追加しなくてもClaude等の費用は発生する。
+初期は既存Max契約を利用し、従量APIへの追加支出は0円とする。既存契約料、端末・通信・基盤費、手動保守は残る。モデル呼出し回数・tool回数・処理秒数・失敗率・quota停止を計測し、追加課金で上限を回避しない。通常driverはモデル呼出し0回で動かす。
 
 ## 10. PoCと本番受入の段階
 
@@ -300,7 +311,7 @@ PoCで記録する版：実行SHA、Node、SDK、browser、driver、adapter、mo
 設計・起票を止めるオーナー確認は不要。規約許可は取得済みとして扱う。次の事項はPoCまたは配備の具体作業で埋める。
 
 - 最初の外部accountと検証回：既存のAirbnbを候補、国内2社目はアソビュー！を仮置き。実アカウントの準備状況で入替可能。
-- API利用資格情報とモデルID、専用OSユーザーの用意、画面なし／画面付きの適合、再ログイン手順。
+- Max公式ログイン、専用profile、GUI／headlessの適合、再ログイン手順。APIキーの新規設定は行わない。
 - 403の発生箇所、機械向けpathの配備・認証・WAF設定。対象を限定して直す。
 - 会場・講師の同時利用条件と準備片付け時間。初期は共用会場1組。
 - 予約取込みの実際の通知方式と許容遅延。サイトごとの即時／リクエスト方式。
@@ -321,4 +332,4 @@ PoCで記録する版：実行SHA、Node、SDK、browser、driver、adapter、mo
 | [P6 #201](https://github.com/niho-life/niho-experience/issues/201) | Google busy・資源対応・Airbnb公式経路 | P2、P3、既存#109を拡張 |
 | [P7 #202](https://github.com/niho-life/niho-experience/issues/202) | PWA/Admin反映状態・監視復旧・2販路pilot | P0〜P5、Google採用時P6。#177と整合 |
 
-P1/P2はP0と独立に設計を進められる。P0が不成立なら、その理由に応じてdriver・実行環境・接続方式を変更し、実証せず本番展開へ進まない。これらは起票単位であり、今回の作業で本番実装を開始するという意味ではない。
+P1/P2はP0と独立に設計を進められる。P0が不成立なら、その理由に応じてdriver・実行環境・接続方式を変更し、実証せず本番展開へ進まない。起票単位と現在の実装・実証は冒頭の更新節を照合し、本番有効化と混同しない。
