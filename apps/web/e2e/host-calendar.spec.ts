@@ -53,6 +53,8 @@ test("week, day agenda and add dialog work without overflow", async ({ page }, t
   await testInfo.attach("calendar", { body: await page.screenshot({ path: testInfo.outputPath("calendar.png") }), contentType: "image/png" });
 
   await page.locator(`[data-calendar-day="${selectedDay}"]:visible`).click();
+  await expect(page.getByRole("group", { name: "日を選ぶ", exact: true })).toBeVisible();
+  await expect(page.locator("[data-calendar-day]:visible")).toHaveCount(7);
   await expect(page.getByRole("heading", { name: new RegExp(`${Number(selectedDay.slice(5, 7))}月${Number(selectedDay.slice(8))}日`) })).toBeVisible();
   const addButton = page.getByRole("button", { name: "枠を追加" });
   await addButton.click();
