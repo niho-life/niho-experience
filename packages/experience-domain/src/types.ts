@@ -142,7 +142,8 @@ export type AvailabilityReason =
   | "RESOURCE_GOOGLE_BUSY"
   | "GOOGLE_SYNC_UNAVAILABLE"
   | "GOOGLE_BUSY"
-  | "EXTERNAL_RESERVATION_UNRESOLVED";
+  | "EXTERNAL_RESERVATION_UNRESOLVED"
+  | "EXTERNAL_RESERVATION_READ_UNAVAILABLE";
 
 export interface AvailabilityResult {
   readonly bookable: boolean;

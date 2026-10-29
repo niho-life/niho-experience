@@ -8,7 +8,7 @@ type OccurrenceItem = HostCalendarData["occurrences"][number];
 
 function statePill(item: OccurrenceItem) {
   const label = availabilityLabel(item.availabilityReason);
-  const tone = item.availabilityReason === "AVAILABLE" ? "ok" : item.availabilityReason === "MANUALLY_CLOSED" ? "stop" : item.availabilityReason === "GOOGLE_SYNC_UNAVAILABLE" || item.availabilityReason === "RESOURCE_GOOGLE_UNAVAILABLE" ? "wait" : "draft";
+  const tone = item.availabilityReason === "AVAILABLE" ? "ok" : item.availabilityReason === "MANUALLY_CLOSED" ? "stop" : item.availabilityReason === "GOOGLE_SYNC_UNAVAILABLE" || item.availabilityReason === "RESOURCE_GOOGLE_UNAVAILABLE" || item.availabilityReason === "EXTERNAL_RESERVATION_READ_UNAVAILABLE" ? "wait" : "draft";
   return <StatusPill status={{ label, tone }} />;
 }
 
