@@ -27,7 +27,7 @@ on:
         required: false
         type: string
       candidate_image_digest:
-        description: Existing sha256 digest from the successful candidate run (promote only)
+        description: Cloud Run runtime sha256 digest from the successful candidate run (promote only)
         required: false
         type: string
 
@@ -184,7 +184,7 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
             echo "revision=${revision}"
-            echo "image_digest=${{ steps.pushed_image.outputs.digest }}"
+            echo "pushed_image_digest=${{ steps.pushed_image.outputs.digest }}"
             echo "candidate_url=${url}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Check isolated candidate
@@ -195,7 +195,25 @@ jobs:
           curl -fsS --retry 5 --retry-all-errors 'https://niho.life/api/public/experiences' \
             | jq -e '.experiences | type == "array"' >/dev/null
           revision_json="$(gcloud run revisions describe "$REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          test "$(jq -r '.spec.containers[0].image' <<< "$revision_json")" = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${{ steps.pushed_image.outputs.digest }}"
+          image_repo="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web"
+          pushed_digest="${{ steps.pushed_image.outputs.digest }}"
+          runtime_image="$(jq -r '.spec.containers[0].image' <<< "$revision_json")"
+          [[ "$runtime_image" == "${image_repo}@sha256:"* ]]
+          runtime_digest="${runtime_image##*@}"
+          [[ "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          if [ "$runtime_digest" != "$pushed_digest" ]; then
+            # Cloud Run pins the platform image while Docker may push an OCI index.
+            manifest="$(curl -fsS --retry 3 --retry-all-errors \
+              -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://${REGION}-docker.pkg.dev/v2/${PROJECT_ID}/${REPOSITORY}/web/manifests/${pushed_digest}")"
+            jq -e --arg digest "$runtime_digest" '
+              (.mediaType == "application/vnd.oci.image.index.v1+json" or
+               .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json") and
+              ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] |
+               length == 1 and .[0].digest == $digest)
+            ' <<< "$manifest" >/dev/null
+          fi
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_PUBLIC_API_VERSION") | .value' <<< "$revision_json")" = 1.0
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "BOOKINGS_ENABLED") | .value' <<< "$revision_json")" = false
@@ -214,7 +232,7 @@ jobs:
             ' <<< "$revision_json" >/dev/null
             curl -fsSL -o /dev/null "${URL}/host/calendar"
           else
-            jq -e '.metadata.annotations["run.googleapis.com/cloudsql-instances"] == null and .metadata.annotations["run.googleapis.com/network-interfaces"] == null' <<< "$revision_json" >/dev/null
+            jq -e '(.metadata.annotations["run.googleapis.com/cloudsql-instances"] // "") == "" and .metadata.annotations["run.googleapis.com/network-interfaces"] == null' <<< "$revision_json" >/dev/null
             test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/host/calendar")" = 404
           fi
           for path in / /experiences /host; do
@@ -233,8 +251,12 @@ jobs:
           curl -fsS "${URL}/robots.txt" | grep -qF 'Disallow: /'
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
-          echo "Candidate: ${REVISION} ${URL}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=block; host signup=pilot; host calendar=${HOST_CALENDAR_ENABLED}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Candidate: ${REVISION} ${URL}"
+            echo "Runtime image digest (candidate_image_digest): ${runtime_digest}"
+            echo "Pushed image digest: ${pushed_digest}"
+            echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=block; host signup=pilot; host calendar=${HOST_CALENDAR_ENABLED}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   promote:
     if: vars.PRODUCTION_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.action == 'promote'
@@ -306,7 +328,7 @@ jobs:
               (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default"))
             ' <<< "$revision_json" >/dev/null
           else
-            jq -e '.metadata.annotations["run.googleapis.com/cloudsql-instances"] == null and .metadata.annotations["run.googleapis.com/network-interfaces"] == null' <<< "$revision_json" >/dev/null
+            jq -e '(.metadata.annotations["run.googleapis.com/cloudsql-instances"] // "") == "" and .metadata.annotations["run.googleapis.com/network-interfaces"] == null' <<< "$revision_json" >/dev/null
           fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           tag="candidate-${CANDIDATE_SHA}"
