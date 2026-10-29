@@ -20,18 +20,18 @@ describe("Experience editor auth client", () => {
     const url = new URL(experienceEditorConnectUrl("https://niho.example", {
       challenge: "c".repeat(43),
       state: "s".repeat(43),
-      redirectOrigin: "https://experience.example",
     }));
     expect(url.origin + url.pathname).toBe("https://niho.example/connect/niho-experience-editor");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       v: "1",
-      challenge: "c".repeat(43),
+      code_challenge: "c".repeat(43),
+      code_challenge_method: "S256",
       state: "s".repeat(43),
-      origin: "https://experience.example",
     });
 
     const client = createExperienceEditorAuthClient({ nihoWebOrigin: "https://niho.example", fetch: fetchMock as typeof fetch });
     await expect(client.exchangeCode({ code: "x".repeat(43), codeVerifier: "v".repeat(43) })).resolves.toMatchObject({ ok: true });
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe("/api/auth/experience-editor-connect/exchange");
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({
       clientId: EXPERIENCE_EDITOR_CLIENT_ID,
       code: "x".repeat(43),
@@ -55,6 +55,16 @@ describe("Experience editor auth client", () => {
       },
     });
     expect(new Headers(fetchMock.mock.calls[0]![1]!.headers).get("authorization")).toBe("Bearer id-token");
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe("/api/auth/experience-editor-connect/session");
+  });
+
+  it("revokes with the editor refresh token, even when the ID token has expired", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }));
+    const client = createExperienceEditorAuthClient({ nihoWebOrigin: "https://niho.example", fetch: fetchMock as typeof fetch });
+    await expect(client.revokeConnection("refresh-token")).resolves.toBe(true);
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe("/api/auth/experience-editor-connect/revoke");
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({ clientId: EXPERIENCE_EDITOR_CLIENT_ID, refreshToken: "refresh-token" });
   });
 
   it("classifies rejected, unavailable and malformed responses without exposing bodies", async () => {

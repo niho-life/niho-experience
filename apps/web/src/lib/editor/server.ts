@@ -91,7 +91,7 @@ export async function renewEditorSession(session: EditorSession): Promise<Editor
   let rotated: EditorSession = {
     ...session,
     refreshToken: refreshed.data.refreshToken,
-    connectionExpiresAt: Math.min(session.connectionExpiresAt, refreshed.data.connectionExpiresAt),
+    connectionExpiresAt: refreshed.data.connectionExpiresAt,
   };
   if (rotated.connectionExpiresAt <= Date.now()) return { outcome: "invalidated", reason: "rejected" };
 

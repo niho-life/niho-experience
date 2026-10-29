@@ -9,7 +9,6 @@ import {
   editorMutationAllowed,
   editorSessionSealer,
   isEditorConsole,
-  renewEditorSession,
 } from "@/lib/editor/server";
 
 function cleared(response: NextResponse): NextResponse {
@@ -24,15 +23,7 @@ export async function POST(request: NextRequest) {
 
   const session = decodeEditorSession(editorSessionSealer(), request.cookies.get(EDITOR_SESSION_COOKIE)?.value, Date.now());
   if (session) {
-    let current = session;
-    if (current.idTokenExpiresAt <= Date.now()) {
-      const renewal = await renewEditorSession(current);
-      if (renewal.outcome === "refreshed") current = renewal.session;
-      else if (renewal.outcome === "retryable") current = renewal.session;
-    }
-    if (current.idTokenExpiresAt > Date.now()) {
-      await editorAuthClient().deleteConnection(current.connectionId, current.idToken);
-    }
+    await editorAuthClient().revokeConnection(session.refreshToken);
   }
 
   return cleared(new NextResponse(null, {
