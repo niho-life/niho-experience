@@ -1,5 +1,7 @@
 # NIHO Experienceを横断チャネルマネージャーへ育てる条件
 
+2026-10-29の追加設計：[PWAの講師別カレンダー・Mac Studio実行部・外部予約サイトとの同期](../../idea/active/2026-10-29-ota-calendar-operations.md)、[アカウント名義・共有メール・講師精算](niho-experience-seller-and-settlement.md)、[12サービスの登録手順・①〜④の比較・掲載判断](ota-account-registration-and-operating-models.md)。オーナーの低固定費・NIHO代行運営の方針を具体化した設計案で、下記のAPI審査の調査とは区別する。
+
 調査日：2026-10-28。対象は体験・ツアーの**供給者側**予約システムとOTA接続。公開された各社の一次資料を確認した。契約の非公開部分とNIHOの個別審査結果は未確認である。関連：[鎌倉の市場・販路調査](kamakura-experience-market-and-channels.md)、[体験データの正本](../adr/0002-experience-domain-ownership.md)。
 
 ## 結論
