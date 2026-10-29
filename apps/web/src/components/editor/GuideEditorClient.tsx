@@ -612,7 +612,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
         ) : unsupported ? (
           <section className="editor-state-panel" role="alert">
             <h1>この本文はここでは編集できません</h1>
-            <p>表・囲み・写真・重なった文字装飾などを含む記事は、内容を失わないため初期版の編集対象外です。</p>
+            <p>表・囲み・caption付き写真・重なった文字装飾などを含む記事は、内容を失わないためこの編集画面の対象外です。</p>
             <a href="/editor/guides" className="editor-secondary-button">記事一覧へ</a>
           </section>
         ) : mode === "new" && subjects.length === 0 ? (
@@ -642,7 +642,18 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
               <GuideRichTextEditor
                 key={editorKey}
                 initialContent={editorDocument}
+                articleId={articleId}
+                revision={revision}
                 disabled={editorBusy}
+                onRevoked={(guide, assetId) => {
+                  setSavedGuide(guide);
+                  setRevision(guide.revision);
+                  setForm((current) => current.coverAssetId === assetId
+                    ? { ...current, coverAssetId: "", coverAlt: "", coverCredit: "", coverWebConfirmed: false }
+                    : current);
+                  setPublicationState(null);
+                }}
+                onRevisionConflict={() => void fetchLatestForConflict()}
                 onChange={(next) => {
                   setEditorDocument(next);
                   markDirty();

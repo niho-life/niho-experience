@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { GuideArticleRecord } from "@niho-experience/experience-store";
+import type { GuideArticleRecord, GuideMediaAssetSummary } from "@niho-experience/experience-store";
 import { GuideBody } from "@/components/GuideBody";
 import { EditorHeader } from "@/components/editor/EditorHeader";
 import { guideApiError, loadGuideApiContext } from "@/lib/editor/guide-api-server";
@@ -51,8 +51,10 @@ export default async function GuideDraftPreviewPage({ params }: { params: Promis
   }
 
   let article: GuideArticleRecord;
+  let mediaAssets: readonly GuideMediaAssetSummary[];
   try {
     article = await loaded.value.repository.getArticle(loaded.value.actor, articleId);
+    mediaAssets = await loaded.value.repository.listReadyMediaAssets(loaded.value.actor, articleId);
   } catch (error) {
     const response = guideApiError(error);
     return (
@@ -66,6 +68,9 @@ export default async function GuideDraftPreviewPage({ params }: { params: Promis
   }
 
   const preview = parseGuideDraftPreview(article.content.markdown);
+  const mediaById = new Map(mediaAssets.map((asset) => [asset.id, asset]));
+  const missingFigure = preview.ok && preview.blocks.some((block) =>
+    block.type === "figure" && block.assetId !== undefined && !mediaById.has(block.assetId));
   const author = article.content.author;
   return (
     <>
@@ -80,12 +85,18 @@ export default async function GuideDraftPreviewPage({ params }: { params: Promis
               {author ? <><strong>{author.name}</strong> · {author.role}</> : "著者未設定"}
             </p>
           </header>
-          {preview.ok ? (
-            <div className="editor-preview-body"><GuideBody blocks={preview.blocks} /></div>
+          {preview.ok && !missingFigure ? (
+            <div className="editor-preview-body"><GuideBody
+              blocks={preview.blocks}
+              figureSrc={(block) => block.assetId
+                ? `/editor/api/guides/${encodeURIComponent(article.id)}/media/assets/${encodeURIComponent(block.assetId)}`
+                : null}
+              figureCredit={(assetId) => mediaById.get(assetId)?.publicCredit}
+            /></div>
           ) : (
             <section className="editor-preview-error" role="alert">
               <h2>本文をプレビューできません</h2>
-              <p>{preview.message}</p>
+              <p>{preview.ok ? "利用できなくなった本文写真があります。編集画面で差し替えてください。" : preview.message}</p>
             </section>
           )}
           {author ? (

@@ -1,5 +1,6 @@
 import type {
   GuideArticleRecord,
+  GuideMediaAssetSummary,
   GuidePublicationVisibility,
 } from "@niho-experience/experience-store";
 import {
@@ -69,6 +70,7 @@ function addProblem(
 export function guidePublicationProblems(
   article: GuideArticleRecord,
   activeCategorySlugs?: ReadonlySet<string>,
+  readyMedia?: readonly GuideMediaAssetSummary[],
 ): readonly GuidePublicationProblem[] {
   const problems: GuidePublicationProblem[] = [];
   const title = article.title.trim();
@@ -115,8 +117,18 @@ export function guidePublicationProblems(
     if (!blocks.some((block) => block.type === "heading" && block.level === 2)) {
       addProblem(problems, "body", "本文にH2見出しを1つ以上追加してください。");
     }
-    if (blocks.some((block) => block.type === "figure")) {
-      addProblem(problems, "body", "写真は掲載許諾の仕組みが整うまで公開できません。");
+    if (blocks.some((block) => block.type === "figure" && !block.assetId)) {
+      addProblem(problems, "body", "外部URLまたは旧形式の写真を記事専用写真へ差し替えてください。");
+    }
+    if (readyMedia !== undefined) {
+      const byId = new Map(readyMedia.map((asset) => [asset.id.toLowerCase(), asset]));
+      const figures = blocks.filter((block): block is Extract<GuideBlock, { type: "figure" }> =>
+        block.type === "figure" && Boolean(block.assetId));
+      if (figures.some((block) => !byId.has(block.assetId!.toLowerCase()))) {
+        addProblem(problems, "body", "利用できなくなった本文写真を差し替えてください。");
+      } else if (figures.some((block) => !byId.get(block.assetId!.toLowerCase())?.webConfirmed)) {
+        addProblem(problems, "body", "本文写真のWeb掲載許諾とクレジットを確認してください。");
+      }
     }
   } catch {
     // Parser failures are author-correctable input, never service failures.
@@ -137,8 +149,8 @@ export function parseGuideDraftPreview(markdown: string): GuideDraftPreview {
   }
   try {
     const blocks = parseGuideMarkdown(markdown);
-    if (blocks.some((block) => block.type === "figure")) {
-      return { ok: false, message: "写真は掲載許諾の仕組みが整うまでプレビューできません。" };
+    if (blocks.some((block) => block.type === "figure" && !block.assetId)) {
+      return { ok: false, message: "外部URLまたは旧形式の写真を記事専用写真へ差し替えてください。" };
     }
     return { ok: true, blocks };
   } catch {

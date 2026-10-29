@@ -70,6 +70,20 @@ describe("guide editor document", () => {
       .toThrow(UnsupportedGuideEditorContentError);
   });
 
+  it("round trips internal figures and preserves legacy figures until explicit replacement", () => {
+    const id = "00000000-0000-4000-8000-000000000216";
+    const internal = `## Photo\n\n![A synthetic photo](niho-guide-asset:${id})`;
+    expect(guideEditorDocumentToMarkdown(markdownToGuideEditorDocument(internal))).toBe(internal);
+
+    const legacy = "## Legacy\n\n![Keep this exactly](https://images.example.test/original.jpg)";
+    const document = markdownToGuideEditorDocument(legacy);
+    expect(document.content?.[1]).toMatchObject({
+      type: "guideFigure",
+      attrs: { assetId: null, unresolvedSource: "https://images.example.test/original.jpg", originalMarkdown: legacy.split("\n").at(-1) },
+    });
+    expect(guideEditorDocumentToMarkdown(document)).toBe(legacy);
+  });
+
   it("refuses parser-supported overlapping marks before editing", () => {
     expect(() => markdownToGuideEditorDocument("This is **bold *and italic* text**."))
       .toThrow("太字と斜体");

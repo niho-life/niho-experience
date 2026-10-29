@@ -1,5 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import {
+  GUIDE_ASSET_URI_PREFIX,
+  GUIDE_ASSET_UUID_V4,
   guideLinkHref,
   parseGuideMarkdown,
   type GuideBlock,
@@ -49,6 +51,15 @@ export function markdownToGuideEditorDocument(markdown: string): JSONContent {
       return { type: "heading", attrs: { level: block.level }, content: inlineToEditorContent(block.children) };
     }
     if (block.type === "paragraph" || block.type === "list") return textBlockToEditorNode(block);
+    if (block.type === "figure") {
+      if (block.assetId && block.caption) throw new UnsupportedGuideEditorContentError("本文写真のcaptionはこの編集画面では扱えません。");
+      return {
+        type: "guideFigure",
+        attrs: block.assetId
+          ? { assetId: block.assetId, alt: block.alt, unresolvedSource: null, originalMarkdown: null }
+          : { assetId: null, alt: block.alt, unresolvedSource: block.src, originalMarkdown: block.source },
+      };
+    }
     throw new UnsupportedGuideEditorContentError();
   });
   const document = { type: "doc", content: content.length ? content : [{ type: "paragraph" }] } satisfies JSONContent;
@@ -126,6 +137,21 @@ function serializeList(node: JSONContent, ordered: boolean): string {
   }).join("\n");
 }
 
+function serializeGuideFigure(node: JSONContent): string {
+  const assetId = node.attrs?.assetId;
+  const alt = node.attrs?.alt;
+  const unresolvedSource = node.attrs?.unresolvedSource;
+  const originalMarkdown = node.attrs?.originalMarkdown;
+  if (assetId === null && typeof unresolvedSource === "string" && typeof originalMarkdown === "string") {
+    return originalMarkdown;
+  }
+  if (typeof assetId !== "string" || !GUIDE_ASSET_UUID_V4.test(assetId) || typeof alt !== "string" || !alt.trim()) {
+    throw new UnsupportedGuideEditorContentError("本文写真のassetまたは英語altが不正です。");
+  }
+  if (alt.trim().length > 300) throw new UnsupportedGuideEditorContentError("本文写真の英語altは300文字以内にしてください。");
+  return `![${escapeMarkdownText(alt.trim())}](${GUIDE_ASSET_URI_PREFIX}${assetId})`;
+}
+
 export function guideEditorDocumentToMarkdown(document: JSONContent): string {
   if (document.type !== "doc") throw new UnsupportedGuideEditorContentError();
   const blocks = (document.content ?? []).flatMap((node): string[] => {
@@ -142,6 +168,7 @@ export function guideEditorDocumentToMarkdown(document: JSONContent): string {
     }
     if (node.type === "bulletList") return [serializeList(node, false)];
     if (node.type === "orderedList") return [serializeList(node, true)];
+    if (node.type === "guideFigure") return [serializeGuideFigure(node)];
     throw new UnsupportedGuideEditorContentError();
   });
   const markdown = blocks.join("\n\n");

@@ -288,6 +288,11 @@
 .guide-prosemirror li + li { margin-top: 0.35rem; }
 .guide-prosemirror a { color: var(--color-moss); text-decoration: underline; text-decoration-color: var(--color-leaf); text-decoration-thickness: 3px; text-underline-offset: 4px; }
 .guide-prosemirror p:only-child:empty::before { content: "英語で本文を書く"; color: #aaa9a2; pointer-events: none; }
+.editor-guide-figure { overflow: hidden; border-radius: var(--radius-card); background: var(--color-sand); }
+.editor-guide-figure.ProseMirror-selectednode { outline: 3px solid var(--color-moss); outline-offset: 0.25rem; }
+.editor-guide-figure img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; }
+.editor-guide-figure figcaption { padding: 0.65rem 0.85rem; color: var(--color-muted); font-size: 0.78rem; line-height: 1.45; }
+.editor-guide-figure-placeholder { display: grid; min-height: 10rem; padding: 1.5rem; place-items: center; color: var(--color-danger); font-weight: 850; text-align: center; }
 
 .editor-link-popover {
   position: absolute;
@@ -308,6 +313,33 @@
 .editor-link-popover > div { display: flex; margin-top: 0.75rem; justify-content: flex-end; gap: 0.5rem; }
 .editor-link-popover button { min-height: 2.25rem; border: 0; border-radius: 999px; padding: 0.4rem 0.8rem; background: var(--color-sand); font-weight: 800; }
 .editor-link-popover .editor-link-apply { background: var(--color-leaf); }
+
+.editor-figure-popover {
+  position: absolute;
+  z-index: 21;
+  top: 3.5rem;
+  right: 1rem;
+  display: grid;
+  width: min(26rem, calc(100% - 2rem));
+  max-height: min(44rem, calc(100dvh - 8rem));
+  overflow-y: auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 0.85rem;
+  padding: 1rem;
+  gap: 0.75rem;
+  background: white;
+  box-shadow: var(--shadow-card);
+}
+.editor-figure-popover label { display: grid; gap: 0.35rem; font-size: 0.78rem; font-weight: 850; }
+.editor-figure-popover input,
+.editor-figure-popover select { width: 100%; border: 1px solid var(--color-line-strong); border-radius: 0.55rem; padding: 0.65rem; background: white; }
+.editor-figure-popover > img { width: 100%; aspect-ratio: 3 / 2; border-radius: 0.65rem; object-fit: cover; background: var(--color-sand); }
+.editor-figure-popover .editor-figure-confirm { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+.editor-figure-popover .editor-figure-confirm input { width: auto; margin-top: 0.15rem; }
+.editor-figure-error { color: var(--color-danger); font-size: 0.78rem; font-weight: 750; }
+.editor-figure-popover > div { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.editor-figure-popover button { min-height: 2.25rem; border: 0; border-radius: 999px; padding: 0.4rem 0.8rem; background: var(--color-sand); font-weight: 800; }
+.editor-figure-popover .editor-link-apply { background: var(--color-leaf); }
 
 .editor-settings {
   position: sticky;

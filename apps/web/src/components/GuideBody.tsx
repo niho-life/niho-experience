@@ -5,25 +5,27 @@ import type { GuideBlock, GuideInline } from "@/lib/guide-markdown";
 import type { GuideOutlineItem } from "@/lib/guides";
 
 /** Renders the parsed guide body (lib/guide-markdown.ts) as React elements. Text is always escaped by React: no HTML is injected. */
-export function GuideBody({ blocks, outline = [], insertAfter = null, insertion = null }: { blocks: readonly GuideBlock[]; outline?: readonly GuideOutlineItem[]; insertAfter?: number | null; insertion?: ReactNode }) {
+type GuideFigureResolver = (block: Extract<GuideBlock, { type: "figure" }>) => string | null;
+
+export function GuideBody({ blocks, outline = [], insertAfter = null, insertion = null, figureSrc, figureCredit }: { blocks: readonly GuideBlock[]; outline?: readonly GuideOutlineItem[]; insertAfter?: number | null; insertion?: ReactNode; figureSrc?: GuideFigureResolver; figureCredit?: (assetId: string) => string | undefined }) {
   return (
     <div className="text-[1.0625rem] leading-[1.75] [&>:first-child]:mt-0">
-      <Blocks blocks={blocks} outline={outline} insertAfter={insertAfter} insertion={insertion} />
+      <Blocks blocks={blocks} outline={outline} insertAfter={insertAfter} insertion={insertion} figureSrc={figureSrc} figureCredit={figureCredit} />
     </div>
   );
 }
 
-function Blocks({ blocks, outline = [], insertAfter = null, insertion = null }: { blocks: readonly GuideBlock[]; outline?: readonly GuideOutlineItem[]; insertAfter?: number | null; insertion?: ReactNode }): ReactNode {
+function Blocks({ blocks, outline = [], insertAfter = null, insertion = null, figureSrc, figureCredit }: { blocks: readonly GuideBlock[]; outline?: readonly GuideOutlineItem[]; insertAfter?: number | null; insertion?: ReactNode; figureSrc?: GuideFigureResolver; figureCredit?: (assetId: string) => string | undefined }): ReactNode {
   const headings = new Map(outline.map((item) => [item.blockIndex, item]));
   return blocks.map((block, index) => (
     <Fragment key={index}>
-      <Block block={block} heading={headings.get(index)} />
+      <Block block={block} heading={headings.get(index)} figureSrc={figureSrc} figureCredit={figureCredit} />
       {insertAfter === index ? insertion : null}
     </Fragment>
   ));
 }
 
-function Block({ block, heading }: { block: GuideBlock; heading?: GuideOutlineItem }) {
+function Block({ block, heading, figureSrc, figureCredit }: { block: GuideBlock; heading?: GuideOutlineItem; figureSrc?: GuideFigureResolver; figureCredit?: (assetId: string) => string | undefined }) {
   switch (block.type) {
     case "heading":
       return block.level === 2 ? (
@@ -57,20 +59,24 @@ function Block({ block, heading }: { block: GuideBlock; heading?: GuideOutlineIt
           ))}
         </ul>
       );
-    case "figure":
+    case "figure": {
+      const resolvedFigureSrc = block.assetId ? figureSrc?.(block) ?? null : block.src;
+      const credit = block.assetId ? figureCredit?.(block.assetId) : undefined;
+      if (!resolvedFigureSrc) return null;
       // A fixed 3:2 frame (no layout shift whatever the photo's size), rounded like the hero.
       return (
         <figure className="mt-8">
           <div className="relative aspect-[3/2] overflow-hidden rounded-[var(--radius-card)] bg-sand">
-            <NextImage src={block.src} alt={block.alt} fill unoptimized sizes="(min-width: 46rem) 736px, 100vw" className="object-cover" />
+            <NextImage src={resolvedFigureSrc} alt={block.alt} fill unoptimized sizes="(min-width: 46rem) 736px, 100vw" className="object-cover" />
           </div>
-          {block.caption ? (
+          {block.caption || credit ? (
             <figcaption className="mt-2 text-sm leading-normal text-muted">
-              <GuideInlines items={block.caption} />
+              {block.caption ? <GuideInlines items={block.caption} /> : credit}
             </figcaption>
           ) : null}
         </figure>
       );
+    }
     case "table":
       // Only the box scrolls sideways on narrow screens; it takes keyboard focus so the hidden columns stay reachable.
       return (
@@ -113,7 +119,7 @@ function Block({ block, heading }: { block: GuideBlock; heading?: GuideOutlineIt
     case "note":
       return (
         <aside role="note" className="mt-6 rounded-[var(--radius-card)] bg-sand px-5 py-4 text-[0.96875rem] text-ink-soft sm:px-6 [&>:first-child]:mt-0">
-          <Blocks blocks={block.blocks} />
+          <Blocks blocks={block.blocks} figureSrc={figureSrc} figureCredit={figureCredit} />
         </aside>
       );
     case "paragraph":

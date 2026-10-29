@@ -46,6 +46,7 @@ export type {
   GuideLinkInvitation,
   GuideLinkInvitationState,
   GuideMediaAssetRecord,
+  GuideMediaAssetSummary,
   GuideMediaAssetState,
   GuideProductLinkInput,
   GuidePublicationVisibility,
@@ -53,6 +54,7 @@ export type {
   LinkableGuideProduct,
   PublicGuideArticle,
   PublicGuideCover,
+  PublicGuideFigure,
   PublicGuideProductLink,
   SaveGuideDraftInput,
 } from "./guides.ts";

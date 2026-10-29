@@ -11,7 +11,8 @@ export async function GET(_request: Request, context: GuideRouteContext) {
   try {
     const article = await loaded.value.repository.getArticle(loaded.value.actor, articleId);
     const categories = await loaded.value.repository.listActiveCategories();
-    const problems = guidePublicationProblems(article, new Set(categories.map((category) => category.slug)));
+    const media = await loaded.value.repository.listReadyMediaAssets(loaded.value.actor, articleId);
+    const problems = guidePublicationProblems(article, new Set(categories.map((category) => category.slug)), media);
     return guideApiJson({ guide: privateGuideArticle(article), problems });
   } catch (error) {
     return guideApiError(error);

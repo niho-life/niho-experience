@@ -1,4 +1,7 @@
+import { GUIDE_ASSET_URI_PREFIX, GUIDE_ASSET_UUID_V4, parseGuideAssetFigureLine } from "@niho-experience/experience-domain";
 import { safeHttpsUrl } from "./safe-url";
+
+export { GUIDE_ASSET_URI_PREFIX, GUIDE_ASSET_UUID_V4 };
 
 /**
  * The small Markdown subset that guide bodies are written in (docs/content/guides.md):
@@ -34,7 +37,7 @@ export type GuideTextBlock =
 export type GuideBlock =
   | { type: "heading"; level: 2 | 3; children: GuideInline[] }
   | GuideTextBlock
-  | { type: "figure"; src: string; external: boolean; alt: string; caption: GuideInline[] | null }
+  | { type: "figure"; src: string; external: boolean; alt: string; caption: GuideInline[] | null; assetId?: string; source: string }
   /** `label` names the table's scroll region: the nearest heading above it, else "Table" (numbered when repeated). */
   | { type: "table"; label: string; head: GuideInline[][]; rows: GuideInline[][][] }
   | { type: "note"; blocks: GuideTextBlock[] };
@@ -235,13 +238,29 @@ function parseFigure(line: string, no: number): Extract<GuideBlock, { type: "fig
   if (line[close + 1] !== "(" || !line.endsWith(")")) throw new GuideMarkdownError(usage, no);
   const target = /^(\S+)(?:\s+"(.*)")?$/.exec(line.slice(close + 2, -1));
   if (!target) throw new GuideMarkdownError(usage, no);
+  const targetValue = target[1]!;
+  if (targetValue.startsWith(GUIDE_ASSET_URI_PREFIX)) {
+    const internal = parseGuideAssetFigureLine(line);
+    if (!internal) throw new GuideMarkdownError("A guide photo needs a valid guide asset and plain English alt text", no);
+    return {
+      type: "figure", src: `${GUIDE_ASSET_URI_PREFIX}${internal.assetId}`, external: false,
+      alt: internal.alt, caption: null, assetId: internal.assetId, source: line,
+    };
+  }
   const alt = plainInline(line.slice(2, close), no, "Alt text").trim();
   if (!alt) throw new GuideMarkdownError("A photo needs alt text: ![what the photo shows](/path)", no);
-  const src = guideLinkHref(target[1]!);
-  if (!src) throw new GuideMarkdownError(`Unsafe or unsupported photo "${target[1]}": use a site path (/guides/…) or an https:// URL`, no);
+  const src = guideLinkHref(targetValue);
+  if (!src) throw new GuideMarkdownError(`Unsafe or unsupported photo "${targetValue}": use a site path (/guides/…), an https:// URL, or a valid guide asset`, no);
   const captionSource = target[2]?.trim() ?? "";
   if (target[2] !== undefined && !captionSource) throw new GuideMarkdownError("An empty caption: write the caption between the quotes, or leave the quotes out", no);
-  return { type: "figure", src: src.href, external: src.external, alt, caption: captionSource ? parseGuideInline(captionSource, no) : null };
+  return {
+    type: "figure",
+    src: src.href,
+    external: src.external,
+    alt,
+    caption: captionSource ? parseGuideInline(captionSource, no) : null,
+    source: line,
+  };
 }
 
 /** `| a | b |` → ["a", "b"]. The closing pipe is optional; `\|` stays escaped for the inline parser (a literal pipe). */

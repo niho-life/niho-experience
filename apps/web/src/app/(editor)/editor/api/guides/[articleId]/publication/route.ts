@@ -34,7 +34,8 @@ export async function POST(request: Request, context: GuideRouteContext) {
     const article = await loaded.value.repository.getArticle(loaded.value.actor, articleId);
     if (article.revision !== input.expectedRevision) return guideApiJson({ error: "conflict" }, 409);
     const categories = await loaded.value.repository.listActiveCategories();
-    const problems = guidePublicationProblems(article, new Set(categories.map((category) => category.slug)));
+    const media = await loaded.value.repository.listReadyMediaAssets(loaded.value.actor, articleId);
+    const problems = guidePublicationProblems(article, new Set(categories.map((category) => category.slug)), media);
     if (problems.length) return guideApiJson({ error: "invalid_input", problems }, 400);
 
     await loaded.value.repository.commitPublication(loaded.value.actor, articleId, {
