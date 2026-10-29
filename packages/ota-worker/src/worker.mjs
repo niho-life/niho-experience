@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BACKOFF_MS, DEFAULT_POLL_MS } from "./constants.mjs";
 import { executeJob } from "./supervisor.mjs";
-import { makeResult } from "./validation.mjs";
+import { makeReservationResult, makeResult } from "./validation.mjs";
 import { restartDisposition } from "./journal.mjs";
 import { createHaltLatch } from "./halt-latch.mjs";
 
@@ -54,8 +54,11 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
   if (!job) { await googleSync; return { status: "IDLE", modelInvocations: 0 }; }
   await journal.claimed(job);
   await journal.running();
-  const execution = await executor({ job, cloud, config });
-  const result = makeResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped, observation: execution.observation });
+  const execution = await executor({ job, cloud, config, journal });
+  const result = job.purpose === "RESERVATION_WINDOW"
+    ? makeReservationResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped,
+      reservationReadId: execution.reservationReadId, reservationReceiptId: execution.reservationReceiptId })
+    : makeResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped, observation: execution.observation });
   const haltReason = execution.stopped !== true ? "PROCESS_STOP_UNCONFIRMED"
     : execution.halt ? execution.reason ?? execution.outcome : undefined;
   await journal.pendingResult(result, haltReason);
@@ -67,7 +70,8 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
     const reason = error.code === "AUTH" ? "RESULT_AUTH" : "RESULT_INVALID_RESPONSE";
     await haltLatch?.set(reason);
     await googleSync;
-    return { status: "HALT_PENDING_RESULT", outcome: execution.outcome, stopped: execution.stopped, reason, modelInvocations: config.mode === "claude-code" ? 1 : 0 };
+    return { status: "HALT_PENDING_RESULT", outcome: execution.outcome, stopped: execution.stopped, reason,
+      modelInvocations: job.purpose === "RESERVATION_WINDOW" ? 0 : config.mode === "claude-code" ? 1 : 0 };
   }
   await journal.clearAfterAcknowledged(result.resultId);
   await googleSync;
@@ -78,7 +82,7 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
     quarantine: execution.quarantine,
     reason: haltReason ?? execution.reason,
     acceptedAsCurrent: receipt?.acceptedAsCurrent !== false,
-    modelInvocations: config.mode === "claude-code" ? 1 : 0,
+    modelInvocations: job.purpose === "RESERVATION_WINDOW" ? 0 : config.mode === "claude-code" ? 1 : 0,
   };
 }
 

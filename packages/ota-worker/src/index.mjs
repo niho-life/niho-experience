@@ -4,6 +4,7 @@ export { createJournal, restartDisposition } from "./journal.mjs";
 export { createGygDriver } from "./gyg-driver.mjs";
 export { createNetworkGuard, isNamedReadOnlyQuery, validateUpdateMutation } from "./network-guard.mjs";
 export { executeJob } from "./supervisor.mjs";
+export { executeReservationWindow, unsupportedReservationReaderFactory } from "./reservation-executor.mjs";
 export { runWorkerLoop, runWorkerOnce, resumeJournal } from "./worker.mjs";
 export { acquireSingleInstance } from "./single-instance.mjs";
 export { ContractError, validateClaim, validateTarget } from "./validation.mjs";

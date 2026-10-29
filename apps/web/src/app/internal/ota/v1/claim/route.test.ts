@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   worker: { workerId: "studio-1", credentialVersion: 1 },
-  runtime: { enqueueDueReconciliationTicks: vi.fn(), consumeCalendarOutbox: vi.fn(), claim: vi.fn() },
+  runtime: { enqueueDueReconciliationTicks: vi.fn(), consumeCalendarOutbox: vi.fn(), enqueueDueReservationReads: vi.fn(), claim: vi.fn() },
 }));
 
 vi.mock("@/lib/experience/channel-runtime", () => ({
@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.runtime.enqueueDueReconciliationTicks.mockResolvedValue({ enqueued: 0 });
   mocks.runtime.consumeCalendarOutbox.mockResolvedValue({ events: 0, occurrences: 0, jobs: 0 });
+  mocks.runtime.enqueueDueReservationReads.mockResolvedValue({ enqueued: 0 });
   mocks.runtime.claim.mockResolvedValue(null);
 });
 
@@ -28,14 +29,16 @@ describe("POST /internal/ota/v1/claim", () => {
     const order: string[] = [];
     mocks.runtime.enqueueDueReconciliationTicks.mockImplementation(async () => { order.push("tick"); return { enqueued: 0 }; });
     mocks.runtime.consumeCalendarOutbox.mockImplementation(async () => { order.push("dispatch"); });
+    mocks.runtime.enqueueDueReservationReads.mockImplementation(async () => { order.push("reservation"); return { enqueued: 0 }; });
     mocks.runtime.claim.mockImplementation(async () => { order.push("claim"); return null; });
     const response = await POST(new Request("https://example.test/internal/ota/v1/claim", {
       method: "POST", headers: { "content-type": "application/json" }, body: "{}",
     }));
     expect(response.status).toBe(204);
-    expect(order).toEqual(["tick", "dispatch", "claim"]);
+    expect(order).toEqual(["tick", "dispatch", "reservation", "claim"]);
     expect(mocks.runtime.enqueueDueReconciliationTicks).toHaveBeenCalledWith(mocks.worker, 20);
     expect(mocks.runtime.consumeCalendarOutbox).toHaveBeenCalledWith(50, mocks.worker);
+    expect(mocks.runtime.enqueueDueReservationReads).toHaveBeenCalledWith(mocks.worker, 1);
   });
 
   it("does not claim after dispatch failure", async () => {
@@ -44,6 +47,7 @@ describe("POST /internal/ota/v1/claim", () => {
       method: "POST", headers: { "content-type": "application/json" }, body: "{}",
     }));
     expect(response.status).toBe(503);
+    expect(mocks.runtime.enqueueDueReservationReads).not.toHaveBeenCalled();
     expect(mocks.runtime.claim).not.toHaveBeenCalled();
   });
 
