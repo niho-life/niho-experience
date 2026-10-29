@@ -46,6 +46,10 @@ import type {
   CreateBookingHoldInput,
   GoogleCalendarConfiguration,
   HostActor,
+  InventoryAdminActor,
+  InventoryAdminProduct,
+  InventoryAdminProvider,
+  InventoryAdminSnapshot,
   InventoryResourceInput,
   InventoryResourceRecord,
   MembershipRole,
@@ -114,6 +118,10 @@ function validateActor(actor: HostActor, allowOperator = false): void {
 
 function validateScope(scope: ProviderScope): void {
   assertStoreIdentifier(scope.providerId, "scope.providerId");
+}
+
+function validateInventoryAdmin(actor: InventoryAdminActor): void {
+  assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
 }
 
 function validateCommandId(commandId: string): void {
@@ -424,38 +432,8 @@ export class ExperienceStore {
     }
     validateCommandId(commandId);
     const requestFingerprint = inventoryCommandFingerprint({ input, expectedVersion });
-    return withTransaction(this.#pool, async (client) => {
-      await lockProviderInventory(client, actor.providerId);
-      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
-      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "inventory_resource.save", requestFingerprint);
-      if (previous) return previous;
-      const current = await client.query<DbRow>(
-        "SELECT kind,version FROM inventory_resources WHERE provider_id=$1 AND id=$2 FOR UPDATE",
-        [actor.providerId, input.id],
-      );
-      const row = current.rows[0];
-      if (row === undefined && expectedVersion !== null) throw new StoreConflictError("Inventory resource was not found.");
-      if (row !== undefined && (expectedVersion === null || Number(row.version) !== expectedVersion)) {
-        throw new StoreConflictError("Inventory resource version mismatch.");
-      }
-      if (row !== undefined && row.kind !== input.kind) throw new StoreConflictError("Inventory resource kind is immutable.");
-      const saved = row === undefined
-        ? await client.query<DbRow>(
-            `INSERT INTO inventory_resources (provider_id,id,kind,display_name,active)
-             VALUES ($1,$2,$3,$4,$5)
-             RETURNING provider_id,id,kind,display_name,active,version,created_at,updated_at`,
-            [actor.providerId, input.id, input.kind, input.displayName, input.active],
-          )
-        : await client.query<DbRow>(
-            `UPDATE inventory_resources SET display_name=$3,active=$4,version=version+1,updated_at=clock_timestamp()
-              WHERE provider_id=$1 AND id=$2
-              RETURNING provider_id,id,kind,display_name,active,version,created_at,updated_at`,
-            [actor.providerId, input.id, input.displayName, input.active],
-          );
-      const savedRow = oneRow(saved.rows, "inventory resource");
-      return completeCalendarCommand(client, actor.providerId, commandId, "inventory_resource.save", requestFingerprint,
-        "inventory_resource", { aggregateId: input.id, version: Number(savedRow.version), repeated: false });
-    });
+    return this.#saveInventoryResource(actor.providerId, input, expectedVersion, commandId, requestFingerprint,
+      (client) => requireMembership(client, actor, ["OWNER", "EDITOR"]));
   }
 
   async listInventoryResources(actor: HostActor): Promise<readonly InventoryResourceRecord[]> {
@@ -474,6 +452,87 @@ export class ExperienceStore {
       displayName: String(row.display_name), active: row.active === true, version: Number(row.version),
       createdAtUtc: isoValue(row, "created_at"), updatedAtUtc: isoValue(row, "updated_at"),
     }));
+  }
+
+  async listInventoryAdminProviders(actor: InventoryAdminActor): Promise<readonly InventoryAdminProvider[]> {
+    validateInventoryAdmin(actor);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT providers.id,providers.display_name FROM (
+         SELECT p.id,COALESCE(MIN(NULLIF(BTRIM(e.seller_display_name),'')),p.id) AS display_name
+           FROM experience_providers p
+           LEFT JOIN experience_products e ON e.provider_id=p.id AND e.status<>'ARCHIVED'
+          GROUP BY p.id
+        ) providers ORDER BY providers.display_name COLLATE "C",providers.id COLLATE "C" LIMIT 500`,
+    );
+    return result.rows.map((row) => ({ id: String(row.id), displayName: String(row.display_name) }));
+  }
+
+  async getInventoryAdminSnapshot(actor: InventoryAdminActor, providerId: string): Promise<InventoryAdminSnapshot> {
+    validateInventoryAdmin(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return withTransaction(this.#pool, async (client) => {
+    await lockProviderInventory(client, providerId);
+    const provider = await client.query("SELECT 1 FROM experience_providers WHERE id=$1", [providerId]);
+    if (!provider.rows[0]) throw new StoreNotFoundError("provider");
+    const [productsResult, resources, settingsResult, assignmentsResult] = await Promise.all([
+      client.query<DbRow>(
+        `SELECT id,public_title,seller_display_name,status FROM experience_products
+          WHERE provider_id=$1 AND status<>'ARCHIVED'
+          ORDER BY public_title COLLATE "C",id COLLATE "C" LIMIT 500`, [providerId],
+      ),
+      this.#listInventoryResources(providerId, client),
+      client.query<DbRow>(
+        `SELECT product_id,booking_mode,version FROM product_inventory_settings
+          WHERE provider_id=$1 ORDER BY product_id COLLATE "C"`, [providerId],
+      ),
+      client.query<DbRow>(
+        `SELECT product_id,resource_id,prepare_minutes,cleanup_minutes FROM product_inventory_resources
+          WHERE provider_id=$1 ORDER BY product_id COLLATE "C",resource_id COLLATE "C"`, [providerId],
+      ),
+    ]);
+    const assignments = new Map<string, ProductInventorySetting["resources"] extends readonly (infer T)[] ? T[] : never>();
+    for (const row of assignmentsResult.rows) {
+      const productId = String(row.product_id);
+      const current = assignments.get(productId) ?? [];
+      current.push({ resourceId: String(row.resource_id), prepareMinutes: Number(row.prepare_minutes), cleanupMinutes: Number(row.cleanup_minutes) });
+      assignments.set(productId, current);
+    }
+    const settings = new Map(settingsResult.rows.map((row) => {
+      const productId = String(row.product_id);
+      return [productId, {
+        providerId, productId, bookingMode: String(row.booking_mode) as BookingMode,
+        version: Number(row.version), resources: assignments.get(productId) ?? [],
+      } satisfies ProductInventorySetting] as const;
+    }));
+    const products: InventoryAdminProduct[] = productsResult.rows.map((row) => {
+      const id = String(row.id);
+      const inventory = settings.get(id);
+      return {
+        id, publicTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name),
+        status: String(row.status) as InventoryAdminProduct["status"], ...(inventory ? { inventory } : {}),
+      };
+    });
+    return { providerId, products, resources };
+    });
+  }
+
+  async saveInventoryResourceAsAdmin(
+    actor: InventoryAdminActor,
+    providerId: string,
+    input: InventoryResourceInput,
+    expectedVersion: number | null,
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
+    validateInventoryAdmin(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(input.id, "resource.id");
+    assertNonEmptyText(input.displayName, "resource.displayName", 200);
+    if (!(input.kind === "VENUE" || input.kind === "INSTRUCTOR" || input.kind === "EQUIPMENT")) throw new StoreValidationError("resource.kind is invalid.");
+    if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) throw new StoreValidationError("expectedVersion must be null or a positive integer.");
+    validateCommandId(commandId);
+    const requestFingerprint = inventoryCommandFingerprint({ input, expectedVersion });
+    return this.#saveInventoryResource(providerId, input, expectedVersion, commandId, requestFingerprint,
+      (client) => this.#requireAdminProvider(client, providerId));
   }
 
   async saveProductInventorySetting(
@@ -506,57 +565,39 @@ export class ExperienceStore {
       resources: [...input.resources].sort((a, b) => a.resourceId < b.resourceId ? -1 : a.resourceId > b.resourceId ? 1 : 0),
     };
     const requestFingerprint = inventoryCommandFingerprint({ productId, input: normalized, expectedVersion });
-    return withTransaction(this.#pool, async (client) => {
-      await lockProviderInventory(client, actor.providerId);
-      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
-      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "product_inventory.save", requestFingerprint);
-      if (previous) return previous;
-      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR UPDATE", [actor.providerId, productId]);
-      if (!product.rows[0]) throw new StoreNotFoundError("product");
-      const active = await client.query(
-        `SELECT 1 FROM bookings WHERE provider_id=$1 AND product_id=$2
-          AND (occurrence_snapshot->>'endUtc')::timestamptz>clock_timestamp()
-          AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>clock_timestamp())) LIMIT 1`,
-        [actor.providerId, productId],
-      );
-      if (active.rows[0]) throw new StoreConflictError("Product inventory cannot change while an active hold or confirmed booking exists.");
-      const current = await client.query<DbRow>(
-        "SELECT version FROM product_inventory_settings WHERE provider_id=$1 AND product_id=$2 FOR UPDATE",
-        [actor.providerId, productId],
-      );
-      const currentRow = current.rows[0];
-      if (currentRow === undefined && expectedVersion !== null) throw new StoreConflictError("Product inventory setting was not found.");
-      if (currentRow !== undefined && (expectedVersion === null || Number(currentRow.version) !== expectedVersion)) {
-        throw new StoreConflictError("Product inventory setting version mismatch.");
+    return this.#saveProductInventorySetting(actor.providerId, productId, normalized, expectedVersion, commandId, requestFingerprint,
+      (client) => requireMembership(client, actor, ["OWNER", "EDITOR"]));
+  }
+
+  async saveProductInventorySettingAsAdmin(
+    actor: InventoryAdminActor,
+    providerId: string,
+    productId: string,
+    input: ProductInventorySettingInput,
+    expectedVersion: number | null,
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
+    validateInventoryAdmin(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(productId, "productId");
+    if (input.bookingMode !== "SEAT" && input.bookingMode !== "PRIVATE_GROUP") throw new StoreValidationError("bookingMode is invalid.");
+    if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) throw new StoreValidationError("expectedVersion must be null or a positive integer.");
+    validateCommandId(commandId);
+    if (input.resources.length > 200) throw new StoreValidationError("A product may use at most 200 inventory resources.");
+    const seen = new Set<string>();
+    for (const assignment of input.resources) {
+      assertStoreIdentifier(assignment.resourceId, "resourceId");
+      if (seen.has(assignment.resourceId)) throw new StoreValidationError("A resource may be assigned only once per product.");
+      seen.add(assignment.resourceId);
+      if (!Number.isInteger(assignment.prepareMinutes) || assignment.prepareMinutes < 0 || assignment.prepareMinutes > 1_440
+        || !Number.isInteger(assignment.cleanupMinutes) || assignment.cleanupMinutes < 0 || assignment.cleanupMinutes > 1_440) {
+        throw new StoreValidationError("Resource preparation and cleanup must be from 0 to 1440 minutes.");
       }
-      if (normalized.resources.length > 0) {
-        const owned = await client.query<{ id: string }>(
-          "SELECT id FROM inventory_resources WHERE provider_id=$1 AND id=ANY($2::text[]) FOR SHARE",
-          [actor.providerId, normalized.resources.map((item) => item.resourceId)],
-        );
-        if (owned.rowCount !== normalized.resources.length) throw new StoreConflictError("Every assigned resource must belong to the same provider.");
-      }
-      const version = currentRow === undefined ? 1 : Number(currentRow.version) + 1;
-      if (currentRow === undefined) {
-        await client.query("INSERT INTO product_inventory_settings (provider_id,product_id,booking_mode) VALUES ($1,$2,$3)",
-          [actor.providerId, productId, normalized.bookingMode]);
-      } else {
-        await client.query(
-          "UPDATE product_inventory_settings SET booking_mode=$3,version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND product_id=$2",
-          [actor.providerId, productId, normalized.bookingMode],
-        );
-        await client.query("DELETE FROM product_inventory_resources WHERE provider_id=$1 AND product_id=$2", [actor.providerId, productId]);
-      }
-      for (const assignment of normalized.resources) {
-        await client.query(
-          `INSERT INTO product_inventory_resources (provider_id,product_id,resource_id,prepare_minutes,cleanup_minutes)
-           VALUES ($1,$2,$3,$4,$5)`,
-          [actor.providerId, productId, assignment.resourceId, assignment.prepareMinutes, assignment.cleanupMinutes],
-        );
-      }
-      return completeCalendarCommand(client, actor.providerId, commandId, "product_inventory.save", requestFingerprint,
-        "product_inventory", { aggregateId: productId, version, repeated: false });
-    });
+    }
+    const normalized = { bookingMode: input.bookingMode, resources: [...input.resources].sort((a, b) => a.resourceId < b.resourceId ? -1 : a.resourceId > b.resourceId ? 1 : 0) };
+    const requestFingerprint = inventoryCommandFingerprint({ productId, input: normalized, expectedVersion });
+    return this.#saveProductInventorySetting(providerId, productId, normalized, expectedVersion, commandId, requestFingerprint,
+      (client) => this.#requireAdminProvider(client, providerId));
   }
 
   async getProductInventorySetting(actor: HostActor, productId: string): Promise<ProductInventorySetting> {
@@ -1217,6 +1258,122 @@ export class ExperienceStore {
         });
       }
       return result.rowCount ?? 0;
+    });
+  }
+
+  async #requireAdminProvider(client: PoolClient, providerId: string): Promise<void> {
+    const provider = await client.query("SELECT 1 FROM experience_providers WHERE id=$1 FOR SHARE", [providerId]);
+    if (!provider.rows[0]) throw new StoreNotFoundError("provider");
+  }
+
+  async #listInventoryResources(providerId: string, client: Pool | PoolClient = this.#pool): Promise<readonly InventoryResourceRecord[]> {
+    const result = await client.query<DbRow>(
+      `SELECT provider_id,id,kind,display_name,active,version,created_at,updated_at
+         FROM inventory_resources WHERE provider_id=$1 ORDER BY id COLLATE "C"`, [providerId],
+    );
+    return result.rows.map((row) => ({
+      providerId: String(row.provider_id), id: String(row.id), kind: String(row.kind) as InventoryResourceRecord["kind"],
+      displayName: String(row.display_name), active: row.active === true, version: Number(row.version),
+      createdAtUtc: isoValue(row, "created_at"), updatedAtUtc: isoValue(row, "updated_at"),
+    }));
+  }
+
+  async #saveInventoryResource(
+    providerId: string,
+    input: InventoryResourceInput,
+    expectedVersion: number | null,
+    commandId: string,
+    requestFingerprint: string,
+    authorize: (client: PoolClient) => Promise<unknown>,
+  ): Promise<CalendarCommandReceipt> {
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await authorize(client);
+      const previous = await previousCalendarCommand(client, providerId, commandId, "inventory_resource.save", requestFingerprint);
+      if (previous) return previous;
+      const current = await client.query<DbRow>(
+        "SELECT kind,display_name,active,version FROM inventory_resources WHERE provider_id=$1 AND id=$2 FOR UPDATE",
+        [providerId, input.id],
+      );
+      const row = current.rows[0];
+      if (row === undefined && expectedVersion !== null) throw new StoreConflictError("Inventory resource was not found.");
+      if (row !== undefined && (expectedVersion === null || Number(row.version) !== expectedVersion)) throw new StoreConflictError("Inventory resource version mismatch.");
+      if (row !== undefined && row.kind !== input.kind) throw new StoreConflictError("Inventory resource kind is immutable.");
+      const saved = row === undefined
+        ? await client.query<DbRow>(
+            `INSERT INTO inventory_resources (provider_id,id,kind,display_name,active)
+             VALUES ($1,$2,$3,$4,$5)
+             RETURNING provider_id,id,kind,display_name,active,version,created_at,updated_at`,
+            [providerId, input.id, input.kind, input.displayName, input.active],
+          )
+        : await client.query<DbRow>(
+            `UPDATE inventory_resources SET display_name=$3,active=$4,version=version+1,updated_at=clock_timestamp()
+              WHERE provider_id=$1 AND id=$2
+              RETURNING provider_id,id,kind,display_name,active,version,created_at,updated_at`,
+            [providerId, input.id, input.displayName, input.active],
+          );
+      const savedRow = oneRow(saved.rows, "inventory resource");
+      return completeCalendarCommand(client, providerId, commandId, "inventory_resource.save", requestFingerprint,
+        "inventory_resource", { aggregateId: input.id, version: Number(savedRow.version), repeated: false });
+    });
+  }
+
+  async #saveProductInventorySetting(
+    providerId: string,
+    productId: string,
+    normalized: ProductInventorySettingInput,
+    expectedVersion: number | null,
+    commandId: string,
+    requestFingerprint: string,
+    authorize: (client: PoolClient) => Promise<unknown>,
+  ): Promise<CalendarCommandReceipt> {
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await authorize(client);
+      const previous = await previousCalendarCommand(client, providerId, commandId, "product_inventory.save", requestFingerprint);
+      if (previous) return previous;
+      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR UPDATE", [providerId, productId]);
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      const active = await client.query(
+        `SELECT 1 FROM bookings WHERE provider_id=$1 AND product_id=$2
+          AND (occurrence_snapshot->>'endUtc')::timestamptz>clock_timestamp()
+          AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>clock_timestamp())) LIMIT 1`,
+        [providerId, productId],
+      );
+      if (active.rows[0]) throw new StoreConflictError("Product inventory cannot change while an active hold or confirmed booking exists.");
+      const current = await client.query<DbRow>(
+        "SELECT version FROM product_inventory_settings WHERE provider_id=$1 AND product_id=$2 FOR UPDATE", [providerId, productId],
+      );
+      const currentRow = current.rows[0];
+      if (currentRow === undefined && expectedVersion !== null) throw new StoreConflictError("Product inventory setting was not found.");
+      if (currentRow !== undefined && (expectedVersion === null || Number(currentRow.version) !== expectedVersion)) throw new StoreConflictError("Product inventory setting version mismatch.");
+      if (normalized.resources.length > 0) {
+        const owned = await client.query<{ id: string }>(
+          "SELECT id FROM inventory_resources WHERE provider_id=$1 AND id=ANY($2::text[]) FOR SHARE",
+          [providerId, normalized.resources.map((item) => item.resourceId)],
+        );
+        if (owned.rowCount !== normalized.resources.length) throw new StoreConflictError("Every assigned resource must belong to the same provider.");
+      }
+      const version = currentRow === undefined ? 1 : Number(currentRow.version) + 1;
+      if (currentRow === undefined) {
+        await client.query("INSERT INTO product_inventory_settings (provider_id,product_id,booking_mode) VALUES ($1,$2,$3)",
+          [providerId, productId, normalized.bookingMode]);
+      } else {
+        await client.query(
+          "UPDATE product_inventory_settings SET booking_mode=$3,version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND product_id=$2",
+          [providerId, productId, normalized.bookingMode],
+        );
+        await client.query("DELETE FROM product_inventory_resources WHERE provider_id=$1 AND product_id=$2", [providerId, productId]);
+      }
+      for (const assignment of normalized.resources) {
+        await client.query(
+          `INSERT INTO product_inventory_resources (provider_id,product_id,resource_id,prepare_minutes,cleanup_minutes)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [providerId, productId, assignment.resourceId, assignment.prepareMinutes, assignment.cleanupMinutes],
+        );
+      }
+      return completeCalendarCommand(client, providerId, commandId, "product_inventory.save", requestFingerprint,
+        "product_inventory", { aggregateId: productId, version, repeated: false });
     });
   }
 

@@ -4,6 +4,7 @@ import { boundedObject, channelFailure, channelJson, channelManagerEnabled, exac
 import { channelRuntime } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -18,11 +19,11 @@ function capabilities(value: unknown): ChannelCapabilities | null {
 
 function accountInput(value: unknown): ExternalAccountInput | null {
   const item = record(value);
-  if (!item || !exactKeys(item, ["id", "providerId", "site", "externalAccountId", "displayName", "operatingModel"], ["active", "delegatedUntilUtc", "revokedAtUtc", "privateProfileRef"])) return null;
+  if (!item || !exactKeys(item, ["id", "providerId", "site", "externalAccountId", "displayName", "operatingModel"], ["active", "delegatedUntilUtc", "revokedAtUtc"])) return null;
   if (!["id", "providerId", "site", "externalAccountId", "displayName"].every((key) => typeof item[key] === "string")
     || ![1, 2, 3, 4].includes(item.operatingModel as number)
     || (item.active !== undefined && typeof item.active !== "boolean")
-    || ["delegatedUntilUtc", "revokedAtUtc", "privateProfileRef"].some((key) => item[key] !== undefined && typeof item[key] !== "string")) return null;
+    || ["delegatedUntilUtc", "revokedAtUtc"].some((key) => item[key] !== undefined && typeof item[key] !== "string")) return null;
   return item as unknown as ExternalAccountInput;
 }
 
@@ -39,7 +40,7 @@ function listingInput(value: unknown): ChannelListingInput | null {
 }
 
 function command(body: Record<string, unknown>): string | null {
-  return typeof body.commandId === "string" ? body.commandId : null;
+  return typeof body.commandId === "string" && UUID_V4.test(body.commandId) ? body.commandId : null;
 }
 
 function accountDto(value: Awaited<ReturnType<NonNullable<ReturnType<typeof channelRuntime>>["createExternalAccount"]>>) {
@@ -79,12 +80,12 @@ export async function POST(request: Request) {
     }
     if (body.action === "updateAccount" && exactKeys(body, ["action", "commandId", "accountId", "expectedVersion", "account"])) {
       const input = accountInput(body.account); const commandId = command(body);
-      if (!input || input.active === undefined || !commandId || typeof body.accountId !== "string" || !Number.isSafeInteger(body.expectedVersion)) return channelJson({ error: "invalid_input" }, 400);
+      if (!input || input.id !== body.accountId || input.active === undefined || !commandId || typeof body.accountId !== "string" || !Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number) < 1) return channelJson({ error: "invalid_input" }, 400);
       const update = {
+        site: input.site, externalAccountId: input.externalAccountId,
         displayName: input.displayName, operatingModel: input.operatingModel, active: input.active,
         ...(input.delegatedUntilUtc === undefined ? {} : { delegatedUntilUtc: input.delegatedUntilUtc }),
         ...(input.revokedAtUtc === undefined ? {} : { revokedAtUtc: input.revokedAtUtc }),
-        ...(input.privateProfileRef === undefined ? {} : { privateProfileRef: input.privateProfileRef }),
       };
       return channelJson({ account: accountDto(await runtime.updateExternalAccount(actor, body.accountId, update, body.expectedVersion as number, commandId)) });
     }
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
     }
     if (body.action === "updateListing" && exactKeys(body, ["action", "commandId", "listingId", "expectedVersion", "listing"])) {
       const input = listingInput(body.listing); const commandId = command(body);
-      if (!input || !commandId || typeof body.listingId !== "string" || !Number.isSafeInteger(body.expectedVersion)) return channelJson({ error: "invalid_input" }, 400);
+      if (!input || input.id !== body.listingId || !commandId || typeof body.listingId !== "string" || !Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number) < 1) return channelJson({ error: "invalid_input" }, 400);
       const update = {
         externalProductId: input.externalProductId, ...(input.externalOptionId === undefined ? {} : { externalOptionId: input.externalOptionId }),
         adapter: input.adapter, adapterVersion: input.adapterVersion, connectionMode: input.connectionMode,

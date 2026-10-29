@@ -22,6 +22,30 @@ export interface HostActor {
   readonly nihoUserId: string;
 }
 
+/** Built only after the HTTP boundary has verified a current NIHO Admin. */
+export interface InventoryAdminActor {
+  readonly nihoUserId: string;
+}
+
+export interface InventoryAdminProvider {
+  readonly id: string;
+  readonly displayName: string;
+}
+
+export interface InventoryAdminProduct {
+  readonly id: string;
+  readonly publicTitle: string;
+  readonly sellerDisplayName: string;
+  readonly status: ProductStatus;
+  readonly inventory?: ProductInventorySetting;
+}
+
+export interface InventoryAdminSnapshot {
+  readonly providerId: string;
+  readonly products: readonly InventoryAdminProduct[];
+  readonly resources: readonly InventoryResourceRecord[];
+}
+
 export type CalendarAccess =
   | { readonly basis: "MEMBER"; readonly role: MembershipRole }
   | { readonly basis: "OPERATOR"; readonly version: number; readonly assignmentLabel: string };

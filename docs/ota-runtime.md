@@ -1,6 +1,6 @@
 # OTA channel runtime
 
-対象: #194、#196、#197、#198、#234。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)に追加し、Host の開催枠詳細はこの read model を表示する。外部予約取込、Googleへの枠制御出力、Admin の運用 UI は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
+対象: #194、#196、#197、#198、#234、#235。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)に追加し、Host の開催枠詳細はこの read model を表示する。外部予約取込とGoogleへの枠制御出力は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
 
 ## 既定で閉じるゲート
 
@@ -19,12 +19,18 @@ external account は provider scope に属し、site、外部 account ID、表�
 
 listing は provider 所有 product と同じ provider の account だけを結ぶ。外部 product/option、Asia/Tokyo、adapter/version、connection mode と個別 capability を持ち、active と capability の既定値は false。同じ product を複数 site/account へ結べるが、同じ account の外部 product/option は重複できない。更新は `expectedVersion` 必須で、Admin mutation は UUID v4 command と fingerprint で冪等化する。actor user ID は、HTTP 境界が fresh Admin 検証から作った `ChannelAdminActor` だけを受け入れる。
 
-account の委任・失効・active・profile 変更、listing の target/capability/active 変更は version を上げ、QUEUED job を `SUPERSEDED` にする。LEASED job の immutable target は書き換えず、preflight/result で current version と不一致になる。古い job を新しい target へ転送しない。
+account の site・外部 account ID・委任・失効・active・profile 変更、listing の target/capability/active 変更は version を上げ、QUEUED job を `SUPERSEDED` にする。account の site または外部 account ID を変えた listing は停止・capability false・mapping version 更新へ戻し、再確認前の設定を引き継がない。LEASED job の immutable target は書き換えず、preflight/result で current version と不一致になる。古い job を新しい target へ転送しない。
 
 worker credential の初回 mint と account assignment 作成は `expectedVersion: null`、rotation・再 assignment と revoke は現在の正の version を必須とする。raw credential を再表示する idempotent replay は行わず、同じ mint command の再送は conflict とする。
 
 listing を active にしただけでは外部操作を作らない。Admin の deterministic `reconcile`、または `calendar_outbox_events` consumer が現在の schedule から desired state を再構築する。
 active mapping の開催時刻変更は、旧外部枠を確実に閉じてから新 target へ移す P2 の手順が未実装である。この slice は古い時刻の preflight/result を拒否して quarantine するだけで、外部 reschedule を対応済みとはしない。従って runtime flag は引き続き無効にする。
+
+### Admin の掲載先設定
+
+`/admin/channels` と `/admin/api/channel-workspace` は channel manager flag が有効で、fresh な Admin HTTP session を毎回確認できる場合だけ開く。提供者を選び、商品、external account/listing、会場・講師・備品、商品の予約単位と準備・片付け時間を設定する。担当者の招待は既存 `/admin/operators`、定員は host calendar を使う。
+
+新しい account/listing/資源は停止、listing capability は false が既定である。保存の受領は接続・外部反映の成功ではなく、再照合も job の受付までとする。料金は掲載先ごとに管理し、この画面・runtime は読み取りも同期も更新もしない。password、cookie、bearer、private profile、worker credential の入力・表示・mint/revoke/recovery はこの画面に置かない。
 
 ## Desired state と calendar outbox
 
@@ -71,3 +77,11 @@ StudioではChrome 156 + Node 24のdeterministic browser driverでsynthetic 24 c
 実DBの対象検証は9件、Webの境界検証は12件が合格した。認可の解除・再付与、再開直後の古いCLOSE、2,016 occurrenceの2ページ展開、期限後の停止確認、未対応adapterが先頭56件を占める場合、mapping変更直後の未確認表示も含む。独立read-onlyレビュー3件とGitHubレビュー3件のfindingを修正し、対応する実DB回帰テストで確認した。
 
 これらはClaude end-to-endまたはP0完了の証跡ではない。Claude/Maxはweekly limit中（2026-11-03 13:00 JST reset）であり、有料API fallbackは使用しない。worker adapter統合と本番有効化は後続sliceである。
+
+### 管理UIの受入境界（#235）
+
+`/admin/channels` は専用Admin認証と `EXPERIENCE_CHANNEL_MANAGER_ENABLED=true` が必要。提供者ごとに外部アカウント・掲載設定・共有資源を扱い、担当者の招待は既存の `/admin/operators` を使う。価格は販路別に管理し、この画面では同期しない。開催回の人数上限はカレンダーで設定する。
+
+`EXPERIENCE_CHANNEL_WORKSPACE_PREVIEW_ENABLED=true` はmockモードかつ合成AdminのUI検証専用。合成提供者だけを表示し、実APIの認可・DB保存・workerを有効にしない。E2Eはブラウザ応答をstubする。HTTPではこのpreview flagを無視する。
+
+Adminの資源設定も既存のprovider inventory mutex・版・immutable command・calendar outboxを使う。商品への資源割当や予約単位は、未終了の確定予約/HOLDがあると変更を拒否する。資源自体の休止は既存どおり今後の空きを止め、既存予約を取り消さない。

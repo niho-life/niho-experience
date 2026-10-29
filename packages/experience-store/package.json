@@ -9,7 +9,11 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./channel-sites": {
+      "types": "./src/channel-sites.ts",
+      "default": "./src/channel-sites.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",

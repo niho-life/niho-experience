@@ -16,9 +16,8 @@ import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { calendarMembershipRole, listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 
-export const CHANNEL_SITES = [
-  "Airbnb", "GetYourGuide", "Viator", "Klook", "Jalan", "Asoview", "ActivityJapan", "Rezio", "Reddy",
-] as const;
+import { CHANNEL_SITES } from "./channel-sites.ts";
+export { CHANNEL_SITES } from "./channel-sites.ts";
 export type ChannelSite = typeof CHANNEL_SITES[number] | (string & {});
 export type ChannelConnectionMode = "BROWSER" | "GOOGLE" | "API";
 export type ChannelAction = "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
@@ -53,6 +52,8 @@ export interface ExternalAccountInput {
 }
 
 export interface ExternalAccountUpdate {
+  readonly site: ChannelSite;
+  readonly externalAccountId: string;
   readonly displayName: string;
   readonly operatingModel: 1 | 2 | 3 | 4;
   readonly active: boolean;
@@ -414,13 +415,22 @@ export class ChannelRuntime {
       const existing = await client.query<DbRow>("SELECT * FROM channel_external_accounts WHERE id=$1 FOR UPDATE", [accountId]);
       const current = existing.rows[0];
       if (!current) throw new StoreNotFoundError("external account");
-      validateAccount({ ...input, id: accountId, providerId: text(current, "provider_id"), site: text(current, "site"), externalAccountId: text(current, "external_account_id") });
+      validateAccount({ ...input, id: accountId, providerId: text(current, "provider_id") });
       if (integer(current, "version") !== expectedVersion) throw new StoreConflictError("External account version mismatch.");
+      const targetChanged = text(current, "site") !== input.site || text(current, "external_account_id") !== input.externalAccountId;
       const updated = await client.query<DbRow>(
-        `UPDATE channel_external_accounts SET display_name=$2,operating_model=$3,active=$4,delegated_until=$5,revoked_at=$6,
-           private_profile_ref=$7,version=version+1,updated_at=$8 WHERE id=$1 RETURNING ${ACCOUNT_COLUMNS}`,
-        [accountId, input.displayName, input.operatingModel, input.active, input.delegatedUntilUtc ?? null, input.revokedAtUtc ?? null, input.privateProfileRef ?? null, this.#nowIso()],
+        `UPDATE channel_external_accounts SET site=$2,external_account_id=$3,display_name=$4,operating_model=$5,active=$6,
+           delegated_until=$7,revoked_at=COALESCE($8,revoked_at),private_profile_ref=COALESCE($9,private_profile_ref),version=version+1,updated_at=$10
+         WHERE id=$1 RETURNING ${ACCOUNT_COLUMNS}`,
+        [accountId, input.site, input.externalAccountId, input.displayName, input.operatingModel, input.active,
+          input.delegatedUntilUtc ?? null, input.revokedAtUtc ?? null, input.privateProfileRef ?? null, this.#nowIso()],
       );
+      if (targetChanged) {
+        await client.query(
+          `UPDATE channel_listings SET active=false,can_observe=false,can_close=false,can_open=false,can_create=false,
+             mapping_version=mapping_version+1,updated_at=$2 WHERE account_id=$1`, [accountId, this.#nowIso()],
+        );
+      }
       await client.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE account_id=$1 AND status='QUEUED'", [accountId, this.#nowIso()]);
       const saved = accountDto(updated.rows[0]!);
       await this.#completeCommand(client, actor, commandId, "account.update", request, { id: saved.id, version: saved.version }, saved.providerId, "external_account", saved.id);
