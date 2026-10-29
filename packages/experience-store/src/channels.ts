@@ -194,6 +194,9 @@ const ACCOUNT_COLUMNS = `id,provider_id,site,external_account_id,display_name,op
 const LISTING_COLUMNS = `id,provider_id,account_id,product_id,external_product_id,external_option_id,time_zone,adapter,
   adapter_version,connection_mode,can_observe,can_close,can_open,can_create,active,mapping_version,created_at,updated_at`;
 
+interface DispatchCursor { readonly listingId: string; readonly ruleId: string; readonly occurrenceId: string }
+interface DispatchPage { readonly fromDate: string; readonly toDate: string; readonly after?: DispatchCursor }
+
 function integer(row: DbRow, key: string): number {
   const value = Number(row[key]);
   if (!Number.isSafeInteger(value)) throw new StoreConflictError(`Database returned an invalid ${key}.`);
@@ -630,7 +633,8 @@ export class ChannelRuntime {
     return withTransaction(this.#pool, async (client) => {
       const previous = await this.#previousCommand(client, actor, commandId, "listing.reconcile", request);
       if (previous) return { occurrences: Number(previous.occurrences), jobs: Number(previous.jobs) };
-      const result = await this.#reconcile(client, "l.id=$1", [listingId], 2_000);
+      const reconciled = await this.#reconcile(client, "l.id=$1", [listingId], 2_000);
+      const result = { occurrences: reconciled.occurrences, jobs: reconciled.jobs };
       await this.#completeCommand(client, actor, commandId, "listing.reconcile", request, result, undefined, "listing", listingId);
       return result;
     });
@@ -642,7 +646,7 @@ export class ChannelRuntime {
     return withTransaction(this.#pool, async (client) => {
       if (identity) await this.#requireWorker(client, identity);
       const events = await client.query<DbRow>(
-        `SELECT e.id,e.provider_id FROM calendar_outbox_events e
+        `SELECT e.id,e.provider_id,e.channel_dispatch_cursor,e.channel_dispatch_from::text,e.channel_dispatch_to::text FROM calendar_outbox_events e
           WHERE e.processed_at IS NULL AND e.available_at <= $1
             AND ($3::text IS NULL OR EXISTS (
               SELECT 1 FROM channel_worker_accounts wa
@@ -654,37 +658,50 @@ export class ChannelRuntime {
       );
       let occurrences = 0;
       let jobs = 0;
-      const providers = [...new Set(events.rows.map((row) => text(row, "provider_id")))];
-      for (const providerId of providers) {
+      let completed = 0;
+      for (const event of events.rows) {
         const remaining = 2_000 - occurrences;
-        if (remaining <= 0) throw new StoreConflictError("Channel outbox expansion exceeded 2000 occurrences.");
-        const reconciled = await this.#reconcile(client, "l.provider_id=$1", [providerId], remaining);
+        if (remaining <= 0) break;
+        const fromDate = event.channel_dispatch_from === null ? tokyoDate(this.#now()) : text(event, "channel_dispatch_from");
+        const toDate = event.channel_dispatch_to === null ? addLocalDays(fromDate, 55) : text(event, "channel_dispatch_to");
+        const after = event.channel_dispatch_cursor as DispatchCursor | null;
+        const reconciled = await this.#reconcile(client, "l.provider_id=$1", [text(event, "provider_id")], remaining,
+          { fromDate, toDate, ...(after === null ? {} : { after }) });
         occurrences += reconciled.occurrences;
         jobs += reconciled.jobs;
+        await client.query(
+          `UPDATE calendar_outbox_events SET channel_dispatch_cursor=$2::jsonb,channel_dispatch_from=$3::date,
+             channel_dispatch_to=$4::date,processed_at=$5,attempts=attempts+1 WHERE id=$1`,
+          [event.id, reconciled.continuation === null ? null : JSON.stringify(reconciled.continuation), fromDate, toDate,
+            reconciled.continuation === null ? this.#nowIso() : null],
+        );
+        if (reconciled.continuation === null) completed += 1;
+        else break;
       }
-      if (events.rows.length > 0) {
-        await client.query("UPDATE calendar_outbox_events SET processed_at=$2,attempts=attempts+1 WHERE id=ANY($1::bigint[])", [events.rows.map((row) => row.id), this.#nowIso()]);
-      }
-      return { events: events.rows.length, occurrences, jobs };
+      return { events: completed, occurrences, jobs };
     });
   }
 
-  async #reconcile(client: PoolClient, listingWhere: string, params: readonly unknown[], maxOccurrences: number): Promise<{ occurrences: number; jobs: number }> {
+  async #reconcile(client: PoolClient, listingWhere: string, params: readonly unknown[], maxOccurrences: number, page?: DispatchPage): Promise<{ occurrences: number; jobs: number; continuation: DispatchCursor | null }> {
     const listings = await client.query<DbRow>(
       `SELECT l.*,a.site,a.external_account_id,a.active AS account_active,a.delegated_until,a.revoked_at,a.version AS account_version,a.quarantined_at
          FROM channel_listings l JOIN channel_external_accounts a ON a.id=l.account_id
          JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-        WHERE ${listingWhere} AND l.active=true AND p.status='PUBLISHED' ORDER BY l.id`, [...params],
+        WHERE ${listingWhere} AND l.active=true AND p.status='PUBLISHED' ORDER BY l.id COLLATE "C"`, [...params],
     );
     let occurrenceCount = 0;
     let jobCount = 0;
-    const fromDate = tokyoDate(this.#now());
-    const toDate = addLocalDays(fromDate, 55);
+    const fromDate = page?.fromDate ?? tokyoDate(this.#now());
+    const toDate = page?.toDate ?? addLocalDays(fromDate, 55);
+    let lastCursor: DispatchCursor | null = null;
     for (const listing of listings.rows) {
+      const listingId = text(listing, "id");
+      if (page?.after && listingId < page.after.listingId) continue;
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,19))", [`channel-listing:${text(listing, "id")}`]);
-      const rules = await client.query<DbRow>(`SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 ORDER BY id`, [listing.provider_id, listing.product_id]);
+      const rules = await client.query<DbRow>(`SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 ORDER BY id COLLATE "C"`, [listing.provider_id, listing.product_id]);
       for (const ruleRow of rules.rows) {
         const storedRule = scheduleRuleFromRow(ruleRow);
+        if (page?.after && listingId === page.after.listingId && storedRule.rule.id < page.after.ruleId) continue;
         const overridesResult = await client.query<DbRow>(
           `SELECT occurrence_id,kind,local_date::text AS local_date,to_char(local_start_time,'HH24:MI') AS local_start_time,duration_minutes,version
              FROM schedule_occurrence_overrides WHERE provider_id=$1 AND rule_id=$2`, [listing.provider_id, storedRule.rule.id],
@@ -696,17 +713,20 @@ export class ChannelRuntime {
         const overrides: OccurrenceOverride[] = overridesResult.rows.map((row) => overrideFromRow(row).override);
         const salesStates: OccurrenceSalesState[] = salesResult.rows.map((row) => salesStateFromRow(row).state);
         const occurrences = expandOccurrences({ rule: storedRule.rule, overrides, salesStates, fromDate, toDate });
-        for (const occurrence of occurrences) {
+        for (const occurrence of [...occurrences].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+          if (page?.after && listingId === page.after.listingId && storedRule.rule.id === page.after.ruleId && occurrence.id <= page.after.occurrenceId) continue;
+          if (page && occurrenceCount === maxOccurrences) return { occurrences: occurrenceCount, jobs: jobCount, continuation: lastCursor };
           occurrenceCount += 1;
           if (occurrenceCount > maxOccurrences) throw new StoreConflictError("Channel reconciliation exceeded its occurrence bound.");
           const availability = await this.#liveAvailability(client, text(listing, "provider_id"), occurrence, this.#nowIso());
           const desiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
           const desired = await this.#upsertDesired(client, listing, occurrence, desiredState, availability.reason);
           jobCount += await this.#enqueueDesiredJob(client, listing, occurrence, desiredState, desired.desiredVersion);
+          lastCursor = { listingId, ruleId: storedRule.rule.id, occurrenceId: occurrence.id };
         }
       }
     }
-    return { occurrences: occurrenceCount, jobs: jobCount };
+    return { occurrences: occurrenceCount, jobs: jobCount, continuation: null };
   }
 
   async #liveAvailability(client: PoolClient, providerId: string, occurrence: Occurrence, nowUtc: string) {
@@ -840,7 +860,7 @@ export class ChannelRuntime {
       );
       for (const row of expired.rows) await this.#quarantine(client, text(row, "account_id"), "RETRY_DEADLINE");
       const result = await client.query<DbRow>(
-        `SELECT j.* FROM channel_jobs j
+        `SELECT j.*,wa.version AS assignment_version FROM channel_jobs j
           JOIN channel_external_accounts a ON a.id=j.account_id
           JOIN channel_listings l ON l.id=j.listing_id
           JOIN experience_products p ON p.provider_id=j.provider_id AND p.id=l.product_id
@@ -863,9 +883,9 @@ export class ChannelRuntime {
       const leaseExpiresAtUtc = new Date(Math.min(this.#now().getTime() + 120_000, Date.parse(deadlineAtUtc))).toISOString();
       await client.query(
         `UPDATE channel_jobs SET status='LEASED',leased_worker_id=$2,lease_digest=$3,lease_expires_at=$4,
-           job_deadline_at=COALESCE(job_deadline_at,$5),lease_epoch=lease_epoch+1,lease_started_at=$6,
+           job_deadline_at=COALESCE(job_deadline_at,$5),lease_epoch=lease_epoch+1,lease_started_at=$6,lease_assignment_version=$7,
            attempt_count=attempt_count+1,updated_at=$6 WHERE id=$1`,
-        [job.id, identity.workerId, digest(leaseToken), leaseExpiresAtUtc, deadlineAtUtc, nowUtc],
+        [job.id, identity.workerId, digest(leaseToken), leaseExpiresAtUtc, deadlineAtUtc, nowUtc, job.assignment_version],
       );
       await client.query("UPDATE channel_workers SET last_heartbeat_at=$2,updated_at=$2 WHERE id=$1", [identity.workerId, nowUtc]);
       return {
@@ -902,8 +922,8 @@ export class ChannelRuntime {
     if (!job || job.status !== "LEASED" || job.leased_worker_id !== identity.workerId || typeof job.lease_digest !== "string"
       || !secureDigestMatch(job.lease_digest, leaseToken)) throw new StoreAccessDeniedError();
     const assignment = await client.query(
-      "SELECT 1 FROM channel_worker_accounts WHERE worker_id=$1 AND account_id=$2 AND revoked_at IS NULL FOR SHARE",
-      [identity.workerId, job.account_id],
+      "SELECT 1 FROM channel_worker_accounts WHERE worker_id=$1 AND account_id=$2 AND revoked_at IS NULL AND version=$3 FOR SHARE",
+      [identity.workerId, job.account_id, job.lease_assignment_version],
     );
     if (!assignment.rows[0]) throw new StoreAccessDeniedError();
     return job;
@@ -968,10 +988,10 @@ export class ChannelRuntime {
         await this.#quarantine(client, text(job, "account_id"), "SOURCE_OCCURRENCE_STALE");
         return { conflict: "Source occurrence timing changed; the account remains locked." };
       }
-      if (job.action === "SET_OPEN") {
+      if (job.action !== "OBSERVE") {
         const availability = await this.#liveAvailability(client, text(job, "provider_id"), occurrence, nowUtc);
-        if (!availability.bookable) {
-          return { conflict: `OPEN preflight is closed: ${availability.reason}; the old lease remains locked until stopped.` };
+        if (desiredAction(availability.bookable ? "OPEN" : "CLOSED") !== job.action) {
+          return { conflict: "Live availability changed; the old lease remains locked until stopped." };
         }
       }
       return { ready: true, desiredState };
@@ -1045,8 +1065,8 @@ export class ChannelRuntime {
       if (!job || job.status !== "LEASED" || job.leased_worker_id !== identity.workerId || typeof job.lease_digest !== "string"
         || !secureDigestMatch(job.lease_digest, input.leaseToken)) throw new StoreAccessDeniedError();
       const assignment = await client.query(
-        "SELECT 1 FROM channel_worker_accounts WHERE worker_id=$1 AND account_id=$2 AND revoked_at IS NULL FOR SHARE",
-        [identity.workerId, job.account_id],
+        "SELECT 1 FROM channel_worker_accounts WHERE worker_id=$1 AND account_id=$2 AND revoked_at IS NULL AND version=$3 FOR SHARE",
+        [identity.workerId, job.account_id, job.lease_assignment_version],
       );
       const assignmentCurrent = assignment.rows[0] !== undefined;
       const leaseDigest = text(job, "lease_digest");
@@ -1081,14 +1101,15 @@ export class ChannelRuntime {
       const action = text(job, "action") as ChannelAction;
       const capability = action === "SET_OPEN" ? current?.can_open : action === "SET_CLOSED" ? current?.can_close : current?.can_observe;
       let liveOccurrenceMatches = false;
-      let liveOpenAllowed = action !== "SET_OPEN";
+      let liveActionAllowed = action === "OBSERVE";
       if (current) {
         try {
           const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
           liveOccurrenceMatches = occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")
             && isoValue(current, "source_start_at") === occurrence.startUtc && isoValue(current, "source_end_at") === occurrence.endUtc;
-          if (liveOccurrenceMatches && action === "SET_OPEN") {
-            liveOpenAllowed = (await this.#liveAvailability(client, text(job, "provider_id"), occurrence, nowUtc)).bookable;
+          if (liveOccurrenceMatches && action !== "OBSERVE") {
+            const availability = await this.#liveAvailability(client, text(job, "provider_id"), occurrence, nowUtc);
+            liveActionAllowed = desiredAction(availability.bookable ? "OPEN" : "CLOSED") === action;
           }
         } catch (error) {
           if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
@@ -1104,7 +1125,7 @@ export class ChannelRuntime {
         && integer(current, "mapping_version") === integer(job, "mapping_version")
         && integer(current, "desired_mapping_version") === integer(job, "mapping_version")
         && integer(current, "desired_version") === integer(job, "desired_version")
-        && desiredStateCurrent && liveOccurrenceMatches && liveOpenAllowed;
+        && desiredStateCurrent && liveOccurrenceMatches && liveActionAllowed;
       const acceptedAsCurrent = channelReadbackAccepted({
         action, expectedTarget: targetFromRow(job), resultTarget: input.target,
         outcome: input.outcome, stopped: input.stopped, withinLease, versionsCurrent,

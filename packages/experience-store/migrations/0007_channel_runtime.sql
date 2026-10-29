@@ -1,5 +1,12 @@
 BEGIN;
 
+-- The fan-out cursor commits after each bounded page; a large provider cannot
+-- permanently roll back the same first 2,000 occurrences.
+ALTER TABLE calendar_outbox_events
+  ADD COLUMN channel_dispatch_cursor jsonb,
+  ADD COLUMN channel_dispatch_from date,
+  ADD COLUMN channel_dispatch_to date;
+
 CREATE TABLE channel_external_accounts (
   id text PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 256),
   provider_id text NOT NULL REFERENCES experience_providers(id) ON DELETE RESTRICT,
@@ -141,6 +148,7 @@ CREATE TABLE channel_jobs (
   leased_worker_id text REFERENCES channel_workers(id) ON DELETE RESTRICT,
   lease_digest text CHECK (lease_digest IS NULL OR lease_digest ~ '^[0-9a-f]{64}$'),
   lease_epoch bigint NOT NULL DEFAULT 0 CHECK (lease_epoch >= 0),
+  lease_assignment_version bigint CHECK (lease_assignment_version > 0),
   lease_started_at timestamptz,
   lease_expires_at timestamptz,
   outcome text CHECK (outcome IN ('VERIFIED','AUTH_REQUIRED','NEEDS_REVIEW','UNKNOWN_AFTER_SAVE','RETRY_WAIT','SUPERSEDED')),
@@ -152,7 +160,7 @@ CREATE TABLE channel_jobs (
   FOREIGN KEY (provider_id, account_id, listing_id) REFERENCES channel_listings(provider_id, account_id, id) ON DELETE RESTRICT,
   CHECK (source_end_at > source_start_at),
   CHECK (
-    (status = 'LEASED' AND leased_worker_id IS NOT NULL AND lease_digest IS NOT NULL AND lease_epoch > 0
+    (status = 'LEASED' AND leased_worker_id IS NOT NULL AND lease_digest IS NOT NULL AND lease_epoch > 0 AND lease_assignment_version IS NOT NULL
       AND lease_started_at IS NOT NULL AND lease_expires_at IS NOT NULL AND job_deadline_at IS NOT NULL)
     OR status <> 'LEASED'
   )

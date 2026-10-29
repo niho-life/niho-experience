@@ -208,4 +208,88 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       await pool.end();
     }
   });
+  it("rejects assignment ABA and stale CLOSE, and resumes fan-out beyond 2,000 occurrences", async () => {
+    const { Pool } = await import("pg");
+    const schema = `channel_regression_${randomUUID().replaceAll("-", "")}`;
+    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const admin = { nihoUserId: "synthetic-admin" };
+    const actor = { providerId: "provider", nihoUserId: "owner" };
+    const now = new Date("2099-01-01T00:00:00.000Z");
+    const runtime = new ChannelRuntime(pool, { now: () => now,
+      supportedAdapters: { "GetYourGuide/gyg-browser@1": { canObserve: true, canClose: true, canOpen: true } } });
+    const store = new ExperienceStore(pool);
+    try {
+      await pool.query(`CREATE SCHEMA "${schema}"`);
+      const names = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
+      for (const name of names) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+      await pool.query("INSERT INTO experience_providers (id) VALUES ('provider')");
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider','owner','OWNER')");
+      await pool.query(`INSERT INTO experience_products
+        (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+        VALUES ('provider','tea','synthetic-tea','PUBLISHED','Synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic','Synthetic')`);
+      await store.saveScheduleRule(actor, "tea", {
+        id: "morning", timeZone: "Asia/Tokyo", startsOn: "2099-01-01", localStartTime: "10:00", durationMinutes: 60,
+        capacity: 1, bookingCutoffMinutes: 30, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
+      }, null, command("101"));
+      await runtime.createExternalAccount(admin, { id: "account", providerId: "provider", site: "GetYourGuide",
+        externalAccountId: "synthetic-account", displayName: "Synthetic account", operatingModel: 4, active: true }, command("102"));
+      await runtime.createListing(admin, { id: "listing-00", providerId: "provider", accountId: "account", productId: "tea",
+        externalProductId: "synthetic-product-0", adapter: "gyg-browser", adapterVersion: "1", connectionMode: "BROWSER",
+        capabilities: { canObserve: true, canClose: true, canOpen: true }, active: true }, command("103"));
+      const credential = await runtime.mintWorkerCredential(admin, "studio", "Synthetic Studio", "2099-02-01T00:00:00.000Z", null, command("104"));
+      await runtime.assignWorkerAccount(admin, "studio", "account", null, command("105"));
+      const worker = await runtime.authenticateWorker(credential.bearerToken);
+      await runtime.consumeCalendarOutbox();
+      const oldLease = await runtime.claim(worker);
+      assert.ok(oldLease);
+      await runtime.revokeWorkerAccount(admin, "studio", "account", 1, command("106"));
+      await runtime.assignWorkerAccount(admin, "studio", "account", 2, command("107"));
+      await assert.rejects(() => runtime.renew(worker, oldLease.id, oldLease.leaseToken), StoreAccessDeniedError);
+      await assert.rejects(() => runtime.preflight(worker, oldLease.id, oldLease.leaseToken), StoreAccessDeniedError);
+      assert.equal((await runtime.submitResult(worker, oldLease.id, { resultId: command("108"), leaseToken: oldLease.leaseToken,
+        outcome: "VERIFIED", stopped: true, target: oldLease.target, occurrenceId: oldLease.occurrenceId,
+        sourceStartAtUtc: oldLease.sourceStartAtUtc, sourceEndAtUtc: oldLease.sourceEndAtUtc,
+        observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString(),
+      })).acceptedAsCurrent, false);
+      // The stale result quarantines the account. Use the supported recovery path.
+      const recovery = await runtime.recoverQuarantinedLease(admin, "account", true, command("109"));
+      const observed = await runtime.claim(worker);
+      assert.equal(observed?.id, recovery.observeJobId); assert.ok(observed);
+      await runtime.submitResult(worker, observed.id, { resultId: command("110"), leaseToken: observed.leaseToken,
+        outcome: "VERIFIED", stopped: true, target: observed.target, occurrenceId: observed.occurrenceId,
+        sourceStartAtUtc: observed.sourceStartAtUtc, sourceEndAtUtc: observed.sourceEndAtUtc,
+        observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString() });
+      const occurrenceId = "morning@2099-01-02";
+      await store.setOccurrenceSalesState(actor, "tea", "morning", { occurrenceId, desiredState: "CLOSED" }, null, command("111"));
+      await runtime.consumeCalendarOutbox();
+      const close = await runtime.claim(worker);
+      assert.equal(close?.action, "SET_CLOSED"); assert.equal(close?.occurrenceId, occurrenceId); assert.ok(close);
+      await store.setOccurrenceSalesState(actor, "tea", "morning", { occurrenceId, desiredState: "OPEN" }, 1, command("112"));
+      // Deliberately do not consume the reopening outbox before either check.
+      await assert.rejects(() => runtime.preflight(worker, close.id, close.leaseToken), StoreConflictError);
+      assert.equal((await runtime.submitResult(worker, close.id, { resultId: command("113"), leaseToken: close.leaseToken,
+        outcome: "VERIFIED", stopped: true, target: close.target, occurrenceId,
+        sourceStartAtUtc: close.sourceStartAtUtc, sourceEndAtUtc: close.sourceEndAtUtc,
+        observedState: "CLOSED", observedBookable: false, observedManuallyBlocked: true, observedAtUtc: now.toISOString(),
+      })).acceptedAsCurrent, false);
+      await runtime.consumeCalendarOutbox();
+      await pool.query(`INSERT INTO channel_listings
+        (id,provider_id,account_id,product_id,external_product_id,adapter,adapter_version,connection_mode,can_observe,can_close,can_open,active)
+        SELECT 'listing-'||lpad(n::text,2,'0'),'provider','account','tea','synthetic-product-'||n,'gyg-browser','1','BROWSER',true,true,true,true
+        FROM generate_series(1,35) n`);
+      await store.setOccurrenceSalesState(actor, "tea", "morning", { occurrenceId, desiredState: "CLOSED" }, 2, command("114"));
+      const first = await runtime.consumeCalendarOutbox(1);
+      assert.equal(first.occurrences, 2_000); assert.equal(first.events, 0);
+      const cursor = await pool.query("SELECT channel_dispatch_cursor,processed_at FROM calendar_outbox_events WHERE command_id=$1::uuid", [command("114")]);
+      assert.ok(cursor.rows[0]?.channel_dispatch_cursor); assert.equal(cursor.rows[0]?.processed_at, null);
+      const second = await runtime.consumeCalendarOutbox(1);
+      assert.equal(second.occurrences, 16); assert.equal(second.events, 1);
+      assert.equal(Number((await pool.query("SELECT count(*) FROM channel_desired_states")).rows[0]?.count), 2_016);
+      assert.equal((await runtime.consumeCalendarOutbox()).events, 0);
+    } finally {
+      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await pool.end();
+    }
+  });
+
 });

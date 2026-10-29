@@ -28,7 +28,7 @@ active mapping の開催時刻変更は、旧外部枠を確実に閉じてか�
 
 ## Desired state と calendar outbox
 
-対象期間は Tokyo local date の当日を含む 56 日、1 dispatch 最大 2,000 occurrence。outbox row は transaction 内で `FOR UPDATE SKIP LOCKED` し、全展開と desired/job 保存が成功した場合だけ `processed_at` を付ける。重複 outbox/reconcile は、listing + canonical occurrence の同じ desired/mapping version と job unique key により重複操作を作らない。連続編集では未 lease の旧 job を coalesce して `SUPERSEDED` にする。
+対象期間は Tokyo local date の当日を含む 56 日、1 dispatch 最大 2,000 occurrence。outbox row は transaction 内で `FOR UPDATE SKIP LOCKED` する。対象期間と listing/rule/occurrence の続き位置を保存し、上限に達したページも desired/job と同時にcommitする。全ページ完了時だけ `processed_at` を付けるため、36 listing × 56日を超えても同じ先頭ページを永久にrollbackしない。重複 outbox/reconcile は、listing + canonical occurrence の同じ desired/mapping version と job unique key により重複操作を作らない。連続編集では未 lease の旧 job を coalesce して `SUPERSEDED` にする。
 worker の claim は、認証済みworkerに割り当てられたaccountのproviderだけを対象に、bounded outbox dispatch を同期完了してからjobを選ぶ。listing単位のtransaction advisory lockにより、同時dispatchとAdmin reconcileを直列化する。
 
 desired は schedule rule、reschedule override、直交した sales state を `expandOccurrences` で展開し、`evaluateAvailability` で決める。CONFIRMED と有効な HOLD の席、booking cutoff、Google blocking の freshness/coverage/busy を毎回参照する。Google が stale、coverage 外、または failed の時に OPEN を作らない。manual Block は schedule の `CLOSED` であり、外部 observed state と別の列・表示で扱う。
@@ -36,7 +36,7 @@ desired は schedule rule、reschedule override、直交した sales state を `
 ## Lease と executor 契約
 
 - credential は random 32 bytes 以上の bearer を mint 時に一度だけ返し、DB には SHA-256 digest、期限、失効だけを保存する。GET、job target、URL、log 用 DTO には含めない。
-- worker は明示 assignment のある account だけを claim できる。browser claim は全体 concurrency 1、account exclusivity 1。transaction advisory lock、row lock、partial unique index を併用する。
+- worker は明示 assignment のある account だけを claim できる。claim時のassignment versionをleaseへ固定し、renew/preflight/resultで一致を確認する。失効後に同じworkerへ再付与しても、古いleaseは復活しない。browser claim は全体 concurrency 1、account exclusivity 1。transaction advisory lock、row lock、partial unique index を併用する。
 - lease は 120 秒、job deadline は初回claimから 180 秒で、retryしても延長しない。executor は30秒以内の間隔でrenewし、serverは最後の更新から60秒を越えたrenewを成功させない。CLOSED は OPEN より優先する。
 - expired lease は lock を解放しない。account を quarantine し、古い job は `LEASED` のまま残す。認証済み executor が `stopped=true` を返すか、Admin が executor 停止を明示確認した recovery だけが lock を解放できる。
 - manual recovery は supported `OBSERVE` capability を必須とし、まず OBSERVE job を作る。exact target の fresh readback が VERIFIED になるまで quarantine を解除せず、OPEN を再作成しない。
@@ -52,7 +52,7 @@ claim に対象がなければ body なし `204`。認証不備は `401/403`、v
 
 ## Preflight と結果
 
-preflight は worker、assignment、lease/deadline、account active/delegation/revocation/version、listing active/capability/mapping version、商品公開状態、desired version、配備adapterをtransaction内で確認する。全actionで現在のoccurrence開始・終了がimmutable job snapshotと一致することを確認する。`SET_OPEN` はさらに予約席、cutoff、Google freshness/coverage/busyを再計算する。予約、close、非公開化、時刻変更が後から入った操作は`409`で止め、accountをquarantineしたままlease lockを保持する。`ENSURE`やmodel proseによる成功判定はない。
+preflight は worker、assignment、lease/deadline、account active/delegation/revocation/version、listing active/capability/mapping version、商品公開状態、desired version、配備adapterをtransaction内で確認する。全actionで現在のoccurrence開始・終了がimmutable job snapshotと一致することを確認する。`SET_OPEN`と`SET_CLOSED`は予約席、cutoff、Google freshness/coverage/busy、現在のsales stateを再計算し、現在の販売可否とactionが一致するときだけ実行する。再開直後でoutboxが未消費の場合にも古いCLOSEを成功扱いしない。古い操作は`409`で止め、lease lockを停止確認まで保持する。authorityや時刻が失効した場合はaccountもquarantineする。`ENSURE`やmodel proseによる成功判定はない。
 
 結果は `VERIFIED`、`AUTH_REQUIRED`、`NEEDS_REVIEW`、`UNKNOWN_AFTER_SAVE`、`RETRY_WAIT`、`SUPERSEDED`。VERIFIED は immutable target、occurrence ID、source開始・終了の完全一致、current authorityとlive availability、lease/deadline内、`stopped=true`、実行window内のreadback時刻が揃った場合だけcurrent observed/synced stateを更新する。readbackは外部のmanual block状態と実際のbookable booleanを別フィールドで返す。`SET_CLOSED`はmanual block済みかつbookable=false、`SET_OPEN`はmanual blockなし、かつbookable=trueを必須にする。例えばmanual block=falseでもcutoffによりbookable=falseならOPEN成功ではない。結果UUIDはworker・job・lease epoch/digest・payloadへ結び、同じreceiptの再送だけを冪等に受ける。古い結果は監査保存できるがgreenにしない。`AUTH_REQUIRED`と`UNKNOWN_AFTER_SAVE`は書込みを盲目的にretryせずquarantineする。`RETRY_WAIT`だけを最大5 attempts、初回deadline内のbounded backoffで再試行できる。
 
@@ -62,4 +62,8 @@ Admin の `/admin/api/channels` は action allowlist だけを受け、任意 qu
 
 ## 現時点の検証範囲
 
-StudioではChrome 156 + Node 24のdeterministic browser driverでsynthetic 24 cases（通常20、stale、応答喪失、認証期限、誤product拒否）を確認し、model invocationは0回だった。実GetYourGuide local UIは合計2 roundtrip後に元の状態へ復元した。これはClaude end-to-endまたはP0完了の証跡ではない。Claude/Maxはweekly limit中（2026-11-03 13:00 JST reset）であり、有料API fallbackは使用しない。worker adapter統合と本番有効化は後続sliceである。
+StudioではChrome 156 + Node 24のdeterministic browser driverでsynthetic 24 cases（通常20、stale、応答喪失、認証期限、誤product拒否）を確認し、model invocationは0回だった。実GetYourGuideはlocal UIの2往復に加え、Studioの専用profileでも5往復（停止・再読込・再開・再読込、計10書込み）に成功し、元の受付可能な状態へ復元した。指定以外の書込みは遮断した。実ID・ログイン情報・画面証跡は公開リポへ保存しない。
+
+実DBの対象検証は9件、Webの境界検証は12件が合格した。認可の解除・再付与、再開直後の古いCLOSE、2,016 occurrenceの2ページ展開も含む。独立read-onlyレビューの3 findingを修正し、対応する実DB回帰テストで確認した。
+
+これらはClaude end-to-endまたはP0完了の証跡ではない。Claude/Maxはweekly limit中（2026-11-03 13:00 JST reset）であり、有料API fallbackは使用しない。worker adapter統合と本番有効化は後続sliceである。
