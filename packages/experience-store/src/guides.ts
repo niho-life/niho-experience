@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
   StoreAccessDeniedError,
@@ -12,6 +13,7 @@ import { assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 export type GuideArticleStatus = "DRAFT" | "PUBLISHED" | "STOPPED";
 export type GuidePublicationVisibility = "PUBLIC" | "UNLISTED";
 export type GuideLinkPermissionBasis = "PROVIDER_MEMBERSHIP" | "GUIDE_PRODUCT_LINK_MEMBERSHIP";
+export type GuideLinkInvitationState = "PENDING" | "ACCEPTED" | "DECLINED" | "REVOKED";
 
 export interface GuideActor {
   readonly nihoUserId: string;
@@ -96,6 +98,27 @@ export interface PublicGuideProductLink {
   readonly productId: string;
 }
 
+export interface GuideLinkInvitation {
+  readonly id: string;
+  readonly providerId: string;
+  readonly writerNihoUserId: string;
+  readonly invitedByNihoUserId: string;
+  readonly state: GuideLinkInvitationState;
+  readonly generation: number;
+  readonly invitedAtUtc: string;
+  readonly acceptedAtUtc?: string;
+  readonly declinedAtUtc?: string;
+  readonly revokedAtUtc?: string;
+  readonly createdAtUtc: string;
+  readonly updatedAtUtc: string;
+}
+
+export interface LinkableGuideProduct {
+  readonly providerId: string;
+  readonly productId: string;
+  readonly publicTitle: string;
+}
+
 export interface PublicGuideArticle {
   readonly articleId: string;
   readonly publicationId: number;
@@ -116,6 +139,10 @@ export interface PublicGuideArticle {
 const GUIDE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_MARKDOWN_LENGTH = 500_000;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INVITATION_COLUMNS = `
+  id::text AS id, provider_id, writer_niho_user_id, invited_by_niho_user_id,
+  state, generation, invited_at, accepted_at, declined_at, revoked_at, created_at, updated_at`;
 const ARTICLE_COLUMNS = `
   a.id, a.slug, a.creator_niho_user_id, a.subject_kind, a.subject_provider_id,
   a.category_slug, a.title, a.description, a.content, a.status, a.revision,
@@ -150,6 +177,10 @@ function integerValue(row: DbRow, key: string): number {
   return parsed;
 }
 
+function optionalIsoValue(row: DbRow, key: string): string | undefined {
+  return row[key] === null || row[key] === undefined ? undefined : isoValue(row, key);
+}
+
 function validateActor(actor: GuideActor): void {
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
 }
@@ -163,6 +194,16 @@ function validateSlug(slug: string): void {
 function validateRevision(revision: number): void {
   if (!Number.isSafeInteger(revision) || revision < 1) {
     throw new StoreValidationError("expectedRevision must be a positive integer.");
+  }
+}
+
+function validateInvitationId(invitationId: string): void {
+  if (!UUID_V4.test(invitationId)) throw new StoreValidationError("invitationId must be a UUID v4.");
+}
+
+function validateInvitationGeneration(generation: number): void {
+  if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new StoreValidationError("invitation generation must be a positive integer.");
   }
 }
 
@@ -301,6 +342,30 @@ function publicArticleFromRow(row: DbRow, productLinks: readonly PublicGuideProd
   };
 }
 
+function invitationFromRow(row: DbRow): GuideLinkInvitation {
+  const state = stringValue(row, "state") as GuideLinkInvitationState;
+  if (!["PENDING", "ACCEPTED", "DECLINED", "REVOKED"].includes(state)) {
+    throw new StoreValidationError("Database returned an invalid guide link invitation state.");
+  }
+  const acceptedAtUtc = optionalIsoValue(row, "accepted_at");
+  const declinedAtUtc = optionalIsoValue(row, "declined_at");
+  const revokedAtUtc = optionalIsoValue(row, "revoked_at");
+  return {
+    id: stringValue(row, "id"),
+    providerId: stringValue(row, "provider_id"),
+    writerNihoUserId: stringValue(row, "writer_niho_user_id"),
+    invitedByNihoUserId: stringValue(row, "invited_by_niho_user_id"),
+    state,
+    generation: integerValue(row, "generation"),
+    invitedAtUtc: isoValue(row, "invited_at"),
+    ...(acceptedAtUtc === undefined ? {} : { acceptedAtUtc }),
+    ...(declinedAtUtc === undefined ? {} : { declinedAtUtc }),
+    ...(revokedAtUtc === undefined ? {} : { revokedAtUtc }),
+    createdAtUtc: isoValue(row, "created_at"),
+    updatedAtUtc: isoValue(row, "updated_at"),
+  };
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
@@ -324,6 +389,67 @@ async function requireSubjectAuthority(client: PoolClient, actor: GuideActor, su
         [subject.providerId, actor.nihoUserId],
       );
   if (result.rows[0] === undefined) throw new StoreAccessDeniedError();
+}
+
+async function lockInvitationPair(client: PoolClient, providerId: string, writerNihoUserId: string): Promise<void> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 4))",
+    [JSON.stringify([providerId, writerNihoUserId])],
+  );
+}
+
+async function requireCurrentOwner(
+  client: PoolClient,
+  providerId: string,
+  nihoUserId: string,
+): Promise<void> {
+  const result = await client.query(
+    `SELECT 1 FROM provider_memberships
+      WHERE provider_id=$1 AND niho_user_id=$2 AND active=true AND role='OWNER'
+      FOR SHARE`,
+    [providerId, nihoUserId],
+  );
+  if (result.rows[0] === undefined) throw new StoreAccessDeniedError();
+}
+
+async function requireCurrentWriterGrant(client: PoolClient, writerNihoUserId: string): Promise<void> {
+  const result = await client.query(
+    `SELECT 1 FROM guide_writer_grants
+      WHERE niho_user_id=$1 AND active=true
+      FOR SHARE`,
+    [writerNihoUserId],
+  );
+  if (result.rows[0] === undefined) throw new StoreAccessDeniedError();
+}
+
+async function lockInvitationForWriter(
+  client: PoolClient,
+  actor: GuideActor,
+  invitationId: string,
+): Promise<GuideLinkInvitation> {
+  const pairResult = await client.query<DbRow>(
+    `SELECT provider_id, writer_niho_user_id
+       FROM guide_product_link_invitations
+      WHERE id=$1::uuid AND writer_niho_user_id=$2`,
+    [invitationId, actor.nihoUserId],
+  );
+  const pair = pairResult.rows[0];
+  if (pair === undefined) throw new StoreAccessDeniedError();
+  await lockInvitationPair(
+    client,
+    stringValue(pair, "provider_id"),
+    stringValue(pair, "writer_niho_user_id"),
+  );
+  const invitationResult = await client.query<DbRow>(
+    `SELECT ${INVITATION_COLUMNS}
+       FROM guide_product_link_invitations
+      WHERE id=$1::uuid AND writer_niho_user_id=$2
+      FOR UPDATE`,
+    [invitationId, actor.nihoUserId],
+  );
+  const row = invitationResult.rows[0];
+  if (row === undefined) throw new StoreAccessDeniedError();
+  return invitationFromRow(row);
 }
 
 async function getOwnedArticleForUpdate(
@@ -383,6 +509,15 @@ async function activePublicLinks(client: PoolClient, publicationId: number): Pro
              WHERE gm.provider_id=l.provider_id
                AND gm.niho_user_id=l.link_created_by_niho_user_id
                AND gm.active=true
+          ) AND EXISTS (
+            SELECT 1 FROM guide_product_link_invitations invitation
+             WHERE invitation.provider_id=l.provider_id
+               AND invitation.writer_niho_user_id=l.link_created_by_niho_user_id
+               AND invitation.state='ACCEPTED'
+          ) AND EXISTS (
+            SELECT 1 FROM guide_writer_grants wg
+             WHERE wg.niho_user_id=l.link_created_by_niho_user_id
+               AND wg.active=true
           ))
         )
       ORDER BY l.provider_id, l.product_id`,
@@ -433,6 +568,246 @@ export class GuideRepository {
     return result.rows.map((row) => subjectFromRow({
       subject_kind: row.subject_kind,
       subject_provider_id: row.provider_id,
+    }));
+  }
+
+  async inviteProductLinkWriter(
+    actor: GuideActor,
+    providerId: string,
+    writerNihoUserId: string,
+  ): Promise<GuideLinkInvitation> {
+    validateActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(writerNihoUserId, "writerNihoUserId");
+    const invitationId = randomUUID();
+    return withTransaction(this.#pool, async (client) => {
+      await lockInvitationPair(client, providerId, writerNihoUserId);
+      const currentResult = await client.query<DbRow>(
+        `SELECT ${INVITATION_COLUMNS}
+           FROM guide_product_link_invitations
+          WHERE provider_id=$1 AND writer_niho_user_id=$2
+          FOR UPDATE`,
+        [providerId, writerNihoUserId],
+      );
+      await requireCurrentOwner(client, providerId, actor.nihoUserId);
+      await requireCurrentWriterGrant(client, writerNihoUserId);
+      const currentRow = currentResult.rows[0];
+      if (currentRow === undefined) {
+        const inserted = await client.query<DbRow>(
+          `INSERT INTO guide_product_link_invitations (
+             id, provider_id, writer_niho_user_id, invited_by_niho_user_id, state
+           ) VALUES ($1::uuid,$2,$3,$4,'PENDING')
+           RETURNING ${INVITATION_COLUMNS}`,
+          [invitationId, providerId, writerNihoUserId, actor.nihoUserId],
+        );
+        return invitationFromRow(inserted.rows[0]!);
+      }
+      const current = invitationFromRow(currentRow);
+      if (current.state === "PENDING") return current;
+      if (current.state === "ACCEPTED") {
+        throw new StoreConflictError("An accepted guide link invitation must be revoked before it can be sent again.");
+      }
+      await client.query(
+        `UPDATE guide_product_link_memberships
+            SET active=false, updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND niho_user_id=$2 AND active=true`,
+        [providerId, writerNihoUserId],
+      );
+      const reinvited = await client.query<DbRow>(
+        `UPDATE guide_product_link_invitations
+            SET invited_by_niho_user_id=$3, state='PENDING', generation=generation+1,
+                invited_at=clock_timestamp(), accepted_at=NULL, declined_at=NULL, revoked_at=NULL,
+                updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND writer_niho_user_id=$2
+          RETURNING ${INVITATION_COLUMNS}`,
+        [providerId, writerNihoUserId, actor.nihoUserId],
+      );
+      return invitationFromRow(reinvited.rows[0]!);
+    });
+  }
+
+  async listProviderLinkInvitations(
+    actor: GuideActor,
+    providerId: string,
+  ): Promise<readonly GuideLinkInvitation[]> {
+    validateActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireCurrentOwner(client, providerId, actor.nihoUserId);
+      const result = await client.query<DbRow>(
+        `SELECT ${INVITATION_COLUMNS}
+           FROM guide_product_link_invitations
+          WHERE provider_id=$1
+          ORDER BY updated_at DESC, id`,
+        [providerId],
+      );
+      return result.rows.map(invitationFromRow);
+    });
+  }
+
+  async listOwnPendingLinkInvitations(actor: GuideActor): Promise<readonly GuideLinkInvitation[]> {
+    validateActor(actor);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT invitation.id::text AS id, invitation.provider_id,
+              invitation.writer_niho_user_id, invitation.invited_by_niho_user_id,
+              invitation.state, invitation.generation, invitation.invited_at,
+              invitation.accepted_at, invitation.declined_at, invitation.revoked_at,
+              invitation.created_at, invitation.updated_at
+         FROM guide_product_link_invitations invitation
+         JOIN guide_writer_grants writer
+           ON writer.niho_user_id=invitation.writer_niho_user_id AND writer.active=true
+         JOIN provider_memberships inviter
+           ON inviter.provider_id=invitation.provider_id
+          AND inviter.niho_user_id=invitation.invited_by_niho_user_id
+          AND inviter.active=true AND inviter.role='OWNER'
+        WHERE invitation.writer_niho_user_id=$1 AND invitation.state='PENDING'
+        ORDER BY invitation.invited_at, invitation.id`,
+      [actor.nihoUserId],
+    );
+    return result.rows.map(invitationFromRow);
+  }
+
+  async acceptLinkInvitation(
+    actor: GuideActor,
+    invitationId: string,
+    generation: number,
+  ): Promise<GuideLinkInvitation> {
+    validateActor(actor);
+    validateInvitationId(invitationId);
+    validateInvitationGeneration(generation);
+    return withTransaction(this.#pool, async (client) => {
+      const invitation = await lockInvitationForWriter(client, actor, invitationId);
+      if (invitation.generation !== generation) throw new StoreConflictError("Guide link invitation generation mismatch.");
+      if (invitation.state !== "PENDING") throw new StoreConflictError("The guide link invitation is no longer pending.");
+      await requireCurrentOwner(client, invitation.providerId, invitation.invitedByNihoUserId);
+      await requireCurrentWriterGrant(client, actor.nihoUserId);
+      await client.query(
+        `INSERT INTO guide_product_link_memberships (
+           provider_id, niho_user_id, granted_by_niho_user_id, active
+         ) VALUES ($1,$2,$3,true)
+         ON CONFLICT (provider_id, niho_user_id) DO UPDATE
+           SET granted_by_niho_user_id=EXCLUDED.granted_by_niho_user_id,
+               active=true, updated_at=clock_timestamp()`,
+        [invitation.providerId, actor.nihoUserId, invitation.invitedByNihoUserId],
+      );
+      const accepted = await client.query<DbRow>(
+        `UPDATE guide_product_link_invitations
+            SET state='ACCEPTED', accepted_at=clock_timestamp(), updated_at=clock_timestamp()
+          WHERE id=$1::uuid
+          RETURNING ${INVITATION_COLUMNS}`,
+        [invitationId],
+      );
+      return invitationFromRow(accepted.rows[0]!);
+    });
+  }
+
+  async declineLinkInvitation(
+    actor: GuideActor,
+    invitationId: string,
+    generation: number,
+  ): Promise<GuideLinkInvitation> {
+    validateActor(actor);
+    validateInvitationId(invitationId);
+    validateInvitationGeneration(generation);
+    return withTransaction(this.#pool, async (client) => {
+      const invitation = await lockInvitationForWriter(client, actor, invitationId);
+      if (invitation.generation !== generation) throw new StoreConflictError("Guide link invitation generation mismatch.");
+      if (invitation.state !== "PENDING") throw new StoreConflictError("The guide link invitation is no longer pending.");
+      await client.query(
+        `UPDATE guide_product_link_memberships
+            SET active=false, updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND niho_user_id=$2 AND active=true`,
+        [invitation.providerId, actor.nihoUserId],
+      );
+      const declined = await client.query<DbRow>(
+        `UPDATE guide_product_link_invitations
+            SET state='DECLINED', declined_at=clock_timestamp(), updated_at=clock_timestamp()
+          WHERE id=$1::uuid
+          RETURNING ${INVITATION_COLUMNS}`,
+        [invitationId],
+      );
+      return invitationFromRow(declined.rows[0]!);
+    });
+  }
+
+  async revokeLinkInvitation(actor: GuideActor, invitationId: string): Promise<GuideLinkInvitation> {
+    validateActor(actor);
+    validateInvitationId(invitationId);
+    return withTransaction(this.#pool, async (client) => {
+      const pairResult = await client.query<DbRow>(
+        `SELECT provider_id, writer_niho_user_id
+           FROM guide_product_link_invitations WHERE id=$1::uuid`,
+        [invitationId],
+      );
+      const pair = pairResult.rows[0];
+      if (pair === undefined) throw new StoreAccessDeniedError();
+      const providerId = stringValue(pair, "provider_id");
+      const writerNihoUserId = stringValue(pair, "writer_niho_user_id");
+      await lockInvitationPair(client, providerId, writerNihoUserId);
+      const invitationResult = await client.query<DbRow>(
+        `SELECT ${INVITATION_COLUMNS}
+           FROM guide_product_link_invitations WHERE id=$1::uuid FOR UPDATE`,
+        [invitationId],
+      );
+      const invitationRow = invitationResult.rows[0];
+      if (invitationRow === undefined) throw new StoreAccessDeniedError();
+      const invitation = invitationFromRow(invitationRow);
+      await requireCurrentOwner(client, invitation.providerId, actor.nihoUserId);
+      await client.query(
+        `UPDATE guide_product_link_memberships
+            SET active=false, updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND niho_user_id=$2 AND active=true`,
+        [invitation.providerId, invitation.writerNihoUserId],
+      );
+      if (invitation.state === "REVOKED") return invitation;
+      const revoked = await client.query<DbRow>(
+        `UPDATE guide_product_link_invitations
+            SET state='REVOKED', declined_at=NULL, revoked_at=clock_timestamp(), updated_at=clock_timestamp()
+          WHERE id=$1::uuid
+          RETURNING ${INVITATION_COLUMNS}`,
+        [invitationId],
+      );
+      return invitationFromRow(revoked.rows[0]!);
+    });
+  }
+
+  async listLinkableProducts(actor: GuideActor): Promise<readonly LinkableGuideProduct[]> {
+    validateActor(actor);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT product.provider_id, product.id AS product_id, product.public_title
+         FROM experience_products product
+        WHERE product.status='PUBLISHED'
+          AND (
+            EXISTS (
+              SELECT 1 FROM provider_memberships membership
+               WHERE membership.provider_id=product.provider_id
+                 AND membership.niho_user_id=$1
+                 AND membership.active=true AND membership.role IN ('OWNER','EDITOR')
+            )
+            OR (
+              EXISTS (
+                SELECT 1 FROM guide_product_link_memberships link_membership
+                 WHERE link_membership.provider_id=product.provider_id
+                   AND link_membership.niho_user_id=$1 AND link_membership.active=true
+              )
+              AND EXISTS (
+                SELECT 1 FROM guide_product_link_invitations invitation
+                 WHERE invitation.provider_id=product.provider_id
+                   AND invitation.writer_niho_user_id=$1 AND invitation.state='ACCEPTED'
+              )
+              AND EXISTS (
+                SELECT 1 FROM guide_writer_grants writer
+                 WHERE writer.niho_user_id=$1 AND writer.active=true
+              )
+            )
+          )
+        ORDER BY product.provider_id, product.id`,
+      [actor.nihoUserId],
+    );
+    return result.rows.map((row) => ({
+      providerId: stringValue(row, "provider_id"),
+      productId: stringValue(row, "product_id"),
+      publicTitle: stringValue(row, "public_title"),
     }));
   }
 
@@ -607,6 +982,10 @@ export class GuideRepository {
                   EXISTS (
                     SELECT 1 FROM guide_product_link_memberships gm
                      WHERE gm.provider_id=product.provider_id AND gm.niho_user_id=$3 AND gm.active=true
+                  ) AND EXISTS (
+                    SELECT 1 FROM guide_product_link_invitations invitation
+                     WHERE invitation.provider_id=product.provider_id
+                       AND invitation.writer_niho_user_id=$3 AND invitation.state='ACCEPTED'
                   ) AS guide_link_allowed
              FROM experience_products product
             WHERE product.provider_id=$1 AND product.id=$2 AND product.status='PUBLISHED'
