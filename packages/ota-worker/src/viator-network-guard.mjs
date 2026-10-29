@@ -21,13 +21,22 @@ function canonicalDate(value) {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function boundedOpaqueReadValue(value) {
-  if (value === null || typeof value === "boolean") return true;
-  if (typeof value === "string") return value.length <= 256;
-  if (typeof value === "number") return Number.isFinite(value) && Math.abs(value) <= 1_000_000;
-  if (Array.isArray(value)) return value.length <= 100 && value.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item)
-    && (typeof item !== "string" || item.length <= 128) && (typeof item !== "number" || Number.isFinite(item)));
-  return false;
+const PRODUCT_CODE = /^\d{1,12}P\d{1,8}$/;
+const OPTION_CODE = /^TG\d{1,8}$/;
+const SCRIPT_NAMES = "rolldown-runtime|react-vendor|jumpstart-vendor|redux-form-vendor|recharts-vendor|vendor|intl-vendor|libphonenumber-vendor|common|Dial|BookingPerformanceDrivenReportUtils|AvailabilityProductFilter\\.module";
+const SCRIPT_PATH = new RegExp(`^/static/js/client/(?:(?:${SCRIPT_NAMES})-[a-f0-9]{8}|AvailabilityPage\\.[a-f0-9]{8})\\.js$`);
+const STYLE_PATH = /^\/static\/css\/(?:jumpstartUi|common|Dial|BookingPerformanceDrivenReportUtils|AvailabilityProductFilter|AvailabilityPage)\.[a-f0-9]{8}\.css$/;
+
+function optionFilters(value) {
+  return isPlainObject(value) && Object.keys(value).length <= 100
+    && Object.entries(value).every(([product, options]) => PRODUCT_CODE.test(product) && Array.isArray(options)
+      && options.length <= 100 && options.every((option) => typeof option === "string" && OPTION_CODE.test(option)));
+}
+
+function pagination(value) {
+  return isPlainObject(value) && Object.keys(value).length <= 62
+    && Object.entries(value).every(([date, page]) => canonicalDate(date) && exactKeys(page, ["cursor", "hasMore"])
+      && Number.isSafeInteger(page.cursor) && page.cursor >= 0 && page.cursor <= 10_000 && typeof page.hasMore === "boolean");
 }
 
 function sameJsonValue(left, right) {
@@ -43,11 +52,11 @@ export function validateViatorListState(value) {
   if (!exactKeys(value, VIATOR_LIST_STATE_KEYS)) return false;
   if (![value.startDate, value.endDate, value.jumpToDate].every(canonicalDate)) return false;
   if (value.startDate > value.endDate || Date.parse(`${value.endDate}T00:00:00Z`) - Date.parse(`${value.startDate}T00:00:00Z`) > 62 * 86_400_000) return false;
-  if (!Array.isArray(value.filteredProducts) || !Array.isArray(value.filteredTourGrades)
-    || value.filteredProducts.length > 100 || value.filteredTourGrades.length > 100
-    || value.filteredProducts.some((item) => typeof item !== "string" || item.length > 128)
-    || value.filteredTourGrades.some((item) => typeof item !== "string" || item.length > 128)) return false;
-  return [value.loadDirection, value.hasMoreAfter, value.hasMoreBefore, value.perDayPagination].every(boundedOpaqueReadValue);
+  if (!Array.isArray(value.filteredProducts) || value.filteredProducts.length > 100
+    || value.filteredProducts.some((item) => typeof item !== "string" || !PRODUCT_CODE.test(item))
+    || !optionFilters(value.filteredTourGrades) || !pagination(value.perDayPagination)) return false;
+  return ["FORWARD", "BACKWARD"].includes(value.loadDirection)
+    && typeof value.hasMoreAfter === "boolean" && typeof value.hasMoreBefore === "boolean";
 }
 
 export function validateViatorReadBody(body) {
@@ -59,8 +68,10 @@ export function viatorListStateCoversTarget(value, job) {
   const date = job.localDateTime.slice(0, 10);
   const productScope = value.filteredProducts.length === 0
     || (value.filteredProducts.length === 1 && value.filteredProducts[0] === job.target.externalProductId);
-  const optionScope = value.filteredTourGrades.length === 0
-    || (value.filteredTourGrades.length === 1 && value.filteredTourGrades[0] === job.target.externalOptionId);
+  const optionEntries = Object.entries(value.filteredTourGrades);
+  const optionScope = optionEntries.length === 0 || (optionEntries.length === 1
+    && optionEntries[0][0] === job.target.externalProductId
+    && (optionEntries[0][1].length === 0 || (optionEntries[0][1].length === 1 && optionEntries[0][1][0] === job.target.externalOptionId)));
   return value.startDate <= date && value.endDate >= date && productScope && optionScope;
 }
 
@@ -126,8 +137,11 @@ export function createViatorNetworkGuard({ job, cloud, getSnapshot, assertWriteC
     if (method === "GET") {
       const navigation = request.isNavigationRequest?.() === true;
       const fixedPage = url.pathname === "/availability/" && url.searchParams.size === 0;
+      const type = request.resourceType?.();
+      const asset = !navigation && url.search === ""
+        && ((type === "script" && SCRIPT_PATH.test(url.pathname)) || (type === "stylesheet" && STYLE_PATH.test(url.pathname)));
       if (navigation && !fixedPage) externalNavigationBlocked = true;
-      return fixedPage ? forward(route) : refuse(route);
+      return fixedPage || asset ? forward(route) : refuse(route);
     }
     if (method !== "POST" || url.search !== "" || jsonBytes(request) > MAX_JSON_BYTES) return refuse(route, permit !== null);
     if (request.headers?.()["content-type"]?.split(";")[0] !== "application/json") return refuse(route, permit !== null);

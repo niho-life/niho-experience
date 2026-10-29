@@ -39,15 +39,18 @@ export async function syntheticViator() {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       if (!state.authenticated) { response.end("<h1>Log in</h1>"); return; }
       response.end(`<!doctype html><html><head><meta charset="utf-8"></head><body><button>Synthetic product（${state.accountId}）</button>
-        <label>日付を選択<input aria-label="日付を選択" value="${state.initialDate}"></label><div id="grid"></div>
+        <input placeholder="日付を選択" readonly style="display:none"><input placeholder="日付を選択" readonly value="${state.initialDate}"><div id="picker"></div><div id="grid"></div>
         <script>
-          const input=document.querySelector('input');
-          const stateFor=(date)=>({startDate:date,endDate:date,jumpToDate:date,filteredProducts:[],filteredTourGrades:[],loadDirection:null,hasMoreAfter:false,hasMoreBefore:false,perDayPagination:null});
+          const input=document.querySelectorAll('input')[1];
+          let month=new Date('${state.initialDate}T12:00:00Z');
+          function drawPicker(){const picker=document.getElementById('picker');picker.replaceChildren();for(const [name,delta] of [['Go to the Previous Month',-1],['Go to the Next Month',1]]){const button=document.createElement('button');button.setAttribute('aria-label',name);button.onclick=()=>{month=new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth()+delta,1,12));drawPicker()};picker.append(button)}const grid=document.createElement('table');grid.setAttribute('role','grid');grid.setAttribute('aria-label',new Intl.DateTimeFormat('en-US',{month:'long',year:'numeric',timeZone:'UTC'}).format(month));for(let n=1;n<=new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth()+1,0)).getUTCDate();n++){const date=new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth(),n,12));const button=document.createElement('button');button.setAttribute('aria-label',date.toDateString());button.onclick=()=>{input.value=date.toISOString().slice(0,10);picker.replaceChildren();load(input.value)};grid.append(button)}picker.append(grid)}
+          input.onclick=drawPicker;
+          const stateFor=(date)=>({startDate:date,endDate:date,jumpToDate:date,filteredProducts:[],filteredTourGrades:{},loadDirection:"FORWARD",hasMoreAfter:false,hasMoreBefore:false,perDayPagination:{}});
           async function load(date){const listState=stateFor(date);const data=await (await fetch('/availability/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(listState)})).json();
             const row=data.availabilities[date]?.[0];const grid=document.getElementById('grid');grid.replaceChildren();if(!row)return;
             const container=document.createElement('div');container.className='synthetic_gridCol_observed';container.innerHTML='<a href="/bookings/search?travelDate='+date+'&filteredTourGrade='+row.productCode+'%7C'+row.tourGradeCode+'">予約を表示</a><span>13:00</span><span class="state">'+(row.availability==='AVAILABLE'?'予約可能':'完売')+'</span>';
-            const action=document.createElement('button');action.textContent=row.availability==='AVAILABLE'?'完売':'予約可能';action.onclick=()=>fetch('/availability/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({availabilityKeys:[{productCode:row.productCode,tourGradeCode:row.tourGradeCode,travelDate:date,startTime:'13:00:00'}],availability:row.availability==='AVAILABLE'?'SOLD_OUT':'AVAILABLE',prevAvailability:row.availability,isBulkUpdate:false,availabilityListState:listState})});container.append(action);grid.append(container);}
-          input.addEventListener('keydown',(event)=>{if(event.key==='Enter')load(input.value)});load(input.value);
+            const action=document.createElement('button');action.textContent=row.availability==='AVAILABLE'?'完売':'予約可能';action.onclick=()=>fetch('/availability/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({availabilityKeys:[{productCode:row.productCode,tourGradeCode:row.tourGradeCode,travelDate:date,startTime:'13:00:00'}],availability:row.availability==='AVAILABLE'?'SOLD_OUT':'AVAILABLE',prevAvailability:row.availability,isBulkUpdate:false,availabilityListState:data.availabilityListState})});container.append(action);grid.append(container);}
+          load(input.value);
         </script></body></html>`); return;
     }
     if (url.pathname === "/availability/api" && request.method === "POST") {
@@ -55,7 +58,7 @@ export async function syntheticViator() {
       const target = body.startDate === state.localDateTime.slice(0, 10);
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ availabilities: { [body.startDate]: target ? [{ productCode: state.productId, tourGradeCode: state.optionId,
-        startTime: "13:00:00", availability: state.availability }] : [] }, privateIdentity: { syntheticSecret: "discard" } })); return;
+        startTime: "13:00:00", availability: state.availability }] : [] }, availabilityListState: { ...body, perDayPagination: { [body.startDate]: { cursor: 1, hasMore: false } } }, privateIdentity: { syntheticSecret: "discard" } })); return;
     }
     if (url.pathname === "/availability/update" && request.method === "POST") {
       const body = await readBody(request); state.requests.push(body); state.writes += 1; state.availability = body.availability;

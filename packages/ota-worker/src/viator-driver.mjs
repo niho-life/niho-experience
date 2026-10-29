@@ -43,13 +43,17 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
       const response = await responsePromise;
       if (!response) return authOrDrift();
       if (response.status() !== 200 || response.headers()["content-type"]?.split(";")[0] !== "application/json") throw new ContractError("DOM_DRIFT");
-      let listState;
-      try { listState = response.request().postDataJSON(); } catch { throw new ContractError("DOM_DRIFT"); }
-      if (!validateViatorReadBody(listState)) throw new ContractError("DOM_DRIFT");
+      let requestState;
+      try { requestState = response.request().postDataJSON(); } catch { throw new ContractError("DOM_DRIFT"); }
+      if (!validateViatorReadBody(requestState)) throw new ContractError("DOM_DRIFT");
       const raw = await response.text();
       if (Buffer.byteLength(raw) > MAX_JSON_BYTES) throw new ContractError("DOM_DRIFT");
       let parsed;
       try { parsed = JSON.parse(raw); } catch { throw new ContractError("DOM_DRIFT"); }
+      // The response expands the date range and advances per-day cursors. The UI
+      // submits this returned state on save, rather than the original request.
+      const listState = parsed.availabilityListState;
+      if (!validateViatorReadBody(listState)) throw new ContractError("DOM_DRIFT");
       const selected = selectViatorAvailability(parsed, job, { allowMissing: !targetRequired });
       const coversTarget = viatorListStateCoversTarget(listState, job);
       if (targetRequired && (!selected || !coversTarget)) throw new ContractError("DOM_DRIFT");
@@ -86,12 +90,32 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
     }
 
     async function moveToTargetDate() {
-      const textbox = page.getByRole("textbox", { name: "日付を選択" });
+      const textbox = page.getByPlaceholder("日付を選択", { exact: true }).filter({ visible: true });
       if (await textbox.count() !== 1) throw new ContractError("DOM_DRIFT");
       const date = job.localDateTime.slice(0, 10);
+      const target = new Date(`${date}T12:00:00.000Z`);
+      const monthName = (value) => new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(value);
+      const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      await textbox.click();
+      const grid = page.locator('table[role="grid"]');
+      if (await grid.count() !== 1) throw new ContractError("DOM_DRIFT");
+      const shown = /^(\w+) (\d{4})$/.exec(await grid.getAttribute("aria-label") ?? "");
+      if (!shown || !months.includes(shown[1])) throw new ContractError("DOM_DRIFT");
+      const shownIndex = Number(shown[2]) * 12 + months.indexOf(shown[1]);
+      const distance = target.getUTCFullYear() * 12 + target.getUTCMonth() - shownIndex;
+      if (Math.abs(distance) > 24) throw new ContractError("UNSUPPORTED_TARGET");
+      for (let step = 1; step <= Math.abs(distance); step += 1) {
+        const next = page.getByRole("button", { name: distance > 0 ? "Go to the Next Month" : "Go to the Previous Month", exact: true });
+        if (await next.count() !== 1 || !await next.isEnabled()) throw new ContractError("DOM_DRIFT");
+        await next.click();
+        const expected = new Date(Date.UTC(Number(shown[2]), months.indexOf(shown[1]) + Math.sign(distance) * step, 1, 12));
+        await page.locator(`table[role="grid"][aria-label=${JSON.stringify(monthName(expected))}]`).waitFor({ state: "visible", timeout: 2_000 });
+      }
+      const dayName = `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][target.getUTCDay()]} ${months[target.getUTCMonth()].slice(0, 3)} ${String(target.getUTCDate()).padStart(2, "0")} ${target.getUTCFullYear()}`;
+      const day = page.getByRole("button", { name: dayName, exact: true });
+      if (await day.count() !== 1 || !await day.isEnabled()) throw new ContractError("DOM_DRIFT");
       return receiveRead(async () => {
-        await textbox.fill(date);
-        await textbox.press("Enter");
+        await day.click();
       }, { targetRequired: true });
     }
 

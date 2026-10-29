@@ -20,6 +20,8 @@
 - 受付停止は「完売」、再開は「予約可能」。「催行なし」は予約・開催取消につながるため対象外。
 - UIの更新要求は `/availability/update`。`availabilityKeys` は対象商品・option・日付・開始時刻の1件だけ、`isBulkUpdate=false`、状態は `AVAILABLE` / `SOLD_OUT` のみ。`prevAvailability` と現在の行を照合する。付随する表示状態も実画面のsnapshotに固定する。任意のJSONや複数回の更新を受け付けない。
 - 空き情報の読戻しは `/availability/api` へのPOSTであり、POSTを一律に書込み扱いしない。日付範囲・商品・option・paginationの選別済み入力だけを許可する。戻り値の `availabilities` を日付・商品・option・開始時刻で照合する。応答全体には本人確認等の別情報もあるため、必要な空き状態だけを取り出し、原文を保存しない。
+- 実画面の `filteredTourGrades` は商品IDをkeyにした配列のobject、`perDayPagination` は日付をkeyにした `cursor/hasMore` のobject。保存時は読取要求の古い状態でなく、応答の `availabilityListState` を使う。値の型と範囲を限定する。
+- 日付欄はreadonlyで、同じplaceholderの非表示inputもある。可視inputから日付pickerを開き、月・年と日付buttonを照合して選択する。文字列のfill/Enterを成功としない。必要な同一originのUI bundle/CSSだけを許可し、計測や任意の静的pathを許可しない。
 - supplier画面の受付状態と、旅行者側の予約可否は別に検証する。既存回の手動開閉の成功だけで、定員・締切・新規作成まで対応済みとしない。
 - 保存直後には古いDOMが残る。ACKと同一対象の新しい読戻しを分け、価格や予約取消の要求をnetwork guardで拒否する。
 - Tripadvisorの商品を同じViator在庫で販売する場合、別の在庫として二重登録しない。

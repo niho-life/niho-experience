@@ -11,8 +11,8 @@ import { validateTarget } from "../src/validation.mjs";
 import { makeJob } from "./helpers/synthetic-gyg.mjs";
 
 const listState = Object.freeze({ startDate: "2099-01-01", endDate: "2099-01-01", jumpToDate: "2099-01-01",
-  filteredProducts: ["999999P1"], filteredTourGrades: ["TG1"], loadDirection: "INITIAL", hasMoreAfter: false,
-  hasMoreBefore: false, perDayPagination: 10 });
+  filteredProducts: ["999999P1"], filteredTourGrades: { "999999P1": ["TG1"] }, loadDirection: "FORWARD", hasMoreAfter: false,
+  hasMoreBefore: false, perDayPagination: { "2099-01-01": { cursor: 1, hasMore: false } } });
 const viatorJob = makeJob({ accountId: "999999", productId: "999999P1", optionId: "TG1", localDateTime: "2099-01-01T13:00:00" }, "SET_CLOSED", {
   target: Object.freeze({ site: "Viator", externalAccountId: "999999", externalProductId: "999999P1", externalOptionId: "TG1",
     timeZone: "Asia/Tokyo", adapter: "viator-browser", adapterVersion: "1", connectionMode: "BROWSER" }),
@@ -69,7 +69,7 @@ test("Viator extracts only one canonical row and exact update preserves the fres
 
 test("Viator bootstrap read is bounded but cannot authorize a target write", () => {
   const bootstrap = { ...structuredClone(listState), startDate: "2098-12-19", endDate: "2098-12-19", jumpToDate: "2098-12-19",
-    filteredProducts: [], filteredTourGrades: [], loadDirection: null, perDayPagination: null };
+    filteredProducts: [], filteredTourGrades: {}, loadDirection: "FORWARD", perDayPagination: {} };
   assert.equal(validateViatorReadBody(bootstrap), true);
   assert.equal(viatorListStateCoversTarget(bootstrap, viatorJob), false);
   assert.equal(validateViatorUpdate(viatorUpdate(), viatorJob, { authorized: true, availability: "AVAILABLE", listState: bootstrap }), false);
@@ -89,6 +89,28 @@ test("Viator guard allows the bounded read POST and one exact write with interce
   assert.deepEqual(calls, ["continue", "continue", "abort"]);
   assert.equal(contextChecks, 1); assert.equal(preflights, 1); assert.equal(guard.writes, 1);
   assert.equal(guard.endUiAction().writes, 1);
+});
+
+test("Viator permits only observed UI bundles and rejects unbounded or ambiguous response state", async () => {
+  const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: "http://127.0.0.1:4321", getSnapshot: () => null, cloud: {} });
+  const asset = (path, type, calls, navigation = false) => {
+    const value = route(`http://127.0.0.1:4321${path}`, "GET", undefined, calls);
+    value.request = () => ({ url: () => `http://127.0.0.1:4321${path}`, method: () => "GET", isNavigationRequest: () => navigation, resourceType: () => type });
+    return value;
+  };
+  const calls = [];
+  await guard.handle(asset("/static/js/client/AvailabilityPage.aaaaaaaa.js", "script", calls));
+  await guard.handle(asset("/static/js/client/AvailabilityProductFilter.module-bbbbbbbb.js", "script", calls));
+  await guard.handle(asset("/static/css/AvailabilityPage.cccccccc.css", "stylesheet", calls));
+  await guard.handle(asset("/static/js/client/ElasticApmBrowserInit.aaaaaaaa.js", "script", calls));
+  await guard.handle(asset("/static/js/client/AvailabilityPage.aaaaaaaa.js?send=1", "script", calls));
+  await guard.handle(asset("/static/js/client/AvailabilityPage.aaaaaaaa.js", "script", calls, true));
+  assert.deepEqual(calls, ["continue", "continue", "continue", "abort", "abort", "abort"]);
+  for (const state of [
+    { ...listState, filteredTourGrades: ["TG1"] },
+    { ...listState, perDayPagination: { "2099-01-01": { cursor: 1, hasMore: false, amount: 1 } } },
+    { ...listState, filteredTourGrades: { "999999P2": ["TG1"] } },
+  ]) assert.equal(viatorListStateCoversTarget(state, viatorJob), false);
 });
 
 test("site guards refuse a second business write even under a new UI permit", async () => {
