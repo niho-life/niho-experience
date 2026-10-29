@@ -1,5 +1,5 @@
 import type { ChannelDesiredState, ChannelOutcome, ChannelTarget } from "@niho-experience/experience-store";
-import { boundedObject, channelEmpty, channelFailure, channelJson, exactKeys, internalContext } from "@/lib/experience/channel-runtime";
+import { boundedObject, channelFailure, channelJson, exactKeys, internalContext } from "@/lib/experience/channel-runtime";
 
 export const runtime = "nodejs";
 
@@ -54,8 +54,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ...(body.observedManuallyBlocked === undefined ? {} : { observedManuallyBlocked: body.observedManuallyBlocked as boolean }),
       ...(body.observedAtUtc === undefined ? {} : { observedAtUtc: body.observedAtUtc as string }),
     });
-    if (body.outcome === "VERIFIED" && !result.acceptedAsCurrent) return channelJson({ error: "stale" }, 409);
-    return channelEmpty();
+    // This acknowledges the durable receipt, independently of a current-state
+    // verification. The worker must not retry a recorded stale result as new work.
+    return channelJson({ acceptedAsCurrent: result.acceptedAsCurrent, repeated: result.repeated });
   } catch (error) {
     return channelFailure(error);
   }
