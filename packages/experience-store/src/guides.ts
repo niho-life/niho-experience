@@ -762,7 +762,7 @@ async function activePublicLinksByPublication(
                AND wg.active=true
           ))
         )
-      ORDER BY l.publication_id, l.provider_id, l.product_id`,
+      ORDER BY l.publication_id, l.display_order NULLS LAST, l.provider_id, l.product_id`,
     [publicationIds],
   );
   for (const row of result.rows) {
@@ -1617,13 +1617,13 @@ export class GuideRepository {
       const publication = publicationResult.rows[0]!;
       const publicationId = integerValue(publication, "publication_id");
 
-      for (const link of authorizedLinks) {
+      for (const [index, link] of authorizedLinks.entries()) {
         await client.query(
           `INSERT INTO guide_publication_product_links (
-             article_id, publication_id, provider_id, product_id,
+             article_id, publication_id, provider_id, product_id, display_order,
              link_created_by_niho_user_id, permission_basis
-           ) VALUES ($1,$2,$3,$4,$5,$6)`,
-          [articleId, publicationId, link.providerId, link.productId, actor.nihoUserId, link.permissionBasis],
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [articleId, publicationId, link.providerId, link.productId, index + 1, actor.nihoUserId, link.permissionBasis],
         );
       }
       if (article.cover !== undefined) {

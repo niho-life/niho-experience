@@ -15,6 +15,8 @@ describe("guide CMS schema", () => {
     assert.match(sql, /UNIQUE \(article_id, display_order\)/);
     assert.match(sql, /display_order BETWEEN 1 AND 3/);
     assert.match(sql, /FOREIGN KEY \(provider_id, product_id\)[\s\S]*experience_products/);
+    assert.match(sql, /ALTER TABLE guide_publication_product_links[\s\S]*ADD COLUMN display_order smallint/);
+    assert.match(sql, /ON guide_publication_product_links \(publication_id, display_order\)/);
     assert.doesNotMatch(sql, /niho_user|email|display_name|profile/i);
   });
 

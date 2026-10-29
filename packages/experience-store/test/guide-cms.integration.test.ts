@@ -341,13 +341,33 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         description: hostArticle.description,
         categorySlug: "culture",
         content: hostArticle.content,
-        draftProductLinks: [{ providerId: "provider-a", productId: "tea" }],
+        draftProductLinks: [
+          { providerId: "provider-a", productId: "tea-two" },
+          { providerId: "provider-a", productId: "tea" },
+        ],
       }, hostArticle.revision);
       const hostPublication = await store.commitPublication(host, hostArticle.id, {
         expectedRevision: linkedHostArticle.revision,
         visibility: "PUBLIC",
       });
-      assert.deepEqual(hostPublication.productLinks, [{ providerId: "provider-a", productId: "tea", productSlug: "tea" }]);
+      const orderedHostLinks = [
+        { providerId: "provider-a", productId: "tea-two", productSlug: "tea-two" },
+        { providerId: "provider-a", productId: "tea", productSlug: "tea" },
+      ];
+      assert.deepEqual(hostPublication.productLinks, orderedHostLinks);
+      assert.deepEqual((await store.getPublicArticleBySlug(hostArticle.slug))?.productLinks, orderedHostLinks);
+      assert.deepEqual(
+        (await store.listPublicArticles()).find((article) => article.slug === hostArticle.slug)?.productLinks,
+        orderedHostLinks,
+      );
+      assert.deepEqual((await pool.query<{ product_id: string; display_order: number }>(
+        `SELECT product_id, display_order FROM guide_publication_product_links
+          WHERE publication_id=$1 ORDER BY display_order`,
+        [hostPublication.publicationId],
+      )).rows, [
+        { product_id: "tea-two", display_order: 1 },
+        { product_id: "tea", display_order: 2 },
+      ]);
       await pool.query(
         "UPDATE provider_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='host-a'",
       );

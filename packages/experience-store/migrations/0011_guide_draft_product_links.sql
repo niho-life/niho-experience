@@ -13,4 +13,13 @@ CREATE TABLE guide_draft_product_links (
     REFERENCES experience_products(provider_id, id) ON DELETE RESTRICT
 );
 
+-- Existing sealed publications have no recorded order. Keep their links untouched;
+-- new snapshots write an ordinal, while older rows retain the former stable sort.
+ALTER TABLE guide_publication_product_links
+  ADD COLUMN display_order smallint CHECK (display_order BETWEEN 1 AND 3);
+
+CREATE UNIQUE INDEX guide_publication_product_links_display_order_idx
+  ON guide_publication_product_links (publication_id, display_order)
+  WHERE display_order IS NOT NULL;
+
 COMMIT;
