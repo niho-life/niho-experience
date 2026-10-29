@@ -127,7 +127,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
             <Link href={`/guides/${featuredGuide.slug}`} className="link-leaf mt-5 inline-block">Read the preview</Link>
           </div>
           <div className="border-t border-line pt-5 lg:border-l lg:border-t-0 lg:py-2 lg:pl-8">
-            <p className="font-hand text-[1.5rem] leading-tight text-leaf">The day keeps going.</p>
+            <p className="font-hand text-[1.5rem] leading-tight text-moss">The day keeps going.</p>
             <p className="mt-2 text-sm leading-relaxed text-ink-soft">A suggested route for after your temple visit. Local details are still being checked.</p>
             <p className="mt-4 text-sm text-muted">{guideReadMinutes(featuredGuide)} min read · {featuredGuide.checkedAt ? "Checked" : "Updated"} <time dateTime={featuredGuide.checkedAt ?? featuredGuide.updatedAt}>{formatGuideDate(featuredGuide.checkedAt ?? featuredGuide.updatedAt)}</time></p>
           </div>
