@@ -7,7 +7,7 @@ import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 const PHASES = ["CLAIMED", "RUNNING", "PENDING_RESULT", "QUARANTINED"];
 
 function validateRecord(value) {
-  if (!exactKeys(value, ["version", "phase", "journalId", "createdAtUtc", "updatedAtUtc", "job"], ["result", "reason"])
+  if (!exactKeys(value, ["version", "phase", "journalId", "createdAtUtc", "updatedAtUtc", "job"], ["result", "reason", "reservationPage"])
     || value.version !== 1 || !PHASES.includes(value.phase) || typeof value.journalId !== "string"
     || typeof value.createdAtUtc !== "string" || typeof value.updatedAtUtc !== "string" || !isPlainObject(value.job)) {
     throw new ContractError("INVALID_JOURNAL");
@@ -49,6 +49,19 @@ export function createJournal(privateDir, now = () => new Date()) {
       current = { ...current, phase: "PENDING_RESULT", result, ...(reason ? { reason: String(reason).slice(0, 80) } : {}), updatedAtUtc: now().toISOString() };
       await persist();
       return current;
+    },
+    async pendingReservationPage(page) {
+      if (!current || current.phase !== "RUNNING" || !isPlainObject(page)) throw new ContractError("INVALID_JOURNAL_TRANSITION");
+      current = { ...current, reservationPage: page, updatedAtUtc: now().toISOString() };
+      await persist();
+    },
+    async reservationPageAcknowledged(receiptId) {
+      if (!current || current.phase !== "RUNNING" || current.reservationPage?.receiptId !== receiptId) {
+        throw new ContractError("INVALID_JOURNAL_TRANSITION");
+      }
+      const { reservationPage: _discarded, ...rest } = current;
+      current = { ...rest, updatedAtUtc: now().toISOString() };
+      await persist();
     },
     async quarantine(reason) {
       if (!current || current.phase === "PENDING_RESULT") throw new ContractError("INVALID_JOURNAL_TRANSITION");

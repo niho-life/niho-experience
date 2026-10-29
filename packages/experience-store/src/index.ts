@@ -24,6 +24,7 @@ export type {
   ChannelCapabilities,
   ChannelConnectionMode,
   ChannelDesiredState,
+  ChannelJobPurpose,
   ChannelListingDto,
   ChannelListingInput,
   ChannelListingUpdate,

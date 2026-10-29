@@ -11,6 +11,7 @@ export async function POST(request: Request) {
   try {
     await context.runtime.enqueueDueReconciliationTicks(context.worker, 20);
     await context.runtime.consumeCalendarOutbox(50, context.worker);
+    await context.runtime.enqueueDueReservationReads(context.worker, 1);
     const job = await context.runtime.claim(context.worker);
     return job ? channelJson({ job }) : channelEmpty();
   } catch (error) {
