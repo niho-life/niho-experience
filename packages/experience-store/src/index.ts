@@ -9,6 +9,29 @@ export {
 export { ExperienceStore } from "./repository.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
+export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
+export type {
+  ChannelAction,
+  ChannelAdminActor,
+  ChannelCapabilities,
+  ChannelConnectionMode,
+  ChannelDesiredState,
+  ChannelListingDto,
+  ChannelListingInput,
+  ChannelListingUpdate,
+  ChannelOutcome,
+  ChannelResultInput,
+  ChannelRuntimeOptions,
+  ChannelSite,
+  ChannelTarget,
+  ClaimedChannelJob,
+  ExternalAccountDto,
+  ExternalAccountInput,
+  ExternalAccountUpdate,
+  HostChannelStatus,
+  WorkerCredential,
+  WorkerIdentity,
+} from "./channels.ts";
 export type {
   CommitGuidePublicationInput,
   CreateGuideArticleInput,

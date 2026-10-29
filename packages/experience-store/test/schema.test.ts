@@ -37,6 +37,23 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /UPDATE outbox_messages|INSERT INTO outbox_messages/);
   });
 
+  it("keeps OTA targets immutable, credentials hashed, and expired leases locked", async () => {
+    const sql = await readFile(new URL("../migrations/0007_channel_runtime.sql", import.meta.url), "utf8");
+    assert.match(sql, /credential_digest text NOT NULL/);
+    assert.doesNotMatch(sql, /credential_token|bearer_token|cookie_value/);
+    assert.match(sql, /target_external_account_id text NOT NULL/);
+    assert.match(sql, /account_version bigint NOT NULL/);
+    assert.match(sql, /mapping_version bigint NOT NULL/);
+    assert.match(sql, /UNIQUE \(site, external_account_id\)/);
+    assert.match(sql, /lease_epoch bigint NOT NULL/);
+    assert.match(sql, /observed_bookable boolean/);
+    assert.match(sql, /observed_manually_blocked boolean/);
+    assert.match(sql, /channel_jobs_global_browser_lease[\s\S]*WHERE status = 'LEASED'/);
+    assert.match(sql, /channel_jobs_account_lease[\s\S]*WHERE status = 'LEASED'/);
+    assert.match(sql, /expired lease deliberately remains LEASED/);
+    assert.match(sql, /outcome IN \('VERIFIED','AUTH_REQUIRED','NEEDS_REVIEW','UNKNOWN_AFTER_SAVE','RETRY_WAIT','SUPERSEDED'\)/);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
