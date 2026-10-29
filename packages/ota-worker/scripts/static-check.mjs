@@ -1,0 +1,13 @@
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+if (packageJson.type !== "module" || packageJson.engines.node !== "24.x" || packageJson.dependencies["playwright-core"] !== "1.56.1") {
+  throw new Error("package metadata drift");
+}
+await Promise.all([
+  "src/index.mjs", "src/supervisor.mjs", "src/gyg-driver.mjs", "src/network-guard.mjs", "src/worker.mjs",
+  "src/mcp-stdio.mjs", "src/healthcheck.mjs",
+].map((path) => import(join(root, path))));

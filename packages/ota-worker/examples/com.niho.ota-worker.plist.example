@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.niho.ota-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/NODE_24_BIN</string>
+    <string>/ABSOLUTE/REVIEWED_SHA/packages/ota-worker/bin/ota-worker.mjs</string>
+    <string>--config</string>
+    <string>/ABSOLUTE/PRIVATE_DIR/config.json</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>/ABSOLUTE/PRIVATE_DIR/worker.stdout.jsonl</string>
+  <key>StandardErrorPath</key><string>/ABSOLUTE/PRIVATE_DIR/worker.stderr.jsonl</string>
+</dict>
+</plist>

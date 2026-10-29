@@ -1,0 +1,29 @@
+{
+  "name": "@niho-experience/ota-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Studio-side bounded OTA browser executor for NIHO Experience.",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "niho-ota-worker": "./bin/ota-worker.mjs",
+    "niho-ota-mcp": "./bin/ota-mcp.mjs",
+    "niho-ota-healthcheck": "./bin/healthcheck.mjs"
+  },
+  "scripts": {
+    "check": "node ./scripts/static-check.mjs",
+    "healthcheck": "node ./bin/healthcheck.mjs",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "node ./scripts/static-check.mjs",
+    "test:browser": "node --test test/driver.browser.mjs"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

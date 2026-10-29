@@ -120,6 +120,8 @@ jobs:
       - run: npm run build
       - name: Install Chromium for Playwright
         run: npx -w @niho-experience/web playwright install --with-deps chromium
+      - name: Test OTA browser adapter with synthetic data
+        run: npm -w @niho-experience/ota-worker run test:browser
       - run: npm run test:e2e
       - name: Test provider owner and cohost operations with synthetic data
         run: npm -w @niho-experience/web run test:e2e:provider-operations

@@ -831,7 +831,9 @@ export class ChannelRuntime {
   }
 
   async #requireWorker(client: PoolClient, identity: WorkerIdentity): Promise<DbRow> {
-    const result = await client.query<DbRow>("SELECT * FROM channel_workers WHERE id=$1 FOR SHARE", [identity.workerId]);
+    // Serialize a worker's requests before taking job/account locks. SHARE then
+    // heartbeat UPDATE lets concurrent claims/renewals deadlock on lock upgrade.
+    const result = await client.query<DbRow>("SELECT * FROM channel_workers WHERE id=$1 FOR UPDATE", [identity.workerId]);
     const worker = result.rows[0];
     if (!worker || worker.revoked_at !== null || integer(worker, "version") !== identity.credentialVersion
       || isoValue(worker, "credential_expires_at") <= this.#nowIso()) throw new StoreAccessDeniedError();

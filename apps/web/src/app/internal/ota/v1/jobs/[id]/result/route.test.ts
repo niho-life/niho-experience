@@ -36,10 +36,20 @@ describe("POST /internal/ota/v1/jobs/:id/result", () => {
     const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
       method: "POST", body: JSON.stringify(verified), headers: { "content-type": "application/json" },
     }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ acceptedAsCurrent: true, repeated: false });
     expect(mocks.submitResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), expect.objectContaining({
       occurrenceId: verified.occurrenceId, observedBookable: true, observedManuallyBlocked: false,
     }));
+  });
+
+  it("acknowledges a recorded stale verification without labelling it current", async () => {
+    mocks.submitResult.mockResolvedValue({ acceptedAsCurrent: false, repeated: true });
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify(verified), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ acceptedAsCurrent: false, repeated: true });
   });
 
   it("rejects an incomplete VERIFIED observation before the store", async () => {

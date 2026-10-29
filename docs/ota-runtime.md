@@ -50,6 +50,8 @@ worker endpoints は次の versioned route だけで、すべて `POST`、JSON 1
 
 claim に対象がなければ body なし `204`。認証不備は `401/403`、version/lease/preflight の stale は `409`。lease token は worker envelope の直下にだけ置き、target model へ入れない。
 
+resultを監査保存した場合は `200 {acceptedAsCurrent,repeated}` でreceiptを返す。`acceptedAsCurrent:false`は現在の反映成功ではないが、同じ記録済みresultを新たな操作として再送する理由にもならない。actor/lease認証失敗や不正入力は引き続きエラーにする。
+
 ## Preflight と結果
 
 preflight は worker、assignment、lease/deadline、account active/delegation/revocation/version、listing active/capability/mapping version、商品公開状態、desired version、配備adapterをtransaction内で確認する。全actionで現在のoccurrence開始・終了がimmutable job snapshotと一致することを確認する。`SET_OPEN`と`SET_CLOSED`は予約席、cutoff、Google freshness/coverage/busy、現在のsales stateを再計算し、現在の販売可否とactionが一致するときだけ実行する。再開直後でoutboxが未消費の場合にも古いCLOSEを成功扱いしない。古い操作は`409`で止め、lease lockを停止確認まで保持する。authorityや時刻が失効した場合はaccountもquarantineする。`ENSURE`やmodel proseによる成功判定はない。

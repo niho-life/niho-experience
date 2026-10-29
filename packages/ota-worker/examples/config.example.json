@@ -1,0 +1,11 @@
+{
+  "cloudOrigin": "https://EXPERIENCE_CLOUD_ORIGIN",
+  "tokenFile": "/ABSOLUTE/PRIVATE_DIR/worker-token",
+  "privateDir": "/ABSOLUTE/PRIVATE_DIR",
+  "accountProfiles": {
+    "00000": "/ABSOLUTE/PRIVATE_DIR/profiles/00000"
+  },
+  "browserExecutable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "mode": "deterministic",
+  "debugScreenshots": false
+}
