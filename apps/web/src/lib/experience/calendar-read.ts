@@ -1,7 +1,7 @@
 import "server-only";
 import type { Pool } from "pg";
-import { addLocalDays, addMinutes, evaluateAvailability, expandOccurrences, tokyoLocalToUtc, type BusyInterval } from "@niho-experience/experience-domain";
-import { ExperienceStore, StoreAccessDeniedError, type HostActor } from "@niho-experience/experience-store";
+import { addLocalDays, expandOccurrences, tokyoLocalToUtc, type BusyInterval } from "@niho-experience/experience-domain";
+import { evaluateStoredInventories, ExperienceStore, StoreAccessDeniedError, type HostActor } from "@niho-experience/experience-store";
 import type { HostCalendarData } from "@/experience/calendar-contract";
 
 /** A private host read model. Mutations and booking decisions remain in ExperienceStore. */
@@ -64,15 +64,13 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
     [actor.providerId, actor.nihoUserId, occurrenceIds],
   ) : { rows: [] };
   const seatsByOccurrence = new Map(seats.rows.map((row) => [row.occurrence_id, { confirmed: Number(row.confirmed_seats), held: Number(row.held_seats) }]));
+  const inventoryByOccurrence = await evaluateStoredInventories(pool, actor.providerId, expanded.map(({ occurrence, experienceId }) => ({
+    productId: experienceId, occurrence, requestedSeats: 1,
+  })), nowUtc);
   const occurrences = expanded.map(({ occurrence, experienceId, experienceTitle, overrideVersion, salesStateVersion }) => {
     const reserved = seatsByOccurrence.get(occurrence.id) ?? { confirmed: 0, held: 0 };
-    const rangeStart = addMinutes(occurrence.startUtc, -occurrence.busyBufferBeforeMinutes);
-    const rangeEnd = addMinutes(occurrence.endUtc, occurrence.busyBufferAfterMinutes);
-    const occurrenceCovered = google?.coverageStartUtc !== undefined && google.coverageEndUtc !== undefined
-      && google.coverageStartUtc <= rangeStart && google.coverageEndUtc >= rangeEnd;
-    const occurrenceSyncStatus = google?.syncStatus === "FAILED" ? "FAILED" : fresh && occurrenceCovered ? "FRESH" : "STALE";
-    const result = evaluateAvailability({ occurrence, requestedSeats: 1, confirmedSeats: reserved.confirmed, heldSeats: reserved.held, nowUtc,
-      googleCalendar: { blockingEnabled: google?.blockingEnabled ?? false, syncStatus: occurrenceSyncStatus, busyIntervals } });
+    const result = inventoryByOccurrence.get(occurrence.id)?.availability;
+    if (result === undefined) throw new Error("Inventory evaluation did not return a host calendar occurrence.");
     return {
       ...occurrence,
       experienceId,
@@ -84,7 +82,8 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
       confirmedSeats: reserved.confirmed,
       heldSeats: reserved.held,
     };
-  }).sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+  });
+  occurrences.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 
   return {
     preview: false,

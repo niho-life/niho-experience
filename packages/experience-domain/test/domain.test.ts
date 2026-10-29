@@ -272,6 +272,27 @@ describe("availability", () => {
       "BOOKING_CUTOFF_REACHED",
     );
   });
+
+  it("keeps private-group and shared-resource blockers separate from seat capacity", () => {
+    const privateOccurrence = occurrence();
+    const base = {
+      occurrence: { ...privateOccurrence, capacity: 8 }, requestedSeats: 6, confirmedSeats: 0, heldSeats: 0,
+      nowUtc: "2026-10-01T00:00:00.000Z",
+      googleCalendar: { blockingEnabled: false, syncStatus: "STALE" as const, busyIntervals: [] },
+    };
+    assert.equal(evaluateAvailability({ ...base, sharedInventory: {
+      bookingMode: "PRIVATE_GROUP", activeGroupCount: 1, hasInactiveResource: false, hasResourceConflict: false,
+    } }).reason, "GROUP_RESERVED");
+    assert.equal(evaluateAvailability({ ...base, sharedInventory: {
+      bookingMode: "PRIVATE_GROUP", activeGroupCount: 0, hasInactiveResource: true, hasResourceConflict: false,
+    } }).reason, "RESOURCE_INACTIVE");
+    assert.equal(evaluateAvailability({ ...base, sharedInventory: {
+      bookingMode: "PRIVATE_GROUP", activeGroupCount: 0, hasInactiveResource: false, hasResourceConflict: true,
+    } }).reason, "RESOURCE_BUSY");
+    assert.equal(evaluateAvailability({ ...base, sharedInventory: {
+      bookingMode: "PRIVATE_GROUP", activeGroupCount: 0, hasInactiveResource: false, hasResourceConflict: false,
+    } }).bookable, true);
+  });
 });
 
 describe("validation boundaries", () => {

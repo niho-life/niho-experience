@@ -1,7 +1,13 @@
 import "server-only";
 import type { Pool } from "pg";
 import { createBookingCalendar, queryGoogleBusy, refreshGoogleToken, type GoogleConfig, type GoogleTokenSet } from "@niho-experience/google-calendar";
-import { ExperienceStore, StoreAccessDeniedError, type HostActor } from "@niho-experience/experience-store";
+import {
+  enqueueCalendarRecalculation,
+  ExperienceStore,
+  lockProviderInventory,
+  StoreAccessDeniedError,
+  type HostActor,
+} from "@niho-experience/experience-store";
 import { siteOrigin } from "@/lib/host/server";
 import { googleTokenKey, openGoogleRefreshToken, sealGoogleRefreshToken } from "./google-token-crypto";
 
@@ -22,6 +28,7 @@ export async function saveGoogleConnection(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockProviderInventory(client, actor.providerId);
     const member = await client.query<{ role: string }>(
       "SELECT role FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2 AND active=true FOR SHARE",
       [actor.providerId, actor.nihoUserId],
@@ -50,6 +57,12 @@ export async function saveGoogleConnection(
       [actor.providerId, busyCalendarId],
     );
     await client.query("DELETE FROM google_busy_intervals WHERE provider_id=$1", [actor.providerId]);
+    await enqueueCalendarRecalculation(client, {
+      providerId: actor.providerId,
+      aggregateType: "google_calendar",
+      aggregateId: actor.providerId,
+      cause: "google_connection_changed",
+    });
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -104,6 +117,7 @@ export async function disconnectGoogleCalendar(pool: Pool, actor: HostActor): Pr
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockProviderInventory(client, actor.providerId);
     const member = await client.query<{ role: string }>(
       "SELECT role FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2 AND active=true FOR SHARE",
       [actor.providerId, actor.nihoUserId],
@@ -111,6 +125,12 @@ export async function disconnectGoogleCalendar(pool: Pool, actor: HostActor): Pr
     if (member.rows[0]?.role !== "OWNER") throw new StoreAccessDeniedError();
     await client.query("DELETE FROM provider_google_connections WHERE provider_id=$1", [actor.providerId]);
     await client.query("DELETE FROM provider_google_calendars WHERE provider_id=$1", [actor.providerId]);
+    await enqueueCalendarRecalculation(client, {
+      providerId: actor.providerId,
+      aggregateType: "google_calendar",
+      aggregateId: actor.providerId,
+      cause: "google_connection_disconnected",
+    });
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

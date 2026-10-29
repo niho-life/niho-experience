@@ -35,6 +35,8 @@ Schedule rules use optimistic versions. Booking hold creation derives the reques
 
 `0006_calendar_commands_and_sales_state.sql` は旧 `CLOSE` 行をversion付き販売状態へ移し、日時変更を別に保持する。カレンダー保存・UUID command・専用 `calendar_outbox_events` を同じtransactionで記録する。同じcommandの再送は保存済みの結果を返し、異なる入力への使い回しは拒否する。通知outboxの処理位置とは独立している。
 
+`0009_shared_inventory.sql` はprovider所有の会場・講師・設備、商品の `SEAT` / `PRIVATE_GROUP` と資源割当、予約時のimmutable占有snapshot、providerごとのdue reconciliation tickを追加する。複合外部キーでprovider越境を拒否し、既存商品は設定がない限り席数制を維持する。ロック順とoutbox契約は [`docs/ota-inventory.md`](../../docs/ota-inventory.md) を参照する。
+
 ### 0006の配備順序
 
 `0006` は停止を伴う移行とする。旧アプリは `schedule_occurrence_overrides` へ `CLOSE` を書くため、移行後に旧writerを使えない。また、旧readerは「日時を移動したうえで休止」を表現できない。

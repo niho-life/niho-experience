@@ -1,19 +1,18 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   addLocalDays,
-  addMinutes,
-  evaluateAvailability,
   expandOccurrences,
-  type BusyInterval,
   type Occurrence,
   type OccurrenceOverride,
   type OccurrenceSalesState,
 } from "@niho-experience/experience-domain";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
-import { googleCalendarFromRow, isoValue, overrideFromRow, salesStateFromRow, scheduleRuleFromRow, type DbRow } from "./rows.ts";
+import { isoValue, overrideFromRow, salesStateFromRow, scheduleRuleFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
-import { assertCanonicalInstant, assertNonEmptyText, assertStoreIdentifier, effectiveGoogleSyncStatus } from "./validation.ts";
+import { evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
+import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { assertCanonicalInstant, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 
 export const CHANNEL_SITES = [
   "Airbnb", "GetYourGuide", "Viator", "Klook", "Jalan", "Asoview", "ActivityJapan", "Rezio", "Reddy",
@@ -631,6 +630,9 @@ export class ChannelRuntime {
     assertStoreIdentifier(listingId, "listingId");
     const request = fingerprint({ listingId });
     return withTransaction(this.#pool, async (client) => {
+      const provider = await client.query<{ provider_id: string }>("SELECT provider_id FROM channel_listings WHERE id=$1", [listingId]);
+      if (!provider.rows[0]) throw new StoreNotFoundError("channel listing");
+      await lockProviderInventory(client, provider.rows[0].provider_id);
       const previous = await this.#previousCommand(client, actor, commandId, "listing.reconcile", request);
       if (previous) return { occurrences: Number(previous.occurrences), jobs: Number(previous.jobs) };
       const reconciled = await this.#reconcile(client, "l.id=$1", [listingId], 2_000);
@@ -640,13 +642,64 @@ export class ChannelRuntime {
     });
   }
 
+  async enqueueDueReconciliationTicks(identity: WorkerIdentity, limit = 20): Promise<{ readonly enqueued: number }> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new StoreValidationError("Tick limit must be between 1 and 200.");
+    return withTransaction(this.#pool, async (client) => {
+      await this.#requireWorker(client, identity);
+      const nowUtc = this.#nowIso();
+      const candidates = await client.query<DbRow>(
+        `SELECT DISTINCT a.provider_id
+           FROM channel_worker_accounts wa
+           JOIN channel_external_accounts a ON a.id=wa.account_id
+           JOIN channel_listings l ON l.account_id=a.id
+           JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+           LEFT JOIN calendar_reconciliation_ticks t ON t.provider_id=a.provider_id
+          WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL AND a.active=true AND a.revoked_at IS NULL
+            AND l.active=true AND p.status='PUBLISHED'
+            AND (t.provider_id IS NULL OR (t.pending_command_id IS NULL AND t.next_due_at<=$2))
+          ORDER BY a.provider_id LIMIT $3`,
+        [identity.workerId, nowUtc, limit],
+      );
+      const candidateProviderIds = candidates.rows.map((row) => text(row, "provider_id")).sort();
+      for (const providerId of candidateProviderIds) await lockProviderInventory(client, providerId);
+      if (candidateProviderIds.length === 0) return { enqueued: 0 };
+      await client.query(
+        `INSERT INTO calendar_reconciliation_ticks (provider_id,next_due_at)
+         SELECT item,$2::timestamptz FROM unnest($1::text[]) AS item
+         ON CONFLICT (provider_id) DO NOTHING`,
+        [candidateProviderIds, nowUtc],
+      );
+      const due = await client.query<DbRow>(
+        `SELECT t.provider_id FROM calendar_reconciliation_ticks t
+          WHERE t.provider_id=ANY($1::text[]) AND t.pending_command_id IS NULL AND t.next_due_at<=$2
+          ORDER BY t.next_due_at,t.provider_id FOR UPDATE OF t`,
+        [candidateProviderIds, nowUtc],
+      );
+      const providerIds = due.rows.map((row) => text(row, "provider_id")).sort();
+      for (const providerId of providerIds) {
+        const commandId = await enqueueCalendarRecalculation(client, {
+          providerId,
+          aggregateType: "provider_inventory",
+          aggregateId: providerId,
+          cause: "due_reconciliation",
+        });
+        await client.query(
+          `UPDATE calendar_reconciliation_ticks SET pending_command_id=$2::uuid,version=version+1,updated_at=$3
+            WHERE provider_id=$1 AND pending_command_id IS NULL`,
+          [providerId, commandId, nowUtc],
+        );
+      }
+      return { enqueued: providerIds.length };
+    });
+  }
+
   /** Consume and expand only rows locked by this transaction; any expansion failure rolls back the processed cursor. */
   async consumeCalendarOutbox(limit = 50, identity?: WorkerIdentity): Promise<{ readonly events: number; readonly occurrences: number; readonly jobs: number }> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new StoreValidationError("Outbox limit must be between 1 and 200.");
     return withTransaction(this.#pool, async (client) => {
       if (identity) await this.#requireWorker(client, identity);
       const events = await client.query<DbRow>(
-        `SELECT e.id,e.provider_id,e.channel_dispatch_cursor,e.channel_dispatch_from::text,e.channel_dispatch_to::text FROM calendar_outbox_events e
+        `SELECT e.id,e.provider_id,e.command_id,e.channel_dispatch_cursor,e.channel_dispatch_from::text,e.channel_dispatch_to::text FROM calendar_outbox_events e
           WHERE e.processed_at IS NULL AND e.available_at <= $1
             AND ($3::text IS NULL OR EXISTS (
               SELECT 1 FROM channel_worker_accounts wa
@@ -656,6 +709,9 @@ export class ChannelRuntime {
           ORDER BY e.id LIMIT $2 FOR UPDATE OF e SKIP LOCKED`,
         [this.#nowIso(), limit, identity?.workerId ?? null],
       );
+      for (const providerId of [...new Set(events.rows.map((event) => text(event, "provider_id")))].sort()) {
+        await lockProviderInventory(client, providerId);
+      }
       let occurrences = 0;
       let jobs = 0;
       let completed = 0;
@@ -675,7 +731,16 @@ export class ChannelRuntime {
           [event.id, reconciled.continuation === null ? null : JSON.stringify(reconciled.continuation), fromDate, toDate,
             reconciled.continuation === null ? this.#nowIso() : null],
         );
-        if (reconciled.continuation === null) completed += 1;
+        if (reconciled.continuation === null) {
+          completed += 1;
+          const nextDueAtUtc = new Date(this.#now().getTime() + 60_000).toISOString();
+          await client.query(
+            `UPDATE calendar_reconciliation_ticks
+                SET pending_command_id=NULL,last_completed_at=$3,next_due_at=$4,version=version+1,updated_at=$3
+              WHERE provider_id=$1 AND pending_command_id=$2::uuid`,
+            [event.provider_id, event.command_id, this.#nowIso(), nextDueAtUtc],
+          );
+        }
         else break;
       }
       return { events: completed, occurrences, jobs };
@@ -718,7 +783,7 @@ export class ChannelRuntime {
           if (page && occurrenceCount === maxOccurrences) return { occurrences: occurrenceCount, jobs: jobCount, continuation: lastCursor };
           occurrenceCount += 1;
           if (occurrenceCount > maxOccurrences) throw new StoreConflictError("Channel reconciliation exceeded its occurrence bound.");
-          const availability = await this.#liveAvailability(client, text(listing, "provider_id"), occurrence, this.#nowIso());
+          const availability = await this.#liveAvailability(client, text(listing, "provider_id"), text(listing, "product_id"), occurrence, this.#nowIso());
           const desiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
           const desired = await this.#upsertDesired(client, listing, occurrence, desiredState, availability.reason);
           jobCount += await this.#enqueueDesiredJob(client, listing, occurrence, desiredState, desired.desiredVersion);
@@ -729,38 +794,8 @@ export class ChannelRuntime {
     return { occurrences: occurrenceCount, jobs: jobCount, continuation: null };
   }
 
-  async #liveAvailability(client: PoolClient, providerId: string, occurrence: Occurrence, nowUtc: string) {
-    const reservations = await client.query<{ confirmed: string; held: string }>(
-      `SELECT COALESCE(sum(seats) FILTER (WHERE status='CONFIRMED'),0)::text AS confirmed,
-              COALESCE(sum(seats) FILTER (WHERE status='HOLD' AND hold_expires_at>$3),0)::text AS held
-         FROM bookings WHERE provider_id=$1 AND occurrence_id=$2`, [providerId, occurrence.id, nowUtc],
-    );
-    const row = reservations.rows[0];
-    const googleResult = await client.query<DbRow>("SELECT * FROM provider_google_calendars WHERE provider_id=$1", [providerId]);
-    const googleRow = googleResult.rows[0];
-    let blockingEnabled = false;
-    let syncStatus: "FRESH" | "STALE" | "FAILED" = "STALE";
-    let busyIntervals: BusyInterval[] = [];
-    if (googleRow) {
-      const google = googleCalendarFromRow(googleRow);
-      blockingEnabled = google.blockingEnabled;
-      const rangeStart = addMinutes(occurrence.startUtc, -occurrence.busyBufferBeforeMinutes);
-      const rangeEnd = addMinutes(occurrence.endUtc, occurrence.busyBufferAfterMinutes);
-      const covered = google.coverageStartUtc !== undefined && google.coverageEndUtc !== undefined
-        && google.coverageStartUtc <= rangeStart && google.coverageEndUtc >= rangeEnd;
-      syncStatus = covered ? effectiveGoogleSyncStatus(google.syncStatus, google.freshUntilUtc, nowUtc) : "STALE";
-      if (blockingEnabled && syncStatus === "FRESH") {
-        const busy = await client.query<DbRow>(
-          "SELECT start_at,end_at FROM google_busy_intervals WHERE provider_id=$1 AND opaque_calendar_id=$2 AND end_at>$3 AND start_at<$4 ORDER BY start_at",
-          [providerId, google.opaqueCalendarId, rangeStart, rangeEnd],
-        );
-        busyIntervals = busy.rows.map((entry) => ({ startUtc: isoValue(entry, "start_at"), endUtc: isoValue(entry, "end_at") }));
-      }
-    }
-    return evaluateAvailability({
-      occurrence, requestedSeats: 1, confirmedSeats: Number(row?.confirmed ?? 0), heldSeats: Number(row?.held ?? 0), nowUtc,
-      googleCalendar: { blockingEnabled, syncStatus, busyIntervals },
-    });
+  async #liveAvailability(client: PoolClient, providerId: string, productId: string, occurrence: Occurrence, nowUtc: string) {
+    return (await evaluateStoredInventory(client, providerId, productId, occurrence, nowUtc, 1)).availability;
   }
 
   async #upsertDesired(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, reason: string): Promise<{ desiredVersion: number }> {
@@ -944,10 +979,25 @@ export class ChannelRuntime {
     );
   }
 
+  async #lockJobInventory(client: PoolClient, identity: WorkerIdentity, jobId: string, resultId?: string): Promise<void> {
+    // Read the worker-owned scope without a job row lock first. Dispatchers lock
+    // provider inventory before desired/job rows, so the reverse order can deadlock.
+    const scope = await client.query<{ provider_id: string }>(
+      `SELECT j.provider_id FROM channel_jobs j WHERE j.id=$1::uuid
+        AND (j.leased_worker_id=$2 OR EXISTS (
+          SELECT 1 FROM channel_job_results r
+           WHERE r.job_id=j.id AND r.worker_id=$2 AND r.result_id=$3::uuid))`,
+      [jobId, identity.workerId, resultId ?? null],
+    );
+    if (!scope.rows[0]) throw new StoreAccessDeniedError();
+    await lockProviderInventory(client, scope.rows[0].provider_id);
+  }
+
   async preflight(identity: WorkerIdentity, jobId: string, leaseToken: string): Promise<{ readonly ready: true; readonly desiredState: ChannelDesiredState }>{
     assertUuid(jobId, "jobId");
     const result = await withTransaction(this.#pool, async (client): Promise<{ ready: true; desiredState: ChannelDesiredState } | { conflict: string }> => {
       await this.#requireWorker(client, identity);
+      await this.#lockJobInventory(client, identity, jobId);
       const job = await this.#leasedJob(client, identity, jobId, leaseToken);
       const nowUtc = this.#nowIso();
       if (isoValue(job, "lease_expires_at") <= nowUtc || isoValue(job, "job_deadline_at") <= nowUtc) {
@@ -956,7 +1006,7 @@ export class ChannelRuntime {
       }
       const current = await client.query<DbRow>(
         `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,l.active AS listing_active,
-                a.site,l.mapping_version,l.can_open,l.can_close,l.can_observe,l.adapter,l.adapter_version,
+                a.site,l.product_id,l.mapping_version,l.can_open,l.can_close,l.can_observe,l.adapter,l.adapter_version,
                 d.desired_state,d.desired_version,d.mapping_version AS desired_mapping_version,d.source_start_at,d.source_end_at,p.status AS product_status
            FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
            JOIN channel_desired_states d ON d.listing_id=l.id AND d.occurrence_id=$3
@@ -997,7 +1047,7 @@ export class ChannelRuntime {
         return { conflict: "Source occurrence timing changed; the account remains locked." };
       }
       if (job.action !== "OBSERVE") {
-        const availability = await this.#liveAvailability(client, text(job, "provider_id"), occurrence, nowUtc);
+        const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(state, "product_id"), occurrence, nowUtc);
         if (desiredAction(availability.bookable ? "OPEN" : "CLOSED") !== job.action) {
           return { conflict: "Live availability changed; the old lease remains locked until stopped." };
         }
@@ -1051,6 +1101,7 @@ export class ChannelRuntime {
     if (input.observedState !== undefined && input.observedState !== "OPEN" && input.observedState !== "CLOSED") throw new StoreValidationError("result.observedState is invalid.");
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
+      await this.#lockJobInventory(client, identity, jobId, input.resultId);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,23))", [`channel-result:${input.resultId}`]);
       const repeated = await client.query<DbRow>(
         "SELECT job_id,worker_id,lease_epoch,lease_digest,fingerprint,accepted_as_current FROM channel_job_results WHERE result_id=$1::uuid",
@@ -1097,7 +1148,7 @@ export class ChannelRuntime {
         && observedMs <= Math.min(Date.parse(isoValue(job, "lease_expires_at")), Date.parse(isoValue(job, "job_deadline_at")), this.#now().getTime() + 5_000);
       const currentResult = await client.query<DbRow>(
         `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,
-                l.active AS listing_active,l.mapping_version,l.adapter,l.adapter_version,l.can_open,l.can_close,l.can_observe,
+                l.active AS listing_active,l.product_id,l.mapping_version,l.adapter,l.adapter_version,l.can_open,l.can_close,l.can_observe,
                 d.desired_version,d.desired_state,d.mapping_version AS desired_mapping_version,d.source_start_at,d.source_end_at,
                 p.status AS product_status
            FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
@@ -1116,7 +1167,7 @@ export class ChannelRuntime {
           liveOccurrenceMatches = occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")
             && isoValue(current, "source_start_at") === occurrence.startUtc && isoValue(current, "source_end_at") === occurrence.endUtc;
           if (liveOccurrenceMatches && action !== "OBSERVE") {
-            const availability = await this.#liveAvailability(client, text(job, "provider_id"), occurrence, nowUtc);
+            const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(current, "product_id"), occurrence, nowUtc);
             liveActionAllowed = desiredAction(availability.bookable ? "OPEN" : "CLOSED") === action;
           }
         } catch (error) {
@@ -1219,7 +1270,7 @@ export class ChannelRuntime {
     const listing = listingResult.rows[0];
     if (!listing) return;
     const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
-    const availability = await this.#liveAvailability(client, text(job, "provider_id"), occurrence, this.#nowIso());
+    const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(listing, "product_id"), occurrence, this.#nowIso());
     const desiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
     const desired = await client.query<DbRow>(
       `UPDATE channel_desired_states SET desired_state=$3,reason=$4,desired_version=desired_version+1,mapping_version=$5,

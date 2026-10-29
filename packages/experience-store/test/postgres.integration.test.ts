@@ -23,7 +23,7 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       await pool.query(oauthMigration);
       const coverageMigration = await readFile(new URL("../migrations/0003_google_busy_coverage.sql", import.meta.url), "utf8");
       await pool.query(coverageMigration);
-      for (const name of ["0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql"]) {
+      for (const name of ["0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql", "0009_shared_inventory.sql"]) {
         await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       }
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
@@ -104,6 +104,11 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
         coverageStartUtc: "2099-01-01T00:00:00.000Z", coverageEndUtc: "2099-01-03T00:00:00.000Z",
         busyIntervals: [{ startUtc: "2099-01-02T01:00:00.000Z", endUtc: "2099-01-02T02:00:00.000Z" }],
       });
+      const freshnessDelivery = await pool.query<{ available_at: Date }>(
+        "SELECT available_at FROM calendar_outbox_events WHERE payload->>'cause'='google_freshness_expired' ORDER BY id DESC LIMIT 1",
+      );
+      assert.ok(freshnessDelivery.rows[0]);
+      assert.ok(freshnessDelivery.rows[0].available_at.getTime() > Date.now());
       await assert.rejects(
         () => store.createBookingHold(actor, { productId: "tea", occurrenceId: nextOccurrenceId, seats: 1, idempotencyKey: "overlap-busy" }),
         (error: unknown) => error instanceof BookingUnavailableError && error.reason === "GOOGLE_BUSY",
@@ -169,7 +174,7 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
 
       const repeated = await store.setOccurrenceSalesState(actor, "tea", rule.id, { occurrenceId: fourthOccurrenceId, desiredState: "OPEN" }, closed.version, "00000000-0000-4000-8000-000000000004");
       assert.equal(repeated.repeated, true);
-      const events = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM calendar_outbox_events WHERE topic='calendar.changed'");
+      const events = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM calendar_commands WHERE action<>'inventory.recalculate'");
       assert.equal(events.rows[0]?.count, "5");
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);

@@ -10,10 +10,43 @@ import type {
 export type MembershipRole = "OWNER" | "EDITOR" | "VIEWER";
 export type ProductStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export type BookingStatus = "HOLD" | "CONFIRMED" | "EXPIRED" | "CANCELLED" | "PAYMENT_REVIEW";
+export type BookingMode = "SEAT" | "PRIVATE_GROUP";
+export type InventoryResourceKind = "VENUE" | "INSTRUCTOR" | "EQUIPMENT";
 
 export interface HostActor {
   readonly providerId: string;
   readonly nihoUserId: string;
+}
+
+export interface InventoryResourceInput {
+  readonly id: string;
+  readonly kind: InventoryResourceKind;
+  readonly displayName: string;
+  readonly active: boolean;
+}
+
+export interface InventoryResourceRecord extends InventoryResourceInput {
+  readonly providerId: string;
+  readonly version: number;
+  readonly createdAtUtc: string;
+  readonly updatedAtUtc: string;
+}
+
+export interface ProductInventoryResourceInput {
+  readonly resourceId: string;
+  readonly prepareMinutes: number;
+  readonly cleanupMinutes: number;
+}
+
+export interface ProductInventorySettingInput {
+  readonly bookingMode: BookingMode;
+  readonly resources: readonly ProductInventoryResourceInput[];
+}
+
+export interface ProductInventorySetting extends ProductInventorySettingInput {
+  readonly providerId: string;
+  readonly productId: string;
+  readonly version: number;
 }
 
 /** A tenant scope established by a trusted public API or worker before calling the store. */
