@@ -3,6 +3,7 @@ import { createGygDriver } from "./gyg-driver.mjs";
 import { createSupervisorRpc } from "./mcp-rpc.mjs";
 import { runClaude } from "./claude-runner.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
+import { MAX_JOB_MS } from "./constants.mjs";
 
 const wait = (ms, signal) => new Promise((resolve) => {
   if (signal.aborted) return resolve(false);
@@ -72,7 +73,7 @@ export async function executeJob({
       throw abortReason ?? new ContractError(now() >= deadlineMs ? "DEADLINE_EXCEEDED" : "LEASE_RENEW_FAILED");
     }
   };
-  const deadlineMs = Date.parse(job.deadlineAtUtc);
+  const deadlineMs = Math.min(Date.parse(job.deadlineAtUtc), now() + MAX_JOB_MS);
   let leaseExpiresMs = Date.parse(job.leaseExpiresAtUtc);
   const deadlineTimer = setTimeout(() => abort(new ContractError("DEADLINE_EXCEEDED")), Math.max(0, deadlineMs - now()));
   deadlineTimer.unref?.();

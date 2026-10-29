@@ -63,12 +63,14 @@ test("cloud timeout remains armed while reading a hanging response body", async 
   assert.equal(cancelled, true);
 });
 
-test("claim DTO is exact and enforces live lease plus <=180 second deadline", () => {
+test("claim DTO requires a live lease and bounds the deadline with small clock skew", () => {
   const state = { accountId: "10001", productId: "20002", optionId: "30003", localDateTime: "2099-01-01T13:00:00" };
   const { localDateTime, desiredState, ...wire } = makeJob(state, "SET_CLOSED");
   assert.equal(validateClaim(wire).desiredState, "CLOSED");
   assert.throws(() => validateClaim({ ...wire, extra: true }));
-  assert.throws(() => validateClaim({ ...wire, deadlineAtUtc: new Date(Date.now() + 180_001).toISOString() }));
+  const now = Date.now();
+  assert.equal(validateClaim(wire, now - 250).desiredState, "CLOSED");
+  assert.throws(() => validateClaim({ ...wire, deadlineAtUtc: new Date(now + 185_001).toISOString() }, now));
   assert.throws(() => validateClaim({ ...wire, leaseExpiresAtUtc: new Date(Date.now() - 1).toISOString() }));
 });
 

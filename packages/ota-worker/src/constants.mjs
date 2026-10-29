@@ -6,6 +6,7 @@ export const SITE = "GetYourGuide";
 export const CONNECTION_MODE = "BROWSER";
 export const TIME_ZONE = "Asia/Tokyo";
 export const MAX_JOB_MS = 180_000;
+export const MAX_CLOCK_SKEW_MS = 5_000;
 export const DEFAULT_RENEW_MS = 20_000;
 export const DEFAULT_POLL_MS = 15_000;
 export const BACKOFF_MS = Object.freeze([15_000, 30_000, 60_000]);

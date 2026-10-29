@@ -14,6 +14,7 @@
 - 既存 lock は stale に見えても自動削除しません。`STALE_LOCK_NEEDS_REVIEW` で停止し、所有 process と journal を人が確認してから手動 recovery します。
 - 再起動時に `CLAIMED` / `RUNNING` が残っていたら OPEN を再実行しません。`QUARANTINED` にして停止し、旧 browser 停止確認と運用者による明示 recovery を要求します。
 - lease は約20秒ごとに renew します。claim deadline は最大180秒です。renew/deadline/preflight failure 後は gate を閉じ、以後の write preflight を拒否し、自分が起動した browser/Claude process group だけを停止します。両方の終了を確認できない result は `stopped:false` です。
+- claim受信時は端末間の小さな時計差を最大5秒まで許容します。実行時間は受信から180秒とserver deadlineの短い方に制限し、serverのlease/preflight判定も維持します。
 - CDPのcloseは最大1秒だけ待ち、応答がなくても独立したprocess groupの停止へ進みます。Chromeの通信応答に停止保証を依存させません。
 - `VERIFIED` は model の文章では決まりません。最後に supervisor が reload して manual Block と actual `Bookable` を独立確認し、その後 process 停止を確認します。OPEN は「manual Block=false かつ Bookable」、CLOSED は「manual Block=true」が必要です。
 - result API は exact な 200 JSON `{acceptedAsCurrent,repeated}` を受けます。`acceptedAsCurrent:false` も durable receipt として同一 result の再送は止めますが、green success には分類せず audit 状態として記録します。result receipt の AUTH/不正応答では pending result を消さず halt します。

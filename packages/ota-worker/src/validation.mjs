@@ -3,6 +3,7 @@ import {
   ADAPTER_VERSION,
   CONNECTION_MODE,
   MAX_JOB_MS,
+  MAX_CLOCK_SKEW_MS,
   OPTIONAL_TARGET_KEYS,
   SITE,
   TARGET_KEYS,
@@ -93,7 +94,7 @@ export function validateClaim(value, nowMs = Date.now()) {
   canonicalInstant(value.sourceStartAtUtc, "sourceStartAtUtc");
   canonicalInstant(value.sourceEndAtUtc, "sourceEndAtUtc");
   const deadlineMs = Date.parse(value.deadlineAtUtc);
-  if (deadlineMs <= nowMs || deadlineMs - nowMs > MAX_JOB_MS || Date.parse(value.leaseExpiresAtUtc) <= nowMs || Date.parse(value.leaseExpiresAtUtc) > deadlineMs
+  if (deadlineMs <= nowMs || deadlineMs - nowMs > MAX_JOB_MS + MAX_CLOCK_SKEW_MS || Date.parse(value.leaseExpiresAtUtc) <= nowMs || Date.parse(value.leaseExpiresAtUtc) > deadlineMs
     || Date.parse(value.sourceEndAtUtc) <= Date.parse(value.sourceStartAtUtc)) throw new ContractError("INVALID_JOB_DEADLINE");
   const target = validateTarget(value.target);
   const localDateTime = validateTokyoLocal(tokyoLocalFromUtc(value.sourceStartAtUtc));
