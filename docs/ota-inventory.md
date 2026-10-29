@@ -5,7 +5,7 @@ Issue #197 の共有在庫基盤を記録する。外部予約の取込み・取
 ## 在庫モデル
 
 - 未設定商品は従来どおり `SEAT`（席数制）である。`PRIVATE_GROUP` を明示した商品だけ、人数とは別に1予約を1組として扱う。定員を1へ書き換えないため、1組6名の申込みにも既存の人数上限と料金計算がそのまま働く。
-- `VENUE`、`INSTRUCTOR`、`EQUIPMENT` はprovider所有で、同時に使えるのは1組である。商品割当には準備・片付け分を持ち、占有区間は半開区間 `[start, end)` とする。終了と次の開始が同じなら競合しない。
+- `VENUE`、`INSTRUCTOR`、`EQUIPMENT` はprovider所有で、別の開催回同士では同時に使えない。同じ開催回の席数制予約は資源を共有し、PRIVATE_GROUPの組数は別途1組に制限する。商品割当には準備・片付け分を持ち、占有区間は半開区間 `[start, end)` とする。終了と次の開始が同じなら競合しない。
 - 資源と割当の外部キーは常に `(provider_id, id)` の複合キーである。同じ会場をNIHO共通で利用する場合も、現段階では別providerから共有・参照できない。将来共有する場合は、所有者とは別の明示的grantと監査を追加し、この制約を迂回しない。
 - 予約時のmode、資源kind、準備・片付け、占有開始・終了はimmutable snapshotとして保存する。資源を無効化しても確定予約のsnapshotは残り、以後の新規受付だけを止める。`CONFIRMED` と未失効の `HOLD` だけが現在の占有となり、期限後に届いた支払の `PAYMENT_REVIEW` は資源を再取得しない。
 
@@ -35,6 +35,6 @@ providerごとのtickはDBに1件だけ置き、pending commandがある間は�
 
 ## 配備と検証
 
-`0009_shared_inventory.sql` を先に反映し、このスキーマを参照するAPIを配備する。既存商品は設定未登録の席制を保つ。source codeの実装と本番有効化は分けて受け入れる。
+`0009_shared_inventory.sql` を先に反映し、このスキーマを参照するAPIを配備する。既存商品は設定未登録の席制を保つ。全APIを新コードへ切り替え、旧writerのrevisionを停止した後にのみPRIVATE_GROUPと資源割当を有効にする。旧writerは新しいmutex・占有を扱えないため、設定を有効にしたまま旧新writerを混在させない。source codeの実装と本番有効化は分けて受け入れる。
 
 実PostgreSQLで、2名／6名の同時HOLD、同室・同講師と準備片付け、別室／隣接、保存失敗のrollback、失効後の実支払によるPAYMENT_REVIEW、古いOPENの拒否、並行HOLDとOPEN resultの受理順、tick/cursor/通知outbox分離を確認した。結果受理中にHOLDがDBのロック待ちになることと、receipt保存→HOLD作成の順序を実DBで確認する。

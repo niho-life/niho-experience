@@ -10,7 +10,7 @@
 - capability は account/listing 作成だけでは有効にならない。配備設定 `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` に明示された `site/adapter@version` の boolean だけを Admin が保存でき、claim/preflight/result でも同じ配備 allowlist を再確認する。未設定・不正設定は全 capability false となり、live job は claim されない。
 - groups/resources の共有在庫基盤は [OTA共有在庫](ota-inventory.md) に実装したが、外部予約取込みと実OTAでの結合受入は未完了なので、配備 flag は引き続き有効にしない。
 
-`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` は秘密ではない JSON で、例は `{"Airbnb/browser-v1@1":{"canObserve":true,"canClose":true}}`。これは実装・受入済み capability の allowlist であり、サイト名だけから対応済みとは判断しない。
+`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` は秘密ではない JSON で、例は `{"GetYourGuide/gyg-browser@1":{"canObserve":true,"canClose":true,"canOpen":true}}`。これは実装・受入済み capability の allowlist であり、サイト名だけから対応済みとは判断しない。
 
 ## Registry と権限境界
 
