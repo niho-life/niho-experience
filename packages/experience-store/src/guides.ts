@@ -636,6 +636,14 @@ async function activePublicLinksByPublication(
        JOIN experience_products product
          ON product.provider_id=l.provider_id AND product.id=l.product_id AND product.status='PUBLISHED'
       WHERE l.publication_id=ANY($1::bigint[])
+        -- The public experience API exposes only a slug. If another product can
+        -- resolve to that slug, the caller cannot prove which product its card
+        -- represents. Hide the link until the slug identifies this exact product.
+        AND NOT EXISTS (
+          SELECT 1 FROM experience_products other_product
+           WHERE other_product.slug=product.slug
+             AND (other_product.provider_id, other_product.id)<>(l.provider_id, l.product_id)
+        )
         AND (
           (l.permission_basis='PROVIDER_MEMBERSHIP' AND EXISTS (
             SELECT 1 FROM provider_memberships m
