@@ -17,6 +17,7 @@ const migrations = [
   "0008_guide_link_invitations.sql",
   "0009_guide_media.sql",
   "0010_guide_body_media.sql",
+  "0011_guide_draft_product_links.sql",
 ] as const;
 
 const content = {
@@ -51,6 +52,7 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
            cancellation_terms_ref, seller_niho_account_ref, stripe_connect_account_ref, seller_display_name
          ) VALUES
            ('provider-a','tea','tea','PUBLISHED','Synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic','Synthetic Seller'),
+           ('provider-a','tea-two','tea-two','PUBLISHED','Synthetic tea two','{}','JPY',1200,'terms','seller','acct_synthetic','Synthetic Seller'),
            ('provider-b','walk','walk','PUBLISHED','Synthetic walk','{}','JPY',2000,'terms','seller','acct_synthetic_b','Synthetic Seller'),
            ('provider-b','draft-product','draft-product','DRAFT','Synthetic draft','{}','JPY',2000,'terms','seller','acct_synthetic_b','Synthetic Seller')`,
       );
@@ -123,8 +125,35 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         description: "A synthetic guide for database tests.",
         categorySlug: "food",
         content,
+        draftProductLinks: [
+          { providerId: "provider-a", productId: "tea" },
+          { providerId: "provider-a", productId: "tea-two" },
+        ],
       }, created.revision);
       assert.equal(saved.revision, 2);
+      const reordered = await store.saveDraft(actor, created.id, {
+        slug: saved.slug,
+        title: saved.title,
+        description: saved.description,
+        categorySlug: "food",
+        content: saved.content,
+        draftProductLinks: [
+          { providerId: "provider-a", productId: "tea-two" },
+          { providerId: "provider-a", productId: "tea" },
+        ],
+      }, saved.revision);
+      assert.deepEqual(reordered.draftProductLinks, [
+        { providerId: "provider-a", productId: "tea-two" },
+        { providerId: "provider-a", productId: "tea" },
+      ]);
+      const publicationDraft = await store.saveDraft(actor, created.id, {
+        slug: reordered.slug,
+        title: reordered.title,
+        description: reordered.description,
+        categorySlug: "food",
+        content: reordered.content,
+        draftProductLinks: [{ providerId: "provider-a", productId: "tea" }],
+      }, reordered.revision);
       await assert.rejects(
         () => store.saveDraft(actor, created.id, {
           slug: created.slug,
@@ -137,9 +166,8 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       );
 
       const unlisted = await store.commitPublication(actor, created.id, {
-        expectedRevision: saved.revision,
+        expectedRevision: publicationDraft.revision,
         visibility: "UNLISTED",
-        productLinks: [{ providerId: "provider-a", productId: "tea" }],
       });
       assert.equal(unlisted.indexable, false);
       assert.equal(unlisted.category.labelEn, "Food");
@@ -155,6 +183,7 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         categorySlug: "food",
         content: { ...content, markdown: `${content.markdown}\n\nA private edit.` },
       }, afterPublish.revision);
+      assert.deepEqual(edited.draftProductLinks, [{ providerId: "provider-a", productId: "tea" }]);
       assert.equal((await store.getPublicArticleBySlug(created.slug))?.title, "Synthetic guide");
       await assert.rejects(
         () => store.saveDraft(actor, created.id, {
@@ -172,14 +201,17 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         [created.id],
       );
       await assert.rejects(
-        () => store.commitPublication(actor, created.id, {
-          expectedRevision: edited.revision,
-          visibility: "PUBLIC",
-          productLinks: [
+        () => store.saveDraft(actor, created.id, {
+          slug: edited.slug,
+          title: edited.title,
+          description: edited.description,
+          categorySlug: "food",
+          content: edited.content,
+          draftProductLinks: [
             { providerId: "provider-a", productId: "tea" },
             { providerId: "provider-b", productId: "draft-product" },
           ],
-        }),
+        }, edited.revision),
         StoreNotFoundError,
       );
       assert.equal(
@@ -193,7 +225,6 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       const listed = await store.commitPublication(actor, created.id, {
         expectedRevision: edited.revision,
         visibility: "PUBLIC",
-        productLinks: [{ providerId: "provider-a", productId: "tea" }],
       });
       assert.equal(listed.publicationNumber, 2);
       assert.equal(listed.firstPublishedAtUtc, unlisted.publishedAtUtc);
@@ -201,6 +232,7 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       assert.equal((await store.getPublicArticleBySlug(created.slug))?.firstPublishedAtUtc, unlisted.publishedAtUtc);
       await pool.query("UPDATE guide_categories SET label_en='Food and drink', active=false WHERE slug='food'");
       assert.equal((await store.getPublicArticleBySlug(created.slug))?.category.labelEn, "Food");
+      await pool.query("UPDATE guide_categories SET active=true WHERE slug='food'");
 
       const linkAudit = await pool.query<{ link_created_by_niho_user_id: string; permission_basis: string }>(
         `SELECT link_created_by_niho_user_id, permission_basis
@@ -233,6 +265,47 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         "UPDATE guide_product_link_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='writer-a'",
       );
       assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, []);
+      const expiredPermissionDraft = await store.getArticle(actor, created.id);
+      const retained = await store.saveDraft(actor, created.id, {
+        slug: expiredPermissionDraft.slug,
+        title: "Retained while link permission is unavailable",
+        description: expiredPermissionDraft.description,
+        categorySlug: "food",
+        content: expiredPermissionDraft.content,
+      }, expiredPermissionDraft.revision);
+      assert.deepEqual(retained.draftProductLinks, [{ providerId: "provider-a", productId: "tea" }]);
+      await assert.rejects(
+        () => store.commitPublication(actor, created.id, {
+          expectedRevision: retained.revision,
+          visibility: "PUBLIC",
+        }),
+        StoreAccessDeniedError,
+      );
+      assert.equal((await store.getPublicArticleBySlug(created.slug))?.publicationId, listed.publicationId);
+      await assert.rejects(
+        () => store.saveDraft(actor, created.id, {
+          slug: retained.slug,
+          title: "Must roll back",
+          description: retained.description,
+          categorySlug: "food",
+          content: retained.content,
+          draftProductLinks: [
+            ...retained.draftProductLinks,
+            { providerId: "provider-b", productId: "walk" },
+          ],
+        }, retained.revision),
+        StoreAccessDeniedError,
+      );
+      assert.equal((await store.getArticle(actor, created.id)).title, retained.title);
+      const removed = await store.saveDraft(actor, created.id, {
+        slug: retained.slug,
+        title: retained.title,
+        description: retained.description,
+        categorySlug: "food",
+        content: retained.content,
+        draftProductLinks: [],
+      }, retained.revision);
+      assert.deepEqual(removed.draftProductLinks, []);
 
       const host = { nihoUserId: "host-a" } as const;
       await pool.query(
@@ -247,20 +320,54 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         description: "A synthetic host guide.",
         content,
       });
+      assert.deepEqual(await store.listLinkableProducts(host, hostArticle.subject), [
+        { providerId: "provider-a", productId: "tea", publicTitle: "Synthetic tea" },
+        { providerId: "provider-a", productId: "tea-two", publicTitle: "Synthetic tea two" },
+      ]);
       await assert.rejects(
-        () => store.commitPublication(host, hostArticle.id, {
-          expectedRevision: hostArticle.revision,
-          visibility: "PUBLIC",
-          productLinks: [{ providerId: "provider-b", productId: "walk" }],
-        }),
+        () => store.saveDraft(host, hostArticle.id, {
+          slug: hostArticle.slug,
+          title: hostArticle.title,
+          description: hostArticle.description,
+          categorySlug: "culture",
+          content: hostArticle.content,
+          draftProductLinks: [{ providerId: "provider-b", productId: "walk" }],
+        }, hostArticle.revision),
         StoreValidationError,
       );
+      const linkedHostArticle = await store.saveDraft(host, hostArticle.id, {
+        slug: hostArticle.slug,
+        title: hostArticle.title,
+        description: hostArticle.description,
+        categorySlug: "culture",
+        content: hostArticle.content,
+        draftProductLinks: [
+          { providerId: "provider-a", productId: "tea-two" },
+          { providerId: "provider-a", productId: "tea" },
+        ],
+      }, hostArticle.revision);
       const hostPublication = await store.commitPublication(host, hostArticle.id, {
-        expectedRevision: hostArticle.revision,
+        expectedRevision: linkedHostArticle.revision,
         visibility: "PUBLIC",
-        productLinks: [{ providerId: "provider-a", productId: "tea" }],
       });
-      assert.deepEqual(hostPublication.productLinks, [{ providerId: "provider-a", productId: "tea", productSlug: "tea" }]);
+      const orderedHostLinks = [
+        { providerId: "provider-a", productId: "tea-two", productSlug: "tea-two" },
+        { providerId: "provider-a", productId: "tea", productSlug: "tea" },
+      ];
+      assert.deepEqual(hostPublication.productLinks, orderedHostLinks);
+      assert.deepEqual((await store.getPublicArticleBySlug(hostArticle.slug))?.productLinks, orderedHostLinks);
+      assert.deepEqual(
+        (await store.listPublicArticles()).find((article) => article.slug === hostArticle.slug)?.productLinks,
+        orderedHostLinks,
+      );
+      assert.deepEqual((await pool.query<{ product_id: string; display_order: number }>(
+        `SELECT product_id, display_order FROM guide_publication_product_links
+          WHERE publication_id=$1 ORDER BY display_order`,
+        [hostPublication.publicationId],
+      )).rows, [
+        { product_id: "tea-two", display_order: 1 },
+        { product_id: "tea", display_order: 2 },
+      ]);
       await pool.query(
         "UPDATE provider_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='host-a'",
       );

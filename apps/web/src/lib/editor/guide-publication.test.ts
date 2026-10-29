@@ -22,6 +22,7 @@ const validArticle: GuideArticleRecord = {
     markdown: "## Start here\n\nThis is safe test content.",
     author: { name: "Synthetic Writer", role: "Local guide", bio: "A test-only profile." },
   },
+  draftProductLinks: [],
   status: "DRAFT",
   revision: 2,
   createdAtUtc: "2026-10-29T00:00:00.000Z",
@@ -98,6 +99,23 @@ describe("guide publication validation", () => {
       field: "cover",
       message: expect.stringContaining("掲載許諾"),
     });
+  });
+
+  it("points stale saved related experiences back to the right rail", () => {
+    const linked = {
+      ...validArticle,
+      draftProductLinks: [{ providerId: "provider-a", productId: "tea" }],
+    };
+    expect(guidePublicationProblems(linked, new Set(["walks"]), [], new Set())).toContainEqual({
+      field: "relatedExperiences",
+      message: expect.stringContaining("右側"),
+    });
+    expect(guidePublicationProblems(
+      linked,
+      new Set(["walks"]),
+      [],
+      new Set(["provider-a\u0000tea"]),
+    )).toEqual([]);
   });
 
   it("parses safe private previews and returns author-correctable errors", () => {

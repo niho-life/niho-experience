@@ -3,6 +3,8 @@ import type {
   GuideCategory,
   GuideContent,
   GuideDraftCover,
+  GuideProductLinkInput,
+  LinkableGuideProduct,
   GuidePublicationVisibility,
   GuideSubject,
 } from "@niho-experience/experience-store";
@@ -18,6 +20,7 @@ export interface EditorGuideArticle {
   readonly categorySlug?: string;
   readonly content: GuideContent;
   readonly cover?: GuideDraftCover;
+  readonly draftProductLinks: readonly GuideProductLinkInput[];
   readonly status: GuideArticleStatus;
   readonly revision: number;
   readonly currentPublication?: {
@@ -108,6 +111,7 @@ export type GuideListResponse = { readonly guides: readonly EditorGuideArticle[]
 export type GuideResponse = { readonly guide: EditorGuideArticle };
 export type GuideCategoriesResponse = { readonly categories: readonly GuideCategory[] };
 export type GuideSubjectsResponse = { readonly subjects: readonly GuideSubject[] };
+export type GuideLinkableProductsResponse = { readonly products: readonly LinkableGuideProduct[] };
 export type GuideMutationResponse = { readonly id: string; readonly revision: number };
 export type GuideCoverUploadResponse = {
   readonly asset: { readonly id: string; readonly width: number; readonly height: number };

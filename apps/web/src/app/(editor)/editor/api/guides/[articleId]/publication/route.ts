@@ -35,13 +35,14 @@ export async function POST(request: Request, context: GuideRouteContext) {
     if (article.revision !== input.expectedRevision) return guideApiJson({ error: "conflict" }, 409);
     const categories = await loaded.value.repository.listActiveCategories();
     const media = await loaded.value.repository.listReadyMediaAssets(loaded.value.actor, articleId);
-    const problems = guidePublicationProblems(article, new Set(categories.map((category) => category.slug)), media);
+    const products = await loaded.value.repository.listLinkableProducts(loaded.value.actor, article.subject);
+    const productKeys = new Set(products.map((product) => `${product.providerId}\u0000${product.productId}`));
+    const problems = guidePublicationProblems(article, new Set(categories.map((category) => category.slug)), media, productKeys);
     if (problems.length) return guideApiJson({ error: "invalid_input", problems }, 400);
 
     await loaded.value.repository.commitPublication(loaded.value.actor, articleId, {
       expectedRevision: input.expectedRevision,
       visibility: input.visibility,
-      productLinks: [],
     });
     // Publication is committed. A second tab may save before this read, so never
     // give the caller a newer revision for content it has not displayed.

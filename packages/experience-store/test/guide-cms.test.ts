@@ -6,6 +6,20 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
+  it("adds ordered article draft links without private identity fields", async () => {
+    const sql = await readFile(new URL("../migrations/0011_guide_draft_product_links.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /CREATE TABLE guide_draft_product_links/);
+    assert.match(sql, /PRIMARY KEY \(article_id, provider_id, product_id\)/);
+    assert.match(sql, /UNIQUE \(article_id, display_order\)/);
+    assert.match(sql, /display_order BETWEEN 1 AND 3/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, product_id\)[\s\S]*experience_products/);
+    assert.match(sql, /ALTER TABLE guide_publication_product_links[\s\S]*ADD COLUMN display_order smallint/);
+    assert.match(sql, /ON guide_publication_product_links \(publication_id, display_order\)/);
+    assert.doesNotMatch(sql, /niho_user|email|display_name|profile/i);
+  });
+
   it("adds immutable figure rights and ordered publication slots in a forward migration", async () => {
     const sql = await readFile(new URL("../migrations/0010_guide_body_media.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

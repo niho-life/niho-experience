@@ -4,6 +4,7 @@ import type {
   GuideAuthor,
   GuideContent,
   GuideDraftCover,
+  GuideProductLinkInput,
   GuideSubject,
   SaveGuideDraftInput,
 } from "@niho-experience/experience-store";
@@ -74,6 +75,23 @@ function parseCover(value: unknown): GuideDraftCover | null {
   };
 }
 
+function parseProductLinks(value: unknown): readonly GuideProductLinkInput[] | null {
+  if (!Array.isArray(value) || value.length > 3) return null;
+  const links: GuideProductLinkInput[] = [];
+  const keys = new Set<string>();
+  for (const candidate of value) {
+    const link = objectWithKeys(candidate, ["providerId", "productId"]);
+    if (!link || Object.keys(link).length !== 2 || typeof link.providerId !== "string" || typeof link.productId !== "string") {
+      return null;
+    }
+    const key = `${link.providerId}\u0000${link.productId}`;
+    if (keys.has(key)) return null;
+    keys.add(key);
+    links.push({ providerId: link.providerId, productId: link.productId });
+  }
+  return links;
+}
+
 export function parseGuideCreateBody(value: unknown): GuideCreateBody | null {
   const body = objectWithKeys(value, ["slug", "title", "subject", "description", "categorySlug", "content"]);
   if (!body || typeof body.slug !== "string" || typeof body.title !== "string") return null;
@@ -98,7 +116,7 @@ export function parseGuideCreateBody(value: unknown): GuideCreateBody | null {
 }
 
 export function parseGuidePatchBody(value: unknown): GuidePatchBody | null {
-  const body = objectWithKeys(value, ["slug", "title", "description", "categorySlug", "content", "cover", "expectedRevision"]);
+  const body = objectWithKeys(value, ["slug", "title", "description", "categorySlug", "content", "cover", "draftProductLinks", "expectedRevision"]);
   if (!body || typeof body.slug !== "string" || typeof body.title !== "string" || typeof body.description !== "string") return null;
   if (body.categorySlug !== undefined && typeof body.categorySlug !== "string") return null;
   if (typeof body.expectedRevision !== "number") return null;
@@ -110,6 +128,12 @@ export function parseGuidePatchBody(value: unknown): GuidePatchBody | null {
     cover = parseCover(body.cover);
     if (!cover) return null;
   }
+  let draftProductLinks: readonly GuideProductLinkInput[] | undefined;
+  if (body.draftProductLinks !== undefined) {
+    const parsed = parseProductLinks(body.draftProductLinks);
+    if (!parsed) return null;
+    draftProductLinks = parsed;
+  }
   return {
     draft: {
       slug: body.slug,
@@ -118,6 +142,7 @@ export function parseGuidePatchBody(value: unknown): GuidePatchBody | null {
       ...(body.categorySlug === undefined ? {} : { categorySlug: body.categorySlug }),
       content,
       ...(cover === undefined ? {} : { cover }),
+      ...(draftProductLinks === undefined ? {} : { draftProductLinks }),
     },
     expectedRevision: body.expectedRevision,
   };
@@ -133,6 +158,7 @@ export function privateGuideArticle(article: GuideArticleRecord) {
     ...(article.categorySlug === undefined ? {} : { categorySlug: article.categorySlug }),
     content: article.content,
     ...(article.cover === undefined ? {} : { cover: article.cover }),
+    draftProductLinks: article.draftProductLinks,
     status: article.status,
     revision: article.revision,
     ...(article.currentPublication === undefined ? {} : { currentPublication: article.currentPublication }),

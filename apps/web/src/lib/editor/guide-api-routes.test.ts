@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     listActiveCategories: vi.fn(),
     listReadyMediaAssets: vi.fn(),
     listWritableSubjects: vi.fn(),
+    listLinkableProducts: vi.fn(),
   },
 }));
 
@@ -38,6 +39,7 @@ import { GET as listGuides, POST as createGuide } from "@/app/(editor)/editor/ap
 import { GET as getGuide, PATCH as patchGuide } from "@/app/(editor)/editor/api/guides/[articleId]/route";
 import { GET as getCategories } from "@/app/(editor)/editor/api/guides/categories/route";
 import { GET as getSubjects } from "@/app/(editor)/editor/api/guides/subjects/route";
+import { GET as getLinkableProducts } from "@/app/(editor)/editor/api/guides/[articleId]/linkable-products/route";
 import { GET as getPublicationPreflight } from "@/app/(editor)/editor/api/guides/[articleId]/publication/preflight/route";
 import { DELETE as stopGuidePublication, POST as publishGuide } from "@/app/(editor)/editor/api/guides/[articleId]/publication/route";
 
@@ -56,6 +58,7 @@ const article = {
   title: "Synthetic guide",
   description: "Test-only guide.",
   content: { markdown: "## Synthetic" },
+  draftProductLinks: [],
   status: "DRAFT" as const,
   revision: 2,
   createdAtUtc: "2026-10-29T00:00:00.000Z",
@@ -109,6 +112,7 @@ beforeEach(() => {
   mocks.repository.listActiveCategories.mockResolvedValue([{ slug: "walks", labelEn: "Walks", labelJa: "散歩", displayOrder: 10 }]);
   mocks.repository.listReadyMediaAssets.mockResolvedValue([]);
   mocks.repository.listWritableSubjects.mockResolvedValue([{ kind: "WRITER" }]);
+  mocks.repository.listLinkableProducts.mockResolvedValue([]);
 });
 
 describe("private editor guide routes", () => {
@@ -123,6 +127,7 @@ describe("private editor guide routes", () => {
       }), context),
       getCategories(),
       getSubjects(),
+      getLinkableProducts(new Request(`${SITE}/editor/api/guides/article-synthetic/linkable-products`), context),
       getPublicationPreflight(new Request(`${SITE}/editor/api/guides/article-synthetic/publication/preflight`), context),
       publishGuide(jsonRequest("/editor/api/guides/article-synthetic/publication", "POST", {
         expectedRevision: 2, visibility: "PUBLIC",
@@ -131,10 +136,10 @@ describe("private editor guide routes", () => {
         expectedRevision: 2,
       }), context),
     ]);
-    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401]);
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401]);
     expect(responses.every((response) => response.headers.get("cache-control") === "private, no-store")).toBe(true);
     expect(responses.every((response) => response.headers.get("x-robots-tag") === "noindex, nofollow")).toBe(true);
-    expect(mocks.load).toHaveBeenCalledTimes(9);
+    expect(mocks.load).toHaveBeenCalledTimes(10);
 
     mocks.load.mockResolvedValue({ status: "rejected" });
     expect((await listGuides()).status).toBe(401);
@@ -160,6 +165,7 @@ describe("private editor guide routes", () => {
       title: article.title,
       description: article.description,
       content: article.content,
+      draftProductLinks: [],
       status: article.status,
       revision: article.revision,
       createdAtUtc: article.createdAtUtc,
@@ -194,6 +200,22 @@ describe("private editor guide routes", () => {
     expect(await (await getCategories()).json()).toEqual({ categories: [{ slug: "walks", labelEn: "Walks", labelJa: "散歩", displayOrder: 10 }] });
     expect(await (await getSubjects()).json()).toEqual({ subjects: [{ kind: "WRITER" }] });
     expect(mocks.repository.listWritableSubjects).toHaveBeenCalledWith("writer-synthetic");
+
+    mocks.repository.listLinkableProducts.mockResolvedValue([
+      { providerId: "provider-a", productId: "tea", publicTitle: "Synthetic tea" },
+    ]);
+    const products = await getLinkableProducts(
+      new Request(`${SITE}/editor/api/guides/article-synthetic/linkable-products`),
+      context,
+    );
+    expect(await products.json()).toEqual({
+      products: [{ providerId: "provider-a", productId: "tea", publicTitle: "Synthetic tea" }],
+    });
+    expect(mocks.repository.getArticle).toHaveBeenCalledWith({ nihoUserId: "writer-synthetic" }, article.id);
+    expect(mocks.repository.listLinkableProducts).toHaveBeenCalledWith(
+      { nihoUserId: "writer-synthetic" },
+      article.subject,
+    );
   });
 
   it("rejects cross-site, malformed, extra-field, oversized, and invalid UTF-8 mutations", async () => {
@@ -247,7 +269,7 @@ describe("private editor guide routes", () => {
     }
   });
 
-  it("preflights the owned saved article with private response boundaries", async () => {
+  it("preflights the owned saved article and reports stale related experiences", async () => {
     mocks.repository.getArticle.mockResolvedValue(publishableArticle);
     const response = await getPublicationPreflight(
       new Request(`${SITE}/editor/api/guides/article-synthetic/publication/preflight`),
@@ -269,6 +291,19 @@ describe("private editor guide routes", () => {
     );
     expect(invalid.status).toBe(200);
     expect(await invalid.json()).toMatchObject({ problems: [{ field: "description" }] });
+
+    mocks.repository.getArticle.mockResolvedValue({
+      ...publishableArticle,
+      draftProductLinks: [{ providerId: "provider-a", productId: "retired" }],
+    });
+    mocks.repository.listLinkableProducts.mockResolvedValue([]);
+    const stale = await getPublicationPreflight(
+      new Request(`${SITE}/editor/api/guides/article-synthetic/publication/preflight`),
+      context,
+    );
+    expect(await stale.json()).toMatchObject({
+      problems: [{ field: "relatedExperiences", message: expect.stringContaining("右側") }],
+    });
   });
 
   it("publishes only a revalidated exact saved revision and never accepts product links", async () => {
@@ -296,7 +331,7 @@ describe("private editor guide routes", () => {
     expect(mocks.repository.commitPublication).toHaveBeenCalledWith(
       { nihoUserId: "writer-synthetic" },
       article.id,
-      { expectedRevision: 2, visibility: "UNLISTED", productLinks: [] },
+      { expectedRevision: 2, visibility: "UNLISTED" },
     );
 
     const injected = await publishGuide(jsonRequest(
@@ -377,7 +412,7 @@ describe("private editor guide routes", () => {
     expect(mocks.repository.commitPublication).toHaveBeenCalledWith(
       { nihoUserId: "writer-synthetic" },
       article.id,
-      { expectedRevision: 2, visibility: "PUBLIC", productLinks: [] },
+      { expectedRevision: 2, visibility: "PUBLIC" },
     );
   });
 

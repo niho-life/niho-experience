@@ -17,6 +17,7 @@ const migrations = [
   "0008_guide_link_invitations.sql",
   "0009_guide_media.sql",
   "0010_guide_body_media.sql",
+  "0011_guide_draft_product_links.sql",
 ] as const;
 
 const actor = { nihoUserId: "writer-a" } as const;
@@ -110,7 +111,6 @@ describe("PostgreSQL guide body media", { skip: databaseUrl === undefined }, () 
         () => repository.commitPublication(actor, article.id, {
           expectedRevision: article.revision,
           visibility: "PUBLIC",
-          productLinks: [],
         }),
         StoreValidationError,
       );
@@ -135,7 +135,6 @@ describe("PostgreSQL guide body media", { skip: databaseUrl === undefined }, () 
       const published = await repository.commitPublication(actor, article.id, {
         expectedRevision: saved.revision,
         visibility: "PUBLIC",
-        productLinks: [],
       });
       assert.deepEqual(published.figures, [
         { slot: 1, assetId: assetOne, alt: "A synthetic blue rectangle", credit: "Photo: Synthetic One" },
@@ -155,7 +154,6 @@ describe("PostgreSQL guide body media", { skip: databaseUrl === undefined }, () 
         () => repository.commitPublication(actor, article.id, {
           expectedRevision: afterPublish.revision,
           visibility: "PUBLIC",
-          productLinks: [],
         }),
         StoreAccessDeniedError,
       );
