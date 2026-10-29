@@ -87,6 +87,12 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       assert.equal(claims.filter(Boolean).length, 1);
       const claimed = claims.find((item) => item !== null)!;
       assert.equal((await runtime.preflight(worker, claimed.id, claimed.leaseToken)).ready, true);
+      const renewals = await Promise.all([
+        runtime.renew(worker, claimed.id, claimed.leaseToken),
+        runtime.renew(worker, claimed.id, claimed.leaseToken),
+        runtime.preflight(worker, claimed.id, claimed.leaseToken),
+      ]);
+      assert.equal(renewals.length, 3);
       const remapped = await runtime.updateListing(admin, listing.id, {
         externalProductId: listing.externalProductId, ...(listing.externalOptionId === undefined ? {} : { externalOptionId: listing.externalOptionId }),
         adapter: listing.adapter, adapterVersion: listing.adapterVersion, connectionMode: listing.connectionMode,

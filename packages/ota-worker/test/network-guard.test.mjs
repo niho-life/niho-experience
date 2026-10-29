@@ -139,3 +139,21 @@ test("Nuxt static modulepreloads labelled other are allowed, but arbitrary other
   }
   assert.deepEqual(calls, ["continue", "abort"]);
 });
+
+test("only the observed Firebase session refresh form is permitted outside supplier origins", async () => {
+  const guard = createNetworkGuard({ job, cloud: { async preflight() {} } });
+  const calls = [];
+  const refresh = { url: "https://securetoken.googleapis.com/v1/token?key=synthetic_public_api_key_12345", method: "POST",
+    type: "fetch", contentType: "application/x-www-form-urlencoded", body: "grant_type=refresh_token&refresh_token=synthetic-private-token" };
+  for (const patch of [{}, { method: "GET" }, { url: "https://securetoken.googleapis.com/v1/signin?key=synthetic_public_api_key_12345" },
+    { body: "grant_type=password&refresh_token=synthetic" }, { body: "grant_type=refresh_token&refresh_token=synthetic&extra=x" },
+    { body: "grant_type=refresh_token&grant_type=refresh_token" }, { contentType: "application/json" }, { type: "document" },
+    { url: "https://example.test/v1/token?key=synthetic_public_api_key_12345" }]) {
+    const value = { ...refresh, ...patch };
+    await guard.handle({ request: () => ({ url: () => value.url, method: () => value.method, resourceType: () => value.type,
+      isNavigationRequest: () => false, headers: () => ({ "content-type": value.contentType }), postData: () => value.body }),
+      continue: async () => { calls.push("continue"); }, abort: async () => { calls.push("abort"); } });
+  }
+  assert.deepEqual(calls, ["continue", ...Array(8).fill("abort")]);
+  assert.equal(guard.writes, 0);
+});

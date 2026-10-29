@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
 import { createCloudClient, CloudError } from "../src/cloud-client.mjs";
-import { CHROME } from "./helpers/synthetic-gyg.mjs";
 import { makeJob } from "./helpers/synthetic-gyg.mjs";
 import { validateClaim, validatePreflight } from "../src/validation.mjs";
 
@@ -15,7 +14,7 @@ async function configFixture(origin) {
   const token = join(directory, "token"); await writeFile(token, "a".repeat(40), { mode: 0o600 });
   const path = join(directory, "config.json");
   await writeFile(path, JSON.stringify({ cloudOrigin: origin, tokenFile: token, privateDir: directory,
-    accountProfiles: { "10001": join(profiles, "10001") }, browserExecutable: CHROME, mode: "deterministic" }), { mode: 0o600 });
+    accountProfiles: { "10001": join(profiles, "10001") }, browserExecutable: process.execPath, mode: "deterministic" }), { mode: 0o600 });
   return path;
 }
 

@@ -21,7 +21,7 @@
 
 GetYourGuide driver は `GetYourGuide / gyg-browser@1 / BROWSER / Asia/Tokyo` 専用で、`canObserve/canClose/canOpen=true`、作成は行いません。Company profile の literal `Supplier ID:` の親 text にある数字、availability row の option/date testid、最寄りの product link、switch 1個をすべて照合します。画面は終了時刻を表示しないため、result の `sourceEndAtUtc` は「job の occurrence identity を同じ readback に結び付けた値」であり、画面で終了時刻を観測したという意味ではありません。
 
-network guardは最初のnavigationより前に入ります。CDPのservice-worker bypass/停止と登録拒否、download deny、popup deny、外部navigation abortとし、supplier/CDNのstatic GETと、同一originのnamed read-only GraphQL queryだけを許可します。fragmentがqueryより前にある文法もtokenizerで判定し、mutation/subscription/anonymous queryは拒否します。GYGのbackground `Inbox_UnreadCountChanged` とanalytics等の拒否はexpected noiseとして分離します。UI actionとinterceptionで許可する`UpdateMultipleTimeSlots`は1回に限定し、query/body/input/option/Tokyo分単位時刻/desired Booleanをexact照合します。permitをpreflight待ちより先に確保し、同時要求とfreeze後の送信を拒否します。hidden APIの直接replayはありません。
+network guardは最初のnavigationより前に入ります。CDPのservice-worker bypass/停止と登録拒否、download deny、popup deny、外部navigation abortとし、supplier/CDNのstatic GETと、同一originのnamed read-only GraphQL queryを許可します。既存ログインの更新には、`securetoken.googleapis.com/v1/token` の `grant_type=refresh_token` とtokenだけを持つform POSTを限定許可します。新規ログイン・他の認証操作・他hostへのPOSTは許可しません。fragmentがqueryより前にある文法もtokenizerで判定し、mutation/subscription/anonymous queryは拒否します。GYGのbackground `Inbox_UnreadCountChanged` とanalytics等の拒否はexpected noiseとして分離します。UI actionとinterceptionで許可する`UpdateMultipleTimeSlots`は1回に限定し、query/body/input/option/Tokyo分単位時刻/desired Booleanをexact照合します。permitをpreflight待ちより先に確保し、同時要求とfreeze後の送信を拒否します。hidden APIの直接replayはありません。
 
 ### 通信の再送と保証範囲
 
@@ -87,6 +87,6 @@ LaunchAgent は `packages/ota-worker/examples/com.niho.ota-worker.plist.example`
 ## 証跡の区別
 
 - actual private browser: Studioの実GetYourGuide専用profileで、既存の空き枠を5往復（停止・再読込・再開・再読込、計10書込み）して受付可能へ復元。Gitには実target/画像を入れない。
-- synthetic: このpackageの44件のunitと、合成ページを使う実ブラウザ5件がskipなし合格。20回交互open/close、header前／後の応答喪失、誤商品、認証失効、古いpreflight、CDNのNuxt modulepreload許可を含む。UI回数・raw delivery数・論理状態変更数は別に計測する。外部auth/model invocationはなく、実GetYourGuideの20回試験ではない。CIはChromium導入後に別の`test:browser`を実行する。
+- synthetic: このpackageの45件のunitと、合成ページを使う実ブラウザ5件がskipなし合格。20回交互open/close、header前／後の応答喪失、誤商品、認証失効、古いpreflight、CDNのNuxt modulepreload許可を含む。UI回数・raw delivery数・論理状態変更数は別に計測する。外部auth/model invocationはなく、実GetYourGuideの20回試験ではない。CIはChromium導入後に別の`test:browser`を実行する。
 - cloud end-to-end: 未実施。public cloud origin、実 lease/result durability の受入を別途行う。
 - Claude/Max: CLI login は確認済みだが weekly limit 中。20件試験と quota回復後の bounded tool実行は未実施。

@@ -118,6 +118,18 @@ export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGI
     if (frozen) { refused += 1; return route.abort("blockedbyclient"); }
     const request = route.request();
     const url = new URL(request.url());
+    // Firebase refreshes the existing browser session before hydrating the
+    // supplier page. Permit only that form, never sign-in or arbitrary writes.
+    if (url.origin === "https://securetoken.googleapis.com" && url.pathname === "/v1/token"
+      && request.method() === "POST" && request.resourceType?.() === "fetch"
+      && !request.isNavigationRequest?.() && url.searchParams.size === 1
+      && /^[A-Za-z0-9_-]{20,100}$/.test(url.searchParams.get("key") ?? "")
+      && request.headers?.()["content-type"]?.split(";")[0] === "application/x-www-form-urlencoded") {
+      const raw = request.postData?.();
+      const form = typeof raw === "string" && raw.length <= 16_384 ? new URLSearchParams(raw) : null;
+      if (form && form.size === 2 && form.get("grant_type") === "refresh_token"
+        && (form.get("refresh_token")?.length ?? 0) > 0) return forward(route);
+    }
     if (!allowedOrigins.has(url.origin)) {
       if (typeof request.isNavigationRequest === "function" && request.isNavigationRequest()) externalNavigationBlocked = true;
       refused += 1; return route.abort("blockedbyclient");
