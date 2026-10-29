@@ -64,6 +64,19 @@ describe("database invariants", () => {
     assert.match(sql, /pending_command_id/);
   });
 
+  it("keeps resource Google input opaque, generation fenced, durable, and event-content free", async () => {
+    const sql = await readFile(new URL("../migrations/0015_resource_google_busy.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE SEQUENCE provider_google_connection_generation_seq/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, resource_id\)[\s\S]*REFERENCES inventory_resources\(provider_id, id\)/);
+    assert.match(sql, /resource_google_calendars_due_idx/);
+    assert.match(sql, /resource_google_sync_receipts/);
+    assert.match(sql, /token_digest text NOT NULL/);
+    const intervals = sql.match(/CREATE TABLE resource_google_busy_intervals \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(intervals, /start_at/);
+    assert.match(intervals, /end_at/);
+    assert.doesNotMatch(intervals, /title|summary|description|attendee|organizer|event_id/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

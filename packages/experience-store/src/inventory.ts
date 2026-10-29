@@ -1,4 +1,4 @@
-import { addMinutes, evaluateAvailability, type AvailabilityResult, type BusyInterval, type Occurrence } from "@niho-experience/experience-domain";
+import { addMinutes, evaluateAvailability, intervalsOverlap, type AvailabilityResult, type BusyInterval, type Occurrence } from "@niho-experience/experience-domain";
 import type { Pool, PoolClient } from "pg";
 import { googleCalendarFromRow, isoValue, type DbRow } from "./rows.ts";
 import type { BookingMode, InventoryResourceKind } from "./types.ts";
@@ -127,6 +127,31 @@ export async function evaluateStoredInventories(
     const resourceId = String(row.resource_id);
     activeOccupanciesByResource.set(resourceId, [...(activeOccupanciesByResource.get(resourceId) ?? []), row]);
   }
+  const resourceGoogle = resourceIds.length === 0 ? { rows: [] as DbRow[] } : await client.query<DbRow>(
+    `SELECT g.*,c.connection_generation AS current_connection_generation
+       FROM resource_google_calendars g
+       LEFT JOIN provider_google_connections c ON c.provider_id=g.provider_id
+        AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=c.provider_id
+          AND m.niho_user_id=c.connected_by_niho_user_id AND m.active=true AND m.role='OWNER')
+      WHERE g.provider_id=$1 AND g.resource_id=ANY($2::text[])`,
+    [providerId, resourceIds],
+  );
+  const resourceGoogleById = new Map(resourceGoogle.rows.map((row) => [String(row.resource_id), row]));
+  const resourceBusy = resourceIds.length === 0 ? { rows: [] as DbRow[] } : await client.query<DbRow>(
+    `SELECT b.resource_id,b.settings_version,b.connection_generation,b.start_at,b.end_at
+       FROM resource_google_busy_intervals b
+       JOIN resource_google_calendars g ON g.provider_id=b.provider_id AND g.resource_id=b.resource_id
+      WHERE b.provider_id=$1 AND b.resource_id=ANY($2::text[])
+        AND b.settings_version=g.settings_version AND b.connection_generation=g.connection_generation
+        AND b.end_at>$3 AND b.start_at<$4
+      ORDER BY b.resource_id COLLATE "C",b.start_at`,
+    [providerId, resourceIds, addMinutes(overallStart, -1_440), addMinutes(overallEnd, 1_440)],
+  );
+  const resourceBusyById = new Map<string, BusyInterval[]>();
+  for (const row of resourceBusy.rows) {
+    const resourceId = String(row.resource_id);
+    resourceBusyById.set(resourceId, [...(resourceBusyById.get(resourceId) ?? []), { startUtc: isoValue(row, "start_at"), endUtc: isoValue(row, "end_at") }]);
+  }
   const googleResult = await client.query<DbRow>("SELECT * FROM provider_google_calendars WHERE provider_id=$1", [providerId]);
   const google = googleResult.rows[0] === undefined ? undefined : googleCalendarFromRow(googleResult.rows[0]);
   let allBusyIntervals: BusyInterval[] = [];
@@ -162,6 +187,24 @@ export async function evaluateStoredInventories(
     const conflict = occupancies.some((occupancy) => (activeOccupanciesByResource.get(occupancy.resourceId) ?? []).some((row) =>
       !(String(row.product_id) === request.productId && String(row.occurrence_id) === request.occurrence.id)
       && isoValue(row, "end_at") > occupancy.startAtUtc && isoValue(row, "start_at") < occupancy.endAtUtc));
+    let resourceGoogleUnavailable = false;
+    let resourceGoogleBusy = false;
+    for (const occupancy of occupancies) {
+      const configured = resourceGoogleById.get(occupancy.resourceId);
+      if (!configured || configured.enabled !== true) continue;
+      const sameGeneration = configured.current_connection_generation !== null
+        && Number(configured.current_connection_generation) === Number(configured.connection_generation);
+      const covered = configured.coverage_start !== null && configured.coverage_end !== null
+        && isoValue(configured, "coverage_start") <= occupancy.startAtUtc
+        && isoValue(configured, "coverage_end") >= occupancy.endAtUtc;
+      const fresh = sameGeneration && covered
+        && effectiveGoogleSyncStatus(String(configured.sync_status) as "FRESH" | "STALE" | "FAILED",
+          configured.fresh_until === null ? undefined : isoValue(configured, "fresh_until"), nowUtc) === "FRESH";
+      if (!fresh) { resourceGoogleUnavailable = true; continue; }
+      if ((resourceBusyById.get(occupancy.resourceId) ?? []).some((busy) => intervalsOverlap(
+        { startUtc: occupancy.startAtUtc, endUtc: occupancy.endAtUtc }, busy,
+      ))) resourceGoogleBusy = true;
+    }
     const rangeStart = addMinutes(request.occurrence.startUtc, -request.occurrence.busyBufferBeforeMinutes);
     const rangeEnd = addMinutes(request.occurrence.endUtc, request.occurrence.busyBufferAfterMinutes);
     const covered = google?.coverageStartUtc !== undefined && google.coverageEndUtc !== undefined
@@ -181,6 +224,8 @@ export async function evaluateStoredInventories(
         activeGroupCount: Number(reserved?.groups ?? 0),
         hasInactiveResource: resourceRows.some((row) => row.active !== true),
         hasResourceConflict: conflict,
+        hasResourceGoogleUnavailable: resourceGoogleUnavailable,
+        hasResourceGoogleBusy: resourceGoogleBusy,
       },
     });
     results.set(request.occurrence.id, {

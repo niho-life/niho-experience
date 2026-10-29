@@ -260,6 +260,7 @@ export interface ConfirmBookingResult {
 }
 
 export interface RecordGoogleBusySyncInput {
+  readonly connectionGeneration?: number;
   readonly opaqueCalendarId: string;
   readonly attemptedAtUtc: string;
   readonly freshUntilUtc: string;

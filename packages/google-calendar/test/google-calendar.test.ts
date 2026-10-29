@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { GOOGLE_SCOPES, GoogleCalendarError, googleAuthorizationUrl, queryGoogleBusy, refreshGoogleToken, writeConfirmedBooking, type GoogleConfig } from "../src/index.ts";
+import { GOOGLE_SCOPES, GoogleCalendarError, googleAuthorizationUrl, queryGoogleBusy, queryGoogleBusyByCalendar, refreshGoogleToken, watchGoogleCalendar, writeConfirmedBooking, type GoogleConfig } from "../src/index.ts";
 
 const base = { clientId: "synthetic-client", clientSecret: "synthetic-secret", redirectUri: "https://experience.example.test/host/calendar/google/callback" };
 
@@ -30,6 +30,34 @@ describe("Google Calendar boundary", () => {
     ]);
     const error = config(() => Response.json({ calendars: { private: { errors: [{ reason: "notFound" }], busy: [] } } }));
     await assert.rejects(() => queryGoogleBusy(error, "token", ["private"], "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z"), GoogleCalendarError);
+  });
+
+  it("keeps calendar keys, bounds responses, and refuses redirects", async () => {
+    const keyed = config((_url, init) => {
+      assert.equal(init.redirect, "manual");
+      return Response.json({ calendars: { room: { busy: [] }, teacher: { busy: [{ start: "2026-11-01T01:00:00Z", end: "2026-11-01T02:00:00Z", attendees: ["secret"] }] } } });
+    });
+    assert.deepEqual(await queryGoogleBusyByCalendar(keyed, "token", ["room", "teacher"], "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z"), [
+      { id: "room", busyIntervals: [] },
+      { id: "teacher", busyIntervals: [{ startUtc: "2026-11-01T01:00:00.000Z", endUtc: "2026-11-01T02:00:00.000Z" }] },
+    ]);
+    const oversized = config(() => Response.json({ calendars: { room: { busy: [] } }, padding: "x".repeat(300_000) }));
+    await assert.rejects(() => queryGoogleBusyByCalendar(oversized, "token", ["room"], "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z"), GoogleCalendarError);
+  });
+
+  it("creates a bounded HTTPS watch without sending calendar event fields", async () => {
+    const id = "00000000-0000-4000-8000-000000000123";
+    const expiresAtUtc = new Date(Date.now() + 86_400_000).toISOString();
+    let payload: Record<string, unknown> | undefined;
+    const grant = config((url, init) => {
+      assert.match(url, /\/calendars\/private\/events\/watch$/);
+      payload = JSON.parse(String(init.body));
+      return Response.json({ id, resourceId: "opaque-google-resource", expiration: String(Date.parse(expiresAtUtc)) });
+    });
+    const result = await watchGoogleCalendar(grant, "token", { id, calendarId: "private", address: "https://experience.example.test/api/google/calendar/watch", token: "t".repeat(40), expiresAtUtc });
+    assert.equal(result.resourceId, "opaque-google-resource");
+    assert.deepEqual(Object.keys(payload!).sort(), ["address", "expiration", "id", "token", "type"]);
+    assert.equal("summary" in payload!, false);
   });
 
   it("uses a stable private event ID and treats a retry conflict as written", async () => {

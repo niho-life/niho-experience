@@ -45,8 +45,13 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
   if (resumed.status !== "EMPTY") return resumed;
   const halted = await haltLatch?.read();
   if (halted) return { status: "HALT_LATCHED", reason: halted.reason };
+  // Cloud-side Google work overlaps claim/browser work and never receives a
+  // calendar ID locally, so an unavailable optional sync cannot stall OTA.
+  const googleSync = typeof cloud.triggerResourceGoogleSync === "function"
+    ? cloud.triggerResourceGoogleSync().catch(() => ({ processed: false, applied: false }))
+    : Promise.resolve({ processed: false, applied: false });
   const job = await cloud.claimAllowIdle();
-  if (!job) return { status: "IDLE", modelInvocations: 0 };
+  if (!job) { await googleSync; return { status: "IDLE", modelInvocations: 0 }; }
   await journal.claimed(job);
   await journal.running();
   const execution = await executor({ job, cloud, config });
@@ -61,9 +66,11 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
     if (!["AUTH", "INVALID_RESPONSE"].includes(error?.code)) throw error;
     const reason = error.code === "AUTH" ? "RESULT_AUTH" : "RESULT_INVALID_RESPONSE";
     await haltLatch?.set(reason);
+    await googleSync;
     return { status: "HALT_PENDING_RESULT", outcome: execution.outcome, stopped: execution.stopped, reason, modelInvocations: config.mode === "claude-code" ? 1 : 0 };
   }
   await journal.clearAfterAcknowledged(result.resultId);
+  await googleSync;
   return {
     status: haltReason ? "HALT_AFTER_RESULT" : receipt?.acceptedAsCurrent === false ? "RESULT_ACKNOWLEDGED_NOT_CURRENT" : "RESULT_ACKNOWLEDGED",
     outcome: execution.outcome,

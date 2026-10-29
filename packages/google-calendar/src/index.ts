@@ -15,6 +15,12 @@ export interface GoogleTokenSet {
 }
 
 export interface GoogleBusyInterval { startUtc: string; endUtc: string }
+export interface GoogleBusyCalendar { id: string; busyIntervals: readonly GoogleBusyInterval[] }
+export interface GoogleWatchChannel {
+  id: string;
+  resourceId: string;
+  expiresAtUtc: string;
+}
 
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
@@ -24,6 +30,7 @@ export const GOOGLE_SCOPES = [
 
 const GOOGLE_API = "https://www.googleapis.com/calendar/v3";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
+const MAX_RESPONSE_BYTES = 256 * 1024;
 
 export class GoogleCalendarError extends Error {
   readonly reason: "REVOKED" | "UNAVAILABLE" | "INVALID_RESPONSE";
@@ -46,6 +53,30 @@ async function request(config: GoogleConfig, url: string, init: RequestInit): Pr
   } catch {
     throw new GoogleCalendarError("UNAVAILABLE");
   }
+}
+
+async function boundedJson(response: Response): Promise<Record<string, unknown>> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw new GoogleCalendarError("INVALID_RESPONSE");
+  const reader = response.body?.getReader();
+  if (!reader) throw new GoogleCalendarError("INVALID_RESPONSE");
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > MAX_RESPONSE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new GoogleCalendarError("INVALID_RESPONSE");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try { return asRecord(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))); }
+  catch (error) { if (error instanceof GoogleCalendarError) throw error; throw new GoogleCalendarError("INVALID_RESPONSE"); }
 }
 
 /** The caller stores state and verifier in a short-lived, signed HttpOnly cookie. */
@@ -71,7 +102,7 @@ function parseToken(body: unknown, existingScopes?: readonly string[]): GoogleTo
 async function tokenRequest(config: GoogleConfig, fields: Record<string, string>, existingScopes?: readonly string[]): Promise<GoogleTokenSet> {
   const response = await request(config, GOOGLE_TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, ...fields }) });
   if (!response.ok) throw new GoogleCalendarError(response.status >= 400 && response.status < 500 ? "REVOKED" : "UNAVAILABLE");
-  try { return parseToken(await response.json(), existingScopes); } catch (error) { if (error instanceof GoogleCalendarError) throw error; throw new GoogleCalendarError("INVALID_RESPONSE"); }
+  try { return parseToken(await boundedJson(response), existingScopes); } catch (error) { if (error instanceof GoogleCalendarError) throw error; throw new GoogleCalendarError("INVALID_RESPONSE"); }
 }
 
 export async function exchangeGoogleCode(config: GoogleConfig, code: string, verifier: string): Promise<GoogleTokenSet> {
@@ -85,13 +116,18 @@ export async function refreshGoogleToken(config: GoogleConfig, refreshToken: str
 async function apiJson(config: GoogleConfig, accessToken: string, path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const response = await request(config, `${GOOGLE_API}${path}`, { ...init, headers: { authorization: `Bearer ${accessToken}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) } });
   if (!response.ok) throw new GoogleCalendarError(response.status === 401 || response.status === 403 ? "REVOKED" : "UNAVAILABLE");
-  try { return asRecord(await response.json()); } catch (error) { if (error instanceof GoogleCalendarError) throw error; throw new GoogleCalendarError("INVALID_RESPONSE"); }
+  return boundedJson(response);
 }
 
 export async function listGoogleCalendars(config: GoogleConfig, accessToken: string): Promise<readonly { id: string; name: string; primary: boolean }[]> {
   const calendars: { id: string; name: string; primary: boolean }[] = [];
   let nextPageToken: string | undefined;
+  const pageTokens = new Set<string>();
+  let pages = 0;
   do {
+    pages += 1;
+    if (pages > 20 || (nextPageToken !== undefined && (nextPageToken.length > 2_048 || pageTokens.has(nextPageToken)))) throw new GoogleCalendarError("INVALID_RESPONSE");
+    if (nextPageToken) pageTokens.add(nextPageToken);
     const query = new URLSearchParams({ maxResults: "250", fields: "items(id,summary,primary),nextPageToken" });
     if (nextPageToken) query.set("pageToken", nextPageToken);
     const result = await apiJson(config, accessToken, `/users/me/calendarList?${query}`);
@@ -108,21 +144,64 @@ export async function listGoogleCalendars(config: GoogleConfig, accessToken: str
 
 /** Reject partial per-calendar errors; a missing calendar must close booking availability. */
 export async function queryGoogleBusy(config: GoogleConfig, accessToken: string, calendarIds: readonly string[], fromUtc: string, toUtc: string): Promise<readonly GoogleBusyInterval[]> {
+  const calendars = await queryGoogleBusyByCalendar(config, accessToken, calendarIds, fromUtc, toUtc);
+  return calendars.flatMap((calendar) => calendar.busyIntervals).sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+}
+
+/** Keeps the opaque calendar key so callers cannot accidentally apply one resource's busy time to another. */
+export async function queryGoogleBusyByCalendar(config: GoogleConfig, accessToken: string, calendarIds: readonly string[], fromUtc: string, toUtc: string): Promise<readonly GoogleBusyCalendar[]> {
   if (!calendarIds.length || calendarIds.length > 50 || !Number.isFinite(Date.parse(fromUtc)) || !Number.isFinite(Date.parse(toUtc)) || Date.parse(fromUtc) >= Date.parse(toUtc)) throw new TypeError("Invalid busy query range");
+  if (new Set(calendarIds).size !== calendarIds.length || calendarIds.some((id) => !id || id.length > 512)) throw new TypeError("Invalid busy calendar IDs");
   const result = await apiJson(config, accessToken, "/freeBusy", { method: "POST", body: JSON.stringify({ timeMin: fromUtc, timeMax: toUtc, timeZone: "UTC", items: calendarIds.map((id) => ({ id })) }) });
   const calendars = asRecord(result.calendars);
-  const intervals: GoogleBusyInterval[] = [];
+  const keyed: GoogleBusyCalendar[] = [];
+  let totalIntervals = 0;
   for (const id of calendarIds) {
     const calendar = asRecord(calendars[id]);
     if (Array.isArray(calendar.errors) && calendar.errors.length > 0) throw new GoogleCalendarError("UNAVAILABLE");
     if (!Array.isArray(calendar.busy)) throw new GoogleCalendarError("INVALID_RESPONSE");
+    if (calendar.busy.length > 5_000) throw new GoogleCalendarError("INVALID_RESPONSE");
+    const intervals: GoogleBusyInterval[] = [];
     for (const busy of calendar.busy) {
       const slot = asRecord(busy);
-      if (!nonEmpty(slot.start) || !nonEmpty(slot.end) || !Number.isFinite(Date.parse(slot.start)) || !Number.isFinite(Date.parse(slot.end))) throw new GoogleCalendarError("INVALID_RESPONSE");
+      if (!nonEmpty(slot.start) || !nonEmpty(slot.end) || !Number.isFinite(Date.parse(slot.start)) || !Number.isFinite(Date.parse(slot.end)) || Date.parse(slot.start) >= Date.parse(slot.end)) throw new GoogleCalendarError("INVALID_RESPONSE");
       intervals.push({ startUtc: new Date(slot.start).toISOString(), endUtc: new Date(slot.end).toISOString() });
     }
+    totalIntervals += intervals.length;
+    if (totalIntervals > 10_000) throw new GoogleCalendarError("INVALID_RESPONSE");
+    keyed.push({ id, busyIntervals: intervals.sort((a, b) => a.startUtc.localeCompare(b.startUtc)) });
   }
-  return intervals.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+  return keyed;
+}
+
+/** Starts a notification channel. Notifications are only dirty hints; callers must re-query freebusy. */
+export async function watchGoogleCalendar(
+  config: GoogleConfig,
+  accessToken: string,
+  input: { id: string; calendarId: string; address: string; token: string; expiresAtUtc: string },
+): Promise<GoogleWatchChannel> {
+  if (!/^[0-9a-f-]{36}$/i.test(input.id) || !input.calendarId || input.calendarId.length > 512 || input.token.length < 32 || input.token.length > 256) throw new TypeError("Invalid watch channel");
+  const address = new URL(input.address);
+  if (address.protocol !== "https:" || address.username || address.password || address.hash) throw new TypeError("Invalid watch address");
+  const expiration = Date.parse(input.expiresAtUtc);
+  if (!Number.isFinite(expiration) || expiration <= Date.now() || expiration > Date.now() + 7 * 86_400_000) throw new TypeError("Invalid watch expiration");
+  const result = await apiJson(config, accessToken, `/calendars/${encodeURIComponent(input.calendarId)}/events/watch`, {
+    method: "POST",
+    body: JSON.stringify({ id: input.id, type: "web_hook", address: address.href, token: input.token, expiration: String(expiration) }),
+  });
+  if (result.id !== input.id || !nonEmpty(result.resourceId)) throw new GoogleCalendarError("INVALID_RESPONSE");
+  const returnedExpiration = typeof result.expiration === "string" ? Number(result.expiration) : NaN;
+  if (!Number.isFinite(returnedExpiration) || returnedExpiration <= Date.now() || returnedExpiration > expiration) throw new GoogleCalendarError("INVALID_RESPONSE");
+  return { id: input.id, resourceId: result.resourceId, expiresAtUtc: new Date(returnedExpiration).toISOString() };
+}
+
+/** Stops only a channel whose id/resourceId were loaded from our own durable metadata. */
+export async function stopGoogleWatchChannel(config: GoogleConfig, accessToken: string, channel: { id: string; resourceId: string }): Promise<void> {
+  if (!/^[0-9a-f-]{36}$/i.test(channel.id) || !channel.resourceId || channel.resourceId.length > 512) throw new TypeError("Invalid watch channel");
+  const response = await request(config, `${GOOGLE_API}/channels/stop`, {
+    method: "POST", headers: { authorization: `Bearer ${accessToken}`, accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(channel),
+  });
+  if (!response.ok) throw new GoogleCalendarError(response.status === 401 || response.status === 403 ? "REVOKED" : "UNAVAILABLE");
 }
 
 /** App-created calendar avoids write access to the host's personal events. */
@@ -165,7 +244,7 @@ export async function writeConfirmedBooking(config: GoogleConfig, accessToken: s
   // Google returns conflict when a retried outbox job has already written the event.
   if (response.status === 409) return eventId;
   if (!response.ok) throw new GoogleCalendarError(response.status === 401 || response.status === 403 ? "REVOKED" : "UNAVAILABLE");
-  const result = asRecord(await response.json());
+  const result = await boundedJson(response);
   if (result.id !== eventId) throw new GoogleCalendarError("INVALID_RESPONSE");
   return eventId;
 }

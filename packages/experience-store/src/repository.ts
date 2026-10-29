@@ -942,8 +942,12 @@ export class ExperienceStore {
       await lockProviderInventory(client, scope.providerId);
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars
-          WHERE provider_id=$1 AND opaque_calendar_id=$2 FOR UPDATE`,
-        [scope.providerId, input.opaqueCalendarId],
+          WHERE provider_id=$1 AND opaque_calendar_id=$2
+            AND ($3::bigint IS NULL OR EXISTS (SELECT 1 FROM provider_google_connections c
+              JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+                AND m.active=true AND m.role='OWNER'
+              WHERE c.provider_id=$1 AND c.connection_generation=$3)) FOR UPDATE`,
+        [scope.providerId, input.opaqueCalendarId, input.connectionGeneration ?? null],
       );
       const currentRow = current.rows[0];
       if (currentRow === undefined) throw new StoreNotFoundError("Google calendar configuration");
@@ -987,7 +991,7 @@ export class ExperienceStore {
 
   async recordGoogleSyncFailure(
     scope: ProviderScope,
-    input: { readonly opaqueCalendarId: string; readonly attemptedAtUtc: string },
+    input: { readonly opaqueCalendarId: string; readonly attemptedAtUtc: string; readonly connectionGeneration?: number },
   ): Promise<GoogleCalendarConfiguration> {
     validateScope(scope);
     assertNonEmptyText(input.opaqueCalendarId, "opaqueCalendarId");
@@ -996,8 +1000,12 @@ export class ExperienceStore {
       await lockProviderInventory(client, scope.providerId);
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars
-          WHERE provider_id=$1 AND opaque_calendar_id=$2 FOR UPDATE`,
-        [scope.providerId, input.opaqueCalendarId],
+          WHERE provider_id=$1 AND opaque_calendar_id=$2
+            AND ($3::bigint IS NULL OR EXISTS (SELECT 1 FROM provider_google_connections c
+              JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+                AND m.active=true AND m.role='OWNER'
+              WHERE c.provider_id=$1 AND c.connection_generation=$3)) FOR UPDATE`,
+        [scope.providerId, input.opaqueCalendarId, input.connectionGeneration ?? null],
       );
       const currentRow = current.rows[0];
       if (currentRow === undefined) throw new StoreNotFoundError("Google calendar configuration");

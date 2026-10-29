@@ -125,6 +125,8 @@ export interface AvailabilityInput {
     readonly activeGroupCount: number;
     readonly hasInactiveResource: boolean;
     readonly hasResourceConflict: boolean;
+    readonly hasResourceGoogleUnavailable?: boolean;
+    readonly hasResourceGoogleBusy?: boolean;
   };
 }
 
@@ -136,6 +138,8 @@ export type AvailabilityReason =
   | "GROUP_RESERVED"
   | "RESOURCE_INACTIVE"
   | "RESOURCE_BUSY"
+  | "RESOURCE_GOOGLE_UNAVAILABLE"
+  | "RESOURCE_GOOGLE_BUSY"
   | "GOOGLE_SYNC_UNAVAILABLE"
   | "GOOGLE_BUSY"
   | "EXTERNAL_RESERVATION_UNRESOLVED";
