@@ -8,6 +8,7 @@
 - 説明・補足は極力省く。掲載先の詳細は折りたたみ、判断に必要な失敗・不明な結果は短い状態表示にする。モックにだけある切替・架空の接続状態を製品へ入れない。
 - NIHO保存と外部読戻しを分ける。現版・対象・時刻が確認できるまで反映済みにしない。通常時の同期目標は60分以内。予約照合は15分間隔から受け入れる。
 - 価格はサイト別に設定する。金額差は同期エラーにせず、この機能では料金・手数料を読み替えたり書き換えたりしない。同期対象は開催日時と予約受付の状態とする。
+- V1の接続対象はGetYourGuide・Airbnb・Viator（Tripadvisor）・じゃらん。Klook・KKday・アソビュー！・アクティビティジャパンは、オーナーの2026-10-30の指示でV2へ延期し、今回は接続しない。
 - Claude Code / Maxの既存契約内で動かし、有料APIへfallbackしない。通常の決定的な操作で推論を必須にしない。
 - NIHOapp側の関連PRはDraftを維持し、マージしない。Experience側は対象検証・レビュー・必須CIを通して順にマージする。NIHOapp未配備の契約に依存する本番flagは開かない。
 
@@ -24,16 +25,16 @@
 | [#240](https://github.com/niho-life/niho-experience/issues/240) | 常駐・heartbeat・監視・手動復旧 | 公開API/DB/認証の配備受入、#237/#239 | 1商品2販路pilot。コードのマージだけでcloseしない |
 | [#241](https://github.com/niho-life/niho-experience/issues/241) | 新規回作成と日時変更の追跡 | 個別adapterの能力受入 | 既存回の開閉と別に証明する |
 
-追加販路はそれぞれ独立して受け入れる。掲載アカウントや対象が無い間は対応済みと表示しない。
+追加販路はそれぞれ独立して受け入れる。ViatorとじゃらんをV1の対象とし、残る4サイトはV2へ延期する。掲載アカウントや対象が無い間は対応済みと表示しない。
 
-| Issue | サイト |
-| --- | --- |
-| [#242](https://github.com/niho-life/niho-experience/issues/242) | Viator / Tripadvisor（同じ販売在庫を重複登録しない） |
-| [#243](https://github.com/niho-life/niho-experience/issues/243) | Klook |
-| [#244](https://github.com/niho-life/niho-experience/issues/244) | KKday |
-| [#245](https://github.com/niho-life/niho-experience/issues/245) | アソビュー！ |
-| [#246](https://github.com/niho-life/niho-experience/issues/246) | じゃらん遊び・体験 |
-| [#247](https://github.com/niho-life/niho-experience/issues/247) | アクティビティジャパン |
+| Issue | サイト | 時期 |
+| --- | --- | --- |
+| [#242](https://github.com/niho-life/niho-experience/issues/242) | Viator / Tripadvisor（同じ販売在庫を重複登録しない） | V1 |
+| [#243](https://github.com/niho-life/niho-experience/issues/243) | Klook | V2 |
+| [#244](https://github.com/niho-life/niho-experience/issues/244) | KKday | V2 |
+| [#245](https://github.com/niho-life/niho-experience/issues/245) | アソビュー！ | V2 |
+| [#246](https://github.com/niho-life/niho-experience/issues/246) | じゃらん遊び・体験 | V1 |
+| [#247](https://github.com/niho-life/niho-experience/issues/247) | アクティビティジャパン | V2 |
 
 ## 受入の順序
 
