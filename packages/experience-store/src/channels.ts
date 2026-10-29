@@ -1348,11 +1348,11 @@ export class ChannelRuntime {
               d.observed_desired_version,d.observed_mapping_version,d.last_verified_at,d.last_error,
               a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,
               l.active AS listing_active,l.adapter,l.adapter_version,l.can_open,l.can_close,l.mapping_version AS current_mapping_version,p.status AS product_status,
-              EXISTS (SELECT 1 FROM calendar_outbox_events e WHERE e.provider_id=d.provider_id AND e.processed_at IS NULL) AS calendar_pending
+              EXISTS (SELECT 1 FROM calendar_outbox_events e WHERE e.provider_id=d.provider_id AND e.processed_at IS NULL AND e.available_at <= $2::timestamptz) AS calendar_pending
          FROM channel_desired_states d JOIN channel_listings l ON l.id=d.listing_id
          JOIN channel_external_accounts a ON a.id=l.account_id
          JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-        WHERE d.provider_id=$1 ORDER BY d.source_start_at,a.site,l.id`, [actor.providerId],
+        WHERE d.provider_id=$1 ORDER BY d.source_start_at,a.site,l.id`, [actor.providerId, this.#nowIso()],
     );
     return result.rows.map((row) => {
       const desired = text(row, "desired_state") as ChannelDesiredState;
