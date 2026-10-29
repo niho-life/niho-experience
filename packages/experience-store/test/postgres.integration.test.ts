@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
-import { BookingUnavailableError, StoreConflictError } from "../src/errors.ts";
+import { BookingUnavailableError, StoreAccessDeniedError, StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
 import { ExperienceStore } from "../src/repository.ts";
 
@@ -23,13 +23,17 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       await pool.query(oauthMigration);
       const coverageMigration = await readFile(new URL("../migrations/0003_google_busy_coverage.sql", import.meta.url), "utf8");
       await pool.query(coverageMigration);
-      const pushMigration = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
-      await pool.query(pushMigration);
+      for (const name of ["0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql"]) {
+        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
+      await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-b"]);
       await pool.query(
         "INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ($1,$2,'OWNER')",
         ["provider-a", "user-a"],
       );
+      await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ($1,$2,'VIEWER')", ["provider-a", "user-viewer"]);
+      await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ('provider-b','user-b','OWNER')");
 
       const store = new ExperienceStore(pool);
       const actor = { providerId: "provider-a", nihoUserId: "user-a" } as const;
@@ -58,7 +62,21 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
         busyBufferAfterMinutes: 0,
         recurrence: { kind: "DAILY" },
       };
-      await store.saveScheduleRule(actor, "tea", rule, null);
+      const ruleResults = await Promise.all([
+        store.saveScheduleRule(actor, "tea", rule, null, "00000000-0000-4000-8000-000000000001"),
+        store.saveScheduleRule(actor, "tea", rule, null, "00000000-0000-4000-8000-000000000001"),
+      ]);
+      assert.deepEqual(ruleResults.map((result) => result.repeated).sort(), [false, true]);
+      await assert.rejects(
+        () => store.saveScheduleRule(actor, "tea", { ...rule, capacity: 3 }, null, "00000000-0000-4000-8000-000000000001"),
+        StoreConflictError,
+      );
+      assert.equal((await pool.query("SELECT 1 FROM schedule_rules WHERE provider_id='provider-a' AND id='tea-am'")).rowCount, 1);
+      assert.equal((await pool.query("SELECT 1 FROM calendar_outbox_events WHERE provider_id='provider-a' AND command_id='00000000-0000-4000-8000-000000000001'")).rowCount, 1);
+      await assert.rejects(
+        () => store.saveScheduleRule({ providerId: "provider-a", nihoUserId: "user-viewer" }, "tea", { ...rule, id: "viewer-rule" }, null, "00000000-0000-4000-8000-000000000099"),
+        StoreAccessDeniedError,
+      );
       const occurrenceId = occurrenceIdFor(rule.id, "2099-01-01");
       const attempts = await Promise.allSettled([
         store.createBookingHold(actor, { productId: "tea", occurrenceId, seats: 2, idempotencyKey: "hold-a" }),
@@ -113,11 +131,87 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       const confirmed = await store.confirmBookingPayment({ providerId: actor.providerId }, payment);
       assert.equal(confirmed.booking.status, "CONFIRMED");
       assert.equal((await store.confirmBookingPayment({ providerId: actor.providerId }, payment)).duplicateEvent, true);
+      await assert.rejects(
+        () => store.setOccurrenceSalesState({ providerId: "provider-a", nihoUserId: "user-viewer" }, "tea", rule.id, { occurrenceId: nextOccurrenceId, desiredState: "CLOSED" }, null, "00000000-0000-4000-8000-000000000090"),
+        StoreAccessDeniedError,
+      );
+      await assert.rejects(
+        () => store.setOccurrenceSalesState({ providerId: "provider-a", nihoUserId: "user-b" }, "tea", rule.id, { occurrenceId: nextOccurrenceId, desiredState: "CLOSED" }, null, "00000000-0000-4000-8000-000000000091"),
+        StoreAccessDeniedError,
+      );
+      await store.setOccurrenceSalesState(actor, "tea", rule.id, { occurrenceId: nextOccurrenceId, desiredState: "CLOSED" }, null, "00000000-0000-4000-8000-000000000006");
+      await assert.rejects(
+        () => store.createBookingHold(actor, { productId: "tea", occurrenceId: nextOccurrenceId, seats: 1, idempotencyKey: "closed-with-confirmed" }),
+        (error: unknown) => error instanceof BookingUnavailableError && error.reason === "MANUALLY_CLOSED",
+      );
+      const bookedAfterClose = await pool.query<{ status: string; occurrence_snapshot: unknown }>(
+        "SELECT status, occurrence_snapshot FROM bookings WHERE provider_id=$1 AND public_booking_id=$2::uuid",
+        [actor.providerId, confirmed.booking.publicBookingId],
+      );
+      assert.equal(bookedAfterClose.rows[0]?.status, "CONFIRMED");
+      assert.deepEqual(bookedAfterClose.rows[0]?.occurrence_snapshot, confirmed.booking.occurrenceSnapshot);
       const fourthOccurrenceId = occurrenceIdFor(rule.id, "2099-01-04");
-      const firstOverride = await store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "RESCHEDULE", occurrenceId: fourthOccurrenceId, localDate: "2099-01-05", localStartTime: "11:00" }, null);
-      const secondOverride = await store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "CLOSE", occurrenceId: fourthOccurrenceId }, firstOverride.version);
-      assert.equal(secondOverride.version, firstOverride.version + 1);
-      await assert.rejects(() => store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "CLOSE", occurrenceId: fourthOccurrenceId }, firstOverride.version), StoreConflictError);
+      await assert.rejects(
+        () => store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "RESCHEDULE", occurrenceId: occurrenceIdFor(rule.id, "2098-12-31"), localDate: "2099-01-05", localStartTime: "11:00" }, null, "00000000-0000-4000-8000-000000000098"),
+        StoreNotFoundError,
+      );
+      const firstOverride = await store.saveOccurrenceOverride(actor, "tea", rule.id, { kind: "RESCHEDULE", occurrenceId: fourthOccurrenceId, localDate: "2099-01-05", localStartTime: "11:00" }, null, "00000000-0000-4000-8000-000000000002");
+      const closed = await store.setOccurrenceSalesState(actor, "tea", rule.id, { occurrenceId: fourthOccurrenceId, desiredState: "CLOSED" }, null, "00000000-0000-4000-8000-000000000003");
+      const reopened = await store.setOccurrenceSalesState(actor, "tea", rule.id, { occurrenceId: fourthOccurrenceId, desiredState: "OPEN" }, closed.version, "00000000-0000-4000-8000-000000000004");
+      assert.equal(reopened.version, closed.version + 1);
+      await assert.rejects(() => store.setOccurrenceSalesState(actor, "tea", rule.id, { occurrenceId: fourthOccurrenceId, desiredState: "CLOSED" }, closed.version, "00000000-0000-4000-8000-000000000005"), StoreConflictError);
+      const views = await store.listSchedule(actor, "tea");
+      assert.equal(views[0]?.overrides[0]?.override.kind, "RESCHEDULE");
+      const reopenedState = views[0]?.salesStates.find((entry) => entry.state.occurrenceId === fourthOccurrenceId);
+      assert.equal(reopenedState?.state.desiredState, "OPEN");
+      assert.equal(reopenedState?.version, reopened.version);
+      assert.equal(firstOverride.version, 1);
+
+      const repeated = await store.setOccurrenceSalesState(actor, "tea", rule.id, { occurrenceId: fourthOccurrenceId, desiredState: "OPEN" }, closed.version, "00000000-0000-4000-8000-000000000004");
+      assert.equal(repeated.repeated, true);
+      const events = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM calendar_outbox_events WHERE topic='calendar.changed'");
+      assert.equal(events.rows[0]?.count, "5");
+    } finally {
+      await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
+      await pool.end();
+    }
+  });
+
+  it("migrates seeded legacy CLOSE rows without losing version history", async () => {
+    const { Pool } = await import("pg");
+    const schema = `experience_close_migration_${randomUUID().replaceAll("-", "")}`;
+    const pool = new Pool({ connectionString: databaseUrl, max: 1, options: `-c search_path=${schema}` });
+    const quotedSchema = `"${schema}"`;
+    try {
+      await pool.query(`CREATE SCHEMA ${quotedSchema}`);
+      for (const name of ["0001_experience_store.sql", "0002_google_oauth.sql", "0003_google_busy_coverage.sql", "0004_host_push_subscriptions.sql", "0005_guide_cms.sql"]) {
+        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+      }
+      await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-legacy')");
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-legacy','legacy-owner','OWNER')");
+      await pool.query(`INSERT INTO experience_products
+        (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+        VALUES ('provider-legacy','tea','tea','PUBLISHED','Synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic','Synthetic Seller')`);
+      await pool.query(`INSERT INTO schedule_rules
+        (provider_id,id,product_id,time_zone,starts_on,local_start_time,duration_minutes,capacity,booking_cutoff_minutes,busy_buffer_before_minutes,busy_buffer_after_minutes,recurrence)
+        VALUES ('provider-legacy','tea-am','tea','Asia/Tokyo','2099-01-01','10:00',60,4,60,0,0,'{"kind":"DAILY"}')`);
+      await pool.query(`INSERT INTO schedule_occurrence_overrides
+        (provider_id,rule_id,occurrence_id,kind,version,created_at,updated_at)
+        VALUES ('provider-legacy','tea-am','tea-am@2099-01-02','CLOSE',7,'2026-01-01T00:00:00Z','2026-01-02T00:00:00Z')`);
+
+      await pool.query(await readFile(new URL("../migrations/0006_calendar_commands_and_sales_state.sql", import.meta.url), "utf8"));
+      const migrated = await pool.query<{ desired_state: string; version: string; created_at: Date; updated_at: Date }>(
+        "SELECT desired_state, version::text, created_at, updated_at FROM schedule_occurrence_sales_states WHERE provider_id='provider-legacy' AND occurrence_id='tea-am@2099-01-02'",
+      );
+      assert.equal(migrated.rows[0]?.desired_state, "CLOSED");
+      assert.equal(migrated.rows[0]?.version, "7");
+      assert.equal(migrated.rows[0]?.created_at.toISOString(), "2026-01-01T00:00:00.000Z");
+      assert.equal(migrated.rows[0]?.updated_at.toISOString(), "2026-01-02T00:00:00.000Z");
+      assert.equal((await pool.query("SELECT 1 FROM schedule_occurrence_overrides WHERE kind='CLOSE'")).rowCount, 0);
+      const [view] = await new ExperienceStore(pool).listSchedule({ providerId: "provider-legacy", nihoUserId: "legacy-owner" }, "tea");
+      assert.equal(view?.overrides.length, 0);
+      assert.equal(view?.salesStates[0]?.state.desiredState, "CLOSED");
+      assert.equal(view?.salesStates[0]?.version, 7);
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
       await pool.end();
@@ -131,7 +225,7 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
     const quotedSchema = `"${schema}"`;
     try {
       await pool.query(`CREATE SCHEMA ${quotedSchema}`);
-      for (const name of ["0001_experience_store.sql", "0002_google_oauth.sql", "0003_google_busy_coverage.sql", "0004_host_push_subscriptions.sql"]) {
+      for (const name of ["0001_experience_store.sql", "0002_google_oauth.sql", "0003_google_busy_coverage.sql", "0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql"]) {
         await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       }
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);

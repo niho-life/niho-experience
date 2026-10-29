@@ -51,6 +51,12 @@ export type OccurrenceOverride =
       readonly durationMinutes?: number;
     };
 
+/** Selling is independent from a moved occurrence. OPEN is stored too so reopening never resets version history. */
+export interface OccurrenceSalesState {
+  readonly occurrenceId: OccurrenceId;
+  readonly desiredState: "OPEN" | "CLOSED";
+}
+
 export interface Occurrence {
   readonly id: OccurrenceId;
   readonly ruleId: string;
@@ -79,6 +85,7 @@ export interface BusyInterval {
 export interface ExpandOccurrencesInput {
   readonly rule: ScheduleRule;
   readonly overrides?: readonly OccurrenceOverride[];
+  readonly salesStates?: readonly OccurrenceSalesState[];
   /** Inclusive local date in Asia/Tokyo. */
   readonly fromDate: LocalDate;
   /** Inclusive local date in Asia/Tokyo. */

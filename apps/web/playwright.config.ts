@@ -9,7 +9,7 @@ const ADMIN_CASE_PORT = Number(process.env.E2E_ADMIN_CASE_PORT ?? 3103);
 const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 // The host console and its preview tests run against the second server.
 const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|sales|messages|session|reviews|settings|support|pwa)|admin-support)\.spec\.ts/;
-const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations)\.spec\.ts/;
+const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-calendar)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;

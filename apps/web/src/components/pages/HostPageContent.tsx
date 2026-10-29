@@ -6,7 +6,7 @@ import { HandIcon } from "@/components/HandIcon";
 import { buttonClass } from "@/components/ui";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { config } from "@/lib/config";
-import { safeHttpsUrl } from "@/lib/safe-url";
+import { safeHttpsUrl, safeNihoProviderUrl } from "@/lib/safe-url";
 import { HOST_BAND_VIDEO } from "@/lib/site-media";
 import { publicMetadata } from "@/lib/public-metadata";
 import { nihoIdOrNull } from "@/lib/host/providers";
@@ -16,14 +16,6 @@ import { getJapaneseCopy, type SiteLocale } from "@/lib/localized-content";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { englishAlternates } from "@/lib/locale-metadata";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
-
-function hostStartUrl(value: string, nihoOrigin: string): string | null {
-  try {
-    const url = new URL(value); const origin = new URL(nihoOrigin);
-    if (url.origin !== origin.origin || url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/experiences/provider") return null;
-    return url.href;
-  } catch { return null; }
-}
 
 export async function englishHostMetadata(): Promise<Metadata> {
   return { ...publicMetadata("Host an experience with NIHO", "Share a meal, a craft or a favorite walk with travelers in Kamakura. NIHO helps you prepare, list and take bookings.", `${config.siteUrl}/host`), alternates: await englishAlternates("/host") };
@@ -75,7 +67,7 @@ export async function HostPageContent({ searchParams, locale }: { searchParams: 
       copy = (await getJapaneseCopy()).copy;
     } catch { return <JapaneseUnavailable />; }
   }
-  const nihoProviderUrl = hostStartUrl(config.nihoHostStartUrl, config.nihoWebOrigin);
+  const nihoProviderUrl = safeNihoProviderUrl(config.nihoHostStartUrl, config.nihoWebOrigin);
   // The console login replaces the links to NIHO's provider screen.
   const managementUrl = consoleEntry ? null : nihoProviderUrl;
   const startUrl = config.hostSignupMode === "open" ? managementUrl : null;

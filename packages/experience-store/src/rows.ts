@@ -5,6 +5,7 @@ import type {
   GoogleCalendarConfiguration,
   ProductRecord,
   StoredOccurrenceOverride,
+  StoredOccurrenceSalesState,
   StoredScheduleRule,
 } from "./types.ts";
 
@@ -107,6 +108,17 @@ export function overrideFromRow(row: DbRow): StoredOccurrenceOverride {
   const parsed = parseOccurrenceOverrides([raw])[0];
   if (parsed === undefined) throw new StoreError("Database returned an invalid occurrence override.");
   return { override: parsed, version: numberValue(row, "version") };
+}
+
+export function salesStateFromRow(row: DbRow): StoredOccurrenceSalesState {
+  const desiredState = stringValue(row, "desired_state");
+  if (desiredState !== "OPEN" && desiredState !== "CLOSED") {
+    throw new StoreError("Database returned an invalid desired_state.");
+  }
+  return {
+    state: { occurrenceId: stringValue(row, "occurrence_id"), desiredState },
+    version: numberValue(row, "version"),
+  };
 }
 
 export function googleCalendarFromRow(row: DbRow): GoogleCalendarConfiguration {
