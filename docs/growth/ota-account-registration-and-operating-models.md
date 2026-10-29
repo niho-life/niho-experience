@@ -2,6 +2,8 @@
 
 調査日：2026-10-29。対象：12サービスとTripadvisorの販売経路。公式の供給者向けヘルプ・約款・公開登録画面を調査。**アカウント作成、契約同意、講師招待、本番の枠変更は未実施**。画面内だけで確認できる権限・日本向け個別契約は未確定として残す。
 
+同日追記：本調査後、オーナーから規約上の許可取得を確認済み。以下の「未確認」は公開資料から確認できた範囲を示すもので、許可の取り直しを設計・試作の着手条件にしない。対象アカウント・商品・操作範囲を記録し、[Studio worker詳細設計](../ota-studio-worker-design.md)の実機受入に進む。個別許可の申告と、全サイトで動作を実証したことは区別する。
+
 関連：[カレンダー詳細設計](../../idea/active/2026-10-29-ota-calendar-operations.md)、[名義・メール・精算](niho-experience-seller-and-settlement.md)、[チャネルマネージャー調査](niho-channel-manager-feasibility.md)、[体験市場・販路調査](kamakura-experience-market-and-channels.md)。
 
 ## 1. 結論
