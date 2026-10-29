@@ -2,7 +2,7 @@
 
 確認日：2026-10-29。位置付け：運用設計案。契約・税務の適用は実際の事業者、販売条件、課税方式に照らして確定する。口座や税区分の実情報は公開リポジトリへ保存しない。
 
-関連：[カレンダー・外部サイト連携の詳細設計](../../idea/active/2026-10-29-ota-calendar-operations.md)、[市場・販路調査](kamakura-experience-market-and-channels.md)。
+関連：[カレンダー・外部サイト連携の詳細設計](../../idea/active/2026-10-29-ota-calendar-operations.md)、[12サービスの登録手順・①〜④の比較](ota-account-registration-and-operating-models.md)、[市場・販路調査](kamakura-experience-market-and-channels.md)。
 
 ## 1. まず採る構成
 
@@ -31,27 +31,34 @@
 
 ## 3. サイトごとのアカウント方針
 
-以下は公開された一次資料で確認できた範囲。担当者権限、講師委託、複数商品の承認は実アカウント・契約で最終確認する。Web画面を操作できることと、ブラウザ自動操作が許されることは別項目として管理する。
+以下は公開された一次資料で確認できた範囲。担当者権限、講師委託、複数商品の承認は実アカウント・契約で最終確認する。Web画面を操作できることと、ブラウザ自動操作が許されることは別項目として管理する。申込URL・具体的手順・根拠は[登録方式の比較](ota-account-registration-and-operating-models.md)を正とする。
 
 | サイト | 確認できたこと | NIHOの方針と未確認点 |
 | --- | --- | --- |
-| Airbnb体験 | 共同ホストの招待・役割がある。体験を実施する人には本人確認・専門性等の条件がある | NIHOの組織運営を正しく申告し、実施者を指定の方法で登録。会社名義だけで講師登録を省略しない |
+| Airbnb体験 | 裏方／実施担当の共同ホストを招待でき、体験の日程管理が可能 | 初期は③講師所有＋NIHOスタッフを裏方の共同ホスト。①組織運営も実施者登録等の条件を満たせば検討。通常の④で講師登録を省略しない |
 | GetYourGuide | 自ら体験を運営する登録事業者・個人事業者が対象。再販業者・集約業者等は対象外。スタッフ別ユーザーあり | NIHOが実運営する講師委託型を説明して確認。独立した講師商品の掲載代行をNIHO運営と偽ってまとめない |
 | Viator | supplierは複数商品を扱い、primary contactが副ユーザーへカレンダー等の権限を委任できる。供給者が操作に責任を持つ | NIHO supplier＋複数商品を第一候補。正しい会社／個人区分、実施委託条件、商品審査を確認 |
-| Klook | 公式登録案内に企業情報・商品情報・契約・Merchant Portalでの商品管理がある | NIHO merchantを第一候補。体験向けstaff権限と外部講師商品の扱いは今回の公開資料だけでは確定できない |
-| じゃらん遊び・体験 | 掲載事業者が自己責任で体験を提供し、参画申込・審査後に販売メニュー登録 | NIHO会場の複数講師商品をNIHOの運営として掲載できるか申込時に確認 |
-| アソビュー！ | 掲載募集があり、利用者向け規約上の事業者は契約して情報を掲載する法人・個人 | 契約主体、複数商品、委託講師、スタッフ権限は掲載事業者契約で確認 |
-| アクティビティジャパン | 掲載事業者向け約款は契約主体をアクティビティの催行者とする | NIHOが催行責任を持つ形で確認。掲載代行者の名義へ自動的に寄せない |
+| Klook | 公式の体験向けガイドにサブアカウントあり。ただし2021年台湾版 | ④NIHO merchantを第一候補。現在の日本向け権限・講師体制を確認 |
+| KKday | SCM規約にスタッフ追加・権限区分・複数供給者からの委任を明記 | ④を基本、独立講師は③も有力。商品限定権限は別確認 |
+| じゃらん遊び・体験 | 事業者約款§6に子IDと同一店舗内のID利用条件あり | ④を第一候補。外部代行会社の利用を店舗内の例外から推定しない |
+| アソビュー！ | パートナー規約§3.2で全部・一部の実施委託を認め、委託先通知・契約等を要求 | ④を推奨。NIHOが契約責任を持ち講師情報を通知。第三者へのID貸与は採らない |
+| アクティビティジャパン | 事業者約款§13.2は実施業務の委託と供給者の責任を規定 | ④を推奨。§8.3の第三者へのID貸与禁止を守る |
+| VELTRA | 催行会社として申込・契約・商品資料提出の経路あり | ④を商談。スタッフ権限・講師委託条件・枠操作は確認待ち |
+| aini | 法人の登録者と実際の実施者が別でもよいと公式説明 | ④を推奨。登録したNIHOが開催責任を持つ |
+| byFood／airKitchen | 食・茶のホスト登録、カレンダーあり | 料理・茶で④を申請。法人の複数講師運用と権限を確認 |
 
 一次資料：
 
 - Airbnb：[共同ホスト](https://www.airbnb.com/help/article/2685)、[体験ホスト追加規約 §10](https://www.airbnb.com/help/article/2870)、[primary hostとレビュー](https://www.airbnb.com/help/article/1536)
 - GetYourGuide：[申請資格](https://supply.getyourguide.support/hc/en-us/articles/13980993520925-Who-can-apply-to-be-a-Supply-Partner)、[スタッフ権限・通知](https://supply.getyourguide.support/hc/en-us/articles/13980973710493-Updating-the-Account-Management-Section-Managing-User-Access-and-Customizing-Notifications-in-the-Supplier-Portal)
 - Viator：[2026年8月のSupplier Agreement変更案内](https://operatorresources.viator.com/updated-supplier-agreement-august-2026/)、[商品ごとの接続](https://operatorresources.viator.com/connect-to-viator-through-api/)
-- Klook：[公式パートナー登録案内](https://www.klook.com/en-AU/blog/how-to-sign-up-klook-partner-guide/)
-- じゃらん：[掲載申込](https://www.jalan.net/activity/inquiry/)、[遊び・体験利用規約](https://cdn.p.recruit.co.jp/terms/jln-t-1008/index.html)
-- アソビュー！：[掲載募集](https://biz.asoview.com/asoview)、[利用者向け規約](https://www.asoview.com/info/terms)
-- アクティビティジャパン：[掲載事業者向け約款](https://en.activityjapan.com/pdf/conditions.pdf)
+- Klook：[現在の出店申込](https://merchant.klook.com/create_lead)、体験向けガイドの版・権限は[登録方式の比較](ota-account-registration-and-operating-models.md)参照
+- KKday：[SCM規約](https://scm.kkday.com/v1/en/auth/terms)
+- じゃらん：[掲載申込](https://www.jalan.net/activity/inquiry/)、[事業者約款](https://cdn.p.recruit.co.jp/terms/jln-t-1025/index.html)
+- アソビュー！：[掲載募集](https://biz.asoview.com/asoview)、[パートナー規約](https://lp.asoview.com/rs/490-KLJ-479/images/asoview_atractionpartner_terms.pdf)
+- アクティビティジャパン：[掲載事業者向け約款](https://activityjapan.com/pdf/conditions.pdf)
+- VELTRA：[掲載手順](https://file.veltra.com/jp/partner/index.html)、aini：[法人ホスト](https://support.helloaini.com/hc/ja/articles/360001468034)
+- byFood：[パートナーFAQ](https://www.byfood.com/partner-faq)、airKitchen：[登録FAQ](https://airkitchen.me/hostfaq/how-to-register-as-host/)
 
 GetYourGuideのユーザー権限にはAdministration、Finance、Operations、Guidesがあるが、Guidesを招待すれば担当商品だけに絞れるとまでは公開説明から確認できない。全講師へ直接OTA権限を渡さず、NIHO Experienceの体験別権限で必要な情報を見せる。
 
