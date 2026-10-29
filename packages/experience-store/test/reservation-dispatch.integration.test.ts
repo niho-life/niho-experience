@@ -81,6 +81,12 @@ describe("PostgreSQL reservation read dispatch", { skip: databaseUrl === undefin
       }
       await runtime.reconcileListing(admin, "listing-a", randomUUID());
       await runtime.reconcileListing(admin, "listing-b", randomUUID());
+      await store.saveScheduleRule({ providerId: "provider-a", nihoUserId: "owner-a" }, "tea",
+        { ...rule("tea-rule"), startsOn: "2099-01-02" }, 1, randomUUID());
+      await runtime.reconcileListing(admin, "listing-a", randomUUID());
+      assert.equal((await pool.query(
+        "SELECT count(*)::int AS count FROM channel_desired_states WHERE listing_id='listing-a' AND source_start_at='2099-01-01T01:00:00Z'",
+      )).rows[0]?.count, 1);
 
       const credentialA = await runtime.mintWorkerCredential(admin, "worker-a", "Synthetic A", "2099-03-01T00:00:00.000Z", null, randomUUID());
       const credentialB = await runtime.mintWorkerCredential(admin, "worker-b", "Synthetic B", "2099-03-01T00:00:00.000Z", null, randomUUID());
@@ -96,6 +102,9 @@ describe("PostgreSQL reservation read dispatch", { skip: databaseUrl === undefin
       ]);
       assert.equal(initial[0]!.enqueued + initial[1]!.enqueued, 1);
       assert.equal(initial[2]!.enqueued, 1);
+      assert.equal(new Date((await pool.query(
+        "SELECT source_start_at FROM channel_jobs WHERE listing_id='listing-a' AND purpose='RESERVATION_WINDOW'",
+      )).rows[0]?.source_start_at).toISOString(), "2099-01-02T01:00:00.000Z");
       assert.equal((await pool.query(
         "SELECT count(*)::int AS count FROM channel_jobs WHERE listing_id='listing-a' AND purpose='RESERVATION_WINDOW'",
       )).rows[0]?.count, 1);
@@ -298,17 +307,25 @@ describe("PostgreSQL reservation read dispatch", { skip: databaseUrl === undefin
       // Staff confirms the old executor stopped, then the existing availability
       // observer verifies the recovered session. Only that explicit recovery
       // resumes readers; their inventory health is still stale until re-read.
-      await pool.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED' WHERE purpose='AVAILABILITY' AND status='QUEUED'");
-      const recovery = await runtime.recoverQuarantinedLease(admin, "account-d", true, randomUUID());
-      const recoveryJob = await runtime.claim(workerA);
-      assert.ok(recoveryJob);
-      assert.equal(recoveryJob.id, recovery.observeJobId);
-      assert.equal(recoveryJob.purpose, undefined);
-      assert.equal((await runtime.submitResult(workerA, recoveryJob.id, {
-        resultId: randomUUID(), leaseToken: recoveryJob.leaseToken, outcome: "VERIFIED", stopped: true, target: recoveryJob.target,
-        occurrenceId: recoveryJob.occurrenceId, sourceStartAtUtc: recoveryJob.sourceStartAtUtc, sourceEndAtUtc: recoveryJob.sourceEndAtUtc,
-        observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString(),
-      })).acceptedAsCurrent, true);
+      async function recoverAndObserve(accountId: string) {
+        await pool.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED' WHERE purpose='AVAILABILITY' AND status='QUEUED'");
+        const recovery = await runtime.recoverQuarantinedLease(admin, accountId, true, randomUUID());
+        const waiting = (await pool.query(
+          "SELECT pending_job_id,halted_at FROM external_reservation_read_dispatch_states WHERE account_id=$1", [accountId],
+        )).rows[0];
+        assert.equal(waiting?.pending_job_id, null);
+        assert.ok(waiting?.halted_at);
+        const recoveryJob = await runtime.claim(workerA);
+        assert.ok(recoveryJob);
+        assert.equal(recoveryJob.id, recovery.observeJobId);
+        assert.equal(recoveryJob.purpose, undefined);
+        assert.equal((await runtime.submitResult(workerA, recoveryJob.id, {
+          resultId: randomUUID(), leaseToken: recoveryJob.leaseToken, outcome: "VERIFIED", stopped: true, target: recoveryJob.target,
+          occurrenceId: recoveryJob.occurrenceId, sourceStartAtUtc: recoveryJob.sourceStartAtUtc, sourceEndAtUtc: recoveryJob.sourceEndAtUtc,
+          observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString(),
+        })).acceptedAsCurrent, true);
+      }
+      await recoverAndObserve("account-d");
       const recovered = (await pool.query(
         "SELECT pending_job_id,halted_at,last_error FROM external_reservation_read_dispatch_states WHERE listing_id='listing-d'",
       )).rows[0];
@@ -316,6 +333,21 @@ describe("PostgreSQL reservation read dispatch", { skip: databaseUrl === undefin
       assert.equal(recovered?.halted_at, null);
       assert.equal(recovered?.last_error, null);
       assert.ok((await runtime.enqueueDueReservationReads(workerA, 10)).enqueued >= 1);
+      const lostResultJob = await runtime.claim(workerA);
+      assertReservationJob(lostResultJob);
+      await runtime.submitResult(workerA, lostResultJob.id, {
+        resultId: randomUUID(), leaseToken: lostResultJob.leaseToken, outcome: "RETRY_WAIT", stopped: false, target: lostResultJob.target,
+      });
+      // No later stopped=true response ever arrives from this worker. Staff's
+      // explicit stop confirmation must release the old pending reference.
+      assert.equal((await pool.query(
+        "SELECT pending_job_id::text FROM external_reservation_read_dispatch_states WHERE listing_id='listing-d'",
+      )).rows[0]?.pending_job_id, lostResultJob.id);
+      await recoverAndObserve("account-d");
+      assert.equal((await pool.query(
+        "SELECT halted_at FROM external_reservation_read_dispatch_states WHERE listing_id='listing-d'",
+      )).rows[0]?.halted_at, null);
+      assert.equal((await runtime.enqueueDueReservationReads(workerA, 10)).enqueued, 1);
     } finally {
       if (schemaCreated) await pool.query(`DROP SCHEMA "${schema}" CASCADE`).catch(() => {});
       await pool.end();

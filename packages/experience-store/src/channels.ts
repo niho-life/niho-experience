@@ -1045,26 +1045,21 @@ export class ChannelRuntime {
         if (!state.rows[0] || state.rows[0].pending_job_id !== null || state.rows[0].halted_at !== null
           || isoValue(state.rows[0], "next_due_at") > nowUtc) continue;
 
+        const today = tokyoDate(this.#now());
+        const canonical = await this.#reservationWindowManifest(client, text(listing, "provider_id"), text(listing, "product_id"),
+          tokyoLocalToUtc(addLocalDays(today, -3), "00:00"), tokyoLocalToUtc(addLocalDays(today, 59), "00:00"));
         const anchorResult = await client.query<DbRow>(
           `SELECT d.* FROM channel_desired_states d
+            JOIN unnest($4::text[],$5::timestamptz[],$6::timestamptz[]) AS c(id,start_at,end_at)
+              ON d.occurrence_id=c.id AND d.source_start_at=c.start_at AND d.source_end_at=c.end_at
             WHERE d.listing_id=$1 AND d.mapping_version=$2
-            ORDER BY CASE WHEN d.source_end_at>$3 THEN 0 ELSE 1 END,d.source_start_at,d.occurrence_id COLLATE "C" LIMIT 1 FOR UPDATE`,
-          [listing.id, listing.mapping_version, nowUtc],
+            ORDER BY CASE WHEN d.source_end_at>$3 THEN 0 ELSE 1 END,d.source_start_at,d.occurrence_id COLLATE "C"
+            LIMIT 1 FOR UPDATE OF d`,
+          [listing.id, listing.mapping_version, nowUtc, canonical.map((item) => item.id),
+            canonical.map((item) => item.startUtc), canonical.map((item) => item.endUtc)],
         );
         const anchor = anchorResult.rows[0];
         if (!anchor) {
-          await client.query(
-            `UPDATE external_reservation_read_dispatch_states SET retry_count=LEAST(retry_count+1,5),
-               last_error='NO_CANONICAL_ANCHOR',next_due_at=$3::timestamptz + interval '1 minute',updated_at=$3
-              WHERE provider_id=$1 AND listing_id=$2`, [listing.provider_id, listing.id, nowUtc],
-          );
-          continue;
-        }
-        try {
-          const occurrence = await this.#currentOccurrence(client, text(listing, "provider_id"), text(listing, "id"), text(anchor, "occurrence_id"));
-          if (occurrence.startUtc !== isoValue(anchor, "source_start_at") || occurrence.endUtc !== isoValue(anchor, "source_end_at")) throw new StoreConflictError("anchor stale");
-        } catch (error) {
-          if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError || error instanceof StoreConflictError)) throw error;
           await client.query(
             `UPDATE external_reservation_read_dispatch_states SET retry_count=LEAST(retry_count+1,5),
                last_error='NO_CANONICAL_ANCHOR',next_due_at=$3::timestamptz + interval '1 minute',updated_at=$3
@@ -2457,6 +2452,12 @@ export class ChannelRuntime {
       await client.query(
         "UPDATE channel_jobs SET status='FINISHED',outcome='NEEDS_REVIEW',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
         [job.id, this.#nowIso()],
+      );
+      if (job.purpose === "RESERVATION_WINDOW") await client.query(
+        `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
+           last_error='MANUAL_RECOVERY_OBSERVE_REQUIRED',updated_at=$3
+          WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+        [job.provider_id, job.listing_id, this.#nowIso(), job.id],
       );
       const recoveryDesired = await client.query<DbRow>(
         "UPDATE channel_desired_states SET desired_version=desired_version+1,updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING desired_version,source_start_at,source_end_at",
