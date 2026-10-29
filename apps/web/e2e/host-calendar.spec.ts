@@ -49,7 +49,11 @@ test("week, day agenda and add dialog work without overflow", async ({ page }, t
   await expect(page.getByRole("heading", { name: "カレンダー" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await expect(page.locator("[data-calendar-day]:visible")).toHaveCount(7);
-  if (testInfo.project.name === "calendar-desktop") await expect(page.getByRole("region", { name: "週カレンダー" })).toBeVisible();
+  if (testInfo.project.name === "calendar-desktop") {
+    await expect(page.getByRole("region", { name: "週カレンダー" })).toBeVisible();
+    const weeklyAxe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+    expect(weeklyAxe.violations.map((violation) => violation.id)).toEqual([]);
+  }
   await testInfo.attach("calendar", { body: await page.screenshot({ path: testInfo.outputPath("calendar.png") }), contentType: "image/png" });
 
   await page.locator(`[data-calendar-day="${selectedDay}"]:visible`).click();
@@ -338,7 +342,7 @@ test("a moved occurrence keeps its time through pause and reopen", async ({ page
   dialog = page.getByRole("dialog", { name: "合成の料理体験" });
   await expect(dialog).toContainText("10:00–11:00");
   await dialog.getByRole("button", { name: "受付を再開" }).click();
-  await expect(page.getByRole("button", { name: /合成の料理体験.*受付中/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /合成の料理体験/ })).toContainText("受付中");
   expect(actions).toEqual(["rescheduleOccurrence", "setSalesState", "setSalesState"]);
 });
 
