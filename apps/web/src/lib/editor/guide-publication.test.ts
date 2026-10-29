@@ -68,6 +68,21 @@ describe("guide publication validation", () => {
     expect(photo).toContainEqual({ field: "body", message: expect.stringContaining("写真") });
   });
 
+  it("requires explicit Web permission for a selected cover", () => {
+    expect(guidePublicationProblems({
+      ...validArticle,
+      cover: {
+        assetId: "00000000-0000-4000-8000-000000000215",
+        alt: "Synthetic cover",
+        credit: "Synthetic fixture",
+        webConfirmed: false,
+      },
+    }, new Set(["walks"]))).toContainEqual({
+      field: "cover",
+      message: expect.stringContaining("掲載許諾"),
+    });
+  });
+
   it("parses safe private previews and returns author-correctable errors", () => {
     expect(parseGuideDraftPreview(validArticle.content.markdown)).toMatchObject({ ok: true });
     expect(parseGuideDraftPreview("## Unsafe\n\n<script>bad</script>")).toEqual({

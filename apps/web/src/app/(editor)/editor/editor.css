@@ -339,6 +339,15 @@
 .editor-settings textarea:disabled,
 .editor-title-input:disabled { cursor: wait; opacity: 0.65; }
 .editor-settings-section { display: grid; border-top: 1px solid var(--color-line); padding-top: 1.25rem; gap: 1rem; }
+.editor-cover-preview { width: 100%; aspect-ratio: 4 / 3; border-radius: 0.7rem; object-fit: cover; background: var(--color-sand); }
+.editor-cover-upload input { padding: 0.5rem; font-size: 0.78rem; }
+.editor-cover-confirm { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+.editor-cover-confirm input { width: auto; margin-top: 0.15rem; }
+.editor-cover-note { color: var(--color-muted); font-size: 0.75rem; line-height: 1.45; }
+.editor-cover-revoke { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--color-danger); font-size: 0.78rem; font-weight: 850; text-decoration: underline; text-underline-offset: 0.2rem; }
+.editor-cover-revoke:disabled { cursor: not-allowed; opacity: 0.45; }
+.editor-cover-message { border-radius: 0.65rem; padding: 0.75rem; background: var(--color-leaf-pale); color: var(--color-moss); font-size: 0.78rem; font-weight: 750; }
+.editor-cover-error { background: var(--color-danger-pale); color: var(--color-danger); }
 .editor-save-message { border-radius: 0.7rem; padding: 0.85rem; background: var(--color-leaf-pale); color: var(--color-moss); font-size: 0.82rem; font-weight: 750; }
 .editor-save-error { background: var(--color-danger-pale); color: var(--color-danger); }
 .editor-save-message a { display: inline-block; margin-top: 0.4rem; text-decoration: underline; }
