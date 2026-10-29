@@ -648,6 +648,13 @@ export class ChannelRuntime {
         );
       }
       await client.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE account_id=$1 AND status='QUEUED'", [accountId, this.#nowIso()]);
+      await client.query(
+        `UPDATE external_reservation_read_dispatch_states s
+            SET pending_job_id=NULL,next_due_at=$2,last_error='AUTHORITY_CHANGED',updated_at=$2
+          FROM channel_jobs j WHERE s.pending_job_id=j.id AND j.account_id=$1
+            AND j.purpose='RESERVATION_WINDOW' AND j.status='FINISHED' AND j.outcome='SUPERSEDED'`,
+        [accountId, this.#nowIso()],
+      );
       const saved = accountDto(updated.rows[0]!);
       await this.#completeCommand(client, actor, commandId, "account.update", request, { id: saved.id, version: saved.version }, saved.providerId, "external_account", saved.id);
       return saved;
@@ -717,6 +724,13 @@ export class ChannelRuntime {
           capabilities.canCreate, input.active, this.#nowIso()],
       );
       await client.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE listing_id=$1 AND status='QUEUED'", [listingId, this.#nowIso()]);
+      await client.query(
+        `UPDATE external_reservation_read_dispatch_states s
+            SET pending_job_id=NULL,next_due_at=$2,last_error='AUTHORITY_CHANGED',updated_at=$2
+          FROM channel_jobs j WHERE s.pending_job_id=j.id AND j.listing_id=$1
+            AND j.purpose='RESERVATION_WINDOW' AND j.status='FINISHED' AND j.outcome='SUPERSEDED'`,
+        [listingId, this.#nowIso()],
+      );
       const dto = listingDto(updated.rows[0]!);
       await this.#completeCommand(client, actor, commandId, "listing.update", request, { id: dto.id, version: dto.mappingVersion }, dto.providerId, "listing", dto.id);
       return dto;
@@ -928,6 +942,9 @@ export class ChannelRuntime {
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
       const nowUtc = this.#nowIso();
+      const deployedReaders = Object.entries(this.#supportedAdapters)
+        .filter(([, capability]) => capability.canObserve === true && capability.canReadReservations === true)
+        .map(([key]) => key);
 
       // A queued reservation job is safe to retire when its immutable authority
       // snapshot is no longer current. A leased job is never touched here.
@@ -941,34 +958,25 @@ export class ChannelRuntime {
            LEFT JOIN channel_worker_accounts wa ON wa.account_id=j.account_id AND wa.worker_id=j.dispatch_worker_id
              AND wa.revoked_at IS NULL AND wa.version=j.dispatch_assignment_version
           WHERE j.purpose='RESERVATION_WINDOW' AND j.status='QUEUED'
-            AND EXISTS (SELECT 1 FROM channel_worker_accounts caller
-              WHERE caller.account_id=j.account_id AND caller.worker_id=$1 AND caller.revoked_at IS NULL)
+            AND (j.dispatch_worker_id=$1 OR EXISTS (SELECT 1 FROM channel_worker_accounts caller
+              WHERE caller.account_id=j.account_id AND caller.worker_id=$1 AND caller.revoked_at IS NULL))
             AND (a.id IS NULL OR a.active<>true OR a.revoked_at IS NOT NULL
               OR (a.delegated_until IS NOT NULL AND a.delegated_until<=$2) OR a.quarantined_at IS NOT NULL
-              OR a.version<>j.account_version OR l.id IS NULL OR l.active<>true OR l.mapping_version<>j.mapping_version
-              OR l.can_observe<>true OR l.can_read_reservations<>true OR p.status<>'PUBLISHED' OR wa.worker_id IS NULL
-              OR a.site<>j.target_site OR a.external_account_id<>j.target_external_account_id
-              OR l.external_product_id<>j.target_external_product_id OR l.external_option_id<>j.target_external_option_id
-              OR l.adapter<>j.target_adapter OR l.adapter_version<>j.target_adapter_version
-              OR l.connection_mode<>j.target_connection_mode OR d.listing_id IS NULL OR d.mapping_version<>j.mapping_version
-              OR d.source_start_at<>j.source_start_at OR d.source_end_at<>j.source_end_at)`, [identity.workerId, nowUtc],
+              OR a.version IS DISTINCT FROM j.account_version OR l.id IS NULL OR l.active IS DISTINCT FROM true
+              OR l.mapping_version IS DISTINCT FROM j.mapping_version
+              OR l.can_observe IS DISTINCT FROM true OR l.can_read_reservations IS DISTINCT FROM true
+              OR p.status IS DISTINCT FROM 'PUBLISHED' OR wa.worker_id IS NULL
+              OR a.site IS DISTINCT FROM j.target_site OR a.external_account_id IS DISTINCT FROM j.target_external_account_id
+              OR l.external_product_id IS DISTINCT FROM j.target_external_product_id
+              OR l.external_option_id IS DISTINCT FROM j.target_external_option_id
+              OR l.adapter IS DISTINCT FROM j.target_adapter OR l.adapter_version IS DISTINCT FROM j.target_adapter_version
+              OR l.connection_mode IS DISTINCT FROM j.target_connection_mode OR d.listing_id IS NULL
+              OR d.mapping_version IS DISTINCT FROM j.mapping_version
+              OR d.source_start_at IS DISTINCT FROM j.source_start_at OR d.source_end_at IS DISTINCT FROM j.source_end_at
+              OR NOT ((j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($3::text[])))
+          ORDER BY j.provider_id COLLATE "C",j.listing_id COLLATE "C",j.id LIMIT 100`,
+        [identity.workerId, nowUtc, deployedReaders],
       );
-      for (const providerId of [...new Set(stale.rows.map((row) => text(row, "provider_id")))].sort()) {
-        await lockProviderInventory(client, providerId);
-      }
-      for (const job of stale.rows) {
-        await client.query(
-          "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE id=$1::uuid AND status='QUEUED'",
-          [job.id, nowUtc],
-        );
-        await client.query(
-          `UPDATE external_reservation_read_dispatch_states
-              SET pending_job_id=NULL,next_due_at=$3,last_error='AUTHORITY_CHANGED',updated_at=$3
-            WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
-          [job.provider_id, job.listing_id, nowUtc, job.id],
-        );
-      }
-
       const candidates = await client.query<DbRow>(
         `SELECT l.*,a.site,a.external_account_id,a.version AS account_version,wa.version AS assignment_version,
                 s.pending_job_id,s.next_due_at,s.halted_at
@@ -981,14 +989,34 @@ export class ChannelRuntime {
           WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL
             AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
             AND a.quarantined_at IS NULL AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true
+            AND (a.site || '/' || l.adapter || '@' || l.adapter_version)=ANY($4::text[])
             AND p.status='PUBLISHED' AND (s.listing_id IS NULL OR (s.pending_job_id IS NULL AND s.halted_at IS NULL AND s.next_due_at<=$2))
           ORDER BY COALESCE(s.next_due_at,'-infinity'::timestamptz),l.id COLLATE "C" LIMIT $3`,
-        [identity.workerId, nowUtc, limit * 4],
+        [identity.workerId, nowUtc, limit * 4, deployedReaders],
       );
+      const providerIds = [...new Set([...stale.rows, ...candidates.rows].map((row) => text(row, "provider_id")))].sort();
+      for (const providerId of providerIds) {
+        await lockProviderInventory(client, providerId);
+      }
+      for (const job of stale.rows) {
+        const retired = await client.query(
+          "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE id=$1::uuid AND status='QUEUED'",
+          [job.id, nowUtc],
+        );
+        // A claim can win after the candidate read. Its pending lease remains
+        // owned until the normal stopped-result path releases it.
+        if (retired.rowCount !== 1) continue;
+        await client.query(
+          `UPDATE external_reservation_read_dispatch_states
+              SET pending_job_id=NULL,next_due_at=$3,last_error='AUTHORITY_CHANGED',updated_at=$3
+            WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+          [job.provider_id, job.listing_id, nowUtc, job.id],
+        );
+      }
+
       let enqueued = 0;
       for (const candidate of candidates.rows) {
         if (enqueued >= limit) break;
-        await lockProviderInventory(client, text(candidate, "provider_id"));
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,31))", [`reservation-read-listing:${candidate.id}`]);
         const currentListing = await client.query<DbRow>(
           `SELECT l.*,a.site,a.external_account_id,a.version AS account_version,wa.version AS assignment_version
@@ -1052,14 +1080,13 @@ export class ChannelRuntime {
              account_version,desired_version,mapping_version,
              target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,
              target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
-           VALUES ($1,$2,$3,$4,$5,'OBSERVE','RESERVATION_WINDOW',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'Asia/Tokyo',$16,$17,$18,$19,$20,40,NULL)
-           ON CONFLICT (listing_id,occurrence_id,action,purpose,dispatch_sequence,account_version,desired_version,mapping_version) DO NOTHING`,
+           VALUES ($1,$2,$3,$4,$5,'OBSERVE','RESERVATION_WINDOW',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'Asia/Tokyo',$16,$17,$18,$19,$20,40,NULL)`,
           [jobId, listing.provider_id, listing.account_id, listing.id, anchor.occurrence_id, dispatchSequence,
             identity.workerId, listing.assignment_version, listing.account_version, anchor.desired_version, listing.mapping_version, listing.site, listing.external_account_id,
             listing.external_product_id, listing.external_option_id, listing.adapter, listing.adapter_version,
             listing.connection_mode, anchor.source_start_at, anchor.source_end_at],
         );
-        if ((inserted.rowCount ?? 0) === 0) continue;
+        if ((inserted.rowCount ?? 0) !== 1) throw new StoreConflictError("Reservation read job was not inserted.");
         await client.query(
           `UPDATE external_reservation_read_dispatch_states SET pending_job_id=$3::uuid,dispatch_sequence=$4,last_error=NULL,updated_at=$5
             WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id IS NULL`,
@@ -1220,13 +1247,13 @@ export class ChannelRuntime {
     }
     const existing = await client.query(
       `SELECT 1 FROM channel_jobs WHERE listing_id=$1 AND occurrence_id=$2 AND action=$3 AND account_version=$4
-         AND desired_version=$5 AND mapping_version=$6`,
+         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY'`,
       [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version],
     );
     if (existing.rows[0]) return 0;
     await client.query("UPDATE channel_desired_states SET last_error=NULL WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id]);
     await client.query(
-      "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED'",
+      "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED' AND purpose='AVAILABILITY'",
       [listing.id, occurrence.id, nowUtc],
     );
     const inserted = await client.query(
@@ -1235,7 +1262,8 @@ export class ChannelRuntime {
          target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,target_adapter,target_adapter_version,
          target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Asia/Tokyo',$14,$15,$16,$17,$18,$19,$20)
-       ON CONFLICT (listing_id,occurrence_id,action,purpose,dispatch_sequence,account_version,desired_version,mapping_version) DO NOTHING`,
+       ON CONFLICT (listing_id,occurrence_id,action,account_version,desired_version,mapping_version)
+         WHERE purpose='AVAILABILITY' DO NOTHING`,
       [randomUUID(), listing.provider_id, listing.account_id, listing.id, occurrence.id, action, listing.account_version, desiredVersion,
         listing.mapping_version, listing.site, listing.external_account_id, listing.external_product_id, listing.external_option_id,
         listing.adapter, listing.adapter_version, listing.connection_mode, occurrence.startUtc, occurrence.endUtc, desiredState === "CLOSED" ? 100 : 50, null],
@@ -1394,7 +1422,7 @@ export class ChannelRuntime {
       throw new StoreConflictError("Reservation read lease is stale.");
     }
     const state = await client.query<DbRow>(
-      `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.version AS account_version,a.site,a.external_account_id,
+      `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,a.external_account_id,
               l.active AS listing_active,l.product_id,l.mapping_version,l.external_product_id,l.external_option_id,l.adapter,l.adapter_version,
               l.connection_mode,l.can_observe,l.can_read_reservations,p.status AS product_status
          FROM channel_external_accounts a
@@ -1405,7 +1433,7 @@ export class ChannelRuntime {
     );
     const current = state.rows[0];
     if (!current || current.account_active !== true || current.revoked_at !== null
-      || (current.delegated_until !== null && isoValue(current, "delegated_until") <= nowUtc)
+      || (current.delegated_until !== null && isoValue(current, "delegated_until") <= nowUtc) || current.quarantined_at !== null
       || current.listing_active !== true || current.product_status !== "PUBLISHED"
       || current.can_observe !== true || current.can_read_reservations !== true
       || integer(current, "account_version") !== integer(job, "account_version")
@@ -2207,6 +2235,14 @@ export class ChannelRuntime {
             WHERE r.read_id=$1::uuid AND r.job_id=$3::uuid AND r.worker_id=$4 AND r.lease_epoch=$5
               AND r.read_scope='WINDOW' AND r.status='SUBMITTED' AND r.batch_status='COMPLETE'
               AND pr.terminal_status='COMPLETE' AND pr.request_fingerprint IS NOT NULL
+              AND h.read_generation=r.read_generation
+              AND pr.result->>'receiptId'=$2::text AND pr.result->>'readId'=$1::text
+              AND (pr.result->>'generation')::bigint=r.read_generation
+              AND (pr.result->>'pageNumber')::integer=pr.page_number
+              AND pr.result->>'terminalStatus'='COMPLETE'
+              AND (pr.result->>'healthUpdated')::boolean=true
+              AND (pr.result->>'missingActiveReservations')::integer=0
+              AND (pr.result->>'needsReview')::integer=0 AND (pr.result->>'stale')::integer=0
               AND r.account_version=$6 AND r.mapping_version=$7
             FOR SHARE OF r,pr,h`,
           [input.reservationReadId, input.reservationReceiptId, jobId, identity.workerId, leaseEpoch,
@@ -2359,6 +2395,16 @@ export class ChannelRuntime {
     await client.query(
       "UPDATE channel_external_accounts SET quarantined_at=NULL,quarantine_reason=NULL,updated_at=$2 WHERE id=$1",
       [job.account_id, this.#nowIso()],
+    );
+    // Only the observe job issued by an explicit staff recovery may resume a
+    // halted reservation reader. This does not refresh its inventory health.
+    await client.query(
+      `UPDATE external_reservation_read_dispatch_states s
+          SET halted_at=NULL,last_error=NULL,retry_count=0,next_due_at=$2,updated_at=$2
+        WHERE s.account_id=$1 AND s.pending_job_id IS NULL AND s.halted_at IS NOT NULL
+          AND EXISTS (SELECT 1 FROM channel_admin_commands c
+            WHERE c.action='account.recover' AND c.result->>'observeJobId'=$3)`,
+      [job.account_id, this.#nowIso(), job.id],
     );
     const listingResult = await client.query<DbRow>(
       `SELECT l.*,a.site,a.external_account_id,a.active AS account_active,a.delegated_until,a.revoked_at,a.version AS account_version,a.quarantined_at

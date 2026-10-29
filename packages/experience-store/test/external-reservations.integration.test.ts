@@ -95,7 +95,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
 
       async function claim(date: string, mapping: { listingId: string; productId: string; externalProductId: string; externalOptionId: string } = {
         listingId: "listing-tea", productId: "tea", externalProductId: target.externalProductId, externalOptionId: target.externalOptionId,
-      }): Promise<ClaimedChannelJob> {
+      }, window = false): Promise<ClaimedChannelJob> {
         // This ledger test explicitly selects the next read cycle. Leave jobs
         // produced by reconciliation queued, with lower priority than this read.
         await pool.query("UPDATE channel_jobs SET priority=1 WHERE status='QUEUED'");
@@ -111,14 +111,27 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
              desired_state='OPEN',source_start_at=EXCLUDED.source_start_at,source_end_at=EXCLUDED.source_end_at`,
           [occurrenceId, desiredVersion, start, end, mapping.listingId],
         );
+        const jobId = randomUUID();
         await pool.query(
           `INSERT INTO channel_jobs
             (id,provider_id,account_id,listing_id,occurrence_id,action,account_version,desired_version,mapping_version,
              target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,target_adapter,
-             target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority)
-           VALUES ($1::uuid,'provider-a','account-a',$11,$2,'OBSERVE',1,$3,1,'Airbnb',$4,$5,$6,'Asia/Tokyo',$7,$8,'BROWSER',$9,$10,100)`,
-          [randomUUID(), occurrenceId, desiredVersion, target.externalAccountId, mapping.externalProductId, mapping.externalOptionId,
-            target.adapter, target.adapterVersion, start, end, mapping.listingId],
+             target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,purpose,dispatch_sequence,
+             dispatch_worker_id,dispatch_assignment_version)
+           SELECT $1::uuid,'provider-a','account-a',$11,$2,'OBSERVE',1,$3,1,'Airbnb',$4,$5,$6,'Asia/Tokyo',$7,$8,'BROWSER',$9,$10,100,
+             $12,$13,$14,CASE WHEN $14::text IS NULL THEN NULL ELSE wa.version END
+             FROM channel_worker_accounts wa WHERE wa.worker_id=$15 AND wa.account_id='account-a' AND wa.revoked_at IS NULL`,
+          [jobId, occurrenceId, desiredVersion, target.externalAccountId, mapping.externalProductId, mapping.externalOptionId,
+            target.adapter, target.adapterVersion, start, end, mapping.listingId,
+            window ? "RESERVATION_WINDOW" : "AVAILABILITY", window ? desiredVersion : 0, window ? worker.workerId : null, worker.workerId],
+        );
+        if (window) await pool.query(
+          `INSERT INTO external_reservation_read_dispatch_states
+            (provider_id,listing_id,account_id,product_id,pending_job_id,dispatch_sequence)
+           VALUES ('provider-a',$1,'account-a',$2,$3,$4)
+           ON CONFLICT (provider_id,listing_id) DO UPDATE SET pending_job_id=EXCLUDED.pending_job_id,
+             dispatch_sequence=EXCLUDED.dispatch_sequence,halted_at=NULL`,
+          [mapping.listingId,mapping.productId,jobId,desiredVersion],
         );
         const leased = await runtime.claim(worker);
         assert.ok(leased);
@@ -126,7 +139,25 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
         return leased;
       }
 
+      async function claimWindow(date: string, mapping?: Parameters<typeof claim>[1]): Promise<ClaimedChannelJob> {
+        return claim(date, mapping, true);
+      }
+
       async function finish(job: ClaimedChannelJob): Promise<void> {
+        if (job.purpose === "RESERVATION_WINDOW") {
+          const proof = (await pool.query(
+            `SELECT r.read_id,p.receipt_id FROM external_reservation_reads r
+              JOIN external_reservation_window_page_receipts p ON p.read_id=r.read_id AND p.terminal_status='COMPLETE'
+              JOIN external_reservation_listing_health h ON h.read_id=r.read_id
+             WHERE r.job_id=$1 AND r.read_scope='WINDOW' ORDER BY r.read_generation DESC LIMIT 1`, [job.id],
+          )).rows[0];
+          await runtime.submitResult(worker, job.id, {
+            resultId: randomUUID(), leaseToken: job.leaseToken, stopped: true, target: job.target,
+            outcome: proof ? "RESERVATION_VERIFIED" : "RETRY_WAIT",
+            ...(proof ? { reservationReadId: proof.read_id, reservationReceiptId: proof.receipt_id } : {}),
+          });
+          return;
+        }
         await runtime.submitResult(worker, job.id, {
           resultId: randomUUID(), leaseToken: job.leaseToken, outcome: "VERIFIED", stopped: true, target: job.target,
           occurrenceId: job.occurrenceId, sourceStartAtUtc: job.sourceStartAtUtc, sourceEndAtUtc: job.sourceEndAtUtc,
@@ -154,7 +185,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       async function completeEmptyWindow(mapping: {
         listingId: string; productId: string; externalProductId: string; externalOptionId: string;
       }) {
-        const job = await claim("2099-01-01", mapping);
+        const job = await claimWindow("2099-01-01", mapping);
         const read = await runtime.beginReservationWindowRead(worker, job.id, job.leaseToken);
         const receipt = await runtime.submitReservationWindowPage(worker, job.id, {
           receiptId: read.receiptId, readId: read.readId, leaseToken: job.leaseToken, pageNumber: 0, observations: [],
@@ -461,7 +492,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       const teaHealthBeforePartial = (await pool.query(
         "SELECT read_id FROM external_reservation_listing_health WHERE listing_id='listing-tea'",
       )).rows[0]?.read_id;
-      const windowJob = await claim("2099-01-10");
+      const windowJob = await claimWindow("2099-01-10");
       const windowRead = await runtime.beginReservationWindowRead(worker, windowJob.id, windowJob.leaseToken);
       assert.equal(windowRead.scope, "WINDOW");
       assert.equal(windowRead.manifest.length, 10);
@@ -516,7 +547,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
         ...terminalWindowPage, snapshotToken: "changed-snapshot",
       }), StoreConflictError);
 
-      const windowRollbackJob = await claim("2099-01-10");
+      const windowRollbackJob = await claimWindow("2099-01-10");
       const windowRollback = await runtime.beginReservationWindowRead(worker, windowRollbackJob.id, windowRollbackJob.leaseToken);
       await assert.rejects(() => runtime.submitReservationWindowPage(worker, windowRollbackJob.id, {
         receiptId: windowRollback.receiptId, readId: windowRollback.readId, leaseToken: windowRollbackJob.leaseToken,
@@ -532,7 +563,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
         [windowRollback.receiptId])).rows[0]?.request_fingerprint, null);
       await finish(windowRollbackJob);
 
-      const failedWindowJob = await claim("2099-01-10");
+      const failedWindowJob = await claimWindow("2099-01-10");
       const failedWindow = await runtime.beginReservationWindowRead(worker, failedWindowJob.id, failedWindowJob.leaseToken);
       const failedWindowReceipt = await runtime.submitReservationWindowPage(worker, failedWindowJob.id, {
         receiptId: failedWindow.receiptId, readId: failedWindow.readId, leaseToken: failedWindowJob.leaseToken,
@@ -548,7 +579,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       )).rows[0]?.read_id, teaHealthBeforePartial);
       await finish(failedWindowJob);
 
-      const missingWindowJob = await claim("2099-01-10");
+      const missingWindowJob = await claimWindow("2099-01-10");
       const missingWindow = await runtime.beginReservationWindowRead(worker, missingWindowJob.id, missingWindowJob.leaseToken);
       const missingComplete = await runtime.submitReservationWindowPage(worker, missingWindowJob.id, {
         receiptId: missingWindow.receiptId, readId: missingWindow.readId, leaseToken: missingWindowJob.leaseToken,
@@ -561,7 +592,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       assert.equal(missingComplete.healthUpdated, false);
       await finish(missingWindowJob);
 
-      const remoteWindowJob = await claim("2099-01-10", {
+      const remoteWindowJob = await claimWindow("2099-01-10", {
         listingId: "listing-remote", productId: "remote", externalProductId: "synthetic-remote", externalOptionId: "private",
       });
       const remoteWindow = await runtime.beginReservationWindowRead(worker, remoteWindowJob.id, remoteWindowJob.leaseToken);
@@ -586,7 +617,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       const outboxBeforeRemoteHealth = Number((await pool.query(
         "SELECT count(*) FROM calendar_outbox_events WHERE payload->>'cause' IN ('external_reservation_read_health_changed','external_reservation_read_health_expired')",
       )).rows[0]?.count);
-      const freshRemoteWindowJob = await claim("2099-01-10", {
+      const freshRemoteWindowJob = await claimWindow("2099-01-10", {
         listingId: "listing-remote", productId: "remote", externalProductId: "synthetic-remote", externalOptionId: "private",
       });
       const freshRemoteWindow = await runtime.beginReservationWindowRead(worker, freshRemoteWindowJob.id, freshRemoteWindowJob.leaseToken);
@@ -624,7 +655,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       const scopeSeedJob = await claim("2099-01-10");
       await submit(scopeSeedJob, scopeCancelled);
       await finish(scopeSeedJob);
-      const wrongScopeJob = await claim("2099-01-10", {
+      const wrongScopeJob = await claimWindow("2099-01-10", {
         listingId: "listing-remote", productId: "remote", externalProductId: "synthetic-remote", externalOptionId: "private",
       });
       const wrongScopeRead = await runtime.beginReservationWindowRead(worker, wrongScopeJob.id, wrongScopeJob.leaseToken);
@@ -700,19 +731,24 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       await assert.rejects(() => runtime.beginReservationRead(worker, deniedJob.id, deniedJob.leaseToken), StoreConflictError);
       await assert.rejects(() => runtime.beginReservationWindowRead(worker, deniedJob.id, deniedJob.leaseToken), StoreConflictError);
       await pool.query("UPDATE channel_listings SET can_read_reservations=true WHERE id='listing-tea'");
-      const expiredWindow = await runtime.beginReservationWindowRead(worker, deniedJob.id, deniedJob.leaseToken);
+      await finish(deniedJob);
+      const deniedWindowJob = await claimWindow("2099-01-05");
+      const expiredWindow = await runtime.beginReservationWindowRead(worker, deniedWindowJob.id, deniedWindowJob.leaseToken);
+      await pool.query("UPDATE channel_listings SET can_read_reservations=false WHERE id='listing-tea'");
+      await assert.rejects(() => runtime.beginReservationWindowRead(worker, deniedWindowJob.id, deniedWindowJob.leaseToken), StoreConflictError);
+      await pool.query("UPDATE channel_listings SET can_read_reservations=true WHERE id='listing-tea'");
       await pool.query("UPDATE schedule_rules SET local_start_time='10:30',version=version+1 WHERE provider_id='provider-a' AND id='tea-rule'");
-      await assert.rejects(() => runtime.submitReservationWindowPage(worker, deniedJob.id, {
-        receiptId: expiredWindow.receiptId, readId: expiredWindow.readId, leaseToken: deniedJob.leaseToken,
+      await assert.rejects(() => runtime.submitReservationWindowPage(worker, deniedWindowJob.id, {
+        receiptId: expiredWindow.receiptId, readId: expiredWindow.readId, leaseToken: deniedWindowJob.leaseToken,
         pageNumber: 0, observations: [], terminal: {
           status: "FAILED", completedAtUtc: now.toISOString(), allPagesRead: false,
           allStatusesIncluded: false, coverageComplete: false,
         },
       }), StoreConflictError);
       await pool.query("UPDATE schedule_rules SET local_start_time='10:00',version=version+1 WHERE provider_id='provider-a' AND id='tea-rule'");
-      await pool.query("UPDATE channel_jobs SET lease_expires_at=$2 WHERE id=$1::uuid", [deniedJob.id, now.toISOString()]);
-      await assert.rejects(() => runtime.submitReservationWindowPage(worker, deniedJob.id, {
-        receiptId: expiredWindow.receiptId, readId: expiredWindow.readId, leaseToken: deniedJob.leaseToken,
+      await pool.query("UPDATE channel_jobs SET lease_expires_at=$2 WHERE id=$1::uuid", [deniedWindowJob.id, now.toISOString()]);
+      await assert.rejects(() => runtime.submitReservationWindowPage(worker, deniedWindowJob.id, {
+        receiptId: expiredWindow.receiptId, readId: expiredWindow.readId, leaseToken: deniedWindowJob.leaseToken,
         pageNumber: 0, observations: [], terminal: {
           status: "FAILED", completedAtUtc: now.toISOString(), allPagesRead: false,
           allStatusesIncluded: false, coverageComplete: false,
@@ -720,7 +756,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       }), StoreConflictError);
       await runtime.revokeWorkerAccount(admin, "worker-a", "account-a", 1, randomUUID());
       await runtime.assignWorkerAccount(admin, "worker-a", "account-a", 2, randomUUID());
-      await assert.rejects(() => runtime.beginReservationRead(worker, deniedJob.id, deniedJob.leaseToken), StoreAccessDeniedError);
+      await assert.rejects(() => runtime.beginReservationWindowRead(worker, deniedWindowJob.id, deniedWindowJob.leaseToken), StoreAccessDeniedError);
       await assert.rejects(() => runtime.submitReservationRead(worker, firstJob.id, first.payload), StoreAccessDeniedError);
       await pool.query("UPDATE channel_external_accounts SET version=version+1 WHERE id='account-a'");
       assert.equal((await evaluateStoredInventory(pool, "provider-a", "empty", emptyOccurrence,

@@ -34,9 +34,9 @@ BEGIN
   END IF;
 END $$;
 
-ALTER TABLE channel_jobs
-  ADD CONSTRAINT channel_jobs_purpose_identity_key
-  UNIQUE (listing_id,occurrence_id,action,purpose,dispatch_sequence,account_version,desired_version,mapping_version);
+CREATE UNIQUE INDEX channel_jobs_availability_identity
+  ON channel_jobs (listing_id,occurrence_id,action,account_version,desired_version,mapping_version)
+  WHERE purpose='AVAILABILITY';
 
 ALTER TABLE channel_job_results
   ADD COLUMN reservation_read_id uuid REFERENCES external_reservation_reads(read_id) ON DELETE RESTRICT,

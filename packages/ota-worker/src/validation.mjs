@@ -125,7 +125,7 @@ export function validateObservation(value, job) {
 
 export function makeResult({ resultId, job, outcome, stopped, observation }) {
   if (!UUID_V4.test(resultId) || typeof stopped !== "boolean") throw new ContractError("INVALID_RESULT");
-  if (!["VERIFIED", "RESERVATION_VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"].includes(outcome)) {
+  if (!["VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"].includes(outcome)) {
     throw new ContractError("INVALID_RESULT");
   }
   return Object.freeze({

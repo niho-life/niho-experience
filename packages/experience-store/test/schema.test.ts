@@ -101,6 +101,9 @@ describe("database invariants", () => {
     assert.match(sql, /pending_job_id uuid UNIQUE REFERENCES channel_jobs/);
     assert.match(sql, /reservation_read_id uuid REFERENCES external_reservation_reads/);
     assert.match(sql, /reservation_receipt_id uuid REFERENCES external_reservation_window_page_receipts/);
+    assert.match(sql, /CREATE UNIQUE INDEX channel_jobs_availability_identity/);
+    assert.match(sql, /WHERE purpose='AVAILABILITY'/);
+    assert.doesNotMatch(sql, /UNIQUE \(listing_id,occurrence_id,action,purpose/);
     assert.match(sql, /outcome = 'RESERVATION_VERIFIED'/);
     assert.match(sql, /observed_state IS NULL AND observed_bookable IS NULL/);
     assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
