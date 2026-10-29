@@ -170,6 +170,126 @@ test("an unknown create result retries the exact immutable command", async ({ pa
   expect(requests[2]).toEqual(requests[0]);
 });
 
+test("OWNER resource Google settings stay compact and retry the exact unknown command", async ({ page }, testInfo) => {
+  await signIn(page);
+  await stubCalendar(page, (route) => route.fulfill({ status: 200, json: {
+    ...calendarData(), google: { connected: true, canManage: true, blockingEnabled: true, syncStatus: "FRESH", resourceSettingsEnabled: true, resourceBlockingEnabled: true },
+  } }));
+  const writes: Record<string, unknown>[] = [];
+  await page.route("**/host/calendar/resource-google**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, json: { connectionGeneration: 4, inventoryFetchedAtUtc: new Date().toISOString(), calendars: [
+        { id: "room-private", name: "会場用", primary: false }, { id: "teacher-private", name: "講師用", primary: false },
+      ], resources: [{ resourceId: "room-a", resourceName: "茶室", resourceKind: "VENUE", enabled: false, version: null, syncStatus: "STALE" }] } });
+      return;
+    }
+    writes.push(route.request().postDataJSON());
+    if (writes.length === 1) await route.abort("connectionreset");
+    else if (writes.length === 2) await route.fulfill({ status: 401, json: { error: "unauthenticated" } });
+    else await route.fulfill({ status: 201, json: { resourceId: "room-a", version: 1 } });
+  });
+  await page.goto("/host/calendar");
+  await page.getByText("Google カレンダー", { exact: true }).click();
+  await expect(page.getByText("会場・茶室", { exact: true })).toBeVisible();
+  const resourceAxe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(resourceAxe.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
+  await page.getByRole("checkbox", { name: "使わない" }).check();
+  await page.getByRole("button", { name: "保存", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status")).toContainText("保存結果が不明");
+  await expect(page.getByLabel("茶室のカレンダー")).toBeDisabled();
+  await page.getByRole("button", { name: "同じ内容で再送" }).click();
+  await expect(page.getByRole("status")).toContainText("ログイン後に同じ内容を再送");
+  await expect(page.getByRole("link", { name: "ログイン", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "ログイン", exact: true })).toHaveAttribute("target", "_blank");
+  await page.getByRole("button", { name: "同じ内容で再送" }).click();
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  expect(writes).toHaveLength(3);
+  expect(writes[1]).toEqual(writes[0]);
+  expect(writes[2]).toEqual(writes[0]);
+  expect(Object.keys(writes[0]!).sort()).toEqual(["calendarId", "commandId", "enabled", "expectedVersion", "providerId", "resourceId"]);
+  expect(["calendar-mobile-320", "calendar-mobile-360", "calendar-desktop"]).toContain(testInfo.project.name);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+test("resource Google load retry and 409 reread keep fields fixed until current data arrives", async ({ page }) => {
+  await signIn(page);
+  await stubCalendar(page, (route) => route.fulfill({ status: 200, json: {
+    ...calendarData(), google: { connected: true, canManage: true, blockingEnabled: true, syncStatus: "FRESH", resourceSettingsEnabled: true, resourceBlockingEnabled: true },
+  } }));
+  let reads = 0;
+  let writes = 0;
+  await page.route("**/host/calendar/resource-google**", async (route) => {
+    if (route.request().method() === "GET") {
+      reads += 1;
+      if (reads === 1) { await route.fulfill({ status: 503, json: { error: "unavailable" } }); return; }
+      await route.fulfill({ status: 200, json: {
+        connectionGeneration: 4, inventoryFetchedAtUtc: new Date().toISOString(),
+        calendars: [{ id: "room-private", name: "会場用", primary: false }],
+        resources: [{ resourceId: "room-a", resourceName: "茶室", resourceKind: "VENUE", enabled: reads >= 3, opaqueCalendarId: "room-private", version: reads >= 3 ? 2 : 1, syncStatus: "STALE" }],
+      } });
+      return;
+    }
+    writes += 1;
+    await route.fulfill({ status: 409, json: { error: "conflict" } });
+  });
+  await page.goto("/host/calendar");
+  await page.getByText("Google カレンダー", { exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("設定を読み込めませんでした");
+  await page.getByRole("button", { name: "再読込" }).click();
+  await expect(page.getByText("会場・茶室", { exact: true })).toBeVisible();
+  await page.getByRole("checkbox", { name: "使わない" }).check();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("別の変更があります");
+  await expect(page.getByLabel("茶室のカレンダー")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "再読込" }).click();
+  await expect(page.getByLabel("茶室のカレンダー")).toBeEnabled();
+  await expect(page.getByRole("checkbox", { name: "使う" })).toBeChecked();
+  expect(writes).toBe(1);
+});
+
+test("an OWNER can disable cached resource blocking after disconnect", async ({ page }) => {
+  await signIn(page);
+  let connected = true;
+  await stubCalendar(page, (route) => route.fulfill({ status: 200, json: {
+    ...calendarData(), google: { connected, canManage: true, blockingEnabled: connected, syncStatus: connected ? "FRESH" : "STALE", resourceSettingsEnabled: true, resourceBlockingEnabled: true },
+  } }));
+  await page.route("**/host/calendar/google", async (route) => {
+    connected = false;
+    await route.fulfill({ status: 200, json: { disconnected: true } });
+  });
+  const writes: Record<string, unknown>[] = [];
+  await page.route("**/host/calendar/resource-google**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, json: {
+        connectionGeneration: connected ? 4 : null, inventoryFetchedAtUtc: new Date().toISOString(),
+        calendars: [{ id: "room-private", name: "会場用", primary: false }],
+        resources: [{ resourceId: "room-a", resourceName: "茶室", resourceKind: "VENUE", enabled: true, opaqueCalendarId: "room-private", version: 1, syncStatus: connected ? "FRESH" : "STALE" }],
+      } });
+      return;
+    }
+    writes.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, json: { resourceId: "room-a", version: 2 } });
+  });
+  await page.goto("/host/calendar");
+  await page.getByText("Google カレンダー", { exact: true }).click();
+  await page.getByRole("button", { name: "接続を切る" }).click();
+  const dialog = page.getByRole("dialog", { name: "接続を切りますか？" });
+  await expect(dialog).toContainText("再接続または「使わない」");
+  await dialog.getByRole("button", { name: "接続を切る" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  await page.locator("summary").filter({ hasText: "Google カレンダー" }).click();
+  await expect(page.getByRole("link", { name: "Google カレンダーをつなぐ" })).toBeVisible();
+  await page.getByRole("checkbox", { name: "使う" }).uncheck();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({ resourceId: "room-a", enabled: false, expectedVersion: 1 });
+  expect(writes[0]?.providerId).toEqual(expect.any(String));
+});
+
 test("channel labels never turn old observations into a successful reflection", async ({ page }) => {
   await signIn(page);
   let paused = false;

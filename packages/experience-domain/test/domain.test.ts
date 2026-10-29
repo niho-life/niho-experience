@@ -291,6 +291,14 @@ describe("availability", () => {
     } }).reason, "RESOURCE_BUSY");
     assert.equal(evaluateAvailability({ ...base, sharedInventory: {
       bookingMode: "PRIVATE_GROUP", activeGroupCount: 0, hasInactiveResource: false, hasResourceConflict: false,
+      hasResourceGoogleUnavailable: true,
+    } }).reason, "RESOURCE_GOOGLE_UNAVAILABLE");
+    assert.equal(evaluateAvailability({ ...base, sharedInventory: {
+      bookingMode: "PRIVATE_GROUP", activeGroupCount: 0, hasInactiveResource: false, hasResourceConflict: false,
+      hasResourceGoogleBusy: true,
+    } }).reason, "RESOURCE_GOOGLE_BUSY");
+    assert.equal(evaluateAvailability({ ...base, sharedInventory: {
+      bookingMode: "PRIVATE_GROUP", activeGroupCount: 0, hasInactiveResource: false, hasResourceConflict: false,
     } }).bookable, true);
   });
 });

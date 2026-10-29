@@ -59,11 +59,11 @@ export function createCloudClient({ origin, token, fetchImpl = globalThis.fetch,
   const fixedOrigin = new URL(origin).origin;
   if (typeof token !== "string" || !token) throw new ContractError("INVALID_TOKEN");
 
-  async function request(path, body, { allowIdle = false, responseKeys } = {}) {
+  async function request(path, body, { allowIdle = false, responseKeys, requestTimeoutMs = timeoutMs } = {}) {
     const url = new URL(path, `${fixedOrigin}/`);
     if (url.origin !== fixedOrigin || !url.pathname.startsWith("/internal/ota/v1/")) throw new ContractError("INVALID_CLOUD_PATH");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     timer.unref?.();
     try {
       const response = await fetchImpl(url, {
@@ -89,6 +89,17 @@ export function createCloudClient({ origin, token, fetchImpl = globalThis.fetch,
   }
 
   return Object.freeze({
+    async triggerResourceGoogleSync() {
+      try {
+        const value = await request("internal/ota/v1/google-sync", {}, { responseKeys: ["processed", "applied"], requestTimeoutMs: 25_000 });
+        if (typeof value.processed !== "boolean" || typeof value.applied !== "boolean") throw new CloudError("INVALID_RESPONSE");
+        return Object.freeze(value);
+      } catch (error) {
+        // Older cloud revisions and a closed feature flag must not block OTA jobs.
+        if (error instanceof CloudError && error.code === "HTTP_ERROR" && error.status === 404) return Object.freeze({ processed: false, applied: false });
+        throw error;
+      }
+    },
     async claimAllowIdle() {
       const value = await request("internal/ota/v1/claim", {}, { allowIdle: true, responseKeys: ["job"] });
       if (!value) return null;

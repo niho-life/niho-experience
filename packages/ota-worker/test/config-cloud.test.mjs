@@ -50,6 +50,18 @@ test("cloud result validates the exact 200 receipt and accepts a non-current aud
   await assert.rejects(client.result("job", {}), (error) => error.code === "INVALID_RESPONSE");
 });
 
+test("resource Google trigger returns no calendar identifiers and tolerates an older disabled endpoint", async () => {
+  let path;
+  const client = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async (url) => {
+    path = new URL(url).pathname;
+    return new Response(JSON.stringify({ processed: true, applied: false }), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  assert.deepEqual(await client.triggerResourceGoogleSync(), { processed: true, applied: false });
+  assert.equal(path, "/internal/ota/v1/google-sync");
+  const disabled = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async () => new Response(null, { status: 404 }) });
+  assert.deepEqual(await disabled.triggerResourceGoogleSync(), { processed: false, applied: false });
+});
+
 test("cloud timeout remains armed while reading a hanging response body", async () => {
   let cancelled = false;
   const stream = new ReadableStream({

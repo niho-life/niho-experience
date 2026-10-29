@@ -44,6 +44,7 @@ export async function saveGoogleConnection(
          granted_scopes=EXCLUDED.granted_scopes,
          busy_calendar_id=EXCLUDED.busy_calendar_id,
          booking_calendar_id=EXCLUDED.booking_calendar_id,
+         connection_generation=nextval('provider_google_connection_generation_seq'),
          updated_at=clock_timestamp()`,
       [actor.providerId, actor.nihoUserId, sealed, [...token.scopes], busyCalendarId, bookingCalendarId],
     );
@@ -57,6 +58,12 @@ export async function saveGoogleConnection(
       [actor.providerId, busyCalendarId],
     );
     await client.query("DELETE FROM google_busy_intervals WHERE provider_id=$1", [actor.providerId]);
+    await client.query(
+      `UPDATE resource_google_calendars SET sync_status='STALE',fresh_until=NULL,sync_dirty=true,next_sync_due_at=clock_timestamp(),
+         sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
+        WHERE provider_id=$1 AND enabled=true`,
+      [actor.providerId],
+    );
     await enqueueCalendarRecalculation(client, {
       providerId: actor.providerId,
       aggregateType: "google_calendar",
@@ -77,11 +84,16 @@ interface StoredGoogleConnection {
   granted_scopes: string[];
   busy_calendar_id: string;
   booking_calendar_id: string;
+  connection_generation: string;
 }
 
 async function loadConnection(pool: Pool, providerId: string): Promise<StoredGoogleConnection | null> {
   const result = await pool.query<StoredGoogleConnection>(
-    "SELECT encrypted_refresh_token, granted_scopes, busy_calendar_id, booking_calendar_id FROM provider_google_connections WHERE provider_id=$1",
+    `SELECT c.encrypted_refresh_token,c.granted_scopes,c.busy_calendar_id,c.booking_calendar_id,c.connection_generation
+       FROM provider_google_connections c
+       JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+        AND m.active=true AND m.role='OWNER'
+      WHERE c.provider_id=$1`,
     [providerId],
   );
   return result.rows[0] ?? null;
@@ -97,18 +109,22 @@ export async function syncGoogleBusy(pool: Pool, store: ExperienceStore, provide
     const refreshToken = openGoogleRefreshToken(runtime.key, providerId, connection.encrypted_refresh_token);
     const token = await refreshGoogleToken(runtime.google, refreshToken, connection.granted_scopes);
     if (token.refreshToken) {
-      await pool.query("UPDATE provider_google_connections SET encrypted_refresh_token=$2, updated_at=clock_timestamp() WHERE provider_id=$1", [providerId, sealGoogleRefreshToken(runtime.key, providerId, token.refreshToken)]);
+      await pool.query(`UPDATE provider_google_connections c SET encrypted_refresh_token=$3,updated_at=clock_timestamp()
+        WHERE c.provider_id=$1 AND c.connection_generation=$2 AND EXISTS (SELECT 1 FROM provider_memberships m
+          WHERE m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id AND m.active=true AND m.role='OWNER')`,
+      [providerId, connection.connection_generation, sealGoogleRefreshToken(runtime.key, providerId, token.refreshToken)]);
     }
     const fromUtc = new Date(now.getTime() - 86_400_000).toISOString();
     const toUtc = new Date(now.getTime() + 90 * 86_400_000).toISOString();
     const busyIntervals = await queryGoogleBusy(runtime.google, token.accessToken, [connection.busy_calendar_id], fromUtc, toUtc);
     await store.recordGoogleBusySync({ providerId }, {
+      connectionGeneration: Number(connection.connection_generation),
       opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString(),
       freshUntilUtc: new Date(now.getTime() + 2 * 60_000).toISOString(),
       coverageStartUtc: fromUtc, coverageEndUtc: toUtc, busyIntervals,
     });
   } catch (error) {
-    await store.recordGoogleSyncFailure({ providerId }, { opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString() });
+    await store.recordGoogleSyncFailure({ providerId }, { connectionGeneration: Number(connection.connection_generation), opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString() });
     throw error;
   }
 }
@@ -125,6 +141,12 @@ export async function disconnectGoogleCalendar(pool: Pool, actor: HostActor): Pr
     if (member.rows[0]?.role !== "OWNER") throw new StoreAccessDeniedError();
     await client.query("DELETE FROM provider_google_connections WHERE provider_id=$1", [actor.providerId]);
     await client.query("DELETE FROM provider_google_calendars WHERE provider_id=$1", [actor.providerId]);
+    await client.query(
+      `UPDATE resource_google_calendars SET sync_status='STALE',fresh_until=NULL,sync_dirty=true,
+         next_sync_due_at=clock_timestamp(),sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
+        WHERE provider_id=$1 AND enabled=true`,
+      [actor.providerId],
+    );
     await enqueueCalendarRecalculation(client, {
       providerId: actor.providerId,
       aggregateType: "google_calendar",
