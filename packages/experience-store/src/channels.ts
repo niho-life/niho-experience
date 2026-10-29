@@ -269,6 +269,20 @@ function fingerprint(value: unknown): string {
   return digest(JSON.stringify(value));
 }
 
+function canonicalReservationObservation(value: ExternalReservationObservation): ExternalReservationObservation {
+  return {
+    externalReservationId: value.externalReservationId,
+    externalProductId: value.externalProductId,
+    externalOptionId: value.externalOptionId ?? "",
+    sourceStartAtUtc: value.sourceStartAtUtc,
+    sourceEndAtUtc: value.sourceEndAtUtc,
+    status: value.status,
+    seats: value.seats,
+    ...(value.sourceUpdatedAtUtc === undefined ? {} : { sourceUpdatedAtUtc: value.sourceUpdatedAtUtc }),
+    ...(value.sourceRevision === undefined ? {} : { sourceRevision: value.sourceRevision }),
+  };
+}
+
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -1219,7 +1233,10 @@ export class ChannelRuntime {
       if (reservationIds.has(observation.externalReservationId)) throw new StoreValidationError("Duplicate external reservation IDs are not allowed in one batch.");
       reservationIds.add(observation.externalReservationId);
     }
-    const requestFingerprint = fingerprint({ jobId, workerId: identity.workerId, ...input });
+    const observations = input.observations.map(canonicalReservationObservation);
+    const requestFingerprint = fingerprint({ jobId, workerId: identity.workerId,
+      receiptId: input.receiptId, readId: input.readId, leaseToken: input.leaseToken,
+      batchStatus: input.batchStatus, observations });
     return withTransaction(this.#pool, async (client) => {
       // Match preflight/result: serialize the worker before provider/job locks.
       await this.#requireWorker(client, identity);
@@ -1277,7 +1294,7 @@ export class ChannelRuntime {
       let stale = 0;
       let needsReview = 0;
 
-      for (const observation of input.observations) {
+      for (const observation of observations) {
         const externalOptionId = observation.externalOptionId ?? "";
         const observationFingerprint = fingerprint(observation);
         const key: [string, string, string] = [targetSite, targetAccount, observation.externalReservationId];
@@ -1299,9 +1316,17 @@ export class ChannelRuntime {
           }
         }
         if (disposition === "APPLIED" && ledger?.current_fingerprint === observationFingerprint) disposition = "DUPLICATE";
+        if (disposition === "APPLIED" && observation.sourceRevision !== undefined
+          && ledger?.source_revision === observation.sourceRevision) {
+          disposition = "NEEDS_REVIEW";
+          reviewReason = "CONFLICTING_SOURCE_VERSION";
+        }
         const exactTarget = observation.externalProductId === text(read, "target_external_product_id")
           && externalOptionId === targetOption && observation.sourceStartAtUtc === targetStart && observation.sourceEndAtUtc === targetEnd;
-        if (disposition === "DUPLICATE" && exactTarget && ledger?.occurrence_id === null) disposition = "APPLIED";
+        // A fresh exact read can resolve a previous bad target/source observation.
+        // Reapply through inventory evaluation so a real occupancy conflict stays fenced.
+        if (disposition === "DUPLICATE" && exactTarget && (ledger?.occurrence_id === null
+          || (ledger?.needs_review === true && ["TARGET_MISMATCH", "CONFLICTING_SOURCE_VERSION"].includes(String(ledger.review_reason))))) disposition = "APPLIED";
         if (disposition === "APPLIED" && !exactTarget) {
           disposition = "NEEDS_REVIEW";
           reviewReason = "TARGET_MISMATCH";
@@ -1346,9 +1371,10 @@ export class ChannelRuntime {
             ledger = inserted.rows[0]!;
           } else {
             await client.query(
-              `UPDATE external_reservations SET needs_review=true,review_reason=$4,updated_at=$5
+              `UPDATE external_reservations SET needs_review=true,review_reason=$4,updated_at=$5,
+                 last_read_generation=GREATEST(last_read_generation,$6)
                 WHERE source_site=$1 AND source_external_account_id=$2 AND external_reservation_id=$3`,
-              [...key, reviewReason, this.#nowIso()],
+              [...key, reviewReason, this.#nowIso(), generation],
             );
           }
           await client.query(

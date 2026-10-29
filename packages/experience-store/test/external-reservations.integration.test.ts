@@ -135,13 +135,15 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       const confirmed = (id: string, date: string, seats: number, sourceUpdatedAtUtc: string): ExternalReservationObservation => ({
         externalReservationId: id, externalProductId: target.externalProductId, externalOptionId: target.externalOptionId,
         sourceStartAtUtc: `${date}T01:00:00.000Z`, sourceEndAtUtc: `${date}T02:00:00.000Z`,
-        status: "CONFIRMED", seats, sourceUpdatedAtUtc, sourceRevision: `opaque-${date}-${seats}`,
+        status: "CONFIRMED", seats, sourceUpdatedAtUtc, sourceRevision: `opaque-${date}-${seats}-${sourceUpdatedAtUtc}`,
       });
 
       const firstJob = await claim("2099-01-01");
       const first = await submit(firstJob, confirmed("external-1", "2099-01-01", 2, "2099-01-01T00:30:00.000Z"));
       assert.equal(first.receipt.applied, 1);
       assert.equal((await runtime.submitReservationRead(worker, firstJob.id, first.payload)).repeated, true);
+      const reorderedFirst = Object.fromEntries(Object.entries(first.payload.observations[0]!).reverse()) as unknown as ExternalReservationObservation;
+      assert.equal((await runtime.submitReservationRead(worker, firstJob.id, { ...first.payload, observations: [reorderedFirst] })).repeated, true);
       await assert.rejects(() => runtime.submitReservationRead(worker, firstJob.id, {
         ...first.payload, observations: [{ ...first.payload.observations[0]!, seats: 3 }],
       }), StoreConflictError);
@@ -155,6 +157,13 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       await submit(emptyJob, undefined);
       assert.equal((await pool.query("SELECT status FROM external_reservations WHERE external_reservation_id='external-1'")).rows[0]?.status, "CONFIRMED");
       await finish(emptyJob);
+
+      const reorderedJob = await claim("2099-01-01");
+      const reorderedRead = await submit(reorderedJob, reorderedFirst);
+      assert.equal(reorderedRead.receipt.duplicates, 1);
+      assert.equal(reorderedRead.receipt.needsReview, 0);
+      assert.equal((await pool.query("SELECT needs_review FROM external_reservations WHERE external_reservation_id='external-1'")).rows[0]?.needs_review, false);
+      await finish(reorderedJob);
 
       const generationSeedJob = await claim("2099-01-01");
       await submit(generationSeedJob, confirmed("generation-guard", "2099-01-01", 1, "2099-01-01T00:20:00.000Z"));
@@ -364,6 +373,36 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
       assert.equal(failed.batchStatus, "FAILED");
       assert.equal((await pool.query("SELECT status FROM external_reservations WHERE external_reservation_id='partial-fact'")).rows[0]?.status, "CONFIRMED");
       await finish(failedJob);
+
+      const opaqueOnly: ExternalReservationObservation = {
+        externalReservationId: "opaque-only", externalProductId: target.externalProductId, externalOptionId: target.externalOptionId,
+        sourceStartAtUtc: "2099-01-09T01:00:00.000Z", sourceEndAtUtc: "2099-01-09T02:00:00.000Z",
+        status: "CONFIRMED", seats: 1, sourceRevision: "source-version-one",
+      };
+      const opaqueSeed = await claim("2099-01-09");
+      await submit(opaqueSeed, opaqueOnly);
+      await finish(opaqueSeed);
+      const opaqueConflict = await claim("2099-01-09");
+      const contradictory = await submit(opaqueConflict, { ...opaqueOnly, status: "CANCELLED" });
+      assert.equal(contradictory.receipt.needsReview, 1);
+      assert.equal((await pool.query("SELECT status FROM external_reservations WHERE external_reservation_id='opaque-only'")).rows[0]?.status, "CONFIRMED");
+      await finish(opaqueConflict);
+      const opaqueRecovery = await claim("2099-01-09");
+      assert.equal((await submit(opaqueRecovery, opaqueOnly)).receipt.applied, 1);
+      assert.equal((await pool.query("SELECT needs_review FROM external_reservations WHERE external_reservation_id='opaque-only'")).rows[0]?.needs_review, false);
+      await finish(opaqueRecovery);
+      const wrongTarget = await claim("2099-01-09");
+      assert.equal((await submit(wrongTarget, { ...opaqueOnly, externalProductId: "wrong-product", sourceRevision: "bad-target-version" })).receipt.needsReview, 1);
+      assert.equal((await pool.query("SELECT review_reason FROM external_reservations WHERE external_reservation_id='opaque-only'")).rows[0]?.review_reason, "TARGET_MISMATCH");
+      await finish(wrongTarget);
+      const targetRecovery = await claim("2099-01-09");
+      assert.equal((await submit(targetRecovery, opaqueOnly)).receipt.applied, 1);
+      assert.equal((await pool.query("SELECT needs_review FROM external_reservations WHERE external_reservation_id='opaque-only'")).rows[0]?.needs_review, false);
+      await finish(targetRecovery);
+      const legitimateCancel = await claim("2099-01-09");
+      assert.equal((await submit(legitimateCancel, { ...opaqueOnly, status: "CANCELLED", sourceRevision: "source-version-two" })).receipt.applied, 1);
+      assert.equal((await pool.query("SELECT status FROM external_reservations WHERE external_reservation_id='opaque-only'")).rows[0]?.status, "CANCELLED");
+      await finish(legitimateCancel);
       const expiredCredential = { ...worker, credentialVersion: worker.credentialVersion + 1 };
       await assert.rejects(() => runtime.submitReservationRead(expiredCredential, firstJob.id, first.payload), StoreAccessDeniedError);
 
