@@ -112,8 +112,11 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
         assetId: assetOne,
         alt: "A synthetic blue rectangle",
         credit: "Synthetic test image",
+        width: 1200,
+        height: 800,
       });
       assert.doesNotMatch(JSON.stringify(published), /guide-covers|objectKey/);
+      assert.equal((await repository.getPublicMediaAsset(assetOne))?.objectKey, `guide-covers/${assetOne}.jpg`);
 
       await repository.createMediaAsset(actor, article.id, {
         id: assetTwo,
@@ -203,6 +206,7 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
       );
       await repository.revokeMediaAsset(actor, article.id, assetOne, confirmed.revision);
       assert.equal((await repository.getPublicArticleBySlug(article.slug))?.cover, undefined);
+      assert.equal(await repository.getPublicMediaAsset(assetOne), null);
       assert.equal(
         (await pool.query<{ count: string }>(
           "SELECT count(*)::text AS count FROM guide_publication_media WHERE publication_id=$1",

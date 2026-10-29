@@ -178,7 +178,7 @@ describe("private guide cover routes", () => {
   });
 
   it("keeps the future public media route closed", async () => {
-    const response = readPublicCover();
+    const response = await readPublicCover();
     expect(response.status).toBe(404);
     expect(response.headers.get("cache-control")).toContain("no-store");
   });

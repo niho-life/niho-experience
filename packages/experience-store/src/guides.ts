@@ -131,6 +131,8 @@ export interface CommitGuidePublicationInput {
 export interface PublicGuideProductLink {
   readonly providerId: string;
   readonly productId: string;
+  /** Current public slug, re-read with the product status for public catalogue intersection. */
+  readonly productSlug: string;
 }
 
 export interface GuideLinkInvitation {
@@ -170,6 +172,9 @@ export interface PublicGuideArticle {
   readonly productLinks: readonly PublicGuideProductLink[];
   readonly cover?: PublicGuideCover;
   readonly figures: readonly PublicGuideFigure[];
+  /** The first sealed publication time, including an earlier UNLISTED publication. */
+  readonly firstPublishedAtUtc: string;
+  /** The current publication time; a new publication is an article update. */
   readonly publishedAtUtc: string;
 }
 
@@ -177,10 +182,15 @@ export interface PublicGuideCover {
   readonly assetId: string;
   readonly alt: string;
   readonly credit: string;
+  readonly width: number;
+  readonly height: number;
 }
 
-export interface PublicGuideFigure extends PublicGuideCover {
+export interface PublicGuideFigure {
   readonly slot: number;
+  readonly assetId: string;
+  readonly alt: string;
+  readonly credit: string;
 }
 
 const GUIDE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -206,6 +216,10 @@ const PUBLICATION_COLUMNS = `
   p.category_label_en, p.category_label_ja, p.category_display_order,
   p.title, p.description, p.content,
   p.visibility, p.published_at`;
+const FIRST_PUBLICATION_COLUMN = `
+  (SELECT min(first_publication.published_at)
+     FROM guide_publications first_publication
+    WHERE first_publication.article_id=p.article_id AND first_publication.sealed=true) AS first_published_at`;
 const MEDIA_ASSET_COLUMNS = `
   id::text AS id, article_id, creator_niho_user_id, object_key, state,
   width, height, byte_size, public_credit, web_confirmed_at,
@@ -413,6 +427,7 @@ function publicArticleFromRow(
   figures: readonly PublicGuideFigure[] = [],
 ): PublicGuideArticle {
   const visibility = stringValue(row, "visibility") as GuidePublicationVisibility;
+  const publishedAtUtc = isoValue(row, "published_at");
   return {
     articleId: stringValue(row, "article_id"),
     publicationId: integerValue(row, "publication_id"),
@@ -434,7 +449,8 @@ function publicArticleFromRow(
     productLinks,
     ...(cover === undefined ? {} : { cover }),
     figures,
-    publishedAtUtc: isoValue(row, "published_at"),
+    firstPublishedAtUtc: optionalIsoValue(row, "first_published_at") ?? publishedAtUtc,
+    publishedAtUtc,
   };
 }
 
@@ -607,13 +623,19 @@ async function selectOwnedArticle(
   return articleFromRow(row);
 }
 
-async function activePublicLinks(client: PoolClient, publicationId: number): Promise<readonly PublicGuideProductLink[]> {
+async function activePublicLinksByPublication(
+  client: PoolClient,
+  publicationIds: readonly number[],
+): Promise<ReadonlyMap<number, readonly PublicGuideProductLink[]>> {
+  const links = new Map<number, PublicGuideProductLink[]>();
+  for (const publicationId of publicationIds) links.set(publicationId, []);
+  if (publicationIds.length === 0) return links;
   const result = await client.query<DbRow>(
-    `SELECT l.provider_id, l.product_id
+    `SELECT l.publication_id, l.provider_id, l.product_id, product.slug AS product_slug
        FROM guide_publication_product_links l
        JOIN experience_products product
          ON product.provider_id=l.provider_id AND product.id=l.product_id AND product.status='PUBLISHED'
-      WHERE l.publication_id=$1
+      WHERE l.publication_id=ANY($1::bigint[])
         AND (
           (l.permission_basis='PROVIDER_MEMBERSHIP' AND EXISTS (
             SELECT 1 FROM provider_memberships m
@@ -638,48 +660,61 @@ async function activePublicLinks(client: PoolClient, publicationId: number): Pro
                AND wg.active=true
           ))
         )
-      ORDER BY l.provider_id, l.product_id`,
-    [publicationId],
+      ORDER BY l.publication_id, l.provider_id, l.product_id`,
+    [publicationIds],
   );
-  return result.rows.map((row) => ({
-    providerId: stringValue(row, "provider_id"),
-    productId: stringValue(row, "product_id"),
-  }));
+  for (const row of result.rows) {
+    links.get(integerValue(row, "publication_id"))!.push({
+      providerId: stringValue(row, "provider_id"),
+      productId: stringValue(row, "product_id"),
+      productSlug: stringValue(row, "product_slug"),
+    });
+  }
+  return links;
 }
 
-async function activePublicCover(client: PoolClient, publicationId: number): Promise<PublicGuideCover | undefined> {
+type PublicGuideMedia = Readonly<{ cover?: PublicGuideCover; figures: readonly PublicGuideFigure[] }>;
+
+async function activePublicMediaByPublication(
+  client: PoolClient,
+  publicationIds: readonly number[],
+): Promise<ReadonlyMap<number, PublicGuideMedia>> {
+  const mutable = new Map<number, { cover?: PublicGuideCover; figures: PublicGuideFigure[] }>();
+  for (const publicationId of publicationIds) mutable.set(publicationId, { figures: [] });
+  if (publicationIds.length === 0) return mutable;
   const result = await client.query<DbRow>(
-    `SELECT media.asset_id::text AS asset_id, media.alt_text, media.public_credit
+    `SELECT media.publication_id, media.slot, media.placement,
+            media.asset_id::text AS asset_id, media.alt_text, media.public_credit,
+            asset.width, asset.height
        FROM guide_publication_media media
        JOIN guide_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
-      WHERE media.publication_id=$1 AND media.placement='COVER' AND media.slot=0`,
-    [publicationId],
+      WHERE media.publication_id=ANY($1::bigint[])
+      ORDER BY media.publication_id, media.slot`,
+    [publicationIds],
   );
-  const row = result.rows[0];
-  return row === undefined
-    ? undefined
-    : {
+  for (const row of result.rows) {
+    const media = mutable.get(integerValue(row, "publication_id"))!;
+    const placement = stringValue(row, "placement");
+    if (placement === "COVER") {
+      media.cover = {
         assetId: stringValue(row, "asset_id"),
         alt: stringValue(row, "alt_text"),
         credit: stringValue(row, "public_credit"),
+        width: integerValue(row, "width"),
+        height: integerValue(row, "height"),
       };
-}
-
-async function activePublicFigures(client: PoolClient, publicationId: number): Promise<readonly PublicGuideFigure[]> {
-  const result = await client.query<DbRow>(
-    `SELECT media.slot, media.asset_id::text AS asset_id, media.alt_text, media.public_credit
-       FROM guide_publication_media media
-       JOIN guide_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
-      WHERE media.publication_id=$1 AND media.placement='FIGURE'
-      ORDER BY media.slot`,
-    [publicationId],
-  );
-  return result.rows.map((row) => ({
-    slot: integerValue(row, "slot"),
-    assetId: stringValue(row, "asset_id"),
-    alt: stringValue(row, "alt_text"),
-    credit: stringValue(row, "public_credit"),
-  }));
+    } else if (placement === "FIGURE") {
+      media.figures.push({
+        slot: integerValue(row, "slot"),
+        assetId: stringValue(row, "asset_id"),
+        alt: stringValue(row, "alt_text"),
+        credit: stringValue(row, "public_credit"),
+      });
+    } else {
+      throw new StoreValidationError("Database returned an invalid guide media placement.");
+    }
+  }
+  return mutable;
 }
 
 type GuideFigureReference = { readonly assetId: string; readonly alt: string };
@@ -1423,10 +1458,10 @@ export class GuideRepository {
       const category = categoryResult.rows[0];
       if (category === undefined) throw new StoreConflictError("The selected guide category is no longer active.");
 
-      const authorizedLinks: Array<GuideProductLinkInput & { permissionBasis: GuideLinkPermissionBasis }> = [];
+      const authorizedLinks: Array<GuideProductLinkInput & { permissionBasis: GuideLinkPermissionBasis; productSlug: string }> = [];
       for (const link of input.productLinks) {
         const product = await client.query<DbRow>(
-          `SELECT product.id,
+          `SELECT product.id, product.slug,
                   EXISTS (
                     SELECT 1 FROM provider_memberships m
                      WHERE m.provider_id=product.provider_id AND m.niho_user_id=$3
@@ -1453,7 +1488,7 @@ export class GuideRepository {
             ? "GUIDE_PRODUCT_LINK_MEMBERSHIP"
             : undefined;
         if (permissionBasis === undefined) throw new StoreAccessDeniedError();
-        authorizedLinks.push({ ...link, permissionBasis });
+        authorizedLinks.push({ ...link, permissionBasis, productSlug: stringValue(productRow, "slug") });
       }
 
       const numberResult = await client.query<DbRow>(
@@ -1519,6 +1554,11 @@ export class GuideRepository {
         );
       }
       await client.query("UPDATE guide_publications SET sealed=true WHERE id=$1", [publicationId]);
+      const firstPublication = await client.query<DbRow>(
+        "SELECT min(published_at) AS first_published_at FROM guide_publications WHERE article_id=$1 AND sealed=true",
+        [articleId],
+      );
+      publication.first_published_at = firstPublication.rows[0]?.first_published_at;
       await client.query(
         `UPDATE guide_articles
             SET status='PUBLISHED', current_publication_id=$2,
@@ -1528,10 +1568,16 @@ export class GuideRepository {
       );
       return publicArticleFromRow(
         publication,
-        authorizedLinks.map(({ providerId, productId }) => ({ providerId, productId })),
+        authorizedLinks.map(({ providerId, productId, productSlug }) => ({ providerId, productId, productSlug })),
         article.cover === undefined
           ? undefined
-          : { assetId: article.cover.assetId, alt: article.cover.alt, credit: article.cover.credit },
+          : {
+              assetId: article.cover.assetId,
+              alt: article.cover.alt,
+              credit: article.cover.credit,
+              width: figureAssets.get(article.cover.assetId.toLowerCase())!.width!,
+              height: figureAssets.get(article.cover.assetId.toLowerCase())!.height!,
+            },
         figures.map((figure, index) => ({
           slot: index + 1,
           assetId: figure.assetId,
@@ -1565,7 +1611,7 @@ export class GuideRepository {
     validateSlug(slug);
     return withTransaction(this.#pool, async (client) => {
       const result = await client.query<DbRow>(
-        `SELECT ${PUBLICATION_COLUMNS}
+        `SELECT ${PUBLICATION_COLUMNS}, ${FIRST_PUBLICATION_COLUMN}
            FROM guide_articles a
            JOIN guide_publications p ON p.id=a.current_publication_id AND p.article_id=a.id AND p.sealed=true
           WHERE a.status='PUBLISHED' AND p.slug=$1`,
@@ -1574,11 +1620,16 @@ export class GuideRepository {
       const row = result.rows[0];
       if (row === undefined) return null;
       const publicationId = integerValue(row, "publication_id");
+      const [links, media] = await Promise.all([
+        activePublicLinksByPublication(client, [publicationId]),
+        activePublicMediaByPublication(client, [publicationId]),
+      ]);
+      const articleMedia = media.get(publicationId)!;
       return publicArticleFromRow(
         row,
-        await activePublicLinks(client, publicationId),
-        await activePublicCover(client, publicationId),
-        await activePublicFigures(client, publicationId),
+        links.get(publicationId)!,
+        articleMedia.cover,
+        articleMedia.figures,
       );
     });
   }
@@ -1586,23 +1637,54 @@ export class GuideRepository {
   async listPublicArticles(): Promise<readonly PublicGuideArticle[]> {
     return withTransaction(this.#pool, async (client) => {
       const result = await client.query<DbRow>(
-        `SELECT ${PUBLICATION_COLUMNS}
+        `SELECT ${PUBLICATION_COLUMNS}, ${FIRST_PUBLICATION_COLUMN}
            FROM guide_articles a
            JOIN guide_publications p ON p.id=a.current_publication_id AND p.article_id=a.id AND p.sealed=true
           WHERE a.status='PUBLISHED' AND p.visibility='PUBLIC'
           ORDER BY p.published_at DESC, p.id DESC`,
       );
-      const articles: PublicGuideArticle[] = [];
-      for (const row of result.rows) {
+      const publicationIds = result.rows.map((row) => integerValue(row, "publication_id"));
+      const [links, media] = await Promise.all([
+        activePublicLinksByPublication(client, publicationIds),
+        activePublicMediaByPublication(client, publicationIds),
+      ]);
+      return result.rows.map((row) => {
         const publicationId = integerValue(row, "publication_id");
-        articles.push(publicArticleFromRow(
+        const articleMedia = media.get(publicationId)!;
+        return publicArticleFromRow(
           row,
-          await activePublicLinks(client, publicationId),
-          await activePublicCover(client, publicationId),
-          await activePublicFigures(client, publicationId),
-        ));
-      }
-      return articles;
+          links.get(publicationId)!,
+          articleMedia.cover,
+          articleMedia.figures,
+        );
+      });
     });
+  }
+
+  /** Server-only lookup for the JPEG relay. Old publications and revoked assets deliberately return null. */
+  async getPublicMediaAsset(assetId: string): Promise<GuideMediaAssetRecord | null> {
+    validateAssetId(assetId);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT ${MEDIA_ASSET_COLUMNS}
+         FROM guide_media_assets
+        WHERE id=$1::uuid AND state='READY'
+          AND EXISTS (
+            SELECT 1
+              FROM guide_articles article
+              JOIN guide_publications publication
+                ON publication.id=article.current_publication_id
+               AND publication.article_id=article.id
+               AND publication.sealed=true
+              JOIN guide_publication_media media
+                ON media.publication_id=publication.id
+               AND media.article_id=article.id
+               AND media.asset_id=guide_media_assets.id
+             WHERE article.id=guide_media_assets.article_id
+               AND article.status='PUBLISHED'
+          )
+        LIMIT 1`,
+      [assetId],
+    );
+    return result.rows[0] === undefined ? null : mediaAssetFromRow(result.rows[0]);
   }
 }

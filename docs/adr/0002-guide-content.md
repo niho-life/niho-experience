@@ -1,6 +1,6 @@
 # ADR 0002：ガイド記事の原稿の置き場所
 
-- 状態：採用
+- 状態：一部 superseded（2026-10-29 の CMS 公開読取移行。静的経路は既定値・mock preview用として維持）
 - 日付：2026-10-26
 - 関連：[#145 ガイド記事の仕組み](https://github.com/niho-life/niho-experience/issues/145)、[#59 日本語版](https://github.com/niho-life/niho-experience/issues/59)、[#139 index 化前の技術面](https://github.com/niho-life/niho-experience/issues/139)
 
@@ -32,3 +32,15 @@
 - 公開の手順は「原稿をモジュールにする → PR（CI で検査）→ レビュー → マージ → デプロイ」。更新も同じで、`updatedAt` を変える（[docs/content/guides.md](../content/guides.md)）。
 - 記事の公開・更新に NIHO 側の作業は要らない。体験の正本・予約・価格には触れない（体験は slug で参照し、カタログに無いものは表示しない）。
 - 書き手が増える・更新が頻繁になる・非エンジニアが直接公開したくなった時点で、NIHO 側の CMS（選別された公開 API）へ移す案を再検討する。そのときも型（`Guide`）と描画（パーサー・ページ）は再利用できる。
+
+## 2026-10-29：Guide CMS への移行
+
+[#189](https://github.com/niho-life/niho-experience/issues/189) で、上記の再検討条件を満たしたため公開正本を experience DB の sealed guide publication へ移せるようにした。切替は server-only の `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`（http mode限定）で行い、既定値は引き続き `static` とする。コードを配備しただけでは公開表示を変えない。
+
+- database mode は `GuideRepository.listPublicArticles` / `getPublicArticleBySlug` だけを読み、静的記事やmock sampleをunionしない。DB障害を静的記事へfallbackさせない。`PUBLIC` だけを一覧・home・体験導線・footer・sitemapへ出し、`UNLISTED` は直URLだけを `noindex` で出す。
+- Admin管理のcategory slug・英語label・表示順をpublication snapshotから表示し、既存の5 pillarへ変換しない。静的経路は従来どおり5 pillarを使う。
+- `publishedAtUtc` は現在publicationの作成時刻、最古のsealed publication時刻を初回公開日とする。ページとArticle JSON-LDは初回公開日と現在版の更新日を分ける。
+- 既存の安全なMarkdown→React描画を共用する。coverと本文figureはpublication snapshotに含まれ、assetが現在も`READY`のときだけ同一originのJPEG routeから配信する。Web掲載確認はOG/SNS利用許諾ではないため、DB写真をOG imageや`Article.image`へ出さない。
+- 静的なunlisted editorial preview（#147/#184）とmock draft previewはstatic modeに残す。database modeの公開集合には混ぜない。
+
+database modeの有効化条件・staging受入・切戻しは [Guide CMS](../guide-cms.md)、[実行環境](../experience-runtime.md)、[本番配備](../production-deploy.md) を正とする。

@@ -50,7 +50,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function GuidePage({ params, searchParams }: Props) {
   const found = await findGuide((await params).slug);
   if (!found) notFound();
-  const { guide, draft, unlisted } = found;
+  const { guide, draft, editorialPreview } = found;
   const query = await searchParams;
   const blocks = parseGuideMarkdown(guide.body);
   const outline = guideOutline(blocks);
@@ -64,12 +64,13 @@ export default async function GuidePage({ params, searchParams }: Props) {
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
   const hero = guide.hero ? { ...guide.hero, href: guideLinkHref(guide.hero.src)?.href ?? null } : null;
   const pillar = guidePillarDetails(guide.pillar);
-  const pillarLabel = pillar?.label ?? "Draft preview";
+  const sectionLabel = guide.category?.label ?? pillar?.label ?? "Draft preview";
+  const publicFigures = new Map(guide.publicFigures?.map((figure) => [figure.assetId.toLowerCase(), figure]) ?? []);
 
   return (
     <>
-      {!unlisted ? <JsonLd data={guideArticleJsonLd(guide, config.siteUrl, SITE_NAME)} /> : null}
-      {!unlisted ? <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }, { name: guide.title, path: `/guides/${guide.slug}` }])} /> : null}
+      {!editorialPreview ? <JsonLd data={guideArticleJsonLd(guide, config.siteUrl, SITE_NAME)} /> : null}
+      {!editorialPreview ? <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }, { name: guide.title, path: `/guides/${guide.slug}` }])} /> : null}
       <article className="container-page pt-6 sm:pt-9">
         <div className="mx-auto max-w-[46rem]">
           {draft ? (
@@ -77,21 +78,21 @@ export default async function GuidePage({ params, searchParams }: Props) {
               <Notice tone="warn" title="Draft · not published · visible only in this preview" />
             </div>
           ) : null}
-          {unlisted ? (
+          {editorialPreview ? (
             <div className="mb-5">
               <Notice tone="warn" title="Editorial preview · details are being checked · anyone with this link can view it" />
             </div>
           ) : null}
           <nav aria-label="Breadcrumb" className="text-sm text-muted">
-            {unlisted ? <Link href="/" className="font-extrabold text-ink hover:underline">NIHO Experience</Link> : <Link href="/guides" className="font-extrabold text-ink hover:underline">Guides</Link>}
+            {editorialPreview ? <Link href="/" className="font-extrabold text-ink hover:underline">NIHO Experience</Link> : <Link href="/guides" className="font-extrabold text-ink hover:underline">Guides</Link>}
             <span aria-hidden> / </span>
-            <span aria-current="page">{pillarLabel}</span>
+            <span aria-current="page">{sectionLabel}</span>
           </nav>
           <header className="pt-5">
-            <p className="eyebrow">{pillarLabel}</p>
+            <p className="eyebrow">{sectionLabel}</p>
             <h1 className="mt-1.5 text-[2.125rem] leading-[1.1] sm:text-[2.875rem]">{guide.title}</h1>
             <p className="mt-4 text-[0.9375rem] text-muted">
-              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role} · {unlisted ? "Previewed" : "Published"}{" "}
+              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role} · {editorialPreview ? "Previewed" : "Published"}{" "}
               <time dateTime={guide.publishedAt}>{formatGuideDate(guide.publishedAt)}</time> · Updated{" "}
               <time dateTime={guide.updatedAt}>{formatGuideDate(guide.updatedAt)}</time> · {guideReadMinutes(guide)} min read
             </p>
@@ -118,6 +119,8 @@ export default async function GuidePage({ params, searchParams }: Props) {
               outline={outline}
               insertAfter={ctaCard ? guideCtaInsertAfter(blocks, outline) : null}
               insertion={ctaCard ? <GuideExperienceCta card={ctaCard} dates={cardDates} /> : null}
+              figureSrc={(figure) => figure.assetId ? publicFigures.get(figure.assetId.toLowerCase())?.src ?? null : null}
+              figureCredit={(assetId) => publicFigures.get(assetId.toLowerCase())?.credit}
             />
           </div>
           {otherCards.length ? (

@@ -160,3 +160,74 @@ describe("guide writing subjects", () => {
     assert.doesNotMatch(queries[0]?.text ?? "", /email|customer/i);
   });
 });
+
+describe("public guide reads", () => {
+  it("batch-loads links and media for the whole list instead of querying once per article", async () => {
+    const dataQueries: string[] = [];
+    const publication = (id: number, slug: string) => ({
+      article_id: `article-${id}`,
+      publication_id: id,
+      publication_number: 1,
+      source_revision: 2,
+      slug,
+      subject_kind: "WRITER",
+      subject_provider_id: null,
+      category_slug: "culture",
+      category_label_en: "Culture",
+      category_label_ja: "文化",
+      category_display_order: 10,
+      title: `Guide ${id}`,
+      description: `Synthetic guide ${id}`,
+      content: { markdown: "## Synthetic\n\nBody.", author: { name: "Writer", role: "Guide", bio: "Synthetic." } },
+      visibility: "PUBLIC",
+      first_published_at: "2026-10-28T00:00:00.000Z",
+      published_at: "2026-10-29T00:00:00.000Z",
+    });
+    const client = {
+      async query(text: string) {
+        if (text === "BEGIN" || text.startsWith("SET LOCAL") || text === "COMMIT" || text === "ROLLBACK") return { rows: [] };
+        dataQueries.push(text);
+        if (text.includes("FROM guide_articles a")) return { rows: [publication(1, "guide-one"), publication(2, "guide-two")] };
+        if (text.includes("FROM guide_publication_product_links")) {
+          return { rows: [
+            { publication_id: 1, provider_id: "provider-a", product_id: "product-a", product_slug: "experience-a" },
+            { publication_id: 2, provider_id: "provider-b", product_id: "product-b", product_slug: "experience-b" },
+          ] };
+        }
+        if (text.includes("FROM guide_publication_media")) return { rows: [
+          { publication_id: 1, slot: 0, placement: "COVER", asset_id: "00000000-0000-4000-8000-000000000001", alt_text: "Cover", public_credit: "Synthetic", width: 1200, height: 800 },
+          { publication_id: 2, slot: 1, placement: "FIGURE", asset_id: "00000000-0000-4000-8000-000000000002", alt_text: "Figure", public_credit: "Synthetic", width: 900, height: 600 },
+        ] };
+        throw new Error(`Unexpected query: ${text}`);
+      },
+      release() {},
+    };
+    const pool = { async connect() { return client; } } as unknown as Pool;
+    const articles = await new GuideRepository(pool).listPublicArticles();
+
+    assert.equal(dataQueries.length, 3);
+    assert.deepEqual(articles.map((article) => article.productLinks[0]?.productSlug), ["experience-a", "experience-b"]);
+    assert.equal(articles[0]?.cover?.width, 1200);
+    assert.equal(articles[1]?.figures[0]?.slot, 1);
+  });
+
+  it("limits a public media object to a READY asset in the current sealed publication", async () => {
+    const queries: Array<{ text: string; values: readonly unknown[] }> = [];
+    const pool = {
+      async query(text: string, values: readonly unknown[]) {
+        queries.push({ text, values });
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+    const repository = new GuideRepository(pool);
+
+    assert.equal(await repository.getPublicMediaAsset("00000000-0000-4000-8000-000000000189"), null);
+    assert.match(queries[0]?.text ?? "", /state='READY'/);
+    assert.match(queries[0]?.text ?? "", /article\.current_publication_id/);
+    assert.match(queries[0]?.text ?? "", /publication\.sealed=true/);
+    assert.match(queries[0]?.text ?? "", /article\.status='PUBLISHED'/);
+    assert.deepEqual(queries[0]?.values, ["00000000-0000-4000-8000-000000000189"]);
+    await assert.rejects(() => repository.getPublicMediaAsset("not-a-uuid"), StoreValidationError);
+    assert.equal(queries.length, 1);
+  });
+});

@@ -4,7 +4,7 @@ import { sampleRainyDay } from "./samples/rainy-day";
 import { kamakuraAfter4Pm } from "./kamakura-after-4-pm";
 import type { Guide } from "./types";
 
-export type { Guide, GuideAuthor, GuideFaqItem, GuideHero, GuidePillar, GuideTranslation } from "./types";
+export type { Guide, GuideAuthor, GuideCategory, GuideFaqItem, GuideHero, GuidePillar, GuidePublicFigure, GuideTranslation } from "./types";
 
 /**
  * Published guides: one module per guide in this folder, added to this list by a reviewed PR and live on the next deploy

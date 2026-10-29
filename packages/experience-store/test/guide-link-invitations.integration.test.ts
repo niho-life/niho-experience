@@ -199,7 +199,7 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
         productLinks: [{ providerId: "provider-a", productId: "published-a" }],
       });
       assert.deepEqual((await store.getPublicArticleBySlug(article.slug))?.productLinks, [
-        { providerId: "provider-a", productId: "published-a" },
+        { providerId: "provider-a", productId: "published-a", productSlug: "published-a" },
       ]);
 
       await pool.query("UPDATE guide_writer_grants SET active=false WHERE niho_user_id='writer-a'");
@@ -207,7 +207,7 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
       assert.deepEqual((await store.getPublicArticleBySlug(article.slug))?.productLinks, []);
       await pool.query("UPDATE guide_writer_grants SET active=true WHERE niho_user_id='writer-a'");
       assert.deepEqual((await store.getPublicArticleBySlug(article.slug))?.productLinks, [
-        { providerId: "provider-a", productId: "published-a" },
+        { providerId: "provider-a", productId: "published-a", productSlug: "published-a" },
       ]);
 
       const revoked = await store.revokeLinkInvitation(owner, pending.id);
@@ -231,7 +231,7 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
       );
       assert.equal((await store.acceptLinkInvitation(writer, reinvited.id, reinvited.generation)).state, "ACCEPTED");
       assert.deepEqual((await store.getPublicArticleBySlug(article.slug))?.productLinks, [
-        { providerId: "provider-a", productId: "published-a" },
+        { providerId: "provider-a", productId: "published-a", productSlug: "published-a" },
       ]);
 
       const writerBPending = await store.inviteProductLinkWriter(owner, "provider-a", "writer-b");

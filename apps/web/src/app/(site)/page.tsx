@@ -109,7 +109,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
   // An explicit home feature makes this noindex editorial preview visible without opening /guides or the sitemap.
-  const homePreview = PUBLISHED_GUIDES.find((guide) => guide.slug === "kamakura-after-4-pm" && guide.unlisted);
+  const homePreview = guideCatalogResult.source === "static"
+    ? PUBLISHED_GUIDES.find((guide) => guide.slug === "kamakura-after-4-pm" && guide.unlisted)
+    : undefined;
   const featuredGuide = homePreview ? guideCatalogResult.guides.find((guide) => guide.slug === homePreview.slug) ?? homePreview : null;
   const homeGuides = guideCatalogResult.guides.filter((guide) => guide.slug !== featuredGuide?.slug).slice(0, 3);
   const guideEntry = featuredGuide || homeGuides.length ? (

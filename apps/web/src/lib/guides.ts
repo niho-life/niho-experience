@@ -1,3 +1,4 @@
+import type { PublicGuideArticle } from "@niho-experience/experience-store";
 import type { Guide, GuideFaqItem, GuideHero, GuidePillar, GuideTranslation } from "@/content/guides/types";
 import { guideFigureSources, guideInlineText, guideLinkHref, parseGuideAnswer, parseGuideMarkdown, type GuideBlock } from "./guide-markdown";
 import { publicVideoProblems } from "./videos";
@@ -43,6 +44,49 @@ export function isGuidePillar(value: unknown): value is GuidePillar {
 
 export function guidePillarDetails(pillar: GuidePillar | undefined) {
   return GUIDE_PILLARS.find((candidate) => candidate.key === pillar) ?? null;
+}
+
+/** Pure adapter from the sealed CMS read model to the one safe display model used by static guides. */
+export function publicGuideArticleToGuide(article: PublicGuideArticle): Guide {
+  if (article.content.author === undefined) throw new Error("A public guide publication is missing its author snapshot.");
+  const mediaUrl = (assetId: string) => `/api/public/guides/media/${encodeURIComponent(assetId)}`;
+  return {
+    slug: article.slug,
+    ...(article.indexable ? {} : { unlisted: true }),
+    title: article.title,
+    description: article.description,
+    category: {
+      slug: article.category.slug,
+      label: article.category.labelEn,
+      displayOrder: article.category.displayOrder,
+    },
+    author: article.content.author,
+    publishedAt: article.firstPublishedAtUtc.slice(0, 10),
+    updatedAt: article.publishedAtUtc.slice(0, 10),
+    ...(article.content.checkedOn === undefined ? {} : { checkedAt: article.content.checkedOn }),
+    ...(article.cover === undefined
+      ? {}
+      : {
+          hero: {
+            src: mediaUrl(article.cover.assetId),
+            alt: article.cover.alt,
+            width: article.cover.width,
+            height: article.cover.height,
+            // Web display permission does not imply social/OG reuse permission.
+            licensed: false,
+            caption: article.cover.credit,
+          },
+        }),
+    relatedExperienceSlugs: [...new Set(article.productLinks.map((link) => link.productSlug))],
+    relatedGuideSlugs: [],
+    faq: [],
+    body: article.content.markdown,
+    publicFigures: article.figures.map((figure) => ({
+      assetId: figure.assetId,
+      src: mediaUrl(figure.assetId),
+      credit: figure.credit,
+    })),
+  };
 }
 
 export function isGuideDate(value: string): boolean {
