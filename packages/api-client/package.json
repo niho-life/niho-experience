@@ -38,6 +38,10 @@
       "types": "./src/admin-auth/index.ts",
       "default": "./src/admin-auth/index.ts"
     },
+    "./editor-auth": {
+      "types": "./src/editor-auth/index.ts",
+      "default": "./src/editor-auth/index.ts"
+    },
     "./admin-read": {
       "types": "./src/admin-read/index.ts",
       "default": "./src/admin-read/index.ts"
