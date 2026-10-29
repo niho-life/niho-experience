@@ -147,11 +147,13 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const [publicationVisibility, setPublicationVisibility] = useState<GuidePublicationVisibility>("PUBLIC");
   const [publicationBusy, setPublicationBusy] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
+  const [coverOperationCompleted, setCoverOperationCompleted] = useState(0);
   const [coverMessage, setCoverMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [coverPreviewVersion, setCoverPreviewVersion] = useState(0);
   const navigationGuardRef = useRef(false);
   const savingRef = useRef(false);
   const publicationBusyRef = useRef(false);
+  const coverBusyRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -220,6 +222,10 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   }, [coverBusy, dirty, publicationBusy, saving]);
 
   useEffect(() => {
+    if (!coverBusy) coverBusyRef.current = false;
+  }, [coverBusy, coverOperationCompleted]);
+
+  useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (navigationGuardRef.current) event.preventDefault();
     };
@@ -273,7 +279,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const save = async (expectedRevisionOverride?: number) => {
-    if (savingRef.current || (conflict && expectedRevisionOverride === undefined) || unsupported) return;
+    if (savingRef.current || publicationBusyRef.current || coverBusyRef.current || (conflict && expectedRevisionOverride === undefined) || unsupported) return;
     setSaveMessage(null);
     if (!form.title.trim()) {
       setSaveMessage({ text: "タイトルを入力してください。", error: true });
@@ -388,7 +394,8 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const uploadCover = async (file: File | undefined) => {
-    if (!articleId || !file || coverBusy) return;
+    if (!articleId || !file || coverBusyRef.current || savingRef.current || publicationBusyRef.current) return;
+    coverBusyRef.current = true;
     setCoverBusy(true);
     setCoverMessage(null);
     navigationGuardRef.current = true;
@@ -417,13 +424,14 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       });
     } finally {
       setCoverBusy(false);
-      navigationGuardRef.current = dirty;
+      setCoverOperationCompleted((count) => count + 1);
     }
   };
 
   const revokeCover = async () => {
-    if (!articleId || !form.coverAssetId || revision === null || coverBusy) return;
+    if (!articleId || !form.coverAssetId || revision === null || coverBusyRef.current || savingRef.current || publicationBusyRef.current) return;
     if (!window.confirm("この写真の掲載権利を取り消しますか？公開中の版からも直ちに外れます。")) return;
+    coverBusyRef.current = true;
     setCoverBusy(true);
     setCoverMessage(null);
     navigationGuardRef.current = true;
@@ -448,7 +456,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       setCoverMessage({ text: errorMessage(error, mode).text, error: true });
     } finally {
       setCoverBusy(false);
-      navigationGuardRef.current = dirty;
+      setCoverOperationCompleted((count) => count + 1);
     }
   };
 
@@ -468,7 +476,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const loadPublicationPreflight = async (message?: string) => {
-    if (!articleId || revision === null) return;
+    if (!articleId || revision === null || coverBusyRef.current) return;
     setPublicationOpen(true);
     if (dirty) {
       setPublicationState({ status: "error", text: "プレビューまたは公開の前に、変更を保存してください。" });
@@ -507,6 +515,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       || revision === null
       || dirty
       || publicationBusyRef.current
+      || coverBusyRef.current
       || publicationState?.status !== "ready"
       || publicationState.problems.length > 0
     ) return;
@@ -546,7 +555,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const stopPublication = async () => {
-    if (!articleId || revision === null || dirty || publicationBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
+    if (!articleId || revision === null || dirty || publicationBusyRef.current || coverBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
     if (!window.confirm("この記事の公開を停止しますか？公開済みの版は履歴に残ります。")) return;
     publicationBusyRef.current = true;
     navigationGuardRef.current = true;
@@ -575,7 +584,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
 
   const conflicted = conflict !== null;
   const saveLabel = mode === "new" ? (saving ? "作成中" : "下書きを作成") : (saving ? "保存中" : "保存");
-  const saveDisabled = saving || publicationBusy || conflicted || (mode === "new" && subjects.length === 0);
+  const saveDisabled = saving || publicationBusy || coverBusy || conflicted || (mode === "new" && subjects.length === 0);
   const publicationNeedsSave = guidePublicationNeedsSave(dirty, revision);
   const publicationStatus = savedGuide
     ? guidePublicationStatusLabel(savedGuide.status, savedGuide.currentPublication?.visibility)
