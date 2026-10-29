@@ -22,6 +22,12 @@ export function spawnOwned(executable, args, options = {}) {
     catch (error) { if (error?.code === "ESRCH") return false; throw error; }
   };
 
+  async function waitForStop(timeoutMs = 3_000) {
+    const until = Date.now() + timeoutMs;
+    while (groupAlive() && Date.now() < until) await delay(25);
+    return !groupAlive();
+  }
+
   async function stop(timeoutMs = 5_000) {
     try {
       if (!groupAlive()) return true;
@@ -38,5 +44,5 @@ export function spawnOwned(executable, args, options = {}) {
     }
   }
 
-  return Object.freeze({ child, pid: child.pid, get exited() { return exited; }, get exitCode() { return exitCode; }, stop });
+  return Object.freeze({ child, pid: child.pid, get exited() { return exited; }, get exitCode() { return exitCode; }, waitForStop, stop });
 }

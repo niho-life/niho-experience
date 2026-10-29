@@ -35,17 +35,30 @@ function waitForEndpoint(owned, timeoutMs = 15_000) {
   });
 }
 
-export async function stopManagedBrowser(browser, owned, closeGraceMs = 1_000) {
+export async function stopManagedBrowser(browser, owned, closeGraceMs = 1_000, naturalStopMs = 3_000) {
   let timer;
   try {
     await Promise.race([
-      Promise.resolve().then(() => browser?.close()).catch(() => {}),
+      Promise.resolve().then(async () => {
+        if (typeof browser?.newBrowserCDPSession === "function") {
+          const session = await browser.newBrowserCDPSession();
+          await session.send("Browser.close");
+        } else {
+          await browser?.close();
+        }
+      }).catch(() => {}),
       new Promise((resolve) => { timer = setTimeout(resolve, closeGraceMs); }),
     ]);
   } catch {
     // Process stop below remains mandatory even if the close transport fails.
   } finally {
     clearTimeout(timer);
+  }
+  // connectOverCDP.close() disconnects its transport. Chrome must first get a
+  // chance to flush its own profile and exit, without terminating its network
+  // process alongside it. Process ownership remains the final stop boundary.
+  if (typeof owned.waitForStop === "function") {
+    await owned.waitForStop(naturalStopMs).catch(() => false);
   }
   // CDP can be unresponsive. Process ownership is the independent stop boundary.
   return owned.stop();
