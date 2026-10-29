@@ -36,6 +36,22 @@ flowchart LR
 
 コンテンツの所有者、決済上の販売者、地域・掲載先は別の概念とする。外部の個人提供者にダミーの拠点や他拠点の管理権限を付与しない。
 
+## 対面通訳（[#181](https://github.com/niho-life/niho-experience/issues/181)）
+
+対面の日英通訳（公開 SDK [niho-translate](https://github.com/niho-life/niho-translate)）は NIHO の製品で、設計の正は niho-app の Epic [niho-coliving/niho-app#19446](https://github.com/niho-coliving/niho-app/issues/19446)。体験サイトが持つのは入口だけで、通訳そのものは持たない。
+
+| 担当 | 持つもの |
+| --- | --- |
+| NIHO API（Authority） | 部屋、host / guest の participant と招待 code、relay の入室券（EdDSA JWT・60 秒）と JWKS、presence・control・lease、名義（体験提供者）ごとの予算と使用量 |
+| relay（NIHO が運用） | iPhone と OpenAPI の音声の中継。OpenAI の鍵は relay だけが持つ |
+| iPhone（NIHO アプリ・App Clip） | 招待 URL `https://niho.life/i/<code>`（stg は `app-stg.niho.life`）を開き、同意・イヤフォンの確認・開始・終了 |
+| niho-experience | ホスト画面の予約詳細の「通訳を始める」と、その BFF `/host/api/translate/providers/{providerId}/bookings/{bookingId}/rooms[/{roomId}[/end]]` |
+
+- 流れ：英語圏のゲストの確定予約（`languageSnapshot` が EN、または未記録）で、当日以降に「通訳を始める」を出す。押すと BFF がホストのセッションで NIHO の `POST /api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms` を呼び、同じ画面に ① ゲスト用の QR（`guest.inviteUrl`） ② 「自分の iPhone で開く」（`host.inviteUrl`。iPhone なら即、PC なら自分用の QR） ③ 参加状況（3 秒ごとの `GET …/translate-rooms/{roomId}`。非表示中は止める） ④ 「通訳を終了」（`<dialog>` で確認してから `POST …/end`）を出す。
+- 境界：NIHO の ID トークンはサーバーの HttpOnly cookie に留まり、ブラウザは `/host/api/translate/*` だけを呼ぶ。BFF は `participantId`・`inviteCode` を落とし、招待 URL・状態・参加状況だけを `private, no-store` で返す。招待 code は URL の中にだけ存在し、ログ・計測・画面の本文に出さない。入室券・relay の URL・予算はこのサイトを通らない。権限（OWNER / COHOST）は NIHO が毎回判断し、401/403 は権限終了として扱う。
+- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` v0.1.0（`draft`）。Epic の契約節の shape を先に pin したもので、N1b（[niho-coliving/niho-app#19447](https://github.com/niho-coliving/niho-app/issues/19447)）が NIHO 側の `contracts/openapi.yaml` に載せたら export を写し直す。http mode の BFF は `EXPERIENCE_TRANSLATE_API_ENABLED=true` まで開かず、mock は合成の部屋（`apps/web/src/lib/host/mock-translate-rooms.ts`）を返す。
+- 保存しないもの：音声・字幕・ゲストの個人情報。体験サイトは部屋や使用量の記録も持たず、必要なら NIHO から読む。
+
 ## API契約
 
 - 実行時はHTTPS APIで接続する。公開サイトからDBやprivateリポへ接続しない。

@@ -120,6 +120,13 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_ASSISTED_LAUNCH_PREVIEW_ENABLED: "true" }).experienceAssistedLaunchPreviewEnabled).toBe(false);
   });
 
+  it("opens the translate rooms BFF in http mode only with its own flag and the host console", () => {
+    expect(resolveConfig({}).experienceTranslateApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(true);
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {

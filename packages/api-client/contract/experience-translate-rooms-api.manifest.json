@@ -1,0 +1,23 @@
+{
+  "name": "experience-translate-rooms-api",
+  "version": "0.1.0",
+  "sourceRepository": "niho-app",
+  "sourceIssue": "niho-coliving/niho-app#19446",
+  "sourceCommit": null,
+  "sha256": "3aec3f313ca3f9d57a1e3169b297c5aecf8ae440cf46216d046f2afdb167ba5d",
+  "status": "draft",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "Epic niho-coliving/niho-app#19446 の契約節の shape を先に pin した下書き（体験サイト #181 の mock 先行用）。N1b niho-coliving/niho-app#19447 が contracts/openapi.yaml に載せ、NIHO の export を写した時点で sourceCommit・sha256・status を更新する。",
+  "openapiFile": "experience-translate-rooms-api.openapi.json",
+  "sha256File": "experience-translate-rooms-api.openapi.json.sha256",
+  "scope": [
+    "OWNER/COHOST creates a translate room from one of the provider's bookings",
+    "room state, per-role joined/ready and usage minutes for the host screen's polling",
+    "host ends the room"
+  ],
+  "excludedScope": [
+    "relay tickets, relay URLs, JWKS or the public invite join endpoint",
+    "budget, pricing or usage billing",
+    "guest identity beyond a pseudonymous participantId"
+  ]
+}

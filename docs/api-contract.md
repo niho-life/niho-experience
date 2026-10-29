@@ -146,6 +146,7 @@
   - 予約：provider scope の一覧と詳細、承認・辞退、予約者1人へのメール送信。詳細はホストの送信本文と、予約者が認証済みWeb画面から送った返信本文を含む。予約前質問、メール返信の取込、自動翻訳は契約に無い。
   - 顧客・売上（#91）は、NIHO 側が足した段で写す。
 - 予約BFF：NIHOの一覧・詳細は `guestEmail` 等を含むため、ブラウザへそのまま中継しない。`/host/api/provider-operations/{providerId}/bookings/**` が固定DTOへサーバー側投影し、予約者メール、送信元の `replyToEmails`、provider内部IDを除外する。401/403を権限終了として扱い、別providerの予約は404のままにする。レスポンスは `private, no-store`。
+- 対面通訳（#181）：予約の `translate-rooms`（作成・取得・終了）は独立した `experience-translate-rooms-api.openapi.json` v0.1.0（`draft`。niho-app Epic #19446 の契約節の shape）で選別し、`/host/api/translate/providers/{providerId}/bookings/{bookingId}/rooms/**` が招待 URL・状態・参加状況だけを `private, no-store` で返す。`participantId`・`inviteCode`・入室券は中継しない。境界は [architecture.md](architecture.md#対面通訳-181) を正とする。
 - 予約の送信：本文を画面内でそのまま確認してから1件ずつ送る。結果不明時は自動再送せず、最新詳細の送信履歴を読み直す。承認・辞退は確認の直前に最新詳細を読み、金額と結果を示す。取消・返金は専用の最新snapshot・確認UIを備えるまでこのBFFでは公開しない。
 - 失敗の本文：閉じた `ExperienceHostErrorResponse`。`error.code` と `error.details.reason` は enum で、`details` は理由ごとに決まった項目の組（oneOf）。400 以外は `supportId` を持つ。
 - 版の確かめ方：体験ページの保存と公開は header `x-niho-page-updated-at`（違えば 409 `PAGE_UPDATED`）、ページの集合場所は本文の `expectedUpdatedAt`（違えば 409 `PROVIDER_PAGE_CONFLICT`）。ページの集合場所を保存するとページの版が進むので、続く保存はその応答の `updatedAt` を使う。

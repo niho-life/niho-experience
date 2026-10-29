@@ -81,6 +81,9 @@ export function resolveConfig(env: Env) {
   // The real transport opens only after the selected v1 API is deployed and accepted.
   const experienceProviderOperationsApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED === "true";
   const experienceProviderOperationsPreviewEnabled = apiMode === "mock" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED === "true";
+  // 対面通訳 (#181): the translate-rooms BFF under /host/api/translate. The mock always serves synthetic rooms;
+  // http opens only after niho-app N1b (#19447) is deployed and accepted, per environment.
+  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
@@ -143,6 +146,7 @@ export function resolveConfig(env: Env) {
     experienceAssistedLaunchPreviewEnabled,
     experienceProviderOperationsApiEnabled,
     experienceProviderOperationsPreviewEnabled,
+    experienceTranslateApiEnabled,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.
     hostSessionSecret,
     adminSessionSecret,

@@ -1,14 +1,14 @@
 // 契約から型を作る。公開 API（contract/experience-public-api.openapi.json → src/generated/openapi.ts）と
 // ホスト API（contract/experience-host-api.openapi.json → src/generated/host-openapi.ts）、
 // Admin read API（contract/experience-admin-read-api.openapi.json → src/generated/admin-read-openapi.ts）、
-// Admin support case / operations API、host support history / settings API、fee summary API を含む選別契約。
+// Admin support case / operations API、host support history / settings API、fee summary API、translate rooms API を含む選別契約。
 // `--check` は書き込まず、生成結果とコミット済みの型が 1 つでも違えば失敗する（CI の drift 検査）。
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
 
-export type ContractTarget = "public" | "host" | "admin-read" | "admin-support-case" | "admin-operations" | "host-support-history" | "host-support-settings" | "fee-summary" | "experience-preparations" | "experience-provider-operations";
+export type ContractTarget = "public" | "host" | "admin-read" | "admin-support-case" | "admin-operations" | "host-support-history" | "host-support-settings" | "fee-summary" | "experience-preparations" | "experience-provider-operations" | "experience-translate-rooms";
 
 const TARGETS: Record<ContractTarget, { contract: string; output: string }> = {
   public: { contract: "experience-public-api.openapi.json", output: "openapi.ts" },
@@ -21,6 +21,7 @@ const TARGETS: Record<ContractTarget, { contract: string; output: string }> = {
   "fee-summary": { contract: "experience-fee-summary-api.openapi.json", output: "fee-summary-openapi.ts" },
   "experience-preparations": { contract: "experience-preparations-api.openapi.json", output: "experience-preparations-openapi.ts" },
   "experience-provider-operations": { contract: "experience-provider-operations-api.openapi.json", output: "experience-provider-operations-openapi.ts" },
+  "experience-translate-rooms": { contract: "experience-translate-rooms-api.openapi.json", output: "experience-translate-rooms-openapi.ts" },
 };
 
 function outputPath(target: ContractTarget): string {
