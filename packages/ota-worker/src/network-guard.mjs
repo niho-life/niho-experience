@@ -130,7 +130,11 @@ export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGI
           && url.searchParams.get("filter_date_from") === date && url.searchParams.get("filter_date_to") === date));
       if (navigation && !fixedNavigation) { externalNavigationBlocked = true; refused += 1; return route.abort("blockedbyclient"); }
       const resourceType = typeof request.resourceType === "function" ? request.resourceType() : null;
-      if (!navigation && resourceType && !["document", "stylesheet", "script", "image", "media", "font"].includes(resourceType)) {
+      // Chromium reports Nuxt modulepreload GETs as "other", including the
+      // scripts needed to hydrate an otherwise blank supplier page.
+      const staticPreload = url.origin === cdnOrigin && resourceType === "other"
+        && /^\/supplier-portal\/nuxt\/_nuxt\/[A-Za-z0-9._/-]+\.(?:m?js|css|svg|png|jpe?g|webp|woff2?)$/.test(url.pathname);
+      if (!navigation && resourceType && !staticPreload && !["document", "stylesheet", "script", "image", "media", "font"].includes(resourceType)) {
         refused += 1; return route.abort("blockedbyclient");
       }
       return forward(route);

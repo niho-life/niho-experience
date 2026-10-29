@@ -126,3 +126,16 @@ test("external and non-fixed document navigation is aborted", async () => {
   assert.equal(aborted, 2);
   assert.equal(guard.externalNavigationBlocked, true);
 });
+
+test("Nuxt static modulepreloads labelled other are allowed, but arbitrary other requests stay blocked", async () => {
+  const guard = createNetworkGuard({ job, cloud: { async preflight() {} } });
+  const calls = [];
+  for (const path of ["/supplier-portal/nuxt/_nuxt/synthetic.js", "/private-api/synthetic.json"]) {
+    await guard.handle({
+      request: () => ({ url: () => `https://cdn.getyourguide.com${path}`, method: () => "GET",
+        isNavigationRequest: () => false, resourceType: () => "other" }),
+      continue: async () => { calls.push("continue"); }, abort: async () => { calls.push("abort"); },
+    });
+  }
+  assert.deepEqual(calls, ["continue", "abort"]);
+});

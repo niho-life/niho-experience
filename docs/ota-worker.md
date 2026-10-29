@@ -87,6 +87,6 @@ LaunchAgent は `packages/ota-worker/examples/com.niho.ota-worker.plist.example`
 ## 証跡の区別
 
 - actual private browser: Studioの実GetYourGuide専用profileで、既存の空き枠を5往復（停止・再読込・再開・再読込、計10書込み）して受付可能へ復元。Gitには実target/画像を入れない。
-- synthetic: このpackageの43件のunitと、合成ページを使う実ブラウザ5件がskipなし合格。20回交互open/close、header前／後の応答喪失、誤商品、認証失効、古いpreflightを含む。UI回数・raw delivery数・論理状態変更数は別に計測する。外部auth/model invocationはなく、実GetYourGuideの20回試験ではない。CIはChromium導入後に別の`test:browser`を実行する。
+- synthetic: このpackageの44件のunitと、合成ページを使う実ブラウザ5件がskipなし合格。20回交互open/close、header前／後の応答喪失、誤商品、認証失効、古いpreflight、CDNのNuxt modulepreload許可を含む。UI回数・raw delivery数・論理状態変更数は別に計測する。外部auth/model invocationはなく、実GetYourGuideの20回試験ではない。CIはChromium導入後に別の`test:browser`を実行する。
 - cloud end-to-end: 未実施。public cloud origin、実 lease/result durability の受入を別途行う。
 - Claude/Max: CLI login は確認済みだが weekly limit 中。20件試験と quota回復後の bounded tool実行は未実施。
