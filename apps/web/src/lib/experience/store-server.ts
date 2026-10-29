@@ -1,6 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
-import { ChannelRuntime, ExperienceStore, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { ChannelRuntime, ExperienceStore, GuideRepository, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -42,4 +42,9 @@ function supportedChannelAdapters(): Readonly<Record<string, ChannelCapabilities
 export function channelRuntime(): ChannelRuntime | null {
   const pool = experiencePool();
   return pool ? new ChannelRuntime(pool, { supportedAdapters: supportedChannelAdapters() }) : null;
+}
+
+export function guideRepository(): GuideRepository | null {
+  const pool = experiencePool();
+  return pool ? new GuideRepository(pool) : null;
 }

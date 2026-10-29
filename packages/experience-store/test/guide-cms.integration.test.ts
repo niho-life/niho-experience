@@ -65,6 +65,18 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       const store = new GuideRepository(pool);
       const actor = { nihoUserId: "writer-a" } as const;
       const otherWriter = { nihoUserId: "writer-b" } as const;
+      assert.deepEqual(await store.listWritableSubjects("writer-a"), [{ kind: "WRITER" }]);
+      assert.deepEqual(await store.listWritableSubjects("host-a"), [{ kind: "PROVIDER", providerId: "provider-a" }]);
+      await assert.rejects(
+        () => store.createArticle(actor, {
+          id: "guide-unknown-category",
+          slug: "guide-unknown-category",
+          subject: { kind: "WRITER" },
+          title: "Unknown category",
+          categorySlug: "does-not-exist",
+        }),
+        StoreValidationError,
+      );
       await assert.rejects(
         () => store.createArticle(actor, {
           id: "guide-reserved",
@@ -84,6 +96,16 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       assert.equal(created.status, "DRAFT");
       await assert.rejects(() => store.getArticle(otherWriter, created.id), StoreAccessDeniedError);
       assert.equal(await store.getPublicArticleBySlug(created.slug), null);
+      await assert.rejects(
+        () => store.saveDraft(actor, created.id, {
+          slug: created.slug,
+          title: created.title,
+          description: "A synthetic guide for database tests.",
+          categorySlug: "does-not-exist",
+          content,
+        }, created.revision),
+        StoreValidationError,
+      );
 
       const saved = await store.saveDraft(actor, created.id, {
         slug: created.slug,
