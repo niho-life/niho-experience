@@ -94,6 +94,18 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
   });
 
+  it("separates scheduled reservation reads from availability observations and keeps durable listing state", async () => {
+    const sql = await readFile(new URL("../migrations/0017_reservation_read_dispatch.sql", import.meta.url), "utf8");
+    assert.match(sql, /purpose IN \('AVAILABILITY','RESERVATION_WINDOW'\)/);
+    assert.match(sql, /CREATE TABLE external_reservation_read_dispatch_states/);
+    assert.match(sql, /pending_job_id uuid UNIQUE REFERENCES channel_jobs/);
+    assert.match(sql, /reservation_read_id uuid REFERENCES external_reservation_reads/);
+    assert.match(sql, /reservation_receipt_id uuid REFERENCES external_reservation_window_page_receipts/);
+    assert.match(sql, /outcome = 'RESERVATION_VERIFIED'/);
+    assert.match(sql, /observed_state IS NULL AND observed_bookable IS NULL/);
+    assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
