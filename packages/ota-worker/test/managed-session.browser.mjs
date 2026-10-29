@@ -24,7 +24,9 @@ test("owned browser shutdown persists its own expiring cookie across a real rest
     // and loopback fixture. Production launch options remain unchanged.
     executablePath = join(profile, "synthetic-chromium.sh");
     const quotedChrome = `'${CHROME.replaceAll("'", "'\\''")}'`;
-    await writeFile(executablePath, `#!/bin/sh\nexec ${quotedChrome} --no-sandbox "$@"\n`, { mode: 0o700 });
+    await writeFile(executablePath, `#!/bin/sh
+exec ${quotedChrome} --no-sandbox "$@"
+`, { mode: 0o700 });
   }
   const server = createServer((request, response) => {
     if (request.url === "/login") response.setHeader("set-cookie", "niho_synthetic=synthetic; Max-Age=3600; HttpOnly; SameSite=Lax; Path=/");
