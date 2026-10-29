@@ -20,8 +20,8 @@
 - listingごとに専用のapp-createdカレンダーを使い、Google app.created scopeの範囲に限定する。予約書出し、私用busy、Airbnbへの制御出力は別々のcalendar ID。
 - 出力calendarをprovider/資源busy入力として選ばせない。Airbnbが確定予約を戻しても自己書込による永久busy循環を起こさない。
 - deterministic event ID = provider/listing/occurrenceのhash、private visibility、opaque、件名は短い固定値。料金/顧客/他の予定を入れない。
-- CLOSEDは対象時間のNIHO所有eventをcreate/update。OPENは当該NIHO所有eventだけを削除。自分のIDでもownership marker/current mapping/version/ETag不一致なら触らない。外部/手動作成eventを削除しない。
-- event DELETEの404/410を盲目的に成功にせず対象と現在desiredを照合。POST409は既存eventをGETして同一内容を検証。送信前とreadback時にcurrent target/versionを再確認。
+- CLOSEDは対象時間のNIHO所有eventを作成または`opaque`へ変更。OPENは同じeventを`transparent`へ変更し、繰り返す開閉では削除しない。決定的IDの削除後再作成・tombstoneに依存しない。自分のIDでもownership marker/current mapping/version/ETag不一致なら触らず、外部/手動作成eventは変更しない。
+- GETの404/410だけでAirbnbの受付再開を成功とせず、対象と現在desiredを照合。POST409は既存eventをGETして同一内容を検証する。送信前とreadback時にcurrent target/versionを再確認する。専用カレンダーをAirbnbへ接続できることは実画面で別受入し、既存カレンダーを書けない理由だけでOAuth scopeを広げない。
 - GoogleへのACKはGOOGLE_WRITTEN。Airbnbで同じ掲載/実施回の停止/受付を独立に再確認するまでOTAのSYNCEDにしない。GoogleとAirbnbの伝播は60分程度を許容するが、timeoutは成功でなく要確認。
 - Googleのbusy予定でAirbnb枠そのものは作れない。NIHO新規回/時刻変更は#241で別能力・受入とする。まず既存回だけ。
 - writerのcredentials、Google secret、Airbnb sessionはいずれもCloud/Studioの指定私用領域に限定。本番のOAuth同意/実サイト変更は実際の画面で別受入。
