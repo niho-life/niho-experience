@@ -56,7 +56,7 @@ export function HostWeekCalendar({ days, today, occurrences, busyIntervals, prod
     <div className="overflow-hidden rounded-2xl border border-line bg-canvas">
       <div className="grid grid-cols-[52px_repeat(7,minmax(0,1fr))] border-b border-line">
         <span aria-hidden="true" />
-        {days.map((day) => <button key={day} type="button" data-calendar-day={day} onClick={() => onSelectDay(day)} aria-label={`${dateLabel(day)}の日表示`} aria-current={day === today ? "date" : undefined} className={`min-h-14 border-l border-line px-1 text-center hover:bg-sand ${day === today ? "bg-leaf-pale" : ""}`}><span className="block text-xs text-muted">{"月火水木金土日"[days.indexOf(day)]}</span><strong className={`mx-auto mt-0.5 grid size-7 place-items-center rounded-full font-sans text-sm ${day === today ? "bg-ink text-canvas" : ""}`}>{Number(day.slice(8))}</strong></button>)}
+        {days.map((day) => <button key={day} type="button" data-calendar-day={day} onClick={() => onSelectDay(day)} aria-label={`${"月火水木金土日"[days.indexOf(day)]} ${Number(day.slice(8))}、${dateLabel(day)}の日表示`} aria-current={day === today ? "date" : undefined} className={`min-h-14 border-l border-line px-1 text-center hover:bg-sand ${day === today ? "bg-leaf-pale" : ""}`}><span aria-hidden="true" className="block text-xs text-muted">{"月火水木金土日"[days.indexOf(day)]}</span><strong className={`mx-auto mt-0.5 grid size-7 place-items-center rounded-full font-sans text-sm ${day === today ? "bg-ink text-canvas" : ""}`}>{Number(day.slice(8))}</strong></button>)}
       </div>
       <div className="grid grid-cols-[52px_repeat(7,minmax(0,1fr))]">
         <div aria-hidden="true" className="relative border-r border-line bg-canvas" style={{ height: totalHeight + 44 }}>

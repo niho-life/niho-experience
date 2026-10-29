@@ -74,8 +74,8 @@ test("week, day agenda and add dialog work without overflow", async ({ page }, t
   expect(posts).toHaveLength(1);
   expect(posts[0]).toMatchObject({ action: "createRule", experienceId: "sample-experience", rule: { startsOn: selectedDay, endsOn: selectedDay, capacity: 7, recurrence: { kind: "WEEKLY" } } });
   expect(posts[0]?.commandId).toMatch(/^[0-9a-f-]{36}$/);
-  const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag22aa"]).analyze();
-  expect(axe.violations.map((violation) => violation.id)).toEqual([]);
+  const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(axe.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);
 
   await expect(page.getByRole("region", { name: new RegExp(`${Number(selectedDay.slice(5, 7))}月`) })).toBeVisible();
 });
