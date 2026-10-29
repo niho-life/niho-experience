@@ -7,13 +7,14 @@
 ## 2026-10-29の確定事項と実証
 
 - オーナー決定：**Claude Code／Maxの既存契約内で実行し、従量APIへ切り替えない**。通常の既知の枠開閉はNIHOのbrowser driverで実行し、Claude modeも同じ限定操作だけを利用する。
-- ホストカレンダーの単発・繰返し枠、日時変更と販売状態の分離、保存とoutboxは[PR #207](https://github.com/niho-life/niho-experience/pull/207)でマージ済み。掲載先registry、worker認証、耐久job、lease、readbackは[PR #209](https://github.com/niho-life/niho-experience/pull/209)でマージ済み。Studio workerは[PR #218](https://github.com/niho-life/niho-experience/pull/218)。本番runtimeはOFFのまま。
+- ホストカレンダーの単発・繰返し枠、日時変更と販売状態の分離、保存とoutboxは[PR #207](https://github.com/niho-life/niho-experience/pull/207)でマージ済み。掲載先registry、worker認証、耐久job、lease、readbackは[PR #209](https://github.com/niho-life/niho-experience/pull/209)でマージ済み。Studio workerは[PR #218](https://github.com/niho-life/niho-experience/pull/218)でマージ済み。本番runtimeはOFFのまま。
 - Studioの専用Chromeへ本人がログイン済み。許可済みのGetYourGuideの空き枠を、停止→再読込→再開→再読込で**5往復、計10書込み**し、元の受付可能な状態へ復元した。これはdriver単体の実証であり、PWAからの結合やClaude推論を通した実証ではない。
 - StudioのNode 24／Chrome 156で合成24ケースを確認。加えて主担当の実ブラウザテストで20回の連続開閉、応答喪失後の読戻し、誤商品・認証失効・古いpreflightの拒否を確認した。モデル呼出しは0回。
 - Claude Code 2.1.292のMaxログインは確認済みだが、推論は週間上限で停止した。quota回復前にClaude経由の20件成功とは扱わず、従量API fallbackもしない。
 - 合成専用DBの実認証API→暗号化SSHのloopback転送→Studioの新worker→実GetYourGuideで、状態確認・停止・再開・結果保存を実証。25.103秒／37.741秒／34.342秒で完了し、すべてstopped=true・acceptedAsCurrent=true、最後は元のOPENへ復元。PWAと公開cloud originは含まない。詳しくは[workerの証跡区分](ota-worker.md#証跡の区別)。
 - Studioから公開originへの再確認はGET 200、新job APIは未配備の404。独立した合成DBの検証APIでは認証なし401、無関係jobの操作403を確認。公開cloudでの認証付きjob処理は別の受入項目である。
-- 体験限定の運営者招待、1回1組・講師／会場の共有在庫、外部予約取込み、第二サイト、旧外部枠の退役、本番有効化は未完了。実アカウントID・資格情報・画面証跡は公開リポへ置かない。
+- Airbnbの本人ログイン済みの実体験で、既存の公式Google連携を利用し、検証予定のbusyで予約不可、freeへの変更で元の予約可能・定員へ戻ることを確認。検証予定は削除した。これはGoogle UIからの実証であり、NIHOからGoogleへの自動出力や新規開催回作成を実証したものではない。[公式仕様](https://www.airbnb.com/help/article/2822)
+- 共有在庫の基盤は[OTA共有在庫](ota-inventory.md)に実装。体験限定の運営者招待、外部予約取込み、NIHOからのAirbnb公式Google制御、旧外部枠の退役、本番有効化は未完了。実アカウントID・資格情報・画面証跡は公開リポへ置かない。
 
 ## 1. Goal：成立させる操作
 

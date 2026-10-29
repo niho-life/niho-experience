@@ -33,6 +33,9 @@ export function evaluateAvailability(input: AvailabilityInput): AvailabilityResu
   assertIntegerInRange(input.requestedSeats, "requestedSeats", 1, 1_000);
   assertIntegerInRange(input.confirmedSeats, "confirmedSeats", 0, 1_000_000);
   assertIntegerInRange(input.heldSeats, "heldSeats", 0, 1_000_000);
+  if (input.sharedInventory !== undefined) {
+    assertIntegerInRange(input.sharedInventory.activeGroupCount, "sharedInventory.activeGroupCount", 0, 1_000_000);
+  }
   assertUtcInstant(input.nowUtc, "nowUtc");
   assertUtcInstant(input.occurrence.startUtc, "occurrence.startUtc");
   assertUtcInstant(input.occurrence.endUtc, "occurrence.endUtc");
@@ -54,7 +57,14 @@ export function evaluateAvailability(input: AvailabilityInput): AvailabilityResu
   const cutoffUtc = addMinutes(input.occurrence.startUtc, -input.occurrence.bookingCutoffMinutes);
   if (input.nowUtc >= cutoffUtc) return result(input, "BOOKING_CUTOFF_REACHED", remainingCapacity);
 
+  if (input.sharedInventory?.bookingMode === "PRIVATE_GROUP" && input.sharedInventory.activeGroupCount > 0) {
+    return result(input, "GROUP_RESERVED", remainingCapacity);
+  }
+
   if (input.requestedSeats > remainingCapacity) return result(input, "INSUFFICIENT_CAPACITY", remainingCapacity);
+
+  if (input.sharedInventory?.hasInactiveResource === true) return result(input, "RESOURCE_INACTIVE", remainingCapacity);
+  if (input.sharedInventory?.hasResourceConflict === true) return result(input, "RESOURCE_BUSY", remainingCapacity);
 
   if (input.googleCalendar.blockingEnabled) {
     if (input.googleCalendar.syncStatus !== "FRESH") {

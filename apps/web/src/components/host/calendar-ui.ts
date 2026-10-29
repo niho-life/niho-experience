@@ -69,6 +69,9 @@ export function availabilityLabel(reason: AvailabilityReason): string {
     case "MANUALLY_CLOSED": return "休止";
     case "BOOKING_CUTOFF_REACHED": return "締切";
     case "INSUFFICIENT_CAPACITY": return "満席";
+    case "GROUP_RESERVED": return "満席";
+    case "RESOURCE_INACTIVE": return "休止";
+    case "RESOURCE_BUSY": return "予定あり";
     case "GOOGLE_BUSY": return "予定あり";
     case "GOOGLE_SYNC_UNAVAILABLE": return "確認待ち";
   }

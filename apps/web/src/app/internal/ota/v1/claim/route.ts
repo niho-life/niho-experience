@@ -9,6 +9,7 @@ export async function POST(request: Request) {
   if (body instanceof Response) return body;
   if (!exactKeys(body, [])) return channelJson({ error: "invalid_input" }, 400);
   try {
+    await context.runtime.enqueueDueReconciliationTicks(context.worker, 20);
     await context.runtime.consumeCalendarOutbox(50, context.worker);
     const job = await context.runtime.claim(context.worker);
     return job ? channelJson({ job }) : channelEmpty();

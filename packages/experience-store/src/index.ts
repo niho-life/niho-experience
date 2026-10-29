@@ -7,6 +7,9 @@ export {
   StoreValidationError,
 } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
+export { evaluateStoredInventories, evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
+export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
@@ -61,6 +64,7 @@ export type {
 export type { HostPushDeviceLabel, HostPushRecipient, HostPushSubscriptionInput } from "./push-subscriptions.ts";
 export type {
   BookingRecord,
+  BookingMode,
   BookingStatus,
   CalendarCommandReceipt,
   ConfirmBookingInput,
@@ -68,10 +72,16 @@ export type {
   CreateBookingHoldInput,
   GoogleCalendarConfiguration,
   HostActor,
+  InventoryResourceInput,
+  InventoryResourceKind,
+  InventoryResourceRecord,
   JsonValue,
   MembershipRole,
   PricingSnapshot,
   ProductInput,
+  ProductInventoryResourceInput,
+  ProductInventorySetting,
+  ProductInventorySettingInput,
   ProductRecord,
   ProductStatus,
   ProviderMembership,

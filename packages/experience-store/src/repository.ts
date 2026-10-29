@@ -1,13 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  addMinutes,
-  evaluateAvailability,
   expandOccurrences,
   occurrenceIdFor,
   parseOccurrenceOverrides,
   parseScheduleRule,
-  type BusyInterval,
-  type GoogleSyncStatus,
   type Occurrence,
   type OccurrenceOverride,
   type OccurrenceSalesState,
@@ -32,7 +28,14 @@ import {
   type DbRow,
 } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
+import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import {
+  evaluateStoredInventory,
+  lockProviderInventory,
+  persistBookingInventorySnapshot,
+} from "./inventory.ts";
 import type {
+  BookingMode,
   BookingRecord,
   CalendarCommandReceipt,
   ConfirmBookingInput,
@@ -40,8 +43,12 @@ import type {
   CreateBookingHoldInput,
   GoogleCalendarConfiguration,
   HostActor,
+  InventoryResourceInput,
+  InventoryResourceRecord,
   MembershipRole,
   ProductInput,
+  ProductInventorySetting,
+  ProductInventorySettingInput,
   ProductRecord,
   ProviderMembership,
   ProviderScope,
@@ -55,7 +62,6 @@ import {
   assertSeats,
   assertStoreIdentifier,
   buildSnapshots,
-  effectiveGoogleSyncStatus,
   normalizeCurrency,
   validateBusySync,
 } from "./validation.ts";
@@ -110,6 +116,10 @@ function validateCommandId(commandId: string): void {
   if (!COMMAND_ID_PATTERN.test(commandId)) throw new StoreValidationError("commandId must be a UUID v4.");
 }
 
+function inventoryCommandFingerprint(value: unknown): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
 function commandReceipt(value: unknown, repeated: boolean): CalendarCommandReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StoreConflictError("Calendar command result is invalid.");
   const result = value as Record<string, unknown>;
@@ -145,7 +155,7 @@ async function completeCalendarCommand(
   commandId: string,
   action: string,
   requestFingerprint: string,
-  aggregateType: "schedule_rule" | "schedule_occurrence",
+  aggregateType: "schedule_rule" | "schedule_occurrence" | "inventory_resource" | "product_inventory",
   receipt: CalendarCommandReceipt,
 ): Promise<CalendarCommandReceipt> {
   const result = { aggregateId: receipt.aggregateId, version: receipt.version };
@@ -369,6 +379,166 @@ export class ExperienceStore {
     });
   }
 
+  async saveInventoryResource(
+    actor: HostActor,
+    input: InventoryResourceInput,
+    expectedVersion: number | null,
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
+    validateActor(actor);
+    assertStoreIdentifier(input.id, "resource.id");
+    assertNonEmptyText(input.displayName, "resource.displayName", 200);
+    if (!(input.kind === "VENUE" || input.kind === "INSTRUCTOR" || input.kind === "EQUIPMENT")) {
+      throw new StoreValidationError("resource.kind is invalid.");
+    }
+    if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) {
+      throw new StoreValidationError("expectedVersion must be null or a positive integer.");
+    }
+    validateCommandId(commandId);
+    const requestFingerprint = inventoryCommandFingerprint({ input, expectedVersion });
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "inventory_resource.save", requestFingerprint);
+      if (previous) return previous;
+      const current = await client.query<DbRow>(
+        "SELECT kind,version FROM inventory_resources WHERE provider_id=$1 AND id=$2 FOR UPDATE",
+        [actor.providerId, input.id],
+      );
+      const row = current.rows[0];
+      if (row === undefined && expectedVersion !== null) throw new StoreConflictError("Inventory resource was not found.");
+      if (row !== undefined && (expectedVersion === null || Number(row.version) !== expectedVersion)) {
+        throw new StoreConflictError("Inventory resource version mismatch.");
+      }
+      if (row !== undefined && row.kind !== input.kind) throw new StoreConflictError("Inventory resource kind is immutable.");
+      const saved = row === undefined
+        ? await client.query<DbRow>(
+            `INSERT INTO inventory_resources (provider_id,id,kind,display_name,active)
+             VALUES ($1,$2,$3,$4,$5)
+             RETURNING provider_id,id,kind,display_name,active,version,created_at,updated_at`,
+            [actor.providerId, input.id, input.kind, input.displayName, input.active],
+          )
+        : await client.query<DbRow>(
+            `UPDATE inventory_resources SET display_name=$3,active=$4,version=version+1,updated_at=clock_timestamp()
+              WHERE provider_id=$1 AND id=$2
+              RETURNING provider_id,id,kind,display_name,active,version,created_at,updated_at`,
+            [actor.providerId, input.id, input.displayName, input.active],
+          );
+      const savedRow = oneRow(saved.rows, "inventory resource");
+      return completeCalendarCommand(client, actor.providerId, commandId, "inventory_resource.save", requestFingerprint,
+        "inventory_resource", { aggregateId: input.id, version: Number(savedRow.version), repeated: false });
+    });
+  }
+
+  async listInventoryResources(actor: HostActor): Promise<readonly InventoryResourceRecord[]> {
+    validateActor(actor);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT r.provider_id,r.id,r.kind,r.display_name,r.active,r.version,r.created_at,r.updated_at
+         FROM inventory_resources r
+        WHERE r.provider_id=$1 AND EXISTS (
+          SELECT 1 FROM provider_memberships m
+           WHERE m.provider_id=r.provider_id AND m.niho_user_id=$2 AND m.active=true)
+        ORDER BY r.id COLLATE "C"`,
+      [actor.providerId, actor.nihoUserId],
+    );
+    return result.rows.map((row) => ({
+      providerId: String(row.provider_id), id: String(row.id), kind: String(row.kind) as InventoryResourceRecord["kind"],
+      displayName: String(row.display_name), active: row.active === true, version: Number(row.version),
+      createdAtUtc: isoValue(row, "created_at"), updatedAtUtc: isoValue(row, "updated_at"),
+    }));
+  }
+
+  async saveProductInventorySetting(
+    actor: HostActor,
+    productId: string,
+    input: ProductInventorySettingInput,
+    expectedVersion: number | null,
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
+    validateActor(actor);
+    assertStoreIdentifier(productId, "productId");
+    if (input.bookingMode !== "SEAT" && input.bookingMode !== "PRIVATE_GROUP") throw new StoreValidationError("bookingMode is invalid.");
+    if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) {
+      throw new StoreValidationError("expectedVersion must be null or a positive integer.");
+    }
+    validateCommandId(commandId);
+    if (input.resources.length > 200) throw new StoreValidationError("A product may use at most 200 inventory resources.");
+    const seen = new Set<string>();
+    for (const assignment of input.resources) {
+      assertStoreIdentifier(assignment.resourceId, "resourceId");
+      if (seen.has(assignment.resourceId)) throw new StoreValidationError("A resource may be assigned only once per product.");
+      seen.add(assignment.resourceId);
+      if (!Number.isInteger(assignment.prepareMinutes) || assignment.prepareMinutes < 0 || assignment.prepareMinutes > 1_440
+        || !Number.isInteger(assignment.cleanupMinutes) || assignment.cleanupMinutes < 0 || assignment.cleanupMinutes > 1_440) {
+        throw new StoreValidationError("Resource preparation and cleanup must be from 0 to 1440 minutes.");
+      }
+    }
+    const normalized = {
+      bookingMode: input.bookingMode,
+      resources: [...input.resources].sort((a, b) => a.resourceId < b.resourceId ? -1 : a.resourceId > b.resourceId ? 1 : 0),
+    };
+    const requestFingerprint = inventoryCommandFingerprint({ productId, input: normalized, expectedVersion });
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "product_inventory.save", requestFingerprint);
+      if (previous) return previous;
+      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR UPDATE", [actor.providerId, productId]);
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      const active = await client.query(
+        `SELECT 1 FROM bookings WHERE provider_id=$1 AND product_id=$2
+          AND (occurrence_snapshot->>'endUtc')::timestamptz>clock_timestamp()
+          AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>clock_timestamp())) LIMIT 1`,
+        [actor.providerId, productId],
+      );
+      if (active.rows[0]) throw new StoreConflictError("Product inventory cannot change while an active hold or confirmed booking exists.");
+      const current = await client.query<DbRow>(
+        "SELECT version FROM product_inventory_settings WHERE provider_id=$1 AND product_id=$2 FOR UPDATE",
+        [actor.providerId, productId],
+      );
+      const currentRow = current.rows[0];
+      if (currentRow === undefined && expectedVersion !== null) throw new StoreConflictError("Product inventory setting was not found.");
+      if (currentRow !== undefined && (expectedVersion === null || Number(currentRow.version) !== expectedVersion)) {
+        throw new StoreConflictError("Product inventory setting version mismatch.");
+      }
+      if (normalized.resources.length > 0) {
+        const owned = await client.query<{ id: string }>(
+          "SELECT id FROM inventory_resources WHERE provider_id=$1 AND id=ANY($2::text[]) FOR SHARE",
+          [actor.providerId, normalized.resources.map((item) => item.resourceId)],
+        );
+        if (owned.rowCount !== normalized.resources.length) throw new StoreConflictError("Every assigned resource must belong to the same provider.");
+      }
+      const version = currentRow === undefined ? 1 : Number(currentRow.version) + 1;
+      if (currentRow === undefined) {
+        await client.query("INSERT INTO product_inventory_settings (provider_id,product_id,booking_mode) VALUES ($1,$2,$3)",
+          [actor.providerId, productId, normalized.bookingMode]);
+      } else {
+        await client.query(
+          "UPDATE product_inventory_settings SET booking_mode=$3,version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND product_id=$2",
+          [actor.providerId, productId, normalized.bookingMode],
+        );
+        await client.query("DELETE FROM product_inventory_resources WHERE provider_id=$1 AND product_id=$2", [actor.providerId, productId]);
+      }
+      for (const assignment of normalized.resources) {
+        await client.query(
+          `INSERT INTO product_inventory_resources (provider_id,product_id,resource_id,prepare_minutes,cleanup_minutes)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [actor.providerId, productId, assignment.resourceId, assignment.prepareMinutes, assignment.cleanupMinutes],
+        );
+      }
+      return completeCalendarCommand(client, actor.providerId, commandId, "product_inventory.save", requestFingerprint,
+        "product_inventory", { aggregateId: productId, version, repeated: false });
+    });
+  }
+
+  async getProductInventorySetting(actor: HostActor, productId: string): Promise<ProductInventorySetting> {
+    validateActor(actor);
+    assertStoreIdentifier(productId, "productId");
+    const membership = await this.verifyActiveMembership(actor);
+    if (!membership) throw new StoreAccessDeniedError();
+    return this.#productInventorySetting(this.#pool, actor.providerId, productId);
+  }
+
   async saveScheduleRule(
     actor: HostActor,
     productId: string,
@@ -385,6 +555,7 @@ export class ExperienceStore {
     }
     const requestFingerprint = JSON.stringify({ productId, rule, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "schedule_rule.save", requestFingerprint);
       if (previous) return previous;
@@ -518,6 +689,7 @@ export class ExperienceStore {
     }
     const requestFingerprint = JSON.stringify({ productId, ruleId, override, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.reschedule", requestFingerprint);
       if (previous) return previous;
@@ -583,6 +755,7 @@ export class ExperienceStore {
     validateCommandId(commandId);
     const requestFingerprint = JSON.stringify({ productId, ruleId, state: rawState, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.sales_state", requestFingerprint);
       if (previous) return previous;
@@ -639,6 +812,7 @@ export class ExperienceStore {
       throw new StoreValidationError("expectedVersion must be null or a positive integer.");
     }
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars WHERE provider_id=$1 FOR UPDATE`,
@@ -656,7 +830,9 @@ export class ExperienceStore {
            RETURNING ${GOOGLE_COLUMNS}`,
           [actor.providerId, input.opaqueCalendarId, input.blockingEnabled],
         );
-        return googleCalendarFromRow(oneRow(inserted.rows, "Google calendar configuration"));
+        const configuration = googleCalendarFromRow(oneRow(inserted.rows, "Google calendar configuration"));
+        await enqueueCalendarRecalculation(client, { providerId: actor.providerId, aggregateType: "google_calendar", aggregateId: actor.providerId, cause: "google_configuration_changed" });
+        return configuration;
       }
       const calendarChanged = row.opaque_calendar_id !== input.opaqueCalendarId;
       if (calendarChanged) {
@@ -676,7 +852,9 @@ export class ExperienceStore {
           RETURNING ${GOOGLE_COLUMNS}`,
         [actor.providerId, input.opaqueCalendarId, input.blockingEnabled],
       );
-      return googleCalendarFromRow(oneRow(updated.rows, "Google calendar configuration"));
+      const configuration = googleCalendarFromRow(oneRow(updated.rows, "Google calendar configuration"));
+      await enqueueCalendarRecalculation(client, { providerId: actor.providerId, aggregateType: "google_calendar", aggregateId: actor.providerId, cause: "google_configuration_changed" });
+      return configuration;
     });
   }
 
@@ -703,6 +881,7 @@ export class ExperienceStore {
     assertCanonicalInstant(input.coverageEndUtc, "coverageEndUtc");
     if (input.coverageEndUtc <= input.coverageStartUtc) throw new StoreValidationError("Google busy coverage must have a positive duration.");
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, scope.providerId);
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars
           WHERE provider_id=$1 AND opaque_calendar_id=$2 FOR UPDATE`,
@@ -742,6 +921,8 @@ export class ExperienceStore {
           ],
         );
       }
+      await enqueueCalendarRecalculation(client, { providerId: scope.providerId, aggregateType: "google_calendar", aggregateId: scope.providerId, cause: "google_busy_changed" });
+      await enqueueCalendarRecalculation(client, { providerId: scope.providerId, aggregateType: "google_calendar", aggregateId: scope.providerId, cause: "google_freshness_expired", availableAtUtc: input.freshUntilUtc });
       return configuration;
     });
   }
@@ -754,6 +935,7 @@ export class ExperienceStore {
     assertNonEmptyText(input.opaqueCalendarId, "opaqueCalendarId");
     assertCanonicalInstant(input.attemptedAtUtc, "attemptedAtUtc");
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, scope.providerId);
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars
           WHERE provider_id=$1 AND opaque_calendar_id=$2 FOR UPDATE`,
@@ -776,7 +958,9 @@ export class ExperienceStore {
           RETURNING ${GOOGLE_COLUMNS}`,
         [scope.providerId, input.opaqueCalendarId, input.attemptedAtUtc],
       );
-      return googleCalendarFromRow(oneRow(result.rows, "Google calendar configuration"));
+      const configuration = googleCalendarFromRow(oneRow(result.rows, "Google calendar configuration"));
+      await enqueueCalendarRecalculation(client, { providerId: scope.providerId, aggregateType: "google_calendar", aggregateId: scope.providerId, cause: "google_sync_failed" });
+      return configuration;
     });
   }
 
@@ -792,6 +976,7 @@ export class ExperienceStore {
     }
 
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, scope.providerId);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))", [scope.providerId, input.idempotencyKey]);
       const previous = await client.query<DbRow>(
         `SELECT ${BOOKING_COLUMNS} FROM bookings WHERE provider_id=$1 AND idempotency_key=$2`,
@@ -815,24 +1000,10 @@ export class ExperienceStore {
       const occurrence = await this.#materializeAndLockOccurrence(client, scope, input.productId, input.occurrenceId);
       const nowResult = await client.query<DbRow>("SELECT clock_timestamp() AS now");
       const nowUtc = isoValue(oneRow(nowResult.rows, "database time"), "now");
-      const capacity = await client.query<DbRow>(
-        `SELECT
-           COALESCE(sum(seats) FILTER (WHERE status='CONFIRMED'), 0)::text AS confirmed_seats,
-           COALESCE(sum(seats) FILTER (WHERE status='HOLD' AND hold_expires_at > $3), 0)::text AS held_seats
-         FROM bookings WHERE provider_id=$1 AND occurrence_id=$2`,
-        [scope.providerId, occurrence.id, nowUtc],
-      );
-      const capacityRow = oneRow(capacity.rows, "occurrence capacity");
-      const google = await this.#googleAvailability(client, scope.providerId, occurrence, nowUtc);
-      const availability = evaluateAvailability({
-        occurrence,
-        requestedSeats: input.seats,
-        confirmedSeats: Number(capacityRow.confirmed_seats),
-        heldSeats: Number(capacityRow.held_seats),
-        nowUtc,
-        googleCalendar: google,
-      });
-      if (!availability.bookable) throw new BookingUnavailableError(availability.reason, availability.availableSeats);
+      const inventory = await evaluateStoredInventory(client, scope.providerId, input.productId, occurrence, nowUtc, input.seats);
+      if (!inventory.availability.bookable) {
+        throw new BookingUnavailableError(inventory.availability.reason, inventory.availability.availableSeats);
+      }
 
       const snapshots = buildSnapshots(occurrence, input.seats, nowUtc, product);
       const publicBookingId = randomUUID();
@@ -842,7 +1013,7 @@ export class ExperienceStore {
            idempotency_key, hold_expires_at, occurrence_snapshot, pricing_snapshot, seller_snapshot
          ) VALUES (
            $1,$2,$3,$4,'HOLD',$5,$6,clock_timestamp()+($7*interval '1 second'),$8::jsonb,$9::jsonb,$10::jsonb
-         ) RETURNING ${BOOKING_COLUMNS}`,
+         ) RETURNING id, ${BOOKING_COLUMNS}`,
         [
           publicBookingId,
           scope.providerId,
@@ -856,7 +1027,23 @@ export class ExperienceStore {
           JSON.stringify(snapshots.sellerSnapshot),
         ],
       );
-      return bookingFromRow(oneRow(inserted.rows, "booking hold"));
+      const insertedRow = oneRow(inserted.rows, "booking hold");
+      const booking = bookingFromRow(insertedRow);
+      await persistBookingInventorySnapshot(client, {
+        providerId: scope.providerId,
+        bookingId: Number(insertedRow.id),
+        occurrence,
+        bookingMode: inventory.bookingMode,
+        occupancies: inventory.occupancies,
+      });
+      await enqueueCalendarRecalculation(client, {
+        providerId: scope.providerId, aggregateType: "schedule_occurrence", aggregateId: occurrence.id, cause: "booking_hold_created",
+      });
+      await enqueueCalendarRecalculation(client, {
+        providerId: scope.providerId, aggregateType: "schedule_occurrence", aggregateId: occurrence.id,
+        cause: "booking_hold_expired", availableAtUtc: booking.holdExpiresAtUtc,
+      });
+      return booking;
     });
   }
 
@@ -873,6 +1060,7 @@ export class ExperienceStore {
     const currency = normalizeCurrency(input.currency);
 
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, scope.providerId);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 1))", [input.stripeEventId]);
       const initial = await client.query<DbRow>(
         `SELECT id, occurrence_id FROM bookings WHERE provider_id=$1 AND public_booking_id=$2::uuid`,
@@ -964,6 +1152,12 @@ export class ExperienceStore {
           JSON.stringify({ publicBookingId: updatedBooking.publicBookingId, providerId: scope.providerId, outcome }),
         ],
       );
+      await enqueueCalendarRecalculation(client, {
+        providerId: scope.providerId,
+        aggregateType: "schedule_occurrence",
+        aggregateId: updatedBooking.occurrenceId,
+        cause: outcome === "CONFIRMED" ? "booking_confirmed" : "booking_payment_review",
+      });
       return { booking: updatedBooking, duplicateEvent: false };
     });
   }
@@ -987,18 +1181,50 @@ export class ExperienceStore {
   async releaseExpiredHolds(scope: ProviderScope, limit = 500): Promise<number> {
     validateScope(scope);
     if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) throw new StoreValidationError("limit must be from 1 to 5000.");
-    const result = await this.#pool.query<DbRow>(
-      `WITH expired AS (
-         SELECT id FROM bookings
-          WHERE provider_id=$1 AND status='HOLD' AND hold_expires_at <= clock_timestamp()
-          ORDER BY hold_expires_at FOR UPDATE SKIP LOCKED LIMIT $2
-       )
-       UPDATE bookings b SET status='EXPIRED', updated_at=clock_timestamp()
-        FROM expired e WHERE b.provider_id=$1 AND b.id=e.id
-       RETURNING b.id`,
-      [scope.providerId, limit],
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, scope.providerId);
+      const result = await client.query<DbRow>(
+        `WITH expired AS (
+           SELECT id FROM bookings
+            WHERE provider_id=$1 AND status='HOLD' AND hold_expires_at <= clock_timestamp()
+            ORDER BY hold_expires_at FOR UPDATE SKIP LOCKED LIMIT $2
+         )
+         UPDATE bookings b SET status='EXPIRED', updated_at=clock_timestamp()
+          FROM expired e WHERE b.provider_id=$1 AND b.id=e.id
+         RETURNING b.occurrence_id`,
+        [scope.providerId, limit],
+      );
+      for (const occurrenceId of new Set(result.rows.map((row) => String(row.occurrence_id)))) {
+        await enqueueCalendarRecalculation(client, {
+          providerId: scope.providerId, aggregateType: "schedule_occurrence", aggregateId: occurrenceId, cause: "booking_hold_released",
+        });
+      }
+      return result.rowCount ?? 0;
+    });
+  }
+
+  async #productInventorySetting(client: Pool | PoolClient, providerId: string, productId: string): Promise<ProductInventorySetting> {
+    const setting = await client.query<DbRow>(
+      "SELECT booking_mode,version FROM product_inventory_settings WHERE provider_id=$1 AND product_id=$2",
+      [providerId, productId],
     );
-    return result.rowCount ?? 0;
+    const row = oneRow(setting.rows, "product inventory setting");
+    const resources = await client.query<DbRow>(
+      `SELECT resource_id,prepare_minutes,cleanup_minutes FROM product_inventory_resources
+        WHERE provider_id=$1 AND product_id=$2 ORDER BY resource_id COLLATE "C"`,
+      [providerId, productId],
+    );
+    return {
+      providerId,
+      productId,
+      bookingMode: String(row.booking_mode) as BookingMode,
+      version: Number(row.version),
+      resources: resources.rows.map((item) => ({
+        resourceId: String(item.resource_id),
+        prepareMinutes: Number(item.prepare_minutes),
+        cleanupMinutes: Number(item.cleanup_minutes),
+      })),
+    };
   }
 
   async #assertScheduleHasNoFutureReservations(client: PoolClient, providerId: string, ruleId: string): Promise<void> {
@@ -1107,41 +1333,4 @@ export class ExperienceStore {
     return occurrence;
   }
 
-  async #googleAvailability(
-    client: PoolClient,
-    providerId: string,
-    occurrence: Occurrence,
-    nowUtc: string,
-  ): Promise<{
-    readonly blockingEnabled: boolean;
-    readonly syncStatus: GoogleSyncStatus;
-    readonly busyIntervals: readonly BusyInterval[];
-  }> {
-    const settingResult = await client.query<DbRow>(
-      `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars WHERE provider_id=$1 FOR SHARE`,
-      [providerId],
-    );
-    const settingRow = settingResult.rows[0];
-    if (settingRow === undefined) return { blockingEnabled: false, syncStatus: "STALE", busyIntervals: [] };
-    const setting = googleCalendarFromRow(settingRow);
-    const rangeStart = addMinutes(occurrence.startUtc, -occurrence.busyBufferBeforeMinutes);
-    const rangeEnd = addMinutes(occurrence.endUtc, occurrence.busyBufferAfterMinutes);
-    const covered = setting.coverageStartUtc !== undefined && setting.coverageEndUtc !== undefined
-      && setting.coverageStartUtc <= rangeStart && setting.coverageEndUtc >= rangeEnd;
-    const syncStatus = covered ? effectiveGoogleSyncStatus(setting.syncStatus, setting.freshUntilUtc, nowUtc) : "STALE";
-    if (!setting.blockingEnabled || syncStatus !== "FRESH") {
-      return { blockingEnabled: setting.blockingEnabled, syncStatus, busyIntervals: [] };
-    }
-    const busyResult = await client.query<DbRow>(
-      `SELECT start_at, end_at FROM google_busy_intervals
-        WHERE provider_id=$1 AND opaque_calendar_id=$2 AND end_at>$3 AND start_at<$4
-        ORDER BY start_at`,
-      [providerId, setting.opaqueCalendarId, rangeStart, rangeEnd],
-    );
-    return {
-      blockingEnabled: true,
-      syncStatus,
-      busyIntervals: busyResult.rows.map((row) => ({ startUtc: isoValue(row, "start_at"), endUtc: isoValue(row, "end_at") })),
-    };
-  }
 }

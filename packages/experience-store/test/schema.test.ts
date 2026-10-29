@@ -54,6 +54,16 @@ describe("database invariants", () => {
     assert.match(sql, /outcome IN \('VERIFIED','AUTH_REQUIRED','NEEDS_REVIEW','UNKNOWN_AFTER_SAVE','RETRY_WAIT','SUPERSEDED'\)/);
   });
 
+  it("scopes shared resources by provider and keeps booking occupancy snapshots immutable", async () => {
+    const sql = await readFile(new URL("../migrations/0010_shared_inventory.sql", import.meta.url), "utf8");
+    assert.match(sql, /PRIMARY KEY \(provider_id, id\)/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, resource_id\)[\s\S]*REFERENCES inventory_resources\(provider_id, id\)/);
+    assert.match(sql, /booking_resource_occupancies_overlap_idx/);
+    assert.match(sql, /booking inventory snapshots are immutable/);
+    assert.match(sql, /calendar_reconciliation_ticks/);
+    assert.match(sql, /pending_command_id/);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

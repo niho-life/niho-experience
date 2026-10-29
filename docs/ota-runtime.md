@@ -1,6 +1,6 @@
 # OTA channel runtime
 
-対象: #194、#196、#198。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。この slice は基盤のみであり、product operator の招待・権限、resources/groups、外部予約取込、Google 予定変更、管理 UI は実装しない。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
+対象: #194、#196、#197、#198。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。この slice は基盤のみであり、共有在庫は[OTA共有在庫](ota-inventory.md)に追加した。product operator の招待・権限、外部予約取込、Googleへの枠制御出力、管理 UI は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
 
 ## 既定で閉じるゲート
 
@@ -8,9 +8,9 @@
 - worker API は別の `EXPERIENCE_CHANNEL_RUNTIME_ENABLED=true` が必要である。人間用 cookie は認可に使わず、worker bearer を `Authorization` header だけで受け取る。
 - DB 未設定は `503` とし、HTTP 失敗から mock へ切り替えない。両 flag の既定値は false である。
 - capability は account/listing 作成だけでは有効にならない。配備設定 `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` に明示された `site/adapter@version` の boolean だけを Admin が保存でき、claim/preflight/result でも同じ配備 allowlist を再確認する。未設定・不正設定は全 capability false となり、live job は claim されない。
-- groups/resources による共有在庫の安全確認が未実装なので、現時点では配備 flag を有効にしない。
+- groups/resources の共有在庫基盤は [OTA共有在庫](ota-inventory.md) に実装したが、外部予約取込みと実OTAでの結合受入は未完了なので、配備 flag は引き続き有効にしない。
 
-`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` は秘密ではない JSON で、例は `{"Airbnb/browser-v1@1":{"canObserve":true,"canClose":true}}`。これは実装・受入済み capability の allowlist であり、サイト名だけから対応済みとは判断しない。
+`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` は秘密ではない JSON で、例は `{"GetYourGuide/gyg-browser@1":{"canObserve":true,"canClose":true,"canOpen":true}}`。これは実装・受入済み capability の allowlist であり、サイト名だけから対応済みとは判断しない。
 
 ## Registry と権限境界
 

@@ -6,6 +6,7 @@ import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { ChannelRuntime } from "../src/channels.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { enqueueCalendarRecalculation } from "../src/inventory-outbox.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}`;
@@ -291,6 +292,22 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
         outcome: "VERIFIED", stopped: true, target: synced.target, occurrenceId: synced.occurrenceId,
         sourceStartAtUtc: synced.sourceStartAtUtc, sourceEndAtUtc: synced.sourceEndAtUtc,
         observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: now.toISOString() });
+      assert.equal((await runtime.hostStatuses(actor)).find((item) => item.occurrenceId === synced.occurrenceId)?.label, "SYNCED");
+      const futureTimers = await pool.connect();
+      const futureCommands: string[] = [];
+      try {
+        for (const cause of ["hold_expired", "google_freshness_expired"]) {
+          futureCommands.push(await enqueueCalendarRecalculation(futureTimers, {
+            providerId: actor.providerId, aggregateType: "inventory", aggregateId: "tea", cause,
+            availableAtUtc: new Date(now.getTime() + 60_000).toISOString(),
+          }));
+        }
+      } finally { futureTimers.release(); }
+      // A future timer is not a change awaiting delivery now. It becomes pending exactly when due.
+      assert.equal((await runtime.hostStatuses(actor)).find((item) => item.occurrenceId === synced.occurrenceId)?.label, "SYNCED");
+      now.setTime(now.getTime() + 60_000);
+      assert.equal((await runtime.hostStatuses(actor)).find((item) => item.occurrenceId === synced.occurrenceId)?.label, "PENDING");
+      await pool.query("UPDATE calendar_outbox_events SET processed_at=$1 WHERE command_id=ANY($2::uuid[])", [now, futureCommands]);
       assert.equal((await runtime.hostStatuses(actor)).find((item) => item.occurrenceId === synced.occurrenceId)?.label, "SYNCED");
       await runtime.updateListing(admin, "listing-00", { externalProductId: "synthetic-remapped-product", adapter: "gyg-browser", adapterVersion: "1",
         connectionMode: "BROWSER", capabilities: { canObserve: true, canClose: true, canOpen: true }, active: true }, 1, command("118"));

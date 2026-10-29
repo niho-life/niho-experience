@@ -26,6 +26,9 @@ describe("host calendar date model", () => {
   it("translates internal availability reasons to host-facing states", () => {
     expect(availabilityLabel("AVAILABLE")).toBe("受付中");
     expect(availabilityLabel("INSUFFICIENT_CAPACITY")).toBe("満席");
+    expect(availabilityLabel("GROUP_RESERVED")).toBe("満席");
+    expect(availabilityLabel("RESOURCE_INACTIVE")).toBe("休止");
+    expect(availabilityLabel("RESOURCE_BUSY")).toBe("予定あり");
     expect(availabilityLabel("GOOGLE_SYNC_UNAVAILABLE")).toBe("確認待ち");
   });
 });

@@ -67,7 +67,7 @@
 
 ②は利用規約のアカウント資格情報共有制限と合わない。専用Gmailを作っても解消しない。[2026年の日本を含む対象地域の利用規約・§16](https://assets.airbnb.com/help/2026_Terms_of_Service_for_Users_Outside_of_the_EEA_UK_and_Australia_-_English.pdf)
 
-**枠管理**：公式Google連携でbusy予定を既存回の受付停止に利用できる。開催回の新規作成は別操作。Google予定の削除後の再開、貸切1組の扱い、反映遅延を実機確認する。[Google連携](https://www.airbnb.com/help/article/2822)、[開催回の設定](https://www.airbnb.com/help/article/2645)
+**枠管理**：公式Google連携でbusy予定を既存回の受付停止に利用できる。2026-10-29、オーナー許可済みの実体験・空き枠で、Googleのbusy→Airbnb予約不可、同じ予定をfree→元の予約可能・定員への復帰を確認し、検証予定を片付けた。NIHOからGoogleへの自動出力・貸切1組制・反映時間の一般的なp95は未検証。開催回の新規作成は別操作であり、Google busyからは作られない。[Google連携](https://www.airbnb.com/help/article/2822)、[開催回の設定](https://www.airbnb.com/help/article/2645)
 
 ### 3.2 GetYourGuide：④。独立講師の事業には③も使える
 

@@ -119,6 +119,13 @@ export interface AvailabilityInput {
     readonly syncStatus: GoogleSyncStatus;
     readonly busyIntervals: readonly BusyInterval[];
   };
+  /** Defaults to the legacy seat model when no inventory setting exists. */
+  readonly sharedInventory?: {
+    readonly bookingMode: "SEAT" | "PRIVATE_GROUP";
+    readonly activeGroupCount: number;
+    readonly hasInactiveResource: boolean;
+    readonly hasResourceConflict: boolean;
+  };
 }
 
 export type AvailabilityReason =
@@ -126,6 +133,9 @@ export type AvailabilityReason =
   | "MANUALLY_CLOSED"
   | "BOOKING_CUTOFF_REACHED"
   | "INSUFFICIENT_CAPACITY"
+  | "GROUP_RESERVED"
+  | "RESOURCE_INACTIVE"
+  | "RESOURCE_BUSY"
   | "GOOGLE_SYNC_UNAVAILABLE"
   | "GOOGLE_BUSY";
 
