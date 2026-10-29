@@ -42,11 +42,15 @@ export async function POST(request: Request, context: GuideRouteContext) {
       visibility: input.visibility,
       productLinks: [],
     });
-    const current = await loaded.value.repository.getArticle(loaded.value.actor, articleId);
-    // A second tab may save between the publication transaction and this read.
-    // Never give the caller a newer revision for content it has not displayed.
-    if (current.revision !== input.expectedRevision + 1) return guideApiJson({ error: "conflict" }, 409);
-    return guideApiJson({ guide: privateGuideArticle(current) });
+    // Publication is committed. A second tab may save before this read, so never
+    // give the caller a newer revision for content it has not displayed.
+    try {
+      const current = await loaded.value.repository.getArticle(loaded.value.actor, articleId);
+      if (current.revision === input.expectedRevision + 1) {
+        return guideApiJson({ guide: privateGuideArticle(current) });
+      }
+    } catch { /* The committed publication still needs an honest response. */ }
+    return guideApiJson({ result: "committed_needs_refresh" });
   } catch (error) {
     return guideApiError(error);
   }

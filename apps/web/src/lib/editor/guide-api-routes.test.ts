@@ -320,8 +320,22 @@ describe("private editor guide routes", () => {
       "POST",
       { expectedRevision: 2, visibility: "PUBLIC" },
     ), context);
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ error: "conflict" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: "committed_needs_refresh" });
+    expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a committed publication when the follow-up read fails", async () => {
+    mocks.repository.getArticle
+      .mockResolvedValueOnce(publishableArticle)
+      .mockRejectedValueOnce(new Error("follow-up read unavailable"));
+    const response = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC" },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: "committed_needs_refresh" });
     expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
   });
 

@@ -420,7 +420,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     navigationGuardRef.current = true;
     setPublicationBusy(true);
     try {
-      const response = await editorApiRequest<GuideResponse>(
+      const response = await editorApiRequest<GuideResponse | { readonly result: "committed_needs_refresh" }>(
         `/editor/api/guides/${encodeURIComponent(articleId)}/publication`,
         {
           method: "POST",
@@ -428,6 +428,16 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
           body: JSON.stringify({ expectedRevision: revision, visibility: publicationVisibility }),
         },
       );
+      if ("result" in response) {
+        setPublicationOpen(true);
+        setPublicationState({
+          status: "ready",
+          problems: [],
+          message: "公開版を保存しました。その後に原稿が更新されたため、最新版を確認してください。",
+        });
+        void fetchLatestForConflict();
+        return;
+      }
       applyPublicationGuide(response.guide, response.guide.currentPublication?.number === 1 ? "公開版を保存しました。サイト反映は準備中です。" : "公開版を更新しました。サイト反映は準備中です。");
     } catch (error) {
       const result = publicationErrorMessage(error);
