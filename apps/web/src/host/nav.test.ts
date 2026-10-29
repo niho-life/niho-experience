@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HOST_NAV, withProvider, withQuery } from "@/lib/host/routes";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "./nav";
-import { hostNavForRole } from "@/components/host/HostNav";
+import { hostNavForChoice, hostNavForRole } from "@/components/host/HostNav";
 
 const selected = (location: string) => HOST_NAV.filter((item) => isHostNavActive(location, item.href)).map((item) => item.label);
 
@@ -16,6 +16,10 @@ describe("host navigation", () => {
     expect(hostNavForRole("EDITOR").map((item) => item.href)).not.toContain("/host/sales");
     expect(hostNavForRole("EDITOR").map((item) => item.href)).not.toContain("/host/bookings");
     expect(hostNavForRole("COHOST").map((item) => item.href)).toContain("/host/bookings");
+  });
+
+  it("keeps an operator in the calendar-only frontend context", () => {
+    expect(hostNavForChoice({ kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null }).map((item) => item.href)).toEqual(["/host/calendar"]);
   });
 
   it("selects exactly one item on each top page", () => {

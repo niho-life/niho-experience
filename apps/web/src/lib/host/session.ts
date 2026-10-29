@@ -57,6 +57,7 @@ export interface HostLoginState {
   state: string;
   providerId: string | null;
   preparationCaseId: string | null;
+  invitationId?: string | null;
   /** `/host/auth/login?surface=app`: the sign-in was started inside the installed app. */
   surface?: HostSessionSurface;
   /** Epoch ms; the login cookie lives 10 minutes. */
@@ -85,6 +86,7 @@ interface LoginWire {
   s: string;
   pid?: string;
   pc?: string;
+  ii?: string;
   sf?: 1;
   x: number;
 }
@@ -184,7 +186,7 @@ export function decodeSession(sealer: CookieSealer, raw: string | undefined | nu
 }
 
 export function encodeLoginState(sealer: CookieSealer, login: HostLoginState): string {
-  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}) };
+  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}) };
   return sealer.seal(wire);
 }
 
@@ -193,7 +195,9 @@ export function decodeLoginState(sealer: CookieSealer, raw: string | undefined |
   if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
   if (!isString(wire.pv, 128) || !isString(wire.s, 128) || !isTime(wire.x) || now >= wire.x) return null;
   const preparationCaseId = typeof wire.pc === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(wire.pc) ? wire.pc : null;
-  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(wire.sf === 1 ? { surface: "app" as const } : {}), expiresAt: wire.x };
+  const invitationId = typeof wire.ii === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(wire.ii) ? wire.ii : null;
+  if (preparationCaseId && invitationId) return null;
+  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), expiresAt: wire.x };
 }
 
 /** HttpOnly, Secure, SameSite=Lax; scoped to the host console path. */

@@ -9,6 +9,8 @@ export {
 export { ExperienceStore } from "./repository.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+export { ProductOperatorRepository } from "./product-operators.ts";
+export type { CreatedProductOperatorInvitation, CreateProductOperatorInvitationInput, PreparedProductOperatorInvitation, ProductOperatorAdminActor, ProductOperatorAdminSnapshot } from "./product-operators.ts";
 export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
@@ -75,6 +77,8 @@ export type {
   BookingRecord,
   BookingMode,
   BookingStatus,
+  CalendarAccess,
+  CalendarProduct,
   CalendarCommandReceipt,
   ConfirmBookingInput,
   ConfirmBookingResult,
@@ -91,6 +95,10 @@ export type {
   ProductInventoryResourceInput,
   ProductInventorySetting,
   ProductInventorySettingInput,
+  ProductOperatorAssignment,
+  ProductOperatorGrantRecord,
+  ProductOperatorInvitationRecord,
+  ProductOperatorInvitationState,
   ProductRecord,
   ProductStatus,
   ProviderMembership,

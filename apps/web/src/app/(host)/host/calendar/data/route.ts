@@ -5,7 +5,7 @@ import type { HostCalendarData } from "@/experience/calendar-contract";
 import { readHostCalendar } from "@/lib/experience/calendar-read";
 import { syncGoogleBusy } from "@/lib/experience/google-connection";
 import { experiencePool, experienceStore } from "@/lib/experience/store-server";
-import { hostActor } from "@/lib/experience/host-actor";
+import { calendarActor } from "@/lib/experience/calendar-actor";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { hostNotFound, isHostMock, noStoreJson, siteOrigin } from "@/lib/host/server";
 import { config } from "@/lib/config";
@@ -28,7 +28,7 @@ function preview(providerId: string, fromDate: string, toDate: string): HostCale
     capacity: 4, bookingCutoffMinutes: 120, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "WEEKLY" },
   };
   const occurrences = expandOccurrences({ rule, fromDate, toDate }).map((item) => ({ ...item, experienceId: "synthetic-experience", experienceTitle: "合成データの体験", availableSeats: 4, availabilityReason: "AVAILABLE" as const }));
-  return { preview: true, canEdit: false, experiences: [{ id: "synthetic-experience", title: "合成データの体験" }], rules: [{ ...rule, experienceId: "synthetic-experience" }], occurrences: occurrences.map((item) => ({ ...item, confirmedSeats: 0, heldSeats: 0 })), busyIntervals: [], google: { connected: false, canManage: false, blockingEnabled: false, syncStatus: "STALE" } };
+  return { scope: "MEMBER", preview: true, canEdit: false, experiences: [{ id: "synthetic-experience", title: "合成データの体験" }], rules: [{ ...rule, experienceId: "synthetic-experience" }], occurrences: occurrences.map((item) => ({ ...item, confirmedSeats: 0, heldSeats: 0, canReschedule: true })), busyIntervals: [], google: { connected: false, canManage: false, blockingEnabled: false, syncStatus: "STALE" } };
 }
 
 export async function GET(request: NextRequest) {
@@ -39,19 +39,19 @@ export async function GET(request: NextRequest) {
     assertLocalDate(fromDate, "fromDate");
     assertLocalDate(toDate, "toDate");
     if (localDateDistance(fromDate, toDate) < 0 || localDateDistance(fromDate, toDate) > 89) return noStoreJson({ error: "invalid_range" }, 400);
-    const result = await hostActor(request.nextUrl.searchParams.get("providerId"));
+    const result = await calendarActor(request.nextUrl.searchParams.get("providerId"));
     if ("response" in result) return result.response;
     if (isHostMock()) return noStoreJson(preview(result.actor.providerId, fromDate, toDate));
     const pool = experiencePool();
     const store = experienceStore();
     if (!pool || !store) return noStoreJson({ error: "calendar_not_configured" }, 503);
-    const google = await store.getGoogleCalendar(result.actor);
+    const google = result.access.kind === "MEMBER" ? await store.getGoogleCalendar(result.actor) : null;
     if (google && google.blockingEnabled && (google.syncStatus !== "FRESH" || !google.freshUntilUtc || google.freshUntilUtc <= new Date().toISOString())) {
       try { await syncGoogleBusy(pool, store, result.actor.providerId); } catch { /* The store marks this provider failed; availability stays closed. */ }
     }
     const data = await readHostCalendar(pool, store, result.actor, fromDate, toDate);
-    const nihoCanEdit = result.nihoRole === "OWNER" || result.nihoRole === "EDITOR";
-    return noStoreJson({ ...data, canEdit: data.canEdit && nihoCanEdit, google: { ...data.google, canManage: data.google.canManage && result.nihoRole === "OWNER" } });
+    const nihoCanEdit = result.access.kind === "OPERATOR" || result.access.nihoRole === "OWNER" || result.access.nihoRole === "EDITOR";
+    return noStoreJson({ ...data, canEdit: data.canEdit && nihoCanEdit, google: { ...data.google, canManage: data.google.canManage && result.access.kind === "MEMBER" && result.access.nihoRole === "OWNER" } });
   } catch (error) {
     return failure(error);
   }
@@ -71,9 +71,9 @@ export async function POST(request: NextRequest) {
     body = parsed as Record<string, unknown>;
   } catch { return noStoreJson({ error: "invalid_body" }, 400); }
 
-  const result = await hostActor(body.providerId);
+  const result = await calendarActor(body.providerId);
   if ("response" in result) return result.response;
-  if (result.nihoRole !== "OWNER" && result.nihoRole !== "EDITOR") return noStoreJson({ error: "forbidden" }, 403);
+  if (result.access.kind === "MEMBER" && result.access.nihoRole !== "OWNER" && result.access.nihoRole !== "EDITOR") return noStoreJson({ error: "forbidden" }, 403);
   if (isHostMock()) return noStoreJson({ error: "preview_read_only" }, 403);
   const pool = experiencePool();
   const store = experienceStore();
@@ -93,17 +93,12 @@ export async function POST(request: NextRequest) {
       const separator = body.occurrenceId.lastIndexOf("@");
       if (separator < 1) return noStoreJson({ error: "invalid_body" }, 400);
       const ruleId = decodeURIComponent(body.occurrenceId.slice(0, separator));
-      const rule = await pool.query<{ product_id: string }>(
-        `SELECT r.product_id FROM schedule_rules r WHERE r.provider_id=$1 AND r.id=$3
-          AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=r.provider_id AND m.niho_user_id=$2 AND m.active=true AND m.role IN ('OWNER','EDITOR'))`,
-        [result.actor.providerId, result.actor.nihoUserId, ruleId],
-      );
-      if (!rule.rows[0]) return noStoreJson({ error: "not_found" }, 404);
+      const productId = await store.resolveScheduleRuleProduct(result.actor, ruleId, true);
       if (body.action === "setSalesState") {
         if (body.desiredState !== "OPEN" && body.desiredState !== "CLOSED") return noStoreJson({ error: "invalid_body" }, 400);
         const saved = await store.setOccurrenceSalesState(
           result.actor,
-          rule.rows[0].product_id,
+          productId,
           ruleId,
           { occurrenceId: body.occurrenceId, desiredState: body.desiredState },
           body.expectedVersion as number | null,
@@ -113,7 +108,7 @@ export async function POST(request: NextRequest) {
       }
       const saved = await store.saveOccurrenceOverride(
         result.actor,
-        rule.rows[0].product_id,
+        productId,
         ruleId,
         { kind: "RESCHEDULE", occurrenceId: body.occurrenceId, localDate: body.localDate as string, localStartTime: body.localStartTime as string },
         body.expectedVersion as number | null,

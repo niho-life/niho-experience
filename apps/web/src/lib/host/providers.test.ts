@@ -30,7 +30,7 @@ describe("provider list", () => {
   });
 
   it("gives the client switcher only the id, the name and the role", () => {
-    expect(toProviderChoice(provider({ id: "p_1", displayName: " 合成の台所 ", memberRole: "EDITOR" }))).toEqual({ id: "p_1", displayName: "合成の台所", memberRole: "EDITOR" });
+    expect(toProviderChoice(provider({ id: "p_1", displayName: " 合成の台所 ", memberRole: "EDITOR" }))).toEqual({ kind: "MEMBER", id: "p_1", displayName: "合成の台所", memberRole: "EDITOR" });
   });
 
   it("opens the requested provider when the account has it, else the first", () => {

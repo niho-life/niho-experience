@@ -9,7 +9,7 @@ import { HOST_API_PREFIX, HOST_APP_SCOPE, HOST_HOME_PATH } from "./routes";
  * Google round trips and the API relay. P2: it shows pushes (lib/host/push/payload.ts) as
  * notifications that open a page under /host/, and re-subscribes when the browser rotates a subscription.
  */
-export const HOST_SW_PASSTHROUGH = ["/host/auth", "/host/calendar/google", "/host/api"] as const;
+export const HOST_SW_PASSTHROUGH = ["/host/auth", "/host/invitations", "/host/calendar/google", "/host/api"] as const;
 
 /** Self-contained (no request can succeed offline): inline style, a reload button, nothing else. */
 const OFFLINE_HTML = `<!doctype html>

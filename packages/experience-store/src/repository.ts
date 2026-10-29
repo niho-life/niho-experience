@@ -29,6 +29,7 @@ import {
 } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
 import {
   evaluateStoredInventory,
   lockProviderInventory,
@@ -37,7 +38,9 @@ import {
 import type {
   BookingMode,
   BookingRecord,
+  CalendarAccess,
   CalendarCommandReceipt,
+  CalendarProduct,
   ConfirmBookingInput,
   ConfirmBookingResult,
   CreateBookingHoldInput,
@@ -103,7 +106,8 @@ function oneRow(rows: readonly DbRow[], resource: string): DbRow {
   return row;
 }
 
-function validateActor(actor: HostActor): void {
+function validateActor(actor: HostActor, allowOperator = false): void {
+  if (actor.calendarScope === "OPERATOR" && !allowOperator) throw new StoreAccessDeniedError();
   assertStoreIdentifier(actor.providerId, "actor.providerId");
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
 }
@@ -190,11 +194,12 @@ async function requireMembership(
     [actor.providerId, actor.nihoUserId, allowedRoles],
   );
   const row = result.rows[0];
-  if (row === undefined) throw new StoreAccessDeniedError();
+  const role = row ? effectiveCalendarRole(actor, String(row.role) as MembershipRole) : null;
+  if (!row || !role || !allowedRoles.includes(role)) throw new StoreAccessDeniedError();
   return {
     providerId: String(row.provider_id),
     nihoUserId: String(row.niho_user_id),
-    role: String(row.role) as MembershipRole,
+    role,
     active: row.active === true,
   };
 }
@@ -278,9 +283,32 @@ export class ExperienceStore {
       : {
           providerId: String(row.provider_id),
           nihoUserId: String(row.niho_user_id),
-          role: String(row.role) as MembershipRole,
+          role: effectiveCalendarRole(actor, String(row.role) as MembershipRole)!,
           active: true,
         };
+  }
+
+  async verifyProductCalendarAccess(actor: HostActor, productId: string, write = false): Promise<CalendarAccess> {
+    return requireProductCalendarAccess(this.#pool, actor, productId, write ? ["OWNER", "EDITOR"] : ["OWNER", "EDITOR", "VIEWER"]);
+  }
+
+  async listCalendarProducts(actor: HostActor): Promise<readonly CalendarProduct[]> {
+    validateActor(actor, true);
+    return listCalendarProductsForActor(this.#pool, actor);
+  }
+
+  async resolveScheduleRuleProduct(actor: HostActor, ruleId: string, write = false): Promise<string> {
+    validateActor(actor, true);
+    assertStoreIdentifier(ruleId, "ruleId");
+    const result = await this.#pool.query<DbRow>(
+      "SELECT product_id FROM schedule_rules WHERE provider_id=$1 AND id=$2",
+      [actor.providerId, ruleId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new StoreNotFoundError("schedule rule");
+    const productId = String(row.product_id);
+    await requireProductCalendarAccess(this.#pool, actor, productId, write ? ["OWNER", "EDITOR"] : ["OWNER", "EDITOR", "VIEWER"]);
+    return productId;
   }
 
   async createProduct(actor: HostActor, rawInput: ProductInput): Promise<ProductRecord> {
@@ -546,7 +574,7 @@ export class ExperienceStore {
     expectedVersion: number | null,
     commandId: string,
   ): Promise<CalendarCommandReceipt> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     const rule = parseScheduleRule(rawRule);
     validateCommandId(commandId);
@@ -556,7 +584,7 @@ export class ExperienceStore {
     const requestFingerprint = JSON.stringify({ productId, rule, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "schedule_rule.save", requestFingerprint);
       if (previous) return previous;
       const product = await client.query<DbRow>(
@@ -626,18 +654,15 @@ export class ExperienceStore {
   }
 
   async listSchedule(actor: HostActor, productId: string): Promise<readonly ScheduleView[]> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
+    await requireProductCalendarAccess(this.#pool, actor, productId, ["OWNER", "EDITOR", "VIEWER"]);
     const rules = await this.#pool.query<DbRow>(
       `SELECT ${RULE_COLUMNS}
          FROM schedule_rules r
-        WHERE r.provider_id=$1 AND r.product_id=$3
-          AND EXISTS (
-            SELECT 1 FROM provider_memberships m
-             WHERE m.provider_id=r.provider_id AND m.niho_user_id=$2 AND m.active=true
-          )
+        WHERE r.provider_id=$1 AND r.product_id=$2
         ORDER BY r.id`,
-      [actor.providerId, actor.nihoUserId, productId],
+      [actor.providerId, productId],
     );
     const views: ScheduleView[] = [];
     for (const row of rules.rows) {
@@ -645,24 +670,16 @@ export class ExperienceStore {
       const overrides = await this.#pool.query<DbRow>(
         `SELECT ${OVERRIDE_COLUMNS}
            FROM schedule_occurrence_overrides o
-          WHERE o.provider_id=$1 AND o.rule_id=$3
-            AND EXISTS (
-              SELECT 1 FROM provider_memberships m
-               WHERE m.provider_id=o.provider_id AND m.niho_user_id=$2 AND m.active=true
-            )
+          WHERE o.provider_id=$1 AND o.rule_id=$2
           ORDER BY o.occurrence_id`,
-        [actor.providerId, actor.nihoUserId, storedRule.rule.id],
+        [actor.providerId, storedRule.rule.id],
       );
       const salesStates = await this.#pool.query<DbRow>(
         `SELECT ${SALES_STATE_COLUMNS}
            FROM schedule_occurrence_sales_states s
-          WHERE s.provider_id=$1 AND s.rule_id=$3
-            AND EXISTS (
-              SELECT 1 FROM provider_memberships m
-               WHERE m.provider_id=s.provider_id AND m.niho_user_id=$2 AND m.active=true
-            )
+          WHERE s.provider_id=$1 AND s.rule_id=$2
           ORDER BY s.occurrence_id`,
-        [actor.providerId, actor.nihoUserId, storedRule.rule.id],
+        [actor.providerId, storedRule.rule.id],
       );
       views.push({ rule: storedRule, overrides: overrides.rows.map(overrideFromRow), salesStates: salesStates.rows.map(salesStateFromRow) });
     }
@@ -677,7 +694,7 @@ export class ExperienceStore {
     expectedVersion: number | null,
     commandId: string,
   ): Promise<CalendarCommandReceipt> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     const override = parseOccurrenceOverrides([rawOverride])[0];
     if (override === undefined) throw new StoreValidationError("override is required.");
@@ -690,7 +707,7 @@ export class ExperienceStore {
     const requestFingerprint = JSON.stringify({ productId, ruleId, override, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.reschedule", requestFingerprint);
       if (previous) return previous;
       const ruleResult = await client.query<DbRow>(
@@ -747,7 +764,7 @@ export class ExperienceStore {
     expectedVersion: number | null,
     commandId: string,
   ): Promise<CalendarCommandReceipt> {
-    validateActor(actor);
+    validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     sourceDateFromOccurrence(ruleId, rawState.occurrenceId);
     if (rawState.desiredState !== "OPEN" && rawState.desiredState !== "CLOSED") throw new StoreValidationError("desiredState is invalid.");
@@ -756,7 +773,7 @@ export class ExperienceStore {
     const requestFingerprint = JSON.stringify({ productId, ruleId, state: rawState, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.sales_state", requestFingerprint);
       if (previous) return previous;
       const rule = await client.query<DbRow>(

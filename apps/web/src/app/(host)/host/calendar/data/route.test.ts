@@ -6,14 +6,15 @@ const mocks = vi.hoisted(() => ({
   saveRule: vi.fn(),
   reschedule: vi.fn(),
   salesState: vi.fn(),
+  resolveProduct: vi.fn(),
   poolQuery: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { hostConsoleEnabled: true } }));
-vi.mock("@/lib/experience/host-actor", () => ({ hostActor: async () => ({ actor: { providerId: "provider-1", nihoUserId: "user-1" }, nihoRole: mocks.role }) }));
+vi.mock("@/lib/experience/calendar-actor", () => ({ calendarActor: async () => ({ actor: { providerId: "provider-1", nihoUserId: "user-1" }, access: { kind: "MEMBER", nihoRole: mocks.role } }) }));
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePool: () => ({ query: mocks.poolQuery }),
-  experienceStore: () => ({ saveScheduleRule: mocks.saveRule, saveOccurrenceOverride: mocks.reschedule, setOccurrenceSalesState: mocks.salesState }),
+  experienceStore: () => ({ saveScheduleRule: mocks.saveRule, saveOccurrenceOverride: mocks.reschedule, setOccurrenceSalesState: mocks.salesState, resolveScheduleRuleProduct: mocks.resolveProduct }),
 }));
 vi.mock("@/lib/experience/google-connection", () => ({ syncGoogleBusy: vi.fn() }));
 vi.mock("@/lib/experience/calendar-read", () => ({ readHostCalendar: vi.fn() }));
@@ -42,6 +43,7 @@ describe("host calendar mutation route", () => {
     mocks.saveRule.mockResolvedValue({ aggregateId: COMMAND, version: 1, repeated: false });
     mocks.reschedule.mockResolvedValue({ aggregateId: "rule-1@2099-01-01", version: 2, repeated: false });
     mocks.salesState.mockResolvedValue({ aggregateId: "rule-1@2099-01-01", version: 3, repeated: false });
+    mocks.resolveProduct.mockResolvedValue("experience-1");
   });
 
   it("keeps NIHO VIEWER read-only before touching the Experience store", async () => {

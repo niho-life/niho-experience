@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { HostAppBadge } from "@/components/host/HostAppWindow";
 import { HostHomeTodos } from "@/components/host/HostHomeTodos";
 import { HostIcon } from "@/components/host/HostIcon";
@@ -12,6 +13,7 @@ import { homeBadgeCount, type HomeUpcoming } from "@/host/home";
 import { config } from "@/lib/config";
 import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import { isHostMock } from "@/lib/host/server";
+import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 
 export const metadata: Metadata = { title: "ホーム" };
 
@@ -93,11 +95,16 @@ function CalendarPromptCard({ prompt, href }: { prompt: HomeCalendarPrompt; href
  * calendar's card while Google Calendar is not connected (#109), the sessions after, and this month's numbers.
  */
 export default async function HostHomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const context = await hostPageContext(await searchParams);
+  const query = await searchParams;
+  const context = await hostPageContext(query);
   // The console layout shows sign-in, refresh and error states.
   if (!context) return null;
   const { provider, providerNotFound, linkProviderId } = context;
-  if (!provider) return <HostRegisterPrompt title="ホーム" />;
+  const calendar = await resolveCalendarContext(query);
+  if (calendar?.choice?.kind === "OPERATOR") redirect(withProvider("/host/calendar", calendar.choice.id));
+  if (!provider) {
+    return <HostRegisterPrompt title="ホーム" />;
+  }
   const { home, settings } = await loadHostConsoleData(provider);
   const link = (path: string) => withProvider(path, linkProviderId);
   // Only where it can be connected: the preview (http mode waits for NIHO's Google connection, #87).

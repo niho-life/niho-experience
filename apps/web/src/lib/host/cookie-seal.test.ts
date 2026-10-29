@@ -42,6 +42,9 @@ describe("host cookie sealing", () => {
     const login = new CookieSealer([NEW], "login").seal({ state: "x" });
     expect(new CookieSealer([NEW], "session").open(login)).toBeNull();
     expect(new CookieSealer([OLD], "login").open(login)).toBeNull();
+    const invitation = new CookieSealer([NEW], "product-operator-invitation").seal({ invitationId: "synthetic", token: "secret" });
+    expect(new CookieSealer([NEW], "session").open(invitation)).toBeNull();
+    expect(new CookieSealer([NEW], "login").open(invitation)).toBeNull();
   });
 
   it("rotates keys: the first secret seals, every listed secret opens", () => {

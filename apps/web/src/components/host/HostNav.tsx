@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useRef } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
-import { nihoIdOrNull, providerRoleLabel, selectProvider, type HostProviderChoice } from "@/lib/host/providers";
+import { nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
 import { hostSupportPath, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
 import { HostIcon, type HostIconName } from "./HostIcon";
 import { AccountAvatar, InitialAvatar, type HostAccount } from "./ui";
@@ -29,15 +29,19 @@ const MENU_LINK = "flex min-h-11 items-center gap-2 rounded-[10px] px-2.5 text-[
 
 export interface HostChromeProps {
   account: HostAccount;
-  providers: readonly HostProviderChoice[];
+  providers: readonly HostConsoleChoice[];
   /** NIHO's own app (NEXT_PUBLIC_NIHO_WEB_ORIGIN). */
   nihoAppUrl: string;
 }
 
-export function hostNavForRole(role: HostProviderChoice["memberRole"] | null | undefined) {
+export function hostNavForRole(role: HostProviderRole | null | undefined) {
   if (role === "OWNER") return HOST_NAV;
   if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings");
   return HOST_NAV.filter((item) => item.href !== "/host/sales");
+}
+
+export function hostNavForChoice(choice: HostConsoleChoice | null | undefined) {
+  return choice?.kind === "OPERATOR" ? HOST_NAV.filter((item) => item.href === "/host/calendar") : hostNavForRole(choice?.memberRole);
 }
 
 /** The chosen provider lives in `?providerId=`; every console link carries it. */
@@ -45,7 +49,7 @@ function useProviderId(): string | null {
   return nihoIdOrNull(useSearchParams().get("providerId"));
 }
 
-function ProviderLinks({ providers, currentId, onPick }: { providers: readonly HostProviderChoice[]; currentId: string; onPick: () => void }) {
+function ProviderLinks({ providers, currentId, onPick }: { providers: readonly HostConsoleChoice[]; currentId: string; onPick: () => void }) {
   const pathname = usePathname();
   // A page under a section (one experience) may not exist for the other provider: switch to the section itself.
   const base = providerSwitchPath(pathname);
@@ -53,7 +57,7 @@ function ProviderLinks({ providers, currentId, onPick }: { providers: readonly H
     <ul className="flex flex-col gap-0.5">
       {providers.map((provider) => {
         const selected = provider.id === currentId;
-        const role = providerRoleLabel(provider.memberRole);
+        const role = provider.kind === "OPERATOR" ? "商品運営者" : providerRoleLabel(provider.memberRole);
         return (
           <li key={provider.id}>
             <Link
@@ -77,7 +81,7 @@ function ProviderLinks({ providers, currentId, onPick }: { providers: readonly H
 }
 
 /** The provider being managed. With one provider it only shows it; with several it opens the list below it. */
-function SidebarProviderSwitcher({ providers }: { providers: readonly HostProviderChoice[] }) {
+function SidebarProviderSwitcher({ providers }: { providers: readonly HostConsoleChoice[] }) {
   const providerId = useProviderId();
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
@@ -116,7 +120,7 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
   return (
     <header className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-canvas px-3 pt-[18px] pb-3.5 md:flex">
       <p className="px-2.5 pt-1 pb-4">
-        <Link href={withProvider(HOST_HOME_PATH, providerId)} className="font-display text-[1.1875rem] leading-[1.1] font-medium tracking-[-0.01em] whitespace-nowrap">
+        <Link href={withProvider(current?.kind === "OPERATOR" ? "/host/calendar" : HOST_HOME_PATH, providerId)} className="font-display text-[1.1875rem] leading-[1.1] font-medium tracking-[-0.01em] whitespace-nowrap">
           NIHO Experience
         </Link>
       </p>
@@ -125,7 +129,7 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
           <SidebarProviderSwitcher providers={providers} />
           <nav aria-label={NAV_LABEL}>
             <ul className="flex flex-col gap-0.5">
-              {hostNavForRole(current?.memberRole).map((item) => {
+              {hostNavForChoice(current).map((item) => {
                 const active = isHostNavActive(pathname, item.href);
                 return (
                   <li key={item.href}>
@@ -145,14 +149,14 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
         </>
       ) : null}
       <div className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
-        <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} className={FOOT_LINK}>
+        {current?.kind !== "OPERATOR" ? <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} className={FOOT_LINK}>
           <HostIcon name="settings" className="size-3.5" />
           <span>NIHOサポート</span>
-        </Link>
-        <a href={TRAVELER_SITE_PATH} className={FOOT_LINK}>
+        </Link> : null}
+        {current?.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} className={FOOT_LINK}>
           <HostIcon name="external" className="size-3.5" />
           <span>体験サイトを見る</span>
-        </a>
+        </a> : null}
         <a href={nihoAppUrl} className={FOOT_LINK}>
           <HostIcon name="external" className="size-3.5" />
           <span>NIHO アプリ</span>
@@ -199,14 +203,14 @@ function AccountMenu({ account, providers, nihoAppUrl }: HostChromeProps) {
           </div>
         ) : null}
         <div className="flex flex-col gap-0.5 border-t border-line py-1">
-          <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} onClick={() => menu.current?.removeAttribute("open")} className={MENU_LINK}>
+          {current?.kind !== "OPERATOR" ? <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} onClick={() => menu.current?.removeAttribute("open")} className={MENU_LINK}>
             <HostIcon name="settings" className="size-3.5" />
             <span>NIHOサポート</span>
-          </Link>
-          <a href={TRAVELER_SITE_PATH} className={MENU_LINK}>
+          </Link> : null}
+          {current?.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />
             <span>体験サイトを見る</span>
-          </a>
+          </a> : null}
           <a href={nihoAppUrl} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />
             <span>NIHO アプリ</span>
@@ -227,12 +231,13 @@ export function HostMobileHeader(props: HostChromeProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const providerId = useProviderId();
+  const providers = props.providers;
   if (hostBackLink(pathname, searchParams)) return null;
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-canvas md:hidden">
       <div className="flex h-[52px] items-center gap-2.5 pr-2 pl-4">
         <p className="min-w-0 flex-1 truncate">
-          <Link href={withProvider(HOST_HOME_PATH, providerId)} className="font-display text-[1.0625rem] leading-none font-medium tracking-[-0.01em]">
+          <Link href={withProvider(selectProvider(providers, providerId).provider?.kind === "OPERATOR" ? "/host/calendar" : HOST_HOME_PATH, providerId)} className="font-display text-[1.0625rem] leading-none font-medium tracking-[-0.01em]">
             NIHO Experience
           </Link>
         </p>
@@ -243,7 +248,7 @@ export function HostMobileHeader(props: HostChromeProps) {
 }
 
 /** Phones: role-appropriate sections as bottom tabs, with a short label for カレンダー. */
-export function HostTabBar({ providers }: { providers: readonly HostProviderChoice[] }) {
+export function HostTabBar({ providers }: { providers: readonly HostConsoleChoice[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const providerId = useProviderId();
@@ -254,8 +259,8 @@ export function HostTabBar({ providers }: { providers: readonly HostProviderChoi
       {/* Keeps the end of the page clear of the fixed bar. */}
       <div aria-hidden="true" className="h-[var(--host-tabbar)] md:hidden" />
       <nav aria-label={NAV_LABEL} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-canvas px-1 pt-1.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:hidden">
-        <ul className={`grid ${current?.memberRole === "OWNER" ? "grid-cols-6" : current?.memberRole === "EDITOR" ? "grid-cols-4" : "grid-cols-5"}`}>
-          {hostNavForRole(current?.memberRole).map((item) => {
+        <ul className={`grid ${current?.kind === "OPERATOR" ? "grid-cols-1" : current?.memberRole === "OWNER" ? "grid-cols-6" : current?.memberRole === "EDITOR" ? "grid-cols-4" : "grid-cols-5"}`}>
+          {hostNavForChoice(current).map((item) => {
             const active = isHostNavActive(pathname, item.href);
             return (
               <li key={item.href}>

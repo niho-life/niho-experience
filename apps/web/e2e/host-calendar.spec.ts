@@ -11,14 +11,14 @@ function occurrence(day = today(), status: "OPEN" | "CLOSED" = "OPEN") {
     startUtc: instant(day), endUtc: instant(day, 11), durationMinutes: 60, capacity: 4, bookingCutoffMinutes: 120,
     busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, status, rescheduled: day !== today(), experienceId: "sample-experience",
     experienceTitle: "合成の料理体験", availableSeats: status === "OPEN" ? 4 : 0,
-    availabilityReason: status === "OPEN" ? "AVAILABLE" : "MANUALLY_CLOSED", confirmedSeats: 0, heldSeats: 0,
+    availabilityReason: status === "OPEN" ? "AVAILABLE" : "MANUALLY_CLOSED", confirmedSeats: 0, heldSeats: 0, canReschedule: true,
     ...(day === today() ? {} : { overrideVersion: 1 }), ...(status === "CLOSED" ? { salesStateVersion: 1 } : {}),
   } as const;
 }
 
 function calendarData(item = occurrence(), canEdit = true, preview = false) {
   return {
-    preview, canEdit, experiences: [{ id: "sample-experience", title: "合成の料理体験" }], rules: [], occurrences: [item], busyIntervals: [],
+    scope: "MEMBER", preview, canEdit, experiences: [{ id: "sample-experience", title: "合成の料理体験" }], rules: [], occurrences: [item], busyIntervals: [],
     google: { connected: false, canManage: canEdit && !preview, blockingEnabled: false, syncStatus: "STALE" },
   };
 }
@@ -239,4 +239,45 @@ test("provider route switching unmounts the old dialog and product", async ({ pa
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText("合成の工房体験", { exact: true })).toBeVisible();
   await expect(page.getByText("合成の料理体験", { exact: true })).toHaveCount(0);
+});
+
+test("operator calendar omits private counts and Google controls while keeping availability actions", async ({ page }, testInfo) => {
+  await signIn(page);
+  let paused = false;
+  const actions: Record<string, unknown>[] = [];
+  await stubCalendar(page, async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON(); actions.push(body); paused = body.desiredState === "CLOSED";
+      await route.fulfill({ status: 200, json: { occurrenceId: occurrence().id, version: 1 } }); return;
+    }
+    const own = { ...occurrence(today(), paused ? "CLOSED" : "OPEN"), availableSeats: undefined, confirmedSeats: undefined, heldSeats: undefined };
+    await route.fulfill({ status: 200, json: { ...calendarData(), scope: "OPERATOR",
+      occurrences: [{ ...own, canReschedule: false }], google: { connected: false, canManage: false, blockingEnabled: false, syncStatus: "STALE" } } });
+  });
+  await page.goto("/host/calendar");
+  await expect(page.getByRole("button", { name: /合成の料理体験/ })).toBeVisible();
+  await expect(page.getByText("連携", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("予約あり", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await testInfo.attach("operator-calendar-synthetic", { body: await page.screenshot({ path: testInfo.outputPath("operator-calendar.png") }), contentType: "image/png" });
+  await page.getByRole("button", { name: /合成の料理体験/ }).click();
+  const dialog = page.getByRole("dialog", { name: "合成の料理体験" });
+  await expect(dialog.getByRole("button", { name: "日時を変更" })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "休止する" }).click();
+  await page.getByRole("button", { name: /合成の料理体験/ }).click();
+  await page.getByRole("button", { name: "受付を再開" }).click();
+  expect(actions.map((item) => item.desiredState)).toEqual(["CLOSED", "OPEN"]);
+});
+
+test("invitation clears the secret from the URL and shows a readable invalid state", async ({ page }, testInfo) => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const secret = "Z".repeat(43);
+  await page.route(`**/host/invitations/${id}/prepare`, (route) => route.fulfill({ status: 403, json: { error: "invalid_invitation" } }));
+  await page.goto(`/host/invitations/${id}#${secret}`);
+  await expect(page.getByRole("heading", { name: "体験への招待" })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("期限");
+  expect(page.url()).not.toContain(secret);
+  expect(page.url()).not.toContain("#");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await testInfo.attach("invitation-invalid-synthetic", { body: await page.screenshot({ path: testInfo.outputPath("invitation-invalid.png") }), contentType: "image/png" });
 });

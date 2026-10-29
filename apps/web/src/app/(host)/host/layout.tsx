@@ -41,6 +41,9 @@ export const viewport: Viewport = {
 export default function HostRootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(()=>{const p=location.pathname;if(!/^\\/host\\/invitations\\/[0-9a-f-]{36}$/i.test(p))return;const h=location.hash;try{if(h.length>1&&h.length<=129)Object.defineProperty(window,"__nihoOperatorInvitationSecret",{value:h.slice(1),writable:true,configurable:true});}finally{if(h)history.replaceState(history.state,"",p+location.search);}})();` }} />
+      </head>
       <body className="flex min-h-dvh flex-col bg-canvas">
         <Script src="/host-history-guard.js" strategy="beforeInteractive" />
         <HostPwaRegistrar enabled={config.hostPwaEnabled} />

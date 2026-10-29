@@ -2,8 +2,8 @@ import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { hostMockScenario, MOCK_ID_TOKEN_PREFIX, mockHostDisplayName, mockToken } from "@/lib/host/mock-niho";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_HOME_PATH, hostPreparationPath, preparationCaseIdOrNull, withProvider } from "@/lib/host/routes";
-import { hostNotFound, isHostMock, MOCK_ID_TOKEN_TTL_MS, seeOther, setSessionCookie } from "@/lib/host/server";
+import { HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, invitationIdOrNull, preparationCaseIdOrNull, withProvider } from "@/lib/host/routes";
+import { hostNotFound, isHostMock, MOCK_ID_TOKEN_TTL_MS, noStoreJson, seeOther, setSessionCookie } from "@/lib/host/server";
 import { startSession } from "@/lib/host/session";
 
 const MOCK_CONNECTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -20,6 +20,9 @@ const MOCK_CONNECTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export async function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled || !isHostMock()) return hostNotFound();
   const params = request.nextUrl.searchParams;
+  const preparationCaseId = preparationCaseIdOrNull(params.get("preparationCaseId"));
+  const invitationId = invitationIdOrNull(params.get("invitationId"));
+  if (preparationCaseId && invitationId) return noStoreJson({ error: "conflicting_login_intent" }, 400);
   const now = Date.now();
   const session = startSession(
     {
@@ -36,8 +39,7 @@ export async function GET(request: NextRequest) {
     },
     now,
   );
-  const preparationCaseId = preparationCaseIdOrNull(params.get("preparationCaseId"));
-  const response = seeOther(preparationCaseId ? hostPreparationPath(preparationCaseId) : withProvider(HOST_HOME_PATH, nihoIdOrNull(params.get("providerId"))));
+  const response = seeOther(invitationId ? hostInvitationPath(invitationId) : preparationCaseId ? hostPreparationPath(preparationCaseId) : withProvider(HOST_HOME_PATH, nihoIdOrNull(params.get("providerId"))));
   setSessionCookie(response, session, now);
   return response;
 }

@@ -5,9 +5,11 @@ import { HostShell } from "@/components/host/HostShell";
 import { hostButtonClass, HOST_HEADING, HOST_PAGE } from "@/components/host/host-ui";
 import { HostPageBody } from "@/components/host/ui";
 import { config } from "@/lib/config";
-import { toProviderChoice } from "@/lib/host/providers";
+import { calendarConsoleChoices } from "@/lib/experience/calendar-actor";
+import type { ProductOperatorAssignment } from "@niho-experience/experience-store";
 import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
+import { productOperatorRepository } from "@/lib/experience/store-server";
 
 function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"], "ok" | "refresh" | "signed-out"> }) {
   if (status === "rejected") {
@@ -58,13 +60,22 @@ export default async function HostConsoleLayout({ children }: { children: React.
   }
 
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
+  let assignments: readonly ProductOperatorAssignment[] = [];
+  if (load.status === "ok" && !isHostMock()) {
+    const repository = productOperatorRepository();
+    if (repository) {
+      try { assignments = await repository.listAssignments(session.nihoUserId); }
+      catch { /* Current NIHO members retain their existing read access; grants fail closed. */ }
+    }
+  }
+  const choices = calendarConsoleChoices(load.status === "ok" ? load.providers : [], assignments);
   return (
     <>
       {appGuard}
       <HostSessionKeeper idTokenExpiresAt={session.idTokenExpiresAt} />
       <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
-      <HostShell account={account} providers={load.status === "ok" ? load.providers.map(toProviderChoice) : []} nihoAppUrl={config.nihoWebOrigin} preview={isHostMock()}>
+      <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} preview={isHostMock()}>
         {load.status === "ok" ? (
           children
         ) : (

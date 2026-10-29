@@ -83,6 +83,7 @@ const nextConfig: NextConfig = {
       { source: "/preview/:path*", headers: privatePageHeaders },
       // `:path+` leaves /host itself (the public introduction) indexable.
       { source: "/host/:path+", headers: hostConsoleHeaders },
+      { source: "/host/invitations/:path+", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       // The whole admin surface is private, including its entrance. Keep root and children
       // explicit so changes in path-pattern handling cannot accidentally leave /admin public.
       { source: "/admin", headers: hostConsoleHeaders },
