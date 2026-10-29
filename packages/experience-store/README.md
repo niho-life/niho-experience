@@ -21,15 +21,19 @@ PostgreSQL is the source of truth for provider-scoped experience products, recur
 
 Apply `migrations/*.sql` in lexical order with the deployment migration identity. `0001_experience_store.sql` is transactional and does not require a PostgreSQL extension. Provider and first OWNER membership provisioning is intentionally outside the host repository API; onboarding must insert those rows from a separately authorized server workflow.
 
+Both `0010_guide_body_media.sql` and `0010_shared_inventory.sql` exist. Apply both filenames in lexical order before `0011_guide_draft_product_links.sql`; the numeric prefix alone is not a unique migration identifier.
+
 `0005_guide_cms.sql` additively creates guide categories, accepted writer/link grants, creator-private article drafts, sealed publication snapshots, and publication-scoped product links. Category and article slugs are stable identities; an article slug becomes immutable after its first publication. Category labels and order are copied into every publication so later category edits or deactivation do not rewrite history. `GuideRepository.commitPublication` locks the draft, verifies its revision/current authority/category/products, inserts the snapshot and authorized links, seals it, and switches `current_publication_id` in one transaction. Public link reads also require the product to remain `PUBLISHED` and the recorded link creator's permission basis to remain active.
 
 `0008_guide_link_invitations.sql` additively creates the provider/writer consent state machine after calendar `0006` and channel `0007`. Invitation transitions serialize on the provider/writer pair, then lock invitation, owner, writer-grant, and projection rows in that order. Public link reads and `listLinkableProducts` require both an active accepted link projection and a current writer grant, so either provider revocation or writer-grant loss hides links without removing the public article body.
 
 `0009_guide_media.sql` adds private cover assets, draft cover fields, and immutable publication-media snapshots. Asset identity/object location cannot change; rights can only advance from `UPLOADING` to `READY`/`REVOKED`, or from `READY` to `REVOKED`. Storage bytes remain outside PostgreSQL and object keys never enter browser DTOs.
 
+`0011_guide_draft_product_links.sql` adds ordered, article-scoped related experience selections. Publication copies the order into immutable links. Legacy sealed links keep a null order and retain the former provider/product sort; the migration does not update their rows.
+
 The code-backed `kamakura-after-4-pm` slug is reserved at the database boundary until #189 imports that article. The import must delete its reservation and create the matching database article in one transaction before switching public readers.
 
-The migrations do not change the current code-backed `/guides` pages. HTTP invitation routes, category admin APIs, SSR/SEO/sitemap reads, cache invalidation, and migration of existing code-backed guides remain follow-up work.
+The migrations do not change the current code-backed `/guides` pages. Database-backed public SSR is separately gated by `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`. HTTP invitation routes, category admin APIs, and migration of existing code-backed guides remain follow-up work.
 
 Schedule rules use optimistic versions. Booking hold creation derives the requested occurrence with `@niho-experience/experience-domain`, materializes it, and locks both its schedule rule and occurrence row. All hold creators therefore serialize on one occurrence before counting active holds and confirmed seats.
 
