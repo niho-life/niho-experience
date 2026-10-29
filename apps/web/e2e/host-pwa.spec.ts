@@ -129,7 +129,11 @@ async function stubPush(page: Page) {
       endpoint: "https://fcm.googleapis.com/fcm/send/e2e-device",
       options: { applicationServerKey: new Uint8Array(key).buffer, userVisibleOnly: true },
       toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/e2e-device", expirationTime: null, keys: { p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" } }),
-      unsubscribe: async () => { sessionStorage.removeItem(KEY); return true; },
+      unsubscribe: async () => {
+        if (sessionStorage.getItem("e2e-push-unsubscribe-fails") === "1") throw new Error("unsubscribe unavailable");
+        sessionStorage.removeItem(KEY);
+        return true;
+      },
     });
     const stored = () => {
       const raw = sessionStorage.getItem(KEY);
@@ -199,4 +203,68 @@ test("通知 inside the app: on, checked again after a reload, a test, and off, 
   await row.getByRole("button", { name: "この端末の通知を止める" }).click();
   await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toBeVisible();
   expect(calls).toEqual(["POST /host/api/push-subscriptions", "POST /host/api/push-subscriptions/status", "POST /host/api/push-subscriptions/test", "DELETE /host/api/push-subscriptions"]);
+});
+
+test("VAPID 鍵が変わった端末はオンと表示せず、再登録できる", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+
+  await page.evaluate(() => sessionStorage.setItem("e2e-push-subscription", JSON.stringify([1, 2, 3])));
+  await page.reload();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toBeVisible();
+  await expect(page.getByText("通知の鍵が更新されました。もう一度オンにしてください。")).toBeVisible();
+  await expect(row).not.toContainText("この端末に通知が届きます");
+
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+});
+
+test("ブラウザとサーバーの解除が両方失敗したらオンを維持して再試行を案内する", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+
+  await page.evaluate(() => sessionStorage.setItem("e2e-push-unsubscribe-fails", "1"));
+  const url = "**/host/api/push-subscriptions";
+  await page.route(url, (route) => route.request().method() === "DELETE"
+    ? route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' })
+    : route.continue());
+  await row.getByRole("button", { name: "この端末の通知を止める" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+  await expect(page.getByText("通知を止められませんでした。もう一度お試しください。")).toBeVisible();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toHaveCount(0);
+
+  await page.evaluate(() => sessionStorage.removeItem("e2e-push-unsubscribe-fails"));
+  await page.unroute(url);
+  await row.getByRole("button", { name: "この端末の通知を止める" }).click();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toBeVisible();
+});
+
+test("状態確認が失敗した場合は通知をオフと断定しない", async ({ page }) => {
+  await insideTheApp(page);
+  await stubPush(page);
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await page.goto("/host/settings");
+  const row = pushRow(page);
+  await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
+  await expect(row).toContainText("この端末に通知が届きます");
+
+  await page.route("**/host/api/push-subscriptions/status", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' }));
+  await page.reload();
+  await expect(row).toContainText("通知の状態を確認できません。");
+  await expect(page.getByText("通知の状態を確認できません。通信を確認してページを再読み込みしてください。")).toBeVisible();
+  await expect(row.getByRole("button", { name: "この端末で通知を受け取る" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "この端末の通知を止める" })).toHaveCount(0);
 });

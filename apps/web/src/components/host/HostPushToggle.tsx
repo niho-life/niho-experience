@@ -55,7 +55,7 @@ const json = (method: "POST" | "DELETE", body: unknown): RequestInit => ({ metho
 export function HostPushToggle({ labelId, vapidPublicKey }: { labelId: string; vapidPublicKey: string }) {
   const standalone = useStandaloneDisplay();
   const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
-  const [state, setState] = useState<"checking" | "off" | "on">("checking");
+  const [state, setState] = useState<"checking" | "off" | "on" | "unknown">("checking");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -73,19 +73,33 @@ export function HostPushToggle({ labelId, vapidPublicKey }: { labelId: string; v
   useEffect(() => {
     if (availability !== "available") return;
     let stopped = false;
-    const check = async () => {
+    const check = async (): Promise<{ on: boolean; keyChanged: boolean }> => {
       const subscription = await currentSubscription();
-      if (!subscription) return false;
+      if (!subscription) return { on: false, keyChanged: false };
+      if (!sameKey(subscription.options.applicationServerKey, serverKey(vapidPublicKey))) {
+        return { on: false, keyChanged: true };
+      }
       const response = await hostFetch("push-subscriptions/status", json("POST", { endpoint: subscription.endpoint }));
-      return response.ok && ((await response.json()) as { subscribed?: unknown }).subscribed === true;
+      if (!response.ok) throw new Error("status unavailable");
+      const body = (await response.json()) as { subscribed?: unknown };
+      if (typeof body.subscribed !== "boolean") throw new Error("invalid status");
+      return { on: body.subscribed, keyChanged: false };
     };
     check()
-      .then((on) => !stopped && setState(on ? "on" : "off"))
-      .catch(() => !stopped && setState("off"));
+      .then(({ on, keyChanged }) => {
+        if (stopped) return;
+        setState(on ? "on" : "off");
+        if (keyChanged) setNotice("通知の鍵が更新されました。もう一度オンにしてください。");
+      })
+      .catch(() => {
+        if (stopped) return;
+        setState("unknown");
+        setNotice("通知の状態を確認できません。通信を確認してページを再読み込みしてください。");
+      });
     return () => {
       stopped = true;
     };
-  }, [availability]);
+  }, [availability, vapidPublicKey]);
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -110,7 +124,7 @@ export function HostPushToggle({ labelId, vapidPublicKey }: { labelId: string; v
         const key = serverKey(vapidPublicKey);
         let subscription = await registration.pushManager.getSubscription();
         if (subscription && !sameKey(subscription.options.applicationServerKey, key)) {
-          await subscription.unsubscribe();
+          if (!(await subscription.unsubscribe())) throw new Error("old subscription not removed");
           subscription = null;
         }
         subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
@@ -131,9 +145,10 @@ export function HostPushToggle({ labelId, vapidPublicKey }: { labelId: string; v
         const subscription = await currentSubscription();
         if (subscription) {
           const { endpoint } = subscription;
-          await subscription.unsubscribe().catch(() => false);
+          const unsubscribed = await subscription.unsubscribe().catch(() => false);
           // The server row would also go when the push service answers 410; this is sooner.
-          await hostFetch("push-subscriptions", json("DELETE", { endpoint })).catch(() => undefined);
+          const response = await hostFetch("push-subscriptions", json("DELETE", { endpoint })).catch(() => null);
+          if (!unsubscribed && !response?.ok) throw new Error("subscription still active");
         }
         setState("off");
       } catch {
@@ -168,6 +183,7 @@ export function HostPushToggle({ labelId, vapidPublicKey }: { labelId: string; v
 
   let content = null;
   if (availability && availability !== "available") content = <p className="text-ink-soft">{UNAVAILABLE_TEXT[availability]}</p>;
+  else if (availability === "available" && state === "unknown") content = <span>通知の状態を確認できません。</span>;
   else if (availability === "available" && state === "off") {
     content = (
       <button type="button" className={consoleButtonClass("secondary", "sm")} disabled={busy} onClick={() => void turnOn()}>

@@ -62,7 +62,7 @@
   node --input-type=module -e "import { generateVapidKeys } from './packages/web-push/src/index.ts'; console.log(JSON.stringify(generateVapidKeys()))"
   ```
 
-- 鍵を替えると既存の購読は使えなくなる（端末で「この端末で通知を受け取る」をやり直す。設定は鍵の違う購読を作り直す）。
+- 鍵を替えると既存の購読は使えなくなる。設定を開くと鍵の違う購読はオフと表示して再登録を案内し、「この端末で通知を受け取る」で作り直す。解除時にブラウザとサーバーの両方が失敗した場合はオン表示を維持して再試行を案内する。
 
 ## 切り替えと戻し方
 
