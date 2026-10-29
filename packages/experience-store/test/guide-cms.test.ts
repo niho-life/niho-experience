@@ -6,6 +6,21 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
+  it("adds versioned guide administration and append-only minimal receipts", async () => {
+    const sql = await readFile(new URL("../migrations/0012_guide_admin.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /ADD COLUMN source_version bigint NOT NULL DEFAULT 0/);
+    assert.match(sql, /ADD COLUMN source_invitation_id uuid/);
+    assert.match(sql, /ADD COLUMN revision bigint NOT NULL DEFAULT 1/);
+    assert.match(sql, /CREATE TABLE guide_admin_command_receipts/);
+    assert.match(sql, /idempotency_key uuid PRIMARY KEY/);
+    assert.match(sql, /request_hash char\(64\)/);
+    assert.match(sql, /guide admin command receipts are append-only/);
+    const receipt = sql.match(/CREATE TABLE guide_admin_command_receipts \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.doesNotMatch(receipt, /email|name\b|token|invitation_body|profile/i);
+  });
+
   it("adds ordered article draft links without private identity fields", async () => {
     const sql = await readFile(new URL("../migrations/0011_guide_draft_product_links.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

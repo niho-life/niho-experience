@@ -57,6 +57,26 @@ function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" 
   return "database";
 }
 
+function guideAdminSettings(apiMode: "mock" | "http", env: Env): {
+  enabled: boolean;
+  audience: string;
+  serviceAccountEmail: string;
+} {
+  if (apiMode !== "http" || env.GUIDE_ADMIN_API_ENABLED !== "true") {
+    return { enabled: false, audience: "", serviceAccountEmail: "" };
+  }
+  const audience = env.GUIDE_ADMIN_AUDIENCE?.trim() ?? "";
+  const serviceAccountEmail = env.GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
+  if (!audience) throw new Error("GUIDE_ADMIN_API_ENABLED=true needs GUIDE_ADMIN_AUDIENCE in http mode");
+  if (!/^[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\.iam\.gserviceaccount\.com$/.test(serviceAccountEmail)) {
+    throw new Error("GUIDE_ADMIN_API_ENABLED=true needs GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL in http mode");
+  }
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) {
+    throw new Error("GUIDE_ADMIN_API_ENABLED=true needs EXPERIENCE_DATABASE_URL in http mode");
+  }
+  return { enabled: true, audience, serviceAccountEmail };
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -115,6 +135,7 @@ export function resolveConfig(env: Env) {
   const editorSettings = resolveEditorConsoleSettings(apiMode, env);
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   const guidePublicSource = guidePublicSourceSetting(apiMode, env);
+  const guideAdmin = guideAdminSettings(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
     ? assertAdminConsoleSettings(
@@ -145,6 +166,11 @@ export function resolveConfig(env: Env) {
     guideDraftsDir,
     // Public CMS reads are opt-in and HTTP-only. Database mode never falls back to code-backed guides.
     guidePublicSource,
+    // NIHO platform ADMIN server -> Experience guide administration. This is a
+    // service-to-service surface and never reuses /admin, /editor, or /host sessions.
+    guideAdminApiEnabled: guideAdmin.enabled,
+    guideAdminAudience: guideAdmin.audience,
+    guideAdminServiceAccountEmail: guideAdmin.serviceAccountEmail,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.
     indexingAllowed: env.SITE_INDEXING === "allow" && apiMode === "http",

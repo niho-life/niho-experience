@@ -15,6 +15,38 @@ describe("public API version rollout gate", () => {
   });
 });
 
+describe("guide admin service settings", () => {
+  const complete = {
+    EXPERIENCE_API_MODE: "http",
+    GUIDE_ADMIN_API_ENABLED: "true",
+    GUIDE_ADMIN_AUDIENCE: "https://experience.example/internal/guide-admin",
+    GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "guide-admin@example.iam.gserviceaccount.com",
+    EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+  };
+
+  it("is default-off and cannot be opened in mock mode", () => {
+    expect(resolveConfig({})).toMatchObject({
+      guideAdminApiEnabled: false,
+      guideAdminAudience: "",
+      guideAdminServiceAccountEmail: "",
+    });
+    expect(resolveConfig({ ...complete, EXPERIENCE_API_MODE: "mock" }).guideAdminApiEnabled).toBe(false);
+    expect(resolveConfig({ ...complete, GUIDE_ADMIN_API_ENABLED: "1" }).guideAdminApiEnabled).toBe(false);
+  });
+
+  it("requires the audience, exact service identity, and database when enabled", () => {
+    expect(() => resolveConfig({ ...complete, GUIDE_ADMIN_AUDIENCE: "" })).toThrow(/GUIDE_ADMIN_AUDIENCE/);
+    expect(() => resolveConfig({ ...complete, GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "" })).toThrow(/GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL/);
+    expect(() => resolveConfig({ ...complete, GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "admin@example.com" })).toThrow(/GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL/);
+    expect(() => resolveConfig({ ...complete, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
+    expect(resolveConfig(complete)).toMatchObject({
+      guideAdminApiEnabled: true,
+      guideAdminAudience: complete.GUIDE_ADMIN_AUDIENCE,
+      guideAdminServiceAccountEmail: complete.GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL,
+    });
+  });
+});
+
 describe("code-owned presentation and Japanese release gate", () => {
   it("ignores the retired visual source flag and gates only the approved Japanese release", () => {
     expect(resolveConfig({})).toMatchObject({ japaneseSiteEnabled: false });
