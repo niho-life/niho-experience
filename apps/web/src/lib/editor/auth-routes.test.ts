@@ -163,7 +163,20 @@ describe("editor login and callback", () => {
     successfulAuth(Date.now() + 24 * HOUR, false);
     const inactive = await callback(new NextRequest(`${SITE}/editor/auth/callback?code=${"c".repeat(43)}&state=${second.location.searchParams.get("state")}`, { headers: { cookie: second.cookie } }));
     expect(inactive.headers.get("location")).toBe("/editor/auth/error");
-    expect(setCookies(inactive).get(EDITOR_SESSION_COOKIE)?.attributes).toMatch(/Max-Age=0/);
+    expect(setCookies(inactive).has(EDITOR_SESSION_COOKIE)).toBe(false);
+  });
+
+  it("does not log out an existing session when an unsolicited callback has no matching login state", async () => {
+    const started = await startLogin();
+    for (const cookie of [sessionCookie(), `${started.cookie}; ${sessionCookie()}`]) {
+      const response = await callback(new NextRequest(`${SITE}/editor/auth/callback?code=${"c".repeat(43)}&state=${"x".repeat(43)}`, {
+        headers: { cookie },
+      }));
+      expect(response.headers.get("location")).toBe("/editor/auth/error");
+      expect(setCookies(response).has(EDITOR_SESSION_COOKIE)).toBe(false);
+      expect(setCookies(response).get(EDITOR_LOGIN_COOKIE)?.attributes).toMatch(/Max-Age=0/);
+    }
+    expect(calls).toHaveLength(0);
   });
 });
 describe("editor refresh rotation", () => {

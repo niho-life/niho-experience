@@ -11,7 +11,6 @@ import {
 import { EDITOR_AUTH_ERROR_PATH, EDITOR_GUIDES_PATH } from "@/lib/editor/routes";
 import {
   clearEditorLoginCookie,
-  clearEditorSessionCookie,
   editorAuthClient,
   editorJson,
   editorLoginSealer,
@@ -26,8 +25,8 @@ function failed() {
     status: 303,
     headers: { location: EDITOR_AUTH_ERROR_PATH, "cache-control": "private, no-store" },
   });
+  // An unsolicited or invalid callback must not log out a valid editor session.
   clearEditorLoginCookie(response);
-  clearEditorSessionCookie(response);
   return response;
 }
 
