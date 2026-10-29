@@ -6,6 +6,7 @@
 
 - 公開する記事だけを `apps/web/src/content/guides/{slug}.ts` に置く（1記事1ファイル）。**下書き・未公開の原稿はコミットしない**（公開リポ）。下書きは非公開台帳で書き（[下書きをプレビューで見る](#下書きをプレビューで見る)）、公開の PR で初めて入れる。
 - `apps/web/src/content/guides/index.ts` の `PUBLISHED_GUIDES` に足すと、次のデプロイで公開される。
+- 公開 URL で内容を確認しつつ一覧・sitemap に載せない記事は `unlisted: true` とする。記事自体は誰でも URL で閲覧でき、常に `noindex, nofollow` を出す。掲載を確定するときは `unlisted` を外す。取り下げるときは `PUBLISHED_GUIDES` から外してデプロイする。
 - `samples/` はプレビュー（mock）専用の合成の記事。実 API の配備には出ない。サンプルを本物の記事の雛形として写すときは、`(sample)` の表記と冒頭の注記を必ず消す。
 
 ## 項目（`types.ts` の `Guide`）

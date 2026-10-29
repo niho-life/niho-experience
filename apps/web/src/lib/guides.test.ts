@@ -24,8 +24,9 @@ describe("registered guides", () => {
   });
 
   it("only the mock preview gets the samples", () => {
-    expect(guideRegistry(false)).toEqual(PUBLISHED_GUIDES);
-    expect(guideRegistry(true)).toEqual([...PUBLISHED_GUIDES, ...SAMPLE_GUIDES]);
+    const listed = PUBLISHED_GUIDES.filter((guide) => !guide.unlisted);
+    expect(guideRegistry(false)).toEqual(listed);
+    expect(guideRegistry(true)).toEqual([...listed, ...SAMPLE_GUIDES]);
   });
 
   it("samples are marked as samples, point at synthetic experiences, and published guides are not samples", () => {

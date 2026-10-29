@@ -1,14 +1,14 @@
 import "server-only";
 import { cache } from "react";
-import { guideRegistry, type Guide } from "@/content/guides";
+import { guideRegistry, PUBLISHED_GUIDES, type Guide } from "@/content/guides";
 import { config, isPreview } from "./config";
 import { GUIDE_DRAFTS_FOLDER, readGuideDrafts, type GuideDraftProblem, type GuideDrafts } from "./guide-drafts";
 import { guidesForExperience, sortGuides } from "./guides";
 
 /**
  * The guides this deployment shows (ADR 0002): the published modules, plus the synthetic samples and the drafts of
- * `GUIDE_DRAFTS_DIR` in the mock preview. With the real API and no published guide, everything here is empty: /guides
- * answers 404, the sitemap and the footer leave guides out, and experience pages show no guides block.
+ * `GUIDE_DRAFTS_DIR` in the mock preview. Unlisted editorial previews are intentionally absent from this catalog;
+ * their direct route is resolved in `findGuide` without making /guides, the footer or sitemap visible.
  */
 export type GuideCatalog = Readonly<{
   /** Every guide to show, newest first. A draft replaces the guide with the same slug (to check an edit before it ships). */
@@ -45,10 +45,12 @@ export function hasGuidesPage(catalog: GuideCatalog): boolean {
   return catalog.guides.length > 0 || catalog.draftProblems.length > 0;
 }
 
-export async function findGuide(slug: string): Promise<{ guide: Guide; draft: boolean } | null> {
+export async function findGuide(slug: string): Promise<{ guide: Guide; draft: boolean; unlisted?: true } | null> {
   const catalog = await guideCatalog();
   const guide = catalog.guides.find((candidate) => candidate.slug === slug);
-  return guide ? { guide, draft: catalog.draftSlugs.includes(slug) } : null;
+  if (guide) return { guide, draft: catalog.draftSlugs.includes(slug) };
+  const unlisted = PUBLISHED_GUIDES.find((candidate) => candidate.unlisted && candidate.slug === slug);
+  return unlisted ? { guide: unlisted, draft: false, unlisted: true } : null;
 }
 
 export async function guidesAboutExperience(experienceSlug: string): Promise<{ guides: Guide[]; draftSlugs: readonly string[] }> {

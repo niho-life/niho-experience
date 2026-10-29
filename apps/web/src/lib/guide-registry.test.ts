@@ -59,6 +59,8 @@ describe("the guide catalog", () => {
     state.config = { guideDraftsDir: "/drafts" };
     state.isPreview = false;
     expect(await guideCatalog()).toEqual({ guides: [], draftSlugs: [], draftProblems: [] });
+    expect(indexableGuides()).toEqual([]);
+    expect(await findGuide("kamakura-after-4-pm")).toMatchObject({ draft: false, unlisted: true, guide: { slug: "kamakura-after-4-pm" } });
     expect(state.read).not.toHaveBeenCalled();
   });
 
