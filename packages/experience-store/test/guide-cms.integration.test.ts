@@ -13,7 +13,8 @@ const migrations = [
   "0004_host_push_subscriptions.sql",
   "0005_guide_cms.sql",
   "0006_calendar_commands_and_sales_state.sql",
-  "0007_guide_link_invitations.sql",
+  "0007_channel_runtime.sql",
+  "0008_guide_link_invitations.sql",
 ] as const;
 
 const content = {

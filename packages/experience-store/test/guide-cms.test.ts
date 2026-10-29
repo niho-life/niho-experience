@@ -7,7 +7,7 @@ import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
   it("stores article-link invitation consent without private identity fields", async () => {
-    const sql = await readFile(new URL("../migrations/0007_guide_link_invitations.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../migrations/0008_guide_link_invitations.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
     assert.match(sql, /COMMIT;\s*$/);
     assert.match(sql, /CREATE TABLE guide_product_link_invitations/);
