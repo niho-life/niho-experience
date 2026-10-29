@@ -433,7 +433,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
         setPublicationState({
           status: "ready",
           problems: [],
-          message: "公開版を保存しました。その後に原稿が更新されたため、最新版を確認してください。",
+          message: "公開版を保存しました。最新版を確認してから編集を続けてください。",
         });
         void fetchLatestForConflict();
         return;
