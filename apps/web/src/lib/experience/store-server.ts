@@ -1,6 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
-import { ExperienceStore } from "@niho-experience/experience-store";
+import { ExperienceStore, GuideRepository } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -17,4 +17,9 @@ export function experiencePool(): Pool | null {
 export function experienceStore(): ExperienceStore | null {
   const pool = experiencePool();
   return pool ? new ExperienceStore(pool) : null;
+}
+
+export function guideRepository(): GuideRepository | null {
+  const pool = experiencePool();
+  return pool ? new GuideRepository(pool) : null;
 }

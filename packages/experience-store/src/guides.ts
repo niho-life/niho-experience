@@ -305,6 +305,12 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
+function isGuideCategoryForeignKeyViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null
+    && "code" in error && error.code === "23503"
+    && "constraint" in error && error.constraint === "guide_articles_category_slug_fkey";
+}
+
 async function requireSubjectAuthority(client: PoolClient, actor: GuideActor, subject: GuideSubject): Promise<void> {
   const result = subject.kind === "WRITER"
     ? await client.query(
@@ -408,6 +414,28 @@ export class GuideRepository {
     }));
   }
 
+  async listWritableSubjects(nihoUserId: string): Promise<readonly GuideSubject[]> {
+    assertStoreIdentifier(nihoUserId, "nihoUserId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT subject_kind, provider_id
+         FROM (
+           SELECT 0 AS display_order, 'WRITER'::text AS subject_kind, NULL::text AS provider_id
+             FROM guide_writer_grants
+            WHERE niho_user_id=$1 AND active=true
+           UNION ALL
+           SELECT 1 AS display_order, 'PROVIDER'::text AS subject_kind, provider_id
+             FROM provider_memberships
+            WHERE niho_user_id=$1 AND active=true AND role IN ('OWNER','EDITOR')
+         ) writable_subjects
+        ORDER BY display_order, provider_id`,
+      [nihoUserId],
+    );
+    return result.rows.map((row) => subjectFromRow({
+      subject_kind: row.subject_kind,
+      subject_provider_id: row.provider_id,
+    }));
+  }
+
   async createArticle(actor: GuideActor, input: CreateGuideArticleInput): Promise<GuideArticleRecord> {
     validateActor(actor);
     assertStoreIdentifier(input.id, "guide.id");
@@ -445,6 +473,7 @@ export class GuideRepository {
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new StoreConflictError("The guide ID or global slug is already in use.");
+      if (isGuideCategoryForeignKeyViolation(error)) throw new StoreValidationError("The guide category does not exist.");
       throw error;
     }
   }
@@ -518,6 +547,7 @@ export class GuideRepository {
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new StoreConflictError("The global guide slug is already in use.");
+      if (isGuideCategoryForeignKeyViolation(error)) throw new StoreValidationError("The guide category does not exist.");
       throw error;
     }
   }
