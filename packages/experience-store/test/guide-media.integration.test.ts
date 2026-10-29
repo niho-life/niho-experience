@@ -17,6 +17,7 @@ const migrations = [
   "0008_guide_link_invitations.sql",
   "0009_guide_media.sql",
   "0010_guide_body_media.sql",
+  "0011_guide_draft_product_links.sql",
 ] as const;
 
 const content = {
@@ -106,7 +107,6 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
       const published = await repository.commitPublication(actor, article.id, {
         expectedRevision: saved.revision,
         visibility: "PUBLIC",
-        productLinks: [],
       });
       assert.deepEqual(published.cover, {
         assetId: assetOne,
@@ -149,7 +149,6 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
         () => repository.commitPublication(actor, article.id, {
           expectedRevision: unconfirmed.revision,
           visibility: "PUBLIC",
-          productLinks: [],
         }),
         StoreValidationError,
       );
@@ -239,7 +238,6 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
       const coverlessPublication = await repository.commitPublication(actor, article.id, {
         expectedRevision: coverless.revision,
         visibility: "PUBLIC",
-        productLinks: [],
       });
       assert.equal(coverlessPublication.cover, undefined);
 

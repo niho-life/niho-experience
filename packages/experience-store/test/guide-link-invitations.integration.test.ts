@@ -18,6 +18,7 @@ const migrations = [
   "0008_guide_link_invitations.sql",
   "0009_guide_media.sql",
   "0010_guide_body_media.sql",
+  "0011_guide_draft_product_links.sql",
 ] as const;
 
 const content = {
@@ -89,11 +90,14 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
         content,
       });
       await assert.rejects(
-        () => store.commitPublication(writer, uninvitedArticle.id, {
-          expectedRevision: uninvitedArticle.revision,
-          visibility: "PUBLIC",
-          productLinks: [{ providerId: "provider-a", productId: "published-a" }],
-        }),
+        () => store.saveDraft(writer, uninvitedArticle.id, {
+          slug: uninvitedArticle.slug,
+          title: uninvitedArticle.title,
+          description: uninvitedArticle.description,
+          categorySlug: "culture",
+          content: uninvitedArticle.content,
+          draftProductLinks: [{ providerId: "provider-a", productId: "published-a" }],
+        }, uninvitedArticle.revision),
         StoreAccessDeniedError,
       );
       await pool.query(
@@ -193,10 +197,17 @@ describe("PostgreSQL guide product-link invitations", { skip: databaseUrl === un
         categorySlug: "culture",
         content,
       });
+      const linkedArticle = await store.saveDraft(writer, article.id, {
+        slug: article.slug,
+        title: article.title,
+        description: article.description,
+        categorySlug: "culture",
+        content: article.content,
+        draftProductLinks: [{ providerId: "provider-a", productId: "published-a" }],
+      }, article.revision);
       await store.commitPublication(writer, article.id, {
-        expectedRevision: article.revision,
+        expectedRevision: linkedArticle.revision,
         visibility: "PUBLIC",
-        productLinks: [{ providerId: "provider-a", productId: "published-a" }],
       });
       assert.deepEqual((await store.getPublicArticleBySlug(article.slug))?.productLinks, [
         { providerId: "provider-a", productId: "published-a", productSlug: "published-a" },

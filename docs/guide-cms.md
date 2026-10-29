@@ -1,4 +1,4 @@
-# Guide CMS の非公開写真
+# Guide CMS の非公開写真と関連体験
 
 [#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張した。[#189](https://github.com/niho-life/niho-experience/issues/189) は公開SSRと公開画像配信を実装するが、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` まで既存の静的表示を維持し、公開 media route は404のままにする。
 
@@ -37,7 +37,7 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## database flagを開く前のゲート
 
-1. `0005`、`0008`、`0009`、`0010`を含む全migrationをstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
+1. `0005`、`0008`、`0009`、`0010`、`0011`を含む全migrationをstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
 2. private bucketのUniform bucket-level access、Public access prevention、runtime SA限定IAM、`GUIDE_MEDIA_BUCKET`を確認する。bucket CORS、公開ACL、公開CDNは作らない。
 3. NIHO editor app-connect/auth（niho-app #19459/#19462）のstaging受入を完了し、writer/provider権限失効、公開、更新、停止、UNLISTEDを確認する。editorの有効化とpublic sourceの切替は別々に判断する。
 4. 合成記事でPUBLIC/UNLISTED/draft/STOPPED、category順、初回公開日と更新日、canonical/Article JSON-LD/noindex、home/list/detail/footer/sitemap、体験との双方向linkを確認する。静的記事がdatabase集合へ混ざらず、DB停止時に静的fallbackしないことも確認する。
@@ -54,3 +54,11 @@ editor は TipTap の atom `guideFigure` をカーソル位置へ置く。popove
 公開transactionは article をlockしてから参照assetをUUID順にlockし、記事・作成者scope、`READY`、初回確認時に固定された公開クレジットとWeb掲載確認、非失効を再検査する。`guide_publication_media` は coverを `slot=0 / placement=COVER`、本文を `slot=1..10 / placement=FIGURE` として、alt・credit・順序をimmutable snapshotへ保存する。公開read modelはsnapshotと現在も `READY` の本文写真metadataだけを返す。#189のrouteは上記database flagのときだけ公開HTMLへ接続し、flag offでは404を維持する。
 
 本文写真の設定から「掲載権利を取り消す」を実行できる。権利取消ではobjectを物理削除せず、publication snapshotとMarkdownも監査・差替えのため残す。本文参照があればarticle revisionを進め、公開readからは直ちに非表示にする。以後の保存・再公開は差替えまで拒否する。通常の「記事から外す」はMarkdownから配置を削除するだけで、assetの権利取消ではない。coverの既存draft・snapshot・取消契約は維持する。
+
+## 関連体験（#223）
+
+`0011_guide_draft_product_links.sql` は、記事ごとに最大3件の `(provider_id, product_id)` と表示順だけを下書きとして保持する。個人名・メール・招待情報は複製しない。記事本文と関連体験は同じ `guide_articles.revision` を楽観ロックに使い、下書き保存transactionで記事更新と選択行の全置換を行う。PATCHで選択を省略した既存クライアントは現在値を維持する。
+
+新しく選ぶ体験は現在 `PUBLISHED` で、保存actorが現在のOWNER/EDITOR、または有効なwriter grant・受諾済み招待・link membershipをすべて持つ場合だけ追加できる。提供者主体の記事はその提供者の商品に限定する。権限失効後も既存選択は下書きから失われず、並べ替え・削除はできるが、新規追加として権限を迂回できない。候補APIは先に記事所有と現在のsubject authorityを確認し、記事のsubjectから導いた範囲だけを `private, no-store` で返す。
+
+公開commandは関連体験を入力に取らず、lockした記事の保存済み選択を読む。現在の商品状態・subject制約・membership・招待・writer grantを再検査し、すべて有効な場合だけ既存のimmutable publication linkへactorとpermission basisをsnapshotしてpublicationをsealする。0件は有効で、1件でも失効していれば旧公開版を切り替えない。preflightも失効を「関連する体験」設定から外す問題として返すが、競合を防ぐ根拠は公開transaction内の再検査とする。

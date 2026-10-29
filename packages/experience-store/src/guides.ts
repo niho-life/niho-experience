@@ -63,6 +63,8 @@ export interface SaveGuideDraftInput {
   readonly content: GuideContent;
   /** undefined preserves the current cover, null removes it. */
   readonly cover?: GuideDraftCover | null;
+  /** undefined preserves the current ordered selection. */
+  readonly draftProductLinks?: readonly GuideProductLinkInput[];
 }
 
 export interface GuideDraftCover {
@@ -105,6 +107,7 @@ export interface GuideArticleRecord {
   readonly categorySlug?: string;
   readonly content: GuideContent;
   readonly cover?: GuideDraftCover;
+  readonly draftProductLinks: readonly GuideProductLinkInput[];
   readonly status: GuideArticleStatus;
   readonly revision: number;
   readonly currentPublication?: {
@@ -125,7 +128,6 @@ export interface GuideProductLinkInput {
 export interface CommitGuidePublicationInput {
   readonly expectedRevision: number;
   readonly visibility: GuidePublicationVisibility;
-  readonly productLinks: readonly GuideProductLinkInput[];
 }
 
 export interface PublicGuideProductLink {
@@ -209,7 +211,14 @@ const ARTICLE_COLUMNS = `
   a.created_at, a.updated_at, p.id AS current_publication_id,
   p.publication_number AS current_publication_number,
   p.visibility AS current_publication_visibility,
-  p.published_at AS current_publication_published_at`;
+  p.published_at AS current_publication_published_at,
+  (SELECT coalesce(
+     jsonb_agg(
+       jsonb_build_object('providerId', draft_link.provider_id, 'productId', draft_link.product_id)
+       ORDER BY draft_link.display_order
+     ),
+     '[]'::jsonb
+   ) FROM guide_draft_product_links draft_link WHERE draft_link.article_id=a.id) AS draft_product_links`;
 const PUBLICATION_COLUMNS = `
   p.article_id, p.id AS publication_id, p.publication_number, p.source_revision,
   p.slug, p.subject_kind, p.subject_provider_id, p.category_slug,
@@ -355,11 +364,46 @@ function validateDraft(input: SaveGuideDraftInput): SaveGuideDraftInput {
   assertNonEmptyText(input.title, "guide.title", 110);
   if (input.description.length > 160) throw new StoreValidationError("guide.description must be at most 160 characters.");
   if (input.categorySlug !== undefined) validateCategorySlug(input.categorySlug);
+  if (input.draftProductLinks !== undefined) validateProductLinks(input.draftProductLinks);
   return {
     ...input,
     content: parseGuideContent(input.content),
     ...(input.cover === undefined || input.cover === null ? {} : { cover: validateCover(input.cover) }),
   };
+}
+
+function validateProductLinks(links: readonly GuideProductLinkInput[]): void {
+  if (links.length > 3) throw new StoreValidationError("A guide may link at most three products.");
+  const keys = new Set<string>();
+  for (const link of links) {
+    assertStoreIdentifier(link.providerId, "guide.productLink.providerId");
+    assertStoreIdentifier(link.productId, "guide.productLink.productId");
+    const key = productLinkKey(link);
+    if (keys.has(key)) throw new StoreValidationError("Guide product links must be unique.");
+    keys.add(key);
+  }
+}
+
+function productLinkKey(link: GuideProductLinkInput): string {
+  return `${link.providerId}\u0000${link.productId}`;
+}
+
+function draftProductLinksFromRow(row: DbRow): readonly GuideProductLinkInput[] {
+  const value = row.draft_product_links;
+  if (!Array.isArray(value)) throw new StoreValidationError("Database returned invalid draft product links.");
+  const links = value.map((candidate) => {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      throw new StoreValidationError("Database returned an invalid draft product link.");
+    }
+    const providerId = (candidate as Record<string, unknown>).providerId;
+    const productId = (candidate as Record<string, unknown>).productId;
+    if (typeof providerId !== "string" || typeof productId !== "string") {
+      throw new StoreValidationError("Database returned an invalid draft product link.");
+    }
+    return { providerId, productId };
+  });
+  validateProductLinks(links);
+  return links;
 }
 
 function validateSubject(subject: GuideSubject): void {
@@ -403,6 +447,7 @@ function articleFromRow(row: DbRow): GuideArticleRecord {
             webConfirmed: booleanValue(row, "cover_web_confirmed"),
           },
         }),
+    draftProductLinks: draftProductLinksFromRow(row),
     status: stringValue(row, "status") as GuideArticleStatus,
     revision: integerValue(row, "revision"),
     ...(currentPublicationId === undefined
@@ -523,6 +568,55 @@ async function requireSubjectAuthority(client: PoolClient, actor: GuideActor, su
         [subject.providerId, actor.nihoUserId],
       );
   if (result.rows[0] === undefined) throw new StoreAccessDeniedError();
+}
+
+async function authorizeCurrentProductLink(
+  client: PoolClient,
+  actor: GuideActor,
+  link: GuideProductLinkInput,
+): Promise<{ readonly permissionBasis: GuideLinkPermissionBasis; readonly productSlug: string }> {
+  const productResult = await client.query<DbRow>(
+    `SELECT slug FROM experience_products
+      WHERE provider_id=$1 AND id=$2 AND status='PUBLISHED'
+      FOR SHARE`,
+    [link.providerId, link.productId],
+  );
+  const product = productResult.rows[0];
+  if (product === undefined) throw new StoreNotFoundError("published product for guide link");
+  const providerMembership = await client.query(
+    `SELECT 1 FROM provider_memberships
+      WHERE provider_id=$1 AND niho_user_id=$2 AND active=true AND role IN ('OWNER','EDITOR')
+      FOR SHARE`,
+    [link.providerId, actor.nihoUserId],
+  );
+  if (providerMembership.rows[0] !== undefined) {
+    return { permissionBasis: "PROVIDER_MEMBERSHIP", productSlug: stringValue(product, "slug") };
+  }
+
+  // Match the invitation transition lock order so revocation and publication
+  // cannot pass each other after authority has been checked.
+  const invitation = await client.query(
+    `SELECT 1 FROM guide_product_link_invitations
+      WHERE provider_id=$1 AND writer_niho_user_id=$2 AND state='ACCEPTED'
+      FOR SHARE`,
+    [link.providerId, actor.nihoUserId],
+  );
+  if (invitation.rows[0] === undefined) throw new StoreAccessDeniedError();
+  const writerGrant = await client.query(
+    `SELECT 1 FROM guide_writer_grants
+      WHERE niho_user_id=$1 AND active=true
+      FOR SHARE`,
+    [actor.nihoUserId],
+  );
+  if (writerGrant.rows[0] === undefined) throw new StoreAccessDeniedError();
+  const linkMembership = await client.query(
+    `SELECT 1 FROM guide_product_link_memberships
+      WHERE provider_id=$1 AND niho_user_id=$2 AND active=true
+      FOR SHARE`,
+    [link.providerId, actor.nihoUserId],
+  );
+  if (linkMembership.rows[0] === undefined) throw new StoreAccessDeniedError();
+  return { permissionBasis: "GUIDE_PRODUCT_LINK_MEMBERSHIP", productSlug: stringValue(product, "slug") };
 }
 
 async function lockInvitationPair(client: PoolClient, providerId: string, writerNihoUserId: string): Promise<void> {
@@ -1221,12 +1315,18 @@ export class GuideRepository {
     });
   }
 
-  async listLinkableProducts(actor: GuideActor): Promise<readonly LinkableGuideProduct[]> {
+  async listLinkableProducts(
+    actor: GuideActor,
+    subject?: GuideSubject,
+  ): Promise<readonly LinkableGuideProduct[]> {
     validateActor(actor);
+    if (subject !== undefined) validateSubject(subject);
+    const subjectProviderId = subject?.kind === "PROVIDER" ? subject.providerId : null;
     const result = await this.#pool.query<DbRow>(
       `SELECT product.provider_id, product.id AS product_id, product.public_title
          FROM experience_products product
         WHERE product.status='PUBLISHED'
+          AND ($2::text IS NULL OR product.provider_id=$2)
           AND (
             EXISTS (
               SELECT 1 FROM provider_memberships membership
@@ -1252,7 +1352,7 @@ export class GuideRepository {
             )
           )
         ORDER BY product.provider_id, product.id`,
-      [actor.nihoUserId],
+      [actor.nihoUserId, subjectProviderId],
     );
     return result.rows.map((row) => ({
       providerId: stringValue(row, "provider_id"),
@@ -1357,6 +1457,16 @@ export class GuideRepository {
         const article = await getOwnedArticleForUpdate(client, actor, articleId);
         if (article.revision !== expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
         const cover = input.cover === undefined ? article.cover : input.cover ?? undefined;
+        if (input.draftProductLinks !== undefined) {
+          const currentKeys = new Set(article.draftProductLinks.map(productLinkKey));
+          for (const link of input.draftProductLinks) {
+            if (currentKeys.has(productLinkKey(link))) continue;
+            if (article.subject.kind === "PROVIDER" && link.providerId !== article.subject.providerId) {
+              throw new StoreValidationError("A provider article may link only its own products.");
+            }
+            await authorizeCurrentProductLink(client, actor, link);
+          }
+        }
         await lockReadyFigureAssets(
           client,
           article,
@@ -1392,6 +1502,17 @@ export class GuideRepository {
             cover?.webConfirmed ?? false,
           ],
         );
+        if (input.draftProductLinks !== undefined) {
+          await client.query("DELETE FROM guide_draft_product_links WHERE article_id=$1", [articleId]);
+          for (const [index, link] of input.draftProductLinks.entries()) {
+            await client.query(
+              `INSERT INTO guide_draft_product_links (
+                 article_id, provider_id, product_id, display_order
+               ) VALUES ($1,$2,$3,$4)`,
+              [articleId, link.providerId, link.productId, index + 1],
+            );
+          }
+        }
         return selectOwnedArticle(client, actor, articleId);
       });
     } catch (error) {
@@ -1412,23 +1533,14 @@ export class GuideRepository {
     if (input.visibility !== "PUBLIC" && input.visibility !== "UNLISTED") {
       throw new StoreValidationError("guide publication visibility is invalid.");
     }
-    if (input.productLinks.length > 3) throw new StoreValidationError("A guide may link at most three products.");
-    const linkKeys = new Set<string>();
-    for (const link of input.productLinks) {
-      assertStoreIdentifier(link.providerId, "guide.productLink.providerId");
-      assertStoreIdentifier(link.productId, "guide.productLink.productId");
-      const key = `${link.providerId}\u0000${link.productId}`;
-      if (linkKeys.has(key)) throw new StoreValidationError("Guide product links must be unique.");
-      linkKeys.add(key);
-    }
-
     return withTransaction(this.#pool, async (client) => {
       const article = await getOwnedArticleForUpdate(client, actor, articleId);
       if (article.revision !== input.expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
+      validateProductLinks(article.draftProductLinks);
       const figures = guideFigureReferences(article.content.markdown);
       if (article.subject.kind === "PROVIDER") {
         const subjectProviderId = article.subject.providerId;
-        if (input.productLinks.some((link) => link.providerId !== subjectProviderId)) {
+        if (article.draftProductLinks.some((link) => link.providerId !== subjectProviderId)) {
           throw new StoreValidationError("A provider article may link only its own products.");
         }
       }
@@ -1467,36 +1579,9 @@ export class GuideRepository {
       if (category === undefined) throw new StoreConflictError("The selected guide category is no longer active.");
 
       const authorizedLinks: Array<GuideProductLinkInput & { permissionBasis: GuideLinkPermissionBasis; productSlug: string }> = [];
-      for (const link of input.productLinks) {
-        const product = await client.query<DbRow>(
-          `SELECT product.id, product.slug,
-                  EXISTS (
-                    SELECT 1 FROM provider_memberships m
-                     WHERE m.provider_id=product.provider_id AND m.niho_user_id=$3
-                       AND m.active=true AND m.role IN ('OWNER','EDITOR')
-                  ) AS provider_allowed,
-                  EXISTS (
-                    SELECT 1 FROM guide_product_link_memberships gm
-                     WHERE gm.provider_id=product.provider_id AND gm.niho_user_id=$3 AND gm.active=true
-                  ) AND EXISTS (
-                    SELECT 1 FROM guide_product_link_invitations invitation
-                     WHERE invitation.provider_id=product.provider_id
-                       AND invitation.writer_niho_user_id=$3 AND invitation.state='ACCEPTED'
-                  ) AS guide_link_allowed
-             FROM experience_products product
-            WHERE product.provider_id=$1 AND product.id=$2 AND product.status='PUBLISHED'
-            FOR SHARE`,
-          [link.providerId, link.productId, actor.nihoUserId],
-        );
-        const productRow = product.rows[0];
-        if (productRow === undefined) throw new StoreNotFoundError("published product for guide link");
-        const permissionBasis = productRow.provider_allowed === true
-          ? "PROVIDER_MEMBERSHIP"
-          : productRow.guide_link_allowed === true
-            ? "GUIDE_PRODUCT_LINK_MEMBERSHIP"
-            : undefined;
-        if (permissionBasis === undefined) throw new StoreAccessDeniedError();
-        authorizedLinks.push({ ...link, permissionBasis, productSlug: stringValue(productRow, "slug") });
+      for (const link of article.draftProductLinks) {
+        const authorized = await authorizeCurrentProductLink(client, actor, link);
+        authorizedLinks.push({ ...link, ...authorized });
       }
 
       const numberResult = await client.query<DbRow>(

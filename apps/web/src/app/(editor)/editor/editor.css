@@ -371,6 +371,52 @@
 .editor-settings textarea:disabled,
 .editor-title-input:disabled { cursor: wait; opacity: 0.65; }
 .editor-settings-section { display: grid; border-top: 1px solid var(--color-line); padding-top: 1.25rem; gap: 1rem; }
+.editor-related-products { gap: 0.75rem; }
+.editor-related-products-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.editor-related-products-heading > span { color: var(--color-muted); font-size: 0.75rem; font-weight: 800; }
+.editor-linkable-products,
+.editor-unavailable-products { display: grid; gap: 0.45rem; }
+.editor-linkable-products label {
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 1px solid var(--color-line);
+  border-radius: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  align-items: start;
+  gap: 0.6rem;
+  background: #fafaf8;
+  color: var(--color-ink);
+}
+.editor-linkable-products input { width: auto; margin-top: 0.12rem; }
+.editor-linkable-products span { line-height: 1.4; }
+.editor-unavailable-products li {
+  display: flex;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  background: #fafaf8;
+}
+.editor-unavailable-products li.is-unavailable { background: var(--color-danger-pale); }
+.editor-unavailable-products span { display: grid; min-width: 0; gap: 0.1rem; }
+.editor-unavailable-products strong { overflow-wrap: anywhere; color: var(--color-ink); font-size: 0.78rem; }
+.editor-unavailable-products small { color: var(--color-danger); font-size: 0.7rem; font-weight: 800; }
+.editor-unavailable-products button,
+.editor-related-products-error button {
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-danger);
+  font-size: 0.75rem;
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+}
+.editor-related-products-note { color: var(--color-muted); font-size: 0.75rem; line-height: 1.45; }
+.editor-related-products-error { display: grid; border-radius: 0.65rem; padding: 0.7rem; gap: 0.45rem; background: var(--color-danger-pale); color: var(--color-danger); font-size: 0.75rem; font-weight: 750; }
+.editor-related-products-error button { justify-self: start; }
 .editor-cover-preview { width: 100%; aspect-ratio: 4 / 3; border-radius: 0.7rem; object-fit: cover; background: var(--color-sand); }
 .editor-cover-upload input { padding: 0.5rem; font-size: 0.78rem; }
 .editor-cover-confirm { grid-template-columns: auto minmax(0, 1fr); align-items: start; }

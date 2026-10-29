@@ -43,6 +43,20 @@ describe("editor guide API input", () => {
       draft: { slug: "synthetic-walk", title: "Synthetic walk", description: "", content: { markdown: "" } },
       expectedRevision: 3,
     });
+    expect(parseGuidePatchBody({
+      slug: "synthetic-walk",
+      title: "Synthetic walk",
+      description: "",
+      content: { markdown: "" },
+      draftProductLinks: [
+        { providerId: "provider-a", productId: "tea" },
+        { providerId: "provider-b", productId: "walk" },
+      ],
+      expectedRevision: 3,
+    })?.draft.draftProductLinks).toEqual([
+      { providerId: "provider-a", productId: "tea" },
+      { providerId: "provider-b", productId: "walk" },
+    ]);
     expect(parseGuidePatchBody({ slug: "synthetic-walk", title: "Synthetic walk", expectedRevision: 3 })).toBeNull();
     expect(parseGuidePatchBody({
       slug: "synthetic-walk",
@@ -76,6 +90,17 @@ describe("editor guide API input", () => {
       description: "",
       content: { markdown: "" },
       cover: { assetId: "x", alt: "x", credit: "x", webConfirmed: true, objectKey: "private" },
+      expectedRevision: 3,
+    })).toBeNull();
+    expect(parseGuidePatchBody({
+      slug: "synthetic-walk",
+      title: "Synthetic walk",
+      description: "",
+      content: { markdown: "" },
+      draftProductLinks: [
+        { providerId: "provider-a", productId: "tea" },
+        { providerId: "provider-a", productId: "tea" },
+      ],
       expectedRevision: 3,
     })).toBeNull();
   });

@@ -10,7 +10,7 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
-export type GuidePublicationProblemField = "title" | "body" | "category" | "description" | "author" | "cover";
+export type GuidePublicationProblemField = "title" | "body" | "category" | "description" | "author" | "cover" | "relatedExperiences";
 
 export type GuidePublicationProblem = {
   readonly field: GuidePublicationProblemField;
@@ -71,6 +71,7 @@ export function guidePublicationProblems(
   article: GuideArticleRecord,
   activeCategorySlugs?: ReadonlySet<string>,
   readyMedia?: readonly GuideMediaAssetSummary[],
+  linkableProductKeys?: ReadonlySet<string>,
 ): readonly GuidePublicationProblem[] {
   const problems: GuidePublicationProblem[] = [];
   const title = article.title.trim();
@@ -103,6 +104,12 @@ export function guidePublicationProblems(
 
   if (article.cover && !article.cover.webConfirmed) {
     addProblem(problems, "cover", "カバー写真のWeb掲載許諾を確認してください。");
+  }
+
+  if (linkableProductKeys !== undefined && article.draftProductLinks.some(
+    (link) => !linkableProductKeys.has(`${link.providerId}\u0000${link.productId}`),
+  )) {
+    addProblem(problems, "relatedExperiences", "現在選べない関連体験を右側の設定から外してください。");
   }
 
   if (!markdown.trim()) {

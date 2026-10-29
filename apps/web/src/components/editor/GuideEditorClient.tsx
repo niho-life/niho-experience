@@ -2,7 +2,13 @@
 "use client";
 
 import type { JSONContent } from "@tiptap/core";
-import type { GuideCategory, GuidePublicationVisibility, GuideSubject } from "@niho-experience/experience-store";
+import type {
+  GuideCategory,
+  GuideProductLinkInput,
+  GuidePublicationVisibility,
+  GuideSubject,
+  LinkableGuideProduct,
+} from "@niho-experience/experience-store";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorHeader } from "./EditorHeader";
 import { GuideRichTextEditor } from "./GuideRichTextEditor";
@@ -12,6 +18,7 @@ import {
   type EditorGuideArticle,
   type GuideCategoriesResponse,
   type GuideCoverUploadResponse,
+  type GuideLinkableProductsResponse,
   type GuideMutationResponse,
   type GuidePublicationPreflightResponse,
   type GuideResponse,
@@ -134,6 +141,11 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const [selectedSubject, setSelectedSubject] = useState("");
   const [revision, setRevision] = useState<number | null>(null);
   const [savedGuide, setSavedGuide] = useState<EditorGuideArticle | null>(null);
+  const [selectedProductLinks, setSelectedProductLinks] = useState<readonly GuideProductLinkInput[]>([]);
+  const [linkableProducts, setLinkableProducts] = useState<readonly LinkableGuideProduct[] | null>(null);
+  const [linkableProductsLoading, setLinkableProductsLoading] = useState(false);
+  const [linkableProductsError, setLinkableProductsError] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadFailure, setLoadFailure] = useState<{ text: string; login?: boolean } | null>(null);
   const [unsupported, setUnsupported] = useState(false);
@@ -158,6 +170,23 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const coverBusyRef = useRef(false);
   const bodyMediaBusyRef = useRef(false);
 
+  const loadLinkableProducts = useCallback(async () => {
+    if (!articleId) return;
+    setLinkableProductsLoading(true);
+    setLinkableProductsError(false);
+    try {
+      const response = await editorApiRequest<GuideLinkableProductsResponse>(
+        `/editor/api/guides/${encodeURIComponent(articleId)}/linkable-products`,
+      );
+      setLinkableProducts(response.products);
+    } catch {
+      setLinkableProducts(null);
+      setLinkableProductsError(true);
+    } finally {
+      setLinkableProductsLoading(false);
+    }
+  }, [articleId]);
+
   const load = useCallback(async () => {
     try {
       setUnsupported(false);
@@ -179,8 +208,10 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
         setEditorKey((key) => key + 1);
         setRevision(guideResponse.guide.revision);
         setSavedGuide(guideResponse.guide);
+        setSelectedProductLinks(guideResponse.guide.draftProductLinks);
         setPublicationVisibility(guideResponse.guide.currentPublication?.visibility ?? "PUBLIC");
         setCategories(categoryResponse.categories);
+        void loadLinkableProducts();
       } else {
         const [categoryResponse, subjectResponse] = await Promise.all([
           editorApiRequest<GuideCategoriesResponse>("/editor/api/guides/categories"),
@@ -195,7 +226,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     } finally {
       setLoading(false);
     }
-  }, [articleId, mode]);
+  }, [articleId, loadLinkableProducts, mode]);
 
   const fetchLatestForConflict = useCallback(async () => {
     if (!articleId) return;
@@ -277,6 +308,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     setEditorKey((key) => key + 1);
     setRevision(conflict.latest.revision);
     setSavedGuide(conflict.latest);
+    setSelectedProductLinks(conflict.latest.draftProductLinks);
     setPublicationVisibility(conflict.latest.currentPublication?.visibility ?? "PUBLIC");
     setSlugCustomized(true);
     setDirty(false);
@@ -365,6 +397,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
             ...(form.categorySlug ? { categorySlug: form.categorySlug } : {}),
             content,
             cover,
+            draftProductLinks: selectedProductLinks,
             expectedRevision,
           }),
         });
@@ -377,6 +410,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
           ...(form.categorySlug ? { categorySlug: form.categorySlug } : { categorySlug: undefined }),
           content,
           ...(cover ? { cover } : { cover: undefined }),
+          draftProductLinks: selectedProductLinks,
           revision: response.revision,
         } : current);
         setDirty(false);
@@ -474,6 +508,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       description: "guide-description",
       author: "guide-author-name",
       cover: "guide-cover-alt",
+      relatedExperiences: "guide-related-products-search",
     };
     const target = field === "body"
       ? window.document.querySelector<HTMLElement>(".guide-prosemirror")
@@ -502,6 +537,9 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       setSavedGuide(response.guide);
       setPublicationVisibility(response.guide.currentPublication?.visibility ?? publicationVisibility);
       setPublicationState({ status: "ready", problems: response.problems, ...(message ? { message } : {}) });
+      if (response.problems.some((problem) => problem.field === "relatedExperiences")) {
+        void loadLinkableProducts();
+      }
     } catch (error) {
       const result = publicationErrorMessage(error);
       setPublicationState({ status: "error", text: result.text, login: result.login });
@@ -511,6 +549,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const applyPublicationGuide = (guide: EditorGuideArticle, message: string) => {
     setSavedGuide(guide);
     setRevision(guide.revision);
+    setSelectedProductLinks(guide.draftProductLinks);
     setPublicationVisibility(guide.currentPublication?.visibility ?? publicationVisibility);
     setConflict(null);
     setPublicationState({ status: "ready", problems: [], message });
@@ -598,6 +637,37 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     ? guidePublicationStatusLabel(savedGuide.status, savedGuide.currentPublication?.visibility)
     : "未公開";
   const editorBusy = saving || publicationBusy || coverBusy || bodyMediaBusy;
+  const selectedProductKeys = new Set(selectedProductLinks.map((link) => `${link.providerId}\u0000${link.productId}`));
+  const normalizedProductSearch = productSearch.trim().toLocaleLowerCase();
+  const visibleLinkableProducts = (linkableProducts ?? []).filter((product) =>
+    !normalizedProductSearch
+    || product.publicTitle.toLocaleLowerCase().includes(normalizedProductSearch)
+    || product.productId.toLocaleLowerCase().includes(normalizedProductSearch));
+  const selectableVisibleProducts = visibleLinkableProducts.filter(
+    (product) => !selectedProductKeys.has(`${product.providerId}\u0000${product.productId}`),
+  );
+  const unavailableSelectedLinks = linkableProducts === null
+    ? []
+    : selectedProductLinks.filter((link) => !linkableProducts.some(
+        (product) => product.providerId === link.providerId && product.productId === link.productId,
+      ));
+
+  const toggleProductLink = (product: LinkableGuideProduct, checked: boolean) => {
+    const key = `${product.providerId}\u0000${product.productId}`;
+    setSelectedProductLinks((current) => checked
+      ? current.some((link) => `${link.providerId}\u0000${link.productId}` === key) || current.length >= 3
+        ? current
+        : [...current, { providerId: product.providerId, productId: product.productId }]
+      : current.filter((link) => `${link.providerId}\u0000${link.productId}` !== key));
+    markDirty();
+  };
+
+  const removeProductLink = (link: GuideProductLinkInput) => {
+    setSelectedProductLinks((current) => current.filter(
+      (candidate) => candidate.providerId !== link.providerId || candidate.productId !== link.productId,
+    ));
+    markDirty();
+  };
 
   return (
     <>
@@ -700,6 +770,68 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
               <label htmlFor="guide-description">説明（英語） <span>{form.description.length}/160</span>
                 <textarea id="guide-description" disabled={editorBusy} rows={4} maxLength={160} value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
               </label>
+
+              {mode === "edit" && (
+                <section className="editor-settings-section editor-related-products" aria-labelledby="guide-related-products-heading">
+                  <div className="editor-related-products-heading">
+                    <h3 id="guide-related-products-heading">関連する体験</h3>
+                    <span>{selectedProductLinks.length}/3</span>
+                  </div>
+                  <input
+                    id="guide-related-products-search"
+                    type="search"
+                    aria-label="体験を検索"
+                    value={productSearch}
+                    disabled={editorBusy}
+                    placeholder="体験を検索"
+                    onChange={(event) => setProductSearch(event.target.value)}
+                  />
+                  {linkableProductsLoading && linkableProducts === null && <p className="editor-related-products-note" role="status">体験を読み込み中</p>}
+                  {linkableProductsError && (
+                    <div className="editor-related-products-error" role="alert">
+                      <p>体験を読み込めませんでした。</p>
+                      <button type="button" disabled={editorBusy || linkableProductsLoading} onClick={() => void loadLinkableProducts()}>再試行</button>
+                    </div>
+                  )}
+                  {selectedProductLinks.length > 0 && (
+                    <ul className="editor-unavailable-products" aria-label="選択中の関連体験">
+                      {selectedProductLinks.map((link) => {
+                        const candidate = linkableProducts?.find(
+                          (product) => product.providerId === link.providerId && product.productId === link.productId,
+                        );
+                        const unavailable = linkableProducts !== null && !linkableProductsError && candidate === undefined;
+                        return <li className={unavailable ? "is-unavailable" : undefined} key={`${link.providerId}:${link.productId}`}>
+                          <span><strong>{candidate?.publicTitle ?? link.productId}</strong>{unavailable && <small>現在選べません</small>}</span>
+                          <button type="button" disabled={editorBusy} onClick={() => removeProductLink(link)}>外す</button>
+                        </li>;
+                      })}
+                    </ul>
+                  )}
+                  {linkableProducts !== null && selectableVisibleProducts.length > 0 && (
+                    <ul className="editor-linkable-products">
+                      {selectableVisibleProducts.map((product) => {
+                        const key = `${product.providerId}\u0000${product.productId}`;
+                        return (
+                          <li key={key}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={false}
+                                disabled={editorBusy || selectedProductLinks.length >= 3}
+                                onChange={(event) => toggleProductLink(product, event.target.checked)}
+                              />
+                              <span>{product.publicTitle}</span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {linkableProducts !== null && !linkableProductsError && visibleLinkableProducts.length === 0 && unavailableSelectedLinks.length === 0 && (
+                    <p className="editor-related-products-note">{normalizedProductSearch ? "一致する体験がありません。" : "選べる公開中の体験はありません。"}</p>
+                  )}
+                </section>
+              )}
 
               {mode === "edit" && (
                 <div className="editor-settings-section editor-cover-section">
