@@ -289,7 +289,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
         const assigned = selectedProduct.inventory?.resources.find((item) => item.resourceId === resource.id);
         return <div key={resource.id} className="grid min-w-0 gap-2 p-3"><label className="flex min-h-11 min-w-0 items-center gap-2 font-bold"><input name={`use-${index}`} type="checkbox" defaultChecked={Boolean(assigned)} /> <span className="min-w-0 [overflow-wrap:anywhere]">{resource.displayName}</span></label><div className="grid min-w-0 grid-cols-2 gap-2"><label className={LABEL}>準備（分）<input name={`prepare-${index}`} type="number" min={0} max={1440} required defaultValue={assigned?.prepareMinutes ?? 0} className={FIELD} /></label><label className={LABEL}>片付け（分）<input name={`cleanup-${index}`} type="number" min={0} max={1440} required defaultValue={assigned?.cleanupMinutes ?? 0} className={FIELD} /></label></div></div>;
       })}{editor.resources.length === 0 ? <p className="p-3 text-sm text-ink-soft">共有資源はありません。</p> : null}</div></fieldset>
-      
+
     </WorkspaceDialog> : null}
   </div>;
 }
