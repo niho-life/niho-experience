@@ -6,7 +6,7 @@ import { Fragment, Slice } from "@tiptap/pm/model";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { ListItem } from "@tiptap/extension-list";
 import StarterKit from "@tiptap/starter-kit";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   EditorApiError,
   editorApiRequest,
@@ -114,6 +114,7 @@ export function GuideRichTextEditor({
   revision,
   onRevoked,
   onRevisionConflict,
+  onMediaBusyChange,
   disabled = false,
 }: {
   initialContent: JSONContent;
@@ -122,6 +123,7 @@ export function GuideRichTextEditor({
   revision: number | null;
   onRevoked: (guide: EditorGuideArticle, assetId: string) => void;
   onRevisionConflict: () => void;
+  onMediaBusyChange: (busy: boolean) => boolean;
   disabled?: boolean;
 }) {
   const [, rerenderToolbar] = useState(0);
@@ -135,7 +137,23 @@ export function GuideRichTextEditor({
   const [figureCredit, setFigureCredit] = useState("");
   const [figureConfirmed, setFigureConfirmed] = useState(false);
   const [figureBusy, setFigureBusy] = useState(false);
+  const [figureOperationCompleted, setFigureOperationCompleted] = useState(0);
+  const figureBusyRef = useRef(false);
   const [figureError, setFigureError] = useState("");
+  const beginFigureOperation = (): boolean => {
+    if (!onMediaBusyChange(true)) return false;
+    figureBusyRef.current = true;
+    setFigureBusy(true);
+    return true;
+  };
+  const endFigureOperation = () => {
+    setFigureBusy(false);
+    setFigureOperationCompleted((count) => count + 1);
+    onMediaBusyChange(false);
+  };
+  useEffect(() => {
+    if (!figureBusy) figureBusyRef.current = false;
+  }, [figureBusy, figureOperationCompleted]);
   const editor = useEditor({
     immediatelyRender: false,
     editable: !disabled,
@@ -239,7 +257,7 @@ export function GuideRichTextEditor({
   };
 
   const openFigure = async () => {
-    if (!editor || !articleId || disabled) return;
+    if (!editor || !articleId || disabled || (editor.isActive("listItem") && !editor.isActive("guideFigure"))) return;
     const attrs = editor.isActive("guideFigure") ? editor.getAttributes("guideFigure") : {};
     const selectedId = typeof attrs.assetId === "string" ? attrs.assetId : "";
     setFigureAssetId(selectedId);
@@ -269,8 +287,8 @@ export function GuideRichTextEditor({
   };
 
   const uploadFigure = async (file: File | undefined) => {
-    if (!articleId || !file || figureBusy) return;
-    setFigureBusy(true);
+    if (!articleId || !file || disabled || figureBusyRef.current) return;
+    if (!beginFigureOperation()) return;
     setFigureError("");
     try {
       const response = await editorApiRequest<GuideCoverUploadResponse>(
@@ -285,12 +303,16 @@ export function GuideRichTextEditor({
     } catch (error) {
       setFigureError(figureOperationError(error, "upload"));
     } finally {
-      setFigureBusy(false);
+      endFigureOperation();
     }
   };
 
   const applyFigure = async () => {
-    if (!editor || !articleId || disabled || figureBusy) return;
+    if (!editor || !articleId || disabled || figureBusyRef.current) return;
+    if (editor.isActive("listItem")) {
+      setFigureError("写真はリストの外に配置してください。");
+      return;
+    }
     if (!figureAssetId || !figureAlt.trim() || !figureCredit.trim() || !figureConfirmed) {
       setFigureError("写真、英語alt、公開クレジット、Web掲載確認をすべて設定してください。");
       return;
@@ -303,7 +325,7 @@ export function GuideRichTextEditor({
       setFigureError("本文写真は1記事10か所以内にしてください。");
       return;
     }
-    setFigureBusy(true);
+    if (!beginFigureOperation()) return;
     setFigureError("");
     try {
       const response = await editorApiRequest<GuideMediaRightsResponse>(
@@ -314,6 +336,10 @@ export function GuideRichTextEditor({
           body: JSON.stringify({ publicCredit: figureCredit.trim(), webConfirmed: true }),
         },
       );
+      if (editor.isActive("listItem")) {
+        setFigureError("写真はリストの外に配置してください。");
+        return;
+      }
       const attrs = {
         assetId: response.asset.id,
         alt: figureAlt.trim(),
@@ -326,14 +352,14 @@ export function GuideRichTextEditor({
     } catch (error) {
       setFigureError(figureOperationError(error, "confirm"));
     } finally {
-      setFigureBusy(false);
+      endFigureOperation();
     }
   };
 
   const revokeFigure = async () => {
-    if (!articleId || !figureAssetId || revision === null || figureBusy) return;
+    if (!articleId || !figureAssetId || revision === null || disabled || figureBusyRef.current) return;
     if (!window.confirm("この写真の掲載権利を取り消しますか？公開中の記事からも直ちに外れます。")) return;
-    setFigureBusy(true);
+    if (!beginFigureOperation()) return;
     setFigureError("");
     const assetId = figureAssetId;
     try {
@@ -351,7 +377,7 @@ export function GuideRichTextEditor({
       if (error instanceof EditorApiError && error.kind === "conflict") onRevisionConflict();
       setFigureError(figureOperationError(error, "revoke"));
     } finally {
-      setFigureBusy(false);
+      endFigureOperation();
     }
   };
 
@@ -375,7 +401,7 @@ export function GuideRichTextEditor({
         <ToolbarButton label="箇条書き" active={editor?.isActive("bulletList")} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}>•</ToolbarButton>
         <ToolbarButton label="番号付きリスト" active={editor?.isActive("orderedList")} disabled={!editor || disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}>1.</ToolbarButton>
         <span className="editor-toolbar-divider" aria-hidden="true" />
-        <ToolbarButton label="本文写真（最大10か所）" active={editor?.isActive("guideFigure")} disabled={!editor || disabled || !articleId} onClick={() => void openFigure()}>写真</ToolbarButton>
+        <ToolbarButton label="本文写真（最大10か所）" active={editor?.isActive("guideFigure")} disabled={!editor || disabled || !articleId || (editor.isActive("listItem") && !editor.isActive("guideFigure"))} onClick={() => void openFigure()}>写真</ToolbarButton>
       </div>
       <span id="guide-body-label" className="sr-only">記事本文</span>
       <EditorContent editor={editor} />
