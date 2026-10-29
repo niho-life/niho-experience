@@ -14,6 +14,7 @@
 - 合成専用DBの実認証API→暗号化SSHのloopback転送→Studioの新worker→実GetYourGuideで、状態確認・停止・再開・結果保存を実証。25.103秒／37.741秒／34.342秒で完了し、すべてstopped=true・acceptedAsCurrent=true、最後は元のOPENへ復元。PWAと公開cloud originは含まない。詳しくは[workerの証跡区分](ota-worker.md#証跡の区別)。
 - Studioから公開originへの再確認はGET 200、新job APIは未配備の404。独立した合成DBの検証APIでは認証なし401、無関係jobの操作403を確認。公開cloudでの認証付きjob処理は別の受入項目である。
 - Airbnbの本人ログイン済みの実体験で、既存の公式Google連携を利用し、検証予定のbusyで予約不可、freeへの変更で元の予約可能・定員へ戻ることを確認。検証予定は削除した。これはGoogle UIからの実証であり、NIHOからGoogleへの自動出力や新規開催回作成を実証したものではない。[公式仕様](https://www.airbnb.com/help/article/2822)
+- 入出力の分離、OAuth、Google ACKとAirbnb読戻しの区別、既存接続の復元、PWAでの状態表示は[Airbnb公式Google経路の接続設計](ota-airbnb-google-bridge.md)に具体化した。実装済み契約とは分けて受け入れる。
 - 共有在庫の基盤は[OTA共有在庫](ota-inventory.md)に実装。体験限定の運営者招待、外部予約取込み、NIHOからのAirbnb公式Google制御、旧外部枠の退役、本番有効化は未完了。実アカウントID・資格情報・画面証跡は公開リポへ置かない。
 
 ## 1. Goal：成立させる操作
