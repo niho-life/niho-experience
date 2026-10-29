@@ -38,6 +38,31 @@ describe("guide editor document", () => {
     expect(markdown).toContain("\\`");
   });
 
+  it("round trips adjacent bold and italic text in both orders", () => {
+    for (const [first, second, markdown] of [
+      ["bold", "italic", "**太字***斜体*"],
+      ["italic", "bold", "*斜体***太字**"],
+    ] as const) {
+      const document = {
+        type: "doc",
+        content: [{ type: "paragraph", content: [
+          { type: "text", text: first === "bold" ? "太字" : "斜体", marks: [{ type: first }] },
+          { type: "text", text: second === "bold" ? "太字" : "斜体", marks: [{ type: second }] },
+        ] }],
+      };
+      expect(guideEditorDocumentToMarkdown(document)).toBe(markdown);
+      expect(markdownToGuideEditorDocument(markdown)).toEqual(document);
+    }
+  });
+
+  it("preserves paragraph-leading ASCII and Japanese spaces", () => {
+    for (const leading of [" ", "  ", "　"]) {
+      const document = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: `${leading}鎌倉の朝` }] }] };
+      expect(guideEditorDocumentToMarkdown(document)).toBe(`${leading}鎌倉の朝`);
+      expect(markdownToGuideEditorDocument(`${leading}鎌倉の朝`)).toEqual(document);
+    }
+  });
+
   it("refuses legacy blocks instead of dropping them", () => {
     expect(() => markdownToGuideEditorDocument("| Place | Time |\n| --- | --- |\n| Beach | 10:00 |"))
       .toThrow(UnsupportedGuideEditorContentError);
