@@ -45,6 +45,19 @@ install -m 600 packages/ota-worker/examples/config.example.json /ABSOLUTE/PRIVAT
 
 本番 worker を起動する前に、専用 profile で Chrome を手動起動して GetYourGuide に初回 login し、Company details と availability を人が確認して Chrome を終了します。上記の既存 worker 専用 profile を rename できる場合は再 login を要求しません。challenge、AUTH_REQUIRED、DOM drift、UNKNOWN_AFTER_SAVE は halt+quarantine とし、自動 login は行いません。debug screenshot は config で明示した場合だけ 0700 private directory 以下へ0600で保存します。
 
+### 限定 session restore policy（未接続）
+
+`startManagedBrowser` は、専用profileにだけ適用できる明示policy `none`（既定）/ `prepare` / `restore` を持ちます。このPRではconfig・driver・site registry・runtime flagへ接続しないため、既存workerの挙動は`none`のままです。任意のChrome引数は受け付けません。
+
+- `prepare` は初回の本人loginに使う通常起動です。台帳が無いか、直前の正常停止を示す`CLEAN`の場合だけ開始します。
+- `restore` は受入済み`CLEAN`台帳、profile binding、停止後profile attestationがすべて一致した場合だけ、固定の`--restore-last-session`を加えます。policy有効時は対象を`Default`に固定し、extensionも固定で無効化します。Chromeのstartup preferenceは書き換えず、cookieの値・期限・ファイル、History、暗号化、keychainにはアクセスしません。
+- attestationは`Default/Preferences`と`Default/Sessions`直下の選別済み`Session_*` / `Tabs_*`通常fileだけを、size上限とno-follow/race検知付きでstream hashします。台帳には名前・size・各hashから作った全体hashだけを置き、URLや内容は保存・出力しません。未知artifact、symlink、複数profile、上限超過は拒否します。
+- 起動前にowner-only lockを排他的に取り、台帳を`DIRTY`として永続化してからChromeを起動します。`CLEAN`は「全pageを`about:blank`にし、networkを遮断したまま新規pageが無いことと所有processの停止を確認し、停止後attestationを記録した」という意味だけで、認証の有効性は保証しません。
+- 終了時は最後のcontext routeで全networkをabortしてから、1秒上限のpage整理で1枚の`about:blank`だけを独立確認し、新規page監視を所有process停止確認まで外しません。sanitizeとprocess停止の両方が成功した場合だけ`CLEAN`へ戻します。process停止を確認できない場合はlockを保持し、sanitize失敗や台帳書込み失敗は`DIRTY`のまま次回起動を拒否します。
+- symlink、別owner、0600以外、過大・破損・未知key、別profile binding、`DIRTY`、既存lockはすべて拒否します。lockをPIDの生存推測で自動削除しません。一般利用・個人用Chrome profileには適用しません。
+
+`CLEAN`後に同じ専用profileを通常のChromeで開くとattestationが変わるため、次の`restore`は拒否されます。再び`prepare`で起動し、本人確認と正常停止で新しい`CLEAN`を作ります。クラッシュ後も自動復旧しません。運用者が対象Chromeと所有process groupの停止、専用profileであること、台帳とlockを確認し、両ファイルを証跡としてprofile外のowner-only退避先へ移した後、`prepare`で再準備します。`DIRTY`やattestationを手編集で`CLEAN`へ変えたり、業務URLを残したまま`restore`したりしません。
+
 ## pin と healthcheck
 
 - Node: 24.x（private PoC 記録は 24.18）
