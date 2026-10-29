@@ -140,6 +140,7 @@ GetYourGuideは予約管理システムとの接続を提供しており、対�
 ## 関連する実行計画
 
 - [地域の協力者が参加するための実装計画](../../idea/active/2026-10-24-community-implementation-plan.md)：代理での掲載準備、地域の協力、実装順序と受入条件の提案
+- [鎌倉の体験市場とNIHOの商品機会](kamakura-experience-market-opportunities.md)：Airbnb掲載の比較、39の商品案、写真・説明、事業性の試算
 - [30日間の流入検証計画](pilot-30day-plan.md)：販売開始の条件、施策の実行判断、振り返り
 - [集客の文案と掲示物](launch-kit.md)：紹介カードや案内の準備
 - [英語検索向けコンテンツ方針](seo-content-policy.md)：検索に届ける内容と公開条件
