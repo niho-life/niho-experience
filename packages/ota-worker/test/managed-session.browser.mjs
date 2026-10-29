@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, chmod, realpath, rm } from "node:fs/promises";
+import { mkdtemp, chmod, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -17,6 +17,15 @@ test("owned browser shutdown persists its own expiring cookie across a real rest
   }
   const profile = await mkdtemp(join(await realpath(tmpdir()), "niho-ota-session-test-"));
   await chmod(profile, 0o700);
+  let executablePath = CHROME;
+  if (process.platform === "linux" && process.env.CI) {
+    // Hosted Linux blocks Chromium's namespace sandbox. Match Playwright's
+    // existing synthetic-test launch here, using only this fresh empty profile
+    // and loopback fixture. Production launch options remain unchanged.
+    executablePath = join(profile, "synthetic-chromium.sh");
+    const quotedChrome = `'${CHROME.replaceAll("'", "'\\''")}'`;
+    await writeFile(executablePath, `#!/bin/sh\nexec ${quotedChrome} --no-sandbox "$@"\n`, { mode: 0o700 });
+  }
   const server = createServer((request, response) => {
     if (request.url === "/login") response.setHeader("set-cookie", "niho_synthetic=synthetic; Max-Age=3600; HttpOnly; SameSite=Lax; Path=/");
     response.setHeader("content-type", "text/plain");
@@ -30,7 +39,7 @@ test("owned browser shutdown persists its own expiring cookie across a real rest
     await once(server, "listening");
     const origin = `http://127.0.0.1:${server.address().port}`;
     for (let index = 0; index < 2; index += 1) {
-      browser = await startManagedBrowser({ executablePath: CHROME, userDataDir: profile, headless: true });
+      browser = await startManagedBrowser({ executablePath, userDataDir: profile, headless: true });
       safeToRemove = false;
       const page = await browser.context.newPage();
       if (index === 0) await page.goto(`${origin}/login`);
