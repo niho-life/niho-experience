@@ -152,6 +152,7 @@ export function availabilityLabel(reason: AvailabilityReason): string {
     case "RESOURCE_INACTIVE": return "休止";
     case "RESOURCE_BUSY": return "予定あり";
     case "GOOGLE_BUSY": return "予定あり";
+    case "EXTERNAL_RESERVATION_UNRESOLVED": return "要確認";
     case "GOOGLE_SYNC_UNAVAILABLE": return "確認待ち";
   }
 }

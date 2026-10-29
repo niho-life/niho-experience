@@ -12,7 +12,7 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function capabilities(value: unknown): ChannelCapabilities | null {
   const item = record(value);
-  if (!item || !exactKeys(item, [], ["canObserve", "canClose", "canOpen", "canCreate"])
+  if (!item || !exactKeys(item, [], ["canObserve", "canReadReservations", "canClose", "canOpen", "canCreate"])
     || Object.values(item).some((entry) => typeof entry !== "boolean")) return null;
   return item as ChannelCapabilities;
 }

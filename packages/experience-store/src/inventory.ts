@@ -78,12 +78,28 @@ export async function evaluateStoredInventories(
     resourcesByProduct.set(productId, [...(resourcesByProduct.get(productId) ?? []), row]);
   }
   const reservations = await client.query<DbRow>(
-    `SELECT occurrence_id,
+    `WITH active_reservations AS (
+       SELECT occurrence_id,seats,status,hold_expires_at FROM bookings
+        WHERE provider_id=$1 AND occurrence_id=ANY($2::text[])
+       UNION ALL
+       SELECT occurrence_id,seats,'CONFIRMED'::text AS status,NULL::timestamptz AS hold_expires_at
+         FROM external_reservations
+        WHERE provider_id=$1 AND occurrence_id=ANY($2::text[]) AND status IN ('PENDING','CONFIRMED')
+     )
+     SELECT occurrence_id,
             COALESCE(sum(seats) FILTER (WHERE status='CONFIRMED'),0)::text AS confirmed,
             COALESCE(sum(seats) FILTER (WHERE status='HOLD' AND hold_expires_at>$3),0)::text AS held,
             count(*) FILTER (WHERE status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>$3))::text AS groups
-       FROM bookings WHERE provider_id=$1 AND occurrence_id=ANY($2::text[]) GROUP BY occurrence_id`,
+       FROM active_reservations GROUP BY occurrence_id`,
     [providerId, occurrenceIds, nowUtc],
+  );
+  // A mismatched source may belong to another time/resource. Do not infer an
+  // empty calendar from it. This provider-wide fence lasts until an exact read
+  // resolves the fact; it does not invent a canonical occurrence or booking.
+  const unresolved = await client.query(
+    `SELECT 1 FROM external_reservations WHERE provider_id=$1 AND needs_review=true
+       AND review_reason IN ('TARGET_MISMATCH','CONFLICTING_SOURCE_VERSION') LIMIT 1`,
+    [providerId],
   );
   const reservationsByOccurrence = new Map(reservations.rows.map((row) => [String(row.occurrence_id), row]));
   const resourceIds = [...new Set(resources.rows.map((row) => String(row.resource_id)))];
@@ -95,7 +111,15 @@ export async function evaluateStoredInventories(
        JOIN bookings b ON b.provider_id=o.provider_id AND b.id=o.booking_id
       WHERE o.provider_id=$1 AND o.resource_id=ANY($2::text[])
         AND o.end_at>$3 AND o.start_at<$4
-        AND (b.status='CONFIRMED' OR (b.status='HOLD' AND b.hold_expires_at>$5))`,
+        AND (b.status='CONFIRMED' OR (b.status='HOLD' AND b.hold_expires_at>$5))
+     UNION ALL
+     SELECT o.resource_id,o.start_at,o.end_at,o.product_id,o.occurrence_id
+       FROM external_reservation_resource_occupancies o
+       JOIN external_reservations e ON e.source_site=o.source_site
+        AND e.source_external_account_id=o.source_external_account_id
+        AND e.external_reservation_id=o.external_reservation_id AND e.local_revision=o.local_revision
+      WHERE o.provider_id=$1 AND o.resource_id=ANY($2::text[])
+        AND o.end_at>$3 AND o.start_at<$4 AND e.status IN ('PENDING','CONFIRMED')`,
     [providerId, resourceIds, addMinutes(overallStart, -1_440), addMinutes(overallEnd, 1_440), nowUtc],
   );
   const activeOccupanciesByResource = new Map<string, DbRow[]>();
@@ -145,23 +169,25 @@ export async function evaluateStoredInventories(
     const syncStatus = google === undefined ? "STALE" : covered
       ? effectiveGoogleSyncStatus(google.syncStatus, google.freshUntilUtc, nowUtc) : "STALE";
     const bookingMode = modeByProduct.get(request.productId) ?? "SEAT";
+    const availability = evaluateAvailability({
+      occurrence: request.occurrence,
+      requestedSeats: request.requestedSeats,
+      confirmedSeats: Number(reserved?.confirmed ?? 0),
+      heldSeats: Number(reserved?.held ?? 0),
+      nowUtc,
+      googleCalendar: { blockingEnabled: google?.blockingEnabled ?? false, syncStatus, busyIntervals: allBusyIntervals },
+      sharedInventory: {
+        bookingMode,
+        activeGroupCount: Number(reserved?.groups ?? 0),
+        hasInactiveResource: resourceRows.some((row) => row.active !== true),
+        hasResourceConflict: conflict,
+      },
+    });
     results.set(request.occurrence.id, {
-      bookingMode,
-      occupancies,
-      availability: evaluateAvailability({
-        occurrence: request.occurrence,
-        requestedSeats: request.requestedSeats,
-        confirmedSeats: Number(reserved?.confirmed ?? 0),
-        heldSeats: Number(reserved?.held ?? 0),
-        nowUtc,
-        googleCalendar: { blockingEnabled: google?.blockingEnabled ?? false, syncStatus, busyIntervals: allBusyIntervals },
-        sharedInventory: {
-          bookingMode,
-          activeGroupCount: Number(reserved?.groups ?? 0),
-          hasInactiveResource: resourceRows.some((row) => row.active !== true),
-          hasResourceConflict: conflict,
-        },
-      }),
+      bookingMode, occupancies,
+      availability: unresolved.rows.length > 0 && availability.bookable
+        ? { ...availability, bookable: false, availableSeats: 0, reason: "EXTERNAL_RESERVATION_UNRESOLVED" }
+        : availability,
     });
   }
   return results;

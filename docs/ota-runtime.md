@@ -1,6 +1,6 @@
 # OTA channel runtime
 
-対象: #194、#196、#197、#198、#234、#235。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)に追加し、Host の開催枠詳細はこの read model を表示する。外部予約取込とGoogleへの枠制御出力は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
+対象: #194、#196、#197、#198、#234、#235、#236。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)、外部予約取込のserver契約は[OTA外部予約台帳](ota-external-reservations.md)に記録する。Host の開催枠詳細はこの read model を表示する。実OTA予約readerとGoogleへの枠制御出力は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
 
 ## 既定で閉じるゲート
 
@@ -10,7 +10,7 @@
 - capability は account/listing 作成だけでは有効にならない。配備設定 `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` に明示された `site/adapter@version` の boolean だけを Admin が保存でき、claim/preflight/result でも同じ配備 allowlist を再確認する。未設定・不正設定は全 capability false となり、live job は claim されない。
 - groups/resources の共有在庫基盤は [OTA共有在庫](ota-inventory.md) に実装したが、外部予約取込みと実OTAでの結合受入は未完了なので、配備 flag は引き続き有効にしない。
 
-`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` は秘密ではない JSON で、例は `{"GetYourGuide/gyg-browser@1":{"canObserve":true,"canClose":true,"canOpen":true}}`。これは実装・受入済み capability の allowlist であり、サイト名だけから対応済みとは判断しない。
+`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` は秘密ではない JSON で、例は `{"GetYourGuide/gyg-browser@1":{"canObserve":true,"canReadReservations":false,"canClose":true,"canOpen":true}}`。これは実装・受入済み capability の allowlist であり、サイト名だけから対応済みとは判断しない。`canReadReservations` は既定falseで、`canObserve`から暗黙に導出しない。
 
 ## Registry と権限境界
 
@@ -53,6 +53,8 @@ worker endpoints は次の versioned route だけで、すべて `POST`、JSON 1
 - `/internal/ota/v1/jobs/{id}/renew`
 - `/internal/ota/v1/jobs/{id}/preflight`
 - `/internal/ota/v1/jobs/{id}/result`
+- `/internal/ota/v1/jobs/{id}/reservation-read`
+- `/internal/ota/v1/jobs/{id}/reservations`
 
 claim に対象がなければ body なし `204`。認証不備は `401/403`、version/lease/preflight の stale は `409`。lease token は worker envelope の直下にだけ置き、target model へ入れない。
 
