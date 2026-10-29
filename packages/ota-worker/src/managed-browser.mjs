@@ -35,6 +35,22 @@ function waitForEndpoint(owned, timeoutMs = 15_000) {
   });
 }
 
+export async function stopManagedBrowser(browser, owned, closeGraceMs = 1_000) {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => browser?.close()).catch(() => {}),
+      new Promise((resolve) => { timer = setTimeout(resolve, closeGraceMs); }),
+    ]);
+  } catch {
+    // Process stop below remains mandatory even if the close transport fails.
+  } finally {
+    clearTimeout(timer);
+  }
+  // CDP can be unresponsive. Process ownership is the independent stop boundary.
+  return owned.stop();
+}
+
 export async function startManagedBrowser({ executablePath, userDataDir, headless = false }) {
   await privateProfile(userDataDir);
   const args = [
@@ -70,16 +86,12 @@ export async function startManagedBrowser({ executablePath, userDataDir, headles
       browser,
       context,
       async stop() {
-        stopPromise ??= (async () => {
-          await browser.close().catch(() => {});
-          return owned.stop();
-        })();
+        stopPromise ??= stopManagedBrowser(browser, owned);
         return stopPromise;
       },
     });
   } catch (error) {
-    await browser?.close().catch(() => {});
-    if (!await owned.stop().catch(() => false)) throw new ContractError("PROCESS_STOP_UNCONFIRMED");
+    if (!await stopManagedBrowser(browser, owned).catch(() => false)) throw new ContractError("PROCESS_STOP_UNCONFIRMED");
     throw error;
   }
 }

@@ -17,6 +17,10 @@ export function minimalClaudeEnv(source = process.env) {
     TMPDIR: source.TMPDIR ?? "/tmp",
     LANG: "en_US.UTF-8",
     TERM: "dumb",
+    // macOS CLI/keychain lookup needs the login identity as well as HOME.
+    ...Object.fromEntries(["USER", "LOGNAME", "SHELL"]
+      .filter((key) => typeof source[key] === "string" && source[key].length > 0)
+      .map((key) => [key, source[key]])),
   });
 }
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { validateUpdateMutation } from "../src/network-guard.mjs";
 import { createGygDriver } from "../src/gyg-driver.mjs";
 import { syntheticGyg, makeJob } from "./helpers/synthetic-gyg.mjs";
 
@@ -25,24 +26,32 @@ test("synthetic browser alternates 20 OPEN/CLOSED jobs with reload verification"
     assert.equal(applied.observation.sourceEndAtUtc, job.sourceEndAtUtc);
     assert.equal(await driver.stop(), true);
   }
-  assert.equal(fixture.state.writes, 20);
+  assert.equal(fixture.state.rawDeliveries, 20);
 });
 
-test("lost save response is resolved by readback without duplicate write", { timeout: 30_000 }, async (t) => {
-  if (!requireBrowser(t)) return;
-  const fixture = await syntheticGyg(); t.after(() => fixture.close());
-  fixture.state.failAfterSave = true;
-  const job = makeJob(fixture.state, "SET_CLOSED");
-  const cloud = { async preflight() { return { ready: true, desiredState: "CLOSED" }; } };
-  const driver = await createGygDriver({ job, cloud, config: fixture.config, testOnlySupplierOrigin: fixture.origin,
-    allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory });
-  const applied = await driver.applyDesiredState();
-  assert.equal(applied.observation.manuallyBlocked, true);
-  assert.equal(fixture.state.writes, 1);
-  await driver.verifyAfterReload();
-  assert.equal(fixture.state.writes, 1);
-  await driver.stop();
-});
+for (const failure of ["before-headers", "after-headers"]) {
+  test(`lost response ${failure} keeps one UI command and one logical state transition`, { timeout: 30_000 }, async (t) => {
+    if (!requireBrowser(t)) return;
+    const fixture = await syntheticGyg(); t.after(() => fixture.close());
+    fixture.state.responseFailure = failure;
+    const job = makeJob(fixture.state, "SET_CLOSED");
+    const cloud = { async preflight() { return { ready: true, desiredState: "CLOSED" }; } };
+    const driver = await createGygDriver({ job, cloud, config: fixture.config, testOnlySupplierOrigin: fixture.origin,
+      allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory });
+    t.after(() => driver.stop());
+    const applied = await driver.applyDesiredState();
+    assert.equal(applied.observation.manuallyBlocked, true);
+    assert.equal(driver.guard.writes, 1);
+    assert.equal(fixture.state.uiActions, 1);
+    assert.equal(fixture.state.logicalStateTransitions, 1);
+    assert.ok(fixture.state.rawDeliveries >= 1);
+    if (failure === "after-headers") assert.equal(fixture.state.rawDeliveries, 1);
+    for (const body of fixture.state.requestBodies) assert.equal(validateUpdateMutation(body, job), true);
+    await driver.verifyAfterReload();
+    assert.equal(fixture.state.uiActions, 1);
+    assert.equal(fixture.state.logicalStateTransitions, 1);
+  });
+}
 
 test("wrong account, product, target time and auth expiry halt before write", { timeout: 60_000 }, async (t) => {
   if (!requireBrowser(t)) return;
@@ -63,7 +72,7 @@ test("wrong account, product, target time and auth expiry halt before write", { 
     await assert.rejects(driver.observeTarget(), (error) => error.code === code);
     await driver.stop();
   }
-  assert.equal(fixture.state.writes, 0);
+  assert.equal(fixture.state.rawDeliveries, 0);
 });
 
 test("stale cloud preflight prevents the UI write", { timeout: 30_000 }, async (t) => {
@@ -74,6 +83,6 @@ test("stale cloud preflight prevents the UI write", { timeout: 30_000 }, async (
   const driver = await createGygDriver({ job, cloud, config: fixture.config, testOnlySupplierOrigin: fixture.origin,
     allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory });
   await assert.rejects(driver.applyDesiredState(), (error) => error.code === "STALE_PREFLIGHT");
-  assert.equal(fixture.state.writes, 0);
+  assert.equal(fixture.state.rawDeliveries, 0);
   await driver.stop();
 });

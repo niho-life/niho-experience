@@ -154,7 +154,8 @@ export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGI
       return route.abort("blockedbyclient");
     }
     // Reserve before awaiting preflight: two requests may arrive concurrently.
-    // A transport retry of this exact command is blocked and resolved by readback.
+    // Re-requests reaching this interceptor are blocked; Chromium can still retry
+    // below this layer. Only idempotent Boolean SET is supported, then read back.
     if (permit.used) { refused += 1; return route.abort("blockedbyclient"); }
     const reservedPermit = permit;
     reservedPermit.used = true;

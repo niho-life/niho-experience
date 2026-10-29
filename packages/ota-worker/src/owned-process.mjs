@@ -10,6 +10,8 @@ export function spawnOwned(executable, args, options = {}) {
     cwd: options.cwd,
     env: options.env,
   });
+  // A failed exec emits `error` on the next tick even when no PID was returned.
+  child.on("error", () => {});
   if (!child.pid) throw new ContractError("PROCESS_START_FAILED");
   let exited = false;
   let exitCode = null;

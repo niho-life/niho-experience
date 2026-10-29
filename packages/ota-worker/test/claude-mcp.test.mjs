@@ -35,6 +35,13 @@ test("Claude auth status accepts only claude.ai first-party Max", () => {
   ]) assert.throws(() => validateClaudeAuthStatus(value), (error) => error.code === "CLAUDE_AUTH_REQUIRED");
 });
 
+test("minimal Claude environment preserves login identity without copying arbitrary credentials", () => {
+  const env = minimalClaudeEnv({ HOME: "/synthetic/home", USER: "synthetic", LOGNAME: "synthetic", SHELL: "/bin/zsh",
+    WORKER_BEARER: "synthetic-private-value", SSH_AUTH_SOCK: "/synthetic/agent.sock" });
+  assert.equal(env.USER, "synthetic"); assert.equal(env.LOGNAME, "synthetic"); assert.equal(env.SHELL, "/bin/zsh");
+  assert.equal("WORKER_BEARER" in env, false); assert.equal("SSH_AUTH_SOCK" in env, false);
+});
+
 function runMcp(input) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [fileURLToPath(new URL("../bin/ota-mcp.mjs", import.meta.url)), "--socket", "/tmp/unused-niho-ota-test.sock"], {

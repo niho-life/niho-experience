@@ -18,8 +18,10 @@ export async function syntheticGyg() {
     blocked: false,
     bookableWhenOpen: true,
     authenticated: true,
-    failAfterSave: false,
-    writes: 0,
+    responseFailure: null,
+    rawDeliveries: 0,
+    logicalStateTransitions: 0,
+    uiActions: 0,
     requestBodies: [],
   };
   const server = createServer(async (request, response) => {
@@ -41,6 +43,7 @@ export async function syntheticGyg() {
         <script>
           const toggle=document.querySelector('[role=switch]');
           toggle.addEventListener('click',async()=>{
+            await globalThis.__nihoRecordSyntheticClick();
             const desired=toggle.checked;
             try {
               const response=await fetch('/graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:'UpdateMultipleTimeSlots',query:${JSON.stringify(EXPECTED_MUTATION)},variables:{input:{isBlocked:desired,type:'IS_BLOCKED',timeSlots:[{dateTime:${JSON.stringify(state.localDateTime.slice(0, 16))},tourOptionId:${JSON.stringify(state.optionId)}}]}}})});
@@ -60,8 +63,16 @@ export async function syntheticGyg() {
       if (body.operationName !== "UpdateMultipleTimeSlots" || slot?.tourOptionId !== state.optionId) {
         response.writeHead(403); response.end(); return;
       }
-      state.blocked = body.variables.input.isBlocked; state.writes += 1;
-      if (state.failAfterSave) { state.failAfterSave = false; request.socket.destroy(); return; }
+      const desired = body.variables.input.isBlocked;
+      if (state.blocked !== desired) state.logicalStateTransitions += 1;
+      state.blocked = desired; state.rawDeliveries += 1;
+      if (state.responseFailure === "before-headers") { request.socket.destroy(); return; }
+      if (state.responseFailure === "after-headers") {
+        response.writeHead(200, { "content-type": "application/json", "content-length": "1000" });
+        response.write('{"blocked":');
+        setTimeout(() => response.destroy(), 10);
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ blocked: state.blocked })); return;
     }
     response.writeHead(404); response.end();
@@ -76,6 +87,7 @@ export async function syntheticGyg() {
   catch (error) { await new Promise((resolve) => server.close(resolve)); throw error; }
   const browserFactory = async () => {
     const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
+    await context.exposeFunction("__nihoRecordSyntheticClick", () => { state.uiActions += 1; });
     return { pid: process.pid, context, async stop() { await context.close(); return true; } };
   };
   const config = {
