@@ -71,6 +71,34 @@ test("month, keyboard and add dialog work without overflow", async ({ page }, te
   }
 });
 
+test("selected weekdays can be checked, unchecked and saved", async ({ page }) => {
+  await signIn(page);
+  const posts: Record<string, unknown>[] = [];
+  await stubCalendar(page, async (route) => {
+    if (route.request().method() === "POST") {
+      posts.push(route.request().postDataJSON());
+      await route.fulfill({ status: 201, json: { id: "new", version: 1 } });
+    } else await route.fulfill({ status: 200, json: calendarData() });
+  });
+  await page.goto("/host/calendar");
+  await page.getByRole("button", { name: "枠を追加" }).click();
+  const dialog = page.getByRole("dialog", { name: "枠を追加" });
+  await dialog.getByRole("checkbox", { name: "繰り返す" }).check();
+  await dialog.getByRole("combobox", { name: "繰り返し", exact: true }).selectOption("SELECTED_WEEKDAYS");
+  const monday = dialog.getByRole("checkbox", { name: "月", exact: true });
+  const saturday = dialog.getByRole("checkbox", { name: "土", exact: true });
+  await monday.check();
+  await saturday.check();
+  await monday.uncheck();
+  await expect(monday).not.toBeChecked();
+  await expect(saturday).toBeChecked();
+  await dialog.getByLabel("終了日").fill(addDays(today(), 14));
+  await dialog.getByRole("button", { name: "追加する" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ rule: { recurrence: { kind: "SELECTED_WEEKDAYS", weekdays: ["SATURDAY"] } } });
+});
+
 test("409 keeps input; successful save followed by GET failure is not resubmitted", async ({ page }) => {
   await signIn(page);
   const posts: Record<string, unknown>[] = [];
