@@ -43,6 +43,9 @@ export async function POST(request: Request, context: GuideRouteContext) {
       productLinks: [],
     });
     const current = await loaded.value.repository.getArticle(loaded.value.actor, articleId);
+    // A second tab may save between the publication transaction and this read.
+    // Never give the caller a newer revision for content it has not displayed.
+    if (current.revision !== input.expectedRevision + 1) return guideApiJson({ error: "conflict" }, 409);
     return guideApiJson({ guide: privateGuideArticle(current) });
   } catch (error) {
     return guideApiError(error);

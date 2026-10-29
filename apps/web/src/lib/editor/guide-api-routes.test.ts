@@ -306,6 +306,25 @@ describe("private editor guide routes", () => {
     expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
   });
 
+  it("does not hand a newer draft revision to a tab that published older content", async () => {
+    mocks.repository.getArticle
+      .mockResolvedValueOnce(publishableArticle)
+      .mockResolvedValueOnce({
+        ...publishableArticle,
+        revision: 4,
+        title: "Saved from another tab after publication",
+        status: "PUBLISHED",
+      });
+    const response = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC" },
+    ), context);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "conflict" });
+    expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
+  });
+
   it("returns validation and revision failures before the publication transaction", async () => {
     mocks.repository.getArticle.mockResolvedValue({
       ...publishableArticle,
