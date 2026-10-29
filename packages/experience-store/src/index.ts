@@ -8,6 +8,24 @@ export {
 } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
+export { GuideRepository, parseGuideContent } from "./guides.ts";
+export type {
+  CommitGuidePublicationInput,
+  CreateGuideArticleInput,
+  GuideActor,
+  GuideArticleRecord,
+  GuideArticleStatus,
+  GuideAuthor,
+  GuideCategory,
+  GuideContent,
+  GuideLinkPermissionBasis,
+  GuideProductLinkInput,
+  GuidePublicationVisibility,
+  GuideSubject,
+  PublicGuideArticle,
+  PublicGuideProductLink,
+  SaveGuideDraftInput,
+} from "./guides.ts";
 export type { HostPushDeviceLabel, HostPushRecipient, HostPushSubscriptionInput } from "./push-subscriptions.ts";
 export type {
   BookingRecord,
