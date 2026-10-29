@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { BookingUnavailableError, StoreAccessDeniedError, StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
@@ -17,13 +17,8 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
     const quotedSchema = `"${schema}"`;
     try {
       await pool.query(`CREATE SCHEMA ${quotedSchema}`);
-      const migration = await readFile(new URL("../migrations/0001_experience_store.sql", import.meta.url), "utf8");
-      await pool.query(migration);
-      const oauthMigration = await readFile(new URL("../migrations/0002_google_oauth.sql", import.meta.url), "utf8");
-      await pool.query(oauthMigration);
-      const coverageMigration = await readFile(new URL("../migrations/0003_google_busy_coverage.sql", import.meta.url), "utf8");
-      await pool.query(coverageMigration);
-      for (const name of ["0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql", "0010_shared_inventory.sql", "0013_product_operators.sql"]) {
+      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
+      for (const name of migrations) {
         await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       }
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
