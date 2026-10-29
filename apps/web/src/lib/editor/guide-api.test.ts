@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseGuideCreateBody, parseGuidePatchBody } from "./guide-api";
+import { parseGuidePublicationInput, parseGuideStopPublicationInput } from "./guide-publication";
 
 describe("editor guide API input", () => {
   it("accepts only the exact create shape", () => {
@@ -51,5 +52,25 @@ describe("editor guide API input", () => {
       expectedRevision: 3,
       visibility: "PUBLIC",
     })).toBeNull();
+  });
+
+  it("accepts only exact positive-revision publication commands", () => {
+    expect(parseGuidePublicationInput({ expectedRevision: 3, visibility: "PUBLIC" })).toEqual({
+      expectedRevision: 3,
+      visibility: "PUBLIC",
+    });
+    expect(parseGuidePublicationInput({ expectedRevision: 4, visibility: "UNLISTED" })).toEqual({
+      expectedRevision: 4,
+      visibility: "UNLISTED",
+    });
+    expect(parseGuidePublicationInput({ expectedRevision: 1, visibility: "PUBLIC", productLinks: [] })).toBeNull();
+    expect(parseGuidePublicationInput({ expectedRevision: 0, visibility: "PUBLIC" })).toBeNull();
+    expect(parseGuidePublicationInput({ expectedRevision: 1.5, visibility: "PUBLIC" })).toBeNull();
+    expect(parseGuidePublicationInput({ expectedRevision: Number.MAX_SAFE_INTEGER + 1, visibility: "PUBLIC" })).toBeNull();
+    expect(parseGuidePublicationInput({ expectedRevision: 1, visibility: "PRIVATE" })).toBeNull();
+
+    expect(parseGuideStopPublicationInput({ expectedRevision: 5 })).toEqual({ expectedRevision: 5 });
+    expect(parseGuideStopPublicationInput({ expectedRevision: 5, visibility: "PUBLIC" })).toBeNull();
+    expect(parseGuideStopPublicationInput({ expectedRevision: -1 })).toBeNull();
   });
 });
