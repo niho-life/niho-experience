@@ -15,7 +15,6 @@ export function GET() {
       location: experienceEditorConnectUrl(config.nihoWebOrigin, {
         challenge: pkceChallenge(verifier),
         state,
-        redirectOrigin: config.editorOrigin,
       }),
       "cache-control": "private, no-store",
     },

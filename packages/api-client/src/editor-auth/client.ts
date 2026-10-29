@@ -1,11 +1,6 @@
 import "server-only";
 
-/**
- * Provisional server-only consumer for niho-app #19459.
- *
- * The NIHO registry/client and the dedicated session endpoint are not deployed.
- * This deliberately selects only the fields the editor auth boundary needs.
- */
+/** Server-only consumer of niho-app's dedicated Experience editor connect v1 contract. */
 export const EXPERIENCE_EDITOR_CLIENT_ID = "niho-experience-editor";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -43,7 +38,7 @@ export interface ExperienceEditorAuthClient {
   exchangeCode(input: { code: string; codeVerifier: string }): Promise<ExperienceEditorAuthResult<ExperienceEditorExchange>>;
   refreshConnection(refreshToken: string): Promise<ExperienceEditorAuthResult<ExperienceEditorRefresh>>;
   verifySession(idToken: string): Promise<ExperienceEditorAuthResult<ExperienceEditorVerifiedSession>>;
-  deleteConnection(connectionId: string, idToken: string): Promise<boolean>;
+  revokeConnection(refreshToken: string): Promise<boolean>;
 }
 
 const isText = (value: unknown, max = MAX_TOKEN_LENGTH): value is string =>
@@ -90,14 +85,14 @@ async function requestJson(options: RequestOptions, path: string, init: RequestI
 
 export function experienceEditorConnectUrl(
   nihoWebOrigin: string,
-  input: { challenge: string; state: string; redirectOrigin: string },
+  input: { challenge: string; state: string },
 ): string {
   const url = new URL("/connect/niho-experience-editor", safeOrigin(nihoWebOrigin));
   url.search = new URLSearchParams({
     v: "1",
-    challenge: input.challenge,
+    code_challenge: input.challenge,
+    code_challenge_method: "S256",
     state: input.state,
-    origin: safeOrigin(input.redirectOrigin),
   }).toString();
   return url.href;
 }
@@ -111,7 +106,7 @@ export function createExperienceEditorAuthClient(input: ExperienceEditorAuthClie
 
   return {
     async exchangeCode({ code, codeVerifier }) {
-      const result = await requestJson(options, "/api/auth/app-connect/exchange", {
+      const result = await requestJson(options, "/api/auth/experience-editor-connect/exchange", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ clientId: EXPERIENCE_EDITOR_CLIENT_ID, code, codeVerifier }),
@@ -126,7 +121,7 @@ export function createExperienceEditorAuthClient(input: ExperienceEditorAuthClie
     },
 
     async refreshConnection(refreshToken) {
-      const result = await requestJson(options, "/api/auth/app-connect/refresh", {
+      const result = await requestJson(options, "/api/auth/experience-editor-connect/refresh", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ clientId: EXPERIENCE_EDITOR_CLIENT_ID, refreshToken }),
@@ -141,9 +136,7 @@ export function createExperienceEditorAuthClient(input: ExperienceEditorAuthClie
     },
 
     async verifySession(idToken) {
-      // Provisional response assumption for niho-app #19459:
-      // { actor: { id }, connection: { id, expiresAt }, account: { active } }.
-      const result = await requestJson(options, "/api/auth/app-connect/experience-editor/session", {
+      const result = await requestJson(options, "/api/auth/experience-editor-connect/session", {
         method: "GET",
         headers: { authorization: `Bearer ${idToken}` },
       });
@@ -162,18 +155,17 @@ export function createExperienceEditorAuthClient(input: ExperienceEditorAuthClie
       };
     },
 
-    async deleteConnection(connectionId, idToken) {
-      const url = new URL(`/api/auth/app-connections/${encodeURIComponent(connectionId)}`, options.nihoWebOrigin);
-      url.searchParams.set("reason", "logout");
+    async revokeConnection(refreshToken) {
       try {
-        const response = await options.fetch(url, {
-          method: "DELETE",
-          headers: { authorization: `Bearer ${idToken}` },
+        const response = await options.fetch(new URL("/api/auth/experience-editor-connect/revoke", options.nihoWebOrigin), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ clientId: EXPERIENCE_EDITOR_CLIENT_ID, refreshToken }),
           cache: "no-store",
           redirect: "manual",
           signal: AbortSignal.timeout(options.timeoutMs),
         });
-        return response.ok || response.status === 404;
+        return response.ok;
       } catch {
         return false;
       }

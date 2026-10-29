@@ -1,24 +1,24 @@
 # Editor app-connect 認証基盤
 
 このディレクトリは `/editor` のサーバー側認証境界です。niho-app #19459
-は未実装・未配備のため、`EDITOR_CONSOLE_ENABLED` の既定値は `false` です。
+のブラウザ接続は専用契約で実装済みですが、配備・結合受入までは `EDITOR_CONSOLE_ENABLED` の既定値は `false` です。
 HTTP mode、明示 flag、editor 専用 cookie secret、NIHO Firebase Web API key、
 登録済み editor origin がすべて揃わない限り route は 404 を返します。
 mock login や本番用 bypass はありません。
 
-NIHO 側の仮契約は次のとおりです。
+NIHO 側の専用契約は次のとおりです。
 
 - client: `niho-experience-editor`
 - confirmation: `/connect/niho-experience-editor`
-- exchange/refresh: the standard app-connect endpoints
-- verification: `GET /api/auth/app-connect/experience-editor/session`
+- exchange/refresh/revoke: `/api/auth/experience-editor-connect/*`
+- verification: `GET /api/auth/experience-editor-connect/session`
 - verification body: `{ actor: { id }, connection: { id, expiresAt }, account: { active } }`
 
-flag を有効にする前に NIHO の正式な書き出し契約と照合します。ブラウザへ
+flag を有効にする前に NIHO の配備と結合受入を確認します。ブラウザへ
 渡すのは seal 済みの HttpOnly / Secure / SameSite=Lax cookie だけです。
 session と login cookie の Path はそれぞれ `/editor` と `/editor/auth` で、
 editor 専用の seal purpose を使います。Firebase custom/ID token と、回転する
-app-connect refresh token はサーバーだけが保持します。
+editor connect refresh token はサーバーだけが保持します。
 editor session は初回ログインから最大 7 日で期限切れとなり、refresh で延長しません。
 
 editor の認証済み操作は毎回先に `loadEditorSession()` を呼び、NIHO で現在の

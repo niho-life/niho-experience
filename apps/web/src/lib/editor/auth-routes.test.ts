@@ -82,7 +82,7 @@ function sessionCookie(session = editorSession()) {
 
 function successfulAuth(connectionExpiresAt: number, active = true) {
   handler = (url, init) => {
-    if (url.pathname === "/api/auth/app-connect/exchange") {
+    if (url.pathname === "/api/auth/experience-editor-connect/exchange") {
       expect(JSON.parse(String(init.body))).toMatchObject({ clientId: "niho-experience-editor", code: "c".repeat(43) });
       return json(200, {
         customToken: "custom-1",
@@ -94,7 +94,7 @@ function successfulAuth(connectionExpiresAt: number, active = true) {
     if (url.hostname === "identitytoolkit.googleapis.com") {
       return json(200, { idToken: "id-1", expiresIn: "3600", refreshToken: "firebase-token-must-not-be-kept" });
     }
-    if (url.pathname === "/api/auth/app-connect/experience-editor/session") {
+    if (url.pathname === "/api/auth/experience-editor-connect/session") {
       expect(new Headers(init.headers).get("authorization")).toBe("Bearer id-1");
       return json(200, {
         actor: { id: "actor-1", email: "must-not-leak@example.test" },
@@ -125,9 +125,10 @@ describe("editor login and callback", () => {
     const { response, location, rawCookie } = await startLogin();
     expect(response.headers.get("cache-control")).toContain("no-store");
     expect(location.origin + location.pathname).toBe(`${NIHO}/connect/niho-experience-editor`);
-    expect(location.searchParams.get("challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(location.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(location.searchParams.get("code_challenge_method")).toBe("S256");
     expect(location.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(location.searchParams.get("origin")).toBe(SITE);
+    expect(location.searchParams.has("origin")).toBe(false);
     expect(rawCookie.attributes).toMatch(/Path=\/editor\/auth/);
     expect(rawCookie.attributes).toMatch(/Max-Age=600/);
     expect(rawCookie.attributes).toMatch(/HttpOnly/);
@@ -183,12 +184,12 @@ describe("editor refresh rotation", () => {
   const post = (cookie: string, headers: Record<string, string> = sameOrigin) =>
     refresh(new NextRequest(`${SITE}/editor/auth/refresh`, { method: "POST", headers: { ...headers, cookie } }));
 
-  it("serially rotates and verifies without extending the connection deadline", async () => {
+  it("serially rotates and verifies while keeping the local session deadline", async () => {
     const original = editorSession(4 * 60 * 1000);
     handler = (url) => {
-      if (url.pathname === "/api/auth/app-connect/refresh") return json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionExpiresAt: new Date(original.connectionExpiresAt + HOUR).toISOString() });
+      if (url.pathname === "/api/auth/experience-editor-connect/refresh") return json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionExpiresAt: new Date(original.connectionExpiresAt + HOUR).toISOString() });
       if (url.hostname === "identitytoolkit.googleapis.com") return json(200, { idToken: "id-2", expiresIn: "3600" });
-      return json(200, { actor: { id: "actor-1" }, connection: { id: "connection-1", expiresAt: new Date(original.connectionExpiresAt).toISOString() }, account: { active: true } });
+      return json(200, { actor: { id: "actor-1" }, connection: { id: "connection-1", expiresAt: new Date(original.connectionExpiresAt + HOUR).toISOString() }, account: { active: true } });
     };
     const response = await post(sessionCookie(original));
     expect(response.status).toBe(200);
@@ -199,7 +200,7 @@ describe("editor refresh rotation", () => {
       setCookies(response).get(EDITOR_SESSION_COOKIE)?.value,
       Date.now(),
     );
-    expect(renewed).toMatchObject({ refreshToken: "refresh-2", idToken: "id-2", connectionExpiresAt: original.connectionExpiresAt });
+    expect(renewed).toMatchObject({ refreshToken: "refresh-2", idToken: "id-2", connectionExpiresAt: original.connectionExpiresAt + HOUR, expiresAt: original.expiresAt });
   });
 
   it("discards the old token after an ambiguous rotation failure", async () => {
@@ -213,7 +214,7 @@ describe("editor refresh rotation", () => {
   it("reseals only the rotated token when a later Firebase step is unavailable", async () => {
     const original = editorSession(4 * 60 * 1000);
     handler = async (url) => {
-      if (url.pathname === "/api/auth/app-connect/refresh") {
+      if (url.pathname === "/api/auth/experience-editor-connect/refresh") {
         return json(200, { customToken: "custom-2", refreshToken: "refresh-2", connectionExpiresAt: new Date(original.connectionExpiresAt).toISOString() });
       }
       throw new Error("firebase offline");
@@ -238,7 +239,7 @@ describe("editor refresh rotation", () => {
     const response = await post(sessionCookie());
     expect(response.status).toBe(401);
     expect(setCookies(response).get(EDITOR_SESSION_COOKIE)?.attributes).toMatch(/Max-Age=0/);
-    expect(calls[0]!.url.pathname).toBe("/api/auth/app-connect/experience-editor/session");
+    expect(calls[0]!.url.pathname).toBe("/api/auth/experience-editor-connect/session");
   });
 
   it("refuses cross-site requests and rejects cookies sealed for another purpose", async () => {
@@ -258,7 +259,8 @@ describe("editor logout", () => {
     const response = await logout(new NextRequest(`${SITE}/editor/auth/logout`, { method: "POST", headers: { ...sameOrigin, cookie: sessionCookie() } }));
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/editor/auth/login");
-    expect(calls[0]!.url.href).toBe(`${NIHO}/api/auth/app-connections/connection-1?reason=logout`);
+    expect(calls[0]!.url.href).toBe(`${NIHO}/api/auth/experience-editor-connect/revoke`);
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ clientId: "niho-experience-editor", refreshToken: "refresh-1" });
     expect(setCookies(response).get(EDITOR_SESSION_COOKIE)?.attributes).toMatch(/Max-Age=0/);
     expect(setCookies(response).get(EDITOR_LOGIN_COOKIE)?.attributes).toMatch(/Max-Age=0/);
   });
