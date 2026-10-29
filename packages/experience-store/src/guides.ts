@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseGuideAssetFigureLine } from "@niho-experience/experience-domain";
 import type { Pool, PoolClient } from "pg";
 import {
   StoreAccessDeniedError,
@@ -81,6 +82,17 @@ export interface GuideMediaAssetRecord {
   readonly width?: number;
   readonly height?: number;
   readonly byteSize?: number;
+  readonly publicCredit?: string;
+  readonly webConfirmedAtUtc?: string;
+  readonly webConfirmedByNihoUserId?: string;
+}
+
+export interface GuideMediaAssetSummary {
+  readonly id: string;
+  readonly width: number;
+  readonly height: number;
+  readonly publicCredit?: string;
+  readonly webConfirmed: boolean;
 }
 
 export interface GuideArticleRecord {
@@ -157,6 +169,7 @@ export interface PublicGuideArticle {
   readonly indexable: boolean;
   readonly productLinks: readonly PublicGuideProductLink[];
   readonly cover?: PublicGuideCover;
+  readonly figures: readonly PublicGuideFigure[];
   readonly publishedAtUtc: string;
 }
 
@@ -166,9 +179,14 @@ export interface PublicGuideCover {
   readonly credit: string;
 }
 
+export interface PublicGuideFigure extends PublicGuideCover {
+  readonly slot: number;
+}
+
 const GUIDE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_MARKDOWN_LENGTH = 500_000;
+const MAX_GUIDE_FIGURES = 10;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INVITATION_COLUMNS = `
   id::text AS id, provider_id, writer_niho_user_id, invited_by_niho_user_id,
@@ -190,7 +208,8 @@ const PUBLICATION_COLUMNS = `
   p.visibility, p.published_at`;
 const MEDIA_ASSET_COLUMNS = `
   id::text AS id, article_id, creator_niho_user_id, object_key, state,
-  width, height, byte_size`;
+  width, height, byte_size, public_credit, web_confirmed_at,
+  web_confirmed_by_niho_user_id`;
 
 function stringValue(row: DbRow, key: string): string {
   const value = row[key];
@@ -239,7 +258,7 @@ function validateRevision(revision: number): void {
 }
 
 function validateAssetId(assetId: string): void {
-  if (!UUID_V4.test(assetId)) throw new StoreValidationError("guide cover assetId must be a UUID v4.");
+  if (!UUID_V4.test(assetId)) throw new StoreValidationError("guide media assetId must be a UUID v4.");
 }
 
 function validateCover(cover: GuideDraftCover): GuideDraftCover {
@@ -391,6 +410,7 @@ function publicArticleFromRow(
   row: DbRow,
   productLinks: readonly PublicGuideProductLink[],
   cover?: PublicGuideCover,
+  figures: readonly PublicGuideFigure[] = [],
 ): PublicGuideArticle {
   const visibility = stringValue(row, "visibility") as GuidePublicationVisibility;
   return {
@@ -413,6 +433,7 @@ function publicArticleFromRow(
     indexable: visibility === "PUBLIC",
     productLinks,
     ...(cover === undefined ? {} : { cover }),
+    figures,
     publishedAtUtc: isoValue(row, "published_at"),
   };
 }
@@ -421,6 +442,9 @@ function mediaAssetFromRow(row: DbRow): GuideMediaAssetRecord {
   const width = row.width === null || row.width === undefined ? undefined : integerValue(row, "width");
   const height = row.height === null || row.height === undefined ? undefined : integerValue(row, "height");
   const byteSize = row.byte_size === null || row.byte_size === undefined ? undefined : integerValue(row, "byte_size");
+  const publicCredit = optionalString(row, "public_credit");
+  const webConfirmedAtUtc = optionalIsoValue(row, "web_confirmed_at");
+  const webConfirmedByNihoUserId = optionalString(row, "web_confirmed_by_niho_user_id");
   return {
     id: stringValue(row, "id"),
     articleId: stringValue(row, "article_id"),
@@ -430,6 +454,9 @@ function mediaAssetFromRow(row: DbRow): GuideMediaAssetRecord {
     ...(width === undefined ? {} : { width }),
     ...(height === undefined ? {} : { height }),
     ...(byteSize === undefined ? {} : { byteSize }),
+    ...(publicCredit === undefined ? {} : { publicCredit }),
+    ...(webConfirmedAtUtc === undefined ? {} : { webConfirmedAtUtc }),
+    ...(webConfirmedByNihoUserId === undefined ? {} : { webConfirmedByNihoUserId }),
   };
 }
 
@@ -625,7 +652,7 @@ async function activePublicCover(client: PoolClient, publicationId: number): Pro
     `SELECT media.asset_id::text AS asset_id, media.alt_text, media.public_credit
        FROM guide_publication_media media
        JOIN guide_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
-      WHERE media.publication_id=$1`,
+      WHERE media.publication_id=$1 AND media.placement='COVER' AND media.slot=0`,
     [publicationId],
   );
   const row = result.rows[0];
@@ -638,8 +665,76 @@ async function activePublicCover(client: PoolClient, publicationId: number): Pro
       };
 }
 
-function containsGuideFigure(markdown: string): boolean {
-  return /!\[[^\]]*\]\s*(?:\([^)]*\)|\[[^\]]*\])|<\s*(?:img|figure)\b/i.test(markdown);
+async function activePublicFigures(client: PoolClient, publicationId: number): Promise<readonly PublicGuideFigure[]> {
+  const result = await client.query<DbRow>(
+    `SELECT media.slot, media.asset_id::text AS asset_id, media.alt_text, media.public_credit
+       FROM guide_publication_media media
+       JOIN guide_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
+      WHERE media.publication_id=$1 AND media.placement='FIGURE'
+      ORDER BY media.slot`,
+    [publicationId],
+  );
+  return result.rows.map((row) => ({
+    slot: integerValue(row, "slot"),
+    assetId: stringValue(row, "asset_id"),
+    alt: stringValue(row, "alt_text"),
+    credit: stringValue(row, "public_credit"),
+  }));
+}
+
+type GuideFigureReference = { readonly assetId: string; readonly alt: string };
+
+function guideFigureReferences(markdown: string): readonly GuideFigureReference[] {
+  const figures: GuideFigureReference[] = [];
+  for (const line of markdown.replace(/\r\n?/g, "\n").split("\n")) {
+    if (line.includes("![")) {
+      const figure = parseGuideAssetFigureLine(line);
+      if (figure === null) {
+        throw new StoreValidationError("Guide photos must use the canonical niho-guide-asset UUID format on their own line.");
+      }
+      figures.push(figure);
+    }
+    if (/<\s*\/?\s*(?:img|figure)\b/i.test(line)) {
+      throw new StoreValidationError("Raw HTML guide photos are not supported.");
+    }
+  }
+  if (figures.length > MAX_GUIDE_FIGURES) {
+    throw new StoreValidationError(`A guide may contain at most ${MAX_GUIDE_FIGURES} figure placements.`);
+  }
+  return figures;
+}
+
+function markdownReferencesAsset(markdown: string, assetId: string): boolean {
+  return markdown.toLowerCase().includes(`](niho-guide-asset:${assetId.toLowerCase()})`);
+}
+
+async function lockReadyFigureAssets(
+  client: PoolClient,
+  article: GuideArticleRecord,
+  figures: readonly GuideFigureReference[],
+  lock: "SHARE" | "UPDATE",
+  additionalAssetIds: readonly string[] = [],
+): Promise<ReadonlyMap<string, GuideMediaAssetRecord>> {
+  const assets = new Map<string, GuideMediaAssetRecord>();
+  const figureAssetIds = new Set(figures.map((figure) => figure.assetId.toLowerCase()));
+  const assetIds = [...new Set([...figureAssetIds, ...additionalAssetIds.map((assetId) => assetId.toLowerCase())])].sort();
+  for (const assetId of assetIds) {
+    const result = await client.query<DbRow>(
+      `SELECT ${MEDIA_ASSET_COLUMNS}
+         FROM guide_media_assets
+        WHERE id=$1::uuid AND article_id=$2 AND creator_niho_user_id=$3 AND state='READY'
+        FOR ${lock}`,
+      [assetId, article.id, article.creatorNihoUserId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new StoreAccessDeniedError();
+    const asset = mediaAssetFromRow(row);
+    if (figureAssetIds.has(assetId) && (asset.publicCredit === undefined || asset.webConfirmedAtUtc === undefined)) {
+      throw new StoreValidationError("Every guide figure must have confirmed Web publication rights and a public credit.");
+    }
+    assets.set(assetId, asset);
+  }
+  return assets;
 }
 
 export class GuideRepository {
@@ -752,6 +847,81 @@ export class GuideRepository {
     });
   }
 
+  async listReadyMediaAssets(actor: GuideActor, articleId: string): Promise<readonly GuideMediaAssetSummary[]> {
+    validateActor(actor);
+    assertStoreIdentifier(articleId, "articleId");
+    return withTransaction(this.#pool, async (client) => {
+      const article = await selectOwnedArticle(client, actor, articleId);
+      await requireSubjectAuthority(client, actor, article.subject);
+      const result = await client.query<DbRow>(
+        `SELECT ${MEDIA_ASSET_COLUMNS}
+           FROM guide_media_assets
+          WHERE article_id=$1 AND creator_niho_user_id=$2 AND state='READY'
+          ORDER BY created_at DESC, id`,
+        [articleId, actor.nihoUserId],
+      );
+      return result.rows.map((row) => {
+        const asset = mediaAssetFromRow(row);
+        if (asset.width === undefined || asset.height === undefined) {
+          throw new StoreValidationError("Database returned incomplete guide media dimensions.");
+        }
+        return {
+          id: asset.id,
+          width: asset.width,
+          height: asset.height,
+          ...(asset.publicCredit === undefined ? {} : { publicCredit: asset.publicCredit }),
+          webConfirmed: asset.webConfirmedAtUtc !== undefined,
+        };
+      });
+    });
+  }
+
+  async confirmMediaAssetWebRights(
+    actor: GuideActor,
+    articleId: string,
+    assetId: string,
+    publicCredit: string,
+  ): Promise<GuideMediaAssetSummary> {
+    validateActor(actor);
+    assertStoreIdentifier(articleId, "articleId");
+    validateAssetId(assetId);
+    assertNonEmptyText(publicCredit, "guide media publicCredit", 300);
+    const normalizedCredit = publicCredit.trim();
+    return withTransaction(this.#pool, async (client) => {
+      await getOwnedArticleForUpdate(client, actor, articleId);
+      const currentResult = await client.query<DbRow>(
+        `SELECT ${MEDIA_ASSET_COLUMNS}
+           FROM guide_media_assets
+          WHERE id=$1::uuid AND article_id=$2 AND creator_niho_user_id=$3 AND state='READY'
+          FOR UPDATE`,
+        [assetId, articleId, actor.nihoUserId],
+      );
+      const row = currentResult.rows[0];
+      if (row === undefined) throw new StoreAccessDeniedError();
+      let asset = mediaAssetFromRow(row);
+      if (asset.publicCredit !== undefined && asset.publicCredit !== normalizedCredit) {
+        throw new StoreConflictError("Guide media rights were already confirmed with a different public credit.");
+      }
+      if (asset.publicCredit === undefined) {
+        const updated = await client.query<DbRow>(
+          `UPDATE guide_media_assets
+              SET public_credit=$4, web_confirmed_at=clock_timestamp(), web_confirmed_by_niho_user_id=$3
+            WHERE id=$1::uuid AND article_id=$2 AND creator_niho_user_id=$3 AND state='READY'
+            RETURNING ${MEDIA_ASSET_COLUMNS}`,
+          [assetId, articleId, actor.nihoUserId, normalizedCredit],
+        );
+        asset = mediaAssetFromRow(updated.rows[0]!);
+      }
+      return {
+        id: asset.id,
+        width: asset.width!,
+        height: asset.height!,
+        publicCredit: asset.publicCredit!,
+        webConfirmed: true,
+      };
+    });
+  }
+
   async revokeMediaAsset(
     actor: GuideActor,
     articleId: string,
@@ -780,7 +950,8 @@ export class GuideRepository {
       if (expectedRevision === undefined && current.state !== "UPLOADING") {
         throw new StoreAccessDeniedError();
       }
-      if (current.state !== "REVOKED") {
+      const newlyRevoked = current.state !== "REVOKED";
+      if (newlyRevoked) {
         await client.query(
           `UPDATE guide_media_assets
               SET state='REVOKED', revoked_at=clock_timestamp()
@@ -788,14 +959,19 @@ export class GuideRepository {
           [assetId],
         );
       }
-      if (article.cover?.assetId === assetId) {
+      const coverReferencesAsset = article.cover?.assetId === assetId;
+      const bodyReferencesAsset = markdownReferencesAsset(article.content.markdown, assetId);
+      if (newlyRevoked && (coverReferencesAsset || bodyReferencesAsset)) {
         await client.query(
           `UPDATE guide_articles
-              SET cover_asset_id=NULL, cover_alt=NULL, cover_credit=NULL,
-                  cover_web_confirmed=false, revision=revision+1,
+              SET cover_asset_id=CASE WHEN cover_asset_id=$2::uuid THEN NULL ELSE cover_asset_id END,
+                  cover_alt=CASE WHEN cover_asset_id=$2::uuid THEN NULL ELSE cover_alt END,
+                  cover_credit=CASE WHEN cover_asset_id=$2::uuid THEN NULL ELSE cover_credit END,
+                  cover_web_confirmed=CASE WHEN cover_asset_id=$2::uuid THEN false ELSE cover_web_confirmed END,
+                  revision=revision+1,
                   updated_at=clock_timestamp()
             WHERE id=$1`,
-          [articleId],
+          [articleId, assetId],
         );
       }
       return selectOwnedArticle(client, actor, articleId);
@@ -1052,6 +1228,9 @@ export class GuideRepository {
     if (description.length > 160) throw new StoreValidationError("guide.description must be at most 160 characters.");
     if (input.categorySlug !== undefined) validateCategorySlug(input.categorySlug);
     const content = parseGuideContent(input.content ?? { markdown: "" });
+    if (guideFigureReferences(content.markdown).length > 0) {
+      throw new StoreValidationError("Create the guide before attaching article-scoped figure assets.");
+    }
     try {
       return await withTransaction(this.#pool, async (client) => {
         await requireSubjectAuthority(client, actor, input.subject);
@@ -1129,20 +1308,19 @@ export class GuideRepository {
     assertStoreIdentifier(articleId, "articleId");
     validateRevision(expectedRevision);
     const input = validateDraft(rawInput);
+    const figures = guideFigureReferences(input.content.markdown);
     try {
       return await withTransaction(this.#pool, async (client) => {
         const article = await getOwnedArticleForUpdate(client, actor, articleId);
         if (article.revision !== expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
         const cover = input.cover === undefined ? article.cover : input.cover ?? undefined;
-        if (cover !== undefined) {
-          const asset = await client.query(
-            `SELECT 1 FROM guide_media_assets
-              WHERE id=$1::uuid AND article_id=$2 AND creator_niho_user_id=$3 AND state='READY'
-              FOR SHARE`,
-            [cover.assetId, articleId, actor.nihoUserId],
-          );
-          if (asset.rows[0] === undefined) throw new StoreAccessDeniedError();
-        }
+        await lockReadyFigureAssets(
+          client,
+          article,
+          figures,
+          "SHARE",
+          cover === undefined ? [] : [cover.assetId],
+        );
         if (article.slug !== input.slug) {
           const published = await client.query(
             "SELECT 1 FROM guide_publications WHERE article_id=$1 LIMIT 1",
@@ -1204,6 +1382,7 @@ export class GuideRepository {
     return withTransaction(this.#pool, async (client) => {
       const article = await getOwnedArticleForUpdate(client, actor, articleId);
       if (article.revision !== input.expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
+      const figures = guideFigureReferences(article.content.markdown);
       if (article.subject.kind === "PROVIDER") {
         const subjectProviderId = article.subject.providerId;
         if (input.productLinks.some((link) => link.providerId !== subjectProviderId)) {
@@ -1213,24 +1392,27 @@ export class GuideRepository {
       if (article.categorySlug === undefined) throw new StoreValidationError("A category is required before publication.");
       if (article.description.trim().length === 0) throw new StoreValidationError("A description is required before publication.");
       if (article.content.markdown.trim().length === 0) throw new StoreValidationError("Article Markdown is required before publication.");
-      if (containsGuideFigure(article.content.markdown)) {
-        throw new StoreValidationError("Article figures are not supported for publication.");
-      }
       if (article.content.author === undefined) throw new StoreValidationError("A public author is required before publication.");
 
       if (article.cover !== undefined) {
         if (!article.cover.webConfirmed) {
           throw new StoreValidationError("Guide cover Web publication permission must be confirmed.");
         }
-        const asset = await client.query(
-          `SELECT 1 FROM guide_media_assets
-            WHERE id=$1::uuid AND article_id=$2 AND creator_niho_user_id=$3 AND state='READY'
-            FOR UPDATE`,
-          [article.cover.assetId, articleId, article.creatorNihoUserId],
+      }
+      let figureAssets: ReadonlyMap<string, GuideMediaAssetRecord>;
+      try {
+        figureAssets = await lockReadyFigureAssets(
+          client,
+          article,
+          figures,
+          "UPDATE",
+          article.cover === undefined ? [] : [article.cover.assetId],
         );
-        if (asset.rows[0] === undefined) {
-          throw new StoreConflictError("The selected guide cover is no longer available.");
+      } catch (error) {
+        if (error instanceof StoreAccessDeniedError && article.cover !== undefined) {
+          throw new StoreConflictError("A selected guide photo is no longer available.");
         }
+        throw error;
       }
 
       const categoryResult = await client.query<DbRow>(
@@ -1319,9 +1501,21 @@ export class GuideRepository {
       if (article.cover !== undefined) {
         await client.query(
           `INSERT INTO guide_publication_media (
-             article_id, publication_id, asset_id, alt_text, public_credit
-           ) VALUES ($1,$2,$3::uuid,$4,$5)`,
+             article_id, publication_id, slot, placement, asset_id, alt_text, public_credit
+           ) VALUES ($1,$2,0,'COVER',$3::uuid,$4,$5)`,
           [articleId, publicationId, article.cover.assetId, article.cover.alt, article.cover.credit],
+        );
+      }
+      for (const [index, figure] of figures.entries()) {
+        const asset = figureAssets.get(figure.assetId.toLowerCase());
+        if (asset?.publicCredit === undefined) {
+          throw new StoreConflictError("A guide figure is no longer available for publication.");
+        }
+        await client.query(
+          `INSERT INTO guide_publication_media (
+             article_id, publication_id, slot, placement, asset_id, alt_text, public_credit
+           ) VALUES ($1,$2,$3,'FIGURE',$4::uuid,$5,$6)`,
+          [articleId, publicationId, index + 1, figure.assetId, figure.alt, asset.publicCredit],
         );
       }
       await client.query("UPDATE guide_publications SET sealed=true WHERE id=$1", [publicationId]);
@@ -1338,6 +1532,12 @@ export class GuideRepository {
         article.cover === undefined
           ? undefined
           : { assetId: article.cover.assetId, alt: article.cover.alt, credit: article.cover.credit },
+        figures.map((figure, index) => ({
+          slot: index + 1,
+          assetId: figure.assetId,
+          alt: figure.alt,
+          credit: figureAssets.get(figure.assetId.toLowerCase())!.publicCredit!,
+        })),
       );
     });
   }
@@ -1378,6 +1578,7 @@ export class GuideRepository {
         row,
         await activePublicLinks(client, publicationId),
         await activePublicCover(client, publicationId),
+        await activePublicFigures(client, publicationId),
       );
     });
   }
@@ -1398,6 +1599,7 @@ export class GuideRepository {
           row,
           await activePublicLinks(client, publicationId),
           await activePublicCover(client, publicationId),
+          await activePublicFigures(client, publicationId),
         ));
       }
       return articles;

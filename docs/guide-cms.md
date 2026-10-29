@@ -1,6 +1,6 @@
-# Guide CMS のカバー写真
+# Guide CMS の非公開写真
 
-[#215](https://github.com/niho-life/niho-experience/issues/215) では、英語記事に任意のカバー写真を1枚だけ設定できる。本文の figure は引き続き公開前検査と store の公開 transaction の双方で拒否する。公開 SSR と公開画像配信は #189 の切替対象であり、この段階では公開 media route は常に 404、公開 HTML は写真 URL を出さない。
+[#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張する。公開 SSR と公開画像配信は #189 の切替対象であり、この段階では公開 media route は常に 404、公開 HTML は写真 URL を出さない。
 
 ## データと権利の境界
 
@@ -25,3 +25,13 @@ editor を受け入れる候補 revision では、次を先に満たす。
 4. `0009_guide_media.sql` を適用し、合成 JPEG/PNG の upload・private read・draft保存・公開・権利取消・404 public route を staging で確認する。実顧客写真を受入証跡に添付しない。
 
 bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配信を接続するときも、現在の権利を再検査する server route を先に設計し、draft object keyを公開URLへ転用しない。
+
+## 本文写真（#216）
+
+本文写真は `0010_guide_body_media.sql` 適用後に利用する。Markdown の新規写真形式は、行単独の `![English alt](niho-guide-asset:<uuid-v4>)` だけとする。本文が持つのは記事scopeの opaque asset ID、配置順、文脈依存の英語altだけで、object key・署名URL・公開クレジット・許諾記録は持たない。外部URL、`/sample/`、raw HTML、未知・別記事・`UPLOADING`・`REVOKED` assetは、storeを直接呼んでも保存・公開できない。1記事の配置は10か所以内で、同じassetを複数位置に置ける。
+
+editor は TipTap の atom `guideFigure` をカーソル位置へ置く。popover から記事専用写真をuploadまたは既存の `READY` assetから選び、英語alt・公開クレジット・Web掲載確認を設定する。画像は認証済み `private, no-store` routeだけで表示し、ブラウザへobject keyを返さない。既存の外部URL写真はネットから取得せず、原文を持つ unresolved node として表示する。明示的に内部assetへ差し替えるまで保存・公開を拒否し、失敗時も原文を画面内に保持する。
+
+公開transactionは article をlockしてから参照assetをUUID順にlockし、記事・作成者scope、`READY`、初回確認時に固定された公開クレジットとWeb掲載確認、非失効を再検査する。`guide_publication_media` は coverを `slot=0 / placement=COVER`、本文を `slot=1..10 / placement=FIGURE` として、alt・credit・順序をimmutable snapshotへ保存する。公開read modelはsnapshotと現在も `READY` の本文写真metadataだけを返すが、#189までは公開HTMLや公開画像routeへ接続しない。公開routeは引き続き404とする。
+
+本文写真の設定から「掲載権利を取り消す」を実行できる。権利取消ではobjectを物理削除せず、publication snapshotとMarkdownも監査・差替えのため残す。本文参照があればarticle revisionを進め、公開readからは直ちに非表示にする。以後の保存・再公開は差替えまで拒否する。通常の「記事から外す」はMarkdownから配置を削除するだけで、assetの権利取消ではない。coverの既存draft・snapshot・取消契約は維持する。

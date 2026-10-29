@@ -16,6 +16,7 @@ const migrations = [
   "0007_channel_runtime.sql",
   "0008_guide_link_invitations.sql",
   "0009_guide_media.sql",
+  "0010_guide_body_media.sql",
 ] as const;
 
 const content = {
@@ -158,12 +159,29 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
       );
       assert.equal((await repository.getPublicArticleBySlug(article.slug))?.cover?.assetId, assetOne);
 
-      const unsafe = await repository.saveDraft(actor, article.id, {
+      await assert.rejects(
+        () => repository.saveDraft(actor, article.id, {
+          slug: unconfirmed.slug,
+          title: unconfirmed.title,
+          description: unconfirmed.description,
+          categorySlug: "walks",
+          content: { ...content, markdown: "## Unsafe\n\n![figure](https://example.test/image.jpg)" },
+          cover: {
+            assetId: assetTwo,
+            alt: "A second synthetic rectangle",
+            credit: "Synthetic test image",
+            webConfirmed: true,
+          },
+        }, unconfirmed.revision),
+        StoreValidationError,
+      );
+      assert.equal((await repository.getPublicArticleBySlug(article.slug))?.cover?.assetId, assetOne);
+      const confirmed = await repository.saveDraft(actor, article.id, {
         slug: unconfirmed.slug,
         title: unconfirmed.title,
         description: unconfirmed.description,
         categorySlug: "walks",
-        content: { ...content, markdown: "## Unsafe\n\n![figure](https://example.test/image.jpg)" },
+        content,
         cover: {
           assetId: assetTwo,
           alt: "A second synthetic rectangle",
@@ -171,15 +189,6 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
           webConfirmed: true,
         },
       }, unconfirmed.revision);
-      await assert.rejects(
-        () => repository.commitPublication(actor, article.id, {
-          expectedRevision: unsafe.revision,
-          visibility: "PUBLIC",
-          productLinks: [],
-        }),
-        StoreValidationError,
-      );
-      assert.equal((await repository.getPublicArticleBySlug(article.slug))?.cover?.assetId, assetOne);
 
       await assert.rejects(
         () => pool.query(
@@ -192,7 +201,7 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
         () => pool.query("DELETE FROM guide_publication_media WHERE publication_id=$1", [published.publicationId]),
         /immutable/,
       );
-      await repository.revokeMediaAsset(actor, article.id, assetOne, unsafe.revision);
+      await repository.revokeMediaAsset(actor, article.id, assetOne, confirmed.revision);
       assert.equal((await repository.getPublicArticleBySlug(article.slug))?.cover, undefined);
       assert.equal(
         (await pool.query<{ count: string }>(
@@ -202,24 +211,24 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
         "1",
       );
 
-      const revokedDraft = await repository.revokeMediaAsset(actor, article.id, assetTwo, unsafe.revision);
+      const revokedDraft = await repository.revokeMediaAsset(actor, article.id, assetTwo, confirmed.revision);
       assert.equal(revokedDraft.cover, undefined);
-      assert.equal(revokedDraft.revision, unsafe.revision + 1);
+      assert.equal(revokedDraft.revision, confirmed.revision + 1);
       await assert.rejects(
         () => repository.saveDraft(actor, article.id, {
-          slug: unsafe.slug,
-          title: unsafe.title,
-          description: unsafe.description,
+          slug: confirmed.slug,
+          title: confirmed.title,
+          description: confirmed.description,
           categorySlug: "walks",
           content,
           cover: { assetId: assetTwo, alt: "Stale", credit: "Synthetic", webConfirmed: true },
-        }, unsafe.revision),
+        }, confirmed.revision),
         StoreConflictError,
       );
       const coverless = await repository.saveDraft(actor, article.id, {
-        slug: unsafe.slug,
-        title: unsafe.title,
-        description: unsafe.description,
+        slug: confirmed.slug,
+        title: confirmed.title,
+        description: confirmed.description,
         categorySlug: "walks",
         content,
       }, revokedDraft.revision);
@@ -237,9 +246,9 @@ describe("PostgreSQL guide cover transaction", { skip: databaseUrl === undefined
       );
       await assert.rejects(
         () => repository.saveDraft(actor, article.id, {
-          slug: unsafe.slug,
-          title: unsafe.title,
-          description: unsafe.description,
+          slug: confirmed.slug,
+          title: confirmed.title,
+          description: confirmed.description,
           categorySlug: "walks",
           content,
         }, coverless.revision + 1),

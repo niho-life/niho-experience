@@ -112,6 +112,15 @@ export type GuideMutationResponse = { readonly id: string; readonly revision: nu
 export type GuideCoverUploadResponse = {
   readonly asset: { readonly id: string; readonly width: number; readonly height: number };
 };
+export type GuideMediaAsset = {
+  readonly id: string;
+  readonly width: number;
+  readonly height: number;
+  readonly publicCredit?: string;
+  readonly webConfirmed: boolean;
+};
+export type GuideMediaAssetsResponse = { readonly assets: readonly GuideMediaAsset[] };
+export type GuideMediaRightsResponse = { readonly asset: GuideMediaAsset };
 export type GuidePublicationPreflightResponse = {
   readonly guide: EditorGuideArticle;
   readonly problems: readonly GuidePublicationProblem[];

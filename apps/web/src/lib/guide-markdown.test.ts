@@ -154,11 +154,19 @@ describe("guide photos", () => {
       {
         type: "figure", src: "/guides/gate.jpg", external: false, alt: "A gate in the rain",
         caption: [{ type: "text", value: "The gate, " }, { type: "em", children: [{ type: "text", value: "early" }] }, { type: "text", value: " in the day" }],
+        source: '![A gate in the rain](/guides/gate.jpg "The gate, *early* in the day")',
       },
-      { type: "figure", src: "https://images.example.com/s.jpg", external: true, alt: "Steps", caption: null },
+      { type: "figure", src: "https://images.example.com/s.jpg", external: true, alt: "Steps", caption: null, source: "![Steps](https://images.example.com/s.jpg)" },
     ]);
-    expect(parseGuideMarkdown("![Snake\\_case \\[sic\\]](/a.jpg)")).toEqual([{ type: "figure", src: "/a.jpg", external: false, alt: "Snake_case [sic]", caption: null }]);
+    expect(parseGuideMarkdown("![Snake\\_case \\[sic\\]](/a.jpg)")).toEqual([{ type: "figure", src: "/a.jpg", external: false, alt: "Snake_case [sic]", caption: null, source: "![Snake\\_case \\[sic\\]](/a.jpg)" }]);
     expect(guideFigureSources(parseGuideMarkdown("![A](/a.jpg)\n\nText\n\n![B](/sample/b.jpg)"))).toEqual(["/a.jpg", "/sample/b.jpg"]);
+  });
+
+  it("accepts only strict UUID v4 guide asset targets", () => {
+    const id = "00000000-0000-4000-8000-000000000216";
+    const [figure] = parseGuideMarkdown(`![Synthetic](niho-guide-asset:${id})`);
+    expect(figure).toMatchObject({ type: "figure", assetId: id, src: `niho-guide-asset:${id}`, external: false });
+    expect(() => parseGuideMarkdown("![Synthetic](niho-guide-asset:not-a-uuid)")).toThrow(/valid guide asset/);
   });
 
   it.each([

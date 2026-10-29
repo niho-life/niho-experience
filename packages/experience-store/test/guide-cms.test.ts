@@ -6,6 +6,20 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
+  it("adds immutable figure rights and ordered publication slots in a forward migration", async () => {
+    const sql = await readFile(new URL("../migrations/0010_guide_body_media.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /public_credit text/);
+    assert.match(sql, /web_confirmed_at timestamptz/);
+    assert.match(sql, /web_confirmed_by_niho_user_id text/);
+    assert.match(sql, /ADD PRIMARY KEY \(publication_id, slot\)/);
+    assert.match(sql, /placement = 'COVER' AND slot = 0/);
+    assert.match(sql, /placement = 'FIGURE' AND slot BETWEEN 1 AND 10/);
+    assert.match(sql, /guide publication media snapshots are immutable/);
+    assert.doesNotMatch(sql, /https?:\/\/|signed_url|gcs_url|object_key\s+text/i);
+  });
+
   it("adds private media assets and immutable publication snapshots without editing the CMS base migration", async () => {
     const sql = await readFile(new URL("../migrations/0009_guide_media.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -76,6 +90,29 @@ describe("guide content boundary", () => {
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "29/10/2026" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "2026-02-30" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", author: { name: "A", role: "B" } }), StoreValidationError);
+  });
+
+  it("rejects non-canonical and more than ten body figure placements before querying", async () => {
+    const repository = new GuideRepository({} as Pool);
+    const base = {
+      id: "synthetic-figures",
+      slug: "synthetic-figures",
+      subject: { kind: "WRITER" as const },
+      title: "Synthetic figures",
+    };
+    await assert.rejects(
+      () => repository.createArticle({ nihoUserId: "writer-synthetic" }, {
+        ...base,
+        content: { markdown: "![External](https://example.test/photo.jpg)" },
+      }),
+      StoreValidationError,
+    );
+    const figures = Array.from({ length: 11 }, (_, index) =>
+      `![Synthetic ${index}](niho-guide-asset:00000000-0000-4000-8000-${String(index).padStart(12, "0")})`).join("\n\n");
+    await assert.rejects(
+      () => repository.createArticle({ nihoUserId: "writer-synthetic" }, { ...base, content: { markdown: figures } }),
+      /at most 10/,
+    );
   });
 });
 

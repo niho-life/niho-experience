@@ -148,12 +148,15 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const [publicationBusy, setPublicationBusy] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverOperationCompleted, setCoverOperationCompleted] = useState(0);
+  const [bodyMediaBusy, setBodyMediaBusy] = useState(false);
+  const [bodyMediaOperationCompleted, setBodyMediaOperationCompleted] = useState(0);
   const [coverMessage, setCoverMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [coverPreviewVersion, setCoverPreviewVersion] = useState(0);
   const navigationGuardRef = useRef(false);
   const savingRef = useRef(false);
   const publicationBusyRef = useRef(false);
   const coverBusyRef = useRef(false);
+  const bodyMediaBusyRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -218,12 +221,16 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   }, [load]);
 
   useEffect(() => {
-    navigationGuardRef.current = dirty || saving || publicationBusy || coverBusy;
-  }, [coverBusy, dirty, publicationBusy, saving]);
+    navigationGuardRef.current = dirty || saving || publicationBusy || coverBusy || bodyMediaBusy;
+  }, [bodyMediaBusy, coverBusy, dirty, publicationBusy, saving]);
 
   useEffect(() => {
     if (!coverBusy) coverBusyRef.current = false;
   }, [coverBusy, coverOperationCompleted]);
+
+  useEffect(() => {
+    if (!bodyMediaBusy) bodyMediaBusyRef.current = false;
+  }, [bodyMediaBusy, bodyMediaOperationCompleted]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -279,7 +286,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const save = async (expectedRevisionOverride?: number) => {
-    if (savingRef.current || publicationBusyRef.current || coverBusyRef.current || (conflict && expectedRevisionOverride === undefined) || unsupported) return;
+    if (savingRef.current || publicationBusyRef.current || coverBusyRef.current || bodyMediaBusyRef.current || (conflict && expectedRevisionOverride === undefined) || unsupported) return;
     setSaveMessage(null);
     if (!form.title.trim()) {
       setSaveMessage({ text: "タイトルを入力してください。", error: true });
@@ -394,7 +401,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const uploadCover = async (file: File | undefined) => {
-    if (!articleId || !file || coverBusyRef.current || savingRef.current || publicationBusyRef.current) return;
+    if (!articleId || !file || coverBusyRef.current || bodyMediaBusyRef.current || savingRef.current || publicationBusyRef.current) return;
     coverBusyRef.current = true;
     setCoverBusy(true);
     setCoverMessage(null);
@@ -429,7 +436,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const revokeCover = async () => {
-    if (!articleId || !form.coverAssetId || revision === null || coverBusyRef.current || savingRef.current || publicationBusyRef.current) return;
+    if (!articleId || !form.coverAssetId || revision === null || coverBusyRef.current || bodyMediaBusyRef.current || savingRef.current || publicationBusyRef.current) return;
     if (!window.confirm("この写真の掲載権利を取り消しますか？公開中の版からも直ちに外れます。")) return;
     coverBusyRef.current = true;
     setCoverBusy(true);
@@ -476,7 +483,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const loadPublicationPreflight = async (message?: string) => {
-    if (!articleId || revision === null || coverBusyRef.current) return;
+    if (!articleId || revision === null || coverBusyRef.current || bodyMediaBusyRef.current) return;
     setPublicationOpen(true);
     if (dirty) {
       setPublicationState({ status: "error", text: "プレビューまたは公開の前に、変更を保存してください。" });
@@ -516,6 +523,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
       || dirty
       || publicationBusyRef.current
       || coverBusyRef.current
+      || bodyMediaBusyRef.current
       || publicationState?.status !== "ready"
       || publicationState.problems.length > 0
     ) return;
@@ -555,7 +563,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   };
 
   const stopPublication = async () => {
-    if (!articleId || revision === null || dirty || publicationBusyRef.current || coverBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
+    if (!articleId || revision === null || dirty || publicationBusyRef.current || coverBusyRef.current || bodyMediaBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
     if (!window.confirm("この記事の公開を停止しますか？公開済みの版は履歴に残ります。")) return;
     publicationBusyRef.current = true;
     navigationGuardRef.current = true;
@@ -584,12 +592,12 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
 
   const conflicted = conflict !== null;
   const saveLabel = mode === "new" ? (saving ? "作成中" : "下書きを作成") : (saving ? "保存中" : "保存");
-  const saveDisabled = saving || publicationBusy || coverBusy || conflicted || (mode === "new" && subjects.length === 0);
+  const saveDisabled = saving || publicationBusy || coverBusy || bodyMediaBusy || conflicted || (mode === "new" && subjects.length === 0);
   const publicationNeedsSave = guidePublicationNeedsSave(dirty, revision);
   const publicationStatus = savedGuide
     ? guidePublicationStatusLabel(savedGuide.status, savedGuide.currentPublication?.visibility)
     : "未公開";
-  const editorBusy = saving || publicationBusy || coverBusy;
+  const editorBusy = saving || publicationBusy || coverBusy || bodyMediaBusy;
 
   return (
     <>
@@ -612,7 +620,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
         ) : unsupported ? (
           <section className="editor-state-panel" role="alert">
             <h1>この本文はここでは編集できません</h1>
-            <p>表・囲み・写真・重なった文字装飾などを含む記事は、内容を失わないため初期版の編集対象外です。</p>
+            <p>表・囲み・caption付き写真・重なった文字装飾などを含む記事は、内容を失わないためこの編集画面の対象外です。</p>
             <a href="/editor/guides" className="editor-secondary-button">記事一覧へ</a>
           </section>
         ) : mode === "new" && subjects.length === 0 ? (
@@ -642,7 +650,28 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
               <GuideRichTextEditor
                 key={editorKey}
                 initialContent={editorDocument}
-                disabled={editorBusy}
+                articleId={articleId}
+                revision={revision}
+                disabled={saving || publicationBusy || coverBusy}
+                onMediaBusyChange={(busy) => {
+                  if (busy) {
+                    if (savingRef.current || publicationBusyRef.current || coverBusyRef.current || bodyMediaBusyRef.current) return false;
+                    bodyMediaBusyRef.current = true;
+                    navigationGuardRef.current = true;
+                  }
+                  setBodyMediaBusy(busy);
+                  if (!busy) setBodyMediaOperationCompleted((count) => count + 1);
+                  return true;
+                }}
+                onRevoked={(guide, assetId) => {
+                  setSavedGuide(guide);
+                  setRevision(guide.revision);
+                  setForm((current) => current.coverAssetId === assetId
+                    ? { ...current, coverAssetId: "", coverAlt: "", coverCredit: "", coverWebConfirmed: false }
+                    : current);
+                  setPublicationState(null);
+                }}
+                onRevisionConflict={() => void fetchLatestForConflict()}
                 onChange={(next) => {
                   setEditorDocument(next);
                   markDirty();

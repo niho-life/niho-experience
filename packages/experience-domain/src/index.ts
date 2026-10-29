@@ -36,3 +36,4 @@ export {
   occurrenceIdFor,
 } from "#schedule";
 export { evaluateAvailability, intervalsOverlap } from "#availability";
+export { GUIDE_ASSET_URI_PREFIX, GUIDE_ASSET_UUID_V4, parseGuideAssetFigureLine } from "./guide-asset-figure.ts";

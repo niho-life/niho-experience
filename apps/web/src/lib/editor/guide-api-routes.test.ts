@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     commitPublication: vi.fn(),
     stopPublication: vi.fn(),
     listActiveCategories: vi.fn(),
+    listReadyMediaAssets: vi.fn(),
     listWritableSubjects: vi.fn(),
   },
 }));
@@ -106,6 +107,7 @@ beforeEach(() => {
   });
   mocks.repository.stopPublication.mockResolvedValue({ ...publishableArticle, status: "STOPPED", revision: 4 });
   mocks.repository.listActiveCategories.mockResolvedValue([{ slug: "walks", labelEn: "Walks", labelJa: "散歩", displayOrder: 10 }]);
+  mocks.repository.listReadyMediaAssets.mockResolvedValue([]);
   mocks.repository.listWritableSubjects.mockResolvedValue([{ kind: "WRITER" }]);
 });
 

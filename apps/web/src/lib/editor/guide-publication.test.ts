@@ -33,6 +33,23 @@ describe("guide publication validation", () => {
     expect(guidePublicationProblems(validArticle, new Set(["walks"]))).toEqual([]);
   });
 
+  it("points authors to missing or unconfirmed body photos before publication", () => {
+    const assetId = "00000000-0000-4000-8000-000000000216";
+    const article = {
+      ...validArticle,
+      content: { ...validArticle.content, markdown: `## Photo\n\n![Synthetic photo](niho-guide-asset:${assetId})` },
+    };
+    expect(guidePublicationProblems(article, new Set(["walks"]), [])).toContainEqual({
+      field: "body", message: expect.stringContaining("利用できなくなった"),
+    });
+    expect(guidePublicationProblems(article, new Set(["walks"]), [{
+      id: assetId, width: 100, height: 100, webConfirmed: false,
+    }])).toContainEqual({ field: "body", message: expect.stringContaining("掲載許諾") });
+    expect(guidePublicationProblems(article, new Set(["walks"]), [{
+      id: assetId, width: 100, height: 100, publicCredit: "Synthetic", webConfirmed: true,
+    }])).toEqual([]);
+  });
+
   it("returns compact field-keyed corrections for incomplete or stale content", () => {
     const problems = guidePublicationProblems({
       ...validArticle,
@@ -91,8 +108,9 @@ describe("guide publication validation", () => {
     });
     expect(parseGuideDraftPreview("## Photo\n\n![Synthetic](/photo.jpg)")).toEqual({
       ok: false,
-      message: expect.stringContaining("写真"),
+      message: expect.stringContaining("差し替え"),
     });
+    expect(parseGuideDraftPreview("## Photo\n\n![Synthetic](niho-guide-asset:00000000-0000-4000-8000-000000000216)")).toMatchObject({ ok: true });
   });
 });
 
