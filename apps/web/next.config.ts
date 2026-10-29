@@ -87,6 +87,9 @@ const nextConfig: NextConfig = {
       // explicit so changes in path-pattern handling cannot accidentally leave /admin public.
       { source: "/admin", headers: hostConsoleHeaders },
       { source: "/admin/:path+", headers: hostConsoleHeaders },
+      // The editor is private even while its rollout flag keeps every route at 404.
+      { source: "/editor", headers: hostConsoleHeaders },
+      { source: "/editor/:path+", headers: hostConsoleHeaders },
     ];
   },
 };
