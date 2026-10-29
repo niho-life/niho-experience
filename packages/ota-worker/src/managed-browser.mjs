@@ -1,7 +1,16 @@
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { chromium } from "playwright-core";
 import { spawnOwned } from "./owned-process.mjs";
+import {
+  beginManagedSession,
+  markManagedSessionClean,
+  releaseManagedSessionLock,
+  validateSessionPolicy,
+} from "./managed-session-journal.mjs";
 import { ContractError } from "./validation.mjs";
+
+const MAX_SANITIZE_PAGES = 16;
+const SANITIZE_TIMEOUT_MS = 1_000;
 
 async function privateProfile(path) {
   await mkdir(path, { recursive: true, mode: 0o700 });
@@ -64,8 +73,103 @@ export async function stopManagedBrowser(browser, owned, closeGraceMs = 1_000, n
   return owned.stop();
 }
 
-export async function startManagedBrowser({ executablePath, userDataDir, headless = false }) {
-  await privateProfile(userDataDir);
+function remaining(deadline) {
+  return Math.max(1, deadline - Date.now());
+}
+
+async function bounded(operation, deadline) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new ContractError("SESSION_SANITIZE_TIMEOUT")), remaining(deadline));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function trackManagedSessionPages(context) {
+  let unexpectedPage = false;
+  let creatingPage = false;
+  let expectedPage;
+  let creationEvents = [];
+  const onPage = (page) => {
+    if (creatingPage) creationEvents.push(page);
+    else if (page !== expectedPage) unexpectedPage = true;
+  };
+  context.on("page", onPage);
+  return Object.freeze({
+    get unexpectedPage() { return unexpectedPage; },
+    async createExpected(operation) {
+      creatingPage = true;
+      creationEvents = [];
+      let page;
+      try { page = await operation(); expectedPage = page; }
+      finally {
+        creatingPage = false;
+        if (!page || creationEvents.some((candidate) => candidate !== page)) unexpectedPage = true;
+      }
+      return page;
+    },
+    stop() { try { context.off("page", onPage); } catch {} },
+  });
+}
+
+async function sanitizeManagedSession(context, timeoutMs = SANITIZE_TIMEOUT_MS, maxPages = MAX_SANITIZE_PAGES, existingTracker) {
+  const deadline = Date.now() + timeoutMs;
+  let tracker = existingTracker;
+  let ownsTracker = false;
+  try {
+    if (!tracker) { tracker = trackManagedSessionPages(context); ownsTracker = true; }
+    await bounded(() => context.route("**/*", (route) => route.abort("blockedbyclient")), deadline);
+    let pages = context.pages();
+    if (pages.length > maxPages) return false;
+    if (pages.length === 0) {
+      pages = [await tracker.createExpected(() => bounded(() => context.newPage(), deadline))];
+    }
+    for (const page of pages) {
+      await bounded(() => page.goto("about:blank", { waitUntil: "commit", timeout: remaining(deadline) }), deadline);
+    }
+    for (const page of pages.slice(1)) {
+      await bounded(() => page.close({ runBeforeUnload: false }), deadline);
+    }
+    await bounded(() => new Promise((resolve) => setImmediate(resolve)), deadline);
+    const finalPages = context.pages();
+    if (tracker.unexpectedPage || finalPages.length !== 1 || finalPages[0].url() !== "about:blank") return false;
+    await bounded(() => new Promise((resolve) => setImmediate(resolve)), deadline);
+    return !tracker.unexpectedPage && context.pages().length === 1 && context.pages()[0] === finalPages[0]
+      && finalPages[0].url() === "about:blank";
+  } catch {
+    return false;
+  } finally {
+    if (ownsTracker) tracker?.stop();
+  }
+}
+
+async function stopManagedSessionBrowser(browser, context, owned, session, options = {}) {
+  let tracker;
+  try { tracker = trackManagedSessionPages(context); } catch {}
+  const sanitized = tracker ? await sanitizeManagedSession(
+    context, options.sanitizeTimeoutMs ?? SANITIZE_TIMEOUT_MS, options.maxPages ?? MAX_SANITIZE_PAGES, tracker,
+  ).catch(() => false) : false;
+  const stopped = await stopManagedBrowser(
+    browser,
+    owned,
+    options.closeGraceMs,
+    options.naturalStopMs,
+  ).catch(() => false);
+  const noLatePage = tracker ? !tracker.unexpectedPage : false;
+  tracker?.stop();
+  if (!stopped) return false;
+  if (sanitized && noLatePage) await markManagedSessionClean(session).catch(() => {});
+  await releaseManagedSessionLock(session).catch(() => false);
+  return true;
+}
+
+function managedBrowserArguments(userDataDir, headless, sessionEnabled, restore) {
   const args = [
     `--user-data-dir=${userDataDir}`,
     "--remote-debugging-address=127.0.0.1",
@@ -79,15 +183,28 @@ export async function startManagedBrowser({ executablePath, userDataDir, headles
     "--disable-features=OptimizationHints,Translate,ServiceWorker",
     "about:blank",
   ];
+  // The attestation covers Default. Do not let Local State select another
+  // profile before the network guard has been attached.
+  if (sessionEnabled) args.splice(args.length - 1, 0, "--disable-extensions", "--profile-directory=Default");
+  if (restore) args.splice(args.length - 1, 0, "--restore-last-session");
   if (headless) args.unshift("--headless=new", "--disable-gpu");
-  const owned = spawnOwned(executablePath, args, { stdio: ["ignore", "ignore", "pipe"], env: {
-    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-    HOME: process.env.HOME,
-    TMPDIR: process.env.TMPDIR ?? "/tmp",
-    LANG: "en_US.UTF-8",
-  } });
+  return args;
+}
+
+export async function startManagedBrowser({ executablePath, userDataDir, headless = false, sessionPolicy = "none" }) {
+  validateSessionPolicy(sessionPolicy);
+  await privateProfile(userDataDir);
+  const session = sessionPolicy === "none" ? null : await beginManagedSession(userDataDir, sessionPolicy);
+  const args = managedBrowserArguments(userDataDir, headless, session !== null, session?.restore === true);
+  let owned;
   let browser;
   try {
+    owned = spawnOwned(executablePath, args, { stdio: ["ignore", "ignore", "pipe"], env: {
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+      HOME: process.env.HOME,
+      TMPDIR: process.env.TMPDIR ?? "/tmp",
+      LANG: "en_US.UTF-8",
+    } });
     const endpoint = await waitForEndpoint(owned);
     owned.child.stderr.resume();
     browser = await chromium.connectOverCDP(endpoint, { timeout: 10_000 });
@@ -99,12 +216,25 @@ export async function startManagedBrowser({ executablePath, userDataDir, headles
       browser,
       context,
       async stop() {
-        stopPromise ??= stopManagedBrowser(browser, owned);
+        stopPromise ??= session
+          ? stopManagedSessionBrowser(browser, context, owned, session)
+          : stopManagedBrowser(browser, owned);
         return stopPromise;
       },
     });
   } catch (error) {
-    if (!await stopManagedBrowser(browser, owned).catch(() => false)) throw new ContractError("PROCESS_STOP_UNCONFIRMED");
+    const stopped = owned ? await stopManagedBrowser(browser, owned).catch(() => false) : true;
+    if (session && stopped) await releaseManagedSessionLock(session).catch(() => false);
+    if (!stopped) throw new ContractError("PROCESS_STOP_UNCONFIRMED");
     throw error;
   }
 }
+
+export const managedBrowserInternals = Object.freeze({
+  managedBrowserArguments,
+  trackManagedSessionPages,
+  sanitizeManagedSession,
+  stopManagedSessionBrowser,
+  MAX_SANITIZE_PAGES,
+  SANITIZE_TIMEOUT_MS,
+});
