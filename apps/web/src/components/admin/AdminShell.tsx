@@ -19,7 +19,7 @@ export function AdminShell({ actorName, unreadCount = null, children }: { actorN
           <nav aria-label="管理メニュー" className="order-3 col-span-2 flex min-w-0 gap-1 overflow-x-auto sm:order-none sm:col-auto sm:flex-1">
             <Link href="/admin/bookings" className={`${navClass} ${bookingsCurrent ? "bg-sand" : ""}`} aria-current={bookingsCurrent ? "page" : undefined}>予約支援</Link>
             <Link href="/admin/preparations" className={`${navClass} ${preparationsCurrent ? "bg-sand" : ""}`} aria-current={preparationsCurrent ? "page" : undefined}>掲載準備</Link>
-            <Link href="/admin/operators" className={`${navClass} ${operatorsCurrent ? "bg-sand" : ""}`} aria-current={operatorsCurrent ? "page" : undefined}>商品運営者</Link>
+            <Link href="/admin/operators" className={`${navClass} ${operatorsCurrent ? "bg-sand" : ""}`} aria-current={operatorsCurrent ? "page" : undefined}>運営者</Link>
             <Link href="/admin/notifications" className={`${navClass} ${notificationsCurrent ? "bg-sand" : ""}`} aria-current={notificationsCurrent ? "page" : undefined}>
               通知
               {unreadCount !== null && unreadCount > 0 ? <span aria-label={`未読${unreadCount}件`} aria-live="polite" className="inline-flex min-w-5 items-center justify-center rounded-full bg-warn px-1.5 text-[0.6875rem] leading-5 text-white">{unreadCount}</span> : null}
