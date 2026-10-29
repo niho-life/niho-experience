@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildFixtureExperiences } from "@niho-experience/api-client/mock";
+import { buildFixtureExperiences, buildPilotExperiences } from "@niho-experience/api-client/mock";
+import { kamakuraAfter4Pm } from "@/content/guides/kamakura-after-4-pm";
 import { PUBLISHED_GUIDES, SAMPLE_GUIDES, guideRegistry, type Guide } from "@/content/guides";
 import { formatGuideDate, guideAlternates, guideCtaInsertAfter, guideOutline, guideProblems, guidePublishProblems, guideReadMinutes, guideRegistryProblems, guidesForExperience, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
 import { parseGuideMarkdown } from "./guide-markdown";
@@ -27,6 +28,11 @@ describe("registered guides", () => {
     const listed = PUBLISHED_GUIDES.filter((guide) => !guide.unlisted);
     expect(guideRegistry(false)).toEqual(listed);
     expect(guideRegistry(true)).toEqual([...listed, ...SAMPLE_GUIDES]);
+  });
+
+  it("selects the dinner CTA in both the pilot preview and the current live catalog", () => {
+    expect(listedExperienceSlugs(kamakuraAfter4Pm, buildPilotExperiences())).toEqual(["kamakura-community-dinner"]);
+    expect(listedExperienceSlugs(kamakuraAfter4Pm, [{ slug: "community-dinner-with-locals" }])).toEqual(["community-dinner-with-locals"]);
   });
 
   it("samples are marked as samples, point at synthetic experiences, and published guides are not samples", () => {

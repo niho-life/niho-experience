@@ -16,7 +16,7 @@ export const kamakuraAfter4Pm: Guide = {
   updatedAt: "2026-10-29",
   checkedAt: "2026-10-29",
   readMinutes: 4,
-  relatedExperienceSlugs: ["community-dinner-with-locals", "kamakura-coffee-roasting"],
+  relatedExperienceSlugs: ["community-dinner-with-locals", "kamakura-community-dinner"],
   relatedGuideSlugs: [],
   faq: [
     {
@@ -46,7 +46,7 @@ The [Enoden](https://www.enoden.co.jp/en/) connects Kamakura and Fujisawa, with 
 
 ## Stay for dinner
 
-If you would like to spend the evening around a shared table, see the current [Kamakura Community Dinner with Locals](/experiences/community-dinner-with-locals) listing. Its live page is the place to check dates, the format of the evening and any booking conditions. Make sure the listing answers your questions about food and accessibility before booking.
+If you would like to spend the evening around a shared table, check the [available experiences](/experiences). When Kamakura Community Dinner with Locals is listed, its current page is the place to check dates, the format of the evening and any booking conditions. Make sure the listing answers your questions about food and accessibility before booking.
 
 ## Plan the train home
 
