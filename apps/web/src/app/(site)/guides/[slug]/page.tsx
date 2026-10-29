@@ -22,7 +22,7 @@ type Props = { params: Promise<{ slug: string }>; searchParams: Promise<SearchPa
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const found = await findGuide((await params).slug);
   if (!found) notFound();
-  const { guide, draft } = found;
+  const { guide, draft, unlisted } = found;
   const canonical = `${config.siteUrl}/guides/${guide.slug}`;
   const base = publicMetadata(guide.title, guide.description, canonical);
   // Only a hero whose rights cover sharing becomes the share image (docs/seo.md).
@@ -38,8 +38,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       publishedTime: guide.publishedAt, modifiedTime: guide.updatedAt, authors: [guide.author.name], images,
     },
     twitter: { card: "summary", title: guide.title, description: guide.description, images: image ? [image] : [] },
-    // A draft (mock preview only) is never indexed, whatever the deployment's indexing setting.
-    ...(draft ? { robots: { index: false, follow: false } } : {}),
+    // Drafts and direct-link editorial previews stay out of search, even if site indexing opens later.
+    ...(draft || unlisted ? { robots: { index: false, follow: false } } : {}),
   };
 }
 
@@ -50,7 +50,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function GuidePage({ params, searchParams }: Props) {
   const found = await findGuide((await params).slug);
   if (!found) notFound();
-  const { guide, draft } = found;
+  const { guide, draft, unlisted } = found;
   const query = await searchParams;
   const blocks = parseGuideMarkdown(guide.body);
   const outline = guideOutline(blocks);
@@ -68,8 +68,8 @@ export default async function GuidePage({ params, searchParams }: Props) {
 
   return (
     <>
-      <JsonLd data={guideArticleJsonLd(guide, config.siteUrl, SITE_NAME)} />
-      <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }, { name: guide.title, path: `/guides/${guide.slug}` }])} />
+      {!unlisted ? <JsonLd data={guideArticleJsonLd(guide, config.siteUrl, SITE_NAME)} /> : null}
+      {!unlisted ? <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }, { name: guide.title, path: `/guides/${guide.slug}` }])} /> : null}
       <article className="container-page pt-6 sm:pt-9">
         <div className="mx-auto max-w-[46rem]">
           {draft ? (
@@ -77,10 +77,13 @@ export default async function GuidePage({ params, searchParams }: Props) {
               <Notice tone="warn" title="Draft · not published · visible only in this preview" />
             </div>
           ) : null}
+          {unlisted ? (
+            <div className="mb-5">
+              <Notice tone="warn" title="Editorial preview · details are being checked · anyone with this link can view it" />
+            </div>
+          ) : null}
           <nav aria-label="Breadcrumb" className="text-sm text-muted">
-            <Link href="/guides" className="font-extrabold text-ink hover:underline">
-              Guides
-            </Link>
+            {unlisted ? <Link href="/" className="font-extrabold text-ink hover:underline">NIHO Experience</Link> : <Link href="/guides" className="font-extrabold text-ink hover:underline">Guides</Link>}
             <span aria-hidden> / </span>
             <span aria-current="page">{pillarLabel}</span>
           </nav>
@@ -88,7 +91,7 @@ export default async function GuidePage({ params, searchParams }: Props) {
             <p className="eyebrow">{pillarLabel}</p>
             <h1 className="mt-1.5 text-[2.125rem] leading-[1.1] sm:text-[2.875rem]">{guide.title}</h1>
             <p className="mt-4 text-[0.9375rem] text-muted">
-              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role} · Published{" "}
+              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role} · {unlisted ? "Previewed" : "Published"}{" "}
               <time dateTime={guide.publishedAt}>{formatGuideDate(guide.publishedAt)}</time> · Updated{" "}
               <time dateTime={guide.updatedAt}>{formatGuideDate(guide.updatedAt)}</time> · {guideReadMinutes(guide)} min read
             </p>

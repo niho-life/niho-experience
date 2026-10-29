@@ -38,6 +38,8 @@ export type GuideTranslation = Readonly<{ title: string; description: string; bo
 export type Guide = Readonly<{
   /** URL segment: `/guides/{slug}`. Lower-case letters, digits and hyphens. Never changed once published. */
   slug: string;
+  /** A public, direct-link editorial preview. Keep it out of navigation and sitemap, and always emit noindex. */
+  unlisted?: true;
   /** The h1, `<title>` and `Article.headline` (110 characters at most). */
   title: string;
   /** The meta description and the lead under the title (160 characters at most). */
