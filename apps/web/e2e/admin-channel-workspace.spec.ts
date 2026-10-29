@@ -60,6 +60,7 @@ test("unknown resource save can be retried inside its modal with the identical c
   await stub(page, async (route, body) => {
     posts.push(body);
     if (posts.length === 1) await route.abort("connectionreset");
+    else if (posts.length === 2) await route.fulfill({ status: 401, json: { error: "unauthenticated" } });
     else await route.fulfill({ json: { receipt: { version: 2 } } });
   });
   await page.goto("/admin/channels");
@@ -69,10 +70,15 @@ test("unknown resource save can be retried inside its modal with the identical c
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog.getByText("保存結果を確認できません。", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "やめる", exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel("名前")).toBeDisabled();
+  await dialog.getByRole("button", { name: "結果を確認", exact: true }).click();
+  await expect(dialog.getByRole("link", { name: "ログイン", exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("名前")).toBeDisabled();
   await dialog.getByRole("button", { name: "結果を確認", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  expect(posts).toHaveLength(2);
+  expect(posts).toHaveLength(3);
   expect(posts[1]).toEqual(posts[0]);
+  expect(posts[2]).toEqual(posts[0]);
   expect(posts[0]).toMatchObject({ action: "saveResource", expectedVersion: 1, resource: { id: "room", kind: "VENUE", displayName: "変更後の会場" } });
 });
 

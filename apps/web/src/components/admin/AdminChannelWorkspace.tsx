@@ -90,7 +90,7 @@ function WorkspaceDialog({ title, busy, submitLabel, onClose, onSubmit, feedback
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pt-4 pb-4 md:px-5 md:pt-5">
         <h2 id="channel-workspace-dialog-title" className="text-[0.9375rem] font-extrabold">{title}</h2>
         {feedback}
-        {children}
+        <fieldset disabled={busy} className="contents">{children}</fieldset>
       </div>
       <div className="flex flex-wrap justify-end gap-2 border-t border-line px-4 py-3 md:px-5">
         <button ref={cancel} type="button" disabled={busy} onClick={onClose} className={consoleButtonClass("secondary", "md", "min-h-11")}>やめる</button>
@@ -113,6 +113,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
   const [pending, setPending] = useState<PendingMutation | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
   const request = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null });
   const busyRef = useRef(false);
   useAdminLeaveProtection(editor !== null || pending !== null, busy || pending !== null);
@@ -155,13 +156,18 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
     return () => { window.clearTimeout(timer); tracker.controller?.abort(); };
   }, [loadProvider, providerId]);
 
-  const mutate = useCallback(async (next: PendingMutation) => {
+  const mutate = useCallback(async (next: PendingMutation, retry = false) => {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setConflict(false); setMessage(null); setPending(next);
+    busyRef.current = true; setBusy(true); setConflict(false); setMessage(null); setNeedsSignIn(false); setPending(next);
     try {
       const response = await fetch(next.endpoint, {
         method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(next.body),
       });
+      if (retry && response.status >= 400 && response.status < 500) {
+        setNeedsSignIn(response.status === 401 || response.status === 403);
+        setMessage("保存結果を確認できません。ログインと権限を確認してください。");
+        return;
+      }
       if (response.status === 409) {
         setPending(null); setConflict(true); setMessage("別の変更があります。入力は残っています。");
         return;
@@ -188,7 +194,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
   const selectedProduct = editor?.kind === "inventory" ? editor.product : undefined;
 
   const feedback = <>
-{message ? <div className="flex flex-wrap items-center gap-2 rounded-xl bg-sand px-3 py-2 text-sm font-bold" role="status"><span className="min-w-0 flex-1">{message}</span>{pending ? <button type="button" disabled={busy} className={consoleButtonClass("secondary", "md", "min-h-11")} onClick={() => void mutate(pending)}>結果を確認</button> : null}</div> : null}
+{message ? <div className="flex flex-wrap items-center gap-2 rounded-xl bg-sand px-3 py-2 text-sm font-bold" role="status"><span className="min-w-0 flex-1">{message}</span>{needsSignIn ? <a href="/admin" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline underline-offset-4">ログイン</a> : null}{pending ? <button type="button" disabled={busy} className={consoleButtonClass("secondary", "md", "min-h-11")} onClick={() => void mutate(pending, true)}>結果を確認</button> : null}</div> : null}
     {conflict ? <button type="button" disabled={busy} onClick={() => void loadProvider(providerId)} className={consoleButtonClass("secondary", "md", "min-h-11")}>一覧を再読込</button> : null}
   </>;
 
