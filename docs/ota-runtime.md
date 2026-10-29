@@ -1,6 +1,6 @@
 # OTA channel runtime
 
-対象: #194、#196、#197、#198。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。この slice は基盤のみであり、共有在庫は[OTA共有在庫](ota-inventory.md)に追加した。product operator の招待・権限、外部予約取込、Googleへの枠制御出力、管理 UI は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
+対象: #194、#196、#197、#198、#234。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)に追加し、Host の開催枠詳細はこの read model を表示する。外部予約取込、Googleへの枠制御出力、Admin の運用 UI は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
 
 ## 既定で閉じるゲート
 
@@ -60,7 +60,9 @@ preflight は worker、assignment、lease/deadline、account active/delegation/r
 
 ## 公開する read model
 
-Admin の `/admin/api/channels` は action allowlist だけを受け、任意 query を中継しない。Host の `/host/calendar/channels?providerId=...` は `hostActor` と現在の experience membership を両方確認し、occurrence/site ごとの desired、observed、label、last verified、coarse error だけを返す。外部 account ID、worker、credential、private profile は返さず、product operator scope へ拡張しない。
+Admin の `/admin/api/channels` は action allowlist だけを受け、任意 query を中継しない。Host の `/host/calendar/channels?providerId=...` は確立済みの `HostActor` を使い、`listCalendarProductsForActor` が許可した商品だけについて occurrence/site ごとの desired、observed、label、last verified、coarse error を返す。member は provider 内の許可範囲、product operator は自分の商品だけであり、人数・予約者・provider-wide の Google 情報を加えない。外部 account ID、worker、credential、private profile は返さない。
+
+`/host/calendar` はタブが表示中の間だけ20秒間隔でこの read model を読み、非表示時は停止する。provider・週・pollの切替では `AbortController` と sequence を併用し、古い応答を適用しない。UI は `label=SYNCED` のときだけ「反映済み」とし、古い `observed` や `lastVerifiedAtUtc` から成功を推定しない。`PENDING` は「反映待ち」、`UNVERIFIED` は「未確認」、`ERROR` と 403/503/通信断は「要確認」とする。flag OFF の404と状態0件を成功として表示しない。calendar mutation の保存ACKはこの外部反映表示と別に扱う。保存直後は旧い成功表示を外し、掲載先も読み直す。状態0件は「未確認」とし、掲載の有無を推測しない。
 
 ## 現時点の検証範囲
 
