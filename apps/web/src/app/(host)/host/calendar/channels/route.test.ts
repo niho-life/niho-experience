@@ -30,4 +30,11 @@ describe("host channel status", () => {
     expect((await GET(new Request("https://experience.example/host/calendar/channels?providerId=provider-a&productOperator=true"))).status).toBe(400);
     expect(mocks.actor).not.toHaveBeenCalled();
   });
+
+  it("keeps the read model closed when the channel flag is off", async () => {
+    mocks.enabled = false;
+    expect((await GET(new Request("https://experience.example/host/calendar/channels?providerId=provider-a"))).status).toBe(404);
+    expect(mocks.actor).not.toHaveBeenCalled();
+    expect(mocks.statuses).not.toHaveBeenCalled();
+  });
 });
