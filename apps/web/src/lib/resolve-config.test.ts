@@ -185,6 +185,27 @@ describe("guide drafts folder", () => {
   });
 });
 
+describe("public guide source", () => {
+  const database = {
+    EXPERIENCE_API_MODE: "http",
+    EXPERIENCE_GUIDE_PUBLIC_SOURCE: "database",
+    EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+    GUIDE_MEDIA_BUCKET: "synthetic-private-guide-media",
+  };
+
+  it("defaults to static and ignores the database source outside http mode", () => {
+    expect(resolveConfig({}).guidePublicSource).toBe("static");
+    expect(resolveConfig({ EXPERIENCE_GUIDE_PUBLIC_SOURCE: "database" }).guidePublicSource).toBe("static");
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUIDE_PUBLIC_SOURCE: "DATABASE" }).guidePublicSource).toBe("static");
+  });
+
+  it("opens database mode only with both server-side dependencies", () => {
+    expect(resolveConfig(database).guidePublicSource).toBe("database");
+    expect(() => resolveConfig({ ...database, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
+    expect(() => resolveConfig({ ...database, GUIDE_MEDIA_BUCKET: "" })).toThrow(/GUIDE_MEDIA_BUCKET/);
+  });
+});
+
 describe("editor console settings", () => {
   const configured = {
     EXPERIENCE_API_MODE: "http",

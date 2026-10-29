@@ -143,7 +143,7 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       });
       assert.equal(unlisted.indexable, false);
       assert.equal(unlisted.category.labelEn, "Food");
-      assert.deepEqual(unlisted.productLinks, [{ providerId: "provider-a", productId: "tea" }]);
+      assert.deepEqual(unlisted.productLinks, [{ providerId: "provider-a", productId: "tea", productSlug: "tea" }]);
       assert.equal((await store.listPublicArticles()).length, 0);
       assert.equal((await store.getPublicArticleBySlug(created.slug))?.title, "Synthetic guide");
 
@@ -196,7 +196,9 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         productLinks: [{ providerId: "provider-a", productId: "tea" }],
       });
       assert.equal(listed.publicationNumber, 2);
+      assert.equal(listed.firstPublishedAtUtc, unlisted.publishedAtUtc);
       assert.equal((await store.listPublicArticles()).length, 1);
+      assert.equal((await store.getPublicArticleBySlug(created.slug))?.firstPublishedAtUtc, unlisted.publishedAtUtc);
       await pool.query("UPDATE guide_categories SET label_en='Food and drink', active=false WHERE slug='food'");
       assert.equal((await store.getPublicArticleBySlug(created.slug))?.category.labelEn, "Food");
 
@@ -213,7 +215,19 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, []);
       await pool.query("UPDATE guide_writer_grants SET active=true WHERE niho_user_id='writer-a'");
       assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, [
-        { providerId: "provider-a", productId: "tea" },
+        { providerId: "provider-a", productId: "tea", productSlug: "tea" },
+      ]);
+      await pool.query(
+        `INSERT INTO experience_products (
+           provider_id, id, slug, status, public_title, content, currency, unit_amount,
+           cancellation_terms_ref, seller_niho_account_ref, stripe_connect_account_ref, seller_display_name
+         ) VALUES ('provider-b','same-slug','tea','PUBLISHED','Other synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic_b','Synthetic Seller')`,
+      );
+      assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, []);
+      assert.deepEqual((await store.listPublicArticles())[0]?.productLinks, []);
+      await pool.query("UPDATE experience_products SET slug='other-tea' WHERE provider_id='provider-b' AND id='same-slug'");
+      assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, [
+        { providerId: "provider-a", productId: "tea", productSlug: "tea" },
       ]);
       await pool.query(
         "UPDATE guide_product_link_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='writer-a'",
@@ -246,7 +260,7 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         visibility: "PUBLIC",
         productLinks: [{ providerId: "provider-a", productId: "tea" }],
       });
-      assert.deepEqual(hostPublication.productLinks, [{ providerId: "provider-a", productId: "tea" }]);
+      assert.deepEqual(hostPublication.productLinks, [{ providerId: "provider-a", productId: "tea", productSlug: "tea" }]);
       await pool.query(
         "UPDATE provider_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='host-a'",
       );

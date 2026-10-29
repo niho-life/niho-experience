@@ -11,6 +11,11 @@ export type GuideFaqItem = Readonly<{ question: string; answer: string }>;
 /** The five editorial shelves on `/guides`, in their fixed display order. Optional only for legacy preview drafts. */
 export type GuidePillar = "evenings" | "zazen" | "hands-on" | "planning" | "hosts";
 
+/** Admin-managed CMS category. It is intentionally separate from the five code-owned editorial pillars. */
+export type GuideCategory = Readonly<{ slug: string; label: string; displayOrder: number }>;
+
+export type GuidePublicFigure = Readonly<{ assetId: string; src: string; credit: string }>;
+
 export type GuideAuthor = Readonly<{
   /** The writer's real name as shown on the page. */
   name: string;
@@ -46,6 +51,8 @@ export type Guide = Readonly<{
   description: string;
   /** Required before publication. Legacy external drafts may omit it and stay in an unclassified preview shelf. */
   pillar?: GuidePillar;
+  /** Present only for database publications; static guides continue to use `pillar`. */
+  category?: GuideCategory;
   author: GuideAuthor;
   /** ISO dates (`YYYY-MM-DD`), shown on the page and in the structured data. */
   publishedAt: string;
@@ -65,5 +72,7 @@ export type Guide = Readonly<{
   /** Questions and answers shown as an h2 followed by native details/summary rows. No FAQPage structured data. */
   faq: readonly GuideFaqItem[];
   body: string;
+  /** Currently READY snapshot figures that the safe Markdown renderer may resolve. */
+  publicFigures?: readonly GuidePublicFigure[];
   translations?: Readonly<{ ja?: GuideTranslation }>;
 }>;

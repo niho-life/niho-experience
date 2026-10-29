@@ -46,6 +46,17 @@ function guideDraftsSetting(apiMode: "mock" | "http", value: string | undefined)
   return dir;
 }
 
+function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" {
+  if (apiMode !== "http" || env.EXPERIENCE_GUIDE_PUBLIC_SOURCE !== "database") return "static";
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) {
+    throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=database needs EXPERIENCE_DATABASE_URL in http mode");
+  }
+  if (!env.GUIDE_MEDIA_BUCKET?.trim()) {
+    throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=database needs GUIDE_MEDIA_BUCKET in http mode");
+  }
+  return "database";
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -103,6 +114,7 @@ export function resolveConfig(env: Env) {
   const adminOriginSetting = env.NIHO_EXPERIENCE_ADMIN_ORIGIN?.trim() ?? "";
   const editorSettings = resolveEditorConsoleSettings(apiMode, env);
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
+  const guidePublicSource = guidePublicSourceSetting(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
     ? assertAdminConsoleSettings(
@@ -131,6 +143,8 @@ export function resolveConfig(env: Env) {
     mockCatalog: env.MOCK_CATALOG === "pilot" ? "pilot" : "synthetic",
     // Unpublished guide drafts shown in the mock preview only (absolute path, outside git); null otherwise.
     guideDraftsDir,
+    // Public CMS reads are opt-in and HTTP-only. Database mode never falls back to code-backed guides.
+    guidePublicSource,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.
     indexingAllowed: env.SITE_INDEXING === "allow" && apiMode === "http",

@@ -25,6 +25,12 @@ export default async function GuidesPage() {
   const catalog = await guideCatalog();
   if (!hasGuidesPage(catalog)) notFound();
   const unclassified = catalog.guides.filter((guide) => !guide.pillar);
+  const categoriesBySlug = new Map<string, NonNullable<(typeof catalog.guides)[number]["category"]>>();
+  for (const guide of catalog.guides) {
+    if (guide.category && !categoriesBySlug.has(guide.category.slug)) categoriesBySlug.set(guide.category.slug, guide.category);
+  }
+  const categories = [...categoriesBySlug.values()]
+    .sort((a, b) => a.displayOrder - b.displayOrder || a.label.localeCompare(b.label));
   return (
     <div className="container-page pt-9 sm:pt-14">
       <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }])} />
@@ -39,7 +45,15 @@ export default async function GuidesPage() {
         </div>
       ) : null}
       <div className="mt-12 grid max-w-[46rem] gap-14">
-        {GUIDE_PILLARS.map((pillar) => {
+        {catalog.source === "database" ? categories.map((category) => {
+          const guides = catalog.guides.filter((guide) => guide.category?.slug === category.slug);
+          return (
+            <section key={category.slug} id={category.slug} aria-labelledby={`${category.slug}-heading`} className="scroll-mt-24">
+              <h2 id={`${category.slug}-heading`} className="mb-5 text-[2rem] sm:text-[2.375rem]">{category.label}</h2>
+              <GuideTeasers guides={guides} descriptions={false} />
+            </section>
+          );
+        }) : GUIDE_PILLARS.map((pillar) => {
           const guides = catalog.guides.filter((guide) => guide.pillar === pillar.key);
           return guides.length ? (
             <section key={pillar.key} id={pillar.key} aria-labelledby={`${pillar.key}-heading`} className="scroll-mt-24">
@@ -49,7 +63,7 @@ export default async function GuidesPage() {
             </section>
           ) : null;
         })}
-        {unclassified.length ? (
+        {catalog.source === "static" && unclassified.length ? (
           <section id="draft-previews" aria-labelledby="draft-previews-heading" className="scroll-mt-24">
             <p className="eyebrow">Preview only</p>
             <h2 id="draft-previews-heading" className="mb-5 mt-1 text-[2rem] sm:text-[2.375rem]">Drafts awaiting a pillar</h2>

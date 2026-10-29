@@ -1,6 +1,6 @@
 # Guide CMS の非公開写真
 
-[#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張する。公開 SSR と公開画像配信は #189 の切替対象であり、この段階では公開 media route は常に 404、公開 HTML は写真 URL を出さない。
+[#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張した。[#189](https://github.com/niho-life/niho-experience/issues/189) は公開SSRと公開画像配信を実装するが、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` まで既存の静的表示を維持し、公開 media route は404のままにする。
 
 ## データと権利の境界
 
@@ -26,12 +26,31 @@ editor を受け入れる候補 revision では、次を先に満たす。
 
 bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配信を接続するときも、現在の権利を再検査する server route を先に設計し、draft object keyを公開URLへ転用しない。
 
+## 公開SSRと画像配信（#189）
+
+- http modeで `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` を明示したときだけDB publicationを公開元にする。`EXPERIENCE_DATABASE_URL` または `GUIDE_MEDIA_BUCKET` が無ければ起動時に失敗し、静的記事・mock・ローカル画像へfallbackしない。flag off/mockは従来の静的記事とpreviewを維持する。
+- 一覧は現在のsealed `PUBLIC` publicationだけ、詳細は`PUBLIC`または直URLを知る`UNLISTED`だけを読む。draft、`STOPPED`、過去publicationは公開しない。database modeでは静的記事をunionしない。
+- `/api/public/guides/media/{assetId}` は匿名GETだけを持つ。現在`PUBLISHED`の記事のcurrent publicationにsnapshotされた、現在`READY`のassetだけをprivate bucketからJPEGとして返す。object key・bucket名・署名URLをレスポンスへ出さない。unknown、old publication、`REVOKED`は404、bucket/DB/read異常とbyte不一致は503とする。
+- JPEG応答は `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex` とする。HTML・metadata・sitemapもrequestごとにDBを読み、ISR、Nextの永続cache、CDN HTML/media cacheを使わない。React `cache` は同一request内の重複読取だけに使う。
+- coverと本文figureのURLはopaque asset IDのrouteだけ。Markdownの内部asset参照は現在READYのsnapshot placementと交差したものだけ解決し、取消直後の次requestで画像を消す。Web掲載確認をSNS/OG許諾へ拡張せず、DB写真はOG metadataと`Article.image`へ出さない。
+- 記事→体験はpublication linkの現在権限、現在`PUBLISHED` productと現在slugを再評価し、さらに旅行者向け公開catalogと交差する。体験→記事も同じ現在有効linkを持つ`PUBLIC` publicationだけを使う。
+
+## database flagを開く前のゲート
+
+1. `0005`、`0008`、`0009`、`0010`を含む全migrationをstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
+2. private bucketのUniform bucket-level access、Public access prevention、runtime SA限定IAM、`GUIDE_MEDIA_BUCKET`を確認する。bucket CORS、公開ACL、公開CDNは作らない。
+3. NIHO editor app-connect/auth（niho-app #19459/#19462）のstaging受入を完了し、writer/provider権限失効、公開、更新、停止、UNLISTEDを確認する。editorの有効化とpublic sourceの切替は別々に判断する。
+4. 合成記事でPUBLIC/UNLISTED/draft/STOPPED、category順、初回公開日と更新日、canonical/Article JSON-LD/noindex、home/list/detail/footer/sitemap、体験との双方向linkを確認する。静的記事がdatabase集合へ混ざらず、DB停止時に静的fallbackしないことも確認する。
+5. 合成JPEGでcover/本文、過去publication、権利取消直後の404、storage異常の503、全no-store header、HTML/JSON/logにobject keyが無いことを確認する。Cloudflareは`/guides*`、公開media route、HTML、sitemapをbypassする。
+
+切戻しは新しいrevisionで `EXPERIENCE_GUIDE_PUBLIC_SOURCE=static` に戻す。DB publication/assetを削除せず、editor flagや検索公開を同時に開閉したことにしない。
+
 ## 本文写真（#216）
 
 本文写真は `0010_guide_body_media.sql` 適用後に利用する。Markdown の新規写真形式は、行単独の `![English alt](niho-guide-asset:<uuid-v4>)` だけとする。本文が持つのは記事scopeの opaque asset ID、配置順、文脈依存の英語altだけで、object key・署名URL・公開クレジット・許諾記録は持たない。外部URL、`/sample/`、raw HTML、未知・別記事・`UPLOADING`・`REVOKED` assetは、storeを直接呼んでも保存・公開できない。1記事の配置は10か所以内で、同じassetを複数位置に置ける。
 
 editor は TipTap の atom `guideFigure` をカーソル位置へ置く。popover から記事専用写真をuploadまたは既存の `READY` assetから選び、英語alt・公開クレジット・Web掲載確認を設定する。画像は認証済み `private, no-store` routeだけで表示し、ブラウザへobject keyを返さない。既存の外部URL写真はネットから取得せず、原文を持つ unresolved node として表示する。明示的に内部assetへ差し替えるまで保存・公開を拒否し、失敗時も原文を画面内に保持する。
 
-公開transactionは article をlockしてから参照assetをUUID順にlockし、記事・作成者scope、`READY`、初回確認時に固定された公開クレジットとWeb掲載確認、非失効を再検査する。`guide_publication_media` は coverを `slot=0 / placement=COVER`、本文を `slot=1..10 / placement=FIGURE` として、alt・credit・順序をimmutable snapshotへ保存する。公開read modelはsnapshotと現在も `READY` の本文写真metadataだけを返すが、#189までは公開HTMLや公開画像routeへ接続しない。公開routeは引き続き404とする。
+公開transactionは article をlockしてから参照assetをUUID順にlockし、記事・作成者scope、`READY`、初回確認時に固定された公開クレジットとWeb掲載確認、非失効を再検査する。`guide_publication_media` は coverを `slot=0 / placement=COVER`、本文を `slot=1..10 / placement=FIGURE` として、alt・credit・順序をimmutable snapshotへ保存する。公開read modelはsnapshotと現在も `READY` の本文写真metadataだけを返す。#189のrouteは上記database flagのときだけ公開HTMLへ接続し、flag offでは404を維持する。
 
 本文写真の設定から「掲載権利を取り消す」を実行できる。権利取消ではobjectを物理削除せず、publication snapshotとMarkdownも監査・差替えのため残す。本文参照があればarticle revisionを進め、公開readからは直ちに非表示にする。以後の保存・再公開は差替えまで拒否する。通常の「記事から外す」はMarkdownから配置を削除するだけで、assetの権利取消ではない。coverの既存draft・snapshot・取消契約は維持する。
