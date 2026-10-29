@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { EN_STATIC_COPY_V1, HomeViewV1, type AssetBindingsV1, type DisplayImageV1, type DisplayVideoV1, type ExperienceCardModelV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { HomeFinder } from "@/components/HomeFinder";
 import { EmptyResults, ErrorState } from "@/components/States";
@@ -19,10 +18,11 @@ import { editorialOf, FEATURED_HOST, FEATURED_STORY, shortName, themeEntries, th
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
-import { GuideTeasers } from "@/components/GuideBlocks";
+import { HomeJournal } from "@/components/HomeJournal";
+import { buttonClass } from "@/components/ui";
 import { PUBLISHED_GUIDES } from "@/content/guides";
-import { guideCatalog } from "@/lib/guide-registry";
-import { formatGuideDate, guideReadMinutes } from "@/lib/guides";
+import { guideCatalog, hasGuidesPage } from "@/lib/guide-registry";
+import { homeJournal } from "@/lib/home-journal";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
 import { siteJsonLd } from "@/lib/structured-data";
 import { englishAlternates } from "@/lib/locale-metadata";
@@ -96,6 +96,7 @@ function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardMod
     strips: strips.map((strip) => ({ key: strip.theme.key, href: `/experiences/${strip.slug}`, verb: strip.theme.verb, name: strip.name, video: publishedVideo(assets, `home.strip.${strip.theme.key}` as keyof AssetBindingsV1, strip.video) })),
     stripsEyebrow: copy.text(strips.length === 1 ? "home.stripsEyebrowOne" : "home.stripsEyebrowMany", { countWord: numberWord(strips.length) }), banner: publishedVideo(assets, "home.banner", BANNER_VIDEO), hostFeature: host, figures,
     postcards: POSTCARDS.map((card, index) => ({ id: card.src, image: publishedImage(assets, (["home.postcard.crossing", "home.postcard.enoden", "home.postcard.buddha", "home.postcard.fuji", "home.postcard.bamboo"] as const)[index]!, card), place: card.place, rotate: card.rotate })), hostBand: publishedVideo(assets, "home.hostBand", HOST_BAND_VIDEO),
+    layout: "journal",
   };
 }
 
@@ -113,31 +114,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
     ? PUBLISHED_GUIDES.find((guide) => guide.slug === "kamakura-after-4-pm" && guide.unlisted)
     : undefined;
   const featuredGuide = homePreview ? guideCatalogResult.guides.find((guide) => guide.slug === homePreview.slug) ?? homePreview : null;
-  const homeGuides = guideCatalogResult.guides.filter((guide) => guide.slug !== featuredGuide?.slug).slice(0, 3);
-  const guideEntry = featuredGuide || homeGuides.length ? (
-    <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="home-guides-heading">
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div><p className="eyebrow">Local notes</p><h2 id="home-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">Guides from people who live here</h2></div>
-        {homeGuides.length ? <Link href="/guides" className="link-leaf shrink-0 text-sm">See all guides</Link> : null}
-      </div>
-      {featuredGuide ? (
-        <article className="grid gap-7 rounded-[var(--radius-card)] border border-line bg-sand p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] lg:items-center lg:gap-10 lg:p-10">
-          <div>
-            <p className="eyebrow">Evenings · {guideCatalogResult.draftSlugs.includes(featuredGuide.slug) ? "Draft preview" : "Editorial preview"}</p>
-            <h3 className="mt-2 max-w-[25ch] text-[1.75rem] leading-[1.15] sm:text-[2.25rem]">{featuredGuide.title}</h3>
-            <p className="mt-3 max-w-[38rem] text-ink-soft">{featuredGuide.description}</p>
-            <Link href={`/guides/${featuredGuide.slug}`} className="link-leaf mt-5 inline-block">Read the preview</Link>
-          </div>
-          <div className="border-t border-line pt-5 lg:border-l lg:border-t-0 lg:py-2 lg:pl-8">
-            <p className="font-hand text-[1.5rem] leading-tight text-moss">The day keeps going.</p>
-            <p className="mt-2 text-sm leading-relaxed text-ink-soft">A suggested route for after your temple visit. Local details are still being checked.</p>
-            <p className="mt-4 text-sm text-muted">{guideReadMinutes(featuredGuide)} min read · {featuredGuide.checkedAt ? "Checked" : "Updated"} <time dateTime={featuredGuide.checkedAt ?? featuredGuide.updatedAt}>{formatGuideDate(featuredGuide.checkedAt ?? featuredGuide.updatedAt)}</time></p>
-          </div>
-        </article>
-      ) : null}
-      {homeGuides.length ? <div className={featuredGuide ? "mt-4" : ""}><GuideTeasers guides={homeGuides} draftSlugs={guideCatalogResult.draftSlugs} columns={homeGuides.length === 3 ? "three" : "one"} descriptions={false} /></div> : null}
-    </section>
-  ) : undefined;
+  const journal = homeJournal(guideCatalogResult.guides, { featured: featuredGuide, draftSlugs: guideCatalogResult.draftSlugs });
+  const guideEntry = journal.items.length ? <HomeJournal journal={journal} allHref={hasGuidesPage(guideCatalogResult) ? "/guides" : null} moreClassName={buttonClass("secondary")} /> : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
     <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, upcomingDays(new Date(), 14), EN_STATIC_COPY_V1, null, guideEntry)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />

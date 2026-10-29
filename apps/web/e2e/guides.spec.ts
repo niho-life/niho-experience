@@ -101,12 +101,25 @@ test("the footer links to the guides while some exist, and unknown guides are no
   expect((await request.get("/guides/no-such-guide")).status()).toBe(404);
 });
 
-test("the home and experience list expose three guide cards in their requested positions", async ({ page }) => {
+test("the home journal follows the experience cards, and the experience list keeps three guide cards", async ({ page }) => {
   await page.goto("/");
-  const homeGuides = page.getByRole("region", { name: "Guides from people who live here" });
-  await expect(homeGuides.getByRole("listitem")).toHaveCount(3);
-  const homeOrder = await page.locator("#home-cards-v1, #home-guides-heading-v1, #home-guides-heading, #featured-heading-v1").evaluateAll((nodes) => nodes.map((node) => node.id));
-  expect(homeOrder.indexOf("home-guides-heading")).toBeGreaterThan(homeOrder.indexOf("home-cards-v1"));
+  const journal = page.getByRole("region", { name: "Kamakura Journal" });
+  // The editorial preview leads, then the three samples and the draft fixture (server HTML, before any filtering).
+  const cards = journal.locator('a[href^="/guides/"]');
+  await expect(cards).toHaveCount(5);
+  await expect(cards.first()).toHaveAttribute("href", "/guides/kamakura-after-4-pm");
+  await expect(cards.first()).toContainText("Editorial preview");
+  await expect(journal.getByRole("link", { name: "See all", exact: true })).toHaveAttribute("href", "/guides");
+  const handsOn = journal.getByRole("button", { name: "Hands-on", exact: true });
+  await handsOn.click();
+  await expect(handsOn).toHaveAttribute("aria-pressed", "true");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toHaveAttribute("href", "/guides/sample-rainy-day-in-kamakura");
+  await journal.getByRole("button", { name: "All", exact: true }).click();
+  await expect(cards).toHaveCount(5);
+  const homeOrder = await page.locator("#home-cards-v1, #home-guides-heading, #host-band-heading-v1").evaluateAll((nodes) => nodes.map((node) => node.id));
+  expect(homeOrder).toEqual(["home-cards-v1", "home-guides-heading", "host-band-heading-v1"]);
+  await expect(page.locator("#featured-heading-v1, #strips-heading-v1, #numbers-heading-v1, #walk-heading-v1")).toHaveCount(0);
 
   await page.goto("/experiences");
   const plan = page.getByRole("region", { name: "Plan your day" });

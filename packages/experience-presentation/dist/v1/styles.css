@@ -630,6 +630,9 @@
   .h-\[340px\] {
     height: 340px;
   }
+  .h-\[460px\] {
+    height: 460px;
+  }
   .h-\[466px\] {
     height: 466px;
   }
@@ -2056,6 +2059,9 @@
     .lg\:mt-8 {
       margin-top: calc(var(--spacing) * 8);
     }
+    .lg\:mt-12 {
+      margin-top: calc(var(--spacing) * 12);
+    }
     .lg\:mt-\[22px\] {
       margin-top: 22px;
     }
@@ -2087,6 +2093,9 @@
     }
     .lg\:h-\[500px\] {
       height: 500px;
+    }
+    .lg\:h-\[560px\] {
+      height: 560px;
     }
     .lg\:h-\[680px\] {
       height: 680px;

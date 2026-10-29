@@ -132,7 +132,7 @@ relatedGuides: kamakura-day-trip-from-tokyo, hands-on-kamakura
 - `/guides` は柱順にカードを並べ、0本の柱は出さない。カードの読了分数は `readMinutes` または自動算出値、日付は `checkedAt` または `updatedAt` を使う。
 - 記事の目次と番号は本文の `##` から作る。同じ見出しが複数あってもリンク先IDは重複させない。本文は構文木からReact要素へ描画し、HTML文字列を注入しない。
 - 本文途中の体験案内は `relatedExperienceSlugs` の先頭から、公開カタログに現在ある最初の1件を選ぶ。価格・所要時間・日程は公開API由来のカード表示値を使い、記事へ固定値を写さない。カタログ取得失敗・未掲載では出さない。
-- トップの入口は体験カードの直後、夕食体験の特集の前に置く。#147 の未掲載記事は写真なしの「Editorial preview」カードとして1件だけ案内し、`/guides` へのリンクは掲載済みガイドがあるときだけ出す。掲載済みガイドは1本から最大3枚を同じ枠へ追加する。体験一覧末尾の `Plan your day` は掲載済みガイドが1本以上で最大3枚を出す。httpモードでは `PUBLISHED_GUIDES` だけを使う。
+- トップの入口（Kamakura Journal）は体験カードと予約の流れの直後に置く（[design-system.md](../design-system.md) のトップ）。#147 の未掲載記事は「Editorial preview」と表記して先頭に大きく出し、`/guides` へのリンクは `/guides` があるときだけ出す。続けて catalog の順に、トップ全体で最大10本。サムネイルは `hero`。無ければカテゴリ名の面になるので、トップに並ぶ記事には `hero` を付ける。体験一覧末尾の `Plan your day` は掲載済みガイドが1本以上で最大3枚を出す。httpモードでは `PUBLISHED_GUIDES` だけを使う。
 
 ## 公開の手順
 

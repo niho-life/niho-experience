@@ -81,6 +81,7 @@ schema 2 は home の2見出しを whole rich message として持つ。`{em}...
 - `DetailViewModelV1.relatedGuides`：FAQ の直後・取消の前に置く eyebrow、h2、記事カードの差し込み口。公開 route がない日本語や記事0件では渡さない。
 - `SiteFooterV1.links`（`{ href, label }[]`）：フッターの固定のリンク（体験・提供者・ヘルプ）の後に足すリンク。公開サイトはガイド記事があるときだけ `/guides` を渡す。
 - `HomeViewModelV1.afterCards`（ReactNode）：体験カードの直後に置く consumer-owned の任意 slot。公開サイトはガイドが3本以上ある場合だけ、3枚のガイド入口を渡す。copy registry と価格・日程・在庫の責務は変えない。
+- `HomeViewModelV1.layout`（`"classic" | "journal"`、既定 classic）：`"journal"` はヒーローを低くし、予約の流れ（既存の3つの key、見出しは `home.bookingTitle` を読み上げ名に使う）をカードの直下へ移し、特集・動画の帯・ホスト紹介・数字・絵はがきを出さない（2026-10-29、公開トップのモック A）。key 集合は変えない。日本語版トップは渡さないので従来どおり。
 
 一覧の h1 と直下の導入文も consumer が `CatalogueViewV1.heading` / `intro` で渡す。これらはページ固有の編集コピーで、static-copy v1 の保存済み日本語 release を必須 key 追加で失効させない。
 
