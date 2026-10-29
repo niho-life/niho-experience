@@ -1,5 +1,8 @@
 /** Google Calendar boundary: OAuth tokens remain server-side, busy results contain no event details. */
-import { createHash } from "node:crypto";
+import { asRecord, boundedJson, GOOGLE_API, GoogleCalendarError, googleRequest as request, nonEmpty } from "./http.ts";
+import { sha256Base32Hex } from "./ids.ts";
+export { GoogleCalendarError } from "./http.ts";
+export * from "./managed-block.ts";
 export interface GoogleConfig {
   clientId: string;
   clientSecret: string;
@@ -28,56 +31,7 @@ export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.app.created",
 ] as const;
 
-const GOOGLE_API = "https://www.googleapis.com/calendar/v3";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
-const MAX_RESPONSE_BYTES = 256 * 1024;
-
-export class GoogleCalendarError extends Error {
-  readonly reason: "REVOKED" | "UNAVAILABLE" | "INVALID_RESPONSE";
-  constructor(reason: "REVOKED" | "UNAVAILABLE" | "INVALID_RESPONSE") {
-    super(`Google Calendar ${reason}`);
-    this.reason = reason;
-  }
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GoogleCalendarError("INVALID_RESPONSE");
-  return value as Record<string, unknown>;
-}
-
-function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.length > 0; }
-
-async function request(config: GoogleConfig, url: string, init: RequestInit): Promise<Response> {
-  try {
-    return await (config.fetch ?? fetch)(url, { ...init, cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(10_000) });
-  } catch {
-    throw new GoogleCalendarError("UNAVAILABLE");
-  }
-}
-
-async function boundedJson(response: Response): Promise<Record<string, unknown>> {
-  const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw new GoogleCalendarError("INVALID_RESPONSE");
-  const reader = response.body?.getReader();
-  if (!reader) throw new GoogleCalendarError("INVALID_RESPONSE");
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    length += value.byteLength;
-    if (length > MAX_RESPONSE_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      throw new GoogleCalendarError("INVALID_RESPONSE");
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  try { return asRecord(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))); }
-  catch (error) { if (error instanceof GoogleCalendarError) throw error; throw new GoogleCalendarError("INVALID_RESPONSE"); }
-}
 
 /** The caller stores state and verifier in a short-lived, signed HttpOnly cookie. */
 export function googleAuthorizationUrl(config: GoogleConfig, state: string, codeChallenge: string): string {
@@ -211,25 +165,8 @@ export async function createBookingCalendar(config: GoogleConfig, accessToken: s
   return result.id;
 }
 
-const BASE32HEX = "0123456789abcdefghijklmnopqrstuv";
-
-/** Calendar event IDs accept base32hex, not arbitrary SHA-256 hex characters. */
 function bookingEventId(bookingId: string): string {
-  const digest = createHash("sha256").update(bookingId).digest();
-  let bits = 0;
-  let value = 0;
-  let encoded = "";
-  for (const byte of digest) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      bits -= 5;
-      encoded += BASE32HEX[(value >>> bits) & 31];
-      value &= (1 << bits) - 1;
-    }
-  }
-  if (bits > 0) encoded += BASE32HEX[(value << (5 - bits)) & 31];
-  return encoded;
+  return sha256Base32Hex(bookingId);
 }
 
 /** Deterministic Google event ID makes a retried outbox job safe. No guest contact fields. */
