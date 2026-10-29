@@ -1,6 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
-import { ExperienceStore, GuideRepository } from "@niho-experience/experience-store";
+import { ChannelRuntime, ExperienceStore, GuideRepository, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -17,6 +17,31 @@ export function experiencePool(): Pool | null {
 export function experienceStore(): ExperienceStore | null {
   const pool = experiencePool();
   return pool ? new ExperienceStore(pool) : null;
+}
+
+function supportedChannelAdapters(): Readonly<Record<string, ChannelCapabilities>> {
+  const raw = process.env.EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS;
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const result: Record<string, ChannelCapabilities> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== "object" || Array.isArray(value) || key.length > 300) return {};
+      const record = value as Record<string, unknown>;
+      if (Object.keys(record).some((name) => !["canObserve", "canClose", "canOpen", "canCreate"].includes(name))) return {};
+      if (Object.values(record).some((item) => typeof item !== "boolean")) return {};
+      result[key] = record as ChannelCapabilities;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export function channelRuntime(): ChannelRuntime | null {
+  const pool = experiencePool();
+  return pool ? new ChannelRuntime(pool, { supportedAdapters: supportedChannelAdapters() }) : null;
 }
 
 export function guideRepository(): GuideRepository | null {
