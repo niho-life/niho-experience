@@ -37,7 +37,7 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## database flagを開く前のゲート
 
-1. `0005`、`0008`、`0009`、`0010`、`0011`を含む全migrationをstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
+1. `0005`、`0008`、`0009`、両方の`0010`、`0011`、`0012`を含む全migrationをファイル名順にstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
 2. private bucketのUniform bucket-level access、Public access prevention、runtime SA限定IAM、`GUIDE_MEDIA_BUCKET`を確認する。bucket CORS、公開ACL、公開CDNは作らない。
 3. NIHO editor app-connect/auth（niho-app #19459/#19462）のstaging受入を完了し、writer/provider権限失効、公開、更新、停止、UNLISTEDを確認する。editorの有効化とpublic sourceの切替は別々に判断する。
 4. 合成記事でPUBLIC/UNLISTED/draft/STOPPED、category順、初回公開日と更新日、canonical/Article JSON-LD/noindex、home/list/detail/footer/sitemap、体験との双方向linkを確認する。静的記事がdatabase集合へ混ざらず、DB停止時に静的fallbackしないことも確認する。
@@ -62,3 +62,34 @@ editor は TipTap の atom `guideFigure` をカーソル位置へ置く。popove
 新しく選ぶ体験は現在 `PUBLISHED` で、保存actorが現在のOWNER/EDITOR、または有効なwriter grant・受諾済み招待・link membershipをすべて持つ場合だけ追加できる。提供者主体の記事はその提供者の商品に限定する。権限失効後も既存選択は下書きから失われず、並べ替え・削除はできるが、新規追加として権限を迂回できない。候補APIは先に記事所有と現在のsubject authorityを確認し、記事のsubjectから導いた範囲だけを `private, no-store` で返す。
 
 公開commandは関連体験を入力に取らず、lockした記事の保存済み選択を読む。現在の商品状態・subject制約・membership・招待・writer grantを再検査し、すべて有効な場合だけ既存のimmutable publication linkへactor・permission basis・表示順をsnapshotしてpublicationをsealする。公開readはこの表示順を使い、旧公開版の順序未記録行は従来のprovider/product順で読む。0件は有効で、1件でも失効していれば旧公開版を切り替えない。preflightも失効を「関連する体験」設定から外す問題として返すが、競合を防ぐ根拠は公開transaction内の再検査とする。
+
+## NIHO Adminからのgrant/category管理（#224）
+
+Experienceは、受諾済みwriter grantとGuide categoryの正本・監査だけを持つ。NIHOはverified email、本人性、招待と受諾、通知配送、outboxを持ち、招待のemail・氏名・本文・tokenをExperienceのDB、API response、logへ送らない。相関用`sourceInvitationId`はNIHOの招待内容の複製ではない。`0005`で作成済みのgrantは`0012_guide_admin.sql`適用時に`sourceVersion=0`となり、より新しいcommandが来るまで従来どおり有効である。既存categoryは`revision=1`から始まる。
+
+内部契約は`/internal/guide-admin/v1`、HTTP mode限定、`GUIDE_ADMIN_API_ENABLED=false`が既定である。有効化には`GUIDE_ADMIN_AUDIENCE`、許可する1つの`GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`、`EXPERIENCE_DATABASE_URL`をすべて必要とする。audienceはCloud Runのservice URLか明示設定したcustom audienceを使う（custom domainそのものは既定のaudienceにしない）。`Authorization: Bearer <Google service account ID token>`のGoogle署名・issuer・期限、設定audienceとの完全一致、verified email claimと許可emailとの完全一致をserverで検査する。Firebase user token、通常の`/admin` cookie、`/editor` session、`/host` sessionは認証材料にしない。flag offは認証・DBより先に404、identity不正は401、署名鍵取得等の検証停止とDB停止は503とし、対象の存在を未認証callerへ示さない。tokenはrequest memoryだけに置き、log・browser・receiptへ出さない。全responseは`private, no-store`かつ`noindex`である。
+
+### Writer grant
+
+- `GET /internal/guide-admin/v1/writers/{nihoUserId}`は`{writer:{nihoUserId,active,sourceVersion,sourceInvitationId?}}`で1つの安定NIHO user IDの現在状態を返す。未作成は`active=false, sourceVersion=0`として扱う。
+- `PUT /internal/guide-admin/v1/writers/{nihoUserId}`のJSONは正確に`{active:boolean,sourceVersion:positive safe integer,sourceInvitationId:UUIDv4}`、headerは`Idempotency-Key: UUIDv4`と`X-NIHO-Admin-Actor-Id: <stable NIHO user ID>`である。NIHOは招待受諾後だけ送る。
+- userごとの`sourceVersion`は単調増加とする。保存済みversionより小さいcommandは409。同じversionでdesired stateとinvitation IDが同一なら副作用なしで成功し、異なれば409となる。したがって遅延したactivationは新しいrevokeを戻せない。
+
+### Category
+
+- `GET /internal/guide-admin/v1/categories`は`{categories:[{slug,labelEn,labelJa,displayOrder,active,revision}]}`でinactiveを含む全categoryとrevisionを返す。PUT成功は更新後の`{writer}`または`{category}`を返す。競合は409と`{error:"conflict",reason}`を返す。
+- `PUT /internal/guide-admin/v1/categories/{slug}`のJSONは正確に`{labelEn,labelJa,displayOrder,active,expectedRevision}`、headerはwriter PUTと同じである。slugは1〜80文字のlowercase英数字と単一hyphenで不変、labelは空白だけを不可として各120文字以内、orderは`0..1000000`の整数とする。
+- `expectedRevision=0`は未作成slugだけをrevision 1で作成する。正の値は現在revisionとの一致時だけ更新し、revisionを1進める。DELETEは設けない。editorのcategory候補は従来どおりactiveだけ、publicationはcategory label/order snapshotを保持するため、category変更やinactive化で公開済み版を書き換えない。
+
+### IdempotencyとNIHO callerの責務
+
+全PUTはroute、actor、target、意味上のbodyをcanonical JSONにしてSHA-256 hashを計算する。Store transactionは最初にidempotency key、次に対象をlockし、mutationまたはversion/revision conflictの結果と同じtransactionでimmutable receiptをcommitする。receiptはkey、hash、actor/target ID、action、result、timestampだけのappend-only auditである。同じkeyと同じpayloadのretryは保存済み結果を返し、別payloadなら409となる。別keyの同一targetもserializeするため、grant versionとcategory revisionを並行commandで迂回できない。
+
+NIHO callerは次を守る。
+
+1. commandごとに現在のplatform ADMINを検査し、その安定NIHO user IDをactor headerへ設定する。
+2. verified identityと招待受諾をNIHO側で確認し、writerごとに永続的で単調増加する`sourceVersion`を割り当てる。
+3. outbox retryでは同じidempotency keyと同じpayloadを維持し、送信ごとに短命なservice account ID tokenだけを新しく発行する。
+4. ExperienceのACKを受けるまで管理UIを成功表示にしない。timeout後の同一command replayは安全である。
+
+NIHO側のADMIN UI、招待、outboxはこのリポジトリでは実装しない。

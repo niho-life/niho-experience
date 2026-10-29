@@ -12,6 +12,7 @@ export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
+export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
 export type {
   ChannelAction,
@@ -61,6 +62,14 @@ export type {
   PublicGuideProductLink,
   SaveGuideDraftInput,
 } from "./guides.ts";
+export type {
+  GuideAdminCategory,
+  GuideAdminCategoryPutResult,
+  GuideAdminWriterGrant,
+  GuideAdminWriterPutResult,
+  PutGuideAdminCategoryInput,
+  PutGuideAdminWriterGrantInput,
+} from "./guide-admin.ts";
 export type { HostPushDeviceLabel, HostPushRecipient, HostPushSubscriptionInput } from "./push-subscriptions.ts";
 export type {
   BookingRecord,
