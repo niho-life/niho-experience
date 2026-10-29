@@ -42,7 +42,12 @@ export type {
   ReservationReadBatchStatus,
   ReservationReadCycle,
   ReservationReadReceipt,
+  ReservationWindowManifestOccurrence,
+  ReservationWindowPageReceipt,
+  ReservationWindowReadCycle,
+  ReservationWindowTerminalEvidence,
   SubmitReservationReadInput,
+  SubmitReservationWindowPageInput,
   WorkerCredential,
   WorkerIdentity,
 } from "./channels.ts";

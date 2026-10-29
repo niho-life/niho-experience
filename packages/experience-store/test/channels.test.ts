@@ -74,4 +74,25 @@ describe("external reservation input validation", () => {
       ...base, batchStatus: "FAILED", observations: base.observations,
     }), StoreValidationError);
   });
+
+  it("rejects invalid window page order, bounds, and terminal evidence before a database call", async () => {
+    const windowBase = {
+      receiptId: base.receiptId, readId: base.readId, leaseToken: base.leaseToken, pageNumber: 0,
+      nextSourceCursor: "next", observations: [observation],
+    };
+    await assert.rejects(() => runtime.submitReservationWindowPage(worker, "00000000-0000-4000-8000-000000000003", {
+      ...windowBase, observations: Array.from({ length: 33 }, (_, index) => ({ ...observation, externalReservationId: `external-${index}` })),
+    }), StoreValidationError);
+    await assert.rejects(() => runtime.submitReservationWindowPage(worker, "00000000-0000-4000-8000-000000000003", {
+      receiptId: windowBase.receiptId, readId: windowBase.readId, leaseToken: windowBase.leaseToken,
+      pageNumber: windowBase.pageNumber, observations: windowBase.observations,
+    }), StoreValidationError);
+    await assert.rejects(() => runtime.submitReservationWindowPage(worker, "00000000-0000-4000-8000-000000000003", {
+      ...windowBase, terminal: { status: "FAILED", completedAtUtc: "2099-01-01T02:00:00.000Z",
+        allPagesRead: false, allStatusesIncluded: false, coverageComplete: false },
+    }), StoreValidationError);
+    await assert.rejects(() => runtime.submitReservationWindowPage(worker, "00000000-0000-4000-8000-000000000003", {
+      ...windowBase, pageNumber: 1, previousReceiptId: "00000000-0000-4000-8000-000000000004",
+    }), StoreValidationError);
+  });
 });

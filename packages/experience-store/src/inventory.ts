@@ -5,6 +5,10 @@ import type { BookingMode, InventoryResourceKind } from "./types.ts";
 import { effectiveGoogleSyncStatus } from "./validation.ts";
 
 type Queryable = Pool | PoolClient;
+// schedule_rules and RESCHEDULE overrides both cap duration at 1,440 minutes.
+// Using the domain maximum keeps a boundary closed even when the current rule
+// is later shortened while an external reservation still occupies a resource.
+const MAX_SOURCE_OCCURRENCE_MINUTES = 1_440;
 
 export interface InventoryOccupancySnapshot {
   readonly resourceId: string;
@@ -76,6 +80,25 @@ export async function evaluateStoredInventories(
   for (const row of resources.rows) {
     const productId = String(row.product_id);
     resourcesByProduct.set(productId, [...(resourcesByProduct.get(productId) ?? []), row]);
+  }
+  const reservationReadRequirements = await client.query<DbRow>(
+    `SELECT l.id AS listing_id,l.account_id,l.product_id,l.mapping_version,l.can_observe,
+            a.version AS account_version,a.active AS account_active,a.revoked_at,a.delegated_until,
+            h.account_id AS health_account_id,h.account_version AS health_account_version,
+            h.mapping_version AS health_mapping_version,h.coverage_from,h.coverage_to,h.fresh_until,
+            pr.resource_id,pr.prepare_minutes AS source_prepare_minutes,pr.cleanup_minutes AS source_cleanup_minutes
+       FROM channel_listings l
+       JOIN channel_external_accounts a ON a.provider_id=l.provider_id AND a.id=l.account_id
+       LEFT JOIN external_reservation_listing_health h ON h.provider_id=l.provider_id AND h.listing_id=l.id
+       LEFT JOIN product_inventory_resources pr ON pr.provider_id=l.provider_id AND pr.product_id=l.product_id
+      WHERE l.provider_id=$1 AND l.active=true AND l.can_read_reservations=true
+      ORDER BY l.id COLLATE "C",pr.resource_id COLLATE "C" NULLS FIRST`,
+    [providerId],
+  );
+  const reservationReadRequirementsByListing = new Map<string, DbRow[]>();
+  for (const row of reservationReadRequirements.rows) {
+    const listingId = String(row.listing_id);
+    reservationReadRequirementsByListing.set(listingId, [...(reservationReadRequirementsByListing.get(listingId) ?? []), row]);
   }
   const reservations = await client.query<DbRow>(
     `WITH active_reservations AS (
@@ -175,6 +198,7 @@ export async function evaluateStoredInventories(
   const results = new Map<string, InventoryAvailability>();
   for (const request of requests) {
     const resourceRows = resourcesByProduct.get(request.productId) ?? [];
+    const requestedResourceIds = new Set(resourceRows.map((row) => String(row.resource_id)));
     const occupancies = resourceRows.map((row): InventoryOccupancySnapshot => ({
       resourceId: String(row.resource_id),
       resourceKind: String(row.kind) as InventoryResourceKind,
@@ -183,6 +207,33 @@ export async function evaluateStoredInventories(
       startAtUtc: addMinutes(request.occurrence.startUtc, -Number(row.prepare_minutes)),
       endAtUtc: addMinutes(request.occurrence.endUtc, Number(row.cleanup_minutes)),
     }));
+    const reservationReadUnavailable = [...reservationReadRequirementsByListing.values()].some((listingRows) => {
+      const row = listingRows[0]!;
+      const sharedRows = listingRows.filter((item) => item.resource_id !== null
+        && requestedResourceIds.has(String(item.resource_id)));
+      const relevant = String(row.product_id) === request.productId || sharedRows.length > 0;
+      if (!relevant) return false;
+      let requiredCoverageFromUtc = request.occurrence.startUtc;
+      let requiredCoverageToUtc = request.occurrence.endUtc;
+      for (const sourceResource of sharedRows) {
+        const requestedOccupancy = occupancies.find((item) => item.resourceId === String(sourceResource.resource_id));
+        if (!requestedOccupancy) continue;
+        const sourceFromUtc = addMinutes(requestedOccupancy.startAtUtc,
+          -(MAX_SOURCE_OCCURRENCE_MINUTES + Number(sourceResource.source_cleanup_minutes)));
+        const sourceToUtc = addMinutes(requestedOccupancy.endAtUtc, Number(sourceResource.source_prepare_minutes));
+        if (sourceFromUtc < requiredCoverageFromUtc) requiredCoverageFromUtc = sourceFromUtc;
+        if (sourceToUtc > requiredCoverageToUtc) requiredCoverageToUtc = sourceToUtc;
+      }
+      return row.can_observe !== true || row.account_active !== true || row.revoked_at !== null
+        || (row.delegated_until !== null && isoValue(row, "delegated_until") <= nowUtc)
+        || row.health_account_id !== row.account_id
+        || Number(row.health_account_version) !== Number(row.account_version)
+        || Number(row.health_mapping_version) !== Number(row.mapping_version)
+        || row.coverage_from === null || row.coverage_to === null || row.fresh_until === null
+        || isoValue(row, "coverage_from") > requiredCoverageFromUtc
+        || isoValue(row, "coverage_to") < requiredCoverageToUtc
+        || isoValue(row, "fresh_until") <= nowUtc;
+    });
     const reserved = reservationsByOccurrence.get(request.occurrence.id);
     const conflict = occupancies.some((occupancy) => (activeOccupanciesByResource.get(occupancy.resourceId) ?? []).some((row) =>
       !(String(row.product_id) === request.productId && String(row.occurrence_id) === request.occurrence.id)
@@ -232,6 +283,8 @@ export async function evaluateStoredInventories(
       bookingMode, occupancies,
       availability: unresolved.rows.length > 0 && availability.bookable
         ? { ...availability, bookable: false, availableSeats: 0, reason: "EXTERNAL_RESERVATION_UNRESOLVED" }
+        : reservationReadUnavailable && availability.bookable
+          ? { ...availability, bookable: false, availableSeats: 0, reason: "EXTERNAL_RESERVATION_READ_UNAVAILABLE" }
         : availability,
     });
   }

@@ -77,6 +77,23 @@ describe("database invariants", () => {
     assert.doesNotMatch(intervals, /title|summary|description|attendee|organizer|event_id/i);
   });
 
+  it("adds bounded immutable reservation window manifests, page receipts, and separate health", async () => {
+    const sql = await readFile(new URL("../migrations/0016_external_reservation_window_reads.sql", import.meta.url), "utf8");
+    assert.match(sql, /read_scope IN \('OCCURRENCE','WINDOW'\)/);
+    assert.match(sql, /ADD CONSTRAINT external_reservation_reads_completion_check/);
+    assert.doesNotMatch(sql, /ADD CONSTRAINT external_reservation_reads_status_check/);
+    assert.match(sql, /coverage_to <= coverage_from \+ interval '62 days'/);
+    assert.match(sql, /manifest_index integer NOT NULL CHECK \(manifest_index BETWEEN 0 AND 511\)/);
+    assert.match(sql, /CREATE TABLE external_reservation_window_page_receipts/);
+    assert.match(sql, /UNIQUE \(read_id, page_number\)/);
+    assert.match(sql, /source_cursor_fingerprint/);
+    assert.match(sql, /next_source_cursor_fingerprint/);
+    assert.match(sql, /CREATE TABLE external_reservation_listing_health/);
+    assert.doesNotMatch(sql, /external_reservation_listing_read_requirements/);
+    assert.match(sql, /external_reservation_listing_health\.read_generation < EXCLUDED\.read_generation|read_generation bigint NOT NULL/);
+    assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

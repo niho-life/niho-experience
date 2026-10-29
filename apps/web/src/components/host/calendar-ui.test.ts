@@ -55,6 +55,7 @@ describe("host calendar date model", () => {
     expect(availabilityLabel("RESOURCE_BUSY")).toBe("予定あり");
     expect(availabilityLabel("GOOGLE_SYNC_UNAVAILABLE")).toBe("確認待ち");
     expect(availabilityLabel("RESOURCE_GOOGLE_UNAVAILABLE")).toBe("確認待ち");
+    expect(availabilityLabel("EXTERNAL_RESERVATION_READ_UNAVAILABLE")).toBe("確認待ち");
     expect(availabilityLabel("RESOURCE_GOOGLE_BUSY")).toBe("予定あり");
   });
 });
