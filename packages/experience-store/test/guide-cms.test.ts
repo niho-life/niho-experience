@@ -6,6 +6,18 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
+  it("stores article-link invitation consent without private identity fields", async () => {
+    const sql = await readFile(new URL("../migrations/0007_guide_link_invitations.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /CREATE TABLE guide_product_link_invitations/);
+    assert.match(sql, /UNIQUE \(provider_id, writer_niho_user_id\)/);
+    assert.match(sql, /generation integer NOT NULL DEFAULT 1 CHECK \(generation > 0\)/);
+    assert.match(sql, /'PENDING', 'ACCEPTED', 'DECLINED', 'REVOKED'/);
+    const invitation = sql.match(/CREATE TABLE guide_product_link_invitations \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.doesNotMatch(invitation, /email|display_name|profile|provider_memberships\s*\(/i);
+  });
+
   it("keeps grants separate and seals immutable publication snapshots with their links", async () => {
     const sql = await readFile(new URL("../migrations/0005_guide_cms.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -52,6 +64,25 @@ describe("guide content boundary", () => {
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "29/10/2026" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "2026-02-30" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", author: { name: "A", role: "B" } }), StoreValidationError);
+  });
+});
+
+describe("guide link invitation boundary", () => {
+  it("validates stable identifiers, UUID v4 IDs, and positive generations before querying", async () => {
+    const repository = new GuideRepository({} as Pool);
+    const actor = { nihoUserId: "writer-synthetic" } as const;
+    await assert.rejects(
+      () => repository.inviteProductLinkWriter(actor, "invalid provider id", "writer-synthetic"),
+      StoreValidationError,
+    );
+    await assert.rejects(
+      () => repository.acceptLinkInvitation(actor, "not-a-uuid", 1),
+      StoreValidationError,
+    );
+    await assert.rejects(
+      () => repository.declineLinkInvitation(actor, "00000000-0000-4000-8000-000000000001", 0),
+      StoreValidationError,
+    );
   });
 });
 

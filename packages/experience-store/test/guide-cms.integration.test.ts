@@ -12,6 +12,8 @@ const migrations = [
   "0003_google_busy_coverage.sql",
   "0004_host_push_subscriptions.sql",
   "0005_guide_cms.sql",
+  "0006_calendar_commands_and_sales_state.sql",
+  "0007_guide_link_invitations.sql",
 ] as const;
 
 const content = {
@@ -56,6 +58,11 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
       await pool.query(
         `INSERT INTO guide_writer_grants (niho_user_id, granted_by_niho_user_id)
          VALUES ('writer-a','admin-synthetic'), ('writer-b','admin-synthetic')`,
+      );
+      await pool.query(
+        `INSERT INTO guide_product_link_invitations
+           (id, provider_id, writer_niho_user_id, invited_by_niho_user_id, state, accepted_at)
+         VALUES ('00000000-0000-4000-8000-000000000007', 'provider-a', 'writer-a', 'host-a', 'ACCEPTED', clock_timestamp())`,
       );
       await pool.query(
         `INSERT INTO guide_product_link_memberships (provider_id, niho_user_id, granted_by_niho_user_id)
@@ -199,6 +206,12 @@ describe("PostgreSQL guide publication transaction", { skip: databaseUrl === und
         link_created_by_niho_user_id: "writer-a",
         permission_basis: "GUIDE_PRODUCT_LINK_MEMBERSHIP",
       });
+      await pool.query("UPDATE guide_writer_grants SET active=false WHERE niho_user_id='writer-a'");
+      assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, []);
+      await pool.query("UPDATE guide_writer_grants SET active=true WHERE niho_user_id='writer-a'");
+      assert.deepEqual((await store.getPublicArticleBySlug(created.slug))?.productLinks, [
+        { providerId: "provider-a", productId: "tea" },
+      ]);
       await pool.query(
         "UPDATE guide_product_link_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='writer-a'",
       );
