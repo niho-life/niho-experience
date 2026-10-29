@@ -145,6 +145,7 @@ test("an unknown create result retries the exact immutable command", async ({ pa
     if (route.request().method() === "GET") { await route.fulfill({ status: 200, json: calendarData() }); return; }
     requests.push(route.request().postDataJSON());
     if (requests.length === 1) await route.abort("connectionreset");
+    else if (requests.length === 2) await route.fulfill({ status: 401, json: { error: "unauthenticated" } });
     else await route.fulfill({ status: 201, json: { id: "new", version: 1 } });
   });
   await page.goto("/host/calendar");
@@ -154,10 +155,15 @@ test("an unknown create result retries the exact immutable command", async ({ pa
   await dialog.getByRole("button", { name: "追加する" }).click();
   await expect(dialog.getByRole("alert")).toContainText("保存結果を確認できません");
   await expect(dialog.getByRole("button", { name: "追加する" })).toBeDisabled();
+  await expect(dialog.getByLabel("定員（人）")).toBeDisabled();
+  await dialog.getByRole("button", { name: "同じ内容で再送" }).click();
+  await expect(dialog.getByRole("link", { name: "ログイン", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "追加する" })).toBeDisabled();
   await dialog.getByRole("button", { name: "同じ内容で再送" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(requests).toHaveLength(2);
+  expect(requests).toHaveLength(3);
   expect(requests[1]).toEqual(requests[0]);
+  expect(requests[2]).toEqual(requests[0]);
 });
 
 test("channel labels never turn old observations into a successful reflection", async ({ page }) => {
