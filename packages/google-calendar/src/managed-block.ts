@@ -4,7 +4,7 @@ import { sha256Base32Hex } from "./ids.ts";
 
 const MANAGED_KIND = "niho-managed-block-v1";
 const FIXED_SUMMARY = "NIHO availability";
-const EVENT_FIELDS = "id,etag,status,start(date,dateTime),end(date,dateTime),transparency,visibility,extendedProperties/private";
+const EVENT_FIELDS = "id,etag,status,start(date,dateTime),end(date,dateTime),recurrence,recurringEventId,originalStartTime(date,dateTime),transparency,visibility,extendedProperties/private";
 const ACK_FIELDS = "id,etag";
 const MAX_OPAQUE_ID_LENGTH = 256;
 const MAX_CALENDAR_ID_LENGTH = 512;
@@ -49,6 +49,7 @@ export type GoogleManagedBlockStopCode =
   | "TOMBSTONE"
   | "CANCELLED_EVENT"
   | "STATUS_MISMATCH"
+  | "RECURRING_EVENT"
   | "ALL_DAY_EVENT"
   | "FOREIGN_EVENT"
   | "MAPPING_MISMATCH"
@@ -221,6 +222,12 @@ function inspectEvent(raw: Record<string, unknown>, target: GoogleManagedBlockTa
   }
   if (raw.status === "cancelled") return { ok: false, code: "CANCELLED_EVENT" };
   if (raw.status !== "confirmed") return { ok: false, code: "STATUS_MISMATCH" };
+  // A series parent can retain the anchor ID and its first start/end. Changing
+  // that parent affects all instances, so neither a series nor an instance is
+  // a single-occurrence control, even when copied private markers still match.
+  if ("recurrence" in raw || "recurringEventId" in raw || "originalStartTime" in raw) {
+    return { ok: false, code: "RECURRING_EVENT" };
+  }
 
   const start = recordOrUndefined(raw.start);
   const end = recordOrUndefined(raw.end);

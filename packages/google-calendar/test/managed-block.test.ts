@@ -164,7 +164,7 @@ describe("managed Google block protocol", () => {
     assert.equal(assertions, 3);
     assert.equal(requests.length, 3);
     assert.deepEqual(requests.map(({ init }) => init.method), ["GET", "POST", "GET"]);
-    assert.equal(requests[0]!.url.searchParams.get("fields"), "id,etag,status,start(date,dateTime),end(date,dateTime),transparency,visibility,extendedProperties/private");
+    assert.equal(requests[0]!.url.searchParams.get("fields"), "id,etag,status,start(date,dateTime),end(date,dateTime),recurrence,recurringEventId,originalStartTime(date,dateTime),transparency,visibility,extendedProperties/private");
     assert.equal(requests[1]!.url.searchParams.get("sendUpdates"), "none");
     assert.equal(requests[1]!.url.searchParams.get("fields"), "id,etag");
     assert.equal(requests[1]!.body?.summary, "NIHO availability");
@@ -387,6 +387,45 @@ describe("managed Google block protocol", () => {
     }), accessToken, calendarId, value, () => undefined);
     assert.equal(result.code, "WRITE_UNCERTAIN");
     assert.equal(result.writeAcknowledged, true);
+  });
+
+  it("refuses recurring parents and instances before writes and before no-op success", async () => {
+    const recurrenceShapes = [
+      { recurrence: ["RRULE:FREQ=DAILY;COUNT=30"] },
+      { recurringEventId: "synthetic-parent" },
+      { originalStartTime: { dateTime: "2026-11-01T01:00:00Z" } },
+    ];
+    for (const shape of recurrenceShapes) for (const desiredState of ["OPEN", "CLOSED"] as const) {
+      const value = target({ desiredState, desiredVersion: 8 });
+      let requests = 0;
+      const result = await applyGoogleManagedBlock(config(() => {
+        requests += 1;
+        return json(ownedEvent(value, shape));
+      }), accessToken, calendarId, value, () => undefined);
+      assert.equal(result.code, "RECURRING_EVENT");
+      assert.equal(result.changed, false);
+      assert.equal(requests, 1);
+    }
+  });
+
+  it("does not verify a saved anchor changed into a recurring series before readback", async () => {
+    const value = target({ desiredVersion: 8 });
+    let requests = 0;
+    let writes = 0;
+    const result = await applyGoogleManagedBlock(config((_url, init) => {
+      requests += 1;
+      if (requests === 1) return json(ownedEvent(target({ desiredVersion: 7 })));
+      if (init.method === "PATCH") {
+        writes += 1;
+        return json({ id: managedGoogleBlockEventId(value), etag: '"saved"' });
+      }
+      return json(ownedEvent(value, { etag: '"recurring"', recurrence: ["RRULE:FREQ=DAILY;COUNT=30"] }));
+    }), accessToken, calendarId, value, () => undefined);
+    assert.equal(result.code, "WRITE_UNCERTAIN");
+    assert.equal(result.changed, null);
+    assert.equal(result.writeAcknowledged, true);
+    assert.equal(writes, 1);
+    assert.equal(requests, 3);
   });
 
   it("keeps a 2xx write ACK but reports uncertain when the fresh event is foreign or mismatched", async (context) => {

@@ -18,6 +18,8 @@ targetはprovider・listing・occurrenceのopaque ID、mapping version、単調�
 
 既存NIHO anchorの正常statusは`confirmed`であるため、status欠落・未知値・`tentative`は安全側に停止する。`tentative`を受付制御へ採用する要件はなく、意味を推測してconfirmed相当にはしない。GETの部分応答には`start.date` / `end.date`も含め、終日eventである証拠を欠落させない。
 
+繰り返し予定の親・個別instanceも`RECURRING_EVENT`で停止する。初回の時刻と所有markerだけではシリーズ全体への変更を防げないため、部分応答で`recurrence`・`recurringEventId`・`originalStartTime`を取得して確認する。変更後の読戻しで繰り返しに変わっていた場合は`WRITE_UNCERTAIN`とし、Google検証済みにはしない。[Googleの繰り返し予定](https://developers.google.com/workspace/calendar/api/guides/recurringevents)
+
 ## リクエスト順序と競合
 
 1. server実装の必須`assertCurrent`で、現在target・version・leaseを確認する。
