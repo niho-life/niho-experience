@@ -18,7 +18,7 @@
     "healthcheck": "node ./bin/healthcheck.mjs",
     "test": "node --test test/*.test.mjs",
     "typecheck": "node ./scripts/static-check.mjs",
-    "test:browser": "node --test test/driver.browser.mjs"
+    "test:browser": "node --test test/driver.browser.mjs test/managed-session.browser.mjs"
   },
   "engines": {
     "node": "24.x"

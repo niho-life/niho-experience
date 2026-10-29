@@ -15,7 +15,7 @@
 - 再起動時に `CLAIMED` / `RUNNING` が残っていたら OPEN を再実行しません。`QUARANTINED` にして停止し、旧 browser 停止確認と運用者による明示 recovery を要求します。
 - lease は約20秒ごとに renew します。claim deadline は最大180秒です。renew/deadline/preflight failure 後は gate を閉じ、以後の write preflight を拒否し、自分が起動した browser/Claude process group だけを停止します。両方の終了を確認できない result は `stopped:false` です。
 - claim受信時は端末間の小さな時計差を最大5秒まで許容します。実行時間は受信から180秒とserver deadlineの短い方に制限し、serverのlease/preflight判定も維持します。
-- CDPのcloseは最大1秒だけ待ち、応答がなくても独立したprocess groupの停止へ進みます。Chromeの通信応答に停止保証を依存させません。
+- 所有ChromeにはCDPの`Browser.close`で正常終了を要求し、要求の待機は最大1秒、process groupの自然終了は最大3秒待ちます。残っていれば従来のTERM/KILLへ進み、停止証明は独立したprocess group確認で決めます。CDP transportを切断した直後にChromeのnetwork processまで止め、ログイン用の永続データの保存を失うことを防ぎます。
 - `VERIFIED` は model の文章では決まりません。最後に supervisor が reload して manual Block と actual `Bookable` を独立確認し、その後 process 停止を確認します。OPEN は「manual Block=false かつ Bookable」、CLOSED は「manual Block=true」が必要です。
 - result API は exact な 200 JSON `{acceptedAsCurrent,repeated}` を受けます。`acceptedAsCurrent:false` も durable receipt として同一 result の再送は止めますが、green success には分類せず audit 状態として記録します。result receipt の AUTH/不正応答では pending result を消さず halt します。
 
@@ -40,6 +40,8 @@ install -m 600 packages/ota-worker/examples/config.example.json /ABSOLUTE/PRIVAT
 ```
 
 `accountProfiles` は `privateDir/profiles/{config account id}` への exact mapping です。Chrome/Brave の一般利用 profile/cookie を指定・コピーしません。以前から worker 専用として使っていた profile を移行する場合だけ、Chrome と worker の完全停止を確認して、その専用 directory 自体を exact mapping 先へ rename します（cookie の抽出・複製はしません）。実 token、実 ID、メール、profile path、スクリーンショットを Git に入れません。
+
+正常終了の回帰試験は、合成サーバーの保存期限付きcookieを専用profileへ保存し、所有Chromeの停止・再起動後にも保持されることを実ブラウザで確認します。cookie値や期限、Chromeの起動設定、OS keychain・暗号化は変更しません。session-only認証やサイト側の期限、challengeは別の実サイト受入対象です。
 
 本番 worker を起動する前に、専用 profile で Chrome を手動起動して GetYourGuide に初回 login し、Company details と availability を人が確認して Chrome を終了します。上記の既存 worker 専用 profile を rename できる場合は再 login を要求しません。challenge、AUTH_REQUIRED、DOM drift、UNKNOWN_AFTER_SAVE は halt+quarantine とし、自動 login は行いません。debug screenshot は config で明示した場合だけ 0700 private directory 以下へ0600で保存します。
 
