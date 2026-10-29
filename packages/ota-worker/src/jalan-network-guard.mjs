@@ -35,9 +35,14 @@ export function parseJsonp(raw, callback) {
   if (typeof raw !== "string" || Buffer.byteLength(raw) > MAX_JSON_BYTES || !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(callback)) {
     throw new ContractError("DOM_DRIFT");
   }
-  const prefix = `${callback}(`;
-  if (!raw.startsWith(prefix) || !raw.endsWith(");")) throw new ContractError("DOM_DRIFT");
-  try { return JSON.parse(raw.slice(prefix.length, -2)); } catch { throw new ContractError("DOM_DRIFT"); }
+  const source = raw.trim();
+  if (!source.startsWith(callback) || !source.endsWith(");")) throw new ContractError("DOM_DRIFT");
+  // The observed supplier response uses `callback (`. Permit only whitespace
+  // between the exact requested callback and its JSON argument; never evaluate it.
+  const invocation = /^[\t\r\n ]*\(/.exec(source.slice(callback.length));
+  if (!invocation) throw new ContractError("DOM_DRIFT");
+  try { return JSON.parse(source.slice(callback.length + invocation[0].length, -2)); }
+  catch { throw new ContractError("DOM_DRIFT"); }
 }
 
 function dateKey(day) {

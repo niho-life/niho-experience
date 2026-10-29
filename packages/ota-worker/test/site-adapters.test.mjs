@@ -148,6 +148,18 @@ test("Jalan bootstrap validates a non-target range without inventing a target sl
   assert.throws(() => selectJalanSlot(bootstrap, jalanJob, "14:00"));
 });
 
+test("Jalan accepts observed callback whitespace without accepting another call or executable wrapper", () => {
+  const fixture = jalanSummary();
+  assert.deepEqual(parseJsonp(` \nsynthetic.callback \t( ${JSON.stringify(fixture)}\n);\n`, "synthetic.callback"), fixture);
+  for (const raw of [
+    "synthetic.callbackOther ({});",
+    "synthetic.callback.extra ({});",
+    "synthetic.callback /* comment */ ({});",
+    "synthetic.callback ({}); other ({});",
+    "synthetic.callback (globalThis.pwned=true);",
+  ]) assert.throws(() => parseJsonp(raw, "synthetic.callback"), (error) => error.code === "DOM_DRIFT");
+});
+
 test("Jalan summary query requires the observed exact keys, bounded values and no duplicates", () => {
   const base = "http://127.0.0.1/stateful/schdl/client/summary?callback=cb&dspBaseDate=20990101&dspRange=14&pageSize=14&pageNo=1&schdlKbn=&groupSchdlId=&lessonSchdlId=l000000001&includeSaleStops=true&_=1";
   assert.equal(validateJalanSummaryUrl(new URL(base), jalanJob), true);
