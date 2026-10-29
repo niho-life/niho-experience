@@ -49,10 +49,11 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
       if (normalizedText(await matches[0].innerText()) !== expected) throw new ContractError("ACCOUNT_MISMATCH");
     }
 
-    async function receiveSummary(trigger, { targetRequired }) {
+    async function receiveSummary(trigger, { targetRequired, expectedBaseDate }) {
       const responsePromise = page.waitForResponse((response) => {
         const url = new URL(response.url());
-        return url.origin === supplierOrigin && url.pathname === "/stateful/schdl/client/summary" && response.request().method() === "GET";
+        return url.origin === supplierOrigin && url.pathname === "/stateful/schdl/client/summary" && response.request().method() === "GET"
+          && (expectedBaseDate === undefined || url.searchParams.get("dspBaseDate") === expectedBaseDate);
       }, { timeout: responseTimeoutMs }).catch(() => null);
       await trigger();
       const response = await responsePromise;
@@ -97,9 +98,28 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
       if (await textbox.count() !== 1) throw new ContractError("DOM_DRIFT");
       const date = job.localDateTime.slice(0, 10);
       return receiveSummary(async () => {
-        await textbox.fill(date);
-        await textbox.press("Enter");
-      }, { targetRequired: true });
+        await textbox.click();
+        const picker = page.locator(".ui-datepicker:visible");
+        if (await picker.count() !== 1) throw new ContractError("DOM_DRIFT");
+        const targetYear = Number(date.slice(0, 4));
+        const targetMonth = Number(date.slice(5, 7));
+        for (let step = 0; ; step += 1) {
+          assertActive();
+          const year = normalizedText(await picker.locator(".ui-datepicker-year").innerText());
+          const month = normalizedText(await picker.locator(".ui-datepicker-month").innerText());
+          if (!/^\d{4}$/.test(year) || !/^(?:[1-9]|1[0-2])月$/.test(month)) throw new ContractError("DOM_DRIFT");
+          const difference = (targetYear - Number(year)) * 12 + targetMonth - Number(month.slice(0, -1));
+          if (difference === 0) break;
+          if (step >= 24 || Math.abs(difference) > 24) throw new ContractError("UNSUPPORTED_TARGET");
+          const navigation = picker.locator(`a[data-handler="${difference > 0 ? "next" : "prev"}"]`);
+          if (await navigation.count() !== 1) throw new ContractError("DOM_DRIFT");
+          await navigation.click();
+        }
+        const day = picker.locator(`td[data-handler="selectDay"][data-year="${targetYear}"][data-month="${targetMonth - 1}"]`)
+          .getByRole("link", { name: String(Number(date.slice(8, 10))), exact: true });
+        if (await day.count() !== 1) throw new ContractError("DOM_DRIFT");
+        await day.click();
+      }, { targetRequired: true, expectedBaseDate: date.replaceAll("-", "") });
     }
 
     async function loadTarget(mode = "navigate") {

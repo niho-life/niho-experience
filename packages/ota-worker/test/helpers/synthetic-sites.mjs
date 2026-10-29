@@ -75,16 +75,24 @@ export async function syntheticViator() {
 
 export async function syntheticJalan() {
   const state = { accountId: "SyntheticAirId", productId: "l000000001", optionId: "1", slotId: "T_SYNTHETIC", initialSlotId: "T_BOOTSTRAP",
-    initialDate: "2098-12-19", localDateTime: "2099-01-01T13:00:00", open: true, authenticated: true, responseFailure: null,
+    initialDate: "2098-12-05", localDateTime: "2099-01-01T13:00:00", open: true, authenticated: true, responseFailure: null,
     writes: 0, requests: [], reads: [] };
   const summary = (compactDate) => {
-    const target = compactDate === "20990101";
-    const year = Number(compactDate.slice(0, 4)); const month = Number(compactDate.slice(4, 6)); const day = Number(compactDate.slice(6, 8));
-    return { dto: { dspBaseDate: compactDate, selectedLessonSchdlId: state.productId, dispDays: [{ year, month, day }],
-      plans: [{ lessonSchdlId: state.productId, version: 21, tmzs: [{ timeZoneSeqNo: 1, startHm: "13:00", endHm: "14:00", slots: [{
-        slotId: target ? state.slotId : state.initialSlotId, receptionStatus: state.open ? "KeyOPEN" : "KeyCLOSE", frontOpenFlg: state.open,
+    const base = Date.UTC(Number(compactDate.slice(0, 4)), Number(compactDate.slice(4, 6)) - 1, Number(compactDate.slice(6, 8)));
+    const dispDays = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(base + index * 86_400_000);
+      return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+    });
+    const slots = dispDays.map((day) => {
+      const date = String(day.year) + String(day.month).padStart(2, "0") + String(day.day).padStart(2, "0");
+      const frontOpen = date === "20990101" ? state.open : true;
+      return { slotId: date === "20990101" ? state.slotId : `T_SYNTHETIC_${date}`,
+        receptionStatus: frontOpen ? "KeyOPEN" : "KeyCLOSE", frontOpenFlg: frontOpen,
         bookingAvailableKbn: "KeyUNCONFIRMED", cfmBookingLimMgrKbn: null, cfmCapaBookingCnt: 0, cfmCapaPaxCnt: 0,
-        cfmEntryBookingCnt: 0, cfmEntryPaxCnt: 0, uncfmEntryBookingCnt: 0, uncfmEntryPaxCnt: 0, version: 1 }] }] }] },
+        cfmEntryBookingCnt: 0, cfmEntryPaxCnt: 0, uncfmEntryBookingCnt: 0, uncfmEntryPaxCnt: 0, version: 1 };
+    });
+    return { dto: { dspBaseDate: compactDate, selectedLessonSchdlId: state.productId, dispDays,
+      plans: [{ lessonSchdlId: state.productId, version: 21, tmzs: [{ timeZoneSeqNo: 1, startHm: "13:00", endHm: "14:00", slots }] }] },
       authCsrfDto: { syntheticSecret: "discard" } };
   };
   const handler = async (request, response) => {
@@ -94,13 +102,16 @@ export async function syntheticJalan() {
       if (!state.authenticated) { response.end("<h1>ログイン</h1>"); return; }
       response.end(`<!doctype html><html><head><meta charset="utf-8"></head><body><header><ul><li>Account<ul><li>\n AirID \n ${state.accountId} \n</li></ul></li></ul></header>
         <input value="${state.initialDate}"><select><option value="${state.productId}" selected>Synthetic plan</option></select><h2>プランID ${state.productId}</h2>
+        <div class="ui-datepicker" hidden><a href="#" data-handler="prev">&lt;前</a><a href="#" data-handler="next">次&gt;</a><span class="ui-datepicker-year"></span><span class="ui-datepicker-month"></span><table><tbody id="picker-days"></tbody></table></div>
         <span id="count">0/14</span><ul id="slots"></ul><select class="js-panel-saleStatus"><option>販売</option><option>売止</option></select>
         <button id="complete">一括変更する</button><a href="#" id="refresh">最新の情報に更新</a>
         <script>
           const input=document.querySelector('input');let callbackIndex=0;let selected=false;let currentDate=input.value.replaceAll('-','');
           async function load(compactDate){currentDate=compactDate;const callback='syntheticCallback'+(++callbackIndex);const query=new URLSearchParams({callback,dspBaseDate:compactDate,dspRange:'14',pageSize:'14',pageNo:'1',schdlKbn:'',groupSchdlId:'',lessonSchdlId:${JSON.stringify(state.productId)},includeSaleStops:'true',_:String(Date.now())});const text=await (await fetch('/stateful/schdl/client/summary?'+query)).text();
-            const data=JSON.parse(text.slice(callback.length+1,-2));const slot=data.dto.plans[0].tmzs[0].slots[0];const list=document.getElementById('slots');list.innerHTML='<li id="'+slot.slotId+'" class="'+(slot.frontOpenFlg?'sale-open':'sale-stop')+'"><a href="#" data-bind="click: $root.onClickSlot.bind($data, $index(), $parent, $parents[1])">slot</a></li>';list.querySelector('a').onclick=(event)=>{event.preventDefault();selected=true;document.getElementById('count').textContent='1/14';};}
-          input.addEventListener('keydown',(event)=>{if(event.key==='Enter')load(input.value.replaceAll('-',''))});
+            const data=JSON.parse(text.slice(callback.length+2,-2));const slot=data.dto.plans[0].tmzs[0].slots[0];const list=document.getElementById('slots');list.innerHTML='<li id="'+slot.slotId+'" class="'+(slot.frontOpenFlg?'sale-open':'sale-stop')+'"><a href="#" data-bind="click: $root.onClickSlot.bind($data, $index(), $parent, $parents[1])">slot</a></li>';list.querySelector('a').onclick=(event)=>{event.preventDefault();selected=true;document.getElementById('count').textContent='1/14';};}
+          const picker=document.querySelector('.ui-datepicker');let pickerYear=Number(input.value.slice(0,4));let pickerMonth=Number(input.value.slice(5,7))-1;
+          function renderPicker(){picker.querySelector('.ui-datepicker-year').textContent=String(pickerYear);picker.querySelector('.ui-datepicker-month').textContent=String(pickerMonth+1)+'月';const days=document.getElementById('picker-days');days.innerHTML='';const count=new Date(Date.UTC(pickerYear,pickerMonth+1,0)).getUTCDate();for(let day=1;day<=count;day++){const td=document.createElement('td');td.dataset.handler='selectDay';td.dataset.year=String(pickerYear);td.dataset.month=String(pickerMonth);const link=document.createElement('a');link.href='#';link.textContent=String(day);link.onclick=(event)=>{event.preventDefault();const date=String(pickerYear)+'-'+String(pickerMonth+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');input.value=date.replaceAll('-','/');picker.hidden=true;load(date.replaceAll('-',''));};td.append(link);days.append(td);}}
+          input.onclick=()=>{picker.hidden=false;renderPicker()};for(const direction of ['prev','next'])picker.querySelector('[data-handler="'+direction+'"]').onclick=(event)=>{event.preventDefault();const date=new Date(Date.UTC(pickerYear,pickerMonth+(direction==='next'?1:-1),1));pickerYear=date.getUTCFullYear();pickerMonth=date.getUTCMonth();renderPicker()};
           document.getElementById('complete').onclick=()=>{if(!selected)return;const open=document.querySelector('.js-panel-saleStatus').value==='販売';fetch('/stateful/schdl/client/complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({groups:[],slots:[{slotId:${JSON.stringify(state.slotId)},version:1,frontOpenFlg:String(open),bookingAvailableKbn:'KeyUNCONFIRMED',cfmBookingLimMgrKbn:null,cfmCapaCnt:0,lessonSchdlId:${JSON.stringify(state.productId)},lessonSchdlVersion:21}]})});};
           document.getElementById('refresh').onclick=(event)=>{event.preventDefault();load(currentDate)};load(currentDate);
         </script></body></html>`); return;
@@ -108,7 +119,7 @@ export async function syntheticJalan() {
     if (url.pathname === "/stateful/schdl/client/summary" && request.method === "GET") {
       const compactDate = url.searchParams.get("dspBaseDate"); state.reads.push(Object.fromEntries(url.searchParams));
       const callback = url.searchParams.get("callback"); response.writeHead(200, { "content-type": "application/javascript" });
-      response.end(`${callback}(${JSON.stringify(summary(compactDate))});`); return;
+      response.end(`${callback} (${JSON.stringify(summary(compactDate))});`); return;
     }
     if (url.pathname === "/stateful/schdl/client/complete" && request.method === "POST") {
       const body = await readBody(request); state.requests.push(body); state.writes += 1; state.open = body.slots[0].frontOpenFlg === "true";
