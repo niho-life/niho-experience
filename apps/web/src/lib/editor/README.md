@@ -30,4 +30,22 @@ account active と connection identity を再確認します。後続 UI の ses
 token を受け取った後段で通信失敗した場合だけ、回転済み token を再 seal します。
 
 ログイン後は常に `/editor/guides` へ移動し、任意の return target は受け付けません。
-guide/article API、writer grant、editor UI はこの段階の対象外です。
+writer grant の管理 UI と editor UI はこの段階の対象外です。
+
+## PRIVATE guide draft API (editor v1)
+
+`/editor/api/guides` 以下は同一 origin の非公開 JSON API です。各 request で
+`loadEditorSession()` により現在の NIHO account と connection を再確認し、DB 接続が
+無い場合や NIHO / PostgreSQL が利用できない場合は `503` を返します。すべての response は
+`private, no-store` / `noindex, nofollow` です。mutation は `Origin` と
+`Sec-Fetch-Site: same-origin` を要求し、request body は厳密な UTF-8 JSON として最大 1 MiB まで
+streaming で読み取ります。
+
+- `GET /editor/api/guides`: 本人が作成し、現在も subject 権限を持つ article の一覧
+- `POST /editor/api/guides`: server-generated ID の private draft 作成
+- `GET/PATCH /editor/api/guides/[articleId]`: 本人の private snapshot の取得と revision 付き全量保存
+- `GET /editor/api/guides/categories`: active category
+- `GET /editor/api/guides/subjects`: writer grant と OWNER/EDITOR membership 由来の書込可能 subject
+
+この API に publish / stop や public read は含めません。公開前の Markdown・写真・権利検査と
+公開操作は #187 の別契約です。

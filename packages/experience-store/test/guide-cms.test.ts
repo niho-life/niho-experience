@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
+import type { Pool } from "pg";
 import { StoreValidationError } from "../src/errors.ts";
-import { parseGuideContent } from "../src/guides.ts";
+import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
   it("keeps grants separate and seals immutable publication snapshots with their links", async () => {
@@ -51,5 +52,31 @@ describe("guide content boundary", () => {
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "29/10/2026" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "2026-02-30" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", author: { name: "A", role: "B" } }), StoreValidationError);
+  });
+});
+
+describe("guide writing subjects", () => {
+  it("returns only the writer grant and OWNER/EDITOR provider IDs", async () => {
+    const queries: Array<{ text: string; values: readonly unknown[] }> = [];
+    const pool = {
+      async query(text: string, values: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            { subject_kind: "WRITER", provider_id: null },
+            { subject_kind: "PROVIDER", provider_id: "provider-editor" },
+          ],
+        };
+      },
+    } as unknown as Pool;
+    const repository = new GuideRepository(pool);
+
+    assert.deepEqual(await repository.listWritableSubjects("writer-synthetic"), [
+      { kind: "WRITER" },
+      { kind: "PROVIDER", providerId: "provider-editor" },
+    ]);
+    assert.deepEqual(queries[0]?.values, ["writer-synthetic"]);
+    assert.match(queries[0]?.text ?? "", /role IN \('OWNER','EDITOR'\)/);
+    assert.doesNotMatch(queries[0]?.text ?? "", /email|customer/i);
   });
 });
