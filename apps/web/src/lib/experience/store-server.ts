@@ -36,7 +36,7 @@ function supportedChannelAdapters(): Readonly<Record<string, ChannelCapabilities
     for (const [key, value] of Object.entries(parsed)) {
       if (!value || typeof value !== "object" || Array.isArray(value) || key.length > 300) return {};
       const record = value as Record<string, unknown>;
-      if (Object.keys(record).some((name) => !["canObserve", "canClose", "canOpen", "canCreate"].includes(name))) return {};
+      if (Object.keys(record).some((name) => !["canObserve", "canReadReservations", "canClose", "canOpen", "canCreate"].includes(name))) return {};
       if (Object.values(record).some((item) => typeof item !== "boolean")) return {};
       result[key] = record as ChannelCapabilities;
     }

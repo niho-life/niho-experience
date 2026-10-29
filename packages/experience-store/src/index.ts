@@ -34,7 +34,13 @@ export type {
   ExternalAccountDto,
   ExternalAccountInput,
   ExternalAccountUpdate,
+  ExternalReservationObservation,
+  ExternalReservationStatus,
   HostChannelStatus,
+  ReservationReadBatchStatus,
+  ReservationReadCycle,
+  ReservationReadReceipt,
+  SubmitReservationReadInput,
   WorkerCredential,
   WorkerIdentity,
 } from "./channels.ts";

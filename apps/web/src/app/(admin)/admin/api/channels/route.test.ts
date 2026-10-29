@@ -70,4 +70,34 @@ describe("Admin channel BFF", () => {
     }, 1, "00000000-0000-4000-8000-000000000235");
     expect((await POST(request({ action: "createAccount", commandId: "00000000-0000-4000-8000-000000000236", account: { ...input, privateProfileRef: "profile-secret" } }))).status).toBe(400);
   });
+
+  it("allows only the explicit reservation-read capability field", async () => {
+    const listing = {
+      id: "listing-a", providerId: "provider-a", accountId: "account-a", productId: "tea",
+      externalProductId: "external-tea", timeZone: "Asia/Tokyo", adapter: "browser-v1", adapterVersion: "1",
+      connectionMode: "BROWSER", capabilities: { canObserve: true, canReadReservations: true, canClose: false, canOpen: false, canCreate: false },
+      active: false, mappingVersion: 1, createdAtUtc: "2099-01-01T00:00:00.000Z", updatedAtUtc: "2099-01-01T00:00:00.000Z",
+    };
+    mocks.runtime!.createListing = vi.fn().mockResolvedValue(listing);
+    const listingInput = {
+      id: "listing-a", providerId: "provider-a", accountId: "account-a", productId: "tea",
+      externalProductId: "external-tea", adapter: "browser-v1", adapterVersion: "1", connectionMode: "BROWSER",
+      capabilities: { canObserve: true, canReadReservations: true }, active: false,
+    };
+    const response = await POST(request({
+      action: "createListing", commandId: "00000000-0000-4000-8000-000000000237",
+      listing: listingInput,
+    }));
+    expect(response.status).toBe(201);
+    expect(mocks.runtime!.createListing).toHaveBeenCalledWith(
+      { nihoUserId: "verified-admin" }, expect.objectContaining({ capabilities: { canObserve: true, canReadReservations: true } }),
+      "00000000-0000-4000-8000-000000000237",
+    );
+    expect((await POST(request({
+      action: "createListing", commandId: randomUUIDForTest,
+      listing: { ...listingInput, capabilities: { canObserve: true, canReadReservations: true, customerData: true } },
+    }))).status).toBe(400);
+  });
 });
+
+const randomUUIDForTest = "00000000-0000-4000-8000-000000000238";

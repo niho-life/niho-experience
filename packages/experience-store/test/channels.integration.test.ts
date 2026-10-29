@@ -67,7 +67,7 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       assert.equal((await pool.query("SELECT private_profile_ref FROM channel_external_accounts WHERE id='account-a'")).rows[0]?.private_profile_ref, "profile-ref-synthetic");
       const unverifiedListing = (await runtime.listListings(admin, "provider-a"))[0]!;
       assert.equal(unverifiedListing.active, false);
-      assert.deepEqual(unverifiedListing.capabilities, { canObserve: false, canClose: false, canOpen: false, canCreate: false });
+      assert.deepEqual(unverifiedListing.capabilities, { canObserve: false, canReadReservations: false, canClose: false, canOpen: false, canCreate: false });
       listing = await runtime.updateListing(admin, unverifiedListing.id, {
         externalProductId: unverifiedListing.externalProductId,
         ...(unverifiedListing.externalOptionId === undefined ? {} : { externalOptionId: unverifiedListing.externalOptionId }),

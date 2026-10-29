@@ -61,7 +61,7 @@ it("serializes an OPEN result with a concurrent group hold before accepting its 
         return new Proxy(client, { get(connection, field) {
           if (field === "query") return async (...args: unknown[]) => {
             const result = await Reflect.apply(connection.query, connection, args);
-            if (armed && typeof args[0] === "string" && args[0].includes("count(*) FILTER") && args[0].includes("FROM bookings WHERE")) {
+            if (armed && typeof args[0] === "string" && args[0].includes("count(*) FILTER") && args[0].includes("FROM active_reservations GROUP BY")) {
               armed = false; readReached(); await resume;
             }
             return result;

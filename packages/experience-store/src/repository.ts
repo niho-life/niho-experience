@@ -1337,7 +1337,11 @@ export class ExperienceStore {
       const active = await client.query(
         `SELECT 1 FROM bookings WHERE provider_id=$1 AND product_id=$2
           AND (occurrence_snapshot->>'endUtc')::timestamptz>clock_timestamp()
-          AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>clock_timestamp())) LIMIT 1`,
+          AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>clock_timestamp()))
+         UNION ALL
+         SELECT 1 FROM external_reservations WHERE provider_id=$1 AND (
+          (product_id=$2 AND source_end_at>clock_timestamp() AND status IN ('PENDING','CONFIRMED'))
+          OR (needs_review=true AND review_reason IN ('TARGET_MISMATCH','CONFLICTING_SOURCE_VERSION'))) LIMIT 1`,
         [providerId, productId],
       );
       if (active.rows[0]) throw new StoreConflictError("Product inventory cannot change while an active hold or confirmed booking exists.");
@@ -1407,8 +1411,13 @@ export class ExperienceStore {
          JOIN bookings b ON b.provider_id=o.provider_id AND b.occurrence_id=o.occurrence_id
         WHERE o.provider_id=$1 AND o.rule_id=$2 AND o.end_at > clock_timestamp()
           AND (b.status='CONFIRMED' OR (b.status='HOLD' AND b.hold_expires_at > clock_timestamp()))
+       UNION ALL
+       SELECT 1 FROM external_reservations e
+        WHERE e.provider_id=$1 AND (
+          (split_part(e.occurrence_id,'@',1)=$3 AND e.source_end_at > clock_timestamp() AND e.status IN ('PENDING','CONFIRMED'))
+          OR (e.needs_review=true AND e.review_reason IN ('TARGET_MISMATCH','CONFLICTING_SOURCE_VERSION')))
         LIMIT 1`,
-      [providerId, ruleId],
+      [providerId, ruleId, encodeURIComponent(ruleId)],
     );
     if (result.rows[0] !== undefined) {
       throw new StoreConflictError("A schedule with active holds or future confirmed bookings cannot be changed.");
@@ -1420,6 +1429,10 @@ export class ExperienceStore {
       `SELECT 1 FROM bookings
         WHERE provider_id=$1 AND occurrence_id=$2
           AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at > clock_timestamp()))
+       UNION ALL
+       SELECT 1 FROM external_reservations
+        WHERE provider_id=$1 AND ((occurrence_id=$2 AND status IN ('PENDING','CONFIRMED'))
+          OR (needs_review=true AND review_reason IN ('TARGET_MISMATCH','CONFLICTING_SOURCE_VERSION')))
         LIMIT 1`,
       [providerId, occurrenceId],
     );

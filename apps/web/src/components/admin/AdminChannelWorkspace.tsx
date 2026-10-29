@@ -90,7 +90,7 @@ function WorkspaceDialog({ title, busy, submitLabel, onClose, onSubmit, feedback
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pt-4 pb-4 md:px-5 md:pt-5">
         <h2 id="channel-workspace-dialog-title" className="text-[0.9375rem] font-extrabold">{title}</h2>
         {feedback}
-        {children}
+        <fieldset disabled={busy} className="contents">{children}</fieldset>
       </div>
       <div className="flex flex-wrap justify-end gap-2 border-t border-line px-4 py-3 md:px-5">
         <button ref={cancel} type="button" disabled={busy} onClick={onClose} className={consoleButtonClass("secondary", "md", "min-h-11")}>やめる</button>
@@ -113,6 +113,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
   const [pending, setPending] = useState<PendingMutation | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
   const request = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null });
   const busyRef = useRef(false);
   useAdminLeaveProtection(editor !== null || pending !== null, busy || pending !== null);
@@ -155,13 +156,18 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
     return () => { window.clearTimeout(timer); tracker.controller?.abort(); };
   }, [loadProvider, providerId]);
 
-  const mutate = useCallback(async (next: PendingMutation) => {
+  const mutate = useCallback(async (next: PendingMutation, retry = false) => {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setConflict(false); setMessage(null); setPending(next);
+    busyRef.current = true; setBusy(true); setConflict(false); setMessage(null); setNeedsSignIn(false); setPending(next);
     try {
       const response = await fetch(next.endpoint, {
         method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(next.body),
       });
+      if (retry && response.status >= 400 && response.status < 500) {
+        setNeedsSignIn(response.status === 401 || response.status === 403);
+        setMessage("保存結果を確認できません。ログインと権限を確認してください。");
+        return;
+      }
       if (response.status === 409) {
         setPending(null); setConflict(true); setMessage("別の変更があります。入力は残っています。");
         return;
@@ -188,7 +194,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
   const selectedProduct = editor?.kind === "inventory" ? editor.product : undefined;
 
   const feedback = <>
-{message ? <div className="flex flex-wrap items-center gap-2 rounded-xl bg-sand px-3 py-2 text-sm font-bold" role="status"><span className="min-w-0 flex-1">{message}</span>{pending ? <button type="button" disabled={busy} className={consoleButtonClass("secondary", "md", "min-h-11")} onClick={() => void mutate(pending)}>結果を確認</button> : null}</div> : null}
+{message ? <div className="flex flex-wrap items-center gap-2 rounded-xl bg-sand px-3 py-2 text-sm font-bold" role="status"><span className="min-w-0 flex-1">{message}</span>{needsSignIn ? <a href="/admin" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline underline-offset-4">ログイン</a> : null}{pending ? <button type="button" disabled={busy} className={consoleButtonClass("secondary", "md", "min-h-11")} onClick={() => void mutate(pending, true)}>結果を確認</button> : null}</div> : null}
     {conflict ? <button type="button" disabled={busy} onClick={() => void loadProvider(providerId)} className={consoleButtonClass("secondary", "md", "min-h-11")}>一覧を再読込</button> : null}
   </>;
 
@@ -257,7 +263,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
     {editor?.kind === "listing" && snapshot ? <WorkspaceDialog feedback={feedback} title={editor.listing ? "掲載設定を編集" : "掲載先を追加"} busy={busy || pending !== null} submitLabel="保存" onClose={() => { if (!locked) setEditor(null); }} onSubmit={(form) => {
       const listing = editor.listing;
       const externalOptionId = String(form.get("externalOptionId") ?? "").trim();
-      const input = { id: listing?.id ?? crypto.randomUUID(), providerId, productId: listing?.productId ?? String(form.get("productId")), accountId: listing?.accountId ?? String(form.get("accountId")), externalProductId: String(form.get("externalProductId")).trim(), ...(externalOptionId ? { externalOptionId } : {}), adapter: String(form.get("adapter")).trim(), adapterVersion: String(form.get("adapterVersion")).trim(), connectionMode: String(form.get("connectionMode")), capabilities: { canObserve: form.get("canObserve") === "on", canClose: form.get("canClose") === "on", canOpen: form.get("canOpen") === "on", canCreate: form.get("canCreate") === "on" }, active: listing ? form.get("active") === "on" : false };
+      const input = { id: listing?.id ?? crypto.randomUUID(), providerId, productId: listing?.productId ?? String(form.get("productId")), accountId: listing?.accountId ?? String(form.get("accountId")), externalProductId: String(form.get("externalProductId")).trim(), ...(externalOptionId ? { externalOptionId } : {}), adapter: String(form.get("adapter")).trim(), adapterVersion: String(form.get("adapterVersion")).trim(), connectionMode: String(form.get("connectionMode")), capabilities: { canObserve: form.get("canObserve") === "on", canReadReservations: form.get("canReadReservations") === "on", canClose: form.get("canClose") === "on", canOpen: form.get("canOpen") === "on", canCreate: form.get("canCreate") === "on" }, active: listing ? form.get("active") === "on" : false };
       submit(CHANNEL_API, listing ? { action: "updateListing", listingId: listing.id, expectedVersion: listing.mappingVersion, listing: input } : { action: "createListing", listing: input }, "保存しました。");
     }}>
       <label className={LABEL}>体験<select name="productId" required defaultValue={editor.listing?.productId} disabled={Boolean(editor.listing)} className={FIELD}>{snapshot.products.map((product) => <option key={product.id} value={product.id}>{product.publicTitle}</option>)}</select></label>
@@ -266,7 +272,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
       <label className={LABEL}>外部option ID<input name="externalOptionId" maxLength={256} defaultValue={editor.listing?.externalOptionId ?? ""} className={FIELD} /></label>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2"><label className={LABEL}>adapter<input name="adapter" required maxLength={120} defaultValue={editor.listing?.adapter ?? ""} className={FIELD} /></label><label className={LABEL}>版<input name="adapterVersion" required maxLength={80} defaultValue={editor.listing?.adapterVersion ?? ""} className={FIELD} /></label></div>
       <label className={LABEL}>接続方式<select name="connectionMode" defaultValue={editor.listing?.connectionMode ?? "BROWSER"} className={FIELD}><option>BROWSER</option><option>GOOGLE</option><option>API</option></select></label>
-      <fieldset><legend className="text-xs font-extrabold text-ink-soft">設定する能力</legend><div className="mt-1 grid grid-cols-2 gap-2">{(["canObserve", "canClose", "canOpen", "canCreate"] as const).map((capability) => <label key={capability} className="flex min-h-11 items-center gap-2"><input name={capability} type="checkbox" defaultChecked={editor.listing?.capabilities[capability] ?? false} />{{ canObserve: "確認", canClose: "閉じる", canOpen: "開く", canCreate: "作成" }[capability]}</label>)}</div></fieldset>
+      <fieldset><legend className="text-xs font-extrabold text-ink-soft">設定する能力</legend><div className="mt-1 grid grid-cols-2 gap-2">{(["canObserve", "canReadReservations", "canClose", "canOpen", "canCreate"] as const).map((capability) => <label key={capability} className="flex min-h-11 items-center gap-2"><input name={capability} type="checkbox" defaultChecked={editor.listing?.capabilities[capability] ?? false} />{{ canObserve: "確認", canReadReservations: "外部予約を読む", canClose: "閉じる", canOpen: "開く", canCreate: "作成" }[capability]}</label>)}</div></fieldset>
       {editor.listing ? <label className="flex min-h-11 items-center gap-2 font-bold"><input name="active" type="checkbox" defaultChecked={editor.listing.active} />有効にする</label> : <p className="text-xs text-ink-soft">停止で保存</p>}
     </WorkspaceDialog> : null}
 

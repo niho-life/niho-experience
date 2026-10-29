@@ -49,21 +49,10 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
   ) : { rows: [] };
   const busyIntervals: BusyInterval[] = busyResult.rows.map((row) => ({ startUtc: row.start_at.toISOString(), endUtc: row.end_at.toISOString() }));
 
-  const occurrenceIds = expanded.map(({ occurrence }) => occurrence.id);
-  const seats = occurrenceIds.length ? await pool.query<{ occurrence_id: string; confirmed_seats: string; held_seats: string }>(
-    `SELECT b.occurrence_id,
-       COALESCE(sum(b.seats) FILTER (WHERE b.status='CONFIRMED'),0)::text AS confirmed_seats,
-       COALESCE(sum(b.seats) FILTER (WHERE b.status='HOLD' AND b.hold_expires_at>clock_timestamp()),0)::text AS held_seats
-       FROM bookings b WHERE b.provider_id=$1 AND b.occurrence_id=ANY($2::text[])
-       GROUP BY b.occurrence_id`,
-    [actor.providerId, occurrenceIds],
-  ) : { rows: [] };
-  const seatsByOccurrence = new Map(seats.rows.map((row) => [row.occurrence_id, { confirmed: Number(row.confirmed_seats), held: Number(row.held_seats) }]));
   const inventoryByOccurrence = await evaluateStoredInventories(pool, actor.providerId, expanded.map(({ occurrence, experienceId }) => ({
     productId: experienceId, occurrence, requestedSeats: 1,
   })), nowUtc);
   const occurrences = expanded.map(({ occurrence, experienceId, experienceTitle, overrideVersion, salesStateVersion }) => {
-    const reserved = seatsByOccurrence.get(occurrence.id) ?? { confirmed: 0, held: 0 };
     const result = inventoryByOccurrence.get(occurrence.id)?.availability;
     if (result === undefined) throw new Error("Inventory evaluation did not return a host calendar occurrence.");
     const common = {
@@ -73,9 +62,9 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
       ...(overrideVersion === undefined ? {} : { overrideVersion }),
       ...(salesStateVersion === undefined ? {} : { salesStateVersion }),
       availabilityReason: result.reason,
-      canReschedule: reserved.confirmed === 0 && reserved.held === 0,
+      canReschedule: result.confirmedSeats === 0 && result.heldSeats === 0 && result.reason !== "EXTERNAL_RESERVATION_UNRESOLVED",
     };
-    return scope === "MEMBER" ? { ...common, availableSeats: result.availableSeats, confirmedSeats: reserved.confirmed, heldSeats: reserved.held } : common;
+    return scope === "MEMBER" ? { ...common, availableSeats: result.availableSeats, confirmedSeats: result.confirmedSeats, heldSeats: result.heldSeats } : common;
   });
   occurrences.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 
