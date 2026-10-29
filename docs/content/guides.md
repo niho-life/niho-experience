@@ -6,7 +6,7 @@
 
 - 公開する記事だけを `apps/web/src/content/guides/{slug}.ts` に置く（1記事1ファイル）。**下書き・未公開の原稿はコミットしない**（公開リポ）。下書きは非公開台帳で書き（[下書きをプレビューで見る](#下書きをプレビューで見る)）、公開の PR で初めて入れる。
 - `apps/web/src/content/guides/index.ts` の `PUBLISHED_GUIDES` に足すと、次のデプロイで公開される。
-- 公開 URL で内容を確認しつつ一覧・sitemap に載せない記事は `unlisted: true` とする。記事自体は誰でも URL で閲覧でき、常に `noindex, nofollow` を出す。掲載を確定するときは `unlisted` を外す。取り下げるときは `PUBLISHED_GUIDES` から外してデプロイする。
+- 公開 URL で内容を確認しつつ `/guides`・sitemap・フッターに載せない記事は `unlisted: true` とする。記事自体は誰でも URL で閲覧でき、常に `noindex, nofollow` を出す。#147 の記事だけは、オーナーの指示によりトップに「Editorial preview」として明示的に案内する。トップからも誰でも到達できる。掲載を確定するときは `unlisted` を外す。取り下げるときは `PUBLISHED_GUIDES` から外してデプロイする。
 - `samples/` はプレビュー（mock）専用の合成の記事。実 API の配備には出ない。サンプルを本物の記事の雛形として写すときは、`(sample)` の表記と冒頭の注記を必ず消す。
 
 ## 項目（`types.ts` の `Guide`）
@@ -132,7 +132,7 @@ relatedGuides: kamakura-day-trip-from-tokyo, hands-on-kamakura
 - `/guides` は柱順にカードを並べ、0本の柱は出さない。カードの読了分数は `readMinutes` または自動算出値、日付は `checkedAt` または `updatedAt` を使う。
 - 記事の目次と番号は本文の `##` から作る。同じ見出しが複数あってもリンク先IDは重複させない。本文は構文木からReact要素へ描画し、HTML文字列を注入しない。
 - 本文途中の体験案内は `relatedExperienceSlugs` の先頭から、公開カタログに現在ある最初の1件を選ぶ。価格・所要時間・日程は公開API由来のカード表示値を使い、記事へ固定値を写さない。カタログ取得失敗・未掲載では出さない。
-- トップの入口はガイドが3本以上あるときだけ3枚を出す。体験一覧末尾の `Plan your day` は1本以上で最大3枚を出す。httpモードでは `PUBLISHED_GUIDES` だけを使う。
+- トップの入口は体験カードの直後、夕食体験の特集の前に置く。#147 の未掲載記事は写真なしの「Editorial preview」カードとして1件だけ案内し、`/guides` へのリンクは掲載済みガイドがあるときだけ出す。掲載済みガイドは1本から最大3枚を同じ枠へ追加する。体験一覧末尾の `Plan your day` は掲載済みガイドが1本以上で最大3枚を出す。httpモードでは `PUBLISHED_GUIDES` だけを使う。
 
 ## 公開の手順
 

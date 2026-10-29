@@ -20,7 +20,9 @@ import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experien
 import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
 import { GuideTeasers } from "@/components/GuideBlocks";
+import { PUBLISHED_GUIDES } from "@/content/guides";
 import { guideCatalog } from "@/lib/guide-registry";
+import { formatGuideDate, guideReadMinutes } from "@/lib/guides";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
 import { siteJsonLd } from "@/lib/structured-data";
 import { englishAlternates } from "@/lib/locale-metadata";
@@ -106,14 +108,32 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const cards = withReviewLines(buildCardModels(summaries, details, isPilotPreview), await getReviewSummaries(summaries.map((summary) => summary.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
-  const homeGuides = guideCatalogResult.guides.length >= 3 ? guideCatalogResult.guides.slice(0, 3) : [];
-  const guideEntry = homeGuides.length === 3 ? (
+  // An explicit home feature makes this noindex editorial preview visible without opening /guides or the sitemap.
+  const homePreview = PUBLISHED_GUIDES.find((guide) => guide.slug === "kamakura-after-4-pm" && guide.unlisted);
+  const featuredGuide = homePreview ? guideCatalogResult.guides.find((guide) => guide.slug === homePreview.slug) ?? homePreview : null;
+  const homeGuides = guideCatalogResult.guides.filter((guide) => guide.slug !== featuredGuide?.slug).slice(0, 3);
+  const guideEntry = featuredGuide || homeGuides.length ? (
     <section className="container-page pt-[72px] lg:pt-[104px]" aria-labelledby="home-guides-heading">
       <div className="mb-5 flex items-end justify-between gap-4">
-        <div><p className="eyebrow">New</p><h2 id="home-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">Guides from people who live here</h2></div>
-        <Link href="/guides" className="link-leaf shrink-0 text-sm">See all guides</Link>
+        <div><p className="eyebrow">Local notes</p><h2 id="home-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">Guides from people who live here</h2></div>
+        {homeGuides.length ? <Link href="/guides" className="link-leaf shrink-0 text-sm">See all guides</Link> : null}
       </div>
-      <GuideTeasers guides={homeGuides} draftSlugs={guideCatalogResult.draftSlugs} columns="three" descriptions={false} />
+      {featuredGuide ? (
+        <article className="grid gap-7 rounded-[var(--radius-card)] border border-line bg-sand p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] lg:items-center lg:gap-10 lg:p-10">
+          <div>
+            <p className="eyebrow">Evenings · {guideCatalogResult.draftSlugs.includes(featuredGuide.slug) ? "Draft preview" : "Editorial preview"}</p>
+            <h3 className="mt-2 max-w-[25ch] text-[1.75rem] leading-[1.15] sm:text-[2.25rem]">{featuredGuide.title}</h3>
+            <p className="mt-3 max-w-[38rem] text-ink-soft">{featuredGuide.description}</p>
+            <Link href={`/guides/${featuredGuide.slug}`} className="link-leaf mt-5 inline-block">Read the preview</Link>
+          </div>
+          <div className="border-t border-line pt-5 lg:border-l lg:border-t-0 lg:py-2 lg:pl-8">
+            <p className="font-hand text-[1.5rem] leading-tight text-moss">The day keeps going.</p>
+            <p className="mt-2 text-sm leading-relaxed text-ink-soft">A suggested route for after your temple visit. Local details are still being checked.</p>
+            <p className="mt-4 text-sm text-muted">{guideReadMinutes(featuredGuide)} min read · {featuredGuide.checkedAt ? "Checked" : "Updated"} <time dateTime={featuredGuide.checkedAt ?? featuredGuide.updatedAt}>{formatGuideDate(featuredGuide.checkedAt ?? featuredGuide.updatedAt)}</time></p>
+          </div>
+        </article>
+      ) : null}
+      {homeGuides.length ? <div className={featuredGuide ? "mt-4" : ""}><GuideTeasers guides={homeGuides} draftSlugs={guideCatalogResult.draftSlugs} columns={homeGuides.length === 3 ? "three" : "one"} descriptions={false} /></div> : null}
     </section>
   ) : undefined;
   return <>

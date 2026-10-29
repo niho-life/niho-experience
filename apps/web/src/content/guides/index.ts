@@ -9,7 +9,7 @@ export type { Guide, GuideAuthor, GuideFaqItem, GuideHero, GuidePillar, GuideTra
 /**
  * Published guides: one module per guide in this folder, added to this list by a reviewed PR and live on the next deploy
  * (docs/content/guides.md, ADR 0002). Drafts are not committed. Unlisted editorial previews are public by direct URL
- * but stay out of the list, sitemap and footer until they are approved for discovery.
+ * but stay out of /guides, sitemap and footer. A reviewed home feature may deliberately link to one.
  */
 export const PUBLISHED_GUIDES: readonly Guide[] = [kamakuraAfter4Pm];
 
