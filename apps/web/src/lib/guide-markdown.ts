@@ -150,6 +150,23 @@ export function parseGuideInline(text: string, line: number, inLink = false): Gu
     if (char === "*") {
       let run = 1;
       while (text[i + run] === "*") run++;
+      // Two adjacent, exclusive marks share a closing/opening boundary:
+      // **bold***italic* and *italic***bold**. The editor emits these when
+      // authors format neighboring text without a space between them.
+      if (run === 3 && stack.length === 2 && (top().type === "strong" || top().type === "em")) {
+        const frame = top();
+        const before = text[i - 1] ?? "";
+        const after = text[i + run] ?? "";
+        if (!before || /\s/.test(before) || !after || /\s/.test(after) || !frame.children.length) {
+          throw new GuideMarkdownError("Adjacent bold and italic marks must touch text on both sides", line);
+        }
+        const closedType = frame.type === "strong" ? "strong" : "em";
+        stack.pop();
+        top().children.push({ type: closedType, children: frame.children });
+        stack.push({ type: closedType === "strong" ? "em" : "strong", children: [] });
+        i += run;
+        continue;
+      }
       if (run > 2) throw new GuideMarkdownError("*** is not supported; use **bold** or *italic*, or \\* for a literal asterisk", line);
       const type = run === 2 ? "strong" : "em";
       const before = text[i - 1] ?? "";
@@ -321,7 +338,9 @@ function parseBlocks(lines: readonly SourceLine[], labels: TableLabels | null): 
       closeBlocks();
       continue;
     }
-    if (/^\s/.test(line)) throw new GuideMarkdownError("Indented lines are not supported (no nested lists or code blocks)", no);
+    if (/^(?: {4}|\t| {1,3}(?:-|\d{1,3}[.)])\s)/.test(line)) {
+      throw new GuideMarkdownError("Indented lines are not supported (no nested lists or code blocks)", no);
+    }
 
     if (line.startsWith(":::")) {
       const name = line.slice(3).trim();
@@ -396,8 +415,8 @@ function parseBlocks(lines: readonly SourceLine[], labels: TableLabels | null): 
     }
 
     if (list) throw new GuideMarkdownError("Leave a blank line after a list; list items are one line each", no);
-    if (paragraph) (paragraph as { start: number; lines: string[] }).lines.push(line.trim());
-    else paragraph = { start: no, lines: [line.trim()] };
+    if (paragraph) (paragraph as { start: number; lines: string[] }).lines.push(line.trimEnd());
+    else paragraph = { start: no, lines: [line.trimEnd()] };
   }
   closeBlocks();
   return blocks;
