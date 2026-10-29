@@ -1,4 +1,11 @@
-import type { GuideArticleStatus, GuideCategory, GuideContent, GuideSubject } from "@niho-experience/experience-store";
+import type {
+  GuideArticleStatus,
+  GuideCategory,
+  GuideContent,
+  GuidePublicationVisibility,
+  GuideSubject,
+} from "@niho-experience/experience-store";
+import type { GuidePublicationProblem } from "./guide-publication";
 import { refreshEditorSession, type EditorRefreshOutcome } from "./client-session";
 
 export interface EditorGuideArticle {
@@ -11,6 +18,12 @@ export interface EditorGuideArticle {
   readonly content: GuideContent;
   readonly status: GuideArticleStatus;
   readonly revision: number;
+  readonly currentPublication?: {
+    readonly id: number;
+    readonly number: number;
+    readonly visibility: GuidePublicationVisibility;
+    readonly publishedAtUtc: string;
+  };
   readonly createdAtUtc: string;
   readonly updatedAtUtc: string;
 }
@@ -92,3 +105,7 @@ export type GuideResponse = { readonly guide: EditorGuideArticle };
 export type GuideCategoriesResponse = { readonly categories: readonly GuideCategory[] };
 export type GuideSubjectsResponse = { readonly subjects: readonly GuideSubject[] };
 export type GuideMutationResponse = { readonly id: string; readonly revision: number };
+export type GuidePublicationPreflightResponse = {
+  readonly guide: EditorGuideArticle;
+  readonly problems: readonly GuidePublicationProblem[];
+};

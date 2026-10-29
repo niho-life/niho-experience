@@ -2,7 +2,7 @@
 "use client";
 
 import type { JSONContent } from "@tiptap/core";
-import type { GuideCategory, GuideSubject } from "@niho-experience/experience-store";
+import type { GuideCategory, GuidePublicationVisibility, GuideSubject } from "@niho-experience/experience-store";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorHeader } from "./EditorHeader";
 import { GuideRichTextEditor } from "./GuideRichTextEditor";
@@ -12,6 +12,7 @@ import {
   type EditorGuideArticle,
   type GuideCategoriesResponse,
   type GuideMutationResponse,
+  type GuidePublicationPreflightResponse,
   type GuideResponse,
   type GuideSubjectsResponse,
 } from "@/lib/editor/guide-editor-api";
@@ -22,6 +23,12 @@ import {
   markdownToGuideEditorDocument,
   UnsupportedGuideEditorContentError,
 } from "@/lib/editor/guide-editor-document";
+import type { GuidePublicationProblem, GuidePublicationProblemField } from "@/lib/editor/guide-publication";
+import {
+  guidePublicationActionLabel,
+  guidePublicationNeedsSave,
+  guidePublicationStatusLabel,
+} from "@/lib/editor/guide-publication-ui";
 import { EDITOR_LOGIN_PATH } from "@/lib/editor/routes";
 
 type FormState = {
@@ -46,6 +53,11 @@ type SaveMessage = {
 type ConflictState =
   | { status: "loading" }
   | { status: "ready"; latest: EditorGuideArticle }
+  | { status: "error"; text: string; login?: boolean };
+
+type PublicationState =
+  | { status: "loading" }
+  | { status: "ready"; problems: readonly GuidePublicationProblem[]; message?: string }
   | { status: "error"; text: string; login?: boolean };
 
 const emptyForm: FormState = {
@@ -82,6 +94,17 @@ function errorMessage(error: unknown, mode: "new" | "edit"): { text: string; log
   return { text: "保存できませんでした。入力内容はこの画面に残っています。", retry: true };
 }
 
+function publicationErrorMessage(error: unknown): { text: string; login?: boolean; conflict?: boolean; invalid?: boolean } {
+  if (error instanceof EditorApiError) {
+    if (error.kind === "signed-out") return { text: "ログインの有効期限が切れました。公開状態は変更していません。", login: true };
+    if (error.kind === "reconnect") return { text: "接続を更新できません。公開状態は変更していません。", login: true };
+    if (error.kind === "forbidden" || error.kind === "not-found") return { text: "記事が見つからないか、公開する権限がありません。" };
+    if (error.kind === "conflict") return { text: "保存後に記事が更新されました。最新版を確認してください。", conflict: true };
+    if (error.kind === "invalid") return { text: "公開条件をもう一度確認してください。", invalid: true };
+  }
+  return { text: "公開状態を変更できませんでした。現在の公開状態は保たれています。" };
+}
+
 function subjectKey(subject: GuideSubject): string {
   return subject.kind === "WRITER" ? "WRITER" : `PROVIDER:${subject.providerId}`;
 }
@@ -100,6 +123,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const [subjects, setSubjects] = useState<readonly GuideSubject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState("");
   const [revision, setRevision] = useState<number | null>(null);
+  const [savedGuide, setSavedGuide] = useState<EditorGuideArticle | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailure, setLoadFailure] = useState<{ text: string; login?: boolean } | null>(null);
   const [unsupported, setUnsupported] = useState(false);
@@ -108,8 +132,13 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<SaveMessage | null>(null);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [publicationOpen, setPublicationOpen] = useState(false);
+  const [publicationState, setPublicationState] = useState<PublicationState | null>(null);
+  const [publicationVisibility, setPublicationVisibility] = useState<GuidePublicationVisibility>("PUBLIC");
+  const [publicationBusy, setPublicationBusy] = useState(false);
   const navigationGuardRef = useRef(false);
   const savingRef = useRef(false);
+  const publicationBusyRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +160,8 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
         setEditorDocument(nextDocument);
         setEditorKey((key) => key + 1);
         setRevision(guideResponse.guide.revision);
+        setSavedGuide(guideResponse.guide);
+        setPublicationVisibility(guideResponse.guide.currentPublication?.visibility ?? "PUBLIC");
         setCategories(categoryResponse.categories);
       } else {
         const [categoryResponse, subjectResponse] = await Promise.all([
@@ -172,8 +203,8 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
   }, [load]);
 
   useEffect(() => {
-    navigationGuardRef.current = dirty || saving;
-  }, [dirty, saving]);
+    navigationGuardRef.current = dirty || saving || publicationBusy;
+  }, [dirty, publicationBusy, saving]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -187,6 +218,8 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     navigationGuardRef.current = true;
     setDirty(true);
     setSaveMessage(null);
+    setPublicationOpen(false);
+    setPublicationState(null);
   };
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -217,6 +250,8 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     setEditorDocument(nextDocument);
     setEditorKey((key) => key + 1);
     setRevision(conflict.latest.revision);
+    setSavedGuide(conflict.latest);
+    setPublicationVisibility(conflict.latest.currentPublication?.visibility ?? "PUBLIC");
     setSlugCustomized(true);
     setDirty(false);
     setConflict(null);
@@ -294,6 +329,15 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
           }),
         });
         setRevision(response.revision);
+        setSavedGuide((current) => current ? {
+          ...current,
+          slug: form.slug,
+          title: form.title.trim(),
+          description: form.description,
+          ...(form.categorySlug ? { categorySlug: form.categorySlug } : { categorySlug: undefined }),
+          content,
+          revision: response.revision,
+        } : current);
         setDirty(false);
         setConflict(null);
         setSaveMessage({ text: "保存しました" });
@@ -315,19 +359,144 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
     }
   };
 
+  const focusPublicationField = (field: GuidePublicationProblemField) => {
+    const idByField: Partial<Record<GuidePublicationProblemField, string>> = {
+      title: "guide-title",
+      category: "guide-category",
+      description: "guide-description",
+      author: "guide-author-name",
+    };
+    const target = field === "body"
+      ? window.document.querySelector<HTMLElement>(".guide-prosemirror")
+      : window.document.getElementById(idByField[field] ?? "");
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    target?.focus({ preventScroll: true });
+  };
+
+  const loadPublicationPreflight = async (message?: string) => {
+    if (!articleId || revision === null) return;
+    setPublicationOpen(true);
+    if (dirty) {
+      setPublicationState({ status: "error", text: "プレビューまたは公開の前に、変更を保存してください。" });
+      return;
+    }
+    setPublicationState({ status: "loading" });
+    try {
+      const response = await editorApiRequest<GuidePublicationPreflightResponse>(
+        `/editor/api/guides/${encodeURIComponent(articleId)}/publication/preflight`,
+      );
+      if (response.guide.revision !== revision) {
+        setConflict({ status: "ready", latest: response.guide });
+        setPublicationState({ status: "error", text: "保存後に記事が更新されました。最新版を確認してください。" });
+        return;
+      }
+      setSavedGuide(response.guide);
+      setPublicationVisibility(response.guide.currentPublication?.visibility ?? publicationVisibility);
+      setPublicationState({ status: "ready", problems: response.problems, ...(message ? { message } : {}) });
+    } catch (error) {
+      const result = publicationErrorMessage(error);
+      setPublicationState({ status: "error", text: result.text, login: result.login });
+    }
+  };
+
+  const applyPublicationGuide = (guide: EditorGuideArticle, message: string) => {
+    setSavedGuide(guide);
+    setRevision(guide.revision);
+    setPublicationVisibility(guide.currentPublication?.visibility ?? publicationVisibility);
+    setConflict(null);
+    setPublicationState({ status: "ready", problems: [], message });
+  };
+
+  const publish = async () => {
+    if (
+      !articleId
+      || revision === null
+      || dirty
+      || publicationBusyRef.current
+      || publicationState?.status !== "ready"
+      || publicationState.problems.length > 0
+    ) return;
+    publicationBusyRef.current = true;
+    navigationGuardRef.current = true;
+    setPublicationBusy(true);
+    try {
+      const response = await editorApiRequest<GuideResponse | { readonly result: "committed_needs_refresh" }>(
+        `/editor/api/guides/${encodeURIComponent(articleId)}/publication`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expectedRevision: revision, visibility: publicationVisibility }),
+        },
+      );
+      if ("result" in response) {
+        setPublicationOpen(true);
+        setPublicationState({
+          status: "ready",
+          problems: [],
+          message: "公開版を保存しました。最新版を確認してから編集を続けてください。",
+        });
+        void fetchLatestForConflict();
+        return;
+      }
+      applyPublicationGuide(response.guide, response.guide.currentPublication?.number === 1 ? "公開版を保存しました。サイト反映は準備中です。" : "公開版を更新しました。サイト反映は準備中です。");
+    } catch (error) {
+      const result = publicationErrorMessage(error);
+      if (result.conflict) void fetchLatestForConflict();
+      if (result.invalid) await loadPublicationPreflight(result.text);
+      else setPublicationState({ status: "error", text: result.text, login: result.login });
+    } finally {
+      publicationBusyRef.current = false;
+      setPublicationBusy(false);
+      navigationGuardRef.current = dirty;
+    }
+  };
+
+  const stopPublication = async () => {
+    if (!articleId || revision === null || dirty || publicationBusyRef.current || savedGuide?.status !== "PUBLISHED") return;
+    if (!window.confirm("この記事の公開を停止しますか？公開済みの版は履歴に残ります。")) return;
+    publicationBusyRef.current = true;
+    navigationGuardRef.current = true;
+    setPublicationBusy(true);
+    try {
+      const response = await editorApiRequest<GuideResponse>(
+        `/editor/api/guides/${encodeURIComponent(articleId)}/publication`,
+        {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expectedRevision: revision }),
+        },
+      );
+      applyPublicationGuide(response.guide, "公開を停止しました。");
+    } catch (error) {
+      const result = publicationErrorMessage(error);
+      if (result.conflict) void fetchLatestForConflict();
+      setPublicationOpen(true);
+      setPublicationState({ status: "error", text: result.text, login: result.login });
+    } finally {
+      publicationBusyRef.current = false;
+      setPublicationBusy(false);
+      navigationGuardRef.current = dirty;
+    }
+  };
+
   const conflicted = conflict !== null;
   const saveLabel = mode === "new" ? (saving ? "作成中" : "下書きを作成") : (saving ? "保存中" : "保存");
-  const saveDisabled = saving || conflicted || (mode === "new" && subjects.length === 0);
+  const saveDisabled = saving || publicationBusy || conflicted || (mode === "new" && subjects.length === 0);
+  const publicationNeedsSave = guidePublicationNeedsSave(dirty, revision);
+  const publicationStatus = savedGuide
+    ? guidePublicationStatusLabel(savedGuide.status, savedGuide.currentPublication?.visibility)
+    : "未公開";
+  const editorBusy = saving || publicationBusy;
 
   return (
     <>
-      <EditorHeader logoutDisabled={saving} actions={loading || loadFailure || unsupported ? undefined : (
+      <EditorHeader logoutDisabled={editorBusy} actions={loading || loadFailure || unsupported ? undefined : (
         <>
           <span className="editor-save-state" role="status">{conflicted ? "競合" : saving ? "保存中" : dirty ? "未保存" : mode === "edit" ? "保存済み" : "新規"}</span>
           <button type="button" className="editor-primary-button" disabled={saveDisabled} onClick={() => void save()}>{saveLabel}</button>
         </>
       )} />
-      <main id="main" className="editor-workspace-main" aria-busy={saving}>
+      <main id="main" className="editor-workspace-main" aria-busy={editorBusy}>
         {loading ? (
           <p className="editor-loading" role="status">読み込み中</p>
         ) : loadFailure ? (
@@ -359,9 +528,9 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
                 className="editor-title-input"
                 rows={2}
                 maxLength={110}
-                placeholder="タイトル"
+                placeholder="英語のタイトル"
                 value={form.title}
-                disabled={saving}
+                disabled={editorBusy}
                 onChange={(event) => updateTitle(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.nativeEvent.isComposing) event.preventDefault();
@@ -370,7 +539,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
               <GuideRichTextEditor
                 key={editorKey}
                 initialContent={editorDocument}
-                disabled={saving}
+                disabled={editorBusy}
                 onChange={(next) => {
                   setEditorDocument(next);
                   markDirty();
@@ -382,39 +551,140 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
               <h2>記事の設定</h2>
               {mode === "new" && subjects.length > 1 && (
                 <label>公開主体
-                  <select disabled={saving} value={selectedSubject} onChange={(event) => { setSelectedSubject(event.target.value); markDirty(); }}>
+                  <select disabled={editorBusy} value={selectedSubject} onChange={(event) => { setSelectedSubject(event.target.value); markDirty(); }}>
                     {subjects.map((subject) => <option key={subjectKey(subject)} value={subjectKey(subject)}>{subjectLabel(subject)}</option>)}
                   </select>
                 </label>
               )}
-              <label>カテゴリ
-                <select disabled={saving} value={form.categorySlug} onChange={(event) => updateForm("categorySlug", event.target.value)}>
+              <label htmlFor="guide-category">カテゴリ
+                <select id="guide-category" disabled={editorBusy} value={form.categorySlug} onChange={(event) => updateForm("categorySlug", event.target.value)}>
                   <option value="">未選択</option>
                   {categories.map((category) => <option key={category.slug} value={category.slug}>{category.labelJa || category.labelEn}</option>)}
                 </select>
               </label>
               <label htmlFor="guide-slug">slug
-                <input id="guide-slug" value={form.slug} maxLength={160} spellCheck={false} disabled={saving} onChange={(event) => { setSlugCustomized(true); updateForm("slug", event.target.value.toLowerCase()); }} />
+                <input id="guide-slug" value={form.slug} maxLength={160} spellCheck={false} disabled={editorBusy} onChange={(event) => { setSlugCustomized(true); updateForm("slug", event.target.value.toLowerCase()); }} />
               </label>
-              <label>説明 <span>{form.description.length}/160</span>
-                <textarea disabled={saving} rows={4} maxLength={160} value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
+              <label htmlFor="guide-description">説明（英語） <span>{form.description.length}/160</span>
+                <textarea id="guide-description" disabled={editorBusy} rows={4} maxLength={160} value={form.description} onChange={(event) => updateForm("description", event.target.value)} />
               </label>
 
               <div className="editor-settings-section">
                 <h3>著者</h3>
                 <label htmlFor="guide-author-name">著者名
-                  <input id="guide-author-name" disabled={saving} maxLength={120} value={form.authorName} onChange={(event) => updateForm("authorName", event.target.value)} />
+                  <input id="guide-author-name" disabled={editorBusy} maxLength={120} value={form.authorName} onChange={(event) => updateForm("authorName", event.target.value)} />
                 </label>
-                <label>肩書き
-                  <input disabled={saving} maxLength={160} value={form.authorRole} onChange={(event) => updateForm("authorRole", event.target.value)} />
+                <label htmlFor="guide-author-role">肩書き
+                  <input id="guide-author-role" disabled={editorBusy} maxLength={160} value={form.authorRole} onChange={(event) => updateForm("authorRole", event.target.value)} />
                 </label>
-                <label>紹介
-                  <textarea disabled={saving} rows={3} maxLength={500} value={form.authorBio} onChange={(event) => updateForm("authorBio", event.target.value)} />
+                <label htmlFor="guide-author-bio">紹介
+                  <textarea id="guide-author-bio" disabled={editorBusy} rows={3} maxLength={500} value={form.authorBio} onChange={(event) => updateForm("authorBio", event.target.value)} />
                 </label>
                 <label>事実確認日
-                  <input disabled={saving} type="date" value={form.checkedOn} onChange={(event) => updateForm("checkedOn", event.target.value)} />
+                  <input disabled={editorBusy} type="date" value={form.checkedOn} onChange={(event) => updateForm("checkedOn", event.target.value)} />
                 </label>
               </div>
+
+              {mode === "edit" && savedGuide && (
+                <section className="editor-publication-section" aria-labelledby="guide-publication-heading">
+                  <div className="editor-publication-heading">
+                    <h3 id="guide-publication-heading">公開</h3>
+                    <span className={`editor-status editor-status-${savedGuide.status.toLowerCase()}`}>{publicationStatus}</span>
+                  </div>
+                  {publicationNeedsSave && <p className="editor-publication-hint">変更を保存すると、プレビューと公開ができます。</p>}
+                  <div className="editor-publication-actions">
+                    {publicationNeedsSave ? (
+                      <span className="editor-secondary-button editor-disabled-button" aria-disabled="true">プレビュー</span>
+                    ) : (
+                      <a
+                        href={`/editor/guides/${encodeURIComponent(articleId!)}/preview`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="editor-secondary-button"
+                      >プレビュー</a>
+                    )}
+                    <button
+                      type="button"
+                      className="editor-secondary-button"
+                      disabled={publicationNeedsSave || editorBusy || conflicted}
+                      onClick={() => void loadPublicationPreflight()}
+                    >公開設定</button>
+                  </div>
+                  {savedGuide.status === "PUBLISHED" && (
+                    <button
+                      type="button"
+                      className="editor-stop-publication"
+                      disabled={publicationNeedsSave || editorBusy || conflicted}
+                      onClick={() => void stopPublication()}
+                    >公開を停止</button>
+                  )}
+
+                  {publicationOpen && publicationState && (
+                    <div className="editor-publication-panel" aria-live="polite">
+                      <div className="editor-publication-panel-heading">
+                        <h3>公開前の確認</h3>
+                        <button type="button" disabled={publicationBusy} onClick={() => setPublicationOpen(false)} aria-label="公開設定を閉じる">×</button>
+                      </div>
+                      {publicationState.status === "loading" && <p role="status">保存済みの内容を確認中</p>}
+                      {publicationState.status === "error" && (
+                        <div className="editor-publication-error" role="alert">
+                          <p>{publicationState.text}</p>
+                          {publicationState.login && <a href={EDITOR_LOGIN_PATH} target="_blank" rel="noopener noreferrer">ログインを別タブで開く</a>}
+                        </div>
+                      )}
+                      {publicationState.status === "ready" && (
+                        <>
+                          {publicationState.message && <p className="editor-publication-success" role="status">{publicationState.message}</p>}
+                          {publicationState.problems.length > 0 ? (
+                            <div className="editor-publication-problems" role="alert">
+                              <p>公開前に修正してください。</p>
+                              <ul>
+                                {publicationState.problems.map((problem, index) => (
+                                  <li key={`${problem.field}-${index}`}>
+                                    <button type="button" onClick={() => focusPublicationField(problem.field)}>{problem.message}</button>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <>
+                              <fieldset className="editor-visibility-options" disabled={publicationBusy}>
+                                <legend>公開範囲</legend>
+                                <label>
+                                  <input
+                                    type="radio"
+                                    name="guide-visibility"
+                                    value="PUBLIC"
+                                    checked={publicationVisibility === "PUBLIC"}
+                                    onChange={() => setPublicationVisibility("PUBLIC")}
+                                  />
+                                  <span><strong>公開</strong><small>サイト連携後、一覧や検索に掲載</small></span>
+                                </label>
+                                <label>
+                                  <input
+                                    type="radio"
+                                    name="guide-visibility"
+                                    value="UNLISTED"
+                                    checked={publicationVisibility === "UNLISTED"}
+                                    onChange={() => setPublicationVisibility("UNLISTED")}
+                                  />
+                                  <span><strong>限定公開</strong><small>サイト連携後、URLを知る人に公開</small></span>
+                                </label>
+                              </fieldset>
+                              <button
+                                type="button"
+                                className="editor-primary-button editor-publication-submit"
+                                disabled={publicationBusy || publicationNeedsSave || conflicted}
+                                onClick={() => void publish()}
+                              >{guidePublicationActionLabel(savedGuide.status, publicationBusy)}</button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {saveMessage && (
                 <div className={saveMessage.error ? "editor-save-message editor-save-error" : "editor-save-message"} role={saveMessage.error ? "alert" : "status"}>
@@ -422,7 +692,7 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
                   {saveMessage.login && (
                     <p><a href={EDITOR_LOGIN_PATH} target="_blank" rel="noopener noreferrer">ログインを別タブで開く</a><br />ログイン後、このタブに戻って保存してください。</p>
                   )}
-                  {saveMessage.retry && <button type="button" disabled={saving} onClick={() => void save(saveMessage.retryRevision)}>もう一度保存</button>}
+                  {saveMessage.retry && <button type="button" disabled={editorBusy} onClick={() => void save(saveMessage.retryRevision)}>もう一度保存</button>}
                 </div>
               )}
 
@@ -435,13 +705,13 @@ export function GuideEditorClient({ articleId }: { articleId?: string }) {
                     <>
                       <p>{conflict.text}</p>
                       {conflict.login && <p><a href={EDITOR_LOGIN_PATH} target="_blank" rel="noopener noreferrer">ログインを別タブで開く</a><br />ログイン後、このタブに戻って再試行してください。</p>}
-                      <button type="button" disabled={saving} onClick={() => void fetchLatestForConflict()}>再試行</button>
+                      <button type="button" disabled={editorBusy} onClick={() => void fetchLatestForConflict()}>再試行</button>
                     </>
                   )}
                   {conflict.status === "ready" && (
                     <div className="editor-conflict-actions">
-                      <button type="button" disabled={saving} onClick={loadLatestIntoEditor}>最新版を読み込む</button>
-                      <button type="button" className="editor-conflict-overwrite" disabled={saving} onClick={() => void save(conflict.latest.revision)}>今の内容で上書き</button>
+                      <button type="button" disabled={editorBusy} onClick={loadLatestIntoEditor}>最新版を読み込む</button>
+                      <button type="button" className="editor-conflict-overwrite" disabled={editorBusy} onClick={() => void save(conflict.latest.revision)}>今の内容で上書き</button>
                     </div>
                   )}
                 </div>

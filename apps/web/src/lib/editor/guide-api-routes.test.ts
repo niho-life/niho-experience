@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
     createArticle: vi.fn(),
     getArticle: vi.fn(),
     saveDraft: vi.fn(),
+    commitPublication: vi.fn(),
+    stopPublication: vi.fn(),
     listActiveCategories: vi.fn(),
     listWritableSubjects: vi.fn(),
   },
@@ -35,6 +37,8 @@ import { GET as listGuides, POST as createGuide } from "@/app/(editor)/editor/ap
 import { GET as getGuide, PATCH as patchGuide } from "@/app/(editor)/editor/api/guides/[articleId]/route";
 import { GET as getCategories } from "@/app/(editor)/editor/api/guides/categories/route";
 import { GET as getSubjects } from "@/app/(editor)/editor/api/guides/subjects/route";
+import { GET as getPublicationPreflight } from "@/app/(editor)/editor/api/guides/[articleId]/publication/preflight/route";
+import { DELETE as stopGuidePublication, POST as publishGuide } from "@/app/(editor)/editor/api/guides/[articleId]/publication/route";
 
 const SITE = "https://experience.example.test";
 const mutationHeaders = {
@@ -57,9 +61,18 @@ const article = {
   updatedAtUtc: "2026-10-29T01:00:00.000Z",
 };
 
-function jsonRequest(path: string, method: "POST" | "PATCH", body: unknown, headers = mutationHeaders) {
+function jsonRequest(path: string, method: "POST" | "PATCH" | "DELETE", body: unknown, headers = mutationHeaders) {
   return new Request(`${SITE}${path}`, { method, headers, body: JSON.stringify(body) });
 }
+
+const publishableArticle = {
+  ...article,
+  categorySlug: "walks",
+  content: {
+    markdown: "## Synthetic\n\nSafe test content.",
+    author: { name: "Synthetic Writer", role: "Guide", bio: "Test-only profile." },
+  },
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -75,6 +88,23 @@ beforeEach(() => {
   mocks.repository.createArticle.mockResolvedValue({ ...article, revision: 1 });
   mocks.repository.getArticle.mockResolvedValue(article);
   mocks.repository.saveDraft.mockResolvedValue({ ...article, revision: 3 });
+  mocks.repository.commitPublication.mockResolvedValue({
+    articleId: article.id,
+    publicationId: 1,
+    publicationNumber: 1,
+    sourceRevision: 2,
+    slug: article.slug,
+    subject: article.subject,
+    category: { slug: "walks", labelEn: "Walks", labelJa: "散歩", displayOrder: 10 },
+    title: article.title,
+    description: article.description,
+    content: publishableArticle.content,
+    visibility: "PUBLIC",
+    indexable: true,
+    productLinks: [],
+    publishedAtUtc: "2026-10-29T02:00:00.000Z",
+  });
+  mocks.repository.stopPublication.mockResolvedValue({ ...publishableArticle, status: "STOPPED", revision: 4 });
   mocks.repository.listActiveCategories.mockResolvedValue([{ slug: "walks", labelEn: "Walks", labelJa: "散歩", displayOrder: 10 }]);
   mocks.repository.listWritableSubjects.mockResolvedValue([{ kind: "WRITER" }]);
 });
@@ -91,11 +121,18 @@ describe("private editor guide routes", () => {
       }), context),
       getCategories(),
       getSubjects(),
+      getPublicationPreflight(new Request(`${SITE}/editor/api/guides/article-synthetic/publication/preflight`), context),
+      publishGuide(jsonRequest("/editor/api/guides/article-synthetic/publication", "POST", {
+        expectedRevision: 2, visibility: "PUBLIC",
+      }), context),
+      stopGuidePublication(jsonRequest("/editor/api/guides/article-synthetic/publication", "DELETE", {
+        expectedRevision: 2,
+      }), context),
     ]);
-    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401]);
     expect(responses.every((response) => response.headers.get("cache-control") === "private, no-store")).toBe(true);
     expect(responses.every((response) => response.headers.get("x-robots-tag") === "noindex, nofollow")).toBe(true);
-    expect(mocks.load).toHaveBeenCalledTimes(6);
+    expect(mocks.load).toHaveBeenCalledTimes(9);
 
     mocks.load.mockResolvedValue({ status: "rejected" });
     expect((await listGuides()).status).toBe(401);
@@ -206,5 +243,171 @@ describe("private editor guide routes", () => {
       expect(response.status).toBe(status);
       expect(await response.json()).toEqual({ error: code });
     }
+  });
+
+  it("preflights the owned saved article with private response boundaries", async () => {
+    mocks.repository.getArticle.mockResolvedValue(publishableArticle);
+    const response = await getPublicationPreflight(
+      new Request(`${SITE}/editor/api/guides/article-synthetic/publication/preflight`),
+      context,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(await response.json()).toMatchObject({
+      guide: { id: article.id, revision: 2 },
+      problems: [],
+    });
+    expect(mocks.repository.getArticle).toHaveBeenCalledWith({ nihoUserId: "writer-synthetic" }, article.id);
+
+    mocks.repository.getArticle.mockResolvedValue({ ...publishableArticle, description: "" });
+    const invalid = await getPublicationPreflight(
+      new Request(`${SITE}/editor/api/guides/article-synthetic/publication/preflight`),
+      context,
+    );
+    expect(invalid.status).toBe(200);
+    expect(await invalid.json()).toMatchObject({ problems: [{ field: "description" }] });
+  });
+
+  it("publishes only a revalidated exact saved revision and never accepts product links", async () => {
+    const publishedArticle = {
+      ...publishableArticle,
+      status: "PUBLISHED" as const,
+      revision: 3,
+      currentPublication: {
+        id: 1,
+        number: 1,
+        visibility: "UNLISTED" as const,
+        publishedAtUtc: "2026-10-29T02:00:00.000Z",
+      },
+    };
+    mocks.repository.getArticle
+      .mockResolvedValueOnce(publishableArticle)
+      .mockResolvedValueOnce(publishedArticle);
+    const response = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "UNLISTED" },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ guide: { status: "PUBLISHED", revision: 3 } });
+    expect(mocks.repository.commitPublication).toHaveBeenCalledWith(
+      { nihoUserId: "writer-synthetic" },
+      article.id,
+      { expectedRevision: 2, visibility: "UNLISTED", productLinks: [] },
+    );
+
+    const injected = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC", productLinks: [{ providerId: "p", productId: "x" }] },
+    ), context);
+    expect(injected.status).toBe(400);
+    expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hand a newer draft revision to a tab that published older content", async () => {
+    mocks.repository.getArticle
+      .mockResolvedValueOnce(publishableArticle)
+      .mockResolvedValueOnce({
+        ...publishableArticle,
+        revision: 4,
+        title: "Saved from another tab after publication",
+        status: "PUBLISHED",
+      });
+    const response = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC" },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: "committed_needs_refresh" });
+    expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a committed publication when the follow-up read fails", async () => {
+    mocks.repository.getArticle
+      .mockResolvedValueOnce(publishableArticle)
+      .mockRejectedValueOnce(new Error("follow-up read unavailable"));
+    const response = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC" },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: "committed_needs_refresh" });
+    expect(mocks.repository.commitPublication).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns validation and revision failures before the publication transaction", async () => {
+    mocks.repository.getArticle.mockResolvedValue({
+      ...publishableArticle,
+      content: { ...publishableArticle.content, markdown: "## Unsafe\n\n<script>bad</script>" },
+    });
+    const invalid = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC" },
+    ), context);
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: "invalid_input", problems: [{ field: "body" }] });
+    expect(mocks.repository.commitPublication).not.toHaveBeenCalled();
+
+    mocks.repository.getArticle.mockResolvedValue(publishableArticle);
+    const conflict = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 1, visibility: "PUBLIC" },
+    ), context);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: "conflict" });
+    expect(mocks.repository.commitPublication).not.toHaveBeenCalled();
+
+    mocks.repository.getArticle.mockResolvedValue(publishableArticle);
+    mocks.repository.commitPublication.mockRejectedValueOnce(new StoreConflictError("revision changed in transaction"));
+    const transactionRace = await publishGuide(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "POST",
+      { expectedRevision: 2, visibility: "PUBLIC" },
+    ), context);
+    expect(transactionRace.status).toBe(409);
+    expect(await transactionRace.json()).toEqual({ error: "conflict" });
+    expect(mocks.repository.commitPublication).toHaveBeenCalledWith(
+      { nihoUserId: "writer-synthetic" },
+      article.id,
+      { expectedRevision: 2, visibility: "PUBLIC", productLinks: [] },
+    );
+  });
+
+  it("stops publication through the store revision check and maps mutation boundaries", async () => {
+    const response = await stopGuidePublication(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "DELETE",
+      { expectedRevision: 3 },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ guide: { status: "STOPPED", revision: 4 } });
+    expect(mocks.repository.stopPublication).toHaveBeenCalledWith(
+      { nihoUserId: "writer-synthetic" },
+      article.id,
+      3,
+    );
+
+    mocks.allowed.mockReturnValue(false);
+    expect((await stopGuidePublication(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "DELETE",
+      { expectedRevision: 3 },
+    ), context)).status).toBe(403);
+    mocks.allowed.mockReturnValue(true);
+
+    mocks.repository.stopPublication.mockRejectedValue(new StoreConflictError("private detail"));
+    const conflict = await stopGuidePublication(jsonRequest(
+      "/editor/api/guides/article-synthetic/publication",
+      "DELETE",
+      { expectedRevision: 3 },
+    ), context);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: "conflict" });
   });
 });
