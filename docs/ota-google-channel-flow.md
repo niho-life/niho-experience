@@ -31,8 +31,8 @@
 - `0015_resource_google_busy.sql` は接続の単調なgeneration、OWNERだけが読めるcalendar inventory、資源設定、選別UTC busy区間、watch metadata、15分due/lease/receiptを追加する。資源設定は `(provider_id, resource_id)` 複合FKで、接続削除には連動削除しない。
 - `evaluateStoredInventories` は商品に割り当てた資源ごとにprepare/cleanupを含む半開区間を評価する。enabled資源の接続generation不一致、STALE/FAILED、freshness切れ、coverage不足は `RESOURCE_GOOGLE_UNAVAILABLE`、重なりは `RESOURCE_GOOGLE_BUSY`。未設定資源とprovider全体の従来Google判定は独立して残す。
 - OWNER BFFはfreshなhost actorと現在のExperience OWNERを二重確認し、Googleから取得した10分以内のcalendar inventoryだけを選択可能にする。予約出力calendarは一覧から除外する。OPERATOR/COHOST DTOにはcalendar ID・name・tokenを含めない。commandはUUID v4、expectedVersion、fingerprintを保存し、同じ再送だけACKする。
-- Studio workerは既存の認証済みoutbound pollから `/internal/ota/v1/google-sync` を最大25秒で呼ぶ。cloudは毎回worker credentialとprovider assignmentを確認し、一要求を1provider・最大5calendarに限定する。calendar IDはworkerへ返さない。flag OFFや旧cloudの404は既存OTA jobを止めない。
-- syncはDB外でrefresh/freebusyを行い、provider inventory mutex内でconnection generation、settings version、calendar ID、claim/lease epochを再確認してからだけ保存する。成功は15分後due・25分freshness、失敗/失効はbusyを空にせず受付を保留する。busy変更、失敗、freshness期限のcalendar outboxは同じtransactionで作る。
+- Studio workerは既存の認証済みoutbound pollから `/internal/ota/v1/google-sync` を最大25秒で呼ぶ。cloudは毎回worker credentialとprovider assignmentを確認し、一要求を1provider・1資源のcalendarに限定し、あるcalendarの権限エラーを別資源へ広げない。calendar IDはworkerへ返さない。flag OFFや旧cloudの404は既存OTA jobを止めない。
+- syncはDB外でrefresh/freebusyを行い、provider inventory mutex内でconnection generation、settings version、calendar ID、claim/lease epochを再確認してからだけ保存する。busy区間は資源ごとの一括INSERTで保存し、区間数に比例するDB往復を避ける。成功は15分後due・25分freshness、失敗/失効はbusyを空にせず受付を保留する。busy変更、失敗、freshness期限のcalendar outboxは同じtransactionで作る。
 - watchはHTTPSのchannel ID、Google resource ID、token digest、有効期限、単調message number、connection/settings epochを検証し、通知をdirty化するだけである。本文を読まず、必ず次のfreebusyで状態を確定する。watch登録はpollと並行し、失敗しても15分pollが完全性を担う。
 - watch登録後に同期保存がSUPERSEDEDになったchannelは永続metadataへ採用せず、通知ではbusyを変更できない。外部channelはGoogle側TTLで失効し、pollが完全性を維持する。
 

@@ -120,7 +120,7 @@ async function claimDue(pool: Pool, worker: WorkerIdentity): Promise<DueClaim | 
         WHERE g.provider_id=$1 AND g.enabled=true AND g.connection_generation=$2
           AND g.next_sync_due_at<=clock_timestamp()
           AND (g.sync_claim_id IS NULL OR g.sync_lease_expires_at<=clock_timestamp())
-        ORDER BY g.next_sync_due_at,g.resource_id COLLATE "C" LIMIT 5 FOR UPDATE OF g SKIP LOCKED`,
+        ORDER BY g.next_sync_due_at,g.resource_id COLLATE "C" LIMIT 1 FOR UPDATE OF g SKIP LOCKED`,
       [selected.provider_id, selected.connection_generation],
     );
     if (!rows.rows.length) return null;
@@ -209,12 +209,17 @@ async function finishClaim(pool: Pool, worker: WorkerIdentity, claim: DueClaim, 
     for (const { resource } of settings) {
       if (input.outcome === "APPLIED" && input.busyByCalendar) {
         await client.query("DELETE FROM resource_google_busy_intervals WHERE provider_id=$1 AND resource_id=$2", [claim.providerId, resource.resourceId]);
-        for (const busy of input.busyByCalendar.get(resource.calendarId) ?? []) {
+        const busy = input.busyByCalendar.get(resource.calendarId);
+        if (!busy) throw new StoreConflictError("A selected calendar is missing from the busy response.");
+        if (busy.length > 0) {
           await client.query(
             `INSERT INTO resource_google_busy_intervals
                (provider_id,resource_id,settings_version,connection_generation,start_at,end_at)
-             VALUES ($1,$2,$3,$4,$5,$6)`,
-            [claim.providerId, resource.resourceId, resource.settingsVersion, claim.generation, busy.startUtc, busy.endUtc],
+             SELECT $1,$2,$3,$4,b.start_at,b.end_at
+               FROM unnest($5::timestamptz[],$6::timestamptz[]) AS b(start_at,end_at)
+             ON CONFLICT (provider_id,resource_id,start_at,end_at) DO NOTHING`,
+            [claim.providerId, resource.resourceId, resource.settingsVersion, claim.generation,
+              busy.map((interval) => interval.startUtc), busy.map((interval) => interval.endUtc)],
           );
         }
         await client.query(
@@ -254,7 +259,7 @@ async function finishClaim(pool: Pool, worker: WorkerIdentity, claim: DueClaim, 
   });
 }
 
-/** One authenticated Studio trigger handles at most one provider and five selected calendars. */
+/** A calendar's permission failure must not invalidate another resource. */
 export async function syncOneDueResourceGoogle(pool: Pool, worker: WorkerIdentity): Promise<{ processed: boolean; applied: boolean }> {
   if (!resourceGoogleEnabled()) return { processed: false, applied: false };
   const claim = await claimDue(pool, worker);

@@ -236,11 +236,16 @@ describe.skipIf(!databaseUrl)("resource Google sync epochs", () => {
         const url = String(input);
         if (url.includes("oauth2.googleapis.com/token")) return Response.json({ access_token: "access", expires_in: 3600 });
         if (url.includes("/events/watch")) return new Response(null, { status: 503 });
-        return Response.json({ calendars: { "room-calendar": { busy: [{ start: "2099-01-01T03:00:00Z", end: "2099-01-01T04:00:00Z" }] } } });
+        return Response.json({ calendars: { "room-calendar": { busy: [
+          { start: "2099-01-01T03:00:00Z", end: "2099-01-01T04:00:00Z" },
+          { start: "2099-01-01T03:00:00Z", end: "2099-01-01T04:00:00Z" },
+          { start: "2099-01-01T04:30:00Z", end: "2099-01-01T05:00:00Z" },
+        ] } } });
       });
       expect(await syncOneDueResourceGoogle(pool, worker)).toEqual({ processed: true, applied: true });
       expect((await pool.query("SELECT sync_status FROM resource_google_calendars WHERE provider_id='provider-a' AND resource_id='room-a'")).rows[0].sync_status).toBe("FRESH");
       expect((await pool.query("SELECT count(*)::int AS count FROM resource_google_watch_channels")).rows[0].count).toBe(0);
+      expect((await pool.query("SELECT count(*)::int AS count FROM resource_google_busy_intervals")).rows[0].count).toBe(2);
 
       await resetDue();
       // A registered Google channel is only trusted after its metadata commits. A superseded
@@ -283,6 +288,24 @@ describe.skipIf(!databaseUrl)("resource Google sync epochs", () => {
       expect((await pool.query("SELECT outcome FROM resource_google_sync_receipts ORDER BY created_at DESC LIMIT 1")).rows[0].outcome).toBe("FAILED");
       expect((await pool.query("SELECT payload->>'cause' AS cause FROM calendar_outbox_events ORDER BY id DESC LIMIT 1")).rows[0].cause).toBe("resource_google_sync_failed");
       expect((await pool.query("SELECT count(*)::int AS count FROM resource_google_busy_intervals WHERE start_at='2099-01-01T03:00:00Z'")).rows[0].count).toBe(1);
+
+      // The failed calendar is backed off; another resource can sync on its own.
+      await pool.query("DROP TRIGGER reject_resource_busy_outbox ON calendar_outbox_events");
+      process.env.EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED = "false";
+      await pool.query("INSERT INTO inventory_resources (provider_id,id,kind,display_name) VALUES ('provider-a','room-b','VENUE','Room B')");
+      await pool.query(
+        `INSERT INTO resource_google_calendars
+          (provider_id,resource_id,opaque_calendar_id,enabled,connection_generation,next_sync_due_at)
+         VALUES ('provider-a','room-b','room-b-calendar',true,$1,clock_timestamp()-interval '1 minute')`, [generation],
+      );
+      mocks.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("oauth2.googleapis.com/token")) return Response.json({ access_token: "access", expires_in: 3600 });
+        expect(JSON.parse(String(init?.body)).items).toEqual([{ id: "room-b-calendar" }]);
+        return Response.json({ calendars: { "room-b-calendar": { busy: [] } } });
+      });
+      expect(await syncOneDueResourceGoogle(pool, worker)).toEqual({ processed: true, applied: true });
+      const isolated = (await pool.query("SELECT resource_id,sync_status FROM resource_google_calendars ORDER BY resource_id")).rows;
+      expect(isolated).toEqual([{ resource_id: "room-a", sync_status: "FAILED" }, { resource_id: "room-b", sync_status: "FRESH" }]);
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
       await pool.end();
