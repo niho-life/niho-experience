@@ -179,7 +179,7 @@ export function createViatorNetworkGuard({ job, cloud, getSnapshot, assertWriteC
     } catch (error) { fatalWrite = error; return refuse(route); }
     if (frozen || permit !== reserved || fatalWrite) return refuse(route);
     writes += 1;
-    return forwardSingleWrite(route);
+    return forwardSingleWrite(route, { sameOriginXhrPage: `${supplierOrigin}/availability/` });
   }
 
   return Object.freeze({

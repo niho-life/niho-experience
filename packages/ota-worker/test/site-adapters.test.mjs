@@ -31,7 +31,8 @@ const jalanSummary = (frontOpenFlg = true) => ({ dto: { dspBaseDate: "20990101",
 
 function route(url, method, body, calls) {
   return { request: () => ({ url: () => url, method: () => method, postData: () => body === undefined ? null : JSON.stringify(body),
-    postDataJSON: () => body, isNavigationRequest: () => false, resourceType: () => "fetch", headers: () => ({ "content-type": "application/json" }) }),
+    postDataJSON: () => body, isNavigationRequest: () => false, resourceType: () => "xhr", redirectedFrom: () => null,
+    frame: () => ({ url: () => new URL(url).origin + "/availability/" }), headers: () => ({ "content-type": "application/json", origin: new URL(url).origin }) }),
     fetch: async (options) => { assert.equal(options.maxRetries, 0); assert.equal(options.maxRedirects, 0); return { async dispose() {} }; },
     fulfill: async () => { calls.push("continue"); },
     continue: async () => { calls.push("continue"); }, abort: async () => { calls.push("abort"); } };
