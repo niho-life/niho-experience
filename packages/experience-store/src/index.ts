@@ -7,7 +7,7 @@ export {
   StoreValidationError,
 } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
-export { evaluateStoredInventories, evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
+export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export { ResourceGoogleRepository } from "./resource-google.ts";
 export type { ResourceGoogleOwnerSnapshot, ResourceGoogleSetting } from "./resource-google.ts";
@@ -15,11 +15,15 @@ export { ProductOperatorRepository } from "./product-operators.ts";
 export type { CreatedProductOperatorInvitation, CreateProductOperatorInvitationInput, PreparedProductOperatorInvitation, ProductOperatorAdminActor, ProductOperatorAdminSnapshot } from "./product-operators.ts";
 export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
+export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
+export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
 export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
 export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";
+export { GoogleChannelSetupRepository } from "./google-channel-setup.ts";
+export type { GoogleChannelSetupPhase, GoogleChannelSetupRecord, GoogleChannelSetupSecretSnapshot } from "./google-channel-setup.ts";
 export type {
   ChannelAction,
   ChannelAdminActor,

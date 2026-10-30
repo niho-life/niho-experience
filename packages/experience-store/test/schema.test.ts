@@ -127,6 +127,19 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
   });
 
+  it("fences OWNER calendar creation before I/O without persisting credentials or response bodies", async () => {
+    const sql = await readFile(new URL("../migrations/0019_google_channel_setup.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE google_channel_setup_journals/);
+    assert.match(sql, /phase IN \('PREPARING','CREATING','READY_FOR_CONNECTION','FAILED_BEFORE_CREATE','UNCERTAIN'\)/);
+    assert.match(sql, /operation_nonce uuid NOT NULL/);
+    assert.match(sql, /created_by_niho_user_id text NOT NULL/);
+    assert.match(sql, /expected_mapping_version bigint NOT NULL/);
+    assert.match(sql, /connection_generation bigint NOT NULL/);
+    assert.match(sql, /granted_scopes_digest text NOT NULL/);
+    assert.match(sql, /WHERE phase IN \('PREPARING','CREATING','UNCERTAIN'\)/);
+    assert.doesNotMatch(sql, /access_token|refresh_token|raw_response|error_body|customer|guest|email|phone/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -159,5 +172,16 @@ describe("database invariants", () => {
     assert.match(sql, /CREATE TABLE product_operator_commands/);
     assert.match(sql, /CREATE TABLE product_operator_audit_events/);
     assert.doesNotMatch(sql, /calendar_commands|calendar_outbox_events/);
+  });
+
+  it("keeps only the three stoppable notification choices per provider, with no addresses (#109)", async () => {
+    const sql = await readFile(new URL("../migrations/0020_provider_notification_preferences.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const table = sql.match(/CREATE TABLE provider_notification_preferences \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /notification_key IN \('GUEST_MESSAGE', 'DAY_BEFORE_SUMMARY', 'NEW_REVIEW'\)/);
+    assert.match(table, /PRIMARY KEY \(provider_id, notification_key\)/);
+    assert.match(table, /REFERENCES experience_providers\(id\)/);
+    assert.doesNotMatch(table, /email|address|display_name|body\b|NEW_BOOKING|CANCELLATION/i);
   });
 });

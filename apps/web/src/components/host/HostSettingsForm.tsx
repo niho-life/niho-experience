@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
-import { saveProviderMeetingPoint, saveProviderProfile, submitProviderReview } from "@/host/actions";
+import { saveNotificationSettings, saveProviderMeetingPoint, saveProviderProfile, submitProviderReview } from "@/host/actions";
 import { normalizeMeetingPoint, sameMeetingPoint } from "@/host/meeting-point";
-import { notificationChanges, notificationPanelView, toggleNotification } from "@/host/notifications";
+import { notificationChanges, notificationPanelView, notificationRows, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
 import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
 import type { HostGoogleConnection, HostMeetingDefaults, HostNotificationKey, HostSettings } from "@/host/types";
@@ -52,7 +52,9 @@ export interface HostSettingsFormProps {
  * too and saved after 提供者情報 by the same 保存; changing it stops every listed experience of the
  * provider, so the host is asked first (one dialog with the review's sentence when both apply). The
  * preview keeps it on screen only. 審査を申請, the payout account and カレンダー (#109) work on their
- * own. 通知 (#109: the three notifications the host may stop) is kept by 保存 but has no API yet.
+ * own. 通知 (#109: the three notifications the owner may stop) is kept by 保存 in the experience DB
+ * once it is open there (`settings.notificationSource`), on screen only in the preview, and 準備中
+ * until then.
  *
  * Only 提供者情報 and the payout account sit inside the <form>: カレンダー's dialogs are forms of
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
@@ -74,7 +76,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const meetingEditable = settings.meetingPoint !== null && (role === "OWNER" || role === "EDITOR");
   const [savedMeeting, setSavedMeeting] = useState<HostMeetingDefaults | null>(settings.meetingPoint);
   const [meeting, setMeeting] = useState<HostMeetingDefaults | null>(settings.meetingPoint);
-  const notificationView = notificationPanelView(settings.notifications, role, preview);
+  const notificationView = notificationPanelView(settings.notifications, role, settings.notificationSource);
   const [savedNotifications, setSavedNotifications] = useState(notificationView.kind === "owner" ? notificationView.rows : []);
   const [notifications, setNotifications] = useState(savedNotifications);
   const [saving, startSaving] = useTransition();
@@ -117,12 +119,22 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   };
 
   /**
-   * The notifications that changed, "saved" as they are on screen (the preview keeps nothing).
-   * TODO(#87): PATCH them to NIHO's notification settings (niho-app#19315, OWNER only) once the host
-   * contract has it, and show what NIHO answers.
+   * The notifications that changed: the experience DB keeps them and answers all seven as they are
+   * now (#109); the preview "saves" them as they are on screen. The error to show, or null.
    */
-  const keepNotifications = () => {
-    if (Object.keys(notificationChanges(savedNotifications, notifications)).length > 0) setSavedNotifications(notifications);
+  const saveNotifications = async (): Promise<HostNotice | null> => {
+    const changed = notificationChanges(savedNotifications, notifications);
+    if (Object.keys(changed).length === 0) return null;
+    if (settings.notificationSource !== "live") {
+      setSavedNotifications(notifications);
+      return null;
+    }
+    const result = await saveNotificationSettings({ providerId, changes: changed });
+    if (!result.ok) return { tone: "error", message: result.message };
+    const rows = notificationRows(result.items);
+    setSavedNotifications(rows);
+    setNotifications(rows);
+    return null;
   };
 
   /** The meeting point as NIHO keeps it now: the preview's on-screen one, trimmed. */
@@ -138,15 +150,10 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
       setNotice({ tone: "error", message: "既定の集合案内の地図 URL は https:// で始まる URL にしてください。" });
       return;
     }
-    // Nothing of NIHO's changed: the preview's on-screen parts are "saved" as they are.
-    if (!unsaved && !(meetingNow && !preview)) {
-      if (meetingNow) keepMeeting(meetingNow);
-      keepNotifications();
-      setNotice({ tone: "success", message: "保存しました" });
-      return;
-    }
     startSaving(async () => {
+      // 提供者情報, then the meeting point, then 通知: a refused later part leaves the earlier ones saved.
       let message = "保存しました";
+      const savedParts: string[] = [];
       if (unsaved) {
         const result = await saveProviderProfile({ providerId, ...changes });
         if (!result.ok) {
@@ -157,8 +164,8 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
         setProfile(result.profile);
         setReviewStatus(result.reviewStatus);
         message = result.message;
+        savedParts.push("提供者情報");
       }
-      // 提供者情報 first, then the meeting point: a refused meeting point leaves the profile saved.
       if (meetingNow && preview) keepMeeting(meetingNow);
       else if (meetingNow) {
         const result = await saveProviderMeetingPoint({ providerId, meetingPoint: meetingNow });
@@ -168,8 +175,13 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
         }
         keepMeeting(result.meetingPoint);
         message = result.message;
+        savedParts.push("既定の集合案内");
       }
-      keepNotifications();
+      const failed = await saveNotifications();
+      if (failed) {
+        setNotice({ tone: "error", message: savedParts.length ? `${savedParts.join("と")}は保存しました。${failed.message}` : failed.message });
+        return;
+      }
       setNotice({ tone: "success", message });
     });
   };

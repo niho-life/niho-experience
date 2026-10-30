@@ -2,10 +2,11 @@ import type { HostProviderRole } from "@/lib/host/providers";
 import type { HostNotificationItem, HostNotificationKey, HostNotificationSettings } from "./types";
 
 /*
- * 設定 › 通知 (#109, Epic #103): the notifications NIHO emails a provider, in NIHO's order (niho-app
- * spec §17.4), what each one is and when it comes, and which the host may turn off. NIHO answers
- * every key in this order; the screen still drops a key it does not know and fills in one that is
- * missing. Plain data and rules (no server code), shared by the settings page and its form.
+ * 設定 › 通知 (#109, Epic #103): the notifications a provider gets, in the order of niho-app spec
+ * §17.4, what each one is and when it comes, and which the host may turn off. The experience DB
+ * keeps the three the OWNER may stop (ADR 0002, migration 0020) and answers every key in this
+ * order; the screen still drops a key it does not know and fills in one that is missing. Plain
+ * data and rules (no server code), shared by the settings page, its form and its server action.
  */
 
 export interface NotificationDefinition {
@@ -27,13 +28,15 @@ export const NOTIFICATIONS: readonly NotificationDefinition[] = [
   { key: "LISTING_REVIEW", label: "掲載と審査の結果", when: "掲載の承認・差し戻し・停止", stoppable: false },
 ];
 
-/** The only keys NIHO's PATCH takes (booleans). */
+/** The only keys 保存 changes (booleans). */
 export const STOPPABLE_NOTIFICATION_KEYS = ["GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW"] as const satisfies readonly HostNotificationKey[];
 export type StoppableNotificationKey = (typeof STOPPABLE_NOTIFICATION_KEYS)[number];
 
 export const NOTIFICATION_LOCKED_TEXT = "止められません";
 export const NOTIFICATION_OWNER_ONLY_TEXT = "通知の設定はオーナーが変えられます";
 export const NOTIFICATION_ADDRESS_CHANGE_TEXT = "宛先の変更は準備中です";
+export const NOTIFICATION_LOAD_FAILED_TEXT = "通知の設定を読み込めませんでした。時間をおいて、ページを読み込み直してください。";
+export const NOTIFICATION_SAVE_FAILED_TEXT = "通知の設定を保存できませんでした。時間をおいて、もう一度お試しください。";
 
 /** One row of 通知: the words, and whether it is on and may be changed. */
 export interface NotificationRow {
@@ -66,7 +69,7 @@ export function toggleNotification(rows: readonly NotificationRow[], key: HostNo
   return rows.map((row) => (row.key === key && !row.locked ? { ...row, enabled } : row));
 }
 
-/** What 保存 sends NIHO's PATCH: only the notifications the host may change, and only those that changed. */
+/** What 保存 sends: only the notifications the host may change, and only those that changed. */
 export function notificationChanges(saved: readonly NotificationRow[], now: readonly NotificationRow[]): Partial<Record<StoppableNotificationKey, boolean>> {
   const changes: Partial<Record<StoppableNotificationKey, boolean>> = {};
   for (const row of now) {
@@ -77,29 +80,48 @@ export function notificationChanges(saved: readonly NotificationRow[], now: read
   return changes;
 }
 
+/**
+ * Where 通知 is kept for this page: the preview (mock mode: on screen only), the experience DB
+ * (保存 sends the changes), not here yet (準備中: the flag is off or the provider's OWNER is not in
+ * the experience DB), or the experience DB could not be read.
+ */
+export type NotificationSource = "preview" | "live" | "preparing" | "error";
+
 /** 設定 › 通知 for this person. */
 export type NotificationPanelView =
-  /** Anyone but the owner: NIHO answers the settings to the owner only. */
+  /** Anyone but the owner: the settings are the owner's only. */
   | { kind: "owner-only"; text: string; preparing: boolean }
+  | { kind: "error"; text: string; preparing: false }
   | {
       kind: "owner";
-      /** http mode: NIHO's API is not in the host contract yet, so nothing can be changed (準備中). */
+      /** Nothing can be changed here yet (準備中). */
       preparing: boolean;
-      /** The verified addresses NIHO sends to, shown as they are (changed outside this screen). */
+      /** The verified addresses the notifications go to, shown as they are (changed outside this screen). */
       addresses: readonly string[];
       addressText: string;
       rows: NotificationRow[];
     };
 
-/**
- * 通知 as the settings page opens it. `preview` (mock mode) lets the owner try the switches on screen;
- * in http mode the panel is 準備中 until NIHO's API (niho-app#19315) is in the host contract.
- */
-export function notificationPanelView(settings: HostNotificationSettings | null, role: HostProviderRole | null, preview: boolean): NotificationPanelView {
-  const preparing = !preview;
+/** 通知 as the settings page opens it: the owner changes it in the preview and once the experience DB keeps it. */
+export function notificationPanelView(settings: HostNotificationSettings | null, role: HostProviderRole | null, source: NotificationSource): NotificationPanelView {
+  const preparing = source === "preparing";
   if (role !== "OWNER" || !settings) return { kind: "owner-only", text: NOTIFICATION_OWNER_ONLY_TEXT, preparing };
+  if (source === "error") return { kind: "error", text: NOTIFICATION_LOAD_FAILED_TEXT, preparing: false };
   const addresses = settings.email.addresses.filter((address) => address.trim() !== "");
   const addressText =
     addresses.length === 0 ? "NIHO からの通知は、NIHO アカウントの確認済みのメールに届きます" : addresses.length === 1 ? "NIHO からの通知はこのメールに届きます" : "NIHO からの通知はこれらのメールに届きます";
   return { kind: "owner", preparing, addresses, addressText, rows: notificationRows(settings.items) };
+}
+
+/** The changes a browser sent to 保存, or null unless they are one or more stoppable keys with booleans. */
+export function notificationChangesInput(value: unknown): Partial<Record<StoppableNotificationKey, boolean>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length === 0 || entries.length > STOPPABLE_NOTIFICATION_KEYS.length) return null;
+  const changes: Partial<Record<StoppableNotificationKey, boolean>> = {};
+  for (const [key, enabled] of entries) {
+    if (!(STOPPABLE_NOTIFICATION_KEYS as readonly string[]).includes(key) || typeof enabled !== "boolean") return null;
+    changes[key as StoppableNotificationKey] = enabled;
+  }
+  return changes;
 }

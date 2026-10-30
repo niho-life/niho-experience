@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>トップページ案 · NIHO Experience</title>
+<link rel="icon" href="assets/icon.svg">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+body{font-family:"Nunito","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.top{padding:44px 0 8px}
+.top .hand{font-size:24px}
+.top h1{font-size:30px;overflow-wrap:anywhere;margin-top:4px;font-family:"Fraunces","Hiragino Mincho ProN",serif}
+.top p{margin-top:12px;color:var(--ink2);max-width:46rem}
+.common{margin-top:28px;background:var(--sand);border-radius:var(--r);padding:20px 22px}
+.common h2{font-size:20px;font-family:"Hiragino Sans","Noto Sans JP",sans-serif;font-weight:800}
+.common ul{margin-top:10px;display:grid;gap:6px}
+.common li{padding-left:20px;position:relative;color:var(--ink2);font-size:15.5px}
+.common li::before{content:"";position:absolute;left:2px;top:.65em;width:8px;height:8px;border-radius:50%;background:var(--leaf)}
+.pats{display:grid;gap:22px;margin-top:36px}
+@media (min-width:960px){.pats{grid-template-columns:repeat(3,1fr)}}
+.pat{border:1px solid var(--line);border-radius:26px;padding:20px;display:flex;flex-direction:column}
+.pat .tag{font-family:"Fraunces",serif;font-size:40px;line-height:1;color:var(--moss)}
+.pat h2{font-size:22px;margin-top:6px;font-family:"Hiragino Sans","Noto Sans JP",sans-serif;font-weight:800}
+.pat .sum{margin-top:8px;color:var(--ink2);font-size:15px}
+.pat dl{margin:14px 0 0;display:grid;gap:10px;font-size:14.5px}
+.pat dt{font-weight:800;font-size:13px;color:var(--muted)}
+.pat dd{margin:2px 0 0;color:var(--ink2)}
+.pat .btn{margin-top:20px;align-self:flex-start}
+.rec{display:inline-block;margin-left:8px;vertical-align:middle;background:var(--leaf);color:var(--ink);font-size:12px;font-weight:800;border-radius:999px;padding:2px 10px}
+/* wireframes */
+.wf{margin-top:14px;background:var(--sand);border-radius:16px;padding:10px;display:grid;gap:5px}
+.wf div{border-radius:4px}
+.wf .h{height:8px;background:#fff}
+.wf .hero{height:40px;background:#c9c9c2}
+.wf .x{height:30px;background:repeating-linear-gradient(90deg,var(--leaf) 0 22%,transparent 22% 26%)}
+.wf .x3{height:22px;background:repeating-linear-gradient(90deg,var(--leaf) 0 31%,transparent 31% 34.5%)}
+.wf .xf{height:30px;background:linear-gradient(90deg,var(--leaf) 0 56%,#fff 56%)}
+.wf .st{height:8px;background:#fff}
+.wf .lbl{height:auto;font-size:11px;font-weight:800;color:var(--muted);padding:2px 0 0}
+.wf .feat{height:44px;background:linear-gradient(90deg,#9fb3c8 0 60%,transparent 60% 63%,#cbd6e1 63%)}
+.wf .ag{height:22px;background:repeating-linear-gradient(90deg,#cbd6e1 0 31%,transparent 31% 34.5%)}
+.wf .intro{height:34px;background:linear-gradient(90deg,#fff 0 48%,transparent 48% 52%,#c9c9c2 52%)}
+.wf .lst{height:60px;background:linear-gradient(90deg,transparent 70%,#fff 70% 72%,#e3e3dd 72%),repeating-linear-gradient(180deg,#cbd6e1 0 9px,transparent 9px 12px) 0 0/68% 100% no-repeat}
+.wf .tabs{height:8px;background:repeating-linear-gradient(90deg,#fff 0 17%,transparent 17% 19%)}
+.wf .area{height:44px;background:linear-gradient(90deg,#9fb3c8 0 55%,transparent 55% 58%,#cbd6e1 58%)}
+.wf .sea{height:26px;background:repeating-linear-gradient(90deg,#e0c9a0 0 23%,transparent 23% 25.6%)}
+.wf .ag4{height:18px;background:repeating-linear-gradient(90deg,#cbd6e1 0 23%,transparent 23% 25.6%)}
+.notes{margin-top:44px;display:grid;gap:22px}
+@media (min-width:900px){.notes{grid-template-columns:1fr 1fr}}
+.notes section{border-top:2px solid var(--ink);padding-top:14px}
+.notes h2{font-size:19px;font-family:"Hiragino Sans","Noto Sans JP",sans-serif;font-weight:800}
+.notes ul{margin-top:8px;display:grid;gap:6px;font-size:15px;color:var(--ink2)}
+.notes li{padding-left:16px;position:relative}
+.notes li::before{content:"–";position:absolute;left:0;color:var(--muted)}
+.foot{margin:48px 0 40px;font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="top">
+    <span class="hand">mock · 2026-10-29</span>
+    <h1>experience.niho.life トップページ案</h1>
+    <p>「鎌倉の街・暮らしを楽しむサイト」として、<b>体験を先に</b>見せ、その下に<b>記事をサムネイル付きの一覧</b>で並べる構成を3パターン作りました。各パターンはPC・スマホどちらの幅でも見られます（上部の帯で切り替え）。</p>
+  </div>
+
+  <div class="common">
+    <h2>3案に共通すること</h2>
+    <ul>
+      <li>ヒーローの直下に体験。予約の流れ（日付→円で支払い→ホストに会う）も体験のすぐ下に小さくまとめた。</li>
+      <li>記事は体験の下。写真・カテゴリ・題名・読了時間を揃えたカードで、本数が増えても同じ型で足せる。</li>
+      <li>記事のカテゴリを「街歩き・食・季節・暮らし・1日プラン」に。トーンを「寺社の観光案内」から「街と暮らしを楽しむ」へ寄せた。</li>
+      <li>今の「Why it feels different」「Make a day of it」などの説明ブロックは、体験カードと記事に役割を移して省いた。ホスト募集は最下部に1つだけ。</li>
+    </ul>
+  </div>
+
+  <div class="pats">
+    <article class="pat">
+      <span class="tag">A</span>
+      <h2>雑誌グリッド<span class="rec">おすすめ</span></h2>
+      <p class="sum">体験4列 → 「Kamakura Journal」。大きな1本＋右に3本、その下に3列のサムネイル。カテゴリのチップで絞り込み。</p>
+      <div class="wf" aria-hidden="true"><div class="h"></div><div class="hero"></div><div class="x"></div><div class="st"></div><div class="lbl">記事</div><div class="tabs"></div><div class="feat"></div><div class="ag"></div><div class="ag"></div></div>
+      <dl>
+        <dt>良いところ</dt><dd>写真が主役で、今のサイトの世界観のまま記事を増やせる。記事が数本でも、数十本でも成り立つ。</dd>
+        <dt>気になるところ</dt><dd>記事が100本を超えると、トップから古い記事へは「All stories」頼みになる。</dd>
+      </dl>
+      <a class="btn" href="a-journal-grid.html">Aを見る</a>
+    </article>
+
+    <article class="pat">
+      <span class="tag">B</span>
+      <h2>リスト＋目次</h2>
+      <p class="sum">ヒーローを小さくし、体験の目玉1件を横長に大きく。記事はブログ型の縦リスト（左にサムネイル）と、右の目次（はじめての人向け3本・カテゴリ・エリア別の件数）。</p>
+      <div class="wf" aria-hidden="true"><div class="h"></div><div class="intro"></div><div class="xf"></div><div class="x3"></div><div class="st"></div><div class="lbl">記事</div><div class="lst"></div></div>
+      <dl>
+        <dt>良いところ</dt><dd>体験が一番早く目に入る。記事が大量になっても探しやすく、ページ送りもできる。体験が1件でも寂しく見えない。</dd>
+        <dt>気になるところ</dt><dd>読み物サイト寄りで、写真の迫力はAより控えめ。</dd>
+      </dl>
+      <a class="btn" href="b-list-sidebar.html">Bを見る</a>
+    </article>
+
+    <article class="pat">
+      <span class="tag">C</span>
+      <h2>エリアで歩く</h2>
+      <p class="sum">体験は横スクロールのカルーセル。記事は「鎌倉駅・小町／北鎌倉／長谷／海沿い／材木座」のタブで、エリアの写真・記事・近くの体験をまとめて見せる。その下に季節の特集と全記事。</p>
+      <div class="wf" aria-hidden="true"><div class="h"></div><div class="hero"></div><div class="x"></div><div class="st"></div><div class="lbl">記事</div><div class="tabs"></div><div class="area"></div><div class="sea"></div><div class="ag4"></div></div>
+      <dl>
+        <dt>良いところ</dt><dd>「街・暮らしを楽しむ」が一番伝わる。記事から近くの体験へ自然につながる。</dd>
+        <dt>気になるところ</dt><dd>記事ごとにエリアの設定が必要。エリアごとに3本くらいたまるまでは、空いた印象になる。</dd>
+      </dl>
+      <a class="btn" href="c-neighborhoods.html">Cを見る</a>
+    </article>
+  </div>
+
+  <div class="notes">
+    <section>
+      <h2>おすすめの進め方</h2>
+      <ul>
+        <li>まずAをベースにする。記事が1本でも数十本でも同じ型で増やせ、今の見た目からの変更も小さい。</li>
+        <li>記事がエリアごとに3本ほどたまったら、Cの「エリアで歩く」を記事一覧の上に足す。</li>
+        <li>体験が1〜2件の間は、Bの「横長の目玉カード」をAの体験欄に使うと、カードが1枚だけ寂しく並ぶのを避けられる。</li>
+      </ul>
+    </section>
+    <section>
+      <h2>このモックで仮にしているもの</h2>
+      <ul>
+        <li>体験はコミュニティディナーだけが実在。座禅・書道・金継ぎは見た目確認用の仮。日程・料金も仮。</li>
+        <li>記事は「Kamakura After 4 PM」以外は仮の題名。写真はリポジトリの仮素材（Unsplash・NIHO自前）。</li>
+        <li>検索・絞り込み・ページ送りの見た目だけで、予約や記事ページには進めない。</li>
+        <li>ホストの顔写真はオーナー本人のものだけ。ほかは顔の代わりのストック写真。</li>
+      </ul>
+    </section>
+  </div>
+
+  <p class="foot">NIHO Experience · トップページのレイアウト検討用モック（noindex）</p>
+</main>
+</body>
+</html>

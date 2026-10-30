@@ -181,6 +181,13 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(true);
   });
 
+  it("keeps 設定 › 通知 in the experience DB only in http mode with its own flag and the host console (#109)", () => {
+    expect(resolveConfig({}).hostNotificationSettingsEnabled).toBe(false);
+    expect(resolveConfig({ HOST_NOTIFICATION_SETTINGS_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_NOTIFICATION_SETTINGS_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_NOTIFICATION_SETTINGS_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(true);
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {
@@ -235,6 +242,19 @@ describe("public guide source", () => {
     expect(resolveConfig(database).guidePublicSource).toBe("database");
     expect(() => resolveConfig({ ...database, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
     expect(() => resolveConfig({ ...database, GUIDE_MEDIA_BUCKET: "" })).toThrow(/GUIDE_MEDIA_BUCKET/);
+  });
+});
+
+describe("editor site entrance (#254)", () => {
+  it("stays hidden until set, then keeps only an https origin (loopback http in development)", () => {
+    expect(resolveConfig({}).guideEditorSiteOrigin).toBe("");
+    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: " " }).guideEditorSiteOrigin).toBe("");
+    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example/" }).guideEditorSiteOrigin).toBe("https://editor.example");
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example" }).guideEditorSiteOrigin).toBe("https://editor.example");
+    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: "http://127.0.0.1:4320" }).guideEditorSiteOrigin).toBe("http://127.0.0.1:4320");
+    for (const origin of ["http://editor.example", "editor.example", "https://editor.example/p/new", "https://editor.example/?from=footer", "https://user:pass@editor.example", "javascript:alert(1)"]) {
+      expect(() => resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: origin }), origin).toThrow(/GUIDE_EDITOR_SITE_ORIGIN/);
+    }
   });
 });
 

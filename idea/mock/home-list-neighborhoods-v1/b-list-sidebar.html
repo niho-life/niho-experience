@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Pattern B · NIHO Experience</title>
+<link rel="icon" href="assets/icon.svg">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+/* compact intro: experiences come into view quickly */
+.intro{display:grid;gap:26px;padding-top:28px}
+.intro h1{font-size:36px;line-height:1.06}
+.intro h1 .hand{font-size:1.15em;display:inline-block;transform:rotate(-3deg)}
+.intro p{margin-top:12px;color:var(--ink2);font-size:17px;max-width:32rem}
+.intro .finder{margin-top:22px;box-shadow:0 0 0 1.5px var(--line2)}
+.collage{display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:10px;height:260px}
+.collage img{width:100%;height:100%;object-fit:cover;border-radius:18px}
+.collage img:first-child{grid-row:1/span 2}
+@media (min-width:1024px){
+  .intro{grid-template-columns:1fr 1.05fr;align-items:center;gap:56px;padding-top:48px}
+  .intro h1{font-size:58px}
+  .collage{height:430px}
+}
+
+/* experiences: one featured listing + grid */
+.xfeat{display:grid;gap:0;border:1px solid var(--line);border-radius:28px;overflow:hidden;background:#fff}
+.xfeat .ph{position:relative;aspect-ratio:4/3}
+.xfeat .ph img{width:100%;height:100%;object-fit:cover}
+.xfeat .ph .chip{left:16px;top:16px}
+.xfeat .body{padding:22px 22px 26px;display:flex;flex-direction:column}
+.xfeat .who{display:flex;align-items:center;gap:12px;font-size:14px;font-weight:700;color:var(--muted)}
+.xfeat .who img{width:46px;height:46px;border-radius:14px;object-fit:cover}
+.xfeat h3{font-size:28px;margin-top:14px}
+.xfeat .lead{margin-top:10px;color:var(--ink2)}
+.xfeat .row2{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;margin-top:auto;padding-top:22px}
+@media (min-width:900px){
+  .xfeat{grid-template-columns:1.25fr 1fr}
+  .xfeat .ph{aspect-ratio:auto;min-height:420px}
+  .xfeat .body{padding:36px 38px}
+  .xfeat h3{font-size:36px}
+}
+.xgrid{display:grid;gap:32px 22px;margin-top:34px}
+@media (max-width:899px){.xgrid{grid-auto-flow:column;grid-auto-columns:72%;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px var(--gut) 24px;margin-inline:calc(var(--gut) * -1);scrollbar-width:none}.xgrid::-webkit-scrollbar{display:none}.xgrid>*{scroll-snap-align:start}}
+@media (min-width:600px) and (max-width:899px){.xgrid{grid-auto-columns:44%}}
+@media (min-width:900px){.xgrid{grid-template-columns:repeat(3,1fr)}.xgrid .xph{aspect-ratio:4/3}}
+
+/* stories: list + sidebar */
+.stories{display:grid;grid-template-columns:minmax(0,1fr);gap:44px}
+@media (min-width:1024px){.stories{grid-template-columns:minmax(0,1fr) 320px;gap:64px}}
+.list{display:grid}
+.lrow{display:grid;grid-template-columns:104px 1fr;gap:16px;padding:18px 0;border-top:1px solid var(--line);align-items:start}
+.lrow:first-child{border-top:0;padding-top:0}
+.lrow .th{aspect-ratio:1/1;border-radius:14px;overflow:hidden;background:var(--sand)}
+.lrow .th img{width:100%;height:100%;object-fit:cover;transition:transform .5s}
+.lrow:hover .th img{transform:scale(1.05)}
+.lrow .top{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:13px;color:var(--muted);font-weight:700}
+.lrow h3{font-size:18px;margin-top:4px}
+.lrow:hover h3{text-decoration:underline;text-decoration-color:var(--leaf);text-decoration-thickness:3px;text-underline-offset:4px}
+.lrow p{display:none;margin-top:6px;color:var(--ink2);font-size:15px}
+@media (min-width:700px){
+  .lrow{grid-template-columns:220px 1fr;gap:24px;padding:24px 0}
+  .lrow .th{aspect-ratio:3/2;border-radius:16px}
+  .lrow h3{font-size:23px}
+  .lrow p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+}
+.pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;margin-top:28px;padding-top:22px;border-top:1px solid var(--line)}
+.pages{display:flex;gap:6px}
+.pages a{min-width:38px;height:38px;display:grid;place-items:center;border-radius:999px;font-weight:800;font-size:14.5px;border:1.5px solid var(--line2)}
+.pages a[aria-current]{background:var(--ink);border-color:var(--ink);color:#fff}
+
+.side{display:grid;gap:30px;align-content:start}
+@media (min-width:1024px){.side{position:sticky;top:88px}}
+.box h4{font-family:"Fraunces",serif;font-weight:400;font-size:21px;margin-bottom:12px}
+.box .hand{display:block;font-size:20px;margin-bottom:2px}
+.picks{display:grid;gap:14px;counter-reset:p}
+.picks a{display:grid;grid-template-columns:auto 64px 1fr;gap:12px;align-items:center;counter-increment:p}
+.picks a::before{content:counter(p);font-family:"Fraunces",serif;font-size:26px;color:var(--moss);width:18px}
+.picks img{width:64px;height:64px;border-radius:12px;object-fit:cover}
+.picks b{font-size:15px;line-height:1.35;font-weight:800}
+.tlist a{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--line);font-weight:700;font-size:15.5px}
+.tlist a:first-child{border-top:0}
+.tlist a:hover{color:var(--moss)}
+.tlist a span{font-size:13px;color:var(--muted);background:var(--sand);border-radius:999px;padding:1px 9px}
+.mobile-topics{margin-bottom:20px}
+@media (min-width:1024px){.mobile-topics{display:none}}
+</style>
+</head>
+<body>
+<div id="top"></div>
+
+<main>
+  <section class="wrap intro">
+    <div>
+      <h1>Kamakura, the way <span class="hand">neighbors</span> live it</h1>
+      <p>Small experiences hosted by people who live here, and their notes on the town's streets, food and everyday life.</p>
+      <form class="finder" onsubmit="return false" aria-label="Find experiences">
+        <button class="fcell" type="button"><svg class="ico" aria-hidden="true"><use href="#i-cal"/></svg><div><small>When</small><span>Any day</span></div></button>
+        <button class="fcell" type="button"><svg class="ico" aria-hidden="true"><use href="#i-people"/></svg><div><small>Guests</small><span>2 adults</span></div></button>
+        <button class="btn" type="submit">Find experiences</button>
+      </form>
+    </div>
+    <div class="collage" aria-hidden="true">
+      <img src="assets/photos/niho-dinner-1.jpg" alt="">
+      <img src="assets/photos/enoden-crossing.jpg" alt="">
+      <img src="assets/photos/calligraphy-brush.jpg" alt="">
+    </div>
+  </section>
+
+  <section class="wrap sec" id="experiences" style="padding-top:64px">
+    <div class="sh">
+      <div><span class="hand">book with a neighbor</span><h2>Experiences this week</h2></div>
+      <a class="tlink" href="#">See all experiences</a>
+    </div>
+    <div id="xfeat"></div>
+    <div class="xgrid" id="xgrid"></div>
+    <div class="steps" style="margin-top:34px" aria-label="How booking works">
+      <div class="step"><span class="n">1</span><div><b>Pick a date</b><span>Next dates are on every card, in Japan time.</span></div></div>
+      <div class="step"><span class="n">2</span><div><b>Pay in yen</b><span>Secure checkout, tax included. No account needed.</span></div></div>
+      <div class="step"><span class="n">3</span><div><b>Meet your host</b><span>The meeting point arrives by email.</span></div></div>
+    </div>
+  </section>
+
+  <section class="wrap sec" id="stories">
+    <div class="sh">
+      <div><span class="hand">notes from the neighborhood</span><h2>Latest from <span class="squig">Kamakura</span></h2>
+        <p>Walks, food, seasons and daily life, written by people who live here.</p></div>
+    </div>
+    <div class="stories">
+      <div>
+        <div class="chips mobile-topics" role="group" aria-label="Filter stories by topic" id="mchips"></div>
+        <div class="list" id="list"></div>
+        <div class="pager">
+          <span class="count" id="count"></span>
+          <nav class="pages" aria-label="Story pages"><a href="#" aria-current="page">1</a><a href="#">2</a><a href="#">3</a><a href="#" aria-label="Next page"><svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg></a></nav>
+        </div>
+      </div>
+      <aside class="side" aria-label="Browse stories">
+        <div class="box"><span class="hand">new here?</span><h4>Start with these</h4><div class="picks" id="picks"></div></div>
+        <div class="box"><h4>Topics</h4><div class="tlist" id="topics"></div></div>
+        <div class="box"><h4>Neighborhoods</h4><div class="tlist" id="areas"></div></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="wrap sec">
+    <div class="hostband">
+      <div>
+        <span class="hand" style="font-size:24px">for locals</span>
+        <h2>Share the Kamakura you love</h2>
+        <p>One table, one afternoon, a few guests. NIHO helps neighbors prepare, take bookings in yen and welcome visitors.</p>
+        <a class="btn" href="#">Host with NIHO</a>
+      </div>
+      <img src="assets/photos/niho-cd-hands-salad.jpg" alt="Hands preparing a salad together">
+    </div>
+  </section>
+</main>
+
+<div id="foot"></div>
+
+<script src="assets/data.js"></script>
+<script>
+chrome("b");
+const [f, ...rest] = EXPERIENCES;
+document.getElementById("xfeat").innerHTML = `<a class="xfeat" href="#">
+  <div class="ph"><img src="${PH(f.photo)}" alt=""><span class="chip">${f.chip}</span></div>
+  <div class="body">
+    <div class="who"><img src="${PH(f.face)}" alt="">with ${f.with}</div>
+    <h3>${f.title}</h3>
+    <p class="lead">${f.lead}</p>
+    <div class="meta" style="margin-top:14px"><span>${ic("clock")}${f.dur}</span><span>${ic("chat")}${f.lang}</span><span>${ic("pin")}2 min from Kamakura Station</span></div>
+    <div class="nextd">Next ${f.next.map((d) => `<i>${d}</i>`).join("")}</div>
+    <div class="row2"><div class="price" style="margin:0">From <b>¥${f.price}</b> / adult</div><span class="btn">See dates</span></div>
+  </div></a>`;
+document.getElementById("xgrid").innerHTML = rest.map((x) => xcard(x)).join("");
+
+const count = (fn) => ARTICLES.filter(fn).length;
+document.getElementById("picks").innerHTML = ["one-day-kamakura", "after-4pm", "living-near-station"]
+  .map((s) => ARTICLES.find((a) => a.slug === s))
+  .map((a) => `<a href="#"><img src="${PH(a.photo)}" alt=""><b>${a.title}</b></a>`).join("");
+document.getElementById("topics").innerHTML = TOPICS.slice(1)
+  .map((t) => `<a href="#" data-t="${t.id}">${t.label}<span>${count((a) => a.topic === t.id)}</span></a>`).join("");
+document.getElementById("areas").innerHTML = AREAS
+  .map((r) => `<a href="#">${r.label}<span>${count((a) => a.area === r.id)}</span></a>`).join("");
+const mchips = document.getElementById("mchips");
+mchips.innerHTML = TOPICS.map((t, i) => `<button type="button" data-t="${t.id}" aria-pressed="${i === 0}">${t.label}</button>`).join("");
+
+let topic = "all";
+function render() {
+  const list = topic === "all" ? ARTICLES : ARTICLES.filter((a) => a.topic === topic);
+  document.getElementById("list").innerHTML = list.slice(0, 8).map((a) => `<a class="lrow" href="#">
+    <div class="th"><img src="${PH(a.photo)}" alt="" loading="lazy"></div>
+    <div><div class="top"><span class="cat">${topicLabel(a.topic)}</span><span>${a.date}</span><span>· ${a.min} min read</span></div>
+    <h3>${a.title}</h3><p>${a.ex}</p></div></a>`).join("");
+  document.getElementById("count").textContent = topic === "all" ? "Showing 8 of 36 stories" : `${list.length} ${topicLabel(topic).toLowerCase()} stories`;
+  mchips.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.t === topic));
+}
+function pick(t) { topic = t; render(); document.getElementById("stories").scrollIntoView({ behavior: "smooth" }); }
+mchips.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { topic = b.dataset.t; render(); } });
+document.getElementById("topics").addEventListener("click", (e) => { const a = e.target.closest("a"); if (a) { e.preventDefault(); pick(a.dataset.t); } });
+render();
+</script>
+</body>
+</html>

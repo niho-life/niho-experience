@@ -107,6 +107,15 @@ function guideEditorSettings(env: Env): GuideEditorSettings {
   };
 }
 
+/**
+ * Where writers go to write (editor.niho.life, #254): the footer's "For writers" and the host console's 記事を書く.
+ * Unset keeps both links hidden, so neither points at an editor that is not serving yet.
+ */
+function guideEditorSiteOrigin(value: string | undefined): string {
+  const origin = value?.trim() ?? "";
+  return origin ? deploymentOrigin(origin, "GUIDE_EDITOR_SITE_ORIGIN") : "";
+}
+
 function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" | "editor" {
   if (apiMode === "http" && env.EXPERIENCE_GUIDE_PUBLIC_SOURCE === "editor") return "editor";
   if (apiMode !== "http" || env.EXPERIENCE_GUIDE_PUBLIC_SOURCE !== "database") return "static";
@@ -190,6 +199,9 @@ export function resolveConfig(env: Env) {
   // 対面通訳 (#181): the translate-rooms BFF under /host/api/translate. The mock always serves synthetic rooms;
   // http opens only after niho-app N1b (#19447) is deployed and accepted, per environment.
   const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
+  // 設定 › 通知 (#109) kept in the experience DB. The mock keeps the switches on screen; http opens per
+  // environment after migration 0020 and the provider's experience OWNER membership are accepted.
+  const hostNotificationSettingsEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_NOTIFICATION_SETTINGS_ENABLED === "true";
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
@@ -198,6 +210,7 @@ export function resolveConfig(env: Env) {
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   const guidePublicSource = guidePublicSourceSetting(apiMode, env);
   const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
+  const guideEditorSite = guideEditorSiteOrigin(env.GUIDE_EDITOR_SITE_ORIGIN);
   const guideAdmin = guideAdminSettings(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
@@ -234,6 +247,8 @@ export function resolveConfig(env: Env) {
     guideEditorApiHandle: guideEditor.handle,
     guideEditorApiToken: guideEditor.token,
     guideEditorAssetOrigins: guideEditor.assetOrigins,
+    // The editor's own site, linked from the footer and /host; empty hides the links.
+    guideEditorSiteOrigin: guideEditorSite,
     // NIHO platform ADMIN server -> Experience guide administration. This is a
     // service-to-service surface and never reuses /admin, /editor, or /host sessions.
     guideAdminApiEnabled: guideAdmin.enabled,
@@ -275,6 +290,7 @@ export function resolveConfig(env: Env) {
     experienceProviderOperationsApiEnabled,
     experienceProviderOperationsPreviewEnabled,
     experienceTranslateApiEnabled,
+    hostNotificationSettingsEnabled,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.
     hostSessionSecret,
     adminSessionSecret,

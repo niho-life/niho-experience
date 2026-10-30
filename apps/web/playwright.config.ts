@@ -9,7 +9,7 @@ const ADMIN_CASE_PORT = Number(process.env.E2E_ADMIN_CASE_PORT ?? 3103);
 const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 // The host console and its preview tests run against the second server.
 const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|sales|messages|session|reviews|settings|support|pwa)|admin-support)\.spec\.ts/;
-const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-calendar|admin-channel-workspace)\.spec\.ts/;
+const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-calendar|admin-channel-workspace|guides-editor-source)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;
@@ -71,7 +71,7 @@ export default defineConfig({
       // SITE_URL is this server's origin: the console's same-origin check compares against it.
       // MOCK_CATALOG=pilot, as in the mock preview deployment: the console's experiences are the
       // pilot listings, so their public pages (the editor's プレビュー) open here too.
-      env: { ...serverEnv, PORT: String(HOST_PORT), HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: hostBaseURL, MOCK_CATALOG: "pilot" },
+      env: { ...serverEnv, PORT: String(HOST_PORT), HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: hostBaseURL, MOCK_CATALOG: "pilot", GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example" },
     },
     {
       command: "sh scripts/start-standalone.sh",

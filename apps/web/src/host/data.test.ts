@@ -7,14 +7,23 @@ const state = vi.hoisted(() => ({
   config: { apiMode: "mock" as "mock" | "http", nihoWebOrigin: "https://niho.example.test" },
   providers: [] as HostProvider[],
   scenario: "default" as HostMockScenario,
+  notificationLoad: { status: "preparing" } as import("./notification-settings-server").HostNotificationSettingsLoad,
+  notificationCalls: [] as { providerId: string; nihoUserId: string }[],
 }));
 vi.mock("server-only", () => ({}));
+// The experience DB's 通知 (#109) is its own module; here only what it answers.
+vi.mock("./notification-settings-server", () => ({
+  loadNotificationSettings: async (provider: HostProvider, nihoUserId: string) => {
+    state.notificationCalls.push({ providerId: provider.id, nihoUserId });
+    return state.notificationLoad;
+  },
+}));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: true }));
 // The real hostApiClient (typed client + contract mock, or the global fetch in http mode); only the session and the list are stubbed.
 vi.mock("@/lib/host/server", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/host/server")>();
   const now = Date.now();
-  const session = { refreshToken: "r", idToken: "mock-id-token.data-test", idTokenExpiresAt: now + 3_600_000, connectionId: "c", connectionExpiresAt: now + 86_400_000, expiresAt: now + 86_400_000, displayName: "サンプル ホスト", iconUrl: null };
+  const session = { nihoUserId: "sample-niho-user", refreshToken: "r", idToken: "mock-id-token.data-test", idTokenExpiresAt: now + 3_600_000, connectionId: "c", connectionExpiresAt: now + 86_400_000, expiresAt: now + 86_400_000, displayName: "サンプル ホスト", iconUrl: null };
   return {
     ...actual,
     readHostSession: async () => ({ ...session, mockScenario: state.scenario }),
@@ -74,6 +83,8 @@ beforeEach(() => {
   state.config.apiMode = "mock";
   state.providers = [KITCHEN, STUDIO];
   state.scenario = "default";
+  state.notificationLoad = { status: "preparing" };
+  state.notificationCalls = [];
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -90,7 +101,10 @@ describe("loadHostConsoleData", () => {
       meetingPoint: expect.objectContaining({ overview: "Near Kamakura Station, 5-minute walk", mapUrl: "https://maps.example.com/sample-kitchen" }),
       calendar: { google: expect.objectContaining({ status: "connected", account: "kitchen@example.com" }), icsUrl: expect.stringMatching(/^https:\/\/calendar\.example\.com\//) },
       notifications: { email: { addresses: ["kitchen@example.com"] }, items: expect.any(Array) },
+      notificationSource: "preview",
     });
+    // The preview never reads the experience DB.
+    expect(state.notificationCalls).toEqual([]);
     expect(data.googleConnection).toBe(MOCK_GOOGLE_CONNECTION);
     expect(data.experiences).toHaveLength(3);
     expect(data.home.todos).toHaveLength(10);
@@ -133,6 +147,7 @@ describe("loadHostConsoleData", () => {
       meetingPoint: MEETING,
       calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
       notifications: { email: { addresses: [] }, items: [] },
+      notificationSource: "preparing",
     });
     // Nothing to connect until NIHO's Google connection is in the host contract.
     expect(data.googleConnection).toBeNull();
@@ -141,6 +156,27 @@ describe("loadHostConsoleData", () => {
     // A provider who agreed to older terms cannot ask for the review until NIHO sorts it out.
     stubNiho(() => Response.json({ ...detailBody(detail), consent: { version: "sample-provider-consent-2", text: "新しい合成の同意文" } }));
     expect((await loadHostConsoleData(KITCHEN)).settings.consentCurrent).toBe(false);
+  });
+
+  it("http: 通知 comes from the experience DB for the owner once it is open there (#109)", async () => {
+    state.config.apiMode = "http";
+    const detail = provider({ id: KITCHEN.id, displayName: "合成の台所", memberRole: "OWNER" });
+    stubNiho(() => Response.json(detailBody(detail)));
+    const items = [{ key: "NEW_BOOKING", enabled: true, locked: true }, { key: "NEW_REVIEW", enabled: false, locked: false }];
+    state.notificationLoad = { status: "live", items };
+    // Only 設定 asks for them; the other pages never read the DB for them.
+    expect((await loadHostConsoleData(KITCHEN)).settings.notificationSource).toBe("preparing");
+    expect(state.notificationCalls).toEqual([]);
+    const live = await loadHostConsoleData(KITCHEN, { notifications: true });
+    expect(live.settings).toMatchObject({ notifications: { email: { addresses: [] }, items }, notificationSource: "live" });
+    expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, nihoUserId: "sample-niho-user" }]);
+    state.notificationLoad = { status: "error" };
+    expect((await loadHostConsoleData(KITCHEN, { notifications: true })).settings.notificationSource).toBe("error");
+    // An editor never reads them.
+    state.notificationCalls = [];
+    stubNiho(() => Response.json(detailBody(provider({ id: STUDIO.id, displayName: "サンプル工房", memberRole: "EDITOR" }))));
+    expect((await loadHostConsoleData(STUDIO, { notifications: true })).settings).toMatchObject({ notifications: null, notificationSource: "preparing" });
+    expect(state.notificationCalls).toEqual([]);
   });
 
   it("http: falls back to the list's provider when the detail cannot be read", async () => {
