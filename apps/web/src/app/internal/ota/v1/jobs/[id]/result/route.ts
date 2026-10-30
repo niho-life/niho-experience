@@ -46,6 +46,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     && body.observedBookable !== undefined && body.observedAtUtc !== undefined
     && ((body.observedManuallyBlocked !== undefined && body.googleAirbnbProof === undefined)
       || (body.observedManuallyBlocked === undefined && parsedGoogleAirbnbProof !== undefined)));
+  const googleRetryFieldsPresent = body.outcome !== "RETRY_WAIT" || body.googleAirbnbProof === undefined
+    || (body.occurrenceId !== undefined && body.sourceStartAtUtc !== undefined && body.sourceEndAtUtc !== undefined
+      && body.observedState !== undefined && body.observedBookable !== undefined && body.observedAtUtc !== undefined
+      && body.observedManuallyBlocked === undefined && parsedGoogleAirbnbProof !== undefined);
   const reservationFieldsValid = body.outcome !== "RESERVATION_VERIFIED"
     ? body.reservationReadId === undefined && body.reservationReceiptId === undefined
     : typeof body.reservationReadId === "string" && typeof body.reservationReceiptId === "string"
@@ -56,8 +60,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (typeof body.resultId !== "string" || typeof body.leaseToken !== "string" || body.leaseToken.length > 100
     || typeof body.outcome !== "string" || !outcomes.includes(body.outcome) || typeof body.stopped !== "boolean" || !parsedTarget
     || (body.googleAirbnbProof !== undefined && parsedGoogleAirbnbProof === null)
-    || (body.outcome !== "VERIFIED" && body.googleAirbnbProof !== undefined)
-    || !verifiedFieldsPresent || !reservationFieldsValid
+    || (body.outcome !== "VERIFIED" && body.outcome !== "RETRY_WAIT" && body.googleAirbnbProof !== undefined)
+    || !verifiedFieldsPresent || !googleRetryFieldsPresent || !reservationFieldsValid
     || (body.occurrenceId !== undefined && (typeof body.occurrenceId !== "string" || body.occurrenceId.length < 1 || body.occurrenceId.length > 256))
     || (body.sourceStartAtUtc !== undefined && typeof body.sourceStartAtUtc !== "string")
     || (body.sourceEndAtUtc !== undefined && typeof body.sourceEndAtUtc !== "string")

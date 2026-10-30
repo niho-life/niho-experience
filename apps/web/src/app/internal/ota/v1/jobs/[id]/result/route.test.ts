@@ -104,6 +104,18 @@ describe("POST /internal/ota/v1/jobs/:id/result", () => {
     }));
   });
 
+  it("passes the exact typed proof on a structured RETRY_WAIT mismatch", async () => {
+    const mismatch = { ...googleVerified, outcome: "RETRY_WAIT", observedState: "CLOSED", observedBookable: false };
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify(mismatch), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(200);
+    expect(mocks.submitResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), expect.objectContaining({
+      outcome: "RETRY_WAIT", observedState: "CLOSED", observedBookable: false,
+      googleAirbnbProof: googleVerified.googleAirbnbProof,
+    }));
+  });
+
   it.each([
     { deliveryId: "not-a-uuid", evidence: "EXACT_SLOT_V1", partySize: 1 },
     { evidence: "OTHER", partySize: 1 },

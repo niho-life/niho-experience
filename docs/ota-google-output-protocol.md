@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 で同一lease内のGoogle/Airbnb typed receiptを追加し、Issue #302 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Googleへの本番実接続、worker callerとの接続、本番有効化は未完了である。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 と Issue #302 で同一lease内のGoogle/Airbnb typed receiptとその現在権威検証を追加し、Issue #306 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Issue #307 では typed receipt が確認した既知の伝播不一致を最大60分GET-onlyで追うbackend待機状態とclaim連携を追加した。Googleへの本番実接続、#307 DTOを使うworker caller、本番有効化は未完了である。
 
 公式根拠：
 
@@ -63,6 +63,20 @@ serverのtyped result受付は `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=tru
 同じleaseのDISPATCHが検証済みの場合も、追加writeなしでGET再確認できる。現在intentの確認はquarantineのないaccountだけを対象とし、手動停止中はGoogle読取りとtyped receiptの両方を止める。通常の手動復旧・過去intentのreconcileによる認可境界は保つ。
 
 `RECONCILE`は結果不明writeのhistorical journalを読む手動回復経路であり、`STORED_JOURNAL_ONLY`の過去事実に留まる。`RECONCILE`だけの`GOOGLE_VERIFIED`はtyped receiptへ直接使えず、現在intentの成功には新しい`observe` GETが必要である。このleafでは保守的に、最後のoperationが`RECONCILE`のjournalをobserve seedとして再利用しない。
+
+## GoogleからAirbnbへの伝播待機（Issue #307 backend）
+
+`google_airbnb_propagation_waits` は `google_channel_deliveries.id` ごとに1行だけ持つ。予約起点の他掲載先反映時間を測る `channel_propagation_measurements` / `channel_propagation_targets` とは目的もidentityも別であり、desired stateや在庫の新しい正本にはしない。保存するのはprovider/account/listing/occurrence、desired・mapping・account version、canonical UTC区間、target、binding・connection・scopeのdigest、固定worker assignment、最初のGoogle検証時刻、期限、次回時刻、pending job、状態と短いreasonだけである。credential、calendar ID、Google/Airbnb raw response、顧客情報は保存しない。
+
+既存の `RETRY_WAIT` に3 field固定の `googleAirbnbProof` があり、同じlease内のfresh Google operationと、1名のAirbnb観測が現在desiredのちょうど反対を示す場合だけ、既知の伝播不一致として受け付ける。`VERIFIED` は従来どおりdesired一致だけである。proofのないretry、時刻・枠・target違い、matching stateの`RETRY_WAIT`、`stopped=false`、期限後、flag OFF、古いversion、quarantine、OWNER・scope・binding・connection・assignment・live inventoryの不一致、入力calendar衝突、未解決writeは `WAITING` にしない。immutable result ID replayの挙動は変えない。
+
+最初の不一致では元jobを `FINISHED/RETRY_WAIT` としてleaseを解放し、accountをquarantineせず、現在desiredの `last_error` を `GOOGLE_PROPAGATION_PENDING` にする（旧日時停止warningがあれば保持する）。期限は `google_channel_deliveries.first_verified_at + 60分` で固定し、再観測でも延長しない。次回は `min(DB now + 5分, deadline)` とする。期限境界では新jobを発行せず `NEEDS_REVIEW` とし、現在desiredだけに短いreview errorを残す。
+
+due処理は認証済みworkerの固定assignment内だけを有限件走査し、provider inventory mutexの後にjob/waitをlockする。毎回、current occurrence、shared live availability、desired/mapping/account/target、非quarantine、現OWNER、3 scope、binding version、connection generation、calendar digest、自己入力非衝突、未解決writeなしを再確認する。変化があれば発行前に `SUPERSEDED` または `NEEDS_REVIEW` へ止める。発行するのは最大3分かつ伝播期限内の新しい `AVAILABILITY/OBSERVE` jobで、`google_propagation_delivery_id` を持つ。同じwaitのlive jobは1件だけであり、通常AVAILABILITYの一意identityからは除外する。claim DTOに追加するのは検証済みmarker jobの `googleDeliveryOperation: "observe"` だけで、delivery IDは渡さない。
+
+marker jobのpreflight、Google GET前後の既存repository fence、result保存はすべてwaitの `CHECKING/pending_job_id` と現在権威を再確認する。Google側は `prepareObservation` / `inspectGoogleManagedBlock` のGETだけを使い、伝播再確認からinsert/PATCH/deleteを行わない。再び反対状態なら元の `first_verified_at` / deadlineを保って `WAITING` に戻し、一致したtyped `VERIFIED` だけを `MATCHED` として既存desired観測更新へ通す。通常失敗、認可失敗、stop喪失はlinked waitをreviewへ止め、自動account回復や `completeRecoveryObserve` を呼ばない。queued期限切れは安全に終了するが、leased jobはstop-confirmed resultなしに強制解放せず、既存watchdog/quarantine規則を維持する。
+
+このbackendは既存 `googleAirbnbObservationEnabled` がtrueのruntimeでだけdue jobを作り、既定OFFを変えない。OTA worker側のclaim parserと `googleDeliveryOperation` caller接続、実Google/Airbnb・実credentialによる受入、flag有効化、activation、UIは後続範囲である。
 
 この受付は日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。独立observerを使うworker caller、wait queue・scheduler・job作成、60分pending表示、UI、flag有効化は含まない。既存flagは既定OFFのままであり、次段ではcallerとlive scopeでSET再lease／将来OBSERVEを実際に起動して受入する。
 

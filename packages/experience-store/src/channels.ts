@@ -27,7 +27,16 @@ import {
 import { calendarMembershipRole, listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertSeats, assertStoreIdentifier } from "./validation.ts";
 import { currentChannelOccurrence } from "./channel-occurrence.ts";
-import { verifyGoogleAirbnbReceipt } from "./google-airbnb-receipt.ts";
+import { verifyGoogleAirbnbReceipt, type VerifiedGoogleAirbnbReceipt } from "./google-airbnb-receipt.ts";
+import {
+  GOOGLE_PROPAGATION_PENDING,
+  GOOGLE_PROPAGATION_REVIEW,
+  googlePropagationAuthorityCurrent,
+  googlePropagationJobMatches,
+  isExactGoogleAirbnbMismatch,
+  loadGooglePropagationAuthority,
+  nextGooglePropagationDue,
+} from "./google-airbnb-propagation.ts";
 import {
   HEARTBEAT_STALE_MS,
   countOpenIncidents,
@@ -181,6 +190,8 @@ export interface ClaimedChannelJob {
   readonly target: ChannelTarget;
   /** Present only for the dedicated reservation-window executor. */
   readonly purpose?: "RESERVATION_WINDOW";
+  /** Present only for a validated Google -> Airbnb propagation observation. */
+  readonly googleDeliveryOperation?: "observe";
 }
 
 /** Server-only snapshot for the fixed Airbnb -> Google delivery adapter. */
@@ -1165,6 +1176,134 @@ export class ChannelRuntime {
     });
   }
 
+  async enqueueDueGoogleAirbnbObservations(identity: WorkerIdentity, limit = 1): Promise<{ readonly enqueued: number }> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new StoreValidationError("Google propagation limit must be between 1 and 10.");
+    if (!this.#googleAirbnbObservationEnabled) return { enqueued: 0 };
+    return withTransaction(this.#pool, async (client) => {
+      await this.#requireWorker(client, identity);
+      const nowUtc = this.#nowIso();
+      const candidates = await client.query<DbRow>(
+        `SELECT w.delivery_id,w.provider_id,w.next_due_at,w.deadline_at,w.status,w.pending_job_id
+           FROM google_airbnb_propagation_waits w
+          WHERE w.dispatched_worker_id=$1 AND w.status IN ('WAITING','CHECKING')
+            AND (w.status='CHECKING' OR w.next_due_at<=$2 OR w.deadline_at<=$2)
+          ORDER BY w.deadline_at,w.next_due_at,w.delivery_id
+          LIMIT $3`,
+        [identity.workerId, nowUtc, limit * 8],
+      );
+      for (const providerId of [...new Set(candidates.rows.map((row) => text(row, "provider_id")))].sort()) {
+        await lockProviderInventory(client, providerId);
+      }
+
+      let enqueued = 0;
+      for (const candidate of candidates.rows) {
+        if (enqueued >= limit) break;
+        const lockedPending = candidate.status === "CHECKING" && candidate.pending_job_id !== null
+          ? (await client.query<DbRow>("SELECT * FROM channel_jobs WHERE id=$1::uuid FOR UPDATE", [candidate.pending_job_id])).rows[0]
+          : undefined;
+        const wait = await loadGooglePropagationAuthority(client, text(candidate, "delivery_id"), true);
+        if (!wait || wait.dispatched_worker_id !== identity.workerId || !["WAITING", "CHECKING"].includes(String(wait.status))) continue;
+        const currentAuthority = googlePropagationAuthorityCurrent(wait, nowUtc) && this.#adapterSupports({
+          site: wait.current_site,
+          adapter: wait.current_adapter,
+          adapter_version: wait.current_adapter_version,
+        }, "OBSERVE");
+
+        if (wait.status === "CHECKING") {
+          const pending = lockedPending && lockedPending.id === wait.pending_job_id ? lockedPending : undefined;
+          if (!pending) {
+            await this.#finishGooglePropagationWait(client, wait, "NEEDS_REVIEW", "PENDING_JOB_MISSING", nowUtc, true);
+            continue;
+          }
+          const pendingCurrent = googlePropagationJobMatches(wait, pending) && currentAuthority;
+          if (pending.status === "LEASED") {
+            if (!pendingCurrent || isoValue(wait, "deadline_at") <= nowUtc) {
+              await this.#finishGooglePropagationWait(client, wait, "NEEDS_REVIEW",
+                pendingCurrent ? "PROPAGATION_DEADLINE" : "AUTHORITY_CHANGED", nowUtc, false);
+            }
+            continue;
+          }
+          if (pending.status !== "QUEUED") {
+            await this.#finishGooglePropagationWait(client, wait,
+              pending.outcome === "SUPERSEDED" ? "SUPERSEDED" : "NEEDS_REVIEW",
+              pending.outcome === "SUPERSEDED" ? "AUTHORITY_CHANGED" : "PENDING_JOB_FINISHED", nowUtc, true);
+            continue;
+          }
+          if (!pendingCurrent || isoValue(wait, "deadline_at") <= nowUtc || isoValue(pending, "job_deadline_at") <= nowUtc) {
+            const reason = !pendingCurrent ? "AUTHORITY_CHANGED"
+              : isoValue(wait, "deadline_at") <= nowUtc ? "PROPAGATION_DEADLINE" : "OBSERVATION_JOB_EXPIRED";
+            await client.query(
+              "UPDATE channel_jobs SET status='FINISHED',outcome=$2,updated_at=$3 WHERE id=$1::uuid AND status='QUEUED'",
+              [pending.id, pendingCurrent ? "NEEDS_REVIEW" : "SUPERSEDED", nowUtc],
+            );
+            await this.#finishGooglePropagationWait(client, wait,
+              pendingCurrent ? "NEEDS_REVIEW" : "SUPERSEDED", reason, nowUtc, true);
+          }
+          continue;
+        }
+
+        if (isoValue(wait, "deadline_at") <= nowUtc) {
+          await this.#finishGooglePropagationWait(client, wait, "NEEDS_REVIEW", "PROPAGATION_DEADLINE", nowUtc, true);
+          continue;
+        }
+        if (!currentAuthority) {
+          await this.#finishGooglePropagationWait(client, wait, "SUPERSEDED", "AUTHORITY_CHANGED", nowUtc, true);
+          continue;
+        }
+        let occurrence: Occurrence;
+        try {
+          occurrence = await this.#currentOccurrence(
+            client, text(wait, "provider_id"), text(wait, "listing_id"), text(wait, "occurrence_id"),
+          );
+        } catch (error) {
+          if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
+          await this.#finishGooglePropagationWait(client, wait, "SUPERSEDED", "SOURCE_OCCURRENCE_STALE", nowUtc, true);
+          continue;
+        }
+        if (occurrence.startUtc !== isoValue(wait, "source_start_at") || occurrence.endUtc !== isoValue(wait, "source_end_at")) {
+          await this.#finishGooglePropagationWait(client, wait, "SUPERSEDED", "SOURCE_OCCURRENCE_STALE", nowUtc, true);
+          continue;
+        }
+        const availability = await this.#liveAvailability(
+          client, text(wait, "provider_id"), text(wait, "product_id"), occurrence, nowUtc,
+        );
+        if ((availability.bookable ? "OPEN" : "CLOSED") !== wait.desired_state) {
+          await this.#finishGooglePropagationWait(client, wait, "SUPERSEDED", "LIVE_AVAILABILITY_CHANGED", nowUtc, true);
+          continue;
+        }
+
+        const jobId = randomUUID();
+        const jobDeadlineAtUtc = new Date(Math.min(Date.parse(nowUtc) + 3 * 60_000, Date.parse(isoValue(wait, "deadline_at")))).toISOString();
+        const inserted = await client.query(
+          `INSERT INTO channel_jobs
+            (id,provider_id,account_id,listing_id,occurrence_id,action,purpose,google_propagation_delivery_id,
+             dispatch_worker_id,dispatch_assignment_version,account_version,desired_version,mapping_version,
+             target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,
+             target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
+           VALUES ($1::uuid,$2,$3,$4,$5,'OBSERVE','AVAILABILITY',$6::uuid,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+             'Asia/Tokyo',$16,$17,$18,$19,$20,$21,$22)
+           ON CONFLICT (google_propagation_delivery_id)
+             WHERE google_propagation_delivery_id IS NOT NULL AND status IN ('QUEUED','LEASED') DO NOTHING`,
+          [jobId, wait.provider_id, wait.account_id, wait.listing_id, wait.occurrence_id, wait.delivery_id,
+            wait.dispatched_worker_id, wait.dispatched_assignment_version, wait.account_version, wait.desired_version,
+            wait.mapping_version, wait.target_site, wait.target_external_account_id, wait.target_external_product_id,
+            wait.target_external_option_id, wait.target_adapter, wait.target_adapter_version, wait.target_connection_mode,
+            wait.source_start_at, wait.source_end_at, wait.desired_state === "CLOSED" ? 90 : 40, jobDeadlineAtUtc],
+        );
+        if ((inserted.rowCount ?? 0) !== 1) continue;
+        const updated = await client.query(
+          `UPDATE google_airbnb_propagation_waits SET status='CHECKING',pending_job_id=$2::uuid,
+             latest_reason=NULL,last_checked_at=$3,updated_at=$3
+           WHERE delivery_id=$1::uuid AND status='WAITING' AND pending_job_id IS NULL`,
+          [wait.delivery_id, jobId, nowUtc],
+        );
+        if ((updated.rowCount ?? 0) !== 1) throw new StoreConflictError("Google propagation wait lost its job fence.");
+        enqueued += 1;
+      }
+      return { enqueued };
+    });
+  }
+
   /** Consume and expand only rows locked by this transaction; any expansion failure rolls back the processed cursor. */
   async consumeCalendarOutbox(limit = 50, identity?: WorkerIdentity): Promise<{ readonly events: number; readonly occurrences: number; readonly jobs: number }> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new StoreValidationError("Outbox limit must be between 1 and 200.");
@@ -1269,6 +1408,96 @@ export class ChannelRuntime {
 
   async #liveAvailability(client: PoolClient, providerId: string, productId: string, occurrence: Occurrence, nowUtc: string) {
     return (await evaluateStoredInventory(client, providerId, productId, occurrence, nowUtc, 1)).availability;
+  }
+
+  async #finishGooglePropagationWait(
+    client: PoolClient,
+    wait: DbRow,
+    status: "SUPERSEDED" | "NEEDS_REVIEW",
+    reason: string,
+    nowUtc: string,
+    clearPending: boolean,
+  ): Promise<void> {
+    await client.query(
+      `UPDATE google_airbnb_propagation_waits SET status=$2,latest_reason=$3,
+         pending_job_id=CASE WHEN $4 THEN NULL ELSE pending_job_id END,updated_at=$5
+       WHERE delivery_id=$1::uuid AND status IN ('WAITING','CHECKING')`,
+      [wait.delivery_id, status, reason, clearPending, nowUtc],
+    );
+    await client.query(
+      `UPDATE channel_desired_states SET last_error=CASE WHEN last_error=$10 THEN last_error ELSE $9 END,updated_at=$8
+        WHERE listing_id=$1 AND occurrence_id=$2 AND provider_id=$3 AND desired_state=$4
+          AND desired_version=$5 AND mapping_version=$6 AND source_start_at=$7 AND source_end_at=$11`,
+      [wait.listing_id, wait.occurrence_id, wait.provider_id, wait.desired_state, wait.desired_version,
+        wait.mapping_version, wait.source_start_at, nowUtc, GOOGLE_PROPAGATION_REVIEW, SLOT_RETIREMENT_WARNING,
+        wait.source_end_at],
+    );
+  }
+
+  async #recordGooglePropagationMismatch(
+    client: PoolClient,
+    job: DbRow,
+    input: ChannelResultInput,
+    receipt: VerifiedGoogleAirbnbReceipt,
+    existingWait: DbRow | undefined,
+    desiredState: ChannelDesiredState,
+    nowUtc: string,
+  ): Promise<void> {
+    let wait = existingWait;
+    if (!wait) {
+      const deadlineAtUtc = new Date(Date.parse(receipt.firstVerifiedAtUtc) + 60 * 60_000).toISOString();
+      const expired = deadlineAtUtc <= nowUtc;
+      await client.query(
+        `INSERT INTO google_airbnb_propagation_waits
+          (delivery_id,provider_id,account_id,listing_id,occurrence_id,desired_state,desired_version,mapping_version,
+           account_version,source_start_at,source_end_at,target_site,target_external_account_id,target_external_product_id,
+           target_external_option_id,target_adapter,target_adapter_version,target_connection_mode,binding_version,
+           connection_generation,binding_calendar_digest,granted_scopes_digest,dispatched_worker_id,
+           dispatched_assignment_version,first_verified_at,deadline_at,next_due_at,status,latest_reason,
+           latest_observed_at,last_checked_at,created_at,updated_at)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
+           $23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$32)
+         ON CONFLICT (delivery_id) DO NOTHING`,
+        [receipt.deliveryId, job.provider_id, job.account_id, job.listing_id, job.occurrence_id,
+          desiredState,
+          job.desired_version, job.mapping_version, job.account_version, job.source_start_at, job.source_end_at,
+          job.target_site, job.target_external_account_id, job.target_external_product_id, job.target_external_option_id,
+          job.target_adapter, job.target_adapter_version, job.target_connection_mode, receipt.bindingVersion,
+          receipt.connectionGeneration, receipt.bindingCalendarDigest, receipt.grantedScopesDigest,
+          job.leased_worker_id, job.lease_assignment_version, receipt.firstVerifiedAtUtc, deadlineAtUtc,
+          nextGooglePropagationDue(nowUtc, deadlineAtUtc), expired ? "NEEDS_REVIEW" : "WAITING",
+          expired ? "PROPAGATION_DEADLINE" : "KNOWN_MISMATCH", input.observedAtUtc, nowUtc],
+      );
+      wait = (await client.query<DbRow>(
+        "SELECT * FROM google_airbnb_propagation_waits WHERE delivery_id=$1::uuid FOR UPDATE", [receipt.deliveryId],
+      )).rows[0];
+      if (!wait) throw new StoreConflictError("Google propagation wait was not persisted.");
+    } else {
+      const expired = isoValue(wait, "deadline_at") <= nowUtc;
+      const updated = await client.query(
+        `UPDATE google_airbnb_propagation_waits SET status=$2,pending_job_id=NULL,next_due_at=$3,
+           latest_reason=$4,latest_observed_at=$5,last_checked_at=$6,updated_at=$6
+         WHERE delivery_id=$1::uuid AND status='CHECKING' AND pending_job_id=$7::uuid`,
+        [wait.delivery_id, expired ? "NEEDS_REVIEW" : "WAITING",
+          nextGooglePropagationDue(nowUtc, isoValue(wait, "deadline_at")),
+          expired ? "PROPAGATION_DEADLINE" : "KNOWN_MISMATCH", input.observedAtUtc, nowUtc, job.id],
+      );
+      if ((updated.rowCount ?? 0) !== 1) throw new StoreConflictError("Google propagation mismatch lost its pending job fence.");
+      wait = { ...wait, status: expired ? "NEEDS_REVIEW" : "WAITING" };
+    }
+
+    await client.query(
+      "UPDATE channel_jobs SET status='FINISHED',outcome='RETRY_WAIT',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
+      [job.id, nowUtc],
+    );
+    const desiredError = wait.status === "WAITING" ? GOOGLE_PROPAGATION_PENDING : GOOGLE_PROPAGATION_REVIEW;
+    await client.query(
+      `UPDATE channel_desired_states SET last_error=CASE WHEN last_error=$9 THEN last_error ELSE $8 END,updated_at=$7
+        WHERE listing_id=$1 AND occurrence_id=$2 AND desired_version=$3 AND mapping_version=$4
+          AND source_start_at=$5 AND source_end_at=$6`,
+      [job.listing_id, job.occurrence_id, job.desired_version, job.mapping_version,
+        job.source_start_at, job.source_end_at, nowUtc, desiredError, SLOT_RETIREMENT_WARNING],
+    );
   }
 
   async #upsertDesired(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, reason: string): Promise<{ desiredVersion: number }> {
@@ -1446,7 +1675,7 @@ export class ChannelRuntime {
     }
     const existing = await client.query(
       `SELECT 1 FROM channel_jobs WHERE listing_id=$1 AND occurrence_id=$2 AND action=$3 AND account_version=$4
-         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY'`,
+         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL`,
       [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version],
     );
     if (existing.rows[0]) return 0;
@@ -1455,7 +1684,7 @@ export class ChannelRuntime {
       [listing.id, occurrence.id, SLOT_RETIREMENT_WARNING],
     );
     await client.query(
-      "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED' AND purpose='AVAILABILITY'",
+      "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED' AND purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL",
       [listing.id, occurrence.id, nowUtc],
     );
     const inserted = await client.query(
@@ -1465,7 +1694,7 @@ export class ChannelRuntime {
          target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Asia/Tokyo',$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (listing_id,occurrence_id,action,account_version,desired_version,mapping_version)
-         WHERE purpose='AVAILABILITY' DO NOTHING`,
+         WHERE purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL DO NOTHING`,
       [randomUUID(), listing.provider_id, listing.account_id, listing.id, occurrence.id, action, listing.account_version, desiredVersion,
         listing.mapping_version, listing.site, listing.external_account_id, listing.external_product_id, listing.external_option_id,
         listing.adapter, listing.adapter_version, listing.connection_mode, occurrence.startUtc, occurrence.endUtc, desiredState === "CLOSED" ? 100 : 50, null],
@@ -1562,16 +1791,37 @@ export class ChannelRuntime {
           WHERE status='QUEUED' AND purpose='SLOT_RETIREMENT'
             AND (attempt_count>=5 OR (job_deadline_at IS NOT NULL AND job_deadline_at<=$1))`, [nowUtc],
       )).rows.map((row) => text(row, "provider_id")).sort();
-      for (const providerId of retirementProviders) await lockProviderInventory(client, providerId);
+      const propagationProviders = (await client.query<DbRow>(
+        `SELECT DISTINCT provider_id FROM channel_jobs
+          WHERE status='QUEUED' AND google_propagation_delivery_id IS NOT NULL
+            AND job_deadline_at IS NOT NULL AND job_deadline_at<=$1`, [nowUtc],
+      )).rows.map((row) => text(row, "provider_id"));
+      for (const providerId of [...new Set([...retirementProviders, ...propagationProviders])].sort()) {
+        await lockProviderInventory(client, providerId);
+      }
       const expired = await client.query<DbRow>(
         `UPDATE channel_jobs j SET status='FINISHED',outcome='NEEDS_REVIEW',updated_at=$1
           WHERE j.status='QUEUED' AND (j.attempt_count>=5 OR (j.job_deadline_at IS NOT NULL AND j.job_deadline_at<=$1))
+            AND j.google_propagation_delivery_id IS NULL
             AND (j.purpose<>'SLOT_RETIREMENT' OR j.provider_id=ANY($2::text[]))
           RETURNING j.account_id,j.purpose,j.slot_retirement_id,j.desired_version`, [nowUtc, retirementProviders],
       );
       for (const row of expired.rows) {
         await this.#quarantine(client, text(row, "account_id"), "RETRY_DEADLINE");
         if (row.purpose === "SLOT_RETIREMENT") await this.#finishRetirement(client, row, "NEEDS_REVIEW", "RETRY_DEADLINE");
+      }
+      const expiredPropagation = await client.query<DbRow>(
+        `SELECT w.* FROM google_airbnb_propagation_waits w
+          JOIN channel_jobs j ON j.id=w.pending_job_id AND j.google_propagation_delivery_id=w.delivery_id
+         WHERE w.status='CHECKING' AND j.status='QUEUED' AND j.job_deadline_at<=$1
+         ORDER BY w.provider_id,w.delivery_id FOR UPDATE OF j,w`, [nowUtc],
+      );
+      for (const wait of expiredPropagation.rows) {
+        await client.query(
+          "UPDATE channel_jobs SET status='FINISHED',outcome='NEEDS_REVIEW',updated_at=$2 WHERE id=$1::uuid AND status='QUEUED'",
+          [wait.pending_job_id, nowUtc],
+        );
+        await this.#finishGooglePropagationWait(client, wait, "NEEDS_REVIEW", "OBSERVATION_JOB_EXPIRED", nowUtc, true);
       }
       const deployedActions = this.#deployedActionKeys();
       const deployedReservationAdapters = this.#deployedReaderKeys();
@@ -1585,10 +1835,12 @@ export class ChannelRuntime {
           LEFT JOIN channel_slot_retirements r ON j.purpose='SLOT_RETIREMENT' AND r.id=j.slot_retirement_id
           JOIN channel_worker_accounts wa ON wa.account_id=j.account_id AND wa.worker_id=$1 AND wa.revoked_at IS NULL
           LEFT JOIN external_reservation_read_dispatch_states rs ON rs.pending_job_id=j.id
+          LEFT JOIN google_airbnb_propagation_waits gw ON gw.delivery_id=j.google_propagation_delivery_id
          WHERE j.status='QUEUED' AND j.next_attempt_at<=$2 AND (j.job_deadline_at IS NULL OR j.job_deadline_at>$2)
            AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
            -- MANUAL_HANDLING: staff own the external profile, so not even an OBSERVE may run until stop-confirmed recovery.
-           AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE' AND a.quarantine_reason<>'MANUAL_HANDLING'))
+           AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE'
+             AND j.google_propagation_delivery_id IS NULL AND a.quarantine_reason<>'MANUAL_HANDLING'))
            AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version AND p.status='PUBLISHED'
            AND ((j.purpose IN ('AVAILABILITY','RESERVATION_WINDOW')
                AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
@@ -1599,7 +1851,13 @@ export class ChannelRuntime {
                AND r.listing_id=j.listing_id AND r.occurrence_id=j.occurrence_id
                AND r.mapping_version=j.mapping_version AND r.account_version=j.account_version
                AND r.source_start_at=j.source_start_at AND r.source_end_at=j.source_end_at))
-           AND (j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT') OR (j.dispatch_worker_id=$1 AND j.dispatch_assignment_version=wa.version))
+           AND (j.purpose='SLOT_RETIREMENT'
+             OR (j.purpose='AVAILABILITY' AND j.google_propagation_delivery_id IS NULL)
+             OR (j.dispatch_worker_id=$1 AND j.dispatch_assignment_version=wa.version))
+           AND (j.google_propagation_delivery_id IS NULL OR
+             ($6::boolean AND gw.status='CHECKING' AND gw.pending_job_id=j.id
+               AND gw.dispatched_worker_id=$1 AND gw.dispatched_assignment_version=wa.version
+               AND gw.deadline_at>$2))
            AND ((j.action='SET_OPEN' AND l.can_open) OR (j.action='SET_CLOSED' AND l.can_close)
              OR (j.action='OBSERVE' AND l.can_observe AND (j.purpose='AVAILABILITY' OR l.can_read_reservations)))
            AND (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version || '/' || j.action)=ANY($3::text[])
@@ -1608,7 +1866,8 @@ export class ChannelRuntime {
            -- preflight does not repeat this; the seconds between claim and preflight are accepted.
            AND (j.action<>'SET_OPEN' OR NOT ${providerOpenHeldSql("j.provider_id", "$2", "$5")})
          ORDER BY j.priority DESC,j.next_attempt_at,j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`,
-        [identity.workerId, nowUtc, deployedActions, deployedReservationAdapters, new Date(this.#now().getTime() - HEARTBEAT_STALE_MS).toISOString()],
+        [identity.workerId, nowUtc, deployedActions, deployedReservationAdapters,
+          new Date(this.#now().getTime() - HEARTBEAT_STALE_MS).toISOString(), this.#googleAirbnbObservationEnabled],
       );
       const job = result.rows.find((candidate) => this.#adapterSupports(candidate, text(candidate, "action") as ChannelAction));
       if (!job) return null;
@@ -1627,6 +1886,7 @@ export class ChannelRuntime {
         occurrenceId: text(job, "occurrence_id"), desiredVersion: integer(job, "desired_version"), mappingVersion: integer(job, "mapping_version"),
         sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"), target: targetFromRow(job),
         ...(job.purpose === "RESERVATION_WINDOW" ? { purpose: "RESERVATION_WINDOW" as const } : {}),
+        ...(job.google_propagation_delivery_id === null ? {} : { googleDeliveryOperation: "observe" as const }),
       };
     });
   }
@@ -2288,11 +2548,37 @@ export class ChannelRuntime {
       await this.#lockJobInventory(client, identity, jobId);
       const job = await this.#leasedJob(client, identity, jobId, leaseToken);
       const nowUtc = this.#nowIso();
+      const propagationDeliveryId = job.google_propagation_delivery_id === null
+        ? undefined : text(job, "google_propagation_delivery_id");
       if (isoValue(job, "lease_expires_at") <= nowUtc || isoValue(job, "job_deadline_at") <= nowUtc) {
+        if (propagationDeliveryId) {
+          const wait = await loadGooglePropagationAuthority(client, propagationDeliveryId, true);
+          if (wait && wait.pending_job_id === job.id) {
+            await this.#finishGooglePropagationWait(client, wait, "NEEDS_REVIEW", "OBSERVATION_JOB_EXPIRED", nowUtc, false);
+          }
+          return { conflict: "Propagation observation lease or deadline expired; the stopped result is still required." };
+        }
         await this.#quarantine(client, text(job, "account_id"), "LEASE_EXPIRED");
         return { conflict: "Lease or job deadline expired; the account remains locked." };
       }
       if (job.purpose === "SLOT_RETIREMENT") return this.#preflightRetirement(client, job, nowUtc);
+      let propagationWait: DbRow | undefined;
+      if (propagationDeliveryId) {
+        propagationWait = await loadGooglePropagationAuthority(client, propagationDeliveryId, true);
+        if (!this.#googleAirbnbObservationEnabled || !propagationWait || propagationWait.status !== "CHECKING"
+          || isoValue(propagationWait, "deadline_at") <= nowUtc
+          || !googlePropagationJobMatches(propagationWait, job)
+          || !googlePropagationAuthorityCurrent(propagationWait, nowUtc)
+          || !this.#adapterSupports({ site: propagationWait.current_site, adapter: propagationWait.current_adapter,
+            adapter_version: propagationWait.current_adapter_version }, "OBSERVE")) {
+          if (propagationWait && propagationWait.pending_job_id === job.id) {
+            await this.#finishGooglePropagationWait(client, propagationWait,
+              isoValue(propagationWait, "deadline_at") <= nowUtc ? "NEEDS_REVIEW" : "SUPERSEDED",
+              isoValue(propagationWait, "deadline_at") <= nowUtc ? "PROPAGATION_DEADLINE" : "AUTHORITY_CHANGED", nowUtc, false);
+          }
+          return { conflict: "Google propagation observation authority changed; the stopped result is still required." };
+        }
+      }
       const current = await client.query<DbRow>(
         `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,l.active AS listing_active,
                 a.site,l.product_id,l.mapping_version,l.can_open,l.can_close,l.can_observe,l.adapter,l.adapter_version,
@@ -2332,12 +2618,21 @@ export class ChannelRuntime {
       }
       if (occurrence.startUtc !== isoValue(job, "source_start_at") || occurrence.endUtc !== isoValue(job, "source_end_at")
         || isoValue(state, "source_start_at") !== occurrence.startUtc || isoValue(state, "source_end_at") !== occurrence.endUtc) {
+        if (propagationWait) {
+          await this.#finishGooglePropagationWait(client, propagationWait, "SUPERSEDED", "SOURCE_OCCURRENCE_STALE", nowUtc, false);
+          return { conflict: "Google propagation occurrence changed; the stopped result is still required." };
+        }
         await this.#quarantine(client, text(job, "account_id"), "SOURCE_OCCURRENCE_STALE");
         return { conflict: "Source occurrence timing changed; the account remains locked." };
       }
-      if (job.action !== "OBSERVE") {
+      if (job.action !== "OBSERVE" || propagationWait) {
         const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(state, "product_id"), occurrence, nowUtc);
-        if (desiredAction(availability.bookable ? "OPEN" : "CLOSED") !== job.action) {
+        const liveDesiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
+        if (propagationWait ? liveDesiredState !== propagationWait.desired_state : desiredAction(liveDesiredState) !== job.action) {
+          if (propagationWait) {
+            await this.#finishGooglePropagationWait(client, propagationWait, "SUPERSEDED", "LIVE_AVAILABILITY_CHANGED", nowUtc, false);
+            return { conflict: "Google propagation live availability changed; the stopped result is still required." };
+          }
           return { conflict: "Live availability changed; the old lease remains locked until stopped." };
         }
       }
@@ -2420,6 +2715,13 @@ export class ChannelRuntime {
       const nowUtc = this.#nowIso();
       if (isoValue(job, "lease_expires_at") <= nowUtc || isoValue(job, "job_deadline_at") <= nowUtc) throw new StoreConflictError("Delivery lease expired.");
       if (operation === "observe") {
+        if (job.google_propagation_delivery_id !== null) {
+          const wait = await loadGooglePropagationAuthority(client, text(job, "google_propagation_delivery_id"), true);
+          if (!wait || wait.status !== "CHECKING" || isoValue(wait, "deadline_at") <= nowUtc
+            || !googlePropagationJobMatches(wait, job) || !googlePropagationAuthorityCurrent(wait, nowUtc)) {
+            throw new StoreConflictError("Google propagation observation fence changed.");
+          }
+        }
         const current = (await client.query<DbRow>(
           `SELECT a.site,a.quarantined_at,l.product_id,l.can_observe,l.adapter,l.adapter_version,l.mapping_version,
                   d.desired_state,d.desired_version,d.mapping_version AS desired_mapping_version,
@@ -2506,8 +2808,8 @@ export class ChannelRuntime {
     if (input.outcome !== "RESERVATION_VERIFIED" && (input.reservationReadId !== undefined || input.reservationReceiptId !== undefined)) {
       throw new StoreValidationError("Reservation receipt fields require RESERVATION_VERIFIED.");
     }
-    if (input.outcome !== "VERIFIED" && input.googleAirbnbProof !== undefined) {
-      throw new StoreValidationError("Google Airbnb proof requires VERIFIED.");
+    if (input.outcome !== "VERIFIED" && input.outcome !== "RETRY_WAIT" && input.googleAirbnbProof !== undefined) {
+      throw new StoreValidationError("Google Airbnb proof requires VERIFIED or RETRY_WAIT.");
     }
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
@@ -2538,6 +2840,13 @@ export class ChannelRuntime {
       const reservationJob = job.purpose === "RESERVATION_WINDOW";
       const retirementJob = job.purpose === "SLOT_RETIREMENT";
       const availabilityJob = !reservationJob && !retirementJob;
+      const propagationDeliveryId = job.google_propagation_delivery_id === null
+        ? undefined : text(job, "google_propagation_delivery_id");
+      const propagationWait = propagationDeliveryId === undefined
+        ? undefined : await loadGooglePropagationAuthority(client, propagationDeliveryId, true);
+      if (propagationDeliveryId !== undefined && (!propagationWait || propagationWait.pending_job_id !== job.id)) {
+        throw new StoreConflictError("Google propagation result lost its wait fence.");
+      }
       if (!reservationJob && job.target_connection_mode === "GOOGLE" && input.outcome === "VERIFIED"
         && input.googleAirbnbProof === undefined) {
         throw new StoreValidationError("GOOGLE jobs require independent Google delivery and Airbnb observation receipts.");
@@ -2548,11 +2857,16 @@ export class ChannelRuntime {
         || !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(String(job.action)))) {
         throw new StoreValidationError("Google Airbnb observation is not enabled for this job.");
       }
-      if (input.googleAirbnbProof !== undefined
-        && job.action !== "OBSERVE"
-        && (input.observedState !== (job.action === "SET_OPEN" ? "OPEN" : "CLOSED")
-          || input.observedBookable !== (job.action === "SET_OPEN"))) {
-        throw new StoreValidationError("Google Airbnb observation does not match the exact desired slot state.");
+      if (input.googleAirbnbProof !== undefined && job.action !== "OBSERVE") {
+        const jobDesiredState = job.action === "SET_OPEN" ? "OPEN" : "CLOSED";
+        const validObservation = input.outcome === "VERIFIED"
+          ? input.observedState === jobDesiredState && input.observedBookable === (jobDesiredState === "OPEN")
+          : isExactGoogleAirbnbMismatch(jobDesiredState, input.observedState, input.observedBookable);
+        if (!validObservation) throw new StoreValidationError(
+          input.outcome === "VERIFIED"
+            ? "Google Airbnb observation does not match the exact desired slot state."
+            : "Google Airbnb RETRY_WAIT must contain the exact opposite slot state.",
+        );
       }
       if ((reservationJob && input.outcome === "VERIFIED") || (!reservationJob && input.outcome === "RESERVATION_VERIFIED")) {
         throw new StoreValidationError("Result outcome does not match the job purpose.");
@@ -2579,6 +2893,17 @@ export class ChannelRuntime {
         && input.observedState !== undefined && input.observedBookable !== undefined && input.observedAtUtc !== undefined
         && (browserVerifiedShape || googleAirbnbVerifiedShape);
       if (input.outcome === "VERIFIED" && !verifiedShape) throw new StoreValidationError("VERIFIED requires exact target and structured readback observation.");
+      const googleRetryShape = input.outcome === "RETRY_WAIT" && input.googleAirbnbProof !== undefined
+        && exactTarget && occurrenceMatchesSnapshot && input.observedState !== undefined
+        && input.observedBookable !== undefined && input.observedManuallyBlocked === undefined
+        && input.observedAtUtc !== undefined;
+      if (input.outcome === "RETRY_WAIT" && input.googleAirbnbProof !== undefined && !googleRetryShape) {
+        throw new StoreValidationError("Google Airbnb RETRY_WAIT requires exact target and structured readback observation.");
+      }
+      if (propagationWait && (input.outcome === "VERIFIED" || input.outcome === "RETRY_WAIT")
+        && input.googleAirbnbProof === undefined) {
+        throw new StoreValidationError("Google propagation observations require a typed Google Airbnb proof.");
+      }
       const nowUtc = this.#nowIso();
       const withinLease = isoValue(job, "lease_expires_at") > nowUtc && isoValue(job, "job_deadline_at") > nowUtc;
       const observedMs = input.observedAtUtc === undefined ? Number.NaN : Date.parse(input.observedAtUtc);
@@ -2655,6 +2980,10 @@ export class ChannelRuntime {
         && integer(current, "desired_mapping_version") === integer(job, "mapping_version")
         && integer(current, "desired_version") === integer(job, "desired_version")
         && desiredStateCurrent && liveOccurrenceMatches && liveActionAllowed;
+      const propagationVersionsCurrent = propagationWait !== undefined
+        && propagationWait.status === "CHECKING" && isoValue(propagationWait, "deadline_at") > nowUtc
+        && googlePropagationJobMatches(propagationWait, job)
+        && googlePropagationAuthorityCurrent(propagationWait, nowUtc);
       const reservationVersionsCurrent = reservationJob && assignmentCurrent && current !== undefined
         && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
@@ -2684,6 +3013,7 @@ export class ChannelRuntime {
         && retiredTimeStillOld;
       let reservationReceiptCurrent = false;
       let googleAirbnbVerifiedAtUtc: string | undefined;
+      let googleAirbnbReceipt: Awaited<ReturnType<typeof verifyGoogleAirbnbReceipt>> | undefined;
       let reservationNextDueAt: string | undefined;
       let reservationCompletedAt: string | undefined;
       if (reservationJob && input.outcome === "RESERVATION_VERIFIED" && input.reservationReadId && input.reservationReceiptId) {
@@ -2723,7 +3053,8 @@ export class ChannelRuntime {
         : current?.desired_state as ChannelDesiredState | undefined;
       if (input.googleAirbnbProof) {
         if (!input.observedAtUtc || (googleDesiredState !== "OPEN" && googleDesiredState !== "CLOSED")
-          || !availabilityVersionsCurrent || current?.quarantined_at !== null) {
+          || !availabilityVersionsCurrent || current?.quarantined_at !== null
+          || (propagationWait !== undefined && !propagationVersionsCurrent)) {
           throw new StoreConflictError("Google Airbnb observation authority changed.");
         }
         const receipt = await verifyGoogleAirbnbReceipt(client, {
@@ -2735,12 +3066,19 @@ export class ChannelRuntime {
           sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),
           leaseStartedAtUtc: isoValue(job, "lease_started_at"), observedAtUtc: input.observedAtUtc,
         });
+        googleAirbnbReceipt = receipt;
         googleAirbnbVerifiedAtUtc = receipt.googleVerifiedAtUtc;
       }
       const googleAirbnbObservationMatches = input.googleAirbnbProof !== undefined
         && googleDesiredState !== undefined && input.observedState === googleDesiredState
         && input.observedBookable === (googleDesiredState === "OPEN")
         && googleAirbnbVerifiedAtUtc !== undefined;
+      const googleAirbnbKnownMismatch = input.googleAirbnbProof !== undefined && input.outcome === "RETRY_WAIT"
+        && googleDesiredState !== undefined
+        && isExactGoogleAirbnbMismatch(googleDesiredState, input.observedState, input.observedBookable)
+        && googleAirbnbVerifiedAtUtc !== undefined && input.stopped && withinLease
+        && availabilityVersionsCurrent && exactTarget && occurrenceMatchesSnapshot && observationTimeValid
+        && (propagationWait === undefined || propagationVersionsCurrent);
       const acceptedAsCurrent = reservationJob
         ? input.outcome === "RESERVATION_VERIFIED" && input.stopped && withinLease && exactTarget
           && reservationVersionsCurrent && reservationReceiptCurrent
@@ -2775,6 +3113,14 @@ export class ChannelRuntime {
           input.googleAirbnbProof?.partySize ?? null, googleAirbnbVerifiedAtUtc ?? null],
       );
       if (!withinLease) {
+        if (propagationWait) {
+          await this.#finishGooglePropagationWait(client, propagationWait, "NEEDS_REVIEW", "LATE_RESULT", nowUtc, input.stopped);
+          if (input.stopped) await client.query(
+            `UPDATE google_airbnb_propagation_waits SET pending_job_id=NULL,updated_at=$3
+              WHERE delivery_id=$1::uuid AND pending_job_id=$2::uuid AND status IN ('SUPERSEDED','NEEDS_REVIEW')`,
+            [propagationWait.delivery_id, jobId, nowUtc],
+          );
+        }
         await this.#quarantine(client, text(job, "account_id"), "LATE_RESULT");
         if (input.stopped) {
           await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "LATE_RESULT_STOPPED");
@@ -2788,7 +3134,16 @@ export class ChannelRuntime {
         return { acceptedAsCurrent: false, repeated: false };
       }
       if (!input.stopped) {
+        if (propagationWait) {
+          await this.#finishGooglePropagationWait(client, propagationWait, "NEEDS_REVIEW", "EXECUTOR_NOT_STOPPED", nowUtc, false);
+        }
         await this.#quarantine(client, text(job, "account_id"), "EXECUTOR_NOT_STOPPED");
+        return { acceptedAsCurrent: false, repeated: false };
+      }
+      if (googleAirbnbKnownMismatch && googleAirbnbReceipt && googleDesiredState) {
+        await this.#recordGooglePropagationMismatch(
+          client, job, input, googleAirbnbReceipt, propagationWait, googleDesiredState, nowUtc,
+        );
         return { acceptedAsCurrent: false, repeated: false };
       }
       if (acceptedAsCurrent) {
@@ -2810,12 +3165,43 @@ export class ChannelRuntime {
             [job.listing_id, job.occurrence_id, input.observedState, job.desired_version, job.mapping_version, input.observedAtUtc,
               SLOT_RETIREMENT_WARNING],
           );
+          if (propagationWait) {
+            await client.query(
+              `UPDATE google_airbnb_propagation_waits SET status='MATCHED',pending_job_id=NULL,
+                 latest_reason='MATCHED',latest_observed_at=$3,last_checked_at=$4,updated_at=$4
+               WHERE delivery_id=$1::uuid AND status='CHECKING' AND pending_job_id=$2::uuid`,
+              [propagationWait.delivery_id, jobId, input.observedAtUtc, nowUtc],
+            );
+          }
         }
         await client.query(
           "UPDATE channel_jobs SET status='FINISHED',outcome=$3,lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
           [jobId, nowUtc, reservationJob ? "RESERVATION_VERIFIED" : "VERIFIED"],
         );
-        if (!reservationJob && job.action === "OBSERVE") await this.#completeRecoveryObserve(client, job);
+        if (!reservationJob && job.action === "OBSERVE" && !propagationWait) await this.#completeRecoveryObserve(client, job);
+      } else if (propagationWait) {
+        const stale = !propagationVersionsCurrent || input.outcome === "SUPERSEDED";
+        const outcome: ChannelOutcome = stale ? "SUPERSEDED" : "NEEDS_REVIEW";
+        await client.query(
+          "UPDATE channel_jobs SET status='FINISHED',outcome=$2,lease_digest=NULL,lease_expires_at=NULL,updated_at=$3 WHERE id=$1::uuid",
+          [jobId, outcome, nowUtc],
+        );
+        await this.#finishGooglePropagationWait(client, propagationWait,
+          stale ? "SUPERSEDED" : "NEEDS_REVIEW",
+          stale ? "AUTHORITY_CHANGED" : input.googleAirbnbProof !== undefined ? "INVALID_PROPAGATION_OBSERVATION" : input.outcome,
+          nowUtc, true);
+        await client.query(
+          `UPDATE google_airbnb_propagation_waits SET pending_job_id=NULL,updated_at=$3
+            WHERE delivery_id=$1::uuid AND pending_job_id=$2::uuid AND status IN ('SUPERSEDED','NEEDS_REVIEW')`,
+          [propagationWait.delivery_id, jobId, nowUtc],
+        );
+        if (!stale && (input.outcome === "AUTH_REQUIRED" || input.outcome === "NEEDS_REVIEW" || input.outcome === "UNKNOWN_AFTER_SAVE"
+          || input.googleAirbnbProof !== undefined)) {
+          await this.#quarantine(client, text(job, "account_id"),
+            input.googleAirbnbProof !== undefined ? "INVALID_PROPAGATION_OBSERVATION" : input.outcome);
+        }
+      } else if (input.googleAirbnbProof !== undefined && input.outcome === "RETRY_WAIT") {
+        await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "INVALID_PROPAGATION_OBSERVATION");
       } else if (reservationJob) {
         if (input.outcome === "SUPERSEDED" || !reservationVersionsCurrent) {
           await client.query(
