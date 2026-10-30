@@ -101,7 +101,10 @@ interface Context {
   readonly addRule: (productId: string, value: ScheduleRule) => Promise<void>;
 }
 
-/** A fresh schema with every migration, synthetic providers, members, products and sale terms (no schedule rules). */
+/**
+ * A fresh schema with every migration, synthetic providers (support off), members, products and sale
+ * terms (no schedule rules).
+ */
 async function withSchema(run: (context: Context) => Promise<void>): Promise<void> {
   const { Pool } = await import("pg");
   const schema = `guest_bookings_${randomUUID().replaceAll("-", "")}`;
@@ -136,6 +139,8 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
+    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+    await guests.setProviderSaleSettings("provider-b", { supportEnabled: false });
     await guests.setSaleTerms(ownerA, "tea", TEA_TERMS);
     await guests.setSaleTerms(ownerA, "walk", PLAIN_TERMS);
     await guests.setSaleTerms(ownerA, "kids", KIDS_TERMS);
@@ -251,6 +256,75 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await pool.query("UPDATE experience_products SET status='PUBLISHED', slug='sample-tea' WHERE provider_id='provider-b' AND id='dup'");
       assert.equal(await guests.publicBookingTerms("sample-tea"), null);
       await assert.rejects(() => guests.startGuestBooking(request()), StoreNotFoundError);
+    });
+  });
+
+  it("sells a provider's products only with its sale settings, and fixes NIHO's fee on each booking", async () => {
+    await withSchema(async ({ pool, store, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      await pool.query("UPDATE experience_products SET unit_amount=3333 WHERE id='walk'");
+      const walk = (overrides: Partial<StartGuestBookingInput> = {}) => walkRequest({ expectedTotalYen: 3333, ...overrides });
+
+      // No settings: none of the provider's products is for sale, whatever their terms (no fee is assumed).
+      await pool.query("DELETE FROM provider_sale_settings WHERE provider_id='provider-a'");
+      assert.equal(await guests.publicBookingTerms("sample-walk"), null);
+      assert.equal(await guests.listPublicAvailability("sample-walk"), null);
+      await assert.rejects(() => guests.startGuestBooking(walk()), StoreNotFoundError);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM bookings")).rows[0].n, 0);
+
+      // Support off: 10 %, rounded down to the yen.
+      const off = await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+      assert.deepEqual({ ...off, updatedAtUtc: undefined }, { providerId: "provider-a", supportEnabled: false, platformFeeBasisPoints: 1000, version: 1, updatedAtUtc: undefined });
+      const offKey = randomUUID();
+      const before = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
+      assert.deepEqual(before.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333 });
+
+      // Support on: 15 % for bookings taken from now on; the earlier booking and its replay keep 10 %.
+      const on = await guests.setProviderSaleSettings("provider-a", { supportEnabled: true }, 1);
+      assert.deepEqual({ supportEnabled: on.supportEnabled, basisPoints: on.platformFeeBasisPoints, version: on.version }, { supportEnabled: true, basisPoints: 1500, version: 2 });
+      const after = await guests.startGuestBooking(walk({ guestEmail: "second@example.com", adultCount: 2, expectedTotalYen: 6666 }));
+      assert.deepEqual(after.booking.pricingSnapshot.platformFee, { supportEnabled: true, basisPoints: 1500, amount: 999 });
+      const replay = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
+      assert.equal(replay.publicBookingId, before.publicBookingId);
+      assert.deepEqual(replay.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333 });
+      const stored = await pool.query("SELECT pricing_snapshot->'platformFee' AS fee FROM bookings ORDER BY id");
+      assert.deepEqual(stored.rows.map((row) => row.fee), [
+        { supportEnabled: false, basisPoints: 1000, amount: 333 },
+        { supportEnabled: true, basisPoints: 1500, amount: 999 },
+      ]);
+      // The webhook still compares the charge with the total, not the total less the fee.
+      assert.equal((await payFor(store, after, 6666, "fee")).booking.status, "CONFIRMED");
+      // Provider B's settings do not sell provider A's products and the other way round.
+      await pool.query("DELETE FROM provider_sale_settings WHERE provider_id='provider-b'");
+      assert.notEqual(await guests.publicBookingTerms("sample-walk"), null);
+    });
+  });
+
+  it("writes sale settings at a version, for an existing provider, with the fee the support setting implies", async () => {
+    await withSchema(async ({ pool, guests }) => {
+      // Without a version the settings must be new; with one it must be current.
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-a", { supportEnabled: true }), StoreConflictError);
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-a", { supportEnabled: true }, 2), StoreConflictError);
+      assert.equal((await guests.setProviderSaleSettings("provider-a", { supportEnabled: true }, 1)).version, 2);
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-a", { supportEnabled: false }, 1), StoreConflictError);
+      assert.deepEqual(
+        (await guests.setProviderSaleSettings("provider-a", { supportEnabled: false }, 2)).platformFeeBasisPoints,
+        1000,
+      );
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-missing", { supportEnabled: false }), StoreNotFoundError);
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-missing", { supportEnabled: false }, 1), StoreNotFoundError);
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-a", { supportEnabled: "true" as never }, 3), StoreValidationError);
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-a", null as never, 3), StoreValidationError);
+      await assert.rejects(() => guests.setProviderSaleSettings("provider-a", { supportEnabled: true }, 0), StoreValidationError);
+      await assert.rejects(() => guests.setProviderSaleSettings("", { supportEnabled: true }), StoreValidationError);
+
+      // The database keeps the fee tied to the support setting.
+      for (const [support, basisPoints] of [[true, 1000], [false, 1500], [false, 1200]] as const) {
+        await assert.rejects(
+          () => pool.query("UPDATE provider_sale_settings SET support_enabled=$1, platform_fee_basis_points=$2 WHERE provider_id='provider-a'", [support, basisPoints]),
+          /check constraint/,
+        );
+      }
     });
   });
 
@@ -632,6 +706,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.deepEqual(family.booking.pricingSnapshot, {
         currency: "JPY", unitAmount: 4000, seats: 3, totalAmount: 10_000, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2000 }, cancellationPolicy: "FREE_UNTIL_24H",
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 },
       });
       assert.equal(family.booking.occurrenceSnapshot.seats, 3);
       const stored = await pool.query(
@@ -651,6 +726,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.deepEqual(children.booking.pricingSnapshot, {
         currency: "JPY", unitAmount: 2500, seats: 2, totalAmount: 3000, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 0, childCount: 2, childUnitAmount: 1500 }, cancellationPolicy: "FREE_UNTIL_48H",
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 300 },
       });
 
       // The webhook compares the charge with the snapshot total, not unit price × seats.

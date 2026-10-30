@@ -223,6 +223,19 @@ export interface PricingSnapshot {
   readonly breakdown?: PricingBreakdown;
   /** Guest bookings (#285) only: the cancellation policy fixed at booking. */
   readonly cancellationPolicy?: GuestCancellationPolicy;
+  /** Guest bookings (#285) only: NIHO's fee fixed at booking, the Checkout Session's application fee. */
+  readonly platformFee?: PlatformFeeSnapshot;
+}
+
+/**
+ * NIHO's fee on a guest booking (owner decision 2026-10-31, #285): 10 % with NIHO support off, 15 % with
+ * it on, payment fees included, taken from the provider's sale settings when the booking is made.
+ */
+export interface PlatformFeeSnapshot {
+  readonly supportEnabled: boolean;
+  readonly basisPoints: 1000 | 1500;
+  /** floor(totalAmount × basisPoints / 10000) in yen: at least 1 and below totalAmount. */
+  readonly amount: number;
 }
 
 export interface SellerSnapshot {

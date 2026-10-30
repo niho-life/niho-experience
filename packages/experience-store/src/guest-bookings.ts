@@ -35,7 +35,7 @@ import {
 import { bookingFromRow, isoValue, overrideFromRow, productFromRow, salesStateFromRow, scheduleRuleFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { BookingRecord, BookingStatus, GuestCancellationPolicy, HostActor, ProductRecord, StoredScheduleRule } from "./types.ts";
-import { assertCanonicalInstant, assertMoney, assertStoreIdentifier } from "./validation.ts";
+import { assertCanonicalInstant, assertMoney, assertStoreIdentifier, chargeablePlatformFee } from "./validation.ts";
 
 /**
  * The bounds of the public booking flow. Input bounds follow NIHO's public checkout contract
@@ -69,6 +69,19 @@ export const GUEST_BOOKING_LIMITS = {
   activeHoldsPerProduct: 30,
   bookingsPerGuestPerHour: 5,
 } as const;
+
+/** NIHO's fee on a guest booking, in basis points (owner decision 2026-10-31, #285; payment fees included). */
+export const PLATFORM_FEE_BASIS_POINTS = { supportOff: 1000, supportOn: 1500 } as const;
+
+/** What NIHO charges a provider on bookings made here (migration 0025). */
+export interface ProviderSaleSettings {
+  readonly providerId: string;
+  /** NIHO support (docs/admin-support.md 支援条件). */
+  readonly supportEnabled: boolean;
+  readonly platformFeeBasisPoints: 1000 | 1500;
+  readonly version: number;
+  readonly updatedAtUtc: string;
+}
 
 export type BookingQuestionInputType = "SHORT_TEXT" | "LONG_TEXT" | "SINGLE_SELECT" | "MULTI_SELECT";
 
@@ -208,7 +221,7 @@ export interface StartGuestBookingInput {
   /** Leave out when the browser sends DNT: 1. */
   readonly utm?: GuestBookingUtm;
   readonly clientRequestKey: string;
-  /** Defaults to the repository's (31 minutes); 60-3600. */
+  /** Defaults to the repository's (35 minutes); 60-3600. */
   readonly holdSeconds?: number;
 }
 
@@ -256,6 +269,7 @@ const WEEKDAY_NUMBER: Readonly<Record<Weekday, number>> = {
 const MAX_SELLABLE_PRODUCT_ID_LENGTH = 120;
 const MAX_LISTED_OCCURRENCES = 2_000;
 
+const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
 const TERMS_COLUMNS = `
   provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
   minimum_participants, max_party_size, cancellation_policy, booking_questions,
@@ -386,17 +400,31 @@ function termsFromRow(row: DbRow): ProductSaleTerms {
   };
 }
 
+function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
+  return {
+    providerId: String(row.provider_id),
+    supportEnabled: row.support_enabled === true,
+    platformFeeBasisPoints: Number(row.platform_fee_basis_points) === PLATFORM_FEE_BASIS_POINTS.supportOn
+      ? PLATFORM_FEE_BASIS_POINTS.supportOn
+      : PLATFORM_FEE_BASIS_POINTS.supportOff,
+    version: Number(row.version),
+    updatedAtUtc: isoValue(row, "updated_at"),
+  };
+}
+
 /* ---------- what is for sale ---------- */
 
 interface Sellable {
   readonly product: ProductRecord;
   readonly terms: ProductSaleTerms;
+  readonly settings: ProviderSaleSettings;
 }
 
 /**
  * The product travelers may book under this slug: exactly one PUBLISHED product across providers has it
- * (as guide links and guest questions), it has sale terms, it is sold in JPY at a chargeable price, and
- * its ID fits the guest idempotency key. Anything else is not for sale (fail closed).
+ * (as guide links and guest questions), it has sale terms, its provider has sale settings (no fee is
+ * ever assumed), it is sold in JPY at a chargeable price whose fee Stripe accepts, and its ID fits the
+ * guest idempotency key. Anything else is not for sale (fail closed).
  */
 async function loadSellable(client: Queryable, slug: string, lock: boolean): Promise<Sellable | null> {
   if (typeof slug !== "string" || slug.length < 1 || slug.length > 160) return null;
@@ -413,7 +441,20 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
     `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2${lock ? " FOR SHARE" : ""}`,
     [product.providerId, product.id],
   );
-  return terms.rows[0] === undefined ? null : { product, terms: termsFromRow(terms.rows[0]) };
+  if (terms.rows[0] === undefined) return null;
+  const settings = await client.query<DbRow>(
+    `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1${lock ? " FOR SHARE" : ""}`,
+    [product.providerId],
+  );
+  if (settings.rows[0] === undefined) return null;
+  const sellable = { product, terms: termsFromRow(terms.rows[0]), settings: saleSettingsFromRow(settings.rows[0]) };
+  return chargeablePlatformFee(smallestCharge(sellable), sellable.settings.platformFeeBasisPoints) ? sellable : null;
+}
+
+/** The smallest total a party may pay: one adult, or one child where children may come alone. */
+function smallestCharge({ product, terms }: Pick<Sellable, "product" | "terms">): number {
+  const child = terms.childPricing;
+  return child !== null && !child.adultRequired ? Math.min(product.unitAmount, child.priceYen) : product.unitAmount;
 }
 
 async function databaseNow(client: Queryable): Promise<string> {
@@ -780,7 +821,7 @@ function startResult(booking: BookingRecord, productTitle: string, guestEmail: s
 }
 
 /**
- * 旅行者の予約 (#285; migration 0023). The traveler's booking flow on this site, backed by the same
+ * 旅行者の予約 (#285; migrations 0023 and 0025). The traveler's booking flow on this site, backed by the same
  * occurrence expansion, stored-inventory evaluation and hold transaction as the host calendar and
  * ExperienceStore.createBookingHold. The public methods take a slug or a booking ID and no identity;
  * the web layer establishes nothing else. Results map 1:1 onto NIHO's public contract (offers,
@@ -850,6 +891,57 @@ export class GuestBookingRepository {
           : "Sale terms version mismatch or sale terms not found in this provider.");
       }
       return termsFromRow(row);
+    });
+  }
+
+  /* ---------- NIHO staff (server-side import / Admin) ---------- */
+
+  /**
+   * Writes what NIHO charges a provider on bookings made here: 10 % with support off, 15 % with it on
+   * (migration 0025). Without these settings none of the provider's products is sold here. Only NIHO's
+   * server-side import or Admin may call this, never a host route: it takes no actor because the
+   * provider's own members must not set NIHO's fee. Nothing in apps/web reaches it yet (the migration,
+   * #285 slice 9, writes it). Without expectedVersion the settings must not exist yet; with it
+   * they must be at that version. Later bookings take the new fee; bookings already made keep theirs.
+   */
+  async setProviderSaleSettings(
+    providerId: string,
+    input: { readonly supportEnabled: boolean },
+    expectedVersion?: number,
+  ): Promise<ProviderSaleSettings> {
+    assertStoreIdentifier(providerId, "providerId");
+    if (input === null || typeof input !== "object" || typeof input.supportEnabled !== "boolean") {
+      throw new StoreValidationError("supportEnabled must be a boolean.");
+    }
+    if (expectedVersion !== undefined && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) {
+      throw new StoreValidationError("expectedVersion must be a positive integer.");
+    }
+    const basisPoints = input.supportEnabled ? PLATFORM_FEE_BASIS_POINTS.supportOn : PLATFORM_FEE_BASIS_POINTS.supportOff;
+    return withTransaction(this.#pool, async (client) => {
+      const provider = await client.query("SELECT 1 FROM experience_providers WHERE id=$1", [providerId]);
+      if (provider.rows[0] === undefined) throw new StoreNotFoundError("provider");
+      const result = expectedVersion === undefined
+        ? await client.query<DbRow>(
+            `INSERT INTO provider_sale_settings (provider_id, support_enabled, platform_fee_basis_points)
+             VALUES ($1,$2,$3)
+             ON CONFLICT DO NOTHING
+             RETURNING ${SALE_SETTINGS_COLUMNS}`,
+            [providerId, input.supportEnabled, basisPoints],
+          )
+        : await client.query<DbRow>(
+            `UPDATE provider_sale_settings
+                SET support_enabled=$2, platform_fee_basis_points=$3, version=version+1, updated_at=clock_timestamp()
+              WHERE provider_id=$1 AND version=$4
+              RETURNING ${SALE_SETTINGS_COLUMNS}`,
+            [providerId, input.supportEnabled, basisPoints, expectedVersion],
+          );
+      const row = result.rows[0];
+      if (row === undefined) {
+        throw new StoreConflictError(expectedVersion === undefined
+          ? "Sale settings already exist for this provider."
+          : "Sale settings version mismatch or sale settings not found for this provider.");
+      }
+      return saleSettingsFromRow(row);
     });
   }
 
@@ -940,10 +1032,11 @@ export class GuestBookingRepository {
 
   /**
    * Starts a booking: checks the request as NIHO's checkout does, then holds the seats and records the
-   * guest in one transaction. The same clientRequestKey with the same content returns the earlier
-   * booking (whatever its status); with other content REQUEST_MISMATCH. Throws GuestCheckoutError with
-   * NIHO's code, StoreNotFoundError when the experience is not for sale here, StoreValidationError for
-   * the web layer's own values.
+   * guest in one transaction. The pricing snapshot fixes NIHO's fee from the provider's sale settings of
+   * this moment (`platformFee`). The same clientRequestKey with the same content returns the earlier
+   * booking (whatever its status, with the fee it was taken at); with other content REQUEST_MISMATCH.
+   * Throws GuestCheckoutError with NIHO's code, StoreNotFoundError when the experience is not for sale
+   * here, StoreValidationError for the web layer's own values.
    */
   async startGuestBooking(input: StartGuestBookingInput): Promise<GuestBookingStart> {
     const request = validRequest(input, this.#defaultHoldSeconds);
@@ -960,7 +1053,7 @@ export class GuestBookingRepository {
       if (sellable === null || sellable.product.providerId !== providerId || sellable.product.id !== productId) {
         throw new StoreNotFoundError("experience for sale");
       }
-      const { product, terms } = sellable;
+      const { product, terms, settings } = sellable;
 
       const previous = await client.query<DbRow>(
         `SELECT id, ${BOOKING_COLUMNS} FROM bookings WHERE provider_id=$1 AND idempotency_key=$2`,
@@ -999,6 +1092,8 @@ export class GuestBookingRepository {
       if (request.adultCount < 1 && terms.childPricing?.adultRequired !== false) throw invalid("adultCount");
       const totalYen = product.unitAmount * request.adultCount + (terms.childPricing?.priceYen ?? 0) * request.childCount;
       if (request.expectedTotalYen !== totalYen) throw new GuestCheckoutError("PRICE_CHANGED", { currentTotalYen: totalYen });
+      // Unreachable with the ¥50 minimum and today's rates; a fee Stripe would refuse is not for sale.
+      if (!chargeablePlatformFee(totalYen, settings.platformFeeBasisPoints)) throw new StoreNotFoundError("experience for sale");
       if (request.bookingQuestionsFingerprint !== terms.bookingQuestionsFingerprint) throw new GuestCheckoutError("QUESTIONS_CHANGED");
       const answers = checkedAnswers(terms.bookingQuestions, request.answers);
 
@@ -1042,6 +1137,7 @@ export class GuestBookingRepository {
           guest: {
             breakdown: { adultCount: request.adultCount, childCount: request.childCount, childUnitAmount: terms.childPricing?.priceYen ?? null },
             cancellationPolicy: terms.cancellationPolicy,
+            platformFee: { supportEnabled: settings.supportEnabled, basisPoints: settings.platformFeeBasisPoints },
           },
         });
       } catch (error) {

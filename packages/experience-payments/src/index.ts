@@ -10,17 +10,27 @@ const CONNECTED_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,}$/;
 const EVENT_ID = /^evt_[A-Za-z0-9]{8,}$/;
 const PAYMENT_INTENT_ID = /^pi_[A-Za-z0-9]{8,}$/;
 const CURRENCY = /^[A-Z]{3}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CONTROL = /[\u0000-\u001F\u007F]/;
 
 export type PaymentsStripeClient = Pick<Stripe, "checkout" | "webhooks">;
 
 export interface CreateDirectCheckoutInput {
   readonly booking: Readonly<BookingRecord>;
-  /** A trusted, server-calculated fee in the currency's minor unit. */
-  readonly applicationFeeAmount: number;
+  /**
+   * A trusted, server-calculated fee in the currency's minor unit. A booking whose pricing snapshot fixes
+   * the fee (`platformFee`, every guest booking) is charged that fee: leave this out, or pass the same
+   * amount. A guest booking without the snapshot is refused.
+   */
+  readonly applicationFeeAmount?: number;
   /** An allowlisted server configuration value, such as https://experience.example. */
   readonly returnOrigin: string;
   /** A trusted local path. Query parameters are allowed; fragments and cross-origin URLs are not. */
   readonly returnPath: string;
+  /** Where Stripe sends a guest who leaves Checkout: a trusted local path on returnOrigin, as returnPath. */
+  readonly cancelPath?: string;
+  /** Prefills Stripe's email field. Never put it in metadata; leave it out once the guest data is erased. */
+  readonly customerEmail?: string;
   readonly platformStripeKey?: string;
   readonly stripe?: PaymentsStripeClient;
   /** Injectable clock for deterministic tests. */
@@ -32,6 +42,20 @@ export interface DirectCheckoutResult {
   readonly checkoutSessionId: string;
   readonly checkoutUrl: string;
 }
+
+export interface RetrieveDirectCheckoutInput {
+  /** The booking the Session was created for; its seller's account holds the Session. */
+  readonly booking: Readonly<BookingRecord>;
+  readonly checkoutSessionId: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: PaymentsStripeClient;
+}
+
+/** A Session created before: still payable (its URL), paid, or over. */
+export type RetrievedDirectCheckout =
+  | { readonly status: "open"; readonly checkoutUrl: string }
+  | { readonly status: "complete" }
+  | { readonly status: "expired" };
 
 export interface VerifyDirectCheckoutWebhookInput {
   /** Exact, unparsed bytes received from Stripe. */
@@ -58,6 +82,14 @@ export class ExperiencePaymentsValidationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "ExperiencePaymentsValidationError";
+  }
+}
+
+/** The hold ends too soon for a Checkout Session (Stripe's 30-minute minimum plus the safety margin). */
+export class ExperiencePaymentsHoldTooShortError extends ExperiencePaymentsValidationError {
+  constructor() {
+    super("The booking hold must remain valid beyond Stripe's 30-minute minimum plus the safety margin.");
+    this.name = "ExperiencePaymentsHoldTooShortError";
   }
 }
 
@@ -142,18 +174,14 @@ function checkoutExpiry(
   const nowSeconds = Math.floor(nowMilliseconds / 1_000);
   const beforeHoldSeconds = Math.floor(holdExpiresMilliseconds / 1_000) - holdSafetyMarginSeconds;
   const expiresAt = Math.min(beforeHoldSeconds, nowSeconds + STRIPE_MAXIMUM_EXPIRY_SECONDS);
-  if (expiresAt < nowSeconds + STRIPE_MINIMUM_EXPIRY_SECONDS) {
-    throw new ExperiencePaymentsValidationError(
-      "The booking hold must remain valid beyond Stripe's 30-minute minimum plus the safety margin.",
-    );
-  }
+  if (expiresAt < nowSeconds + STRIPE_MINIMUM_EXPIRY_SECONDS) throw new ExperiencePaymentsHoldTooShortError();
   if (expiresAt * 1_000 >= holdExpiresMilliseconds) {
     throw new ExperiencePaymentsValidationError("Checkout must expire before the booking hold.");
   }
   return expiresAt;
 }
 
-function trustedSuccessUrl(returnOrigin: string, returnPath: string): string {
+function trustedOrigin(returnOrigin: string): URL {
   let origin: URL;
   try {
     origin = new URL(returnOrigin);
@@ -167,20 +195,61 @@ function trustedSuccessUrl(returnOrigin: string, returnPath: string): string {
   if (origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) {
     throw new ExperiencePaymentsValidationError("returnOrigin must contain only a trusted origin.");
   }
-  if (!returnPath.startsWith("/") || returnPath.startsWith("//") || returnPath.includes("\\")) {
-    throw new ExperiencePaymentsValidationError("returnPath must be a same-origin absolute path.");
+  return origin;
+}
+
+/** A local path (returnPath or cancelPath) on the trusted origin. */
+function trustedUrl(origin: URL, path: string, field: "returnPath" | "cancelPath"): string {
+  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    throw new ExperiencePaymentsValidationError(`${field} must be a same-origin absolute path.`);
   }
 
-  let successUrl: URL;
+  let url: URL;
   try {
-    successUrl = new URL(returnPath, origin);
+    url = new URL(path, origin);
   } catch (error) {
-    throw new ExperiencePaymentsValidationError("returnPath is invalid.", { cause: error });
+    throw new ExperiencePaymentsValidationError(`${field} is invalid.`, { cause: error });
   }
-  if (successUrl.origin !== origin.origin || successUrl.hash) {
-    throw new ExperiencePaymentsValidationError("returnPath must stay on the trusted origin and contain no fragment.");
+  if (url.origin !== origin.origin || url.hash) {
+    throw new ExperiencePaymentsValidationError(`${field} must stay on the trusted origin and contain no fragment.`);
   }
-  return successUrl.href;
+  return url.href;
+}
+
+/**
+ * The fee fixed in the booking's pricing snapshot (guest bookings, #285), or for a booking without one the
+ * caller's trusted amount. Either way at least 1 and below the total, as Stripe requires.
+ */
+function applicationFee(booking: Readonly<BookingRecord>, requested: number | undefined): number {
+  const snapshot = booking.pricingSnapshot.platformFee;
+  let fee: number;
+  if (snapshot !== undefined) {
+    assertPositiveAmount(snapshot.amount, "booking.pricingSnapshot.platformFee.amount");
+    if (requested !== undefined && requested !== snapshot.amount) {
+      throw new ExperiencePaymentsValidationError("applicationFeeAmount must equal the booking's platform fee snapshot.");
+    }
+    fee = snapshot.amount;
+  } else if (booking.pricingSnapshot.breakdown !== undefined) {
+    throw new ExperiencePaymentsValidationError("A guest booking must carry its platform fee snapshot.");
+  } else if (requested === undefined) {
+    throw new ExperiencePaymentsValidationError("applicationFeeAmount is required for a booking without a platform fee snapshot.");
+  } else {
+    assertPositiveAmount(requested, "applicationFeeAmount");
+    fee = requested;
+  }
+  if (fee >= booking.pricingSnapshot.totalAmount) {
+    throw new ExperiencePaymentsValidationError("applicationFeeAmount must be less than the booking total.");
+  }
+  return fee;
+}
+
+/** The guest's address for Stripe's own email field. The message never repeats the value. */
+function checkoutEmail(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length < 3 || value.length > 254 || !EMAIL.test(value) || CONTROL.test(value)) {
+    throw new ExperiencePaymentsValidationError("customerEmail must be an email address.");
+  }
+  return value;
 }
 
 function snapshotTitle(booking: Readonly<BookingRecord>): string {
@@ -193,14 +262,13 @@ function snapshotTitle(booking: Readonly<BookingRecord>): string {
 
 /**
  * Creates a Stripe-hosted, card-only Checkout Session as a Direct charge.
- * All charge-defining fields come from the immutable booking snapshots.
+ * All charge-defining fields, the application fee included, come from the immutable booking snapshots.
+ * The idempotency key is the booking's, so calling again for the same booking returns the same Session.
  */
 export async function createDirectCheckout(input: CreateDirectCheckoutInput): Promise<DirectCheckoutResult> {
   assertBookingForCheckout(input.booking);
-  assertPositiveAmount(input.applicationFeeAmount, "applicationFeeAmount");
-  if (input.applicationFeeAmount >= input.booking.pricingSnapshot.totalAmount) {
-    throw new ExperiencePaymentsValidationError("applicationFeeAmount must be less than the booking total.");
-  }
+  const applicationFeeAmount = applicationFee(input.booking, input.applicationFeeAmount);
+  const customerEmail = checkoutEmail(input.customerEmail);
 
   const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
   const expiresAt = checkoutExpiry(
@@ -208,13 +276,17 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
     input.now ?? new Date(),
     input.holdSafetyMarginSeconds ?? DEFAULT_HOLD_SAFETY_MARGIN_SECONDS,
   );
-  const successUrl = trustedSuccessUrl(input.returnOrigin, input.returnPath);
+  const origin = trustedOrigin(input.returnOrigin);
+  const successUrl = trustedUrl(origin, input.returnPath, "returnPath");
+  const cancelUrl = input.cancelPath === undefined ? undefined : trustedUrl(origin, input.cancelPath, "cancelPath");
   const bookingId = input.booking.publicBookingId.toLowerCase();
   const session = await stripe.checkout.sessions.create(
     {
       mode: "payment",
       payment_method_types: ["card"],
       success_url: successUrl,
+      ...(cancelUrl === undefined ? {} : { cancel_url: cancelUrl }),
+      ...(customerEmail === undefined ? {} : { customer_email: customerEmail }),
       expires_at: expiresAt,
       line_items: [
         {
@@ -227,7 +299,7 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
         },
       ],
       metadata: { source: "niho-experience", booking_id: bookingId },
-      payment_intent_data: { application_fee_amount: input.applicationFeeAmount },
+      payment_intent_data: { application_fee_amount: applicationFeeAmount },
     },
     {
       stripeAccount: input.booking.sellerSnapshot.stripeConnectAccountRef,
@@ -239,6 +311,27 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
     throw new ExperiencePaymentsValidationError("Stripe returned a Checkout Session without a redirect URL.");
   }
   return { checkoutSessionId: session.id, checkoutUrl: session.url };
+}
+
+/**
+ * Reads back the Checkout Session created for a booking, on the seller's account, so a repeated request
+ * returns the same Session even after the hold is too short for a new one. A Session of another booking
+ * is refused.
+ */
+export async function retrieveDirectCheckout(input: RetrieveDirectCheckoutInput): Promise<RetrievedDirectCheckout> {
+  if (typeof input.checkoutSessionId !== "string" || !/^cs_[A-Za-z0-9_]{1,250}$/.test(input.checkoutSessionId)) {
+    throw new ExperiencePaymentsValidationError("checkoutSessionId is malformed.");
+  }
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  const session = await stripe.checkout.sessions.retrieve(input.checkoutSessionId, undefined, {
+    stripeAccount: input.booking.sellerSnapshot.stripeConnectAccountRef,
+  });
+  if (session.id !== input.checkoutSessionId || session.metadata?.booking_id !== input.booking.publicBookingId.toLowerCase()) {
+    throw new ExperiencePaymentsValidationError("The Checkout Session belongs to another booking.");
+  }
+  if (session.status === "complete") return { status: "complete" };
+  if (session.status === "open" && typeof session.url === "string" && session.url.length > 0) return { status: "open", checkoutUrl: session.url };
+  return { status: "expired" };
 }
 
 function asRecord(value: unknown, field: string): Record<string, unknown> {

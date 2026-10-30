@@ -4,7 +4,9 @@ import Stripe from "stripe";
 import type { BookingRecord } from "@niho-experience/experience-store";
 import {
   createDirectCheckout,
+  ExperiencePaymentsHoldTooShortError,
   ExperiencePaymentsValidationError,
+  retrieveDirectCheckout,
   verifyDirectCheckoutWebhook,
   type PaymentsStripeClient,
 } from "../src/index.ts";
@@ -117,6 +119,7 @@ describe("createDirectCheckout", () => {
       pricingSnapshot: {
         ...base.pricingSnapshot, seats: 3, totalAmount: 10_000,
         breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2_000 }, cancellationPolicy: "FREE_UNTIL_24H",
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1_000 },
       },
     });
     const input = { applicationFeeAmount: 1_000, returnOrigin: "https://experience.example.test", returnPath: "/booking/return", stripe, now: NOW };
@@ -135,6 +138,81 @@ describe("createDirectCheckout", () => {
     }
   });
 
+  it("charges a guest booking the fee of its snapshot, with a cancel URL and the guest's email (#285)", async () => {
+    let receivedParams: Stripe.Checkout.SessionCreateParams | undefined;
+    let receivedOptions: Stripe.RequestOptions | undefined;
+    const stripe = {
+      checkout: { sessions: { create: async (params: Stripe.Checkout.SessionCreateParams, options?: Stripe.RequestOptions) => {
+        receivedParams = params;
+        receivedOptions = options;
+        return { id: "cs_test_synthetic", url: "https://checkout.stripe.com/c/pay/synthetic" };
+      } } },
+    } as unknown as PaymentsStripeClient;
+    const base = booking();
+    const guest = booking({
+      pricingSnapshot: {
+        ...base.pricingSnapshot,
+        breakdown: { adultCount: 2, childCount: 0, childUnitAmount: null }, cancellationPolicy: "NONE",
+        platformFee: { supportEnabled: true, basisPoints: 1500, amount: 1_200 },
+      },
+    });
+    const input = {
+      booking: guest,
+      returnOrigin: "https://experience.example.test",
+      returnPath: "/booking/return?type=instant",
+      cancelPath: "/experiences/sample-tea?checkout=cancelled",
+      customerEmail: "guest@example.com",
+      stripe,
+      now: NOW,
+    };
+    await createDirectCheckout(input);
+    assert.deepEqual(receivedParams?.payment_intent_data, { application_fee_amount: 1_200 });
+    assert.equal(receivedParams?.success_url, "https://experience.example.test/booking/return?type=instant");
+    assert.equal(receivedParams?.cancel_url, "https://experience.example.test/experiences/sample-tea?checkout=cancelled");
+    assert.equal(receivedParams?.customer_email, "guest@example.com");
+    assert.equal(receivedOptions?.idempotencyKey, `experience-checkout:${BOOKING_ID}`);
+    // The guest's address goes to Stripe's own field only, never to metadata.
+    assert.deepEqual(receivedParams?.metadata, { source: "niho-experience", booking_id: BOOKING_ID });
+
+    // The same fee may be passed explicitly; another one is refused.
+    await createDirectCheckout({ ...input, applicationFeeAmount: 1_200 });
+    await assert.rejects(createDirectCheckout({ ...input, applicationFeeAmount: 800 }), /must equal the booking's platform fee snapshot/);
+    // A guest booking without its fee snapshot is refused, even with a fee.
+    const withoutFee = { ...guest, pricingSnapshot: { ...guest.pricingSnapshot, platformFee: undefined } };
+    await assert.rejects(createDirectCheckout({ ...input, booking: withoutFee, applicationFeeAmount: 1_200 }), /must carry its platform fee snapshot/);
+    // A snapshot fee Stripe would refuse is refused here first.
+    for (const amount of [0, 8_000, 1.5]) {
+      const bad = { ...guest, pricingSnapshot: { ...guest.pricingSnapshot, platformFee: { supportEnabled: true, basisPoints: 1500 as const, amount } } };
+      await assert.rejects(createDirectCheckout({ ...input, booking: bad }), ExperiencePaymentsValidationError);
+    }
+    // A booking without a fee snapshot still needs a trusted fee.
+    await assert.rejects(createDirectCheckout({ ...input, booking: booking() }), /applicationFeeAmount is required/);
+
+    // Without the optional fields Stripe gets neither.
+    await createDirectCheckout({ ...input, cancelPath: undefined, customerEmail: undefined });
+    assert.equal("cancel_url" in (receivedParams ?? {}), false);
+    assert.equal("customer_email" in (receivedParams ?? {}), false);
+  });
+
+  it("keeps the cancel URL on the trusted origin and never repeats a refused email address", async () => {
+    const base = {
+      booking: booking(),
+      applicationFeeAmount: 800,
+      returnOrigin: "https://experience.example.test",
+      returnPath: "/booking/return",
+      stripe: {} as PaymentsStripeClient,
+      now: NOW,
+    };
+    for (const cancelPath of ["//attacker.example/x", "https://attacker.example/x", "experiences/sample", "/\\attacker.example", "/experiences/sample#top"]) {
+      await assert.rejects(createDirectCheckout({ ...base, cancelPath }), /cancelPath must/, cancelPath);
+    }
+    for (const customerEmail of ["not-an-address", "secret@example", "two words@example.com", "secret@example.com\n", "x".repeat(250) + "@example.com"]) {
+      const error = await createDirectCheckout({ ...base, customerEmail }).then(() => null, (caught: unknown) => caught);
+      assert.ok(error instanceof ExperiencePaymentsValidationError);
+      assert.doesNotMatch(error.message, /secret|example|words/);
+    }
+  });
+
   it("rejects holds that cannot satisfy Stripe's minimum expiry plus the safety margin", async () => {
     await assert.rejects(
       createDirectCheckout({
@@ -145,7 +223,7 @@ describe("createDirectCheckout", () => {
         stripe: {} as PaymentsStripeClient,
         now: NOW,
       }),
-      ExperiencePaymentsValidationError,
+      ExperiencePaymentsHoldTooShortError,
     );
   });
 
@@ -221,6 +299,33 @@ function signedPayload(event: Record<string, unknown>): {
   });
   return { rawBody: Buffer.from(payload), stripeSignature, endpointSecret, stripe };
 }
+
+describe("retrieveDirectCheckout", () => {
+  function stripeWith(session: Record<string, unknown>, calls: unknown[][] = []): PaymentsStripeClient {
+    return {
+      checkout: { sessions: { retrieve: async (...args: unknown[]) => { calls.push(args); return session; } } },
+    } as unknown as PaymentsStripeClient;
+  }
+  const mine = { id: "cs_test_synthetic", metadata: { source: "niho-experience", booking_id: BOOKING_ID } };
+
+  it("reads the booking's Session on the seller's account: open with its URL, paid, or over", async () => {
+    const calls: unknown[][] = [];
+    const open = await retrieveDirectCheckout({
+      booking: booking(), checkoutSessionId: "cs_test_synthetic",
+      stripe: stripeWith({ ...mine, status: "open", url: "https://checkout.stripe.com/c/pay/synthetic" }, calls),
+    });
+    assert.deepEqual(open, { status: "open", checkoutUrl: "https://checkout.stripe.com/c/pay/synthetic" });
+    assert.deepEqual(calls, [["cs_test_synthetic", undefined, { stripeAccount: booking().sellerSnapshot.stripeConnectAccountRef }]]);
+    assert.deepEqual(await retrieveDirectCheckout({ booking: booking(), checkoutSessionId: "cs_test_synthetic", stripe: stripeWith({ ...mine, status: "complete", url: null }) }), { status: "complete" });
+    assert.deepEqual(await retrieveDirectCheckout({ booking: booking(), checkoutSessionId: "cs_test_synthetic", stripe: stripeWith({ ...mine, status: "expired", url: null }) }), { status: "expired" });
+  });
+
+  it("refuses a malformed id and a Session of another booking", async () => {
+    await assert.rejects(() => retrieveDirectCheckout({ booking: booking(), checkoutSessionId: "pi_synthetic", stripe: stripeWith(mine) }), ExperiencePaymentsValidationError);
+    const other = { ...mine, status: "open", url: "https://checkout.stripe.com/c/pay/other", metadata: { booking_id: "00000000-0000-4000-8000-000000000000" } };
+    await assert.rejects(() => retrieveDirectCheckout({ booking: booking(), checkoutSessionId: "cs_test_synthetic", stripe: stripeWith(other) }), ExperiencePaymentsValidationError);
+  });
+});
 
 describe("verifyDirectCheckoutWebhook", () => {
   it("verifies raw bytes and returns only the payment ledger fields", () => {

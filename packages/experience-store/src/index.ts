@@ -44,7 +44,7 @@ export type {
   GuestQuestionTopic,
   SubmitGuestQuestionInput,
 } from "./guest-questions.ts";
-export { GUEST_BOOKING_LIMITS, GuestBookingRepository } from "./guest-bookings.ts";
+export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS } from "./guest-bookings.ts";
 export type {
   BookingQuestion,
   BookingQuestionInputType,
@@ -54,6 +54,7 @@ export type {
   GuestBookingUtm,
   ProductSaleTerms,
   ProductSaleTermsInput,
+  ProviderSaleSettings,
   PublicAvailability,
   PublicBookingOffer,
   PublicBookingTerms,
@@ -173,6 +174,7 @@ export type {
   InventoryResourceRecord,
   JsonValue,
   MembershipRole,
+  PlatformFeeSnapshot,
   PricingBreakdown,
   PricingSnapshot,
   ProductInput,

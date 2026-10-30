@@ -1,12 +1,11 @@
 import "server-only";
-import { config } from "@/lib/config";
-import { readBoundedJson } from "@/lib/host/bounded-json";
+import { publicEmpty, publicJson, readPublicJsonObject, retryAfterHeader } from "@/lib/experience/public-http";
 
 /*
  * The public routes of 予約前の質問 (#105, docs/guest-questions.md): "Ask the host" and the guest's reply
  * page post here. They carry names, addresses, what the guest wrote and one-time link tokens, so none of
- * it is logged, cached or put in a URL. The answers use the AskHost contract's closed error body
- * (packages/api-client/src/journey.ts).
+ * it is logged, cached or put in a URL (the shared headers and same-site check: public-http.ts). The
+ * answers use the AskHost contract's closed error body (packages/api-client/src/journey.ts).
  */
 
 /** Every body these routes take fits in this many bytes. */
@@ -32,47 +31,24 @@ const MESSAGES: Record<GuestQuestionErrorCode, string> = {
   SEND_FAILED: "The message could not be saved. Please try again.",
 };
 
-const HEADERS = {
-  "cache-control": "no-store",
-  "referrer-policy": "no-referrer",
-  "x-content-type-options": "nosniff",
-  "x-robots-tag": "noindex, nofollow",
-} as const;
-
 /** A status with no body (404, 403). */
-export function guestQuestionEmpty(status: number): Response {
-  return new Response(null, { status, headers: HEADERS });
-}
+export const guestQuestionEmpty = publicEmpty;
 
-export function guestQuestionJson(status: number, body: unknown, headers: Record<string, string> = {}): Response {
-  return Response.json(body, { status, headers: { ...HEADERS, ...headers } });
-}
+export const guestQuestionJson = publicJson;
 
 /** The closed `{ error }` body. `status` overrides the code's own (413 for a body that is too large). */
 export function guestQuestionError(code: GuestQuestionErrorCode, { field = null, retryAfterSeconds, status }: { field?: string | null; retryAfterSeconds?: number; status?: number } = {}): Response {
   const error = { code, message: MESSAGES[code], retryable: code === "RATE_LIMITED" || code === "SEND_FAILED", field };
-  return guestQuestionJson(status ?? STATUS[code], { error }, retryAfterSeconds ? { "retry-after": String(Math.max(1, Math.ceil(retryAfterSeconds))) } : {});
-}
-
-/**
- * Only this site's own pages post here: the browser's Origin must be the site's, and Sec-Fetch-Site,
- * where the browser sends it, must say same-origin. The pages send their POSTs with
- * `referrerPolicy: "same-origin"`, since the site's `no-referrer` would make the Origin `null`.
- */
-export function fromThisSite(request: Request): boolean {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  return request.headers.get("origin") === new URL(config.siteUrl).origin && (fetchSite === null || fetchSite === "same-origin");
+  return publicJson(status ?? STATUS[code], { error }, retryAfterHeader(retryAfterSeconds));
 }
 
 export type GuestQuestionBody = { ok: true; value: Record<string, unknown> } | { ok: false; response: Response };
 
 /** The JSON object the page sent, at most GUEST_QUESTION_BODY_LIMIT bytes. */
 export async function readGuestQuestionBody(request: Request): Promise<GuestQuestionBody> {
-  const body = await readBoundedJson(request, GUEST_QUESTION_BODY_LIMIT);
-  if (!body.ok) return { ok: false, response: guestQuestionError("VALIDATION_ERROR", body.reason === "too_large" ? { status: 413 } : {}) };
-  const value = body.value;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, response: guestQuestionError("VALIDATION_ERROR") };
-  return { ok: true, value: value as Record<string, unknown> };
+  const body = await readPublicJsonObject(request, GUEST_QUESTION_BODY_LIMIT);
+  if (!body.ok) return { ok: false, response: guestQuestionError("VALIDATION_ERROR", body.tooLarge ? { status: 413 } : {}) };
+  return body;
 }
 
 /** The reply link's token as the page read it from the URL fragment; anything else is no link at all. */

@@ -2,7 +2,8 @@ import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "@n
 import { REPLY_PAGE_MESSAGE_MAX_LENGTH } from "@/lib/guest-reply";
 import { config } from "@/lib/config";
 import { guestQuestionRepository } from "@/lib/experience/store-server";
-import { clientRequestKey, fromThisSite, guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody, replyToken } from "@/lib/experience/guest-questions-http";
+import { fromThisSite } from "@/lib/experience/public-http";
+import { clientRequestKey, guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody, replyToken } from "@/lib/experience/guest-questions-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

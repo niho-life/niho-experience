@@ -1,6 +1,7 @@
 import { config } from "@/lib/config";
 import { guestQuestionRepository } from "@/lib/experience/store-server";
-import { fromThisSite, guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody, replyToken } from "@/lib/experience/guest-questions-http";
+import { fromThisSite } from "@/lib/experience/public-http";
+import { guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody, replyToken } from "@/lib/experience/guest-questions-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

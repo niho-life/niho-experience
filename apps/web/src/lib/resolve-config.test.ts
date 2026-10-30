@@ -233,6 +233,40 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "true", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
   });
 
+  it("sells on this site only in http mode with its own flag, and refuses to start without what a sale needs (#285)", () => {
+    const sale = {
+      EXPERIENCE_API_MODE: "http",
+      SITE_URL: "https://experience.example",
+      EXPERIENCE_GUEST_BOOKING_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused",
+      EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_sample",
+      EXPERIENCE_STRIPE_WEBHOOK_SECRET: "whsec_sample",
+      EXPERIENCE_BOOKING_CONSENT_VERSION: "sample-terms-2026-10",
+    };
+    expect(resolveConfig({})).toMatchObject({ guestBookingEnabled: false, guestBookingConsentVersion: "" });
+    // The mock keeps NIHO's contract on the api-client mock, whatever is set; "1" is not "true".
+    expect(resolveConfig({ ...sale, EXPERIENCE_API_MODE: "mock" }).guestBookingEnabled).toBe(false);
+    expect(resolveConfig({ ...sale, EXPERIENCE_GUEST_BOOKING_ENABLED: "1" }).guestBookingEnabled).toBe(false);
+    expect(resolveConfig(sale)).toMatchObject({ guestBookingEnabled: true, guestBookingConsentVersion: "sample-terms-2026-10" });
+    expect(resolveConfig({ ...sale, EXPERIENCE_BOOKING_CONSENT_VERSION: "  sample-terms-2026-10 " }).guestBookingConsentVersion).toBe("sample-terms-2026-10");
+    expect(resolveConfig({ ...sale, SITE_URL: "http://localhost:3000" }).guestBookingEnabled).toBe(true);
+
+    for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET", "EXPERIENCE_BOOKING_CONSENT_VERSION"]) {
+      expect(() => resolveConfig({ ...sale, [name]: undefined })).toThrow(name);
+      expect(() => resolveConfig({ ...sale, [name]: " " })).toThrow(name);
+    }
+    for (const version of ["two words", "x".repeat(101), "terms\u0000"]) {
+      expect(() => resolveConfig({ ...sale, EXPERIENCE_BOOKING_CONSENT_VERSION: version })).toThrow(/EXPERIENCE_BOOKING_CONSENT_VERSION/);
+    }
+    expect(() => resolveConfig({ ...sale, SITE_URL: "http://experience.example" })).toThrow(/HTTPS/);
+    // A refused setting is named, never repeated.
+    try {
+      resolveConfig({ ...sale, EXPERIENCE_DATABASE_URL: undefined });
+    } catch (error) {
+      expect(String(error)).not.toMatch(/sk_test_sample|whsec_sample/);
+    }
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {
