@@ -25,6 +25,14 @@ const verified = {
   occurrenceId: "rule@2099-01-01", sourceStartAtUtc: "2099-01-01T01:00:00.000Z", sourceEndAtUtc: "2099-01-01T02:00:00.000Z",
   observedState: "OPEN", observedBookable: true, observedManuallyBlocked: false, observedAtUtc: "2099-01-01T01:00:30.000Z",
 };
+const googleVerified = {
+  ...verified,
+  target: { ...target, adapter: "airbnb-google-busy", connectionMode: "GOOGLE" },
+  observedManuallyBlocked: undefined,
+  googleAirbnbProof: {
+    deliveryId: "00000000-0000-4000-8000-000000000020", evidence: "EXACT_SLOT_V1", partySize: 1,
+  },
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -82,6 +90,40 @@ describe("POST /internal/ota/v1/jobs/:id/result", () => {
       method: "POST", body: JSON.stringify({ ...reservation, observedState: "OPEN" }), headers: { "content-type": "application/json" },
     }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
     expect(mixed.status).toBe(400);
+    expect(mocks.submitResult).not.toHaveBeenCalled();
+  });
+
+  it("passes the exact typed Google/Airbnb proof without exposing metadata in the ACK", async () => {
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify(googleVerified), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ acceptedAsCurrent: true, repeated: false });
+    expect(mocks.submitResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), expect.objectContaining({
+      googleAirbnbProof: googleVerified.googleAirbnbProof,
+    }));
+  });
+
+  it.each([
+    { deliveryId: "not-a-uuid", evidence: "EXACT_SLOT_V1", partySize: 1 },
+    { evidence: "OTHER", partySize: 1 },
+    { evidence: "EXACT_SLOT_V1", partySize: 2 },
+    { evidence: "EXACT_SLOT_V1", partySize: 1, extra: true },
+  ])("rejects malformed typed proof %# before the store", async (proof) => {
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify({ ...googleVerified, googleAirbnbProof: { deliveryId: googleVerified.googleAirbnbProof.deliveryId, ...proof } }),
+      headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(400);
+    expect(mocks.submitResult).not.toHaveBeenCalled();
+  });
+
+  it("rejects mixed manual-blocked and typed proof shapes", async () => {
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify({ ...googleVerified, observedManuallyBlocked: false }),
+      headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(400);
     expect(mocks.submitResult).not.toHaveBeenCalled();
   });
 });

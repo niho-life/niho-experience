@@ -48,6 +48,7 @@ export type {
   ChannelTarget,
   ClaimedChannelJob,
   GoogleChannelDeliveryContext,
+  GoogleAirbnbProof,
   ExternalAccountDto,
   ExternalAccountInput,
   ExternalAccountUpdate,

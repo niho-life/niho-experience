@@ -54,6 +54,10 @@ HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node
 
 OTA worker caller も `googleDeliveryEnabled` が既定falseである。ON時だけ固定originの内部配送APIへ `dispatch` または `reconcile` を1回送り、Googleへ直接接続せず、browser・Claude・任意adapterへfallbackしない。callerのdeadlineはjob期限内かつ最大60秒で、送信開始後に確定DTOを受け取れない場合は再送せず `UNKNOWN_AFTER_SAVE` として隔離する。`GOOGLE_VERIFIED` はGoogle予定だけの確認であり、Airbnb observerが未接続のため worker結果は `NEEDS_REVIEW` / `AIRBNB_OBSERVATION_REQUIRED` のままとする。
 
+serverのtyped result受付は `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=true` に加え、HTTP modeと既存delivery flagがONの場合だけ開く（既定false）。同じ現在job・worker・lease・assignmentで直前に `GOOGLE_VERIFIED` になった `DISPATCH` をUUIDで指定し、別系統のAirbnb観測が同じcanonical UTC枠を1名で予約可能／不可能と確認した場合だけ、`EXACT_SLOT_V1` receiptを既存result receiptへ保存できる。Google metadata、binding、connection generation、3 scopeのdigest、現OWNER、desired/live inventory、入力calendar非衝突、未解決delivery不在、Google検証時刻から観測時刻までを同一transactionで再確認する。calendar ID、scope、token、raw responseはworker入力やresult receiptへ保存しない。
+
+この受付は現在の `SET_OPEN` / `SET_CLOSED` leaseだけに限定し、過去lease、`RECONCILE`、`OBSERVE`、日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。後続lease用のGET-only proof refresh、Airbnb observer/caller、60分pending表示、UI、本番flag有効化は含まない。
+
 ## 未接続・未受入
 
 ### Issue #275 のsetup backend

@@ -46,9 +46,18 @@ function supportedChannelAdapters(): Readonly<Record<string, ChannelCapabilities
   }
 }
 
+export function googleAirbnbObservationEnabled(): boolean {
+  return config.apiMode === "http"
+    && process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED === "true"
+    && process.env.EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED === "true";
+}
+
 export function channelRuntime(): ChannelRuntime | null {
   const pool = experiencePool();
-  return pool ? new ChannelRuntime(pool, { supportedAdapters: supportedChannelAdapters() }) : null;
+  return pool ? new ChannelRuntime(pool, {
+    supportedAdapters: supportedChannelAdapters(),
+    googleAirbnbObservationEnabled: googleAirbnbObservationEnabled(),
+  }) : null;
 }
 
 export function guideRepository(): GuideRepository | null {

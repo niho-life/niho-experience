@@ -19,6 +19,7 @@ import { applyExternalReservationObservations } from "./external-reservation-led
 import { calendarMembershipRole, listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertSeats, assertStoreIdentifier } from "./validation.ts";
 import { currentChannelOccurrence } from "./channel-occurrence.ts";
+import { verifyGoogleAirbnbReceipt } from "./google-airbnb-receipt.ts";
 
 import { CHANNEL_SITES } from "./channel-sites.ts";
 export { CHANNEL_SITES } from "./channel-sites.ts";
@@ -196,8 +197,15 @@ export interface ChannelResultInput {
   readonly observedBookable?: boolean;
   readonly observedManuallyBlocked?: boolean;
   readonly observedAtUtc?: string;
+  readonly googleAirbnbProof?: GoogleAirbnbProof;
   readonly reservationReadId?: string;
   readonly reservationReceiptId?: string;
+}
+
+export interface GoogleAirbnbProof {
+  readonly deliveryId: string;
+  readonly evidence: "EXACT_SLOT_V1";
+  readonly partySize: 1;
 }
 
 export type ExternalReservationStatus = "PENDING" | "CONFIRMED" | "CANCELLED";
@@ -316,6 +324,8 @@ export interface ChannelRuntimeOptions {
   readonly now?: () => Date;
   /** Adapter keys explicitly accepted by deployment, e.g. `Airbnb/browser-v1@1`. Empty means all capabilities stay false. */
   readonly supportedAdapters?: Readonly<Record<string, ChannelCapabilities>>;
+  /** Accept the independently observed Airbnb receipt paired to a fresh Google DISPATCH. Default OFF. */
+  readonly googleAirbnbObservationEnabled?: boolean;
 }
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -555,11 +565,13 @@ export class ChannelRuntime {
   readonly #pool: Pool;
   readonly #now: () => Date;
   readonly #supportedAdapters: Readonly<Record<string, ChannelCapabilities>>;
+  readonly #googleAirbnbObservationEnabled: boolean;
 
   constructor(pool: Pool, options: ChannelRuntimeOptions = {}) {
     this.#pool = pool;
     this.#now = options.now ?? (() => new Date());
     this.#supportedAdapters = options.supportedAdapters ?? {};
+    this.#googleAirbnbObservationEnabled = options.googleAirbnbObservationEnabled ?? false;
   }
 
   #nowIso(): string { return this.#now().toISOString(); }
@@ -2128,16 +2140,33 @@ export class ChannelRuntime {
     if (input.sourceStartAtUtc) assertCanonicalInstant(input.sourceStartAtUtc, "result.sourceStartAtUtc");
     if (input.sourceEndAtUtc) assertCanonicalInstant(input.sourceEndAtUtc, "result.sourceEndAtUtc");
     if (input.observedState !== undefined && input.observedState !== "OPEN" && input.observedState !== "CLOSED") throw new StoreValidationError("result.observedState is invalid.");
+    if (input.googleAirbnbProof !== undefined) {
+      if (!input.googleAirbnbProof || typeof input.googleAirbnbProof !== "object" || Array.isArray(input.googleAirbnbProof)
+        || Object.keys(input.googleAirbnbProof).length !== 3
+        || !Object.hasOwn(input.googleAirbnbProof, "deliveryId")
+        || !Object.hasOwn(input.googleAirbnbProof, "evidence")
+        || !Object.hasOwn(input.googleAirbnbProof, "partySize")) {
+        throw new StoreValidationError("result.googleAirbnbProof must contain exactly three fields.");
+      }
+      assertUuid(input.googleAirbnbProof.deliveryId, "result.googleAirbnbProof.deliveryId");
+      if (input.googleAirbnbProof.evidence !== "EXACT_SLOT_V1" || input.googleAirbnbProof.partySize !== 1) {
+        throw new StoreValidationError("result.googleAirbnbProof is invalid.");
+      }
+    }
     const reservationShape = input.outcome === "RESERVATION_VERIFIED"
       && input.reservationReadId !== undefined && input.reservationReceiptId !== undefined
       && input.occurrenceId === undefined && input.sourceStartAtUtc === undefined && input.sourceEndAtUtc === undefined
       && input.observedState === undefined && input.observedBookable === undefined
-      && input.observedManuallyBlocked === undefined && input.observedAtUtc === undefined;
+      && input.observedManuallyBlocked === undefined && input.observedAtUtc === undefined
+      && input.googleAirbnbProof === undefined;
     if (input.outcome === "RESERVATION_VERIFIED" && !reservationShape) {
       throw new StoreValidationError("RESERVATION_VERIFIED requires only the terminal reservation read receipt.");
     }
     if (input.outcome !== "RESERVATION_VERIFIED" && (input.reservationReadId !== undefined || input.reservationReceiptId !== undefined)) {
       throw new StoreValidationError("Reservation receipt fields require RESERVATION_VERIFIED.");
+    }
+    if (input.outcome !== "VERIFIED" && input.googleAirbnbProof !== undefined) {
+      throw new StoreValidationError("Google Airbnb proof requires VERIFIED.");
     }
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
@@ -2156,6 +2185,7 @@ export class ChannelRuntime {
           outcome: input.outcome, stopped: input.stopped, target: input.target, occurrenceId: input.occurrenceId,
           sourceStartAtUtc: input.sourceStartAtUtc, sourceEndAtUtc: input.sourceEndAtUtc, observedState: input.observedState,
           observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc,
+          googleAirbnbProof: input.googleAirbnbProof,
           reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId });
         if (repeated.rows[0].fingerprint !== resultFingerprint) throw new StoreConflictError("Result ID was already used with different input.");
         return { acceptedAsCurrent: repeated.rows[0].accepted_as_current === true, repeated: true };
@@ -2165,8 +2195,20 @@ export class ChannelRuntime {
       if (!job || job.status !== "LEASED" || job.leased_worker_id !== identity.workerId || typeof job.lease_digest !== "string"
         || !secureDigestMatch(job.lease_digest, input.leaseToken)) throw new StoreAccessDeniedError();
       const reservationJob = job.purpose === "RESERVATION_WINDOW";
-      if (!reservationJob && job.target_connection_mode === "GOOGLE" && input.outcome === "VERIFIED") {
+      if (!reservationJob && job.target_connection_mode === "GOOGLE" && input.outcome === "VERIFIED"
+        && input.googleAirbnbProof === undefined) {
         throw new StoreValidationError("GOOGLE jobs require independent Google delivery and Airbnb observation receipts.");
+      }
+      if (input.googleAirbnbProof !== undefined && (!this.#googleAirbnbObservationEnabled || reservationJob
+        || job.purpose !== "AVAILABILITY" || job.target_site !== "Airbnb" || job.target_connection_mode !== "GOOGLE"
+        || job.target_adapter !== "airbnb-google-busy" || job.target_adapter_version !== "1"
+        || (job.action !== "SET_OPEN" && job.action !== "SET_CLOSED"))) {
+        throw new StoreValidationError("Google Airbnb observation is not enabled for this job.");
+      }
+      if (input.googleAirbnbProof !== undefined
+        && (input.observedState !== (job.action === "SET_OPEN" ? "OPEN" : "CLOSED")
+          || input.observedBookable !== (job.action === "SET_OPEN"))) {
+        throw new StoreValidationError("Google Airbnb observation does not match the exact desired slot state.");
       }
       if ((reservationJob && input.outcome === "VERIFIED") || (!reservationJob && input.outcome === "RESERVATION_VERIFIED")) {
         throw new StoreValidationError("Result outcome does not match the job purpose.");
@@ -2182,13 +2224,16 @@ export class ChannelRuntime {
         outcome: input.outcome, stopped: input.stopped, target: input.target, occurrenceId: input.occurrenceId,
         sourceStartAtUtc: input.sourceStartAtUtc, sourceEndAtUtc: input.sourceEndAtUtc, observedState: input.observedState,
         observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc,
+        googleAirbnbProof: input.googleAirbnbProof,
         reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId });
       const exactTarget = targetEqual(targetFromRow(job), input.target);
       const occurrenceMatchesSnapshot = input.occurrenceId === job.occurrence_id
         && input.sourceStartAtUtc === isoValue(job, "source_start_at") && input.sourceEndAtUtc === isoValue(job, "source_end_at");
+      const browserVerifiedShape = input.googleAirbnbProof === undefined && input.observedManuallyBlocked !== undefined;
+      const googleAirbnbVerifiedShape = input.googleAirbnbProof !== undefined && input.observedManuallyBlocked === undefined;
       const verifiedShape = input.outcome === "VERIFIED" && exactTarget && occurrenceMatchesSnapshot
-        && input.observedState !== undefined && input.observedBookable !== undefined
-        && input.observedManuallyBlocked !== undefined && input.observedAtUtc !== undefined;
+        && input.observedState !== undefined && input.observedBookable !== undefined && input.observedAtUtc !== undefined
+        && (browserVerifiedShape || googleAirbnbVerifiedShape);
       if (input.outcome === "VERIFIED" && !verifiedShape) throw new StoreValidationError("VERIFIED requires exact target and structured readback observation.");
       const nowUtc = this.#nowIso();
       const withinLease = isoValue(job, "lease_expires_at") > nowUtc && isoValue(job, "job_deadline_at") > nowUtc;
@@ -2255,6 +2300,7 @@ export class ChannelRuntime {
         && current.adapter === job.target_adapter && current.adapter_version === job.target_adapter_version
         && current.connection_mode === job.target_connection_mode;
       let reservationReceiptCurrent = false;
+      let googleAirbnbVerifiedAtUtc: string | undefined;
       let reservationNextDueAt: string | undefined;
       let reservationCompletedAt: string | undefined;
       if (reservationJob && input.outcome === "RESERVATION_VERIFIED" && input.reservationReadId && input.reservationReceiptId) {
@@ -2290,9 +2336,29 @@ export class ChannelRuntime {
           reservationCompletedAt = isoValue(row, "last_complete_at");
         }
       }
+      if (input.googleAirbnbProof && input.observedAtUtc && (action === "SET_OPEN" || action === "SET_CLOSED")) {
+        if (!availabilityVersionsCurrent) throw new StoreConflictError("Google Airbnb observation authority changed.");
+        const receipt = await verifyGoogleAirbnbReceipt(client, {
+          deliveryId: input.googleAirbnbProof.deliveryId, jobId, providerId: text(job, "provider_id"),
+          accountId: text(job, "account_id"), listingId: text(job, "listing_id"), occurrenceId: text(job, "occurrence_id"),
+          workerId: identity.workerId, leaseEpoch, assignmentVersion: integer(job, "lease_assignment_version"),
+          accountVersion: integer(job, "account_version"), mappingVersion: integer(job, "mapping_version"),
+          desiredVersion: integer(job, "desired_version"), desiredState: action === "SET_OPEN" ? "OPEN" : "CLOSED", action,
+          sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),
+          leaseStartedAtUtc: isoValue(job, "lease_started_at"), observedAtUtc: input.observedAtUtc,
+        });
+        googleAirbnbVerifiedAtUtc = receipt.googleVerifiedAtUtc;
+      }
+      const googleAirbnbObservationMatches = input.googleAirbnbProof !== undefined
+        && input.observedState === (action === "SET_OPEN" ? "OPEN" : "CLOSED")
+        && input.observedBookable === (action === "SET_OPEN")
+        && googleAirbnbVerifiedAtUtc !== undefined;
       const acceptedAsCurrent = reservationJob
         ? input.outcome === "RESERVATION_VERIFIED" && input.stopped && withinLease && exactTarget
           && reservationVersionsCurrent && reservationReceiptCurrent
+        : input.googleAirbnbProof !== undefined
+          ? input.outcome === "VERIFIED" && input.stopped && withinLease && availabilityVersionsCurrent
+            && exactTarget && occurrenceMatchesSnapshot && observationTimeValid && googleAirbnbObservationMatches
         : channelReadbackAccepted({
         action, expectedTarget: targetFromRow(job), resultTarget: input.target,
         outcome: input.outcome, stopped: input.stopped, withinLease, versionsCurrent: availabilityVersionsCurrent,
@@ -2306,14 +2372,18 @@ export class ChannelRuntime {
         `INSERT INTO channel_job_results
           (result_id,job_id,worker_id,lease_epoch,lease_digest,fingerprint,outcome,stopped,exact_target_match,
            occurrence_id,source_start_at,source_end_at,observed_state,observed_bookable,observed_manually_blocked,observed_at,
-           accepted_as_current,reservation_read_id,reservation_receipt_id)
-         VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::uuid,$19::uuid)`,
+           accepted_as_current,reservation_read_id,reservation_receipt_id,
+           google_airbnb_delivery_id,google_airbnb_evidence,google_airbnb_party_size,google_airbnb_verified_at)
+         VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::uuid,$19::uuid,
+           $20::uuid,$21,$22,$23)`,
         [input.resultId, jobId, identity.workerId, leaseEpoch, leaseDigest, resultFingerprint, input.outcome, input.stopped, exactTarget,
           reservationShape ? null : input.occurrenceId ?? job.occurrence_id,
           reservationShape ? null : input.sourceStartAtUtc ?? job.source_start_at,
           reservationShape ? null : input.sourceEndAtUtc ?? job.source_end_at,
           input.observedState ?? null, input.observedBookable ?? null, input.observedManuallyBlocked ?? null, input.observedAtUtc ?? null,
-          acceptedAsCurrent, input.reservationReadId ?? null, input.reservationReceiptId ?? null],
+          acceptedAsCurrent, input.reservationReadId ?? null, input.reservationReceiptId ?? null,
+          input.googleAirbnbProof?.deliveryId ?? null, input.googleAirbnbProof?.evidence ?? null,
+          input.googleAirbnbProof?.partySize ?? null, googleAirbnbVerifiedAtUtc ?? null],
       );
       if (!withinLease) {
         await this.#quarantine(client, text(job, "account_id"), "LATE_RESULT");
