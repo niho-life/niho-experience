@@ -63,6 +63,7 @@ function GuestBubble({ message, guest }: { message: HostGuestMessage; guest: str
 /** The host's reply on the right: the Japanese they wrote, and the English the guest got behind 送った英語. */
 function ReplyBubble({ message, providerName }: { message: HostReplyMessage; providerName: string }) {
   const sent = message.status === "sent";
+  const failed = message.status === "failed";
   return (
     <li className="flex flex-col items-end">
       <div className={`${BUBBLE} rounded-tr-md bg-leaf-pale`}>
@@ -87,8 +88,8 @@ function ReplyBubble({ message, providerName }: { message: HostReplyMessage; pro
         )}
       </div>
       <p className={`${BUBBLE_META} justify-end`}>
-        <span className={`inline-flex items-center gap-0.5 font-bold ${sent ? "text-moss" : "text-danger"}`}>
-          <HostIcon name={sent ? "check" : "close"} className="size-3.5" />
+        <span className={`inline-flex items-center gap-0.5 font-bold ${sent ? "text-moss" : failed ? "text-danger" : "text-muted"}`}>
+          {sent || failed ? <HostIcon name={sent ? "check" : "close"} className="size-3.5" /> : null}
           {REPLY_STATUS[message.status]}
         </span>
         <MessageTime at={message.at} />
@@ -100,23 +101,41 @@ function ReplyBubble({ message, providerName }: { message: HostReplyMessage; pro
 export interface ReplyInput {
   japanese: string;
   english: string;
+  /** The browser's id for this reply: the same words sent again keep it, so a retry is the same reply. */
+  commandId: string;
 }
+
+/** What the screen did with a reply: null when it was sent, else why not (the reply stays as written). */
+export type SendReply = (reply: ReplyInput) => Promise<string | null>;
 
 /**
  * 送信欄: 日本語で書く → 英語にする → "{名前} さんに届く英語" (英語を作り直す / 英語を直す) →
  * この英語で送る. On phones it stays at the bottom of the screen. While NIHO makes the English,
- * or when it fails, the Japanese stays as written (ReplyDraftFields).
+ * or when it fails, the Japanese stays as written (ReplyDraftFields); so does a reply that could not be sent.
  */
-function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; providerId: string; onSend: (reply: ReplyInput) => void }) {
+function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; providerId: string; onSend: SendReply }) {
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const attempt = useRef<{ signature: string; commandId: string } | null>(null);
   const japaneseField = useRef<HTMLTextAreaElement>(null);
   const draft = useReplyDraft((japanese) => draftReplyEnglish({ providerId, threadId: thread.id, japanese }), { onChange: () => setSent(false) });
   const { canSend } = replyDraftState(draft);
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!canSend || draft.drafting) return;
-    onSend({ japanese: draft.japanese, english: draft.english });
+    if (!canSend || draft.drafting || sending) return;
+    const signature = JSON.stringify([draft.japanese, draft.english]);
+    if (attempt.current?.signature !== signature) attempt.current = { signature, commandId: crypto.randomUUID() };
+    setSending(true);
+    setProblem(null);
+    const failed = await onSend({ japanese: draft.japanese, english: draft.english, commandId: attempt.current.commandId });
+    setSending(false);
+    if (failed) {
+      setProblem(failed);
+      return;
+    }
+    attempt.current = null;
     draft.clear();
     setSent(true);
     // The button pressed waits for the next English: the next reply starts in the Japanese.
@@ -124,8 +143,13 @@ function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; pro
   };
 
   return (
-    <form onSubmit={submit} aria-label="返信" className="sticky bottom-0 z-10 mt-auto rounded-b-2xl border-t border-line bg-canvas px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-5">
-      <ReplyDraftFields draft={draft} japaneseRef={japaneseField} maxLength={MESSAGE_TEXT_LIMIT} englishLabel={`${thread.guest} さんに届く英語`} submitLabel="この英語で送る" canSubmit={canSend} />
+    <form onSubmit={(event) => void submit(event)} aria-label="返信" aria-busy={sending || undefined} className="sticky bottom-0 z-10 mt-auto rounded-b-2xl border-t border-line bg-canvas px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-5">
+      <ReplyDraftFields draft={draft} japaneseRef={japaneseField} maxLength={MESSAGE_TEXT_LIMIT} englishLabel={`${thread.guest} さんに届く英語`} submitLabel={sending ? "送っています…" : "この英語で送る"} canSubmit={canSend && !sending} />
+      {problem ? (
+        <p role="alert" className="mt-2 text-[0.78125rem] leading-normal font-extrabold text-danger">
+          {problem}
+        </p>
+      ) : null}
       <p className="mt-2 text-xs leading-normal text-muted">{thread.guest} さんにはメールで届きます</p>
       <p role="status" className={sent ? "mt-1 flex items-center gap-1 text-[0.78125rem] leading-normal font-extrabold text-moss" : "sr-only"}>
         {sent ? (
@@ -150,11 +174,13 @@ export interface HostMessageThreadProps {
   providerId: string;
   /** Who the host's replies are from, for screen readers. */
   providerName: string;
-  onSend: (reply: ReplyInput) => void;
+  onSend: SendReply;
+  /** A question opened from the list while its messages are read (or why they could not be). */
+  loading?: { failed: string | null } | null;
 }
 
 /** One thread: its title and experience (with the booking when there is one), the messages in time order, and the reply. */
-export function HostMessageThread({ thread, experienceTitle, headingId, linkProviderId, providerId, providerName, onSend }: HostMessageThreadProps) {
+export function HostMessageThread({ thread, experienceTitle, headingId, linkProviderId, providerId, providerName, onSend, loading = null }: HostMessageThreadProps) {
   return (
     <section aria-labelledby={headingId} className={`${HOST_SURFACE} flex flex-col`}>
       <div className="p-4 pb-3 md:px-5 md:pt-[18px]">
@@ -173,6 +199,11 @@ export function HostMessageThread({ thread, experienceTitle, headingId, linkProv
           ) : null}
         </div>
       </div>
+      {loading ? (
+        <p role={loading.failed ? "alert" : "status"} className={`px-4 pb-2 text-[0.8125rem] leading-normal md:px-5 ${loading.failed ? "font-extrabold text-danger" : "text-muted"}`}>
+          {loading.failed ?? "前のやりとりを読み込んでいます…"}
+        </p>
+      ) : null}
       {thread.messages.length ? (
         <ol aria-label="やりとり" className="flex flex-col gap-3.5 px-4 pt-1 pb-4 md:px-5">
           {thread.messages.map((message) => (message.from === "guest" ? <GuestBubble key={message.id} message={message} guest={thread.guest} /> : <ReplyBubble key={message.id} message={message} providerName={providerName} />))}

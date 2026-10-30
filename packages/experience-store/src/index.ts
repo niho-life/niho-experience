@@ -4,6 +4,7 @@ export {
   StoreConflictError,
   StoreError,
   StoreNotFoundError,
+  StoreRateLimitedError,
   StoreValidationError,
 } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
@@ -17,6 +18,20 @@ export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupa
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
+export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
+export type {
+  ClaimedGuestQuestionReply,
+  GuestQuestionDeliveryOutcome,
+  GuestQuestionDeliveryStatus,
+  GuestQuestionLanguage,
+  GuestQuestionMessage,
+  GuestQuestionReplyLink,
+  GuestQuestionThread,
+  GuestQuestionThreadPage,
+  GuestQuestionThreadSummary,
+  GuestQuestionTopic,
+  SubmitGuestQuestionInput,
+} from "./guest-questions.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";

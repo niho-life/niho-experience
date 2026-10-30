@@ -10,6 +10,7 @@ import { openStripe, stepNotice, syncStripe } from "./connect";
 import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
 import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
+import { openGuestQuestion, replyToGuestQuestion } from "./guest-questions-server";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
@@ -19,7 +20,7 @@ import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
 import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfileChange, RegisterProviderInput } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
-import type { HostNotificationItem, HostPageText } from "./types";
+import type { HostNotificationItem, HostPageText, HostThread } from "./types";
 
 /*
  * The host console's changes to NIHO (#88/#91), as server actions: each reads the session,
@@ -218,6 +219,32 @@ export async function draftReplyEnglish(input: { providerId: string; threadId: s
   if (!providerId || !threadId || !japanese?.trim()) return invalid;
   // TODO(#87): NIHO's translation for the thread (niho-app#19319/#19238) once the host contract has it.
   return draftEnglish(() => mockEnglishDraft(threadId, japanese));
+}
+
+const COMMAND_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type GuestQuestionOpened = { thread: HostThread };
+
+/** メッセージ (#106): a question to the host (experience DB) opened on the screen, read in full; it counts as read. */
+export async function openGuestQuestionThread(input: { providerId: string; threadId: string }): Promise<HostActionResult<GuestQuestionOpened>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const threadId = text(input?.threadId, LIMITS.threadId);
+  if (!providerId || !threadId) return invalid;
+  return openGuestQuestion(providerId, threadId);
+}
+
+/**
+ * メッセージ › この英語で送る for a question to the host (#106, experience DB): the English the guest gets
+ * by email, and the Japanese the host wrote. `commandId` is the browser's UUID for this reply, so
+ * sending it again after a lost answer is the same reply.
+ */
+export async function sendGuestQuestionReply(input: { providerId: string; threadId: string; japanese: string; english: string; commandId: string }): Promise<HostActionResult<GuestQuestionOpened>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const threadId = text(input?.threadId, LIMITS.threadId);
+  const japanese = text(input?.japanese, MESSAGE_TEXT_LIMIT);
+  const english = text(input?.english, MESSAGE_TEXT_LIMIT);
+  const commandId = typeof input?.commandId === "string" && COMMAND_ID.test(input.commandId) ? input.commandId : null;
+  if (!providerId || !threadId || japanese === null || !english?.trim() || !commandId) return invalid;
+  return replyToGuestQuestion(providerId, threadId, { japanese, english, commandId });
 }
 
 /**

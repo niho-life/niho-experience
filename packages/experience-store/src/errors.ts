@@ -33,6 +33,17 @@ export class StoreValidationError extends StoreError {
   }
 }
 
+/** Too many requests in a window; the caller may try again after `retryAfterSeconds`. */
+export class StoreRateLimitedError extends StoreError {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super("Too many requests were made in the current window.");
+    this.name = "StoreRateLimitedError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export class BookingUnavailableError extends StoreError {
   readonly reason: string;
   readonly availableSeats: number;

@@ -1,0 +1,147 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError, type GuestQuestionMessage, type GuestQuestionThread, type GuestQuestionThreadSummary, type HostActor } from "@niho-experience/experience-store";
+import type { HostProvider } from "@/lib/host/providers";
+
+/** メッセージ's questions against a stubbed experience store and NIHO provider list (#106). */
+const state = vi.hoisted(() => ({
+  store: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  session: null as null | { nihoUserId: string; idTokenExpiresAt: number },
+  providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
+}));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/experience/store-server", () => ({ guestQuestionRepository: () => state.store }));
+vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
+vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+
+import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
+import {
+  GUEST_QUESTION_LOAD_FAILED_TEXT,
+  GUEST_QUESTION_MISSING_TEXT,
+  GUEST_QUESTION_OWNER_ONLY_TEXT,
+  GUEST_QUESTION_REPLY_FAILED_TEXT,
+  hostThread,
+  loadGuestQuestions,
+  openGuestQuestion,
+  replyToGuestQuestion,
+} from "./guest-questions-server";
+
+const THREAD_ID = "00000000-0000-4000-8000-000000000106";
+const COMMAND_ID = "00000000-0000-4000-8000-0000000c0106";
+const OWNER = { id: "sample-provider", memberRole: "OWNER" } as HostProvider;
+const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
+
+const QUESTION: GuestQuestionMessage = { id: "m-1", author: "GUEST", source: "SITE_FORM", body: "Is there a vegetarian option?", bodyJa: null, createdAtUtc: "2026-10-31T01:02:03.000Z", deliveryStatus: null };
+const REPLY: GuestQuestionMessage = { id: "m-2", author: "HOST", source: "HOST_CONSOLE", body: "Yes, we can.", bodyJa: "はい、できます。", createdAtUtc: "2026-10-31T02:00:00.000Z", deliveryStatus: "PENDING" };
+const ANSWER: GuestQuestionMessage = { id: "m-3", author: "GUEST", source: "REPLY_PAGE", body: "Thank you!", bodyJa: null, createdAtUtc: "2026-10-31T15:30:00.000Z", deliveryStatus: null };
+const STORED: Omit<GuestQuestionThreadSummary, "lastMessage"> = {
+  id: THREAD_ID, productId: "tea", productTitle: "Synthetic tea", guestName: "Sample Guest", topic: "FOOD", language: "EN",
+  needsReply: true, read: false, lastMessageAtUtc: ANSWER.createdAtUtc, createdAtUtc: QUESTION.createdAtUtc,
+};
+const SUMMARY: GuestQuestionThreadSummary = { ...STORED, lastMessage: ANSWER };
+const THREAD: GuestQuestionThread = { ...STORED, messages: [QUESTION, REPLY, ANSWER] };
+
+beforeEach(() => {
+  state.store = {
+    listThreads: vi.fn(async () => ({ threads: [SUMMARY], nextCursor: null })),
+    markThreadRead: vi.fn(async () => undefined),
+    getThread: vi.fn(async () => THREAD),
+    reply: vi.fn(async () => REPLY),
+  };
+  state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+  state.providers = { status: "ok", providers: [OWNER, { id: "sample-other", memberRole: "EDITOR" }] };
+});
+
+describe("hostThread", () => {
+  it("shows the guest's words untranslated, the host's English and Japanese, and each reply's email, dated in Japan", () => {
+    expect(hostThread(STORED, THREAD.messages)).toEqual({
+      id: THREAD_ID,
+      experienceId: "tea",
+      guest: "Sample Guest",
+      topic: "食べもの",
+      booking: null,
+      messages: [
+        { id: "m-1", from: "guest", at: "2026-10-31T10:02", original: "Is there a vegetarian option?", language: "en", translation: null, viaEmail: false },
+        { id: "m-2", from: "host", at: "2026-10-31T11:00", japanese: "はい、できます。", english: "Yes, we can.", status: "pending" },
+        { id: "m-3", from: "guest", at: "2026-11-01T00:30", original: "Thank you!", language: "en", translation: null, viaEmail: true },
+      ],
+    });
+  });
+
+  it("names no topic for Other and reads every delivery state", () => {
+    expect(hostThread({ ...STORED, topic: "OTHER", language: "JA" }, []).topic).toBeNull();
+    const statuses = (["PENDING", "SENDING", "SENT", "FAILED"] as const).map((deliveryStatus) => hostThread(STORED, [{ ...REPLY, bodyJa: null, deliveryStatus }]).messages[0]);
+    expect(statuses).toEqual(["pending", "pending", "sent", "failed"].map((status) => expect.objectContaining({ from: "host", japanese: "", status })));
+    expect(hostThread({ ...STORED, language: "JA" }, [QUESTION]).messages[0]).toMatchObject({ language: "ja" });
+  });
+});
+
+describe("loadGuestQuestions", () => {
+  it("lists the OWNER's questions with their last message, and opens the one asked for in full (read)", async () => {
+    const list = await loadGuestQuestions(OWNER, "sample-niho-user", null);
+    expect(list).toMatchObject({ status: "live", loaded: [], requestedMissing: false, experiences: [{ id: "tea", title: "Synthetic tea" }] });
+    expect(list.status === "live" && list.threads[0]?.messages.map((message) => message.id)).toEqual(["m-3"]);
+    expect(state.store?.listThreads).toHaveBeenCalledWith(ACTOR, { limit: 50 });
+    expect(state.store?.markThreadRead).not.toHaveBeenCalled();
+
+    const opened = await loadGuestQuestions(OWNER, "sample-niho-user", THREAD_ID);
+    expect(opened).toMatchObject({ status: "live", loaded: [THREAD_ID], requestedMissing: false });
+    expect(opened.status === "live" && opened.threads[0]?.messages).toHaveLength(3);
+    expect(state.store?.markThreadRead).toHaveBeenCalledWith(ACTOR, THREAD_ID);
+    expect(JSON.stringify(opened)).not.toMatch(/@/);
+  });
+
+  it("marks a thread that is not the provider's as missing", async () => {
+    state.store!.markThreadRead!.mockRejectedValueOnce(new StoreNotFoundError("guest question"));
+    expect(await loadGuestQuestions(OWNER, "sample-niho-user", THREAD_ID)).toMatchObject({ status: "live", requestedMissing: true, loaded: [] });
+  });
+
+  it("keeps today's screen while closed, for anyone but the owner, and while the experience DB has no OWNER for them", async () => {
+    expect(await loadGuestQuestions({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user", null)).toEqual({ status: "closed" });
+    state.store!.listThreads!.mockRejectedValueOnce(new StoreAccessDeniedError());
+    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
+    state.store = null;
+    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
+  });
+
+  it("says the questions could not be read when the DB fails", async () => {
+    state.store!.listThreads!.mockRejectedValueOnce(new Error("synthetic outage"));
+    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "error" });
+  });
+});
+
+describe("openGuestQuestion and replyToGuestQuestion", () => {
+  it("open a thread in full and send a reply as the OWNER, answering the thread as it is now", async () => {
+    expect(await openGuestQuestion("sample-provider", THREAD_ID)).toMatchObject({ ok: true, thread: { id: THREAD_ID } });
+    expect(state.store?.markThreadRead).toHaveBeenCalledWith(ACTOR, THREAD_ID);
+    const sent = await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "はい、できます。", english: "Yes, we can.", commandId: COMMAND_ID });
+    expect(sent).toMatchObject({ ok: true, message: "送りました", thread: { id: THREAD_ID } });
+    expect(state.store?.reply).toHaveBeenCalledWith(ACTOR, THREAD_ID, { english: "Yes, we can.", japanese: "はい、できます。", commandId: COMMAND_ID });
+    await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "  ", english: "See you.", commandId: COMMAND_ID });
+    expect(state.store?.reply).toHaveBeenLastCalledWith(ACTOR, THREAD_ID, { english: "See you.", japanese: null, commandId: COMMAND_ID });
+  });
+
+  it("do nothing unless the session is usable and NIHO says this account is the OWNER", async () => {
+    state.session = null;
+    expect(await openGuestQuestion("sample-provider", THREAD_ID)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
+    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    for (const providerId of ["sample-other", "sample-unknown"]) {
+      expect(await replyToGuestQuestion(providerId, THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT });
+    }
+    expect(state.store?.reply).not.toHaveBeenCalled();
+    state.providers = { status: "error" };
+    expect(await openGuestQuestion("sample-provider", THREAD_ID)).toEqual({ ok: false, message: GUEST_QUESTION_LOAD_FAILED_TEXT });
+    state.store = null;
+    expect(await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_REPLY_FAILED_TEXT });
+  });
+
+  it("tell the host what the store refused", async () => {
+    state.store!.reply!.mockRejectedValueOnce(new StoreAccessDeniedError());
+    expect(await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT });
+    state.store!.reply!.mockRejectedValueOnce(new StoreNotFoundError("guest question"));
+    expect(await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_MISSING_TEXT });
+    state.store!.reply!.mockRejectedValueOnce(new StoreConflictError("synthetic"));
+    expect(await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_REPLY_FAILED_TEXT });
+    state.store!.getThread!.mockRejectedValueOnce(new StoreValidationError("synthetic"));
+    expect(await openGuestQuestion("sample-provider", "not-a-uuid")).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+  });
+});

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExperienceCheckoutRequest } from "@niho-experience/api-client";
-import { getBrowserApi } from "./browser-api";
+import { getBrowserApi, getSiteQuestionsApi } from "./browser-api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,5 +24,19 @@ describe("HTTP guest checkout boundary", () => {
     expect(init.cache).toBe("no-store");
     expect(init.referrerPolicy).toBe("no-referrer");
     expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+});
+
+describe("questions to the host (#105)", () => {
+  it("post to this site's own route with a same-origin referrer policy, so the route sees this site's Origin", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ accepted: true }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = { topic: "FOOD" as const, message: "Is there a vegetarian option?", guestName: "Sample Guest", guestEmail: "guest@example.com", clientRequestKey: "key-12345678" };
+    expect(await getSiteQuestionsApi("https://experience.example").askHost("sample-tea", request)).toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://experience.example/api/public/experiences/sample-tea/questions");
+    expect(init.referrerPolicy).toBe("same-origin");
+    expect(init.credentials).toBe("omit");
+    expect(JSON.parse(init.body as string)).toEqual(request);
   });
 });

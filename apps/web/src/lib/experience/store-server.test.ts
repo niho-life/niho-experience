@@ -11,3 +11,9 @@ it("never gives a mock NIHO identity access to the operator database", async () 
   const { productOperatorRepository } = await import("./store-server");
   expect(productOperatorRepository()).toBeNull();
 });
+
+it("keeps guest questions closed in the preview even with a database URL", async () => {
+  vi.stubEnv("EXPERIENCE_DATABASE_URL", "postgresql://synthetic:unused@127.0.0.1/unused");
+  const { guestQuestionRepository } = await import("./store-server");
+  expect(guestQuestionRepository()).toBeNull();
+});

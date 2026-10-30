@@ -131,7 +131,7 @@ export const ASK_HOST_INPUT_LIMITS = {
   clientRequestKeyMaxLength: 120,
 } as const;
 
-/** `POST /api/public/experiences/{slug}/questions` の要求。旅行者のブラウザから NIHO へ直接送る。 */
+/** `POST /api/public/experiences/{slug}/questions` の要求。旅行者のブラウザからこのサイトへ送り、experience DB に置く（docs/guest-questions.md）。プレビューは mock が答える。 */
 export type AskHostRequest = {
   topic: AskHostTopic;
   message: string;

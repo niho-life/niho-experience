@@ -184,4 +184,26 @@ describe("database invariants", () => {
     assert.match(table, /REFERENCES experience_providers\(id\)/);
     assert.doesNotMatch(table, /email|address|display_name|body\b|NEW_BOOKING|CANCELLATION/i);
   });
+
+  it("keeps guest questions per provider, reply links only as hashes, and no IP addresses (#105 #106)", async () => {
+    const sql = await readFile(new URL("../migrations/0021_guest_questions.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.doesNotMatch(sql, /CREATE EXTENSION|\bip_address\b|\binet\b|user_agent/i);
+    const threads = sql.match(/CREATE TABLE guest_question_threads \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(threads, /FOREIGN KEY \(provider_id, product_id\) REFERENCES experience_products\(provider_id, id\)/);
+    assert.match(threads, /topic IN \('CHILDREN', 'FOOD', 'ACCESS', 'LANGUAGE', 'OTHER'\)/);
+    assert.match(threads, /guest_email_key = lower\(guest_email\)/);
+    assert.match(threads, /UNIQUE \(provider_id, product_id, client_request_key\)/);
+    const messages = sql.match(/CREATE TABLE guest_question_messages \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(messages, /FOREIGN KEY \(provider_id, thread_id\) REFERENCES guest_question_threads\(provider_id, id\)/);
+    assert.match(messages, /delivery_status IN \('PENDING', 'SENDING', 'SENT', 'FAILED'\)/);
+    assert.match(messages, /UNIQUE \(provider_id, command_id\)/);
+    assert.match(messages, /author = 'GUEST' AND length\(body\) <= 1000\) OR \(author = 'HOST' AND length\(body\) <= 4000/);
+    assert.doesNotMatch(messages, /email/i);
+    const tokens = sql.match(/CREATE TABLE guest_question_reply_tokens \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(tokens, /token_hash bytea PRIMARY KEY CHECK \(octet_length\(token_hash\) = 32\)/);
+    assert.doesNotMatch(tokens, /token_value|plain|secret|email/i);
+    assert.doesNotMatch(sql, /outbox_messages/);
+  });
 });

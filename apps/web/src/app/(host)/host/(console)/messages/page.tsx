@@ -7,6 +7,7 @@ import { HostSubHeader } from "@/components/host/HostSubHeader";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostMessages } from "@/host/data";
+import { GUEST_QUESTION_LOAD_FAILED_TEXT, loadGuestQuestions } from "@/host/guest-questions-server";
 import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
@@ -14,16 +15,21 @@ export const metadata: Metadata = { title: "メッセージ" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** HTTP rollout gate while the provider booking conversation contract is disabled. */
-function MessagesUnavailable({ homeHref }: { homeHref: string }) {
+const UNAVAILABLE = {
+  title: "この画面は準備中です",
+  body: "予約後のWeb返信と予約者への個別連絡は、NIHO との接続を有効にしたあと、ここから読み書きできます。予約前の質問はまだ利用できません。",
+};
+
+/** HTTP rollout gate while the provider booking conversation contract is disabled; also the questions' read failure. */
+function MessagesUnavailable({ homeHref, title = UNAVAILABLE.title, body = UNAVAILABLE.body }: { homeHref: string; title?: string; body?: string }) {
   return (
     <>
       <HostSubHeader backHref={homeHref} backLabel="ホーム" title="" />
       <HostPageBody>
         <PageHead title="メッセージ" />
         <section className={`${HOST_SURFACE} px-5 py-8 md:px-6 md:py-10`}>
-          <p className="font-extrabold">この画面は準備中です</p>
-          <p className="mt-1 text-ink-soft">予約後のWeb返信と予約者への個別連絡は、NIHO との接続を有効にしたあと、ここから読み書きできます。予約前の質問はまだ利用できません。</p>
+          <p className="font-extrabold">{title}</p>
+          <p className="mt-1 text-ink-soft">{body}</p>
         </section>
       </HostPageBody>
     </>
@@ -49,6 +55,26 @@ export default async function HostMessagesPage({ searchParams }: { searchParams:
   const booking = [query.booking].flat()[0] || null;
   const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
   if (providerOperationsEnabled()) return <><HostSubHeader backHref={homeHref} backLabel="ホーム" title="" /><HostLiveBookings key={`${provider.id}/messages`} providerId={provider.id} initialBookingId={booking} mode="messages" /></>;
+  // 予約前の質問 kept in the experience DB (#106): the OWNER's threads. Anyone else, or while closed, keeps the screen below.
+  const questions = await loadGuestQuestions(provider, context.session.nihoUserId, thread);
+  if (questions.status === "error") return <MessagesUnavailable homeHref={homeHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
+  if (questions.status === "live") {
+    if (questions.requestedMissing) notFound();
+    return (
+      <HostMessages
+        key={provider.id}
+        threads={questions.threads}
+        newThread={null}
+        experiences={questions.experiences}
+        today={questions.today}
+        now={questions.now}
+        linkProviderId={linkProviderId}
+        providerId={provider.id}
+        providerName={provider.displayName}
+        live={{ loaded: questions.loaded }}
+      />
+    );
+  }
   const { list, requested, experiences, today, now } = await loadHostMessages(provider, { thread, booking });
   if (list.status === "unavailable") return <MessagesUnavailable homeHref={homeHref} />;
   // Another provider's thread or booking, a booking that can no longer be written to, or none at all.
