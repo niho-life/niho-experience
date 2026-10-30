@@ -39,6 +39,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   let counterparts: Readonly<Record<string, string>> = {};
   try { counterparts = await getJapaneseStaticCounterparts(); } catch { /* no approved JA release: expose no link */ }
   const guides = await guideCatalogForSite();
+  const footerLinks = [
+    ...(hasGuidesPage(guides) ? [{ href: "/guides", label: "Guides" }] : []),
+    // Articles are written on editor.niho.life (#254); hidden until its origin is set.
+    ...(config.guideEditorSiteOrigin ? [{ href: config.guideEditorSiteOrigin, label: "For writers" }] : []),
+  ];
 
   return (
     <html lang="en">
@@ -49,7 +54,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SiteLocaleProvider locale="en">
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <AttributionCapture enabled={config.publicApiVersion === "1.2"} />
-          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={hasGuidesPage(guides) ? [{ href: "/guides", label: "Guides" }] : undefined}>
+          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={footerLinks.length ? footerLinks : undefined}>
             {children}
           </CodeSiteChrome>
         </SiteLocaleProvider>

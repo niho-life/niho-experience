@@ -1,8 +1,8 @@
 # ADR 0002：ガイド記事の原稿の置き場所
 
-- 状態：一部 superseded（2026-10-29 の CMS 公開読取移行。静的経路は既定値・mock preview用として維持）
+- 状態：superseded（2026-10-30 のオーナー判断で記事の正本は editor.niho.life。experience は発信先。下の「2026-10-30」を正とし、移行が終わるまで静的経路を既定値・mock preview 用に、database 経路を受入済みの切戻し先として残す）
 - 日付：2026-10-26
-- 関連：[#145 ガイド記事の仕組み](https://github.com/niho-life/niho-experience/issues/145)、[#59 日本語版](https://github.com/niho-life/niho-experience/issues/59)、[#139 index 化前の技術面](https://github.com/niho-life/niho-experience/issues/139)
+- 関連：[#145 ガイド記事の仕組み](https://github.com/niho-life/niho-experience/issues/145)、[#59 日本語版](https://github.com/niho-life/niho-experience/issues/59)、[#139 index 化前の技術面](https://github.com/niho-life/niho-experience/issues/139)、[#251 記事の正本を editor.niho.life へ](https://github.com/niho-life/niho-experience/issues/251)
 
 ## 背景
 
@@ -44,3 +44,33 @@
 - 静的なunlisted editorial preview（#147/#184）とmock draft previewはstatic modeに残す。database modeの公開集合には混ぜない。
 
 database modeの有効化条件・staging受入・切戻しは [Guide CMS](../guide-cms.md)、[実行環境](../experience-runtime.md)、[本番配備](../production-deploy.md) を正とする。
+
+## 2026-10-30：正本を editor.niho.life へ、experience は発信先（#251）
+
+オーナー判断（2026-10-30）。方針と設計の正本は niho-editor の `docs/architecture/editor-niho-life.md` と `docs/architecture/editor-niho-life-design.md`。上の「2026-10-29」で experience DB に置いた記事の正本と、experience の `/editor` は、この判断で役目を終える。
+
+### 決定
+
+- **記事の正本は editor.niho.life**：下書き・版・本文・写真と掲載許諾・公開前の検査・公開と公開停止の操作は editor が持つ。発信先は記事ごとに書き手が選び、experience に載るのは experience を発信先に選んだ英語の記事だけ。
+- **experience は発信先**：公開版を editor の公開 API から読み、`/guides`・`/guides/{slug}`・トップの Kamakura Journal・体験詳細の関連記事・sitemap・Article JSON-LD・canonical・hreflang を自分のドメインで SSR する。検索エンジンが評価するのは公開 URL なので、SEO の狙いは変えない。
+- **受け取るときに再確認する**：英語であること、Markdown の部分集合、https の許可 origin の写真、関連体験が今も掲載中で記事連携が有効であること。editor の表示や API の `related` を認可の根拠にしない。編集上の条件（リード・カバー・カテゴリなど）は experience が宣言し（`/api/public/guides/publication-requirements`）、editor の公開前の検査が使う。
+- **プレビューの見え方の正本は experience**：editor が発行する短命のトークンで下書きを読み、`/guides/preview` で通常の記事と同じ部品で `noindex`・`no-store` に描画する。
+- **編集画面は experience に置かない**：`/editor/*`（画面・API・下書き・写真の保管・公開前の検査）は #254 で撤去する。書き手の入口は公開サイトのフッター「For writers」と、ホストの画面の「記事を書く」で、どちらも editor.niho.life へのリンクだけを置く（`GUIDE_EDITOR_SITE_ORIGIN` を設定した環境だけ表示）。
+- **記事連携の正本は NIHO の役割の層**：招待・承諾・取消は NIHO 側へ移す（#255）。experience は公開版の関連体験を、現在の権限と掲載状態で表示のたびに再判定する。
+- **公開元は常に一つ**：`EXPERIENCE_GUIDE_PUBLIC_SOURCE` の `static`／`database`／`editor` から一つだけを選び、union しない。同じ slug の二重表示と二重の正本を作らない。
+
+### 切り替えの条件
+
+- editor の公開（設計 §14 の段階 3）が本番で使え、公開 API の契約（niho-editor #40）が確定していること。それまでは `static` を既定値のままにし、`editor` は合成 fixture でだけ動かす（`npm -w @niho-experience/web run test:e2e:guide-editor`）。
+- 切替は専用の配備変更で行い、切戻しは `database`（受入済みの場合）か `static` の新しい revision。手順は [Guide CMS](../guide-cms.md#切替切戻し) を正とする。
+
+### 結果
+
+- 記事の公開・更新・停止は editor で完結し、experience の再ビルドも PR も要らない（公開版は次の読み取りで反映）。
+- 移行が終わると、「原稿をモジュールにする → PR」の手順（上の「決定」）と experience DB の Guide CMS の編集・公開の経路は使わなくなる。それまでに静的経路・database 経路で出した記事は editor へ移してから公開元を切り替え、同じ slug を二重に出さない。静的経路は mock preview の合成サンプルのために残る。database 経路と `/editor` を消す時期は #254 で決める。
+- experience 側の記事の型（`Guide`）、安全な Markdown→React の描画、SEO の部品はそのまま使う。
+
+### 未決
+
+- `/editor` を撤去するまでの間、experience の `/editor` を公開に使うか（`EDITOR_CONSOLE_ENABLED` は OFF のまま）。
+- 日本語の記事を experience の `/ja/guides` に出すか（#59）。

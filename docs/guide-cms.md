@@ -102,7 +102,9 @@ NIHO側のADMIN UI、招待、outboxはこのリポジトリでは実装しな�
 
 ## editor.niho.life の公開 API を読む（#252 #253・仮契約）
 
-[#252](https://github.com/niho-life/niho-experience/issues/252) は `/guides`・`/guides/{slug}`・トップの Kamakura Journal・体験詳細の関連記事・sitemap の読み取り元に editor.niho.life の公開 API を足し、[#253](https://github.com/niho-life/niho-experience/issues/253) は下書きのプレビューと発信先の条件の宣言を足す（Epic #251、editor 設計 §8・§9）。**editor 公開（設計 §14 の段階 3）が本番で使えるまで、どの環境でも `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` を有効にしない。** Secret Manager・配備 workflow への配線はこの変更の対象外とする。
+[#252](https://github.com/niho-life/niho-experience/issues/252) は `/guides`・`/guides/{slug}`・トップの Kamakura Journal・体験詳細の関連記事・sitemap の読み取り元に editor.niho.life の公開 API を足し、[#253](https://github.com/niho-life/niho-experience/issues/253) は下書きのプレビューと発信先の条件の宣言を足す（Epic #251、editor 設計 §8・§9）。**editor 公開（設計 §14 の段階 3）が本番で使えるまで、どの環境でも `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` を有効にしない。** 記事の正本を editor に置く判断は [ADR 0002](adr/0002-guide-content.md) の「2026-10-30」。
+
+Secret Manager・配備 workflow への `GUIDE_EDITOR_API_*` の配線は、契約（niho-editor #40）が確定するまで行わない。契約案（niho-editor PR #64、未マージ）では NIHO の面は接続ごとの鍵ではなく、audience で面を確かめるサービス間の token で読むため、固定の token を Secret Manager に置く前提が変わりうる。
 
 ### 仮契約
 
@@ -166,6 +168,10 @@ NIHO側のADMIN UI、招待、outboxはこのリポジトリでは実装しな�
 - 応答は `Cache-Control: private, no-store`、`X-Robots-Tag: noindex, nofollow`、`Referrer-Policy: no-referrer`、metadata の robots も noindex。robots.txt は `/guides/preview?` を disallow する（`/guides/preview-…` という slug は塞がない）。sitemap・一覧・内部リンクにプレビューURLを出さず、計測（Umami）は対象外のパスとして送らない。
 - **トークンの取り扱い注意**：トークンは URL のクエリにあるため、Cloud Run のリクエストログ（と前段の CDN・proxy のログ）に残りうる。コードでは防げないので、editor 側のトークンは短命・単一記事・読み取り専用を前提にする。`next dev` は開発時だけリクエスト URL を端末に表示する。アプリ自身のログ・エラー・例外はトークンとURLを含めない。
 
+### 書き手の入口（#254）
+
+公開サイトのフッター「For writers」とホストの画面の「記事を書く」（PC のサイドバーの下、スマホのアカウントのメニュー。商品運営者には出さない）は、`GUIDE_EDITOR_SITE_ORIGIN` を設定したときだけ出て、その origin へ飛ぶ。値は https の origin だけ（パス・クエリ不可、ローカル開発の loopback の http だけ例外）で、形が不正なら起動時に失敗する。未設定なら両方とも出ない。editor.niho.life がまだ開けない間に壊れたリンクを出さないためで、公開の source flag とは独立している（書き手は公開元の切替より先に editor で書き始められる）。
+
 ### 発信先の条件の宣言（#253）
 
 `GET /api/public/guides/publication-requirements` は editor の「公開の前に」が読む条件を JSON で返す（仮 v1、source flag に関係なく常に配信、秘密なし、`Cache-Control: public, max-age=300`、`Access-Control-Allow-Origin: *`、`X-Robots-Tag: noindex`）。中身は `version`・`dest`・`label`・`origin`（`SITE_URL`）・`pathPrefix`・`preview: { path, tokenParam }` と、英語（`lang`）、カバー（掲載許諾あり）、リード（160文字以下）、題名（110文字以下）、カテゴリ、見出し1つ以上、`CONFIRM` なし、関連体験が掲載中（`{origin}/experiences/{slug}` で確認）の各条件。上限値は `GUIDE_LIMITS` から作り、表示文言は editor が持つ。experience が受信時に再確認するのは安全に関わるもの（英語、Markdown subset、https の許可 origin の写真）だけで、編集上の条件は editor の公開前チェックに任せる。
@@ -190,7 +196,9 @@ NEXT_PUBLIC_NIHO_WEB_ORIGIN=http://127.0.0.1:4392 SITE_URL=http://127.0.0.1:3000
 npm -w @niho-experience/web run dev
 ```
 
-`/guides`、`/guides/sample-evening-walk`、`/guides/sample-direct-link-only`（noindex）、`/guides/sample-http-cover`（`/guides` へ転送）、`/guides/preview?token=synthetic-preview-token-0001`（条件未達の下書き）、`…-0002`（Markdown エラー面）、`…-gone`（404）を確かめる。`EDITOR_FIXTURE_STATUS=503` で起動すると障害時の stale を、`EDITOR_FIXTURE_PORT` でポートを変えられる。写真は `*.example` の URL なので読み込まれない。
+同じ組み合わせ（fixture サーバー、NIHO の公開 API の合成 mock、http mode のサイト）を Playwright が立てて確かめる：`npm -w @niho-experience/web run test:e2e:guide-editor`（CI の e2e job でも実行。`playwright.guide-editor.config.ts`）。一覧と sitemap は live 3本だけ、限定公開は noindex、公開をやめた記事と未知の slug は `/guides` へ 307、不正な slug は 404、初期 HTML に本文・canonical・Article JSON-LD、プレビューは noindex で JSON-LD・canonical なし、失効・別の発信先・トークンなしは 404、条件の宣言、フッターの「For writers」。プレビューの HTML では、Next のルーターが `<script>` に要求された URL（アドレスバーと同じ値）を埋めるのでトークンがそこには現れる。リンク・画像・meta・canonical に出ないことを確かめている。
+
+手で見るときは `/guides`、`/guides/sample-evening-walk`、`/guides/sample-direct-link-only`（noindex）、`/guides/sample-http-cover`（`/guides` へ転送）、`/guides/preview?token=synthetic-preview-token-0001`（条件未達の下書き）、`…-0002`（Markdown エラー面）、`…-gone`（404）を確かめる。`EDITOR_FIXTURE_STATUS=503` で起動すると障害時の stale を、`EDITOR_FIXTURE_PORT` でポートを変えられる。写真は `*.example` の URL なので読み込まれない。
 
 ### #40 確定時に直す箇所
 
@@ -198,3 +206,17 @@ npm -w @niho-experience/web run dev
 - `client.ts`：認証方式（Bearer か署名・ID token か）。
 - `requirements.ts`：条件の `kind` 名と形（editor 側の読み取りに合わせる）。
 - fixture とテスト、この節。
+
+契約案（niho-editor PR #64、2026-10-30 時点・未マージ）と仮契約の主な違い。確定したら差分を取り直す。
+
+| 項目 | 仮契約（いまの実装） | 契約案 |
+| --- | --- | --- |
+| 一覧の本体 | `{ items }` | `{ contractVersion, items, nextCursor }`。`limit`（1〜100）と `cursor` でページ送り |
+| `dest` の値 | `niho-experience` | `exp`（NIHO の面の handle も予約語 `exp`） |
+| 限定公開 | 一覧に `range: unlisted` で載る | 既定では載らない。面が `include=unlisted` を付けたときだけ |
+| 本文 | `markdown` を正に描画 | `blocks`（限定 AST）が正本、`markdown` はその投影。どちらで描画するかを決める |
+| 認可の失敗 | 401/403 を失敗として扱う | 403 は使わず 404（存在を推測させない）。401 は資格なし・失効 |
+| 公開をやめた記事 | 410 | 410。面から面へ移ったときは `movedTo: { dest, canonicalUrl }` を添える |
+| 著者・写真 | `author { name, role, bio }`。写真は `width`・`height`・`licensed` | `author { name, handle, url }`。写真は `contentType`・`bytes`・`sha256`・`alt`・`credit` で、`licensed` と寸法が無い（OG に写真を出す条件を決め直す） |
+| 関連体験 | 本文の `related` | 一覧の項目にも `related`（申告で、認可の根拠にならない）。`version`・`extras` も増える |
+| 認証 | Bearer の固定 token | NIHO の面は audience つきのサービス間 token（上の Secret Manager の注記） |

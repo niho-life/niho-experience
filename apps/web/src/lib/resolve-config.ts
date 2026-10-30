@@ -107,6 +107,15 @@ function guideEditorSettings(env: Env): GuideEditorSettings {
   };
 }
 
+/**
+ * Where writers go to write (editor.niho.life, #254): the footer's "For writers" and the host console's 記事を書く.
+ * Unset keeps both links hidden, so neither points at an editor that is not serving yet.
+ */
+function guideEditorSiteOrigin(value: string | undefined): string {
+  const origin = value?.trim() ?? "";
+  return origin ? deploymentOrigin(origin, "GUIDE_EDITOR_SITE_ORIGIN") : "";
+}
+
 function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" | "editor" {
   if (apiMode === "http" && env.EXPERIENCE_GUIDE_PUBLIC_SOURCE === "editor") return "editor";
   if (apiMode !== "http" || env.EXPERIENCE_GUIDE_PUBLIC_SOURCE !== "database") return "static";
@@ -198,6 +207,7 @@ export function resolveConfig(env: Env) {
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   const guidePublicSource = guidePublicSourceSetting(apiMode, env);
   const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
+  const guideEditorSite = guideEditorSiteOrigin(env.GUIDE_EDITOR_SITE_ORIGIN);
   const guideAdmin = guideAdminSettings(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
@@ -234,6 +244,8 @@ export function resolveConfig(env: Env) {
     guideEditorApiHandle: guideEditor.handle,
     guideEditorApiToken: guideEditor.token,
     guideEditorAssetOrigins: guideEditor.assetOrigins,
+    // The editor's own site, linked from the footer and /host; empty hides the links.
+    guideEditorSiteOrigin: guideEditorSite,
     // NIHO platform ADMIN server -> Experience guide administration. This is a
     // service-to-service surface and never reuses /admin, /editor, or /host sessions.
     guideAdminApiEnabled: guideAdmin.enabled,

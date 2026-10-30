@@ -129,6 +129,8 @@ jobs:
         run: npm -w @niho-experience/web run test:e2e:assisted-launch
       - name: Test host calendar with synthetic data
         run: npm -w @niho-experience/web run test:e2e:host-calendar
+      - name: Test editor.niho.life as the guide source with synthetic data
+        run: npm -w @niho-experience/web run test:e2e:guide-editor
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
