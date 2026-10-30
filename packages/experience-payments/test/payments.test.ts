@@ -102,6 +102,39 @@ describe("createDirectCheckout", () => {
     assert.equal(JSON.stringify(receivedParams).includes("Synthetic Host"), false);
   });
 
+  it("charges a guest booking's snapshot total when children have their own price (#285)", async () => {
+    let receivedParams: Stripe.Checkout.SessionCreateParams | undefined;
+    const stripe = {
+      checkout: { sessions: { create: async (params: Stripe.Checkout.SessionCreateParams) => {
+        receivedParams = params;
+        return { id: "cs_test_synthetic", url: "https://checkout.stripe.com/c/pay/synthetic" };
+      } } },
+    } as unknown as PaymentsStripeClient;
+    const base = booking();
+    const family = booking({
+      seats: 3,
+      occurrenceSnapshot: { ...base.occurrenceSnapshot, seats: 3 },
+      pricingSnapshot: {
+        ...base.pricingSnapshot, seats: 3, totalAmount: 10_000,
+        breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2_000 }, cancellationPolicy: "FREE_UNTIL_24H",
+      },
+    });
+    const input = { applicationFeeAmount: 1_000, returnOrigin: "https://experience.example.test", returnPath: "/booking/return", stripe, now: NOW };
+    await createDirectCheckout({ ...input, booking: family });
+    assert.equal(receivedParams?.line_items?.[0]?.price_data?.unit_amount, 10_000);
+    // A breakdown that does not add up to the seats or the total is refused.
+    for (const breakdown of [
+      { adultCount: 2, childCount: 2, childUnitAmount: 2_000 },
+      { adultCount: 2, childCount: 1, childUnitAmount: 1_000 },
+      { adultCount: 2, childCount: 1, childUnitAmount: null },
+    ]) {
+      await assert.rejects(
+        createDirectCheckout({ ...input, booking: { ...family, pricingSnapshot: { ...family.pricingSnapshot, breakdown } } }),
+        /total is inconsistent/,
+      );
+    }
+  });
+
   it("rejects holds that cannot satisfy Stripe's minimum expiry plus the safety margin", async () => {
     await assert.rejects(
       createDirectCheckout({

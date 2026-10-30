@@ -1,11 +1,14 @@
 export {
   BookingUnavailableError,
+  GuestCheckoutError,
   StoreAccessDeniedError,
   StoreConflictError,
   StoreError,
   StoreNotFoundError,
+  StoreRateLimitedError,
   StoreValidationError,
 } from "./errors.ts";
+export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
@@ -27,6 +30,37 @@ export {
 export type { ApprovalDeadlinePayload, ClaimedHostNotification, GuestMessagePayload, HostNotificationTopic } from "./host-notification-outbox.ts";
 export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
+export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
+export type {
+  ClaimedGuestQuestionReply,
+  GuestQuestionDeliveryOutcome,
+  GuestQuestionDeliveryStatus,
+  GuestQuestionLanguage,
+  GuestQuestionMessage,
+  GuestQuestionReplyLink,
+  GuestQuestionThread,
+  GuestQuestionThreadPage,
+  GuestQuestionThreadSummary,
+  GuestQuestionTopic,
+  SubmitGuestQuestionInput,
+} from "./guest-questions.ts";
+export { GUEST_BOOKING_LIMITS, GuestBookingRepository } from "./guest-bookings.ts";
+export type {
+  BookingQuestion,
+  BookingQuestionInputType,
+  ChildPricing,
+  GuestBookingAnswer,
+  GuestBookingStart,
+  GuestBookingUtm,
+  ProductSaleTerms,
+  ProductSaleTermsInput,
+  PublicAvailability,
+  PublicBookingOffer,
+  PublicBookingTerms,
+  PublicOccurrence,
+  PublicOccurrenceReason,
+  StartGuestBookingInput,
+} from "./guest-bookings.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
@@ -125,6 +159,7 @@ export type {
   ConfirmBookingResult,
   CreateBookingHoldInput,
   GoogleCalendarConfiguration,
+  GuestCancellationPolicy,
   HostActor,
   InventoryAdminActor,
   InventoryAdminProduct,
@@ -135,6 +170,7 @@ export type {
   InventoryResourceRecord,
   JsonValue,
   MembershipRole,
+  PricingBreakdown,
   PricingSnapshot,
   ProductInput,
   ProductInventoryResourceInput,

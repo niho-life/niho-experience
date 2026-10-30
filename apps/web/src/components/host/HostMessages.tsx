@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { loadMoreGuestQuestionThreads, openGuestQuestionThread, sendGuestQuestionReply } from "@/host/actions";
 import { addReply, lastMessage, listTimeLabel, messagePreview, messagesHref, sortThreads, threadHeading, threadWhen, waitingSince } from "@/host/messages";
 import { THREAD_WAITING } from "@/host/status";
 import type { HostThread } from "@/host/types";
@@ -9,7 +10,7 @@ import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
 import { HostIcon } from "./HostIcon";
 import { HostMessageThread, type ReplyInput } from "./HostMessageThread";
 import { HostSubHeader } from "./HostSubHeader";
-import { HOST_SURFACE } from "./host-ui";
+import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostPageBody, InitialAvatar, PageHead, StatusPill } from "./ui";
 
 /** The list and one thread side by side from lg (64rem); below it, one of them at a time. */
@@ -36,6 +37,13 @@ export interface HostMessagesProps {
   /** The provider shown: 英語にする asks NIHO for its threads. */
   providerId: string;
   providerName: string;
+  /**
+   * Questions kept in the experience DB (#106, http mode): a thread holds its last message until it is
+   * opened here, which reads it in full and counts it as read; a reply is sent to the store. `loaded`
+   * names the threads the page already read in full; `nextCursor` reads the older ones (続きを見る),
+   * null when the list holds them all. Absent in mock mode.
+   */
+  live?: { loaded: readonly string[]; nextCursor: string | null } | null;
 }
 
 /**
@@ -46,11 +54,20 @@ export interface HostMessagesProps {
  *
  * The thread lives in the URL and changes with pushState, so the page is not loaded again and the
  * threads keep the replies sent on this screen (mock mode: on this screen only; the preview note
- * says nothing is kept). TODO(#87): send the reply to NIHO and show the thread it reads back.
+ * says nothing is kept). Questions kept in the experience DB (`live`, #106) send the reply to the
+ * store and show the thread it reads back. TODO(#87): the same for NIHO's booking messages.
  */
-export function HostMessages({ threads: initialThreads, newThread, experiences, today, now, linkProviderId, providerId, providerName }: HostMessagesProps) {
+export function HostMessages({ threads: initialThreads, newThread, experiences: initialExperiences, today, now, linkProviderId, providerId, providerName, live = null }: HostMessagesProps) {
   const searchParams = useSearchParams();
   const [threads, setThreads] = useState<readonly HostThread[]>(initialThreads);
+  /** Live: the threads read in full, and why one could not be (by id). */
+  const [loaded, setLoaded] = useState<ReadonlySet<string>>(() => new Set(live?.loaded ?? []));
+  const [loadFailed, setLoadFailed] = useState<Readonly<Record<string, string>>>({});
+  const requested = useRef<Set<string>>(new Set());
+  /** Live: where the older threads start (null once all are here), and the experiences their rows name. */
+  const [cursor, setCursor] = useState<string | null>(live?.nextCursor ?? null);
+  const [more, setMore] = useState<{ busy: boolean; failed: string | null }>({ busy: false, failed: null });
+  const [experiences, setExperiences] = useState(initialExperiences);
   const focusDetail = useRef(false);
   const lastOpened = useRef<string | null>(null);
 
@@ -84,6 +101,51 @@ export function HostMessages({ threads: initialThreads, newThread, experiences, 
     if (back && !window.matchMedia(TWO_COLUMNS).matches) document.getElementById(rowId(back))?.focus();
   }, [opened, selectedId]);
 
+  // Live: the thread on screen is read in full once (and counts as read). Below lg only a chosen one is on screen.
+  const shownId = shown?.id ?? null;
+  useEffect(() => {
+    if (!live || !shownId || loaded.has(shownId) || requested.current.has(shownId)) return;
+    if (!sub && !window.matchMedia(TWO_COLUMNS).matches) return;
+    requested.current.add(shownId);
+    void openGuestQuestionThread({ providerId, threadId: shownId }).then(
+      (result) => {
+        if (result.ok) {
+          setThreads((current) => current.map((item) => (item.id === result.thread.id ? result.thread : item)));
+          setLoaded((current) => new Set(current).add(result.thread.id));
+        } else {
+          requested.current.delete(shownId);
+          setLoadFailed((current) => ({ ...current, [shownId]: result.message }));
+        }
+      },
+      () => {
+        requested.current.delete(shownId);
+        setLoadFailed((current) => ({ ...current, [shownId]: "やりとりを読み込めませんでした。時間をおいて、もう一度お試しください。" }));
+      },
+    );
+  }, [live, shownId, loaded, sub, providerId]);
+
+  /** 続きを見る: the next page of older threads joins the list (a thread already on it keeps what it holds). */
+  const loadMore = async () => {
+    if (!cursor || more.busy) return;
+    setMore({ busy: true, failed: null });
+    let result: Awaited<ReturnType<typeof loadMoreGuestQuestionThreads>>;
+    try {
+      result = await loadMoreGuestQuestionThreads({ providerId, cursor });
+    } catch {
+      setMore({ busy: false, failed: "続きを読み込めませんでした。時間をおいて、もう一度お試しください。" });
+      return;
+    }
+    if (!result.ok) {
+      setMore({ busy: false, failed: result.message });
+      return;
+    }
+    const page = result;
+    setThreads((current) => [...current, ...page.threads.filter((thread) => !current.some((item) => item.id === thread.id))]);
+    setExperiences((current) => [...current, ...page.experiences.filter((experience) => !current.some((item) => item.id === experience.id))]);
+    setCursor(page.nextCursor);
+    setMore({ busy: false, failed: null });
+  };
+
   /** Another view of this screen, without loading the page again. */
   const move = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (!plainClick(event)) return;
@@ -106,10 +168,25 @@ export function HostMessages({ threads: initialThreads, newThread, experiences, 
    * One shown without being chosen (the first of the list) becomes the chosen one, so it stays on
    * screen while the list sorts again.
    */
-  const send = (thread: HostThread, reply: ReplyInput) => {
-    const updated = addReply(thread, reply, now);
-    setThreads(threads.some((item) => item.id === thread.id) ? threads.map((item) => (item.id === thread.id ? updated : item)) : [...threads, updated]);
+  const send = async (thread: HostThread, reply: ReplyInput): Promise<string | null> => {
+    let updated: HostThread;
+    if (live) {
+      // Live: the store keeps the reply (送信待ち until the email goes out) and answers the whole thread.
+      let result: Awaited<ReturnType<typeof sendGuestQuestionReply>>;
+      try {
+        result = await sendGuestQuestionReply({ providerId, threadId: thread.id, japanese: reply.japanese, english: reply.english, commandId: reply.commandId });
+      } catch {
+        return "返信を送れませんでした。時間をおいて、もう一度お試しください。";
+      }
+      if (!result.ok) return result.message;
+      updated = result.thread;
+      setLoaded((current) => new Set(current).add(updated.id));
+    } else {
+      updated = addReply(thread, reply, now);
+    }
+    setThreads((current) => (current.some((item) => item.id === thread.id) ? current.map((item) => (item.id === thread.id ? updated : item)) : [...current, updated]));
     if (!sub) window.history.replaceState(null, "", messagesHref({ providerId: linkProviderId, thread: thread.id }));
+    return null;
   };
 
   return (
@@ -167,6 +244,14 @@ export function HostMessages({ threads: initialThreads, newThread, experiences, 
               ) : (
                 <p className="px-4 py-6 text-muted md:px-5">質問や連絡はまだありません</p>
               )}
+              {live && cursor ? (
+                <div className="border-t border-line p-3">
+                  {more.failed ? <p role="alert" className="mb-2 text-[0.8125rem] text-ink-soft">{more.failed}</p> : null}
+                  <button type="button" disabled={more.busy} onClick={() => void loadMore()} className={consoleButtonClass("secondary", "sm")}>
+                    {more.busy ? "読み込み中…" : "続きを見る"}
+                  </button>
+                </div>
+              ) : null}
             </section>
           </div>
 
@@ -192,6 +277,7 @@ export function HostMessages({ threads: initialThreads, newThread, experiences, 
                 providerId={providerId}
                 providerName={providerName}
                 onSend={(reply) => send(shown, reply)}
+                loading={live && !loaded.has(shown.id) ? { failed: loadFailed[shown.id] ?? null } : null}
               />
             ) : sub ? (
               <section className={`${HOST_SURFACE} px-5 py-8`}>

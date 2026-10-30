@@ -42,6 +42,9 @@ describe("the threads", () => {
     expect(waitingSince(again)).toBe("2026-10-21T16:00");
     const failed = { ...thread, messages: [...thread.messages, { id: "z", from: "host" as const, at: AT, japanese: "", english: "Yes.", status: "failed" as const }] };
     expect(waitingSince(failed)).toBe("2026-10-21T11:05");
+    // A question's reply queued for the email (#105) has answered the guest.
+    const queued = { ...thread, messages: [...thread.messages, { id: "q", from: "host" as const, at: AT, japanese: "", english: "Yes.", status: "pending" as const }] };
+    expect(waitingSince(queued)).toBeNull();
     expect(waitingSince({ messages: [] })).toBeNull();
   });
 

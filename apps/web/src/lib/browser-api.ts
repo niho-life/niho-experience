@@ -2,6 +2,15 @@ import { createExperienceApiClient } from "@niho-experience/api-client";
 
 const previewAvailabilityFailures = new Set<string>();
 
+/**
+ * Browser only: questions to the host (#105) go to this site's own route, which keeps them in the experience
+ * DB (docs/guest-questions.md), not to NIHO. `same-origin` replaces the client's no-referrer for these POSTs so
+ * they carry this site's Origin, which the route checks; the Referer is this site's own page.
+ */
+export function getSiteQuestionsApi(siteOrigin: string) {
+  return createExperienceApiClient({ nihoWebOrigin: siteOrigin, fetch: (input, init) => fetch(input, { ...init, referrerPolicy: "same-origin" }) });
+}
+
 /** Browser only: availability and guest checkout use this client directly. */
 export async function getBrowserApi(preview: boolean, nihoWebOrigin: string) {
   if (!preview) return createExperienceApiClient({ nihoWebOrigin });

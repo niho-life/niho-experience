@@ -377,8 +377,11 @@ export interface HostBooking {
  * (#19315) are not in the host contract yet.
  */
 
-/** Whether NIHO could send the host's reply: 送信済み / 送れませんでした. */
-export type HostMessageStatus = "sent" | "failed";
+/**
+ * Whether the host's reply reached the guest: 送信済み / 送れませんでした, or 送信待ち while a question's
+ * reply (#105, experience DB) waits for the mail worker.
+ */
+export type HostMessageStatus = "sent" | "failed" | "pending";
 
 /** What a guest wrote, and NIHO's Japanese translation of it. */
 export interface HostGuestMessage {

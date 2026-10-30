@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ChannelRuntime, ExperienceStore, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { ChannelRuntime, ExperienceStore, GuestQuestionRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -66,4 +66,11 @@ export function providerNotificationSettings(): ProviderNotificationSettings | n
   if (!config.hostNotificationSettingsEnabled) return null;
   const pool = experiencePool();
   return pool ? new ProviderNotificationSettings(pool) : null;
+}
+
+/** 予約前の質問 (#105/#106): null until its flag is on and the experience DB is configured. */
+export function guestQuestionRepository(): GuestQuestionRepository | null {
+  if (!config.guestQuestionsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestQuestionRepository(pool) : null;
 }
