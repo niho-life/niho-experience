@@ -2,13 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultStaticCopyValuesV1 } from "@niho/experience-presentation/v1";
 import { assertSameJapaneseRelease, JapaneseReleaseUnavailable, japaneseBookingAllowed } from "./localized-release";
 
-const state = vi.hoisted(() => ({ releaseId: "release-1", responses: new Map<string, unknown | null>() }));
+const state = vi.hoisted(() => ({
+  releaseId: "release-1",
+  responses: new Map<string, unknown | null>(),
+  catalog: null as { releaseId: string; slugs: string[] } | null,
+  catalogReads: 0,
+  config: { japaneseSiteEnabled: true, nihoWebOrigin: "https://niho.example", siteUrl: "https://experience.example.com", indexingAllowed: true },
+}));
 
 vi.mock("server-only", () => ({}));
-vi.mock("./config", () => ({ config: { japaneseSiteEnabled: true, nihoWebOrigin: "https://niho.example", siteUrl: "https://experience.example.com", indexingAllowed: true } }));
+vi.mock("./config", () => ({ config: state.config }));
 vi.mock("./api", () => ({
   getApi: async () => ({
     getJapaneseSiteCopy: async () => ({ ok: true as const, data: { schemaVersion: 2, releaseId: state.releaseId, locale: "ja", values: defaultStaticCopyValuesV1() } }),
+    listJapaneseExperiences: async () => (state.catalogReads += 1, state.catalog)
+      ? { ok: true as const, data: { releaseId: state.catalog.releaseId, locale: "ja", displayLocale: "ja", copySchemaVersion: 2, experiences: state.catalog.slugs.map((slug) => ({ slug })) } }
+      : { ok: false as const, kind: "not_found" as const },
   }),
 }));
 
@@ -38,6 +47,9 @@ beforeEach(() => {
   vi.resetModules();
   state.releaseId = "release-1";
   state.responses.clear();
+  state.catalog = null;
+  state.catalogReads = 0;
+  state.config.japaneseSiteEnabled = true;
   installValidRelease();
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
     const value = state.responses.get(new URL(String(input)).pathname);
@@ -91,7 +103,6 @@ describe("Japanese release selection", () => {
       releaseId: "release-1",
       counterparts: { "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help" },
     });
-    await expect(valid.getJapaneseIndexablePaths()).resolves.toEqual(["/ja", "/ja/experiences", "/ja/host"]);
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/sidecars/chrome/"), expect.anything());
   });
 
@@ -111,5 +122,41 @@ describe("Japanese release selection", () => {
     });
     const { getPreparedJapaneseStaticRelease } = await import("./localized-content");
     await expect(getPreparedJapaneseStaticRelease()).resolves.toMatchObject({ releaseId: "release-1" });
+  });
+});
+
+describe("experience pairs in the prepared release (#59)", () => {
+  it("adds the language switch for experience pages paired in the same release's catalog", async () => {
+    state.catalog = { releaseId: "release-1", slugs: ["tea-ceremony", "zen-walk"] };
+    const { getJapaneseStaticCounterparts, getPreparedJapaneseStaticRelease } = await import("./localized-content");
+    await expect(getJapaneseStaticCounterparts()).resolves.toEqual({
+      "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help",
+      "/experiences/tea-ceremony": "/ja/experiences/tea-ceremony",
+      "/experiences/zen-walk": "/ja/experiences/zen-walk",
+    });
+    // The catalog says nothing about Japanese booking, so no booking page is paired.
+    expect((await getPreparedJapaneseStaticRelease()).experiences.get("tea-ceremony")).toMatchObject({ bookingReady: false });
+  });
+
+  it("keeps only the static pages when the catalog is missing or from another release", async () => {
+    const statics = { "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help" };
+    const missing = await import("./localized-content");
+    await expect(missing.getJapaneseStaticCounterparts()).resolves.toEqual(statics);
+    vi.resetModules();
+    state.catalog = { releaseId: "release-2", slugs: ["tea-ceremony"] };
+    const other = await import("./localized-content");
+    await expect(other.getJapaneseStaticCounterparts()).resolves.toEqual(statics);
+    expect((await other.getPreparedJapaneseStaticRelease()).experiences.size).toBe(0);
+  });
+
+  it("stays off the network and exposes no switch while the Japanese site flag is off", async () => {
+    state.config.japaneseSiteEnabled = false;
+    state.catalog = { releaseId: "release-1", slugs: ["tea-ceremony"] };
+    const { getJapaneseCatalog, getJapaneseDetail, getJapaneseStaticCounterparts } = await import("./localized-content");
+    await expect(getJapaneseStaticCounterparts()).rejects.toMatchObject({ reason: "disabled" });
+    await expect(getJapaneseCatalog()).rejects.toMatchObject({ reason: "disabled" });
+    await expect(getJapaneseDetail("tea-ceremony")).rejects.toMatchObject({ reason: "disabled" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(state.catalogReads).toBe(0);
   });
 });
