@@ -79,12 +79,16 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
       if (await plan.count() !== 1 || await plan.locator("..").inputValue() !== job.target.externalProductId) throw new ContractError("PRODUCT_MISMATCH");
       if (await page.getByRole("heading").filter({ hasText: job.target.externalProductId }).count() !== 1) throw new ContractError("PRODUCT_MISMATCH");
       const slot = page.locator(`[id=${JSON.stringify(current.slotId)}]`);
-      await page.locator(`[id=${JSON.stringify(current.slotId)}]${current.frontOpenFlg ? ":not(.sale-stop)" : ".sale-stop"}`)
+      const indicator = slot.locator(".sales-status-wrapper-slot > span");
+      await indicator.waitFor({ state: "attached", timeout: 5_000 }).catch(() => { throw new ContractError("DOM_DRIFT"); });
+      const stoppedIndicator = ":has(.sales-status-wrapper-slot > span.sale-stop)";
+      await page.locator(`[id=${JSON.stringify(current.slotId)}]${current.frontOpenFlg ? `:not(${stoppedIndicator})` : stoppedIndicator}`)
         .waitFor({ state: "visible", timeout: 5_000 }).catch(() => { throw new ContractError("DOM_DRIFT"); });
       if (await slot.count() !== 1) throw new ContractError("TARGET_MISMATCH");
       const link = slot.locator('a[data-bind="click: $root.onClickSlot.bind($data, $index(), $parent, $parents[1])"]');
       if (await link.count() !== 1) throw new ContractError("DOM_DRIFT");
-      const saleStop = (await slot.getAttribute("class") ?? "").split(/\s+/).includes("sale-stop");
+      if (await indicator.count() !== 1) throw new ContractError("DOM_DRIFT");
+      const saleStop = (await indicator.getAttribute("class") ?? "").split(/\s+/).includes("sale-stop");
       if (saleStop !== !current.frontOpenFlg || (current.frontOpenFlg && current.receptionStatus !== "KeyOPEN")) throw new ContractError("DOM_DRIFT");
       return { slot, link };
     }
