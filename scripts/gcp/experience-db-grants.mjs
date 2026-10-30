@@ -11,6 +11,7 @@ const ID = ["INSERT", "DELETE"];
 const IUD = ["INSERT", "UPDATE", "DELETE"];
 
 export const RUNTIME_TABLE_GRANTS = Object.freeze({
+  booking_guests: { write: IU },
   booking_inventory_snapshots: { write: I },
   booking_resource_occupancies: { write: I },
   bookings: { write: IU },
@@ -31,6 +32,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   channel_watchdog_state: { write: IU },
   channel_worker_accounts: { write: IU },
   channel_workers: { write: IU },
+  experience_product_sale_terms: { write: IU },
   experience_products: { write: IU },
   // Providers are provisioned privately; the runtime only locks them.
   experience_providers: { write: [], updateColumns: ["created_at"] },
@@ -48,9 +50,13 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   external_reservation_window_page_receipts: { write: IU },
   external_reservations: { write: IU },
   google_busy_intervals: { write: ID },
+  google_channel_anchor_journals: { write: IU },
   google_channel_deliveries: { write: IU },
   google_channel_output_bindings: { write: I, updateColumns: ["updated_at"] },
   google_channel_setup_journals: { write: IU },
+  guest_question_messages: { write: IU },
+  guest_question_reply_tokens: { write: IU },
+  guest_question_threads: { write: IU },
   guide_admin_command_receipts: { write: I },
   guide_articles: { write: IU },
   guide_categories: { write: IU },
@@ -65,7 +71,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   guide_writer_grants: { write: IU },
   host_push_subscriptions: { write: IUD },
   inventory_resources: { write: IU },
-  outbox_messages: { write: I },
+  outbox_messages: { write: IU },
   // Append-only; the ledger trigger also rejects mutation.
   payment_ledger_entries: { write: I },
   product_inventory_resources: { write: ID },
