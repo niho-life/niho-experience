@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
 import { MIGRATION_LEDGER_TABLE, RUNTIME_TABLE_GRANTS } from "./experience-db-grants.mjs";
+import { atomicMigrationSql } from "./migration-sql.mjs";
 
 const { Client } = pg;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -196,8 +197,14 @@ try {
   for (const name of pending) {
     step = `apply ${name}`;
     await target.query(`SET ROLE ${migrator}`);
-    await target.query(sources.get(name));
-    await target.query(`INSERT INTO ${ledger} (name,sha256) VALUES ($1,$2)`, [name, sha256(sources.get(name))]);
+    // The file and its ledger row commit together: a dropped connection leaves both or neither.
+    const sql = atomicMigrationSql({ name, source: sources.get(name), ledger, sha256: sha256(sources.get(name)), escapeLiteral: (value) => target.escapeLiteral(value) });
+    try {
+      await target.query(sql);
+    } catch (error) {
+      await target.query("ROLLBACK").catch(() => {});
+      throw error;
+    }
     await target.query("RESET ROLE");
     applied.push(name);
   }

@@ -43,7 +43,7 @@ CONFIRM_EXPERIENCE_STG_DB_BOOTSTRAP=niho-app-stg \
 
 ### 以降のmigrationとruntime権限
 
-初回bootstrap後のmigrationは `scripts/gcp/apply-experience-db-migrations.mjs` で適用する。適用済みのファイル名とSHA-256を `experience_schema_migrations`（migration role所有、runtimeは権限なし）に記録し、未適用のファイルだけを辞書順にNOLOGINのmigration roleで流す。適用済みファイルの改変や、適用済みより前に並ぶ未適用ファイルがあれば止まる。runtime roleのsessionが残っている間も止まる。その後、runtimeの権限を `scripts/gcp/experience-db-grants.mjs` の宣言に一致させ（全テーブルを一度REVOKEしてから付け直す）、`has_table_privilege` / `has_column_privilege` で宣言との完全一致と、NIHO側テーブルを読めないことを確認する。新しいテーブル・書込み・upsert・行ロックを足したら同じPRで宣言を更新する。store の `runtime-grants.test.ts` がコード中のSQLとのずれを検出する。
+初回bootstrap後のmigrationは `scripts/gcp/apply-experience-db-migrations.mjs` で適用する。適用済みのファイル名とSHA-256を `experience_schema_migrations`（migration role所有、runtimeは権限なし）に記録し、未適用のファイルだけを辞書順にNOLOGINのmigration roleで流す。各ファイルとその台帳の行は1つのトランザクションで確定する（ファイル自身の外側の `BEGIN;`…`COMMIT;` を、台帳の INSERT まで含む1つに置き換える。途中で接続が切れても「スキーマだけ変わって記録がない」状態は残らない。外側の `BEGIN;`/`COMMIT;` の形でないファイルや、中に別のトランザクション制御があるファイルは、流す前に止まる）。適用済みファイルの改変や、適用済みより前に並ぶ未適用ファイルがあれば止まる。runtime roleのsessionが残っている間も止まる。その後、runtimeの権限を `scripts/gcp/experience-db-grants.mjs` の宣言に一致させ（全テーブルを一度REVOKEしてから付け直す）、`has_table_privilege` / `has_column_privilege` で宣言との完全一致と、NIHO側テーブルを読めないことを確認する。新しいテーブル・書込み・upsert・行ロックを足したら同じPRで宣言を更新する。store の `runtime-grants.test.ts` がコード中のSQLとのずれを検出する。
 
 10/27のbootstrap（0001〜0003）で作ったstg DBには台帳が無いため、最初の1回だけ `EXPERIENCE_DB_BASELINE_THROUGH=0003_google_busy_coverage.sql` を渡す。scriptは既存テーブルが0001〜0003の作るテーブルと完全一致する場合だけ、その3件を台帳へ記録する。stgのCloud SQLは通常 `activationPolicy=NEVER` で停止しているので、適用の間だけ起動し、終わったら戻す。
 
