@@ -64,7 +64,7 @@ export async function createAirbnbCalendarObserver({ job: rawJob, cloud, config,
     await cacheSession.send("Network.enable");
     await cacheSession.send("Network.setCacheDisabled", { cacheDisabled: true });
     await browser.context.routeWebSocket("**/*", (socket) => {
-      guard.noteWebSocket();
+      guard.noteWebSocket(socket.url());
       void socket.close({ code: 1008, reason: "Read-only observer" }).catch(() => {});
     });
     const profileUrl = airbnbProfileUrl(supplierOrigin);

@@ -26,6 +26,8 @@ test("Airbnb observer proves self ownership and performs a fresh OPEN/CLOSED cyc
   assert.equal(closed.bookable, false); assert.notEqual(closed.observedAtUtc, undefined);
   assert.equal(fixture.state.profileReads, 2); assert.equal(fixture.state.calendarReads, 2); assert.equal(fixture.state.serverWrites, 0);
   assert.equal(preflights.length, 4); assert.equal(observer.guard.writes, 0); assert.equal(observer.guard.profileReads, 2);
+  assert.equal(observer.guard.webSockets, 2); assert.equal(observer.guard.optionalUiSockets, 2);
+  assert.equal(observer.guard.fatalRead, null);
   assert.equal(await observer.stop(), true); assert.equal(await observer.stop(), true); assert.equal(observer.guard.frozen, true);
   assert.equal(Object.hasOwn(observer, "applyDesiredState"), false); assert.equal(Object.hasOwn(observer, "model"), false);
 });

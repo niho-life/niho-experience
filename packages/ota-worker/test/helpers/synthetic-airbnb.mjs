@@ -34,6 +34,7 @@ export async function syntheticAirbnb() {
       const profileVariables = { userId: opaqueAirbnbId("User", state.accountId), mockIdentifier: null, userProfileType: "HOST", isEditMode: true };
       const auxiliary = new URL(apiPath("IsHostQuery", {}), "http://fixture.invalid"); auxiliary.searchParams.delete("variables");
       response.end(`<!doctype html><html><body><main><h1>自己紹介</h1><button id="edit">編集</button></main><script>
+        const socket=new WebSocket('wss://ws.airbnb.jp/ws/?connection_id=synthetic&key=synthetic');socket.onerror=()=>{};
         fetch(${JSON.stringify(auxiliary.pathname + auxiliary.search)}).then(response=>response.json()).catch(()=>{});
         fetch('/api/v2/client_configs',{method:'POST',body:'{}'}).catch(()=>{});
         fetch('/api/v2/get_travel_guides_by_user?user_id=synthetic').catch(()=>{});

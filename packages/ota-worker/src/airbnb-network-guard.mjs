@@ -46,6 +46,7 @@ export function createAirbnbNetworkGuard({ job, supplierOrigin = AIRBNB_ORIGIN, 
   let calendarReads = 0;
   let auxiliaryReads = 0;
   let webSockets = 0;
+  let optionalUiSockets = 0;
   let fatalRead = null;
   let externalNavigationBlocked = false;
   let frozen = false;
@@ -112,8 +113,19 @@ export function createAirbnbNetworkGuard({ job, supplierOrigin = AIRBNB_ORIGIN, 
 
   const guard = {
     handle,
-    noteWebSocket() {
+    noteWebSocket(value) {
       webSockets += 1;
+      // This UI socket is always closed before connectToServer. It carries no
+      // evidence and must not prevent the independent profile/calendar reads.
+      try {
+        const url = new URL(value);
+        if (url.origin === "wss://ws.airbnb.jp" && url.pathname === "/ws/" && !url.username && !url.password && !url.hash
+          && url.searchParams.size === 2 && ["connection_id", "key"].every((key) => url.searchParams.getAll(key).length === 1
+            && url.searchParams.get(key).length > 0 && url.searchParams.get(key).length <= 512)) {
+          optionalUiSockets += 1;
+          return;
+        }
+      } catch {}
       if (fatalRead === null) fatalRead = new ContractError("UNSAFE_REQUEST");
     },
     freeze() { frozen = true; },
@@ -126,6 +138,7 @@ export function createAirbnbNetworkGuard({ job, supplierOrigin = AIRBNB_ORIGIN, 
     get calendarReads() { return calendarReads; },
     get auxiliaryReads() { return auxiliaryReads; },
     get webSockets() { return webSockets; },
+    get optionalUiSockets() { return optionalUiSockets; },
     get fatalRead() { return fatalRead; },
     get externalNavigationBlocked() { return externalNavigationBlocked; },
     get frozen() { return frozen; },

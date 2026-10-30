@@ -283,6 +283,21 @@ test("Airbnb aborts unrelated observed profile requests without authorizing them
   assert.throws(() => guard.assertSafe(), (error) => error.code === "UNSAFE_REQUEST");
 });
 
+test("Airbnb distinguishes the blocked known UI socket from unknown websocket attempts", () => {
+  const guard = createAirbnbNetworkGuard({ job: makeJob() });
+  guard.noteWebSocket("wss://ws.airbnb.jp/ws/?connection_id=synthetic&key=synthetic");
+  guard.assertSafe(); assert.equal(guard.optionalUiSockets, 1); assert.equal(guard.writes, 0);
+  for (const url of [
+    "wss://ws.airbnb.jp.evil.example/ws/?connection_id=synthetic&key=synthetic",
+    "wss://ws.airbnb.jp/business/?connection_id=synthetic&key=synthetic",
+    "wss://ws.airbnb.jp/ws/?connection_id=synthetic&key=synthetic&mutation=1",
+    "wss://ws.airbnb.jp/ws/?connection_id=synthetic&key=synthetic&key=other",
+  ]) {
+    const invalid = createAirbnbNetworkGuard({ job: makeJob() }); invalid.noteWebSocket(url);
+    assert.throws(() => invalid.assertSafe(), (error) => error.code === "UNSAFE_REQUEST");
+  }
+});
+
 test("Airbnb config uses only private profiles/airbnb/<positive decimal> and never enables restore", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "niho-airbnb-config-"))); await chmod(directory, 0o700);
   const profiles = join(directory, "profiles"); const airbnb = join(profiles, "airbnb");
