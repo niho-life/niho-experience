@@ -4,7 +4,8 @@ import { createSupervisorRpc } from "./mcp-rpc.mjs";
 import { runClaude } from "./claude-runner.mjs";
 import { ContractError, isGoogleDeliveryTarget, validateObservation } from "./validation.mjs";
 import { MAX_JOB_MS } from "./constants.mjs";
-import { executeReservationWindow, unsupportedReservationReaderFactory } from "./reservation-executor.mjs";
+import { executeReservationWindow } from "./reservation-executor.mjs";
+import { selectReservationReaderFactory } from "./reservation-reader-registry.mjs";
 import { executeGoogleDelivery } from "./google-delivery-executor.mjs";
 
 const wait = (ms, signal) => new Promise((resolve) => {
@@ -48,11 +49,14 @@ export async function executeJob({
   now = () => Date.now(),
   driverOptions = {},
   journal,
-  reservationReaderFactory = unsupportedReservationReaderFactory,
+  reservationReaderFactory,
 }) {
   if (job.purpose === "RESERVATION_WINDOW") {
     if (!journal) throw new ContractError("INVALID_JOURNAL");
-    return executeReservationWindow({ job, cloud, config, journal, readerFactory: reservationReaderFactory, renewEveryMs, now });
+    // Without an injected factory, only a config-enabled registry reader runs;
+    // otherwise the unsupported sentinel halts before any read generation.
+    const readerFactory = reservationReaderFactory ?? selectReservationReaderFactory({ job, config });
+    return executeReservationWindow({ job, cloud, config, journal, readerFactory, renewEveryMs, now });
   }
   if (isGoogleDeliveryTarget(job.target)) {
     return executeGoogleDelivery({ job, cloud, config, renewEveryMs, now });

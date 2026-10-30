@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { HostNotificationOutbox, HostPushSubscriptions } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { experiencePool } from "@/lib/experience/store-server";
-import { internalServiceJson, serviceIdentityFailure, verifyGoogleServiceIdentity, type GoogleTokenVerifier } from "@/lib/google-service-identity";
+import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { drainHostNotifications, hostNotificationAllowed, type HostNotificationDrainCounts } from "./outbox";
 import { hostPushDeps } from "./server";
 
@@ -15,9 +15,21 @@ export interface HostPushJobSettings {
 
 export interface HostPushJobDependencies {
   readonly settings?: HostPushJobSettings;
-  readonly verifier?: GoogleTokenVerifier;
+  readonly verifier?: GoogleServiceTokenVerifier;
   readonly pool?: () => Pool | null;
   readonly drain?: (pool: Pool) => Promise<HostNotificationDrainCounts>;
+}
+
+/** JSON for an internal route: never cached, sniffed or indexed. */
+function internalServiceJson(body: unknown, status = 200): Response {
+  return Response.json(body, {
+    status,
+    headers: {
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
+    },
+  });
 }
 
 function drainWithPool(pool: Pool): Promise<HostNotificationDrainCounts> {
@@ -45,7 +57,11 @@ export async function hostPushDrainResponse(request: Pick<Request, "headers">, d
   };
   if (!settings.enabled) return internalServiceJson({ error: "not_found" }, 404);
   const identity = await verifyGoogleServiceIdentity(request, settings, dependencies.verifier);
-  if (!identity.ok) return serviceIdentityFailure(identity.kind);
+  if (!identity.ok) {
+    return identity.kind === "outage"
+      ? internalServiceJson({ error: "identity_verification_unavailable" }, 503)
+      : internalServiceJson({ error: "invalid_identity" }, 401);
+  }
   const pool = (dependencies.pool ?? experiencePool)();
   if (!pool) return internalServiceJson({ error: "unavailable" }, 503);
   try {

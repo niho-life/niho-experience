@@ -26,7 +26,7 @@ vi.mock("google-auth-library", () => ({
   },
 }));
 
-import type { GoogleTokenVerifier } from "@/lib/google-service-identity";
+import type { GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { hostPushDrainResponse } from "@/lib/host/push/job";
 import * as route from "./route";
 
@@ -146,7 +146,7 @@ describe("POST /internal/host-push/v1/drain", () => {
 
 describe("hostPushDrainResponse dependencies", () => {
   const settings = { enabled: true, audience: "https://experience.example/internal/host-push", serviceAccountEmail: "host-push-job@example.iam.gserviceaccount.com" };
-  const verifier = (result: Awaited<ReturnType<GoogleTokenVerifier["verify"]>>): GoogleTokenVerifier => ({ verify: vi.fn().mockResolvedValue(result) });
+  const verifier = (result: Awaited<ReturnType<GoogleServiceTokenVerifier["verify"]>>): GoogleServiceTokenVerifier => ({ verify: vi.fn().mockResolvedValue(result) });
   const request = new Request(URL, { method: "POST", headers: { authorization: "Bearer synthetic.jwt.token" } });
   const claims = { iss: "accounts.google.com", aud: settings.audience, email: settings.serviceAccountEmail, emailVerified: true, exp: Math.floor(Date.now() / 1000) + 60 };
 

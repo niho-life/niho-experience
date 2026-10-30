@@ -1,13 +1,10 @@
 import "server-only";
 import { OAuth2Client, type TokenPayload } from "google-auth-library";
 
-/**
- * Service-to-service calls into the internal routes (guide administration, the host push job): a
- * Google-signed OIDC ID token for one service account and one audience, never a cookie or session.
- */
 const GOOGLE_ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 
-export interface GoogleIdentityClaims {
+/** Claims kept from a Google-signed OIDC ID token (for example Cloud Scheduler or a NIHO server). */
+export interface GoogleServiceIdentityClaims {
   readonly iss: string;
   readonly aud: string;
   readonly email?: string;
@@ -15,12 +12,12 @@ export interface GoogleIdentityClaims {
   readonly exp: number;
 }
 
-export type GoogleTokenVerification =
-  | { readonly ok: true; readonly claims: GoogleIdentityClaims }
+export type GoogleServiceTokenVerification =
+  | { readonly ok: true; readonly claims: GoogleServiceIdentityClaims }
   | { readonly ok: false; readonly kind: "invalid" | "outage" };
 
-export interface GoogleTokenVerifier {
-  verify(token: string, audience: string): Promise<GoogleTokenVerification>;
+export interface GoogleServiceTokenVerifier {
+  verify(token: string, audience: string): Promise<GoogleServiceTokenVerification>;
 }
 
 export interface GoogleServiceIdentitySettings {
@@ -28,9 +25,14 @@ export interface GoogleServiceIdentitySettings {
   readonly serviceAccountEmail: string;
 }
 
+/** `missing` and `invalid` are both unauthenticated; only `outage` means the verifier itself is unavailable. */
+export type GoogleServiceIdentityResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly kind: "missing" | "invalid" | "outage" };
+
 const googleClient = new OAuth2Client();
 
-function tokenPayloadClaims(payload: TokenPayload): GoogleIdentityClaims {
+function tokenPayloadClaims(payload: TokenPayload): GoogleServiceIdentityClaims {
   return {
     iss: payload.iss,
     aud: payload.aud,
@@ -54,7 +56,7 @@ function isVerificationOutage(error: unknown): boolean {
   return typeof status === "number";
 }
 
-export const googleIdTokenVerifier: GoogleTokenVerifier = {
+export const googleServiceTokenVerifier: GoogleServiceTokenVerifier = {
   async verify(token, audience) {
     try {
       const ticket = await googleClient.verifyIdToken({ idToken: token, audience });
@@ -66,30 +68,19 @@ export const googleIdTokenVerifier: GoogleTokenVerifier = {
   },
 };
 
-/** JSON for an internal route: never cached, sniffed or indexed. */
-export function internalServiceJson(body: unknown, status = 200): Response {
-  return Response.json(body, {
-    status,
-    headers: {
-      "cache-control": "private, no-store",
-      "x-content-type-options": "nosniff",
-      "x-robots-tag": "noindex, nofollow",
-    },
-  });
-}
-
 /**
- * The bearer token is the configured service account's, for this audience, from Google, and not
- * expired. `outage` when Google's signing keys cannot be fetched (the caller answers 503).
+ * Accepts only a Google-issued ID token for the exact audience and verified
+ * service-account email. Cookies, session roles, and other bearer formats are
+ * never consulted.
  */
 export async function verifyGoogleServiceIdentity(
   request: Pick<Request, "headers">,
   settings: GoogleServiceIdentitySettings,
-  verifier: GoogleTokenVerifier = googleIdTokenVerifier,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly kind: "invalid" | "outage" }> {
+  verifier: GoogleServiceTokenVerifier = googleServiceTokenVerifier,
+): Promise<GoogleServiceIdentityResult> {
   const authorization = request.headers.get("authorization");
   const match = authorization?.match(/^Bearer ([A-Za-z0-9._~-]+)$/);
-  if (!match) return { ok: false, kind: "invalid" };
+  if (!match) return { ok: false, kind: "missing" };
   const verified = await verifier.verify(match[1]!, settings.audience);
   if (!verified.ok) return { ok: false, kind: verified.kind };
   const claims = verified.claims;
@@ -104,11 +95,4 @@ export async function verifyGoogleServiceIdentity(
     return { ok: false, kind: "invalid" };
   }
   return { ok: true };
-}
-
-/** The 401 or 503 an internal route answers for a failed identity check. */
-export function serviceIdentityFailure(kind: "invalid" | "outage"): Response {
-  return kind === "outage"
-    ? internalServiceJson({ error: "identity_verification_unavailable" }, 503)
-    : internalServiceJson({ error: "invalid_identity" }, 401);
 }

@@ -3,14 +3,12 @@ import { StoreValidationError, type GuideAdminRepository } from "@niho-experienc
 import { config } from "@/lib/config";
 import { guideAdminRepository } from "@/lib/experience/store-server";
 import {
-  googleIdTokenVerifier,
-  internalServiceJson,
-  serviceIdentityFailure,
+  googleServiceTokenVerifier,
   verifyGoogleServiceIdentity,
-  type GoogleIdentityClaims,
+  type GoogleServiceIdentityClaims,
   type GoogleServiceIdentitySettings,
-  type GoogleTokenVerification,
-  type GoogleTokenVerifier,
+  type GoogleServiceTokenVerification,
+  type GoogleServiceTokenVerifier,
 } from "@/lib/google-service-identity";
 import { readBoundedJson } from "@/lib/read-bounded-json";
 
@@ -19,16 +17,22 @@ const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CATEGORY_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const JSON_LIMIT_BYTES = 16 * 1024;
 
-// The Google service identity check is shared with other internal routes (lib/google-service-identity.ts).
-export type GuideAdminIdentityClaims = GoogleIdentityClaims;
-export type GuideAdminTokenVerification = GoogleTokenVerification;
-export type GuideAdminTokenVerifier = GoogleTokenVerifier;
+export type GuideAdminIdentityClaims = GoogleServiceIdentityClaims;
+export type GuideAdminTokenVerification = GoogleServiceTokenVerification;
+export type GuideAdminTokenVerifier = GoogleServiceTokenVerifier;
 export type GuideAdminAuthSettings = GoogleServiceIdentitySettings;
 
-export const googleGuideAdminTokenVerifier: GuideAdminTokenVerifier = googleIdTokenVerifier;
+export const googleGuideAdminTokenVerifier: GuideAdminTokenVerifier = googleServiceTokenVerifier;
 
 export function guideAdminJson(body: unknown, status = 200): Response {
-  return internalServiceJson(body, status);
+  return Response.json(body, {
+    status,
+    headers: {
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
+    },
+  });
 }
 
 export async function verifyGuideAdminServiceIdentity(
@@ -36,8 +40,12 @@ export async function verifyGuideAdminServiceIdentity(
   settings: GuideAdminAuthSettings,
   verifier: GuideAdminTokenVerifier = googleGuideAdminTokenVerifier,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly response: Response }> {
-  const identity = await verifyGoogleServiceIdentity(request, settings, verifier);
-  return identity.ok ? { ok: true } : { ok: false, response: serviceIdentityFailure(identity.kind) };
+  const verified = await verifyGoogleServiceIdentity(request, settings, verifier);
+  if (verified.ok) return { ok: true };
+  return {
+    ok: false,
+    response: guideAdminJson({ error: verified.kind === "outage" ? "identity_verification_unavailable" : "invalid_identity" }, verified.kind === "outage" ? 503 : 401),
+  };
 }
 
 export async function loadGuideAdmin(

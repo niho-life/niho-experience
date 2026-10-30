@@ -23,6 +23,10 @@ export async function syntheticGyg() {
     logicalStateTransitions: 0,
     uiActions: 0,
     requestBodies: [],
+    bookings: [],
+    reservationStatus: 200,
+    reservationRequests: [],
+    unexpectedWrites: 0,
   };
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -31,6 +35,20 @@ export async function syntheticGyg() {
     }
     if (url.pathname === "/company-profile/company-details" && request.method === "GET") {
       response.writeHead(200, { "content-type": "text/html" }); response.end(`<p><span>Supplier ID:</span> ${state.accountId}</p>`); return;
+    }
+    if (url.pathname === "/bookings" && request.method === "GET") {
+      // The synthetic supplier app sends a side mutation first, then its own
+      // bookings read carrying the session headers the reader must reuse.
+      response.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" });
+      response.end(`<!doctype html><html><body><h1>Bookings</h1><script>
+        (async () => {
+          const post = (headers, payload) => fetch('/graphql', { method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload) }).catch(() => null);
+          await post({}, { operationName: 'SyntheticMarkSeen', query: 'mutation SyntheticMarkSeen { markSeen { ok } }', variables: {} });
+          await post({ authorization: 'Bearer synthetic-session-token', 'x-synthetic-client': 'supplier-portal' },
+            { operationName: 'SyntheticBookingsList', query: 'query SyntheticBookingsList { bookings { id } }', variables: {} });
+        })();
+      </script></body></html>`); return;
     }
     if (url.pathname === "/manage/availability" && request.method === "GET") {
       const checked = state.blocked ? "checked" : "";
@@ -56,6 +74,20 @@ export async function syntheticGyg() {
     if (url.pathname === "/graphql" && request.method === "POST") {
       let raw = ""; for await (const chunk of request) raw += chunk;
       const body = JSON.parse(raw); state.requestBodies.push(body);
+      if (body.operationName === "SyntheticBookingsList") {
+        response.writeHead(200, { "content-type": "application/json" }); response.end('{"data":{"bookings":[]}}'); return;
+      }
+      if (body.operationName === "NihoReservationWindowRead") {
+        const input = body.variables?.input ?? {};
+        state.reservationRequests.push({ authorization: request.headers.authorization ?? null, client: request.headers["x-synthetic-client"] ?? null, input });
+        if (state.reservationStatus !== 200 || request.headers.authorization !== "Bearer synthetic-session-token") {
+          response.writeHead(state.reservationStatus === 200 ? 401 : state.reservationStatus); response.end(); return;
+        }
+        const items = state.bookings.slice(input.offset, input.offset + input.limit);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: { bookings: { items, pagination: { totalItems: state.bookings.length } } } })); return;
+      }
+      if (body.operationName === "SyntheticMarkSeen") state.unexpectedWrites += 1;
       if (body.operationName === "SyntheticRead") {
         response.writeHead(200, { "content-type": "application/json" }); response.end('{"data":{"ok":true}}'); return;
       }

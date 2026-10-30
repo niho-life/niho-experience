@@ -11,6 +11,8 @@ export const ADAPTER_REGISTRY = Object.freeze({
   Jalan: Object.freeze({ site: "Jalan", adapter: "jalan-browser", adapterVersion: "1", profileNamespace: "jalan" }),
 });
 export const CONNECTION_MODE = "BROWSER";
+// Reservation-window readers are opt-in per adapter key; the default is none.
+export const RESERVATION_READER_KEYS = Object.freeze(["GetYourGuide/gyg-browser@1"]);
 export const GOOGLE_DELIVERY_TARGET = Object.freeze({
   site: "Airbnb",
   adapter: "airbnb-google-busy",

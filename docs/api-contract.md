@@ -150,6 +150,7 @@
 - 予約の送信：本文を画面内でそのまま確認してから1件ずつ送る。結果不明時は自動再送せず、最新詳細の送信履歴を読み直す。承認・辞退は確認の直前に最新詳細を読み、金額と結果を示す。取消・返金は専用の最新snapshot・確認UIを備えるまでこのBFFでは公開しない。
 - 失敗の本文：閉じた `ExperienceHostErrorResponse`。`error.code` と `error.details.reason` は enum で、`details` は理由ごとに決まった項目の組（oneOf）。400 以外は `supportId` を持つ。
 - 版の確かめ方：体験ページの保存と公開は header `x-niho-page-updated-at`（違えば 409 `PAGE_UPDATED`）、ページの集合場所は本文の `expectedUpdatedAt`（違えば 409 `PROVIDER_PAGE_CONFLICT`）。ページの集合場所を保存するとページの版が進むので、続く保存はその応答の `updatedAt` を使う。
+- 体験の編集の BFF（#89）：`/host/api/provider-pages/{providerId}/{pageId}` に、`/meeting-point`（GET・PUT。本文は契約の oneOf を ajv で確かめ、版の形も見る）と `/listing`（GET・PUT `{consentVersion}`・DELETE。NIHO は OWNER 以外に 404）を足した。どれも同一 origin の変更だけを通し、NIHO の失敗は `{ error: reason }` と同じ status で返す。画面は保存（本文 PATCH → 集合場所 PUT）と掲載の操作を分け、結果が分からない要求は再送しない。既定の集合案内（`/meeting-point`）は設定の server action が送る。
 - 写真の流れ：
   1. サーバーが `createExperienceProviderUploadPolicy` で署名つき POST を受け取り、`toExperienceProviderPhotoUploadForm` でブラウザへ渡す。
   2. ブラウザは fields を全部入れ、最後に `file` を足して GCS へ直接送る。

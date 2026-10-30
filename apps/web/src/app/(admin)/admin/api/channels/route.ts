@@ -1,10 +1,11 @@
-import type { ChannelCapabilities, ChannelListingInput, ExternalAccountInput } from "@niho-experience/experience-store";
+import type { ChannelCapabilities, ChannelListingInput, ChannelRuntimeOverview, ExternalAccountInput } from "@niho-experience/experience-store";
 import { adminMutationAllowed, loadAdminHttpSession } from "@/lib/admin/server";
 import { boundedObject, channelFailure, channelJson, channelManagerEnabled, exactKeys } from "@/lib/experience/channel-runtime";
 import { channelRuntime } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INCIDENT_ID = /^[1-9][0-9]{0,17}$/;
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -54,6 +55,40 @@ function listingDto(value: Awaited<ReturnType<NonNullable<ReturnType<typeof chan
   const { id, providerId, accountId, productId, externalProductId, externalOptionId, timeZone, adapter, adapterVersion, connectionMode, capabilities, active, mappingVersion, createdAtUtc, updatedAtUtc } = value;
   return { id, providerId, accountId, productId, externalProductId, ...(externalOptionId === undefined ? {} : { externalOptionId }),
     timeZone, adapter, adapterVersion, connectionMode, capabilities, active, mappingVersion, createdAtUtc, updatedAtUtc };
+}
+
+/** Explicit allowlist: worker credentials, private profile refs, and external account IDs never reach the browser. */
+function runtimeOverviewDto(value: ChannelRuntimeOverview) {
+  return {
+    providerId: value.providerId, generatedAtUtc: value.generatedAtUtc,
+    ...(value.watchdogLastRunAtUtc === undefined ? {} : { watchdogLastRunAtUtc: value.watchdogLastRunAtUtc }),
+    watchdogStale: value.watchdogStale, openHold: value.openHold, unclosedOccurrences: value.unclosedOccurrences,
+    workers: value.workers.map(({ id, displayName, lastHeartbeatAtUtc, health, openHold, openHoldSinceUtc, assignedAccounts }) => ({
+      id, displayName, ...(lastHeartbeatAtUtc === undefined ? {} : { lastHeartbeatAtUtc }), health, openHold,
+      ...(openHoldSinceUtc === undefined ? {} : { openHoldSinceUtc }), assignedAccounts,
+    })),
+    accounts: value.accounts.map(({ id, site, displayName, active, version, quarantineReason, quarantinedAtUtc, sync, reservationReads, listings }) => ({
+      id, site, displayName, active, version,
+      ...(quarantineReason === undefined ? {} : { quarantineReason }), ...(quarantinedAtUtc === undefined ? {} : { quarantinedAtUtc }),
+      sync: {
+        closePending: sync.closePending, openPending: sync.openPending, overdue: sync.overdue, heldOpen: sync.heldOpen,
+        ...(sync.oldestChangedAtUtc === undefined ? {} : { oldestChangedAtUtc: sync.oldestChangedAtUtc }),
+      },
+      reservationReads: {
+        listings: reservationReads.listings, halted: reservationReads.halted,
+        ...(reservationReads.lastSuccessAtUtc === undefined ? {} : { lastSuccessAtUtc: reservationReads.lastSuccessAtUtc }),
+        ...(reservationReads.nextDueAtUtc === undefined ? {} : { nextDueAtUtc: reservationReads.nextDueAtUtc }),
+        ...(reservationReads.freshUntilUtc === undefined ? {} : { freshUntilUtc: reservationReads.freshUntilUtc }),
+      },
+      listings: listings.map(({ listingId, productTitle, closePending, openPending, overdue, reservationReads: reads, readHalted, readLastError }) => ({
+        listingId, productTitle, closePending, openPending, overdue, reservationReads: reads, readHalted,
+        ...(readLastError === undefined ? {} : { readLastError }),
+      })),
+    })),
+    incidents: value.incidents.map(({ id, kind, subjectType, subjectId, openedAtUtc, escalated, acknowledged, assignedToMe, detail }) => ({
+      id, kind, subjectType, subjectId, openedAtUtc, escalated, acknowledged, assignedToMe, detail,
+    })),
+  };
 }
 
 export async function POST(request: Request) {
@@ -131,6 +166,25 @@ export async function POST(request: Request) {
     if (body.action === "recover" && exactKeys(body, ["action", "commandId", "accountId", "stopConfirmed"])
       && typeof body.accountId === "string" && body.stopConfirmed === true && command(body)) {
       return channelJson(await runtime.recoverQuarantinedLease(actor, body.accountId, true, command(body)!));
+    }
+    if (body.action === "runtimeOverview" && exactKeys(body, ["action", "providerId"]) && typeof body.providerId === "string") {
+      return channelJson({ overview: runtimeOverviewDto(await runtime.runtimeOverview(actor, body.providerId)) });
+    }
+    if (body.action === "pauseAccount" && exactKeys(body, ["action", "commandId", "accountId", "expectedVersion"])
+      && typeof body.accountId === "string" && Number.isSafeInteger(body.expectedVersion) && (body.expectedVersion as number) >= 1 && command(body)) {
+      return channelJson(await runtime.pauseAccount(actor, body.accountId, body.expectedVersion as number, command(body)!));
+    }
+    if (body.action === "confirmReauth" && exactKeys(body, ["action", "commandId", "accountId", "stopConfirmed", "reauthConfirmed"])
+      && typeof body.accountId === "string" && body.stopConfirmed === true && body.reauthConfirmed === true && command(body)) {
+      return channelJson(await runtime.confirmReauth(actor, body.accountId, true, true, command(body)!));
+    }
+    if (body.action === "retryReservationReads" && exactKeys(body, ["action", "commandId", "listingId"])
+      && typeof body.listingId === "string" && command(body)) {
+      return channelJson(await runtime.retryReservationReads(actor, body.listingId, command(body)!));
+    }
+    if (body.action === "acknowledgeIncident" && exactKeys(body, ["action", "commandId", "incidentId"])
+      && typeof body.incidentId === "string" && INCIDENT_ID.test(body.incidentId) && command(body)) {
+      return channelJson(await runtime.acknowledgeIncident(actor, body.incidentId, command(body)!));
     }
     return channelJson({ error: "invalid_input" }, 400);
   } catch (error) {
