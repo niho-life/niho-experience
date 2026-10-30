@@ -5,7 +5,7 @@ import { lockProviderInventory } from "./inventory.ts";
 import type { ChannelRuntime, GoogleChannelDeliveryContext, WorkerIdentity } from "./channels.ts";
 
 export type GoogleChannelDeliveryPhase = "DISPATCHING" | "GOOGLE_VERIFIED" | "UNCERTAIN" | "NOT_MATCHED" | "STOPPED";
-export type GoogleChannelDeliveryOperation = "dispatch" | "reconcile";
+export type GoogleChannelDeliveryOperation = "dispatch" | "reconcile" | "observe";
 
 export interface GoogleChannelDeliveryRecord {
   readonly deliveryId: string;
@@ -74,7 +74,7 @@ function integer(value: unknown): number {
   return result;
 }
 function iso(value: unknown): string {
-  const parsed = new Date(String(value));
+  const parsed = value instanceof Date ? value : new Date(String(value));
   if (!Number.isFinite(parsed.getTime())) throw new StoreConflictError("Stored Google delivery time is invalid.");
   return parsed.toISOString();
 }
@@ -152,16 +152,19 @@ export class GoogleChannelDeliveryRepository {
     const row = result.rows[0];
     const now = new Date().toISOString();
     const dispatch = operation === "dispatch";
+    const observe = operation === "observe";
     if (!row || row.status !== "LEASED" || row.leased_worker_id !== identity.workerId || typeof row.lease_digest !== "string"
       || !secureDigestMatch(row.lease_digest, leaseToken) || row.purpose !== "AVAILABILITY" || row.site !== "Airbnb"
       || row.target_site !== "Airbnb" || row.connection_mode !== "GOOGLE" || row.target_connection_mode !== "GOOGLE"
       || row.adapter !== "airbnb-google-busy" || row.target_adapter !== "airbnb-google-busy"
       || row.adapter_version !== "1" || row.target_adapter_version !== "1"
-      || (dispatch ? (row.action !== "SET_OPEN" && row.action !== "SET_CLOSED") : row.action !== "OBSERVE")
+      || (dispatch
+        ? (row.action !== "SET_OPEN" && row.action !== "SET_CLOSED")
+        : observe ? !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(String(row.action)) : row.action !== "OBSERVE")
       || row.account_active !== true || row.listing_active !== true || row.revoked_at !== null
       || row.product_status !== "PUBLISHED"
-      || (row.action === "SET_OPEN" ? row.can_open : row.action === "SET_CLOSED" ? row.can_close : row.can_observe) !== true
-      || (dispatch && row.quarantined_at !== null)
+      || (observe ? row.can_observe : row.action === "SET_OPEN" ? row.can_open : row.action === "SET_CLOSED" ? row.can_close : row.can_observe) !== true
+      || ((dispatch || observe) && row.quarantined_at !== null)
       || (row.delegated_until !== null && new Date(String(row.delegated_until)).toISOString() <= now)
       || new Date(String(row.lease_expires_at)).toISOString() <= now || new Date(String(row.job_deadline_at)).toISOString() <= now
       || integer(row.lease_epoch) !== context.leaseEpoch || integer(row.lease_assignment_version) !== context.assignmentVersion
@@ -200,6 +203,18 @@ export class GoogleChannelDeliveryRepository {
     }
   }
 
+  #assertCurrentTarget(delivery: DeliveryRow, context: GoogleChannelDeliveryContext): void {
+    const target = storedTarget(delivery);
+    const expectedAction = context.desiredState === "OPEN" ? "SET_OPEN" : "SET_CLOSED";
+    if (target.providerId !== context.providerId || target.listingId !== context.listingId
+      || target.occurrenceId !== context.occurrenceId || target.action !== expectedAction
+      || target.desiredState !== context.desiredState || target.desiredVersion !== context.desiredVersion
+      || target.mappingVersion !== context.mappingVersion || target.sourceStartAtUtc !== context.sourceStartAtUtc
+      || target.sourceEndAtUtc !== context.sourceEndAtUtc) {
+      throw new StoreConflictError("Stored Google target no longer matches the current intent.");
+    }
+  }
+
   #snapshot(
     delivery: DeliveryRow,
     current: CurrentRow,
@@ -209,7 +224,7 @@ export class GoogleChannelDeliveryRepository {
   ): GoogleChannelDeliverySecretSnapshot {
     return {
       record: record(delivery), context, storedTarget: storedTarget(delivery),
-      targetAuthority: operation === "dispatch" ? "CURRENT_JOB" : "STORED_JOURNAL_ONLY",
+      targetAuthority: operation === "reconcile" ? "STORED_JOURNAL_ONLY" : "CURRENT_JOB",
       operation, operationNonce: String(delivery.operation_nonce), calendarId: current.opaque_calendar_id,
       connectionGeneration: integer(current.binding_connection_generation), encryptedRefreshToken: current.encrypted_refresh_token,
       grantedScopes: current.granted_scopes, canDispatch,
@@ -295,13 +310,92 @@ export class GoogleChannelDeliveryRepository {
         const updated = await client.query<DeliveryRow>(
           `UPDATE google_channel_deliveries SET operation_nonce=$2::uuid,operation_epoch=operation_epoch+1,
              operation_kind='RECONCILE',operation_job_id=$3::uuid,operation_worker_id=$4,
-             operation_lease_epoch=$5,operation_assignment_version=$6,updated_at=clock_timestamp()
+             operation_lease_epoch=$5,operation_assignment_version=$6,operation_verified_at=NULL,updated_at=clock_timestamp()
            WHERE id=$1::uuid AND phase IN ('DISPATCHING','UNCERTAIN') RETURNING *`,
           [delivery.id, operationNonce, context.jobId, identity.workerId, context.leaseEpoch, context.assignmentVersion],
         );
         delivery = updated.rows[0]!;
       }
       return this.#snapshot(delivery, current, context, "reconcile", false);
+    });
+  }
+
+  async prepareObservation(identity: WorkerIdentity, jobId: string, leaseToken: string): Promise<GoogleChannelDeliverySecretSnapshot> {
+    const context = await this.#runtime.googleDeliveryContext(identity, jobId, leaseToken, "observe");
+    return transaction(this.#pool, async (client) => {
+      const current = await this.#lockAndVerifyCurrent(client, identity, context, leaseToken, "observe");
+      const unresolved = await client.query<DeliveryRow>(
+        `SELECT * FROM google_channel_deliveries
+          WHERE provider_id=$1 AND listing_id=$2 AND occurrence_id=$3
+            AND phase IN ('DISPATCHING','UNCERTAIN') ORDER BY created_at FOR UPDATE`,
+        [context.providerId, context.listingId, context.occurrenceId],
+      );
+      if (unresolved.rows.length !== 0) {
+        throw new StoreConflictError("An unresolved Google write must be reconciled before current observation.");
+      }
+      const expectedAction = context.desiredState === "OPEN" ? "SET_OPEN" : "SET_CLOSED";
+      const eligible = await client.query<DeliveryRow>(
+        `SELECT * FROM google_channel_deliveries
+          WHERE provider_id=$1 AND account_id=$2 AND listing_id=$3 AND occurrence_id=$4
+            AND action=$5 AND desired_state=$6 AND desired_version=$7 AND mapping_version=$8
+            AND source_start_at=$9::timestamptz AND source_end_at=$10::timestamptz
+            AND operation_kind<>'RECONCILE'
+            AND (phase='GOOGLE_VERIFIED'
+              OR (operation_kind='OBSERVE' AND phase IN ('STOPPED','NOT_MATCHED')))
+            AND first_verified_at IS NOT NULL
+          ORDER BY created_at FOR UPDATE`,
+        [context.providerId, context.accountId, context.listingId, context.occurrenceId, expectedAction,
+          context.desiredState, context.desiredVersion, context.mappingVersion,
+          context.sourceStartAtUtc, context.sourceEndAtUtc],
+      );
+      if (eligible.rows.length !== 1) {
+        throw new StoreConflictError(eligible.rows.length === 0
+          ? "No verified Google delivery exists for the current intent."
+          : "Multiple Google delivery journals match the current intent.");
+      }
+      let delivery = eligible.rows[0]!;
+      this.#assertBindingSnapshot(delivery, current, context);
+      this.#assertCurrentTarget(delivery, context);
+
+      const sameCurrentOperation = (delivery.operation_kind === "OBSERVE"
+        || (delivery.operation_kind === "DISPATCH" && delivery.phase === "GOOGLE_VERIFIED"
+          && delivery.operation_verified_at !== null && delivery.operation_verified_at !== undefined))
+        && delivery.operation_job_id === context.jobId && delivery.operation_worker_id === identity.workerId
+        && integer(delivery.operation_lease_epoch) === context.leaseEpoch
+        && integer(delivery.operation_assignment_version) === context.assignmentVersion;
+      if (!sameCurrentOperation) {
+        if (delivery.operation_job_id === context.jobId) {
+          if (integer(delivery.operation_lease_epoch) >= context.leaseEpoch) {
+            throw new StoreConflictError("The prior Google operation lease is still current.");
+          }
+          const stopped = await client.query(
+            `SELECT 1 FROM channel_job_results
+              WHERE job_id=$1::uuid AND worker_id=$2 AND lease_epoch=$3 AND stopped=true LIMIT 1`,
+            [delivery.operation_job_id, delivery.operation_worker_id, delivery.operation_lease_epoch],
+          );
+          if (!stopped.rows[0]) throw new StoreConflictError("The prior Google operation has not confirmed stop.");
+        } else {
+          const stopped = await client.query(
+            "SELECT 1 FROM channel_jobs WHERE id=$1::uuid AND status='FINISHED' FOR SHARE",
+            [delivery.operation_job_id],
+          );
+          if (!stopped.rows[0]) throw new StoreConflictError("The prior Google operation job is still active.");
+        }
+      }
+
+      const operationNonce = randomUUID();
+      const updated = await client.query<DeliveryRow>(
+        `UPDATE google_channel_deliveries SET operation_nonce=$2::uuid,operation_epoch=operation_epoch+1,
+           operation_kind='OBSERVE',operation_job_id=$3::uuid,operation_worker_id=$4,
+           operation_lease_epoch=$5,operation_assignment_version=$6,operation_verified_at=NULL,
+           updated_at=clock_timestamp()
+         WHERE id=$1::uuid AND phase IN ('GOOGLE_VERIFIED','STOPPED','NOT_MATCHED')
+           AND first_verified_at IS NOT NULL RETURNING *`,
+        [delivery.id, operationNonce, context.jobId, identity.workerId, context.leaseEpoch, context.assignmentVersion],
+      );
+      delivery = updated.rows[0]!;
+      if (!delivery) throw new StoreConflictError("Google observation preparation lost its journal fence.");
+      return this.#snapshot(delivery, current, context, "observe", false);
     });
   }
 
@@ -322,12 +416,20 @@ export class GoogleChannelDeliveryRepository {
       || delivery.operation_worker_id !== identity.workerId
       || integer(delivery.operation_lease_epoch) !== context.leaseEpoch
       || integer(delivery.operation_assignment_version) !== context.assignmentVersion
-      || (operation === "dispatch" ? delivery.phase !== "DISPATCHING" : !["DISPATCHING", "UNCERTAIN"].includes(delivery.phase))) {
+      || (operation === "dispatch" ? delivery.phase !== "DISPATCHING"
+        : operation === "reconcile" ? !["DISPATCHING", "UNCERTAIN"].includes(delivery.phase)
+          : !["GOOGLE_VERIFIED", "STOPPED", "NOT_MATCHED"].includes(delivery.phase))) {
       throw new StoreConflictError("Google delivery operation was fenced.");
     }
     this.#assertBindingSnapshot(delivery, current, context);
     if (operation === "dispatch" && delivery.intent_fingerprint !== intentFingerprint(context)) {
       throw new StoreConflictError("Google delivery intent changed.");
+    }
+    if (operation === "observe") {
+      if (delivery.first_verified_at === null || delivery.operation_verified_at !== null) {
+        throw new StoreConflictError("Google observation operation was already completed or is not eligible.");
+      }
+      this.#assertCurrentTarget(delivery, context);
     }
     if (operation === "reconcile") {
       const original = await client.query(
@@ -379,9 +481,14 @@ export class GoogleChannelDeliveryRepository {
         throw new StoreConflictError("Google verification does not match the immutable stored target.");
       }
       const updated = await client.query<DeliveryRow>(
-        `UPDATE google_channel_deliveries SET phase=$2,reason=$3,event_id=$4,event_etag=$5,binding_hash=$6,
+        `WITH stamp AS (SELECT clock_timestamp() AS verified_at)
+         UPDATE google_channel_deliveries SET phase=$2,reason=$3,event_id=$4,event_etag=$5,binding_hash=$6,
            google_mapping_version=$7,google_desired_version=$8,google_start_at=$9,google_end_at=$10,
-           google_desired_state=$11,google_transparency=$12,changed=$13,write_acknowledged=$14,updated_at=clock_timestamp()
+           google_desired_state=$11,google_transparency=$12,changed=$13,write_acknowledged=$14,
+           operation_verified_at=CASE WHEN $2='GOOGLE_VERIFIED' THEN stamp.verified_at ELSE NULL END,
+           first_verified_at=CASE WHEN $2='GOOGLE_VERIFIED' THEN COALESCE(first_verified_at,stamp.verified_at) ELSE first_verified_at END,
+           updated_at=stamp.verified_at
+         FROM stamp
          WHERE id=$1::uuid AND operation_nonce=$15::uuid AND operation_job_id=$16::uuid
            AND operation_worker_id=$17 AND operation_lease_epoch=$18 AND operation_assignment_version=$19
            AND phase=$20 RETURNING *`,

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  enabled: vi.fn(), context: vi.fn(), execute: vi.fn(), pool: { synthetic: true },
+  enabled: vi.fn(), observationEnabled: vi.fn(), context: vi.fn(), execute: vi.fn(), pool: { synthetic: true },
   worker: { workerId: "studio-1", credentialVersion: 3 }, runtime: { synthetic: true },
 }));
 vi.mock("@/lib/experience/channel-runtime", () => ({
   googleChannelDeliveryEnabled: mocks.enabled,
+  googleChannelObservationEnabled: mocks.observationEnabled,
   internalContext: mocks.context,
   boundedObject: async (request: Request) => {
     if (new URL(request.url).search) return Response.json({ error: "invalid_input" }, { status: 400 });
@@ -30,6 +31,7 @@ describe("POST /internal/ota/v1/jobs/:id/google-delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enabled.mockReturnValue(true);
+    mocks.observationEnabled.mockReturnValue(true);
     mocks.context.mockResolvedValue({ worker: mocks.worker, runtime: mocks.runtime });
     mocks.execute.mockResolvedValue({
       deliveryId: "00000000-0000-4000-8000-000000000002", phase: "GOOGLE_VERIFIED", airbnb: "UNVERIFIED",
@@ -50,6 +52,13 @@ describe("POST /internal/ota/v1/jobs/:id/google-delivery", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it("keeps explicit observation default-off without changing dispatch or reconcile", async () => {
+    mocks.observationEnabled.mockReturnValue(false);
+    expect((await POST(request({ leaseToken: "lease", operation: "observe" }), params)).status).toBe(404);
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect((await POST(request({ leaseToken: "lease", operation: "dispatch" }), params)).status).toBe(200);
+  });
+
   it("rejects query strings, extra target input, and invalid operations", async () => {
     for (const [body, query] of [
       [{ leaseToken: "lease", operation: "dispatch" }, "?calendarId=untrusted"],
@@ -66,6 +75,17 @@ describe("POST /internal/ota/v1/jobs/:id/google-delivery", () => {
     expect(response.status).toBe(200);
     expect(mocks.execute).toHaveBeenCalledWith(
       mocks.pool, mocks.runtime, mocks.worker, "00000000-0000-4000-8000-000000000001", "lease", "dispatch",
+    );
+    expect(await response.json()).toEqual({
+      deliveryId: "00000000-0000-4000-8000-000000000002", phase: "GOOGLE_VERIFIED", airbnb: "UNVERIFIED",
+    });
+  });
+
+  it("accepts only leaseToken plus observe and returns the same selected DTO", async () => {
+    const response = await POST(request({ leaseToken: "lease", operation: "observe" }), params);
+    expect(response.status).toBe(200);
+    expect(mocks.execute).toHaveBeenCalledWith(
+      mocks.pool, mocks.runtime, mocks.worker, "00000000-0000-4000-8000-000000000001", "lease", "observe",
     );
     expect(await response.json()).toEqual({
       deliveryId: "00000000-0000-4000-8000-000000000002", phase: "GOOGLE_VERIFIED", airbnb: "UNVERIFIED",

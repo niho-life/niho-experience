@@ -11,6 +11,8 @@ export const channelWorkspacePreviewEnabled = () => config.apiMode === "mock" &&
 export const channelWorkerEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED === "true";
 export const googleChannelDeliveryEnabled = () => channelWorkerEnabled()
   && process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED === "true";
+export const googleChannelObservationEnabled = () => googleChannelDeliveryEnabled()
+  && process.env.EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED === "true";
 /** Cloud Scheduler watchdog. Independent of the worker flag; it never accepts a worker bearer. */
 export const channelWatchdogEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_WATCHDOG_ENABLED === "true";
 
