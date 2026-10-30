@@ -178,6 +178,22 @@ test("Jalan permits observed stock assets without opening navigation, analytics 
   assert.deepEqual(calls, ["continue", "continue", "continue", ...Array(6).fill("abort")]);
 });
 
+test("Jalan permits only bounded stock status/header reads and refuses their mutations", async () => {
+  const guard = createJalanNetworkGuard({ job: jalanJob, getSnapshot: () => null, cloud: {} });
+  const calls = [];
+  const status = "/activityboard/schedule/readOpenStatus/?time=1793324280327&_=1793324280328";
+  const notice = "/stateful/notice/summary?callback=jQuery123_456&_=1793324280328";
+  for (const [path, method] of [[status, "GET"], [notice, "GET"], [status, "POST"], [notice, "POST"],
+    [`${status}&time=1`, "GET"], [status.replace("time=1793324280327", "other=1"), "GET"],
+    [notice.replace("jQuery123_456", "cb()"), "GET"]]) {
+    const r = route(`https://activityboard.jp${path}`, method, undefined, calls);
+    const request = r.request();
+    r.request = () => ({ ...request, resourceType: () => "xhr" });
+    await guard.handle(r);
+  }
+  assert.deepEqual(calls, ["continue", "continue", ...Array(5).fill("abort")]);
+});
+
 test("Jalan accepts observed callback whitespace without accepting another call or executable wrapper", () => {
   const fixture = jalanSummary();
   assert.deepEqual(parseJsonp(` \nsynthetic.callback \t( ${JSON.stringify(fixture)}\n);\n`, "synthetic.callback"), fixture);

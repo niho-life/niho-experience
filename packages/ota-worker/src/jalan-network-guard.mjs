@@ -25,6 +25,20 @@ function isStockAsset(request, url) {
     || (request.resourceType?.() === "stylesheet" && STYLE_PATHS.has(url.pathname));
 }
 
+function isStockBackgroundRead(request, url) {
+  if (url.pathname === "/activityboard/schedule/readOpenStatus/") {
+    return ["xhr", "fetch"].includes(request.resourceType?.())
+      && [...url.searchParams.keys()].every((key) => ["time", "_"].includes(key))
+      && ["time", "_"].every((key) => url.searchParams.getAll(key).length === 1 && /^\d{10,16}$/.test(url.searchParams.get(key)));
+  }
+  // The common header performs this read during stock-page initialization. Its
+  // generic Ajax failure handler otherwise redirects the page to login.
+  return url.pathname === "/stateful/notice/summary"
+    && [...url.searchParams.keys()].every((key) => ["callback", "_"].includes(key))
+    && url.searchParams.getAll("callback").length === 1 && /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(url.searchParams.get("callback"))
+    && url.searchParams.getAll("_").length === 1 && /^\d{10,16}$/.test(url.searchParams.get("_"));
+}
+
 function canonicalCompactDate(value) {
   if (!/^\d{8}$/.test(value)) return false;
   const iso = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
@@ -148,8 +162,9 @@ export function createJalanNetworkGuard({ job, cloud, getSnapshot, assertWriteCo
       const fixedPage = url.pathname === "/activityboard/bookingStockMgt/" && url.searchParams.size === 0;
       const summary = !navigation && validateJalanSummaryUrl(url, job);
       const asset = !navigation && isStockAsset(request, url);
+      const backgroundRead = !navigation && isStockBackgroundRead(request, url);
       if (navigation && !fixedPage) externalNavigationBlocked = true;
-      return fixedPage || summary || asset ? forward(route) : refuse(route);
+      return fixedPage || summary || asset || backgroundRead ? forward(route) : refuse(route);
     }
     if (request.method() !== "POST" || url.search !== "" || url.pathname !== "/stateful/schdl/client/complete") return refuse(route, permit !== null);
     if (request.headers?.()["content-type"]?.split(";")[0] !== "application/json") return refuse(route, true);
