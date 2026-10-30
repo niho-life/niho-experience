@@ -48,7 +48,7 @@ export async function syntheticViator() {
           const stateFor=(date)=>({startDate:${JSON.stringify(state.initialDate)},endDate:${JSON.stringify(state.initialDate)},jumpToDate:date,filteredProducts:[],filteredTourGrades:{},loadDirection:date===${JSON.stringify(state.initialDate)}?"FORWARD":"BIDIRECTIONAL",hasMoreAfter:false,hasMoreBefore:false,perDayPagination:{}});
           async function load(date){const listState=stateFor(date);const data=await (await fetch('/availability/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(listState)})).json();
             const row=data.availabilities[date]?.[0];const grid=document.getElementById('grid');grid.replaceChildren();if(!row)return;
-            const container=document.createElement('div');container.className='synthetic_gridCol_observed';container.innerHTML='<a href="/bookings/search?travelDate='+date+'&filteredTourGrade='+row.productCode+'%7C'+row.tourGradeCode+'">予約を表示</a><span>13:00</span><span class="state">'+(row.availability==='AVAILABLE'?'予約可能':'完売')+'</span>';
+            const container=document.createElement('div');container.className='synthetic_gridCol_observed';container.innerHTML='<a href="/bookings/search?travelDate='+date+'&filteredTourGrade='+row.productCode+'%7C'+row.tourGradeCode+'">予約を表示</a><span>13:00</span><div class="state"><span class="jumpstart_ui__Badge__badge">'+(row.availability==='AVAILABLE'?'予約可能':'完売')+'</span></div>';
             const action=document.createElement('button');action.textContent=row.availability==='AVAILABLE'?'完売':'予約可能';action.onclick=()=>fetch('/availability/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({availabilityKeys:[{productCode:row.productCode,tourGradeCode:row.tourGradeCode,travelDate:date,startTime:'13:00:00'}],availability:row.availability==='AVAILABLE'?'SOLD_OUT':'AVAILABLE',prevAvailability:row.availability,isBulkUpdate:false,availabilityListState:data.availabilityListState})});container.append(action);grid.append(container);}
           load(input.value);
         </script></body></html>`); return;
@@ -103,7 +103,7 @@ export async function syntheticJalan() {
       response.end(`<!doctype html><html><head><meta charset="utf-8"></head><body><header><ul><li>Account<ul><li>\n AirID \n ${state.accountId} \n</li></ul></li></ul></header>
         <input class="experienceDay" style="display:${state.renderDelayMs ? "none" : "block"}" value="${state.initialDate}"><input class="datepicker" style="display:none"><input class="js-groupCfmCapaCnt" style="display:none"><select><option value="${state.productId}" selected>Synthetic plan</option></select><h2>プランID ${state.productId}</h2>
         <div class="ui-datepicker" hidden><a href="#" data-handler="prev">&lt;前</a><a href="#" data-handler="next">次&gt;</a><span class="ui-datepicker-year"></span><span class="ui-datepicker-month"></span><table><tbody id="picker-days"></tbody></table></div>
-        <span id="count">0/14</span><ul id="slots"></ul><select class="js-panel-saleStatus"><option>販売</option><option>売止</option></select>
+        <span id="count" class="panel-select-number">0/14</span><span>12/14</span><ul id="slots"></ul><select class="js-panel-saleStatus"><option>販売</option><option>売止</option></select>
         <button id="complete">一括変更する</button><a href="#" id="refresh">最新の情報に更新</a>
         <script>
           const input=document.querySelector('input');let callbackIndex=0;let selected=false;let currentDate=input.value.replaceAll('-','');

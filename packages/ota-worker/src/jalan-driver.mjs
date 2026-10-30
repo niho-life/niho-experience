@@ -161,7 +161,7 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
       const beforeObservation = await observationFrom(before);
       const desiredOpen = job.desiredState === "OPEN";
       if (before.frontOpenFlg === desiredOpen) return Object.freeze({ changed: false, observation: beforeObservation, responseObserved: true });
-      const selectedCount = page.getByText(/^\d+\/14$/);
+      const selectedCount = page.locator(".panel-select-number");
       if (await selectedCount.count() !== 1 || normalizedText(await selectedCount.innerText()) !== "0/14") throw new ContractError("DOM_DRIFT");
       const { link } = await findSlot(before);
       await verifyAccount();

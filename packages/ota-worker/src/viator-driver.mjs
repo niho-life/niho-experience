@@ -76,8 +76,9 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
       const row = rows.first();
       if (await row.getByText(job.localDateTime.slice(11, 16), { exact: true }).count() !== 1) throw new ContractError("TARGET_MISMATCH");
       const label = current.availability === "AVAILABLE" ? "予約可能" : "完売";
-      const stateLabels = row.getByText(label, { exact: true }).locator("xpath=self::*[not(ancestor-or-self::button)]");
-      if (await stateLabels.count() !== 1) throw new ContractError("DOM_DRIFT");
+      const badge = row.locator("span.jumpstart_ui__Badge__badge");
+      await badge.waitFor({ state: "visible", timeout: 5_000 }).catch(() => { throw new ContractError("DOM_DRIFT"); });
+      if (await badge.count() !== 1 || (await badge.innerText()).trim() !== label) throw new ContractError("DOM_DRIFT");
       return row;
     }
 
