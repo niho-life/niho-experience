@@ -36,8 +36,9 @@ Issue #295 では、`packages/ota-worker` に Airbnb 体験カレンダーを読
 
 - browserが通常画面操作で発生させたGETだけを使い、既知requestの合成・replayや別transportへのfallbackを行わない。
 - Airbnb本体は `https://www.airbnb.jp`、assetは `https://a0.muscache.com` の完全一致originだけである。suffix一致や追加domainを許可しない。
-- `/api/v3/<operation>/<64文字lowercase hash>` は公開済みのpinned read operationだけを許可する。queryは `operationName, locale, currency, variables, extensions` の5個ちょうどで、重複・追加・hash不一致を拒否する。
+- `/api/v3/<operation>/<64文字lowercase hash>` は公開済みのpinned read operationだけを許可する。primary queryは `operationName, locale, currency, variables, extensions` の5個ちょうどで、補助queryだけは通常UIの空variables省略も受ける。重複・追加・hash不一致を拒否する。
 - profileとcalendarのprimary queryはvariablesも完全固定する。補助queryはpinned operation/hashと有界JSONに限定する。
+- 実際のprofile表示で発生する `POST /api/v2/client_configs` と `GET /api/v2/get_travel_guides_by_user` は、本人・対象回の証拠に不要なため送信せず破棄する。これらの破棄だけでは必要な読取りを停止しない。別path・methodへこの例外を広げない。
 - POST / PUT / PATCH / DELETE、mutation名、unknown API、websocket、subscription、service worker、popup、downloadを許可しない。接続前の`routeWebSocket` interceptionが使えないbrowserはread前に拒否する。userinfoまたはfragmentを持つrequestはforwardしない。telemetryは送信せず、必要なUI readを壊さない範囲でnon-fatal abortできる。未知の業務requestはfail closedにする。
 - responseはHTTP 200、JSON content type、最大2 MiB、calendar最大512 rowsに制限する。GraphQL errorやpartial responseを受理しない。
 - observerには入力・保存・`applyDesiredState` がなく、guardの`writes`は常に0である。

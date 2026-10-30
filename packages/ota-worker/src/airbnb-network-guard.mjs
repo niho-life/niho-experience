@@ -65,6 +65,16 @@ export function createAirbnbNetworkGuard({ job, supplierOrigin = AIRBNB_ORIGIN, 
     if (url.username || url.password || url.hash) return refuse(route, { fatal: true });
     const method = request.method();
     const navigation = request.isNavigationRequest?.() === true;
+    // The profile UI can render the required self-owner query without these
+    // unrelated requests. Abort them, without allowing a business operation.
+    const ignoredProfileRequest = url.origin === supplierOrigin && !navigation && !request.redirectedFrom?.()
+      && sourcePage(request, job, supplierOrigin)
+      && ((method === "POST" && url.pathname === "/api/v2/client_configs")
+        || (method === "GET" && url.pathname === "/api/v2/get_travel_guides_by_user"));
+    if (ignoredProfileRequest) {
+      if (method !== "GET") writeAttempts += 1;
+      return refuse(route);
+    }
     if (method !== "GET") {
       writeAttempts += 1;
       const nonFatalTelemetry = TELEMETRY.test(`${url.hostname}${url.pathname}`);

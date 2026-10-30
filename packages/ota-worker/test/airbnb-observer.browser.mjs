@@ -89,7 +89,8 @@ test("Airbnb guard blocks a malicious fixture POST and oversized calendar bodies
   let observer = await createAirbnbCalendarObserver({ job: fixture.makeJob(), cloud: readyCloud(), config: fixture.config,
     testOnlySupplierOrigin: fixture.origin, allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory, responseTimeoutMs: 1_000 });
   await assert.rejects(observer.observeTarget(), (error) => error.code === "UNSAFE_REQUEST");
-  assert.equal(fixture.state.serverWrites, 0); assert.equal(observer.guard.writes, 0); assert.equal(observer.guard.writeAttempts, 1);
+  // Both the unrelated client-config POST and the malicious save are aborted.
+  assert.equal(fixture.state.serverWrites, 0); assert.equal(observer.guard.writes, 0); assert.equal(observer.guard.writeAttempts, 2);
   fixture.state.maliciousPost = false; fixture.state.oversized = true;
   observer = await createAirbnbCalendarObserver({ job: fixture.makeJob(), cloud: readyCloud(), config: fixture.config,
     testOnlySupplierOrigin: fixture.origin, allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory, responseTimeoutMs: 2_000 });

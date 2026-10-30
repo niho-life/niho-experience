@@ -101,17 +101,20 @@ function validateProfileVariables(value, job) {
 }
 
 export function parseAirbnbApiUrl(url, job) {
-  if (!(url instanceof URL) || url.searchParams.size !== API_KEYS.length
-    || !API_KEYS.every((key) => url.searchParams.getAll(key).length === 1)) fail("UNSAFE_REQUEST");
+  if (!(url instanceof URL)) fail("UNSAFE_REQUEST");
   const path = /^\/api\/v3\/([A-Za-z][A-Za-z0-9_]*)\/([a-f0-9]{64})$/.exec(url.pathname);
   if (!path) fail("UNSAFE_REQUEST");
   const [, operationName, pathHash] = path;
+  const primary = operationName === AIRBNB_PROFILE_OPERATION || operationName === AIRBNB_CALENDAR_OPERATION;
+  const requiredKeys = primary ? API_KEYS : API_KEYS.filter((key) => key !== "variables");
+  if (!requiredKeys.every((key) => url.searchParams.getAll(key).length === 1)
+    || [...url.searchParams.keys()].some((key) => !API_KEYS.includes(key) || url.searchParams.getAll(key).length !== 1)) fail("UNSAFE_REQUEST");
   if (url.searchParams.get("operationName") !== operationName || AIRBNB_READ_HASHES[operationName] !== pathHash
     || url.searchParams.get("locale") !== "ja" || url.searchParams.get("currency") !== "JPY") fail("UNSAFE_REQUEST");
   const extensions = parseJsonParameter(url.searchParams.get("extensions"));
   if (!exactKeys(extensions, ["persistedQuery"]) || !exactKeys(extensions.persistedQuery, ["version", "sha256Hash"])
     || extensions.persistedQuery.version !== 1 || extensions.persistedQuery.sha256Hash !== pathHash) fail("UNSAFE_REQUEST");
-  const variables = parseJsonParameter(url.searchParams.get("variables"));
+  const variables = url.searchParams.has("variables") ? parseJsonParameter(url.searchParams.get("variables")) : Object.freeze({});
   const selectedVariables = operationName === AIRBNB_PROFILE_OPERATION
     ? validateProfileVariables(variables, job)
     : operationName === AIRBNB_CALENDAR_OPERATION

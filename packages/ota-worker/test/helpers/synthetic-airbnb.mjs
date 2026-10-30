@@ -32,7 +32,11 @@ export async function syntheticAirbnb() {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       if (!state.authenticated) { response.end("<main><h1>ログイン</h1></main>"); return; }
       const profileVariables = { userId: opaqueAirbnbId("User", state.accountId), mockIdentifier: null, userProfileType: "HOST", isEditMode: true };
+      const auxiliary = new URL(apiPath("IsHostQuery", {}), "http://fixture.invalid"); auxiliary.searchParams.delete("variables");
       response.end(`<!doctype html><html><body><main><h1>自己紹介</h1><button id="edit">編集</button></main><script>
+        fetch(${JSON.stringify(auxiliary.pathname + auxiliary.search)}).then(response=>response.json()).catch(()=>{});
+        fetch('/api/v2/client_configs',{method:'POST',body:'{}'}).catch(()=>{});
+        fetch('/api/v2/get_travel_guides_by_user?user_id=synthetic').catch(()=>{});
         document.getElementById('edit').onclick=()=>{
           history.pushState({},'', '/users/profile/about?context=host&editMode=true');
           fetch(${JSON.stringify(apiPath("UserProfileQuery", profileVariables))}).then(response=>response.json()).catch(()=>{});
@@ -47,6 +51,9 @@ export async function syntheticAirbnb() {
       </script></body></html>`); return;
     }
     const match = /^\/api\/v3\/([A-Za-z][A-Za-z0-9_]*)\/([a-f0-9]{64})$/.exec(url.pathname);
+    if (match?.[1] === "IsHostQuery") {
+      response.writeHead(200, { "content-type": "application/json" }); response.end('{"data":{"isHost":true}}'); return;
+    }
     if (match?.[1] === "UserProfileQuery") {
       state.profileReads += 1;
       const reported = state.reportedAccountId ?? state.accountId;

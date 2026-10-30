@@ -150,6 +150,18 @@ test("Airbnb protocol preserves large decimal identities and requires canonical 
   }
 });
 
+test("Airbnb auxiliary queries may omit variables, while primary queries cannot", () => {
+  const job = makeJob();
+  const auxiliary = new URL(apiUrl("IsHostQuery", {})); auxiliary.searchParams.delete("variables");
+  assert.deepEqual(parseAirbnbApiUrl(auxiliary, job).variables, {});
+  for (const operation of [AIRBNB_PROFILE_OPERATION, AIRBNB_CALENDAR_OPERATION]) {
+    const primary = new URL(apiUrl(operation, {})); primary.searchParams.delete("variables");
+    assert.throws(() => parseAirbnbApiUrl(primary, job), (error) => error.code === "UNSAFE_REQUEST");
+  }
+  auxiliary.searchParams.append("locale", "ja");
+  assert.throws(() => parseAirbnbApiUrl(auxiliary, job), (error) => error.code === "UNSAFE_REQUEST");
+});
+
 test("Airbnb profile proof accepts only the requested User and viewer-owned ContextualUser", () => {
   const job = makeJob(); const id = opaqueAirbnbId("User", accountId);
   const value = { data: { node: { __typename: "User", id, owner: { __typename: "ContextualUser", id: "different-owner-id", isViewerProfileOwner: true } } } };
@@ -258,6 +270,17 @@ test("Airbnb guard blocks redirects, off-target navigation, hash drift and extra
   assert.deepEqual(calls, ["abort", "abort", "abort", "abort", "abort", "abort", "abort"]);
   assert.equal(guard.externalNavigationBlocked, true); assert.equal(guard.writes, 0);
   guard.noteWebSocket(); assert.equal(guard.webSockets, 1); assert.equal(guard.fatalRead.code, "UNSAFE_REQUEST");
+});
+
+test("Airbnb aborts unrelated observed profile requests without authorizing them or stopping the required read", async () => {
+  const origin = "http://127.0.0.1:4321"; const calls = [];
+  const guard = createAirbnbNetworkGuard({ job: makeJob(), supplierOrigin: origin });
+  await guard.handle(route(`${origin}/api/v2/client_configs?locale=ja&currency=JPY`, { method: "POST", type: "fetch" }, calls));
+  await guard.handle(route(`${origin}/api/v2/get_travel_guides_by_user?user_id=7`, { type: "fetch" }, calls));
+  assert.deepEqual(calls, ["abort", "abort"]);
+  guard.assertSafe(); assert.equal(guard.writes, 0); assert.equal(guard.allowed, 0);
+  await guard.handle(route(`${origin}/api/v2/client_configs/save`, { method: "POST", type: "fetch" }, calls));
+  assert.throws(() => guard.assertSafe(), (error) => error.code === "UNSAFE_REQUEST");
 });
 
 test("Airbnb config uses only private profiles/airbnb/<positive decimal> and never enables restore", async () => {
