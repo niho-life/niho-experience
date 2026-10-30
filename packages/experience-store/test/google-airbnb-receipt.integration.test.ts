@@ -6,6 +6,7 @@ import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { ChannelRuntime } from "../src/channels.ts";
 import { GoogleChannelDeliveryRepository } from "../src/google-channel-delivery.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { StoreConflictError } from "../src/errors.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -112,6 +113,30 @@ async function cleanup(value: Fixture) {
 }
 
 describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl === undefined }, () => {
+  for (const scenario of [
+    { name: "retains verification milliseconds after a same-second lease start", desired: "CLOSED", leaseAt: "2099-01-01T00:00:00.100Z", observedAt: "2099-01-01T00:00:00.700Z", accepted: true },
+    { name: "rejects a same-second observation preceding Google verification", desired: "OPEN", leaseAt: "2098-12-31T23:59:59.900Z", observedAt: "2099-01-01T00:00:00.400Z", accepted: false },
+  ] as const) it(scenario.name, async () => {
+    const value = await fixture(scenario.desired);
+    try {
+      const googleAt = "2099-01-01T00:00:00.500Z";
+      await value.pool.query("UPDATE channel_jobs SET lease_started_at=$2 WHERE id=$1::uuid", [value.claimed.id, scenario.leaseAt]);
+      await value.pool.query("UPDATE google_channel_deliveries SET updated_at=$2 WHERE id=$1::uuid", [value.delivery.deliveryId, googleAt]);
+      value.setNow(new Date("2099-01-01T00:00:00.900Z"));
+      const selected = (await value.pool.query("SELECT updated_at FROM google_channel_deliveries WHERE id=$1::uuid", [value.delivery.deliveryId])).rows[0];
+      assert.ok(selected.updated_at instanceof Date, "exercise the actual pg timestamptz Date representation");
+      const input = value.result(command(200), { observedAtUtc: scenario.observedAt });
+      if (scenario.accepted) {
+        assert.equal((await value.runtime.submitResult(value.worker, value.claimed.id, input)).acceptedAsCurrent, true);
+        const stored = (await value.pool.query("SELECT google_airbnb_verified_at FROM channel_job_results WHERE result_id=$1::uuid", [input.resultId])).rows[0];
+        assert.equal(stored.google_airbnb_verified_at.toISOString(), googleAt);
+      } else {
+        await assert.rejects(() => value.runtime.submitResult(value.worker, value.claimed.id, input), StoreConflictError);
+        assert.equal((await value.pool.query("SELECT count(*)::int AS count FROM channel_job_results WHERE result_id=$1::uuid", [input.resultId])).rows[0].count, 0);
+      }
+    } finally { await cleanup(value); }
+  });
+
   it("accepts fresh exact-slot OPEN and CLOSED observations, persists the selected proof, and replays immutably", async () => {
     for (const desiredState of ["OPEN", "CLOSED"] as const) {
       const value = await fixture(desiredState);

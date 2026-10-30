@@ -42,7 +42,7 @@ function integer(value: unknown): number {
   return parsed;
 }
 function iso(value: unknown): string {
-  const parsed = new Date(String(value));
+  const parsed = value instanceof Date ? value : new Date(String(value));
   if (!Number.isFinite(parsed.getTime())) throw new StoreConflictError("Google Airbnb proof is stale.");
   return parsed.toISOString();
 }
