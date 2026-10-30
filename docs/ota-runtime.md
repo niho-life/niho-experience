@@ -1,12 +1,13 @@
 # OTA channel runtime
 
-対象: #194、#196、#197、#198、#234、#235、#236。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)、外部予約取込のserver契約は[OTA外部予約台帳](ota-external-reservations.md)に記録する。Host の開催枠詳細はこの read model を表示する。実OTA予約readerとGoogleへの枠制御出力は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
+対象: #194、#196、#197、#198、#234、#235、#236、#240。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)、外部予約取込のserver契約は[OTA外部予約台帳](ota-external-reservations.md)に記録する。Host の開催枠詳細はこの read model を表示する。実OTA予約readerとGoogleへの枠制御出力は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
 
 ## 既定で閉じるゲート
 
 - Admin API は `apiMode=http` かつ `EXPERIENCE_CHANNEL_MANAGER_ENABLED=true` の場合だけ開く。NIHO がその時点で検証した Admin HTTP session が必要で、mock/preview cookie は利用できない。
 - worker API は別の `EXPERIENCE_CHANNEL_RUNTIME_ENABLED=true` が必要である。人間用 cookie は認可に使わず、worker bearer を `Authorization` header だけで受け取る。
 - DB 未設定は `503` とし、HTTP 失敗から mock へ切り替えない。両 flag の既定値は false である。
+- 監視 endpoint は別の `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true` と、audience・service account email の両方が揃う場合だけ開く（[監視・heartbeat・復旧](#監視heartbeat復旧)）。
 - capability は account/listing 作成だけでは有効にならない。配備設定 `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` に明示された `site/adapter@version` の boolean だけを Admin が保存でき、claim/preflight/result でも同じ配備 allowlist を再確認する。未設定・不正設定は全 capability false となり、live job は claim されない。
 - groups/resources の共有在庫基盤は [OTA共有在庫](ota-inventory.md) に実装したが、外部予約取込みと実OTAでの結合受入は未完了なので、配備 flag は引き続き有効にしない。
 
@@ -70,7 +71,56 @@ preflight は worker、assignment、lease/deadline、account active/delegation/r
 
 Admin の `/admin/api/channels` は action allowlist だけを受け、任意 query を中継しない。Host の `/host/calendar/channels?providerId=...` は確立済みの `HostActor` を使い、`listCalendarProductsForActor` が許可した商品だけについて occurrence/site ごとの desired、observed、label、last verified、coarse error を返す。member は provider 内の許可範囲、product operator は自分の商品だけであり、人数・予約者・provider-wide の Google 情報を加えない。外部 account ID、worker、credential、private profile は返さない。
 
-`/host/calendar` はタブが表示中の間だけ20秒間隔でこの read model を読み、非表示時は停止する。provider・週・pollの切替では `AbortController` と sequence を併用し、古い応答を適用しない。UI は `label=SYNCED` のときだけ「反映済み」とし、古い `observed` や `lastVerifiedAtUtc` から成功を推定しない。`PENDING` は「反映待ち」、`UNVERIFIED` は「未確認」、`ERROR` と 403/503/通信断は「要確認」とする。flag OFF の404と状態0件を成功として表示しない。calendar mutation の保存ACKはこの外部反映表示と別に扱う。保存直後は旧い成功表示を外し、掲載先も読み直す。状態0件は「未確認」とし、掲載の有無を推測しない。
+`/host/calendar` はタブが表示中の間だけ20秒間隔でこの read model を読み、非表示時は停止する。provider・週・pollの切替では `AbortController` と sequence を併用し、古い応答を適用しない。UI は `label=SYNCED` のときだけ「反映済み」とし、古い `observed` や `lastVerifiedAtUtc` から成功を推定しない。`PENDING` は「反映待ち」、`HELD` は「保留中」、`UNVERIFIED` は「未確認」、`ERROR` と 403/503/通信断は「要確認」とする。複数販路の集約は ERROR > UNVERIFIED > HELD > PENDING > SYNCED の順で悪い方を表示する。`HELD` は反映成功ではない。flag OFF の404と状態0件を成功として表示しない。calendar mutation の保存ACKはこの外部反映表示と別に扱う。保存直後は旧い成功表示を外し、掲載先も読み直す。状態0件は「未確認」とし、掲載の有無を推測しない。
+
+## 監視・heartbeat・復旧
+
+対象: #240。[worker詳細設計](ota-studio-worker-design.md)「9. 監視、失敗、費用」の server 側を実装する。scheduler・通知先・本番 flag はこの slice で作成・有効化しない。
+
+### heartbeat と新規OPENの保留
+
+- heartbeat は worker の `claim` 時刻（`last_heartbeat_at`）である。前回から90秒を超えた claim、初回 claim、watchdog が検知した90秒超の停止は worker の `open_hold_since` を開始する。途絶後の claim は既存の保留があっても開始時刻をその claim 時刻へ数え直し、途絶前に終わった予約読取では解除しない。
+- 保留開始時は、その worker が担当する予約読取の `next_due_at` を現在へ前倒しする（他の dispatcher が lock 中の行は飛ばす）。
+- 保留の解除条件は、その worker の live かつ未隔離 account に属する、予約読取可能な全 listing が `open_hold_since` 以後に開始した読取を完了していること。判定は claim ごとに行う。
+- provider に live な Studio（未失効 credential と assignment、active account）が1台でも保留中、heartbeat 未受信、または90秒超なら、その provider の新規 `SET_OPEN` は claim されず `QUEUED` のまま残る。attempt と deadline は消費しない。CLOSE、OBSERVE、予約読取は保留しない。claim 後 preflight までの数秒間の変化は再判定しない。
+- Host の read model は、この保留中に未反映の desired OPEN を `HELD`、fresh な Studio が1台もない provider の未反映 CLOSE を `ERROR`（`WORKER_STALE`）とする。閉じる書込み手段がない状態を「反映待ち」と表示しない。
+- NIHO直販の停止は既存の予約読取 freshness（[OTA外部予約台帳](ota-external-reservations.md)）に従う。heartbeat 途絶だけで直販を即時停止する処理は追加していない。
+
+**Studio が止まった時に、既に外部で受付中の回が自動で閉じる保証はない。** Studio が応答なし・停止・未接続の間、Admin の稼働状況はこれと閉じられていない回の件数を明記し、「停止済み」とは表示しない。
+
+### クラウド watchdog
+
+`POST /internal/ota/v1/watchdog` は Cloud Scheduler（例: 1分間隔）から呼ぶ独立 job の入口である。
+
+- 認証は Google 発行の OIDC ID token だけ。`EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE` と完全一致する audience、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL` と一致する verified email、Google issuer、未失効を必須とする。worker bearer、Admin cookie、session role は参照しない。guide admin と同じ検証部品（`apps/web/src/lib/google-service-identity.ts`）を使う。
+- flag OFF・設定不足は `404`、token 不備は `401`、Google 署名鍵の取得障害は `503 identity_verification_unavailable`、DB 未設定・失敗は `503`。body は空か `{}`（1 KiB 以下）、query なしだけを受ける。応答は件数だけで `private, no-store`。
+- 同時実行は transaction advisory lock の try-lock で1本にし、取れなかった実行は待たずに `skipped:true` を返す。同じ条件の incident は `dedupe_key` の部分 unique index で未解決1件に限る。
+- watchdog が変更するのは incident、`channel_watchdog_state`、90秒超の worker の `open_hold_since` 開始だけである。job、lease、quarantine、desired state は変更しない。
+
+| incident | 開く条件 | escalation |
+| --- | --- | --- |
+| `WORKER_STALE` | live な worker の heartbeat（未受信なら最初の assignment）が90秒超 | 停止60分超 |
+| `SYNC_OVERDUE` | 配備済み action で実行可能な未反映 desired が、desired 変更から60分超（account 単位） | 開いた時点 |
+| `RESERVATION_READ_OVERDUE` | 予約読取可能な listing の読取が halted、fresh 期限切れ、または作成後60分未読 | 開いてから60分超 |
+| `ACCOUNT_QUARANTINED` | active account の隔離 | 隔離60分超 |
+
+未反映の判定は `desired_changed_at`（desired version を変えた時刻）を基準にし、観測・エラー記録で動く `updated_at` は使わない。退役 adapter など配備 allowlist で実行できない backlog は `SYNC_OVERDUE` にしない。incident は条件が消えた次の実行で `AUTO_RECOVERED` として閉じる。各種上限（500行）に達した種別は、その実行で自動解決しない。
+
+detail は件数・経過秒・内部理由コードだけで、外部 account ID、旅行者情報、token を含めない。開始・escalation・解決ごとに `notified_*_at` を記録し、`ota_runtime_incident` の構造化ログを1行出す。通知はこのログを Cloud Logging の log-based alert で拾う前提であり、メール・チャット送信先はこの slice に含めない。Admin は最終実行が5分より古い watchdog を「監視が止まっています」と表示する。
+
+### Admin の稼働状況と手動復旧
+
+`/admin/channels` は選択中の提供者について、表示中だけ30秒間隔で `runtimeOverview` を読む。DTO は allowlist で組み立て、worker credential、private profile、外部 account ID、担当者の user ID を返さない。表示は Studio の状態（稼働中／応答なし／停止／未接続）と保留、閉じられていない回の件数、account ごとの未反映件数と予約読取、未解決 incident と担当である。
+
+操作はすべて UUID v4 command で冪等化し、`channel_admin_commands` に監査記録する。同じ command を別の Admin が再送すると `409`。
+
+- `pauseAccount`（停止して手動対応）: `expectedVersion` 必須。account を `MANUAL_HANDLING` で隔離する。スタッフが外部 profile を操作している間なので、OBSERVE を含む全 job を claim せず、手動対応前に貸し出された OBSERVE の確認でも隔離を解かない。lease 切れ・遅れて届いた結果などの自動の隔離は理由を `MANUAL_HANDLING` のまま残し、理由を書き換えられるのは停止と復旧の Admin 操作だけ。既存 lease は通常の停止確認付き復旧まで保持し、復帰は「停止を確認して照合」から行う。
+- `recover`（停止を確認して照合）: 既存の observe-first 復旧。手動対応中で一度も実行していない account は、いちばん新しい待機中の job の listing・回から復旧用の OBSERVE を作り、その job は外部に触れていないので `SUPERSEDED` で閉じる。
+- `confirmReauth`（再認証を確認して照合）: Studio 停止と掲載先への再ログインの両方の確認を必須とし、`AUTH_REQUIRED` の隔離だけを受ける。処理は `recover` と同じ observe-first で、`account.reauth` として別に監査する。password・cookie・session の入力欄は置かない。
+- `retryReservationReads`（予約照合を再開）: halted かつ実行中 job のない listing だけ。account が active・未失効・委任期限内・未隔離で、listing が予約読取可能な場合に限り、停止を解いて即時 due にする。読取の健全性は更新しない。
+- `acknowledgeIncident`（担当する）: 未解決 incident の担当を自分にする。incident を手動で閉じる操作は置かない。
+
+検証は合成データの実DB結合テスト、route・UI の単体テスト、stub した Admin 画面の E2E までである。Cloud Scheduler・通知の配備、実Studio・実OTAでの停止／復旧の受入は未実施で、#240 はコードのマージだけでは close しない。
 
 ## 現時点の検証範囲
 

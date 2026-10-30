@@ -166,6 +166,23 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
   });
 
+  it("adds OPEN hold, desired change age, deduplicated incidents, and one watchdog row without private data", async () => {
+    const sql = await readFile(new URL("../migrations/0021_channel_runtime_watchdog.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /ALTER TABLE channel_workers\s+ADD COLUMN open_hold_since timestamptz;/);
+    assert.match(sql, /UPDATE channel_desired_states SET desired_changed_at = updated_at;/);
+    assert.match(sql, /desired_changed_at SET DEFAULT clock_timestamp\(\)/);
+    assert.match(sql, /desired_changed_at SET NOT NULL/);
+    assert.match(sql, /kind IN \('WORKER_STALE','SYNC_OVERDUE','RESERVATION_READ_OVERDUE','ACCOUNT_QUARANTINED'\)/);
+    assert.match(sql, /subject_type IN \('worker','account'\)/);
+    assert.match(sql, /resolution IN \('AUTO_RECOVERED'\)/);
+    assert.match(sql, /CHECK \(\(resolved_at IS NULL\) = \(resolution IS NULL\)\)/);
+    assert.match(sql, /CREATE UNIQUE INDEX channel_runtime_incidents_open_dedupe[\s\S]*\(dedupe_key\) WHERE resolved_at IS NULL/);
+    assert.match(sql, /id smallint PRIMARY KEY CHECK \(id = 1\)/);
+    assert.doesNotMatch(sql, /DROP |DELETE FROM|external_account_id|customer|guest|email|phone|price|amount|cookie|bearer|token|raw_response/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -198,5 +215,16 @@ describe("database invariants", () => {
     assert.match(sql, /CREATE TABLE product_operator_commands/);
     assert.match(sql, /CREATE TABLE product_operator_audit_events/);
     assert.doesNotMatch(sql, /calendar_commands|calendar_outbox_events/);
+  });
+
+  it("keeps only the three stoppable notification choices per provider, with no addresses (#109)", async () => {
+    const sql = await readFile(new URL("../migrations/0020_provider_notification_preferences.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const table = sql.match(/CREATE TABLE provider_notification_preferences \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /notification_key IN \('GUEST_MESSAGE', 'DAY_BEFORE_SUMMARY', 'NEW_REVIEW'\)/);
+    assert.match(table, /PRIMARY KEY \(provider_id, notification_key\)/);
+    assert.match(table, /REFERENCES experience_providers\(id\)/);
+    assert.doesNotMatch(table, /email|address|display_name|body\b|NEW_BOOKING|CANCELLATION/i);
   });
 });

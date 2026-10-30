@@ -20,6 +20,17 @@ import { calendarMembershipRole, listCalendarProductsForActor } from "./product-
 import { assertCanonicalInstant, assertNonEmptyText, assertSeats, assertStoreIdentifier } from "./validation.ts";
 import { currentChannelOccurrence } from "./channel-occurrence.ts";
 import { verifyGoogleAirbnbReceipt } from "./google-airbnb-receipt.ts";
+import {
+  HEARTBEAT_STALE_MS,
+  countOpenIncidents,
+  loadChannelRuntimeOverview,
+  providerOpenHeldSql,
+  providerWorkerSignals,
+  runChannelWatchdog,
+  unsyncedDesiredSql,
+  type ChannelRuntimeOverview,
+  type ChannelWatchdogRunResult,
+} from "./channel-runtime-monitor.ts";
 
 import { CHANNEL_SITES } from "./channel-sites.ts";
 export { CHANNEL_SITES } from "./channel-sites.ts";
@@ -315,7 +326,8 @@ export interface HostChannelStatus {
   readonly site: string;
   readonly desired: ChannelDesiredState;
   readonly observed?: ChannelDesiredState;
-  readonly label: "SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED";
+  /** HELD: a desired OPEN waits while a Studio for this provider re-reads reservations after a heartbeat gap. */
+  readonly label: "SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED" | "HELD";
   readonly lastVerifiedAtUtc?: string;
   readonly error?: string;
 }
@@ -846,7 +858,7 @@ export class ChannelRuntime {
       let version: number;
       if (!current.rows[0]) {
         if (expectedVersion !== null) throw new StoreConflictError("Worker assignment was not found.");
-        await client.query("INSERT INTO channel_worker_accounts (worker_id,account_id) VALUES ($1,$2)", [workerId, accountId]);
+        await client.query("INSERT INTO channel_worker_accounts (worker_id,account_id,assigned_at) VALUES ($1,$2,$3)", [workerId, accountId, this.#nowIso()]);
         version = 1;
       } else {
         if (expectedVersion === null || integer(current.rows[0], "version") !== expectedVersion) throw new StoreConflictError("Worker assignment version mismatch.");
@@ -978,9 +990,7 @@ export class ChannelRuntime {
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
       const nowUtc = this.#nowIso();
-      const deployedReaders = Object.entries(this.#supportedAdapters)
-        .filter(([, capability]) => capability.canObserve === true && capability.canReadReservations === true)
-        .map(([key]) => key);
+      const deployedReaders = this.#deployedReaderKeys();
 
       // A queued reservation job is safe to retire when its immutable authority
       // snapshot is no longer current. A leased job is never touched here.
@@ -1070,8 +1080,8 @@ export class ChannelRuntime {
         if (!listing || !this.#adapterSupports(listing, "OBSERVE") || !this.#adapterSupportsReservationRead(listing)) continue;
         await client.query(
           `INSERT INTO external_reservation_read_dispatch_states
-            (provider_id,listing_id,account_id,product_id,next_due_at)
-           VALUES ($1,$2,$3,$4,$5) ON CONFLICT (provider_id,listing_id) DO NOTHING`,
+            (provider_id,listing_id,account_id,product_id,next_due_at,created_at,updated_at)
+           VALUES ($1,$2,$3,$4,$5,$5,$5) ON CONFLICT (provider_id,listing_id) DO NOTHING`,
           [listing.provider_id, listing.id, listing.account_id, listing.product_id, nowUtc],
         );
         const state = await client.query<DbRow>(
@@ -1247,16 +1257,16 @@ export class ChannelRuntime {
     if (!current) {
       await client.query(
         `INSERT INTO channel_desired_states
-          (listing_id,provider_id,occurrence_id,desired_state,reason,desired_version,mapping_version,source_start_at,source_end_at)
-         VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8)`,
-        [listing.id, listing.provider_id, occurrence.id, desiredState, reason, mappingVersion, occurrence.startUtc, occurrence.endUtc],
+          (listing_id,provider_id,occurrence_id,desired_state,reason,desired_version,mapping_version,source_start_at,source_end_at,desired_changed_at)
+         VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8,$9)`,
+        [listing.id, listing.provider_id, occurrence.id, desiredState, reason, mappingVersion, occurrence.startUtc, occurrence.endUtc, this.#nowIso()],
       );
       return { desiredVersion: 1 };
     }
     const desiredVersion = integer(current, "desired_version") + 1;
     await client.query(
       `UPDATE channel_desired_states SET desired_state=$3,reason=$4,desired_version=$5,mapping_version=$6,source_start_at=$7,
-         source_end_at=$8,updated_at=$9 WHERE listing_id=$1 AND occurrence_id=$2`,
+         source_end_at=$8,updated_at=$9,desired_changed_at=$9 WHERE listing_id=$1 AND occurrence_id=$2`,
       [listing.id, occurrence.id, desiredState, reason, desiredVersion, mappingVersion, occurrence.startUtc, occurrence.endUtc, this.#nowIso()],
     );
     return { desiredVersion };
@@ -1312,18 +1322,75 @@ export class ChannelRuntime {
     return worker;
   }
 
+  #deployedActionKeys(): string[] {
+    return Object.entries(this.#supportedAdapters).flatMap(([key, capability]) => [
+      ...(capability.canOpen === true ? [`${key}/SET_OPEN`] : []),
+      ...(capability.canClose === true ? [`${key}/SET_CLOSED`] : []),
+      ...(capability.canObserve === true ? [`${key}/OBSERVE`] : []),
+    ]);
+  }
+
+  #deployedReaderKeys(): string[] {
+    return Object.entries(this.#supportedAdapters)
+      .filter(([, capability]) => capability.canObserve === true && capability.canReadReservations === true)
+      .map(([key]) => key);
+  }
+
+  /**
+   * A heartbeat gap starts this worker's OPEN hold and pulls its reservation
+   * reads forward. The hold ends only after every readable listing of its live,
+   * unquarantined accounts completed a read that started after the latest gap.
+   */
+  async #refreshOpenHold(client: PoolClient, worker: DbRow, nowUtc: string): Promise<void> {
+    const workerId = text(worker, "id");
+    const previousHeartbeat = worker.last_heartbeat_at === null ? null : Date.parse(isoValue(worker, "last_heartbeat_at"));
+    let holdSince = worker.open_hold_since === null ? null : isoValue(worker, "open_hold_since");
+    if (previousHeartbeat === null || this.#now().getTime() - previousHeartbeat > HEARTBEAT_STALE_MS) {
+      // Restart from this gap, not an older hold: a read that finished before the
+      // Studio went silent again does not cover reservations taken during the gap.
+      holdSince = nowUtc;
+      await client.query("UPDATE channel_workers SET open_hold_since=$2 WHERE id=$1", [workerId, nowUtc]);
+      // Best effort: a row a dispatcher currently locks keeps its own schedule.
+      await client.query(
+        `UPDATE external_reservation_read_dispatch_states s SET next_due_at=$2,updated_at=$2
+          WHERE (s.provider_id,s.listing_id) IN (
+            SELECT ds.provider_id,ds.listing_id FROM external_reservation_read_dispatch_states ds
+              JOIN channel_listings l ON l.provider_id=ds.provider_id AND l.id=ds.listing_id
+              JOIN channel_external_accounts a ON a.id=l.account_id
+              JOIN channel_worker_accounts wa ON wa.account_id=a.id AND wa.worker_id=$1 AND wa.revoked_at IS NULL
+             WHERE a.active=true AND a.revoked_at IS NULL AND l.active=true AND l.can_read_reservations=true
+               AND ds.pending_job_id IS NULL AND ds.halted_at IS NULL AND ds.next_due_at>$2
+             FOR UPDATE OF ds SKIP LOCKED)`,
+        [workerId, nowUtc],
+      );
+    }
+    if (holdSince === null) return;
+    const unread = await client.query(
+      `SELECT 1 FROM channel_worker_accounts wa
+         JOIN channel_external_accounts a ON a.id=wa.account_id
+         JOIN channel_listings l ON l.account_id=a.id
+         JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+         LEFT JOIN external_reservation_listing_health h ON h.provider_id=l.provider_id AND h.listing_id=l.id
+        WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL
+          AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2) AND a.quarantined_at IS NULL
+          AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true AND p.status='PUBLISHED'
+          AND (a.site || '/' || l.adapter || '@' || l.adapter_version)=ANY($4::text[])
+          AND (h.listing_id IS NULL OR h.read_started_at<$3) LIMIT 1`,
+      [workerId, nowUtc, holdSince, this.#deployedReaderKeys()],
+    );
+    if (!unread.rows[0]) await client.query("UPDATE channel_workers SET open_hold_since=NULL WHERE id=$1 AND open_hold_since IS NOT NULL", [workerId]);
+  }
+
   async claim(identity: WorkerIdentity): Promise<ClaimedChannelJob | null> {
     return withTransaction(this.#pool, async (client) => {
-      await this.#requireWorker(client, identity);
+      const worker = await this.#requireWorker(client, identity);
       const nowUtc = this.#nowIso();
       await client.query("UPDATE channel_workers SET last_heartbeat_at=$2,updated_at=$2 WHERE id=$1", [identity.workerId, nowUtc]);
+      await this.#refreshOpenHold(client, worker, nowUtc);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('channel-browser-global',11))");
       const existingLease = await client.query<DbRow>("SELECT id,account_id,lease_expires_at FROM channel_jobs WHERE status='LEASED' FOR UPDATE");
       if (existingLease.rows[0] && isoValue(existingLease.rows[0], "lease_expires_at") <= nowUtc) {
-        await client.query(
-          "UPDATE channel_external_accounts SET quarantined_at=COALESCE(quarantined_at,$2),quarantine_reason='LEASE_EXPIRED',updated_at=$2 WHERE id=$1",
-          [existingLease.rows[0].account_id, nowUtc],
-        );
+        await this.#quarantine(client, text(existingLease.rows[0], "account_id"), "LEASE_EXPIRED");
         return null;
       }
       if (existingLease.rows[0]) return null;
@@ -1333,14 +1400,8 @@ export class ChannelRuntime {
           RETURNING j.account_id`, [nowUtc],
       );
       for (const row of expired.rows) await this.#quarantine(client, text(row, "account_id"), "RETRY_DEADLINE");
-      const deployedActions = Object.entries(this.#supportedAdapters).flatMap(([key, capability]) => [
-        ...(capability.canOpen === true ? [`${key}/SET_OPEN`] : []),
-        ...(capability.canClose === true ? [`${key}/SET_CLOSED`] : []),
-        ...(capability.canObserve === true ? [`${key}/OBSERVE`] : []),
-      ]);
-      const deployedReservationAdapters = Object.entries(this.#supportedAdapters)
-        .filter(([, capability]) => capability.canObserve === true && capability.canReadReservations === true)
-        .map(([key]) => key);
+      const deployedActions = this.#deployedActionKeys();
+      const deployedReservationAdapters = this.#deployedReaderKeys();
       const result = await client.query<DbRow>(
         `SELECT j.*,wa.version AS assignment_version FROM channel_jobs j
           JOIN channel_external_accounts a ON a.id=j.account_id
@@ -1351,7 +1412,8 @@ export class ChannelRuntime {
           LEFT JOIN external_reservation_read_dispatch_states rs ON rs.pending_job_id=j.id
          WHERE j.status='QUEUED' AND j.next_attempt_at<=$2 AND (j.job_deadline_at IS NULL OR j.job_deadline_at>$2)
            AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
-           AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE'))
+           -- MANUAL_HANDLING: staff own the external profile, so not even an OBSERVE may run until stop-confirmed recovery.
+           AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE' AND a.quarantine_reason<>'MANUAL_HANDLING'))
            AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version AND p.status='PUBLISHED'
            AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
            AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
@@ -1362,8 +1424,11 @@ export class ChannelRuntime {
              OR (j.action='OBSERVE' AND l.can_observe AND (j.purpose='AVAILABILITY' OR l.can_read_reservations)))
            AND (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version || '/' || j.action)=ANY($3::text[])
            AND (j.purpose='AVAILABILITY' OR (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($4::text[]))
+           -- New OPEN stays QUEUED (no attempt/deadline) while any live Studio of the provider is held or stale.
+           -- preflight does not repeat this; the seconds between claim and preflight are accepted.
+           AND (j.action<>'SET_OPEN' OR NOT ${providerOpenHeldSql("j.provider_id", "$2", "$5")})
          ORDER BY j.priority DESC,j.next_attempt_at,j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`,
-        [identity.workerId, nowUtc, deployedActions, deployedReservationAdapters],
+        [identity.workerId, nowUtc, deployedActions, deployedReservationAdapters, new Date(this.#now().getTime() - HEARTBEAT_STALE_MS).toISOString()],
       );
       const job = result.rows.find((candidate) => this.#adapterSupports(candidate, text(candidate, "action") as ChannelAction));
       if (!job) return null;
@@ -1419,7 +1484,20 @@ export class ChannelRuntime {
     return job;
   }
 
+  /**
+   * Automatic quarantine. A staff pause (MANUAL_HANDLING) keeps its reason: no lease expiry, late result or other
+   * automatic error may turn it into a reason that lets an OBSERVE run or that its completion would clear.
+   */
   async #quarantine(client: PoolClient, accountId: string, reason: string): Promise<void> {
+    await client.query(
+      `UPDATE channel_external_accounts SET quarantined_at=COALESCE(quarantined_at,$2),
+         quarantine_reason=CASE WHEN quarantine_reason='MANUAL_HANDLING' THEN quarantine_reason ELSE $3 END,updated_at=$2 WHERE id=$1`,
+      [accountId, this.#nowIso(), reason],
+    );
+  }
+
+  /** Staff actions (pause, stop-confirmed recovery) replace whatever reason is there. */
+  async #quarantineByStaff(client: PoolClient, accountId: string, reason: "MANUAL_HANDLING" | "MANUAL_RECOVERY_OBSERVE_REQUIRED"): Promise<void> {
     await client.query(
       "UPDATE channel_external_accounts SET quarantined_at=COALESCE(quarantined_at,$2),quarantine_reason=$3,updated_at=$2 WHERE id=$1",
       [accountId, this.#nowIso(), reason],
@@ -2493,10 +2571,12 @@ export class ChannelRuntime {
   }
 
   async #completeRecoveryObserve(client: PoolClient, job: DbRow): Promise<void> {
-    await client.query(
-      "UPDATE channel_external_accounts SET quarantined_at=NULL,quarantine_reason=NULL,updated_at=$2 WHERE id=$1",
+    // An observe leased before staff switched to manual handling must not lift that hold.
+    const released = await client.query(
+      "UPDATE channel_external_accounts SET quarantined_at=NULL,quarantine_reason=NULL,updated_at=$2 WHERE id=$1 AND quarantine_reason IS DISTINCT FROM 'MANUAL_HANDLING'",
       [job.account_id, this.#nowIso()],
     );
+    if (released.rowCount === 0) return;
     // Only the observe job issued by an explicit staff recovery may resume a
     // halted reservation reader. This does not refresh its inventory health.
     await client.query(
@@ -2504,7 +2584,7 @@ export class ChannelRuntime {
           SET halted_at=NULL,last_error=NULL,retry_count=0,next_due_at=$2,updated_at=$2
         WHERE s.account_id=$1 AND s.pending_job_id IS NULL AND s.halted_at IS NOT NULL
           AND EXISTS (SELECT 1 FROM channel_admin_commands c
-            WHERE c.action='account.recover' AND c.result->>'observeJobId'=$3)`,
+            WHERE c.action IN ('account.recover','account.reauth') AND c.result->>'observeJobId'=$3)`,
       [job.account_id, this.#nowIso(), job.id],
     );
     const listingResult = await client.query<DbRow>(
@@ -2520,7 +2600,7 @@ export class ChannelRuntime {
     const desiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
     const desired = await client.query<DbRow>(
       `UPDATE channel_desired_states SET desired_state=$3,reason=$4,desired_version=desired_version+1,mapping_version=$5,
-         source_start_at=$6,source_end_at=$7,updated_at=$8 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING *`,
+         source_start_at=$6,source_end_at=$7,updated_at=$8,desired_changed_at=$8 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING *`,
       [job.listing_id, job.occurrence_id, desiredState, availability.reason, listing.mapping_version,
         occurrence.startUtc, occurrence.endUtc, this.#nowIso()],
     );
@@ -2533,58 +2613,186 @@ export class ChannelRuntime {
     assertStoreIdentifier(accountId, "accountId");
     if (stopConfirmed !== true) throw new StoreValidationError("Explicit executor stop confirmation is required.");
     const request = fingerprint({ accountId, stopConfirmed });
+    return withTransaction(this.#pool, (client) => this.#recoverLease(client, actor, commandId, "account.recover", request, accountId));
+  }
+
+  /**
+   * Staff confirmed both that the executor stopped and that the external login
+   * was renewed. Only an AUTH_REQUIRED quarantine qualifies; the recovery is the
+   * same observe-first path as `recoverQuarantinedLease`, audited separately.
+   */
+  async confirmReauth(actor: ChannelAdminActor, accountId: string, stopConfirmed: true, reauthConfirmed: true, commandId: string): Promise<{ readonly observeJobId: string }> {
+    this.#validateActor(actor);
+    assertStoreIdentifier(accountId, "accountId");
+    if (stopConfirmed !== true || reauthConfirmed !== true) throw new StoreValidationError("Explicit executor stop and re-authentication confirmations are required.");
+    const request = fingerprint({ accountId, stopConfirmed, reauthConfirmed });
+    return withTransaction(this.#pool, (client) => this.#recoverLease(client, actor, commandId, "account.reauth", request, accountId,
+      (reason) => reason !== null && reason.startsWith("AUTH_REQUIRED")));
+  }
+
+  async #recoverLease(
+    client: PoolClient, actor: ChannelAdminActor, commandId: string, action: "account.recover" | "account.reauth", request: string,
+    accountId: string, reasonAllowed?: (reason: string | null) => boolean,
+  ): Promise<{ readonly observeJobId: string }> {
+    const previous = await this.#previousCommand(client, actor, commandId, action, request);
+    if (previous) return { observeJobId: String(previous.observeJobId) };
+    const leased = await client.query<DbRow>(
+      `SELECT j.*,l.can_observe,l.active AS listing_active,a.version AS current_account_version,a.site,a.external_account_id,a.quarantine_reason,
+              l.external_product_id,l.external_option_id,l.time_zone,l.mapping_version AS current_mapping_version,
+              l.adapter,l.adapter_version,l.connection_mode,
+              d.desired_version AS current_desired_version,d.source_start_at AS current_source_start_at,d.source_end_at AS current_source_end_at,
+              p.status AS product_status
+         FROM channel_jobs j JOIN channel_listings l ON l.id=j.listing_id JOIN channel_external_accounts a ON a.id=j.account_id
+         JOIN channel_desired_states d ON d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
+         JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+        WHERE j.account_id=$1 AND (j.status='LEASED' OR (j.status='FINISHED' AND a.quarantined_at IS NOT NULL)
+          -- A pause before any job ran: the newest waiting job names the listing to observe first.
+          OR (j.status='QUEUED' AND a.quarantine_reason='MANUAL_HANDLING'))
+        ORDER BY (j.status='LEASED') DESC,j.updated_at DESC LIMIT 1 FOR UPDATE OF j,a`, [accountId],
+    );
+    const job = leased.rows[0];
+    if (!job) throw new StoreConflictError("No leased job requires recovery.");
+    // A waiting job never reached the external site: the recovery supersedes it instead of asking for its review.
+    const neverRan = job.status === "QUEUED";
+    if (reasonAllowed && !reasonAllowed(job.quarantine_reason === null ? null : text(job, "quarantine_reason"))) {
+      throw new StoreConflictError("This account is not waiting for re-authentication.");
+    }
+    if (job.can_observe !== true || job.listing_active !== true || job.product_status !== "PUBLISHED"
+      || !this.#adapterSupports({ site: job.site, adapter: job.adapter, adapter_version: job.adapter_version }, "OBSERVE")) {
+      throw new StoreConflictError("Recovery is closed until this mapping has a deployed OBSERVE capability and a published product.");
+    }
+    await this.#quarantineByStaff(client, accountId, "MANUAL_RECOVERY_OBSERVE_REQUIRED");
+    await client.query(
+      "UPDATE channel_jobs SET status='FINISHED',outcome=$3,lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
+      [job.id, this.#nowIso(), neverRan ? "SUPERSEDED" : "NEEDS_REVIEW"],
+    );
+    if (job.purpose === "RESERVATION_WINDOW") await client.query(
+      `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
+         last_error='MANUAL_RECOVERY_OBSERVE_REQUIRED',updated_at=$3
+        WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+      [job.provider_id, job.listing_id, this.#nowIso(), job.id],
+    );
+    const recoveryDesired = await client.query<DbRow>(
+      "UPDATE channel_desired_states SET desired_version=desired_version+1,updated_at=$3,desired_changed_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING desired_version,source_start_at,source_end_at",
+      [job.listing_id, job.occurrence_id, this.#nowIso()],
+    );
+    const currentDesired = recoveryDesired.rows[0];
+    if (!currentDesired) throw new StoreConflictError("Recovery desired state is missing.");
+    const observeJobId = randomUUID();
+    await client.query(
+      `INSERT INTO channel_jobs
+        (id,provider_id,account_id,listing_id,occurrence_id,action,account_version,desired_version,mapping_version,target_site,
+         target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,target_adapter,target_adapter_version,
+         target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
+       VALUES ($1,$2,$3,$4,$5,'OBSERVE',$6,$7,$8,$9,$10,$11,$12,'Asia/Tokyo',$13,$14,$15,$16,$17,90,$18)`,
+      [observeJobId, job.provider_id, accountId, job.listing_id, job.occurrence_id, job.current_account_version, currentDesired.desired_version,
+        job.current_mapping_version, job.site, job.external_account_id, job.external_product_id, job.external_option_id,
+        job.adapter, job.adapter_version, job.connection_mode, currentDesired.source_start_at, currentDesired.source_end_at, null],
+    );
+    await this.#completeCommand(client, actor, commandId, action, request, { observeJobId }, text(job, "provider_id"), "external_account", accountId);
+    return { observeJobId };
+  }
+
+  /** Switch an account to manual handling. Existing leases stay locked until the normal stop-confirmed recovery. */
+  async pauseAccount(actor: ChannelAdminActor, accountId: string, expectedVersion: number, commandId: string): Promise<{ readonly accountId: string; readonly quarantineReason: "MANUAL_HANDLING" }> {
+    this.#validateActor(actor);
+    assertStoreIdentifier(accountId, "accountId");
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new StoreValidationError("expectedVersion is required.");
+    const request = fingerprint({ accountId, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
-      const previous = await this.#previousCommand(client, actor, commandId, "account.recover", request);
-      if (previous) return { observeJobId: String(previous.observeJobId) };
-      const leased = await client.query<DbRow>(
-        `SELECT j.*,l.can_observe,l.active AS listing_active,a.version AS current_account_version,a.site,a.external_account_id,
-                l.external_product_id,l.external_option_id,l.time_zone,l.mapping_version AS current_mapping_version,
-                l.adapter,l.adapter_version,l.connection_mode,
-                d.desired_version AS current_desired_version,d.source_start_at AS current_source_start_at,d.source_end_at AS current_source_end_at,
-                p.status AS product_status
-           FROM channel_jobs j JOIN channel_listings l ON l.id=j.listing_id JOIN channel_external_accounts a ON a.id=j.account_id
-           JOIN channel_desired_states d ON d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
-           JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-          WHERE j.account_id=$1 AND (j.status='LEASED' OR (j.status='FINISHED' AND a.quarantined_at IS NOT NULL))
-          ORDER BY (j.status='LEASED') DESC,j.updated_at DESC LIMIT 1 FOR UPDATE OF j,a`, [accountId],
-      );
-      const job = leased.rows[0];
-      if (!job) throw new StoreConflictError("No leased job requires recovery.");
-      if (job.can_observe !== true || job.listing_active !== true || job.product_status !== "PUBLISHED"
-        || !this.#adapterSupports({ site: job.site, adapter: job.adapter, adapter_version: job.adapter_version }, "OBSERVE")) {
-        throw new StoreConflictError("Recovery is closed until this mapping has a deployed OBSERVE capability and a published product.");
-      }
-      await this.#quarantine(client, accountId, "MANUAL_RECOVERY_OBSERVE_REQUIRED");
-      await client.query(
-        "UPDATE channel_jobs SET status='FINISHED',outcome='NEEDS_REVIEW',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
-        [job.id, this.#nowIso()],
-      );
-      if (job.purpose === "RESERVATION_WINDOW") await client.query(
-        `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
-           last_error='MANUAL_RECOVERY_OBSERVE_REQUIRED',updated_at=$3
-          WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
-        [job.provider_id, job.listing_id, this.#nowIso(), job.id],
-      );
-      const recoveryDesired = await client.query<DbRow>(
-        "UPDATE channel_desired_states SET desired_version=desired_version+1,updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING desired_version,source_start_at,source_end_at",
-        [job.listing_id, job.occurrence_id, this.#nowIso()],
-      );
-      const currentDesired = recoveryDesired.rows[0];
-      if (!currentDesired) throw new StoreConflictError("Recovery desired state is missing.");
-      const observeJobId = randomUUID();
-      await client.query(
-        `INSERT INTO channel_jobs
-          (id,provider_id,account_id,listing_id,occurrence_id,action,account_version,desired_version,mapping_version,target_site,
-           target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,target_adapter,target_adapter_version,
-           target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
-         VALUES ($1,$2,$3,$4,$5,'OBSERVE',$6,$7,$8,$9,$10,$11,$12,'Asia/Tokyo',$13,$14,$15,$16,$17,90,$18)`,
-        [observeJobId, job.provider_id, accountId, job.listing_id, job.occurrence_id, job.current_account_version, currentDesired.desired_version,
-          job.current_mapping_version, job.site, job.external_account_id, job.external_product_id, job.external_option_id,
-          job.adapter, job.adapter_version, job.connection_mode, currentDesired.source_start_at, currentDesired.source_end_at, null],
-      );
-      await this.#completeCommand(client, actor, commandId, "account.recover", request, { observeJobId }, text(job, "provider_id"), "external_account", accountId);
-      return { observeJobId };
+      const previous = await this.#previousCommand(client, actor, commandId, "account.pause", request);
+      if (previous) return { accountId, quarantineReason: "MANUAL_HANDLING" as const };
+      const current = await client.query<DbRow>("SELECT provider_id,version FROM channel_external_accounts WHERE id=$1 FOR UPDATE", [accountId]);
+      const row = current.rows[0];
+      if (!row) throw new StoreNotFoundError("external account");
+      if (integer(row, "version") !== expectedVersion) throw new StoreConflictError("External account version mismatch.");
+      await this.#quarantineByStaff(client, accountId, "MANUAL_HANDLING");
+      await this.#completeCommand(client, actor, commandId, "account.pause", request, { accountId }, text(row, "provider_id"), "external_account", accountId);
+      return { accountId, quarantineReason: "MANUAL_HANDLING" as const };
     });
+  }
+
+  /** Resume one halted reservation reader. Authority must already be current; this never refreshes inventory health. */
+  async retryReservationReads(actor: ChannelAdminActor, listingId: string, commandId: string): Promise<{ readonly listingId: string; readonly nextDueAtUtc: string }> {
+    this.#validateActor(actor);
+    assertStoreIdentifier(listingId, "listingId");
+    const request = fingerprint({ listingId });
+    return withTransaction(this.#pool, async (client) => {
+      const scope = await client.query<DbRow>("SELECT provider_id FROM channel_listings WHERE id=$1", [listingId]);
+      if (!scope.rows[0]) throw new StoreNotFoundError("channel listing");
+      const providerId = text(scope.rows[0], "provider_id");
+      await lockProviderInventory(client, providerId);
+      const previous = await this.#previousCommand(client, actor, commandId, "listing.reservationReadRetry", request);
+      if (previous) return { listingId, nextDueAtUtc: String(previous.nextDueAtUtc) };
+      const nowUtc = this.#nowIso();
+      const state = await client.query<DbRow>(
+        `SELECT s.halted_at,s.pending_job_id,l.active,l.can_read_reservations,a.active AS account_active,a.revoked_at,
+                a.delegated_until,a.quarantined_at
+           FROM external_reservation_read_dispatch_states s
+           JOIN channel_listings l ON l.provider_id=s.provider_id AND l.id=s.listing_id
+           JOIN channel_external_accounts a ON a.id=l.account_id
+          WHERE s.provider_id=$1 AND s.listing_id=$2 FOR UPDATE OF s`,
+        [providerId, listingId],
+      );
+      const row = state.rows[0];
+      if (!row || row.halted_at === null || row.pending_job_id !== null) throw new StoreConflictError("Reservation reads are not halted for this listing.");
+      if (row.account_active !== true || row.revoked_at !== null || row.quarantined_at !== null
+        || (row.delegated_until !== null && isoValue(row, "delegated_until") <= nowUtc)) {
+        throw new StoreConflictError("The external account must be active and not quarantined.");
+      }
+      if (row.active !== true || row.can_read_reservations !== true) throw new StoreConflictError("The listing must be active and allowed to read reservations.");
+      await client.query(
+        `UPDATE external_reservation_read_dispatch_states SET halted_at=NULL,last_error=NULL,retry_count=0,next_due_at=$3,updated_at=$3
+          WHERE provider_id=$1 AND listing_id=$2 AND halted_at IS NOT NULL AND pending_job_id IS NULL`,
+        [providerId, listingId, nowUtc],
+      );
+      await this.#completeCommand(client, actor, commandId, "listing.reservationReadRetry", request, { listingId, nextDueAtUtc: nowUtc }, providerId, "listing", listingId);
+      return { listingId, nextDueAtUtc: nowUtc };
+    });
+  }
+
+  /** Staff takes ownership of an open runtime incident. Incidents resolve only when the watched condition clears. */
+  async acknowledgeIncident(actor: ChannelAdminActor, incidentId: string, commandId: string): Promise<{ readonly incidentId: string; readonly acknowledgedAtUtc: string }> {
+    this.#validateActor(actor);
+    if (!/^[1-9][0-9]{0,17}$/.test(incidentId)) throw new StoreValidationError("incidentId is invalid.");
+    const request = fingerprint({ incidentId });
+    return withTransaction(this.#pool, async (client) => {
+      const previous = await this.#previousCommand(client, actor, commandId, "incident.acknowledge", request);
+      if (previous) return { incidentId, acknowledgedAtUtc: String(previous.acknowledgedAtUtc) };
+      const current = await client.query<DbRow>("SELECT provider_id,resolved_at FROM channel_runtime_incidents WHERE id=$1::bigint FOR UPDATE", [incidentId]);
+      const row = current.rows[0];
+      if (!row) throw new StoreNotFoundError("runtime incident");
+      if (row.resolved_at !== null) throw new StoreConflictError("The runtime incident is already resolved.");
+      const nowUtc = this.#nowIso();
+      await client.query(
+        "UPDATE channel_runtime_incidents SET assignee_niho_user_id=$2,acknowledged_at=$3,updated_at=$3 WHERE id=$1::bigint",
+        [incidentId, actor.nihoUserId, nowUtc],
+      );
+      await this.#completeCommand(client, actor, commandId, "incident.acknowledge", request, { incidentId, acknowledgedAtUtc: nowUtc },
+        row.provider_id === null ? undefined : text(row, "provider_id"), "runtime_incident", incidentId);
+      return { incidentId, acknowledgedAtUtc: nowUtc };
+    });
+  }
+
+  async runtimeOverview(actor: ChannelAdminActor, providerId: string): Promise<ChannelRuntimeOverview> {
+    this.#validateActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return loadChannelRuntimeOverview(this.#pool, providerId, actor.nihoUserId, this.#now());
+  }
+
+  /**
+   * Independent cloud watchdog. A concurrent run returns `skipped` instead of
+   * waiting, so incidents are never duplicated. It changes no job, lease, or
+   * quarantine; it only records incidents and holds stale Studios' new OPEN.
+   */
+  async runWatchdog(): Promise<ChannelWatchdogRunResult> {
+    const ran = await withTransaction(this.#pool, async (client) => {
+      const lock = await client.query<DbRow>("SELECT pg_try_advisory_xact_lock(hashtextextended('channel-watchdog',11)) AS locked");
+      if (lock.rows[0]?.locked !== true) return null;
+      return runChannelWatchdog(client, this.#now(), this.#deployedActionKeys());
+    });
+    if (ran) return { ...ran, skipped: false };
+    return { ranAtUtc: this.#nowIso(), skipped: true, opened: 0, escalated: 0, resolved: 0, openIncidents: await countOpenIncidents(this.#pool), transitions: [] };
   }
 
   async hostStatuses(actor: HostActor): Promise<readonly HostChannelStatus[]> {
@@ -2592,6 +2800,7 @@ export class ChannelRuntime {
     assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
     const products = await listCalendarProductsForActor(this.#pool, actor, true);
     if (products.length === 0 && !await calendarMembershipRole(this.#pool, actor)) throw new StoreAccessDeniedError();
+    const workers = await providerWorkerSignals(this.#pool, actor.providerId, this.#now());
     const result = await this.#pool.query<DbRow>(
       `SELECT d.occurrence_id,a.site,d.desired_state,d.desired_version,d.mapping_version,d.observed_state,
               d.observed_desired_version,d.observed_mapping_version,d.last_verified_at,d.last_error,
@@ -2622,9 +2831,13 @@ export class ChannelRuntime {
         && integer(row, "observed_desired_version") === integer(row, "desired_version")
         && integer(row, "observed_mapping_version") === integer(row, "mapping_version")
         && integer(row, "observed_mapping_version") === integer(row, "current_mapping_version");
+      const synced = currentObservation && observed === desired;
+      // No live Studio has a fresh heartbeat: a pending CLOSE cannot be written, so it needs staff, not waiting.
+      if (!error && !synced && desired === "CLOSED" && !workers.freshWorker) error = "WORKER_STALE";
+      const held = !error && !synced && desired === "OPEN" && workers.openHold;
       return {
         occurrenceId: text(row, "occurrence_id"), site: text(row, "site"), desired, ...(observed ? { observed } : {}),
-        label: error ? "ERROR" : row.calendar_pending === true ? "PENDING" : observed === undefined ? "UNVERIFIED" : currentObservation && observed === desired ? "SYNCED" : "PENDING",
+        label: error ? "ERROR" : held ? "HELD" : row.calendar_pending === true ? "PENDING" : observed === undefined ? "UNVERIFIED" : synced ? "SYNCED" : "PENDING",
         ...(row.last_verified_at === null ? {} : { lastVerifiedAtUtc: isoValue(row, "last_verified_at") }), ...(error ? { error } : {}),
       };
     });
