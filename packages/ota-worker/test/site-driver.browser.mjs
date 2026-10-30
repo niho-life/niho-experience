@@ -30,8 +30,10 @@ for (const definition of [
       assert.equal(await driver.stop(), true);
     }
     assert.equal(fixture.state.writes, 2); assert.equal(definition.isClosed(fixture.state), false);
-    if (definition.name === "Viator") assert.deepEqual(fixture.state.requests[0].availabilityListState.perDayPagination,
-      { "2099-01-01": { cursor: 1, hasMore: false } });
+    if (definition.name === "Viator") {
+      assert.deepEqual(fixture.state.requests[0].availabilityListState.perDayPagination, { "2099-01-01": { cursor: 1, hasMore: false } });
+      assert.ok(fixture.state.requests.every((body) => body.availabilityKeys.length === 1 && body.availabilityKeys[0].startTime === "13:00:00"));
+    }
     assert.ok(fixture.state.reads.some((read) => definition.name === "Jalan"
       ? read.dspBaseDate === "" : read.startDate === fixture.state.initialDate));
     assert.ok(fixture.state.reads.some((read) => read.jumpToDate === "2099-01-01")
@@ -63,10 +65,10 @@ for (const definition of [
     const originalAccount = fixture.state.accountId;
     const originalProduct = fixture.state.productId;
     const cases = definition.name === "Viator"
-      ? [["ACCOUNT_MISMATCH", () => { fixture.state.accountId = "888888"; }], ["DOM_DRIFT", () => { fixture.state.productId = "888888P2"; }], ["AUTH_REQUIRED", () => { fixture.state.authenticated = false; }]]
+      ? [["ACCOUNT_MISMATCH", () => { fixture.state.accountId = "888888"; }], ["DOM_DRIFT", () => { fixture.state.productId = "888888P2"; }], ["AUTH_REQUIRED", () => { fixture.state.authenticated = false; }], ["PRODUCT_MISMATCH", () => { fixture.state.duplicateTargetRow = true; }]]
       : [["ACCOUNT_MISMATCH", () => { fixture.state.accountId = "OtherAirId"; }], ["DOM_DRIFT", () => { fixture.state.productId = "l999999999"; }], ["AUTH_REQUIRED", () => { fixture.state.authenticated = false; }]];
     for (const [code, mutate] of cases) {
-      fixture.state.accountId = originalAccount; fixture.state.productId = originalProduct; fixture.state.authenticated = true;
+      fixture.state.accountId = originalAccount; fixture.state.productId = originalProduct; fixture.state.authenticated = true; fixture.state.duplicateTargetRow = false;
       const job = fixture.makeJob("SET_CLOSED"); mutate();
       const driver = await definition.create({ job, cloud, config: fixture.config, testOnlySupplierOrigin: fixture.origin,
         allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory, responseTimeoutMs: 500, writeResponseTimeoutMs: 500 });

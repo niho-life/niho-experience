@@ -32,7 +32,7 @@ async function fixtureBase(prefix, state, handler, site, namespace) {
 
 export async function syntheticViator() {
   const state = { accountId: "999999", productId: "999999P1", optionId: "TG1", localDateTime: "2099-01-01T13:00:00",
-    initialDate: "2098-12-19", availability: "AVAILABLE", authenticated: true, responseFailure: null, writes: 0, requests: [], reads: [] };
+    initialDate: "2098-12-19", duplicateTargetRow: false, availability: "AVAILABLE", authenticated: true, responseFailure: null, writes: 0, requests: [], reads: [] };
   const handler = async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname === "/availability/" && request.method === "GET") {
@@ -47,9 +47,9 @@ export async function syntheticViator() {
           input.onclick=drawPicker;
           const stateFor=(date)=>({startDate:${JSON.stringify(state.initialDate)},endDate:${JSON.stringify(state.initialDate)},jumpToDate:date,filteredProducts:[],filteredTourGrades:{},loadDirection:date===${JSON.stringify(state.initialDate)}?"FORWARD":"BIDIRECTIONAL",hasMoreAfter:false,hasMoreBefore:false,perDayPagination:{}});
           async function load(date){const listState=stateFor(date);const data=await (await fetch('/availability/api',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(listState)})).json();
-            const returnedDates=Object.keys(data.availabilities).sort();const displayState={...data.availabilityListState,startDate:returnedDates[0],endDate:returnedDates.at(-1)};const row=data.availabilities[date]?.[0];const grid=document.getElementById('grid');grid.replaceChildren();if(!row)return;
+            const returnedDates=Object.keys(data.availabilities).sort();const displayState={...data.availabilityListState,startDate:returnedDates[0],endDate:returnedDates.at(-1)};const row=data.availabilities[date]?.find(r=>r.startTime==='13:00:00');const grid=document.getElementById('grid');grid.replaceChildren();if(!row)return;
             const container=document.createElement('div');container.className='synthetic_gridCol_observed';container.innerHTML='<a href="/bookings/search?travelDate='+date+'&filteredTourGrade='+row.productCode+'%7C'+row.tourGradeCode+'">予約を表示</a><span>13:00</span><div class="state"><span class="jumpstart_ui__Badge__badge">'+(row.availability==='AVAILABLE'?'予約可能':'完売')+'</span></div>';
-            const action=document.createElement('button');action.textContent=row.availability==='AVAILABLE'?'完売':'予約可能';action.onclick=()=>{const xhr=new XMLHttpRequest();xhr.open('POST','/availability/update');xhr.setRequestHeader('content-type','application/json');xhr.send(JSON.stringify({availabilityKeys:[{productCode:row.productCode,tourGradeCode:row.tourGradeCode,travelDate:date,startTime:'13:00:00'}],availability:row.availability==='AVAILABLE'?'SOLD_OUT':'AVAILABLE',prevAvailability:row.availability,isBulkUpdate:false,availabilityListState:displayState}));};container.append(action);const preceding=document.createElement('div');preceding.className='synthetic_gridCol_observed';preceding.innerHTML='<a href="/bookings/search?travelDate=2098-12-31&filteredTourGrade='+row.productCode+'%7C'+row.tourGradeCode+'">予約を表示</a><span>13:00</span><span class="jumpstart_ui__Badge__badge">予約可能</span><button>完売</button>';grid.append(preceding,container);}
+            const action=document.createElement('button');action.textContent=row.availability==='AVAILABLE'?'完売':'予約可能';action.onclick=()=>{const xhr=new XMLHttpRequest();xhr.open('POST','/availability/update');xhr.setRequestHeader('content-type','application/json');xhr.send(JSON.stringify({availabilityKeys:[{productCode:row.productCode,tourGradeCode:row.tourGradeCode,travelDate:date,startTime:'13:00:00'}],availability:row.availability==='AVAILABLE'?'SOLD_OUT':'AVAILABLE',prevAvailability:row.availability,isBulkUpdate:false,availabilityListState:displayState}));};container.append(action);const preceding=document.createElement('div');preceding.className='synthetic_gridCol_observed';preceding.innerHTML='<a href="/bookings/search?travelDate=2098-12-31&filteredTourGrade='+row.productCode+'%7C'+row.tourGradeCode+'">予約を表示</a><span>13:00</span><span class="jumpstart_ui__Badge__badge">予約可能</span><button>完売</button>';const other=container.cloneNode(true);other.querySelector('span').textContent='14:00';other.querySelector('span.jumpstart_ui__Badge__badge').textContent='予約可能';other.querySelector('button').textContent='完売';grid.append(preceding,other,container);if(${JSON.stringify(state.duplicateTargetRow)})grid.append(container.cloneNode(true));}
           load(input.value);
         </script></body></html>`); return;
     }
@@ -57,8 +57,8 @@ export async function syntheticViator() {
       const body = await readBody(request); state.reads.push(body);
       const target = body.jumpToDate === state.localDateTime.slice(0, 10);
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ availabilities: { [body.jumpToDate]: target ? [{ productCode: state.productId, tourGradeCode: state.optionId,
-        startTime: "13:00:00", availability: state.availability }] : [] }, availabilityListState: { ...body, perDayPagination: { [body.jumpToDate]: { cursor: 1, hasMore: false } } }, privateIdentity: { syntheticSecret: "discard" } })); return;
+      response.end(JSON.stringify({ availabilities: { [body.jumpToDate]: target ? [{ productCode: state.productId, tourGradeCode: state.optionId, startTime: "14:00:00", availability: "AVAILABLE" },
+        { productCode: state.productId, tourGradeCode: state.optionId, startTime: "13:00:00", availability: state.availability }] : [] }, availabilityListState: { ...body, perDayPagination: { [body.jumpToDate]: { cursor: 1, hasMore: false } } }, privateIdentity: { syntheticSecret: "discard" } })); return;
     }
     if (url.pathname === "/availability/update" && request.method === "POST") {
       if (request.headers["sec-fetch-site"] !== "same-origin" || request.headers["sec-fetch-mode"] !== "cors" || request.headers["sec-fetch-dest"] !== "empty") {

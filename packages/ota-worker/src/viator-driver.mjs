@@ -60,22 +60,24 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
 
     async function findRow(current) {
       const links = page.locator('a[href*="/bookings/search"]');
-      const matchingLinks = [];
+      const matchingLinks = new Set();
       for (let index = 0; index < await links.count(); index += 1) {
         const href = await links.nth(index).getAttribute("href");
         if (!href) continue;
         const url = new URL(href, supplierOrigin);
-        if (url.pathname === "/bookings/search" && url.searchParams.get("travelDate") === job.localDateTime.slice(0, 10)
-          && url.searchParams.get("filteredTourGrade") === `${job.target.externalProductId}|${job.target.externalOptionId}`) matchingLinks.push(href);
+        if (url.origin === supplierOrigin && url.pathname === "/bookings/search" && url.searchParams.get("travelDate") === job.localDateTime.slice(0, 10)
+          && url.searchParams.get("filteredTourGrade") === `${job.target.externalProductId}|${job.target.externalOptionId}`) matchingLinks.add(href);
       }
-      if (matchingLinks.length !== 1) throw new ContractError("PRODUCT_MISMATCH");
-      const canonicalLink = page.locator(`a[href=${JSON.stringify(matchingLinks[0])}]`);
-      if (await canonicalLink.count() !== 1) throw new ContractError("PRODUCT_MISMATCH");
-      // `has: links.nth(index)` would reapply a page-wide index inside each row.
-      // Anchor the ancestor to the immutable, already-validated canonical href.
-      const rows = canonicalLink.locator('xpath=ancestor::div[contains(@class, "_gridCol_")]');
-      if (await rows.count() !== 1) throw new ContractError("DOM_DRIFT");
+      if (matchingLinks.size !== 1) throw new ContractError("PRODUCT_MISMATCH");
+      const linkSelector = `a[href=${JSON.stringify([...matchingLinks][0])}]`;
+      // Each start time shares the same booking-search href. Scope by both
+      // href and time before uniqueness; inner locators must have no global nth.
+      const rows = page.locator('div[class*="_gridCol_"]')
+        .filter({ has: page.locator(linkSelector) })
+        .filter({ has: page.getByText(job.localDateTime.slice(11, 16), { exact: true }) });
+      if (await rows.count() !== 1) throw new ContractError("PRODUCT_MISMATCH");
       const row = rows.first();
+      if (await row.locator(linkSelector).count() !== 1) throw new ContractError("DOM_DRIFT");
       if (await row.getByText(job.localDateTime.slice(11, 16), { exact: true }).count() !== 1) throw new ContractError("TARGET_MISMATCH");
       const label = current.availability === "AVAILABLE" ? "予約可能" : "完売";
       const badge = row.locator("span.jumpstart_ui__Badge__badge");
