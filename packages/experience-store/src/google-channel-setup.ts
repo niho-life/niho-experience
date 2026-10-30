@@ -101,6 +101,18 @@ export class GoogleChannelSetupRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
+  async #assertCurrentOwner(client: PoolClient, actor: HostActor): Promise<void> {
+    assertActor(actor);
+    const allowed = await client.query(
+      `SELECT 1 FROM provider_google_connections c
+        JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+          AND m.active=true AND m.role='OWNER'
+       WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
+      [actor.providerId, actor.nihoUserId],
+    );
+    if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+  }
+
   async #authority(client: PoolClient, actor: HostActor, listingId: string, lock: boolean): Promise<AuthorityRow> {
     assertActor(actor);
     const result = await client.query<AuthorityRow>(
@@ -211,14 +223,7 @@ export class GoogleChannelSetupRepository {
       || input.expectedMappingVersion < 1 || !UUID_V4.test(input.commandId)) throw new StoreValidationError("Invalid Google setup command.");
     return transaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      const allowed = await client.query(
-        `SELECT 1 FROM provider_google_connections c
-          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
-            AND m.active=true AND m.role='OWNER'
-         WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
-        [actor.providerId, actor.nihoUserId],
-      );
-      if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+      await this.#assertCurrentOwner(client, actor);
       const row = (await client.query<JournalRow>(
         "SELECT * FROM google_channel_setup_journals WHERE provider_id=$1 AND command_id=$2::uuid FOR UPDATE",
         [actor.providerId, input.commandId],
@@ -246,13 +251,18 @@ export class GoogleChannelSetupRepository {
     if (!listingId || listingId.length > 256) throw new StoreValidationError("Invalid listing ID.");
     return transaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      const authority = await this.#authority(client, actor, listingId, false);
+      await this.#assertCurrentOwner(client, actor);
       const found = await client.query<JournalRow>(
         `SELECT * FROM google_channel_setup_journals WHERE provider_id=$1 AND listing_id=$2
           ORDER BY created_at DESC,command_id DESC LIMIT 1`, [actor.providerId, listingId],
       );
       const row = found.rows[0];
       if (!row) return null;
+      if (row.phase === "PREPARING" || (row.phase === "FAILED_BEFORE_CREATE" && row.failure_reason === "PREPARATION_CANCELLED")) {
+        if (row.created_by_niho_user_id !== actor.nihoUserId) throw new StoreAccessDeniedError();
+        return record(row);
+      }
+      const authority = await this.#authority(client, actor, listingId, false);
       if (row.phase !== "READY_FOR_CONNECTION") return record(row);
       const binding = await client.query(
         `SELECT 1 FROM google_channel_output_bindings
@@ -366,14 +376,7 @@ export class GoogleChannelSetupRepository {
     assertActor(actor);
     await transaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      const allowed = await client.query(
-        `SELECT 1 FROM provider_google_connections c
-          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
-            AND m.active=true AND m.role='OWNER'
-         WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
-        [actor.providerId, actor.nihoUserId],
-      );
-      if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+      await this.#assertCurrentOwner(client, actor);
     });
   }
 

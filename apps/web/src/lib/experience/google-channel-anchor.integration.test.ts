@@ -204,11 +204,13 @@ describe.skipIf(!databaseUrl)("Google anchor real store/executor/helper integrat
       const abandoned = await repository.prepare(actor, input());
       await value.pool.query("UPDATE channel_desired_states SET desired_version=desired_version+1 WHERE listing_id='listing-a'");
       await value.pool.query("UPDATE schedule_rules SET local_start_time='11:00' WHERE id='rule-a'");
+      expect(await repository.get(actor, "listing-a", occurrenceId)).toMatchObject({ commandId: command(1), state: "PREPARING" });
       const recovered = await executeGoogleChannelAnchor(value.pool, actor, input(command(1), "inspect"), {
         ...dependencies(async () => { throw new Error("must not call Google"); }),
         refreshToken: async () => { throw new Error("must not refresh token"); },
       });
       expect(recovered.reason).toBe("PREPARATION_CANCELLED");
+      expect(await repository.get(actor, "listing-a", occurrenceId)).toMatchObject({ commandId: command(1), state: "FAILED_BEFORE_INITIALIZE" });
       await expect(repository.markInitializing(abandoned)).rejects.toThrow();
       expect((await value.pool.query("SELECT count(*)::int AS count FROM google_channel_anchor_journals WHERE phase IN ('PREPARING','INITIALIZING','UNCERTAIN')")).rows[0].count).toBe(0);
     } finally { await cleanup(value); }

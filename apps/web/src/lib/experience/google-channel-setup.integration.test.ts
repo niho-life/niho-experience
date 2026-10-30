@@ -108,13 +108,16 @@ describe.skipIf(!databaseUrl)("Google output setup runtime/repository/create int
     try {
       const repository = new GoogleChannelSetupRepository(value.pool);
       const original = await repository.prepare(actorA, setupInput());
-      await value.pool.query("UPDATE channel_listings SET mapping_version=mapping_version+1 WHERE id='listing-a'");
+      await value.pool.query("UPDATE channel_listings SET mapping_version=mapping_version+1,active=false WHERE id='listing-a'");
+      expect(await repository.get(actorA, "listing-a")).toMatchObject({ commandId: command(1), state: "PREPARING" });
       const neverCall = { ...injected(async () => { throw new Error("must not call Google"); }), refreshToken: async () => { throw new Error("must not refresh"); } };
       const cancel = { ...setupInput(), operation: "cancel_preparing" as const };
       expect((await executeGoogleChannelSetup(value.pool, actorA, cancel, neverCall)).reason).toBe("PREPARATION_CANCELLED");
       expect((await executeGoogleChannelSetup(value.pool, actorA, cancel, neverCall)).state).toBe("FAILED_BEFORE_CREATE");
+      expect(await repository.get(actorA, "listing-a")).toMatchObject({ state: "FAILED_BEFORE_CREATE" });
       await expect(repository.markCreating(original)).rejects.toThrow();
       await expect(repository.failBeforeCreate(original, "GOOGLE_UNAVAILABLE")).rejects.toBeInstanceOf(StoreConflictError);
+      await value.pool.query("UPDATE channel_listings SET active=true WHERE id='listing-a'");
       const next = await executeGoogleChannelSetup(value.pool, actorA, { ...setupInput(command(2)), expectedMappingVersion: 2 }, injected(async () => {
         creates += 1; return Response.json({ id: "synthetic-recovered-output" });
       }));

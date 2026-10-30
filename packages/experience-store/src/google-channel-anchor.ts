@@ -165,6 +165,18 @@ export class GoogleChannelAnchorRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
+  async #assertCurrentOwner(client: PoolClient, actor: HostActor): Promise<void> {
+    assertActor(actor);
+    const allowed = await client.query(
+      `SELECT 1 FROM provider_google_connections c
+        JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+          AND m.active=true AND m.role='OWNER'
+       WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
+      [actor.providerId, actor.nihoUserId],
+    );
+    if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+  }
+
   async #authority(
     client: PoolClient,
     actor: HostActor,
@@ -175,14 +187,7 @@ export class GoogleChannelAnchorRepository {
     lock: boolean,
   ): Promise<AuthorityRow> {
     assertActor(actor);
-    const owner = await client.query(
-      `SELECT 1 FROM provider_google_connections c
-        JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
-          AND m.active=true AND m.role='OWNER'
-       WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
-      [actor.providerId, actor.nihoUserId],
-    );
-    if (!owner.rows[0]) throw new StoreAccessDeniedError();
+    await this.#assertCurrentOwner(client, actor);
     const desiredExists = await client.query(
       "SELECT 1 FROM channel_desired_states WHERE provider_id=$1 AND listing_id=$2 AND occurrence_id=$3",
       [actor.providerId, listingId, occurrenceId],
@@ -364,14 +369,7 @@ export class GoogleChannelAnchorRepository {
     assertInput(input);
     if (input.operation !== "inspect") throw new StoreValidationError("Inspection is required.");
     return transaction(this.#pool, actor.providerId, async (client) => {
-      const allowed = await client.query(
-        `SELECT 1 FROM provider_google_connections c
-          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
-            AND m.active=true AND m.role='OWNER'
-         WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
-        [actor.providerId, actor.nihoUserId],
-      );
-      if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+      await this.#assertCurrentOwner(client, actor);
       const row = (await client.query<JournalRow>(
         "SELECT * FROM google_channel_anchor_journals WHERE provider_id=$1 AND command_id=$2::uuid FOR UPDATE",
         [actor.providerId, input.commandId],
@@ -403,6 +401,7 @@ export class GoogleChannelAnchorRepository {
       throw new StoreValidationError("Invalid Google anchor target.");
     }
     return transaction(this.#pool, actor.providerId, async (client) => {
+      await this.#assertCurrentOwner(client, actor);
       const found = await client.query<JournalRow>(
         `SELECT * FROM google_channel_anchor_journals WHERE provider_id=$1 AND listing_id=$2 AND occurrence_id=$3
           ORDER BY created_at DESC,command_id DESC LIMIT 1`,
@@ -410,6 +409,10 @@ export class GoogleChannelAnchorRepository {
       );
       const row = found.rows[0];
       if (!row) return null;
+      if (row.phase === "PREPARING" || (row.phase === "FAILED_BEFORE_INITIALIZE" && row.reason === "PREPARATION_CANCELLED")) {
+        if (row.actor_niho_user_id !== actor.nihoUserId) throw new StoreAccessDeniedError();
+        return record(row);
+      }
       const authority = await this.#authority(
         client, actor, listingId, occurrenceId, integer(row.mapping_version), integer(row.desired_version), false,
       );
@@ -562,14 +565,7 @@ export class GoogleChannelAnchorRepository {
   async assertCurrentOwnerAccess(actor: HostActor): Promise<void> {
     assertActor(actor);
     await transaction(this.#pool, actor.providerId, async (client) => {
-      const allowed = await client.query(
-        `SELECT 1 FROM provider_google_connections c
-          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
-            AND m.active=true AND m.role='OWNER'
-         WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
-        [actor.providerId, actor.nihoUserId],
-      );
-      if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+      await this.#assertCurrentOwner(client, actor);
     });
   }
 

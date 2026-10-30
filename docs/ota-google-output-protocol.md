@@ -78,7 +78,7 @@ serverはprovider inventory mutexを各transactionの最初に取り、外部通
 
 journalは`PREPARING`の後、Google event I/O前に`INITIALIZING`を保存する。provider/account/listing/occurrence/actor/command、account・mapping・binding・connection generation、calendar/scope digest、desired state/version/UTC区間、operation nonce/epochだけを保持し、credential・calendar ID・raw bodyは保持しない。同じcommandの再送はinsertせず、`INITIALIZING` / `UNCERTAIN`の明示`inspect`だけが新しいnonce/epochを取得してGET-only照合する。missing・読取失敗・設定/token失敗では`UNCERTAIN` fenceを残し、別commandや自動initialize retryで回避できない。古いcallbackはnonce/epoch CASで新しいinspection結果を上書きできない。
 
-`PREPARING`で中断したcommandの明示`inspect`は、Google通信をせずnonce/epochを更新して古い実行を無効化し、`FAILED_BEFORE_INITIALIZE` / `PREPARATION_CANCELLED`へ安全に終了する。その後は新しいcommandで準備できる。`INITIALIZING`以降はこの未送信扱いを適用せず、結果不明のfenceとGET-only照合を維持する。
+`PREPARING`で中断したcommandの明示`inspect`は、Google通信をせずnonce/epochを更新して古い実行を無効化し、`FAILED_BEFORE_INITIALIZE` / `PREPARATION_CANCELLED`へ安全に終了する。その後は新しいcommandで準備できる。現在OWNERかつGoogle接続本人は、元desired・時刻・listing設定が変わった後も、GETから未送信準備と安全終了済みの最小状態・command IDを取得できる。カレンダー作成前のPREPARINGも同じ読取原則を使う。`INITIALIZING`以降はこの未送信扱いを適用せず、結果不明のfenceとGET-only照合を維持する。
 
 この段階ではbindingをactiveにせず、Airbnb接続・activation・UI・scheduler・readerを追加しない。Google側のanchor確認だけでAirbnb反映済みとは扱わない。
 
