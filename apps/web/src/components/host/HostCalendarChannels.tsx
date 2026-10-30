@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { StatusPill } from "./ui";
 import { HostIcon } from "./HostIcon";
 
-type ChannelLabel = "SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED";
+type ChannelLabel = "SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED" | "HELD";
 
 interface ChannelStatus {
   readonly occurrenceId: string;
@@ -27,7 +27,7 @@ function decodeChannels(value: unknown): readonly ChannelStatus[] | null {
     const item = entry as Record<string, unknown>;
     if (typeof item.occurrenceId !== "string" || typeof item.site !== "string" || item.site.length === 0 || item.site.length > 120
       || (item.desired !== "OPEN" && item.desired !== "CLOSED")
-      || (item.label !== "SYNCED" && item.label !== "PENDING" && item.label !== "ERROR" && item.label !== "UNVERIFIED")) return null;
+      || (item.label !== "SYNCED" && item.label !== "PENDING" && item.label !== "ERROR" && item.label !== "UNVERIFIED" && item.label !== "HELD")) return null;
     decoded.push({ occurrenceId: item.occurrenceId, site: item.site, desired: item.desired, label: item.label });
   }
   return decoded;
@@ -92,6 +92,8 @@ function statusView(label: ChannelLabel): { label: string; tone: "ok" | "wait" |
   if (label === "SYNCED") return { label: "反映済み", tone: "ok" };
   if (label === "PENDING") return { label: "反映待ち", tone: "wait" };
   if (label === "UNVERIFIED") return { label: "未確認", tone: "draft" };
+  // New OPEN waits until the Studio re-reads reservations after a stop. It is not reflected success.
+  if (label === "HELD") return { label: "保留中", tone: "wait" };
   return { label: "要確認", tone: "wait" };
 }
 
@@ -103,6 +105,7 @@ export function channelSummary(state: HostChannelState, occurrenceId?: string): 
   if (channels.length === 0) return { label: "未確認", tone: "draft" };
   if (channels.some((item) => item.label === "ERROR")) return statusView("ERROR");
   if (channels.some((item) => item.label === "UNVERIFIED")) return statusView("UNVERIFIED");
+  if (channels.some((item) => item.label === "HELD")) return statusView("HELD");
   if (channels.some((item) => item.label === "PENDING")) return statusView("PENDING");
   return statusView("SYNCED");
 }

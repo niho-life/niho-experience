@@ -11,6 +11,15 @@ export const channelWorkspacePreviewEnabled = () => config.apiMode === "mock" &&
 export const channelWorkerEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED === "true";
 export const googleChannelDeliveryEnabled = () => channelWorkerEnabled()
   && process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED === "true";
+/** Cloud Scheduler watchdog. Independent of the worker flag; it never accepts a worker bearer. */
+export const channelWatchdogEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_WATCHDOG_ENABLED === "true";
+
+/** Both values are required; a partial configuration keeps the endpoint closed. */
+export function channelWatchdogIdentitySettings(): { readonly audience: string; readonly serviceAccountEmail: string } | null {
+  const audience = process.env.EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE?.trim() ?? "";
+  const serviceAccountEmail = process.env.EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
+  return audience && serviceAccountEmail ? { audience, serviceAccountEmail } : null;
+}
 
 export function channelJson(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "cache-control": "private, no-store" } });

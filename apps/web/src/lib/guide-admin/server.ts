@@ -1,74 +1,28 @@
 import "server-only";
-import { OAuth2Client, type TokenPayload } from "google-auth-library";
 import { StoreValidationError, type GuideAdminRepository } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { guideAdminRepository } from "@/lib/experience/store-server";
+import {
+  googleServiceTokenVerifier,
+  verifyGoogleServiceIdentity,
+  type GoogleServiceIdentityClaims,
+  type GoogleServiceIdentitySettings,
+  type GoogleServiceTokenVerification,
+  type GoogleServiceTokenVerifier,
+} from "@/lib/google-service-identity";
 import { readBoundedJson } from "@/lib/read-bounded-json";
 
-const GOOGLE_ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CATEGORY_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const JSON_LIMIT_BYTES = 16 * 1024;
 
-export interface GuideAdminIdentityClaims {
-  readonly iss: string;
-  readonly aud: string;
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly exp: number;
-}
+export type GuideAdminIdentityClaims = GoogleServiceIdentityClaims;
+export type GuideAdminTokenVerification = GoogleServiceTokenVerification;
+export type GuideAdminTokenVerifier = GoogleServiceTokenVerifier;
+export type GuideAdminAuthSettings = GoogleServiceIdentitySettings;
 
-export type GuideAdminTokenVerification =
-  | { readonly ok: true; readonly claims: GuideAdminIdentityClaims }
-  | { readonly ok: false; readonly kind: "invalid" | "outage" };
-
-export interface GuideAdminTokenVerifier {
-  verify(token: string, audience: string): Promise<GuideAdminTokenVerification>;
-}
-
-export interface GuideAdminAuthSettings {
-  readonly audience: string;
-  readonly serviceAccountEmail: string;
-}
-
-const googleClient = new OAuth2Client();
-
-function tokenPayloadClaims(payload: TokenPayload): GuideAdminIdentityClaims {
-  return {
-    iss: payload.iss,
-    aud: payload.aud,
-    ...(payload.email === undefined ? {} : { email: payload.email }),
-    ...(payload.email_verified === undefined ? {} : { emailVerified: payload.email_verified }),
-    exp: payload.exp,
-  };
-}
-
-function isVerificationOutage(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const record = error as { code?: unknown; cause?: { code?: unknown }; response?: { status?: unknown } };
-  const networkCodes = [
-    "ECONNABORTED", "ECONNREFUSED", "ECONNRESET", "ENETDOWN", "ENETUNREACH", "EAI_AGAIN", "ETIMEDOUT",
-  ];
-  if (typeof record.code === "string" && networkCodes.includes(record.code)) return true;
-  if (typeof record.cause?.code === "string" && networkCodes.includes(record.cause.code)) return true;
-  const status = record.response?.status;
-  // verifyIdToken validates malformed/expired/wrong-claim tokens locally. An HTTP
-  // response here belongs to Google's signing-key retrieval and is an outage.
-  return typeof status === "number";
-}
-
-export const googleGuideAdminTokenVerifier: GuideAdminTokenVerifier = {
-  async verify(token, audience) {
-    try {
-      const ticket = await googleClient.verifyIdToken({ idToken: token, audience });
-      const payload = ticket.getPayload();
-      return payload === undefined ? { ok: false, kind: "invalid" } : { ok: true, claims: tokenPayloadClaims(payload) };
-    } catch (error) {
-      return { ok: false, kind: isVerificationOutage(error) ? "outage" : "invalid" };
-    }
-  },
-};
+export const googleGuideAdminTokenVerifier: GuideAdminTokenVerifier = googleServiceTokenVerifier;
 
 export function guideAdminJson(body: unknown, status = 200): Response {
   return Response.json(body, {
@@ -86,28 +40,12 @@ export async function verifyGuideAdminServiceIdentity(
   settings: GuideAdminAuthSettings,
   verifier: GuideAdminTokenVerifier = googleGuideAdminTokenVerifier,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly response: Response }> {
-  const authorization = request.headers.get("authorization");
-  const match = authorization?.match(/^Bearer ([A-Za-z0-9._~-]+)$/);
-  if (!match) return { ok: false, response: guideAdminJson({ error: "invalid_identity" }, 401) };
-  const verified = await verifier.verify(match[1]!, settings.audience);
-  if (!verified.ok) {
-    return {
-      ok: false,
-      response: guideAdminJson({ error: verified.kind === "outage" ? "identity_verification_unavailable" : "invalid_identity" }, verified.kind === "outage" ? 503 : 401),
-    };
-  }
-  const claims = verified.claims;
-  if (
-    !GOOGLE_ISSUERS.has(claims.iss)
-    || claims.aud !== settings.audience
-    || claims.emailVerified !== true
-    || claims.email !== settings.serviceAccountEmail
-    || !Number.isSafeInteger(claims.exp)
-    || claims.exp <= Math.floor(Date.now() / 1000)
-  ) {
-    return { ok: false, response: guideAdminJson({ error: "invalid_identity" }, 401) };
-  }
-  return { ok: true };
+  const verified = await verifyGoogleServiceIdentity(request, settings, verifier);
+  if (verified.ok) return { ok: true };
+  return {
+    ok: false,
+    response: guideAdminJson({ error: verified.kind === "outage" ? "identity_verification_unavailable" : "invalid_identity" }, verified.kind === "outage" ? 503 : 401),
+  };
 }
 
 export async function loadGuideAdmin(
