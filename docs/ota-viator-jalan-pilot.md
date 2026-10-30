@@ -18,7 +18,7 @@
 | サイト | 専用profile / 読取り | driverによる開閉 | 残ること |
 | --- | --- | --- | --- |
 | じゃらん | 許可済みsession復元・accountと枠の一致を確認 | 予約ゼロの一枠で販売→売止→販売、独立reload、各Chromeの停止まで成功。元状態へ復元済み | cloud/PWA結合、予約reader、常駐と遅延の計測 |
-| Viator | 再起動後の認証、canonical枠、全状態の予約検索とゼロ件の証拠を確認 | 初回停止要求後に`UNKNOWN_AFTER_SAVE`。本人再認証後の新しいnative readで元のOPENを確認済み。転送readは403、native readは成功 | Chrome通常通信による一度のUI要求・認証維持・停止/再開の再受入（#269） |
+| Viator | 再起動後の認証、canonical枠、全状態の予約検索とゼロ件の証拠を確認 | Chrome通常通信でOPEN→CLOSED→OPEN。停止/再開とも200、独立reloadで状態一致、各Chromeの停止まで成功。元OPENへ復元済み | cloud/PWA結合、予約reader、常駐と遅延の計測 |
 
 じゃらんの初回実証では売止のDOM照合が止まったため復旧を優先した。状態がLI本体でなく子の`span.request-reservation`に付く点と、同列の補足spanを修正して販売へ戻し、その後の完全な停止・再開サイクルを同じdriverで再確認した。Viatorの旧DOMの「予約可能」は保存後の新しい証拠として使わない。本番flag・deployment/listing capabilityは受入前に開かない。private pilotの固定preflightによるdriver受入は、実cloudのclaim/lease/PWA結合の代替ではない。
 
@@ -54,3 +54,11 @@
 2. 専用profileと現行worker認証に接続し、lease/version/preflight/停止証明/独立readbackを通す。
 3. サイトごとの予約読取りと完全性・遅延を検証する。未取得を予約ゼロと扱わない。
 4. オーナーの許可した空き回でworkerから停止・再開・復元を実証する。
+
+## Viator転送方式の受入（#269）
+
+初回のNode転送後は結果不明となった。本人の再認証後、新しいnative readで元OPENを確認してから切り分けを進めた。同じ専用profileで、native read成功 → Fetch Metadata補完付き転送readが403 → native read再成功となり、転送でbrowser文脈を再現する処理は削除した。403の内部理由や初回保存失敗のstatusまでは断定しない。
+
+固定SHA `61b771165fce564f52d5c41f36ae6fb9a8480455` のdriverで、送信直前のpreflight拒否によるwrite=0を確認した後、全9状態の予約検索を再実行した。HTTP200、対象商品/option/日付、先頭page、hasNext=false、参照配列0件まで照合してから実枠を操作した。2026-10-30 12:33 JSTに、OBSERVE→SET_CLOSED→SET_OPENが成功。書込dispatchは停止1回・再開1回、各保存status=200、独立reload一致、各owned processのstopped=trueを確認した。予約・価格・人数・別枠は変更していない。
+
+Chrome内部のHTTP再送回数をexactly-onceとは扱わない。UI要求とpermitは高々1回で、受信bodyは同一枠の同一SETに限定し、応答喪失時は新しい読取りへ収束する。合成ブラウザ試験ではACK切断時の全body一致、500後のreadback、再読込による追加writeなしを確認済み。作成・予約取消へこの方式を広げない。

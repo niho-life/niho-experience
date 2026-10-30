@@ -73,4 +73,4 @@ slot選択は観測済みのdata-bind linkだけを使い、専用 `.panel-selec
 
 公開repoのfixtureは合成ID、合成HTML、合成JSONだけを使う。初期日はjobとは別のtoday相当日にし、bootstrapからfuture targetへの移動を必須にする。unit testではregistry、ID文法、profile namespace/symlink拒否、JSONP、query重複/上限、対象一意性、exact write、price / cancel / bulk / 別slot / 未対応予約方式の拒否、interceptor時preflightを確認する。browser testでは両siteの停止、再開、reload後の独立readback、ACK喪失と500応答後の新read収束、別account、別target、認証切れを確認する。
 
-Codex sandboxがChrome process controlを拒否する場合、`npm --prefix packages/ota-worker run test:browser` は理由付きでskipする。同じtestをreviewed Studio executorで実行する必要がある。合成fixtureは実サイト互換の証拠ではない。じゃらんは専用profileの認証保持・既存一枠の停止/再開/元への復元・独立reload・停止まで実サイトで受入済み。Viatorはnative read成功と転送readの403を切り分けたが、Chrome本来の通信による保存の再受入は進行中（#269）。本番enable、予約reader、新規枠作成、料金同期はこのコード受入には含まれない。
+Codex sandboxがChrome process controlを拒否する場合、`npm --prefix packages/ota-worker run test:browser` は理由付きでskipする。同じtestをreviewed Studio executorで実行する必要がある。合成fixtureは実サイト互換の証拠ではない。じゃらんは専用profileの認証保持・既存一枠の停止/再開/元への復元・独立reload・停止まで実サイトで受入済み。Viatorもnative read成功と転送readの403を切り分け、Chrome本来の通信による停止/再開（各200）・独立reload・元OPENへの復元・各browser停止まで実サイトで再受入済み（#269、詳細は[実証記録](ota-viator-jalan-pilot.md)）。本番enable、予約reader、新規枠作成、料金同期はこのコード受入には含まれない。
