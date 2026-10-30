@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
-import { saveProviderProfile, submitProviderReview } from "@/host/actions";
+import { saveProviderMeetingPoint, saveProviderProfile, submitProviderReview } from "@/host/actions";
+import { normalizeMeetingPoint, sameMeetingPoint } from "@/host/meeting-point";
 import { notificationChanges, notificationPanelView, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
 import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
-import type { HostGoogleConnection, HostNotificationKey, HostSettings } from "@/host/types";
+import type { HostGoogleConnection, HostMeetingDefaults, HostNotificationKey, HostSettings } from "@/host/types";
 import type { HostProviderRole } from "@/lib/host/providers";
 import { HOST_CALENDAR_PATH, withProvider } from "@/lib/host/routes";
 import { DISABLED } from "./editor-parts";
 import { FIELD_DISABLED, FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
+import { MeetingPointFields } from "./MeetingPointFields";
 import { HostCalendarPanel } from "./HostCalendarPanel";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { consoleButtonClass } from "./host-ui";
@@ -37,7 +39,7 @@ export interface HostSettingsFormProps {
   connectNotice: HostNotice | null;
   /** The Google account カレンダー's つなぐ connects in the preview; null in http mode. */
   googleConnection: HostGoogleConnection | null;
-  /** Mock mode: the parts NIHO cannot keep yet (集合案内・カレンダー・通知) can be tried on screen. */
+  /** Mock mode: the parts NIHO cannot keep yet (カレンダー・通知) can be tried on screen, and 集合案内 is kept on screen only. */
   preview: boolean;
   /** The account panel, passed in because its sign-out form cannot sit inside this form. */
   account: ReactNode;
@@ -46,10 +48,11 @@ export interface HostSettingsFormProps {
 /**
  * 設定 (mock v2): one panel per group and one 保存. 提供者情報 is NIHO's (#88/#91): 保存 sends
  * the fields that changed to the provider API and shows what NIHO kept; a reviewed provider is
- * asked first, as saving sends it back to review. 審査を申請, the payout account and カレンダー
- * (#109) work on their own. 既定の集合案内 and 通知 (#109: the three notifications the host may
- * stop) are kept by 保存 but have no API yet: the preview keeps them on screen only, and http mode
- * shows them as 準備中.
+ * asked first, as saving sends it back to review. 既定の集合案内 (#89, OWNER and EDITOR) is NIHO's
+ * too and saved after 提供者情報 by the same 保存; changing it stops every listed experience of the
+ * provider, so the host is asked first (one dialog with the review's sentence when both apply). The
+ * preview keeps it on screen only. 審査を申請, the payout account and カレンダー (#109) work on their
+ * own. 通知 (#109: the three notifications the host may stop) is kept by 保存 but has no API yet.
  *
  * Only 提供者情報 and the payout account sit inside the <form>: カレンダー's dialogs are forms of
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
@@ -67,6 +70,10 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const [notice, setNotice] = useState<HostNotice | null>(null);
   const [reviewNotice, setReviewNotice] = useState<HostNotice | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // 既定の集合案内: NIHO answers it to the OWNER and EDITOR only; null could not be read.
+  const meetingEditable = settings.meetingPoint !== null && (role === "OWNER" || role === "EDITOR");
+  const [savedMeeting, setSavedMeeting] = useState<HostMeetingDefaults | null>(settings.meetingPoint);
+  const [meeting, setMeeting] = useState<HostMeetingDefaults | null>(settings.meetingPoint);
   const notificationView = notificationPanelView(settings.notifications, role, preview);
   const [savedNotifications, setSavedNotifications] = useState(notificationView.kind === "owner" ? notificationView.rows : []);
   const [notifications, setNotifications] = useState(savedNotifications);
@@ -76,6 +83,10 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
 
   const changes = changedFields(saved, profile, owner);
   const unsaved = Object.keys(changes).length > 0;
+  const meetingChanged = meetingEditable && meeting !== null && savedMeeting !== null && !sameMeetingPoint(meeting, savedMeeting);
+  // The preview keeps the meeting point on screen: nothing of NIHO's stops there.
+  const meetingConfirm = meetingChanged && !preview;
+  const reviewConfirm = unsaved && saveNeedsReviewConfirm(reviewStatus);
   const review = reviewRow({
     reviewStatus,
     role,
@@ -114,25 +125,52 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
     if (Object.keys(notificationChanges(savedNotifications, notifications)).length > 0) setSavedNotifications(notifications);
   };
 
+  /** The meeting point as NIHO keeps it now: the preview's on-screen one, trimmed. */
+  const keepMeeting = (value: HostMeetingDefaults) => {
+    setSavedMeeting(value);
+    setMeeting(value);
+  };
+
   const commit = () => {
     setNotice(null);
+    const meetingNow = meetingChanged && meeting ? normalizeMeetingPoint(meeting) : null;
+    if (meetingChanged && !meetingNow) {
+      setNotice({ tone: "error", message: "既定の集合案内の地図 URL は https:// で始まる URL にしてください。" });
+      return;
+    }
     // Nothing of NIHO's changed: the preview's on-screen parts are "saved" as they are.
-    if (!unsaved) {
+    if (!unsaved && !(meetingNow && !preview)) {
+      if (meetingNow) keepMeeting(meetingNow);
       keepNotifications();
       setNotice({ tone: "success", message: "保存しました" });
       return;
     }
     startSaving(async () => {
-      const result = await saveProviderProfile({ providerId, ...changes });
-      if (!result.ok) {
-        setNotice({ tone: "error", message: result.message });
-        return;
+      let message = "保存しました";
+      if (unsaved) {
+        const result = await saveProviderProfile({ providerId, ...changes });
+        if (!result.ok) {
+          setNotice({ tone: "error", message: result.message });
+          return;
+        }
+        setSaved(result.profile);
+        setProfile(result.profile);
+        setReviewStatus(result.reviewStatus);
+        message = result.message;
       }
-      setSaved(result.profile);
-      setProfile(result.profile);
-      setReviewStatus(result.reviewStatus);
+      // 提供者情報 first, then the meeting point: a refused meeting point leaves the profile saved.
+      if (meetingNow && preview) keepMeeting(meetingNow);
+      else if (meetingNow) {
+        const result = await saveProviderMeetingPoint({ providerId, meetingPoint: meetingNow });
+        if (!result.ok) {
+          setNotice({ tone: "error", message: unsaved ? "提供者情報は保存しました。既定の集合案内は保存できませんでした。" : result.message });
+          return;
+        }
+        keepMeeting(result.meetingPoint);
+        message = result.message;
+      }
       keepNotifications();
-      setNotice({ tone: "success", message: result.message });
+      setNotice({ tone: "success", message });
     });
   };
 
@@ -140,7 +178,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
-    if (unsaved && saveNeedsReviewConfirm(reviewStatus)) setConfirming(true);
+    if (reviewConfirm || meetingConfirm) setConfirming(true);
     else commit();
   };
 
@@ -160,7 +198,6 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const sellerOwnerHelp = `${ids}-seller-owner`;
   const kindHelp = `${ids}-kind-help`;
   const reviewWhy = `${ids}-review-why`;
-  const onScreenOnly = !preview;
 
   return (
     <>
@@ -267,16 +304,12 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
             </FieldRow>
           </FieldSection>}
 
-        <FieldSection id="settings-meeting" title="既定の集合案内" status={onScreenOnly ? PREPARING_STATUS : null}>
-          <FieldRow label="公開する集合エリア" htmlFor="settings-meeting-area">
-            <input id="settings-meeting-area" form={formId} disabled={onScreenOnly} defaultValue={settings.meetingPoint.area} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
-          </FieldRow>
-          <FieldRow label="地図 URL" htmlFor="settings-map-url">
-            <input id="settings-map-url" form={formId} type="url" inputMode="url" placeholder="https://" disabled={onScreenOnly} defaultValue={settings.meetingPoint.mapUrl} className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`} />
-          </FieldRow>
-          <FieldRow label="入口の案内（予約確定後）" htmlFor="settings-entrance">
-            <textarea id="settings-entrance" form={formId} rows={3} disabled={onScreenOnly} defaultValue={settings.meetingPoint.entrance} className={`${TEXTAREA} ${FIELD_DISABLED}`} />
-          </FieldRow>
+        <FieldSection id="settings-meeting" title="既定の集合案内" status={null}>
+          {meetingEditable && meeting ? (
+            <MeetingPointFields idPrefix="settings-meeting" value={meeting} form={formId} onChange={(value) => { setMeeting(value); setNotice(null); }} />
+          ) : (
+            <p className="text-ink-soft">{role === "OWNER" || role === "EDITOR" ? "既定の集合案内を読めませんでした。" : "既定の集合案内はオーナーと編集者が変えられます。"}</p>
+          )}
         </FieldSection>
 
         <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} />
@@ -311,17 +344,16 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
 
       {confirming ? (
         <HostConfirmDialog
-          title="提供者情報を保存しますか？"
-          description={
-            reviewStatus === "APPROVED"
-              ? "保存すると NIHO の再審査（審査待ち）になり、審査が済むまで掲載中の体験は止まります。"
-              : "保存すると NIHO の再審査（審査待ち）になります。"
-          }
+          title={reviewConfirm && meetingConfirm ? "提供者情報と既定の集合案内を保存しますか？" : reviewConfirm ? "提供者情報を保存しますか？" : "既定の集合案内を保存しますか？"}
+          description={[
+            reviewConfirm ? (reviewStatus === "APPROVED" ? "保存すると NIHO の再審査（審査待ち）になり、審査が済むまで掲載中の体験は止まります。" : "保存すると NIHO の再審査（審査待ち）になります。") : null,
+            meetingConfirm ? "この提供者の掲載中の体験はすべて止まり、NIHO がもう一度確認するまで体験サイトに出ません。" : null,
+          ].filter(Boolean).join("")}
           focusRef={stay}
           stayRef={stay}
           confirm={
             <button type="submit" className={consoleButtonClass("primary")}>
-              保存して再審査を受ける
+              {reviewConfirm ? "保存して再審査を受ける" : "保存する"}
             </button>
           }
           onConfirm={commit}

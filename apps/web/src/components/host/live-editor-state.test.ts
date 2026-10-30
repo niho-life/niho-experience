@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
-import { conflictValueText, editLines, mergeLivePage, serializeLivePagePatch } from "./live-editor-state";
+import { conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, mergeLivePage, readLiveMeeting, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 
 const offer = (id: string, name: string, priceYen: number) => ({ id, name, shortDescription: null, sortOrder: 0, isActive: true, priceYen, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [2], startTime: "10:00", durationMinutes: 60, cutoffDays: 1, closedDates: [], cancellationPolicy: "FREE_UNTIL_24H" as const, acceptanceMode: "APPROVAL" as const, spaceScope: "ENTIRE_FACILITY" as const, useZone: [], bookingQuestions: [] });
 const page = (): ExperienceProviderPageDetail => ({ id: "page_1", kind: "EXPERIENCE", slug: "sample-page", language: "JA", title: "元の題名", status: "DRAFT", listOnEntrance: false, publishedAt: null, unpublishedAt: null, content: { lead: "元", facts: { language: "日本語" }, highlights: [], timeline: [], description: "元", included: [], notIncluded: [], notSuitableFor: [], meetingPoint: { entranceNote: "内部", exteriorPhotoObjectKey: null }, knowBeforeYouGo: [], hostUserIds: ["hidden"] }, photos: [], coverObjectKey: null, offer: offer("offer_1", "商品", 1000), offers: [offer("offer_1", "商品", 1000)], publishBlockers: [], publicPath: "/living/sample/pages/sample-page", createdAt: "2026-10-27T00:00:00.000Z", updatedAt: "2026-10-27T01:00:00.000Z", photoAlts: [] });
@@ -57,5 +57,50 @@ describe("live editor state", () => {
     expect(mine.conflicts.map((item) => item.label)).toContain("題名");
     expect(mine.draft.title).toBe("自分の題名");
     expect(theirs.draft.title).toBe("別の人の題名");
+  });
+});
+
+const place = { overview: "（合成）駅の近く", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から", mapUrl: "https://maps.example.test/sample", entranceNote: "（合成）木の門" };
+const inherit = (fields = place): LiveMeeting => ({ mode: "INHERIT", fields: { ...fields } });
+const override = (patch: Partial<typeof place> = {}): LiveMeeting => ({ mode: "OVERRIDE", fields: { ...place, ...patch } });
+
+describe("live editor meeting point", () => {
+  it("reads only the BFF's two modes with all five text fields", () => {
+    expect(readLiveMeeting({ mode: "INHERIT", meetingPoint: place })).toEqual(inherit());
+    expect(readLiveMeeting({ mode: "OVERRIDE", meetingPoint: { ...place, extra: "x" } })).toEqual(override());
+    for (const value of [null, {}, { mode: "DEFAULT", meetingPoint: place }, { mode: "OVERRIDE" }, { mode: "OVERRIDE", meetingPoint: { ...place, mapUrl: null } }]) expect(readLiveMeeting(value)).toBeNull();
+  });
+
+  it("counts a change of what would be saved: INHERIT ignores the fields, OVERRIDE ignores spaces around them", () => {
+    expect(liveMeetingChanged(inherit({ ...place, overview: "別" }), inherit())).toBe(false);
+    expect(liveMeetingChanged(override(), inherit())).toBe(true);
+    expect(liveMeetingChanged(override({ overview: " （合成）駅の近く " }), override())).toBe(false);
+    expect(liveMeetingChanged(override({ address: "（合成）別の町" }), override())).toBe(true);
+  });
+
+  it("sends INHERIT with the page version only, OVERRIDE with the trimmed fields", () => {
+    expect(liveMeetingRequest(inherit(), "2026-10-27T01:00:00.000Z")).toEqual({ mode: "INHERIT", expectedUpdatedAt: "2026-10-27T01:00:00.000Z" });
+    expect(liveMeetingRequest(override({ entranceNote: " （合成）木の門\n" }), "2026-10-27T02:00:00.000Z")).toEqual({ mode: "OVERRIDE", meetingPoint: place, expectedUpdatedAt: "2026-10-27T02:00:00.000Z" });
+  });
+
+  it("refuses an OVERRIDE map URL that is not https before anything is sent", () => {
+    expect(liveMeetingProblem(override())).toBeNull();
+    expect(liveMeetingProblem(override({ mapUrl: "" }))).toBeNull();
+    expect(liveMeetingProblem(override({ mapUrl: "http://maps.example.test" }))).toMatch(/https/);
+    expect(liveMeetingProblem(inherit({ ...place, mapUrl: "http://maps.example.test" }))).toBeNull();
+  });
+
+  it("takes the side that changed and reports one 集合場所 conflict when both did", () => {
+    const base = inherit();
+    expect(mergeLiveMeeting(base, base, override({ overview: "（合成）最新" }))).toEqual({ draft: override({ overview: "（合成）最新" }), conflict: null });
+    expect(mergeLiveMeeting(base, override(), base)).toEqual({ draft: override(), conflict: null });
+    expect(mergeLiveMeeting(base, override(), override({ overview: " （合成）駅の近く" })).conflict).toBeNull();
+    const local = override({ overview: "（合成）自分" }); const remote = override({ overview: "（合成）別の人" });
+    const mine = mergeLiveMeeting(base, local, remote, "local");
+    expect(mine.conflict).toMatchObject({ path: "meetingPoint", label: "集合場所" });
+    expect(mine.draft).toEqual(local);
+    expect(mergeLiveMeeting(base, local, remote, "remote").draft).toEqual(remote);
+    expect(conflictValueText(mine.conflict!.local)).toBe("この体験だけ別の場所: （合成）自分 / （合成）サンプル町 1 丁目");
+    expect(conflictValueText(mergeLiveMeeting(override(), inherit(), override({ address: "（合成）別" })).conflict!.local)).toBe("提供者の既定を使う");
   });
 });

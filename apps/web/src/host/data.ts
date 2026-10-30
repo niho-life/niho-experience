@@ -31,7 +31,7 @@ import {
 } from "./console-data";
 import { bookingConversations, type BookingConversation } from "./messages";
 import type { HostNotice, HostPayoutLoad } from "./payout";
-import type { HostExperience, HostGoogleConnection, HostSettings } from "./types";
+import type { HostExperience, HostGoogleConnection, HostMeetingDefaults, HostSettings } from "./types";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -93,6 +93,24 @@ async function loadProviderDetail(providerId: string): Promise<{ provider: HostP
 }
 
 /**
+ * 既定の集合案内 (`GET /api/experience-providers/:id/meeting-point`, OWNER and EDITOR): NIHO's in http
+ * mode; the preview keeps its synthetic one on screen (no API). Null when it cannot be read, and for
+ * anyone else (NIHO answers them 404).
+ */
+async function loadMeetingDefaults(provider: Pick<HostProvider, "id" | "memberRole">, mode: "mock" | "http", synthetic: HostMeetingDefaults): Promise<HostMeetingDefaults | null> {
+  if (provider.memberRole !== "OWNER" && provider.memberRole !== "EDITOR") return null;
+  if (mode === "mock") return synthetic;
+  const session = await usableSession();
+  if (!session) return null;
+  try {
+    const result = await hostApiClient(session).getExperienceProviderMeetingPoint(provider.id);
+    return result.ok ? result.data.meetingPoint : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Everything the console pages show for one provider: the home rows and numbers,
  * the experiences and the settings' starting values. Mock mode returns the synthetic
  * sets; http mode is empty while the host contract has no such API (see console-data.ts).
@@ -106,7 +124,7 @@ export async function loadHostConsoleData(provider: HostProvider): Promise<HostC
   const mode = isHostMock() ? "mock" : "http";
   const session = await readHostSession();
   const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now(), session?.mockScenario);
-  const detail = await loadProviderDetail(provider.id);
+  const [detail, meetingPoint] = await Promise.all([loadProviderDetail(provider.id), loadMeetingDefaults(provider, mode, snapshot.meetingPoint)]);
   const known = detail?.provider ?? provider;
   return {
     today: snapshot.today,
@@ -120,7 +138,7 @@ export async function loadHostConsoleData(provider: HostProvider): Promise<HostC
       reviewStatus: known.reviewStatus,
       // Unknown without the detail: NIHO still checks it when the review is requested.
       consentCurrent: detail ? detail.provider.consentVersion === detail.consent.version : true,
-      meetingPoint: snapshot.meetingPoint,
+      meetingPoint,
       calendar: snapshot.calendar,
       notifications: provider.memberRole === "OWNER" ? snapshot.notifications : null,
     },

@@ -112,9 +112,10 @@ test("owner adds two exact-email cohosts and removes one from the current backen
 });
 
 test("cohost preserves edits across a version conflict and persists content and two offer schedules", async ({ page }) => {
-  let serverPage = structuredClone(pageDetail); let patchCalls = 0;
+  let serverPage = structuredClone(pageDetail); let patchCalls = 0; let listingCalls = 0;
   await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
     const request = route.request(); const path = new URL(request.url()).pathname;
+    if (path.endsWith("/listing")) listingCalls += 1;
     if (path.endsWith(`/${PROVIDER}`) && request.method() === "GET") return json(route, listPage(serverPage));
     if (path.endsWith(`/${PAGE}`) && request.method() === "GET") return json(route, serverPage);
     if (path.endsWith(`/${PAGE}`) && request.method() === "PATCH") {
@@ -144,6 +145,111 @@ test("cohost preserves edits across a version conflict and persists content and 
   await page.getByRole("button", { name: "競合項目は自分の入力を残す" }).click();
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  // 掲載 is the owner's: a cohost neither sees it nor asks NIHO for it, and keeps 公開する.
+  await expect(page.getByRole("region", { name: "掲載", exact: true })).toHaveCount(0);
+  await expect(page.getByText("体験サイトへの掲載の申請はオーナーが行います。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "公開する" })).toBeVisible();
+  // NIHO answers the meeting point to the owner and editors: the rest of the editor stays usable.
+  await expect(page.getByRole("region", { name: "集合場所" })).toContainText("集合場所を読めませんでした。");
+  expect(listingCalls).toBe(0);
+  await noOverflow(page);
+});
+
+test("owner saves a page-only meeting point, applies for the listing, withdraws it and is asked before a save pauses it", async ({ page }) => {
+  const version = (hour: number) => `2026-10-27T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  const defaults = { overview: "（合成）駅から歩いて 10 分", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から川沿いに歩きます。", mapUrl: "https://maps.example.test/synthetic", entranceNote: "（合成）木の門の呼び鈴" };
+  const consent = { version: "synthetic-listing-consent-2", text: "（合成）体験サイトへの掲載と、NIHO の確認に同意します。" };
+  let serverPage = { ...structuredClone(pageDetail), language: "EN", updatedAt: version(1) };
+  let serverMeeting: { mode: "INHERIT" | "OVERRIDE"; meetingPoint: typeof defaults } = { mode: "INHERIT", meetingPoint: defaults };
+  let listing: Record<string, unknown> | null = null;
+  const calls: string[] = []; const sent: Record<string, unknown>[] = [];
+  const listingOf = (status: string, slug: string | null = null) => ({
+    id: "synthetic-listing", spotId: "synthetic-spot", campaignPageId: PAGE, status, slug, regionKey: null, consentVersion: consent.version,
+    consentedAt: version(1), approvedAt: null, pausedAt: null, withdrawnAt: null, createdAt: version(1), updatedAt: version(1),
+  });
+  const pause = () => { if (listing?.status === "ACTIVE") listing = { ...listing, status: "PAUSED" }; };
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const request = route.request(); const path = new URL(request.url()).pathname; const method = request.method();
+    if (method !== "GET") { calls.push(`${method} ${path.split("/").at(-1)}`); sent.push(request.postDataJSON() ?? {}); }
+    if (path.endsWith(`/${PAGE}`) && method === "GET") return json(route, serverPage);
+    if (path.endsWith(`/${PAGE}`) && method === "PATCH") {
+      const body = request.postDataJSON();
+      expect(body.expectedUpdatedAt).toBe(serverPage.updatedAt);
+      serverPage = { ...serverPage, ...body.patch, updatedAt: version(5) }; pause();
+      return json(route, serverPage);
+    }
+    if (path.endsWith("/meeting-point") && method === "GET") return json(route, serverMeeting);
+    if (path.endsWith("/meeting-point") && method === "PUT") {
+      const body = request.postDataJSON();
+      if (body.expectedUpdatedAt !== serverPage.updatedAt) return json(route, { error: "PROVIDER_PAGE_CONFLICT" }, 409);
+      serverMeeting = body.mode === "OVERRIDE" ? { mode: "OVERRIDE", meetingPoint: body.meetingPoint } : { mode: "INHERIT", meetingPoint: defaults };
+      serverPage = { ...serverPage, updatedAt: version(2) }; pause();
+      return json(route, { mode: body.mode, updatedAt: serverPage.updatedAt, ...(body.mode === "OVERRIDE" ? { meetingPoint: body.meetingPoint } : {}) });
+    }
+    if (path.endsWith("/publish") && method === "POST") {
+      if (request.postDataJSON().expectedUpdatedAt !== serverPage.updatedAt) return json(route, { error: "PAGE_UPDATED" }, 409);
+      serverPage = { ...serverPage, status: "PUBLISHED", updatedAt: version(3) };
+      return json(route, serverPage);
+    }
+    if (path.endsWith("/listing") && method === "GET") return json(route, { listing, consent });
+    if (path.endsWith("/listing") && method === "PUT") { listing = listingOf("REQUESTED"); return json(route, { listing, consent }); }
+    if (path.endsWith("/listing") && method === "DELETE") { listing = { ...listing!, status: "WITHDRAWN" }; return json(route, { listing, consent }); }
+    return json(route, { error: "not_found" }, 404);
+  });
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences/${PAGE}?providerId=${PROVIDER}`);
+  const listingPanel = page.getByRole("region", { name: "掲載", exact: true });
+  await expect(listingPanel).toContainText("未申請");
+  await expect(listingPanel).toContainText(consent.text);
+  await expect(page.getByRole("button", { name: "公開する" })).toHaveCount(0);
+
+  // Only the meeting point changed: no PATCH, and the PUT carries the page's own version.
+  const meeting = page.getByRole("region", { name: "集合場所" });
+  await expect(meeting).toContainText(defaults.address);
+  await meeting.getByRole("radio", { name: "この体験だけ別の場所にする" }).check();
+  await expect(page.getByLabel("公開する大まかな場所")).toHaveValue(defaults.overview);
+  await page.getByLabel("住所").fill("（合成）この体験だけの集合場所");
+  await expect(listingPanel.getByRole("button", { name: "同意して掲載を申請" })).toBeDisabled();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  expect(calls).toEqual(["PUT meeting-point"]);
+  expect(sent[0]).toEqual({ mode: "OVERRIDE", meetingPoint: { ...defaults, address: "（合成）この体験だけの集合場所" }, expectedUpdatedAt: version(1) });
+  await expect(page.getByLabel("住所")).toHaveValue("（合成）この体験だけの集合場所");
+
+  // 申請 publishes the saved page with the version the meeting point moved it to, then sends NIHO's consent version.
+  await listingPanel.getByRole("button", { name: "同意して掲載を申請" }).click();
+  await expect(listingPanel).toContainText("審査待ち");
+  await expect(listingPanel).toContainText("NIHO が確認しています。");
+  expect(calls.slice(1)).toEqual(["POST publish", "PUT listing"]);
+  expect(sent.slice(1)).toEqual([{ expectedUpdatedAt: version(2) }, { consentVersion: consent.version }]);
+
+  await listingPanel.getByRole("button", { name: "申請を取り下げる" }).click();
+  const withdrawDialog = page.getByRole("dialog");
+  await expect(withdrawDialog).toContainText("もう一度載せるには、申請と NIHO の確認が必要です。");
+  await withdrawDialog.getByRole("button", { name: "申請を取り下げる" }).click();
+  await expect(listingPanel).toContainText("未申請");
+  expect(calls.at(-1)).toBe("DELETE listing");
+
+  // NIHO approved it: a save would pause it, so the owner is asked first.
+  listing = listingOf("ACTIVE", "synthetic-workshop");
+  await page.reload();
+  await expect(listingPanel).toContainText("掲載中");
+  await expect(listingPanel.getByRole("link", { name: "体験サイトで見る" })).toHaveAttribute("href", /\/experiences\/synthetic-workshop$/);
+  await listingPanel.getByRole("button", { name: "掲載を止める" }).click();
+  await expect(page.getByRole("dialog")).toContainText("受け付けた予約は残ります。");
+  await page.getByRole("dialog").getByRole("button", { name: "やめる" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByLabel("題名").fill("オーナーが直した合成題名");
+  await expect(listingPanel.getByRole("button", { name: "掲載を止める" })).toBeDisabled();
+  const before = calls.length;
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("体験サイトから一時的に外れ、NIHO が確認すると掲載に戻ります。");
+  expect(calls.length).toBe(before);
+  await page.getByRole("dialog").getByRole("button", { name: "保存して掲載を止める" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  expect(calls.slice(before)).toEqual(["PATCH " + PAGE]);
+  await expect(listingPanel).toContainText("停止中");
+  await expect(listingPanel).toContainText("内容を変えたため掲載を止めています。");
   await noOverflow(page);
 });
 

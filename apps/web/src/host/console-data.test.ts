@@ -203,7 +203,7 @@ describe("console data per provider", () => {
       threads: [],
       reviews: [],
       sales: [],
-      meetingPoint: { area: "", mapUrl: "", entrance: "" },
+      meetingPoint: { overview: "", address: "", accessNote: "", mapUrl: "", entranceNote: "" },
       calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
       notifications: { email: { addresses: [] }, items: [] },
     });
