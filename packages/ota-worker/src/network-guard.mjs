@@ -104,6 +104,32 @@ export function validateUpdateMutation(body, job) {
     && slot.tourOptionId === job.target.externalOptionId;
 }
 
+// Firebase refreshes the existing browser session before hydrating the
+// supplier page. Permit only that form, never sign-in or arbitrary writes.
+export function isFirebaseSessionRefresh(request, url) {
+  if (url.origin === "https://securetoken.googleapis.com" && url.pathname === "/v1/token"
+    && request.method() === "POST" && request.resourceType?.() === "fetch"
+    && !request.isNavigationRequest?.() && url.searchParams.size === 1
+    && /^[A-Za-z0-9_-]{20,100}$/.test(url.searchParams.get("key") ?? "")
+    && request.headers?.()["content-type"]?.split(";")[0] === "application/x-www-form-urlencoded") {
+    const raw = request.postData?.();
+    const form = typeof raw === "string" && raw.length <= 16_384 ? new URLSearchParams(raw) : null;
+    return Boolean(form && form.size === 2 && form.get("grant_type") === "refresh_token"
+      && (form.get("refresh_token")?.length ?? 0) > 0);
+  }
+  return false;
+}
+
+// Non-navigation GETs on allowed origins are limited to static resource types.
+export function isPermittedSubresourceGet(request, url, cdnOrigin) {
+  const resourceType = typeof request.resourceType === "function" ? request.resourceType() : null;
+  // Chromium reports Nuxt modulepreload GETs as "other", including the
+  // scripts needed to hydrate an otherwise blank supplier page.
+  const staticPreload = url.origin === cdnOrigin && resourceType === "other"
+    && /^\/supplier-portal\/nuxt\/_nuxt\/[A-Za-z0-9._/-]+\.(?:m?js|css|svg|png|jpe?g|webp|woff2?)$/.test(url.pathname);
+  return !resourceType || staticPreload || ["document", "stylesheet", "script", "image", "media", "font"].includes(resourceType);
+}
+
 export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGIN, cdnOrigin = CDN_ORIGIN }) {
   const allowedOrigins = new Set([supplierOrigin, cdnOrigin]);
   let permit = null;
@@ -118,18 +144,7 @@ export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGI
     if (frozen) { refused += 1; return route.abort("blockedbyclient"); }
     const request = route.request();
     const url = new URL(request.url());
-    // Firebase refreshes the existing browser session before hydrating the
-    // supplier page. Permit only that form, never sign-in or arbitrary writes.
-    if (url.origin === "https://securetoken.googleapis.com" && url.pathname === "/v1/token"
-      && request.method() === "POST" && request.resourceType?.() === "fetch"
-      && !request.isNavigationRequest?.() && url.searchParams.size === 1
-      && /^[A-Za-z0-9_-]{20,100}$/.test(url.searchParams.get("key") ?? "")
-      && request.headers?.()["content-type"]?.split(";")[0] === "application/x-www-form-urlencoded") {
-      const raw = request.postData?.();
-      const form = typeof raw === "string" && raw.length <= 16_384 ? new URLSearchParams(raw) : null;
-      if (form && form.size === 2 && form.get("grant_type") === "refresh_token"
-        && (form.get("refresh_token")?.length ?? 0) > 0) return forward(route);
-    }
+    if (isFirebaseSessionRefresh(request, url)) return forward(route);
     if (!allowedOrigins.has(url.origin)) {
       if (typeof request.isNavigationRequest === "function" && request.isNavigationRequest()) externalNavigationBlocked = true;
       refused += 1; return route.abort("blockedbyclient");
@@ -141,12 +156,7 @@ export function createNetworkGuard({ job, cloud, supplierOrigin = SUPPLIER_ORIGI
         || (url.pathname === "/manage/availability" && url.searchParams.size === 2
           && url.searchParams.get("filter_date_from") === date && url.searchParams.get("filter_date_to") === date));
       if (navigation && !fixedNavigation) { externalNavigationBlocked = true; refused += 1; return route.abort("blockedbyclient"); }
-      const resourceType = typeof request.resourceType === "function" ? request.resourceType() : null;
-      // Chromium reports Nuxt modulepreload GETs as "other", including the
-      // scripts needed to hydrate an otherwise blank supplier page.
-      const staticPreload = url.origin === cdnOrigin && resourceType === "other"
-        && /^\/supplier-portal\/nuxt\/_nuxt\/[A-Za-z0-9._/-]+\.(?:m?js|css|svg|png|jpe?g|webp|woff2?)$/.test(url.pathname);
-      if (!navigation && resourceType && !staticPreload && !["document", "stylesheet", "script", "image", "media", "font"].includes(resourceType)) {
+      if (!navigation && !isPermittedSubresourceGet(request, url, cdnOrigin)) {
         refused += 1; return route.abort("blockedbyclient");
       }
       return forward(route);
