@@ -90,7 +90,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("loadHostConsoleData", () => {
   it("mock: the contract mock's provider detail and the kitchen's preview data", async () => {
-    const data = await loadHostConsoleData(KITCHEN);
+    const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
     expect(data.settings).toEqual({
       displayName: "サンプルの台所",
       kind: "INDIVIDUAL",
@@ -132,7 +132,7 @@ describe("loadHostConsoleData", () => {
     state.config.apiMode = "http";
     const detail = provider({ id: KITCHEN.id, displayName: "合成の台所", memberRole: "OWNER", kind: "BUSINESS", bio: "合成の紹介", sellerDisclosureUrl: "https://seller.example.com/", reviewStatus: "REQUESTED" });
     const calls = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(detail)));
-    const data = await loadHostConsoleData(KITCHEN);
+    const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
     expect(calls.toSorted((left, right) => left.url.localeCompare(right.url))).toEqual([
       { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen", authorization: "Bearer mock-id-token.data-test" },
       { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen/meeting-point", authorization: "Bearer mock-id-token.data-test" },
@@ -196,13 +196,17 @@ describe("loadHostConsoleData", () => {
     state.config.apiMode = "http";
     const editor = provider({ id: STUDIO.id, displayName: "サンプル工房", memberRole: "EDITOR" });
     stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(editor)));
-    expect((await loadHostConsoleData(STUDIO)).settings.meetingPoint).toEqual(MEETING);
+    expect((await loadHostConsoleData(STUDIO, { meetingPoint: true })).settings.meetingPoint).toEqual(MEETING);
     stubNiho((url) => url.endsWith("/meeting-point") ? new Response("unavailable", { status: 503 }) : Response.json(detailBody(editor)));
+    expect((await loadHostConsoleData(STUDIO, { meetingPoint: true })).settings.meetingPoint).toBeNull();
+    // Only 設定 asks for them: ホーム and 体験 never call NIHO's meeting point.
+    const unasked = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(editor)));
     expect((await loadHostConsoleData(STUDIO)).settings.meetingPoint).toBeNull();
+    expect(unasked.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-studio"]);
     // A cohost is not asked for: NIHO answers the meeting defaults to the owner and the editor only.
     const cohost = provider({ id: KITCHEN.id, displayName: "サンプルの台所", memberRole: "COHOST" });
     const calls = stubNiho(() => Response.json(detailBody(cohost)));
-    expect((await loadHostConsoleData(cohost)).settings.meetingPoint).toBeNull();
+    expect((await loadHostConsoleData(cohost, { meetingPoint: true })).settings.meetingPoint).toBeNull();
     expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen"]);
   });
 });

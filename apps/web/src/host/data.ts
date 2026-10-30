@@ -121,16 +121,17 @@ async function loadMeetingDefaults(provider: Pick<HostProvider, "id" | "memberRo
  * never NIHO's other internal ids (the owner's user, the vessel spot). The notification
  * settings are the owner's only (niho-app spec §17.4); http mode reads them from the experience
  * DB once HOST_NOTIFICATION_SETTINGS_ENABLED is on (#109), and they stay 準備中 until then.
- * Only 設定 asks for them (`notifications`); the other pages do not read the DB for them.
+ * Only 設定 asks for them (`notifications`) and for 既定の集合案内 (`meetingPoint`); the other pages
+ * read neither the DB nor NIHO for them.
  */
-export async function loadHostConsoleData(provider: HostProvider, options: { notifications?: boolean } = {}): Promise<HostConsoleData> {
+export async function loadHostConsoleData(provider: HostProvider, options: { notifications?: boolean; meetingPoint?: boolean } = {}): Promise<HostConsoleData> {
   const mode = isHostMock() ? "mock" : "http";
   const session = await readHostSession();
   const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now(), session?.mockScenario);
   const owner = provider.memberRole === "OWNER";
   const [detail, meetingPoint, notificationLoad] = await Promise.all([
     loadProviderDetail(provider.id),
-    loadMeetingDefaults(provider, mode, snapshot.meetingPoint),
+    options.meetingPoint ? loadMeetingDefaults(provider, mode, snapshot.meetingPoint) : null,
     mode === "http" && owner && session && options.notifications ? loadNotificationSettings(provider, session.nihoUserId) : null,
   ]);
   const known = detail?.provider ?? provider;

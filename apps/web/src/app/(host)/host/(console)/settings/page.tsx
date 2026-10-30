@@ -38,7 +38,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   if (!provider) return <HostRegisterPrompt title="設定" />;
   // Stripe's way back belongs to the provider it names, never to the one shown in its place.
   const connect = providerNotFound ? null : connectStep(query.connect);
-  const [{ settings, googleConnection }, payout] = await Promise.all([loadHostConsoleData(provider, { notifications: true }), loadHostPayout(provider, { connect })]);
+  const [{ settings, googleConnection }, payout] = await Promise.all([loadHostConsoleData(provider, { notifications: true, meetingPoint: true }), loadHostPayout(provider, { connect })]);
   if (payout.redirectTo) redirect(payout.redirectTo);
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
 
