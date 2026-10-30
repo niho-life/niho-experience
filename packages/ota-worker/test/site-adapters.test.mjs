@@ -125,6 +125,20 @@ test("Viator permits only observed UI bundles and rejects unbounded or ambiguous
   ]) assert.equal(viatorListStateCoversTarget(state, viatorJob), false);
 });
 
+test("Viator keeps observed UI telemetry blocked while preserving one exact business permit", async () => {
+  const calls = [];
+  const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: "http://127.0.0.1:4321",
+    getSnapshot: () => ({ authorized: true, availability: "AVAILABLE", listState }), cloud: { async preflight() {} } });
+  guard.beginUiAction();
+  await guard.handle(route("http://127.0.0.1:4321/tracking/action", "POST", {}, calls));
+  await guard.handle(route("http://127.0.0.1:4321/availability/update", "POST", viatorUpdate(), calls));
+  await guard.handle(route("http://127.0.0.1:4321/intake/v2/rum/events", "POST", {}, calls));
+  await guard.handle(route("http://127.0.0.1:4321/prompts", "POST", {}, calls));
+  assert.equal(guard.endUiAction().writes, 1);
+  assert.equal(guard.writes, 1);
+  assert.deepEqual(calls, ["abort", "continue", "abort", "abort"]);
+});
+
 test("site guards refuse a second business write even under a new UI permit", async () => {
   const calls = [];
   const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: "http://127.0.0.1:4321",

@@ -26,6 +26,7 @@ const OPTION_CODE = /^TG\d{1,8}$/;
 const SCRIPT_NAMES = "rolldown-runtime|react-vendor|jumpstart-vendor|redux-form-vendor|recharts-vendor|vendor|intl-vendor|libphonenumber-vendor|common|Dial|BookingPerformanceDrivenReportUtils|AvailabilityProductFilter\\.module";
 const SCRIPT_PATH = new RegExp(`^/static/js/client/(?:(?:${SCRIPT_NAMES})-[a-f0-9]{8}|AvailabilityPage\\.[a-f0-9]{8})\\.js$`);
 const STYLE_PATH = /^\/static\/css\/(?:jumpstartUi|common|Dial|BookingPerformanceDrivenReportUtils|AvailabilityProductFilter|AvailabilityPage)\.[a-f0-9]{8}\.css$/;
+const BLOCKED_UI_SIDE_POSTS = new Set(["/tracking/action", "/intake/v2/rum/events", "/prompts"]);
 
 function optionFilters(value) {
   return isPlainObject(value) && Object.keys(value).length <= 100
@@ -149,6 +150,9 @@ export function createViatorNetworkGuard({ job, cloud, getSnapshot, assertWriteC
       if (navigation && !fixedPage) externalNavigationBlocked = true;
       return fixedPage || asset ? forward(route) : refuse(route);
     }
+    // These observed UI side requests stay blocked. Their timing must not turn
+    // an otherwise verified single availability write into an unknown outcome.
+    if (method === "POST" && url.search === "" && BLOCKED_UI_SIDE_POSTS.has(url.pathname)) return refuse(route);
     if (method !== "POST" || url.search !== "" || jsonBytes(request) > MAX_JSON_BYTES) return refuse(route, permit !== null);
     if (request.headers?.()["content-type"]?.split(";")[0] !== "application/json") return refuse(route, permit !== null);
     let body;
