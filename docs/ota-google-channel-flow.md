@@ -18,7 +18,7 @@
 
 ## #239（出力）
 - listingごとに専用のapp-createdカレンダーを使い、Google app.created scopeの範囲に限定する。予約書出し、私用busy、Airbnbへの制御出力は別々のcalendar ID。
-- 出力calendarをprovider/資源busy入力として選ばせない。Airbnbが確定予約を戻しても自己書込による永久busy循環を起こさない。
+- 出力calendarはproviderをまたいで一つのlistingだけへ固定し、全providerのprovider/資源busy入力・booking calendarとして選ばせない。Airbnbが確定予約を戻しても自己書込による永久busy循環を起こさない。
 - deterministic event ID = provider/listing/occurrenceのhash、private visibility、opaque、件名は短い固定値。料金/顧客/他の予定を入れない。
 - CLOSEDは対象時間のNIHO所有eventを作成または`opaque`へ変更。OPENは同じeventを`transparent`へ変更し、繰り返す開閉では削除しない。決定的IDの削除後再作成・tombstoneに依存しない。自分のIDでもownership marker/current mapping/version/ETag不一致なら触らず、外部/手動作成eventは変更しない。
 - GETの404/410だけでAirbnbの受付再開を成功とせず、対象と現在desiredを照合。POST409は既存eventをGETして同一内容を検証する。送信前とreadback時にcurrent target/versionを再確認する。専用カレンダーをAirbnbへ接続できることは実画面で別受入し、既存カレンダーを書けない理由だけでOAuth scopeを広げない。
@@ -40,4 +40,4 @@
 
 - `EXPERIENCE_RESOURCE_GOOGLE_ENABLED` と `EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED` は既定false。watchはさらに本番HTTPSの `EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL` がなければ作らない。mock/previewはresource設定routeを404にし、browser stubだけをUI検証に使う。
 - 合成テストはOAuth接続、本番calendar、本番worker assignment、webhook到達を証明しない。本番OAuth consent、watch URL配備、実資源calendar、runtime flag有効化、Studioからのpoll、接続解除/再接続は親の別受入で確認する。
-- #239 Google出力writerと#237 Airbnb readerはこの実装に含めず、実装済みとも扱わない。NIHO料金・決済・予約取消・V2 OTAサイトの契約も変更しない。
+- #270でGoogle出力writerのimmutable binding journal、resource単位の未解決intent fence、operation CAS、server executor、内部API、stop-confirmed OBSERVE leaseからのGET-only再照合まで実装した。再照合は保存済みGoogle targetの証拠だけで、現在desiredやAirbnbの成功にはしない。専用calendarの本番provisioning、Google同意/Airbnb接続、#237 Airbnb reader、PWA通し、60分実測は未完了である。NIHO料金・決済・予約取消・V2 OTAサイトの契約は変更しない。

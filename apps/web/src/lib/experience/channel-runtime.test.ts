@@ -5,10 +5,11 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { get apiMode() { return mocks.apiMode; } } }));
 vi.mock("./store-server", () => ({ channelRuntime: () => mocks.runtime }));
 
-import { boundedObject, channelManagerEnabled, channelWorkerEnabled, internalContext } from "./channel-runtime";
+import { boundedObject, channelManagerEnabled, channelWorkerEnabled, googleChannelDeliveryEnabled, internalContext } from "./channel-runtime";
 
 const originalManagerFlag = process.env.EXPERIENCE_CHANNEL_MANAGER_ENABLED;
 const originalRuntimeFlag = process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED;
+const originalGoogleDeliveryFlag = process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -16,6 +17,7 @@ beforeEach(() => {
   mocks.runtime = { authenticateWorker: vi.fn().mockResolvedValue({ workerId: "studio-1", credentialVersion: 1 }) };
   process.env.EXPERIENCE_CHANNEL_MANAGER_ENABLED = "true";
   process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED = "true";
+  delete process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED;
 });
 
 afterEach(() => {
@@ -23,6 +25,8 @@ afterEach(() => {
   else process.env.EXPERIENCE_CHANNEL_MANAGER_ENABLED = originalManagerFlag;
   if (originalRuntimeFlag === undefined) delete process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED;
   else process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED = originalRuntimeFlag;
+  if (originalGoogleDeliveryFlag === undefined) delete process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED;
+  else process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED = originalGoogleDeliveryFlag;
 });
 
 describe("channel HTTP boundary", () => {
@@ -36,11 +40,24 @@ describe("channel HTTP boundary", () => {
     mocks.apiMode = "mock";
     expect(channelManagerEnabled()).toBe(false);
     expect(channelWorkerEnabled()).toBe(false);
+    expect(googleChannelDeliveryEnabled()).toBe(false);
     mocks.apiMode = "http";
     delete process.env.EXPERIENCE_CHANNEL_MANAGER_ENABLED;
     delete process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED;
     expect(channelManagerEnabled()).toBe(false);
     expect(channelWorkerEnabled()).toBe(false);
+    expect(googleChannelDeliveryEnabled()).toBe(false);
+  });
+
+  it("requires both the channel runtime and dedicated Google delivery flags in HTTP mode", () => {
+    expect(googleChannelDeliveryEnabled()).toBe(false);
+    process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED = "true";
+    expect(googleChannelDeliveryEnabled()).toBe(true);
+    delete process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED;
+    expect(googleChannelDeliveryEnabled()).toBe(false);
+    process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED = "true";
+    mocks.apiMode = "mock";
+    expect(googleChannelDeliveryEnabled()).toBe(false);
   });
 
   it("requires an explicit worker flag, database, and bearer credential", async () => {

@@ -162,6 +162,25 @@ export interface ClaimedChannelJob {
   readonly purpose?: "RESERVATION_WINDOW";
 }
 
+/** Server-only snapshot for the fixed Airbnb -> Google delivery adapter. */
+export interface GoogleChannelDeliveryContext {
+  readonly jobId: string;
+  readonly providerId: string;
+  readonly accountId: string;
+  readonly listingId: string;
+  readonly occurrenceId: string;
+  readonly workerId: string;
+  readonly leaseEpoch: number;
+  readonly assignmentVersion: number;
+  readonly action: "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
+  readonly accountVersion: number;
+  readonly desiredState: ChannelDesiredState;
+  readonly desiredVersion: number;
+  readonly mappingVersion: number;
+  readonly sourceStartAtUtc: string;
+  readonly sourceEndAtUtc: string;
+}
+
 export interface ChannelResultInput {
   readonly resultId: string;
   readonly leaseToken: string;
@@ -510,6 +529,10 @@ export function channelReadbackAccepted(input: {
   readonly observedManuallyBlocked?: boolean;
   readonly observedAtUtc?: string;
 }): boolean {
+  // Google verification is journaled separately and is never an Airbnb
+  // bookability observation. The browser-shaped manualBlocked receipt cannot
+  // be used to mark a GOOGLE listing SYNCED.
+  if (input.expectedTarget.connectionMode === "GOOGLE") return false;
   if (input.outcome !== "VERIFIED" || !input.stopped || !input.withinLease || !input.versionsCurrent
     || !input.occurrenceMatches || !input.observationTimeValid || !targetEqual(input.expectedTarget, input.resultTarget)
     || input.observedState === undefined || input.observedBookable === undefined
@@ -2052,6 +2075,42 @@ export class ChannelRuntime {
     return result;
   }
 
+  /**
+   * Reuses the full preflight and lease/assignment authorization. No caller can
+   * provide provider, listing, occurrence, desired state, or UTC boundaries.
+   */
+  async googleDeliveryContext(
+    identity: WorkerIdentity,
+    jobId: string,
+    leaseToken: string,
+    operation: "dispatch" | "reconcile" = "dispatch",
+  ): Promise<GoogleChannelDeliveryContext> {
+    const preflight = await this.preflight(identity, jobId, leaseToken);
+    return withTransaction(this.#pool, async (client) => {
+      await this.#requireWorker(client, identity);
+      await this.#lockJobInventory(client, identity, jobId);
+      const job = await this.#leasedJob(client, identity, jobId, leaseToken);
+      if (job.purpose !== "AVAILABILITY" || job.target_site !== "Airbnb"
+        || job.target_connection_mode !== "GOOGLE" || job.target_adapter !== "airbnb-google-busy"
+        || job.target_adapter_version !== "1"
+        || (operation === "dispatch" ? (job.action !== "SET_OPEN" && job.action !== "SET_CLOSED") : job.action !== "OBSERVE")) {
+        throw new StoreAccessDeniedError();
+      }
+      const nowUtc = this.#nowIso();
+      if (isoValue(job, "lease_expires_at") <= nowUtc || isoValue(job, "job_deadline_at") <= nowUtc) throw new StoreConflictError("Delivery lease expired.");
+      return {
+        jobId,
+        providerId: text(job, "provider_id"), accountId: text(job, "account_id"), listingId: text(job, "listing_id"),
+        occurrenceId: text(job, "occurrence_id"), workerId: identity.workerId,
+        leaseEpoch: integer(job, "lease_epoch"), assignmentVersion: integer(job, "lease_assignment_version"),
+        action: job.action as "SET_OPEN" | "SET_CLOSED" | "OBSERVE", accountVersion: integer(job, "account_version"),
+        desiredState: preflight.desiredState,
+        desiredVersion: integer(job, "desired_version"), mappingVersion: integer(job, "mapping_version"),
+        sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),
+      };
+    });
+  }
+
   async #currentOccurrence(client: PoolClient, providerId: string, listingId: string, occurrenceId: string): Promise<Occurrence> {
     const marker = occurrenceId.lastIndexOf("@");
     if (marker < 1) throw new StoreValidationError("occurrenceId is invalid.");
@@ -2132,6 +2191,9 @@ export class ChannelRuntime {
       if (!job || job.status !== "LEASED" || job.leased_worker_id !== identity.workerId || typeof job.lease_digest !== "string"
         || !secureDigestMatch(job.lease_digest, input.leaseToken)) throw new StoreAccessDeniedError();
       const reservationJob = job.purpose === "RESERVATION_WINDOW";
+      if (!reservationJob && job.target_connection_mode === "GOOGLE" && input.outcome === "VERIFIED") {
+        throw new StoreValidationError("GOOGLE jobs require independent Google delivery and Airbnb observation receipts.");
+      }
       if ((reservationJob && input.outcome === "VERIFIED") || (!reservationJob && input.outcome === "RESERVATION_VERIFIED")) {
         throw new StoreValidationError("Result outcome does not match the job purpose.");
       }
