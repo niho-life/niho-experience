@@ -32,6 +32,7 @@ const KIND_LABEL: Record<ChannelRuntimeIncidentKind, string> = {
   SYNC_OVERDUE: "反映の遅れ",
   RESERVATION_READ_OVERDUE: "予約照合の遅れ",
   ACCOUNT_QUARANTINED: "アカウント停止",
+  EXTERNAL_RESERVATION_CONFLICT: "予約の重複",
 };
 
 const HEALTH_LABEL: Record<ChannelWorkerHealth, string> = { FRESH: "稼働中", STALE: "応答なし", DOWN: "停止", NEVER: "未接続" };
@@ -238,6 +239,7 @@ export function RuntimeOverviewBody({ overview, locked, onConfirm, send }: {
   const stopped = studioStopped(overview);
   const subject = (incident: ChannelRuntimeIncidentView) => incident.subjectType === "worker"
     ? overview.workers.find((worker) => worker.id === incident.subjectId)?.displayName ?? "Studio"
+    : incident.subjectType === "conflict_case" ? "外部予約の要対応"
     : (() => { const account = overview.accounts.find((item) => item.id === incident.subjectId); return account ? `${account.site} · ${account.displayName}` : "外部アカウント"; })();
   return <div className="space-y-0">
     {stopped ? <div role="alert" className="mx-4 mb-3 rounded-xl bg-danger-pale px-3 py-2 text-sm">

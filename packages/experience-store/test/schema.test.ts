@@ -172,6 +172,35 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /DROP |DELETE FROM|external_account_id|customer|guest|email|phone|price|amount|cookie|bearer|token|raw_response/i);
   });
 
+  it("adds a free-text-free conflict queue, wider incident kinds, and propagation measurements (#200)", async () => {
+    const sql = await readFile(new URL("../migrations/0022_external_reservation_attention.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const cases = sql.match(/CREATE TABLE external_reservation_conflict_cases \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(cases, /status IN \('OPEN','RESOLVED'\)/);
+    assert.match(cases, /resolution IN \('CONFLICT_CLEARED','CUSTOMER_CONTACTED','ACCEPTED_BOTH','CANCELLED_AT_SOURCE'\)/);
+    assert.match(cases, /CHECK \(\(acknowledged_at IS NULL\) = \(assignee_niho_user_id IS NULL\)\)/);
+    // No free-text or contact column: staff cannot type customer details into the queue.
+    assert.doesNotMatch(cases, /^\s+\w*(note|comment|memo|message|body|customer|guest|email|phone|name)\w*\s/im);
+    assert.match(sql, /CREATE UNIQUE INDEX external_reservation_conflict_cases_open[\s\S]*?\(provider_id, occurrence_id\) WHERE status = 'OPEN'/);
+    const members = sql.match(/CREATE TABLE external_reservation_conflict_members \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(members, /member_kind IN \('EXTERNAL','DIRECT'\)/);
+    assert.match(sql, /external_reservation_conflict_members_external[\s\S]*?WHERE member_kind = 'EXTERNAL'/);
+    assert.match(sql, /external_reservation_conflict_members_direct[\s\S]*?WHERE member_kind = 'DIRECT'/);
+    // 0021 is never edited; its auto-named column checks are replaced by name.
+    assert.match(sql, /DROP CONSTRAINT channel_runtime_incidents_kind_check/);
+    assert.match(sql, /DROP CONSTRAINT channel_runtime_incidents_subject_type_check/);
+    assert.match(sql, /'ACCOUNT_QUARANTINED','EXTERNAL_RESERVATION_CONFLICT'\)/);
+    assert.match(sql, /subject_type IN \('worker','account','conflict_case'\)/);
+    assert.match(sql, /\(kind = 'EXTERNAL_RESERVATION_CONFLICT'\) = \(subject_type = 'conflict_case'\)/);
+    const measurements = sql.match(/CREATE TABLE channel_propagation_measurements \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(measurements, /status IN \('OPEN','COMPLETED','NOT_REQUIRED','ABANDONED','TIMED_OUT'\)/);
+    assert.match(measurements, /UNIQUE \(source_site, source_external_account_id, external_reservation_id, local_revision\)/);
+    const targets = sql.match(/CREATE TABLE channel_propagation_targets \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(targets, /outcome IN \('PENDING','VERIFIED','NOT_REQUIRED','UNVERIFIED'\)/);
+    assert.doesNotMatch(sql.replaceAll("'CUSTOMER_CONTACTED'", ""), /DROP TABLE|DELETE FROM|UPDATE |customer|guest|email|phone|price|amount|cookie|bearer|token|raw_response/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
