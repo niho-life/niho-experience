@@ -19,6 +19,7 @@ for (const definition of [
   test(`${definition.name} synthetic browser stops, reopens and independently verifies after reload`, { timeout: 90_000 }, async (t) => {
     if (!requireBrowser(t)) return;
     const fixture = await definition.fixture(); t.after(() => fixture.close());
+    if (definition.name === "Jalan") fixture.state.renderDelayMs = 125;
     for (const action of ["SET_CLOSED", "SET_OPEN"]) {
       const job = fixture.makeJob(action);
       const driver = await definition.create({ job, cloud, config: fixture.config, testOnlySupplierOrigin: fixture.origin,

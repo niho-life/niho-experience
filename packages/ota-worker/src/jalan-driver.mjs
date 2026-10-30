@@ -75,9 +75,12 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
 
     async function findSlot(current) {
       const plan = page.locator(`select option[value=${JSON.stringify(job.target.externalProductId)}]`);
+      await plan.waitFor({ state: "attached", timeout: 5_000 }).catch(() => { throw new ContractError("DOM_DRIFT"); });
       if (await plan.count() !== 1 || await plan.locator("..").inputValue() !== job.target.externalProductId) throw new ContractError("PRODUCT_MISMATCH");
       if (await page.getByRole("heading").filter({ hasText: job.target.externalProductId }).count() !== 1) throw new ContractError("PRODUCT_MISMATCH");
       const slot = page.locator(`[id=${JSON.stringify(current.slotId)}]`);
+      await page.locator(`[id=${JSON.stringify(current.slotId)}]${current.frontOpenFlg ? ":not(.sale-stop)" : ".sale-stop"}`)
+        .waitFor({ state: "visible", timeout: 5_000 }).catch(() => { throw new ContractError("DOM_DRIFT"); });
       if (await slot.count() !== 1) throw new ContractError("TARGET_MISMATCH");
       const link = slot.locator('a[data-bind="click: $root.onClickSlot.bind($data, $index(), $parent, $parents[1])"]');
       if (await link.count() !== 1) throw new ContractError("DOM_DRIFT");
@@ -96,6 +99,7 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
 
     async function moveToTargetDate() {
       const textbox = page.locator("input.experienceDay:visible");
+      await textbox.waitFor({ state: "visible", timeout: 5_000 }).catch(() => { throw new ContractError("DOM_DRIFT"); });
       if (await textbox.count() !== 1) throw new ContractError("DOM_DRIFT");
       const date = job.localDateTime.slice(0, 10);
       return receiveSummary(async () => {
