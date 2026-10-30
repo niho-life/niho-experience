@@ -1,4 +1,13 @@
-import type { ExperienceProviderPageDetail, ExperienceProviderPageOffer, ExperienceProviderPageOfferPatch, ExperienceProviderPagePatchRequest } from "@niho-experience/api-client/host";
+import type {
+  ExperienceProviderMeetingPoint,
+  ExperienceProviderPageDetail,
+  ExperienceProviderPageMeetingPointMode,
+  ExperienceProviderPageMeetingPointUpdateRequest,
+  ExperienceProviderPageOffer,
+  ExperienceProviderPageOfferPatch,
+  ExperienceProviderPagePatchRequest,
+} from "@niho-experience/api-client/host";
+import { MEETING_POINT_FIELDS, normalizeMeetingPoint } from "@/host/meeting-point";
 
 export type LiveEditorConflict = { path: string; label: string; local: unknown; remote: unknown };
 export type LiveEditorMerge = { draft: ExperienceProviderPageDetail; conflicts: LiveEditorConflict[] };
@@ -24,6 +33,7 @@ export function conflictValueText(value: unknown): string {
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (Array.isArray(value)) return value.length ? value.map(conflictValueText).join("、") : "なし";
   if (typeof value === "object") {
+    if ("mode" in value) return value.mode === "INHERIT" ? "提供者の既定を使う" : `この体験だけ別の場所: ${"meetingPoint" in value ? meetingPlaceText(value.meetingPoint) : "未設定"}`;
     if ("language" in value) return conflictValueText(value.language);
     if ("name" in value) return conflictValueText(value.name);
     if ("photoAlts" in value) return `写真の並び・説明: ${conflictValueText(value.photoAlts)}`;
@@ -124,4 +134,54 @@ export function serializeLivePagePatch(draft: ExperienceProviderPageDetail, base
   }
   if (!equal(draft.offers, base.offers)) patch.offers = draft.offers.map(offerInput);
   return patch;
+}
+
+/*
+ * 集合場所 (#89): the page's own meeting point (`/pages/{pageId}/meeting-point`), not the page
+ * content's `meetingPoint`. INHERIT uses the provider's default (設定 › 既定の集合案内); OVERRIDE saves
+ * `fields`. With INHERIT `fields` stays as it was (hidden), so choosing OVERRIDE again starts from it.
+ */
+export type LiveMeeting = { mode: ExperienceProviderPageMeetingPointMode; fields: ExperienceProviderMeetingPoint };
+
+const trimmedMeeting = (fields: ExperienceProviderMeetingPoint): ExperienceProviderMeetingPoint =>
+  Object.fromEntries(MEETING_POINT_FIELDS.map((field) => [field, fields[field].trim()])) as ExperienceProviderMeetingPoint;
+
+/** What saving would keep: INHERIT is the provider's default whatever it says now. */
+const meetingIntent = (meeting: LiveMeeting) => meeting.mode === "INHERIT" ? { mode: "INHERIT" as const } : { mode: "OVERRIDE" as const, meetingPoint: trimmedMeeting(meeting.fields) };
+
+/** The public line and the address, for the conflict box. */
+function meetingPlaceText(value: unknown): string {
+  if (typeof value !== "object" || value === null) return "未設定";
+  const { overview, address } = value as Partial<ExperienceProviderMeetingPoint>;
+  return [overview, address].filter((item): item is string => typeof item === "string" && item !== "").join(" / ") || "未設定";
+}
+
+/** `GET …/meeting-point` as the BFF answers it, or null when it is not that shape. */
+export function readLiveMeeting(value: unknown): LiveMeeting | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { mode, meetingPoint } = value as { mode?: unknown; meetingPoint?: unknown };
+  if (mode !== "INHERIT" && mode !== "OVERRIDE") return null;
+  if (typeof meetingPoint !== "object" || meetingPoint === null || !MEETING_POINT_FIELDS.every((field) => typeof (meetingPoint as Record<string, unknown>)[field] === "string")) return null;
+  return { mode, fields: Object.fromEntries(MEETING_POINT_FIELDS.map((field) => [field, (meetingPoint as Record<string, string>)[field]])) as ExperienceProviderMeetingPoint };
+}
+
+export const liveMeetingChanged = (draft: LiveMeeting, saved: LiveMeeting): boolean => !equal(meetingIntent(draft), meetingIntent(saved));
+
+/** Why OVERRIDE cannot be saved as it is (the map URL), or null. */
+export function liveMeetingProblem(meeting: LiveMeeting): string | null {
+  if (meeting.mode === "INHERIT" || normalizeMeetingPoint(meeting.fields)) return null;
+  return "集合場所の地図 URL は https:// で始まる URL にしてください。";
+}
+
+/** The PUT body: the page version, and the trimmed fields for OVERRIDE. */
+export function liveMeetingRequest(meeting: LiveMeeting, expectedUpdatedAt: string): ExperienceProviderPageMeetingPointUpdateRequest {
+  return meeting.mode === "INHERIT" ? { mode: "INHERIT", expectedUpdatedAt } : { mode: "OVERRIDE", meetingPoint: trimmedMeeting(meeting.fields), expectedUpdatedAt };
+}
+
+/** Like the page's fields: one side's change is taken, a change on both sides is one conflict item 「集合場所」. */
+export function mergeLiveMeeting(base: LiveMeeting, local: LiveMeeting, remote: LiveMeeting, choice: ConflictChoice = "local"): { draft: LiveMeeting; conflict: LiveEditorConflict | null } {
+  const [mine, theirs, original] = [meetingIntent(local), meetingIntent(remote), meetingIntent(base)];
+  if (equal(mine, original)) return { draft: structuredClone(remote), conflict: null };
+  if (equal(theirs, original) || equal(mine, theirs)) return { draft: structuredClone(local), conflict: null };
+  return { draft: structuredClone(choice === "local" ? local : remote), conflict: { path: "meetingPoint", label: "集合場所", local: mine, remote: theirs } };
 }
