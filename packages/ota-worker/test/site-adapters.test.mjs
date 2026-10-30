@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { loadConfig, selectAccountProfile, selectAccountSessionPolicy } from "../src/config.mjs";
 import { DRIVER_REGISTRY_KEYS, adapterRegistryKey } from "../src/driver-registry.mjs";
 import { createViatorNetworkGuard, selectViatorAvailability, validateViatorReadBody, validateViatorUpdate, viatorListStateCoversTarget, VIATOR_LIST_STATE_KEYS } from "../src/viator-network-guard.mjs";
-import { createJalanNetworkGuard, parseJsonp, selectJalanSlot, validateJalanBootstrap, validateJalanComplete, validateJalanSummaryUrl } from "../src/jalan-network-guard.mjs";
+import { createJalanNetworkGuard, parseJsonp, selectJalanSlot, validateJalanBootstrap, validateJalanComplete, validateJalanCompleteUrl, validateJalanSummaryUrl } from "../src/jalan-network-guard.mjs";
 import { validateTarget } from "../src/validation.mjs";
 import { makeJob } from "./helpers/synthetic-gyg.mjs";
 
@@ -240,6 +240,14 @@ test("Jalan complete changes only frontOpenFlg and rejects capacity, mode, bulk,
     (body) => { body.price = 100; }]) { const body = complete(); mutate(body); assert.equal(validateJalanComplete(body, jalanJob, { ...snapshot, authorized: true }), false); }
 });
 
+test("Jalan complete accepts only the bounded supplier JSONP callback envelope", () => {
+  const base = "https://activityboard.jp/stateful/schdl/client/complete";
+  for (const suffix of ["", "?callback=jQuery123_456", "?callback=synthetic.callback"]) assert.equal(validateJalanCompleteUrl(new URL(base + suffix)), true);
+  for (const suffix of ["?callback=cb&callback=other", "?callback=cb&price=1", "?callback=cb()", "?callback=", `?callback=${"x".repeat(129)}`]) {
+    assert.equal(validateJalanCompleteUrl(new URL(base + suffix)), false);
+  }
+});
+
 test("Jalan guard allows only summary GET and one exact complete POST", async () => {
   const snapshot = { ...selectJalanSlot(jalanSummary(), jalanJob, "14:00"), authorized: true };
   let preflights = 0; let contextChecks = 0; const calls = [];
@@ -249,7 +257,7 @@ test("Jalan guard allows only summary GET and one exact complete POST", async ()
   guard.beginUiAction();
   const complete = { groups: [], slots: [{ slotId: "T_SYNTHETIC", version: 1, frontOpenFlg: "false", bookingAvailableKbn: "KeyUNCONFIRMED",
     cfmBookingLimMgrKbn: null, cfmCapaCnt: 0, lessonSchdlId: "l000000001", lessonSchdlVersion: 21 }] };
-  await guard.handle(route("http://127.0.0.1:4322/stateful/schdl/client/complete", "POST", complete, calls));
+  await guard.handle(route("http://127.0.0.1:4322/stateful/schdl/client/complete?callback=syntheticAck", "POST", complete, calls));
   assert.deepEqual(calls, ["continue", "continue"]); assert.equal(contextChecks, 1); assert.equal(preflights, 1);
   assert.equal(guard.endUiAction().writes, 1);
 });

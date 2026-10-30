@@ -4,7 +4,7 @@ import { JALAN_ORIGIN } from "./constants.mjs";
 import { selectAccountProfile, selectAccountSessionPolicy } from "./config.mjs";
 import { startManagedBrowser } from "./managed-browser.mjs";
 import { ContractError, tokyoLocalFromUtc, validateObservation } from "./validation.mjs";
-import { createJalanNetworkGuard, parseJsonp, selectJalanSlot, validateJalanBootstrap } from "./jalan-network-guard.mjs";
+import { createJalanNetworkGuard, parseJsonp, selectJalanSlot, validateJalanBootstrap, validateJalanCompleteUrl } from "./jalan-network-guard.mjs";
 import { assertAuthOrDrift, fixedTestOrigin, prepareGuardedPage } from "./browser-driver-common.mjs";
 
 const normalizedText = (value) => value.replace(/\s+/g, " ").trim();
@@ -174,8 +174,10 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
         const palette = page.locator("select.js-panel-saleStatus");
         if (await palette.count() !== 1) throw new ContractError("DOM_DRIFT");
         await palette.selectOption({ label: desiredOpen ? "販売" : "売止" });
-        const response = page.waitForResponse((candidate) => candidate.url() === `${supplierOrigin}/stateful/schdl/client/complete`
-          && candidate.request().method() === "POST", { timeout: writeResponseTimeoutMs })
+        const response = page.waitForResponse((candidate) => {
+          const url = new URL(candidate.url());
+          return url.origin === supplierOrigin && validateJalanCompleteUrl(url) && candidate.request().method() === "POST";
+        }, { timeout: writeResponseTimeoutMs })
           .then((candidate) => { ackAccepted = candidate.status() >= 200 && candidate.status() < 300; }).catch(() => {});
         await page.getByRole("button", { name: "一括変更する", exact: true }).click();
         await response;

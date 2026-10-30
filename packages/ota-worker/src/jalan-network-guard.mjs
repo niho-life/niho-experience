@@ -151,6 +151,15 @@ export function validateJalanComplete(body, job, snapshot) {
     && slot.lessonSchdlVersion === snapshot.lessonSchdlVersion;
 }
 
+export function validateJalanCompleteUrl(url) {
+  if (url.pathname !== "/stateful/schdl/client/complete") return false;
+  if (url.search === "") return true;
+  const callback = url.searchParams.get("callback");
+  return [...url.searchParams.keys()].every((key) => key === "callback")
+    && url.searchParams.getAll("callback").length === 1 && callback.length <= 128
+    && /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(callback);
+}
+
 export function createJalanNetworkGuard({ job, cloud, getSnapshot, assertWriteContext = async () => {}, supplierOrigin = JALAN_ORIGIN }) {
   let permit = null;
   let writes = 0;
@@ -174,7 +183,7 @@ export function createJalanNetworkGuard({ job, cloud, getSnapshot, assertWriteCo
       if (navigation && !fixedPage) externalNavigationBlocked = true;
       return fixedPage || summary || asset || backgroundRead ? forward(route) : refuse(route);
     }
-    if (request.method() !== "POST" || url.search !== "" || url.pathname !== "/stateful/schdl/client/complete") return refuse(route, permit !== null);
+    if (request.method() !== "POST" || !validateJalanCompleteUrl(url)) return refuse(route, permit !== null);
     if (request.headers?.()["content-type"]?.split(";")[0] !== "application/json") return refuse(route, true);
     const raw = request.postData?.();
     if (typeof raw !== "string" || Buffer.byteLength(raw) > MAX_JSON_BYTES) return refuse(route, true);
