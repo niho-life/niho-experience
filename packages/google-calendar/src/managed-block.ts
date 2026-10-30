@@ -91,6 +91,31 @@ export type GoogleManagedBlockInspectionResult =
       readonly reason: GoogleManagedBlockStopCode | "DESIRED_MISMATCH";
     };
 
+export type GoogleManagedBlockInitializationStopCode =
+  | GoogleManagedBlockStopCode
+  | "ANCHOR_CONFLICT";
+
+export type GoogleManagedBlockInitializationResult =
+  | {
+      readonly code: "GOOGLE_VERIFIED";
+      readonly eventId: string;
+      readonly changed: boolean;
+      readonly writeAcknowledged: boolean;
+      readonly google: GoogleManagedBlockMetadata;
+    }
+  | {
+      readonly code: GoogleManagedBlockInitializationStopCode;
+      readonly eventId: string;
+      readonly changed: false;
+      readonly writeAcknowledged: false;
+    }
+  | {
+      readonly code: "WRITE_UNCERTAIN";
+      readonly eventId: string;
+      readonly changed: null;
+      readonly writeAcknowledged: boolean;
+    };
+
 export type AssertGoogleManagedBlockCurrent = () => void | Promise<void>;
 
 type StopResult = Extract<GoogleManagedBlockResult, { changed: false }>;
@@ -227,6 +252,10 @@ function stop(code: GoogleManagedBlockStopCode, eventId: string): StopResult {
   return { code, eventId, changed: false, writeAcknowledged: false };
 }
 
+function initializationStop(code: GoogleManagedBlockInitializationStopCode, eventId: string): Extract<GoogleManagedBlockInitializationResult, { changed: false }> {
+  return { code, eventId, changed: false, writeAcknowledged: false };
+}
+
 function inspectEvent(raw: Record<string, unknown>, target: GoogleManagedBlockTarget, eventId: string): Inspection {
   if (raw.id !== eventId) return { ok: false, code: "FOREIGN_EVENT" };
   if (!strongEtag(raw.etag)) {
@@ -354,8 +383,74 @@ async function acknowledged(response: Response, eventId: string): Promise<boolea
   }
 }
 
-function uncertain(eventId: string, writeAcknowledged: boolean): GoogleManagedBlockResult {
+function uncertain(eventId: string, writeAcknowledged: boolean): Extract<GoogleManagedBlockResult, { code: "WRITE_UNCERTAIN" }> {
   return { code: "WRITE_UNCERTAIN", eventId, changed: null, writeAcknowledged };
+}
+
+/**
+ * Creates a missing OPEN or CLOSED anchor without ever patching or deleting an
+ * existing event. This is intentionally separate from the regular writer:
+ * applyGoogleManagedBlock must continue to stop on a missing OPEN anchor.
+ */
+export async function initializeGoogleManagedBlock(
+  config: GoogleConfig,
+  accessToken: string,
+  calendarId: string,
+  target: GoogleManagedBlockTarget,
+  assertCurrent: AssertGoogleManagedBlockCurrent,
+): Promise<GoogleManagedBlockInitializationResult> {
+  validateTarget(target);
+  if (!boundedIdentifier(calendarId, MAX_CALENDAR_ID_LENGTH) || !boundedIdentifier(accessToken, MAX_ACCESS_TOKEN_LENGTH)) {
+    throw new TypeError("Invalid managed Google block credentials");
+  }
+  if (typeof assertCurrent !== "function") throw new TypeError("assertCurrent is required");
+
+  const eventId = managedGoogleBlockEventId(target);
+  await assertCurrent();
+  const initial = await readEvent(config, accessToken, calendarId, target, eventId);
+  if (initial.kind === "TOMBSTONE") return stop("TOMBSTONE", eventId);
+  if (initial.kind === "FOUND") {
+    if (!initial.inspection.ok) return stop(initial.inspection.code, eventId);
+    if (!exactDesired(initial.inspection, target)) return initializationStop("ANCHOR_CONFLICT", eventId);
+    await assertCurrent();
+    return {
+      code: "GOOGLE_VERIFIED", eventId, changed: false, writeAcknowledged: false,
+      google: initial.inspection.google,
+    };
+  }
+
+  await assertCurrent();
+  let response: Response | undefined;
+  try {
+    response = await googleRequest(config, writeUrl(calendarId).href, {
+      method: "POST",
+      headers: headers(accessToken, true),
+      body: JSON.stringify({
+        id: eventId,
+        summary: FIXED_SUMMARY,
+        start: { dateTime: target.sourceStartAtUtc },
+        end: { dateTime: target.sourceEndAtUtc },
+        visibility: "private",
+        transparency: desiredTransparency(target),
+        extendedProperties: { private: marker(target) },
+      }),
+    });
+  } catch {
+    response = undefined;
+  }
+
+  const writeAcknowledged = response ? await acknowledged(response, eventId) : false;
+  const readback = await readAfterWrite(config, accessToken, calendarId, target, eventId);
+  if (!readback || readback.kind !== "FOUND") return uncertain(eventId, writeAcknowledged);
+  if (!readback.inspection.ok || !exactDesired(readback.inspection, target)) {
+    if (response?.status === 409) return initializationStop("ANCHOR_CONFLICT", eventId);
+    return uncertain(eventId, writeAcknowledged);
+  }
+  await assertCurrent();
+  return {
+    code: "GOOGLE_VERIFIED", eventId, changed: response?.status !== 409,
+    writeAcknowledged, google: readback.inspection.google,
+  };
 }
 
 /**

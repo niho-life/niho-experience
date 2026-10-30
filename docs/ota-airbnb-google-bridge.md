@@ -1,6 +1,6 @@
 # Airbnb体験とGoogle Calendarの接続・受入設計
 
-更新日：2026-10-30。Issue #201 / 親 #194。Google UIからの停止・再開は実証済みで、#270ではNIHO自動出力の永続journal、server executor、内部API、Google GET-only再照合まで実装した。専用calendarの実provisioning・同意・Airbnb接続と、Airbnb observerのtyped receiptは未受入である。[Google出力protocol](ota-google-output-protocol.md)と区別する。
+更新日：2026-10-31。Issue #201 / 親 #194。Google UIからの停止・再開は実証済みで、#270ではNIHO自動出力の永続journal、server executor、内部API、Google GET-only再照合まで実装し、#275/#278ではinactive専用calendarの作成とinsert-only初期anchor backendを追加した。専用calendarの実同意・Airbnb接続と、Airbnb observerのtyped receiptは未受入である。[Google出力protocol](ota-google-output-protocol.md)と区別する。
 
 ## 1. 実証で確認した範囲
 
@@ -55,6 +55,8 @@ provider全体のbusyを講師全員へ広げない。講師Aの入力はAを使
 6. 既存予定の変更は取得したetagと`If-Match`を使う。412なら現状と現在のdesiredを読み直し、古いOPENをそのまま再送しない。新規insertには条件付き変更が使えないため、決定的IDの衝突時は所有markerと現状を確認する。[Googleの条件付き変更](https://developers.google.com/workspace/calendar/api/guides/version-resources)、[予定作成](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)
 7. 保存直前のpreflight、account排他、deadline、失効・mapping変更時の隔離、応答不明時の書込み停止は既存workerと同じ基準にする。etagだけでNIHO側の権限失効まで防げるとは扱わない。
 8. GoogleのACKを保存した後、Airbnbを読み取って対象・時刻・実際の予約可否を確認する。実行後の読戻しが取れない場合は、Google再書込みをせず、元executorのstop確認後に同じbinding/mapping/sourceのOBSERVE leaseから保存済みGoogle targetをGET-onlyで再照合する。この照合だけではAirbnbや現在desiredを成功にしない。
+
+通常配送を有効にする前の初期anchorは別能力とする。#275で作成済みのinactive専用calendarに対し、#278のOWNER操作が現在desired（OPENまたはCLOSED）を決定的IDでinsert-only作成する。既存eventは完全一致なら採用するだけで、古いdesiredやforeign markerを初期化処理から修正・削除しない。結果不明時の明示inspectionもGET-onlyであり、通常配送のOPEN 404停止を緩和しない。初期anchor成功後もbindingはinactiveのままで、Airbnb設定、active化、scheduler、予約reader、画面は後続受入に残る。
 
 Googleの成功、Airbnbの成功を同じbooleanにしない。新しいreadbackは `GOOGLE_BUSY` という制御方式と、Google予定の所有marker・時刻・transparency・etag、独立したAirbnb観測時刻と予約可否を区別して持つ。現行browser adapter用の `manualBlocked=true` をGoogle経路で捏造しない。
 

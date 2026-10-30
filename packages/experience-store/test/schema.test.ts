@@ -140,6 +140,21 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /access_token|refresh_token|raw_response|error_body|customer|guest|email|phone/i);
   });
 
+  it("fences insert-only Google anchor initialization and unresolved inspection without secrets", async () => {
+    const sql = await readFile(new URL("../migrations/0020_google_channel_anchor.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE google_channel_anchor_journals/);
+    assert.match(sql, /operation IN \('INITIALIZE','INSPECT'\)/);
+    assert.match(sql, /phase IN \('PREPARING','INITIALIZING','GOOGLE_VERIFIED','UNCERTAIN','FAILED_BEFORE_INITIALIZE'\)/);
+    assert.match(sql, /operation_nonce uuid NOT NULL/);
+    assert.match(sql, /operation_epoch bigint NOT NULL/);
+    assert.match(sql, /binding_calendar_digest text NOT NULL/);
+    assert.match(sql, /granted_scopes_digest text NOT NULL/);
+    assert.match(sql, /desired_version bigint NOT NULL/);
+    assert.match(sql, /WHERE phase IN \('PREPARING','INITIALIZING','UNCERTAIN'\)/);
+    assert.doesNotMatch(sql, /access_token|refresh_token|raw_response|error_body|calendar_summary|customer|guest|email|phone/i);
+    assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

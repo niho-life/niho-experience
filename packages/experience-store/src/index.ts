@@ -22,6 +22,15 @@ export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
 export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";
 export { GoogleChannelSetupRepository } from "./google-channel-setup.ts";
 export type { GoogleChannelSetupPhase, GoogleChannelSetupRecord, GoogleChannelSetupSecretSnapshot } from "./google-channel-setup.ts";
+export { GoogleChannelAnchorRepository } from "./google-channel-anchor.ts";
+export type {
+  GoogleChannelAnchorInput,
+  GoogleChannelAnchorMetadata,
+  GoogleChannelAnchorOperation,
+  GoogleChannelAnchorPhase,
+  GoogleChannelAnchorRecord,
+  GoogleChannelAnchorSecretSnapshot,
+} from "./google-channel-anchor.ts";
 export type {
   ChannelAction,
   ChannelAdminActor,
