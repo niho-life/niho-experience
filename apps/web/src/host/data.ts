@@ -32,7 +32,7 @@ import {
 import { bookingConversations, type BookingConversation } from "./messages";
 import { loadNotificationSettings } from "./notification-settings-server";
 import type { HostNotice, HostPayoutLoad } from "./payout";
-import type { HostExperience, HostGoogleConnection, HostSettings } from "./types";
+import type { HostExperience, HostGoogleConnection, HostMeetingDefaults, HostSettings } from "./types";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -94,6 +94,24 @@ async function loadProviderDetail(providerId: string): Promise<{ provider: HostP
 }
 
 /**
+ * 既定の集合案内 (`GET /api/experience-providers/:id/meeting-point`, OWNER and EDITOR): NIHO's in http
+ * mode; the preview keeps its synthetic one on screen (no API). Null when it cannot be read, and for
+ * anyone else (NIHO answers them 404).
+ */
+async function loadMeetingDefaults(provider: Pick<HostProvider, "id" | "memberRole">, mode: "mock" | "http", synthetic: HostMeetingDefaults): Promise<HostMeetingDefaults | null> {
+  if (provider.memberRole !== "OWNER" && provider.memberRole !== "EDITOR") return null;
+  if (mode === "mock") return synthetic;
+  const session = await usableSession();
+  if (!session) return null;
+  try {
+    const result = await hostApiClient(session).getExperienceProviderMeetingPoint(provider.id);
+    return result.ok ? result.data.meetingPoint : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Everything the console pages show for one provider: the home rows and numbers,
  * the experiences and the settings' starting values. Mock mode returns the synthetic
  * sets; http mode is empty while the host contract has no such API (see console-data.ts).
@@ -103,15 +121,17 @@ async function loadProviderDetail(providerId: string): Promise<{ provider: HostP
  * never NIHO's other internal ids (the owner's user, the vessel spot). The notification
  * settings are the owner's only (niho-app spec §17.4); http mode reads them from the experience
  * DB once HOST_NOTIFICATION_SETTINGS_ENABLED is on (#109), and they stay 準備中 until then.
- * Only 設定 asks for them (`notifications`); the other pages do not read the DB for them.
+ * Only 設定 asks for them (`notifications`) and for 既定の集合案内 (`meetingPoint`); the other pages
+ * read neither the DB nor NIHO for them.
  */
-export async function loadHostConsoleData(provider: HostProvider, options: { notifications?: boolean } = {}): Promise<HostConsoleData> {
+export async function loadHostConsoleData(provider: HostProvider, options: { notifications?: boolean; meetingPoint?: boolean } = {}): Promise<HostConsoleData> {
   const mode = isHostMock() ? "mock" : "http";
   const session = await readHostSession();
   const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now(), session?.mockScenario);
   const owner = provider.memberRole === "OWNER";
-  const [detail, notificationLoad] = await Promise.all([
+  const [detail, meetingPoint, notificationLoad] = await Promise.all([
     loadProviderDetail(provider.id),
+    options.meetingPoint ? loadMeetingDefaults(provider, mode, snapshot.meetingPoint) : null,
     mode === "http" && owner && session && options.notifications ? loadNotificationSettings(provider, session.nihoUserId) : null,
   ]);
   const known = detail?.provider ?? provider;
@@ -127,7 +147,7 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
       reviewStatus: known.reviewStatus,
       // Unknown without the detail: NIHO still checks it when the review is requested.
       consentCurrent: detail ? detail.provider.consentVersion === detail.consent.version : true,
-      meetingPoint: snapshot.meetingPoint,
+      meetingPoint,
       calendar: snapshot.calendar,
       notifications: !owner ? null : notificationLoad?.status === "live" ? { email: { addresses: [] }, items: notificationLoad.items } : snapshot.notifications,
       notificationSource: mode === "mock" ? "preview" : (notificationLoad?.status ?? "preparing"),

@@ -67,14 +67,17 @@ const consent = { version: "sample-provider-consent-1", text: "合成の同意�
 const detailBody = (detail: HostProvider) => ({ provider: detail, platformAdmin: false, consent, paymentReuseConsent: consent });
 
 /** http mode: NIHO is the global fetch, recorded here. */
-function stubNiho(respond: () => Response) {
+function stubNiho(respond: (url: string) => Response) {
   const calls: { url: string; authorization: string | null }[] = [];
   vi.stubGlobal("fetch", (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") });
-    return respond();
+    return respond(String(input));
   }) as typeof fetch);
   return calls;
 }
+
+/** 既定の集合案内 as NIHO answers it (synthetic). */
+const MEETING = { overview: "（合成）駅の近く", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から歩きます。", mapUrl: "https://maps.example.test/sample", entranceNote: "（合成）木の門" };
 
 beforeEach(() => {
   state.config.apiMode = "mock";
@@ -87,7 +90,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("loadHostConsoleData", () => {
   it("mock: the contract mock's provider detail and the kitchen's preview data", async () => {
-    const data = await loadHostConsoleData(KITCHEN);
+    const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
     expect(data.settings).toEqual({
       displayName: "サンプルの台所",
       kind: "INDIVIDUAL",
@@ -95,7 +98,7 @@ describe("loadHostConsoleData", () => {
       sellerDisclosureUrl: "https://example.com/sample-kitchen/legal",
       reviewStatus: "APPROVED",
       consentCurrent: true,
-      meetingPoint: expect.objectContaining({ area: "Near Kamakura Station, 5-minute walk" }),
+      meetingPoint: expect.objectContaining({ overview: "Near Kamakura Station, 5-minute walk", mapUrl: "https://maps.example.com/sample-kitchen" }),
       calendar: { google: expect.objectContaining({ status: "connected", account: "kitchen@example.com" }), icsUrl: expect.stringMatching(/^https:\/\/calendar\.example\.com\//) },
       notifications: { email: { addresses: ["kitchen@example.com"] }, items: expect.any(Array) },
       notificationSource: "preview",
@@ -125,12 +128,15 @@ describe("loadHostConsoleData", () => {
     expect(data.home.sessions).toEqual({ today: [], tomorrow: [], later: [] });
   });
 
-  it("http: reads the provider detail from NIHO with the session's token and shows nothing else yet", async () => {
+  it("http: reads the provider detail and the meeting defaults from NIHO with the session's token and shows nothing else yet", async () => {
     state.config.apiMode = "http";
     const detail = provider({ id: KITCHEN.id, displayName: "合成の台所", memberRole: "OWNER", kind: "BUSINESS", bio: "合成の紹介", sellerDisclosureUrl: "https://seller.example.com/", reviewStatus: "REQUESTED" });
-    const calls = stubNiho(() => Response.json(detailBody(detail)));
-    const data = await loadHostConsoleData(KITCHEN);
-    expect(calls).toEqual([{ url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen", authorization: "Bearer mock-id-token.data-test" }]);
+    const calls = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(detail)));
+    const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
+    expect(calls.toSorted((left, right) => left.url.localeCompare(right.url))).toEqual([
+      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen", authorization: "Bearer mock-id-token.data-test" },
+      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen/meeting-point", authorization: "Bearer mock-id-token.data-test" },
+    ]);
     expect(data.settings).toEqual({
       displayName: "合成の台所",
       kind: "BUSINESS",
@@ -138,7 +144,7 @@ describe("loadHostConsoleData", () => {
       sellerDisclosureUrl: "https://seller.example.com/",
       reviewStatus: "REQUESTED",
       consentCurrent: true,
-      meetingPoint: { area: "", mapUrl: "", entrance: "" },
+      meetingPoint: MEETING,
       calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
       notifications: { email: { addresses: [] }, items: [] },
       notificationSource: "preparing",
@@ -184,6 +190,24 @@ describe("loadHostConsoleData", () => {
     // A detail for another provider is not taken for this one.
     stubNiho(() => Response.json(detailBody(provider({ id: "someone-else", displayName: "別の提供者", memberRole: "OWNER", kind: "BUSINESS" }))));
     expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject(fromList);
+  });
+
+  it("http: the meeting defaults are the owner's and the editor's, null when NIHO cannot answer them", async () => {
+    state.config.apiMode = "http";
+    const editor = provider({ id: STUDIO.id, displayName: "サンプル工房", memberRole: "EDITOR" });
+    stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(editor)));
+    expect((await loadHostConsoleData(STUDIO, { meetingPoint: true })).settings.meetingPoint).toEqual(MEETING);
+    stubNiho((url) => url.endsWith("/meeting-point") ? new Response("unavailable", { status: 503 }) : Response.json(detailBody(editor)));
+    expect((await loadHostConsoleData(STUDIO, { meetingPoint: true })).settings.meetingPoint).toBeNull();
+    // Only 設定 asks for them: ホーム and 体験 never call NIHO's meeting point.
+    const unasked = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(editor)));
+    expect((await loadHostConsoleData(STUDIO)).settings.meetingPoint).toBeNull();
+    expect(unasked.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-studio"]);
+    // A cohost is not asked for: NIHO answers the meeting defaults to the owner and the editor only.
+    const cohost = provider({ id: KITCHEN.id, displayName: "サンプルの台所", memberRole: "COHOST" });
+    const calls = stubNiho(() => Response.json(detailBody(cohost)));
+    expect((await loadHostConsoleData(cohost, { meetingPoint: true })).settings.meetingPoint).toBeNull();
+    expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen"]);
   });
 });
 

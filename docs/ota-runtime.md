@@ -107,7 +107,20 @@ Admin の `/admin/api/channels` は action allowlist だけを受け、任意 qu
 
 未反映の判定は `desired_changed_at`（desired version を変えた時刻）を基準にし、観測・エラー記録で動く `updated_at` は使わない。退役 adapter など配備 allowlist で実行できない backlog は `SYNC_OVERDUE` にしない。incident は条件が消えた次の実行で `AUTO_RECOVERED` として閉じる。各種上限（500行）に達した種別は、その実行で自動解決しない。
 
-detail は件数・経過秒・内部理由コードだけで、外部 account ID、旅行者情報、token を含めない。開始・escalation・解決ごとに `notified_*_at` を記録し、`ota_runtime_incident` の構造化ログを1行出す。通知はこのログを Cloud Logging の log-based alert で拾う前提であり、メール・チャット送信先はこの slice に含めない。Admin は最終実行が5分より古い watchdog を「監視が止まっています」と表示する。
+detail は件数・経過秒・内部理由コードだけで、外部 account ID、旅行者情報、token を含めない。開始・escalation・解決ごとに `notified_*_at` を記録し、`ota_runtime_incident` の構造化ログを1行出す。通知はこのログを Cloud Logging の log-based alert で拾う。Admin は最終実行が5分より古い watchdog を「監視が止まっています」と表示する。
+
+### 配備済みの監視資源（2026-10-31、オーナー指示）
+
+stg（`niho-app-stg`）と本番（`niho-app-prd`）に同じ名前で用意した。通知先はオーナー指定の takahama.t@niho.life。
+
+| 資源 | 内容 |
+| --- | --- |
+| サービスアカウント `experience-ota-watchdog@<project>.iam.gserviceaccount.com` | Scheduler の OIDC ID token 専用。ロールは持たない。stg の非公開 Cloud Run にだけ `roles/run.invoker` を付けた |
+| Cloud Scheduler `experience-ota-watchdog`（asia-northeast1） | 毎分 `POST /internal/ota/v1/watchdog`、body `{}`、再試行なし。audience はサービスのベース URL（stg は固定 run.app URL、本番は `https://experience.niho.life`）。flag と DB が揃うまで **一時停止** |
+| alert policy `experience-ota-runtime-incident` | `jsonPayload.event="ota_runtime_incident"` のログごとに通知（5分の rate limit）。件名に kind と transition |
+| alert policy `experience-ota-watchdog-scheduler-failed` | watchdog job の実行失敗（1時間の rate limit） |
+
+Cloud Run 側の値は配備 workflow だけが入れる。stg は repository variable `STG_CHANNEL_WATCHDOG_ENABLED=true`、本番は `PROD_CHANNEL_WATCHDOG_ENABLED=true` かつ `enable_host_calendar=true`（watchdog は体験 DB を使うため）のときだけ、`EXPERIENCE_CHANNEL_WATCHDOG_ENABLED/AUDIENCE/SERVICE_ACCOUNT_EMAIL` を付けて検査する。有効化の順序は、DB migration と runtime 権限 → 変数を true にして候補配備・昇格 → Scheduler を `gcloud scheduler jobs resume` → Admin の「監視」表示とアラートの受信を確認。止めるときは Scheduler を pause してから変数を戻す。本番では既存の `ops-critical-scheduler-http-failures` も全 job の HTTP 失敗を拾うため、未配備のまま resume しない。
 
 ### Admin の稼働状況と手動復旧
 
@@ -121,7 +134,7 @@ detail は件数・経過秒・内部理由コードだけで、外部 account I
 - `retryReservationReads`（予約照合を再開）: halted かつ実行中 job のない listing だけ。account が active・未失効・委任期限内・未隔離で、listing が予約読取可能な場合に限り、停止を解いて即時 due にする。読取の健全性は更新しない。
 - `acknowledgeIncident`（担当する）: 未解決 incident の担当を自分にする。incident を手動で閉じる操作は置かない。
 
-検証は合成データの実DB結合テスト、route・UI の単体テスト、stub した Admin 画面の E2E までである。Cloud Scheduler・通知の配備、実Studio・実OTAでの停止／復旧の受入は未実施で、#240 はコードのマージだけでは close しない。
+検証は合成データの実DB結合テスト、route・UI の単体テスト、stub した Admin 画面の E2E までである。Cloud Scheduler・通知の資源は用意したが一時停止中で、実Studio・実OTAでの停止／復旧の受入は未実施である。#240 はコードのマージだけでは close しない。
 
 ## 現時点の検証範囲
 

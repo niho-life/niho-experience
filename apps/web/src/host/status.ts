@@ -1,3 +1,4 @@
+import type { ExperienceSiteListingStatus } from "@niho-experience/api-client/host";
 import type { HostProviderReviewStatus } from "@/lib/host/providers";
 import type { PageEnglishStatus } from "./page-english";
 import type { HostBookingStatus, HostReviewStatus, ListingStatus, PaymentReadinessReason } from "./types";
@@ -18,6 +19,15 @@ export const LISTING_STATUS: Record<ListingStatus, StatusLabel> = {
   review: { label: "審査待ち", tone: "wait" },
   draft: { label: "下書き", tone: "draft" },
   paused: { label: "停止中", tone: "stop" },
+};
+
+/** 体験の編集 › 掲載 in http mode (#89), as NIHO keeps the experience-site listing: none, or withdrawn, reads 未申請. */
+export const SITE_LISTING_STATUS: Record<ExperienceSiteListingStatus | "NONE", StatusLabel> = {
+  NONE: { label: "未申請", tone: "draft" },
+  REQUESTED: { label: "審査待ち", tone: "wait" },
+  ACTIVE: { label: "掲載中", tone: "ok" },
+  PAUSED: { label: "停止中", tone: "stop" },
+  WITHDRAWN: { label: "未申請", tone: "draft" },
 };
 
 /** The English of a page written in Japanese (#110): 未作成 / 下書き / 確定済み / 古い (the Japanese changed since). */
@@ -52,7 +62,7 @@ export const REVIEW_STATUS: Record<HostReviewStatus, StatusLabel> = {
 /** A published review the host has not replied to (ホーム). Replying is the host's choice: the quiet tone. */
 export const REVIEW_UNREPLIED: StatusLabel = { label: "未返信", tone: "draft" };
 
-/** A part NIHO cannot keep yet (設定's 集合案内・カレンダー・通知 in http mode): shown, but not to be filled in. */
+/** A part NIHO cannot keep yet (設定's カレンダー・通知 in http mode): shown, but not to be filled in. */
 export const PREPARING_STATUS: StatusLabel = { label: "準備中", tone: "draft" };
 
 /** The provider's own review, shown beside 設定 › 提供者情報 (NIHO's provider screen calls SUSPENDED 確認が必要). */
