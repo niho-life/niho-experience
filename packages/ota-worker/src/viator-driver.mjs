@@ -68,10 +68,14 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
         if (!href) continue;
         const url = new URL(href, supplierOrigin);
         if (url.pathname === "/bookings/search" && url.searchParams.get("travelDate") === job.localDateTime.slice(0, 10)
-          && url.searchParams.get("filteredTourGrade") === `${job.target.externalProductId}|${job.target.externalOptionId}`) matchingLinks.push(links.nth(index));
+          && url.searchParams.get("filteredTourGrade") === `${job.target.externalProductId}|${job.target.externalOptionId}`) matchingLinks.push(href);
       }
       if (matchingLinks.length !== 1) throw new ContractError("PRODUCT_MISMATCH");
-      const rows = page.locator('div[class*="_gridCol_"]').filter({ has: matchingLinks[0] });
+      const canonicalLink = page.locator(`a[href=${JSON.stringify(matchingLinks[0])}]`);
+      if (await canonicalLink.count() !== 1) throw new ContractError("PRODUCT_MISMATCH");
+      // `has: links.nth(index)` would reapply a page-wide index inside each row.
+      // Anchor the ancestor to the immutable, already-validated canonical href.
+      const rows = canonicalLink.locator('xpath=ancestor::div[contains(@class, "_gridCol_")]');
       if (await rows.count() !== 1) throw new ContractError("DOM_DRIFT");
       const row = rows.first();
       if (await row.getByText(job.localDateTime.slice(11, 16), { exact: true }).count() !== 1) throw new ContractError("TARGET_MISMATCH");
