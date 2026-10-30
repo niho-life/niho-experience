@@ -158,15 +158,18 @@ describe("loadHostConsoleData", () => {
     stubNiho(() => Response.json(detailBody(detail)));
     const items = [{ key: "NEW_BOOKING", enabled: true, locked: true }, { key: "NEW_REVIEW", enabled: false, locked: false }];
     state.notificationLoad = { status: "live", items };
-    const live = await loadHostConsoleData(KITCHEN);
+    // Only 設定 asks for them; the other pages never read the DB for them.
+    expect((await loadHostConsoleData(KITCHEN)).settings.notificationSource).toBe("preparing");
+    expect(state.notificationCalls).toEqual([]);
+    const live = await loadHostConsoleData(KITCHEN, { notifications: true });
     expect(live.settings).toMatchObject({ notifications: { email: { addresses: [] }, items }, notificationSource: "live" });
     expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, nihoUserId: "sample-niho-user" }]);
     state.notificationLoad = { status: "error" };
-    expect((await loadHostConsoleData(KITCHEN)).settings.notificationSource).toBe("error");
+    expect((await loadHostConsoleData(KITCHEN, { notifications: true })).settings.notificationSource).toBe("error");
     // An editor never reads them.
     state.notificationCalls = [];
     stubNiho(() => Response.json(detailBody(provider({ id: STUDIO.id, displayName: "サンプル工房", memberRole: "EDITOR" }))));
-    expect((await loadHostConsoleData(STUDIO)).settings).toMatchObject({ notifications: null, notificationSource: "preparing" });
+    expect((await loadHostConsoleData(STUDIO, { notifications: true })).settings).toMatchObject({ notifications: null, notificationSource: "preparing" });
     expect(state.notificationCalls).toEqual([]);
   });
 
