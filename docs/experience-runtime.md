@@ -21,8 +21,10 @@
 | 設定 | 用途 |
 | --- | --- |
 | `EXPERIENCE_DATABASE_URL` | 体験専用 PostgreSQL。NIHOapp の業務 DB とは分離する |
-| `EXPERIENCE_GUIDE_PUBLIC_SOURCE` | `database` のときだけGuide CMSのcurrent publicationを公開SSRへ接続する。http mode限定・既定`static` |
+| `EXPERIENCE_GUIDE_PUBLIC_SOURCE` | `database` のときだけGuide CMSのcurrent publicationを、`editor` のときだけ editor.niho.life の公開API（#252・仮契約）を公開SSRへ接続する。http mode限定・既定`static` |
 | `GUIDE_MEDIA_BUCKET` | Guideのprivate JPEG bucket。database公開元では必須。名前・object keyを公開レスポンスへ出さない |
+| `GUIDE_EDITOR_API_BASE_URL` / `GUIDE_EDITOR_API_HANDLE` / `GUIDE_EDITOR_API_TOKEN` | editor公開元では3つとも必須（無ければ起動失敗）。base URL は版のパスを含む https（loopback の http だけ例外）。token は server-only の秘密で、公開出力・ログへ出さない。[Guide CMS](guide-cms.md#editorniholife-の公開-api-を読む252-253仮契約) |
+| `GUIDE_EDITOR_ASSET_ORIGINS` | 任意。editor の写真を配信する https origin のカンマ区切り。未設定なら base URL の origin だけ |
 | `EXPERIENCE_GOOGLE_CLIENT_ID` / `EXPERIENCE_GOOGLE_CLIENT_SECRET` | Google OAuth の Web client。同意済み redirect URI は `https://experience.niho.life/host/calendar/google/callback` |
 | `EXPERIENCE_GOOGLE_TOKEN_KEY` | 32 byte の乱数を base64 にした AES-GCM 鍵。Secret Manager で保持する |
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | 既存 NIHO プラットフォームの Stripe 秘密鍵を、体験処理用の実行 ID に限定して渡す |
@@ -30,7 +32,7 @@
 
 DB migration は `packages/experience-store/migrations/` の `0001`〜`0013` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0006` は上記の停止・移行手順を先に満たす。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
 
-Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、NIHO editor auth、category/article/publication移行、権限失効・停止・UNLISTED・画像取消を合成データで受け入れる。次に `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` の候補revisionで、SSR/metadata/sitemapが次requestに反映されること、static記事が混在しないこと、公開catalogとの体験link交差、mediaの404/503/no-storeを確認する。受入前は`static`を維持し、editorだけの有効化を公開元切替とみなさない。
+Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、NIHO editor auth、category/article/publication移行、権限失効・停止・UNLISTED・画像取消を合成データで受け入れる。次に `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` の候補revisionで、SSR/metadata/sitemapが次requestに反映されること、static記事が混在しないこと、公開catalogとの体験link交差、mediaの404/503/no-storeを確認する。受入前は`static`を維持し、editorだけの有効化を公開元切替とみなさない。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` は editor.niho.life の公開（設計の段階 3）が本番で使えるまで有効化しない。Secret Manager と配備 workflow への配線もそれまで行わない。
 
 ## 切替前の残作業
 

@@ -45,7 +45,8 @@ export default async function GuidesPage() {
         </div>
       ) : null}
       <div className="mt-12 grid max-w-[46rem] gap-14">
-        {catalog.source === "database" ? categories.map((category) => {
+        {/* CMS sources (database, editor) shelve by category; static guides by their code-owned pillar. */}
+        {catalog.source !== "static" ? categories.map((category) => {
           const guides = catalog.guides.filter((guide) => guide.category?.slug === category.slug);
           return (
             <section key={category.slug} id={category.slug} aria-labelledby={`${category.slug}-heading`} className="scroll-mt-24">

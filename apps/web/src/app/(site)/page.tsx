@@ -21,7 +21,7 @@ import { JsonLd } from "@/components/JsonLd";
 import { HomeJournal } from "@/components/HomeJournal";
 import { buttonClass } from "@/components/ui";
 import { PUBLISHED_GUIDES } from "@/content/guides";
-import { guideCatalog, hasGuidesPage } from "@/lib/guide-registry";
+import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { homeJournal } from "@/lib/home-journal";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
 import { siteJsonLd } from "@/lib/structured-data";
@@ -102,7 +102,7 @@ function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardMod
 
 export default async function Home({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
-  const [api, result, guideCatalogResult] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalog()]);
+  const [api, result, guideCatalogResult] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite()]);
   if (!result.ok && result.kind !== "not_found") return <ErrorState title="We couldn't load experiences" />;
   const summaries = result.ok ? result.data.experiences : [];
   const details = await loadDetails(api, summaries, config.publicApiVersion !== "1.0");
