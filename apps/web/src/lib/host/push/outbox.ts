@@ -118,18 +118,23 @@ export interface HostNotificationDrainDeps {
 type Outcome = "delivered" | "skipped" | "dropped" | "retry";
 
 /**
- * One run: claims due rows and sends each. Shown, skipped or dropped rows are completed; a send
+ * One run: claims up to `limit` due rows and sends each. Shown, skipped or dropped rows are completed; a send
  * that throws (the subscriptions or the settings could not be read) is retried 1, 5, 15 and 60
  * minutes later and given up on after `maxAttempts` claims. A row claimed more often than that
  * without finishing (runs cut off mid-send) is given up on too.
+ *
+ * Each row is claimed right before its send, so every send has the whole lease: a slow batch cannot let
+ * another run claim (and send again) the rows it has not reached yet. Completing names the claim, so a
+ * send that outlived its lease cannot close the row another run now holds.
  */
 export async function drainHostNotifications(deps: HostNotificationDrainDeps): Promise<HostNotificationDrainCounts> {
   const { outbox, limit = 50, leaseMs = 60_000, maxAttempts = 5, notify = notifyHostDevices } = deps;
   const counts: HostNotificationDrainCounts = { claimed: 0, delivered: 0, devicesSent: 0, skipped: 0, dropped: 0, retried: 0 };
-  const messages = await outbox.claimDue(limit, leaseMs);
-  counts.claimed = messages.length;
 
-  for (const message of messages) {
+  while (counts.claimed < limit) {
+    const [message] = await outbox.claimDue(1, leaseMs);
+    if (!message) break;
+    counts.claimed += 1;
     const parsed = hostPushEventFromOutbox(message, deps.now());
     let outcome: Outcome;
     if (!parsed.ok || message.attempts > maxAttempts) {
@@ -148,10 +153,10 @@ export async function drainHostNotifications(deps: HostNotificationDrainDeps): P
     }
     if (outcome === "retry") {
       const backoff = RETRY_BACKOFF_MS[Math.min(message.attempts, RETRY_BACKOFF_MS.length) - 1] ?? RETRY_BACKOFF_MS[0]!;
-      await outbox.retryAt(message.id, new Date(deps.now() + backoff));
+      await outbox.retryAt(message.id, new Date(deps.now() + backoff), message.attempts);
       counts.retried += 1;
     } else {
-      await outbox.complete(message.id);
+      await outbox.complete(message.id, message.attempts);
       counts[outcome] += 1;
     }
   }

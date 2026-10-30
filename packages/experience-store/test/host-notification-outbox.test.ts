@@ -33,6 +33,12 @@ describe("host notification payloads (#177 P2)", () => {
     assert.equal(parseGuestMessagePayload(approval), null);
   });
 
+  it("refuses a stored JSON null where an instant belongs", () => {
+    assert.equal(parseApprovalDeadlinePayload({ ...approval, approvalDeadlineAt: null }), null);
+    assert.equal(parseApprovalDeadlinePayload({ ...approval, startsAt: null }), null);
+    assert.equal(parseGuestMessagePayload({ ...message, startsAt: null }), null);
+  });
+
   it("refuses unknown keys, missing keys, wrong types and out-of-range values", () => {
     for (const extra of [{ guestName: "合成 予約者" }, { body: "synthetic text" }, { amount: 12000 }]) {
       assert.equal(parseApprovalDeadlinePayload({ ...approval, ...extra }), null);
@@ -110,8 +116,10 @@ describe("HostNotificationOutbox input checks", () => {
     await assert.rejects(() => outbox.claimDue(0, 60_000), StoreValidationError);
     await assert.rejects(() => outbox.claimDue(201, 60_000), StoreValidationError);
     await assert.rejects(() => outbox.claimDue(10, 999), StoreValidationError);
-    await assert.rejects(() => outbox.complete("1; DROP TABLE outbox_messages"), StoreValidationError);
-    await assert.rejects(() => outbox.retryAt("1", new Date(Number.NaN)), StoreValidationError);
+    await assert.rejects(() => outbox.complete("1; DROP TABLE outbox_messages", 1), StoreValidationError);
+    await assert.rejects(() => outbox.complete("1", -1), StoreValidationError);
+    await assert.rejects(() => outbox.retryAt("1", new Date(Number.NaN), 1), StoreValidationError);
+    await assert.rejects(() => outbox.retryAt("1", new Date(), 1.5), StoreValidationError);
     assert.equal(queries.length, 0);
     assert.deepEqual(await outbox.claimDue(10, 60_000), []);
     assert.deepEqual(queries[0], [[HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage], 10, 60_000]);

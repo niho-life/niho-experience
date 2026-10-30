@@ -50,7 +50,7 @@
 
 - **通知 job（outbox の消費。オーナー決定 2026-10-31）**：承認制の予約と予約者からの連絡の正本は、予約の移行（ADR 0002）までは NIHO にあり、体験 DB には無い。NIHO 側は変えず、体験 DB の `outbox_messages` に積まれた通知を送る job を先に置き、積む側（予約・連絡の transaction）は移行で足す。それまで job は空振りする。
   - topic は 2 つ（`packages/experience-store` の `host-notification-outbox.ts`）。`host.notify.approval_deadline`：承認期限の 6 時間前と 1 時間前の 2 行（期限まで 1 時間を切っていれば 1 時間前の 1 行をすぐ。過ぎていれば積まない）。承認・辞退・取消・期限切れの transaction で `cancelApprovalDeadlineReminders` が未処理の行を閉じる。`host.notify.guest_message`：予約者からの連絡 1 件ごとに 1 行。payload は予約 ID・体験名・日時・人数だけで、予約者名・本文・金額の欄が無い。ほかの topic（`booking.confirmed` など）には触らない。
-  - 取り出しは `available_at` を lease に使う（`FOR UPDATE SKIP LOCKED` で取り、60 秒先へずらす。終わらなければ戻ってくる）。送れたら `processed_at`。期限を過ぎた承認期限・24 時間より古い連絡・形の違う行は送らずに閉じる。購読の読み出しが失敗したら 1・5・15・60 分後に再試行し、5 回で諦める。端末ごとの失敗は従来どおり購読の側に記録する。
+  - 取り出しは `available_at` を lease に使う（`FOR UPDATE SKIP LOCKED` で取り、60 秒先へずらす。終わらなければ戻ってくる）。1 回の実行で最大 50 行を、送る直前に 1 行ずつ取り出す（まとめて取ると、遅い送信の間に後ろの行の lease が切れて別の実行が二重に送る）。完了・再試行は取り出したときの `attempts` と一致する行だけを更新し、lease 切れのあと別の実行が取り直した行には効かない。送れたら `processed_at`。期限を過ぎた承認期限・24 時間より古い連絡・形の違う行は送らずに閉じる。購読の読み出しが失敗したら 1・5・15・60 分後に再試行し、5 回で諦める。端末ごとの失敗は従来どおり購読の側に記録する。
   - 届く種類は設定 › 通知に従う。承認期限は止められない。予約者からの連絡は止められる種類で、送る前に体験 DB の設定（#109、`ProviderNotificationSettings.enabledFor`。行が無ければオン）を読む。`HOST_NOTIFICATION_SETTINGS_ENABLED=false` で設定を読めない間は送らない側に倒す。設定の読み出しが失敗したら購読の読み出しと同じく再試行する。
   - タップ先は `/host/bookings?booking=…&providerId=…`（承認期限）と `/host/messages?booking=…&providerId=…`（連絡）。同じ予約の承認期限は 1 時間前の通知が 6 時間前のものを置き換える（tag）。
   - 起動は `POST /internal/host-push/v1/drain`。Cloud Scheduler（毎分）が専用 service account の Google ID token で呼ぶ（`HOST_PUSH_JOB_AUDIENCE`・`HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL`）。未設定・`HOST_PUSH_ENABLED=false` なら 404。応答は件数だけ。Scheduler・service account・環境変数の配線はまだしていない。

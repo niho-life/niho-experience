@@ -25,7 +25,8 @@ function row(topic: string, payload: unknown, extra: Partial<ClaimedHostNotifica
 
 function fakeOutbox(messages: ClaimedHostNotification[]) {
   return {
-    claimDue: vi.fn(async () => messages),
+    // Hands out the rows the way the store does: up to `limit` per claim, each only once.
+    claimDue: vi.fn(async (limit: number, _leaseMs: number) => messages.splice(0, limit)),
     complete: vi.fn(async () => {}),
     retryAt: vi.fn(async () => {}),
   };
@@ -142,14 +143,14 @@ describe("hostNotificationAllowed", () => {
 });
 
 describe("drainHostNotifications", () => {
-  it("claims 50 rows for a minute by default and completes each sent row, devices or not", async () => {
+  it("claims up to 50 rows one at a time, each for a minute, and completes each sent row, devices or not", async () => {
     const messages = [row(APPROVAL, approvalPayload), row(MESSAGE, messagePayload)];
     const notify = vi.fn(async (event: HostPushEvent) => report(event.kind === "GUEST_MESSAGE" ? 0 : 3));
     const { outbox, allowed, log, result } = run(messages, { notify });
     const counts = await result;
     expect(counts).toEqual({ claimed: 2, delivered: 2, devicesSent: 3, skipped: 0, dropped: 0, retried: 0 });
-    expect(outbox.claimDue).toHaveBeenCalledWith(50, 60_000);
-    expect(outbox.complete.mock.calls).toEqual([["1"], ["2"]]);
+    expect(outbox.claimDue.mock.calls).toEqual([[1, 60_000], [1, 60_000], [1, 60_000]]);
+    expect(outbox.complete.mock.calls).toEqual([["1", 1], ["2", 1]]);
     expect(outbox.retryAt).not.toHaveBeenCalled();
     expect(allowed.mock.calls).toEqual([["provider-a", "APPROVAL_DEADLINE"], ["provider-a", "GUEST_MESSAGE"]]);
     expect(notify).toHaveBeenCalledTimes(2);
@@ -181,8 +182,23 @@ describe("drainHostNotifications", () => {
   it("completes a kind the provider turned off without sending", async () => {
     const { outbox, notify, result } = run([row(MESSAGE, messagePayload)], { allowed: async () => false });
     expect(await result).toMatchObject({ claimed: 1, skipped: 1, delivered: 0 });
-    expect(outbox.complete).toHaveBeenCalledWith("1");
+    expect(outbox.complete).toHaveBeenCalledWith("1", 1);
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("claims each row right before its send, so a slow batch keeps no row waiting under an old lease, and stops at the limit", async () => {
+    const order: string[] = [];
+    const queue = [row(MESSAGE, messagePayload), row(MESSAGE, messagePayload), row(MESSAGE, messagePayload)];
+    const outbox = {
+      claimDue: vi.fn(async (limit: number) => { order.push("claim"); return queue.splice(0, limit); }),
+      complete: vi.fn(async () => { order.push("complete"); }),
+      retryAt: vi.fn(async () => {}),
+    };
+    const notify = async () => { order.push("send"); return report(1); };
+    const counts = await drainHostNotifications({ outbox, pushDeps: () => pushDeps, allowed: async () => true, now: () => NOW, notify, limit: 2 });
+    expect(counts).toMatchObject({ claimed: 2, delivered: 2 });
+    expect(order).toEqual(["claim", "send", "complete", "claim", "send", "complete"]);
+    expect(queue).toHaveLength(1);
   });
 
   it("retries a failed send 1, 5, 15 and 60 minutes later, then gives up at the fifth attempt", async () => {
@@ -191,12 +207,12 @@ describe("drainHostNotifications", () => {
     const { outbox, result } = run(messages, { notify: failing });
     expect(await result).toEqual({ claimed: 5, delivered: 0, devicesSent: 0, skipped: 0, dropped: 1, retried: 4 });
     expect(outbox.retryAt.mock.calls).toEqual([
-      ["1", new Date(NOW + MINUTE)],
-      ["2", new Date(NOW + 5 * MINUTE)],
-      ["3", new Date(NOW + 15 * MINUTE)],
-      ["4", new Date(NOW + 60 * MINUTE)],
+      ["1", new Date(NOW + MINUTE), 1],
+      ["2", new Date(NOW + 5 * MINUTE), 2],
+      ["3", new Date(NOW + 15 * MINUTE), 3],
+      ["4", new Date(NOW + 60 * MINUTE), 4],
     ]);
-    expect(outbox.complete.mock.calls).toEqual([["5"]]);
+    expect(outbox.complete.mock.calls).toEqual([["5", 5]]);
   });
 
   it("retries when the settings or the push dependencies cannot be read", async () => {
@@ -212,11 +228,11 @@ describe("drainHostNotifications", () => {
     const { outbox, notify, result } = run([row(APPROVAL, approvalPayload, { attempts: 6 })]);
     expect(await result).toMatchObject({ claimed: 1, dropped: 1, delivered: 0 });
     expect(notify).not.toHaveBeenCalled();
-    expect(outbox.complete).toHaveBeenCalledWith("1");
+    expect(outbox.complete).toHaveBeenCalledWith("1", 6);
     const custom = run([row(APPROVAL, approvalPayload, { id: "9", attempts: 6 })], { maxAttempts: 8, notify: async () => { throw new Error("down"); } });
     await custom.result;
     // Past the table, the backoff stays at an hour.
-    expect(custom.outbox.retryAt).toHaveBeenCalledWith("9", new Date(NOW + 60 * MINUTE));
+    expect(custom.outbox.retryAt).toHaveBeenCalledWith("9", new Date(NOW + 60 * MINUTE), 6);
   });
 
   it("does nothing on an empty outbox, and stops when the outbox cannot record a result", async () => {

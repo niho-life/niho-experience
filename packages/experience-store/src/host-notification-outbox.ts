@@ -79,8 +79,8 @@ function hasExactKeys(record: Record<string, unknown>, keys: readonly string[]):
   return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
 }
 
-/** A stored instant: already canonical, so a hand-written row in another form is refused. */
-const storedInstant = (value: unknown): value is string => canonicalInstant(value) === value;
+/** A stored instant: a string already canonical, so a hand-written row in another form (or a JSON null) is refused. */
+const storedInstant = (value: unknown): value is string => typeof value === "string" && canonicalInstant(value) === value;
 
 /** The approval reminder's payload, or null for anything else (an unknown key, a wrong type). */
 export function parseApprovalDeadlinePayload(value: unknown): ApprovalDeadlinePayload | null {
@@ -196,6 +196,10 @@ function assertRowId(id: string): void {
   if (!ROW_ID.test(id)) throw new StoreValidationError("id must be an outbox row id.");
 }
 
+function assertAttempts(attempts: number): void {
+  if (!Number.isSafeInteger(attempts) || attempts < 0) throw new StoreValidationError("attempts must be the claim's attempt count.");
+}
+
 function claimedFromRow(row: DbRow): ClaimedHostNotification {
   const attempts = Number(row.attempts);
   if (typeof row.provider_id !== "string" || typeof row.topic !== "string" || !Number.isSafeInteger(attempts)) throw new StoreError("Database returned an invalid outbox row.");
@@ -238,16 +242,28 @@ export class HostNotificationOutbox {
     return result.rows.map(claimedFromRow).sort(byId);
   }
 
-  /** Sent, skipped or given up: the row is done. A row already closed (a cancelled reminder) stays as it is. */
-  async complete(id: string): Promise<void> {
+  /**
+   * Sent, skipped or given up: the row is done. A row already closed (a cancelled reminder) stays as it is.
+   * `attempts` is the claim's count: once the lease ran out and another run claimed the row again, this claim
+   * no longer changes it.
+   */
+  async complete(id: string, attempts: number): Promise<void> {
     assertRowId(id);
-    await this.#pool.query("UPDATE outbox_messages SET processed_at = clock_timestamp() WHERE id = $1 AND topic = ANY($2::text[]) AND processed_at IS NULL", [id, TOPICS]);
+    assertAttempts(attempts);
+    await this.#pool.query(
+      "UPDATE outbox_messages SET processed_at = clock_timestamp() WHERE id = $1 AND topic = ANY($2::text[]) AND processed_at IS NULL AND attempts = $3",
+      [id, TOPICS, attempts],
+    );
   }
 
-  /** Try again at `at` (instead of when the lease runs out). */
-  async retryAt(id: string, at: Date): Promise<void> {
+  /** Try again at `at` (instead of when the lease runs out), for the claim counted `attempts` only. */
+  async retryAt(id: string, at: Date, attempts: number): Promise<void> {
     assertRowId(id);
     if (Number.isNaN(at.getTime())) throw new StoreValidationError("at must be a valid time.");
-    await this.#pool.query("UPDATE outbox_messages SET available_at = $2 WHERE id = $1 AND topic = ANY($3::text[]) AND processed_at IS NULL", [id, at.toISOString(), TOPICS]);
+    assertAttempts(attempts);
+    await this.#pool.query(
+      "UPDATE outbox_messages SET available_at = $2 WHERE id = $1 AND topic = ANY($3::text[]) AND processed_at IS NULL AND attempts = $4",
+      [id, at.toISOString(), TOPICS, attempts],
+    );
   }
 }

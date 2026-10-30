@@ -87,21 +87,21 @@ describe("PostgreSQL host notification outbox (#177 P2)", { skip: databaseUrl ==
       assert.deepEqual(first.find((row) => row.topic === HOST_NOTIFICATION_TOPICS.guestMessage)?.payload, { v: 1, bookingId: "bk-far", messageId: "msg-1", experienceTitle: booking.experienceTitle, startsAt: booking.startsAt, seats: 2 });
       // Claimed: moved past the lease, so a second claim gets nothing.
       assert.deepEqual(await outbox.claimDue(50, 60_000), []);
-      for (const row of first) await outbox.complete(row.id);
+      for (const row of first) await outbox.complete(row.id, row.attempts);
       assert.ok((await rows(`id IN (${first.map((row) => row.id).join(",")})`)).every((row) => row.processed_at !== null));
       // complete and retryAt leave another topic's row alone even by id.
-      await outbox.complete(other.id);
-      await outbox.retryAt(other.id, new Date(Date.now() + HOUR));
+      await outbox.complete(other.id, Number(other.attempts));
+      await outbox.retryAt(other.id, new Date(Date.now() + HOUR), Number(other.attempts));
       assert.deepEqual(await rows("topic = 'booking.confirmed'"), [other]);
 
       // retryAt: later is not due, earlier is.
       const retried = (await rows("aggregate_id = 'bk-mid'"))[0];
-      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() - 1_000));
+      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() - 1_000), Number(retried.attempts));
       const [due] = await outbox.claimDue(50, 60_000);
       assert.equal(due?.id, retried.id);
-      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() + HOUR));
+      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() + HOUR), due!.attempts);
       assert.deepEqual(await outbox.claimDue(50, 60_000), []);
-      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() - 1_000));
+      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() - 1_000), due!.attempts);
 
       // A claimed row that is never completed comes back once its lease runs out, counted again.
       const [leased] = await outbox.claimDue(50, 1_000);
@@ -112,7 +112,13 @@ describe("PostgreSQL host notification outbox (#177 P2)", { skip: databaseUrl ==
       const [back] = await outbox.claimDue(50, 60_000);
       assert.equal(back?.id, retried.id);
       assert.equal(back?.attempts, 3);
-      await outbox.complete(retried.id);
+      // The run whose lease ran out can no longer close or move the row the next run holds.
+      await outbox.complete(retried.id, leased!.attempts);
+      await outbox.retryAt(retried.id, new Date((await dbNow()).getTime() + HOUR), leased!.attempts);
+      assert.equal((await rows(`id = ${retried.id}`))[0]?.processed_at, null);
+      assert.deepEqual(await outbox.claimDue(50, 60_000), []);
+      await outbox.complete(retried.id, back!.attempts);
+      assert.notEqual((await rows(`id = ${retried.id}`))[0]?.processed_at, null);
 
       // A row locked by another transaction is skipped, not waited for.
       for (let index = 0; index < 10; index += 1) {
@@ -131,7 +137,7 @@ describe("PostgreSQL host notification outbox (#177 P2)", { skip: databaseUrl ==
       } finally {
         locker.release();
       }
-      for (const row of await rows("topic = 'host.notify.guest_message' AND processed_at IS NULL")) await outbox.retryAt(row.id, new Date((await dbNow()).getTime() - 1_000));
+      for (const row of await rows("topic = 'host.notify.guest_message' AND processed_at IS NULL")) await outbox.retryAt(row.id, new Date((await dbNow()).getTime() - 1_000), Number(row.attempts));
 
       // Concurrent claimers never share a row, and together they get all of them.
       const claims = await Promise.all([outbox.claimDue(4, 60_000), outbox.claimDue(4, 60_000), outbox.claimDue(4, 60_000)]);
