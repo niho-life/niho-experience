@@ -37,7 +37,7 @@
 
 ## 次の受入
 
-じゃらん専用profileは、本人の許可を受けて、正常終了→session復元→同じAirIDでの認証保持→正常終了を実サイトで確認した。検証中の業務POSTは拒否し、予約枠は変更していない。枠driverへの接続はprivate configによるaccount単位の明示設定に限定する。必要な同一originのstock画面JS/CSSだけを許可し、解析用scriptや未知pathは引き続き拒否する。
+じゃらん専用profileは、本人の許可を受けて、正常終了→session復元→同じAirIDでの認証保持→正常終了を実サイトで確認した。検証中の業務POSTは拒否し、予約枠は変更していない。枠driverへの接続はprivate configによるaccount単位の明示設定に限定する。必要な同一originのstock画面JS/CSSと初期化時の限定読取りだけを許可する。画面が同期呼出しする`s`定義scriptも必要だが、外向きの解析通信や未知pathは拒否する。
 
 1. 合成fixtureで対象取り違え・複数回・価格変更・取消操作を拒否する。
 2. 専用profileと現行worker認証に接続し、lease/version/preflight/停止証明/独立readbackを通す。

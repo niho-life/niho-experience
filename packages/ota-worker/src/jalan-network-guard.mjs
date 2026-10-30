@@ -6,6 +6,9 @@ const COMPLETE_SLOT_KEYS = ["slotId", "version", "frontOpenFlg", "bookingAvailab
 const SUMMARY_QUERY_KEYS = ["callback", "dspBaseDate", "dspRange", "pageSize", "pageNo", "schdlKbn", "groupSchdlId", "lessonSchdlId", "includeSaleStops"];
 const SUMMARY_OPTIONAL_QUERY_KEYS = ["_"];
 const SCRIPT_PATHS = new Set([
+  // Stock initialization calls this supplier-defined `s` global synchronously.
+  // Its outbound analytics requests remain outside the GET allowlist.
+  "/js/sitecatalyst/s_code.js",
   "/js/lib/jquery-2.1.1.min.js", "/js/com/jquery.serialize-object.min.js", "/js/com/jquery-ui.min.js",
   "/js/com/jquery-ui-i18n.min.js", "/js/com/jquery.ui.datepicker-ja.js", "/js/lib/datepicker.js",
   "/js/com/knockout-3.0.0rc.js", "/js/com/knockout.mapping-latest.js", "/js/com/jquery.cookie.js",

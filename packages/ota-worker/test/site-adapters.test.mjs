@@ -156,7 +156,7 @@ test("Jalan refuses confirmed or requested bookings before authorizing a slot", 
   }
 });
 
-test("Jalan permits observed stock assets without opening navigation, analytics or unknown GETs", async () => {
+test("Jalan permits observed stock assets without opening navigation, telemetry or unknown GETs", async () => {
   const guard = createJalanNetworkGuard({ job: jalanJob, getSnapshot: () => null, cloud: {} });
   const calls = [];
   const asset = (path, type, navigation = false) => {
@@ -167,15 +167,16 @@ test("Jalan permits observed stock assets without opening navigation, analytics 
   await guard.handle(asset("/js/com/jquery-ui.min.js?date=20261030", "script"));
   await guard.handle(asset("/css/calendar.css?date=20261030", "stylesheet"));
   await guard.handle(asset("/js/pc/calendar/calendar.js", "script"));
+  await guard.handle(asset("/js/sitecatalyst/s_code.js?date=20261030", "script"));
   for (const [path, type, navigation] of [
-    ["/js/sitecatalyst/s_code.js?date=20261030", "script", false],
+    ["/js/sitecatalyst/unknown.js?date=20261030", "script", false],
     ["/js/com/jquery-ui.min.js?date=1&date=2", "script", false],
     ["/js/com/jquery-ui.min.js?send=1", "script", false],
     ["/js/com/jquery-ui.min.js", "fetch", false],
     ["/js/com/jquery-ui.min.js", "script", true],
     ["/stateful/schdl/client/delete", "fetch", false],
   ]) await guard.handle(asset(path, type, navigation));
-  assert.deepEqual(calls, ["continue", "continue", "continue", ...Array(6).fill("abort")]);
+  assert.deepEqual(calls, ["continue", "continue", "continue", "continue", ...Array(6).fill("abort")]);
 });
 
 test("Jalan permits only bounded stock status/header reads and refuses their mutations", async () => {
