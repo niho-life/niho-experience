@@ -2902,7 +2902,7 @@ export class ChannelRuntime {
   async #completeRecoveryObserve(client: PoolClient, job: DbRow): Promise<void> {
     const recovery = await client.query(
       `SELECT 1 FROM channel_admin_commands
-        WHERE action IN ('account.recover','account.reauth') AND result->>'observeJobId'=$1 LIMIT 1 FOR SHARE`,
+        WHERE action IN ('account.recover','account.reauth') AND result->>'observeJobId'=$1 LIMIT 1`,
       [job.id],
     );
     if (!recovery.rows[0]) return;

@@ -370,7 +370,7 @@ export class GoogleChannelDeliveryRepository {
           }
           const stopped = await client.query(
             `SELECT 1 FROM channel_job_results
-              WHERE job_id=$1::uuid AND worker_id=$2 AND lease_epoch=$3 AND stopped=true LIMIT 1 FOR SHARE`,
+              WHERE job_id=$1::uuid AND worker_id=$2 AND lease_epoch=$3 AND stopped=true LIMIT 1`,
             [delivery.operation_job_id, delivery.operation_worker_id, delivery.operation_lease_epoch],
           );
           if (!stopped.rows[0]) throw new StoreConflictError("The prior Google operation has not confirmed stop.");
