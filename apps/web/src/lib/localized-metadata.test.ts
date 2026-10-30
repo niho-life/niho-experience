@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example.com", indexingAllowed: true } }));
-const shell = vi.hoisted(() => ({ released: false }));
+const shell = vi.hoisted(() => ({ released: false, englishSlugs: ["translated-experience"] }));
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/api")>(),
+  listExperiencesForSite: async () => ({ ok: true as const, data: { experiences: shell.englishSlugs.map((slug) => ({ slug })) } }),
+}));
 vi.mock("@/lib/localized-content", async () => {
   const { assertSameJapaneseRelease } = await vi.importActual<typeof import("@/lib/localized-release")>("@/lib/localized-release");
   return {
-    getJapaneseDetail: async () => ({ releaseId: "release-1", experience: { slug: "translated-experience", title: "翻訳した体験", lead: "鎌倉で過ごす時間。" } }),
+    getJapaneseDetail: async () => ({ releaseId: "release-1", experience: { slug: "translated-experience", title: "翻訳した体験", lead: "鎌倉で過ごす時間。" }, localization: { termsFingerprint: `sha256:${"a".repeat(64)}`, bookingReady: false, unavailableCopyKey: "booking.unavailableJa" } }),
+    getJapaneseCatalog: async () => ({ releaseId: "release-1", experiences: [{ slug: "translated-experience" }] }),
     getJapaneseCopy: async () => ({ releaseId: "release-1" }),
     getJapaneseSidecar: async () => ({ releaseId: "release-1" }),
     getPreparedJapaneseStaticRelease: async () => {
@@ -19,6 +24,7 @@ vi.mock("@/lib/localized-content", async () => {
 });
 
 import { japaneseExperienceMetadata } from "@/components/pages/ExperiencePageContent";
+import { generateMetadata as japaneseExperiencePageMetadata } from "@/app/(ja)/ja/experiences/[slug]/page";
 
 describe("Japanese dynamic metadata", () => {
   it("stays unavailable and noindex when the whole static shell is incomplete", async () => {
@@ -39,5 +45,26 @@ describe("Japanese dynamic metadata", () => {
         "x-default": "https://experience.example.com/experiences/translated-experience",
       },
     });
+  });
+});
+
+describe("Japanese experience page metadata", () => {
+  const props = () => ({ params: Promise.resolve({ slug: "translated-experience" }), searchParams: Promise.resolve({}) });
+  const canonical = "https://experience.example.com/ja/experiences/translated-experience";
+  const english = "https://experience.example.com/experiences/translated-experience";
+
+  it("keeps the unavailable state as it is", async () => {
+    shell.released = false;
+    await expect(japaneseExperiencePageMetadata(props())).resolves.toEqual({ title: "Japanese experience unavailable", robots: { index: false, follow: false } });
+  });
+
+  it("cross-references the English page while it is published, and drops hreflang once it is not", async () => {
+    shell.released = true;
+    shell.englishSlugs = ["translated-experience"];
+    const metadata = await japaneseExperiencePageMetadata(props());
+    expect(metadata).toMatchObject({ title: "翻訳した体験", robots: undefined });
+    expect(metadata.alternates).toEqual({ canonical, languages: { en: english, ja: canonical, "x-default": english } });
+    shell.englishSlugs = [];
+    expect((await japaneseExperiencePageMetadata(props())).alternates).toEqual({ canonical });
   });
 });
