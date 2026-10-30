@@ -284,7 +284,8 @@ test("an OWNER can disable cached resource blocking after disconnect", async ({ 
   await expect(page.getByRole("link", { name: "Google カレンダーをつなぐ" })).toBeVisible();
   await page.getByRole("checkbox", { name: "使う" }).uncheck();
   await page.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("保存しました");
+  // The disconnect's 保存しました may still be on screen: wait for this save's own status.
+  await expect(page.getByRole("status").filter({ hasText: "反映を確認中です" })).toContainText("保存しました。反映を確認中です。");
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({ resourceId: "room-a", enabled: false, expectedVersion: 1 });
   expect(writes[0]?.providerId).toEqual(expect.any(String));
