@@ -133,7 +133,8 @@ function injected(fetchImpl: typeof fetch) {
   };
 }
 
-describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integration", () => {
+// Each case migrates a schema and runs real database round trips: about 2 s, and 5 s on a loaded CI runner.
+describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integration", { timeout: 30_000 }, () => {
   it.each(["publication", "capability"] as const)("fences %s changes between preflight and the journal transaction", async (kind) => {
     const value = await fixture();
     let requests = 0;
