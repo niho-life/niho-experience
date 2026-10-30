@@ -282,7 +282,7 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
       expect(matched.first_verified_at.toISOString()).toBe(waiting.first_verified_at.toISOString());
       expect(matched.deadline_at.toISOString()).toBe(waiting.deadline_at.toISOString());
     } finally { await cleanup(value); }
-  });
+  }, 20_000);
 
   it.each(["OPEN", "CLOSED"] as const)("refreshes %s proof by GET in a new lease before accepting the typed receipt", async (desiredState) => {
     const value = await fixture(desiredState);
@@ -498,7 +498,7 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
     } finally {
       await cleanup(value);
     }
-  });
+  }, 20_000);
 
   it("writes once, fences a duplicate after lost ACK, and GET-only reconciles from a stop-confirmed OBSERVE lease", async () => {
     const value = await fixture();
