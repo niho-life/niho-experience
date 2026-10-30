@@ -92,15 +92,16 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     if (replace) { setSaved(value); setDraft(copyPage(value)); setLatest(null); } else setLatest(value);
     return value;
   }, [endpoint, pageId]);
-  // Never throws: a meeting point that cannot be read hides only its own section.
-  const loadMeeting = useCallback(async (replace = true) => {
+  // Never throws: a meeting point that cannot be read hides only its own section. Answers whether this read landed.
+  const loadMeeting = useCallback(async (replace = true): Promise<boolean> => {
     const version = ++meetingVersion.current;
     let value: LiveMeeting | null = null;
     try { const response = await fetch(`${endpoint}/meeting-point`, { cache: "no-store" }); value = response.ok ? readLiveMeeting(await response.json()) : null; } catch { value = null; }
-    if (version !== meetingVersion.current) return;
-    if (!value) { if (replace) setMeetingState("error"); return; }
+    if (version !== meetingVersion.current) return false;
+    if (!value) { if (replace) setMeetingState("error"); return false; }
     if (value.mode === "INHERIT") setMeetingDefaults(value.fields);
     if (replace) { setSavedMeeting(value); setMeeting(structuredClone(value)); setLatestMeeting(null); setMeetingState("ready"); } else setLatestMeeting(value);
+    return true;
   }, [endpoint]);
   const loadListing = useCallback(async () => {
     if (!owner) return;
@@ -184,9 +185,17 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     finally { setBusy(false); }
   }
 
-  async function reconcile() { setBusy(true); setError(""); setStale(false); try { await Promise.all([load(false), meetingState === "ready" ? loadMeeting(false) : null]); } catch (reason) { setError(reason instanceof Error ? reason.message : message(500)); } finally { setBusy(false); } }
+  async function reconcile() {
+    setBusy(true); setError(""); setStale(false);
+    try {
+      const [, meetingRead] = await Promise.all([load(false), meetingState === "ready" ? loadMeeting(false) : true]);
+      // The page alone is not enough: a check without the meeting point would let 保存 overwrite another editor's one.
+      if (!meetingRead) { setLatest(null); setStale(true); setError("集合場所の最新の保存内容を読めませんでした。もう一度「最新の保存内容を読む」を押してください。"); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : message(500)); } finally { setBusy(false); }
+  }
   function applyMerge(choice: "local" | "remote") {
     if (!latest || !saved || !draft) return;
+    if (meetingState === "ready" && savedMeeting && meeting && !latestMeeting) return;
     const merged = mergeLivePage(saved, draft, latest, choice);
     const meetingMerged = savedMeeting && meeting && latestMeeting ? mergeLiveMeeting(savedMeeting, meeting, latestMeeting, choice) : null;
     setSaved(latest); setDraft(merged.draft); setLatest(null);

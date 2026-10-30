@@ -155,6 +155,45 @@ test("cohost preserves edits across a version conflict and persists content and 
   await noOverflow(page);
 });
 
+test("owner cannot settle a conflict until the meeting point is read again with the page", async ({ page }) => {
+  const defaults = { overview: "（合成）駅から歩いて 10 分", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から川沿いに歩きます。", mapUrl: "https://maps.example.test/synthetic", entranceNote: "（合成）木の門の呼び鈴" };
+  let serverPage = { ...structuredClone(pageDetail), language: "EN", updatedAt: now };
+  let patchCalls = 0; let meetingReads = 0;
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const request = route.request(); const path = new URL(request.url()).pathname; const method = request.method();
+    if (path.endsWith(`/${PAGE}`) && method === "GET") return json(route, serverPage);
+    if (path.endsWith(`/${PAGE}`) && method === "PATCH") {
+      patchCalls += 1;
+      if (patchCalls === 1) { serverPage = { ...serverPage, title: "別端末で保存された合成題名", updatedAt: later }; return json(route, { error: "conflict" }, 409); }
+      return json(route, { error: "not_expected" }, 500);
+    }
+    if (path.endsWith("/meeting-point") && method === "GET") {
+      meetingReads += 1;
+      // The first check after the 409 reads the page but not the meeting point.
+      if (meetingReads === 2) return json(route, { error: "unavailable" }, 503);
+      return json(route, { mode: "INHERIT", meetingPoint: defaults });
+    }
+    if (path.endsWith("/listing") && method === "GET") return json(route, { listing: null, consent: { version: "synthetic-listing-consent-2", text: "（合成）同意の文言" } });
+    return json(route, { error: "not_found" }, 404);
+  });
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences/${PAGE}?providerId=${PROVIDER}`);
+  await expect(page.getByRole("region", { name: "集合場所" })).toContainText(defaults.address);
+  await page.getByLabel("題名").fill("オーナーが編集中の合成題名");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "入力は保持しています" })).toBeVisible();
+
+  await page.getByRole("button", { name: "最新の保存内容を読む" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "集合場所の最新の保存内容を読めませんでした" })).toBeVisible();
+  await expect(page.getByText("最新の保存内容と照合")).toHaveCount(0);
+  await expect(page.getByLabel("題名")).toHaveValue("オーナーが編集中の合成題名");
+
+  await page.getByRole("button", { name: "最新の保存内容を読む" }).click();
+  await expect(page.getByText("同じ項目が変更されています")).toBeVisible();
+  expect(meetingReads).toBe(3);
+  expect(patchCalls).toBe(1);
+});
+
 test("owner saves a page-only meeting point, applies for the listing, withdraws it and is asked before a save pauses it", async ({ page }) => {
   const version = (hour: number) => `2026-10-27T${String(hour).padStart(2, "0")}:00:00.000Z`;
   const defaults = { overview: "（合成）駅から歩いて 10 分", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から川沿いに歩きます。", mapUrl: "https://maps.example.test/synthetic", entranceNote: "（合成）木の門の呼び鈴" };
