@@ -64,6 +64,51 @@ describe("database invariants", () => {
     assert.match(sql, /pending_command_id/);
   });
 
+  it("keeps resource Google input opaque, generation fenced, durable, and event-content free", async () => {
+    const sql = await readFile(new URL("../migrations/0015_resource_google_busy.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE SEQUENCE provider_google_connection_generation_seq/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, resource_id\)[\s\S]*REFERENCES inventory_resources\(provider_id, id\)/);
+    assert.match(sql, /resource_google_calendars_due_idx/);
+    assert.match(sql, /resource_google_sync_receipts/);
+    assert.match(sql, /token_digest text NOT NULL/);
+    const intervals = sql.match(/CREATE TABLE resource_google_busy_intervals \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(intervals, /start_at/);
+    assert.match(intervals, /end_at/);
+    assert.doesNotMatch(intervals, /title|summary|description|attendee|organizer|event_id/i);
+  });
+
+  it("adds bounded immutable reservation window manifests, page receipts, and separate health", async () => {
+    const sql = await readFile(new URL("../migrations/0016_external_reservation_window_reads.sql", import.meta.url), "utf8");
+    assert.match(sql, /read_scope IN \('OCCURRENCE','WINDOW'\)/);
+    assert.match(sql, /ADD CONSTRAINT external_reservation_reads_completion_check/);
+    assert.doesNotMatch(sql, /ADD CONSTRAINT external_reservation_reads_status_check/);
+    assert.match(sql, /coverage_to <= coverage_from \+ interval '62 days'/);
+    assert.match(sql, /manifest_index integer NOT NULL CHECK \(manifest_index BETWEEN 0 AND 511\)/);
+    assert.match(sql, /CREATE TABLE external_reservation_window_page_receipts/);
+    assert.match(sql, /UNIQUE \(read_id, page_number\)/);
+    assert.match(sql, /source_cursor_fingerprint/);
+    assert.match(sql, /next_source_cursor_fingerprint/);
+    assert.match(sql, /CREATE TABLE external_reservation_listing_health/);
+    assert.doesNotMatch(sql, /external_reservation_listing_read_requirements/);
+    assert.match(sql, /external_reservation_listing_health\.read_generation < EXCLUDED\.read_generation|read_generation bigint NOT NULL/);
+    assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
+  });
+
+  it("separates scheduled reservation reads from availability observations and keeps durable listing state", async () => {
+    const sql = await readFile(new URL("../migrations/0017_reservation_read_dispatch.sql", import.meta.url), "utf8");
+    assert.match(sql, /purpose IN \('AVAILABILITY','RESERVATION_WINDOW'\)/);
+    assert.match(sql, /CREATE TABLE external_reservation_read_dispatch_states/);
+    assert.match(sql, /pending_job_id uuid UNIQUE REFERENCES channel_jobs/);
+    assert.match(sql, /reservation_read_id uuid REFERENCES external_reservation_reads/);
+    assert.match(sql, /reservation_receipt_id uuid REFERENCES external_reservation_window_page_receipts/);
+    assert.match(sql, /CREATE UNIQUE INDEX channel_jobs_availability_identity/);
+    assert.match(sql, /WHERE purpose='AVAILABILITY'/);
+    assert.doesNotMatch(sql, /UNIQUE \(listing_id,occurrence_id,action,purpose/);
+    assert.match(sql, /outcome = 'RESERVATION_VERIFIED'/);
+    assert.match(sql, /observed_state IS NULL AND observed_bookable IS NULL/);
+    assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

@@ -23,5 +23,7 @@ export interface HostCalendarData {
     canManage: boolean;
     blockingEnabled: boolean;
     syncStatus: "FRESH" | "STALE" | "FAILED";
+    resourceSettingsEnabled?: boolean;
+    resourceBlockingEnabled?: boolean;
   };
 }

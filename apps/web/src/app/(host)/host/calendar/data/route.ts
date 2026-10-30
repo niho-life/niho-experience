@@ -51,7 +51,11 @@ export async function GET(request: NextRequest) {
     }
     const data = await readHostCalendar(pool, store, result.actor, fromDate, toDate);
     const nihoCanEdit = result.access.kind === "OPERATOR" || result.access.nihoRole === "OWNER" || result.access.nihoRole === "EDITOR";
-    return noStoreJson({ ...data, canEdit: data.canEdit && nihoCanEdit, google: { ...data.google, canManage: data.google.canManage && result.access.kind === "MEMBER" && result.access.nihoRole === "OWNER" } });
+    const resourceSettingsEnabled = process.env.EXPERIENCE_RESOURCE_GOOGLE_ENABLED === "true" && result.access.kind === "MEMBER" && result.access.nihoRole === "OWNER";
+    const resourceBlockingEnabled = resourceSettingsEnabled && (await pool.query(
+      "SELECT 1 FROM resource_google_calendars WHERE provider_id=$1 AND enabled=true LIMIT 1", [result.actor.providerId],
+    )).rows.length > 0;
+    return noStoreJson({ ...data, canEdit: data.canEdit && nihoCanEdit, google: { ...data.google, canManage: data.google.canManage && result.access.kind === "MEMBER" && result.access.nihoRole === "OWNER", resourceSettingsEnabled, resourceBlockingEnabled } });
   } catch (error) {
     return failure(error);
   }

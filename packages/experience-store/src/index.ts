@@ -9,6 +9,8 @@ export {
 export { ExperienceStore } from "./repository.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+export { ResourceGoogleRepository } from "./resource-google.ts";
+export type { ResourceGoogleOwnerSnapshot, ResourceGoogleSetting } from "./resource-google.ts";
 export { ProductOperatorRepository } from "./product-operators.ts";
 export type { CreatedProductOperatorInvitation, CreateProductOperatorInvitationInput, PreparedProductOperatorInvitation, ProductOperatorAdminActor, ProductOperatorAdminSnapshot } from "./product-operators.ts";
 export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
@@ -22,6 +24,7 @@ export type {
   ChannelCapabilities,
   ChannelConnectionMode,
   ChannelDesiredState,
+  ChannelJobPurpose,
   ChannelListingDto,
   ChannelListingInput,
   ChannelListingUpdate,
@@ -40,7 +43,12 @@ export type {
   ReservationReadBatchStatus,
   ReservationReadCycle,
   ReservationReadReceipt,
+  ReservationWindowManifestOccurrence,
+  ReservationWindowPageReceipt,
+  ReservationWindowReadCycle,
+  ReservationWindowTerminalEvidence,
   SubmitReservationReadInput,
+  SubmitReservationWindowPageInput,
   WorkerCredential,
   WorkerIdentity,
 } from "./channels.ts";

@@ -17,26 +17,30 @@ export function spawnOwned(executable, args, options = {}) {
   let exitCode = null;
   child.once("exit", (code) => { exited = true; exitCode = code; });
 
-  const groupAlive = () => {
-    try { process.kill(-child.pid, 0); return true; }
-    catch (error) { if (error?.code === "ESRCH") return false; throw error; }
+  const groupState = () => {
+    try { process.kill(-child.pid, 0); return "ALIVE"; }
+    catch (error) { return error?.code === "ESRCH" ? "GONE" : "UNKNOWN"; }
   };
+
+  async function waitForStop(timeoutMs = 3_000) {
+    const until = Date.now() + timeoutMs;
+    while (groupState() !== "GONE" && Date.now() < until) await delay(25);
+    return groupState() === "GONE";
+  }
 
   async function stop(timeoutMs = 5_000) {
     try {
-      if (!groupAlive()) return true;
-      try { process.kill(-child.pid, "SIGTERM"); } catch (error) { if (error?.code !== "ESRCH") return false; }
-      const until = Date.now() + timeoutMs;
-      while (groupAlive() && Date.now() < until) await delay(25);
-      if (!groupAlive()) return true;
-      try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error?.code !== "ESRCH") return false; }
-      const killUntil = Date.now() + 2_000;
-      while (groupAlive() && Date.now() < killUntil) await delay(25);
-      return !groupAlive();
+      if (groupState() === "GONE") return true;
+      // macOS can briefly report EPERM while Chrome's group is being reaped.
+      // Neither a failed signal nor an exited leader proves the group is gone.
+      try { process.kill(-child.pid, "SIGTERM"); } catch {}
+      if (await waitForStop(timeoutMs)) return true;
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      return await waitForStop(2_000);
     } catch {
       return false;
     }
   }
 
-  return Object.freeze({ child, pid: child.pid, get exited() { return exited; }, get exitCode() { return exitCode; }, stop });
+  return Object.freeze({ child, pid: child.pid, get exited() { return exited; }, get exitCode() { return exitCode; }, waitForStop, stop });
 }

@@ -4,6 +4,7 @@ import { createSupervisorRpc } from "./mcp-rpc.mjs";
 import { runClaude } from "./claude-runner.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
 import { MAX_JOB_MS } from "./constants.mjs";
+import { executeReservationWindow, unsupportedReservationReaderFactory } from "./reservation-executor.mjs";
 
 const wait = (ms, signal) => new Promise((resolve) => {
   if (signal.aborted) return resolve(false);
@@ -45,7 +46,13 @@ export async function executeJob({
   renewEveryMs = 20_000,
   now = () => Date.now(),
   driverOptions = {},
+  journal,
+  reservationReaderFactory = unsupportedReservationReaderFactory,
 }) {
+  if (job.purpose === "RESERVATION_WINDOW") {
+    if (!journal) throw new ContractError("INVALID_JOURNAL");
+    return executeReservationWindow({ job, cloud, config, journal, readerFactory: reservationReaderFactory, renewEveryMs, now });
+  }
   const controller = new AbortController();
   let gateActive = true;
   let abortReason = null;

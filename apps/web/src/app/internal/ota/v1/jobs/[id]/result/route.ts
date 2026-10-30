@@ -25,17 +25,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const body = await boundedObject(request);
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["resultId", "leaseToken", "outcome", "stopped", "target"],
-    ["occurrenceId", "sourceStartAtUtc", "sourceEndAtUtc", "observedState", "observedBookable", "observedManuallyBlocked", "observedAtUtc"])) {
+    ["occurrenceId", "sourceStartAtUtc", "sourceEndAtUtc", "observedState", "observedBookable", "observedManuallyBlocked", "observedAtUtc",
+      "reservationReadId", "reservationReceiptId"])) {
     return channelJson({ error: "invalid_input" }, 400);
   }
   const parsedTarget = target(body.target);
-  const outcomes = ["VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"];
+  const outcomes = ["VERIFIED", "RESERVATION_VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"];
   const verifiedFieldsPresent = body.outcome !== "VERIFIED" || (body.occurrenceId !== undefined
     && body.sourceStartAtUtc !== undefined && body.sourceEndAtUtc !== undefined && body.observedState !== undefined
     && body.observedBookable !== undefined && body.observedManuallyBlocked !== undefined && body.observedAtUtc !== undefined);
+  const reservationFieldsValid = body.outcome !== "RESERVATION_VERIFIED"
+    ? body.reservationReadId === undefined && body.reservationReceiptId === undefined
+    : typeof body.reservationReadId === "string" && typeof body.reservationReceiptId === "string"
+      && body.occurrenceId === undefined && body.sourceStartAtUtc === undefined && body.sourceEndAtUtc === undefined
+      && body.observedState === undefined && body.observedBookable === undefined
+      && body.observedManuallyBlocked === undefined && body.observedAtUtc === undefined;
   if (typeof body.resultId !== "string" || typeof body.leaseToken !== "string" || body.leaseToken.length > 100
     || typeof body.outcome !== "string" || !outcomes.includes(body.outcome) || typeof body.stopped !== "boolean" || !parsedTarget
-    || !verifiedFieldsPresent
+    || !verifiedFieldsPresent || !reservationFieldsValid
     || (body.occurrenceId !== undefined && (typeof body.occurrenceId !== "string" || body.occurrenceId.length < 1 || body.occurrenceId.length > 256))
     || (body.sourceStartAtUtc !== undefined && typeof body.sourceStartAtUtc !== "string")
     || (body.sourceEndAtUtc !== undefined && typeof body.sourceEndAtUtc !== "string")
@@ -53,6 +60,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ...(body.observedBookable === undefined ? {} : { observedBookable: body.observedBookable as boolean }),
       ...(body.observedManuallyBlocked === undefined ? {} : { observedManuallyBlocked: body.observedManuallyBlocked as boolean }),
       ...(body.observedAtUtc === undefined ? {} : { observedAtUtc: body.observedAtUtc as string }),
+      ...(body.reservationReadId === undefined ? {} : { reservationReadId: body.reservationReadId as string }),
+      ...(body.reservationReceiptId === undefined ? {} : { reservationReceiptId: body.reservationReceiptId as string }),
     });
     // This acknowledges the durable receipt, independently of a current-state
     // verification. The worker must not retry a recorded stale result as new work.

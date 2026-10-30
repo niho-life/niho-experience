@@ -61,4 +61,27 @@ describe("POST /internal/ota/v1/jobs/:id/result", () => {
     expect(response.status).toBe(400);
     expect(mocks.submitResult).not.toHaveBeenCalled();
   });
+
+  it("accepts only the exclusive terminal receipt shape for RESERVATION_VERIFIED", async () => {
+    const reservation = {
+      resultId: "00000000-0000-4000-8000-000000000011", leaseToken: "lease", outcome: "RESERVATION_VERIFIED",
+      stopped: true, target, reservationReadId: "00000000-0000-4000-8000-000000000012",
+      reservationReceiptId: "00000000-0000-4000-8000-000000000013",
+    };
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify(reservation), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(200);
+    expect(mocks.submitResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), expect.objectContaining({
+      outcome: "RESERVATION_VERIFIED", reservationReadId: reservation.reservationReadId,
+      reservationReceiptId: reservation.reservationReceiptId,
+    }));
+
+    vi.clearAllMocks();
+    const mixed = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify({ ...reservation, observedState: "OPEN" }), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(mixed.status).toBe(400);
+    expect(mocks.submitResult).not.toHaveBeenCalled();
+  });
 });

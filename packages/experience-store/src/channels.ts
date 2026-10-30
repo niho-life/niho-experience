@@ -3,6 +3,8 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import {
   addLocalDays,
   expandOccurrences,
+  tokyoLocalToUtc,
+  type LocalDate,
   type Occurrence,
   type OccurrenceOverride,
   type OccurrenceSalesState,
@@ -13,6 +15,7 @@ import { isoValue, overrideFromRow, salesStateFromRow, scheduleRuleFromRow, type
 import { withTransaction } from "./transaction.ts";
 import { evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { applyExternalReservationObservations } from "./external-reservation-ledger.ts";
 import { calendarMembershipRole, listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertSeats, assertStoreIdentifier } from "./validation.ts";
 
@@ -21,8 +24,9 @@ export { CHANNEL_SITES } from "./channel-sites.ts";
 export type ChannelSite = typeof CHANNEL_SITES[number] | (string & {});
 export type ChannelConnectionMode = "BROWSER" | "GOOGLE" | "API";
 export type ChannelAction = "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
+export type ChannelJobPurpose = "AVAILABILITY" | "RESERVATION_WINDOW";
 export type ChannelDesiredState = "OPEN" | "CLOSED";
-export type ChannelOutcome = "VERIFIED" | "AUTH_REQUIRED" | "NEEDS_REVIEW" | "UNKNOWN_AFTER_SAVE" | "RETRY_WAIT" | "SUPERSEDED";
+export type ChannelOutcome = "VERIFIED" | "RESERVATION_VERIFIED" | "AUTH_REQUIRED" | "NEEDS_REVIEW" | "UNKNOWN_AFTER_SAVE" | "RETRY_WAIT" | "SUPERSEDED";
 
 /**
  * This actor must be built only after the HTTP boundary has authenticated a current NIHO Admin.
@@ -154,6 +158,8 @@ export interface ClaimedChannelJob {
   readonly sourceStartAtUtc: string;
   readonly sourceEndAtUtc: string;
   readonly target: ChannelTarget;
+  /** Present only for the dedicated reservation-window executor. */
+  readonly purpose?: "RESERVATION_WINDOW";
 }
 
 export interface ChannelResultInput {
@@ -170,6 +176,8 @@ export interface ChannelResultInput {
   readonly observedBookable?: boolean;
   readonly observedManuallyBlocked?: boolean;
   readonly observedAtUtc?: string;
+  readonly reservationReadId?: string;
+  readonly reservationReceiptId?: string;
 }
 
 export type ExternalReservationStatus = "PENDING" | "CONFIRMED" | "CANCELLED";
@@ -215,6 +223,63 @@ export interface ReservationReadReceipt {
   readonly stale: number;
   readonly needsReview: number;
   readonly repeated: boolean;
+}
+
+export interface ReservationWindowManifestOccurrence {
+  readonly occurrenceId: string;
+  readonly sourceStartAtUtc: string;
+  readonly sourceEndAtUtc: string;
+}
+
+export interface ReservationWindowReadCycle {
+  readonly readId: string;
+  readonly generation: number;
+  readonly scope: "WINDOW";
+  readonly repeated: boolean;
+  readonly coverageFromUtc: string;
+  readonly coverageToUtc: string;
+  readonly readStartedAtUtc: string;
+  readonly pageNumber: 0;
+  readonly receiptId: string;
+  readonly manifest: readonly ReservationWindowManifestOccurrence[];
+}
+
+export interface ReservationWindowTerminalEvidence {
+  readonly status: ReservationReadBatchStatus;
+  readonly completedAtUtc: string;
+  readonly allPagesRead: boolean;
+  readonly allStatusesIncluded: boolean;
+  readonly coverageComplete: boolean;
+}
+
+export interface SubmitReservationWindowPageInput {
+  readonly receiptId: string;
+  readonly readId: string;
+  readonly leaseToken: string;
+  readonly pageNumber: number;
+  readonly previousReceiptId?: string;
+  readonly sourceCursor?: string;
+  readonly nextSourceCursor?: string;
+  readonly snapshotToken?: string;
+  readonly observations: readonly ExternalReservationObservation[];
+  readonly terminal?: ReservationWindowTerminalEvidence;
+}
+
+export interface ReservationWindowPageReceipt {
+  readonly receiptId: string;
+  readonly readId: string;
+  readonly generation: number;
+  readonly pageNumber: number;
+  readonly applied: number;
+  readonly duplicates: number;
+  readonly duplicateFacts: number;
+  readonly stale: number;
+  readonly needsReview: number;
+  readonly missingActiveReservations: number;
+  readonly healthUpdated: boolean;
+  readonly repeated: boolean;
+  readonly terminalStatus?: ReservationReadBatchStatus;
+  readonly nextReceiptId?: string;
 }
 
 export interface HostChannelStatus {
@@ -283,6 +348,34 @@ function canonicalReservationObservation(value: ExternalReservationObservation):
   };
 }
 
+function validateReservationObservations(values: readonly ExternalReservationObservation[]): readonly ExternalReservationObservation[] {
+  if (!Array.isArray(values) || values.length > 32) throw new StoreValidationError("observations must contain at most 32 facts.");
+  const reservationIds = new Set<string>();
+  for (const [index, observation] of values.entries()) {
+    if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+      throw new StoreValidationError(`observations[${index}] must be an object.`);
+    }
+    const keys = Object.keys(observation);
+    const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision"];
+    if (keys.some((key) => !allowed.includes(key))) throw new StoreValidationError(`observations[${index}] has unknown fields.`);
+    assertNonEmptyText(observation.externalReservationId, `observations[${index}].externalReservationId`, 256);
+    assertNonEmptyText(observation.externalProductId, `observations[${index}].externalProductId`, 256);
+    if ((observation.externalOptionId ?? "").length > 256) throw new StoreValidationError(`observations[${index}].externalOptionId is too long.`);
+    assertCanonicalInstant(observation.sourceStartAtUtc, `observations[${index}].sourceStartAtUtc`);
+    assertCanonicalInstant(observation.sourceEndAtUtc, `observations[${index}].sourceEndAtUtc`);
+    if (observation.sourceEndAtUtc <= observation.sourceStartAtUtc) throw new StoreValidationError(`observations[${index}] has an invalid time range.`);
+    if (!(observation.status === "PENDING" || observation.status === "CONFIRMED" || observation.status === "CANCELLED")) {
+      throw new StoreValidationError(`observations[${index}].status is invalid.`);
+    }
+    assertSeats(observation.seats);
+    if (observation.sourceUpdatedAtUtc !== undefined) assertCanonicalInstant(observation.sourceUpdatedAtUtc, `observations[${index}].sourceUpdatedAtUtc`);
+    if (observation.sourceRevision !== undefined) assertNonEmptyText(observation.sourceRevision, `observations[${index}].sourceRevision`, 256);
+    if (reservationIds.has(observation.externalReservationId)) throw new StoreValidationError("Duplicate external reservation IDs are not allowed in one page.");
+    reservationIds.add(observation.externalReservationId);
+  }
+  return values.map(canonicalReservationObservation);
+}
+
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -310,6 +403,20 @@ function reservationReceipt(value: unknown, repeated: boolean): ReservationReadR
     needsReview: result.needsReview as number,
     repeated,
   };
+}
+
+function reservationWindowReceipt(value: unknown, repeated: boolean): ReservationWindowPageReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new StoreConflictError("Reservation window receipt is invalid.");
+  const result = value as Record<string, unknown>;
+  for (const key of ["generation", "pageNumber", "applied", "duplicates", "duplicateFacts", "stale", "needsReview", "missingActiveReservations"] as const) {
+    if (!Number.isSafeInteger(result[key]) || (result[key] as number) < 0) throw new StoreConflictError("Reservation window receipt is invalid.");
+  }
+  if (typeof result.receiptId !== "string" || typeof result.readId !== "string" || typeof result.healthUpdated !== "boolean"
+    || (result.terminalStatus !== undefined && !(["COMPLETE", "PARTIAL", "FAILED"] as const).includes(result.terminalStatus as ReservationReadBatchStatus))
+    || (result.nextReceiptId !== undefined && typeof result.nextReceiptId !== "string")) {
+    throw new StoreConflictError("Reservation window receipt is invalid.");
+  }
+  return { ...(result as unknown as ReservationWindowPageReceipt), repeated };
 }
 
 function secureDigestMatch(expectedHex: string, raw: string): boolean {
@@ -365,10 +472,10 @@ function validateAccount(input: ExternalAccountInput | (ExternalAccountUpdate & 
   }
 }
 
-function tokyoDate(now: Date): string {
+function tokyoDate(now: Date): LocalDate {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
+  return `${values.year}-${values.month}-${values.day}` as LocalDate;
 }
 
 function targetFromRow(row: DbRow): ChannelTarget {
@@ -541,6 +648,13 @@ export class ChannelRuntime {
         );
       }
       await client.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE account_id=$1 AND status='QUEUED'", [accountId, this.#nowIso()]);
+      await client.query(
+        `UPDATE external_reservation_read_dispatch_states s
+            SET pending_job_id=NULL,next_due_at=$2,last_error='AUTHORITY_CHANGED',updated_at=$2
+          FROM channel_jobs j WHERE s.pending_job_id=j.id AND j.account_id=$1
+            AND j.purpose='RESERVATION_WINDOW' AND j.status='FINISHED' AND j.outcome='SUPERSEDED'`,
+        [accountId, this.#nowIso()],
+      );
       const saved = accountDto(updated.rows[0]!);
       await this.#completeCommand(client, actor, commandId, "account.update", request, { id: saved.id, version: saved.version }, saved.providerId, "external_account", saved.id);
       return saved;
@@ -610,6 +724,13 @@ export class ChannelRuntime {
           capabilities.canCreate, input.active, this.#nowIso()],
       );
       await client.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE listing_id=$1 AND status='QUEUED'", [listingId, this.#nowIso()]);
+      await client.query(
+        `UPDATE external_reservation_read_dispatch_states s
+            SET pending_job_id=NULL,next_due_at=$2,last_error='AUTHORITY_CHANGED',updated_at=$2
+          FROM channel_jobs j WHERE s.pending_job_id=j.id AND j.listing_id=$1
+            AND j.purpose='RESERVATION_WINDOW' AND j.status='FINISHED' AND j.outcome='SUPERSEDED'`,
+        [listingId, this.#nowIso()],
+      );
       const dto = listingDto(updated.rows[0]!);
       await this.#completeCommand(client, actor, commandId, "listing.update", request, { id: dto.id, version: dto.mappingVersion }, dto.providerId, "listing", dto.id);
       return dto;
@@ -816,6 +937,162 @@ export class ChannelRuntime {
     });
   }
 
+  async enqueueDueReservationReads(identity: WorkerIdentity, limit = 1): Promise<{ readonly enqueued: number }> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new StoreValidationError("Reservation read limit must be between 1 and 10.");
+    return withTransaction(this.#pool, async (client) => {
+      await this.#requireWorker(client, identity);
+      const nowUtc = this.#nowIso();
+      const deployedReaders = Object.entries(this.#supportedAdapters)
+        .filter(([, capability]) => capability.canObserve === true && capability.canReadReservations === true)
+        .map(([key]) => key);
+
+      // A queued reservation job is safe to retire when its immutable authority
+      // snapshot is no longer current. A leased job is never touched here.
+      const stale = await client.query<DbRow>(
+        `SELECT j.id,j.provider_id,j.listing_id
+           FROM channel_jobs j
+           LEFT JOIN channel_external_accounts a ON a.id=j.account_id
+           LEFT JOIN channel_listings l ON l.id=j.listing_id
+           LEFT JOIN experience_products p ON p.provider_id=j.provider_id AND p.id=l.product_id
+           LEFT JOIN channel_desired_states d ON d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
+           LEFT JOIN channel_worker_accounts wa ON wa.account_id=j.account_id AND wa.worker_id=j.dispatch_worker_id
+             AND wa.revoked_at IS NULL AND wa.version=j.dispatch_assignment_version
+          WHERE j.purpose='RESERVATION_WINDOW' AND j.status='QUEUED'
+            AND (j.dispatch_worker_id=$1 OR EXISTS (SELECT 1 FROM channel_worker_accounts caller
+              WHERE caller.account_id=j.account_id AND caller.worker_id=$1 AND caller.revoked_at IS NULL))
+            AND (a.id IS NULL OR a.active<>true OR a.revoked_at IS NOT NULL
+              OR (a.delegated_until IS NOT NULL AND a.delegated_until<=$2) OR a.quarantined_at IS NOT NULL
+              OR a.version IS DISTINCT FROM j.account_version OR l.id IS NULL OR l.active IS DISTINCT FROM true
+              OR l.mapping_version IS DISTINCT FROM j.mapping_version
+              OR l.can_observe IS DISTINCT FROM true OR l.can_read_reservations IS DISTINCT FROM true
+              OR p.status IS DISTINCT FROM 'PUBLISHED' OR wa.worker_id IS NULL
+              OR a.site IS DISTINCT FROM j.target_site OR a.external_account_id IS DISTINCT FROM j.target_external_account_id
+              OR l.external_product_id IS DISTINCT FROM j.target_external_product_id
+              OR l.external_option_id IS DISTINCT FROM j.target_external_option_id
+              OR l.adapter IS DISTINCT FROM j.target_adapter OR l.adapter_version IS DISTINCT FROM j.target_adapter_version
+              OR l.connection_mode IS DISTINCT FROM j.target_connection_mode OR d.listing_id IS NULL
+              OR d.mapping_version IS DISTINCT FROM j.mapping_version
+              OR d.source_start_at IS DISTINCT FROM j.source_start_at OR d.source_end_at IS DISTINCT FROM j.source_end_at
+              OR NOT ((j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($3::text[])))
+          ORDER BY j.provider_id COLLATE "C",j.listing_id COLLATE "C",j.id LIMIT 100`,
+        [identity.workerId, nowUtc, deployedReaders],
+      );
+      const candidates = await client.query<DbRow>(
+        `SELECT l.*,a.site,a.external_account_id,a.version AS account_version,wa.version AS assignment_version,
+                s.pending_job_id,s.next_due_at,s.halted_at
+           FROM channel_worker_accounts wa
+           JOIN channel_external_accounts a ON a.id=wa.account_id
+           JOIN channel_listings l ON l.account_id=a.id
+           JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+           LEFT JOIN external_reservation_read_dispatch_states s
+             ON s.provider_id=l.provider_id AND s.listing_id=l.id
+          WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL
+            AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
+            AND a.quarantined_at IS NULL AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true
+            AND (a.site || '/' || l.adapter || '@' || l.adapter_version)=ANY($4::text[])
+            AND p.status='PUBLISHED' AND (s.listing_id IS NULL OR (s.pending_job_id IS NULL AND s.halted_at IS NULL AND s.next_due_at<=$2))
+          ORDER BY COALESCE(s.next_due_at,'-infinity'::timestamptz),l.id COLLATE "C" LIMIT $3`,
+        [identity.workerId, nowUtc, limit * 4, deployedReaders],
+      );
+      const providerIds = [...new Set([...stale.rows, ...candidates.rows].map((row) => text(row, "provider_id")))].sort();
+      for (const providerId of providerIds) {
+        await lockProviderInventory(client, providerId);
+      }
+      for (const job of stale.rows) {
+        const retired = await client.query(
+          "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2 WHERE id=$1::uuid AND status='QUEUED'",
+          [job.id, nowUtc],
+        );
+        // A claim can win after the candidate read. Its pending lease remains
+        // owned until the normal stopped-result path releases it.
+        if (retired.rowCount !== 1) continue;
+        await client.query(
+          `UPDATE external_reservation_read_dispatch_states
+              SET pending_job_id=NULL,next_due_at=$3,last_error='AUTHORITY_CHANGED',updated_at=$3
+            WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+          [job.provider_id, job.listing_id, nowUtc, job.id],
+        );
+      }
+
+      let enqueued = 0;
+      for (const candidate of candidates.rows) {
+        if (enqueued >= limit) break;
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,31))", [`reservation-read-listing:${candidate.id}`]);
+        const currentListing = await client.query<DbRow>(
+          `SELECT l.*,a.site,a.external_account_id,a.version AS account_version,wa.version AS assignment_version
+             FROM channel_worker_accounts wa
+             JOIN channel_external_accounts a ON a.id=wa.account_id
+             JOIN channel_listings l ON l.account_id=a.id
+             JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+            WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL AND l.id=$2
+              AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$3)
+              AND a.quarantined_at IS NULL AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true
+              AND p.status='PUBLISHED' FOR SHARE OF wa,a,l,p`,
+          [identity.workerId, candidate.id, nowUtc],
+        );
+        const listing = currentListing.rows[0];
+        if (!listing || !this.#adapterSupports(listing, "OBSERVE") || !this.#adapterSupportsReservationRead(listing)) continue;
+        await client.query(
+          `INSERT INTO external_reservation_read_dispatch_states
+            (provider_id,listing_id,account_id,product_id,next_due_at)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT (provider_id,listing_id) DO NOTHING`,
+          [listing.provider_id, listing.id, listing.account_id, listing.product_id, nowUtc],
+        );
+        const state = await client.query<DbRow>(
+          `SELECT * FROM external_reservation_read_dispatch_states
+            WHERE provider_id=$1 AND listing_id=$2 FOR UPDATE`, [listing.provider_id, listing.id],
+        );
+        if (!state.rows[0] || state.rows[0].pending_job_id !== null || state.rows[0].halted_at !== null
+          || isoValue(state.rows[0], "next_due_at") > nowUtc) continue;
+
+        const today = tokyoDate(this.#now());
+        const canonical = await this.#reservationWindowManifest(client, text(listing, "provider_id"), text(listing, "product_id"),
+          tokyoLocalToUtc(addLocalDays(today, -3), "00:00"), tokyoLocalToUtc(addLocalDays(today, 59), "00:00"));
+        const anchorResult = await client.query<DbRow>(
+          `SELECT d.* FROM channel_desired_states d
+            JOIN unnest($4::text[],$5::timestamptz[],$6::timestamptz[]) AS c(id,start_at,end_at)
+              ON d.occurrence_id=c.id AND d.source_start_at=c.start_at AND d.source_end_at=c.end_at
+            WHERE d.listing_id=$1 AND d.mapping_version=$2
+            ORDER BY CASE WHEN d.source_end_at>$3 THEN 0 ELSE 1 END,d.source_start_at,d.occurrence_id COLLATE "C"
+            LIMIT 1 FOR UPDATE OF d`,
+          [listing.id, listing.mapping_version, nowUtc, canonical.map((item) => item.id),
+            canonical.map((item) => item.startUtc), canonical.map((item) => item.endUtc)],
+        );
+        const anchor = anchorResult.rows[0];
+        if (!anchor) {
+          await client.query(
+            `UPDATE external_reservation_read_dispatch_states SET retry_count=LEAST(retry_count+1,5),
+               last_error='NO_CANONICAL_ANCHOR',next_due_at=$3::timestamptz + interval '1 minute',updated_at=$3
+              WHERE provider_id=$1 AND listing_id=$2`, [listing.provider_id, listing.id, nowUtc],
+          );
+          continue;
+        }
+        const jobId = randomUUID();
+        const dispatchSequence = integer(state.rows[0], "dispatch_sequence") + 1;
+        const inserted = await client.query(
+          `INSERT INTO channel_jobs
+            (id,provider_id,account_id,listing_id,occurrence_id,action,purpose,dispatch_sequence,dispatch_worker_id,dispatch_assignment_version,
+             account_version,desired_version,mapping_version,
+             target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,
+             target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
+           VALUES ($1,$2,$3,$4,$5,'OBSERVE','RESERVATION_WINDOW',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'Asia/Tokyo',$16,$17,$18,$19,$20,40,NULL)`,
+          [jobId, listing.provider_id, listing.account_id, listing.id, anchor.occurrence_id, dispatchSequence,
+            identity.workerId, listing.assignment_version, listing.account_version, anchor.desired_version, listing.mapping_version, listing.site, listing.external_account_id,
+            listing.external_product_id, listing.external_option_id, listing.adapter, listing.adapter_version,
+            listing.connection_mode, anchor.source_start_at, anchor.source_end_at],
+        );
+        if ((inserted.rowCount ?? 0) !== 1) throw new StoreConflictError("Reservation read job was not inserted.");
+        await client.query(
+          `UPDATE external_reservation_read_dispatch_states SET pending_job_id=$3::uuid,dispatch_sequence=$4,last_error=NULL,updated_at=$5
+            WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id IS NULL`,
+          [listing.provider_id, listing.id, jobId, dispatchSequence, nowUtc],
+        );
+        enqueued += 1;
+      }
+      return { enqueued };
+    });
+  }
+
   /** Consume and expand only rows locked by this transaction; any expansion failure rolls back the processed cursor. */
   async consumeCalendarOutbox(limit = 50, identity?: WorkerIdentity): Promise<{ readonly events: number; readonly occurrences: number; readonly jobs: number }> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new StoreValidationError("Outbox limit must be between 1 and 200.");
@@ -965,13 +1242,13 @@ export class ChannelRuntime {
     }
     const existing = await client.query(
       `SELECT 1 FROM channel_jobs WHERE listing_id=$1 AND occurrence_id=$2 AND action=$3 AND account_version=$4
-         AND desired_version=$5 AND mapping_version=$6`,
+         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY'`,
       [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version],
     );
     if (existing.rows[0]) return 0;
     await client.query("UPDATE channel_desired_states SET last_error=NULL WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id]);
     await client.query(
-      "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED'",
+      "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED' AND purpose='AVAILABILITY'",
       [listing.id, occurrence.id, nowUtc],
     );
     const inserted = await client.query(
@@ -980,7 +1257,8 @@ export class ChannelRuntime {
          target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,target_adapter,target_adapter_version,
          target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Asia/Tokyo',$14,$15,$16,$17,$18,$19,$20)
-       ON CONFLICT (listing_id,occurrence_id,action,account_version,desired_version,mapping_version) DO NOTHING`,
+       ON CONFLICT (listing_id,occurrence_id,action,account_version,desired_version,mapping_version)
+         WHERE purpose='AVAILABILITY' DO NOTHING`,
       [randomUUID(), listing.provider_id, listing.account_id, listing.id, occurrence.id, action, listing.account_version, desiredVersion,
         listing.mapping_version, listing.site, listing.external_account_id, listing.external_product_id, listing.external_option_id,
         listing.adapter, listing.adapter_version, listing.connection_mode, occurrence.startUtc, occurrence.endUtc, desiredState === "CLOSED" ? 100 : 50, null],
@@ -1024,6 +1302,9 @@ export class ChannelRuntime {
         ...(capability.canClose === true ? [`${key}/SET_CLOSED`] : []),
         ...(capability.canObserve === true ? [`${key}/OBSERVE`] : []),
       ]);
+      const deployedReservationAdapters = Object.entries(this.#supportedAdapters)
+        .filter(([, capability]) => capability.canObserve === true && capability.canReadReservations === true)
+        .map(([key]) => key);
       const result = await client.query<DbRow>(
         `SELECT j.*,wa.version AS assignment_version FROM channel_jobs j
           JOIN channel_external_accounts a ON a.id=j.account_id
@@ -1031,16 +1312,22 @@ export class ChannelRuntime {
           JOIN experience_products p ON p.provider_id=j.provider_id AND p.id=l.product_id
           JOIN channel_desired_states d ON d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
           JOIN channel_worker_accounts wa ON wa.account_id=j.account_id AND wa.worker_id=$1 AND wa.revoked_at IS NULL
+          LEFT JOIN external_reservation_read_dispatch_states rs ON rs.pending_job_id=j.id
          WHERE j.status='QUEUED' AND j.next_attempt_at<=$2 AND (j.job_deadline_at IS NULL OR j.job_deadline_at>$2)
            AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
-           AND (a.quarantined_at IS NULL OR j.action='OBSERVE')
+           AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE'))
            AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version AND p.status='PUBLISHED'
-           AND d.desired_version=j.desired_version AND d.mapping_version=j.mapping_version
-           AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED'))
-           AND ((j.action='SET_OPEN' AND l.can_open) OR (j.action='SET_CLOSED' AND l.can_close) OR (j.action='OBSERVE' AND l.can_observe))
+           AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
+           AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
+                AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED')))
+             OR (j.purpose='RESERVATION_WINDOW' AND j.action='OBSERVE' AND rs.halted_at IS NULL))
+           AND (j.purpose='AVAILABILITY' OR (j.dispatch_worker_id=$1 AND j.dispatch_assignment_version=wa.version))
+           AND ((j.action='SET_OPEN' AND l.can_open) OR (j.action='SET_CLOSED' AND l.can_close)
+             OR (j.action='OBSERVE' AND l.can_observe AND (j.purpose='AVAILABILITY' OR l.can_read_reservations)))
            AND (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version || '/' || j.action)=ANY($3::text[])
+           AND (j.purpose='AVAILABILITY' OR (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($4::text[]))
          ORDER BY j.priority DESC,j.next_attempt_at,j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`,
-        [identity.workerId, nowUtc, deployedActions],
+        [identity.workerId, nowUtc, deployedActions, deployedReservationAdapters],
       );
       const job = result.rows.find((candidate) => this.#adapterSupports(candidate, text(candidate, "action") as ChannelAction));
       if (!job) return null;
@@ -1058,6 +1345,7 @@ export class ChannelRuntime {
         id: text(job, "id"), leaseToken, leaseExpiresAtUtc, deadlineAtUtc, action: text(job, "action") as ChannelAction,
         occurrenceId: text(job, "occurrence_id"), desiredVersion: integer(job, "desired_version"), mappingVersion: integer(job, "mapping_version"),
         sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"), target: targetFromRow(job),
+        ...(job.purpose === "RESERVATION_WINDOW" ? { purpose: "RESERVATION_WINDOW" as const } : {}),
       };
     });
   }
@@ -1129,7 +1417,7 @@ export class ChannelRuntime {
       throw new StoreConflictError("Reservation read lease is stale.");
     }
     const state = await client.query<DbRow>(
-      `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.version AS account_version,a.site,a.external_account_id,
+      `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,a.external_account_id,
               l.active AS listing_active,l.product_id,l.mapping_version,l.external_product_id,l.external_option_id,l.adapter,l.adapter_version,
               l.connection_mode,l.can_observe,l.can_read_reservations,p.status AS product_status
          FROM channel_external_accounts a
@@ -1140,7 +1428,7 @@ export class ChannelRuntime {
     );
     const current = state.rows[0];
     if (!current || current.account_active !== true || current.revoked_at !== null
-      || (current.delegated_until !== null && isoValue(current, "delegated_until") <= nowUtc)
+      || (current.delegated_until !== null && isoValue(current, "delegated_until") <= nowUtc) || current.quarantined_at !== null
       || current.listing_active !== true || current.product_status !== "PUBLISHED"
       || current.can_observe !== true || current.can_read_reservations !== true
       || integer(current, "account_version") !== integer(job, "account_version")
@@ -1159,6 +1447,116 @@ export class ChannelRuntime {
     return { occurrence, current };
   }
 
+  async #reservationWindowManifest(
+    client: PoolClient,
+    providerId: string,
+    productId: string,
+    coverageFromUtc: string,
+    coverageToUtc: string,
+  ): Promise<readonly Occurrence[]> {
+    const fromDate = tokyoDate(new Date(coverageFromUtc));
+    const toDate = tokyoDate(new Date(coverageToUtc));
+    const rules = await client.query<DbRow>(
+      `SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 ORDER BY id COLLATE "C"`,
+      [providerId, productId],
+    );
+    const occurrences: Occurrence[] = [];
+    for (const ruleRow of rules.rows) {
+      const storedRule = scheduleRuleFromRow(ruleRow);
+      const overridesResult = await client.query<DbRow>(
+        `SELECT occurrence_id,kind,local_date::text AS local_date,to_char(local_start_time,'HH24:MI') AS local_start_time,duration_minutes,version
+           FROM schedule_occurrence_overrides WHERE provider_id=$1 AND rule_id=$2`,
+        [providerId, storedRule.rule.id],
+      );
+      const salesResult = await client.query<DbRow>(
+        "SELECT occurrence_id,desired_state,version FROM schedule_occurrence_sales_states WHERE provider_id=$1 AND rule_id=$2",
+        [providerId, storedRule.rule.id],
+      );
+      const expanded = expandOccurrences({
+        rule: storedRule.rule,
+        overrides: overridesResult.rows.map((row) => overrideFromRow(row).override),
+        salesStates: salesResult.rows.map((row) => salesStateFromRow(row).state),
+        fromDate,
+        toDate,
+      }).filter((occurrence) => occurrence.startUtc >= coverageFromUtc && occurrence.startUtc < coverageToUtc);
+      occurrences.push(...expanded);
+      if (occurrences.length > 512) throw new StoreConflictError("Reservation window exceeds 512 canonical occurrences.");
+    }
+    occurrences.sort((left, right) => left.startUtc.localeCompare(right.startUtc)
+      || left.endUtc.localeCompare(right.endUtc) || left.id.localeCompare(right.id));
+    return occurrences;
+  }
+
+  async beginReservationWindowRead(identity: WorkerIdentity, jobId: string, leaseToken: string): Promise<ReservationWindowReadCycle> {
+    assertUuid(jobId, "jobId");
+    assertNonEmptyText(leaseToken, "leaseToken", 100);
+    return withTransaction(this.#pool, async (client) => {
+      await this.#requireWorker(client, identity);
+      await this.#lockJobInventory(client, identity, jobId);
+      const job = await this.#leasedJob(client, identity, jobId, leaseToken);
+      if (job.purpose !== "RESERVATION_WINDOW") throw new StoreConflictError("This job is not a reservation-window read.");
+      const authority = await this.#requireReservationReadAuthority(client, job);
+      const existing = await client.query<DbRow>(
+        `SELECT r.*,p.receipt_id FROM external_reservation_reads r
+           JOIN external_reservation_window_page_receipts p ON p.read_id=r.read_id AND p.page_number=0
+          WHERE r.job_id=$1::uuid AND r.lease_epoch=$2 AND r.read_scope='WINDOW'`,
+        [jobId, job.lease_epoch],
+      );
+      if (existing.rows[0]) {
+        const row = existing.rows[0];
+        const manifest = await client.query<DbRow>(
+          `SELECT occurrence_id,source_start_at,source_end_at FROM external_reservation_read_manifest_occurrences
+            WHERE read_id=$1::uuid ORDER BY manifest_index`, [row.read_id],
+        );
+        return {
+          readId: text(row, "read_id"), generation: integer(row, "read_generation"), scope: "WINDOW", repeated: true,
+          coverageFromUtc: isoValue(row, "coverage_from"), coverageToUtc: isoValue(row, "coverage_to"),
+          readStartedAtUtc: isoValue(row, "read_started_at"), pageNumber: 0, receiptId: text(row, "receipt_id"),
+          manifest: manifest.rows.map((item) => ({ occurrenceId: text(item, "occurrence_id"),
+            sourceStartAtUtc: isoValue(item, "source_start_at"), sourceEndAtUtc: isoValue(item, "source_end_at") })),
+        };
+      }
+      const readStartedAtUtc = this.#nowIso();
+      const today = tokyoDate(this.#now());
+      const coverageFromUtc = tokyoLocalToUtc(addLocalDays(today, -3), "00:00");
+      const coverageToUtc = tokyoLocalToUtc(addLocalDays(today, 59), "00:00");
+      const occurrences = await this.#reservationWindowManifest(client, text(job, "provider_id"), text(authority.current, "product_id"), coverageFromUtc, coverageToUtc);
+      const manifest = occurrences.map((occurrence) => ({ occurrenceId: occurrence.id,
+        sourceStartAtUtc: occurrence.startUtc, sourceEndAtUtc: occurrence.endUtc }));
+      const manifestFingerprint = fingerprint(manifest);
+      const readId = randomUUID();
+      const firstReceiptId = randomUUID();
+      const inserted = await client.query<DbRow>(
+        `INSERT INTO external_reservation_reads
+          (read_id,job_id,worker_id,lease_epoch,lease_assignment_version,provider_id,account_id,listing_id,product_id,
+           target_site,target_external_account_id,target_external_product_id,target_external_option_id,
+           account_version,mapping_version,read_scope,coverage_from,coverage_to,manifest_fingerprint,read_started_at)
+         VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'WINDOW',$16,$17,$18,$19)
+         RETURNING read_generation`,
+        [readId, jobId, identity.workerId, job.lease_epoch, job.lease_assignment_version, job.provider_id, job.account_id,
+          job.listing_id, authority.current.product_id, job.target_site, job.target_external_account_id,
+          job.target_external_product_id, job.target_external_option_id, job.account_version, job.mapping_version,
+          coverageFromUtc, coverageToUtc, manifestFingerprint, readStartedAtUtc],
+      );
+      for (const [index, occurrence] of manifest.entries()) {
+        await client.query(
+          `INSERT INTO external_reservation_read_manifest_occurrences
+            (read_id,manifest_index,occurrence_id,source_start_at,source_end_at) VALUES ($1::uuid,$2,$3,$4,$5)`,
+          [readId, index, occurrence.occurrenceId, occurrence.sourceStartAtUtc, occurrence.sourceEndAtUtc],
+        );
+      }
+      await client.query(
+        `INSERT INTO external_reservation_window_page_receipts
+          (receipt_id,read_id,job_id,worker_id,page_number) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,0)`,
+        [firstReceiptId, readId, jobId, identity.workerId],
+      );
+      return {
+        readId, generation: integer(inserted.rows[0]!, "read_generation"), scope: "WINDOW", repeated: false,
+        coverageFromUtc, coverageToUtc, readStartedAtUtc, pageNumber: 0, receiptId: firstReceiptId, manifest,
+      };
+    });
+  }
+
   async beginReservationRead(identity: WorkerIdentity, jobId: string, leaseToken: string): Promise<ReservationReadCycle> {
     assertUuid(jobId, "jobId");
     assertNonEmptyText(leaseToken, "leaseToken", 100);
@@ -1166,10 +1564,11 @@ export class ChannelRuntime {
       await this.#requireWorker(client, identity);
       await this.#lockJobInventory(client, identity, jobId);
       const job = await this.#leasedJob(client, identity, jobId, leaseToken);
+      if (job.purpose !== "AVAILABILITY") throw new StoreConflictError("This job is not a one-occurrence read.");
       const authority = await this.#requireReservationReadAuthority(client, job);
       const existing = await client.query<DbRow>(
         `SELECT read_id,read_generation,occurrence_id,source_start_at,source_end_at
-           FROM external_reservation_reads WHERE job_id=$1::uuid AND lease_epoch=$2`,
+           FROM external_reservation_reads WHERE job_id=$1::uuid AND lease_epoch=$2 AND read_scope='OCCURRENCE'`,
         [jobId, job.lease_epoch],
       );
       if (existing.rows[0]) {
@@ -1196,6 +1595,281 @@ export class ChannelRuntime {
         readId, generation: integer(inserted.rows[0]!, "read_generation"), repeated: false,
         occurrenceId: text(job, "occurrence_id"), sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),
       };
+    });
+  }
+
+  async submitReservationWindowPage(
+    identity: WorkerIdentity,
+    jobId: string,
+    input: SubmitReservationWindowPageInput,
+  ): Promise<ReservationWindowPageReceipt> {
+    assertUuid(jobId, "jobId");
+    assertUuid(input.receiptId, "receiptId");
+    assertUuid(input.readId, "readId");
+    assertNonEmptyText(input.leaseToken, "leaseToken", 100);
+    if (!Number.isInteger(input.pageNumber) || input.pageNumber < 0 || input.pageNumber > 4095) {
+      throw new StoreValidationError("pageNumber is invalid.");
+    }
+    if (input.previousReceiptId !== undefined) assertUuid(input.previousReceiptId, "previousReceiptId");
+    if (input.sourceCursor !== undefined) assertNonEmptyText(input.sourceCursor, "sourceCursor", 512);
+    if (input.nextSourceCursor !== undefined) assertNonEmptyText(input.nextSourceCursor, "nextSourceCursor", 512);
+    if (input.snapshotToken !== undefined) assertNonEmptyText(input.snapshotToken, "snapshotToken", 256);
+    const observations = validateReservationObservations(input.observations);
+    if (input.pageNumber === 0 && input.sourceCursor !== undefined) throw new StoreValidationError("The first page cannot include a source cursor.");
+    if (input.pageNumber > 0 && input.sourceCursor === undefined) throw new StoreValidationError("A later page requires the previous source cursor.");
+    if (input.terminal === undefined && input.nextSourceCursor === undefined) throw new StoreValidationError("A non-terminal page requires a next source cursor.");
+    if (input.terminal === undefined && input.pageNumber === 4095) throw new StoreValidationError("The final bounded page must be terminal.");
+    if (input.terminal !== undefined && input.nextSourceCursor !== undefined) throw new StoreValidationError("A terminal page cannot include a next source cursor.");
+    if (input.terminal !== undefined) {
+      const terminalKeys = Object.keys(input.terminal);
+      const expectedKeys = ["status", "completedAtUtc", "allPagesRead", "allStatusesIncluded", "coverageComplete"];
+      if (terminalKeys.length !== expectedKeys.length || terminalKeys.some((key) => !expectedKeys.includes(key))) {
+        throw new StoreValidationError("terminal has unknown or missing fields.");
+      }
+      if (!(input.terminal.status === "COMPLETE" || input.terminal.status === "PARTIAL" || input.terminal.status === "FAILED")
+        || typeof input.terminal.allPagesRead !== "boolean" || typeof input.terminal.allStatusesIncluded !== "boolean"
+        || typeof input.terminal.coverageComplete !== "boolean") throw new StoreValidationError("terminal is invalid.");
+      assertCanonicalInstant(input.terminal.completedAtUtc, "terminal.completedAtUtc");
+      if (input.terminal.status === "COMPLETE" && !(input.terminal.allPagesRead
+        && input.terminal.allStatusesIncluded && input.terminal.coverageComplete)) {
+        throw new StoreValidationError("A complete terminal page requires complete pagination, status, and coverage evidence.");
+      }
+      if (input.terminal.status === "FAILED" && observations.length !== 0) throw new StoreValidationError("A failed terminal page cannot contain facts.");
+    }
+    const canonicalInput = {
+      jobId, workerId: identity.workerId, receiptId: input.receiptId, readId: input.readId,
+      leaseToken: input.leaseToken, pageNumber: input.pageNumber,
+      previousReceiptId: input.previousReceiptId ?? "", sourceCursor: input.sourceCursor ?? "",
+      nextSourceCursor: input.nextSourceCursor ?? "",
+      snapshotToken: input.snapshotToken ?? "", observations,
+      terminal: input.terminal === undefined ? null : {
+        status: input.terminal.status,
+        completedAtUtc: input.terminal.completedAtUtc,
+        allPagesRead: input.terminal.allPagesRead,
+        allStatusesIncluded: input.terminal.allStatusesIncluded,
+        coverageComplete: input.terminal.coverageComplete,
+      },
+    };
+    const requestFingerprint = fingerprint(canonicalInput);
+    const sourceCursorFingerprint = input.sourceCursor === undefined ? null : digest(input.sourceCursor);
+    const nextSourceCursorFingerprint = input.nextSourceCursor === undefined ? null : digest(input.nextSourceCursor);
+    const snapshotTokenFingerprint = input.snapshotToken === undefined ? null : digest(input.snapshotToken);
+
+    return withTransaction(this.#pool, async (client) => {
+      await this.#requireWorker(client, identity);
+      const scope = await client.query<{ provider_id: string }>(
+        `SELECT j.provider_id FROM channel_jobs j
+          JOIN external_reservation_window_page_receipts p ON p.job_id=j.id
+         WHERE j.id=$1::uuid AND p.receipt_id=$3::uuid AND p.worker_id=$2`,
+        [jobId, identity.workerId, input.receiptId],
+      );
+      if (!scope.rows[0]) throw new StoreAccessDeniedError();
+      await lockProviderInventory(client, scope.rows[0].provider_id);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,29))", [`external-reservation-window-receipt:${input.receiptId}`]);
+      const pageResult = await client.query<DbRow>(
+        "SELECT * FROM external_reservation_window_page_receipts WHERE receipt_id=$1::uuid FOR UPDATE", [input.receiptId],
+      );
+      const page = pageResult.rows[0];
+      if (!page || page.read_id !== input.readId || page.job_id !== jobId || page.worker_id !== identity.workerId
+        || integer(page, "page_number") !== input.pageNumber
+        || (page.previous_receipt_id ?? undefined) !== input.previousReceiptId) throw new StoreAccessDeniedError();
+      if (page.request_fingerprint !== null) {
+        if (page.request_fingerprint !== requestFingerprint) throw new StoreConflictError("Reservation page receipt was already used with different input.");
+        const authorized = await client.query<DbRow>(
+          `SELECT j.target_site,j.target_adapter,j.target_adapter_version FROM external_reservation_reads r
+             JOIN channel_worker_accounts wa ON wa.account_id=r.account_id AND wa.worker_id=r.worker_id
+             JOIN channel_external_accounts a ON a.id=r.account_id AND a.provider_id=r.provider_id
+             JOIN channel_listings l ON l.id=r.listing_id AND l.provider_id=r.provider_id AND l.account_id=r.account_id
+             JOIN channel_jobs j ON j.id=r.job_id
+             JOIN experience_products p ON p.provider_id=r.provider_id AND p.id=r.product_id
+            WHERE r.read_id=$1::uuid AND r.read_scope='WINDOW' AND j.purpose='RESERVATION_WINDOW'
+              AND wa.revoked_at IS NULL AND wa.version=r.lease_assignment_version
+              AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
+              AND a.version=r.account_version AND a.site=r.target_site AND a.external_account_id=r.target_external_account_id
+              AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true
+              AND l.mapping_version=r.mapping_version AND l.product_id=r.product_id
+              AND l.external_product_id=r.target_external_product_id AND l.external_option_id=r.target_external_option_id
+              AND l.adapter=j.target_adapter AND l.adapter_version=j.target_adapter_version
+              AND l.connection_mode=j.target_connection_mode AND p.status='PUBLISHED'
+            FOR SHARE OF wa,a,l,p`, [input.readId, this.#nowIso()],
+        );
+        if (!authorized.rows[0] || !this.#adapterSupports(authorized.rows[0], "OBSERVE")
+          || !this.#adapterSupportsReservationRead(authorized.rows[0])) throw new StoreAccessDeniedError();
+        return reservationWindowReceipt(page.result, true);
+      }
+
+      const job = await this.#leasedJob(client, identity, jobId, input.leaseToken);
+      if (job.purpose !== "RESERVATION_WINDOW") throw new StoreConflictError("This job is not a reservation-window read.");
+      await this.#requireReservationReadAuthority(client, job);
+      const readResult = await client.query<DbRow>(
+        "SELECT * FROM external_reservation_reads WHERE read_id=$1::uuid FOR UPDATE", [input.readId],
+      );
+      const read = readResult.rows[0];
+      if (!read || read.read_scope !== "WINDOW" || read.status !== "OPEN" || read.job_id !== jobId || read.worker_id !== identity.workerId
+        || integer(read, "lease_epoch") !== integer(job, "lease_epoch")
+        || integer(read, "lease_assignment_version") !== integer(job, "lease_assignment_version")) throw new StoreAccessDeniedError();
+      if (input.pageNumber === 0 && input.previousReceiptId !== undefined) throw new StoreConflictError("The first page cannot have a predecessor.");
+      if (input.pageNumber > 0) {
+        if (input.previousReceiptId === undefined) throw new StoreConflictError("The page predecessor is missing.");
+        const previous = await client.query<DbRow>(
+          `SELECT * FROM external_reservation_window_page_receipts
+            WHERE receipt_id=$1::uuid AND read_id=$2::uuid AND page_number=$3 FOR UPDATE`,
+          [input.previousReceiptId, input.readId, input.pageNumber - 1],
+        );
+        const previousPage = previous.rows[0];
+        if (!previousPage || previousPage.request_fingerprint === null || previousPage.terminal_status !== null
+          || previousPage.next_source_cursor_fingerprint !== sourceCursorFingerprint
+          || previousPage.snapshot_token_fingerprint !== snapshotTokenFingerprint) {
+          throw new StoreConflictError("Reservation window page order, source cursor, or snapshot token is inconsistent.");
+        }
+      }
+      if (nextSourceCursorFingerprint !== null) {
+        const reusedCursor = await client.query(
+          `SELECT 1 FROM external_reservation_window_page_receipts
+            WHERE read_id=$1::uuid AND submitted_at IS NOT NULL
+              AND (source_cursor_fingerprint=$2 OR next_source_cursor_fingerprint=$2) LIMIT 1`,
+          [input.readId, nextSourceCursorFingerprint],
+        );
+        if (reusedCursor.rows.length > 0) throw new StoreConflictError("Reservation pagination cursor did not advance.");
+      }
+      const coverageFromUtc = isoValue(read, "coverage_from");
+      const coverageToUtc = isoValue(read, "coverage_to");
+      const currentManifest = await this.#reservationWindowManifest(
+        client, text(read, "provider_id"), text(read, "product_id"), coverageFromUtc, coverageToUtc,
+      );
+      const currentManifestDto = currentManifest.map((occurrence) => ({ occurrenceId: occurrence.id,
+        sourceStartAtUtc: occurrence.startUtc, sourceEndAtUtc: occurrence.endUtc }));
+      if (fingerprint(currentManifestDto) !== read.manifest_fingerprint) {
+        throw new StoreConflictError("Reservation window manifest is stale.");
+      }
+      const targetsByTime = new Map<string, Occurrence[]>();
+      for (const occurrence of currentManifest) {
+        const key = `${occurrence.startUtc}\n${occurrence.endUtc}`;
+        targetsByTime.set(key, [...(targetsByTime.get(key) ?? []), occurrence]);
+      }
+
+      const newObservations: ExternalReservationObservation[] = [];
+      let duplicateFacts = 0;
+      for (const observation of observations) {
+        const observationFingerprint = fingerprint(observation);
+        const seen = await client.query<DbRow>(
+          `SELECT observation_fingerprint FROM external_reservation_window_facts
+            WHERE read_id=$1::uuid AND external_reservation_id=$2`, [input.readId, observation.externalReservationId],
+        );
+        if (seen.rows[0]) {
+          if (seen.rows[0].observation_fingerprint !== observationFingerprint) {
+            throw new StoreConflictError("A reservation changed between pages; the scan is incomplete.");
+          }
+          duplicateFacts += 1;
+          continue;
+        }
+        await client.query(
+          `INSERT INTO external_reservation_window_facts
+            (read_id,external_reservation_id,observation_fingerprint,first_page_number) VALUES ($1::uuid,$2,$3,$4)`,
+          [input.readId, observation.externalReservationId, observationFingerprint, input.pageNumber],
+        );
+        newObservations.push(observation);
+      }
+      const generation = integer(read, "read_generation");
+      const providerId = text(read, "provider_id");
+      const applied = await applyExternalReservationObservations(client, {
+        readId: input.readId, generation, providerId, accountId: text(read, "account_id"), listingId: text(read, "listing_id"),
+        productId: text(read, "product_id"), targetSite: text(read, "target_site"),
+        targetExternalAccountId: text(read, "target_external_account_id"),
+        targetExternalProductId: text(read, "target_external_product_id"),
+        targetExternalOptionId: text(read, "target_external_option_id"),
+      }, newObservations, async (observation) => {
+        const matches = targetsByTime.get(`${observation.sourceStartAtUtc}\n${observation.sourceEndAtUtc}`) ?? [];
+        return matches.length === 1 ? { occurrence: matches[0]! } : null;
+      }, () => this.#nowIso());
+
+      let missingActiveReservations = 0;
+      let healthUpdated = false;
+      let nextReceiptId: string | undefined;
+      const terminalStatus = input.terminal?.status;
+      if (input.terminal === undefined) {
+        nextReceiptId = randomUUID();
+        await client.query(
+          `INSERT INTO external_reservation_window_page_receipts
+            (receipt_id,read_id,job_id,worker_id,page_number,previous_receipt_id)
+           VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid)`,
+          [nextReceiptId, input.readId, jobId, identity.workerId, input.pageNumber + 1, input.receiptId],
+        );
+      } else {
+        const completedAtUtc = input.terminal.completedAtUtc;
+        const nowWithSkew = new Date(this.#now().getTime() + 5 * 60 * 1_000).toISOString();
+        if (completedAtUtc < isoValue(read, "read_started_at") || completedAtUtc > nowWithSkew) {
+          throw new StoreConflictError("Reservation window completion time is outside the read.");
+        }
+        const manifestIds = currentManifest.map((occurrence) => occurrence.id);
+        const missing = await client.query<DbRow>(
+          `SELECT count(*)::text AS count FROM external_reservations e
+            WHERE e.provider_id=$1 AND e.listing_id=$2 AND e.account_id=$3
+              AND e.status IN ('PENDING','CONFIRMED')
+              AND (e.occurrence_id=ANY($4::text[]) OR (e.source_start_at >= $5 AND e.source_start_at < $6))
+              AND NOT EXISTS (SELECT 1 FROM external_reservation_window_facts f
+                WHERE f.read_id=$7::uuid AND f.external_reservation_id=e.external_reservation_id)`,
+          [providerId, read.listing_id, read.account_id, manifestIds, coverageFromUtc, coverageToUtc, input.readId],
+        );
+        missingActiveReservations = Number(missing.rows[0]?.count ?? 0);
+        const unresolved = await client.query(
+          `SELECT 1 FROM external_reservation_revisions
+            WHERE read_id=$1::uuid AND disposition IN ('NEEDS_REVIEW','STALE') LIMIT 1`, [input.readId],
+        );
+        const completeEvidence = input.terminal.status === "COMPLETE" && input.terminal.allPagesRead
+          && input.terminal.allStatusesIncluded && input.terminal.coverageComplete;
+        if (completeEvidence && missingActiveReservations === 0 && unresolved.rows.length === 0) {
+          const freshUntilUtc = new Date(new Date(completedAtUtc).getTime() + 45 * 60 * 1_000).toISOString();
+          const nextDueAtUtc = new Date(new Date(completedAtUtc).getTime() + 15 * 60 * 1_000).toISOString();
+          const health = await client.query(
+            `INSERT INTO external_reservation_listing_health
+              (provider_id,listing_id,account_id,product_id,read_id,read_generation,account_version,mapping_version,
+               coverage_from,coverage_to,read_started_at,read_finished_at,last_complete_at,next_due_at,fresh_until)
+             VALUES ($1,$2,$3,$4,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14)
+             ON CONFLICT (provider_id,listing_id) DO UPDATE SET
+               account_id=EXCLUDED.account_id,product_id=EXCLUDED.product_id,read_id=EXCLUDED.read_id,
+               read_generation=EXCLUDED.read_generation,account_version=EXCLUDED.account_version,mapping_version=EXCLUDED.mapping_version,
+               coverage_from=EXCLUDED.coverage_from,coverage_to=EXCLUDED.coverage_to,read_started_at=EXCLUDED.read_started_at,
+               read_finished_at=EXCLUDED.read_finished_at,last_complete_at=EXCLUDED.last_complete_at,
+               next_due_at=EXCLUDED.next_due_at,fresh_until=EXCLUDED.fresh_until,updated_at=clock_timestamp()
+             WHERE external_reservation_listing_health.read_generation < EXCLUDED.read_generation
+             RETURNING 1`,
+            [providerId, read.listing_id, read.account_id, read.product_id, input.readId, generation,
+              read.account_version, read.mapping_version, coverageFromUtc, coverageToUtc,
+              read.read_started_at, completedAtUtc, nextDueAtUtc, freshUntilUtc],
+          );
+          healthUpdated = health.rows.length > 0;
+          if (healthUpdated) {
+            await enqueueCalendarRecalculation(client, {
+              providerId, aggregateType: "product_inventory", aggregateId: text(read, "product_id"),
+              cause: "external_reservation_read_health_changed",
+            });
+            await enqueueCalendarRecalculation(client, {
+              providerId, aggregateType: "product_inventory", aggregateId: text(read, "product_id"),
+              cause: "external_reservation_read_health_expired", availableAtUtc: freshUntilUtc,
+            });
+          }
+        }
+        await client.query(
+          `UPDATE external_reservation_reads SET status='SUBMITTED',batch_status=$2,submitted_at=$3
+            WHERE read_id=$1::uuid`, [input.readId, input.terminal.status, completedAtUtc],
+        );
+      }
+      const storedResult = {
+        receiptId: input.receiptId, readId: input.readId, generation, pageNumber: input.pageNumber,
+        applied: applied.applied, duplicates: applied.duplicates, duplicateFacts, stale: applied.stale,
+        needsReview: applied.needsReview, missingActiveReservations, healthUpdated,
+        ...(terminalStatus === undefined ? {} : { terminalStatus }),
+        ...(nextReceiptId === undefined ? {} : { nextReceiptId }),
+      };
+      await client.query(
+        `UPDATE external_reservation_window_page_receipts SET request_fingerprint=$2,source_cursor_fingerprint=$3,
+           next_source_cursor_fingerprint=$4,snapshot_token_fingerprint=$5,
+           terminal_status=$6,result=$7::jsonb,submitted_at=$8 WHERE receipt_id=$1::uuid`,
+        [input.receiptId, requestFingerprint, sourceCursorFingerprint, nextSourceCursorFingerprint,
+          snapshotTokenFingerprint, terminalStatus ?? null, JSON.stringify(storedResult), this.#nowIso()],
+      );
+      return { ...storedResult, repeated: false };
     });
   }
 
@@ -1276,7 +1950,7 @@ export class ChannelRuntime {
       const authority = await this.#requireReservationReadAuthority(client, job);
       const readResult = await client.query<DbRow>("SELECT * FROM external_reservation_reads WHERE read_id=$1::uuid FOR UPDATE", [input.readId]);
       const read = readResult.rows[0];
-      if (!read || read.job_id !== jobId || read.worker_id !== identity.workerId
+      if (!read || read.read_scope !== "OCCURRENCE" || read.job_id !== jobId || read.worker_id !== identity.workerId
         || integer(read, "lease_epoch") !== integer(job, "lease_epoch")
         || integer(read, "lease_assignment_version") !== integer(job, "lease_assignment_version")) throw new StoreAccessDeniedError();
       if (read.status !== "OPEN") throw new StoreConflictError("Reservation read was already submitted with another receipt.");
@@ -1288,223 +1962,12 @@ export class ChannelRuntime {
       const targetOption = text(read, "target_external_option_id");
       const targetStart = isoValue(read, "source_start_at");
       const targetEnd = isoValue(read, "source_end_at");
-      const affectedOccurrences = new Set<string>();
-      let applied = 0;
-      let duplicates = 0;
-      let stale = 0;
-      let needsReview = 0;
-
-      for (const observation of observations) {
-        const externalOptionId = observation.externalOptionId ?? "";
-        const observationFingerprint = fingerprint(observation);
-        const key: [string, string, string] = [targetSite, targetAccount, observation.externalReservationId];
-        const ledgerResult = await client.query<DbRow>(
-          `SELECT * FROM external_reservations
-            WHERE source_site=$1 AND source_external_account_id=$2 AND external_reservation_id=$3 FOR UPDATE`, key,
-        );
-        let ledger = ledgerResult.rows[0];
-        let disposition: "APPLIED" | "DUPLICATE" | "STALE" | "NEEDS_REVIEW" = "APPLIED";
-        let reviewReason: string | null = null;
-        if (ledger && integer(ledger, "last_read_generation") >= generation) disposition = "STALE";
-        if (disposition === "APPLIED" && ledger?.source_updated_at !== null && ledger?.source_updated_at !== undefined
-          && observation.sourceUpdatedAtUtc !== undefined) {
-          const previousUpdated = isoValue(ledger, "source_updated_at");
-          if (observation.sourceUpdatedAtUtc < previousUpdated) disposition = "STALE";
-          else if (observation.sourceUpdatedAtUtc === previousUpdated) {
-            disposition = ledger.current_fingerprint === observationFingerprint ? "DUPLICATE" : "NEEDS_REVIEW";
-            if (disposition === "NEEDS_REVIEW") reviewReason = "CONFLICTING_SOURCE_VERSION";
-          }
-        }
-        if (disposition === "APPLIED" && ledger?.current_fingerprint === observationFingerprint) disposition = "DUPLICATE";
-        if (disposition === "APPLIED" && observation.sourceRevision !== undefined
-          && ledger?.source_revision === observation.sourceRevision) {
-          disposition = "NEEDS_REVIEW";
-          reviewReason = "CONFLICTING_SOURCE_VERSION";
-        }
-        const exactTarget = observation.externalProductId === text(read, "target_external_product_id")
-          && externalOptionId === targetOption && observation.sourceStartAtUtc === targetStart && observation.sourceEndAtUtc === targetEnd;
-        // A fresh exact read can resolve a previous bad target/source observation.
-        // Reapply through inventory evaluation so a real occupancy conflict stays fenced.
-        if (disposition === "DUPLICATE" && exactTarget && (ledger?.occurrence_id === null
-          || (ledger?.needs_review === true && ["TARGET_MISMATCH", "CONFLICTING_SOURCE_VERSION"].includes(String(ledger.review_reason))))) disposition = "APPLIED";
-        if (disposition === "APPLIED" && !exactTarget) {
-          disposition = "NEEDS_REVIEW";
-          reviewReason = "TARGET_MISMATCH";
-        }
-
-        if (disposition === "STALE" || disposition === "DUPLICATE") {
-          if (!ledger) throw new StoreConflictError("Reservation ordering state is invalid.");
-          if (disposition === "DUPLICATE") {
-            await client.query(
-              `UPDATE external_reservations SET last_read_generation=GREATEST(last_read_generation,$4),updated_at=$5
-                WHERE source_site=$1 AND source_external_account_id=$2 AND external_reservation_id=$3`,
-              [...key, generation, this.#nowIso()],
-            );
-            duplicates += 1;
-          } else stale += 1;
-          await client.query(
-            `INSERT INTO external_reservation_revisions
-              (source_site,source_external_account_id,external_reservation_id,read_id,read_generation,local_revision,
-               external_product_id,external_option_id,source_start_at,source_end_at,seats,status,source_updated_at,source_revision,
-               observation_fingerprint,disposition,review_reason)
-             VALUES ($1,$2,$3,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NULL)`,
-            [...key, input.readId, generation, integer(ledger, "local_revision"), observation.externalProductId, externalOptionId,
-              observation.sourceStartAtUtc, observation.sourceEndAtUtc, observation.seats, observation.status,
-              observation.sourceUpdatedAtUtc ?? null, observation.sourceRevision ?? null, observationFingerprint, disposition],
-          );
-          continue;
-        }
-
-        if (disposition === "NEEDS_REVIEW") {
-          if (!ledger) {
-            const inserted = await client.query<DbRow>(
-              `INSERT INTO external_reservations
-                (source_site,source_external_account_id,external_reservation_id,provider_id,account_id,listing_id,product_id,occurrence_id,
-                 external_product_id,external_option_id,source_start_at,source_end_at,seats,status,local_revision,source_updated_at,
-                 source_revision,last_read_generation,current_fingerprint,needs_review,review_reason)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,true,$18)
-               RETURNING *`,
-              [...key, providerId, read.account_id, read.listing_id, productId, observation.externalProductId, externalOptionId,
-                observation.sourceStartAtUtc, observation.sourceEndAtUtc, observation.seats, observation.status,
-                observation.sourceUpdatedAtUtc ?? null, observation.sourceRevision ?? null, generation, observationFingerprint, reviewReason],
-            );
-            ledger = inserted.rows[0]!;
-          } else {
-            await client.query(
-              `UPDATE external_reservations SET needs_review=true,review_reason=$4,updated_at=$5,
-                 last_read_generation=GREATEST(last_read_generation,$6)
-                WHERE source_site=$1 AND source_external_account_id=$2 AND external_reservation_id=$3`,
-              [...key, reviewReason, this.#nowIso(), generation],
-            );
-          }
-          await client.query(
-            `INSERT INTO external_reservation_revisions
-              (source_site,source_external_account_id,external_reservation_id,read_id,read_generation,local_revision,
-               external_product_id,external_option_id,source_start_at,source_end_at,seats,status,source_updated_at,source_revision,
-               observation_fingerprint,disposition,review_reason)
-             VALUES ($1,$2,$3,$4::uuid,$5,NULL,$6,$7,$8,$9,$10,$11,$12,$13,$14,'NEEDS_REVIEW',$15)`,
-            [...key, input.readId, generation, observation.externalProductId, externalOptionId, observation.sourceStartAtUtc,
-              observation.sourceEndAtUtc, observation.seats, observation.status, observation.sourceUpdatedAtUtc ?? null,
-              observation.sourceRevision ?? null, observationFingerprint, reviewReason],
-          );
-          needsReview += 1;
-          continue;
-        }
-
-        const oldOccurrenceId = ledger?.occurrence_id === null || ledger?.occurrence_id === undefined ? undefined : text(ledger, "occurrence_id");
-        const localRevision = ledger === undefined ? 1 : integer(ledger, "local_revision") + 1;
-        const inventory = await evaluateStoredInventory(client, providerId, productId, authority.occurrence, this.#nowIso(), observation.seats);
-        const active = observation.status === "PENDING" || observation.status === "CONFIRMED";
-        let inventoryConflict = false;
-        if (active) {
-          const direct = await client.query<DbRow>(
-            `SELECT COALESCE(sum(seats),0)::text AS seats,count(*)::text AS groups FROM bookings
-              WHERE provider_id=$1 AND occurrence_id=$2
-                AND (status='CONFIRMED' OR (status='HOLD' AND hold_expires_at>$3))`,
-            [providerId, read.occurrence_id, this.#nowIso()],
-          );
-          const external = await client.query<DbRow>(
-            `SELECT COALESCE(sum(seats),0)::text AS seats,count(*)::text AS groups FROM external_reservations
-              WHERE provider_id=$1 AND occurrence_id=$2 AND status IN ('PENDING','CONFIRMED')
-                AND NOT (source_site=$3 AND source_external_account_id=$4 AND external_reservation_id=$5)`,
-            [providerId, read.occurrence_id, ...key],
-          );
-          const directSeats = Number(direct.rows[0]?.seats ?? 0);
-          const externalSeats = Number(external.rows[0]?.seats ?? 0);
-          const otherGroups = Number(direct.rows[0]?.groups ?? 0) + Number(external.rows[0]?.groups ?? 0);
-          inventoryConflict = inventory.bookingMode === "PRIVATE_GROUP"
-            ? otherGroups > 0
-            : directSeats + externalSeats + observation.seats > authority.occurrence.capacity;
-          const resourceIds = inventory.occupancies.map((occupancy) => occupancy.resourceId);
-          if (!inventoryConflict && resourceIds.length > 0) {
-            const collision = await client.query(
-              `WITH requested AS (
-                 SELECT * FROM unnest($2::text[],$3::timestamptz[],$4::timestamptz[]) AS r(resource_id,start_at,end_at)
-               )
-               SELECT 1 FROM booking_resource_occupancies o
-                 JOIN requested r ON r.resource_id=o.resource_id AND o.end_at>r.start_at AND o.start_at<r.end_at
-                 JOIN bookings b ON b.provider_id=o.provider_id AND b.id=o.booking_id
-                WHERE o.provider_id=$1
-                  AND (b.status='CONFIRMED' OR (b.status='HOLD' AND b.hold_expires_at>$5))
-                  AND NOT (b.product_id=$9 AND b.occurrence_id=$10)
-               UNION ALL
-               SELECT 1 FROM external_reservation_resource_occupancies o
-                 JOIN requested r ON r.resource_id=o.resource_id AND o.end_at>r.start_at AND o.start_at<r.end_at
-                 JOIN external_reservations e ON e.source_site=o.source_site
-                  AND e.source_external_account_id=o.source_external_account_id AND e.external_reservation_id=o.external_reservation_id
-                  AND e.local_revision=o.local_revision
-                WHERE o.provider_id=$1 AND e.status IN ('PENDING','CONFIRMED')
-                  AND NOT (e.source_site=$6 AND e.source_external_account_id=$7 AND e.external_reservation_id=$8)
-                  AND NOT (e.product_id=$9 AND e.occurrence_id=$10)
-               LIMIT 1`,
-              [providerId, resourceIds, inventory.occupancies.map((item) => item.startAtUtc),
-                inventory.occupancies.map((item) => item.endAtUtc), this.#nowIso(), ...key, productId, read.occurrence_id],
-            );
-            inventoryConflict = collision.rows[0] !== undefined;
-          }
-        }
-        const ledgerValues = [...key, providerId, read.account_id, read.listing_id, productId, read.occurrence_id,
-          observation.externalProductId, externalOptionId, observation.sourceStartAtUtc, observation.sourceEndAtUtc,
-          observation.seats, observation.status, localRevision, observation.sourceUpdatedAtUtc ?? null,
-          observation.sourceRevision ?? null, generation, observationFingerprint, inventoryConflict, inventoryConflict ? "INVENTORY_CONFLICT" : null];
-        await client.query(
-          `INSERT INTO external_reservations
-            (source_site,source_external_account_id,external_reservation_id,provider_id,account_id,listing_id,product_id,occurrence_id,
-             external_product_id,external_option_id,source_start_at,source_end_at,seats,status,local_revision,source_updated_at,
-             source_revision,last_read_generation,current_fingerprint,needs_review,review_reason)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-           ON CONFLICT (source_site,source_external_account_id,external_reservation_id) DO UPDATE SET
-             provider_id=EXCLUDED.provider_id,account_id=EXCLUDED.account_id,listing_id=EXCLUDED.listing_id,product_id=EXCLUDED.product_id,
-             occurrence_id=EXCLUDED.occurrence_id,external_product_id=EXCLUDED.external_product_id,external_option_id=EXCLUDED.external_option_id,
-             source_start_at=EXCLUDED.source_start_at,source_end_at=EXCLUDED.source_end_at,seats=EXCLUDED.seats,status=EXCLUDED.status,
-             local_revision=EXCLUDED.local_revision,source_updated_at=EXCLUDED.source_updated_at,source_revision=EXCLUDED.source_revision,
-             last_read_generation=EXCLUDED.last_read_generation,current_fingerprint=EXCLUDED.current_fingerprint,
-             needs_review=EXCLUDED.needs_review,review_reason=EXCLUDED.review_reason,updated_at=clock_timestamp()`, ledgerValues,
-        );
-        await client.query(
-          `INSERT INTO external_reservation_inventory_snapshots
-            (source_site,source_external_account_id,external_reservation_id,local_revision,provider_id,product_id,occurrence_id,
-             booking_mode,occurrence_start_at,occurrence_end_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [...key, localRevision, providerId, productId, read.occurrence_id, inventory.bookingMode, authority.occurrence.startUtc, authority.occurrence.endUtc],
-        );
-        for (const occupancy of inventory.occupancies) {
-          await client.query(
-            `INSERT INTO external_reservation_resource_occupancies
-              (source_site,source_external_account_id,external_reservation_id,local_revision,provider_id,product_id,occurrence_id,
-               resource_id,resource_kind,prepare_minutes,cleanup_minutes,start_at,end_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-            [...key, localRevision, providerId, productId, read.occurrence_id, occupancy.resourceId, occupancy.resourceKind,
-              occupancy.prepareMinutes, occupancy.cleanupMinutes, occupancy.startAtUtc, occupancy.endAtUtc],
-          );
-        }
-        await client.query(
-          `INSERT INTO external_reservation_revisions
-            (source_site,source_external_account_id,external_reservation_id,read_id,read_generation,local_revision,
-             external_product_id,external_option_id,source_start_at,source_end_at,seats,status,source_updated_at,source_revision,
-             observation_fingerprint,disposition,review_reason)
-           VALUES ($1,$2,$3,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'APPLIED',$16)`,
-          [...key, input.readId, generation, localRevision, observation.externalProductId, externalOptionId,
-            observation.sourceStartAtUtc, observation.sourceEndAtUtc, observation.seats, observation.status,
-            observation.sourceUpdatedAtUtc ?? null, observation.sourceRevision ?? null, observationFingerprint,
-            inventoryConflict ? "INVENTORY_CONFLICT" : null],
-        );
-        if (oldOccurrenceId) affectedOccurrences.add(oldOccurrenceId);
-        affectedOccurrences.add(text(read, "occurrence_id"));
-        applied += 1;
-        if (inventoryConflict) needsReview += 1;
-      }
-
-      for (const occurrenceId of affectedOccurrences) {
-        await enqueueCalendarRecalculation(client, {
-          providerId, aggregateType: "schedule_occurrence", aggregateId: occurrenceId, cause: "external_reservation_changed",
-        });
-      }
-      if (needsReview > 0) {
-        await enqueueCalendarRecalculation(client, {
-          providerId, aggregateType: "provider_inventory", aggregateId: providerId, cause: "external_reservation_review",
-        });
-      }
+      const { applied, duplicates, stale, needsReview } = await applyExternalReservationObservations(client, {
+        readId: input.readId, generation, providerId, accountId: text(read, "account_id"), listingId: text(read, "listing_id"),
+        productId, targetSite, targetExternalAccountId: targetAccount,
+        targetExternalProductId: text(read, "target_external_product_id"), targetExternalOptionId: targetOption,
+      }, observations, async (observation) => observation.sourceStartAtUtc === targetStart && observation.sourceEndAtUtc === targetEnd
+        ? { occurrence: authority.occurrence } : null, () => this.#nowIso());
       const storedResult = {
         receiptId: input.receiptId, readId: input.readId, generation, batchStatus: input.batchStatus,
         applied, duplicates, stale, needsReview,
@@ -1623,13 +2086,26 @@ export class ChannelRuntime {
   async submitResult(identity: WorkerIdentity, jobId: string, input: ChannelResultInput): Promise<{ readonly acceptedAsCurrent: boolean; readonly repeated: boolean }> {
     assertUuid(jobId, "jobId");
     assertUuid(input.resultId, "resultId");
-    if (!(["VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"] as const).includes(input.outcome)) {
+    if (!(["VERIFIED", "RESERVATION_VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"] as const).includes(input.outcome)) {
       throw new StoreValidationError("result.outcome is invalid.");
     }
+    if (input.reservationReadId !== undefined) assertUuid(input.reservationReadId, "result.reservationReadId");
+    if (input.reservationReceiptId !== undefined) assertUuid(input.reservationReceiptId, "result.reservationReceiptId");
     if (input.observedAtUtc) assertCanonicalInstant(input.observedAtUtc, "result.observedAtUtc");
     if (input.sourceStartAtUtc) assertCanonicalInstant(input.sourceStartAtUtc, "result.sourceStartAtUtc");
     if (input.sourceEndAtUtc) assertCanonicalInstant(input.sourceEndAtUtc, "result.sourceEndAtUtc");
     if (input.observedState !== undefined && input.observedState !== "OPEN" && input.observedState !== "CLOSED") throw new StoreValidationError("result.observedState is invalid.");
+    const reservationShape = input.outcome === "RESERVATION_VERIFIED"
+      && input.reservationReadId !== undefined && input.reservationReceiptId !== undefined
+      && input.occurrenceId === undefined && input.sourceStartAtUtc === undefined && input.sourceEndAtUtc === undefined
+      && input.observedState === undefined && input.observedBookable === undefined
+      && input.observedManuallyBlocked === undefined && input.observedAtUtc === undefined;
+    if (input.outcome === "RESERVATION_VERIFIED" && !reservationShape) {
+      throw new StoreValidationError("RESERVATION_VERIFIED requires only the terminal reservation read receipt.");
+    }
+    if (input.outcome !== "RESERVATION_VERIFIED" && (input.reservationReadId !== undefined || input.reservationReceiptId !== undefined)) {
+      throw new StoreValidationError("Reservation receipt fields require RESERVATION_VERIFIED.");
+    }
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
       await this.#lockJobInventory(client, identity, jobId, input.resultId);
@@ -1646,7 +2122,8 @@ export class ChannelRuntime {
         const resultFingerprint = fingerprint({ jobId, workerId: identity.workerId, leaseEpoch: integer(receipt, "lease_epoch"), leaseDigest: receipt.lease_digest,
           outcome: input.outcome, stopped: input.stopped, target: input.target, occurrenceId: input.occurrenceId,
           sourceStartAtUtc: input.sourceStartAtUtc, sourceEndAtUtc: input.sourceEndAtUtc, observedState: input.observedState,
-          observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc });
+          observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc,
+          reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId });
         if (repeated.rows[0].fingerprint !== resultFingerprint) throw new StoreConflictError("Result ID was already used with different input.");
         return { acceptedAsCurrent: repeated.rows[0].accepted_as_current === true, repeated: true };
       }
@@ -1654,6 +2131,10 @@ export class ChannelRuntime {
       const job = jobResult.rows[0];
       if (!job || job.status !== "LEASED" || job.leased_worker_id !== identity.workerId || typeof job.lease_digest !== "string"
         || !secureDigestMatch(job.lease_digest, input.leaseToken)) throw new StoreAccessDeniedError();
+      const reservationJob = job.purpose === "RESERVATION_WINDOW";
+      if ((reservationJob && input.outcome === "VERIFIED") || (!reservationJob && input.outcome === "RESERVATION_VERIFIED")) {
+        throw new StoreValidationError("Result outcome does not match the job purpose.");
+      }
       const assignment = await client.query(
         "SELECT 1 FROM channel_worker_accounts WHERE worker_id=$1 AND account_id=$2 AND revoked_at IS NULL AND version=$3 FOR SHARE",
         [identity.workerId, job.account_id, job.lease_assignment_version],
@@ -1664,7 +2145,8 @@ export class ChannelRuntime {
       const resultFingerprint = fingerprint({ jobId, workerId: identity.workerId, leaseEpoch, leaseDigest,
         outcome: input.outcome, stopped: input.stopped, target: input.target, occurrenceId: input.occurrenceId,
         sourceStartAtUtc: input.sourceStartAtUtc, sourceEndAtUtc: input.sourceEndAtUtc, observedState: input.observedState,
-        observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc });
+        observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc,
+        reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId });
       const exactTarget = targetEqual(targetFromRow(job), input.target);
       const occurrenceMatchesSnapshot = input.occurrenceId === job.occurrence_id
         && input.sourceStartAtUtc === isoValue(job, "source_start_at") && input.sourceEndAtUtc === isoValue(job, "source_end_at");
@@ -1677,22 +2159,29 @@ export class ChannelRuntime {
       const observedMs = input.observedAtUtc === undefined ? Number.NaN : Date.parse(input.observedAtUtc);
       const observationTimeValid = Number.isFinite(observedMs) && observedMs >= Date.parse(isoValue(job, "lease_started_at"))
         && observedMs <= Math.min(Date.parse(isoValue(job, "lease_expires_at")), Date.parse(isoValue(job, "job_deadline_at")), this.#now().getTime() + 5_000);
-      const currentResult = await client.query<DbRow>(
-        `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,
+      const currentResult = await client.query<DbRow>(reservationJob
+        ? `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,a.external_account_id,
+                l.active AS listing_active,l.product_id,l.mapping_version,l.adapter,l.adapter_version,l.connection_mode,
+                l.external_product_id,l.external_option_id,l.can_open,l.can_close,l.can_observe,l.can_read_reservations,
+                p.status AS product_status
+             FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
+             JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+            WHERE a.id=$1 AND l.id=$2 FOR SHARE OF a,l,p`
+        : `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,
                 l.active AS listing_active,l.product_id,l.mapping_version,l.adapter,l.adapter_version,l.can_open,l.can_close,l.can_observe,
                 d.desired_version,d.desired_state,d.mapping_version AS desired_mapping_version,d.source_start_at,d.source_end_at,
                 p.status AS product_status
-           FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
-           JOIN channel_desired_states d ON d.listing_id=l.id AND d.occurrence_id=$3
-           JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-          WHERE a.id=$1 AND l.id=$2 FOR SHARE OF a,l,d`, [job.account_id, job.listing_id, job.occurrence_id],
-      );
+             FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
+             JOIN channel_desired_states d ON d.listing_id=l.id AND d.occurrence_id=$3
+             JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+            WHERE a.id=$1 AND l.id=$2 FOR SHARE OF a,l,d,p`,
+        reservationJob ? [job.account_id, job.listing_id] : [job.account_id, job.listing_id, job.occurrence_id]);
       const current = currentResult.rows[0];
       const action = text(job, "action") as ChannelAction;
       const capability = action === "SET_OPEN" ? current?.can_open : action === "SET_CLOSED" ? current?.can_close : current?.can_observe;
       let liveOccurrenceMatches = false;
       let liveActionAllowed = action === "OBSERVE";
-      if (current) {
+      if (current && !reservationJob) {
         try {
           const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
           liveOccurrenceMatches = occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")
@@ -1707,7 +2196,7 @@ export class ChannelRuntime {
       }
       const desiredStateCurrent = current !== undefined
         && (action === "OBSERVE" || (action === "SET_OPEN" && current.desired_state === "OPEN") || (action === "SET_CLOSED" && current.desired_state === "CLOSED"));
-      const versionsCurrent = assignmentCurrent && current !== undefined && current.account_active === true && current.revoked_at === null
+      const availabilityVersionsCurrent = !reservationJob && assignmentCurrent && current !== undefined && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
         && current.listing_active === true && current.product_status === "PUBLISHED" && capability === true
         && (current.quarantined_at === null || action === "OBSERVE") && this.#adapterSupports(current, action)
@@ -1716,9 +2205,61 @@ export class ChannelRuntime {
         && integer(current, "desired_mapping_version") === integer(job, "mapping_version")
         && integer(current, "desired_version") === integer(job, "desired_version")
         && desiredStateCurrent && liveOccurrenceMatches && liveActionAllowed;
-      const acceptedAsCurrent = channelReadbackAccepted({
+      const reservationVersionsCurrent = reservationJob && assignmentCurrent && current !== undefined
+        && current.account_active === true && current.revoked_at === null
+        && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
+        && current.quarantined_at === null && current.listing_active === true && current.product_status === "PUBLISHED"
+        && current.can_observe === true && current.can_read_reservations === true
+        && this.#adapterSupports(current, "OBSERVE") && this.#adapterSupportsReservationRead(current)
+        && integer(current, "account_version") === integer(job, "account_version")
+        && integer(current, "mapping_version") === integer(job, "mapping_version")
+        && current.site === job.target_site && current.external_account_id === job.target_external_account_id
+        && current.external_product_id === job.target_external_product_id
+        && current.external_option_id === job.target_external_option_id
+        && current.adapter === job.target_adapter && current.adapter_version === job.target_adapter_version
+        && current.connection_mode === job.target_connection_mode;
+      let reservationReceiptCurrent = false;
+      let reservationNextDueAt: string | undefined;
+      let reservationCompletedAt: string | undefined;
+      if (reservationJob && input.outcome === "RESERVATION_VERIFIED" && input.reservationReadId && input.reservationReceiptId) {
+        const proof = await client.query<DbRow>(
+          `SELECT r.manifest_fingerprint,r.coverage_from,r.coverage_to,r.product_id,h.next_due_at,h.last_complete_at
+             FROM external_reservation_reads r
+             JOIN external_reservation_window_page_receipts pr ON pr.read_id=r.read_id AND pr.receipt_id=$2::uuid
+             JOIN external_reservation_listing_health h ON h.read_id=r.read_id AND h.provider_id=r.provider_id AND h.listing_id=r.listing_id
+            WHERE r.read_id=$1::uuid AND r.job_id=$3::uuid AND r.worker_id=$4 AND r.lease_epoch=$5
+              AND r.read_scope='WINDOW' AND r.status='SUBMITTED' AND r.batch_status='COMPLETE'
+              AND pr.terminal_status='COMPLETE' AND pr.request_fingerprint IS NOT NULL
+              AND h.read_generation=r.read_generation
+              AND pr.result->>'receiptId'=$2::text AND pr.result->>'readId'=$1::text
+              AND (pr.result->>'generation')::bigint=r.read_generation
+              AND (pr.result->>'pageNumber')::integer=pr.page_number
+              AND pr.result->>'terminalStatus'='COMPLETE'
+              AND (pr.result->>'healthUpdated')::boolean=true
+              AND (pr.result->>'missingActiveReservations')::integer=0
+              AND (pr.result->>'needsReview')::integer=0 AND (pr.result->>'stale')::integer=0
+              AND r.account_version=$6 AND r.mapping_version=$7
+            FOR SHARE OF r,pr,h`,
+          [input.reservationReadId, input.reservationReceiptId, jobId, identity.workerId, leaseEpoch,
+            job.account_version, job.mapping_version],
+        );
+        const row = proof.rows[0];
+        if (row && reservationVersionsCurrent) {
+          const manifest = await this.#reservationWindowManifest(client, text(job, "provider_id"), text(row, "product_id"),
+            isoValue(row, "coverage_from"), isoValue(row, "coverage_to"));
+          const dto = manifest.map((occurrence) => ({ occurrenceId: occurrence.id,
+            sourceStartAtUtc: occurrence.startUtc, sourceEndAtUtc: occurrence.endUtc }));
+          reservationReceiptCurrent = fingerprint(dto) === row.manifest_fingerprint;
+          reservationNextDueAt = isoValue(row, "next_due_at");
+          reservationCompletedAt = isoValue(row, "last_complete_at");
+        }
+      }
+      const acceptedAsCurrent = reservationJob
+        ? input.outcome === "RESERVATION_VERIFIED" && input.stopped && withinLease && exactTarget
+          && reservationVersionsCurrent && reservationReceiptCurrent
+        : channelReadbackAccepted({
         action, expectedTarget: targetFromRow(job), resultTarget: input.target,
-        outcome: input.outcome, stopped: input.stopped, withinLease, versionsCurrent,
+        outcome: input.outcome, stopped: input.stopped, withinLease, versionsCurrent: availabilityVersionsCurrent,
         occurrenceMatches: occurrenceMatchesSnapshot, observationTimeValid,
         ...(input.observedState === undefined ? {} : { observedState: input.observedState }),
         ...(input.observedBookable === undefined ? {} : { observedBookable: input.observedBookable }),
@@ -1728,15 +2269,26 @@ export class ChannelRuntime {
       await client.query(
         `INSERT INTO channel_job_results
           (result_id,job_id,worker_id,lease_epoch,lease_digest,fingerprint,outcome,stopped,exact_target_match,
-           occurrence_id,source_start_at,source_end_at,observed_state,observed_bookable,observed_manually_blocked,observed_at,accepted_as_current)
-         VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+           occurrence_id,source_start_at,source_end_at,observed_state,observed_bookable,observed_manually_blocked,observed_at,
+           accepted_as_current,reservation_read_id,reservation_receipt_id)
+         VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::uuid,$19::uuid)`,
         [input.resultId, jobId, identity.workerId, leaseEpoch, leaseDigest, resultFingerprint, input.outcome, input.stopped, exactTarget,
-          input.occurrenceId ?? job.occurrence_id, input.sourceStartAtUtc ?? job.source_start_at, input.sourceEndAtUtc ?? job.source_end_at,
-          input.observedState ?? null, input.observedBookable ?? null, input.observedManuallyBlocked ?? null, input.observedAtUtc ?? null, acceptedAsCurrent],
+          reservationShape ? null : input.occurrenceId ?? job.occurrence_id,
+          reservationShape ? null : input.sourceStartAtUtc ?? job.source_start_at,
+          reservationShape ? null : input.sourceEndAtUtc ?? job.source_end_at,
+          input.observedState ?? null, input.observedBookable ?? null, input.observedManuallyBlocked ?? null, input.observedAtUtc ?? null,
+          acceptedAsCurrent, input.reservationReadId ?? null, input.reservationReceiptId ?? null],
       );
       if (!withinLease) {
         await this.#quarantine(client, text(job, "account_id"), "LATE_RESULT");
-        if (input.stopped) await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "LATE_RESULT_STOPPED");
+        if (input.stopped) {
+          await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "LATE_RESULT_STOPPED");
+          if (reservationJob) await client.query(
+            `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
+               last_error='LATE_RESULT',updated_at=$3 WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+            [job.provider_id, job.listing_id, nowUtc, jobId],
+          );
+        }
         return { acceptedAsCurrent: false, repeated: false };
       }
       if (!input.stopped) {
@@ -1744,17 +2296,64 @@ export class ChannelRuntime {
         return { acceptedAsCurrent: false, repeated: false };
       }
       if (acceptedAsCurrent) {
+        if (reservationJob) {
+          await client.query(
+            `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,retry_count=0,last_error=NULL,halted_at=NULL,
+               last_success_at=$3,next_due_at=$4,updated_at=$2
+              WHERE provider_id=$5 AND listing_id=$6 AND pending_job_id=$1::uuid`,
+            [jobId, nowUtc, reservationCompletedAt, reservationNextDueAt, job.provider_id, job.listing_id],
+          );
+        } else {
+          await client.query(
+            `UPDATE channel_desired_states SET observed_state=$3,observed_desired_version=$4,observed_mapping_version=$5,
+               last_verified_at=$6,last_error=NULL,updated_at=$6 WHERE listing_id=$1 AND occurrence_id=$2`,
+            [job.listing_id, job.occurrence_id, input.observedState, job.desired_version, job.mapping_version, input.observedAtUtc],
+          );
+        }
         await client.query(
-          `UPDATE channel_desired_states SET observed_state=$3,observed_desired_version=$4,observed_mapping_version=$5,
-             last_verified_at=$6,last_error=NULL,updated_at=$6 WHERE listing_id=$1 AND occurrence_id=$2`,
-          [job.listing_id, job.occurrence_id, input.observedState, job.desired_version, job.mapping_version, input.observedAtUtc],
+          "UPDATE channel_jobs SET status='FINISHED',outcome=$3,lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
+          [jobId, nowUtc, reservationJob ? "RESERVATION_VERIFIED" : "VERIFIED"],
         );
-        await client.query(
-          "UPDATE channel_jobs SET status='FINISHED',outcome='VERIFIED',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
-          [jobId, nowUtc],
-        );
-        if (job.action === "OBSERVE") await this.#completeRecoveryObserve(client, job);
-      } else if (!versionsCurrent || input.outcome === "SUPERSEDED") {
+        if (!reservationJob && job.action === "OBSERVE") await this.#completeRecoveryObserve(client, job);
+      } else if (reservationJob) {
+        if (input.outcome === "SUPERSEDED" || !reservationVersionsCurrent) {
+          await client.query(
+            "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
+            [jobId, nowUtc],
+          );
+          await client.query(
+            `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,next_due_at=$3,
+               last_error='AUTHORITY_CHANGED',updated_at=$3 WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+            [job.provider_id, job.listing_id, nowUtc, jobId],
+          );
+        } else if (input.outcome === "RETRY_WAIT") {
+          const state = await client.query<DbRow>(
+            `SELECT retry_count FROM external_reservation_read_dispatch_states
+              WHERE provider_id=$1 AND listing_id=$2 FOR UPDATE`, [job.provider_id, job.listing_id],
+          );
+          const retryCount = Math.min(5, integer(state.rows[0]!, "retry_count") + 1);
+          const delayMinutes = [1, 5, 15, 30, 60][retryCount - 1]!;
+          await client.query(
+            "UPDATE channel_jobs SET status='FINISHED',outcome='RETRY_WAIT',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
+            [jobId, nowUtc],
+          );
+          await client.query(
+            `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,retry_count=$3,last_error='READ_INCOMPLETE',
+               next_due_at=$4::timestamptz + make_interval(mins=>$5),updated_at=$4
+              WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$6::uuid`,
+            [job.provider_id, job.listing_id, retryCount, nowUtc, delayMinutes, jobId],
+          );
+        } else {
+          const failureOutcome = input.outcome === "RESERVATION_VERIFIED" ? "NEEDS_REVIEW" : input.outcome;
+          await this.#finishUnsafe(client, jobId, text(job, "account_id"), failureOutcome, failureOutcome);
+          await client.query(
+            `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,last_error=$4,updated_at=$3
+              WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$5::uuid`,
+            [job.provider_id, job.listing_id, nowUtc,
+              input.outcome === "RESERVATION_VERIFIED" ? "INVALID_COMPLETE_PROOF" : failureOutcome, jobId],
+          );
+        }
+      } else if (!availabilityVersionsCurrent || input.outcome === "SUPERSEDED") {
         if (input.outcome === "VERIFIED") await this.#quarantine(client, text(job, "account_id"), "STALE_RESULT");
         await client.query(
           "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
@@ -1791,6 +2390,16 @@ export class ChannelRuntime {
     await client.query(
       "UPDATE channel_external_accounts SET quarantined_at=NULL,quarantine_reason=NULL,updated_at=$2 WHERE id=$1",
       [job.account_id, this.#nowIso()],
+    );
+    // Only the observe job issued by an explicit staff recovery may resume a
+    // halted reservation reader. This does not refresh its inventory health.
+    await client.query(
+      `UPDATE external_reservation_read_dispatch_states s
+          SET halted_at=NULL,last_error=NULL,retry_count=0,next_due_at=$2,updated_at=$2
+        WHERE s.account_id=$1 AND s.pending_job_id IS NULL AND s.halted_at IS NOT NULL
+          AND EXISTS (SELECT 1 FROM channel_admin_commands c
+            WHERE c.action='account.recover' AND c.result->>'observeJobId'=$3)`,
+      [job.account_id, this.#nowIso(), job.id],
     );
     const listingResult = await client.query<DbRow>(
       `SELECT l.*,a.site,a.external_account_id,a.active AS account_active,a.delegated_until,a.revoked_at,a.version AS account_version,a.quarantined_at
@@ -1843,6 +2452,12 @@ export class ChannelRuntime {
       await client.query(
         "UPDATE channel_jobs SET status='FINISHED',outcome='NEEDS_REVIEW',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
         [job.id, this.#nowIso()],
+      );
+      if (job.purpose === "RESERVATION_WINDOW") await client.query(
+        `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
+           last_error='MANUAL_RECOVERY_OBSERVE_REQUIRED',updated_at=$3
+          WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
+        [job.provider_id, job.listing_id, this.#nowIso(), job.id],
       );
       const recoveryDesired = await client.query<DbRow>(
         "UPDATE channel_desired_states SET desired_version=desired_version+1,updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING desired_version,source_start_at,source_end_at",

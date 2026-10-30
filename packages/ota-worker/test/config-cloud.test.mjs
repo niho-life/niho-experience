@@ -50,6 +50,62 @@ test("cloud result validates the exact 200 receipt and accepts a non-current aud
   await assert.rejects(client.result("job", {}), (error) => error.code === "INVALID_RESPONSE");
 });
 
+test("reservation window client pins paths and validates bounded manifests and page receipts", async () => {
+  const job = { id: "00000000-0000-4000-8000-000000000001", leaseToken: "lease" };
+  const cycle = {
+    readId: "00000000-0000-4000-8000-000000000002", generation: 3, scope: "WINDOW", repeated: false,
+    coverageFromUtc: "2098-12-28T15:00:00.000Z", coverageToUtc: "2099-02-28T15:00:00.000Z",
+    readStartedAtUtc: "2099-01-01T00:00:00.000Z", pageNumber: 0,
+    receiptId: "00000000-0000-4000-8000-000000000003",
+    manifest: [{ occurrenceId: "rule@2099-01-01", sourceStartAtUtc: "2099-01-01T01:00:00.000Z", sourceEndAtUtc: "2099-01-01T02:00:00.000Z" }],
+  };
+  const page = {
+    receiptId: cycle.receiptId, readId: cycle.readId, generation: 3, pageNumber: 0,
+    applied: 1, duplicates: 0, duplicateFacts: 0, stale: 0, needsReview: 0,
+    missingActiveReservations: 0, healthUpdated: false, repeated: false,
+    nextReceiptId: "00000000-0000-4000-8000-000000000004",
+  };
+  const paths = [];
+  const responses = [cycle, page];
+  const client = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async (url) => {
+    paths.push(new URL(url).pathname);
+    return new Response(JSON.stringify(responses.shift()), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  assert.deepEqual(await client.beginReservationWindow(job), cycle);
+  assert.deepEqual(await client.submitReservationWindowPage(job.id, {}), page);
+  assert.deepEqual(paths, [
+    "/internal/ota/v1/jobs/00000000-0000-4000-8000-000000000001/reservation-window-read",
+    "/internal/ota/v1/jobs/00000000-0000-4000-8000-000000000001/reservation-window-pages",
+  ]);
+
+  const invalid = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async () => new Response(JSON.stringify({
+    ...cycle, manifest: [...cycle.manifest, cycle.manifest[0]],
+  }), { status: 200, headers: { "content-type": "application/json" } }) });
+  await assert.rejects(invalid.beginReservationWindow(job), (error) => error.code === "INVALID_RESPONSE");
+
+  const tooWide = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async () => new Response(JSON.stringify({
+    ...cycle, coverageToUtc: "2099-03-01T15:00:00.000Z",
+  }), { status: 200, headers: { "content-type": "application/json" } }) });
+  await assert.rejects(tooWide.beginReservationWindow(job), (error) => error.code === "INVALID_RESPONSE");
+
+  const oversized = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async () => new Response("x", {
+    status: 200, headers: { "content-type": "application/json", "content-length": String(256 * 1024 + 1) },
+  }) });
+  await assert.rejects(oversized.beginReservationWindow(job), (error) => error.code === "RESPONSE_TOO_LARGE");
+});
+
+test("resource Google trigger returns no calendar identifiers and tolerates an older disabled endpoint", async () => {
+  let path;
+  const client = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async (url) => {
+    path = new URL(url).pathname;
+    return new Response(JSON.stringify({ processed: true, applied: false }), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  assert.deepEqual(await client.triggerResourceGoogleSync(), { processed: true, applied: false });
+  assert.equal(path, "/internal/ota/v1/google-sync");
+  const disabled = createCloudClient({ origin: "https://cloud.example", token: "x".repeat(40), fetchImpl: async () => new Response(null, { status: 404 }) });
+  assert.deepEqual(await disabled.triggerResourceGoogleSync(), { processed: false, applied: false });
+});
+
 test("cloud timeout remains armed while reading a hanging response body", async () => {
   let cancelled = false;
   const stream = new ReadableStream({

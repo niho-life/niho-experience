@@ -1,10 +1,14 @@
-import { addMinutes, evaluateAvailability, type AvailabilityResult, type BusyInterval, type Occurrence } from "@niho-experience/experience-domain";
+import { addMinutes, evaluateAvailability, intervalsOverlap, type AvailabilityResult, type BusyInterval, type Occurrence } from "@niho-experience/experience-domain";
 import type { Pool, PoolClient } from "pg";
 import { googleCalendarFromRow, isoValue, type DbRow } from "./rows.ts";
 import type { BookingMode, InventoryResourceKind } from "./types.ts";
 import { effectiveGoogleSyncStatus } from "./validation.ts";
 
 type Queryable = Pool | PoolClient;
+// schedule_rules and RESCHEDULE overrides both cap duration at 1,440 minutes.
+// Using the domain maximum keeps a boundary closed even when the current rule
+// is later shortened while an external reservation still occupies a resource.
+const MAX_SOURCE_OCCURRENCE_MINUTES = 1_440;
 
 export interface InventoryOccupancySnapshot {
   readonly resourceId: string;
@@ -77,6 +81,25 @@ export async function evaluateStoredInventories(
     const productId = String(row.product_id);
     resourcesByProduct.set(productId, [...(resourcesByProduct.get(productId) ?? []), row]);
   }
+  const reservationReadRequirements = await client.query<DbRow>(
+    `SELECT l.id AS listing_id,l.account_id,l.product_id,l.mapping_version,l.can_observe,
+            a.version AS account_version,a.active AS account_active,a.revoked_at,a.delegated_until,
+            h.account_id AS health_account_id,h.account_version AS health_account_version,
+            h.mapping_version AS health_mapping_version,h.coverage_from,h.coverage_to,h.fresh_until,
+            pr.resource_id,pr.prepare_minutes AS source_prepare_minutes,pr.cleanup_minutes AS source_cleanup_minutes
+       FROM channel_listings l
+       JOIN channel_external_accounts a ON a.provider_id=l.provider_id AND a.id=l.account_id
+       LEFT JOIN external_reservation_listing_health h ON h.provider_id=l.provider_id AND h.listing_id=l.id
+       LEFT JOIN product_inventory_resources pr ON pr.provider_id=l.provider_id AND pr.product_id=l.product_id
+      WHERE l.provider_id=$1 AND l.active=true AND l.can_read_reservations=true
+      ORDER BY l.id COLLATE "C",pr.resource_id COLLATE "C" NULLS FIRST`,
+    [providerId],
+  );
+  const reservationReadRequirementsByListing = new Map<string, DbRow[]>();
+  for (const row of reservationReadRequirements.rows) {
+    const listingId = String(row.listing_id);
+    reservationReadRequirementsByListing.set(listingId, [...(reservationReadRequirementsByListing.get(listingId) ?? []), row]);
+  }
   const reservations = await client.query<DbRow>(
     `WITH active_reservations AS (
        SELECT occurrence_id,seats,status,hold_expires_at FROM bookings
@@ -127,6 +150,31 @@ export async function evaluateStoredInventories(
     const resourceId = String(row.resource_id);
     activeOccupanciesByResource.set(resourceId, [...(activeOccupanciesByResource.get(resourceId) ?? []), row]);
   }
+  const resourceGoogle = resourceIds.length === 0 ? { rows: [] as DbRow[] } : await client.query<DbRow>(
+    `SELECT g.*,c.connection_generation AS current_connection_generation
+       FROM resource_google_calendars g
+       LEFT JOIN provider_google_connections c ON c.provider_id=g.provider_id
+        AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=c.provider_id
+          AND m.niho_user_id=c.connected_by_niho_user_id AND m.active=true AND m.role='OWNER')
+      WHERE g.provider_id=$1 AND g.resource_id=ANY($2::text[])`,
+    [providerId, resourceIds],
+  );
+  const resourceGoogleById = new Map(resourceGoogle.rows.map((row) => [String(row.resource_id), row]));
+  const resourceBusy = resourceIds.length === 0 ? { rows: [] as DbRow[] } : await client.query<DbRow>(
+    `SELECT b.resource_id,b.settings_version,b.connection_generation,b.start_at,b.end_at
+       FROM resource_google_busy_intervals b
+       JOIN resource_google_calendars g ON g.provider_id=b.provider_id AND g.resource_id=b.resource_id
+      WHERE b.provider_id=$1 AND b.resource_id=ANY($2::text[])
+        AND b.settings_version=g.settings_version AND b.connection_generation=g.connection_generation
+        AND b.end_at>$3 AND b.start_at<$4
+      ORDER BY b.resource_id COLLATE "C",b.start_at`,
+    [providerId, resourceIds, addMinutes(overallStart, -1_440), addMinutes(overallEnd, 1_440)],
+  );
+  const resourceBusyById = new Map<string, BusyInterval[]>();
+  for (const row of resourceBusy.rows) {
+    const resourceId = String(row.resource_id);
+    resourceBusyById.set(resourceId, [...(resourceBusyById.get(resourceId) ?? []), { startUtc: isoValue(row, "start_at"), endUtc: isoValue(row, "end_at") }]);
+  }
   const googleResult = await client.query<DbRow>("SELECT * FROM provider_google_calendars WHERE provider_id=$1", [providerId]);
   const google = googleResult.rows[0] === undefined ? undefined : googleCalendarFromRow(googleResult.rows[0]);
   let allBusyIntervals: BusyInterval[] = [];
@@ -150,6 +198,7 @@ export async function evaluateStoredInventories(
   const results = new Map<string, InventoryAvailability>();
   for (const request of requests) {
     const resourceRows = resourcesByProduct.get(request.productId) ?? [];
+    const requestedResourceIds = new Set(resourceRows.map((row) => String(row.resource_id)));
     const occupancies = resourceRows.map((row): InventoryOccupancySnapshot => ({
       resourceId: String(row.resource_id),
       resourceKind: String(row.kind) as InventoryResourceKind,
@@ -158,10 +207,55 @@ export async function evaluateStoredInventories(
       startAtUtc: addMinutes(request.occurrence.startUtc, -Number(row.prepare_minutes)),
       endAtUtc: addMinutes(request.occurrence.endUtc, Number(row.cleanup_minutes)),
     }));
+    const reservationReadUnavailable = [...reservationReadRequirementsByListing.values()].some((listingRows) => {
+      const row = listingRows[0]!;
+      const sharedRows = listingRows.filter((item) => item.resource_id !== null
+        && requestedResourceIds.has(String(item.resource_id)));
+      const relevant = String(row.product_id) === request.productId || sharedRows.length > 0;
+      if (!relevant) return false;
+      let requiredCoverageFromUtc = request.occurrence.startUtc;
+      let requiredCoverageToUtc = request.occurrence.endUtc;
+      for (const sourceResource of sharedRows) {
+        const requestedOccupancy = occupancies.find((item) => item.resourceId === String(sourceResource.resource_id));
+        if (!requestedOccupancy) continue;
+        const sourceFromUtc = addMinutes(requestedOccupancy.startAtUtc,
+          -(MAX_SOURCE_OCCURRENCE_MINUTES + Number(sourceResource.source_cleanup_minutes)));
+        const sourceToUtc = addMinutes(requestedOccupancy.endAtUtc, Number(sourceResource.source_prepare_minutes));
+        if (sourceFromUtc < requiredCoverageFromUtc) requiredCoverageFromUtc = sourceFromUtc;
+        if (sourceToUtc > requiredCoverageToUtc) requiredCoverageToUtc = sourceToUtc;
+      }
+      return row.can_observe !== true || row.account_active !== true || row.revoked_at !== null
+        || (row.delegated_until !== null && isoValue(row, "delegated_until") <= nowUtc)
+        || row.health_account_id !== row.account_id
+        || Number(row.health_account_version) !== Number(row.account_version)
+        || Number(row.health_mapping_version) !== Number(row.mapping_version)
+        || row.coverage_from === null || row.coverage_to === null || row.fresh_until === null
+        || isoValue(row, "coverage_from") > requiredCoverageFromUtc
+        || isoValue(row, "coverage_to") < requiredCoverageToUtc
+        || isoValue(row, "fresh_until") <= nowUtc;
+    });
     const reserved = reservationsByOccurrence.get(request.occurrence.id);
     const conflict = occupancies.some((occupancy) => (activeOccupanciesByResource.get(occupancy.resourceId) ?? []).some((row) =>
       !(String(row.product_id) === request.productId && String(row.occurrence_id) === request.occurrence.id)
       && isoValue(row, "end_at") > occupancy.startAtUtc && isoValue(row, "start_at") < occupancy.endAtUtc));
+    let resourceGoogleUnavailable = false;
+    let resourceGoogleBusy = false;
+    for (const occupancy of occupancies) {
+      const configured = resourceGoogleById.get(occupancy.resourceId);
+      if (!configured || configured.enabled !== true) continue;
+      const sameGeneration = configured.current_connection_generation !== null
+        && Number(configured.current_connection_generation) === Number(configured.connection_generation);
+      const covered = configured.coverage_start !== null && configured.coverage_end !== null
+        && isoValue(configured, "coverage_start") <= occupancy.startAtUtc
+        && isoValue(configured, "coverage_end") >= occupancy.endAtUtc;
+      const fresh = sameGeneration && covered
+        && effectiveGoogleSyncStatus(String(configured.sync_status) as "FRESH" | "STALE" | "FAILED",
+          configured.fresh_until === null ? undefined : isoValue(configured, "fresh_until"), nowUtc) === "FRESH";
+      if (!fresh) { resourceGoogleUnavailable = true; continue; }
+      if ((resourceBusyById.get(occupancy.resourceId) ?? []).some((busy) => intervalsOverlap(
+        { startUtc: occupancy.startAtUtc, endUtc: occupancy.endAtUtc }, busy,
+      ))) resourceGoogleBusy = true;
+    }
     const rangeStart = addMinutes(request.occurrence.startUtc, -request.occurrence.busyBufferBeforeMinutes);
     const rangeEnd = addMinutes(request.occurrence.endUtc, request.occurrence.busyBufferAfterMinutes);
     const covered = google?.coverageStartUtc !== undefined && google.coverageEndUtc !== undefined
@@ -181,12 +275,16 @@ export async function evaluateStoredInventories(
         activeGroupCount: Number(reserved?.groups ?? 0),
         hasInactiveResource: resourceRows.some((row) => row.active !== true),
         hasResourceConflict: conflict,
+        hasResourceGoogleUnavailable: resourceGoogleUnavailable,
+        hasResourceGoogleBusy: resourceGoogleBusy,
       },
     });
     results.set(request.occurrence.id, {
       bookingMode, occupancies,
       availability: unresolved.rows.length > 0 && availability.bookable
         ? { ...availability, bookable: false, availableSeats: 0, reason: "EXTERNAL_RESERVATION_UNRESOLVED" }
+        : reservationReadUnavailable && availability.bookable
+          ? { ...availability, bookable: false, availableSeats: 0, reason: "EXTERNAL_RESERVATION_READ_UNAVAILABLE" }
         : availability,
     });
   }

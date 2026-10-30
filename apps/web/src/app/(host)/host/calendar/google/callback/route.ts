@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { exchangeGoogleCode, listGoogleCalendars } from "@niho-experience/google-calendar";
+import { ResourceGoogleRepository } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { googleRuntimeConfig, initializeBookingCalendar, saveGoogleConnection, syncGoogleBusy } from "@/lib/experience/google-connection";
 import { hostActor } from "@/lib/experience/host-actor";
@@ -42,6 +43,12 @@ export async function GET(request: NextRequest) {
     if (!busyCalendarId) return done("failed");
     const bookingCalendarId = await initializeBookingCalendar(token);
     await saveGoogleConnection(pool, actor.actor, token, busyCalendarId, bookingCalendarId);
+    if (process.env.EXPERIENCE_RESOURCE_GOOGLE_ENABLED === "true") {
+      const generation = await pool.query<{ connection_generation: string }>("SELECT connection_generation FROM provider_google_connections WHERE provider_id=$1", [actor.actor.providerId]);
+      if (generation.rows[0]) await new ResourceGoogleRepository(pool).replaceCalendarInventory({ ...actor.actor, calendarRoleCeiling: "OWNER" }, {
+        connectionGeneration: Number(generation.rows[0].connection_generation), calendars, fetchedAtUtc: new Date().toISOString(),
+      });
+    }
     try {
       await syncGoogleBusy(pool, store, actor.actor.providerId);
       return done("connected");

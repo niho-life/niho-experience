@@ -1,6 +1,20 @@
 # 外部予約の定期照合（#237）
 
-2026-10-30の設計。予約台帳と受入APIは[外部予約台帳](ota-external-reservations.md)、実行機の排他・停止は[worker](ota-worker.md)を再利用する。**以下のreaderと定期照合は未実装である。** 予約が読めない状態を予約ゼロや同期完了へ置き換えない。
+2026-10-30の設計と、#237の保存API・#262の配送基盤の実装。予約台帳と受入APIは[外部予約台帳](ota-external-reservations.md)、実行機の排他・停止は[worker](ota-worker.md)を再利用する。**期間readの保存API・page receipt・health、15分scheduler、固定reader executorへの配送までは実装したが、実サイトreader、ブラウザdriver、実サイト受入は未実装である。** 予約が読めない状態を予約ゼロや同期完了へ置き換えない。この段階だけで#237全体を完了または本番対応済みとは扱わない。
+
+## 今回実装した境界
+
+- migration `0016_external_reservation_window_reads.sql` は既存の単一回 `OCCURRENCE` readを残したまま、`WINDOW` scope、JST当日-3日の00:00から当日+59日の00:00未満までの62日coverage、最大512回のimmutable canonical manifest、server発行page receipt、跨page fact fingerprint、listing別healthを追加する。旅行者へ表示する8週間（当日から55日後まで）の前後へ、最大24時間の実施時間・準備・片付けを安全に判定する余白を持たせる。
+- `POST /internal/ota/v1/jobs/{id}/reservation-window-read` は既存の認証済みworkerとOBSERVE lease内で、server clockからJST日境界を決めた62日manifestと最初のreceipt IDを発行する。商品・回・期間をworker入力から受け取らない。
+- `POST /internal/ota/v1/jobs/{id}/reservation-window-pages` は最大32facts・16 KiB、連続page番号、expected previous receipt、`sourceCursor` / `nextSourceCursor` chain、任意のsnapshot token、terminal evidenceを検証する。cursor原文は保存せずdigestだけを永続化する。1page目は開始cursorなし、次pageは直前の`nextSourceCursor`と一致し、terminalは`nextSourceCursor`なしに限定する。同一receiptの同一payloadはACK replayし、改変、順序抜け、cursor/token混在、同じ予約IDの異なるfactを409で拒否する。
+- 個々のfactは既存単一回APIと同じ台帳適用moduleを使い、明示取消、source版、日時移動、resource buffer、要確認fence、transactional outboxの規則を共有する。manifestに一意に対応しない時刻は推測しない。
+- 32件と16 KiBの両方を満たすようにreader側で分割する。外部サイトの1ページを複数の保存pageへ分ける場合は、外部cursorと分割位置を区別したopaque cursorを使う。以前のcursorへ戻る循環も拒否する。ACK再送は同じreceipt・payloadのまま行う。
+- `COMPLETE` healthは、現在のaccount/mapping/canonical manifest、page完走、全状態・coverage evidence、既知active予約の欠落なし、当該readの`NEEDS_REVIEW` / `STALE`なしを同一transactionで満たしたときだけgeneration順に更新する。15分後のnext due、45分後のfreshness expiryと即時・expiry calendar outboxを保存する。`PARTIAL` / `FAILED` / 欠落active / stale fact / 空配列だけではfreshにしない。初回の空COMPLETEは完全性証跡があり既知activeがない場合だけ許す。
+- availability gateは、listingがactiveかつ`canReadReservations=true`になった時点から有効になる。初回未確認、期限切れ、coverage外、account/mapping変更、account inactive/revoked/delegation切れ、`canObserve=false`では対象商品と共有resource商品だけ新規OPENを`EXTERNAL_RESERVATION_READ_UNAVAILABLE`（Host表示「確認待ち」）で保留する。listing自体をinactiveまたは`canReadReservations=false`にした場合だけ読取要件を外す。既存の`canReadReservations=false` pilotは変えない。
+- `channel_jobs.purpose=RESERVATION_WINDOW` とlisting別のdurable巡回stateを追加した。既存claim routeが通常outbox処理後に最大1件をenqueueし、初回は即時、成功はhealthの15分後、失敗は1/5/15/30/60分の有界backoffにする。mapping/account/assignment等が変わったQUEUED jobは`SUPERSEDED`にするが、LEASED jobと既存browser排他はschedulerから解除しない。canonical desired rowが無いlistingは予約ゼロを捏造せず、有界延期する。
+- 配備されていないreaderは候補件数の制限前に除外する。停止した巡回は通常pollで自動解除せず、既存のスタッフによる停止確認・復旧OBSERVEが成功した場合だけ再開する。復旧操作だけでは予約healthをfreshにせず、次の完全な予約readを待つ。
+- claim DTOは予約jobだけ`purpose: RESERVATION_WINDOW`を持つ。通常OBSERVEは従来shapeのままで、予約jobはavailability driverやClaudeへ渡さず固定reader executorへ分岐する。`RESERVATION_VERIFIED`は最終COMPLETE page receiptと同じreadのcurrent health、lease epoch、worker、account/mapping/assignment、現在manifestをserver側で再確認し、通常のobserved列やquarantine recoveryを更新しない。
+- `ota-worker` はmanifestを固定readerへ渡し、reader応答を1回512facts・256 KiB、配送を最大4096page・各32facts・JSON実byte 16 KiB以下に制限する。外部cursorは512文字、snapshot tokenは256文字まで受け、分割位置とcursorのdigestから512文字以下のopaque chainを作る。選別済みfactとimmutable receiptだけを送信前にowner-only private journalへ保存し、ACK喪失時は同一payloadを最大1回だけ再送する。deadline/lease失効ではreader callbackを待ち続けず直ちにstopを開始し、有界時間内に停止を証明できなければ成功へしない。固定reader registryは空であり、合成testだけfactory注入する。unsupported readerを空の`COMPLETE`へ置換しない。
 
 ## V1対象と実行単位
 
@@ -10,12 +24,12 @@ GetYourGuide、Airbnb、Viator、じゃらんがV1対象。サイト別の予約
 
 ## server発行の読取scope
 
-#236の現行APIは単一canonical occurrenceを対象にする。そのまま別の回の予約を投入してはならない。期間走査を有効にする前に、次を明示的に拡張する。
+#236のAPIは単一canonical occurrenceを対象にする。そのまま別の回の予約を投入してはならない。期間走査用に次の境界を拡張した。
 
 - serverがaccount/listing/mapping version、期間、既存canonical occurrenceとUTC時刻の対応表を固定する。worker入力から商品・回・別提供者を新設しない。
 - serverが外部アクセス前に一つの単調generationを発行する。既存のbrowser leaseを再利用し、別のTTL排他を重ねない。
-- 最大32件のpageごとにimmutable receipt IDとfingerprintを保持し、page ACK喪失を同じpayloadで再送する。別page、別cursor、旧mappingを混ぜない。
-- pagination完走、全状態filter、対象account/product、coverage、読取開始・終了を確認した場合だけCOMPLETEにする。完走不明・件数上限・途中認証切れはPARTIAL/FAILED。
+- 最大32件のpageごとにimmutable receipt IDとfingerprintを保持し、page ACK喪失を同じpayloadで再送する。別page、cursor chain、旧mappingを混ぜない。
+- pagination完走、全状態filter、対象account/product、coverage、読取開始・終了を確認した場合だけCOMPLETEにする。`allPagesRead` / `allStatusesIncluded` / `coverageComplete`はallowlist済みreaderによる宣言であり、serverがvendor画面の完全性を独立に証明したものではない。完走不明・件数上限・途中認証切れはPARTIAL/FAILEDにし、未受入readerのcapabilityは閉じたままにする。
 - snapshot tokenやsource revisionが無いpaginationでは、並行更新によりpage間で予約が移動する可能性を扱う。欠落を取消と推測しない。以前のactive予約が見つからなければ、既知IDの正規詳細を再照会するか要確認として占有を保持する。
 
 ## 台帳とfreshness
@@ -37,3 +51,11 @@ GetYourGuide、Airbnb、Viator、じゃらんがV1対象。サイト別の予約
 5. 予約検知から他販路の読戻しまでの時間と、1時間超過・人手介入を実測すること。
 
 Claude Maxの上限、有効な掲載先session、reader未対応は異なる状態として記録する。従量APIへのfallback、challengeの自動突破、本人同意を飛ばす再ログインは行わない。本番flagは対象readerとStudio運用の受入前に開かない。
+
+## 次batchに残るもの
+
+- GetYourGuide、Airbnb、Viator、じゃらん各サイトの実readerと実サイトでの全状態・全page・取消・日時変更・challenge受入。
+- browser driver、実site reader registry、既知予約欠落時の詳細再照会フローへの接続。現registryは空のため、本番capabilityは開けない。
+- rolloutは旧worker停止の確認、migrationとserver、新worker、サイト別受入、deployment/listing capabilityの順とする。予約期間jobだけ新purpose/receiptを使い、通常の枠jobは従来shapeを維持する。
+- 許可済み実サイトでの1時間以内という同期目標の計測。15分/45分は今回保存した初期運用値であり、達成済み実測ではない。
+- Studio常駐設定、段階的なdeployment/listing capability有効化、実DB migrationと本番/ステージング受入。未対応readerを本番対応へ昇格しない。

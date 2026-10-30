@@ -89,12 +89,14 @@ export function validateClaim(value, nowMs = Date.now()) {
   if (!exactKeys(value, [
     "id", "leaseToken", "leaseExpiresAtUtc", "deadlineAtUtc", "action", "occurrenceId", "desiredVersion",
     "mappingVersion", "sourceStartAtUtc", "sourceEndAtUtc", "target",
-  ])) throw new ContractError("INVALID_JOB");
+  ], ["purpose"])) throw new ContractError("INVALID_JOB");
   if (!UUID_V4.test(value.id) || typeof value.leaseToken !== "string" || value.leaseToken.length < 1 || value.leaseToken.length > 100
     || !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(value.action)
     || typeof value.occurrenceId !== "string" || value.occurrenceId.length < 1 || value.occurrenceId.length > 256
     || !Number.isSafeInteger(value.desiredVersion) || value.desiredVersion < 1
-    || !Number.isSafeInteger(value.mappingVersion) || value.mappingVersion < 1) throw new ContractError("INVALID_JOB");
+    || !Number.isSafeInteger(value.mappingVersion) || value.mappingVersion < 1
+    || (value.purpose !== undefined && value.purpose !== "RESERVATION_WINDOW")
+    || (value.purpose === "RESERVATION_WINDOW" && value.action !== "OBSERVE")) throw new ContractError("INVALID_JOB");
   canonicalInstant(value.leaseExpiresAtUtc, "leaseExpiresAtUtc");
   canonicalInstant(value.deadlineAtUtc, "deadlineAtUtc");
   canonicalInstant(value.sourceStartAtUtc, "sourceStartAtUtc");
@@ -147,5 +149,21 @@ export function makeResult({ resultId, job, outcome, stopped, observation }) {
       observedManuallyBlocked: observation.manuallyBlocked,
       observedAtUtc: observation.observedAtUtc,
     } : {}),
+  });
+}
+
+export function makeReservationResult({ resultId, job, outcome, stopped, reservationReadId, reservationReceiptId }) {
+  if (!UUID_V4.test(resultId) || typeof stopped !== "boolean" || job.purpose !== "RESERVATION_WINDOW"
+    || !["RESERVATION_VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "RETRY_WAIT", "SUPERSEDED"].includes(outcome)) {
+    throw new ContractError("INVALID_RESULT");
+  }
+  const verified = outcome === "RESERVATION_VERIFIED";
+  if ((verified && !(UUID_V4.test(reservationReadId ?? "") && UUID_V4.test(reservationReceiptId ?? "")))
+    || (!verified && (reservationReadId !== undefined || reservationReceiptId !== undefined))) {
+    throw new ContractError("INVALID_RESULT");
+  }
+  return Object.freeze({
+    resultId, leaseToken: job.leaseToken, outcome, stopped, target: job.target,
+    ...(verified ? { reservationReadId, reservationReceiptId } : {}),
   });
 }

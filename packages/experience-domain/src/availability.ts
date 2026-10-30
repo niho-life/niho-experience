@@ -65,6 +65,8 @@ export function evaluateAvailability(input: AvailabilityInput): AvailabilityResu
 
   if (input.sharedInventory?.hasInactiveResource === true) return result(input, "RESOURCE_INACTIVE", remainingCapacity);
   if (input.sharedInventory?.hasResourceConflict === true) return result(input, "RESOURCE_BUSY", remainingCapacity);
+  if (input.sharedInventory?.hasResourceGoogleUnavailable === true) return result(input, "RESOURCE_GOOGLE_UNAVAILABLE", remainingCapacity);
+  if (input.sharedInventory?.hasResourceGoogleBusy === true) return result(input, "RESOURCE_GOOGLE_BUSY", remainingCapacity);
 
   if (input.googleCalendar.blockingEnabled) {
     if (input.googleCalendar.syncStatus !== "FRESH") {
