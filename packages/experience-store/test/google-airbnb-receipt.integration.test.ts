@@ -22,7 +22,8 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const { Pool } = await import("pg");
   const schema = `google_airbnb_receipt_${randomUUID().replaceAll("-", "")}`;
   const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
-  let now = new Date();
+  const now = new Date();
+  let clockOffsetMs = 0;
   const occurrenceParts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(new Date(now.getTime() + 24 * 60 * 60 * 1_000));
@@ -52,7 +53,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
     );
   }
   const options = {
-    now: () => now,
+    now: () => new Date(Date.now() + clockOffsetMs),
     supportedAdapters: { "Airbnb/airbnb-google-busy@1": { canOpen: true, canClose: true, canObserve: true } },
   };
   const disabledRuntime = new ChannelRuntime(pool, options);
@@ -108,7 +109,8 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
     googleAirbnbProof: { deliveryId: delivery.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const },
     ...overrides,
   });
-  return { schema, pool, runtime, disabledRuntime, worker, claimed, delivery, generation, result, setNow: (value: Date) => { now = value; } };
+  return { schema, pool, runtime, disabledRuntime, worker, claimed, delivery, generation, result,
+    setNow: (value: Date) => { clockOffsetMs = value.getTime() - Date.now(); } };
 }
 
 async function cleanup(value: Fixture) {
@@ -118,18 +120,19 @@ async function cleanup(value: Fixture) {
 
 describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl === undefined }, () => {
   for (const scenario of [
-    { name: "retains verification milliseconds after a same-second lease start", desired: "CLOSED", leaseAt: "2099-01-01T00:00:00.100Z", observedAt: "2099-01-01T00:00:00.700Z", accepted: true },
-    { name: "rejects a same-second observation preceding Google verification", desired: "OPEN", leaseAt: "2098-12-31T23:59:59.900Z", observedAt: "2099-01-01T00:00:00.400Z", accepted: false },
+    { name: "retains verification milliseconds after a same-second lease start", desired: "CLOSED", leaseOffset: 100, observedOffset: 700, accepted: true },
+    { name: "rejects a same-second observation preceding Google verification", desired: "OPEN", leaseOffset: -100, observedOffset: 400, accepted: false },
   ] as const) it(scenario.name, async () => {
     const value = await fixture(scenario.desired);
     try {
-      const googleAt = "2099-01-01T00:00:00.500Z";
-      await value.pool.query("UPDATE channel_jobs SET lease_started_at=$2 WHERE id=$1::uuid", [value.claimed.id, scenario.leaseAt]);
-      await value.pool.query("UPDATE google_channel_deliveries SET updated_at=$2 WHERE id=$1::uuid", [value.delivery.deliveryId, googleAt]);
-      value.setNow(new Date("2099-01-01T00:00:00.900Z"));
-      const selected = (await value.pool.query("SELECT updated_at FROM google_channel_deliveries WHERE id=$1::uuid", [value.delivery.deliveryId])).rows[0];
-      assert.ok(selected.updated_at instanceof Date, "exercise the actual pg timestamptz Date representation");
-      const input = value.result(command(200), { observedAtUtc: scenario.observedAt });
+      const base = Math.floor(Date.now() / 1_000) * 1_000 + 2_000;
+      const googleAt = new Date(base + 500).toISOString();
+      await value.pool.query("UPDATE channel_jobs SET lease_started_at=$2 WHERE id=$1::uuid", [value.claimed.id, new Date(base + scenario.leaseOffset).toISOString()]);
+      await value.pool.query("UPDATE google_channel_deliveries SET operation_verified_at=$2 WHERE id=$1::uuid", [value.delivery.deliveryId, googleAt]);
+      value.setNow(new Date(base + 900));
+      const selected = (await value.pool.query("SELECT operation_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [value.delivery.deliveryId])).rows[0];
+      assert.ok(selected.operation_verified_at instanceof Date, "exercise the actual pg timestamptz Date representation");
+      const input = value.result(command(200), { observedAtUtc: new Date(base + scenario.observedOffset).toISOString() });
       if (scenario.accepted) {
         assert.equal((await value.runtime.submitResult(value.worker, value.claimed.id, input)).acceptedAsCurrent, true);
         const stored = (await value.pool.query("SELECT google_airbnb_verified_at FROM channel_job_results WHERE result_id=$1::uuid", [input.resultId])).rows[0];
@@ -310,7 +313,8 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       await value.pool.query(
         `INSERT INTO google_channel_deliveries
          SELECT (jsonb_populate_record(NULL::google_channel_deliveries,
-           to_jsonb(d) || jsonb_build_object('id',$2::text,'intent_fingerprint',repeat('f',64),'phase','UNCERTAIN'))).*
+           to_jsonb(d) || jsonb_build_object('id',$2::text,'intent_fingerprint',repeat('f',64),'phase','UNCERTAIN',
+             'operation_verified_at',NULL,'first_verified_at',NULL))).*
            FROM google_channel_deliveries d WHERE d.id=$1::uuid`,
         [value.delivery.deliveryId, unresolvedId],
       );

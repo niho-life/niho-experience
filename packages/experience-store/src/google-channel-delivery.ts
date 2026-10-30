@@ -74,7 +74,7 @@ function integer(value: unknown): number {
   return result;
 }
 function iso(value: unknown): string {
-  const parsed = new Date(String(value));
+  const parsed = value instanceof Date ? value : new Date(String(value));
   if (!Number.isFinite(parsed.getTime())) throw new StoreConflictError("Stored Google delivery time is invalid.");
   return parsed.toISOString();
 }
@@ -164,7 +164,7 @@ export class GoogleChannelDeliveryRepository {
       || row.account_active !== true || row.listing_active !== true || row.revoked_at !== null
       || row.product_status !== "PUBLISHED"
       || (observe ? row.can_observe : row.action === "SET_OPEN" ? row.can_open : row.action === "SET_CLOSED" ? row.can_close : row.can_observe) !== true
-      || (dispatch && row.quarantined_at !== null)
+      || ((dispatch || observe) && row.quarantined_at !== null)
       || (row.delegated_until !== null && new Date(String(row.delegated_until)).toISOString() <= now)
       || new Date(String(row.lease_expires_at)).toISOString() <= now || new Date(String(row.job_deadline_at)).toISOString() <= now
       || integer(row.lease_epoch) !== context.leaseEpoch || integer(row.lease_assignment_version) !== context.assignmentVersion
@@ -357,7 +357,9 @@ export class GoogleChannelDeliveryRepository {
       this.#assertBindingSnapshot(delivery, current, context);
       this.#assertCurrentTarget(delivery, context);
 
-      const sameCurrentOperation = delivery.operation_kind === "OBSERVE"
+      const sameCurrentOperation = (delivery.operation_kind === "OBSERVE"
+        || (delivery.operation_kind === "DISPATCH" && delivery.phase === "GOOGLE_VERIFIED"
+          && delivery.operation_verified_at !== null && delivery.operation_verified_at !== undefined))
         && delivery.operation_job_id === context.jobId && delivery.operation_worker_id === identity.workerId
         && integer(delivery.operation_lease_epoch) === context.leaseEpoch
         && integer(delivery.operation_assignment_version) === context.assignmentVersion;

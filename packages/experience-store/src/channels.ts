@@ -2421,7 +2421,7 @@ export class ChannelRuntime {
       if (isoValue(job, "lease_expires_at") <= nowUtc || isoValue(job, "job_deadline_at") <= nowUtc) throw new StoreConflictError("Delivery lease expired.");
       if (operation === "observe") {
         const current = (await client.query<DbRow>(
-          `SELECT a.site,l.product_id,l.can_observe,l.adapter,l.adapter_version,l.mapping_version,
+          `SELECT a.site,a.quarantined_at,l.product_id,l.can_observe,l.adapter,l.adapter_version,l.mapping_version,
                   d.desired_state,d.desired_version,d.mapping_version AS desired_mapping_version,
                   d.source_start_at,d.source_end_at
              FROM channel_listings l
@@ -2430,7 +2430,7 @@ export class ChannelRuntime {
             WHERE l.id=$1 FOR SHARE OF l,d`,
           [job.listing_id, job.occurrence_id],
         )).rows[0];
-        if (!current || current.can_observe !== true || !this.#adapterSupports(current, "OBSERVE")
+        if (!current || current.quarantined_at !== null || current.can_observe !== true || !this.#adapterSupports(current, "OBSERVE")
           || integer(current, "mapping_version") !== integer(job, "mapping_version")
           || integer(current, "desired_mapping_version") !== integer(job, "mapping_version")
           || integer(current, "desired_version") !== integer(job, "desired_version")
@@ -2721,8 +2721,11 @@ export class ChannelRuntime {
       }
       const googleDesiredState = action === "SET_OPEN" ? "OPEN" : action === "SET_CLOSED" ? "CLOSED"
         : current?.desired_state as ChannelDesiredState | undefined;
-      if (input.googleAirbnbProof && input.observedAtUtc && googleDesiredState !== undefined) {
-        if (!availabilityVersionsCurrent) throw new StoreConflictError("Google Airbnb observation authority changed.");
+      if (input.googleAirbnbProof) {
+        if (!input.observedAtUtc || (googleDesiredState !== "OPEN" && googleDesiredState !== "CLOSED")
+          || !availabilityVersionsCurrent || current?.quarantined_at !== null) {
+          throw new StoreConflictError("Google Airbnb observation authority changed.");
+        }
         const receipt = await verifyGoogleAirbnbReceipt(client, {
           deliveryId: input.googleAirbnbProof.deliveryId, jobId, providerId: text(job, "provider_id"),
           accountId: text(job, "account_id"), listingId: text(job, "listing_id"), occurrenceId: text(job, "occurrence_id"),

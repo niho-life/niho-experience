@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。Issue #291 で同一lease内のGoogle/Airbnb typed receiptを追加し、Issue #302 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Googleへの本番実接続、Airbnb observer/caller、本番有効化の完了を示すものではない。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 で同一lease内のGoogle/Airbnb typed receiptを追加し、Issue #302 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Googleへの本番実接続、worker callerとの接続、本番有効化は未完了である。
 
 公式根拠：
 
@@ -60,9 +60,11 @@ serverのtyped result受付は `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=tru
 
 `observe` は毎回新しいoperation nonce/epochを発行し、Google I/O前に`operation_verified_at`をNULLへ戻してから、`inspectGoogleManagedBlock`のGETだけを行う。404・metadata不一致は`NOT_MATCHED`、token・設定・読取失敗は`STOPPED`であり、insert/PATCH/deleteへfallbackしない。成功時だけserver clockで`operation_verified_at`を記録し、最初の成功時刻`first_verified_at`は`COALESCE`で保持する。typed receiptは`operation_verified_at >= current lease_started_at`かつAirbnbの`observed_at`以下を要求するため、準備時の`updated_at`更新や過去leaseの証拠は通らない。同じcurrent leaseでの明示retryも新nonceで再GETし、遅れて戻った旧GETは保存できない。
 
+同じleaseのDISPATCHが検証済みの場合も、追加writeなしでGET再確認できる。現在intentの確認はquarantineのないaccountだけを対象とし、手動停止中はGoogle読取りとtyped receiptの両方を止める。通常の手動復旧・過去intentのreconcileによる認可境界は保つ。
+
 `RECONCILE`は結果不明writeのhistorical journalを読む手動回復経路であり、`STORED_JOURNAL_ONLY`の過去事実に留まる。`RECONCILE`だけの`GOOGLE_VERIFIED`はtyped receiptへ直接使えず、現在intentの成功には新しい`observe` GETが必要である。このleafでは保守的に、最後のoperationが`RECONCILE`のjournalをobserve seedとして再利用しない。
 
-この受付は日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。Airbnb observer/caller、wait queue・scheduler・job作成、60分pending表示、UI、flag有効化は含まない。既存flagは既定OFFのままであり、次段ではcallerとlive scopeでSET再lease／将来OBSERVEを実際に起動して受入する。
+この受付は日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。独立observerを使うworker caller、wait queue・scheduler・job作成、60分pending表示、UI、flag有効化は含まない。既存flagは既定OFFのままであり、次段ではcallerとlive scopeでSET再lease／将来OBSERVEを実際に起動して受入する。
 
 ## 未接続・未受入
 

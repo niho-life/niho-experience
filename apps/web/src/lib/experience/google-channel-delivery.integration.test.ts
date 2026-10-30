@@ -53,7 +53,8 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
     (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
     VALUES ('provider-a','tea','tea','PUBLISHED','Synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic','Synthetic Seller')`);
   const store = new ExperienceStore(pool);
-  let now = new Date();
+  const now = new Date();
+  let clockOffsetMs = 0;
   const occurrenceParts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(new Date(now.getTime() + 24 * 60 * 60 * 1_000));
@@ -73,7 +74,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
     );
   }
   const runtime = new ChannelRuntime(pool, {
-    now: () => now,
+    now: () => new Date(Date.now() + clockOffsetMs),
     supportedAdapters: { "Airbnb/airbnb-google-busy@1": { canOpen: true, canClose: true, canObserve: true } },
     googleAirbnbObservationEnabled: true,
   });
@@ -110,7 +111,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const claimed = await runtime.claim(worker);
   if (!claimed) throw new Error("Synthetic Google delivery job was not claimable");
   return { schema, pool, runtime, admin, account, listing, worker, claimed, generation,
-    setNow: (value: Date) => { now = value; } };
+    setNow: (value: Date) => { clockOffsetMs = value.getTime() - Date.now(); } };
 }
 
 async function cleanup(value: Fixture): Promise<void> {
@@ -194,6 +195,21 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
         value.pool, value.runtime, value.worker, value.claimed.id, value.claimed.leaseToken, "dispatch", injected(syntheticFetch),
       )).toEqual(result);
       expect(writes).toBe(1);
+      const firstVerifiedAt = (await value.pool.query(
+        "SELECT first_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [result.deliveryId],
+      )).rows[0].first_verified_at;
+      methods.length = 0;
+      expect((await executeGoogleChannelDelivery(
+        value.pool, value.runtime, value.worker, value.claimed.id, value.claimed.leaseToken, "observe", injected(syntheticFetch),
+      )).phase).toBe("GOOGLE_VERIFIED");
+      expect(methods).toEqual(["GET"]);
+      expect(writes).toBe(1);
+      const refreshed = (await value.pool.query(
+        "SELECT operation_kind,operation_verified_at,first_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [result.deliveryId],
+      )).rows[0];
+      expect(refreshed.operation_kind).toBe("OBSERVE");
+      expect(refreshed.first_verified_at.toISOString()).toBe(firstVerifiedAt.toISOString());
+      expect(refreshed.operation_verified_at.getTime()).toBeGreaterThanOrEqual(firstVerifiedAt.getTime());
     } finally {
       await cleanup(value);
     }
@@ -385,6 +401,22 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
           observedState: "CLOSED" as const, observedBookable: false, observedAtUtc: new Date().toISOString(),
           googleAirbnbProof: { deliveryId: dispatch.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const },
         };
+        await value.pool.query("UPDATE channel_external_accounts SET quarantined_at=clock_timestamp(),quarantine_reason='MANUAL_HANDLING' WHERE id='account-a'");
+        methods.length = 0;
+        await expect(executeGoogleChannelDelivery(
+          value.pool, value.runtime, value.worker, futureObserve.id, futureObserve.leaseToken, "observe", injected(google.fetch!),
+        )).rejects.toBeInstanceOf(StoreConflictError);
+        expect(methods).toEqual([]);
+        await expect(value.runtime.submitResult(value.worker, futureObserve.id, futureInput)).rejects.toBeInstanceOf(StoreConflictError);
+        expect((await value.pool.query("SELECT count(*)::int AS count FROM channel_job_results WHERE result_id=$1::uuid", [futureInput.resultId])).rows[0].count).toBe(0);
+        // Restore only this synthetic account, then establish a new proof rather
+        // than reusing the observation collected before the manual hold.
+        await value.pool.query("UPDATE channel_external_accounts SET quarantined_at=NULL,quarantine_reason=NULL WHERE id='account-a'");
+        await executeGoogleChannelDelivery(
+          value.pool, value.runtime, value.worker, futureObserve.id, futureObserve.leaseToken, "observe", injected(google.fetch!),
+        );
+        expect(methods).toEqual(["GET"]);
+        futureInput.observedAtUtc = new Date().toISOString();
         expect(await value.runtime.submitResult(value.worker, futureObserve.id, futureInput)).toEqual({
           acceptedAsCurrent: true, repeated: false,
         });
