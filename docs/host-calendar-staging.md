@@ -41,6 +41,18 @@ CONFIRM_EXPERIENCE_STG_DB_BOOTSTRAP=niho-app-stg \
 
 途中失敗時はSecret version、roleやtableが残り得るため、再実行は拒否される。readinessは無効のまま、専用DBの実状態とSecret versionを管理経路で調べてから復旧する。共有NIHO DBのPUBLIC CONNECTを剥がす操作はこの手順では行わない。runtimeがNIHO側の業務テーブルを読めないことを確認する。将来のmigrationはNOLOGIN roleへ明示的に切り替えて行い、変更したtableのruntime grantを個別に見直す。
 
+### 以降のmigrationとruntime権限
+
+初回bootstrap後のmigrationは `scripts/gcp/apply-experience-db-migrations.mjs` で適用する。適用済みのファイル名とSHA-256を `experience_schema_migrations`（migration role所有、runtimeは権限なし）に記録し、未適用のファイルだけを辞書順にNOLOGINのmigration roleで流す。適用済みファイルの改変や、適用済みより前に並ぶ未適用ファイルがあれば止まる。runtime roleのsessionが残っている間も止まる。その後、runtimeの権限を `scripts/gcp/experience-db-grants.mjs` の宣言に一致させ（全テーブルを一度REVOKEしてから付け直す）、`has_table_privilege` / `has_column_privilege` で宣言との完全一致と、NIHO側テーブルを読めないことを確認する。新しいテーブル・書込み・upsert・行ロックを足したら同じPRで宣言を更新する。store の `runtime-grants.test.ts` がコード中のSQLとのずれを検出する。
+
+10/27のbootstrap（0001〜0003）で作ったstg DBには台帳が無いため、最初の1回だけ `EXPERIENCE_DB_BASELINE_THROUGH=0003_google_busy_coverage.sql` を渡す。scriptは既存テーブルが0001〜0003の作るテーブルと完全一致する場合だけ、その3件を台帳へ記録する。stgのCloud SQLは通常 `activationPolicy=NEVER` で停止しているので、適用の間だけ起動し、終わったら戻す。
+
+```sh
+CONFIRM_EXPERIENCE_DB_MIGRATE=niho-app-stg \
+  "$NIHO_APP_REPO/scripts/dev/niho-db.sh" stg --via-bastion --port 55460 -- \
+  node "$PWD/scripts/gcp/apply-experience-db-migrations.mjs"
+```
+
 ## Secret Manager（値は管理者だけが登録）
 
 Secretはすべて `niho-app-stg` に新規のExperience専用品として作成する。Firebase keyもNIHO **stg** の値を使う。versionは数字へ固定し、`latest` やaliasを使わない。
