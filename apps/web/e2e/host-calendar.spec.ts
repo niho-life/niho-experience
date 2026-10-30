@@ -315,6 +315,27 @@ test("channel labels never turn old observations into a successful reflection", 
   await expect(dialog.locator("summary").filter({ hasText: "掲載先" }).getByText("反映待ち", { exact: true })).toBeVisible();
 });
 
+test("Airbnb propagation shows checking until the exact occurrence is synced", async ({ page }) => {
+  await signIn(page);
+  let label = "CHECKING";
+  await stubCalendar(page, (route) => route.fulfill({ status: 200, json: calendarData(occurrence()) }));
+  await stubChannels(page, (route) => route.fulfill({ status: 200, json: { channels: [
+    { occurrenceId: occurrence().id, site: "Airbnb", desired: "OPEN", label },
+  ] } }));
+  await page.goto("/host/calendar");
+  await page.getByRole("button", { name: /合成の料理体験/ }).click();
+  let dialog = page.getByRole("dialog", { name: "合成の料理体験" });
+  await expect(dialog.locator("summary").filter({ hasText: "掲載先" }).getByText("確認中", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("反映済み", { exact: true })).toHaveCount(0);
+  await dialog.getByText("掲載先", { exact: true }).click();
+  await expect(dialog.getByText("Airbnb", { exact: true })).toBeVisible();
+  label = "SYNCED";
+  await page.reload();
+  await page.getByRole("button", { name: /合成の料理体験/ }).click();
+  dialog = page.getByRole("dialog", { name: "合成の料理体験" });
+  await expect(dialog.locator("summary").filter({ hasText: "掲載先" }).getByText("反映済み", { exact: true })).toBeVisible();
+});
+
 test("saving invalidates a previously synced channel until the new read finishes", async ({ page }) => {
   await signIn(page);
   let paused = false;

@@ -455,6 +455,32 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
     }
   });
 
+  it("does not show expired, stale, disabled, or manually held propagation as pending", async () => {
+    const actor = { providerId: "provider-a", nihoUserId: "owner-a" };
+    for (const kind of ["deadline", "desired", "mapping", "disabled", "manual", "worker"] as const) {
+      const value = await fixture("CLOSED");
+      try {
+        await value.runtime.submitResult(value.worker, value.claimed.id, mismatch(value, command(380)));
+        const pending = (await value.runtime.hostStatuses(actor))[0];
+        assert.equal(pending?.label, "PENDING");
+        assert.equal(pending?.error, undefined);
+        if (kind === "deadline") value.setNow((await value.pool.query("SELECT deadline_at FROM google_airbnb_propagation_waits"))
+          .rows[0].deadline_at);
+        else if (kind === "desired") await value.pool.query("UPDATE channel_desired_states SET desired_version=desired_version+1,last_error=NULL WHERE listing_id='listing-a'");
+        else if (kind === "mapping") await value.pool.query("UPDATE channel_listings SET mapping_version=mapping_version+1 WHERE id='listing-a'");
+        else if (kind === "manual") await value.pool.query("UPDATE channel_external_accounts SET quarantined_at=clock_timestamp(),quarantine_reason='MANUAL_HANDLING' WHERE id='account-a'");
+        else if (kind === "worker") {
+          await value.pool.query(`UPDATE channel_desired_states SET observed_state='CLOSED',
+            observed_desired_version=desired_version,observed_mapping_version=mapping_version,last_verified_at=clock_timestamp()
+            WHERE listing_id='listing-a'`);
+          await value.pool.query("UPDATE channel_workers SET last_heartbeat_at=clock_timestamp()-interval '1 day' WHERE id=$1", [value.worker.workerId]);
+        }
+        const statuses = await (kind === "disabled" ? value.disabledRuntime : value.runtime).hostStatuses(actor);
+        assert.equal(statuses[0]?.label, kind === "desired" ? "UNVERIFIED" : "ERROR");
+      } finally { await cleanup(value); }
+    }
+  });
+
   it("keeps queue time inside the propagation window and caps browser execution when claimed", async () => {
     const value = await fixture("CLOSED");
     try {
@@ -488,6 +514,7 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       assert.deepEqual(await value.runtime.submitResult(value.worker, value.claimed.id, initial), {
         acceptedAsCurrent: false, repeated: false,
       });
+      assert.equal((await value.runtime.hostStatuses({ providerId: "provider-a", nihoUserId: "owner-a" }))[0]?.label, "PENDING");
       assert.deepEqual(await value.runtime.submitResult(value.worker, value.claimed.id, initial), {
         acceptedAsCurrent: false, repeated: true,
       });
@@ -566,6 +593,7 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       const observe = await restarted.claim(value.worker);
       assert.ok(observe);
       assert.equal(observe.googleDeliveryOperation, "observe");
+      assert.equal((await restarted.hostStatuses({ providerId: "provider-a", nihoUserId: "owner-a" }))[0]?.label, "CHECKING");
       const repository = new GoogleChannelDeliveryRepository(value.pool, restarted);
       const observation = await repository.prepareObservation(value.worker, observe.id, observe.leaseToken);
       assert.equal(observation.operation, "observe");
@@ -637,6 +665,7 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       assert.deepEqual(await restarted.submitResult(value.worker, matchingObserve.id, matchedInput), {
         acceptedAsCurrent: true, repeated: false,
       });
+      assert.equal((await restarted.hostStatuses({ providerId: "provider-a", nihoUserId: "owner-a" }))[0]?.label, "SYNCED");
       assert.equal((await value.pool.query(
         "SELECT status,pending_job_id FROM google_airbnb_propagation_waits WHERE delivery_id=$1::uuid",
         [value.delivery.deliveryId],

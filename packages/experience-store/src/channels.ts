@@ -346,7 +346,7 @@ export interface HostChannelStatus {
   readonly desired: ChannelDesiredState;
   readonly observed?: ChannelDesiredState;
   /** HELD: a desired OPEN waits while a Studio for this provider re-reads reservations after a heartbeat gap. */
-  readonly label: "SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED" | "HELD";
+  readonly label: "SYNCED" | "PENDING" | "CHECKING" | "ERROR" | "UNVERIFIED" | "HELD";
   readonly lastVerifiedAtUtc?: string;
   readonly error?: string;
 }
@@ -3606,12 +3606,25 @@ export class ChannelRuntime {
     const result = await this.#pool.query<DbRow>(
       `SELECT d.occurrence_id,a.site,d.desired_state,d.desired_version,d.mapping_version,d.observed_state,
               d.observed_desired_version,d.observed_mapping_version,d.last_verified_at,d.last_error,
+              gw.status AS propagation_status,gw.deadline_at AS propagation_deadline,gw.job_status AS propagation_job_status,
               a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,
               l.active AS listing_active,l.adapter,l.adapter_version,l.can_open,l.can_close,l.mapping_version AS current_mapping_version,p.status AS product_status,
               EXISTS (SELECT 1 FROM calendar_outbox_events e WHERE e.provider_id=d.provider_id AND e.processed_at IS NULL AND e.available_at <= $2::timestamptz) AS calendar_pending
          FROM channel_desired_states d JOIN channel_listings l ON l.id=d.listing_id
          JOIN channel_external_accounts a ON a.id=l.account_id
          JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+         LEFT JOIN LATERAL (
+           SELECT w.status,w.deadline_at,j.status AS job_status
+             FROM google_airbnb_propagation_waits w
+             LEFT JOIN channel_jobs j ON j.id=w.pending_job_id AND j.google_propagation_delivery_id=w.delivery_id
+            WHERE w.provider_id=d.provider_id AND w.account_id=a.id AND w.listing_id=l.id
+              AND w.occurrence_id=d.occurrence_id AND w.desired_state=d.desired_state
+              AND w.desired_version=d.desired_version AND w.mapping_version=d.mapping_version
+              AND w.mapping_version=l.mapping_version AND w.account_version=a.version
+              AND w.source_start_at=d.source_start_at AND w.source_end_at=d.source_end_at
+              AND w.status IN ('WAITING','CHECKING')
+            ORDER BY w.created_at DESC,w.delivery_id LIMIT 1
+         ) gw ON true
         WHERE d.provider_id=$1 AND l.product_id=ANY($3::text[])
         ORDER BY d.source_start_at,a.site,l.id`, [actor.providerId, this.#nowIso(), products.map((product) => product.id)],
     );
@@ -3619,6 +3632,10 @@ export class ChannelRuntime {
       const desired = text(row, "desired_state") as ChannelDesiredState;
       const observed = row.observed_state === null ? undefined : text(row, "observed_state") as ChannelDesiredState;
       const action = desiredAction(desired);
+      const propagationPending = this.#googleAirbnbObservationEnabled && row.propagation_deadline !== null
+        && isoValue(row, "propagation_deadline") > this.#nowIso()
+        && (row.propagation_status === "WAITING"
+          || (row.propagation_status === "CHECKING" && ["QUEUED", "LEASED"].includes(String(row.propagation_job_status))));
       let error: string | undefined;
       if (row.account_active !== true) error = "ACCOUNT_INACTIVE";
       else if (row.revoked_at !== null) error = "ACCOUNT_REVOKED";
@@ -3628,18 +3645,20 @@ export class ChannelRuntime {
       else if (row.product_status !== "PUBLISHED") error = "PRODUCT_UNPUBLISHED";
       else if ((action === "SET_OPEN" ? row.can_open : row.can_close) !== true) error = "CAPABILITY_UNAVAILABLE";
       else if (!this.#adapterSupports(row, action)) error = "ADAPTER_UNAVAILABLE";
-      else if (row.last_error !== null) error = "RUNTIME_ERROR";
+      else if (row.last_error !== null && !(propagationPending && row.last_error === GOOGLE_PROPAGATION_PENDING)) error = "RUNTIME_ERROR";
       const currentObservation = observed !== undefined && row.observed_desired_version !== null && row.observed_mapping_version !== null
         && integer(row, "observed_desired_version") === integer(row, "desired_version")
         && integer(row, "observed_mapping_version") === integer(row, "mapping_version")
         && integer(row, "observed_mapping_version") === integer(row, "current_mapping_version");
-      const synced = currentObservation && observed === desired;
+      const synced = currentObservation && observed === desired && !propagationPending;
       // No live Studio has a fresh heartbeat: a pending CLOSE cannot be written, so it needs staff, not waiting.
       if (!error && !synced && desired === "CLOSED" && !workers.freshWorker) error = "WORKER_STALE";
       const held = !error && !synced && desired === "OPEN" && workers.openHold;
       return {
         occurrenceId: text(row, "occurrence_id"), site: text(row, "site"), desired, ...(observed ? { observed } : {}),
-        label: error ? "ERROR" : held ? "HELD" : row.calendar_pending === true ? "PENDING" : observed === undefined ? "UNVERIFIED" : synced ? "SYNCED" : "PENDING",
+        label: error ? "ERROR" : held ? "HELD" : row.calendar_pending === true ? "PENDING"
+          : propagationPending ? row.propagation_job_status === "LEASED" ? "CHECKING" : "PENDING"
+            : observed === undefined ? "UNVERIFIED" : synced ? "SYNCED" : "PENDING",
         ...(row.last_verified_at === null ? {} : { lastVerifiedAtUtc: isoValue(row, "last_verified_at") }), ...(error ? { error } : {}),
       };
     });
