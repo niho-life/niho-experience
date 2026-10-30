@@ -333,6 +333,17 @@ const LISTING_COLUMNS = `id,provider_id,account_id,product_id,external_product_i
  */
 const SLOT_RETIREMENT_WARNING = "旧日時の掲載枠を停止できていません。掲載先で確認してください。";
 
+/**
+ * Sites whose slots are told apart by their end as well as their start (jalan-network-guard.mjs matches startHm
+ * and endHm). The others key a slot by its start only (gyg-driver.mjs: option and local start; Viator: date and start).
+ */
+const SLOT_KEYED_BY_END: ReadonlySet<string> = new Set(["Jalan"]);
+
+/** Whether two times name the same external slot on the site, so closing one would close the other. */
+function sameExternalSlot(site: unknown, aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart === bStart && (!SLOT_KEYED_BY_END.has(String(site)) || aEnd === bEnd);
+}
+
 interface DispatchCursor { readonly listingId: string; readonly ruleId: string; readonly occurrenceId: string }
 interface DispatchPage { readonly fromDate: string; readonly toDate: string; readonly after?: DispatchCursor }
 
@@ -1268,12 +1279,12 @@ export class ChannelRuntime {
   async #retireRescheduledSlot(client: PoolClient, listing: DbRow, previous: DbRow, occurrence: Occurrence): Promise<void> {
     const nowUtc = this.#nowIso();
     const listingId = text(listing, "id");
-    // A -> B -> A: the restored time belongs to the desired row again.
+    // A -> B -> A: the restored slot belongs to the desired row again (the site's slot, not only the exact times).
     const restored = await client.query<DbRow>(
       `UPDATE channel_slot_retirements SET status='SUPERSEDED',reason='TIME_RESTORED',updated_at=$5
-        WHERE listing_id=$1 AND occurrence_id=$2 AND source_start_at=$3 AND source_end_at=$4
+        WHERE listing_id=$1 AND occurrence_id=$2 AND source_start_at=$3 AND ($6::boolean IS FALSE OR source_end_at=$4)
           AND status IN ('PENDING','NEEDS_REVIEW') RETURNING id`,
-      [listingId, occurrence.id, occurrence.startUtc, occurrence.endUtc, nowUtc],
+      [listingId, occurrence.id, occurrence.startUtc, occurrence.endUtc, nowUtc, SLOT_KEYED_BY_END.has(String(listing.site))],
     );
     if (restored.rows.length > 0) {
       await client.query(
@@ -1291,9 +1302,16 @@ export class ChannelRuntime {
     // A slot that has already started cannot be sold, and sites drop past slots
     // from their availability pages, so closing it would only fail as drift.
     const oldTimeStarted = isoValue(previous, "source_start_at") <= nowUtc;
-    if (listing.connection_mode !== "GOOGLE" && !verifiedClosed && !oldTimeStarted) {
+    // Only the end moved on a site that keys slots by their start: the old time is the current slot, so nothing retires.
+    const slotMoved = !sameExternalSlot(listing.site, isoValue(previous, "source_start_at"), isoValue(previous, "source_end_at"),
+      occurrence.startUtc, occurrence.endUtc);
+    // The old time was offered under an earlier mapping (another external product or option): this listing's target
+    // is not where it was sold, so staff check it instead of closing the new target's slot at that time.
+    const mappingChanged = integer(previous, "mapping_version") !== integer(listing, "mapping_version");
+    if (listing.connection_mode !== "GOOGLE" && slotMoved && !verifiedClosed && !oldTimeStarted) {
       // OPEN, unverified, or an older observation: fail safe and close the old time.
-      const closable = listing.can_close === true && this.#adapterSupports(listing, "SET_CLOSED");
+      const closable = !mappingChanged && listing.can_close === true && this.#adapterSupports(listing, "SET_CLOSED");
+      const reviewReason = mappingChanged ? "MAPPING_CHANGED" : "CLOSE_UNSUPPORTED";
       const saved = await client.query<DbRow>(
         `INSERT INTO channel_slot_retirements
           (id,provider_id,listing_id,occurrence_id,source_start_at,source_end_at,mapping_version,account_version,retirement_version,status,reason)
@@ -1304,7 +1322,8 @@ export class ChannelRuntime {
                reason=EXCLUDED.reason,updated_at=$11
          RETURNING id,retirement_version`,
         [randomUUID(), listing.provider_id, listingId, occurrence.id, previous.source_start_at, previous.source_end_at,
-          listing.mapping_version, listing.account_version, closable ? "PENDING" : "NEEDS_REVIEW", closable ? null : "CLOSE_UNSUPPORTED", nowUtc],
+          mappingChanged ? previous.mapping_version : listing.mapping_version, listing.account_version,
+          closable ? "PENDING" : "NEEDS_REVIEW", closable ? null : reviewReason, nowUtc],
       );
       const retirement = saved.rows[0]!;
       if (closable) {
@@ -2269,8 +2288,8 @@ export class ChannelRuntime {
     } catch (error) {
       if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
     }
-    if (occurrence && occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")) {
-      return { conflict: "The retired time is the current occurrence time again; the old lease remains locked until stopped." };
+    if (occurrence && sameExternalSlot(state.site, occurrence.startUtc, occurrence.endUtc, isoValue(job, "source_start_at"), isoValue(job, "source_end_at"))) {
+      return { conflict: "The retired slot is the current occurrence slot again; the old lease remains locked until stopped." };
     }
     return { ready: true, desiredState: "CLOSED" };
   }

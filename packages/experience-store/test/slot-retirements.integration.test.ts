@@ -380,6 +380,47 @@ describe("PostgreSQL slot retirement after a reschedule", { skip: databaseUrl ==
     });
   });
 
+  it("keeps the current slot when only the end moves on a site that keys slots by their start", async () => {
+    await withRuntime("slot_retire_end_only", { listing: "BROWSER" }, async (context) => {
+      const { pool, store, runtime } = context;
+      const occurrenceId = "morning@2099-01-16";
+      await reschedule(context, occurrenceId, "2099-01-16", "15:00", null);
+      const [first] = await retirements(pool, occurrenceId);
+      assert.deepEqual([first?.status, first?.start], ["PENDING", utc("2099-01-16", "10:00")]);
+
+      // A longer duration moves every end: GetYourGuide still names the same slot by option and start.
+      await store.saveScheduleRule(actor, "tea", {
+        id: "morning", timeZone: "Asia/Tokyo", startsOn: "2099-01-01", localStartTime: "10:00", durationMinutes: 90,
+        capacity: 1, bookingCutoffMinutes: 30, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
+      }, 1, randomUUID());
+      await runtime.consumeCalendarOutbox();
+      assert.deepEqual((await retirements(pool, "morning@2099-01-17")), []);
+      assert.equal((await jobs(pool, "morning@2099-01-17")).some((job) => job.purpose === "SLOT_RETIREMENT"), false);
+
+      // Back to the old start with the new end: the site's old slot is the current one again, so its retirement ends.
+      await reschedule(context, occurrenceId, "2099-01-16", "10:00", 1);
+      const after = await retirements(pool, occurrenceId);
+      assert.deepEqual(after.find((item) => item.id === first?.id)?.status, "SUPERSEDED");
+      assert.equal((await jobs(pool, occurrenceId)).some((job) => job.retirementId === first?.id && job.status === "QUEUED"), false);
+    });
+  });
+
+  it("asks for review instead of closing the new target when the listing was remapped before the reschedule", async () => {
+    await withRuntime("slot_retire_remapped", { listing: "BROWSER" }, async (context) => {
+      const { pool, runtime } = context;
+      const occurrenceId = "morning@2099-01-18";
+      const [listing] = await runtime.listListings(admin, "provider");
+      await runtime.updateListing(admin, "listing", {
+        externalProductId: "synthetic-listing-moved", adapter: listing!.adapter, adapterVersion: listing!.adapterVersion,
+        connectionMode: listing!.connectionMode, capabilities: listing!.capabilities, active: true,
+      }, listing!.mappingVersion, randomUUID());
+      await reschedule(context, occurrenceId, "2099-01-18", "15:00", null);
+      assert.deepEqual((await retirements(pool, occurrenceId)).map(({ status, reason }) => [status, reason]), [["NEEDS_REVIEW", "MAPPING_CHANGED"]]);
+      assert.equal((await jobs(pool, occurrenceId)).some((job) => job.purpose === "SLOT_RETIREMENT"), false);
+      assert.equal((await desired(pool, occurrenceId)).lastError, WARNING);
+    });
+  });
+
   it("makes a retirement visible when its job expires or is superseded by an authority change", async () => {
     await withRuntime("slot_retire_orphans", { listing: "BROWSER" }, async (context) => {
       const { pool, runtime, worker } = context;
