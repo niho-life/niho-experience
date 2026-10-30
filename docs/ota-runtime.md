@@ -114,8 +114,8 @@ detail は件数・経過秒・内部理由コードだけで、外部 account I
 
 操作はすべて UUID v4 command で冪等化し、`channel_admin_commands` に監査記録する。同じ command を別の Admin が再送すると `409`。
 
-- `pauseAccount`（停止して手動対応）: `expectedVersion` 必須。account を `MANUAL_HANDLING` で隔離する。スタッフが外部 profile を操作している間なので、OBSERVE を含む全 job を claim せず、手動対応前に貸し出された OBSERVE の確認でも隔離を解かない。既存 lease は通常の停止確認付き復旧まで保持し、復帰は「停止を確認して照合」から行う。
-- `recover`（停止を確認して照合）: 既存の observe-first 復旧。
+- `pauseAccount`（停止して手動対応）: `expectedVersion` 必須。account を `MANUAL_HANDLING` で隔離する。スタッフが外部 profile を操作している間なので、OBSERVE を含む全 job を claim せず、手動対応前に貸し出された OBSERVE の確認でも隔離を解かない。lease 切れ・遅れて届いた結果などの自動の隔離は理由を `MANUAL_HANDLING` のまま残し、理由を書き換えられるのは停止と復旧の Admin 操作だけ。既存 lease は通常の停止確認付き復旧まで保持し、復帰は「停止を確認して照合」から行う。
+- `recover`（停止を確認して照合）: 既存の observe-first 復旧。手動対応中で一度も実行していない account は、いちばん新しい待機中の job の listing・回から復旧用の OBSERVE を作り、その job は外部に触れていないので `SUPERSEDED` で閉じる。
 - `confirmReauth`（再認証を確認して照合）: Studio 停止と掲載先への再ログインの両方の確認を必須とし、`AUTH_REQUIRED` の隔離だけを受ける。処理は `recover` と同じ observe-first で、`account.reauth` として別に監査する。password・cookie・session の入力欄は置かない。
 - `retryReservationReads`（予約照合を再開）: halted かつ実行中 job のない listing だけ。account が active・未失効・委任期限内・未隔離で、listing が予約読取可能な場合に限り、停止を解いて即時 due にする。読取の健全性は更新しない。
 - `acknowledgeIncident`（担当する）: 未解決 incident の担当を自分にする。incident を手動で閉じる操作は置かない。

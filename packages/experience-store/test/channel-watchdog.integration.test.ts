@@ -353,4 +353,53 @@ describe("PostgreSQL channel runtime watchdog and OPEN hold", { skip: databaseUr
       assert.equal((await runtime.runtimeOverview(admin, "provider-a")).watchdogStale, true);
     });
   });
+
+  it("keeps a staff pause through lease expiry and a late result, and opens only through stop-confirmed recovery", { timeout: 60_000 }, async () => {
+    await withFixture("channel_pause_hold_test", async (fixture) => {
+      const { pool, runtime, clock, workerA } = fixture;
+      const reason = async () => (await pool.query("SELECT quarantine_reason FROM channel_external_accounts WHERE id='account-a'")).rows[0]?.quarantine_reason;
+      const leased = await runtime.claim(workerA);
+      assert.ok(leased);
+      const version = Number((await pool.query("SELECT version FROM channel_external_accounts WHERE id='account-a'")).rows[0]?.version);
+      await runtime.pauseAccount(admin, "account-a", version, randomUUID());
+      assert.equal(await reason(), "MANUAL_HANDLING");
+
+      // The lease runs out while staff hold the profile: the next claim sees it expire, and the result comes late.
+      const expiresAt = (await pool.query("SELECT lease_expires_at FROM channel_jobs WHERE id=$1::uuid", [leased.id])).rows[0]?.lease_expires_at;
+      clock.now = new Date(new Date(expiresAt).getTime() + 1_000);
+      assert.equal(await runtime.claim(workerA), null);
+      assert.equal(await reason(), "MANUAL_HANDLING");
+      assert.deepEqual(await runtime.submitResult(workerA, leased.id, {
+        resultId: randomUUID(), leaseToken: leased.leaseToken, outcome: "VERIFIED", stopped: true, target: leased.target,
+        occurrenceId: leased.occurrenceId, sourceStartAtUtc: leased.sourceStartAtUtc, sourceEndAtUtc: leased.sourceEndAtUtc,
+        observedState: "CLOSED", observedBookable: false, observedManuallyBlocked: true, observedAtUtc: clock.now.toISOString(),
+      }), { acceptedAsCurrent: false, repeated: false });
+      assert.equal(await reason(), "MANUAL_HANDLING");
+      // Nothing runs, OBSERVE included, until staff confirm the executor stopped.
+      assert.equal(await runtime.claim(workerA), null);
+      const recovery = await runtime.recoverQuarantinedLease(admin, "account-a", true, randomUUID());
+      assert.equal(await reason(), "MANUAL_RECOVERY_OBSERVE_REQUIRED");
+      assert.equal((await runtime.claim(workerA))?.id, recovery.observeJobId);
+    });
+  });
+
+  it("recovers an account paused before any job ran from its newest waiting job", { timeout: 60_000 }, async () => {
+    await withFixture("channel_pause_unrun_test", async (fixture) => {
+      const { pool, runtime, workerA } = fixture;
+      const version = Number((await pool.query("SELECT version FROM channel_external_accounts WHERE id='account-a'")).rows[0]?.version);
+      await runtime.pauseAccount(admin, "account-a", version, randomUUID());
+      assert.equal((await pool.query("SELECT count(*)::int AS count FROM channel_jobs WHERE status IN ('LEASED','FINISHED')")).rows[0]?.count, 0);
+      const waiting = (await pool.query("SELECT id FROM channel_jobs WHERE status='QUEUED' ORDER BY updated_at DESC LIMIT 1")).rows[0]?.id;
+      assert.ok(waiting);
+      assert.equal(await runtime.claim(workerA), null);
+
+      const recovery = await runtime.recoverQuarantinedLease(admin, "account-a", true, randomUUID());
+      // It never reached the site, so it is superseded rather than left for review.
+      assert.deepEqual({ ...(await pool.query("SELECT status,outcome FROM channel_jobs WHERE id=$1::uuid", [waiting])).rows[0] }, { status: "FINISHED", outcome: "SUPERSEDED" });
+      assert.equal((await pool.query("SELECT quarantine_reason FROM channel_external_accounts WHERE id='account-a'")).rows[0]?.quarantine_reason, "MANUAL_RECOVERY_OBSERVE_REQUIRED");
+      const observe = await runtime.claim(workerA);
+      assert.equal(observe?.id, recovery.observeJobId);
+      assert.equal(observe?.action, "OBSERVE");
+    });
+  });
 });

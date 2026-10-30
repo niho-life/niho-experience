@@ -1377,10 +1377,7 @@ export class ChannelRuntime {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('channel-browser-global',11))");
       const existingLease = await client.query<DbRow>("SELECT id,account_id,lease_expires_at FROM channel_jobs WHERE status='LEASED' FOR UPDATE");
       if (existingLease.rows[0] && isoValue(existingLease.rows[0], "lease_expires_at") <= nowUtc) {
-        await client.query(
-          "UPDATE channel_external_accounts SET quarantined_at=COALESCE(quarantined_at,$2),quarantine_reason='LEASE_EXPIRED',updated_at=$2 WHERE id=$1",
-          [existingLease.rows[0].account_id, nowUtc],
-        );
+        await this.#quarantine(client, text(existingLease.rows[0], "account_id"), "LEASE_EXPIRED");
         return null;
       }
       if (existingLease.rows[0]) return null;
@@ -1474,7 +1471,20 @@ export class ChannelRuntime {
     return job;
   }
 
+  /**
+   * Automatic quarantine. A staff pause (MANUAL_HANDLING) keeps its reason: no lease expiry, late result or other
+   * automatic error may turn it into a reason that lets an OBSERVE run or that its completion would clear.
+   */
   async #quarantine(client: PoolClient, accountId: string, reason: string): Promise<void> {
+    await client.query(
+      `UPDATE channel_external_accounts SET quarantined_at=COALESCE(quarantined_at,$2),
+         quarantine_reason=CASE WHEN quarantine_reason='MANUAL_HANDLING' THEN quarantine_reason ELSE $3 END,updated_at=$2 WHERE id=$1`,
+      [accountId, this.#nowIso(), reason],
+    );
+  }
+
+  /** Staff actions (pause, stop-confirmed recovery) replace whatever reason is there. */
+  async #quarantineByStaff(client: PoolClient, accountId: string, reason: "MANUAL_HANDLING" | "MANUAL_RECOVERY_OBSERVE_REQUIRED"): Promise<void> {
     await client.query(
       "UPDATE channel_external_accounts SET quarantined_at=COALESCE(quarantined_at,$2),quarantine_reason=$3,updated_at=$2 WHERE id=$1",
       [accountId, this.#nowIso(), reason],
@@ -2591,11 +2601,15 @@ export class ChannelRuntime {
          FROM channel_jobs j JOIN channel_listings l ON l.id=j.listing_id JOIN channel_external_accounts a ON a.id=j.account_id
          JOIN channel_desired_states d ON d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
          JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-        WHERE j.account_id=$1 AND (j.status='LEASED' OR (j.status='FINISHED' AND a.quarantined_at IS NOT NULL))
+        WHERE j.account_id=$1 AND (j.status='LEASED' OR (j.status='FINISHED' AND a.quarantined_at IS NOT NULL)
+          -- A pause before any job ran: the newest waiting job names the listing to observe first.
+          OR (j.status='QUEUED' AND a.quarantine_reason='MANUAL_HANDLING'))
         ORDER BY (j.status='LEASED') DESC,j.updated_at DESC LIMIT 1 FOR UPDATE OF j,a`, [accountId],
     );
     const job = leased.rows[0];
     if (!job) throw new StoreConflictError("No leased job requires recovery.");
+    // A waiting job never reached the external site: the recovery supersedes it instead of asking for its review.
+    const neverRan = job.status === "QUEUED";
     if (reasonAllowed && !reasonAllowed(job.quarantine_reason === null ? null : text(job, "quarantine_reason"))) {
       throw new StoreConflictError("This account is not waiting for re-authentication.");
     }
@@ -2603,10 +2617,10 @@ export class ChannelRuntime {
       || !this.#adapterSupports({ site: job.site, adapter: job.adapter, adapter_version: job.adapter_version }, "OBSERVE")) {
       throw new StoreConflictError("Recovery is closed until this mapping has a deployed OBSERVE capability and a published product.");
     }
-    await this.#quarantine(client, accountId, "MANUAL_RECOVERY_OBSERVE_REQUIRED");
+    await this.#quarantineByStaff(client, accountId, "MANUAL_RECOVERY_OBSERVE_REQUIRED");
     await client.query(
-      "UPDATE channel_jobs SET status='FINISHED',outcome='NEEDS_REVIEW',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
-      [job.id, this.#nowIso()],
+      "UPDATE channel_jobs SET status='FINISHED',outcome=$3,lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
+      [job.id, this.#nowIso(), neverRan ? "SUPERSEDED" : "NEEDS_REVIEW"],
     );
     if (job.purpose === "RESERVATION_WINDOW") await client.query(
       `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
@@ -2648,7 +2662,7 @@ export class ChannelRuntime {
       const row = current.rows[0];
       if (!row) throw new StoreNotFoundError("external account");
       if (integer(row, "version") !== expectedVersion) throw new StoreConflictError("External account version mismatch.");
-      await this.#quarantine(client, accountId, "MANUAL_HANDLING");
+      await this.#quarantineByStaff(client, accountId, "MANUAL_HANDLING");
       await this.#completeCommand(client, actor, commandId, "account.pause", request, { accountId }, text(row, "provider_id"), "external_account", accountId);
       return { accountId, quarantineReason: "MANUAL_HANDLING" as const };
     });
