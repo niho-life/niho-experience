@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, selectAccountProfile } from "../src/config.mjs";
+import { loadConfig, selectAccountProfile, selectAccountSessionPolicy } from "../src/config.mjs";
 import { DRIVER_REGISTRY_KEYS, adapterRegistryKey } from "../src/driver-registry.mjs";
 import { createViatorNetworkGuard, selectViatorAvailability, validateViatorReadBody, validateViatorUpdate, viatorListStateCoversTarget, VIATOR_LIST_STATE_KEYS } from "../src/viator-network-guard.mjs";
 import { createJalanNetworkGuard, parseJsonp, selectJalanSlot, validateJalanBootstrap, validateJalanComplete, validateJalanSummaryUrl } from "../src/jalan-network-guard.mjs";
@@ -148,6 +148,36 @@ test("Jalan bootstrap validates a non-target range without inventing a target sl
   assert.throws(() => selectJalanSlot(bootstrap, jalanJob, "14:00"));
 });
 
+test("Jalan refuses confirmed or requested bookings before authorizing a slot", () => {
+  for (const key of ["cfmCapaBookingCnt", "cfmCapaPaxCnt", "cfmEntryBookingCnt", "cfmEntryPaxCnt", "uncfmEntryBookingCnt", "uncfmEntryPaxCnt"]) {
+    const value = jalanSummary();
+    value.dto.plans[0].tmzs[0].slots[0][key] = 1;
+    assert.throws(() => selectJalanSlot(value, jalanJob, "14:00"), (error) => error.code === "UNSUPPORTED_TARGET");
+  }
+});
+
+test("Jalan permits observed stock assets without opening navigation, analytics or unknown GETs", async () => {
+  const guard = createJalanNetworkGuard({ job: jalanJob, getSnapshot: () => null, cloud: {} });
+  const calls = [];
+  const asset = (path, type, navigation = false) => {
+    const value = route(`https://activityboard.jp${path}`, "GET", undefined, calls);
+    value.request = () => ({ url: () => `https://activityboard.jp${path}`, method: () => "GET", resourceType: () => type, isNavigationRequest: () => navigation });
+    return value;
+  };
+  await guard.handle(asset("/js/com/jquery-ui.min.js?date=20261030", "script"));
+  await guard.handle(asset("/css/calendar.css?date=20261030", "stylesheet"));
+  await guard.handle(asset("/js/pc/calendar/calendar.js", "script"));
+  for (const [path, type, navigation] of [
+    ["/js/sitecatalyst/s_code.js?date=20261030", "script", false],
+    ["/js/com/jquery-ui.min.js?date=1&date=2", "script", false],
+    ["/js/com/jquery-ui.min.js?send=1", "script", false],
+    ["/js/com/jquery-ui.min.js", "fetch", false],
+    ["/js/com/jquery-ui.min.js", "script", true],
+    ["/stateful/schdl/client/delete", "fetch", false],
+  ]) await guard.handle(asset(path, type, navigation));
+  assert.deepEqual(calls, ["continue", "continue", "continue", ...Array(6).fill("abort")]);
+});
+
 test("Jalan accepts observed callback whitespace without accepting another call or executable wrapper", () => {
   const fixture = jalanSummary();
   assert.deepEqual(parseJsonp(` \nsynthetic.callback \t( ${JSON.stringify(fixture)}\n);\n`, "synthetic.callback"), fixture);
@@ -205,6 +235,16 @@ test("namespaced profiles are exact, private, site-separated and never fall back
   const config = await loadConfig(path);
   assert.equal(selectAccountProfile(config, viatorJob.target), join(await realpath(viator), "999999"));
   assert.equal(selectAccountProfile(config, jalanJob.target), join(await realpath(jalan), "SyntheticAirId"));
+  assert.equal(selectAccountSessionPolicy(config, jalanJob.target), "none");
+  const raw = JSON.parse(await (await import("node:fs/promises")).readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...raw, siteAccountSessionPolicies: { Jalan: { SyntheticAirId: "restore" } } }));
+  const restored = await loadConfig(path);
+  assert.equal(selectAccountSessionPolicy(restored, jalanJob.target), "restore");
+  assert.equal(selectAccountSessionPolicy(restored, viatorJob.target), "none");
+  for (const mapping of [{ Jalan: { Missing: "restore" } }, { Jalan: { SyntheticAirId: "prepare" } }, { Viator: { "999999": "restore" } }, []]) {
+    await writeFile(path, JSON.stringify({ ...raw, siteAccountSessionPolicies: mapping }));
+    await assert.rejects(loadConfig(path), (error) => error.code === "INVALID_CONFIG");
+  }
   assert.throws(() => selectAccountProfile(config, { ...jalanJob.target, externalAccountId: "Missing" }), (error) => error.code === "PROFILE_MAPPING_MISSING");
   const alias = join(profiles, "viator-alias"); await symlink(viator, alias);
   await writeFile(path, JSON.stringify({ cloudOrigin: "https://cloud.example", tokenFile: token, privateDir: directory,

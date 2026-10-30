@@ -1,7 +1,7 @@
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { JALAN_ORIGIN } from "./constants.mjs";
-import { selectAccountProfile } from "./config.mjs";
+import { selectAccountProfile, selectAccountSessionPolicy } from "./config.mjs";
 import { startManagedBrowser } from "./managed-browser.mjs";
 import { ContractError, tokyoLocalFromUtc, validateObservation } from "./validation.mjs";
 import { createJalanNetworkGuard, parseJsonp, selectJalanSlot, validateJalanBootstrap } from "./jalan-network-guard.mjs";
@@ -15,7 +15,8 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
   const profile = selectAccountProfile(config, job.target);
   const endLocal = tokyoLocalFromUtc(job.sourceEndAtUtc);
   if (endLocal.slice(0, 10) !== job.localDateTime.slice(0, 10)) throw new ContractError("UNSUPPORTED_TARGET");
-  const browser = await browserFactory({ executablePath: config.browserExecutable, userDataDir: profile, headless });
+  const browser = await browserFactory({ executablePath: config.browserExecutable, userDataDir: profile, headless,
+    sessionPolicy: selectAccountSessionPolicy(config, job.target) });
   let guard;
   try {
     let snapshot = null;
@@ -94,7 +95,7 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
     }
 
     async function moveToTargetDate() {
-      const textbox = page.getByRole("textbox");
+      const textbox = page.locator("input.experienceDay:visible");
       if (await textbox.count() !== 1) throw new ContractError("DOM_DRIFT");
       const date = job.localDateTime.slice(0, 10);
       return receiveSummary(async () => {

@@ -5,6 +5,25 @@ import { ContractError, exactKeys } from "./validation.mjs";
 const COMPLETE_SLOT_KEYS = ["slotId", "version", "frontOpenFlg", "bookingAvailableKbn", "cfmBookingLimMgrKbn", "cfmCapaCnt", "lessonSchdlId", "lessonSchdlVersion"];
 const SUMMARY_QUERY_KEYS = ["callback", "dspBaseDate", "dspRange", "pageSize", "pageNo", "schdlKbn", "groupSchdlId", "lessonSchdlId", "includeSaleStops"];
 const SUMMARY_OPTIONAL_QUERY_KEYS = ["_"];
+const SCRIPT_PATHS = new Set([
+  "/js/lib/jquery-2.1.1.min.js", "/js/com/jquery.serialize-object.min.js", "/js/com/jquery-ui.min.js",
+  "/js/com/jquery-ui-i18n.min.js", "/js/com/jquery.ui.datepicker-ja.js", "/js/lib/datepicker.js",
+  "/js/com/knockout-3.0.0rc.js", "/js/com/knockout.mapping-latest.js", "/js/com/jquery.cookie.js",
+  "/js/lib/moment-with-locales.min.js", "/js/lib/jquery.placeholder.js", "/js/com/exValidation.js",
+  "/js/com/exchecker-ja.js", "/js/lib/airCommonMenu.min.js", "/js/lib/jquery.floatThead.min.js",
+  "/js/common_activeJalan.js", "/js/com/RSVConstants.js", "/js/com/AjaxCommon.js",
+  "/js/com/ProductProcessingRegister.js", "/js/com/RSVBallon.js", "/js/com/Pagination.js",
+  "/js/com/cl/headerNav.js", "/js/pc/modal/openCloseModal.js", "/js/pc/calendar/calendar.js",
+]);
+const STYLE_PATHS = new Set(["/css/common_activeJalan.css", "/css/calendar.css", "/css/common_headerNav.css"]);
+
+function isStockAsset(request, url) {
+  const version = url.searchParams.get("date");
+  if ([...url.searchParams.keys()].some((key) => key !== "date") || url.searchParams.getAll("date").length > 1
+    || (version !== null && !/^[A-Za-z0-9._-]{1,64}$/.test(version))) return false;
+  return (request.resourceType?.() === "script" && SCRIPT_PATHS.has(url.pathname))
+    || (request.resourceType?.() === "stylesheet" && STYLE_PATHS.has(url.pathname));
+}
 
 function canonicalCompactDate(value) {
   if (!/^\d{8}$/.test(value)) return false;
@@ -67,6 +86,8 @@ export function selectJalanSlot(value, job, expectedEndHm) {
     || typeof slot.frontOpenFlg !== "boolean" || !["KeyOPEN", "KeyCLOSE"].includes(slot.receptionStatus)
     || slot.bookingAvailableKbn !== "KeyUNCONFIRMED" || slot.cfmBookingLimMgrKbn !== null
     || slot.cfmCapaBookingCnt !== 0 || slot.cfmCapaPaxCnt !== 0
+    || slot.cfmEntryBookingCnt !== 0 || slot.cfmEntryPaxCnt !== 0
+    || slot.uncfmEntryBookingCnt !== 0 || slot.uncfmEntryPaxCnt !== 0
     || !Number.isSafeInteger(slot.version) || !Number.isSafeInteger(plans[0].version)) throw new ContractError("UNSUPPORTED_TARGET");
   let slotIdMatches = 0;
   for (const plan of dto.plans) for (const tmz of plan?.tmzs ?? []) for (const candidate of tmz?.slots ?? []) {
@@ -126,8 +147,9 @@ export function createJalanNetworkGuard({ job, cloud, getSnapshot, assertWriteCo
       const navigation = request.isNavigationRequest?.() === true;
       const fixedPage = url.pathname === "/activityboard/bookingStockMgt/" && url.searchParams.size === 0;
       const summary = !navigation && validateJalanSummaryUrl(url, job);
+      const asset = !navigation && isStockAsset(request, url);
       if (navigation && !fixedPage) externalNavigationBlocked = true;
-      return fixedPage || summary ? forward(route) : refuse(route);
+      return fixedPage || summary || asset ? forward(route) : refuse(route);
     }
     if (request.method() !== "POST" || url.search !== "" || url.pathname !== "/stateful/schdl/client/complete") return refuse(route, permit !== null);
     if (request.headers?.()["content-type"]?.split(";")[0] !== "application/json") return refuse(route, true);

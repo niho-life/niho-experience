@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 
 const CONFIG_KEYS = ["cloudOrigin", "tokenFile", "privateDir", "accountProfiles", "browserExecutable", "mode"];
-const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles"];
+const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles", "siteAccountSessionPolicies"];
 const SITE_PROFILE_NAMESPACES = Object.freeze({ Viator: "viator", Jalan: "jalan" });
 
 async function assertPrivatePath(path, expectedType, mode) {
@@ -63,6 +63,19 @@ export async function loadConfig(configPath, options = {}) {
     }
     siteAccountProfiles[site] = Object.freeze(entries);
   }
+  const siteAccountSessionPolicies = {};
+  if (raw.siteAccountSessionPolicies !== undefined && !isPlainObject(raw.siteAccountSessionPolicies)) throw new ContractError("INVALID_CONFIG");
+  for (const [site, mapping] of Object.entries(raw.siteAccountSessionPolicies ?? {})) {
+    // Session-cookie restoration is an explicit, account-specific opt-in. Only
+    // the reviewed Jalan flow is supported; login preparation is never a job.
+    if (site !== "Jalan" || !isPlainObject(mapping)) throw new ContractError("INVALID_CONFIG");
+    const entries = {};
+    for (const [accountId, policy] of Object.entries(mapping)) {
+      if (!Object.hasOwn(siteAccountProfiles[site] ?? {}, accountId) || policy !== "restore") throw new ContractError("INVALID_CONFIG");
+      entries[accountId] = policy;
+    }
+    siteAccountSessionPolicies[site] = Object.freeze(entries);
+  }
   if (typeof raw.browserExecutable !== "string" || raw.browserExecutable.length < 1
     || !["deterministic", "claude-code"].includes(raw.mode)
     || (raw.mode === "claude-code" && (typeof raw.claudeExecutable !== "string" || raw.claudeExecutable.length < 1))) {
@@ -76,6 +89,7 @@ export async function loadConfig(configPath, options = {}) {
     privateDir,
     accountProfiles: Object.freeze(profiles),
     siteAccountProfiles: Object.freeze(siteAccountProfiles),
+    siteAccountSessionPolicies: Object.freeze(siteAccountSessionPolicies),
     browserExecutable: resolve(raw.browserExecutable),
     mode: raw.mode,
     ...(raw.claudeExecutable ? { claudeExecutable: resolve(raw.claudeExecutable) } : {}),
@@ -89,6 +103,10 @@ export function selectAccountProfile(config, target) {
     : config.siteAccountProfiles?.[target.site]?.[target.externalAccountId];
   if (!profile) throw new ContractError("PROFILE_MAPPING_MISSING");
   return profile;
+}
+
+export function selectAccountSessionPolicy(config, target) {
+  return config.siteAccountSessionPolicies?.[target.site]?.[target.externalAccountId] ?? "none";
 }
 
 export async function readBearerToken(tokenFile) {

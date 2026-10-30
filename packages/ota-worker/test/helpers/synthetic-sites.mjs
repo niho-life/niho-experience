@@ -101,7 +101,7 @@ export async function syntheticJalan() {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       if (!state.authenticated) { response.end("<h1>ログイン</h1>"); return; }
       response.end(`<!doctype html><html><head><meta charset="utf-8"></head><body><header><ul><li>Account<ul><li>\n AirID \n ${state.accountId} \n</li></ul></li></ul></header>
-        <input value="${state.initialDate}"><select><option value="${state.productId}" selected>Synthetic plan</option></select><h2>プランID ${state.productId}</h2>
+        <input class="experienceDay" value="${state.initialDate}"><input class="datepicker" style="display:none"><input class="js-groupCfmCapaCnt" style="display:none"><select><option value="${state.productId}" selected>Synthetic plan</option></select><h2>プランID ${state.productId}</h2>
         <div class="ui-datepicker" hidden><a href="#" data-handler="prev">&lt;前</a><a href="#" data-handler="next">次&gt;</a><span class="ui-datepicker-year"></span><span class="ui-datepicker-month"></span><table><tbody id="picker-days"></tbody></table></div>
         <span id="count">0/14</span><ul id="slots"></ul><select class="js-panel-saleStatus"><option>販売</option><option>売止</option></select>
         <button id="complete">一括変更する</button><a href="#" id="refresh">最新の情報に更新</a>

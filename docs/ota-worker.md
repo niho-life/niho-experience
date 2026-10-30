@@ -45,9 +45,9 @@ install -m 600 packages/ota-worker/examples/config.example.json /ABSOLUTE/PRIVAT
 
 本番 worker を起動する前に、専用 profile で Chrome を手動起動して GetYourGuide に初回 login し、Company details と availability を人が確認して Chrome を終了します。上記の既存 worker 専用 profile を rename できる場合は再 login を要求しません。challenge、AUTH_REQUIRED、DOM drift、UNKNOWN_AFTER_SAVE は halt+quarantine とし、自動 login は行いません。debug screenshot は config で明示した場合だけ 0700 private directory 以下へ0600で保存します。
 
-### 限定 session restore policy（未接続）
+### 限定 session restore policy
 
-`startManagedBrowser` は、専用profileにだけ適用できる明示policy `none`（既定）/ `prepare` / `restore` を持ちます。このPRではconfig・driver・site registry・runtime flagへ接続しないため、既存workerの挙動は`none`のままです。任意のChrome引数は受け付けません。
+`startManagedBrowser` は、専用profileにだけ適用できる明示policy `none`（既定）/ `prepare` / `restore` を持ちます。任意のChrome引数は受け付けません。じゃらんだけ、本人の許可と初回準備の受入後、private configの`siteAccountSessionPolicies.Jalan.<登録済みAirID> = "restore"`でaccount単位に接続できます。設定が無いaccountと他サイトは`none`です。jobから`prepare`や任意policyを指定することはできません。
 
 - `prepare` は初回の本人loginに使う通常起動です。台帳が無いか、直前の正常停止を示す`CLEAN`の場合だけ開始します。
 - `restore` は受入済み`CLEAN`台帳、profile binding、停止後profile attestationがすべて一致した場合だけ、固定の`--restore-last-session`を加えます。policy有効時は対象を`Default`に固定し、extensionも固定で無効化します。Chromeのstartup preferenceは書き換えず、cookieの値・期限・ファイル、History、暗号化、keychainにはアクセスしません。
