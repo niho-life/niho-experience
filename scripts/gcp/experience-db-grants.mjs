@@ -27,6 +27,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   channel_propagation_measurements: { write: IU },
   channel_propagation_targets: { write: IU },
   channel_runtime_incidents: { write: IU },
+  channel_slot_retirements: { write: IU },
   channel_watchdog_state: { write: IU },
   channel_worker_accounts: { write: IU },
   channel_workers: { write: IU },
