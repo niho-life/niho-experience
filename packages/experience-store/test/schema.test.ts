@@ -206,6 +206,27 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /calendar_commands|calendar_outbox_events/);
   });
 
+  it("tracks rescheduled old slots as a separate SET_CLOSED-only job purpose without customer data (#241)", async () => {
+    const sql = await readFile(new URL("../migrations/0021_channel_slot_retirements.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const table = sql.match(/CREATE TABLE channel_slot_retirements \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /status IN \('PENDING','CLOSED_VERIFIED','NEEDS_REVIEW','SUPERSEDED'\)/);
+    assert.match(table, /reason IS NULL OR \(length\(reason\) BETWEEN 1 AND 80 AND reason ~ '\^\[A-Z0-9_\]\+\$'\)/);
+    assert.match(table, /retirement_version bigint NOT NULL CHECK \(retirement_version > 0\)/);
+    assert.match(table, /UNIQUE \(listing_id, occurrence_id, source_start_at, source_end_at\)/);
+    assert.match(table, /FOREIGN KEY \(provider_id, listing_id\) REFERENCES channel_listings\(provider_id, id\)/);
+    assert.match(table, /CHECK \(source_end_at > source_start_at\)/);
+    assert.doesNotMatch(table, /external_|customer|guest|email|phone|price|amount|raw_response/i);
+    assert.match(sql, /slot_retirement_id uuid REFERENCES channel_slot_retirements\(id\)/);
+    assert.match(sql, /purpose IN \('AVAILABILITY','RESERVATION_WINDOW','SLOT_RETIREMENT'\)/);
+    assert.match(sql, /purpose='SLOT_RETIREMENT' AND action='SET_CLOSED' AND slot_retirement_id IS NOT NULL/);
+    assert.match(sql, /purpose<>'SLOT_RETIREMENT' AND slot_retirement_id IS NULL/);
+    assert.match(sql, /purpose IN \('AVAILABILITY','SLOT_RETIREMENT'\) AND dispatch_worker_id IS NULL/);
+    assert.match(sql, /CREATE UNIQUE INDEX channel_jobs_slot_retirement_identity\s+ON channel_jobs \(slot_retirement_id,desired_version\)\s+WHERE purpose='SLOT_RETIREMENT'/);
+    assert.doesNotMatch(sql, /channel_jobs_availability_identity/);
+  });
+
   it("keeps only the three stoppable notification choices per provider, with no addresses (#109)", async () => {
     const sql = await readFile(new URL("../migrations/0020_provider_notification_preferences.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

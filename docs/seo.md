@@ -25,12 +25,23 @@
 - slugは英小文字・数字・ハイフン。変更する時は旧URLからのリダイレクトをAPI側に持つ（#7で要望済み）。
 - 一覧はページ分割しない（数件のため）。増えた時に方針を追加する。
 - 掲載をやめた体験はAPIが返さず404になる。販売停止中（掲載は継続）は「Bookings paused」を表示したままindexしてよい。
-- 言語は英語が既定（`<html lang="en">`）。`hreflang` はトップ・一覧・`/host`・体験詳細が自分自身（`en`）と `x-default` を出す。承認済みの日本語版が実在するページだけ `ja` を足す（日本語版の詳細は `en`・`ja`・`x-default` を相互に出す）。実在しない言語版は書かない。
+- 言語は英語が既定（`<html lang="en">`）。`hreflang` はトップ・一覧・`/host`・体験詳細が自分自身（`en`）と `x-default` を出す。承認済みの日本語版が実在するページだけ `ja` を足し、日本語版は `en`・`ja`・`x-default`（`x-default` は英語）を相互に出す。実在しない言語版は書かない。詳細は下の「日英の対応（hreflang・sitemap）」。
 - 一覧の `title`・`description` は共有文言（`catalogue.metaTitle` / `catalogue.metaDescription`）から取る。[seo-content-policy.md](growth/seo-content-policy.md) で決めた文言と同じ。
 
 ## `/help` の扱い
 
-index しない（`noindex, follow`）。ページの中身は、NIHOのヘルプと問い合わせ先、確認メールの探し方への案内だけで、取消条件・アカウントの要否のような回答になる事実は載せていない。それらは各体験の詳細（index する）が持つ。回答になる本文（よくある質問）を `/help` に足した時に index へ切り替え、`robots` の指定を外し、sitemapに加え、`englishAlternates("/help")` を使う。
+index しない（`noindex, follow`）。ページの中身は、NIHOのヘルプと問い合わせ先、確認メールの探し方への案内だけで、取消条件・アカウントの要否のような回答になる事実は載せていない。それらは各体験の詳細（index する）が持つ。回答になる本文（よくある質問）を `/help` に足した時に index へ切り替え、`robots` の指定を外し、`englishAlternates("/help")` を使い、`localized-mapping.ts` の `INDEXED_ENGLISH_STATIC_PATHS` に足す（sitemapと日英の組はこの一覧から作る）。
+
+## 日英の対応（hreflang・sitemap）
+
+[#59](https://github.com/niho-life/niho-experience/issues/59)。どのページが日本語版と組になるかは `apps/web/src/lib/localized-mapping.ts` の1か所で決め、ページの hreflang、sitemap、言語切替が同じ規則を使う。体験の対応の規則（オーナー決定 2026-10-31）は [localization-consumer.md](localization-consumer.md) の「動的ページの日英対応」。
+
+- 組になるのは、静的ページは日本語側の route・SEO がともに indexable で英語側も index するもの（`/`・`/experiences`・`/host`）、体験詳細は同じ日本語 release のカタログにある slug。組の hreflang は英日とも `en`・`ja`・`x-default`（英語）の同じ組で、sitemap の `alternates.languages` もこの組を使う。
+- sitemap は、日本語 release が揃うときだけ、英語の静的ページ・詳細に組の `xhtml:link` を付け、日本語の indexable な静的ページと、英語の一覧にもある日本語詳細を足す。並びは英語の静的ページ、英語詳細、ガイド、日本語の静的ページ、日本語詳細。日本語詳細の `lastmod` は出さない（日本語カタログの `updatedAt` が翻訳の更新を表すか、契約で決まっていないため）。
+- 日本語詳細の hreflang は、英語の一覧（sitemap と同じ `kamakura`）にその slug があるときだけ英語を指す。無い・読めないときは canonical だけにする。
+- 日本語版がオフ・未公開・release 不一致のときは、sitemap も hreflang も英語だけの従来どおり（項目・並びとも同じ。`sitemap-route.test.ts` で固定）。
+- 2026-10-31 時点で `EXPERIENCE_JAPANESE_SITE_ENABLED` はどの環境にも無く、日本語の hreflang・sitemap は出ていない。有効化の前に実機で `/sitemap.xml` と各ページの `<head>` を確かめる（[localization-consumer.md](localization-consumer.md) の「有効化の前に確かめること」）。
+- 検査：`localized-mapping.test.ts`（対応の規則・言語切替）、`sitemap-entries.test.ts`・`sitemap-route.test.ts`（sitemap）、`locale-metadata.test.ts`・`localized-metadata.test.ts`（英日の hreflang と sitemap の一致）。
 
 ## 初期HTMLの `<head>`
 

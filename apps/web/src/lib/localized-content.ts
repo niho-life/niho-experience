@@ -15,6 +15,7 @@ import { config } from "./config";
 import { getApi } from "./api";
 import type { PageId } from "./page-document-contract";
 import { assertSameJapaneseRelease, JapaneseReleaseUnavailable } from "./localized-release";
+import { experienceCounterparts, mapJapaneseExperiences } from "./localized-mapping";
 import { readBoundedJson } from "./read-bounded-json";
 export { assertSameJapaneseRelease, JapaneseReleaseUnavailable, japaneseBookingAllowed } from "./localized-release";
 
@@ -121,6 +122,7 @@ export const getJapaneseCopy = cache(async (): Promise<{ releaseId: string; valu
 });
 
 export const getJapaneseCatalog = cache(async (): Promise<SelectedExperienceCatalogResponse> => {
+  if (!config.japaneseSiteEnabled) throw new JapaneseReleaseUnavailable("disabled");
   const [copy, result] = await Promise.all([getJapaneseCopy(), getApi().then((api) => api.listJapaneseExperiences({ region: "kamakura" }))]);
   if (!result.ok) throw new JapaneseReleaseUnavailable(result.kind === "not_found" ? "missing" : "invalid");
   if (result.data.releaseId !== copy.releaseId || result.data.copySchemaVersion !== 2) throw new JapaneseReleaseUnavailable("mismatch");
@@ -128,6 +130,7 @@ export const getJapaneseCatalog = cache(async (): Promise<SelectedExperienceCata
 });
 
 export const getJapaneseDetail = cache(async (slug: string): Promise<SelectedExperienceDetailResponse> => {
+  if (!config.japaneseSiteEnabled) throw new JapaneseReleaseUnavailable("disabled");
   const [copy, catalog, result] = await Promise.all([getJapaneseCopy(), getJapaneseCatalog(), getApi().then((api) => api.getJapaneseExperience(slug))]);
   if (!result.ok) throw new JapaneseReleaseUnavailable(result.kind === "not_found" ? "missing" : "invalid");
   if (result.data.releaseId !== copy.releaseId || result.data.releaseId !== catalog.releaseId || result.data.copySchemaVersion !== 2 || !catalog.experiences.some((item) => item.slug === result.data.experience.slug && item.slug === slug)) throw new JapaneseReleaseUnavailable("mismatch");
@@ -135,8 +138,10 @@ export const getJapaneseDetail = cache(async (slug: string): Promise<SelectedExp
 });
 
 export const getPreparedJapaneseStaticRelease = cache(async () => {
-  const [copy, ...pages] = await Promise.all([
+  const [copy, catalog, ...pages] = await Promise.all([
     getJapaneseCopy(),
+    // Optional: without this release's catalog the static pages still render, only with no experience pairs.
+    getJapaneseCatalog().catch(() => null),
     getJapanesePage("home"),
     getJapanesePage("experiences"),
     getJapanesePage("host"),
@@ -144,15 +149,12 @@ export const getPreparedJapaneseStaticRelease = cache(async () => {
   ]);
   assertSameJapaneseRelease(copy.releaseId, ...pages);
   const pageById = Object.freeze(Object.fromEntries(pages.map((page) => [page.route.pageId, page])) as Readonly<Record<keyof typeof STATIC_SOURCE_PATHS, JapanesePage>>);
-  const counterparts = Object.freeze(Object.fromEntries(pages.map((page) => [page.route.sourcePath, page.route.path])));
-  return Object.freeze({ releaseId: copy.releaseId, copy, pages: Object.freeze(pages), pageById, counterparts });
+  const experiences = mapJapaneseExperiences(copy.releaseId, catalog);
+  const counterparts = Object.freeze({ ...Object.fromEntries(pages.map((page) => [page.route.sourcePath, page.route.path])), ...experienceCounterparts(experiences) });
+  return Object.freeze({ releaseId: copy.releaseId, copy, pages: Object.freeze(pages), pageById, experiences, counterparts });
 });
 
+/** Language-switch table: the four static pages and the experience pages paired in the same release (localized-mapping.ts). */
 export const getJapaneseStaticCounterparts = cache(async (): Promise<Readonly<Record<string, string>>> => {
   return (await getPreparedJapaneseStaticRelease()).counterparts;
-});
-
-export const getJapaneseIndexablePaths = cache(async (): Promise<readonly string[]> => {
-  const { pages } = await getPreparedJapaneseStaticRelease();
-  return pages.filter((page) => page.route.indexable && page.seo.indexable).map((page) => page.route.path);
 });
