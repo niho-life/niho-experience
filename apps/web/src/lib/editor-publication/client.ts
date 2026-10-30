@@ -18,7 +18,9 @@ import {
  * - Only a network failure, a timeout, a 5xx or a 429 may serve the last copy, for at most 10 minutes after it was last
  *   confirmed; a failure then backs off for the fresh period instead of making every page wait for the timeout again.
  * - 401/403 is a broken setting, never "no content": it always throws, even with a cached copy.
- * - Article bodies are kept per ID while the list's `updatedAt` for it stays the same: no request at all.
+ * - Article bodies are kept per ID while the list's `updatedAt` for it stays the same: no request at all. A body is kept
+ *   that way only once this API has confirmed it (200/304) for that `updatedAt`: an older copy served for an outage is
+ *   returned as `stale` and never kept, so the next read asks again instead of showing it until the next edit.
  * - Previews are never cached.
  *
  * Next's data cache is bypassed (`cache: "no-store"`); this layer is the only cache. Errors and log lines name the
@@ -54,7 +56,8 @@ export type EditorPublicationClientOptions = Readonly<{
   timeoutMs?: number;
 }>;
 
-export type EditorArticleOutcome = Readonly<{ status: "ok"; result: EditorArticleBodyResult }> | Readonly<{ status: "gone" }>;
+/** `stale`: the last confirmed copy, served because the API is unavailable; it may predate the list's `updatedAt`. */
+export type EditorArticleOutcome = Readonly<{ status: "ok"; result: EditorArticleBodyResult; stale?: true }> | Readonly<{ status: "gone" }>;
 
 export type EditorPublicationClient = Readonly<{
   list(): Promise<EditorPublishedList>;
@@ -65,7 +68,7 @@ export type EditorPublicationClient = Readonly<{
 }>;
 
 type Entry = { etag: string | null; value: unknown; fetchedAt: number; failedAt: number | null };
-type Cached<T> = Readonly<{ status: "ok"; value: T }> | Readonly<{ status: "missing" | "gone" }>;
+type Cached<T> = Readonly<{ status: "ok"; value: T; stale?: true }> | Readonly<{ status: "missing" | "gone" }>;
 
 const TRANSIENT_ERRORS = new Set(["TimeoutError", "AbortError", "TypeError"]);
 const transient = (error: unknown) => error instanceof Error && TRANSIENT_ERRORS.has(error.name);
@@ -149,18 +152,19 @@ export function createEditorPublicationClient(options: EditorPublicationClientOp
       if (error instanceof EditorPublicationError && error.kind === "unavailable" && entry && now() - entry.fetchedAt <= staleMs) {
         entry.failedAt = now();
         console.error(`[guides] ${error.message}; serving the copy confirmed ${Math.round((now() - entry.fetchedAt) / 1000)} s ago`);
-        return { status: "ok", value: entry.value as T };
+        return { status: "ok", value: entry.value as T, stale: true };
       }
       throw error;
     }
   }
 
-  function cached<T>(target: string, endpoint: EditorEndpoint, maxBytes: number, parse: (value: unknown) => T): Promise<Cached<T>> {
+  /** `force` skips the fresh period: the caller knows the copy may be older than what it needs (see `article`). */
+  function cached<T>(target: string, endpoint: EditorEndpoint, maxBytes: number, parse: (value: unknown) => T, force = false): Promise<Cached<T>> {
     const entry = entries.get(target);
     const at = now();
-    if (entry && at - entry.fetchedAt < freshMs) return Promise.resolve({ status: "ok", value: entry.value as T });
+    if (!force && entry && at - entry.fetchedAt < freshMs) return Promise.resolve({ status: "ok", value: entry.value as T });
     // Recently failed: keep serving the copy without waiting for another timeout, within the stale limit.
-    if (entry?.failedAt != null && at - entry.failedAt < freshMs && at - entry.fetchedAt <= staleMs) return Promise.resolve({ status: "ok", value: entry.value as T });
+    if (entry?.failedAt != null && at - entry.failedAt < freshMs && at - entry.fetchedAt <= staleMs) return Promise.resolve({ status: "ok", value: entry.value as T, stale: true });
     const pending = inflight.get(target);
     if (pending) return pending as Promise<Cached<T>>;
     const request = revalidate(target, endpoint, maxBytes, parse, entry).finally(() => inflight.delete(target));
@@ -182,9 +186,12 @@ export function createEditorPublicationClient(options: EditorPublicationClientOp
       if (known && known.updatedAt === updatedAt) return { status: "ok", result: known.result };
       let result: EditorArticleBodyResult;
       try {
-        const outcome = await cached(url(editorPublicationPaths.article(options.handle, id)), "article", EDITOR_RESPONSE_LIMITS.articleBytes, (value) => parseEditorArticleBody(value, id));
+        // Forced: the list says this version is newer than what this URL last returned, so a copy that is merely "fresh" is not enough.
+        const outcome = await cached(url(editorPublicationPaths.article(options.handle, id)), "article", EDITOR_RESPONSE_LIMITS.articleBytes, (value) => parseEditorArticleBody(value, id), true);
         // Unpublished (410) or unknown (404) since the list was read: left out now, asked again with the next list.
         if (outcome.status !== "ok") return { status: "gone" };
+        // An outage copy may be an older version: shown for now, but not recorded as this `updatedAt`'s body.
+        if (outcome.stale) return { status: "ok", result: outcome.value, stale: true };
         result = outcome.value;
       } catch (error) {
         // One unreadable article is left out; an outage or a refused credential stops the whole read.

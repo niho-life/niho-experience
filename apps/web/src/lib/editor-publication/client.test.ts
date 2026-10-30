@@ -126,6 +126,44 @@ describe("the editor publication client", () => {
     expect(await client.article("unknown-id", "x")).toEqual({ status: "gone" });
   });
 
+  it("revalidates a body that is still within its fresh period when the list's updatedAt moves on", async () => {
+    const { api, client, advance } = setup();
+    await client.article("ed-live-1", "2026-10-30T03:00:00.000Z");
+    const walk = api.state.articles.find((article) => article.id === "ed-live-1")!;
+    walk.updatedAt = "2026-10-31T00:00:10.000Z";
+    walk.markdown = "## Updated\n\nNew text.";
+    advance(5_000);
+    const next = await client.article("ed-live-1", "2026-10-31T00:00:10.000Z");
+    expect(next).toMatchObject({ status: "ok", result: { ok: true, body: { markdown: "## Updated\n\nNew text." } } });
+    expect(next).not.toHaveProperty("stale");
+    expect(api.calls).toHaveLength(2);
+    expect(api.calls[1]!.headers.get("if-none-match")).toMatch(/^".+"$/);
+  });
+
+  it("serves an outage copy of a body as stale without keeping it as the newer version", async () => {
+    const { api, client, advance } = setup();
+    const first = await client.article("ed-live-1", "2026-10-30T03:00:00.000Z");
+    const walk = api.state.articles.find((article) => article.id === "ed-live-1")!;
+    walk.updatedAt = "2026-10-31T00:00:10.000Z";
+    walk.markdown = "## Updated\n\nNew text.";
+    api.state.forcedStatus = 503;
+    advance(5_000);
+    // The old body is shown for now, flagged as stale, and not recorded for the new updatedAt.
+    expect(await client.article("ed-live-1", "2026-10-31T00:00:10.000Z")).toEqual({ status: "ok", result: (first as { result: unknown }).result, stale: true });
+    // Within the back-off nothing is requested, and it is still not kept.
+    advance(10_000);
+    expect(await client.article("ed-live-1", "2026-10-31T00:00:10.000Z")).toMatchObject({ status: "ok", stale: true });
+    // Once the API answers, the new body is read and only then kept: no further request.
+    api.state.forcedStatus = null;
+    advance(30_000);
+    const recovered = await client.article("ed-live-1", "2026-10-31T00:00:10.000Z");
+    expect(recovered).toMatchObject({ status: "ok", result: { ok: true, body: { markdown: "## Updated\n\nNew text." } } });
+    expect(recovered).not.toHaveProperty("stale");
+    const requests = api.calls.length;
+    await client.article("ed-live-1", "2026-10-31T00:00:10.000Z");
+    expect(api.calls).toHaveLength(requests);
+  });
+
   it("leaves out one article whose body is too large, instead of failing the list", async () => {
     const { client } = setup(async (input) => String(input).endsWith("/published.json")
       ? Response.json({ items: [] })

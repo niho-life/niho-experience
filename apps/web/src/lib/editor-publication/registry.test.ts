@@ -115,6 +115,26 @@ describe("the editor guide source (#252)", () => {
     expect(await missingGuideRedirect("sample-rainy-afternoon")).toBe("/guides");
   });
 
+  it("shows an outage copy of an updated guide's body without keeping it, then the new body once the API answers", async () => {
+    const { guideCatalog, api } = await load();
+    let bodiesDown = false;
+    // Only the updated article's body fails: the list still reports its new updatedAt.
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      bodiesDown && String(input).includes("/published/ed-live-1.json") ? Promise.resolve(new Response("{}", { status: 503 })) : api.fetch(input, init));
+    const bySlug = async () => new Map((await guideCatalog()).guides.map((guide) => [guide.slug, guide]));
+    const oldBody = (await bySlug()).get("sample-evening-walk")!.body;
+    const walk = api.state.articles.find((article) => article.id === "ed-live-1")!;
+    walk.updatedAt = "2026-10-31T00:00:20.000Z";
+    walk.markdown = "## Updated\n\nNew text.";
+    bodiesDown = true;
+    vi.setSystemTime(new Date("2026-10-31T00:00:31Z"));
+    expect((await bySlug()).get("sample-evening-walk")).toMatchObject({ updatedAt: "2026-10-31", body: oldBody });
+    bodiesDown = false;
+    // Past the 30 s back-off: the same (unchanged) list entry is converted again from the new body.
+    vi.setSystemTime(new Date("2026-10-31T00:01:02Z"));
+    expect((await bySlug()).get("sample-evening-walk")).toMatchObject({ body: "## Updated\n\nNew text." });
+  });
+
   it("redirects a missing guide only with the editor source, a valid slug and a non-empty /guides", async () => {
     const { missingGuideRedirect, api } = await load();
     expect(await missingGuideRedirect("never-published")).toBe("/guides");

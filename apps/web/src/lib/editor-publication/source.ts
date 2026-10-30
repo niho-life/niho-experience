@@ -56,7 +56,8 @@ async function guideOf(summary: EditorArticleSummary): Promise<Guide | null> {
   const result = outcome.result.ok ? editorArticleToGuide({ ...summary, ...outcome.result.body }, photoPolicy()) : outcome.result;
   const guide = result.ok ? result.guide : null;
   if (!result.ok) logSkip({ id: summary.id, slug: summary.slug, reason: result.reason });
-  converted.set(summary, guide);
+  // A body served for an outage may predate this list entry: show it, but convert again once the API answers.
+  if (!outcome.stale) converted.set(summary, guide);
   return guide;
 }
 
