@@ -7,7 +7,7 @@ export {
   StoreValidationError,
 } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
-export { evaluateStoredInventories, evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
+export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export { ResourceGoogleRepository } from "./resource-google.ts";
 export type { ResourceGoogleOwnerSnapshot, ResourceGoogleSetting } from "./resource-google.ts";
@@ -20,6 +20,8 @@ export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
 export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
 export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";
+export { GoogleChannelSetupRepository } from "./google-channel-setup.ts";
+export type { GoogleChannelSetupPhase, GoogleChannelSetupRecord, GoogleChannelSetupSecretSnapshot } from "./google-channel-setup.ts";
 export type {
   ChannelAction,
   ChannelAdminActor,

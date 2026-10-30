@@ -4,6 +4,7 @@ import { createBookingCalendar, queryGoogleBusy, refreshGoogleToken, type Google
 import {
   enqueueCalendarRecalculation,
   ExperienceStore,
+  lockGoogleCalendarUsage,
   lockProviderInventory,
   StoreAccessDeniedError,
   StoreConflictError,
@@ -35,6 +36,7 @@ export async function saveGoogleConnection(
       [actor.providerId, actor.nihoUserId],
     );
     if (member.rows[0]?.role !== "OWNER") throw new StoreAccessDeniedError();
+    await lockGoogleCalendarUsage(client, [busyCalendarId, bookingCalendarId]);
     const outputCollision = await client.query(
       `SELECT 1 FROM google_channel_output_bindings
         WHERE opaque_calendar_id=ANY($1::text[]) FOR SHARE`,

@@ -165,6 +165,19 @@ export async function createBookingCalendar(config: GoogleConfig, accessToken: s
   return result.id;
 }
 
+/** Creates one dedicated Airbnb output calendar; it never reuses booking setup. */
+export async function createAirbnbOutputCalendar(config: GoogleConfig, accessToken: string, summary: string): Promise<string> {
+  if (!summary || summary.length > 200 || /[\u0000-\u001f\u007f]/u.test(summary)) throw new TypeError("Invalid calendar summary");
+  const result = await apiJson(config, accessToken, "/calendars", {
+    method: "POST",
+    body: JSON.stringify({ summary, timeZone: "Asia/Tokyo" }),
+  });
+  if (!nonEmpty(result.id) || result.id.length > 512 || /[\u0000-\u0020\u007f]/u.test(result.id)) {
+    throw new GoogleCalendarError("INVALID_RESPONSE");
+  }
+  return result.id;
+}
+
 function bookingEventId(bookingId: string): string {
   return sha256Base32Hex(bookingId);
 }

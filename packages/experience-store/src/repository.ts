@@ -32,6 +32,7 @@ import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
 import {
   evaluateStoredInventory,
+  lockGoogleCalendarUsage,
   lockProviderInventory,
   persistBookingInventorySnapshot,
 } from "./inventory.ts";
@@ -872,6 +873,12 @@ export class ExperienceStore {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      await lockGoogleCalendarUsage(client, [input.opaqueCalendarId]);
+      const outputCollision = await client.query(
+        "SELECT 1 FROM google_channel_output_bindings WHERE opaque_calendar_id=$1 FOR SHARE",
+        [input.opaqueCalendarId],
+      );
+      if (outputCollision.rows[0]) throw new StoreConflictError("An Airbnb output calendar cannot be used as busy input.");
       const current = await client.query<DbRow>(
         `SELECT ${GOOGLE_COLUMNS} FROM provider_google_calendars WHERE provider_id=$1 FOR UPDATE`,
         [actor.providerId],
