@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
@@ -9,7 +9,7 @@ import { makeJob } from "./helpers/synthetic-gyg.mjs";
 import { validateClaim, validatePreflight } from "../src/validation.mjs";
 
 async function configFixture(origin) {
-  const directory = await mkdtemp(join(tmpdir(), "niho-ota-config-"));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "niho-ota-config-")));
   const profiles = join(directory, "profiles"); await mkdir(profiles, { mode: 0o700 });
   const token = join(directory, "token"); await writeFile(token, "a".repeat(40), { mode: 0o600 });
   const path = join(directory, "config.json");

@@ -13,6 +13,15 @@
 
 この実証は、ログイン済みブラウザから対象1回の開閉が成立することを示す。Studio workerからの無人実行、予約取込み、常駐監視、複数販路の60分以内の追従は未受入。adapter実装とそれぞれの受入が終わるまで対応済みにしない。
 
+## 専用Studio driverの受入状況
+
+| サイト | 専用profile / 読取り | driverによる開閉 | 残ること |
+| --- | --- | --- | --- |
+| じゃらん | 許可済みsession復元・accountと枠の一致を確認 | 予約ゼロの一枠で販売→売止→販売、独立reload、各Chromeの停止まで成功。元状態へ復元済み | cloud/PWA結合、予約reader、常駐と遅延の計測 |
+| Viator | 再起動後の認証、canonical枠、全状態の予約検索とゼロ件の証拠を確認 | Chrome通常通信でOPEN→CLOSED→OPEN。停止/再開とも200、独立reloadで状態一致、各Chromeの停止まで成功。元OPENへ復元済み | cloud/PWA結合、予約reader、常駐と遅延の計測 |
+
+じゃらんの初回実証では売止のDOM照合が止まったため復旧を優先した。状態がLI本体でなく子の`span.request-reservation`に付く点と、同列の補足spanを修正して販売へ戻し、その後の完全な停止・再開サイクルを同じdriverで再確認した。Viatorの旧DOMの「予約可能」は保存後の新しい証拠として使わない。本番flag・deployment/listing capabilityは受入前に開かない。private pilotの固定preflightによるdriver受入は、実cloudのclaim/lease/PWA結合の代替ではない。
+
 ## Viator adapterへの要件
 
 - `supplier.viator.com/availability/`。選択した日付と表示中の先頭日が一致するとは限らず、月初から行が読み込まれる。入力日だけで操作対象を判定しない。
@@ -20,6 +29,8 @@
 - 受付停止は「完売」、再開は「予約可能」。「催行なし」は予約・開催取消につながるため対象外。
 - UIの更新要求は `/availability/update`。`availabilityKeys` は対象商品・option・日付・開始時刻の1件だけ、`isBulkUpdate=false`、状態は `AVAILABLE` / `SOLD_OUT` のみ。`prevAvailability` と現在の行を照合する。付随する表示状態も実画面のsnapshotに固定する。任意のJSONや複数回の更新を受け付けない。
 - 空き情報の読戻しは `/availability/api` へのPOSTであり、POSTを一律に書込み扱いしない。日付範囲・商品・option・paginationの選別済み入力だけを許可する。戻り値の `availabilities` を日付・商品・option・開始時刻で照合する。応答全体には本人確認等の別情報もあるため、必要な空き状態だけを取り出し、原文を保存しない。
+- 実画面の `filteredTourGrades` は商品IDをkeyにした配列のobject、`perDayPagination` は日付をkeyにした `cursor/hasMore` のobject。日付移動は`BIDIRECTIONAL`を使う。応答の`availabilityListState`のstart/endには前の範囲が残り、UIが返された`availabilities`日付の最小・最大へ直して保存する。この2項目だけを同じ規則で導出し、他の項目は応答snapshotと完全一致させる。対象日のcursor完了も必須とする。
+- 日付欄はreadonlyで、同じplaceholderの非表示inputもある。可視inputから日付pickerを開き、月・年と日付buttonを照合して選択する。文字列のfill/Enterを成功としない。必要な同一originのUI bundle/CSSだけを許可し、計測や任意の静的pathを許可しない。
 - supplier画面の受付状態と、旅行者側の予約可否は別に検証する。既存回の手動開閉の成功だけで、定員・締切・新規作成まで対応済みとしない。
 - 保存直後には古いDOMが残る。ACKと同一対象の新しい読戻しを分け、価格や予約取消の要求をnetwork guardで拒否する。
 - Tripadvisorの商品を同じViator在庫で販売する場合、別の在庫として二重登録しない。
@@ -31,11 +42,23 @@
 - 対象slotを1件だけ選び、選択数 `1/14` を確認する。販売ステータスだけを変える。受付制限・予約受付タイプは「変更しない」。日毎一括や臨時不催行は使わない。
 - 可視DOMに対応する空き状況の読取りは `/stateful/schdl/client/summary`。表示日列と選択プラン・時間帯のslot配列、slotIdを突き合わせる。JSONP内の認証情報・入場照合コードは保存DTO・ログへ出さない。
 - UIの更新要求は `/stateful/schdl/client/complete`。`groups=[]`、`slots` は1件だけ。変更を `frontOpenFlg` に限定し、slotとプランの版、予約方式、受付制限は直前snapshotと一致させる。料金など追加field、異なるslot、複数選択は拒否する。
+- 保存POSTのqueryにはJSONP callbackが付く。未知query・重複callback・実行式を拒否し、限定されたcallback形式だけをACKの照合にも使う。初期summaryの空の日付・pageSize=0はbootstrapの読取りであり、操作対象は応答のcanonical日時・商品・時間帯から再照合する。
+- 選択数は`.panel-select-number`だけを照合する。日付の`12/14`を数に含めない。売止は枠内の`.sales-status-wrapper-slot > span.request-reservation`のclassで判定し、空のinnerTextを販売中の証拠にしない。
 - `KeyOPEN` と `frontOpenFlg`、予約方式、受付締切を区別する。売止解除のACKだけで実際に予約可能と断定しない。更新後は別の取得でslotを読み直す。
 
 ## 次の受入
+
+じゃらん専用profileは、本人の許可を受けて、正常終了→session復元→同じAirIDでの認証保持→正常終了を実サイトで確認した。検証中の業務POSTは拒否し、予約枠は変更していない。枠driverへの接続はprivate configによるaccount単位の明示設定に限定する。必要な同一originのstock画面JS/CSSと初期化時の限定読取りだけを許可する。画面が同期呼出しする`s`定義scriptも必要だが、外向きの解析通信や未知pathは拒否する。
 
 1. 合成fixtureで対象取り違え・複数回・価格変更・取消操作を拒否する。
 2. 専用profileと現行worker認証に接続し、lease/version/preflight/停止証明/独立readbackを通す。
 3. サイトごとの予約読取りと完全性・遅延を検証する。未取得を予約ゼロと扱わない。
 4. オーナーの許可した空き回でworkerから停止・再開・復元を実証する。
+
+## Viator転送方式の受入（#269）
+
+初回のNode転送後は結果不明となった。本人の再認証後、新しいnative readで元OPENを確認してから切り分けを進めた。同じ専用profileで、native read成功 → Fetch Metadata補完付き転送readが403 → native read再成功となり、転送でbrowser文脈を再現する処理は削除した。403の内部理由や初回保存失敗のstatusまでは断定しない。
+
+固定SHA `61b771165fce564f52d5c41f36ae6fb9a8480455` のdriverで、送信直前のpreflight拒否によるwrite=0を確認した後、全9状態の予約検索を再実行した。HTTP200、対象商品/option/日付、先頭page、hasNext=false、参照配列0件まで照合してから実枠を操作した。2026-10-30 12:33 JSTに、OBSERVE→SET_CLOSED→SET_OPENが成功。書込dispatchは停止1回・再開1回、各保存status=200、独立reload一致、各owned processのstopped=trueを確認した。予約・価格・人数・別枠は変更していない。
+
+Chrome内部のHTTP再送回数をexactly-onceとは扱わない。UI要求とpermitは高々1回で、受信bodyは同一枠の同一SETに限定し、応答喪失時は新しい読取りへ収束する。合成ブラウザ試験ではACK切断時の全body一致、500後のreadback、再読込による追加writeなしを確認済み。作成・予約取消へこの方式を広げない。

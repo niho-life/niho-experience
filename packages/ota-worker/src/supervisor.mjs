@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { createGygDriver } from "./gyg-driver.mjs";
+import { selectDriverFactory } from "./driver-registry.mjs";
 import { createSupervisorRpc } from "./mcp-rpc.mjs";
 import { runClaude } from "./claude-runner.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
@@ -19,7 +19,7 @@ function classify(error) {
   const code = error?.code ?? "EXECUTION_FAILED";
   if (["AUTH_REQUIRED", "CLAUDE_AUTH_REQUIRED"].includes(code)) return { outcome: "AUTH_REQUIRED", quarantine: true, halt: true, reason: code };
   if (code === "UNKNOWN_AFTER_SAVE") return { outcome: "UNKNOWN_AFTER_SAVE", quarantine: true, halt: true, reason: code };
-  if (["DOM_DRIFT", "ACCOUNT_MISMATCH", "PRODUCT_MISMATCH", "TARGET_MISMATCH", "WRITE_REFUSED", "VERIFY_FAILED", "SAVE_NOT_APPLIED", "MCP_PROTOCOL_VIOLATION"].includes(code)) {
+  if (["DOM_DRIFT", "ACCOUNT_MISMATCH", "PRODUCT_MISMATCH", "TARGET_MISMATCH", "UNSUPPORTED_TARGET", "WRITE_REFUSED", "VERIFY_FAILED", "SAVE_NOT_APPLIED", "MCP_PROTOCOL_VIOLATION"].includes(code)) {
     return { outcome: "NEEDS_REVIEW", quarantine: true, halt: true, reason: code };
   }
   if (["LEASE_RENEW_FAILED", "DEADLINE_EXCEEDED", "STALE_PREFLIGHT", "HTTP_ERROR", "NETWORK_ERROR", "TIMEOUT"].includes(code)) {
@@ -40,7 +40,7 @@ export async function executeJob({
   job,
   cloud,
   config,
-  driverFactory = createGygDriver,
+  driverFactory = selectDriverFactory,
   claudeExecutor = runClaude,
   rpcFactory = createSupervisorRpc,
   renewEveryMs = 20_000,

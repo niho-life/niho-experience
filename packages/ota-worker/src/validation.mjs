@@ -1,11 +1,9 @@
 import {
-  ADAPTER,
-  ADAPTER_VERSION,
+  ADAPTER_REGISTRY,
   CONNECTION_MODE,
   MAX_JOB_MS,
   MAX_CLOCK_SKEW_MS,
   OPTIONAL_TARGET_KEYS,
-  SITE,
   TARGET_KEYS,
   TIME_ZONE,
 } from "./constants.mjs";
@@ -50,11 +48,19 @@ function canonicalInstant(value, name) {
 
 export function validateTarget(value) {
   if (!exactKeys(value, TARGET_KEYS, OPTIONAL_TARGET_KEYS)) throw new ContractError("TARGET_MISMATCH");
-  if (value.site !== SITE || value.adapter !== ADAPTER || value.adapterVersion !== ADAPTER_VERSION
+  const adapter = ADAPTER_REGISTRY[value.site];
+  if (!adapter || value.adapter !== adapter.adapter || value.adapterVersion !== adapter.adapterVersion
     || value.connectionMode !== CONNECTION_MODE || value.timeZone !== TIME_ZONE) throw new ContractError("UNSUPPORTED_TARGET");
-  if (!DIGITS.test(nonEmptyText(value.externalAccountId, 256, "externalAccountId"))
-    || !DIGITS.test(nonEmptyText(value.externalProductId, 256, "externalProductId"))
-    || !DIGITS.test(nonEmptyText(value.externalOptionId, 256, "externalOptionId"))) throw new ContractError("TARGET_MISMATCH");
+  const account = nonEmptyText(value.externalAccountId, 128, "externalAccountId");
+  const product = nonEmptyText(value.externalProductId, 128, "externalProductId");
+  const option = nonEmptyText(value.externalOptionId, 128, "externalOptionId");
+  const valid = value.site === "GetYourGuide"
+    ? DIGITS.test(account) && DIGITS.test(product) && DIGITS.test(option)
+    : value.site === "Viator"
+      ? DIGITS.test(account) && /^\d+P\d+$/.test(product) && /^TG[A-Za-z0-9]+$/.test(option)
+      : /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(account) && /^l\d+$/.test(product)
+        && /^(?:0|[1-9]\d*)$/.test(option) && Number.isSafeInteger(Number(option));
+  if (!valid) throw new ContractError("TARGET_MISMATCH");
   return Object.freeze({ ...value });
 }
 

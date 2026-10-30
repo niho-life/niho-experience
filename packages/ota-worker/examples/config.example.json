@@ -5,6 +5,14 @@
   "accountProfiles": {
     "00000": "/ABSOLUTE/PRIVATE_DIR/profiles/00000"
   },
+  "siteAccountProfiles": {
+    "Viator": {
+      "999999": "/ABSOLUTE/PRIVATE_DIR/profiles/viator/999999"
+    },
+    "Jalan": {
+      "SyntheticAirId": "/ABSOLUTE/PRIVATE_DIR/profiles/jalan/SyntheticAirId"
+    }
+  },
   "browserExecutable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "mode": "deterministic",
   "debugScreenshots": false

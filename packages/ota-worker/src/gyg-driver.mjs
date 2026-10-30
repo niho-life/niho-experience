@@ -4,6 +4,7 @@ import { CDN_ORIGIN, SUPPLIER_ORIGIN } from "./constants.mjs";
 import { startManagedBrowser } from "./managed-browser.mjs";
 import { createNetworkGuard } from "./network-guard.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
+import { selectAccountProfile } from "./config.mjs";
 
 function fixedOrigin(value, testOnly) {
   if (value === undefined) return SUPPLIER_ORIGIN;
@@ -15,8 +16,7 @@ function fixedOrigin(value, testOnly) {
 
 export async function createGygDriver({ job, cloud, config, now = () => new Date(), testOnlySupplierOrigin, allowLocalTestOrigin = false, headless = false, browserFactory = startManagedBrowser }) {
   const supplierOrigin = fixedOrigin(testOnlySupplierOrigin, allowLocalTestOrigin);
-  const profile = config.accountProfiles[job.target.externalAccountId];
-  if (!profile) throw new ContractError("PROFILE_MAPPING_MISSING");
+  const profile = selectAccountProfile(config, job.target);
   const browser = await browserFactory({ executablePath: config.browserExecutable, userDataDir: profile, headless });
   try {
   const { context } = browser;
