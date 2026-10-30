@@ -1,12 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { StoreConflictError } from "./errors.ts";
-
-const REQUIRED_GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-  "https://www.googleapis.com/auth/calendar.events.freebusy",
-  "https://www.googleapis.com/auth/calendar.app.created",
-] as const;
+import { googleScopesDigest, REQUIRED_GOOGLE_SCOPES } from "./google-airbnb-propagation.ts";
 
 export interface GoogleAirbnbReceiptAuthority {
   readonly deliveryId: string;
@@ -32,10 +27,14 @@ export interface GoogleAirbnbReceiptAuthority {
 export interface VerifiedGoogleAirbnbReceipt {
   readonly deliveryId: string;
   readonly googleVerifiedAtUtc: string;
+  readonly firstVerifiedAtUtc: string;
+  readonly bindingVersion: number;
+  readonly connectionGeneration: number;
+  readonly bindingCalendarDigest: string;
+  readonly grantedScopesDigest: string;
 }
 
 function digest(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
-function scopesDigest(scopes: readonly string[]): string { return digest(JSON.stringify([...scopes].sort())); }
 function integer(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) throw new StoreConflictError("Google Airbnb proof is stale.");
@@ -102,7 +101,7 @@ export async function verifyGoogleAirbnbReceipt(
     || integer(row.current_binding_version) !== integer(row.binding_version)
     || integer(row.current_connection_generation) !== integer(row.connection_generation)
     || digest(String(row.opaque_calendar_id)) !== row.binding_calendar_digest
-    || scopesDigest(scopes) !== row.granted_scopes_digest
+    || googleScopesDigest(scopes) !== row.granted_scopes_digest
     || !REQUIRED_GOOGLE_SCOPES.every((scope) => scopes.includes(scope))
     || row.first_verified_at === null || row.first_verified_at === undefined
     || row.operation_verified_at === null || row.operation_verified_at === undefined
@@ -125,5 +124,13 @@ export async function verifyGoogleAirbnbReceipt(
     [authority.providerId, authority.listingId, authority.occurrenceId, authority.deliveryId],
   );
   if (unresolved.rows[0]) throw new StoreConflictError("Another Google delivery for this occurrence is unresolved.");
-  return { deliveryId: authority.deliveryId, googleVerifiedAtUtc: verifiedAtUtc };
+  return {
+    deliveryId: authority.deliveryId,
+    googleVerifiedAtUtc: verifiedAtUtc,
+    firstVerifiedAtUtc: iso(row.first_verified_at),
+    bindingVersion: integer(row.binding_version),
+    connectionGeneration: integer(row.connection_generation),
+    bindingCalendarDigest: String(row.binding_calendar_digest),
+    grantedScopesDigest: String(row.granted_scopes_digest),
+  };
 }

@@ -216,6 +216,75 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
     }
   });
 
+  it.each(["OPEN", "CLOSED"] as const)("converges durable %s waits through the real Google helper without another write", async (desiredState) => {
+    const value = await fixture(desiredState);
+    const methods: string[] = [];
+    let event: Record<string, unknown> | undefined;
+    const google: GoogleConfig = {
+      clientId: "synthetic", clientSecret: "synthetic", redirectUri: "https://experience.example.test/callback",
+      fetch: async (_input, init = {}) => {
+        const method = init.method ?? "GET";
+        methods.push(method);
+        if (method === "POST" || method === "PATCH") {
+          const selected: Record<string, unknown> = { ...event, ...JSON.parse(String(init.body)), status: "confirmed", etag: `"etag-${method}"` };
+          event = selected;
+          return Response.json({ id: selected.id, etag: selected.etag });
+        }
+        return event ? Response.json(event) : new Response(null, { status: 404 });
+      },
+    };
+    const opposite = desiredState === "OPEN" ? "CLOSED" : "OPEN";
+    try {
+      expect((await initializeGoogleManagedBlock(google, "synthetic-access", "airbnb-output", {
+        providerOpaqueId: "provider-a", listingOpaqueId: value.listing.id,
+        occurrenceOpaqueId: value.claimed.occurrenceId, mappingVersion: value.claimed.mappingVersion,
+        desiredVersion: value.claimed.desiredVersion, sourceStartAtUtc: value.claimed.sourceStartAtUtc,
+        sourceEndAtUtc: value.claimed.sourceEndAtUtc, desiredState: opposite,
+      }, () => undefined)).code).toBe("GOOGLE_VERIFIED");
+      methods.length = 0;
+      const dispatched = await executeGoogleChannelDelivery(value.pool, value.runtime, value.worker,
+        value.claimed.id, value.claimed.leaseToken, "dispatch", injected(google.fetch!));
+      expect(dispatched.phase).toBe("GOOGLE_VERIFIED");
+      expect(methods).toEqual(["GET", "PATCH", "GET"]);
+      const proof = { deliveryId: dispatched.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const };
+      expect(await value.runtime.submitResult(value.worker, value.claimed.id, {
+        resultId: command(70), leaseToken: value.claimed.leaseToken, outcome: "RETRY_WAIT", stopped: true,
+        target: value.claimed.target, occurrenceId: value.claimed.occurrenceId,
+        sourceStartAtUtc: value.claimed.sourceStartAtUtc, sourceEndAtUtc: value.claimed.sourceEndAtUtc,
+        observedState: opposite, observedBookable: opposite === "OPEN", observedAtUtc: new Date().toISOString(),
+        googleAirbnbProof: proof,
+      })).toEqual({ acceptedAsCurrent: false, repeated: false });
+      const waiting = (await value.pool.query(
+        "SELECT first_verified_at,deadline_at FROM google_airbnb_propagation_waits WHERE delivery_id=$1::uuid", [dispatched.deliveryId],
+      )).rows[0];
+      await value.pool.query("UPDATE google_airbnb_propagation_waits SET next_due_at=clock_timestamp()-interval '1 second' WHERE delivery_id=$1::uuid",
+        [dispatched.deliveryId]);
+      expect(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker)).toEqual({ enqueued: 1 });
+      const observedJob = await value.runtime.claim(value.worker);
+      if (!observedJob) throw new Error("Synthetic propagation job was not claimed");
+      expect(observedJob.googleDeliveryOperation).toBe("observe");
+      methods.length = 0;
+      const observed = await executeGoogleChannelDelivery(value.pool, value.runtime, value.worker,
+        observedJob.id, observedJob.leaseToken, "observe", injected(google.fetch!));
+      expect(observed.phase).toBe("GOOGLE_VERIFIED");
+      expect(methods).toEqual(["GET"]);
+      expect(await value.runtime.submitResult(value.worker, observedJob.id, {
+        resultId: command(71), leaseToken: observedJob.leaseToken, outcome: "VERIFIED", stopped: true,
+        target: observedJob.target, occurrenceId: observedJob.occurrenceId,
+        sourceStartAtUtc: observedJob.sourceStartAtUtc, sourceEndAtUtc: observedJob.sourceEndAtUtc,
+        observedState: desiredState, observedBookable: desiredState === "OPEN", observedAtUtc: new Date().toISOString(),
+        googleAirbnbProof: proof,
+      })).toEqual({ acceptedAsCurrent: true, repeated: false });
+      const matched = (await value.pool.query(
+        "SELECT status,pending_job_id,first_verified_at,deadline_at FROM google_airbnb_propagation_waits WHERE delivery_id=$1::uuid", [dispatched.deliveryId],
+      )).rows[0];
+      expect(matched.status).toBe("MATCHED");
+      expect(matched.pending_job_id).toBeNull();
+      expect(matched.first_verified_at.toISOString()).toBe(waiting.first_verified_at.toISOString());
+      expect(matched.deadline_at.toISOString()).toBe(waiting.deadline_at.toISOString());
+    } finally { await cleanup(value); }
+  });
+
   it.each(["OPEN", "CLOSED"] as const)("refreshes %s proof by GET in a new lease before accepting the typed receipt", async (desiredState) => {
     const value = await fixture(desiredState);
     const methods: string[] = [];
@@ -473,6 +542,8 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
         "SELECT id,operation_nonce FROM google_channel_deliveries WHERE id=$1::uuid", [first.deliveryId],
       )).rows[0];
       const recovery = await value.runtime.recoverQuarantinedLease(value.admin, value.account.id, true, command(7));
+      await value.pool.query("UPDATE channel_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid",
+        [recovery.observeJobId]);
       const observe = await value.runtime.claim(value.worker);
       expect(observe?.id).toBe(recovery.observeJobId);
       expect(observe?.action).toBe("OBSERVE");

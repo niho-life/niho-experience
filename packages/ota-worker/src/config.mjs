@@ -5,7 +5,7 @@ import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 import { RESERVATION_READER_KEYS } from "./constants.mjs";
 
 const CONFIG_KEYS = ["cloudOrigin", "tokenFile", "privateDir", "accountProfiles", "browserExecutable", "mode"];
-const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles", "siteAccountSessionPolicies", "googleDeliveryEnabled", "reservationReaders"];
+const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles", "siteAccountSessionPolicies", "googleDeliveryEnabled", "googleAirbnbObservationEnabled", "reservationReaders"];
 const SITE_PROFILE_NAMESPACES = Object.freeze({ Viator: "viator", Jalan: "jalan", Airbnb: "airbnb" });
 
 async function assertPrivatePath(path, expectedType, mode) {
@@ -82,6 +82,8 @@ export async function loadConfig(configPath, options = {}) {
   if (typeof raw.browserExecutable !== "string" || raw.browserExecutable.length < 1
     || !["deterministic", "claude-code"].includes(raw.mode)
     || (raw.googleDeliveryEnabled !== undefined && typeof raw.googleDeliveryEnabled !== "boolean")
+    || (raw.googleAirbnbObservationEnabled !== undefined && typeof raw.googleAirbnbObservationEnabled !== "boolean")
+    || (raw.googleAirbnbObservationEnabled === true && raw.googleDeliveryEnabled !== true)
     || (raw.reservationReaders !== undefined && (!Array.isArray(raw.reservationReaders)
       || new Set(raw.reservationReaders).size !== raw.reservationReaders.length
       || raw.reservationReaders.some((key) => typeof key !== "string" || !RESERVATION_READER_KEYS.includes(key))))
@@ -102,6 +104,7 @@ export async function loadConfig(configPath, options = {}) {
     ...(raw.claudeExecutable ? { claudeExecutable: resolve(raw.claudeExecutable) } : {}),
     debugScreenshots: raw.debugScreenshots === true,
     googleDeliveryEnabled: raw.googleDeliveryEnabled === true,
+    googleAirbnbObservationEnabled: raw.googleAirbnbObservationEnabled === true,
     reservationReaders: Object.freeze([...(raw.reservationReaders ?? [])]),
   });
 }

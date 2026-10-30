@@ -20,4 +20,4 @@ export {
 } from "./gyg-reservation-protocol.mjs";
 export { runWorkerLoop, runWorkerOnce, resumeJournal } from "./worker.mjs";
 export { acquireSingleInstance } from "./single-instance.mjs";
-export { ContractError, validateClaim, validateTarget } from "./validation.mjs";
+export { ContractError, makeGoogleAirbnbResult, projectRawClaim, validateClaim, validateGoogleAirbnbObservation, validateTarget } from "./validation.mjs";

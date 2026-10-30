@@ -54,6 +54,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   google_channel_deliveries: { write: IU },
   google_channel_output_bindings: { write: I, updateColumns: ["updated_at"] },
   google_channel_setup_journals: { write: IU },
+  google_airbnb_propagation_waits: { write: IU },
   guest_question_messages: { write: IU },
   guest_question_reply_tokens: { write: IU },
   guest_question_threads: { write: IU },

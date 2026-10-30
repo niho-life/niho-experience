@@ -27,11 +27,21 @@ test("production config rejects arbitrary/non-HTTPS origin; localhost requires e
 });
 
 test("Google delivery config is optional, defaults off, and accepts only booleans", async () => {
-  assert.equal((await loadConfig(await configFixture("https://cloud.example"))).googleDeliveryEnabled, false);
+  const defaults = await loadConfig(await configFixture("https://cloud.example"));
+  assert.equal(defaults.googleDeliveryEnabled, false);
+  assert.equal(defaults.googleAirbnbObservationEnabled, false);
   assert.equal((await loadConfig(await configFixture("https://cloud.example", { googleDeliveryEnabled: false }))).googleDeliveryEnabled, false);
   assert.equal((await loadConfig(await configFixture("https://cloud.example", { googleDeliveryEnabled: true }))).googleDeliveryEnabled, true);
+  assert.equal((await loadConfig(await configFixture("https://cloud.example", {
+    googleDeliveryEnabled: true, googleAirbnbObservationEnabled: true,
+  }))).googleAirbnbObservationEnabled, true);
   await assert.rejects(loadConfig(await configFixture("https://cloud.example", { googleDeliveryEnabled: "true" })),
     (error) => error.code === "INVALID_CONFIG");
+  await assert.rejects(loadConfig(await configFixture("https://cloud.example", { googleAirbnbObservationEnabled: true })),
+    (error) => error.code === "INVALID_CONFIG");
+  await assert.rejects(loadConfig(await configFixture("https://cloud.example", {
+    googleDeliveryEnabled: true, googleAirbnbObservationEnabled: "true",
+  })), (error) => error.code === "INVALID_CONFIG");
 });
 
 test("reservation readers are optional, default to none, and accept only unique registered keys", async () => {

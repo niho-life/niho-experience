@@ -148,6 +148,23 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /client|observed_at|calendar_id|scope|token|raw_response/i);
   });
 
+  it("keeps Google to Airbnb propagation waits separate from reservation propagation metrics", async () => {
+    const sql = await readFile(new URL("../migrations/0024_google_airbnb_propagation.sql", import.meta.url), "utf8");
+    const table = sql.match(/CREATE TABLE google_airbnb_propagation_waits \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(sql, /outcome IN \('VERIFIED','RETRY_WAIT'\)/);
+    assert.match(sql, /ADD COLUMN google_propagation_delivery_id uuid/);
+    assert.match(sql, /WHERE purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL/);
+    assert.match(sql, /channel_jobs_google_propagation_live/);
+    assert.match(table, /delivery_id uuid PRIMARY KEY REFERENCES google_channel_deliveries/);
+    assert.match(table, /status IN \('WAITING','CHECKING','MATCHED','SUPERSEDED','NEEDS_REVIEW'\)/);
+    assert.match(table, /deadline_at = first_verified_at \+ interval '60 minutes'/);
+    assert.match(table, /dispatched_worker_id text NOT NULL REFERENCES channel_workers/);
+    assert.match(table, /binding_calendar_digest text NOT NULL/);
+    assert.match(table, /granted_scopes_digest text NOT NULL/);
+    assert.doesNotMatch(sql, /ALTER TABLE channel_propagation_measurements|ALTER TABLE channel_propagation_targets/);
+    assert.doesNotMatch(table, /credential|refresh_token|access_token|calendar_id|raw_response|customer|guest|email|phone/i);
+  });
+
   it("fences OWNER calendar creation before I/O without persisting credentials or response bodies", async () => {
     const sql = await readFile(new URL("../migrations/0019_google_channel_setup.sql", import.meta.url), "utf8");
     assert.match(sql, /CREATE TABLE google_channel_setup_journals/);

@@ -201,9 +201,10 @@ export function createCloudClient({ origin, token, fetchImpl = globalThis.fetch,
       if (!isGoogleDeliveryTarget(validateTarget(job.target)) || job.purpose === "RESERVATION_WINDOW") {
         throw new ContractError("INVALID_GOOGLE_DELIVERY_TARGET");
       }
-      const expectedOperation = job.action === "OBSERVE" ? "reconcile"
-        : ["SET_OPEN", "SET_CLOSED"].includes(job.action) ? "dispatch" : null;
-      if (!expectedOperation || operation !== expectedOperation) throw new ContractError("INVALID_GOOGLE_DELIVERY_OPERATION");
+      const allowedOperations = job.action === "OBSERVE"
+        ? new Set([job.googleDeliveryOperation === "observe" ? "observe" : "reconcile"])
+        : ["SET_OPEN", "SET_CLOSED"].includes(job.action) ? new Set(["dispatch", "observe"]) : new Set();
+      if (!allowedOperations.has(operation)) throw new ContractError("INVALID_GOOGLE_DELIVERY_OPERATION");
       const remainingMs = Date.parse(job.deadlineAtUtc) - now();
       if (!Number.isFinite(remainingMs) || remainingMs <= 0) throw new CloudError("TIMEOUT");
       const value = await request(`internal/ota/v1/jobs/${encodeURIComponent(job.id)}/google-delivery`,

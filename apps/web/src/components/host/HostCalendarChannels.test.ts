@@ -13,14 +13,18 @@ describe("host calendar channel labels", () => {
     expect(channelSummary({ kind: "disabled" }, "occurrence-a")).toBeNull();
   });
 
-  it("shows a held OPEN as 保留中 and orders ERROR > UNVERIFIED > HELD > PENDING > SYNCED", () => {
-    const row = (site: string, label: "SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED" | "HELD") => ({ occurrenceId: "occurrence-a", site, desired: "OPEN" as const, label });
-    const ready = (...labels: ("SYNCED" | "PENDING" | "ERROR" | "UNVERIFIED" | "HELD")[]): HostChannelState => ({ kind: "ready", channels: labels.map((label, index) => row(`Synthetic ${index}`, label)) });
+  it("orders ERROR > UNVERIFIED > HELD > CHECKING > PENDING > SYNCED", () => {
+    const row = (site: string, label: "SYNCED" | "PENDING" | "CHECKING" | "ERROR" | "UNVERIFIED" | "HELD") => ({ occurrenceId: "occurrence-a", site, desired: "OPEN" as const, label });
+    const ready = (...labels: ("SYNCED" | "PENDING" | "CHECKING" | "ERROR" | "UNVERIFIED" | "HELD")[]): HostChannelState => ({ kind: "ready", channels: labels.map((label, index) => row(`Synthetic ${index}`, label)) });
     expect(channelSummary(ready("HELD"), "occurrence-a")).toEqual({ label: "保留中", tone: "wait" });
     expect(channelSummary(ready("SYNCED", "PENDING", "HELD"), "occurrence-a")).toEqual({ label: "保留中", tone: "wait" });
     expect(channelSummary(ready("HELD", "UNVERIFIED"), "occurrence-a")).toEqual({ label: "未確認", tone: "draft" });
     expect(channelSummary(ready("HELD", "UNVERIFIED", "ERROR"), "occurrence-a")).toEqual({ label: "要確認", tone: "wait" });
     expect(channelSummary(ready("SYNCED", "PENDING"), "occurrence-a")).toEqual({ label: "反映待ち", tone: "wait" });
+    expect(channelSummary(ready("SYNCED", "PENDING", "CHECKING"), "occurrence-a")).toEqual({ label: "確認中", tone: "wait" });
+    expect(channelSummary(ready("CHECKING", "HELD"), "occurrence-a")).toEqual({ label: "保留中", tone: "wait" });
+    expect(channelSummary(ready("CHECKING", "UNVERIFIED"), "occurrence-a")).toEqual({ label: "未確認", tone: "draft" });
+    expect(channelSummary(ready("CHECKING", "ERROR"), "occurrence-a")).toEqual({ label: "要確認", tone: "wait" });
   });
 
   it("shows reflected only when every returned label is SYNCED", () => {
