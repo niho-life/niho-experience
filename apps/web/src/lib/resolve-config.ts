@@ -15,6 +15,9 @@ export const DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY = "BJWY_HMlymTEFRF78WYjPHnZOQxG
 const VAPID_PUBLIC_KEY = /^B[A-Za-z0-9_-]{86}$/;
 const VAPID_PRIVATE_KEY = /^[A-Za-z0-9_-]{43}$/;
 
+/** A Google service account that calls an internal route with its ID token. */
+const SERVICE_ACCOUNT_EMAIL = /^[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\.iam\.gserviceaccount\.com$/;
+
 const MIN_HOST_SESSION_SECRET_LENGTH = 32;
 const MIN_ADMIN_SESSION_SECRET_LENGTH = 32;
 const MIN_EDITOR_SESSION_SECRET_LENGTH = 32;
@@ -139,11 +142,36 @@ function guideAdminSettings(apiMode: "mock" | "http", env: Env): {
   const audience = env.GUIDE_ADMIN_AUDIENCE?.trim() ?? "";
   const serviceAccountEmail = env.GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
   if (!audience) throw new Error("GUIDE_ADMIN_API_ENABLED=true needs GUIDE_ADMIN_AUDIENCE in http mode");
-  if (!/^[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\.iam\.gserviceaccount\.com$/.test(serviceAccountEmail)) {
+  if (!SERVICE_ACCOUNT_EMAIL.test(serviceAccountEmail)) {
     throw new Error("GUIDE_ADMIN_API_ENABLED=true needs GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL in http mode");
   }
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) {
     throw new Error("GUIDE_ADMIN_API_ENABLED=true needs EXPERIENCE_DATABASE_URL in http mode");
+  }
+  return { enabled: true, audience, serviceAccountEmail };
+}
+
+/**
+ * The host push job's trigger (#177 P2, POST /internal/host-push/v1/drain): Cloud Scheduler calls it
+ * with a Google ID token of its own service account. On only in http mode with push on and both set;
+ * half a setting, a malformed account or no experience DB stops the start-up.
+ */
+function hostPushJobSettings(apiMode: "mock" | "http", hostPushEnabled: boolean, env: Env): {
+  enabled: boolean;
+  audience: string;
+  serviceAccountEmail: string;
+} {
+  const audience = env.HOST_PUSH_JOB_AUDIENCE?.trim() ?? "";
+  const serviceAccountEmail = env.HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
+  if (apiMode !== "http" || !hostPushEnabled || (!audience && !serviceAccountEmail)) {
+    return { enabled: false, audience: "", serviceAccountEmail: "" };
+  }
+  if (!audience) throw new Error("HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL needs HOST_PUSH_JOB_AUDIENCE in http mode");
+  if (!SERVICE_ACCOUNT_EMAIL.test(serviceAccountEmail)) {
+    throw new Error("HOST_PUSH_JOB_AUDIENCE needs HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL (a service account) in http mode");
+  }
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) {
+    throw new Error("HOST_PUSH_JOB_AUDIENCE needs EXPERIENCE_DATABASE_URL in http mode");
   }
   return { enabled: true, audience, serviceAccountEmail };
 }
@@ -159,6 +187,7 @@ export function resolveConfig(env: Env) {
   // Web Push to the app (#177 P2), next to email. Its VAPID private key is server-only, like the session key.
   const hostPushEnabled = hostPwaEnabled && env.HOST_PUSH_ENABLED === "true";
   const hostPush = hostPushSettings(apiMode, hostPushEnabled, env);
+  const hostPushJob = hostPushJobSettings(apiMode, hostPushEnabled, env);
   // The support console has no NIHO admin contract yet. Its explicit gate is useful only for
   // the synthetic preview; http mode renders a preparation boundary and never accepts a mock role.
   const adminSupportConsoleEnabled = env.ADMIN_SUPPORT_CONSOLE_ENABLED === "true";
@@ -273,6 +302,10 @@ export function resolveConfig(env: Env) {
     // Server only: signs VAPID tokens. Empty in mock mode, which never sends.
     hostPushVapidPrivateKey: hostPush.privateKey,
     hostPushVapidSubject: hostPush.subject,
+    // The notification job that sends what `outbox_messages` holds; a service-to-service surface like guide admin.
+    hostPushJobEnabled: hostPushJob.enabled,
+    hostPushJobAudience: hostPushJob.audience,
+    hostPushJobServiceAccountEmail: hostPushJob.serviceAccountEmail,
     adminSupportConsoleEnabled,
     adminSupportReadApiEnabled,
     adminSupportReadPreviewEnabled,
