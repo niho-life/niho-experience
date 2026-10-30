@@ -56,4 +56,6 @@ Airbnbは `siteAccountProfiles.Airbnb` の専用mappingだけを使う。pathは
 
 focused unit testは、大きな10進IDの文字列保持、canonical base64、本人owner、OPENと明示CLOSED、欠落・重複・partial・型drift・link/time/capacity/UTC/coverage/filter、pinned GET guard、mutation・未知request・追加originの拒否、private profile namespaceを対象にする。localhost browser testは、実Chromeで通常のprofile clickとweek navigation、2回目のfresh cycle、account/auth/preflight/deadline失敗、body上限、悪性POSTの未到達、停止確認を対象にする。
 
-合成fixtureは実サイト互換性、認証profileの健全性、継続稼働、同期SLAの証拠ではない。parent review後の実サイトread-only pilotと、将来のcaller・durable wait統合が完了するまで、本番同期済み・予約ゼロ・Airbnb在庫の正本とは表示しない。
+2026-10-31、レビュー済みの固定SHA `81d5201` をStudioの独立したprivate runtimeへ配置し、ログイン済み専用profileで実サイトの読取りを確認した。既存の受付不可・受付可能な回をそれぞれ一意な掲載・開始終了時刻と照合でき、両方でwrite 0、モデル呼出し0、停止確認trueであった。対象回以外の内容・接続key・顧客情報は証跡へ保存していない。
+
+この実サイトpilotのcloud preflightは検証用stubであり、本番のcloud job・Google配送・callerへは接続していない。既存の受付可否を読む実証であり、Googleの変更による停止・再開、最大60分の伝播、継続稼働、予約ledgerの完全性の証拠にはしない。将来のcaller・durable wait統合と実接続の受入が完了するまで、本番同期済み・予約ゼロ・Airbnb在庫の正本とは表示しない。
