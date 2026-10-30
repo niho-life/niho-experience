@@ -279,12 +279,12 @@ test("an OWNER can disable cached resource blocking after disconnect", async ({ 
   await expect(dialog).toContainText("再接続または「使わない」");
   await dialog.getByRole("button", { name: "接続を切る" }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole("status")).toContainText("保存しました");
+  await expect(page.getByRole("status").filter({ hasText: /^保存しました$/ })).toBeVisible();
   await page.locator("summary").filter({ hasText: "Google カレンダー" }).click();
   await expect(page.getByRole("link", { name: "Google カレンダーをつなぐ" })).toBeVisible();
   await page.getByRole("checkbox", { name: "使う" }).uncheck();
   await page.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("保存しました");
+  await expect(page.getByRole("status").filter({ hasText: /^保存しました。反映を確認中です。$/ })).toBeVisible();
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({ resourceId: "room-a", enabled: false, expectedVersion: 1 });
   expect(writes[0]?.providerId).toEqual(expect.any(String));
