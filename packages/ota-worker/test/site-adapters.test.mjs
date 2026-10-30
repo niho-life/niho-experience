@@ -74,6 +74,8 @@ test("Viator bootstrap read is bounded but cannot authorize a target write", () 
   assert.equal(viatorListStateCoversTarget(bootstrap, viatorJob), false);
   assert.equal(validateViatorUpdate(viatorUpdate(), viatorJob, { authorized: true, availability: "AVAILABLE", listState: bootstrap }), false);
   assert.equal(validateViatorReadBody({ ...bootstrap, initialLoad: true }), false);
+  assert.equal(validateViatorReadBody({ ...bootstrap, loadDirection: "BIDIRECTIONAL" }), true);
+  assert.equal(validateViatorReadBody({ ...bootstrap, loadDirection: "UNKNOWN" }), false);
 });
 
 test("Viator guard allows the bounded read POST and one exact write with interception preflight", async () => {
@@ -210,6 +212,8 @@ test("Jalan accepts observed callback whitespace without accepting another call 
 test("Jalan summary query requires the observed exact keys, bounded values and no duplicates", () => {
   const base = "http://127.0.0.1/stateful/schdl/client/summary?callback=cb&dspBaseDate=20990101&dspRange=14&pageSize=14&pageNo=1&schdlKbn=&groupSchdlId=&lessonSchdlId=l000000001&includeSaleStops=true&_=1";
   assert.equal(validateJalanSummaryUrl(new URL(base), jalanJob), true);
+  assert.equal(validateJalanSummaryUrl(new URL(base.replace("dspBaseDate=20990101", "dspBaseDate=")), jalanJob), true);
+  assert.equal(validateJalanSummaryUrl(new URL(base.replace("dspBaseDate=20990101", "dspBaseDate=invalid")), jalanJob), false);
   assert.equal(validateJalanSummaryUrl(new URL(`${base}&pageNo=2`), jalanJob), false);
   assert.equal(validateJalanSummaryUrl(new URL(`${base}&price=1`), jalanJob), false);
   assert.equal(validateJalanSummaryUrl(new URL(base.replace("dspRange=14", "dspRange=99")), jalanJob), false);

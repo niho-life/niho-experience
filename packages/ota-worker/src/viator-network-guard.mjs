@@ -55,7 +55,7 @@ export function validateViatorListState(value) {
   if (!Array.isArray(value.filteredProducts) || value.filteredProducts.length > 100
     || value.filteredProducts.some((item) => typeof item !== "string" || !PRODUCT_CODE.test(item))
     || !optionFilters(value.filteredTourGrades) || !pagination(value.perDayPagination)) return false;
-  return ["FORWARD", "BACKWARD"].includes(value.loadDirection)
+  return ["FORWARD", "BACKWARD", "BIDIRECTIONAL"].includes(value.loadDirection)
     && typeof value.hasMoreAfter === "boolean" && typeof value.hasMoreBefore === "boolean";
 }
 

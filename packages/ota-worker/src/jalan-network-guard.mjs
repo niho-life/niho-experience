@@ -34,9 +34,14 @@ function isStockBackgroundRead(request, url) {
       && [...url.searchParams.keys()].every((key) => ["time", "_"].includes(key))
       && ["time", "_"].every((key) => url.searchParams.getAll(key).length === 1 && /^\d{10,16}$/.test(url.searchParams.get(key)));
   }
+  if (url.pathname === "/stateful/booking/message/summary") {
+    return ["xhr", "fetch"].includes(request.resourceType?.())
+      && [...url.searchParams.keys()].every((key) => key === "_")
+      && url.searchParams.getAll("_").length === 1 && /^\d{10,16}$/.test(url.searchParams.get("_"));
+  }
   // The common header performs this read during stock-page initialization. Its
   // generic Ajax failure handler otherwise redirects the page to login.
-  return url.pathname === "/stateful/notice/summary"
+  return ["/stateful/notice/summary", "/stateful/schdl/group/names", "/stateful/schdl/lesson/names"].includes(url.pathname)
     && [...url.searchParams.keys()].every((key) => ["callback", "_"].includes(key))
     && url.searchParams.getAll("callback").length === 1 && /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(url.searchParams.get("callback"))
     && url.searchParams.getAll("_").length === 1 && /^\d{10,16}$/.test(url.searchParams.get("_"));
@@ -56,7 +61,7 @@ export function validateJalanSummaryUrl(url, job) {
     || SUMMARY_OPTIONAL_QUERY_KEYS.some((key) => url.searchParams.getAll(key).length > 1)) return false;
   const one = (key) => url.searchParams.get(key) ?? "";
   return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(one("callback"))
-    && canonicalCompactDate(one("dspBaseDate"))
+    && (one("dspBaseDate") === "" || canonicalCompactDate(one("dspBaseDate")))
     && /^\d{1,2}$/.test(one("dspRange")) && Number(one("dspRange")) >= 1 && Number(one("dspRange")) <= 31
     && /^\d{1,3}$/.test(one("pageSize")) && Number(one("pageSize")) >= 1 && Number(one("pageSize")) <= 100
     && /^\d{1,4}$/.test(one("pageNo")) && Number(one("pageNo")) >= 1
