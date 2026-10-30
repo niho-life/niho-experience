@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Googleへの本番実接続、Airbnb観測、本番有効化の完了を示すものではない。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Googleへの本番実接続、Airbnb観測、本番有効化の完了を示すものではない。
 
 公式根拠：
 
@@ -56,8 +56,18 @@ OTA worker caller も `googleDeliveryEnabled` が既定falseである。ON時だ
 
 ## 未接続・未受入
 
+### Issue #275 のsetup backend
+
+`/host/calendar/google-output` のGET/POSTはHTTP mode、host console、`EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED=true`、fresh NIHO session、Experience OWNER、同じNIHO userが作成した現行Google接続をすべて満たす場合だけ開く。入力はprovider/listing、期待mapping version、UUIDv4 commandだけで、calendar ID、名称、token、actorは受けない。商品がDRAFTでも現在のAirbnb/GOOGLE/`airbnb-google-busy@1` listingとaccountが有効なら準備できるが、配送は開始しない。
+
+serverは商品名から200文字以内のplainな名称を作り、既存scope `calendar.app.created` による固定 `POST /calendar/v3/calendars` で`Asia/Tokyo`のsecondary calendarを作る。booking calendar作成helperとは分離し、名前検索や既存calendarの採用・置換は行わない。作成前に`PREPARING`、Google POST直前に`CREATING`を永続化する。`CREATING`後のtimeout、5xx、ACK喪失、権限・mapping・接続generation・scope変更、保存失敗は`UNCERTAIN`で止め、盲目的に再作成しない。成功時も`google_channel_output_bindings.active=false`であり、OWNER DTOにcalendar ID、nonce、token、scope、Google responseを返さない。
+
+入力calendarの通常保存経路とsetup finishは、provider inventory mutexの後にopaque calendar ID順の共通advisory lockを取る。これによりprovider busy、resource busy、booking calendar、active/inactive output bindingをprovider横断で同時採用できない。lockは設定transactionだけに限定し、Google通信中は保持しない。
+
+このbackendに含めないもの：初期anchor、Airbnb側への実接続、bindingのactive化、setup UI、observerとtyped receipt、予約reader、本番flag有効化、PWA通し、伝播SLO実測。これらの受入が終わるまで専用calendarは配送対象ではない。
+
 実DBを使う結合testは、実 `ChannelRuntime` / repository / `applyGoogleManagedBlock` / `inspectGoogleManagedBlock` と合成fetchを接続し、ACK喪失、duplicate write抑止、stop-confirmed OBSERVEからのGET-only再照合、binding/desired失効、operation fencing、cross-provider calendar衝突を永続状態とwrite回数で確認する。token refresh/configだけを合成注入し、実Google・実Airbnb・実credentialは使わない。helperにはlocalhostでzero-byte ACK bodyの10秒deadlineを確認するtestもあるが、socket listenを禁止するsandboxではその1件を実行できない。
 
-今回も作っていないもの：専用app-created calendarの本番provisioning、Google同意とAirbnb側接続、OAuth接続UI、Airbnb observerとそのtyped receipt、production setup・flag有効化、PWA通し、伝播SLOの実測。本番calendar、credential、daemon/runtime config、NIHOapp Draft、network、Airbnb画面を使った受入にも触れていない。
+今回も作っていないもの：専用app-created calendarの本番provisioning（backendはdefault-offの合成検証まで）、Google同意とAirbnb側接続、OAuth接続UI、Airbnb observerとそのtyped receipt、production setup・flag有効化、PWA通し、伝播SLOの実測。本番calendar、credential、daemon/runtime config、NIHOapp Draft、network、Airbnb画面を使った受入にも触れていない。
 
 Airbnb制御用のGoogle書出しcalendarはbooking/provider busy/resource busy入力から除外し、自己書込による永久busy循環を防ぐ。Google専用calendarをAirbnb対象listingへ実接続できること、Airbnb browser observerのtyped acceptance、PWA通し、停止・再開それぞれの最大60分伝播実測は別受入である。NIHOapp Draftと本番flagは変更していない。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。

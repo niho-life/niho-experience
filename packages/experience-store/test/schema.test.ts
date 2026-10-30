@@ -127,6 +127,19 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
   });
 
+  it("fences OWNER calendar creation before I/O without persisting credentials or response bodies", async () => {
+    const sql = await readFile(new URL("../migrations/0019_google_channel_setup.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE google_channel_setup_journals/);
+    assert.match(sql, /phase IN \('PREPARING','CREATING','READY_FOR_CONNECTION','FAILED_BEFORE_CREATE','UNCERTAIN'\)/);
+    assert.match(sql, /operation_nonce uuid NOT NULL/);
+    assert.match(sql, /created_by_niho_user_id text NOT NULL/);
+    assert.match(sql, /expected_mapping_version bigint NOT NULL/);
+    assert.match(sql, /connection_generation bigint NOT NULL/);
+    assert.match(sql, /granted_scopes_digest text NOT NULL/);
+    assert.match(sql, /WHERE phase IN \('PREPARING','CREATING','UNCERTAIN'\)/);
+    assert.doesNotMatch(sql, /access_token|refresh_token|raw_response|error_body|customer|guest|email|phone/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

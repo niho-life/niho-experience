@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "./errors.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
-import { lockProviderInventory } from "./inventory.ts";
+import { lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 import type { HostActor } from "./types.ts";
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -181,6 +181,7 @@ export class ResourceGoogleRepository {
       if (!currentConnection && input.enabled) throw new StoreConflictError("Google is not connected.");
       const calendarId = input.enabled ? input.calendarId : (row?.opaque_calendar_id ?? input.calendarId);
       if (input.enabled) {
+        await lockGoogleCalendarUsage(client, [calendarId]);
         if (calendarId === currentConnection!.booking_calendar_id) throw new StoreConflictError("The booking calendar cannot be used as busy input.");
         const output = await client.query(
           "SELECT 1 FROM google_channel_output_bindings WHERE opaque_calendar_id=$1 FOR SHARE",

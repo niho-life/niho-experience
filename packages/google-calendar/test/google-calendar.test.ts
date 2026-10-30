@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { GOOGLE_SCOPES, GoogleCalendarError, googleAuthorizationUrl, queryGoogleBusy, queryGoogleBusyByCalendar, refreshGoogleToken, watchGoogleCalendar, writeConfirmedBooking, type GoogleConfig } from "../src/index.ts";
+import { createAirbnbOutputCalendar, GOOGLE_SCOPES, GoogleCalendarError, googleAuthorizationUrl, queryGoogleBusy, queryGoogleBusyByCalendar, refreshGoogleToken, watchGoogleCalendar, writeConfirmedBooking, type GoogleConfig } from "../src/index.ts";
 
 const base = { clientId: "synthetic-client", clientSecret: "synthetic-secret", redirectUri: "https://experience.example.test/host/calendar/google/callback" };
 
-function config(respond: (url: string, init: RequestInit) => Response): GoogleConfig {
+function config(respond: (url: string, init: RequestInit) => Response | Promise<Response>): GoogleConfig {
   return { ...base, fetch: async (input, init) => respond(String(input), init ?? {}) };
 }
 
@@ -70,5 +70,56 @@ describe("Google Calendar boundary", () => {
     assert.match(first, /^[0-9a-v]{5,1024}$/);
     assert.equal(payloads[0]?.visibility, "private");
     assert.equal("attendees" in payloads[0]!, false);
+  });
+
+  it("creates the dedicated Airbnb calendar at the fixed path with only server summary and timezone", async () => {
+    let seenUrl = "";
+    let seenInit: RequestInit | undefined;
+    const grant = config((url, init) => {
+      seenUrl = url; seenInit = init;
+      return Response.json({ id: "opaque-airbnb-calendar", summary: "ignored", accessRole: "owner" });
+    });
+    assert.equal(await createAirbnbOutputCalendar(grant, "access", "NIHO Airbnb | Synthetic tea"), "opaque-airbnb-calendar");
+    assert.equal(seenUrl, "https://www.googleapis.com/calendar/v3/calendars");
+    assert.equal(seenInit?.method, "POST");
+    assert.equal(seenInit?.redirect, "manual");
+    assert.equal((seenInit?.headers as Record<string, string>).authorization, "Bearer access");
+    assert.deepEqual(JSON.parse(String(seenInit?.body)), { summary: "NIHO Airbnb | Synthetic tea", timeZone: "Asia/Tokyo" });
+    assert.deepEqual(GOOGLE_SCOPES, [
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.freebusy",
+      "https://www.googleapis.com/auth/calendar.app.created",
+    ]);
+  });
+
+  it("rejects redirects, server failures, invalid IDs, and an unbounded summary without leaking bodies", async () => {
+    for (const response of [
+      new Response(null, { status: 302, headers: { location: "https://evil.example" } }),
+      Response.json({ error: { message: "secret-google-error" } }, { status: 500 }),
+      Response.json({ id: "" }),
+      Response.json({ id: "x".repeat(513) }),
+      Response.json({ id: "bad id" }),
+    ]) {
+      await assert.rejects(
+        () => createAirbnbOutputCalendar(config(() => response.clone()), "access", "NIHO Airbnb | Synthetic"),
+        (error: unknown) => error instanceof GoogleCalendarError && !error.message.includes("secret-google-error"),
+      );
+    }
+    await assert.rejects(
+      () => createAirbnbOutputCalendar(config(() => Response.json({ id: "unused" })), "access", "x".repeat(201)),
+      TypeError,
+    );
+  });
+
+  it("applies the shared ten-second deadline to create", { timeout: 15_000 }, async () => {
+    let calls = 0;
+    const hanging = config((_url, init) => new Promise<Response>((_resolve, reject) => {
+      calls += 1;
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+    const started = Date.now();
+    await assert.rejects(() => createAirbnbOutputCalendar(hanging, "access", "NIHO Airbnb | Synthetic"), GoogleCalendarError);
+    assert.equal(calls, 1);
+    assert.ok(Date.now() - started >= 9_500);
   });
 });

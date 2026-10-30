@@ -31,9 +31,23 @@ export interface InventoryEvaluationRequest {
   readonly requestedSeats: number;
 }
 
-/** The first lock for every inventory mutation. Keep later locks in idempotency -> product -> occurrence order. */
+/** The first lock for every inventory mutation. Google usage locks, then idempotency/product/occurrence locks follow. */
 export async function lockProviderInventory(client: PoolClient, providerId: string): Promise<void> {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 31))", [`provider-inventory:${providerId}`]);
+}
+
+/**
+ * Serializes Google calendar adoption across providers and across input/output roles.
+ * Call only after the provider inventory mutex. Sorting prevents two-calendar
+ * connection updates from acquiring the global locks in opposite orders.
+ */
+export async function lockGoogleCalendarUsage(client: PoolClient, calendarIds: readonly string[]): Promise<void> {
+  const ids = [...new Set(calendarIds)];
+  if (ids.some((id) => !id || id.length > 512)) throw new TypeError("Invalid Google calendar ID.");
+  ids.sort();
+  for (const id of ids) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 37))", [`google-calendar-usage:${id}`]);
+  }
 }
 
 export async function evaluateStoredInventory(
