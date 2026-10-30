@@ -23,6 +23,8 @@ const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
 
 /** The traveler site has its own root layout: a plain link, so the browser loads it as a new page. */
 const TRAVELER_SITE_PATH = "/experiences";
+/** Articles are written on editor.niho.life with the same NIHO account; the console only links there (#254). */
+const EDITOR_LINK_LABEL = "記事を書く";
 
 const FOOT_LINK = "flex h-[34px] items-center gap-2 rounded-[10px] px-2.5 text-[0.78125rem] font-bold text-ink-soft hover:bg-sand hover:text-ink";
 const MENU_LINK = "flex min-h-11 items-center gap-2 rounded-[10px] px-2.5 text-[0.8125rem] font-bold text-ink-soft hover:bg-sand hover:text-ink";
@@ -32,6 +34,8 @@ export interface HostChromeProps {
   providers: readonly HostConsoleChoice[];
   /** NIHO's own app (NEXT_PUBLIC_NIHO_WEB_ORIGIN). */
   nihoAppUrl: string;
+  /** editor.niho.life, where articles are written (#254). Empty hides 記事を書く. */
+  editorUrl?: string;
 }
 
 export function hostNavForRole(role: HostProviderRole | null | undefined) {
@@ -112,7 +116,7 @@ function SidebarProviderSwitcher({ providers }: { providers: readonly HostConsol
  * the way out to the traveler site and NIHO, and the NIHO account. Selected items
  * use the sand surface and ink text (no green).
  */
-export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps) {
+export function HostSidebar({ account, providers, nihoAppUrl, editorUrl }: HostChromeProps) {
   const pathname = usePathname();
   const providerId = useProviderId();
   const name = account.displayName || "NIHO アカウント";
@@ -157,6 +161,10 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
           <HostIcon name="external" className="size-3.5" />
           <span>体験サイトを見る</span>
         </a> : null}
+        {editorUrl && current?.kind !== "OPERATOR" ? <a href={editorUrl} className={FOOT_LINK}>
+          <HostIcon name="external" className="size-3.5" />
+          <span>{EDITOR_LINK_LABEL}</span>
+        </a> : null}
         <a href={nihoAppUrl} className={FOOT_LINK}>
           <HostIcon name="external" className="size-3.5" />
           <span>NIHO アプリ</span>
@@ -179,7 +187,7 @@ export function HostSidebar({ account, providers, nihoAppUrl }: HostChromeProps)
 }
 
 /** Phones: the account's initial opens the account, the provider switch (several providers), the ways out and sign-out. */
-function AccountMenu({ account, providers, nihoAppUrl }: HostChromeProps) {
+function AccountMenu({ account, providers, nihoAppUrl, editorUrl }: HostChromeProps) {
   const providerId = useProviderId();
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
@@ -210,6 +218,10 @@ function AccountMenu({ account, providers, nihoAppUrl }: HostChromeProps) {
           {current?.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />
             <span>体験サイトを見る</span>
+          </a> : null}
+          {editorUrl && current?.kind !== "OPERATOR" ? <a href={editorUrl} className={MENU_LINK}>
+            <HostIcon name="external" className="size-3.5" />
+            <span>{EDITOR_LINK_LABEL}</span>
           </a> : null}
           <a href={nihoAppUrl} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />

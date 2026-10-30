@@ -238,6 +238,19 @@ describe("public guide source", () => {
   });
 });
 
+describe("editor site entrance (#254)", () => {
+  it("stays hidden until set, then keeps only an https origin (loopback http in development)", () => {
+    expect(resolveConfig({}).guideEditorSiteOrigin).toBe("");
+    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: " " }).guideEditorSiteOrigin).toBe("");
+    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example/" }).guideEditorSiteOrigin).toBe("https://editor.example");
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example" }).guideEditorSiteOrigin).toBe("https://editor.example");
+    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: "http://127.0.0.1:4320" }).guideEditorSiteOrigin).toBe("http://127.0.0.1:4320");
+    for (const origin of ["http://editor.example", "editor.example", "https://editor.example/p/new", "https://editor.example/?from=footer", "https://user:pass@editor.example", "javascript:alert(1)"]) {
+      expect(() => resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: origin }), origin).toThrow(/GUIDE_EDITOR_SITE_ORIGIN/);
+    }
+  });
+});
+
 describe("editor public guide source (#252, provisional contract)", () => {
   const editor = {
     EXPERIENCE_API_MODE: "http",

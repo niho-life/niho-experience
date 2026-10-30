@@ -2,6 +2,8 @@
 
 対象：[#145](https://github.com/niho-life/niho-experience/issues/145)。置き場所を決めた理由は [ADR 0002](../adr/0002-guide-content.md)、検索まわり（構造化データ・sitemap・hreflang）は [seo.md](../seo.md) の「ガイド記事」。
 
+> 2026-10-30 のオーナー判断で、記事は editor.niho.life で書いて公開し、experience はその公開版を読む発信先になる（[ADR 0002](../adr/0002-guide-content.md) の「2026-10-30」、Epic [#251](https://github.com/niho-life/niho-experience/issues/251)）。この文書の手順（リポ内のモジュールとして公開する）は、公開元を editor へ切り替えるまでの静的経路の説明。ここで出した記事は、切り替える前に editor へ移す（同じ slug を二重に出さない）。
+
 ## 置き場所
 
 - 公開する記事だけを `apps/web/src/content/guides/{slug}.ts` に置く（1記事1ファイル）。**下書き・未公開の原稿はコミットしない**（公開リポ）。下書きは非公開台帳で書き（[下書きをプレビューで見る](#下書きをプレビューで見る)）、公開の PR で初めて入れる。
