@@ -180,7 +180,7 @@ test("lease expiry bounds a stalled preflight and a stalled renew independently 
     const stall = async () => { await new Promise((resolve) => setTimeout(resolve, 300)); upstreamSettled = true; };
     const result = await executeGoogleDelivery({ job, config: { googleDeliveryEnabled: true }, renewEveryMs: 5,
       cloud: executorCloud(job, {
-        async preflight() { if (!afterSend) await stall(); return {}; },
+        async preflight() { if (!afterSend) await stall(); return { ready: true, desiredState: "CLOSED" }; },
         async renew() { renewals += 1; if (renewals > 1) await stall(); return { leaseExpiresAtUtc: job.leaseExpiresAtUtc }; },
         async googleDelivery() { deliveries += 1; await stall(); return {}; },
       }) });

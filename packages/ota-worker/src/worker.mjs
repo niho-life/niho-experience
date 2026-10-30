@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BACKOFF_MS, DEFAULT_POLL_MS } from "./constants.mjs";
 import { executeJob } from "./supervisor.mjs";
-import { isGoogleDeliveryTarget, makeReservationResult, makeResult } from "./validation.mjs";
+import { isGoogleDeliveryTarget, makeGoogleAirbnbResult, makeReservationResult, makeResult } from "./validation.mjs";
 import { restartDisposition } from "./journal.mjs";
 import { createHaltLatch } from "./halt-latch.mjs";
 
@@ -61,6 +61,10 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
   const result = job.purpose === "RESERVATION_WINDOW"
     ? makeReservationResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped,
       reservationReadId: execution.reservationReadId, reservationReceiptId: execution.reservationReceiptId })
+    : execution.googleAirbnbProof !== undefined
+      ? makeGoogleAirbnbResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped,
+        observation: execution.observation, googleAirbnbProof: execution.googleAirbnbProof,
+        expectedDesiredState: execution.expectedDesiredState })
     : makeResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped, observation: execution.observation });
   const haltReason = execution.stopped !== true ? "PROCESS_STOP_UNCONFIRMED"
     : execution.halt ? execution.reason ?? execution.outcome : undefined;

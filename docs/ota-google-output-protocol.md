@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 と Issue #302 で同一lease内のGoogle/Airbnb typed receiptとその現在権威検証を追加し、Issue #306 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Issue #307 では typed receipt が確認した既知の伝播不一致を最大60分GET-onlyで追うbackend待機状態とclaim連携を追加した。Googleへの本番実接続、#307 DTOを使うworker caller、本番有効化は未完了である。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 と Issue #302 で同一lease内のGoogle/Airbnb typed receiptとその現在権威検証を追加し、Issue #306 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Issue #307 では typed receipt が確認した既知の伝播不一致を最大60分GET-onlyで追うbackend待機状態とclaim連携を追加し、Issue #308でそのclaim marker、worker caller、native observer、typed result journalをdefault-offで接続した。Google/Airbnbへの本番実接続、本番有効化、activationは未完了である。
 
 公式根拠：
 
@@ -52,7 +52,9 @@ HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node
 再照合の設定不足・scope不足・token更新失敗では、元の書込み結果が不明な記録を `UNCERTAIN` に保つ。Googleを読めていない段階では未確認のfenceを解除せず、障害復旧後のGET-only再試行を残す。
 内部endpointはHTTP mode、既存channel runtime flag、`EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED=true` の3条件が揃うまで404であり、新flagは既定falseである。
 
-OTA worker caller も `googleDeliveryEnabled` が既定falseである。ON時だけ固定originの内部配送APIへ `dispatch` または `reconcile` を1回送り、Googleへ直接接続せず、browser・Claude・任意adapterへfallbackしない。callerのdeadlineはjob期限内かつ最大60秒で、送信開始後に確定DTOを受け取れない場合は再送せず `UNKNOWN_AFTER_SAVE` として隔離する。`GOOGLE_VERIFIED` はGoogle予定だけの確認であり、Airbnb observerが未接続のため worker結果は `NEEDS_REVIEW` / `AIRBNB_OBSERVATION_REQUIRED` のままとする。
+OTA workerの`googleDeliveryEnabled`と`googleAirbnbObservationEnabled`はともに既定falseで、後者は前者がONのときだけ設定できる。観測flagがOFFなら従来どおり、SETは`dispatch`を1回だけ行い、`GOOGLE_VERIFIED`でも`NEEDS_REVIEW / AIRBNB_OBSERVATION_REQUIRED`に止める。両方ONならSETの`GOOGLE_VERIFIED`後に同じjobでfresh `observe` GETを1回行い、dispatchと同じdelivery UUIDであることを確認してから既定のnative observerを1cycleだけ起動する。marker付きOBSERVEは`observe` GETだけ、markerなしOBSERVEは従来のhistorical `reconcile`だけを行い、後者からAirbnb receiptを作らない。Googleへ直接接続せず、Claude、任意adapter、browser writeへfallbackしない。
+
+dispatch開始後に確定DTOを受け取れない場合は再送せず、従来どおり`UNKNOWN_AFTER_SAVE / stopped=false`で隔離する。dispatchの`GOOGLE_VERIFIED`を受け取った後のfresh GET失敗や、marker付きGET失敗は未知writeとは扱わず、安全なreview停止にする。lease更新とdeadlineはGoogle処理、1回のAirbnb読取り、停止確認、result生成まで保持する。typed成功は`VERIFIED`（現在desired一致）または`RETRY_WAIT`（exactな反対状態）だけで、`googleAirbnbProof`は`deliveryId / evidence: EXACT_SLOT_V1 / partySize: 1`の3 field固定である。native observationには`manuallyBlocked`を作らず、resultにも`observedManuallyBlocked`を出さない。停止未確認、fact不正、desired変化、deadline超過ではproofを残さない。
 
 serverのtyped result受付は `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=true` に加え、HTTP modeと既存delivery flagがONの場合だけ開く（既定false）。同じ現在job・worker・lease・assignmentで直前に `GOOGLE_VERIFIED` になった `DISPATCH` または `OBSERVE` をUUIDで指定し、別系統のAirbnb観測が同じcanonical UTC枠を1名で予約可能／不可能と確認した場合だけ、`EXACT_SLOT_V1` receiptを既存result receiptへ保存できる。Google metadata、binding、connection generation、3 scopeのdigest、現OWNER、desired/live inventory、入力calendar非衝突、未解決delivery不在、Google検証時刻から観測時刻までを同一transactionで再確認する。calendar ID、scope、token、raw responseはworker入力やresult receiptへ保存しない。
 
@@ -76,9 +78,9 @@ due処理は認証済みworkerの固定assignment内だけを有限件走査し�
 
 marker jobのpreflight、Google GET前後の既存repository fence、result保存はすべてwaitの `CHECKING/pending_job_id` と現在権威を再確認する。Google側は `prepareObservation` / `inspectGoogleManagedBlock` のGETだけを使い、伝播再確認からinsert/PATCH/deleteを行わない。再び反対状態なら元の `first_verified_at` / deadlineを保って `WAITING` に戻し、一致したtyped `VERIFIED` だけを `MATCHED` として既存desired観測更新へ通す。通常失敗、認可失敗、stop喪失はlinked waitをreviewへ止め、自動account回復や `completeRecoveryObserve` を呼ばない。queued期限切れは安全に終了するが、leased jobはstop-confirmed resultなしに強制解放せず、既存watchdog/quarantine規則を維持する。
 
-このbackendは既存 `googleAirbnbObservationEnabled` がtrueのruntimeでだけdue jobを作り、既定OFFを変えない。OTA worker側のclaim parserと `googleDeliveryOperation` caller接続、実Google/Airbnb・実credentialによる受入、flag有効化、activation、UIは後続範囲である。
+このbackendは既存 `googleAirbnbObservationEnabled` がtrueのserver runtimeでだけdue jobを作り、既定OFFを変えない。Issue #308でOTA worker側のclaim parserと`googleDeliveryOperation` callerは接続した。実Google/Airbnb・実credentialによる受入、server/worker flag有効化、activation、UIは後続範囲である。
 
-この受付は日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。独立observerを使うworker caller、wait queue・scheduler・job作成、60分pending表示、UI、flag有効化は含まない。既存flagは既定OFFのままであり、次段ではcallerとlive scopeでSET再lease／将来OBSERVEを実際に起動して受入する。
+この受付は日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。wait queue・job作成はserver側にあるが、daemon/runtime config、pointer切替、activation、flag有効化は含まない。ホストの掲載先表示は#309で現在の待機・実行状態に接続し、待機は「反映待ち」、leased読取りは「確認中」、typed一致だけ「反映済み」、期限切れ・停止中は「要確認」とする。既存flagは既定OFFのままであり、live scopeでSET再lease／後続OBSERVEを実際に起動する受入は別途必要である。
 
 ## 未接続・未受入
 
@@ -110,6 +112,6 @@ journalは`PREPARING`の後、Google event I/O前に`INITIALIZING`を保存す�
 
 実DBを使う結合testは、実 `ChannelRuntime` / repository / `applyGoogleManagedBlock` / `inspectGoogleManagedBlock` と合成fetchを接続し、ACK喪失、duplicate write抑止、stop-confirmed OBSERVEからのGET-only再照合、binding/desired失効、operation fencing、cross-provider calendar衝突を永続状態とwrite回数で確認する。token refresh/configだけを合成注入し、実Google・実Airbnb・実credentialは使わない。helperにはlocalhostでzero-byte ACK bodyの10秒deadlineを確認するtestもあるが、socket listenを禁止するsandboxではその1件を実行できない。
 
-今回も作っていないもの：専用app-created calendarの本番provisioning（backendはdefault-offの合成検証まで）、Google同意とAirbnb側接続、OAuth接続UI、Airbnb observerとそのtyped receipt、production setup・flag有効化、PWA通し、伝播SLOの実測。本番calendar、credential、daemon/runtime config、NIHOapp Draft、network、Airbnb画面を使った受入にも触れていない。
+現在実装済みなのは、setup/anchorのdefault-off backend、Google writerとfresh GET、Airbnb observer・typed receipt・永続待機・worker caller・ホストの短い状態表示である。未接続・未受入は、専用calendarの本番provisioning、Google同意とAirbnb側接続、OAuth/setup UIとbinding activation、本番flag、PWAから実GoogleとAirbnbを通す停止・再開・復元、伝播の実測である。Airbnbを直接読む単独pilotは#301で確認済みだが、Google変更による反映を証明するものではない。NIHOapp Draftと既存daemon/runtime configは変更していない。
 
-Airbnb制御用のGoogle書出しcalendarはbooking/provider busy/resource busy入力から除外し、自己書込による永久busy循環を防ぐ。Google専用calendarをAirbnb対象listingへ実接続できること、Airbnb browser observerのtyped acceptance、PWA通し、停止・再開それぞれの最大60分伝播実測は別受入である。NIHOapp Draftと本番flagは変更していない。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。
+Airbnb制御用のGoogle書出しcalendarはbooking/provider busy/resource busy入力から除外し、自己書込による永久busy循環を防ぐ。Google専用calendarをAirbnb対象listingへ実接続できること、実GoogleとAirbnbを通すtyped acceptance、PWA通し、停止・再開それぞれの最大60分伝播実測は別受入である。NIHOapp Draftと本番flagは変更していない。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。

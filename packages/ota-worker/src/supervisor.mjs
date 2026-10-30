@@ -50,6 +50,7 @@ export async function executeJob({
   driverOptions = {},
   journal,
   reservationReaderFactory,
+  airbnbObserverFactory,
 }) {
   if (job.purpose === "RESERVATION_WINDOW") {
     if (!journal) throw new ContractError("INVALID_JOURNAL");
@@ -59,7 +60,7 @@ export async function executeJob({
     return executeReservationWindow({ job, cloud, config, journal, readerFactory, renewEveryMs, now });
   }
   if (isGoogleDeliveryTarget(job.target)) {
-    return executeGoogleDelivery({ job, cloud, config, renewEveryMs, now });
+    return executeGoogleDelivery({ job, cloud, config, renewEveryMs, now, ...(airbnbObserverFactory ? { airbnbObserverFactory } : {}) });
   }
   const controller = new AbortController();
   let gateActive = true;

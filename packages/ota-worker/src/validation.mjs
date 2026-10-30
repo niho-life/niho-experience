@@ -13,6 +13,11 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const TOKYO_LOCAL = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):00$/;
 const DIGITS = /^\d+$/;
+const CLAIM_REQUIRED_KEYS = Object.freeze([
+  "id", "leaseToken", "leaseExpiresAtUtc", "deadlineAtUtc", "action", "occurrenceId", "desiredVersion",
+  "mappingVersion", "sourceStartAtUtc", "sourceEndAtUtc", "target",
+]);
+const CLAIM_OPTIONAL_KEYS = Object.freeze(["purpose", "googleDeliveryOperation"]);
 
 export class ContractError extends Error {
   constructor(code, message = code) {
@@ -109,10 +114,7 @@ export function validateTokyoLocal(value) {
 }
 
 export function validateClaim(value, nowMs = Date.now()) {
-  if (!exactKeys(value, [
-    "id", "leaseToken", "leaseExpiresAtUtc", "deadlineAtUtc", "action", "occurrenceId", "desiredVersion",
-    "mappingVersion", "sourceStartAtUtc", "sourceEndAtUtc", "target",
-  ], ["purpose"])) throw new ContractError("INVALID_JOB");
+  if (!exactKeys(value, CLAIM_REQUIRED_KEYS, CLAIM_OPTIONAL_KEYS)) throw new ContractError("INVALID_JOB");
   if (!UUID_V4.test(value.id) || typeof value.leaseToken !== "string" || value.leaseToken.length < 1 || value.leaseToken.length > 100
     || !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(value.action)
     || typeof value.occurrenceId !== "string" || value.occurrenceId.length < 1 || value.occurrenceId.length > 256
@@ -128,8 +130,21 @@ export function validateClaim(value, nowMs = Date.now()) {
   if (deadlineMs <= nowMs || deadlineMs - nowMs > MAX_JOB_MS + MAX_CLOCK_SKEW_MS || Date.parse(value.leaseExpiresAtUtc) <= nowMs || Date.parse(value.leaseExpiresAtUtc) > deadlineMs
     || Date.parse(value.sourceEndAtUtc) <= Date.parse(value.sourceStartAtUtc)) throw new ContractError("INVALID_JOB_DEADLINE");
   const target = validateTarget(value.target);
+  if (value.googleDeliveryOperation !== undefined && (value.googleDeliveryOperation !== "observe"
+    || value.purpose !== undefined || value.action !== "OBSERVE" || !isGoogleDeliveryTarget(target))) {
+    throw new ContractError("INVALID_JOB");
+  }
   const localDateTime = validateTokyoLocal(tokyoLocalFromUtc(value.sourceStartAtUtc));
   return Object.freeze({ ...value, target, localDateTime, desiredState: value.action === "SET_CLOSED" ? "CLOSED" : value.action === "SET_OPEN" ? "OPEN" : undefined });
+}
+
+export function projectRawClaim(job, leaseExpiresAtUtc = job?.leaseExpiresAtUtc, nowMs = Date.now()) {
+  if (!isPlainObject(job)) throw new ContractError("INVALID_JOB");
+  const raw = Object.fromEntries(CLAIM_REQUIRED_KEYS.map((key) => [key, key === "leaseExpiresAtUtc" ? leaseExpiresAtUtc : job[key]]));
+  if (job.purpose !== undefined) raw.purpose = job.purpose;
+  if (job.googleDeliveryOperation !== undefined) raw.googleDeliveryOperation = job.googleDeliveryOperation;
+  const validated = validateClaim(raw, nowMs);
+  return Object.freeze({ ...raw, target: validated.target });
 }
 
 export function validatePreflight(value, desiredState) {
@@ -152,25 +167,70 @@ export function validateObservation(value, job) {
   return Object.freeze({ ...value });
 }
 
+export function validateGoogleAirbnbObservation(value, job, { notBeforeMs = 0, deadlineMs = Date.parse(job.deadlineAtUtc) } = {}) {
+  if (!exactKeys(value, ["occurrenceId", "sourceStartAtUtc", "sourceEndAtUtc", "observedAtUtc", "bookable", "evidence", "partySize"])) {
+    throw new ContractError("DOM_DRIFT");
+  }
+  if (value.occurrenceId !== job.occurrenceId || value.sourceStartAtUtc !== job.sourceStartAtUtc
+    || value.sourceEndAtUtc !== job.sourceEndAtUtc || typeof value.bookable !== "boolean"
+    || value.evidence !== "EXACT_SLOT_V1" || value.partySize !== 1) throw new ContractError("TARGET_MISMATCH");
+  canonicalInstant(value.sourceStartAtUtc, "sourceStartAtUtc");
+  canonicalInstant(value.sourceEndAtUtc, "sourceEndAtUtc");
+  canonicalInstant(value.observedAtUtc, "observedAtUtc");
+  const observedMs = Date.parse(value.observedAtUtc);
+  if (Date.parse(value.sourceEndAtUtc) <= Date.parse(value.sourceStartAtUtc)
+    || !Number.isFinite(notBeforeMs) || !Number.isFinite(deadlineMs) || observedMs < notBeforeMs || observedMs >= deadlineMs) {
+    throw new ContractError("INVALID_JOB_DEADLINE");
+  }
+  return Object.freeze({ ...value });
+}
+
+export function makeGoogleAirbnbResult({ resultId, job, outcome, stopped, observation, googleAirbnbProof, expectedDesiredState = job?.desiredState }) {
+  const historicalNow = Math.min(Date.now(), Date.parse(job?.leaseExpiresAtUtc) - 1, Date.parse(job?.deadlineAtUtc) - 1);
+  const rawJob = projectRawClaim(job, job?.leaseExpiresAtUtc, historicalNow);
+  const markedObserve = rawJob.action === "OBSERVE" && rawJob.googleDeliveryOperation === "observe";
+  if (!UUID_V4.test(resultId) || stopped !== true || rawJob.purpose !== undefined || !isGoogleDeliveryTarget(rawJob.target)
+    || (!markedObserve && !["SET_OPEN", "SET_CLOSED"].includes(rawJob.action))
+    || !["VERIFIED", "RETRY_WAIT"].includes(outcome)
+    || !["OPEN", "CLOSED"].includes(expectedDesiredState)
+    || !exactKeys(googleAirbnbProof, ["deliveryId", "evidence", "partySize"])
+    || !UUID_V4.test(googleAirbnbProof.deliveryId) || googleAirbnbProof.evidence !== "EXACT_SLOT_V1"
+    || googleAirbnbProof.partySize !== 1) throw new ContractError("INVALID_RESULT");
+  const validated = validateGoogleAirbnbObservation(observation, rawJob);
+  const expectedBookable = expectedDesiredState === "OPEN";
+  if ((outcome === "VERIFIED") !== (validated.bookable === expectedBookable)) throw new ContractError("INVALID_RESULT");
+  return Object.freeze({
+    resultId, leaseToken: rawJob.leaseToken, outcome, stopped: true, target: rawJob.target,
+    occurrenceId: validated.occurrenceId,
+    sourceStartAtUtc: validated.sourceStartAtUtc,
+    sourceEndAtUtc: validated.sourceEndAtUtc,
+    observedState: validated.bookable ? "OPEN" : "CLOSED",
+    observedBookable: validated.bookable,
+    observedAtUtc: validated.observedAtUtc,
+    googleAirbnbProof: Object.freeze({ ...googleAirbnbProof }),
+  });
+}
+
 export function makeResult({ resultId, job, outcome, stopped, observation }) {
   if (!UUID_V4.test(resultId) || typeof stopped !== "boolean") throw new ContractError("INVALID_RESULT");
   if (!["VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"].includes(outcome)) {
     throw new ContractError("INVALID_RESULT");
   }
+  const validatedObservation = observation ? validateObservation(observation, job) : null;
   return Object.freeze({
     resultId,
     leaseToken: job.leaseToken,
     outcome,
     stopped,
     target: job.target,
-    ...(observation ? {
-      occurrenceId: observation.occurrenceId,
-      sourceStartAtUtc: observation.sourceStartAtUtc,
-      sourceEndAtUtc: observation.sourceEndAtUtc,
-      observedState: observation.manuallyBlocked ? "CLOSED" : "OPEN",
-      observedBookable: observation.bookable,
-      observedManuallyBlocked: observation.manuallyBlocked,
-      observedAtUtc: observation.observedAtUtc,
+    ...(validatedObservation ? {
+      occurrenceId: validatedObservation.occurrenceId,
+      sourceStartAtUtc: validatedObservation.sourceStartAtUtc,
+      sourceEndAtUtc: validatedObservation.sourceEndAtUtc,
+      observedState: validatedObservation.manuallyBlocked ? "CLOSED" : "OPEN",
+      observedBookable: validatedObservation.bookable,
+      observedManuallyBlocked: validatedObservation.manuallyBlocked,
+      observedAtUtc: validatedObservation.observedAtUtc,
     } : {}),
   });
 }

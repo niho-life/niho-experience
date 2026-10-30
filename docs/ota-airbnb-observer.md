@@ -1,6 +1,6 @@
 # Airbnb カレンダー read-only observer
 
-Issue #295 では、`packages/ota-worker` に Airbnb 体験カレンダーを読むための **standalone factory** `createAirbnbCalendarObserver` を追加した。これは supervisor、driver registry、worker loop、Google caller、production flag のいずれにも接続していない。運用開始、定期実行、60分の durable propagation wait、later-lease proof は #281 以降の別受入である。
+Issue #295 では、`packages/ota-worker` に Airbnb 体験カレンダーを読むための **standalone factory** `createAirbnbCalendarObserver` を追加した。Issue #308 で、この既定factoryをGoogle専用callerへ接続し、同一lease内のfresh Google GET後に限るtyped resultと、#307のmarker付き後続OBSERVEを実装した。driver registryや任意adapter pathには登録せず、production flagは既定OFFのままである。運用開始、実Google/Airbnbを通す受入、activation、定期実行は別受入である。
 
 ## 対象と返す事実
 
@@ -15,6 +15,8 @@ Issue #295 では、`packages/ota-worker` に Airbnb 体験カレンダーを読
 5. decoded listing IDまたはAirbnbの正規share linkが対象listingを名乗るrowを完全検証し、対象区間・listing・share linkが一致する可視rowが一意であることを確認する。他listingとprivate calendar rowは内容を返さず破棄する。対象を名乗る競合・不完全rowは停止し、再度cloud preflightとlease・deadlineを確認する。
 
 各cycleはjob deadlineとlease expiryの早い方で独立して打ち切る。preflightやresponse bodyが未完了でも期限時にbrowser stopを開始し、元のPromiseの完了を待ってfactを返さない。
+
+workerはcloud claim parserが付加する`localDateTime`や`desiredState`をfactoryへ渡さず、正規claim field、更新済みlease expiry、検証済みの任意markerだけをraw DTOへ投影する。初回preflightのdesired stateを観測cycleの前後でも固定し、Google確認後・期限前のexact-slot factだけを受ける。observer生成、読取り、preflight、response、stopのいずれかが期限までに完了しなければtyped proofを作らず、停止確認が取れない結果は`stopped=false`で安全停止する。
 
 成功時に返すのは次の選別済みfactだけである。response原文、他listing、非公開予定、price、title、連絡先、calendar/event IDは返さず保存しない。
 
@@ -58,4 +60,4 @@ focused unit testは、大きな10進IDの文字列保持、canonical base64、�
 
 2026-10-31、レビュー済みの固定SHA `81d5201` をStudioの独立したprivate runtimeへ配置し、ログイン済み専用profileで実サイトの読取りを確認した。既存の受付不可・受付可能な回をそれぞれ一意な掲載・開始終了時刻と照合でき、両方でwrite 0、モデル呼出し0、停止確認trueであった。対象回以外の内容・接続key・顧客情報は証跡へ保存していない。
 
-この実サイトpilotのcloud preflightは検証用stubであり、本番のcloud job・Google配送・callerへは接続していない。既存の受付可否を読む実証であり、Googleの変更による停止・再開、最大60分の伝播、継続稼働、予約ledgerの完全性の証拠にはしない。将来のcaller・durable wait統合と実接続の受入が完了するまで、本番同期済み・予約ゼロ・Airbnb在庫の正本とは表示しない。
+この実サイトpilotのcloud preflightは検証用stubであり、本番のcloud job・Google配送・callerを通した受入ではない。Issue #308ではlocalhostの合成Airbnb、実observer、実executor、cloud claim parser、worker journal、result HTTP bodyをつないだread-only回帰を追加したが、既存の受付可否を読む合成検証に留まる。Googleの変更による実サイトの停止・再開、最大60分の伝播、継続稼働、予約ledgerの完全性の証拠にはしない。実接続の受入が完了するまで、本番同期済み・予約ゼロ・Airbnb在庫の正本とは表示しない。
