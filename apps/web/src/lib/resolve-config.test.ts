@@ -238,6 +238,69 @@ describe("public guide source", () => {
   });
 });
 
+describe("editor public guide source (#252, provisional contract)", () => {
+  const editor = {
+    EXPERIENCE_API_MODE: "http",
+    EXPERIENCE_GUIDE_PUBLIC_SOURCE: "editor",
+    GUIDE_EDITOR_API_BASE_URL: "https://api.editor.example/v1/",
+    GUIDE_EDITOR_API_HANDLE: "niho-experience",
+    GUIDE_EDITOR_API_TOKEN: "synthetic-editor-token",
+  };
+
+  it("cannot be chosen in mock mode and leaves every editor setting empty otherwise", () => {
+    expect(resolveConfig({ ...editor, EXPERIENCE_API_MODE: "mock" })).toMatchObject({
+      guidePublicSource: "static",
+      guideEditorApiBaseUrl: "",
+      guideEditorApiHandle: "",
+      guideEditorApiToken: "",
+      guideEditorAssetOrigins: [],
+    });
+    expect(resolveConfig({ ...editor, EXPERIENCE_GUIDE_PUBLIC_SOURCE: "EDITOR" }).guidePublicSource).toBe("static");
+  });
+
+  it("opens with the three required settings, trimming the base URL's trailing slash", () => {
+    expect(resolveConfig(editor)).toMatchObject({
+      guidePublicSource: "editor",
+      guideEditorApiBaseUrl: "https://api.editor.example/v1",
+      guideEditorApiHandle: "niho-experience",
+      guideEditorApiToken: "synthetic-editor-token",
+      guideEditorAssetOrigins: ["https://api.editor.example"],
+    });
+  });
+
+  it("refuses to start without any of them, without falling back to static guides", () => {
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "" })).toThrow(/GUIDE_EDITOR_API_BASE_URL/);
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: " " })).toThrow(/GUIDE_EDITOR_API_HANDLE/);
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_TOKEN: "" })).toThrow(/GUIDE_EDITOR_API_TOKEN/);
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: "a/b" })).toThrow(/GUIDE_EDITOR_API_HANDLE/);
+  });
+
+  it("accepts https, or http on loopback only, and never echoes the token in an error", () => {
+    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://127.0.0.1:4319/v1" }).guideEditorApiBaseUrl).toBe("http://127.0.0.1:4319/v1");
+    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://localhost:4319/api/public/v1" }).guideEditorApiBaseUrl).toBe("http://localhost:4319/api/public/v1");
+    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://[::1]:4319/v1" }).guideEditorApiBaseUrl).toBe("http://[::1]:4319/v1");
+    for (const base of ["http://api.editor.example/v1", "ftp://api.editor.example/v1", "api.editor.example/v1", "https://user:pass@api.editor.example/v1", "https://api.editor.example/v1?x=1"]) {
+      expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: base }), base).toThrow(/GUIDE_EDITOR_API_BASE_URL/);
+    }
+    let message = "";
+    try {
+      resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://api.editor.example/v1" });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toMatch(/GUIDE_EDITOR_API_BASE_URL/);
+    expect(message).not.toContain(editor.GUIDE_EDITOR_API_TOKEN);
+  });
+
+  it("reads the photo origins as https origins only", () => {
+    expect(resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: " https://assets.editor.example , https://cdn.editor.example,https://assets.editor.example " }).guideEditorAssetOrigins)
+      .toEqual(["https://assets.editor.example", "https://cdn.editor.example"]);
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "http://assets.editor.example" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "https://assets.editor.example/photos" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
+    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "assets" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
+  });
+});
+
 describe("editor console settings", () => {
   const configured = {
     EXPERIENCE_API_MODE: "http",

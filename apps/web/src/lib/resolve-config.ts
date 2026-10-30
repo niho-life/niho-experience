@@ -46,7 +46,69 @@ function guideDraftsSetting(apiMode: "mock" | "http", value: string | undefined)
   return dir;
 }
 
-function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" {
+type GuideEditorSettings = Readonly<{ apiBaseUrl: string; handle: string; token: string; assetOrigins: readonly string[] }>;
+
+const NO_GUIDE_EDITOR: GuideEditorSettings = { apiBaseUrl: "", handle: "", token: "", assetOrigins: [] };
+const GUIDE_EDITOR_HANDLE = /^[A-Za-z0-9_-]{1,128}$/;
+
+const isLoopbackHost = (hostname: string) => hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+
+/** The editor's public API base (with its version path, still provisional): https, or loopback http for a local fixture server. */
+function guideEditorBaseUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("GUIDE_EDITOR_API_BASE_URL must be an absolute URL");
+  }
+  if (url.username || url.password || url.search || url.hash) throw new Error("GUIDE_EDITOR_API_BASE_URL must not contain credentials, a query or a fragment");
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
+    throw new Error("GUIDE_EDITOR_API_BASE_URL must use HTTPS, except loopback HTTP in development");
+  }
+  return url;
+}
+
+/** Comma-separated https origins that may serve editor photos; the API's own origin when unset. */
+function guideEditorAssetOrigins(value: string | undefined, apiOrigin: string): string[] {
+  const entries = (value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (!entries.length) return [apiOrigin];
+  return [...new Set(entries.map((entry) => {
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      throw new Error("GUIDE_EDITOR_ASSET_ORIGINS must list absolute https origins");
+    }
+    if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      throw new Error("GUIDE_EDITOR_ASSET_ORIGINS must list https origins only");
+    }
+    return url.origin;
+  }))];
+}
+
+/**
+ * editor.niho.life's public API as the guide source (#252, provisional contract: lib/editor-publication/contract.ts).
+ * Every setting is required; a missing one stops the server instead of falling back to static guides.
+ */
+function guideEditorSettings(env: Env): GuideEditorSettings {
+  const base = env.GUIDE_EDITOR_API_BASE_URL?.trim() ?? "";
+  const handle = env.GUIDE_EDITOR_API_HANDLE?.trim() ?? "";
+  const token = env.GUIDE_EDITOR_API_TOKEN?.trim() ?? "";
+  if (!base) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_BASE_URL in http mode");
+  if (!handle) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_HANDLE in http mode");
+  if (!token) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_TOKEN in http mode");
+  if (!GUIDE_EDITOR_HANDLE.test(handle)) throw new Error("GUIDE_EDITOR_API_HANDLE must be letters, digits, - or _");
+  const url = guideEditorBaseUrl(base);
+  return {
+    apiBaseUrl: url.href.replace(/\/+$/, ""),
+    handle,
+    token,
+    assetOrigins: guideEditorAssetOrigins(env.GUIDE_EDITOR_ASSET_ORIGINS, url.origin),
+  };
+}
+
+function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" | "editor" {
+  if (apiMode === "http" && env.EXPERIENCE_GUIDE_PUBLIC_SOURCE === "editor") return "editor";
   if (apiMode !== "http" || env.EXPERIENCE_GUIDE_PUBLIC_SOURCE !== "database") return "static";
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) {
     throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=database needs EXPERIENCE_DATABASE_URL in http mode");
@@ -135,6 +197,7 @@ export function resolveConfig(env: Env) {
   const editorSettings = resolveEditorConsoleSettings(apiMode, env);
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   const guidePublicSource = guidePublicSourceSetting(apiMode, env);
+  const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
   const guideAdmin = guideAdminSettings(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
@@ -164,8 +227,13 @@ export function resolveConfig(env: Env) {
     mockCatalog: env.MOCK_CATALOG === "pilot" ? "pilot" : "synthetic",
     // Unpublished guide drafts shown in the mock preview only (absolute path, outside git); null otherwise.
     guideDraftsDir,
-    // Public CMS reads are opt-in and HTTP-only. Database mode never falls back to code-backed guides.
+    // Public CMS reads are opt-in and HTTP-only. Database and editor modes never fall back to code-backed guides.
     guidePublicSource,
+    // editor.niho.life's public API (editor mode only; empty otherwise). The token is a server-only secret.
+    guideEditorApiBaseUrl: guideEditor.apiBaseUrl,
+    guideEditorApiHandle: guideEditor.handle,
+    guideEditorApiToken: guideEditor.token,
+    guideEditorAssetOrigins: guideEditor.assetOrigins,
     // NIHO platform ADMIN server -> Experience guide administration. This is a
     // service-to-service surface and never reuses /admin, /editor, or /host sessions.
     guideAdminApiEnabled: guideAdmin.enabled,

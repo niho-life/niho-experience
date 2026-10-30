@@ -99,3 +99,102 @@ NIHO callerは次を守る。
 4. ExperienceのACKを受けるまで管理UIを成功表示にしない。timeout後の同一command replayは安全である。
 
 NIHO側のADMIN UI、招待、outboxはこのリポジトリでは実装しない。
+
+## editor.niho.life の公開 API を読む（#252 #253・仮契約）
+
+[#252](https://github.com/niho-life/niho-experience/issues/252) は `/guides`・`/guides/{slug}`・トップの Kamakura Journal・体験詳細の関連記事・sitemap の読み取り元に editor.niho.life の公開 API を足し、[#253](https://github.com/niho-life/niho-experience/issues/253) は下書きのプレビューと発信先の条件の宣言を足す（Epic #251、editor 設計 §8・§9）。**editor 公開（設計 §14 の段階 3）が本番で使えるまで、どの環境でも `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` を有効にしない。** Secret Manager・配備 workflow への配線はこの変更の対象外とする。
+
+### 仮契約
+
+契約（niho-life/niho-docs#40）には機械可読な定義がまだ無い。以下は設計文書からの想定で、パス・項目名・形の読み取りは `apps/web/src/lib/editor-publication/contract.ts` の1ファイルに閉じ込めた。#40 が確定したら、まずこのファイルとテスト（`contract.test.ts`、fixture）だけを直す。
+
+- base URL は設定値 `GUIDE_EDITOR_API_BASE_URL`（版のパスを含む。`/v1` か `/api/public/v1` かが未確定のため）。以下 `{base}`。
+- `GET {base}/{handle}/published.json` → `{ "items": [ListItem, …] }`（更新の新しい順）。
+- `GET {base}/{handle}/published/{id}.json` → ListItem の全項目＋本文。公開をやめた記事は 410、未知は 404。
+- `GET {base}/preview/{token}.json` → 下書き。短命。失効・未知は 404 または 410。
+- 認証は仮に `Authorization: Bearer ${GUIDE_EDITOR_API_TOKEN}`（サービス間認証の方式は未確定）。`ETag` / `If-None-Match` を使う。
+
+| 型 | 項目 | 受け取り方 |
+| --- | --- | --- |
+| ListItem | `id` | `^[A-Za-z0-9_-]{1,128}$` の不透明ID |
+| | `slug` | 小文字英数字と単一ハイフン、80文字以下。`preview` は `/guides/preview` と衝突するため拒否 |
+| | `dest` | `niho-experience` 以外は黙って読み飛ばす。欠けは契約違反 |
+| | `range` | `live`（一覧・sitemap・体験導線に出す）か `unlisted`（直URLだけ・noindex）。欠け・未知値は契約違反 |
+| | `lang` | `en` 以外は契約違反 |
+| | `title` / `lead` | 必須。110 / 160 文字以下（`GUIDE_LIMITS`）。`lead` は記事の description |
+| | `cover?` | Asset |
+| | `category` | `{ slug, label, order? }`。`order` が無ければ 1000（並びの最後） |
+| | `author` | `{ name, role, bio? }` |
+| | `publishedAt` / `updatedAt` | ISO 8601 の日時。表示とsitemapは日付部（`slice(0, 10)`） |
+| | `canonicalUrl` | 受け取るが信頼しない。canonical は常に `SITE_URL` + `/guides/{slug}` |
+| | `extras` | 無視 |
+| Full | ListItem ＋ `markdown`、`blocks`、`assets`、`related`、`checkedOn?` | 本文は `markdown` を既存の safe Markdown renderer で描画する。`blocks`（AST）は v1 では使わず形も検査しない。HTML文字列は受けない。`related` は体験slugの形のものだけを重複除去して使う |
+| Asset | `{ id, url, width, height, alt, credit?, licensed }` | `url` は https かつ許可 origin だけ。`licensed` は `true` の宣言だけを共有可（OG・`Article.image`）とし、省略・不明は不可 |
+| Preview | `title`・`markdown` だけ必須 | 他は欠けてよい（`preview.expiresAt` は読まない）。`dest` があって `niho-experience` 以外なら 404 |
+
+一覧の項目（とくに `range`）は一覧を正とし、本文の取得結果は本文だけに使う。本文を `updatedAt` ごとに保持しても、古い `range` で表示しない。
+
+### 設定
+
+| 設定 | 内容 |
+| --- | --- |
+| `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` | http mode 限定。mock mode では選べず `static` のまま |
+| `GUIDE_EDITOR_API_BASE_URL` | 必須。https のみ（ローカルの fixture 用に loopback の http だけ例外）。末尾 `/` は除く |
+| `GUIDE_EDITOR_API_HANDLE` | 必須。既定値なし |
+| `GUIDE_EDITOR_API_TOKEN` | 必須。server-only の秘密。`NEXT_PUBLIC_*`・HTML・JSON-LD・ログ・エラーへ出さない |
+| `GUIDE_EDITOR_ASSET_ORIGINS` | 任意。写真を配信する https origin のカンマ区切り。未設定なら base URL の origin だけ |
+
+必須の3つのどれかが無い、または形が不正なら起動時に失敗する。static・mock・ローカル画像へ黙って fallback しない。
+
+### 表示と取得の振る舞い
+
+- editor 時は静的 `PUBLISHED_GUIDES`・mock sample・下書き・既存の unlisted editorial preview を一切使わない（同一 slug の二重表示なし）。`/guides` は database と同じくカテゴリ棚で並べる。
+- 一覧を読み、`live` の本文を同時6件までで取得して記事にする。初期HTMLに本文・metadata・JSON-LD が出る。
+- 応答はインスタンスごとのメモリに URL 単位で持つ。30秒以内は再取得せず、その後は `If-None-Match` で再検証し 304 なら再利用する。本文は一覧の `updatedAt` が同じ間は取得しない。Next の data cache は使わない（`cache: "no-store"`）。タイムアウト5秒、一覧2MB・本文/プレビュー1MBの上限。再ビルドなしで公開・更新・停止が次の再検証で反映される。
+- ネットワーク障害・タイムアウト・5xx・429 のときだけ、最後に確認した版を最大10分まで返す（失敗後30秒は再試行せず待たせない）。10分を超えたら記事ページ・`/guides`・sitemap は失敗する。フッターのリンク・トップの Journal・体験一覧と詳細の関連記事だけは記事を隠して表示を続け、予約導線を巻き込まない。
+- 401/403 は「記事が無い」ではなく設定・認証の不具合として、キャッシュがあっても必ず失敗させる。
+- 1記事の契約違反、slug 不正・予約語・重複（新しい方を残す）、Markdown が subset 外、図・カバー・資産の URL が https の許可 origin でない、`niho-guide-asset:` 参照、本文の 410/404 は、その記事だけを読み飛ばし、`console.error` に ID・slug・理由（項目名だけ）を出す。本文・トークン・URL・クエリは出さない。
+- `CONFIRM` の印は既存のパーサーどおり描画する（受信時の拒否条件にはしない。公開前の条件として宣言する）。
+- 一覧に無い `/guides/{slug}`（公開停止・未公開・綴り違い）は、slug が妥当で `/guides` に記事があれば `/guides` へ 307 で転送する（再公開は同じ URL なので恒久転送にしない）。`/guides` が空なら 404。不正な形の slug は通信せず 404。
+- `unlisted` は直URLだけで読め、`noindex, nofollow`。一覧・sitemap・トップ・体験導線には出さない。
+
+### プレビュー（#253）
+
+- `/guides/preview?token=…` は `GET {base}/preview/{token}.json` をキャッシュなし・同じ認証で読み、通常の記事ページと同じ部品（`components/pages/GuideArticle.tsx`）で描画する。「Preview from editor.niho.life · not published · link expires soon」を出し、JSON-LD は出さない。
+- トークンなし・形式不正（`^[A-Za-z0-9_-]{16,256}$` 以外）・失効（404/410）・source が editor 以外は 404。401/403・5xx・タイムアウトは 500 で、古い下書きは返さない。
+- 下書きは条件を満たさなくてよい（リード・カバー・カテゴリ・著者・関連体験の欠けは既定値で埋める）。安全性の検査は公開版と同じで、Markdown が通らなければ行番号つきの理由を 200 で返す（トークンを持つ書き手向け）。
+- 応答は `Cache-Control: private, no-store`、`X-Robots-Tag: noindex, nofollow`、`Referrer-Policy: no-referrer`、metadata の robots も noindex。robots.txt は `/guides/preview?` を disallow する（`/guides/preview-…` という slug は塞がない）。sitemap・一覧・内部リンクにプレビューURLを出さず、計測（Umami）は対象外のパスとして送らない。
+- **トークンの取り扱い注意**：トークンは URL のクエリにあるため、Cloud Run のリクエストログ（と前段の CDN・proxy のログ）に残りうる。コードでは防げないので、editor 側のトークンは短命・単一記事・読み取り専用を前提にする。`next dev` は開発時だけリクエスト URL を端末に表示する。アプリ自身のログ・エラー・例外はトークンとURLを含めない。
+
+### 発信先の条件の宣言（#253）
+
+`GET /api/public/guides/publication-requirements` は editor の「公開の前に」が読む条件を JSON で返す（仮 v1、source flag に関係なく常に配信、秘密なし、`Cache-Control: public, max-age=300`、`Access-Control-Allow-Origin: *`、`X-Robots-Tag: noindex`）。中身は `version`・`dest`・`label`・`origin`（`SITE_URL`）・`pathPrefix`・`preview: { path, tokenParam }` と、英語（`lang`）、カバー（掲載許諾あり）、リード（160文字以下）、題名（110文字以下）、カテゴリ、見出し1つ以上、`CONFIRM` なし、関連体験が掲載中（`{origin}/experiences/{slug}` で確認）の各条件。上限値は `GUIDE_LIMITS` から作り、表示文言は editor が持つ。experience が受信時に再確認するのは安全に関わるもの（英語、Markdown subset、https の許可 origin の写真）だけで、編集上の条件は editor の公開前チェックに任せる。
+
+### 切替・切戻し
+
+1. 段階 3 の editor 公開 API が staging で使えることを確認し、合成記事で live / unlisted / 公開停止 / 更新 / 410、ETag の 304、401 の失敗、10分の stale 上限、プレビューの 404 と no-store を確認する。
+2. 専用の配備変更で `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` と上の設定を渡す。トークンは Secret Manager から渡し、公開出力に出さない。
+3. 切戻しは新しい revision で `EXPERIENCE_GUIDE_PUBLIC_SOURCE` を `database`（受入済みの場合）か未設定（`static`）へ戻す。editor 側のデータは消さない。
+
+### ローカルで確かめる
+
+合成 fixture（`apps/web/src/lib/editor-publication/fixtures/editor-publications.json`、`*.example` だけ）を配る fixture サーバーがある。live 3本（うち1本は本文 410）、unlisted 1本、契約違反の負例、プレビュー用の下書きを含む。
+
+```sh
+node apps/web/scripts/editor-publication-fixture-server.mjs   # http://127.0.0.1:4319/v1
+# 別の端末で（体験の公開APIは無くても記事ページは描画できる）
+EXPERIENCE_API_MODE=http EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor \
+GUIDE_EDITOR_API_BASE_URL=http://127.0.0.1:4319/v1 GUIDE_EDITOR_API_HANDLE=sample-site \
+GUIDE_EDITOR_API_TOKEN=synthetic-fixture-token-not-a-secret GUIDE_EDITOR_ASSET_ORIGINS=https://assets.editor.example \
+NEXT_PUBLIC_NIHO_WEB_ORIGIN=http://127.0.0.1:4392 SITE_URL=http://127.0.0.1:3000 \
+npm -w @niho-experience/web run dev
+```
+
+`/guides`、`/guides/sample-evening-walk`、`/guides/sample-direct-link-only`（noindex）、`/guides/sample-http-cover`（`/guides` へ転送）、`/guides/preview?token=synthetic-preview-token-0001`（条件未達の下書き）、`…-0002`（Markdown エラー面）、`…-gone`（404）を確かめる。`EDITOR_FIXTURE_STATUS=503` で起動すると障害時の stale を、`EDITOR_FIXTURE_PORT` でポートを変えられる。写真は `*.example` の URL なので読み込まれない。
+
+### #40 確定時に直す箇所
+
+- `contract.ts`：パス（版の位置、プレビューの場所）、項目名、`range`・`dest`・`lang` の値、本文の `markdown` と `blocks` のどちらを正にするか、Asset と `licensed` の形、410/404 の使い分け。
+- `client.ts`：認証方式（Bearer か署名・ID token か）。
+- `requirements.ts`：条件の `kind` 名と形（editor 側の読み取りに合わせる）。
+- fixture とテスト、この節。

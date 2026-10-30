@@ -81,6 +81,8 @@ const nextConfig: NextConfig = {
       { source: "/booking/:path*", headers: privatePageHeaders },
       { source: "/ja/booking/:path*", headers: privatePageHeaders },
       { source: "/preview/:path*", headers: privatePageHeaders },
+      // editor.niho.life drafts (#253): the token is in the query, so no Referer may carry it anywhere.
+      { source: "/guides/preview", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       // `:path+` leaves /host itself (the public introduction) indexable.
       { source: "/host/:path+", headers: hostConsoleHeaders },
       { source: "/host/invitations/:path+", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },

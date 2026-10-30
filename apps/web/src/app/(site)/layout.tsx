@@ -10,7 +10,7 @@ import { SITE_DESCRIPTION } from "@/lib/public-metadata";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { getJapaneseStaticCounterparts } from "@/lib/localized-content";
-import { guideCatalog, hasGuidesPage } from "@/lib/guide-registry";
+import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 
 // Every page reads environment settings (indexing, API mode, host sign-up) at
@@ -38,7 +38,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const analyticsMode = analyticsModeForRuntime(config.apiMode, config.siteUrl, config.umamiWebsiteId);
   let counterparts: Readonly<Record<string, string>> = {};
   try { counterparts = await getJapaneseStaticCounterparts(); } catch { /* no approved JA release: expose no link */ }
-  const guides = await guideCatalog();
+  const guides = await guideCatalogForSite();
 
   return (
     <html lang="en">

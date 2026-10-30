@@ -79,7 +79,7 @@ NIHOapp側の変更は連携Aの担当へ集約する。stg Web の `EXPERIENCE_
 | 表示 | 本番候補で mock/pilot fixture が出ず、`/preview/states` と `/preview/checkout` が404。公開APIは掲載済みだけ。モバイル・デスクトップと主要エラー表示、商品原稿・写真許諾を確認 |
 | 予約・販売 | 合成提供者と Stripe test の掲載→予約→決済→確定→予約一覧→売上→返金、販売者/口座/条件、停止・期限切れ・再送を確認。P-01/02の実条件、サポート窓口、販売開始判断者が確定してから `BOOKINGS_ENABLED=true` と NIHO側受付を開く |
 | 検索 | canonical・sitemap・robots、公開原稿と写真、計測の公表が揃ってから `SITE_INDEXING=allow`。販売開始とは別に判断 |
-| Guide CMS公開元 | [Guide CMSのdatabase flagゲート](guide-cms.md#database-flagを開く前のゲート)をstagingで満たし、migration/bucket/NIHO editor auth/移行件数を照合してから、専用の配備変更でだけ `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`。DB/storage障害時にstaticへ戻らないこと、CloudflareがHTML・sitemap・mediaをcacheしないことを確認。切戻しはデータを消さず`static`の新revision |
+| Guide CMS公開元 | [Guide CMSのdatabase flagゲート](guide-cms.md#database-flagを開く前のゲート)をstagingで満たし、migration/bucket/NIHO editor auth/移行件数を照合してから、専用の配備変更でだけ `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`。DB/storage障害時にstaticへ戻らないこと、CloudflareがHTML・sitemap・mediaをcacheしないことを確認。切戻しはデータを消さず`static`の新revision。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor`（#252・仮契約）は editor.niho.life の公開（設計の段階 3）が本番で使えるまで有効化せず、`GUIDE_EDITOR_API_*` の Secret Manager・workflow 配線もそれまで行わない。開くときは [editor 公開APIの切替](guide-cms.md#切替切戻し) をstagingで満たし、Cloudflareが `/guides*`（`/guides/preview` を含む）と sitemap を cacheしないことを確認。切戻しは `database` か `static` の新revision |
 | 外部提供者 | 連携B #19123 の登録・権限・口座・売上の受入後にだけ `HOST_SIGNUP_MODE=open` |
 | ホストの画面 | NIHO 側の接続（niho-app #19282、#19283）の本番配備と [#92](https://github.com/niho-life/niho-experience/issues/92) の受入の後にだけ `enable_host_calendar=true` の候補を昇格する |
 | 計測 | NIHOのプライバシーポリシーに Umami Cloud の送信内容・目的・保存期間を追記し、同意方針の確認後だけ `UMAMI_WEBSITE_ID` を設定。previewには設定しない |
