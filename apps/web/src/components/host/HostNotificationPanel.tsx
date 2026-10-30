@@ -4,11 +4,11 @@ import type { HostNotificationKey } from "@/host/types";
 import { FieldRow, FieldSection, SwitchRow } from "./fields";
 
 /**
- * 設定 › 通知 (#109, the journey mock's H7): where NIHO's emails go (read-only: changing the address
- * is not here yet) and one switch per notification in NIHO's order. The ones the host cannot stop
- * are on, locked and say so. The three that can be stopped are kept by the settings form's 保存
+ * 設定 › 通知 (#109, the journey mock's H7): where the emails go (read-only: changing the address
+ * is not here yet) and one switch per notification in the spec's order. The ones the host cannot
+ * stop are on, locked and say so. The three that can be stopped are kept by the settings form's 保存
  * (the form holds the switches' state). Anyone but the owner reads that the settings are the
- * owner's, as NIHO answers them to the owner only.
+ * owner's; when the experience DB cannot be read, the panel says so instead of guessing.
  */
 export function HostNotificationPanel({
   view,
@@ -24,6 +24,8 @@ export function HostNotificationPanel({
     <FieldSection id="settings-notification" title="通知" status={view.preparing ? PREPARING_STATUS : null}>
       {view.kind === "owner-only" ? (
         <p className="flex min-h-10 items-center text-ink-soft">{view.text}</p>
+      ) : view.kind === "error" ? (
+        <p role="alert" className="flex min-h-10 items-center text-danger">{view.text}</p>
       ) : (
         <>
           <FieldRow label="宛先" labelId="settings-notification-to">

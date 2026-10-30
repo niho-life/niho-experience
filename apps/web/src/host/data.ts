@@ -30,6 +30,7 @@ import {
   type HostThreadLookup,
 } from "./console-data";
 import { bookingConversations, type BookingConversation } from "./messages";
+import { loadNotificationSettings } from "./notification-settings-server";
 import type { HostNotice, HostPayoutLoad } from "./payout";
 import type { HostExperience, HostGoogleConnection, HostSettings } from "./types";
 
@@ -100,13 +101,19 @@ async function loadProviderDetail(providerId: string): Promise<{ provider: HostP
  * to the list. The (client) settings form gets display fields and, for its actions, the
  * provider's id (already in `?providerId=`) and the ids of the owner's spots it may share;
  * never NIHO's other internal ids (the owner's user, the vessel spot). The notification
- * settings are the owner's only, as NIHO answers them (niho-app spec §17.4).
+ * settings are the owner's only (niho-app spec §17.4); http mode reads them from the experience
+ * DB once HOST_NOTIFICATION_SETTINGS_ENABLED is on (#109), and they stay 準備中 until then.
+ * Only 設定 asks for them (`notifications`); the other pages do not read the DB for them.
  */
-export async function loadHostConsoleData(provider: HostProvider): Promise<HostConsoleData> {
+export async function loadHostConsoleData(provider: HostProvider, options: { notifications?: boolean } = {}): Promise<HostConsoleData> {
   const mode = isHostMock() ? "mock" : "http";
   const session = await readHostSession();
   const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now(), session?.mockScenario);
-  const detail = await loadProviderDetail(provider.id);
+  const owner = provider.memberRole === "OWNER";
+  const [detail, notificationLoad] = await Promise.all([
+    loadProviderDetail(provider.id),
+    mode === "http" && owner && session && options.notifications ? loadNotificationSettings(provider, session.nihoUserId) : null,
+  ]);
   const known = detail?.provider ?? provider;
   return {
     today: snapshot.today,
@@ -122,7 +129,8 @@ export async function loadHostConsoleData(provider: HostProvider): Promise<HostC
       consentCurrent: detail ? detail.provider.consentVersion === detail.consent.version : true,
       meetingPoint: snapshot.meetingPoint,
       calendar: snapshot.calendar,
-      notifications: provider.memberRole === "OWNER" ? snapshot.notifications : null,
+      notifications: !owner ? null : notificationLoad?.status === "live" ? { email: { addresses: [] }, items: notificationLoad.items } : snapshot.notifications,
+      notificationSource: mode === "mock" ? "preview" : (notificationLoad?.status ?? "preparing"),
     },
     googleConnection: googleConnectionPreview(mode),
   };

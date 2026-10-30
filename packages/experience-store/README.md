@@ -29,6 +29,8 @@ Both `0010_guide_body_media.sql` and `0010_shared_inventory.sql` exist. Apply bo
 
 `0009_guide_media.sql` adds private cover assets, draft cover fields, and immutable publication-media snapshots. Asset identity/object location cannot change; rights can only advance from `UPLOADING` to `READY`/`REVOKED`, or from `READY` to `REVOKED`. Storage bytes remain outside PostgreSQL and object keys never enter browser DTOs.
 
+`0020_provider_notification_preferences.sql` additively stores 設定 › 通知 (#109): one row per provider and stoppable notification (`GUEST_MESSAGE`, `DAY_BEFORE_SUMMARY`, `NEW_REVIEW`). A missing row means on, so existing providers need no backfill. `ProviderNotificationSettings.get`/`update` require a current OWNER membership that the server-established NIHO role ceiling does not cap; product operators never qualify. Senders call `enabledFor(providerId, key)` before a push or an email; the four locked notifications always answer true. No addresses, names or message text are stored. The runtime role needs SELECT/INSERT/UPDATE on the table.
+
 `0011_guide_draft_product_links.sql` adds ordered, article-scoped related experience selections. Publication copies the order into immutable links. Legacy sealed links keep a null order and retain the former provider/product sort; the migration does not update their rows.
 
 The code-backed `kamakura-after-4-pm` slug is reserved at the database boundary until #189 imports that article. The import must delete its reservation and create the matching database article in one transaction before switching public readers.
