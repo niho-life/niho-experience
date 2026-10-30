@@ -31,6 +31,8 @@
 
 GetYourGuide、Airbnb、Viator、じゃらんがV1対象。サイト別の予約readerは、現在状態・明示取消・日時変更・人数を正しく読めることをそれぞれ受け入れる。AirbnbのGoogle busy区間だけでは予約ID、人数、取消の正本を作れない。メールは再照会の合図に限定する。
 
+Airbnbは2026-10-31に許可済みStudioのChromeで本人照合・カレンダー・「今日／今後」をread-onlyで確認した。カレンダーの開催枠と個別予約は別であり、非空予約・明示取消・全ページの根拠は未確認のためreaderは未実装・既定OFFを維持する。確認できたschemaと有効化条件は[Airbnb予約取込みの実画面調査（#312）](ota-airbnb-reservation-discovery.md)に記録する。
+
 15分照合を一回ずつ全実施回の画面を開く構造にはしない。8週間×4販路の空実施回を逐次巡回すると、1時間の許容遅延を超えやすい。既存accountの排他lease内で、同一listingの期間全体を有界に走査する。最初は1商品・1組予約、8週間、既知account/listingだけを対象にする。
 
 ## server発行の読取scope
