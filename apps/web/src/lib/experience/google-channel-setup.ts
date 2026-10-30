@@ -43,7 +43,7 @@ export function googleChannelSetupDto(value: GoogleChannelSetupRecord) {
 export async function executeGoogleChannelSetup(
   pool: Pool,
   actor: HostActor,
-  input: { listingId: string; expectedMappingVersion: number; commandId: string },
+  input: { listingId: string; expectedMappingVersion: number; commandId: string; operation?: "cancel_preparing" },
   injected?: {
     readonly runtimeConfig?: typeof googleRuntimeConfig;
     readonly refreshToken?: typeof refreshGoogleToken;
@@ -55,6 +55,7 @@ export async function executeGoogleChannelSetup(
     await repository.assertCurrentOwnerAccess(actor);
     return record;
   };
+  if (input.operation === "cancel_preparing") return ownerResult(repository.cancelPreparing(actor, input));
   const snapshot = await repository.prepare(actor, input);
   if (!snapshot.canCreate) return snapshot.record;
   const runtimeConfig = injected?.runtimeConfig ?? googleRuntimeConfig;

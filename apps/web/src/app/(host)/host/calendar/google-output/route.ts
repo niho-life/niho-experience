@@ -70,7 +70,9 @@ export async function POST(request: NextRequest) {
   catch (error) { return failure(error); }
   if (!value || typeof value !== "object" || Array.isArray(value)) return noStoreJson({ error: "invalid_input" }, 400);
   const body = value as Record<string, unknown>;
-  if (Object.keys(body).length !== 4 || !["providerId", "listingId", "expectedMappingVersion", "commandId"].every((key) => key in body)
+  if (Object.keys(body).some((key) => !["providerId", "listingId", "expectedMappingVersion", "commandId", "operation"].includes(key))
+    || !["providerId", "listingId", "expectedMappingVersion", "commandId"].every((key) => key in body)
+    || ("operation" in body && body.operation !== "cancel_preparing")
     || typeof body.providerId !== "string" || typeof body.listingId !== "string" || body.listingId.length < 1 || body.listingId.length > 256
     || !Number.isSafeInteger(body.expectedMappingVersion) || (body.expectedMappingVersion as number) < 1
     || typeof body.commandId !== "string" || !UUID_V4.test(body.commandId)) {
@@ -85,6 +87,7 @@ export async function POST(request: NextRequest) {
       listingId: body.listingId,
       expectedMappingVersion: body.expectedMappingVersion as number,
       commandId: body.commandId,
+      ...(body.operation === "cancel_preparing" ? { operation: "cancel_preparing" as const } : {}),
     });
     return noStoreJson(googleChannelSetupDto(result));
   } catch (error) { return failure(error); }
