@@ -405,9 +405,9 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
     }
   });
 
-  it("expires at the immutable boundary and invalidates changed binding or manual-hold authority before enqueue", async () => {
-    for (const kind of ["deadline", "binding", "manual"] as const) {
-      const value = await fixture("CLOSED");
+  it("expires at the immutable boundary and invalidates changed authority or inventory before enqueue", async () => {
+    for (const kind of ["deadline", "binding", "manual", "assignment", "desired", "mapping", "connection", "scope", "owner", "input", "inventory"] as const) {
+      const value = await fixture(kind === "inventory" ? "OPEN" : "CLOSED");
       try {
         await value.runtime.submitResult(value.worker, value.claimed.id, mismatch(value, kind === "deadline" ? command(414) : command(415)));
         const wait = (await value.pool.query(
@@ -422,8 +422,19 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
         else if (kind === "binding") await value.pool.query(
           "UPDATE google_channel_output_bindings SET binding_version=binding_version+1 WHERE listing_id='listing-a'",
         );
-        else await value.pool.query(
+        else if (kind === "manual") await value.pool.query(
           "UPDATE channel_external_accounts SET quarantined_at=clock_timestamp(),quarantine_reason='MANUAL_HANDLING' WHERE id='account-a'",
+        );
+        else if (kind === "assignment") await value.pool.query("UPDATE channel_worker_accounts SET version=version+1 WHERE account_id='account-a'");
+        else if (kind === "desired") await value.pool.query("UPDATE channel_desired_states SET desired_version=desired_version+1 WHERE listing_id='listing-a'");
+        else if (kind === "mapping") await value.pool.query("UPDATE channel_listings SET mapping_version=mapping_version+1 WHERE id='listing-a'");
+        else if (kind === "connection") await value.pool.query("UPDATE provider_google_connections SET connection_generation=connection_generation+1 WHERE provider_id='provider-a'");
+        else if (kind === "scope") await value.pool.query("UPDATE provider_google_connections SET granted_scopes=ARRAY['synthetic.revoked.scope'] WHERE provider_id='provider-a'");
+        else if (kind === "owner") await value.pool.query("UPDATE provider_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='owner-a'");
+        else if (kind === "input") await value.pool.query("UPDATE provider_google_connections SET busy_calendar_id='airbnb-output' WHERE provider_id='provider-a'");
+        else await new ExperienceStore(value.pool).setOccurrenceSalesState(
+          { providerId: "provider-a", nihoUserId: "owner-a" }, "tea", "tea-once",
+          { occurrenceId: value.claimed.occurrenceId, desiredState: "CLOSED" }, null, command(416),
         );
         assert.deepEqual(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker, 1), { enqueued: 0 });
         const terminal = (await value.pool.query(
@@ -431,7 +442,8 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
           [value.delivery.deliveryId],
         )).rows[0];
         assert.equal(terminal.status, kind === "deadline" ? "NEEDS_REVIEW" : "SUPERSEDED");
-        assert.equal(terminal.latest_reason, kind === "deadline" ? "PROPAGATION_DEADLINE" : "AUTHORITY_CHANGED");
+        assert.equal(terminal.latest_reason, kind === "deadline" ? "PROPAGATION_DEADLINE"
+          : kind === "inventory" ? "LIVE_AVAILABILITY_CHANGED" : "AUTHORITY_CHANGED");
         assert.equal(terminal.pending_job_id, null);
         assert.equal(terminal.first_verified_at.toISOString(), wait.first_verified_at.toISOString());
         assert.equal(terminal.deadline_at.toISOString(), wait.deadline_at.toISOString());
@@ -441,6 +453,32 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
         )).rows[0].count, 0);
       } finally { await cleanup(value); }
     }
+  });
+
+  it("keeps queue time inside the propagation window and caps browser execution when claimed", async () => {
+    const value = await fixture("CLOSED");
+    try {
+      await value.runtime.submitResult(value.worker, value.claimed.id, mismatch(value, command(390)));
+      await value.pool.query("UPDATE google_airbnb_propagation_waits SET next_due_at=clock_timestamp()-interval '1 second' WHERE delivery_id=$1::uuid",
+        [value.delivery.deliveryId]);
+      assert.deepEqual(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker), { enqueued: 1 });
+      const queued = (await value.pool.query(
+        `SELECT j.job_deadline_at,w.deadline_at FROM google_airbnb_propagation_waits w
+           JOIN channel_jobs j ON j.id=w.pending_job_id WHERE w.delivery_id=$1::uuid`, [value.delivery.deliveryId],
+      )).rows[0];
+      assert.equal(queued.job_deadline_at.getTime(), queued.deadline_at.getTime());
+      const beforeClaimMs = Date.now() + 4 * 60_000;
+      value.setNow(new Date(beforeClaimMs));
+      assert.deepEqual(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker), { enqueued: 0 });
+      const claimed = await value.runtime.claim(value.worker);
+      assert.ok(claimed);
+      assert.equal(claimed.googleDeliveryOperation, "observe");
+      const remainingMs = Date.parse(claimed.deadlineAtUtc) - beforeClaimMs;
+      assert.ok(remainingMs > 0 && remainingMs <= 181_000);
+      assert.ok(Date.parse(claimed.deadlineAtUtc) < queued.deadline_at.getTime());
+      assert.equal((await value.pool.query("SELECT job_deadline_at FROM channel_jobs WHERE id=$1::uuid", [claimed.id]))
+        .rows[0].job_deadline_at.toISOString(), claimed.deadlineAtUtc);
+    } finally { await cleanup(value); }
   });
 
   it("persists a known mismatch, survives restart, deduplicates due polls, and matches after fresh GET-only observations", async () => {
@@ -582,6 +620,20 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
         occurrenceId: matchingObserve.occurrenceId, sourceStartAtUtc: matchingObserve.sourceStartAtUtc,
         sourceEndAtUtc: matchingObserve.sourceEndAtUtc, observedAtUtc: new Date(verifiedAt.getTime() + 1).toISOString(),
       });
+      // Even identical selected metadata cannot substitute another delivery
+      // for the delivery that owns this durable wait.
+      await value.pool.query(
+        `INSERT INTO google_channel_deliveries
+           SELECT (jsonb_populate_record(NULL::google_channel_deliveries,
+             to_jsonb(d)||jsonb_build_object('id',$2::text,'intent_fingerprint',repeat('c',64)))).*
+           FROM google_channel_deliveries d WHERE id=$1::uuid`, [value.delivery.deliveryId, command(409)],
+      );
+      await assert.rejects(() => restarted.submitResult(value.worker, matchingObserve.id, {
+        ...matchedInput, resultId: command(410),
+        googleAirbnbProof: { ...matchedInput.googleAirbnbProof, deliveryId: command(409) },
+      }), StoreConflictError);
+      assert.equal((await value.pool.query("SELECT count(*)::int AS count FROM channel_job_results WHERE result_id=$1::uuid", [command(410)]))
+        .rows[0].count, 0);
       assert.deepEqual(await restarted.submitResult(value.worker, matchingObserve.id, matchedInput), {
         acceptedAsCurrent: true, repeated: false,
       });

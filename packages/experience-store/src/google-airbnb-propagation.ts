@@ -101,9 +101,13 @@ function sameInteger(left: unknown, right: unknown): boolean {
   return Number.isSafeInteger(a) && a > 0 && a === b;
 }
 
+function instant(value: unknown): number {
+  return value instanceof Date ? value.getTime() : new Date(String(value)).getTime();
+}
+
 function sameInstant(left: unknown, right: unknown): boolean {
-  const a = new Date(String(left)).getTime();
-  const b = new Date(String(right)).getTime();
+  const a = instant(left);
+  const b = instant(right);
   return Number.isFinite(a) && a === b;
 }
 
@@ -129,7 +133,7 @@ export function googlePropagationAuthorityCurrent(row: DbRow, nowUtc: string): b
     && row.delivery_operation_worker_id === row.dispatched_worker_id
     && sameInteger(row.delivery_operation_assignment_version, row.dispatched_assignment_version)
     && row.account_active === true && row.revoked_at === null && row.quarantined_at === null
-    && (row.delegated_until === null || new Date(String(row.delegated_until)).toISOString() > nowUtc)
+    && (row.delegated_until === null || instant(row.delegated_until) > Date.parse(nowUtc))
     && sameInteger(row.current_account_version, row.account_version)
     && row.current_site === row.target_site && row.current_external_account_id === row.target_external_account_id
     && row.listing_active === true && row.product_status === "PUBLISHED" && row.can_observe === true

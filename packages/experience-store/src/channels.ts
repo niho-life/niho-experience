@@ -1273,22 +1273,24 @@ export class ChannelRuntime {
         }
 
         const jobId = randomUUID();
-        const jobDeadlineAtUtc = new Date(Math.min(Date.parse(nowUtc) + 3 * 60_000, Date.parse(isoValue(wait, "deadline_at")))).toISOString();
+        // Queue time consumes the fixed propagation window, not the browser's
+        // execution window. claim() applies the three-minute execution cap.
+        const jobDeadlineAtUtc = isoValue(wait, "deadline_at");
         const inserted = await client.query(
           `INSERT INTO channel_jobs
             (id,provider_id,account_id,listing_id,occurrence_id,action,purpose,google_propagation_delivery_id,
              dispatch_worker_id,dispatch_assignment_version,account_version,desired_version,mapping_version,
              target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,
-             target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
+             target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at,next_attempt_at)
            VALUES ($1::uuid,$2,$3,$4,$5,'OBSERVE','AVAILABILITY',$6::uuid,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-             'Asia/Tokyo',$16,$17,$18,$19,$20,$21,$22)
+             'Asia/Tokyo',$16,$17,$18,$19,$20,$21,$22,$23)
            ON CONFLICT (google_propagation_delivery_id)
              WHERE google_propagation_delivery_id IS NOT NULL AND status IN ('QUEUED','LEASED') DO NOTHING`,
           [jobId, wait.provider_id, wait.account_id, wait.listing_id, wait.occurrence_id, wait.delivery_id,
             wait.dispatched_worker_id, wait.dispatched_assignment_version, wait.account_version, wait.desired_version,
             wait.mapping_version, wait.target_site, wait.target_external_account_id, wait.target_external_product_id,
             wait.target_external_option_id, wait.target_adapter, wait.target_adapter_version, wait.target_connection_mode,
-            wait.source_start_at, wait.source_end_at, wait.desired_state === "CLOSED" ? 90 : 40, jobDeadlineAtUtc],
+            wait.source_start_at, wait.source_end_at, wait.desired_state === "CLOSED" ? 90 : 40, jobDeadlineAtUtc, nowUtc],
         );
         if ((inserted.rowCount ?? 0) !== 1) continue;
         const updated = await client.query(
@@ -1456,7 +1458,7 @@ export class ChannelRuntime {
            dispatched_assignment_version,first_verified_at,deadline_at,next_due_at,status,latest_reason,
            latest_observed_at,last_checked_at,created_at,updated_at)
          VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
-           $23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$32)
+           $23,$24,$25,$26,$27,$28,$29,$30,$31,$31,$31)
          ON CONFLICT (delivery_id) DO NOTHING`,
         [receipt.deliveryId, job.provider_id, job.account_id, job.listing_id, job.occurrence_id,
           desiredState,
@@ -1872,11 +1874,16 @@ export class ChannelRuntime {
       const job = result.rows.find((candidate) => this.#adapterSupports(candidate, text(candidate, "action") as ChannelAction));
       if (!job) return null;
       const leaseToken = randomBytes(32).toString("base64url");
-      const deadlineAtUtc = job.job_deadline_at === null ? new Date(this.#now().getTime() + 180_000).toISOString() : isoValue(job, "job_deadline_at");
+      const executionDeadlineMs = this.#now().getTime() + 180_000;
+      const storedDeadlineMs = job.job_deadline_at === null ? executionDeadlineMs : Date.parse(isoValue(job, "job_deadline_at"));
+      const deadlineAtUtc = new Date(job.google_propagation_delivery_id !== null
+        ? Math.min(executionDeadlineMs, storedDeadlineMs) : storedDeadlineMs).toISOString();
       const leaseExpiresAtUtc = new Date(Math.min(this.#now().getTime() + 120_000, Date.parse(deadlineAtUtc))).toISOString();
       await client.query(
         `UPDATE channel_jobs SET status='LEASED',leased_worker_id=$2,lease_digest=$3,lease_expires_at=$4,
-           job_deadline_at=COALESCE(job_deadline_at,$5),lease_epoch=lease_epoch+1,lease_started_at=$6,lease_assignment_version=$7,
+           job_deadline_at=CASE WHEN google_propagation_delivery_id IS NOT NULL THEN $5::timestamptz
+             ELSE COALESCE(job_deadline_at,$5::timestamptz) END,
+           lease_epoch=lease_epoch+1,lease_started_at=$6,lease_assignment_version=$7,
            attempt_count=attempt_count+1,updated_at=$6 WHERE id=$1`,
         [job.id, identity.workerId, digest(leaseToken), leaseExpiresAtUtc, deadlineAtUtc, nowUtc, job.assignment_version],
       );
@@ -3054,7 +3061,8 @@ export class ChannelRuntime {
       if (input.googleAirbnbProof) {
         if (!input.observedAtUtc || (googleDesiredState !== "OPEN" && googleDesiredState !== "CLOSED")
           || !availabilityVersionsCurrent || current?.quarantined_at !== null
-          || (propagationWait !== undefined && !propagationVersionsCurrent)) {
+          || (propagationWait !== undefined && (!propagationVersionsCurrent
+            || input.googleAirbnbProof.deliveryId !== propagationWait.delivery_id))) {
           throw new StoreConflictError("Google Airbnb observation authority changed.");
         }
         const receipt = await verifyGoogleAirbnbReceipt(client, {
