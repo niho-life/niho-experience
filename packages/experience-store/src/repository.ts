@@ -72,27 +72,28 @@ import {
   buildSnapshots,
   normalizeCurrency,
   validateBusySync,
+  type GuestPricingInput,
 } from "./validation.ts";
 
-const PRODUCT_COLUMNS = `
+export const PRODUCT_COLUMNS = `
   provider_id, id, slug, status, public_title, content, currency, unit_amount,
   cancellation_terms_ref, seller_niho_account_ref, stripe_connect_account_ref,
   seller_display_name, version, created_at, updated_at`;
 
-const RULE_COLUMNS = `
+export const RULE_COLUMNS = `
   provider_id, id, product_id, time_zone, starts_on::text AS starts_on,
   ends_on::text AS ends_on, to_char(local_start_time, 'HH24:MI') AS local_start_time,
   duration_minutes, capacity, booking_cutoff_minutes, busy_buffer_before_minutes,
   busy_buffer_after_minutes, recurrence, version`;
 
-const OVERRIDE_COLUMNS = `
+export const OVERRIDE_COLUMNS = `
   occurrence_id, kind, local_date::text AS local_date,
   to_char(local_start_time, 'HH24:MI') AS local_start_time, duration_minutes, version`;
 
-const SALES_STATE_COLUMNS = `occurrence_id, desired_state, version`;
+export const SALES_STATE_COLUMNS = `occurrence_id, desired_state, version`;
 const COMMAND_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const BOOKING_COLUMNS = `
+export const BOOKING_COLUMNS = `
   public_booking_id::text AS public_booking_id, provider_id, product_id, occurrence_id,
   status, seats, idempotency_key, hold_expires_at, occurrence_snapshot, pricing_snapshot,
   seller_snapshot, stripe_payment_ref, created_at, confirmed_at`;
@@ -186,7 +187,8 @@ async function completeCalendarCommand(
   return { ...receipt, repeated: false };
 }
 
-async function requireMembership(
+/** The provider-membership check of product edits (OWNER/EDITOR); also used by GuestBookingRepository.setSaleTerms. */
+export async function requireMembership(
   client: PoolClient,
   actor: HostActor,
   allowedRoles: readonly MembershipRole[],
@@ -1050,7 +1052,7 @@ export class ExperienceStore {
 
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, scope.providerId);
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))", [scope.providerId, input.idempotencyKey]);
+      await lockBookingIdempotencyKey(client, scope.providerId, input.idempotencyKey);
       const previous = await client.query<DbRow>(
         `SELECT ${BOOKING_COLUMNS} FROM bookings WHERE provider_id=$1 AND idempotency_key=$2`,
         [scope.providerId, input.idempotencyKey],
@@ -1070,53 +1072,11 @@ export class ExperienceStore {
         [scope.providerId, input.productId],
       );
       const product = productFromRow(oneRow(productResult.rows, "published product"));
-      const occurrence = await this.#materializeAndLockOccurrence(client, scope, input.productId, input.occurrenceId);
-      const nowResult = await client.query<DbRow>("SELECT clock_timestamp() AS now");
-      const nowUtc = isoValue(oneRow(nowResult.rows, "database time"), "now");
-      const inventory = await evaluateStoredInventory(client, scope.providerId, input.productId, occurrence, nowUtc, input.seats);
-      if (!inventory.availability.bookable) {
-        throw new BookingUnavailableError(inventory.availability.reason, inventory.availability.availableSeats);
-      }
-
-      const snapshots = buildSnapshots(occurrence, input.seats, nowUtc, product);
-      const publicBookingId = randomUUID();
-      const inserted = await client.query<DbRow>(
-        `INSERT INTO bookings (
-           public_booking_id, provider_id, product_id, occurrence_id, status, seats,
-           idempotency_key, hold_expires_at, occurrence_snapshot, pricing_snapshot, seller_snapshot
-         ) VALUES (
-           $1,$2,$3,$4,'HOLD',$5,$6,clock_timestamp()+($7*interval '1 second'),$8::jsonb,$9::jsonb,$10::jsonb
-         ) RETURNING id, ${BOOKING_COLUMNS}`,
-        [
-          publicBookingId,
-          scope.providerId,
-          input.productId,
-          occurrence.id,
-          input.seats,
-          input.idempotencyKey,
-          holdSeconds,
-          JSON.stringify(snapshots.occurrenceSnapshot),
-          JSON.stringify(snapshots.pricingSnapshot),
-          JSON.stringify(snapshots.sellerSnapshot),
-        ],
-      );
-      const insertedRow = oneRow(inserted.rows, "booking hold");
-      const booking = bookingFromRow(insertedRow);
-      await persistBookingInventorySnapshot(client, {
-        providerId: scope.providerId,
-        bookingId: Number(insertedRow.id),
-        occurrence,
-        bookingMode: inventory.bookingMode,
-        occupancies: inventory.occupancies,
+      const occurrence = await materializeAndLockOccurrence(client, scope.providerId, input.productId, input.occurrenceId);
+      const placed = await placeBookingHold(client, product, occurrence, {
+        seats: input.seats, idempotencyKey: input.idempotencyKey, holdSeconds,
       });
-      await enqueueCalendarRecalculation(client, {
-        providerId: scope.providerId, aggregateType: "schedule_occurrence", aggregateId: occurrence.id, cause: "booking_hold_created",
-      });
-      await enqueueCalendarRecalculation(client, {
-        providerId: scope.providerId, aggregateType: "schedule_occurrence", aggregateId: occurrence.id,
-        cause: "booking_hold_expired", availableAtUtc: booking.holdExpiresAtUtc,
-      });
-      return booking;
+      return placed.booking;
     });
   }
 
@@ -1456,83 +1416,155 @@ export class ExperienceStore {
     }
   }
 
-  async #materializeAndLockOccurrence(
-    client: PoolClient,
-    scope: ProviderScope,
-    productId: string,
-    occurrenceId: string,
-  ): Promise<Occurrence> {
-    const marker = occurrenceId.lastIndexOf("@");
-    if (marker < 1) throw new StoreValidationError("occurrenceId is invalid.");
-    let ruleId: string;
-    try {
-      ruleId = decodeURIComponent(occurrenceId.slice(0, marker));
-    } catch (error) {
-      throw new StoreValidationError("occurrenceId is invalid.", { cause: error });
-    }
-    const ruleResult = await client.query<DbRow>(
-      `SELECT ${RULE_COLUMNS} FROM schedule_rules
-        WHERE provider_id=$1 AND product_id=$2 AND id=$3 FOR SHARE`,
-      [scope.providerId, productId, ruleId],
-    );
-    const storedRule = scheduleRuleFromRow(oneRow(ruleResult.rows, "schedule rule"));
-    const overrideResult = await client.query<DbRow>(
-      `SELECT ${OVERRIDE_COLUMNS} FROM schedule_occurrence_overrides
-        WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3`,
-      [scope.providerId, ruleId, occurrenceId],
-    );
-    const storedOverride = overrideResult.rows[0] === undefined ? undefined : overrideFromRow(overrideResult.rows[0]).override;
-    const salesStateResult = await client.query<DbRow>(
-      `SELECT ${SALES_STATE_COLUMNS} FROM schedule_occurrence_sales_states
-        WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3`,
-      [scope.providerId, ruleId, occurrenceId],
-    );
-    const storedSalesState = salesStateResult.rows[0] === undefined ? undefined : salesStateFromRow(salesStateResult.rows[0]).state;
-    const occurrence = occurrenceForSource(storedRule.rule, storedOverride, storedSalesState, occurrenceId);
-    await client.query(
-      `INSERT INTO schedule_occurrences (
-         provider_id, occurrence_id, product_id, rule_id, source_local_date, local_date,
-         local_start_time, time_zone, start_at, end_at, duration_minutes, capacity,
-         booking_cutoff_minutes, busy_buffer_before_minutes, busy_buffer_after_minutes,
-         status, rescheduled, schedule_rule_version
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-       ON CONFLICT (provider_id, occurrence_id) DO UPDATE SET
-         product_id=EXCLUDED.product_id, rule_id=EXCLUDED.rule_id,
-         source_local_date=EXCLUDED.source_local_date, local_date=EXCLUDED.local_date,
-         local_start_time=EXCLUDED.local_start_time, time_zone=EXCLUDED.time_zone,
-         start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at,
-         duration_minutes=EXCLUDED.duration_minutes, capacity=EXCLUDED.capacity,
-         booking_cutoff_minutes=EXCLUDED.booking_cutoff_minutes,
-         busy_buffer_before_minutes=EXCLUDED.busy_buffer_before_minutes,
-         busy_buffer_after_minutes=EXCLUDED.busy_buffer_after_minutes,
-         status=EXCLUDED.status, rescheduled=EXCLUDED.rescheduled,
-         schedule_rule_version=EXCLUDED.schedule_rule_version, updated_at=clock_timestamp()`,
-      [
-        scope.providerId,
-        occurrence.id,
-        productId,
-        occurrence.ruleId,
-        occurrence.sourceLocalDate,
-        occurrence.localDate,
-        occurrence.localStartTime,
-        occurrence.timeZone,
-        occurrence.startUtc,
-        occurrence.endUtc,
-        occurrence.durationMinutes,
-        occurrence.capacity,
-        occurrence.bookingCutoffMinutes,
-        occurrence.busyBufferBeforeMinutes,
-        occurrence.busyBufferAfterMinutes,
-        occurrence.status,
-        occurrence.rescheduled,
-        storedRule.version,
-      ],
-    );
-    await client.query(
-      "SELECT occurrence_id FROM schedule_occurrences WHERE provider_id=$1 AND occurrence_id=$2 FOR UPDATE",
-      [scope.providerId, occurrence.id],
-    );
-    return occurrence;
+}
+
+/*
+ * Hold internals shared by ExperienceStore.createBookingHold and GuestBookingRepository.startGuestBooking
+ * (guest-bookings.ts). Package-internal: index.ts does not export them. Callers hold the provider
+ * inventory lock, then the idempotency lock, then lock the product before materializing the occurrence.
+ */
+
+/** Serializes every hold that uses one idempotency key of a provider. */
+export async function lockBookingIdempotencyKey(client: PoolClient, providerId: string, idempotencyKey: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))", [providerId, idempotencyKey]);
+}
+
+/** Derives the occurrence from its stored rule, override and sales state, upserts it, and locks its row. */
+export async function materializeAndLockOccurrence(
+  client: PoolClient,
+  providerId: string,
+  productId: string,
+  occurrenceId: string,
+): Promise<Occurrence> {
+  const marker = occurrenceId.lastIndexOf("@");
+  if (marker < 1) throw new StoreValidationError("occurrenceId is invalid.");
+  let ruleId: string;
+  try {
+    ruleId = decodeURIComponent(occurrenceId.slice(0, marker));
+  } catch (error) {
+    throw new StoreValidationError("occurrenceId is invalid.", { cause: error });
+  }
+  const ruleResult = await client.query<DbRow>(
+    `SELECT ${RULE_COLUMNS} FROM schedule_rules
+      WHERE provider_id=$1 AND product_id=$2 AND id=$3 FOR SHARE`,
+    [providerId, productId, ruleId],
+  );
+  const storedRule = scheduleRuleFromRow(oneRow(ruleResult.rows, "schedule rule"));
+  const overrideResult = await client.query<DbRow>(
+    `SELECT ${OVERRIDE_COLUMNS} FROM schedule_occurrence_overrides
+      WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3`,
+    [providerId, ruleId, occurrenceId],
+  );
+  const storedOverride = overrideResult.rows[0] === undefined ? undefined : overrideFromRow(overrideResult.rows[0]).override;
+  const salesStateResult = await client.query<DbRow>(
+    `SELECT ${SALES_STATE_COLUMNS} FROM schedule_occurrence_sales_states
+      WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3`,
+    [providerId, ruleId, occurrenceId],
+  );
+  const storedSalesState = salesStateResult.rows[0] === undefined ? undefined : salesStateFromRow(salesStateResult.rows[0]).state;
+  const occurrence = occurrenceForSource(storedRule.rule, storedOverride, storedSalesState, occurrenceId);
+  await client.query(
+    `INSERT INTO schedule_occurrences (
+       provider_id, occurrence_id, product_id, rule_id, source_local_date, local_date,
+       local_start_time, time_zone, start_at, end_at, duration_minutes, capacity,
+       booking_cutoff_minutes, busy_buffer_before_minutes, busy_buffer_after_minutes,
+       status, rescheduled, schedule_rule_version
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     ON CONFLICT (provider_id, occurrence_id) DO UPDATE SET
+       product_id=EXCLUDED.product_id, rule_id=EXCLUDED.rule_id,
+       source_local_date=EXCLUDED.source_local_date, local_date=EXCLUDED.local_date,
+       local_start_time=EXCLUDED.local_start_time, time_zone=EXCLUDED.time_zone,
+       start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at,
+       duration_minutes=EXCLUDED.duration_minutes, capacity=EXCLUDED.capacity,
+       booking_cutoff_minutes=EXCLUDED.booking_cutoff_minutes,
+       busy_buffer_before_minutes=EXCLUDED.busy_buffer_before_minutes,
+       busy_buffer_after_minutes=EXCLUDED.busy_buffer_after_minutes,
+       status=EXCLUDED.status, rescheduled=EXCLUDED.rescheduled,
+       schedule_rule_version=EXCLUDED.schedule_rule_version, updated_at=clock_timestamp()`,
+    [
+      providerId,
+      occurrence.id,
+      productId,
+      occurrence.ruleId,
+      occurrence.sourceLocalDate,
+      occurrence.localDate,
+      occurrence.localStartTime,
+      occurrence.timeZone,
+      occurrence.startUtc,
+      occurrence.endUtc,
+      occurrence.durationMinutes,
+      occurrence.capacity,
+      occurrence.bookingCutoffMinutes,
+      occurrence.busyBufferBeforeMinutes,
+      occurrence.busyBufferAfterMinutes,
+      occurrence.status,
+      occurrence.rescheduled,
+      storedRule.version,
+    ],
+  );
+  await client.query(
+    "SELECT occurrence_id FROM schedule_occurrences WHERE provider_id=$1 AND occurrence_id=$2 FOR UPDATE",
+    [providerId, occurrence.id],
+  );
+  return occurrence;
+}
+
+/**
+ * Evaluates the locked occurrence against stored inventory and inserts the HOLD with its snapshots,
+ * inventory snapshot and recalculation events. Throws BookingUnavailableError when it is not bookable.
+ */
+export async function placeBookingHold(
+  client: PoolClient,
+  product: ProductRecord,
+  occurrence: Occurrence,
+  input: { readonly seats: number; readonly idempotencyKey: string; readonly holdSeconds: number; readonly guest?: GuestPricingInput },
+): Promise<{ readonly booking: BookingRecord; readonly bookingRowId: number }> {
+  const providerId = product.providerId;
+  const nowResult = await client.query<DbRow>("SELECT clock_timestamp() AS now");
+  const nowUtc = isoValue(oneRow(nowResult.rows, "database time"), "now");
+  const inventory = await evaluateStoredInventory(client, providerId, product.id, occurrence, nowUtc, input.seats);
+  if (!inventory.availability.bookable) {
+    throw new BookingUnavailableError(inventory.availability.reason, inventory.availability.availableSeats);
   }
 
+  const snapshots = buildSnapshots(occurrence, input.seats, nowUtc, product, input.guest);
+  const publicBookingId = randomUUID();
+  const inserted = await client.query<DbRow>(
+    `INSERT INTO bookings (
+       public_booking_id, provider_id, product_id, occurrence_id, status, seats,
+       idempotency_key, hold_expires_at, occurrence_snapshot, pricing_snapshot, seller_snapshot
+     ) VALUES (
+       $1,$2,$3,$4,'HOLD',$5,$6,clock_timestamp()+($7*interval '1 second'),$8::jsonb,$9::jsonb,$10::jsonb
+     ) RETURNING id, ${BOOKING_COLUMNS}`,
+    [
+      publicBookingId,
+      providerId,
+      product.id,
+      occurrence.id,
+      input.seats,
+      input.idempotencyKey,
+      input.holdSeconds,
+      JSON.stringify(snapshots.occurrenceSnapshot),
+      JSON.stringify(snapshots.pricingSnapshot),
+      JSON.stringify(snapshots.sellerSnapshot),
+    ],
+  );
+  const insertedRow = oneRow(inserted.rows, "booking hold");
+  const booking = bookingFromRow(insertedRow);
+  const bookingRowId = Number(insertedRow.id);
+  await persistBookingInventorySnapshot(client, {
+    providerId,
+    bookingId: bookingRowId,
+    occurrence,
+    bookingMode: inventory.bookingMode,
+    occupancies: inventory.occupancies,
+  });
+  await enqueueCalendarRecalculation(client, {
+    providerId, aggregateType: "schedule_occurrence", aggregateId: occurrence.id, cause: "booking_hold_created",
+  });
+  await enqueueCalendarRecalculation(client, {
+    providerId, aggregateType: "schedule_occurrence", aggregateId: occurrence.id,
+    cause: "booking_hold_expired", availableAtUtc: booking.holdExpiresAtUtc,
+  });
+  return { booking, bookingRowId };
 }

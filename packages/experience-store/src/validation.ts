@@ -8,7 +8,7 @@ import {
   type Occurrence,
 } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "./errors.ts";
-import type { PricingSnapshot, SellerSnapshot } from "./types.ts";
+import type { GuestCancellationPolicy, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -71,6 +71,12 @@ export function effectiveGoogleSyncStatus(
   return storedStatus === "FRESH" && freshUntilUtc !== undefined && freshUntilUtc > nowUtc ? "FRESH" : "STALE";
 }
 
+/** A guest booking's party and its sale terms; without it every seat costs the product's unit amount. */
+export interface GuestPricingInput {
+  readonly breakdown: PricingBreakdown;
+  readonly cancellationPolicy: GuestCancellationPolicy;
+}
+
 export function buildSnapshots(
   occurrence: Occurrence,
   seats: number,
@@ -84,6 +90,7 @@ export function buildSnapshots(
     readonly stripeConnectAccountRef: string;
     readonly sellerDisplayName: string;
   },
+  guest?: GuestPricingInput,
 ): {
   readonly occurrenceSnapshot: BookingOccurrenceSnapshot;
   readonly pricingSnapshot: PricingSnapshot;
@@ -91,7 +98,15 @@ export function buildSnapshots(
 } {
   assertSeats(seats);
   assertMoney(product.unitAmount, "unitAmount");
-  const totalAmount = product.unitAmount * seats;
+  let totalAmount = product.unitAmount * seats;
+  if (guest !== undefined) {
+    const { adultCount, childCount, childUnitAmount } = guest.breakdown;
+    if (adultCount + childCount !== seats || (childCount > 0 && childUnitAmount === null)) {
+      throw new StoreValidationError("The guest party does not match the booked seats.");
+    }
+    if (childUnitAmount !== null) assertMoney(childUnitAmount, "childUnitAmount");
+    totalAmount = product.unitAmount * adultCount + (childUnitAmount ?? 0) * childCount;
+  }
   if (!Number.isSafeInteger(totalAmount)) throw new StoreValidationError("booking total exceeds the safe integer range.");
   return {
     occurrenceSnapshot: createBookingOccurrenceSnapshot(occurrence, seats, acceptedAtUtc),
@@ -101,6 +116,7 @@ export function buildSnapshots(
       seats,
       totalAmount,
       cancellationTermsRef: product.cancellationTermsRef,
+      ...(guest === undefined ? {} : { breakdown: { ...guest.breakdown }, cancellationPolicy: guest.cancellationPolicy }),
     },
     sellerSnapshot: {
       experienceProviderId: product.providerId,
