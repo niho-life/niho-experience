@@ -11,6 +11,12 @@ export const ADAPTER_REGISTRY = Object.freeze({
   Jalan: Object.freeze({ site: "Jalan", adapter: "jalan-browser", adapterVersion: "1", profileNamespace: "jalan" }),
 });
 export const CONNECTION_MODE = "BROWSER";
+export const GOOGLE_DELIVERY_TARGET = Object.freeze({
+  site: "Airbnb",
+  adapter: "airbnb-google-busy",
+  adapterVersion: "1",
+  connectionMode: "GOOGLE",
+});
 export const TIME_ZONE = "Asia/Tokyo";
 export const MAX_JOB_MS = 180_000;
 export const MAX_CLOCK_SKEW_MS = 5_000;

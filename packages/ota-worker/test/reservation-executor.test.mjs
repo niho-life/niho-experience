@@ -353,3 +353,24 @@ test("supervisor reservation dispatch invokes only the fixed reader path", async
   assert.equal(drivers, 0);
   assert.equal(models, 0);
 });
+
+test("RESERVATION_WINDOW remains on the reader path even for the Google target shape", async () => {
+  let deliveries = 0;
+  let reads = 0;
+  const googleReservationJob = { ...job, target: { site: "Airbnb", externalAccountId: "12345", externalProductId: "67890",
+    timeZone: "Asia/Tokyo", adapter: "airbnb-google-busy", adapterVersion: "1", connectionMode: "GOOGLE" } };
+  const result = await executeJob({
+    job: googleReservationJob,
+    cloud: { ...cloudFor(), async googleDelivery() { deliveries += 1; } },
+    config: { mode: "claude-code", googleDeliveryEnabled: true }, journal: journal(false), now: () => fixedNow,
+    reservationReaderFactory: readerFor(async () => { reads += 1; return { facts: [makeFact(1)], terminal: terminal() }; }),
+    driverFactory: async () => { throw new Error("browser must not run"); },
+    claudeExecutor: async () => { throw new Error("model must not run"); },
+  });
+  // The existing reader does not support this target, but the job must remain
+  // on that fail-closed path instead of being misrouted to Google delivery.
+  assert.equal(result.outcome, "NEEDS_REVIEW");
+  assert.equal(result.modelInvocations, 0);
+  assert.equal(reads, 1);
+  assert.equal(deliveries, 0);
+});

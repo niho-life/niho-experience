@@ -2,9 +2,10 @@ import { join } from "node:path";
 import { selectDriverFactory } from "./driver-registry.mjs";
 import { createSupervisorRpc } from "./mcp-rpc.mjs";
 import { runClaude } from "./claude-runner.mjs";
-import { ContractError, validateObservation } from "./validation.mjs";
+import { ContractError, isGoogleDeliveryTarget, validateObservation } from "./validation.mjs";
 import { MAX_JOB_MS } from "./constants.mjs";
 import { executeReservationWindow, unsupportedReservationReaderFactory } from "./reservation-executor.mjs";
+import { executeGoogleDelivery } from "./google-delivery-executor.mjs";
 
 const wait = (ms, signal) => new Promise((resolve) => {
   if (signal.aborted) return resolve(false);
@@ -52,6 +53,9 @@ export async function executeJob({
   if (job.purpose === "RESERVATION_WINDOW") {
     if (!journal) throw new ContractError("INVALID_JOURNAL");
     return executeReservationWindow({ job, cloud, config, journal, readerFactory: reservationReaderFactory, renewEveryMs, now });
+  }
+  if (isGoogleDeliveryTarget(job.target)) {
+    return executeGoogleDelivery({ job, cloud, config, renewEveryMs, now });
   }
   const controller = new AbortController();
   let gateActive = true;

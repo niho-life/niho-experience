@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-30。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Googleへの実接続、Airbnb観測、本番有効化の完了を示すものではない。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Googleへの本番実接続、Airbnb観測、本番有効化の完了を示すものではない。
 
 公式根拠：
 
@@ -52,10 +52,12 @@ HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node
 再照合の設定不足・scope不足・token更新失敗では、元の書込み結果が不明な記録を `UNCERTAIN` に保つ。Googleを読めていない段階では未確認のfenceを解除せず、障害復旧後のGET-only再試行を残す。
 内部endpointはHTTP mode、既存channel runtime flag、`EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED=true` の3条件が揃うまで404であり、新flagは既定falseである。
 
+OTA worker caller も `googleDeliveryEnabled` が既定falseである。ON時だけ固定originの内部配送APIへ `dispatch` または `reconcile` を1回送り、Googleへ直接接続せず、browser・Claude・任意adapterへfallbackしない。callerのdeadlineはjob期限内かつ最大60秒で、送信開始後に確定DTOを受け取れない場合は再送せず `UNKNOWN_AFTER_SAVE` として隔離する。`GOOGLE_VERIFIED` はGoogle予定だけの確認であり、Airbnb observerが未接続のため worker結果は `NEEDS_REVIEW` / `AIRBNB_OBSERVATION_REQUIRED` のままとする。
+
 ## 未接続・未受入
 
 実DBを使う結合testは、実 `ChannelRuntime` / repository / `applyGoogleManagedBlock` / `inspectGoogleManagedBlock` と合成fetchを接続し、ACK喪失、duplicate write抑止、stop-confirmed OBSERVEからのGET-only再照合、binding/desired失効、operation fencing、cross-provider calendar衝突を永続状態とwrite回数で確認する。token refresh/configだけを合成注入し、実Google・実Airbnb・実credentialは使わない。helperにはlocalhostでzero-byte ACK bodyの10秒deadlineを確認するtestもあるが、socket listenを禁止するsandboxではその1件を実行できない。
 
-今回作っていないもの：専用app-created calendarの本番provisioning、Google同意とAirbnb側接続、worker caller、OAuth接続UI、Airbnb observer、production flag有効化。本番calendar、credential、network、Airbnb画面を使った受入も行っていない。
+今回も作っていないもの：専用app-created calendarの本番provisioning、Google同意とAirbnb側接続、OAuth接続UI、Airbnb observerとそのtyped receipt、production setup・flag有効化、PWA通し、伝播SLOの実測。本番calendar、credential、daemon/runtime config、NIHOapp Draft、network、Airbnb画面を使った受入にも触れていない。
 
 Airbnb制御用のGoogle書出しcalendarはbooking/provider busy/resource busy入力から除外し、自己書込による永久busy循環を防ぐ。Google専用calendarをAirbnb対象listingへ実接続できること、Airbnb browser observerのtyped acceptance、PWA通し、停止・再開それぞれの最大60分伝播実測は別受入である。NIHOapp Draftと本番flagは変更していない。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。
