@@ -25,7 +25,25 @@ const runtimeOverview = (providerId: string) => ({
   incidents: [{ id: "7", kind: "WORKER_STALE", subjectType: "worker", subjectId: "worker-a", openedAtUtc: stamp, escalated: true, acknowledged: false, assignedToMe: false, detail: { closePending: 2 } }],
 });
 
-async function stub(page: Page, mutation?: (route: Route, body: Record<string, unknown>) => Promise<void>, runtime?: (providerId: string) => unknown) {
+const attentionData = (providerId: string) => ({
+  cases: [{
+    id: "00000000-0000-4000-8000-000000000301", productId: "tea", productTitle: "合成の茶道", occurrenceId: "tea-am@2099-01-03",
+    occurrenceStartAtUtc: "2099-01-03T01:00:00.000Z", status: "OPEN", openedAtUtc: stamp, lastSeenAtUtc: stamp, acknowledged: false, assignedToMe: false,
+    members: [
+      { kind: "EXTERNAL", site: "Viator", externalReservationId: "SYN-1", seats: 2, status: "CONFIRMED" },
+      { kind: "EXTERNAL", site: "Jalan", externalReservationId: "SYN-2", seats: 1, status: "CONFIRMED" },
+    ],
+  }],
+  metrics: {
+    providerId, generatedAtUtc: stamp, fromUtc: stamp, windowDays: 30, truncated: false,
+    counts: { OPEN: 1, COMPLETED: 4, NOT_REQUIRED: 2, ABANDONED: 0, TIMED_OUT: 0 },
+    closeVerified: { count: 4, p50Seconds: 180, p95Seconds: 540, maxSeconds: 600, over60Minutes: 0 },
+    detectionLag: { count: 4, p50Seconds: 45, p95Seconds: 90 }, queueWait: { count: 4, p50Seconds: 20, p95Seconds: 60 },
+    bySite: [{ site: "Viator", count: 6, closeVerifiedP95Seconds: 540 }], open: { count: 1, oldestAgeSeconds: 120 },
+  },
+});
+
+async function stub(page: Page, mutation?: (route: Route, body: Record<string, unknown>) => Promise<void>, runtime?: (providerId: string) => unknown, attention?: typeof attentionData) {
   await page.route("**/admin/api/channel-workspace**", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({ json: { providers, selected: snapshot(new URL(route.request().url()).searchParams.get("providerId") ?? "synthetic-a") } });
@@ -37,6 +55,8 @@ async function stub(page: Page, mutation?: (route: Route, body: Record<string, u
     if (body.action === "listAccounts") await route.fulfill({ json: { accounts: body.providerId === "synthetic-a" ? [account] : [] } });
     else if (body.action === "listListings") await route.fulfill({ json: { listings: body.providerId === "synthetic-a" ? [listing] : [] } });
     else if (body.action === "runtimeOverview") await route.fulfill(runtime ? { json: { overview: runtime(body.providerId) } } : { status: 404, json: { error: "not_found" } });
+    else if (body.action === "conflictCases") await route.fulfill(attention ? { json: { cases: attention(body.providerId).cases } } : { status: 404, json: { error: "not_found" } });
+    else if (body.action === "propagationMetrics") await route.fulfill(attention ? { json: { metrics: attention(body.providerId).metrics } } : { status: 404, json: { error: "not_found" } });
     else if (mutation) await mutation(route, body);
     else await route.fulfill({ json: { saved: true } });
   });
@@ -95,6 +115,38 @@ test("runtime status says a stopped Studio does not close open occurrences and g
   await expect.poll(() => posts.length).toBe(2);
   expect(posts[1]).toMatchObject({ action: "acknowledgeIncident", incidentId: "7" });
   expect(JSON.stringify(posts)).not.toMatch(/password|cookie|bearer|externalAccountId/i);
+});
+
+test("external reservation conflicts are queued for staff, recorded only after a confirmed choice", async ({ page }, testInfo) => {
+  await signIn(page);
+  const posts: Record<string, unknown>[] = [];
+  await stub(page, async (route, body) => { posts.push(body); await route.fulfill({ json: { saved: true } }); }, undefined, attentionData);
+  await page.goto("/admin/channels");
+  const queue = section(page, "外部予約の要対応");
+  await expect(queue.getByText("Viator SYN-1 · 2名 · 確定", { exact: true })).toBeVisible();
+  await expect(queue.getByText("Jalan SYN-2 · 1名 · 確定", { exact: true })).toBeVisible();
+  await expect(section(page, "反映時間（30日）").getByText(/中央値 3分 · 95% 9分 · 最大 10分（4件）/)).toBeVisible();
+  await expect(page.getByText(/取り消しました|返金しました/)).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  const axe = await new AxeBuilder({ page }).include("section[aria-labelledby='reservation-conflicts-title']").include("section[aria-labelledby='propagation-title']")
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(axe.violations.map((item) => item.id)).toEqual([]);
+  await testInfo.attach("reservation-attention", { body: await page.screenshot({ path: testInfo.outputPath("reservation-attention.png"), fullPage: true }), contentType: "image/png" });
+
+  await queue.getByRole("button", { name: "担当する", exact: true }).click();
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0]).toMatchObject({ action: "acknowledgeConflictCase", caseId: "00000000-0000-4000-8000-000000000301" });
+
+  await queue.getByRole("button", { name: "対応済みにする", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "対応済みにする" });
+  const submit = dialog.getByRole("button", { name: "記録する", exact: true });
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole("radio", { name: "お客様に連絡した" }).check();
+  await submit.click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => posts.length).toBe(2);
+  expect(posts[1]).toMatchObject({ action: "resolveConflictCase", caseId: "00000000-0000-4000-8000-000000000301", resolution: "CUSTOMER_CONTACTED" });
+  expect(JSON.stringify(posts)).not.toMatch(/CONFLICT_CLEARED|note|email|phone/i);
 });
 
 test("unknown resource save can be retried inside its modal with the identical command", async ({ page }) => {

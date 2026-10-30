@@ -1,4 +1,12 @@
-import type { ChannelCapabilities, ChannelListingInput, ChannelRuntimeOverview, ExternalAccountInput } from "@niho-experience/experience-store";
+import type {
+  ChannelCapabilities,
+  ChannelListingInput,
+  ChannelRuntimeOverview,
+  ConflictCaseView,
+  ExternalAccountInput,
+  ManualConflictResolution,
+  PropagationMetrics,
+} from "@niho-experience/experience-store";
 import { adminMutationAllowed, loadAdminHttpSession } from "@/lib/admin/server";
 import { boundedObject, channelFailure, channelJson, channelManagerEnabled, exactKeys } from "@/lib/experience/channel-runtime";
 import { channelRuntime } from "@/lib/experience/store-server";
@@ -6,6 +14,8 @@ import { channelRuntime } from "@/lib/experience/store-server";
 export const runtime = "nodejs";
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INCIDENT_ID = /^[1-9][0-9]{0,17}$/;
+/** CONFLICT_CLEARED is set only by the watchdog when the conflict is gone. */
+const MANUAL_RESOLUTIONS: readonly ManualConflictResolution[] = ["CUSTOMER_CONTACTED", "ACCEPTED_BOTH", "CANCELLED_AT_SOURCE"];
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -88,6 +98,40 @@ function runtimeOverviewDto(value: ChannelRuntimeOverview) {
     incidents: value.incidents.map(({ id, kind, subjectType, subjectId, openedAtUtc, escalated, acknowledged, assignedToMe, detail }) => ({
       id, kind, subjectType, subjectId, openedAtUtc, escalated, acknowledged, assignedToMe, detail,
     })),
+  };
+}
+
+/** Explicit allowlist. The store holds no customer data; external account IDs are never sent to the browser. */
+function conflictCaseDto(value: ConflictCaseView) {
+  return {
+    id: value.id, productId: value.productId, productTitle: value.productTitle, occurrenceId: value.occurrenceId,
+    ...(value.occurrenceStartAtUtc === undefined ? {} : { occurrenceStartAtUtc: value.occurrenceStartAtUtc }),
+    status: value.status, openedAtUtc: value.openedAtUtc, lastSeenAtUtc: value.lastSeenAtUtc,
+    acknowledged: value.acknowledged, assignedToMe: value.assignedToMe,
+    ...(value.resolvedAtUtc === undefined ? {} : { resolvedAtUtc: value.resolvedAtUtc }),
+    ...(value.resolution === undefined ? {} : { resolution: value.resolution }),
+    members: value.members.map((member) => member.kind === "EXTERNAL"
+      ? { kind: member.kind, site: member.site, externalReservationId: member.externalReservationId, seats: member.seats, status: member.status }
+      : { kind: member.kind, bookingId: member.bookingId, seats: member.seats, status: member.status }),
+  };
+}
+
+function propagationMetricsDto(value: PropagationMetrics) {
+  const duration = ({ count, p50Seconds, p95Seconds }: PropagationMetrics["detectionLag"]) => ({
+    count, ...(p50Seconds === undefined ? {} : { p50Seconds }), ...(p95Seconds === undefined ? {} : { p95Seconds }),
+  });
+  return {
+    providerId: value.providerId, generatedAtUtc: value.generatedAtUtc, fromUtc: value.fromUtc, windowDays: value.windowDays,
+    truncated: value.truncated, counts: { ...value.counts },
+    closeVerified: {
+      ...duration(value.closeVerified), over60Minutes: value.closeVerified.over60Minutes,
+      ...(value.closeVerified.maxSeconds === undefined ? {} : { maxSeconds: value.closeVerified.maxSeconds }),
+    },
+    detectionLag: duration(value.detectionLag), queueWait: duration(value.queueWait),
+    bySite: value.bySite.map(({ site, count, closeVerifiedP95Seconds }) => ({
+      site, count, ...(closeVerifiedP95Seconds === undefined ? {} : { closeVerifiedP95Seconds }),
+    })),
+    open: { count: value.open.count, ...(value.open.oldestAgeSeconds === undefined ? {} : { oldestAgeSeconds: value.open.oldestAgeSeconds }) },
   };
 }
 
@@ -185,6 +229,21 @@ export async function POST(request: Request) {
     if (body.action === "acknowledgeIncident" && exactKeys(body, ["action", "commandId", "incidentId"])
       && typeof body.incidentId === "string" && INCIDENT_ID.test(body.incidentId) && command(body)) {
       return channelJson(await runtime.acknowledgeIncident(actor, body.incidentId, command(body)!));
+    }
+    if (body.action === "conflictCases" && exactKeys(body, ["action", "providerId"]) && typeof body.providerId === "string") {
+      return channelJson({ cases: (await runtime.conflictCases(actor, body.providerId)).map(conflictCaseDto) });
+    }
+    if (body.action === "acknowledgeConflictCase" && exactKeys(body, ["action", "commandId", "caseId"])
+      && typeof body.caseId === "string" && UUID_V4.test(body.caseId) && command(body)) {
+      return channelJson(await runtime.acknowledgeConflictCase(actor, body.caseId, command(body)!));
+    }
+    if (body.action === "resolveConflictCase" && exactKeys(body, ["action", "commandId", "caseId", "resolution"])
+      && typeof body.caseId === "string" && UUID_V4.test(body.caseId) && command(body)
+      && typeof body.resolution === "string" && (MANUAL_RESOLUTIONS as readonly string[]).includes(body.resolution)) {
+      return channelJson(await runtime.resolveConflictCase(actor, body.caseId, body.resolution as ManualConflictResolution, command(body)!));
+    }
+    if (body.action === "propagationMetrics" && exactKeys(body, ["action", "providerId"]) && typeof body.providerId === "string") {
+      return channelJson({ metrics: propagationMetricsDto(await runtime.propagationMetrics(actor, body.providerId)) });
     }
     return channelJson({ error: "invalid_input" }, 400);
   } catch (error) {

@@ -95,7 +95,7 @@ Admin の `/admin/api/channels` は action allowlist だけを受け、任意 qu
 - 認証は Google 発行の OIDC ID token だけ。`EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE` と完全一致する audience、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL` と一致する verified email、Google issuer、未失効を必須とする。worker bearer、Admin cookie、session role は参照しない。guide admin と同じ検証部品（`apps/web/src/lib/google-service-identity.ts`）を使う。
 - flag OFF・設定不足は `404`、token 不備は `401`、Google 署名鍵の取得障害は `503 identity_verification_unavailable`、DB 未設定・失敗は `503`。body は空か `{}`（1 KiB 以下）、query なしだけを受ける。応答は件数だけで `private, no-store`。
 - 同時実行は transaction advisory lock の try-lock で1本にし、取れなかった実行は待たずに `skipped:true` を返す。同じ条件の incident は `dedupe_key` の部分 unique index で未解決1件に限る。
-- watchdog が変更するのは incident、`channel_watchdog_state`、90秒超の worker の `open_hold_since` 開始だけである。job、lease、quarantine、desired state は変更しない。
+- watchdog が変更するのは incident、`channel_watchdog_state`、90秒超の worker の `open_hold_since` 開始、外部予約の要対応 case の自動解決と反映時間の計測（[OTA外部予約台帳](ota-external-reservations.md#要対応キューと反映時間の計測)）だけである。job、lease、quarantine、desired state、予約は変更しない。
 
 | incident | 開く条件 | escalation |
 | --- | --- | --- |
@@ -103,6 +103,7 @@ Admin の `/admin/api/channels` は action allowlist だけを受け、任意 qu
 | `SYNC_OVERDUE` | 配備済み action で実行可能な未反映 desired が、desired 変更から60分超（account 単位） | 開いた時点 |
 | `RESERVATION_READ_OVERDUE` | 予約読取可能な listing の読取が halted、fresh 期限切れ、または作成後60分未読 | 開いてから60分超 |
 | `ACCOUNT_QUARANTINED` | active account の隔離 | 隔離60分超 |
+| `EXTERNAL_RESERVATION_CONFLICT` | 外部予約の要対応 case が OPEN（subject は case） | 開いた時点 |
 
 未反映の判定は `desired_changed_at`（desired version を変えた時刻）を基準にし、観測・エラー記録で動く `updated_at` は使わない。退役 adapter など配備 allowlist で実行できない backlog は `SYNC_OVERDUE` にしない。incident は条件が消えた次の実行で `AUTO_RECOVERED` として閉じる。各種上限（500行）に達した種別は、その実行で自動解決しない。
 

@@ -172,3 +172,76 @@ describe("Admin channel runtime operations", () => {
     expect((await POST(request({ action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: true, reauthConfirmed: true }))).status).toBe(409);
   });
 });
+
+describe("Admin external reservation attention", () => {
+  const commandId = "00000000-0000-4000-8000-000000000250";
+  const caseId = "00000000-0000-4000-8000-000000000251";
+  const actor = { nihoUserId: "verified-admin" };
+
+  it("lists conflict cases and metrics through allowlisted DTOs only", async () => {
+    mocks.runtime!.conflictCases = vi.fn().mockResolvedValue([{
+      id: caseId, productId: "tea", productTitle: "Synthetic tea", occurrenceId: "tea-am@2099-01-03", occurrenceStartAtUtc: "2099-01-03T01:00:00.000Z",
+      status: "OPEN", openedAtUtc: "2099-01-01T00:00:00.000Z", lastSeenAtUtc: "2099-01-01T00:00:00.000Z", acknowledged: false, assignedToMe: false,
+      assigneeNihoUserId: "must-not-leak",
+      members: [
+        { kind: "EXTERNAL", site: "Airbnb", externalReservationId: "R1", seats: 2, status: "CONFIRMED", addedAtUtc: "2099-01-01T00:00:00.000Z", externalAccountId: "must-not-leak" },
+        { kind: "DIRECT", bookingId: "42", seats: 1, status: "CONFIRMED", addedAtUtc: "2099-01-01T00:00:00.000Z", publicBookingId: "must-not-leak" },
+      ],
+    }]);
+    mocks.runtime!.propagationMetrics = vi.fn().mockResolvedValue({
+      providerId: "provider-a", generatedAtUtc: "2099-01-02T00:00:00.000Z", fromUtc: "2098-12-03T00:00:00.000Z", windowDays: 30, truncated: false,
+      counts: { OPEN: 1, COMPLETED: 3, NOT_REQUIRED: 2, ABANDONED: 0, TIMED_OUT: 0 },
+      closeVerified: { count: 3, p50Seconds: 120, p95Seconds: 400, maxSeconds: 420, over60Minutes: 0 },
+      detectionLag: { count: 3, p50Seconds: 30, p95Seconds: 60 }, queueWait: { count: 2, p50Seconds: 20, p95Seconds: 40 },
+      bySite: [{ site: "Airbnb", count: 4, closeVerifiedP95Seconds: 400, sourceExternalAccountId: "must-not-leak" }],
+      open: { count: 1, oldestAgeSeconds: 90 },
+    });
+    const cases = await POST(request({ action: "conflictCases", providerId: "provider-a" }));
+    expect(cases.status).toBe(200);
+    const casesBody = await cases.json();
+    expect(JSON.stringify(casesBody)).not.toContain("must-not-leak");
+    expect(casesBody.cases[0].members).toEqual([
+      { kind: "EXTERNAL", site: "Airbnb", externalReservationId: "R1", seats: 2, status: "CONFIRMED" },
+      { kind: "DIRECT", bookingId: "42", seats: 1, status: "CONFIRMED" },
+    ]);
+    expect(mocks.runtime!.conflictCases).toHaveBeenCalledWith(actor, "provider-a");
+    const metrics = await POST(request({ action: "propagationMetrics", providerId: "provider-a" }));
+    const metricsBody = await metrics.json();
+    expect(JSON.stringify(metricsBody)).not.toContain("must-not-leak");
+    expect(metricsBody.metrics.closeVerified).toEqual({ count: 3, p50Seconds: 120, p95Seconds: 400, maxSeconds: 420, over60Minutes: 0 });
+    for (const body of [
+      { action: "conflictCases" }, { action: "conflictCases", providerId: 7 }, { action: "conflictCases", providerId: "provider-a", status: "ALL" },
+      { action: "propagationMetrics", providerId: "provider-a", windowDays: 90 },
+    ]) expect((await POST(request(body))).status).toBe(400);
+  });
+
+  it("validates ownership and manual resolution exactly, and never accepts CONFLICT_CLEARED", async () => {
+    mocks.runtime!.acknowledgeConflictCase = vi.fn().mockResolvedValue({ caseId, acknowledgedAtUtc: "2099-01-01T00:00:00.000Z" });
+    mocks.runtime!.resolveConflictCase = vi.fn().mockResolvedValue({ caseId, resolution: "ACCEPTED_BOTH", resolvedAtUtc: "2099-01-01T00:00:00.000Z" });
+    expect((await POST(request({ action: "acknowledgeConflictCase", commandId, caseId }))).status).toBe(200);
+    expect(mocks.runtime!.acknowledgeConflictCase).toHaveBeenCalledWith(actor, caseId, commandId);
+    for (const resolution of ["CUSTOMER_CONTACTED", "ACCEPTED_BOTH", "CANCELLED_AT_SOURCE"]) {
+      expect((await POST(request({ action: "resolveConflictCase", commandId, caseId, resolution }))).status).toBe(200);
+    }
+    expect(mocks.runtime!.resolveConflictCase).toHaveBeenLastCalledWith(actor, caseId, "CANCELLED_AT_SOURCE", commandId);
+    for (const body of [
+      { action: "acknowledgeConflictCase", commandId, caseId: "not-a-uuid" },
+      { action: "acknowledgeConflictCase", caseId },
+      { action: "acknowledgeConflictCase", commandId, caseId, assignee: "someone-else" },
+      { action: "resolveConflictCase", commandId, caseId, resolution: "CONFLICT_CLEARED" },
+      { action: "resolveConflictCase", commandId, caseId, resolution: "REFUNDED" },
+      { action: "resolveConflictCase", commandId, caseId },
+      { action: "resolveConflictCase", commandId, caseId, resolution: "ACCEPTED_BOTH", note: "free text" },
+      { action: "resolveConflictCase", commandId: "not-a-uuid", caseId, resolution: "ACCEPTED_BOTH" },
+    ]) expect((await POST(request(body))).status).toBe(400);
+    expect(mocks.runtime!.resolveConflictCase).toHaveBeenCalledTimes(3);
+  });
+
+  it("maps a resolved case to 409 and a missing case to 404", async () => {
+    const { StoreConflictError, StoreNotFoundError } = await import("@niho-experience/experience-store");
+    mocks.runtime!.resolveConflictCase = vi.fn().mockRejectedValue(new StoreConflictError("The conflict case is already resolved."));
+    expect((await POST(request({ action: "resolveConflictCase", commandId, caseId, resolution: "ACCEPTED_BOTH" }))).status).toBe(409);
+    mocks.runtime!.acknowledgeConflictCase = vi.fn().mockRejectedValue(new StoreNotFoundError("conflict case"));
+    expect((await POST(request({ action: "acknowledgeConflictCase", commandId, caseId }))).status).toBe(404);
+  });
+});

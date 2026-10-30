@@ -16,6 +16,14 @@ import { withTransaction } from "./transaction.ts";
 import { evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { applyExternalReservationObservations } from "./external-reservation-ledger.ts";
+import {
+  MANUAL_CONFLICT_RESOLUTIONS,
+  loadConflictCases,
+  loadPropagationMetrics,
+  type ConflictCaseView,
+  type ManualConflictResolution,
+  type PropagationMetrics,
+} from "./external-reservation-attention.ts";
 import { calendarMembershipRole, listCalendarProductsForActor } from "./product-calendar-authorization.ts";
 import { assertCanonicalInstant, assertNonEmptyText, assertSeats, assertStoreIdentifier } from "./validation.ts";
 import {
@@ -2736,10 +2744,75 @@ export class ChannelRuntime {
     return loadChannelRuntimeOverview(this.#pool, providerId, actor.nihoUserId, this.#now());
   }
 
+  /** OPEN conflict cases and those resolved in the last 30 days. No customer data or external account ID is returned. */
+  async conflictCases(actor: ChannelAdminActor, providerId: string): Promise<readonly ConflictCaseView[]> {
+    this.#validateActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return loadConflictCases(this.#pool, providerId, actor.nihoUserId, this.#now());
+  }
+
+  /** Staff takes ownership of an open conflict case. Nothing about the reservations changes. */
+  async acknowledgeConflictCase(actor: ChannelAdminActor, caseId: string, commandId: string): Promise<{ readonly caseId: string; readonly acknowledgedAtUtc: string }> {
+    this.#validateActor(actor);
+    assertUuid(caseId, "caseId");
+    const request = fingerprint({ caseId });
+    return withTransaction(this.#pool, async (client) => {
+      const previous = await this.#previousCommand(client, actor, commandId, "conflictCase.acknowledge", request);
+      if (previous) return { caseId, acknowledgedAtUtc: String(previous.acknowledgedAtUtc) };
+      const row = (await client.query<DbRow>("SELECT provider_id,status FROM external_reservation_conflict_cases WHERE id=$1::uuid FOR UPDATE", [caseId])).rows[0];
+      if (!row) throw new StoreNotFoundError("conflict case");
+      if (row.status !== "OPEN") throw new StoreConflictError("The conflict case is already resolved.");
+      const nowUtc = this.#nowIso();
+      await client.query(
+        "UPDATE external_reservation_conflict_cases SET assignee_niho_user_id=$2,acknowledged_at=$3,updated_at=$3 WHERE id=$1::uuid",
+        [caseId, actor.nihoUserId, nowUtc],
+      );
+      await this.#completeCommand(client, actor, commandId, "conflictCase.acknowledge", request, { caseId, acknowledgedAtUtc: nowUtc },
+        text(row, "provider_id"), "conflict_case", caseId);
+      return { caseId, acknowledgedAtUtc: nowUtc };
+    });
+  }
+
+  /**
+   * Staff records how a case was handled outside the system. It changes no
+   * reservation, booking, payment, or inventory; CONFLICT_CLEARED is automatic only.
+   */
+  async resolveConflictCase(actor: ChannelAdminActor, caseId: string, resolution: ManualConflictResolution, commandId: string): Promise<{ readonly caseId: string; readonly resolution: ManualConflictResolution; readonly resolvedAtUtc: string }> {
+    this.#validateActor(actor);
+    assertUuid(caseId, "caseId");
+    if (!(MANUAL_CONFLICT_RESOLUTIONS as readonly string[]).includes(resolution)) throw new StoreValidationError("resolution is invalid.");
+    const request = fingerprint({ caseId, resolution });
+    return withTransaction(this.#pool, async (client) => {
+      const previous = await this.#previousCommand(client, actor, commandId, "conflictCase.resolve", request);
+      if (previous) return { caseId, resolution, resolvedAtUtc: String(previous.resolvedAtUtc) };
+      const row = (await client.query<DbRow>("SELECT provider_id,status,opened_at FROM external_reservation_conflict_cases WHERE id=$1::uuid FOR UPDATE", [caseId])).rows[0];
+      if (!row) throw new StoreNotFoundError("conflict case");
+      if (row.status !== "OPEN") throw new StoreConflictError("The conflict case is already resolved.");
+      const nowUtc = this.#nowIso();
+      const resolvedAtUtc = nowUtc < isoValue(row, "opened_at") ? isoValue(row, "opened_at") : nowUtc;
+      await client.query(
+        `UPDATE external_reservation_conflict_cases SET status='RESOLVED',resolution=$2,resolved_at=$3,resolved_by_niho_user_id=$4,updated_at=$5
+          WHERE id=$1::uuid AND status='OPEN'`,
+        [caseId, resolution, resolvedAtUtc, actor.nihoUserId, nowUtc],
+      );
+      await this.#completeCommand(client, actor, commandId, "conflictCase.resolve", request, { caseId, resolution, resolvedAtUtc },
+        text(row, "provider_id"), "conflict_case", caseId);
+      return { caseId, resolution, resolvedAtUtc };
+    });
+  }
+
+  /** Detection-to-verified-close measurements of the last 30 days, aggregated in SQL. */
+  async propagationMetrics(actor: ChannelAdminActor, providerId: string): Promise<PropagationMetrics> {
+    this.#validateActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return loadPropagationMetrics(this.#pool, providerId, this.#now());
+  }
+
   /**
    * Independent cloud watchdog. A concurrent run returns `skipped` instead of
-   * waiting, so incidents are never duplicated. It changes no job, lease, or
-   * quarantine; it only records incidents and holds stale Studios' new OPEN.
+   * waiting, so incidents are never duplicated. It changes no job, lease,
+   * quarantine, reservation, or inventory; it records incidents, holds stale
+   * Studios' new OPEN, auto-clears conflict cases, and settles measurements.
    */
   async runWatchdog(): Promise<ChannelWatchdogRunResult> {
     const ran = await withTransaction(this.#pool, async (client) => {

@@ -5,6 +5,12 @@ import type { ExternalReservationObservation } from "./channels.ts";
 import { StoreConflictError } from "./errors.ts";
 import { evaluateStoredInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import {
+  recordConflictCase,
+  recordPropagationMeasurements,
+  type ConflictPartner,
+  type PendingPropagationMeasurement,
+} from "./external-reservation-attention.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 
 export interface ExternalReservationReadAuthority {
@@ -65,6 +71,7 @@ export async function applyExternalReservationObservations(
   let duplicates = 0;
   let stale = 0;
   let needsReview = 0;
+  const pendingMeasurements: PendingPropagationMeasurement[] = [];
 
   for (const observation of observations) {
     const externalOptionId = observation.externalOptionId ?? "";
@@ -168,7 +175,10 @@ export async function applyExternalReservationObservations(
     const localRevision = ledger === undefined ? 1 : integer(ledger, "local_revision") + 1;
     const inventory = await evaluateStoredInventory(client, authority.providerId, authority.productId, occurrence, nowIso(), observation.seats);
     const active = observation.status === "PENDING" || observation.status === "CONFIRMED";
+    const wasActiveHere = ledger !== undefined && (ledger.status === "PENDING" || ledger.status === "CONFIRMED")
+      && oldOccurrenceId === occurrence.id;
     let inventoryConflict = false;
+    let partners: ConflictPartner[] = [];
     if (active) {
       const direct = await client.query<DbRow>(
         `SELECT COALESCE(sum(seats),0)::text AS seats,count(*)::text AS groups FROM bookings
@@ -190,30 +200,39 @@ export async function applyExternalReservationObservations(
         : directSeats + externalSeats + observation.seats > occurrence.capacity;
       const resourceIds = inventory.occupancies.map((occupancy) => occupancy.resourceId);
       if (!inventoryConflict && resourceIds.length > 0) {
-        const collision = await client.query(
+        const collision = await client.query<DbRow>(
           `WITH requested AS (
              SELECT * FROM unnest($2::text[],$3::timestamptz[],$4::timestamptz[]) AS r(resource_id,start_at,end_at)
            )
-           SELECT 1 FROM booking_resource_occupancies o
+           (SELECT DISTINCT 'DIRECT'::text AS kind,b.id::text AS booking_id,NULL::text AS source_site,NULL::text AS source_external_account_id,
+                   NULL::text AS external_reservation_id,NULL::bigint AS local_revision,b.seats
+             FROM booking_resource_occupancies o
              JOIN requested r ON r.resource_id=o.resource_id AND o.end_at>r.start_at AND o.start_at<r.end_at
              JOIN bookings b ON b.provider_id=o.provider_id AND b.id=o.booking_id
             WHERE o.provider_id=$1
               AND (b.status='CONFIRMED' OR (b.status='HOLD' AND b.hold_expires_at>$5))
-              AND NOT (b.product_id=$9 AND b.occurrence_id=$10)
+              AND NOT (b.product_id=$9 AND b.occurrence_id=$10))
            UNION ALL
-           SELECT 1 FROM external_reservation_resource_occupancies o
+           (SELECT DISTINCT 'EXTERNAL'::text,NULL::text,e.source_site,e.source_external_account_id,e.external_reservation_id,e.local_revision,e.seats
+             FROM external_reservation_resource_occupancies o
              JOIN requested r ON r.resource_id=o.resource_id AND o.end_at>r.start_at AND o.start_at<r.end_at
              JOIN external_reservations e ON e.source_site=o.source_site
               AND e.source_external_account_id=o.source_external_account_id AND e.external_reservation_id=o.external_reservation_id
               AND e.local_revision=o.local_revision
             WHERE o.provider_id=$1 AND e.status IN ('PENDING','CONFIRMED')
               AND NOT (e.source_site=$6 AND e.source_external_account_id=$7 AND e.external_reservation_id=$8)
-              AND NOT (e.product_id=$9 AND e.occurrence_id=$10)
-           LIMIT 1`,
+              AND NOT (e.product_id=$9 AND e.occurrence_id=$10))
+           LIMIT 50`,
           [authority.providerId, resourceIds, inventory.occupancies.map((item) => item.startAtUtc),
             inventory.occupancies.map((item) => item.endAtUtc), nowIso(), ...key, authority.productId, occurrence.id],
         );
         inventoryConflict = collision.rows[0] !== undefined;
+        partners = collision.rows.map((row): ConflictPartner => row.kind === "DIRECT"
+          ? { kind: "DIRECT", bookingId: text(row, "booking_id"), seats: integer(row, "seats") }
+          : {
+            kind: "EXTERNAL", localRevision: integer(row, "local_revision"), seats: integer(row, "seats"),
+            key: { site: text(row, "source_site"), externalAccountId: text(row, "source_external_account_id"), externalReservationId: text(row, "external_reservation_id") },
+          });
       }
     }
     const ledgerValues = [...key, authority.providerId, authority.accountId, authority.listingId, authority.productId, occurrence.id,
@@ -251,6 +270,7 @@ export async function applyExternalReservationObservations(
           occupancy.prepareMinutes, occupancy.cleanupMinutes, occupancy.startAtUtc, occupancy.endAtUtc],
       );
     }
+    const writtenAtUtc = nowIso();
     await client.query(
       `INSERT INTO external_reservation_revisions
         (source_site,source_external_account_id,external_reservation_id,read_id,read_generation,local_revision,
@@ -262,6 +282,22 @@ export async function applyExternalReservationObservations(
         observation.sourceUpdatedAtUtc ?? null, observation.sourceRevision ?? null, observationFingerprint,
         inventoryConflict ? "INVENTORY_CONFLICT" : null],
     );
+    const reservationKey = { site: key[0], externalAccountId: key[1], externalReservationId: key[2] };
+    // Attention only: a conflict is queued for staff and nothing is cancelled or contacted.
+    if (active && inventoryConflict) {
+      await recordConflictCase(client, {
+        providerId: authority.providerId, productId: authority.productId, occurrenceId: occurrence.id, nowUtc: writtenAtUtc,
+        reservation: { key: reservationKey, localRevision, seats: observation.seats }, partners,
+      });
+    }
+    // Measured once per revision that newly occupies this occurrence (new, moved, or restored).
+    if (active && !wasActiveHere) {
+      pendingMeasurements.push({
+        providerId: authority.providerId, productId: authority.productId, occurrenceId: occurrence.id, sourceListingId: authority.listingId,
+        key: reservationKey, localRevision, detectedAtUtc: writtenAtUtc,
+        ...(observation.sourceUpdatedAtUtc === undefined ? {} : { sourceUpdatedAtUtc: observation.sourceUpdatedAtUtc }),
+      });
+    }
     if (oldOccurrenceId) affectedOccurrences.add(oldOccurrenceId);
     affectedOccurrences.add(occurrence.id);
     applied += 1;
@@ -278,5 +314,7 @@ export async function applyExternalReservationObservations(
       providerId: authority.providerId, aggregateType: "provider_inventory", aggregateId: authority.providerId, cause: "external_reservation_review",
     });
   }
+  // After the outbox events above, so each measurement's watermark covers the event that reflects it.
+  await recordPropagationMeasurements(client, authority.providerId, pendingMeasurements);
   return { applied, duplicates, stale, needsReview, affectedOccurrences };
 }
