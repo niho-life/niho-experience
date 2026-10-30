@@ -98,6 +98,8 @@ jobs:
       ARTIFACT_NAME: production-image-${{ github.run_id }}-${{ github.run_attempt }}
       CANDIDATE_SHA: ${{ inputs.commit_sha }}
       HOST_CALENDAR_ENABLED: ${{ inputs.enable_host_calendar }}
+      # OTA watchdog (docs/ota-runtime.md). Only with the host calendar's database; unset or false keeps it closed.
+      CHANNEL_WATCHDOG: ${{ vars.PROD_CHANNEL_WATCHDOG_ENABLED }}
       HOST_CALENDAR_READY: ${{ vars.PROD_HOST_CALENDAR_READY }}
       HOST_SESSION_SECRET_REF: ${{ vars.PROD_HOST_SESSION_SECRET_REF }}
       FIREBASE_WEB_API_KEY_REF: ${{ vars.PROD_NIHO_FIREBASE_WEB_API_KEY_REF }}
@@ -161,12 +163,19 @@ jobs:
             [[ "$CLOUDSQL_INSTANCE" =~ ^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$ ]]
             test "${CLOUDSQL_INSTANCE%%:*}" = "$PROJECT_ID"
             env_vars+=',HOST_CONSOLE_ENABLED=true'
+            if [ "$CHANNEL_WATCHDOG" = true ]; then
+              env_vars+=",EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true,EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE=https://experience.niho.life,EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL=experience-ota-watchdog@${PROJECT_ID}.iam.gserviceaccount.com"
+            else
+              [[ -z "$CHANNEL_WATCHDOG" || "$CHANNEL_WATCHDOG" = false ]]
+            fi
             runtime_options+=(--network default --subnet default --vpc-egress private-ranges-only)
             runtime_options+=(--add-cloudsql-instances "$CLOUDSQL_INSTANCE")
             runtime_options+=(--set-secrets "HOST_SESSION_SECRET=${HOST_SESSION_SECRET_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY_REF},EXPERIENCE_DATABASE_URL=${DATABASE_URL_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_TOKEN_KEY_SECRET_REF}")
           else
             env_vars+=',HOST_CONSOLE_ENABLED=false'
             runtime_options+=(--clear-secrets --clear-cloudsql-instances --clear-network)
+            # The watchdog needs the Experience database, which only the host calendar wires.
+            [[ -z "$CHANNEL_WATCHDOG" || "$CHANNEL_WATCHDOG" = false ]]
           fi
           gcloud run deploy "$SERVICE" \
             --project "$PROJECT_ID" --region "$REGION" --image "$image" \
@@ -223,6 +232,9 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
+          expected_watchdog=false
+          if [ "$HOST_CALENDAR_ENABLED" = true ] && [ "$CHANNEL_WATCHDOG" = true ]; then expected_watchdog=true; fi
+          test "$(jq -r '[.spec.containers[0].env[] | select(.name == "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED") | .value][0] // "false"' <<< "$revision_json")" = "$expected_watchdog"
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
             jq -e --arg sql "$CLOUDSQL_INSTANCE" '
@@ -277,6 +289,8 @@ jobs:
       CANDIDATE_REVISION: ${{ inputs.candidate_revision }}
       CANDIDATE_IMAGE_DIGEST: ${{ inputs.candidate_image_digest }}
       HOST_CALENDAR_ENABLED: ${{ inputs.enable_host_calendar }}
+      # OTA watchdog (docs/ota-runtime.md). Only with the host calendar's database; unset or false keeps it closed.
+      CHANNEL_WATCHDOG: ${{ vars.PROD_CHANNEL_WATCHDOG_ENABLED }}
       HOST_CALENDAR_READY: ${{ vars.PROD_HOST_CALENDAR_READY }}
       CLOUDSQL_INSTANCE: ${{ vars.PROD_EXPERIENCE_CLOUDSQL_INSTANCE }}
     steps:
@@ -319,6 +333,9 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_PUBLIC_API_VERSION") | .value' <<< "$revision_json")" = 1.0
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
+          expected_watchdog=false
+          if [ "$HOST_CALENDAR_ENABLED" = true ] && [ "$CHANNEL_WATCHDOG" = true ]; then expected_watchdog=true; fi
+          test "$(jq -r '[.spec.containers[0].env[] | select(.name == "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED") | .value][0] // "false"' <<< "$revision_json")" = "$expected_watchdog"
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             test "$HOST_CALENDAR_READY" = true
             jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
