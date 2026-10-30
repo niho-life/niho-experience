@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-30。Issue #239 / #201 / #194 のうち、Google Calendar HTTP境界だけを実装した文書である。Googleへの接続、配送、Airbnb観測、本番有効化の完了を示すものではない。
+更新日：2026-10-30。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Googleへの実接続、Airbnb観測、本番有効化の完了を示すものではない。
 
 公式根拠：
 
@@ -32,7 +32,7 @@ insertの409は成功扱いせず、追加writeなしのfresh GETで完全一致
 
 HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node数、ETagと入力文字列長を制限する。条件付きPATCHには引用符を持つstrong ETagだけを使い、wildcardやweak ETagを拒否する。calendar/event IDは固定originのpath componentとしてencodeする。Googleのerror bodyやraw eventは結果・例外へ含めない。
 
-合成testは、すでにabortしたbody streamと、上限超過後も終了しないbodyのcancelを確認している。ゼロbyteのまま停止するbodyを実時間のdeadlineまで待つtestではない。request signalはbody読取にも効くfetch境界へ渡しているが、そのdeadline実時間経過の証明は今回のtargeted testに含めない。
+合成testは、すでにabortしたbody streamと、上限超過後も終了しないbodyのcancelを確認している。さらにlocalhostのzero-byte ACK bodyで実時間のdeadlineも確認するが、socket listenを禁止するsandboxではその1件だけ実行できない。request signalはbody読取にも効くfetch境界へ渡す。
 
 ## typed result
 
@@ -44,10 +44,17 @@ HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node
 
 このunionにAirbnbの`SYNCED`や既存browser adapter用の`manualBlocked=true`はない。Google ACKや`GOOGLE_VERIFIED`だけで旅行者へ受付停止・再開の反映済み表示を出してはならない。
 
+配送APIは `AVAILABILITY`、`Airbnb`、`GOOGLE`、`airbnb-google-busy@1` の既存leaseだけを受ける。provider/listing/occurrence/mapping/desired/UTC区間と出力calendarはrequestから受けず、server DBから導出する。dispatch前のjournalにはaccount version、binding version、connection generation、calendar IDとgrant scope集合のdigest、worker/lease/assignment、operation nonceを不変snapshotとして保存する。callbackと結果保存は同じsnapshotとoperation nonceを現在値へ照合し、認可取得失敗・別worker/job・古いHTTP応答・後続reconciliationがある場合は更新しない。
+
+同じprovider/listing/occurrenceに `DISPATCHING` / `UNCERTAIN` が一つでも残る間は、desired・mapping・jobが別でも新しいwriteを開始しない。同じintentの既存結果もbinding identityが完全一致する場合だけ再利用する。出力calendarはproviderをまたいで一つのlistingに限定し、全providerのprovider busy・resource busy・booking calendarとの共用を入力側と出力側の両方で拒否する。
+
+`reconcile` は通常のSET leaseでは実行できない。明示的なstop確認で元jobが `NEEDS_REVIEW` 終了し、同じaccount/listing/occurrence・mapping・時刻・bindingの新しい `OBSERVE` leaseがfull preflightを通った場合だけ、journalに保存した過去targetを現在authority contextから分離してGETする。旧desiredを再送せず、元dispatchが生存中の並行reconcileも許可しない。mapping・時刻・binding・owner/assignmentが変わった場合は自動回復せず手動確認に止める。GET一致は過去Google intentの証拠だけで、現在desiredやAirbnbを成功に更新しない。
+内部endpointはHTTP mode、既存channel runtime flag、`EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED=true` の3条件が揃うまで404であり、新flagは既定falseである。
+
 ## 未接続・未受入
 
-合成HTTP試験に加え、localhostの合成サーバーがヘッダー送信後に本文を返さない場合も、実際のfetchが10秒deadlineで中断し、追加writeなしの読戻しへ進むことを試験する。実Googleへの障害試験ではない。
+実DBを使う結合testは、実 `ChannelRuntime` / repository / `applyGoogleManagedBlock` / `inspectGoogleManagedBlock` と合成fetchを接続し、ACK喪失、duplicate write抑止、stop-confirmed OBSERVEからのGET-only再照合、binding/desired失効、operation fencing、cross-provider calendar衝突を永続状態とwrite回数で確認する。token refresh/configだけを合成注入し、実Google・実Airbnb・実credentialは使わない。helperにはlocalhostでzero-byte ACK bodyの10秒deadlineを確認するtestもあるが、socket listenを禁止するsandboxではその1件を実行できない。
 
-今回作っていないもの：server setup、DBのoutbound dispatch journal、job executor、15分dispatcher、専用calendarの作成・listing対応付け、API caller、OAuth接続UI、Airbnb observer、production flag。本番calendar、credential、network、Airbnb画面を使った受入も行っていない。
+今回作っていないもの：専用app-created calendarの本番provisioning、Google同意とAirbnb側接続、worker caller、OAuth接続UI、Airbnb observer、production flag有効化。本番calendar、credential、network、Airbnb画面を使った受入も行っていない。
 
-今後のserver設定では、Airbnb制御用のGoogle書出しcalendarをprovider・資源のbusy入力から必ず除外し、自己書込による永久busy循環を防ぐ必要がある。過去dispatchが存在しないことの証跡、Google専用calendarをAirbnb対象listingへ接続できること、同じlisting/occurrenceの実際の停止・再開は、それぞれDB journalとAirbnb observer・実画面で別に確認する。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。
+Airbnb制御用のGoogle書出しcalendarはbooking/provider busy/resource busy入力から除外し、自己書込による永久busy循環を防ぐ。Google専用calendarをAirbnb対象listingへ実接続できること、Airbnb browser observerのtyped acceptance、PWA通し、停止・再開それぞれの最大60分伝播実測は別受入である。NIHOapp Draftと本番flagは変更していない。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。

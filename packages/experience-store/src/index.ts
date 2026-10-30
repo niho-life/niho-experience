@@ -18,6 +18,8 @@ export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
+export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
+export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";
 export type {
   ChannelAction,
   ChannelAdminActor,
@@ -34,6 +36,7 @@ export type {
   ChannelSite,
   ChannelTarget,
   ClaimedChannelJob,
+  GoogleChannelDeliveryContext,
   ExternalAccountDto,
   ExternalAccountInput,
   ExternalAccountUpdate,

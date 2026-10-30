@@ -9,6 +9,8 @@ export const channelManagerEnabled = () => config.apiMode === "http" && process.
 /** Synthetic UI only. This never opens channel/inventory mutation routes. */
 export const channelWorkspacePreviewEnabled = () => config.apiMode === "mock" && config.adminSupportConsoleEnabled && process.env.EXPERIENCE_CHANNEL_WORKSPACE_PREVIEW_ENABLED === "true";
 export const channelWorkerEnabled = () => config.apiMode === "http" && process.env.EXPERIENCE_CHANNEL_RUNTIME_ENABLED === "true";
+export const googleChannelDeliveryEnabled = () => channelWorkerEnabled()
+  && process.env.EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED === "true";
 
 export function channelJson(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "cache-control": "private, no-store" } });

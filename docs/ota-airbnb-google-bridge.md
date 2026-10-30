@@ -1,6 +1,6 @@
 # Airbnb体験とGoogle Calendarの接続・受入設計
 
-更新日：2026-10-29。Issue #201 / 親 #194。**Google UIからの停止・再開は実証済み。以下のNIHO自動出力、資源別入力、typed receipt、接続切替は未実装の設計**である。[現在の実装範囲](ota-runtime.md)と区別する。
+更新日：2026-10-30。Issue #201 / 親 #194。Google UIからの停止・再開は実証済みで、#270ではNIHO自動出力の永続journal、server executor、内部API、Google GET-only再照合まで実装した。専用calendarの実provisioning・同意・Airbnb接続と、Airbnb observerのtyped receiptは未受入である。[Google出力protocol](ota-google-output-protocol.md)と区別する。
 
 ## 1. 実証で確認した範囲
 
@@ -48,13 +48,13 @@ provider全体のbusyを講師全員へ広げない。講師Aの入力はAを使
 以下は追加する契約案で、現行 `ChannelRuntime` のreadbackへ未検証の値を入れて互換扱いにしない。
 
 1. PWAの保存と同じtransactionでoutboxを作る。共有在庫の判定をGoogle経路にも共用する。
-2. jobにaccount/listing/mapping/desiredのversion、対象回の時刻、専用カレンダーのopaque参照を固定する。
+2. journalにaccount/listing/mapping/desired、binding、connection generation、対象回の時刻、専用カレンダーidentityとgrant scope集合のdigest、operation nonceを固定する。未解決journalが同じlisting/occurrenceに残る間は別intentも書かない。
 3. 初期pilotはGoogle書込とAirbnb観測を直列に処理する限定executorとし、Google tokenをモデルやブラウザページへ渡さない。同一account/listingへ直接Airbnb writerも並行起動しない。
 4. Google予定は対象回に対する決定的なIDを持たせ、private metadataでNIHO所有・mapping versionを識別する。予定には顧客情報、招待先、ゲストを付けない。
 5. CLOSEDは専用予定をbusy、OPENはfreeにする。稼働中のanchorは再開のたびに削除・再作成しない。GoogleイベントIDにはGoogleの文字種制約を守る既存のhash変換を再利用する。
 6. 既存予定の変更は取得したetagと`If-Match`を使う。412なら現状と現在のdesiredを読み直し、古いOPENをそのまま再送しない。新規insertには条件付き変更が使えないため、決定的IDの衝突時は所有markerと現状を確認する。[Googleの条件付き変更](https://developers.google.com/workspace/calendar/api/guides/version-resources)、[予定作成](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)
 7. 保存直前のpreflight、account排他、deadline、失効・mapping変更時の隔離、応答不明時の書込み停止は既存workerと同じ基準にする。etagだけでNIHO側の権限失効まで防げるとは扱わない。
-8. GoogleのACKを保存した後、Airbnbを読み取って対象・時刻・実際の予約可否を確認する。実行後の読戻しが取れない場合は、Google再書込みではなく観測を再試行する。
+8. GoogleのACKを保存した後、Airbnbを読み取って対象・時刻・実際の予約可否を確認する。実行後の読戻しが取れない場合は、Google再書込みをせず、元executorのstop確認後に同じbinding/mapping/sourceのOBSERVE leaseから保存済みGoogle targetをGET-onlyで再照合する。この照合だけではAirbnbや現在desiredを成功にしない。
 
 Googleの成功、Airbnbの成功を同じbooleanにしない。新しいreadbackは `GOOGLE_BUSY` という制御方式と、Google予定の所有marker・時刻・transparency・etag、独立したAirbnb観測時刻と予約可否を区別して持つ。現行browser adapter用の `manualBlocked=true` をGoogle経路で捏造しない。
 

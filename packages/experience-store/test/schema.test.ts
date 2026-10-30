@@ -109,6 +109,24 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /customer|guest|email|phone|price|amount|cookie|raw_response/i);
   });
 
+  it("journals Google channel output without creating a parallel desired-state source", async () => {
+    const sql = await readFile(new URL("../migrations/0018_google_channel_delivery.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE google_channel_output_bindings/);
+    assert.match(sql, /UNIQUE \(opaque_calendar_id\)/);
+    assert.match(sql, /CREATE TABLE google_channel_deliveries/);
+    assert.match(sql, /intent_fingerprint text NOT NULL UNIQUE/);
+    assert.match(sql, /phase IN \('DISPATCHING','GOOGLE_VERIFIED','UNCERTAIN','NOT_MATCHED','STOPPED'\)/);
+    assert.match(sql, /lease_epoch bigint NOT NULL/);
+    assert.match(sql, /assignment_version bigint NOT NULL/);
+    assert.match(sql, /account_version bigint NOT NULL/);
+    assert.match(sql, /binding_calendar_digest text NOT NULL/);
+    assert.match(sql, /granted_scopes_digest text NOT NULL/);
+    assert.match(sql, /operation_nonce uuid NOT NULL/);
+    assert.match(sql, /operation_epoch bigint NOT NULL/);
+    assert.doesNotMatch(sql, /refresh_token|access_token|raw_response|error_body|guest|email|price|amount/i);
+    assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

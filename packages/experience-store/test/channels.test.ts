@@ -33,6 +33,8 @@ describe("channel result state machine", () => {
     assert.equal(channelReadbackAccepted({ ...base, observedState: "CLOSED" }), false);
     assert.equal(channelReadbackAccepted({ ...base, observedBookable: false }), false);
     assert.equal(channelReadbackAccepted({ ...base, resultTarget: { ...target, externalOptionId: "afternoon" } }), false);
+    const googleTarget = { ...target, adapter: "airbnb-google-busy", connectionMode: "GOOGLE" as const };
+    assert.equal(channelReadbackAccepted({ ...base, expectedTarget: googleTarget, resultTarget: googleTarget }), false);
   });
 
   it("requires a manual block for close and keeps an unblocked-but-not-bookable OBSERVE distinct", () => {

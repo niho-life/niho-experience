@@ -6,6 +6,7 @@ import {
   ExperienceStore,
   lockProviderInventory,
   StoreAccessDeniedError,
+  StoreConflictError,
   type HostActor,
 } from "@niho-experience/experience-store";
 import { siteOrigin } from "@/lib/host/server";
@@ -34,6 +35,12 @@ export async function saveGoogleConnection(
       [actor.providerId, actor.nihoUserId],
     );
     if (member.rows[0]?.role !== "OWNER") throw new StoreAccessDeniedError();
+    const outputCollision = await client.query(
+      `SELECT 1 FROM google_channel_output_bindings
+        WHERE opaque_calendar_id=ANY($1::text[]) FOR SHARE`,
+      [[busyCalendarId, bookingCalendarId]],
+    );
+    if (outputCollision.rows[0]) throw new StoreConflictError("An Airbnb output calendar cannot be used as a Google input or booking calendar.");
     await client.query(
       `INSERT INTO provider_google_connections
         (provider_id, connected_by_niho_user_id, encrypted_refresh_token, granted_scopes, busy_calendar_id, booking_calendar_id)

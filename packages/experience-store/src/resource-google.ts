@@ -73,8 +73,12 @@ export class ResourceGoogleRepository {
       const unique = new Map(input.calendars.map((item) => [item.id, item]));
       if (unique.size !== input.calendars.length || input.calendars.some((item) => !item.id || item.id.length > 512 || !item.name || item.name.length > 300)) throw new StoreValidationError("Invalid Google calendar inventory.");
       await client.query("DELETE FROM provider_google_calendar_inventory WHERE provider_id=$1", [actor.providerId]);
+      const outputCalendars = await client.query<{ opaque_calendar_id: string }>(
+        "SELECT opaque_calendar_id FROM google_channel_output_bindings FOR SHARE",
+      );
+      const excludedOutputIds = new Set(outputCalendars.rows.map((row) => row.opaque_calendar_id));
       for (const calendar of input.calendars) {
-        if (calendar.id === current.booking_calendar_id) continue;
+        if (calendar.id === current.booking_calendar_id || excludedOutputIds.has(calendar.id)) continue;
         await client.query(
           `INSERT INTO provider_google_calendar_inventory
              (provider_id,connection_generation,opaque_calendar_id,display_name,is_primary,fetched_at)
@@ -178,6 +182,11 @@ export class ResourceGoogleRepository {
       const calendarId = input.enabled ? input.calendarId : (row?.opaque_calendar_id ?? input.calendarId);
       if (input.enabled) {
         if (calendarId === currentConnection!.booking_calendar_id) throw new StoreConflictError("The booking calendar cannot be used as busy input.");
+        const output = await client.query(
+          "SELECT 1 FROM google_channel_output_bindings WHERE opaque_calendar_id=$1 FOR SHARE",
+          [calendarId],
+        );
+        if (output.rows[0]) throw new StoreConflictError("An Airbnb output calendar cannot be used as busy input.");
         const selectable = await client.query(
           `SELECT 1 FROM provider_google_calendar_inventory
             WHERE provider_id=$1 AND connection_generation=$2 AND opaque_calendar_id=$3

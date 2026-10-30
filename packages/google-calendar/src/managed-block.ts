@@ -79,6 +79,18 @@ export type GoogleManagedBlockResult =
       readonly writeAcknowledged: boolean;
     };
 
+export type GoogleManagedBlockInspectionResult =
+  | {
+      readonly code: "GOOGLE_VERIFIED";
+      readonly eventId: string;
+      readonly google: GoogleManagedBlockMetadata;
+    }
+  | {
+      readonly code: "NOT_MATCHED";
+      readonly eventId: string;
+      readonly reason: GoogleManagedBlockStopCode | "DESIRED_MISMATCH";
+    };
+
 export type AssertGoogleManagedBlockCurrent = () => void | Promise<void>;
 
 type StopResult = Extract<GoogleManagedBlockResult, { changed: false }>;
@@ -432,4 +444,31 @@ export async function applyGoogleManagedBlock(
     writeAcknowledged,
     google: readback.inspection.google,
   };
+}
+
+/**
+ * GET-only reconciliation for a previously journaled intent. It never calls the
+ * write helper and therefore cannot replay an old OPEN/CLOSED intent.
+ */
+export async function inspectGoogleManagedBlock(
+  config: GoogleConfig,
+  accessToken: string,
+  calendarId: string,
+  target: GoogleManagedBlockTarget,
+  assertCurrent: AssertGoogleManagedBlockCurrent,
+): Promise<GoogleManagedBlockInspectionResult> {
+  validateTarget(target);
+  if (!boundedIdentifier(calendarId, MAX_CALENDAR_ID_LENGTH) || !boundedIdentifier(accessToken, MAX_ACCESS_TOKEN_LENGTH)) {
+    throw new TypeError("Invalid managed Google block credentials");
+  }
+  if (typeof assertCurrent !== "function") throw new TypeError("assertCurrent is required");
+  const eventId = managedGoogleBlockEventId(target);
+  await assertCurrent();
+  const current = await readEvent(config, accessToken, calendarId, target, eventId);
+  await assertCurrent();
+  if (current.kind === "MISSING") return { code: "NOT_MATCHED", eventId, reason: "ANCHOR_MISSING" };
+  if (current.kind === "TOMBSTONE") return { code: "NOT_MATCHED", eventId, reason: "TOMBSTONE" };
+  if (!current.inspection.ok) return { code: "NOT_MATCHED", eventId, reason: current.inspection.code };
+  if (!exactDesired(current.inspection, target)) return { code: "NOT_MATCHED", eventId, reason: "DESIRED_MISMATCH" };
+  return { code: "GOOGLE_VERIFIED", eventId, google: current.inspection.google };
 }

@@ -5,6 +5,7 @@ import { once } from "node:events";
 import {
   applyGoogleManagedBlock,
   GoogleCalendarError,
+  inspectGoogleManagedBlock,
   managedGoogleBlockEventId,
   type GoogleConfig,
   type GoogleManagedBlockTarget,
@@ -79,6 +80,35 @@ function json(value: unknown, status = 200): Response {
 }
 
 describe("managed Google block protocol", () => {
+  it("reconciles with exactly one GET and never writes for matches, misses, or unsafe anchors", async (context) => {
+    const value = target();
+    const cases: readonly [string, Response, string, string?][] = [
+      ["match", json(ownedEvent(value)), "GOOGLE_VERIFIED"],
+      ["404", new Response(null, { status: 404 }), "NOT_MATCHED", "ANCHOR_MISSING"],
+      ["410", new Response(null, { status: 410 }), "NOT_MATCHED", "TOMBSTONE"],
+      ["foreign", json(ownedEvent(value, { extendedProperties: { private: {} } })), "NOT_MATCHED", "FOREIGN_EVENT"],
+      ["mapping", json(ownedEvent(value, { extendedProperties: { private: {
+        nihoManagedKind: "niho-managed-block-v1", nihoManagedBinding: binding(value),
+        nihoManagedMappingVersion: "4", nihoManagedDesiredVersion: "7",
+      } } })), "NOT_MATCHED", "MAPPING_MISMATCH"],
+      ["newer intent", json(ownedEvent(target({ desiredVersion: 8 }))), "NOT_MATCHED", "STALE_INTENT"],
+      ["older intent", json(ownedEvent(target({ desiredVersion: 6 }))), "NOT_MATCHED", "DESIRED_MISMATCH"],
+      ["UTC mismatch", json(ownedEvent(value, { start: { dateTime: "2026-11-01T03:00:00Z" } })), "NOT_MATCHED", "TIME_MISMATCH"],
+    ];
+    for (const [name, response, code, reason] of cases) await context.test(name, async () => {
+      const methods: string[] = [];
+      let assertions = 0;
+      const result = await inspectGoogleManagedBlock(config((_url, init) => {
+        methods.push(init.method ?? "GET");
+        return response.clone();
+      }), accessToken, calendarId, value, () => { assertions += 1; });
+      assert.equal(result.code, code);
+      if (result.code === "NOT_MATCHED") assert.equal(result.reason, reason);
+      assert.deepEqual(methods, ["GET"]);
+      assert.equal(assertions, 2);
+    });
+  });
+
   it("preserves canonical UTC millisecond precision", async () => {
     const value = target({ sourceStartAtUtc: "2026-11-01T01:00:00.123Z", sourceEndAtUtc: "2026-11-01T02:00:00.123Z" });
     const result = await applyGoogleManagedBlock(config(() => json(ownedEvent(value))), accessToken, calendarId, value, () => undefined);
