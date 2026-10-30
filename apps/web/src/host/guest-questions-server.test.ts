@@ -21,6 +21,7 @@ import {
   GUEST_QUESTION_REPLY_FAILED_TEXT,
   hostThread,
   loadGuestQuestions,
+  loadMoreGuestQuestions,
   openGuestQuestion,
   replyToGuestQuestion,
 } from "./guest-questions-server";
@@ -106,6 +107,32 @@ describe("loadGuestQuestions", () => {
   it("says the questions could not be read when the DB fails", async () => {
     state.store!.listThreads!.mockRejectedValueOnce(new Error("synthetic outage"));
     expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "error" });
+  });
+
+  it("hands the screen the cursor of the older threads, so none drops off the list", async () => {
+    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toMatchObject({ status: "live", nextCursor: null });
+    state.store!.listThreads!.mockResolvedValueOnce({ threads: [SUMMARY], nextCursor: "sample-cursor" });
+    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toMatchObject({ status: "live", nextCursor: "sample-cursor" });
+  });
+});
+
+describe("loadMoreGuestQuestions", () => {
+  it("reads the next page from the cursor as the OWNER, each thread with its last message", async () => {
+    const older = { ...SUMMARY, id: "00000000-0000-4000-8000-000000000107", productId: "walk", productTitle: "Synthetic walk", lastMessage: QUESTION };
+    state.store!.listThreads!.mockResolvedValueOnce({ threads: [older], nextCursor: "sample-cursor-2" });
+    const page = await loadMoreGuestQuestions("sample-provider", "sample-cursor");
+    expect(state.store?.listThreads).toHaveBeenCalledWith(ACTOR, { limit: 50, cursor: "sample-cursor" });
+    expect(page).toMatchObject({ ok: true, experiences: [{ id: "walk", title: "Synthetic walk" }], nextCursor: "sample-cursor-2" });
+    expect(page.ok && page.threads.map((thread) => [thread.id, thread.messages.map((message) => message.id)])).toEqual([[older.id, ["m-1"]]]);
+    expect(JSON.stringify(page)).not.toMatch(/@/);
+  });
+
+  it("reads nothing for anyone but the OWNER, and says when the cursor or the DB fails", async () => {
+    expect(await loadMoreGuestQuestions("sample-other", "sample-cursor")).toEqual({ ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT });
+    state.store!.listThreads!.mockRejectedValueOnce(new StoreValidationError("cursor is invalid."));
+    expect(await loadMoreGuestQuestions("sample-provider", "broken")).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    state.store!.listThreads!.mockRejectedValueOnce(new Error("synthetic outage"));
+    expect(await loadMoreGuestQuestions("sample-provider", "sample-cursor")).toEqual({ ok: false, message: GUEST_QUESTION_LOAD_FAILED_TEXT });
   });
 });
 

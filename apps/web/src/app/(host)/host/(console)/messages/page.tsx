@@ -71,7 +71,7 @@ export default async function HostMessagesPage({ searchParams }: { searchParams:
         linkProviderId={linkProviderId}
         providerId={provider.id}
         providerName={provider.displayName}
-        live={{ loaded: questions.loaded }}
+        live={{ loaded: questions.loaded, nextCursor: questions.nextCursor }}
       />
     );
   }

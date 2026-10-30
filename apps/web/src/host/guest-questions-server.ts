@@ -5,6 +5,7 @@ import {
   StoreValidationError,
   type GuestQuestionMessage,
   type GuestQuestionRepository,
+  type GuestQuestionThreadPage,
   type GuestQuestionThreadSummary,
   type GuestQuestionTopic,
   type HostActor,
@@ -70,6 +71,21 @@ export function hostThread(thread: StoredThread, messages: readonly GuestQuestio
   };
 }
 
+/** One page of the list as メッセージ shows it: each thread holds its last message only. */
+export interface HostGuestQuestionPage {
+  threads: HostThread[];
+  experiences: { id: string; title: string }[];
+  nextCursor: string | null;
+}
+
+function listPage(page: GuestQuestionThreadPage): HostGuestQuestionPage {
+  return {
+    threads: page.threads.map((summary) => hostThread(summary, [summary.lastMessage])),
+    experiences: [...new Map(page.threads.map((summary) => [summary.productId, summary.productTitle]))].map(([id, title]) => ({ id, title })),
+    nextCursor: page.nextCursor,
+  };
+}
+
 /** Opening a thread: it counts as read, then every message. */
 async function openThread(questions: GuestQuestionRepository, actor: HostActor, threadId: string): Promise<{ thread: HostThread; experience: { id: string; title: string } }> {
   await questions.markThreadRead(actor, threadId);
@@ -86,6 +102,8 @@ export type HostGuestQuestionsLoad =
       /** `?thread=` names none of the provider's threads. */
       requestedMissing: boolean;
       experiences: { id: string; title: string }[];
+      /** さらに表示 reads the older threads from here; null when every thread is on the list. */
+      nextCursor: string | null;
       today: string;
       now: string;
     }
@@ -100,7 +118,7 @@ export async function loadGuestQuestions(provider: HostProvider, nihoUserId: str
   const actor = ownerActor(provider.id, nihoUserId);
   try {
     const page = await questions.listThreads(actor, { limit: LIST_LIMIT });
-    const threads = page.threads.map((summary) => hostThread(summary, [summary.lastMessage]));
+    const { threads } = listPage(page);
     const experiences = new Map(page.threads.map((summary) => [summary.productId, summary.productTitle]));
     const loaded: string[] = [];
     let requestedMissing = false;
@@ -119,7 +137,7 @@ export async function loadGuestQuestions(provider: HostProvider, nihoUserId: str
     }
     const now = Date.now();
     const today = todayInJapan(now);
-    return { status: "live", threads, loaded, requestedMissing, experiences: [...experiences].map(([id, title]) => ({ id, title })), today, now: actionTime(today, now) };
+    return { status: "live", threads, loaded, requestedMissing, experiences: [...experiences].map(([id, title]) => ({ id, title })), nextCursor: page.nextCursor, today, now: actionTime(today, now) };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }
@@ -153,6 +171,17 @@ export async function openGuestQuestion(providerId: string, threadId: string): P
   if (!owner.ok) return owner;
   try {
     return { ok: true, message: "", thread: (await openThread(owner.questions, owner.actor, threadId)).thread };
+  } catch (error) {
+    return failure(error, GUEST_QUESTION_LOAD_FAILED_TEXT);
+  }
+}
+
+/** さらに表示: the threads older than the list's last one, from the cursor the previous page gave. */
+export async function loadMoreGuestQuestions(providerId: string, cursor: string): Promise<HostActionResult<HostGuestQuestionPage>> {
+  const owner = await asOwner(providerId, GUEST_QUESTION_LOAD_FAILED_TEXT);
+  if (!owner.ok) return owner;
+  try {
+    return { ok: true, message: "", ...listPage(await owner.questions.listThreads(owner.actor, { limit: LIST_LIMIT, cursor })) };
   } catch (error) {
     return failure(error, GUEST_QUESTION_LOAD_FAILED_TEXT);
   }

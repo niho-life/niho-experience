@@ -36,7 +36,7 @@ vi.mock("@/lib/host/server", async (importActual) => {
   };
 });
 
-import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, openGuestQuestionThread, openPayoutConnect, registerProvider, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
+import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, registerProvider, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
 import { HOST_ERROR_REASON_TEXT, HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { GUEST_QUESTION_LOAD_FAILED_TEXT, GUEST_QUESTION_REPLY_FAILED_TEXT } from "./guest-questions-server";
@@ -355,10 +355,14 @@ describe("questions to the host kept in the experience DB (#106)", () => {
       expect(await sendGuestQuestionReply(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     }
     expect(await openGuestQuestionThread({ providerId: KITCHEN } as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    for (const input of [{ providerId: KITCHEN }, { providerId: KITCHEN, cursor: "x".repeat(201) }, { providerId: "../admin", cursor: "sample-cursor" }]) {
+      expect(await loadMoreGuestQuestionThreads(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
   });
 
   it("is closed in the preview, which keeps its synthetic threads on the screen", async () => {
     expect(await openGuestQuestionThread({ providerId: KITCHEN, threadId: reply.threadId })).toEqual({ ok: false, message: GUEST_QUESTION_LOAD_FAILED_TEXT });
     expect(await sendGuestQuestionReply(reply)).toEqual({ ok: false, message: GUEST_QUESTION_REPLY_FAILED_TEXT });
+    expect(await loadMoreGuestQuestionThreads({ providerId: KITCHEN, cursor: "sample-cursor" })).toEqual({ ok: false, message: GUEST_QUESTION_LOAD_FAILED_TEXT });
   });
 });

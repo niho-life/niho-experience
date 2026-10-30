@@ -10,7 +10,7 @@ import { openStripe, stepNotice, syncStripe } from "./connect";
 import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
 import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
-import { openGuestQuestion, replyToGuestQuestion } from "./guest-questions-server";
+import { loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
@@ -54,7 +54,7 @@ function text(value: unknown, max: number): string | null {
 }
 
 /** NIHO's limits (the contract), with room for the spaces NIHO trims. */
-const LIMITS = { displayName: 200, bio: 4200, sellerDisclosureUrl: 2048, version: 100, spotId: 200, threadId: 200, reviewId: 200, experienceId: 200 } as const;
+const LIMITS = { displayName: 200, bio: 4200, sellerDisclosureUrl: 2048, version: 100, spotId: 200, threadId: 200, reviewId: 200, experienceId: 200, cursor: 200 } as const;
 
 /** Pages that show the provider (the frame's name, 設定, 売上 and ホーム) read it again. */
 function refreshConsole() {
@@ -230,6 +230,14 @@ export async function openGuestQuestionThread(input: { providerId: string; threa
   const threadId = text(input?.threadId, LIMITS.threadId);
   if (!providerId || !threadId) return invalid;
   return openGuestQuestion(providerId, threadId);
+}
+
+/** メッセージ › さらに表示 (#106, experience DB): the questions older than the list's last one. */
+export async function loadMoreGuestQuestionThreads(input: { providerId: string; cursor: string }): Promise<HostActionResult<HostGuestQuestionPage>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const cursor = text(input?.cursor, LIMITS.cursor);
+  if (!providerId || !cursor) return invalid;
+  return loadMoreGuestQuestions(providerId, cursor);
 }
 
 /**
