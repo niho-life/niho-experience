@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  NOTIFICATION_LOAD_FAILED_TEXT,
   NOTIFICATION_OWNER_ONLY_TEXT,
   notificationChanges,
+  notificationChangesInput,
   notificationPanelView,
   notificationRows,
   NOTIFICATIONS,
@@ -98,27 +100,46 @@ describe("changing notifications", () => {
 
 describe("notificationPanelView", () => {
   it("shows the owner the addresses (read-only) and the seven switches; the preview lets them be tried", () => {
-    const view = notificationPanelView(SETTINGS, "OWNER", true);
+    const view = notificationPanelView(SETTINGS, "OWNER", "preview");
     expect(view).toMatchObject({ kind: "owner", preparing: false, addresses: ["owner@example.com"], addressText: "NIHO からの通知はこのメールに届きます" });
     expect(view.kind === "owner" && view.rows).toEqual(notificationRows(AS_NIHO_ANSWERS));
   });
 
-  it("is 準備中 in http mode until NIHO's API is in the host contract", () => {
-    expect(notificationPanelView(SETTINGS, "OWNER", false)).toMatchObject({ kind: "owner", preparing: true });
-    expect(notificationPanelView(null, "EDITOR", false)).toEqual({ kind: "owner-only", text: NOTIFICATION_OWNER_ONLY_TEXT, preparing: true });
+  it("lets the owner change them once the experience DB keeps them, and is 準備中 until then", () => {
+    expect(notificationPanelView(SETTINGS, "OWNER", "live")).toMatchObject({ kind: "owner", preparing: false });
+    expect(notificationPanelView(SETTINGS, "OWNER", "preparing")).toMatchObject({ kind: "owner", preparing: true });
+    expect(notificationPanelView(null, "EDITOR", "preparing")).toEqual({ kind: "owner-only", text: NOTIFICATION_OWNER_ONLY_TEXT, preparing: true });
+  });
+
+  it("says the settings could not be read rather than showing switches that may be wrong", () => {
+    expect(notificationPanelView(SETTINGS, "OWNER", "error")).toEqual({ kind: "error", text: NOTIFICATION_LOAD_FAILED_TEXT, preparing: false });
   });
 
   it("tells anyone but the owner that the settings are the owner's, whatever data came", () => {
     for (const role of ["EDITOR", null] as const) {
-      expect(notificationPanelView(SETTINGS, role, true), String(role)).toEqual({ kind: "owner-only", text: "通知の設定はオーナーが変えられます", preparing: false });
+      expect(notificationPanelView(SETTINGS, role, "preview"), String(role)).toEqual({ kind: "owner-only", text: "通知の設定はオーナーが変えられます", preparing: false });
+      expect(notificationPanelView(SETTINGS, role, "error"), String(role)).toMatchObject({ kind: "owner-only" });
     }
-    expect(notificationPanelView(null, "OWNER", true)).toMatchObject({ kind: "owner-only" });
+    expect(notificationPanelView(null, "OWNER", "preview")).toMatchObject({ kind: "owner-only" });
   });
 
-  it("names where the mail goes when NIHO lists no address, or several", () => {
-    const none = notificationPanelView({ email: { addresses: [" "] }, items: [] }, "OWNER", true);
+  it("names where the mail goes when no address is listed, or several", () => {
+    const none = notificationPanelView({ email: { addresses: [" "] }, items: [] }, "OWNER", "preview");
     expect(none).toMatchObject({ addresses: [], addressText: "NIHO からの通知は、NIHO アカウントの確認済みのメールに届きます" });
-    const two = notificationPanelView({ email: { addresses: ["a@example.com", "b@example.com"] }, items: [] }, "OWNER", true);
+    const two = notificationPanelView({ email: { addresses: ["a@example.com", "b@example.com"] }, items: [] }, "OWNER", "preview");
     expect(two).toMatchObject({ addresses: ["a@example.com", "b@example.com"], addressText: "NIHO からの通知はこれらのメールに届きます" });
+  });
+});
+
+describe("notificationChangesInput", () => {
+  it("takes one or more of the three stoppable notifications as booleans", () => {
+    expect(notificationChangesInput({ NEW_REVIEW: false })).toEqual({ NEW_REVIEW: false });
+    expect(notificationChangesInput({ GUEST_MESSAGE: true, DAY_BEFORE_SUMMARY: false, NEW_REVIEW: true })).toEqual({ GUEST_MESSAGE: true, DAY_BEFORE_SUMMARY: false, NEW_REVIEW: true });
+  });
+
+  it("refuses anything else the browser might send", () => {
+    for (const value of [null, undefined, [], "NEW_REVIEW", {}, { NEW_BOOKING: false }, { NEW_REVIEW: "false" }, { NEW_REVIEW: false, extra: true }]) {
+      expect(notificationChangesInput(value), JSON.stringify(value)).toBeNull();
+    }
   });
 });

@@ -52,9 +52,11 @@ export const MOCK_CONSOLE_PROVIDERS: ReadonlyMap<string, MockConsoleProvider> = 
     reviews: MOCK_KITCHEN_REVIEWS,
     sales: MOCK_KITCHEN_SALES,
     meetingPoint: {
-      area: "Near Kamakura Station, 5-minute walk",
+      overview: "Near Kamakura Station, 5-minute walk",
+      address: "(sample) 1-2-3 Sample-cho, Sample City (fictional)",
+      accessNote: "(sample) Leave the station by the east exit and walk along the river toward the sea.",
       mapUrl: "https://maps.example.com/sample-kitchen",
-      entrance: "Use the side entrance on the right of the building and take the stairs to the second floor. Look for the small sign by the door.",
+      entranceNote: "Use the side entrance on the right of the building and take the stairs to the second floor. Look for the small sign by the door.",
     },
     // Connected: two of its calendars close the sessions they overlap, bookings go to the kitchen's own.
     calendar: {
@@ -81,7 +83,7 @@ export const MOCK_CONSOLE_PROVIDERS: ReadonlyMap<string, MockConsoleProvider> = 
     threads: [],
     reviews: [],
     sales: [],
-    meetingPoint: { area: "", mapUrl: "", entrance: "" },
+    meetingPoint: { overview: "", address: "", accessNote: "", mapUrl: "", entranceNote: "" },
     calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: "https://calendar.example.com/sample-studio/s2b8e4d0a6c1f37950b2e8d4a6c0f1e3/bookings.ics" },
     notifications: { email: { addresses: ["studio@example.com"] }, items: NOTIFICATIONS_AS_STARTED },
   }],

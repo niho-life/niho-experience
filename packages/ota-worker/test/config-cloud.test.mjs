@@ -34,6 +34,23 @@ test("Google delivery config is optional, defaults off, and accepts only boolean
     (error) => error.code === "INVALID_CONFIG");
 });
 
+test("reservation readers are optional, default to none, and accept only unique registered keys", async () => {
+  const defaults = await loadConfig(await configFixture("https://cloud.example"));
+  assert.deepEqual(defaults.reservationReaders, []);
+  assert.ok(Object.isFrozen(defaults.reservationReaders));
+  assert.deepEqual((await loadConfig(await configFixture("https://cloud.example", { reservationReaders: [] }))).reservationReaders, []);
+  const enabled = await loadConfig(await configFixture("https://cloud.example", { reservationReaders: ["GetYourGuide/gyg-browser@1"] }));
+  assert.deepEqual(enabled.reservationReaders, ["GetYourGuide/gyg-browser@1"]);
+  assert.ok(Object.isFrozen(enabled.reservationReaders));
+  for (const reservationReaders of [
+    ["Viator/viator-browser@1"], ["GetYourGuide/gyg-browser@2"], ["GetYourGuide/gyg-browser@1", "GetYourGuide/gyg-browser@1"],
+    "GetYourGuide/gyg-browser@1", { "GetYourGuide/gyg-browser@1": true }, [1], null, true,
+  ]) {
+    await assert.rejects(loadConfig(await configFixture("https://cloud.example", { reservationReaders })),
+      (error) => error.code === "INVALID_CONFIG");
+  }
+});
+
 test("config and token permissions are fail-closed", async () => {
   const path = await configFixture("https://cloud.example");
   await chmod(path, 0o644);

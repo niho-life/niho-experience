@@ -1,13 +1,15 @@
 import type { ExperienceConditionKind } from "@niho-experience/api-client";
-import type { ExperienceProviderPaymentReadinessReason } from "@niho-experience/api-client/host";
+import type { ExperienceProviderMeetingPoint, ExperienceProviderPaymentReadinessReason } from "@niho-experience/api-client/host";
 import type { HostProviderKind, HostProviderReviewStatus } from "@/lib/host/providers";
+import type { NotificationSource } from "./notifications";
 import type { HostReviewTag } from "./reviews";
 
 /*
  * What the host console screens show (#84). The provider's own values (kind, review
  * status, payout readiness) are the host contract's types (#87). Experiences, bookings,
- * messages, reviews, sales and the meeting and notification defaults are not in the contract yet, so
- * they stay hand-written from the screens' needs; the screens keep reading these shapes. The
+ * messages, reviews, sales and the notification defaults are not in the contract yet, so they stay
+ * hand-written from the screens' needs; the screens keep reading these shapes. The meeting defaults
+ * are NIHO's shape. The
  * calendar and notification settings follow NIHO's own specs for them (#109).
  */
 
@@ -551,14 +553,12 @@ export type HostSaleKind = HostSale["kind"];
 
 export type PaymentReadinessReason = ExperienceProviderPaymentReadinessReason;
 
-/** Where guests meet, used by every experience unless it says otherwise. */
-export interface HostMeetingDefaults {
-  /** Shown on the public page. */
-  area: string;
-  mapUrl: string;
-  /** Sent only after a booking is confirmed. */
-  entrance: string;
-}
+/**
+ * Where guests meet, used by every experience unless it says otherwise: NIHO's shape (#89). Only
+ * `overview` is shown on the public page; the address, the way there, the map and the entrance
+ * reach guests whose booking is confirmed. Unset values are "".
+ */
+export type HostMeetingDefaults = ExperienceProviderMeetingPoint;
 
 /*
  * カレンダー (#109, Epic #103): the provider's Google Calendar and the bookings feed for other
@@ -612,9 +612,9 @@ export interface HostCalendarSettings {
 }
 
 /*
- * 通知 (#109, Epic #103): v1 sends email only, to the provider's verified addresses. The shape is
- * NIHO's `GET/PATCH /api/experience-providers/{providerId}/notification-settings` (niho-app spec
- * §17.4, OWNER only). Changing the addresses is outside it (#19238).
+ * 通知 (#109, Epic #103): the shape of niho-app spec §17.4 (OWNER only). The experience DB keeps the
+ * three stoppable ones (ADR 0002, migration 0020) and has no addresses: the screen then names the
+ * NIHO account's verified email. Changing the addresses is outside it (#19238).
  */
 
 /** The notifications NIHO sends a provider, in the order NIHO lists them (notifications.ts has the words). */
@@ -642,8 +642,11 @@ export interface HostSettings {
   reviewStatus: HostProviderReviewStatus | null;
   /** The provider agreed to the version of NIHO's provider terms in force (審査を申請 needs it). */
   consentCurrent: boolean;
-  meetingPoint: HostMeetingDefaults;
+  /** 既定の集合案内; null when it could not be read, or for a member NIHO does not show it to (only OWNER and EDITOR). */
+  meetingPoint: HostMeetingDefaults | null;
   calendar: HostCalendarSettings;
-  /** Null for anyone but the OWNER: NIHO answers the notification settings to the owner only. */
+  /** Null for anyone but the OWNER: the notification settings are the owner's only. */
   notifications: HostNotificationSettings | null;
+  /** Where 通知 is kept: the preview, the experience DB (保存 changes it), not yet (準備中), or unreadable. */
+  notificationSource: NotificationSource;
 }

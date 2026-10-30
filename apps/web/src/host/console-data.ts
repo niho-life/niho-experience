@@ -45,7 +45,7 @@ export interface HostConsoleSnapshot {
   notifications: HostNotificationSettings;
 }
 
-const NO_MEETING_POINT: HostMeetingDefaults = { area: "", mapUrl: "", entrance: "" };
+const NO_MEETING_POINT: HostMeetingDefaults = { overview: "", address: "", accessNote: "", mapUrl: "", entranceNote: "" };
 const NO_CALENDAR: HostCalendarSettings = { google: GOOGLE_NOT_CONNECTED, icsUrl: null };
 /** NIHO lists every notification as it starts it (notifications.ts fills them in). */
 const NO_NOTIFICATIONS: HostNotificationSettings = { email: { addresses: [] }, items: [] };
@@ -64,9 +64,9 @@ function withScenario(calendar: HostCalendarSettings, scenario: HostMockScenario
 export function hostConsoleSnapshot(providerId: string, mode: HostDataMode, now: number, scenario: HostMockScenario = "default"): HostConsoleSnapshot {
   const mock = mode === "mock" ? MOCK_CONSOLE_PROVIDERS.get(providerId) : undefined;
   if (mock) return { today: MOCK_TODAY, now: MOCK_NOW, salesPeriod: MOCK_SALES_PERIOD, ...mock, calendar: withScenario(mock.calendar, scenario) };
-  // TODO(#87): experiences, bookings, messages, reviews, sales, the meeting defaults, the calendar
-  // (niho-app#19316/#19317) and the notification settings (#19315) are not in the host contract
-  // yet. The payout account is: data.ts reads it from NIHO.
+  // TODO(#87): experiences, bookings, messages, reviews, sales, the calendar (niho-app#19316/#19317)
+  // and the notification settings (#19315) are not in the host contract yet. The payout account and
+  // the meeting defaults are: data.ts reads them from NIHO.
   const today = mode === "mock" ? MOCK_TODAY : todayInJapan(now);
   return {
     today,
