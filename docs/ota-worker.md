@@ -51,6 +51,8 @@ Viatorは固定の販売画面から同じoriginへの直接XHR・元Origin・re
 
 ### 限定 session restore policy
 
+予約readerは private config の `reservationReaders` に登録済みのkey（現在は `"GetYourGuide/gyg-browser@1"` だけ）を明示した場合だけ起動します。既定は空で、未有効のreaderでは期間readを開始しません。GetYourGuide readerは実サイト受入前のため、受入まで設定しません（[予約照合](ota-reservation-read-plan.md)）。
+
 `startManagedBrowser` は、専用profileにだけ適用できる明示policy `none`（既定）/ `prepare` / `restore` を持ちます。任意のChrome引数は受け付けません。じゃらんだけ、本人の許可と初回準備の受入後、private configの`siteAccountSessionPolicies.Jalan.<登録済みAirID> = "restore"`でaccount単位に接続できます。設定が無いaccountと他サイトは`none`です。jobから`prepare`や任意policyを指定することはできません。
 
 - `prepare` は初回の本人loginに使う通常起動です。台帳が無いか、直前の正常停止を示す`CLEAN`の場合だけ開始します。
