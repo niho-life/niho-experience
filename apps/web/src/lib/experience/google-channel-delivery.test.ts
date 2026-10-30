@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  prepareDispatch: vi.fn(), prepareReconcile: vi.fn(), assertCurrent: vi.fn(), saveResult: vi.fn(), saveRotated: vi.fn(),
+  prepareDispatch: vi.fn(), prepareReconcile: vi.fn(), prepareObservation: vi.fn(), assertCurrent: vi.fn(), saveResult: vi.fn(), saveRotated: vi.fn(),
   apply: vi.fn(), inspect: vi.fn(), refresh: vi.fn(), open: vi.fn(), seal: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
@@ -12,6 +12,7 @@ vi.mock("@niho-experience/experience-store", async (original) => {
     GoogleChannelDeliveryRepository: class {
       prepareDispatch = mocks.prepareDispatch;
       prepareReconcile = mocks.prepareReconcile;
+      prepareObservation = mocks.prepareObservation;
       assertCurrent = mocks.assertCurrent;
       saveResult = mocks.saveResult;
       saveRotatedRefreshToken = mocks.saveRotated;
@@ -60,6 +61,7 @@ describe("Google channel server executor", () => {
     vi.clearAllMocks();
     mocks.prepareDispatch.mockResolvedValue(snapshot);
     mocks.prepareReconcile.mockResolvedValue(snapshot);
+    mocks.prepareObservation.mockResolvedValue({ ...snapshot, operation: "observe", canDispatch: false });
     mocks.open.mockReturnValue("refresh-secret");
     mocks.seal.mockReturnValue("rotated-ciphertext");
     mocks.refresh.mockResolvedValue({ accessToken: "access-secret", expiresAtUtc: "2099-01-01T01:00:00.000Z", scopes: ["scope"] });
@@ -92,6 +94,43 @@ describe("Google channel server executor", () => {
     expect(mocks.inspect).toHaveBeenCalledOnce();
     expect(mocks.apply).not.toHaveBeenCalled();
     expect(result).toEqual({ deliveryId: snapshot.record.deliveryId, phase: "NOT_MATCHED", reason: "FOREIGN_EVENT", airbnb: "UNVERIFIED" });
+  });
+
+  it("always performs a fresh GET and never a business write for observe", async () => {
+    mocks.inspect.mockResolvedValue({ code: "GOOGLE_VERIFIED", eventId: "event", google });
+    const result = await executeGoogleChannelDelivery(
+      {} as never, {} as never, { workerId: "studio-1", credentialVersion: 1 }, snapshot.context.jobId, "lease", "observe",
+    );
+    expect(mocks.prepareObservation).toHaveBeenCalledOnce();
+    expect(mocks.inspect).toHaveBeenCalledOnce();
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(mocks.saveResult).toHaveBeenCalledWith(expect.anything(), snapshot.context.jobId, "lease", snapshot.record.deliveryId,
+      snapshot.operationNonce, "observe", expect.objectContaining({ phase: "GOOGLE_VERIFIED", changed: false, writeAcknowledged: false }));
+    expect(result.phase).toBe("GOOGLE_VERIFIED");
+  });
+
+  it.each(["configuration", "refresh"] as const)("records observe %s failures as stopped, never uncertain", async (failure) => {
+    if (failure === "refresh") mocks.refresh.mockRejectedValueOnce(new Error("synthetic read failure"));
+    const result = await executeGoogleChannelDelivery(
+      {} as never, {} as never, { workerId: "studio-1", credentialVersion: 1 }, snapshot.context.jobId, "lease", "observe",
+      failure === "configuration" ? { runtimeConfig: () => null } : undefined,
+    );
+    expect(result.phase).toBe("STOPPED");
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it("records observe GET mismatch as not matched and read failure as stopped", async () => {
+    mocks.inspect.mockResolvedValueOnce({ code: "NOT_MATCHED", eventId: "event", reason: "ANCHOR_MISSING" });
+    const missing = await executeGoogleChannelDelivery(
+      {} as never, {} as never, { workerId: "studio-1", credentialVersion: 1 }, snapshot.context.jobId, "lease", "observe",
+    );
+    expect(missing).toMatchObject({ phase: "NOT_MATCHED", reason: "ANCHOR_MISSING" });
+    mocks.inspect.mockRejectedValueOnce(new Error("synthetic timeout"));
+    const timeout = await executeGoogleChannelDelivery(
+      {} as never, {} as never, { workerId: "studio-1", credentialVersion: 1 }, snapshot.context.jobId, "lease", "observe",
+    );
+    expect(timeout).toMatchObject({ phase: "STOPPED", reason: "GOOGLE_UNAVAILABLE" });
+    expect(mocks.apply).not.toHaveBeenCalled();
   });
 
   it("does not issue token or Google I/O for a duplicate dispatch", async () => {

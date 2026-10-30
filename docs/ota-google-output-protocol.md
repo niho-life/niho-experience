@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。Googleへの本番実接続、Airbnb観測、本番有効化の完了を示すものではない。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。Issue #291 で同一lease内のGoogle/Airbnb typed receiptを追加し、Issue #302 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Googleへの本番実接続、Airbnb observer/caller、本番有効化の完了を示すものではない。
 
 公式根拠：
 
@@ -54,9 +54,15 @@ HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node
 
 OTA worker caller も `googleDeliveryEnabled` が既定falseである。ON時だけ固定originの内部配送APIへ `dispatch` または `reconcile` を1回送り、Googleへ直接接続せず、browser・Claude・任意adapterへfallbackしない。callerのdeadlineはjob期限内かつ最大60秒で、送信開始後に確定DTOを受け取れない場合は再送せず `UNKNOWN_AFTER_SAVE` として隔離する。`GOOGLE_VERIFIED` はGoogle予定だけの確認であり、Airbnb observerが未接続のため worker結果は `NEEDS_REVIEW` / `AIRBNB_OBSERVATION_REQUIRED` のままとする。
 
-serverのtyped result受付は `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=true` に加え、HTTP modeと既存delivery flagがONの場合だけ開く（既定false）。同じ現在job・worker・lease・assignmentで直前に `GOOGLE_VERIFIED` になった `DISPATCH` をUUIDで指定し、別系統のAirbnb観測が同じcanonical UTC枠を1名で予約可能／不可能と確認した場合だけ、`EXACT_SLOT_V1` receiptを既存result receiptへ保存できる。Google metadata、binding、connection generation、3 scopeのdigest、現OWNER、desired/live inventory、入力calendar非衝突、未解決delivery不在、Google検証時刻から観測時刻までを同一transactionで再確認する。calendar ID、scope、token、raw responseはworker入力やresult receiptへ保存しない。
+serverのtyped result受付は `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=true` に加え、HTTP modeと既存delivery flagがONの場合だけ開く（既定false）。同じ現在job・worker・lease・assignmentで直前に `GOOGLE_VERIFIED` になった `DISPATCH` または `OBSERVE` をUUIDで指定し、別系統のAirbnb観測が同じcanonical UTC枠を1名で予約可能／不可能と確認した場合だけ、`EXACT_SLOT_V1` receiptを既存result receiptへ保存できる。Google metadata、binding、connection generation、3 scopeのdigest、現OWNER、desired/live inventory、入力calendar非衝突、未解決delivery不在、Google検証時刻から観測時刻までを同一transactionで再確認する。calendar ID、scope、token、raw responseはworker入力やresult receiptへ保存しない。
 
-この受付は現在の `SET_OPEN` / `SET_CLOSED` leaseだけに限定し、過去lease、`RECONCILE`、`OBSERVE`、日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。後続lease用のGET-only proof refresh、Airbnb observer/caller、60分pending表示、UI、本番flag有効化は含まない。
+`DISPATCH` receiptは従来どおりoriginal job・worker・lease・assignmentが現在leaseと完全一致するときだけ使える。後続leaseでは、journalの`updated_at`や過去のGoogle成功だけでは証明にならない。`observe` は現在の `AVAILABILITY` leaseが `SET_OPEN` / `SET_CLOSED`、または将来の同一intent `OBSERVE` の場合だけ使え、current occurrence、desired state/version、mapping、UTC区間、live shared inventory、予約reader health、canObserve、account/assignment、OWNER、scope、grant generation、binding digestを再確認する。現在SET jobの短い再leaseは、旧leaseがimmutable resultで`stopped=true`を保存済みの場合に限る。手動recoveryはdesired versionを増やす既存仕様のままで、古いintentのjournalを再利用する近道にはならない。
+
+`observe` は毎回新しいoperation nonce/epochを発行し、Google I/O前に`operation_verified_at`をNULLへ戻してから、`inspectGoogleManagedBlock`のGETだけを行う。404・metadata不一致は`NOT_MATCHED`、token・設定・読取失敗は`STOPPED`であり、insert/PATCH/deleteへfallbackしない。成功時だけserver clockで`operation_verified_at`を記録し、最初の成功時刻`first_verified_at`は`COALESCE`で保持する。typed receiptは`operation_verified_at >= current lease_started_at`かつAirbnbの`observed_at`以下を要求するため、準備時の`updated_at`更新や過去leaseの証拠は通らない。同じcurrent leaseでの明示retryも新nonceで再GETし、遅れて戻った旧GETは保存できない。
+
+`RECONCILE`は結果不明writeのhistorical journalを読む手動回復経路であり、`STORED_JOURNAL_ONLY`の過去事実に留まる。`RECONCILE`だけの`GOOGLE_VERIFIED`はtyped receiptへ直接使えず、現在intentの成功には新しい`observe` GETが必要である。このleafでは保守的に、最後のoperationが`RECONCILE`のjournalをobserve seedとして再利用しない。
+
+この受付は日単位のunavailable表示、枠欠落、従来のboolean-only Google結果を成功にしない。Airbnb observer/caller、wait queue・scheduler・job作成、60分pending表示、UI、flag有効化は含まない。既存flagは既定OFFのままであり、次段ではcallerとlive scopeでSET再lease／将来OBSERVEを実際に起動して受入する。
 
 ## 未接続・未受入
 

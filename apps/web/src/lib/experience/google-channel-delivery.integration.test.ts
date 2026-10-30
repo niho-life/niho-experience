@@ -9,7 +9,7 @@ import {
   ResourceGoogleRepository,
   StoreConflictError,
 } from "@niho-experience/experience-store";
-import { GOOGLE_SCOPES, type GoogleConfig } from "@niho-experience/google-calendar";
+import { GOOGLE_SCOPES, initializeGoogleManagedBlock, type GoogleConfig } from "@niho-experience/google-calendar";
 
 vi.mock("server-only", () => ({}));
 
@@ -38,7 +38,7 @@ afterAll(() => {
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
-async function fixture() {
+async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const { Pool } = await import("pg");
   const schema = `web_google_delivery_${randomUUID().replaceAll("-", "")}`;
   const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
@@ -53,25 +53,34 @@ async function fixture() {
     (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
     VALUES ('provider-a','tea','tea','PUBLISHED','Synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic','Synthetic Seller')`);
   const store = new ExperienceStore(pool);
+  let now = new Date();
+  const occurrenceParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(now.getTime() + 24 * 60 * 60 * 1_000));
+  const occurrenceValues = Object.fromEntries(occurrenceParts.map((part) => [part.type, part.value]));
+  const occurrenceDate = `${occurrenceValues.year}-${occurrenceValues.month}-${occurrenceValues.day}`;
+  const authorityExpiresAtUtc = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString();
   const rule: ScheduleRule = {
-    id: "tea-once", timeZone: "Asia/Tokyo", startsOn: "2099-01-01", endsOn: "2099-01-01",
+    id: "tea-once", timeZone: "Asia/Tokyo", startsOn: occurrenceDate, endsOn: occurrenceDate,
     localStartTime: "10:00", durationMinutes: 60, capacity: 1, bookingCutoffMinutes: 30,
     busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
   };
   await store.saveScheduleRule({ providerId: "provider-a", nihoUserId: "owner-a" }, "tea", rule, null, command(1));
-  await store.setOccurrenceSalesState(
-    { providerId: "provider-a", nihoUserId: "owner-a" }, "tea", rule.id,
-    { occurrenceId: `${rule.id}@2099-01-01`, desiredState: "CLOSED" }, null, command(11),
-  );
-  const now = new Date("2099-01-01T00:00:00.000Z");
+  if (desiredState === "CLOSED") {
+    await store.setOccurrenceSalesState(
+      { providerId: "provider-a", nihoUserId: "owner-a" }, "tea", rule.id,
+      { occurrenceId: `${rule.id}@${occurrenceDate}`, desiredState: "CLOSED" }, null, command(11),
+    );
+  }
   const runtime = new ChannelRuntime(pool, {
     now: () => now,
     supportedAdapters: { "Airbnb/airbnb-google-busy@1": { canOpen: true, canClose: true, canObserve: true } },
+    googleAirbnbObservationEnabled: true,
   });
   const admin = { nihoUserId: "admin-a" };
   const account = await runtime.createExternalAccount(admin, {
     id: "account-a", providerId: "provider-a", site: "Airbnb", externalAccountId: "external-a",
-    displayName: "Synthetic account", operatingModel: 2, active: true, delegatedUntilUtc: "2099-02-01T00:00:00.000Z",
+    displayName: "Synthetic account", operatingModel: 2, active: true, delegatedUntilUtc: authorityExpiresAtUtc,
   }, command(2));
   const listing = await runtime.createListing(admin, {
     id: "listing-a", providerId: "provider-a", accountId: account.id, productId: "tea", externalProductId: "external-tea",
@@ -94,13 +103,14 @@ async function fixture() {
   );
   await runtime.reconcileListing(admin, listing.id, command(4));
   const credential = await runtime.mintWorkerCredential(
-    admin, "studio-1", "Synthetic Studio", "2099-02-01T00:00:00.000Z", null, command(5),
+    admin, "studio-1", "Synthetic Studio", authorityExpiresAtUtc, null, command(5),
   );
   await runtime.assignWorkerAccount(admin, credential.workerId, account.id, null, command(6));
   const worker = await runtime.authenticateWorker(credential.bearerToken);
   const claimed = await runtime.claim(worker);
   if (!claimed) throw new Error("Synthetic Google delivery job was not claimable");
-  return { schema, pool, runtime, admin, account, listing, worker, claimed, generation };
+  return { schema, pool, runtime, admin, account, listing, worker, claimed, generation,
+    setNow: (value: Date) => { now = value; } };
 }
 
 async function cleanup(value: Fixture): Promise<void> {
@@ -117,7 +127,7 @@ function injected(fetchImpl: typeof fetch) {
     openRefreshToken: () => "synthetic-refresh",
     sealRefreshToken: () => "synthetic-rotated".padEnd(48, "x"),
     refreshToken: async () => ({
-      accessToken: "synthetic-access", expiresAtUtc: "2099-01-01T01:00:00.000Z", scopes: [...GOOGLE_SCOPES],
+      accessToken: "synthetic-access", expiresAtUtc: new Date(Date.now() + 60 * 60_000).toISOString(), scopes: [...GOOGLE_SCOPES],
     }),
   };
 }
@@ -184,6 +194,206 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
         value.pool, value.runtime, value.worker, value.claimed.id, value.claimed.leaseToken, "dispatch", injected(syntheticFetch),
       )).toEqual(result);
       expect(writes).toBe(1);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it.each(["OPEN", "CLOSED"] as const)("refreshes %s proof by GET in a new lease before accepting the typed receipt", async (desiredState) => {
+    const value = await fixture(desiredState);
+    const methods: string[] = [];
+    let event: Record<string, unknown> | undefined;
+    const google: GoogleConfig = {
+      clientId: "synthetic", clientSecret: "synthetic", redirectUri: "https://experience.example.test/callback",
+      fetch: async (_input, init = {}) => {
+        const method = init.method ?? "GET";
+        methods.push(method);
+        if (method === "POST") {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          event = { ...body, status: "confirmed", etag: '"etag-current"' };
+          return Response.json({ id: body.id, etag: '"etag-ack"' });
+        }
+        return event ? Response.json(event) : new Response(null, { status: 404 });
+      },
+    };
+    const target = {
+      providerOpaqueId: "provider-a", listingOpaqueId: value.listing.id,
+      occurrenceOpaqueId: value.claimed.occurrenceId, mappingVersion: value.claimed.mappingVersion,
+      desiredVersion: value.claimed.desiredVersion, sourceStartAtUtc: value.claimed.sourceStartAtUtc,
+      sourceEndAtUtc: value.claimed.sourceEndAtUtc, desiredState,
+    } as const;
+    try {
+      expect((await initializeGoogleManagedBlock(google, "synthetic-access", "airbnb-output", target, () => undefined)).code)
+        .toBe("GOOGLE_VERIFIED");
+      methods.length = 0;
+      const dispatch = await executeGoogleChannelDelivery(
+        value.pool, value.runtime, value.worker, value.claimed.id, value.claimed.leaseToken, "dispatch",
+        injected(google.fetch!),
+      );
+      expect(dispatch.phase).toBe("GOOGLE_VERIFIED");
+      expect(methods).toEqual(["GET"]);
+      const firstVerifiedAt = (await value.pool.query(
+        "SELECT first_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [dispatch.deliveryId],
+      )).rows[0].first_verified_at;
+
+      await value.runtime.submitResult(value.worker, value.claimed.id, {
+        resultId: command(desiredState === "OPEN" ? 41 : 42), leaseToken: value.claimed.leaseToken,
+        outcome: "RETRY_WAIT", stopped: true, target: value.claimed.target,
+      });
+      value.setNow(new Date());
+      await value.pool.query(
+        "UPDATE channel_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid",
+        [value.claimed.id],
+      );
+      value.setNow(new Date());
+      const released = await value.runtime.claim(value.worker);
+      expect(released?.id).toBe(value.claimed.id);
+      if (!released) throw new Error("Synthetic SET job was not re-leased");
+      const releasedAuthority = (await value.pool.query(
+        "SELECT lease_epoch,lease_started_at FROM channel_jobs WHERE id=$1::uuid", [released.id],
+      )).rows[0];
+
+      await value.pool.query(
+        "UPDATE google_channel_deliveries SET updated_at=clock_timestamp()+interval '1 day' WHERE id=$1::uuid",
+        [dispatch.deliveryId],
+      );
+      const receipt = (resultId: string) => ({
+        resultId, leaseToken: released.leaseToken, outcome: "VERIFIED" as const, stopped: true, target: released.target,
+        occurrenceId: released.occurrenceId, sourceStartAtUtc: released.sourceStartAtUtc, sourceEndAtUtc: released.sourceEndAtUtc,
+        observedState: desiredState, observedBookable: desiredState === "OPEN", observedAtUtc: new Date().toISOString(),
+        googleAirbnbProof: { deliveryId: dispatch.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const },
+      });
+      await expect(value.runtime.submitResult(
+        value.worker, released.id, receipt(command(desiredState === "OPEN" ? 43 : 44)),
+      )).rejects.toBeInstanceOf(StoreConflictError);
+      const preparedOnly = await new GoogleChannelDeliveryRepository(value.pool, value.runtime)
+        .prepareObservation(value.worker, released.id, released.leaseToken);
+      expect(preparedOnly).toMatchObject({
+        targetAuthority: "CURRENT_JOB", operation: "observe", canDispatch: false,
+        storedTarget: { desiredState, desiredVersion: released.desiredVersion },
+      });
+      expect((await value.pool.query(
+        "SELECT operation_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [dispatch.deliveryId],
+      )).rows[0].operation_verified_at).toBeNull();
+      await expect(value.runtime.submitResult(
+        value.worker, released.id, receipt(command(desiredState === "OPEN" ? 49 : 50)),
+      )).rejects.toBeInstanceOf(StoreConflictError);
+
+      if (desiredState === "CLOSED") {
+        const readCases = [
+          { phase: "NOT_MATCHED", fetch: (async () => new Response(null, { status: 404 })) as typeof fetch },
+          { phase: "NOT_MATCHED", fetch: (async () => Response.json({ ...event, visibility: "public" })) as typeof fetch },
+          { phase: "STOPPED", fetch: (async () => { throw new Error("synthetic timeout"); }) as typeof fetch },
+        ] as const;
+        for (const readCase of readCases) {
+          const readMethods: string[] = [];
+          const readOnlyFetch: typeof fetch = async (input, init = {}) => {
+            readMethods.push(init.method ?? "GET");
+            return readCase.fetch(input, init);
+          };
+          const failedRead = await executeGoogleChannelDelivery(
+            value.pool, value.runtime, value.worker, released.id, released.leaseToken, "observe", injected(readOnlyFetch),
+          );
+          expect(failedRead.phase).toBe(readCase.phase);
+          expect(readMethods).toEqual(["GET"]);
+        }
+      }
+
+      methods.length = 0;
+      let releaseStalled: (() => void) | undefined;
+      let stalledStarted: Promise<void> | undefined;
+      let staleObservation: Promise<unknown> | undefined;
+      if (desiredState === "CLOSED") {
+        let markStarted: (() => void) | undefined;
+        stalledStarted = new Promise<void>((resolve) => { markStarted = resolve; });
+        const stalled = new Promise<void>((resolve) => { releaseStalled = resolve; });
+        const stalledFetch: typeof fetch = async (...args) => {
+          markStarted?.();
+          await stalled;
+          return google.fetch!(...args);
+        };
+        staleObservation = executeGoogleChannelDelivery(
+          value.pool, value.runtime, value.worker, released.id, released.leaseToken, "observe", injected(stalledFetch),
+        );
+        await stalledStarted;
+      }
+      const observed = await executeGoogleChannelDelivery(
+        value.pool, value.runtime, value.worker, released.id, released.leaseToken, "observe", injected(google.fetch!),
+      );
+      releaseStalled?.();
+      if (staleObservation) await expect(staleObservation).rejects.toBeInstanceOf(StoreConflictError);
+      expect(observed).toMatchObject({ phase: "GOOGLE_VERIFIED", airbnb: "UNVERIFIED" });
+      expect(methods).toEqual(desiredState === "CLOSED" ? ["GET", "GET"] : ["GET"]);
+      const proof = (await value.pool.query(
+        `SELECT first_verified_at,operation_verified_at,operation_kind,operation_job_id,operation_lease_epoch,
+                changed,write_acknowledged
+           FROM google_channel_deliveries WHERE id=$1::uuid`, [dispatch.deliveryId],
+      )).rows[0];
+      expect(proof.operation_kind).toBe("OBSERVE");
+      expect(proof.operation_job_id).toBe(released.id);
+      expect(Number(proof.operation_lease_epoch)).toBe(Number(releasedAuthority.lease_epoch));
+      expect(new Date(proof.first_verified_at).toISOString()).toBe(new Date(firstVerifiedAt).toISOString());
+      expect(new Date(proof.operation_verified_at).getTime()).toBeGreaterThanOrEqual(new Date(releasedAuthority.lease_started_at).getTime());
+      expect(proof).toMatchObject({ changed: false, write_acknowledged: false });
+
+      await expect(value.runtime.submitResult(value.worker, released.id, {
+        ...receipt(command(desiredState === "OPEN" ? 47 : 48)),
+        observedAtUtc: new Date(new Date(proof.operation_verified_at).getTime() - 1).toISOString(),
+      })).rejects.toBeInstanceOf(StoreConflictError);
+      const acceptedInput = receipt(command(desiredState === "OPEN" ? 45 : 46));
+      acceptedInput.observedAtUtc = new Date().toISOString();
+      expect(await value.runtime.submitResult(value.worker, released.id, acceptedInput)).toEqual({
+        acceptedAsCurrent: true, repeated: false,
+      });
+      expect(await value.runtime.submitResult(value.worker, released.id, acceptedInput)).toEqual({
+        acceptedAsCurrent: true, repeated: true,
+      });
+      await expect(value.runtime.submitResult(value.worker, released.id, {
+        ...acceptedInput, googleAirbnbProof: { ...acceptedInput.googleAirbnbProof, deliveryId: command(99) },
+      })).rejects.toBeInstanceOf(StoreConflictError);
+      if (desiredState === "CLOSED") {
+        const futureObserveJobId = command(90);
+        const beforeVersion = (await value.pool.query(
+          "SELECT desired_version FROM channel_desired_states WHERE listing_id='listing-a' AND occurrence_id=$1",
+          [released.occurrenceId],
+        )).rows[0].desired_version;
+        await value.pool.query(
+          `INSERT INTO channel_jobs
+            (id,provider_id,account_id,listing_id,occurrence_id,action,account_version,desired_version,mapping_version,
+             target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,
+             target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,next_attempt_at,job_deadline_at)
+           SELECT $2::uuid,provider_id,account_id,listing_id,occurrence_id,'OBSERVE',account_version,desired_version,mapping_version,
+             target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,
+             target_adapter,target_adapter_version,target_connection_mode,source_start_at,source_end_at,95,
+             clock_timestamp()-interval '1 second',clock_timestamp()+interval '10 minutes'
+             FROM channel_jobs WHERE id=$1::uuid`,
+          [released.id, futureObserveJobId],
+        );
+        value.setNow(new Date());
+        const futureObserve = await value.runtime.claim(value.worker);
+        expect(futureObserve?.id).toBe(futureObserveJobId);
+        if (!futureObserve) throw new Error("Synthetic future OBSERVE job was not claimable");
+        methods.length = 0;
+        expect((await executeGoogleChannelDelivery(
+          value.pool, value.runtime, value.worker, futureObserve.id, futureObserve.leaseToken, "observe", injected(google.fetch!),
+        )).phase).toBe("GOOGLE_VERIFIED");
+        expect(methods).toEqual(["GET"]);
+        const futureInput = {
+          resultId: command(91), leaseToken: futureObserve.leaseToken, outcome: "VERIFIED" as const, stopped: true,
+          target: futureObserve.target, occurrenceId: futureObserve.occurrenceId,
+          sourceStartAtUtc: futureObserve.sourceStartAtUtc, sourceEndAtUtc: futureObserve.sourceEndAtUtc,
+          observedState: "CLOSED" as const, observedBookable: false, observedAtUtc: new Date().toISOString(),
+          googleAirbnbProof: { deliveryId: dispatch.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const },
+        };
+        expect(await value.runtime.submitResult(value.worker, futureObserve.id, futureInput)).toEqual({
+          acceptedAsCurrent: true, repeated: false,
+        });
+        const afterVersion = (await value.pool.query(
+          "SELECT desired_version FROM channel_desired_states WHERE listing_id='listing-a' AND occurrence_id=$1",
+          [futureObserve.occurrenceId],
+        )).rows[0].desired_version;
+        expect(Number(afterVersion)).toBe(Number(beforeVersion));
+      }
     } finally {
       await cleanup(value);
     }

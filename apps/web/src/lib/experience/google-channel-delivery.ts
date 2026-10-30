@@ -21,7 +21,7 @@ import {
 import { googleRuntimeConfig } from "./google-connection";
 import { openGoogleRefreshToken, sealGoogleRefreshToken } from "./google-token-crypto";
 
-export type GoogleChannelDeliveryOperation = "dispatch" | "reconcile";
+export type GoogleChannelDeliveryOperation = "dispatch" | "reconcile" | "observe";
 
 function target(snapshot: GoogleChannelDeliverySecretSnapshot): GoogleManagedBlockTarget {
   const value = snapshot.storedTarget;
@@ -72,7 +72,8 @@ export async function executeGoogleChannelDelivery(
   const repository = new GoogleChannelDeliveryRepository(pool, runtime);
   const snapshot = operation === "dispatch"
     ? await repository.prepareDispatch(worker, jobId, leaseToken)
-    : await repository.prepareReconcile(worker, jobId, leaseToken);
+    : operation === "reconcile" ? await repository.prepareReconcile(worker, jobId, leaseToken)
+      : await repository.prepareObservation(worker, jobId, leaseToken);
   if (!snapshot) throw new StoreConflictError("No Google delivery journal exists for this intent.");
   if (operation === "dispatch" && !snapshot.canDispatch) return snapshot.record;
 
@@ -99,6 +100,7 @@ export async function executeGoogleChannelDelivery(
     const openedRefreshToken = openRefreshToken(configured.key, snapshot.context.providerId, snapshot.encryptedRefreshToken);
     const token = await refreshToken(configured.google, openedRefreshToken, snapshot.grantedScopes);
     accessToken = token.accessToken;
+    await assertCurrent();
     if (token.refreshToken) {
       const saved = await repository.saveRotatedRefreshToken(
         snapshot.context.providerId,
@@ -114,7 +116,7 @@ export async function executeGoogleChannelDelivery(
   }
 
   try {
-    if (operation === "reconcile") {
+    if (operation === "reconcile" || operation === "observe") {
       const result = await inspectGoogleManagedBlock(
         configured.google, accessToken, snapshot.calendarId, target(snapshot), assertCurrent,
       );
@@ -147,6 +149,6 @@ export async function executeGoogleChannelDelivery(
     });
   } catch (error) {
     if (error instanceof StoreConflictError) throw error;
-    return saveResult({ phase: "UNCERTAIN", reason: staticGoogleReason(error) });
+    return saveResult({ phase: operation === "observe" ? "STOPPED" : "UNCERTAIN", reason: staticGoogleReason(error) });
   }
 }

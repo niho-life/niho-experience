@@ -22,7 +22,7 @@ export interface GoogleAirbnbReceiptAuthority {
   readonly mappingVersion: number;
   readonly desiredVersion: number;
   readonly desiredState: "OPEN" | "CLOSED";
-  readonly action: "SET_OPEN" | "SET_CLOSED";
+  readonly action: "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
   readonly sourceStartAtUtc: string;
   readonly sourceEndAtUtc: string;
   readonly leaseStartedAtUtc: string;
@@ -71,17 +71,24 @@ export async function verifyGoogleAirbnbReceipt(
   const row = result.rows[0];
   const scopes = Array.isArray(row?.granted_scopes) && row.granted_scopes.every((scope) => typeof scope === "string")
     ? row.granted_scopes as string[] : [];
-  const verifiedAtUtc = row ? iso(row.updated_at) : "";
+  const verifiedAtUtc = row?.operation_verified_at === null || row?.operation_verified_at === undefined
+    ? "" : iso(row.operation_verified_at);
   const expectedTransparency = authority.desiredState === "CLOSED" ? "opaque" : "transparent";
-  if (!row || row.phase !== "GOOGLE_VERIFIED" || row.operation_kind !== "DISPATCH"
-    || row.job_id !== authority.jobId || row.operation_job_id !== authority.jobId
-    || row.worker_id !== authority.workerId || row.operation_worker_id !== authority.workerId
-    || integer(row.lease_epoch) !== authority.leaseEpoch || integer(row.operation_lease_epoch) !== authority.leaseEpoch
-    || integer(row.assignment_version) !== authority.assignmentVersion
-    || integer(row.operation_assignment_version) !== authority.assignmentVersion
+  const expectedAction = authority.desiredState === "OPEN" ? "SET_OPEN" : "SET_CLOSED";
+  const operationIdentityCurrent = row?.operation_job_id === authority.jobId
+    && row.operation_worker_id === authority.workerId
+    && integer(row.operation_lease_epoch) === authority.leaseEpoch
+    && integer(row.operation_assignment_version) === authority.assignmentVersion;
+  const dispatchAuthority = row?.operation_kind === "DISPATCH" && authority.action === expectedAction
+    && row.job_id === authority.jobId && row.worker_id === authority.workerId
+    && integer(row.lease_epoch) === authority.leaseEpoch
+    && integer(row.assignment_version) === authority.assignmentVersion
+    && operationIdentityCurrent;
+  const observationAuthority = row?.operation_kind === "OBSERVE" && operationIdentityCurrent;
+  if (!row || row.phase !== "GOOGLE_VERIFIED" || (!dispatchAuthority && !observationAuthority)
     || row.provider_id !== authority.providerId || row.account_id !== authority.accountId
     || row.listing_id !== authority.listingId || row.occurrence_id !== authority.occurrenceId
-    || row.action !== authority.action || row.desired_state !== authority.desiredState
+    || row.action !== expectedAction || row.desired_state !== authority.desiredState
     || integer(row.account_version) !== authority.accountVersion
     || integer(row.mapping_version) !== authority.mappingVersion
     || integer(row.desired_version) !== authority.desiredVersion
@@ -97,6 +104,8 @@ export async function verifyGoogleAirbnbReceipt(
     || digest(String(row.opaque_calendar_id)) !== row.binding_calendar_digest
     || scopesDigest(scopes) !== row.granted_scopes_digest
     || !REQUIRED_GOOGLE_SCOPES.every((scope) => scopes.includes(scope))
+    || row.first_verified_at === null || row.first_verified_at === undefined
+    || row.operation_verified_at === null || row.operation_verified_at === undefined
     || verifiedAtUtc < authority.leaseStartedAtUtc || verifiedAtUtc > authority.observedAtUtc) {
     throw new StoreConflictError("Google Airbnb proof is foreign, stale, or incomplete.");
   }

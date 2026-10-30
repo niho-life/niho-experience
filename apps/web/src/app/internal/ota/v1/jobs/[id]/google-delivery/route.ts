@@ -4,6 +4,7 @@ import {
   channelJson,
   exactKeys,
   googleChannelDeliveryEnabled,
+  googleChannelObservationEnabled,
   internalContext,
 } from "@/lib/experience/channel-runtime";
 import { executeGoogleChannelDelivery } from "@/lib/experience/google-channel-delivery";
@@ -19,8 +20,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["leaseToken", "operation"])
     || typeof body.leaseToken !== "string" || body.leaseToken.length < 1 || body.leaseToken.length > 100
-    || (body.operation !== "dispatch" && body.operation !== "reconcile")) {
+    || (body.operation !== "dispatch" && body.operation !== "reconcile" && body.operation !== "observe")) {
     return channelJson({ error: "invalid_input" }, 400);
+  }
+  if (body.operation === "observe" && !googleChannelObservationEnabled()) {
+    return channelJson({ error: "not_found" }, 404);
   }
   const pool = experiencePool();
   if (!pool) return channelJson({ error: "runtime_unavailable" }, 503);

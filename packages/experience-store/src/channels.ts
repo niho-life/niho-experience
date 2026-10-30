@@ -344,7 +344,7 @@ export interface ChannelRuntimeOptions {
   readonly now?: () => Date;
   /** Adapter keys explicitly accepted by deployment, e.g. `Airbnb/browser-v1@1`. Empty means all capabilities stay false. */
   readonly supportedAdapters?: Readonly<Record<string, ChannelCapabilities>>;
-  /** Accept the independently observed Airbnb receipt paired to a fresh Google DISPATCH. Default OFF. */
+  /** Accept Airbnb receipts only after a fresh Google DISPATCH or GET-only OBSERVE proof. Default OFF. */
   readonly googleAirbnbObservationEnabled?: boolean;
 }
 
@@ -2401,8 +2401,9 @@ export class ChannelRuntime {
     identity: WorkerIdentity,
     jobId: string,
     leaseToken: string,
-    operation: "dispatch" | "reconcile" = "dispatch",
+    operation: "dispatch" | "reconcile" | "observe" = "dispatch",
   ): Promise<GoogleChannelDeliveryContext> {
+    if (operation === "observe" && !this.#googleAirbnbObservationEnabled) throw new StoreAccessDeniedError();
     const preflight = await this.preflight(identity, jobId, leaseToken);
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
@@ -2411,11 +2412,46 @@ export class ChannelRuntime {
       if (job.purpose !== "AVAILABILITY" || job.target_site !== "Airbnb"
         || job.target_connection_mode !== "GOOGLE" || job.target_adapter !== "airbnb-google-busy"
         || job.target_adapter_version !== "1"
-        || (operation === "dispatch" ? (job.action !== "SET_OPEN" && job.action !== "SET_CLOSED") : job.action !== "OBSERVE")) {
+        || (operation === "dispatch"
+          ? (job.action !== "SET_OPEN" && job.action !== "SET_CLOSED")
+          : operation === "observe" ? !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(String(job.action)) : job.action !== "OBSERVE")) {
         throw new StoreAccessDeniedError();
       }
       const nowUtc = this.#nowIso();
       if (isoValue(job, "lease_expires_at") <= nowUtc || isoValue(job, "job_deadline_at") <= nowUtc) throw new StoreConflictError("Delivery lease expired.");
+      if (operation === "observe") {
+        const current = (await client.query<DbRow>(
+          `SELECT a.site,l.product_id,l.can_observe,l.adapter,l.adapter_version,l.mapping_version,
+                  d.desired_state,d.desired_version,d.mapping_version AS desired_mapping_version,
+                  d.source_start_at,d.source_end_at
+             FROM channel_listings l
+             JOIN channel_external_accounts a ON a.id=l.account_id
+             JOIN channel_desired_states d ON d.listing_id=l.id AND d.occurrence_id=$2
+            WHERE l.id=$1 FOR SHARE OF l,d`,
+          [job.listing_id, job.occurrence_id],
+        )).rows[0];
+        if (!current || current.can_observe !== true || !this.#adapterSupports(current, "OBSERVE")
+          || integer(current, "mapping_version") !== integer(job, "mapping_version")
+          || integer(current, "desired_mapping_version") !== integer(job, "mapping_version")
+          || integer(current, "desired_version") !== integer(job, "desired_version")
+          || text(current, "desired_state") !== preflight.desiredState
+          || isoValue(current, "source_start_at") !== isoValue(job, "source_start_at")
+          || isoValue(current, "source_end_at") !== isoValue(job, "source_end_at")) {
+          throw new StoreConflictError("Current Google observation intent changed.");
+        }
+        const occurrence = await this.#currentOccurrence(
+          client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"),
+        );
+        if (occurrence.startUtc !== isoValue(job, "source_start_at") || occurrence.endUtc !== isoValue(job, "source_end_at")) {
+          throw new StoreConflictError("Current Google observation occurrence changed.");
+        }
+        const availability = await this.#liveAvailability(
+          client, text(job, "provider_id"), text(current, "product_id"), occurrence, nowUtc,
+        );
+        if ((availability.bookable ? "OPEN" : "CLOSED") !== preflight.desiredState) {
+          throw new StoreConflictError("Live availability no longer matches the current Google intent.");
+        }
+      }
       return {
         jobId,
         providerId: text(job, "provider_id"), accountId: text(job, "account_id"), listingId: text(job, "listing_id"),
@@ -2509,10 +2545,11 @@ export class ChannelRuntime {
       if (input.googleAirbnbProof !== undefined && (!this.#googleAirbnbObservationEnabled || reservationJob
         || job.purpose !== "AVAILABILITY" || job.target_site !== "Airbnb" || job.target_connection_mode !== "GOOGLE"
         || job.target_adapter !== "airbnb-google-busy" || job.target_adapter_version !== "1"
-        || (job.action !== "SET_OPEN" && job.action !== "SET_CLOSED"))) {
+        || !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(String(job.action)))) {
         throw new StoreValidationError("Google Airbnb observation is not enabled for this job.");
       }
       if (input.googleAirbnbProof !== undefined
+        && job.action !== "OBSERVE"
         && (input.observedState !== (job.action === "SET_OPEN" ? "OPEN" : "CLOSED")
           || input.observedBookable !== (job.action === "SET_OPEN"))) {
         throw new StoreValidationError("Google Airbnb observation does not match the exact desired slot state.");
@@ -2598,9 +2635,10 @@ export class ChannelRuntime {
           const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
           liveOccurrenceMatches = occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")
             && isoValue(current, "source_start_at") === occurrence.startUtc && isoValue(current, "source_end_at") === occurrence.endUtc;
-          if (liveOccurrenceMatches && action !== "OBSERVE") {
+          if (liveOccurrenceMatches && (action !== "OBSERVE" || input.googleAirbnbProof !== undefined)) {
             const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(current, "product_id"), occurrence, nowUtc);
-            liveActionAllowed = desiredAction(availability.bookable ? "OPEN" : "CLOSED") === action;
+            const currentAction = action === "OBSERVE" ? desiredAction(text(current, "desired_state") as ChannelDesiredState) : action;
+            liveActionAllowed = desiredAction(availability.bookable ? "OPEN" : "CLOSED") === currentAction;
           }
         } catch (error) {
           if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
@@ -2681,22 +2719,24 @@ export class ChannelRuntime {
           reservationCompletedAt = isoValue(row, "last_complete_at");
         }
       }
-      if (input.googleAirbnbProof && input.observedAtUtc && (action === "SET_OPEN" || action === "SET_CLOSED")) {
+      const googleDesiredState = action === "SET_OPEN" ? "OPEN" : action === "SET_CLOSED" ? "CLOSED"
+        : current?.desired_state as ChannelDesiredState | undefined;
+      if (input.googleAirbnbProof && input.observedAtUtc && googleDesiredState !== undefined) {
         if (!availabilityVersionsCurrent) throw new StoreConflictError("Google Airbnb observation authority changed.");
         const receipt = await verifyGoogleAirbnbReceipt(client, {
           deliveryId: input.googleAirbnbProof.deliveryId, jobId, providerId: text(job, "provider_id"),
           accountId: text(job, "account_id"), listingId: text(job, "listing_id"), occurrenceId: text(job, "occurrence_id"),
           workerId: identity.workerId, leaseEpoch, assignmentVersion: integer(job, "lease_assignment_version"),
           accountVersion: integer(job, "account_version"), mappingVersion: integer(job, "mapping_version"),
-          desiredVersion: integer(job, "desired_version"), desiredState: action === "SET_OPEN" ? "OPEN" : "CLOSED", action,
+          desiredVersion: integer(job, "desired_version"), desiredState: googleDesiredState, action,
           sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),
           leaseStartedAtUtc: isoValue(job, "lease_started_at"), observedAtUtc: input.observedAtUtc,
         });
         googleAirbnbVerifiedAtUtc = receipt.googleVerifiedAtUtc;
       }
       const googleAirbnbObservationMatches = input.googleAirbnbProof !== undefined
-        && input.observedState === (action === "SET_OPEN" ? "OPEN" : "CLOSED")
-        && input.observedBookable === (action === "SET_OPEN")
+        && googleDesiredState !== undefined && input.observedState === googleDesiredState
+        && input.observedBookable === (googleDesiredState === "OPEN")
         && googleAirbnbVerifiedAtUtc !== undefined;
       const acceptedAsCurrent = reservationJob
         ? input.outcome === "RESERVATION_VERIFIED" && input.stopped && withinLease && exactTarget
@@ -2857,6 +2897,12 @@ export class ChannelRuntime {
   }
 
   async #completeRecoveryObserve(client: PoolClient, job: DbRow): Promise<void> {
+    const recovery = await client.query(
+      `SELECT 1 FROM channel_admin_commands
+        WHERE action IN ('account.recover','account.reauth') AND result->>'observeJobId'=$1 LIMIT 1 FOR SHARE`,
+      [job.id],
+    );
+    if (!recovery.rows[0]) return;
     // An observe leased before staff switched to manual handling must not lift that hold.
     const released = await client.query(
       "UPDATE channel_external_accounts SET quarantined_at=NULL,quarantine_reason=NULL,updated_at=$2 WHERE id=$1 AND quarantine_reason IS DISTINCT FROM 'MANUAL_HANDLING'",

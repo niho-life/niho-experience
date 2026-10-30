@@ -22,7 +22,13 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const { Pool } = await import("pg");
   const schema = `google_airbnb_receipt_${randomUUID().replaceAll("-", "")}`;
   const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
-  let now = new Date("2099-01-01T00:00:00.000Z");
+  let now = new Date();
+  const occurrenceParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(now.getTime() + 24 * 60 * 60 * 1_000));
+  const occurrenceValues = Object.fromEntries(occurrenceParts.map((part) => [part.type, part.value]));
+  const occurrenceDate = `${occurrenceValues.year}-${occurrenceValues.month}-${occurrenceValues.day}`;
+  const authorityExpiresAtUtc = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString();
   await pool.query(`CREATE SCHEMA "${schema}"`);
   for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
     await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
@@ -34,7 +40,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
     VALUES ('provider-a','tea','tea','PUBLISHED','Synthetic tea','{}','JPY',1000,'terms','seller','acct_synthetic','Synthetic Seller')`);
   const store = new ExperienceStore(pool);
   const rule: ScheduleRule = {
-    id: "tea-once", timeZone: "Asia/Tokyo", startsOn: "2099-01-01", endsOn: "2099-01-01",
+    id: "tea-once", timeZone: "Asia/Tokyo", startsOn: occurrenceDate, endsOn: occurrenceDate,
     localStartTime: "10:00", durationMinutes: 60, capacity: 1, bookingCutoffMinutes: 30,
     busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
   };
@@ -42,7 +48,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   if (desiredState === "CLOSED") {
     await store.setOccurrenceSalesState(
       { providerId: "provider-a", nihoUserId: "owner-a" }, "tea", rule.id,
-      { occurrenceId: `${rule.id}@2099-01-01`, desiredState: "CLOSED" }, null, command(2),
+      { occurrenceId: `${rule.id}@${occurrenceDate}`, desiredState: "CLOSED" }, null, command(2),
     );
   }
   const options = {
@@ -54,7 +60,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const admin = { nihoUserId: "admin-a" };
   const account = await runtime.createExternalAccount(admin, {
     id: "account-a", providerId: "provider-a", site: "Airbnb", externalAccountId: "12345",
-    displayName: "Synthetic account", operatingModel: 2, active: true, delegatedUntilUtc: "2099-02-01T00:00:00.000Z",
+    displayName: "Synthetic account", operatingModel: 2, active: true, delegatedUntilUtc: authorityExpiresAtUtc,
   }, command(3));
   const listing = await runtime.createListing(admin, {
     id: "listing-a", providerId: "provider-a", accountId: account.id, productId: "tea", externalProductId: "67890",
@@ -75,7 +81,7 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
      VALUES ('provider-a','listing-a',$1,$2,'airbnb-output')`, [listing.mappingVersion, generation],
   );
   await runtime.reconcileListing(admin, listing.id, command(5));
-  const credential = await runtime.mintWorkerCredential(admin, "studio-1", "Synthetic Studio", "2099-02-01T00:00:00.000Z", null, command(6));
+  const credential = await runtime.mintWorkerCredential(admin, "studio-1", "Synthetic Studio", authorityExpiresAtUtc, null, command(6));
   await runtime.assignWorkerAccount(admin, credential.workerId, account.id, null, command(7));
   const worker = await runtime.authenticateWorker(credential.bearerToken);
   const consumed = await runtime.consumeCalendarOutbox(50, worker);
@@ -95,12 +101,10 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
       },
     },
   );
-  const googleVerifiedAtUtc = new Date(now.getTime() + 1_000).toISOString();
-  await pool.query("UPDATE google_channel_deliveries SET updated_at=$2 WHERE id=$1::uuid", [delivery.deliveryId, googleVerifiedAtUtc]);
   const result = (resultId = command(20), overrides: Record<string, unknown> = {}) => ({
     resultId, leaseToken: claimed.leaseToken, outcome: "VERIFIED" as const, stopped: true, target: claimed.target,
     occurrenceId: claimed.occurrenceId, sourceStartAtUtc: claimed.sourceStartAtUtc, sourceEndAtUtc: claimed.sourceEndAtUtc,
-    observedState: desiredState, observedBookable: desiredState === "OPEN", observedAtUtc: new Date(now.getTime() + 2_000).toISOString(),
+    observedState: desiredState, observedBookable: desiredState === "OPEN", observedAtUtc: new Date().toISOString(),
     googleAirbnbProof: { deliveryId: delivery.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const },
     ...overrides,
   });
@@ -159,12 +163,26 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
         assert.equal(Number(stored.google_airbnb_party_size), 1);
         // SQL CHECK must reject partial proof, including UNKNOWN comparisons
         // caused by NULL; route validation alone cannot protect stored receipts.
-        for (const column of ["google_airbnb_evidence", "google_airbnb_party_size"] as const) {
+        for (const column of ["google_airbnb_evidence", "google_airbnb_party_size", "google_airbnb_verified_at"] as const) {
           await assert.rejects(
             () => value.pool.query(`UPDATE channel_job_results SET ${column}=NULL WHERE result_id=$1::uuid`, [input.resultId]),
             { code: "23514" },
           );
         }
+        await assert.rejects(
+          () => value.pool.query(
+            "UPDATE google_channel_deliveries SET first_verified_at=NULL WHERE id=$1::uuid",
+            [value.delivery.deliveryId],
+          ),
+          { code: "23514" },
+        );
+        await assert.rejects(
+          () => value.pool.query(
+            "UPDATE google_channel_deliveries SET operation_verified_at=first_verified_at-interval '1 millisecond' WHERE id=$1::uuid",
+            [value.delivery.deliveryId],
+          ),
+          { code: "23514" },
+        );
         const desired = (await value.pool.query(
           "SELECT observed_state,last_verified_at FROM channel_desired_states WHERE listing_id='listing-a' AND occurrence_id=$1",
           [value.claimed.occurrenceId],
@@ -196,7 +214,7 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       await assertRejected(value.result(command(21), {
         googleAirbnbProof: { deliveryId: command(98), evidence: "EXACT_SLOT_V1", partySize: 1 },
       }));
-      await assertRejected(value.result(command(22), { observedAtUtc: "2099-01-01T00:00:00.000Z" }));
+      await assertRejected(value.result(command(22), { observedAtUtc: new Date(Date.now() - 60_000).toISOString() }));
 
       const otherJobId = command(90);
       await value.pool.query(
@@ -224,11 +242,16 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       await value.pool.query("UPDATE google_channel_deliveries SET operation_lease_epoch=operation_lease_epoch+1 WHERE id=$1::uuid", [value.delivery.deliveryId]);
       await assertRejected(value.result(command(842)));
       await value.pool.query("UPDATE google_channel_deliveries SET operation_lease_epoch=operation_lease_epoch-1 WHERE id=$1::uuid", [value.delivery.deliveryId]);
-      const verifiedAt = (await value.pool.query("SELECT updated_at FROM google_channel_deliveries WHERE id=$1::uuid", [value.delivery.deliveryId])).rows[0].updated_at;
-      await value.pool.query(`UPDATE google_channel_deliveries d SET updated_at=j.lease_started_at-interval '1 second'
+      const verifiedTimes = (await value.pool.query("SELECT operation_verified_at,first_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [value.delivery.deliveryId])).rows[0];
+      await value.pool.query(`UPDATE google_channel_deliveries d SET operation_verified_at=j.lease_started_at-interval '1 second',
+          first_verified_at=j.lease_started_at-interval '1 second',
+          updated_at=clock_timestamp()+interval '1 day'
         FROM channel_jobs j WHERE d.id=$1::uuid AND j.id=$2::uuid`, [value.delivery.deliveryId, value.claimed.id]);
       await assertRejected(value.result(command(843)));
-      await value.pool.query("UPDATE google_channel_deliveries SET updated_at=$2 WHERE id=$1::uuid", [value.delivery.deliveryId, verifiedAt]);
+      await value.pool.query(
+        "UPDATE google_channel_deliveries SET operation_verified_at=$2,first_verified_at=$3 WHERE id=$1::uuid",
+        [value.delivery.deliveryId, verifiedTimes.operation_verified_at, verifiedTimes.first_verified_at],
+      );
 
       await value.pool.query("UPDATE google_channel_deliveries SET lease_epoch=lease_epoch+1 WHERE id=$1::uuid", [value.delivery.deliveryId]);
       await assertRejected(value.result(command(23)));
@@ -312,7 +335,7 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       const value = await fixture("CLOSED");
       try {
         const input = kind === "stopped" ? value.result(command(40), { stopped: false }) : value.result(command(41));
-        if (kind === "expired") value.setNow(new Date("2099-01-01T00:10:00.000Z"));
+        if (kind === "expired") value.setNow(new Date(Date.now() + 10 * 60_000));
         assert.deepEqual(await value.runtime.submitResult(value.worker, value.claimed.id, input), { acceptedAsCurrent: false, repeated: false });
         assert.equal((await value.pool.query("SELECT accepted_as_current FROM channel_job_results")).rows[0].accepted_as_current, false);
         assert.equal((await value.pool.query("SELECT observed_state FROM channel_desired_states WHERE listing_id='listing-a'")).rows[0].observed_state, null);

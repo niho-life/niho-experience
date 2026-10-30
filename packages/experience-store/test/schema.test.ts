@@ -138,6 +138,16 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /calendar_id|scope|token|raw_response|guest|email|phone|price|amount/i);
   });
 
+  it("separates fresh Google operation proof time from historical journal updates", async () => {
+    const sql = await readFile(new URL("../migrations/0022_google_airbnb_fresh_observation.sql", import.meta.url), "utf8");
+    assert.match(sql, /operation_kind IN \('DISPATCH','RECONCILE','OBSERVE'\)/);
+    assert.match(sql, /ADD COLUMN operation_verified_at timestamptz/);
+    assert.match(sql, /ADD COLUMN first_verified_at timestamptz/);
+    assert.match(sql, /SET operation_verified_at=updated_at,first_verified_at=updated_at/);
+    assert.match(sql, /operation_verified_at>=first_verified_at/);
+    assert.doesNotMatch(sql, /client|observed_at|calendar_id|scope|token|raw_response/i);
+  });
+
   it("fences OWNER calendar creation before I/O without persisting credentials or response bodies", async () => {
     const sql = await readFile(new URL("../migrations/0019_google_channel_setup.sql", import.meta.url), "utf8");
     assert.match(sql, /CREATE TABLE google_channel_setup_journals/);
