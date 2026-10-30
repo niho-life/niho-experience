@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
-import { saveProviderProfile, submitProviderReview } from "@/host/actions";
-import { notificationChanges, notificationPanelView, toggleNotification } from "@/host/notifications";
+import { saveNotificationSettings, saveProviderProfile, submitProviderReview } from "@/host/actions";
+import { notificationChanges, notificationPanelView, notificationRows, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
 import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
 import type { HostGoogleConnection, HostNotificationKey, HostSettings } from "@/host/types";
@@ -47,9 +47,10 @@ export interface HostSettingsFormProps {
  * 設定 (mock v2): one panel per group and one 保存. 提供者情報 is NIHO's (#88/#91): 保存 sends
  * the fields that changed to the provider API and shows what NIHO kept; a reviewed provider is
  * asked first, as saving sends it back to review. 審査を申請, the payout account and カレンダー
- * (#109) work on their own. 既定の集合案内 and 通知 (#109: the three notifications the host may
- * stop) are kept by 保存 but have no API yet: the preview keeps them on screen only, and http mode
- * shows them as 準備中.
+ * (#109) work on their own. 既定の集合案内 has no API yet: the preview keeps it on screen only, and
+ * http mode shows it as 準備中. 通知 (#109: the three notifications the owner may stop) is kept by
+ * 保存 in the experience DB once it is open there (`settings.notificationSource`), on screen only
+ * in the preview, and 準備中 until then.
  *
  * Only 提供者情報 and the payout account sit inside the <form>: カレンダー's dialogs are forms of
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
@@ -67,7 +68,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const [notice, setNotice] = useState<HostNotice | null>(null);
   const [reviewNotice, setReviewNotice] = useState<HostNotice | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const notificationView = notificationPanelView(settings.notifications, role, preview);
+  const notificationView = notificationPanelView(settings.notifications, role, settings.notificationSource);
   const [savedNotifications, setSavedNotifications] = useState(notificationView.kind === "owner" ? notificationView.rows : []);
   const [notifications, setNotifications] = useState(savedNotifications);
   const [saving, startSaving] = useTransition();
@@ -106,23 +107,32 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   };
 
   /**
-   * The notifications that changed, "saved" as they are on screen (the preview keeps nothing).
-   * TODO(#87): PATCH them to NIHO's notification settings (niho-app#19315, OWNER only) once the host
-   * contract has it, and show what NIHO answers.
+   * The notifications that changed: the experience DB keeps them and answers all seven as they are
+   * now (#109); the preview "saves" them as they are on screen. The error to show, or null.
    */
-  const keepNotifications = () => {
-    if (Object.keys(notificationChanges(savedNotifications, notifications)).length > 0) setSavedNotifications(notifications);
+  const saveNotifications = async (): Promise<HostNotice | null> => {
+    const changed = notificationChanges(savedNotifications, notifications);
+    if (Object.keys(changed).length === 0) return null;
+    if (settings.notificationSource !== "live") {
+      setSavedNotifications(notifications);
+      return null;
+    }
+    const result = await saveNotificationSettings({ providerId, changes: changed });
+    if (!result.ok) return { tone: "error", message: result.message };
+    const rows = notificationRows(result.items);
+    setSavedNotifications(rows);
+    setNotifications(rows);
+    return null;
   };
 
   const commit = () => {
     setNotice(null);
-    // Nothing of NIHO's changed: the preview's on-screen parts are "saved" as they are.
-    if (!unsaved) {
-      keepNotifications();
-      setNotice({ tone: "success", message: "保存しました" });
-      return;
-    }
     startSaving(async () => {
+      // Nothing of NIHO's changed: only 通知 (or the preview's on-screen parts) is saved.
+      if (!unsaved) {
+        setNotice((await saveNotifications()) ?? { tone: "success", message: "保存しました" });
+        return;
+      }
       const result = await saveProviderProfile({ providerId, ...changes });
       if (!result.ok) {
         setNotice({ tone: "error", message: result.message });
@@ -131,8 +141,8 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
       setSaved(result.profile);
       setProfile(result.profile);
       setReviewStatus(result.reviewStatus);
-      keepNotifications();
-      setNotice({ tone: "success", message: result.message });
+      const failed = await saveNotifications();
+      setNotice(failed ? { tone: "error", message: `提供者情報は保存しました。${failed.message}` } : { tone: "success", message: result.message });
     });
   };
 

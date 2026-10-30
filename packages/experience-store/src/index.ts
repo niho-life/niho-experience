@@ -15,6 +15,8 @@ export { ProductOperatorRepository } from "./product-operators.ts";
 export type { CreatedProductOperatorInvitation, CreateProductOperatorInvitationInput, PreparedProductOperatorInvitation, ProductOperatorAdminActor, ProductOperatorAdminSnapshot } from "./product-operators.ts";
 export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
+export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
+export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";

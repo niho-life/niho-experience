@@ -160,4 +160,15 @@ describe("database invariants", () => {
     assert.match(sql, /CREATE TABLE product_operator_audit_events/);
     assert.doesNotMatch(sql, /calendar_commands|calendar_outbox_events/);
   });
+
+  it("keeps only the three stoppable notification choices per provider, with no addresses (#109)", async () => {
+    const sql = await readFile(new URL("../migrations/0020_provider_notification_preferences.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const table = sql.match(/CREATE TABLE provider_notification_preferences \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /notification_key IN \('GUEST_MESSAGE', 'DAY_BEFORE_SUMMARY', 'NEW_REVIEW'\)/);
+    assert.match(table, /PRIMARY KEY \(provider_id, notification_key\)/);
+    assert.match(table, /REFERENCES experience_providers\(id\)/);
+    assert.doesNotMatch(table, /email|address|display_name|body\b|NEW_BOOKING|CANCELLATION/i);
+  });
 });
