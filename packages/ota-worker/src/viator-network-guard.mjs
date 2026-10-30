@@ -64,6 +64,17 @@ export function validateViatorReadBody(body) {
   return validateViatorListState(body);
 }
 
+export function deriveViatorDisplayedListState(value) {
+  if (!validateViatorListState(value?.availabilityListState) || !isPlainObject(value.availabilities)) throw new ContractError("DOM_DRIFT");
+  const dates = Object.keys(value.availabilities).sort();
+  if (dates.length < 1 || dates.length > 62 || dates.some((date) => !canonicalDate(date))) throw new ContractError("DOM_DRIFT");
+  // The supplier UI replaces the echoed, preceding range with the bounds of
+  // the returned calendar before submitting an availability update.
+  const displayed = { ...structuredClone(value.availabilityListState), startDate: dates[0], endDate: dates.at(-1) };
+  if (!validateViatorListState(displayed)) throw new ContractError("DOM_DRIFT");
+  return Object.freeze(displayed);
+}
+
 export function viatorListStateCoversTarget(value, job) {
   if (!validateViatorListState(value)) return false;
   const date = job.localDateTime.slice(0, 10);
@@ -75,10 +86,7 @@ export function viatorListStateCoversTarget(value, job) {
     && (optionEntries[0][1].length === 0 || (optionEntries[0][1].length === 1 && optionEntries[0][1][0] === job.target.externalOptionId)));
   const targetPage = value.perDayPagination[date];
   const completeTargetPage = targetPage?.hasMore === false && targetPage.cursor >= 1;
-  // On a date-picker jump the returned range still describes the preceding UI
-  // range. The response's per-day cursor proves that the jumped date was read.
-  const dateScope = (value.startDate <= date && value.endDate >= date)
-    || (value.loadDirection === "BIDIRECTIONAL" && value.jumpToDate === date);
+  const dateScope = value.startDate <= date && value.endDate >= date;
   return dateScope && completeTargetPage && productScope && optionScope;
 }
 

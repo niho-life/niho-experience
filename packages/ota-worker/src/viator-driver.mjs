@@ -6,6 +6,7 @@ import { startManagedBrowser } from "./managed-browser.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
 import {
   createViatorNetworkGuard,
+  deriveViatorDisplayedListState,
   selectViatorAvailability,
   validateViatorReadBody,
   viatorListStateCoversTarget,
@@ -50,10 +51,7 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
       if (Buffer.byteLength(raw) > MAX_JSON_BYTES) throw new ContractError("DOM_DRIFT");
       let parsed;
       try { parsed = JSON.parse(raw); } catch { throw new ContractError("DOM_DRIFT"); }
-      // The response expands the date range and advances per-day cursors. The UI
-      // submits this returned state on save, rather than the original request.
-      const listState = parsed.availabilityListState;
-      if (!validateViatorReadBody(listState)) throw new ContractError("DOM_DRIFT");
+      const listState = deriveViatorDisplayedListState(parsed);
       const selected = selectViatorAvailability(parsed, job, { allowMissing: !targetRequired });
       const coversTarget = viatorListStateCoversTarget(listState, job);
       if (targetRequired && (!selected || !coversTarget)) throw new ContractError("DOM_DRIFT");
