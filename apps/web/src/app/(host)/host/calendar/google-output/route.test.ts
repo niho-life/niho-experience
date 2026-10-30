@@ -75,6 +75,7 @@ describe("OWNER Google output setup route", () => {
       { ...input, token: "untrusted" },
       { ...input, actorId: "untrusted" },
       { ...input, commandId: "not-a-v4" },
+      { ...input, operation: "retry_create" },
     ]) expect((await POST(post(body))).status).toBe(400);
     expect((await POST(post({ ...input, summary: "x".repeat(9_000) }))).status).toBe(413);
     expect((await GET(new NextRequest("https://experience.example/host/calendar/google-output?providerId=provider-a&listingId=listing-a&calendarId=x"))).status).toBe(400);
@@ -101,5 +102,16 @@ describe("OWNER Google output setup route", () => {
     expect(await response.json()).toEqual({ commandId, listingId: "listing-a", state: "READY_FOR_CONNECTION", calendarName: "NIHO Airbnb | Synthetic" });
     const get = await GET(new NextRequest("https://experience.example/host/calendar/google-output?providerId=provider-a&listingId=listing-a"));
     expect(await get.json()).toEqual({ commandId, listingId: "listing-a", state: "READY_FOR_CONNECTION", calendarName: "NIHO Airbnb | Synthetic" });
+  });
+
+  it("accepts only the explicit pre-create cancellation operation under the same OWNER gate", async () => {
+    mocks.execute.mockResolvedValue({ commandId, listingId: "listing-a", state: "FAILED_BEFORE_CREATE", calendarName: "Synthetic", reason: "PREPARATION_CANCELLED" });
+    const response = await POST(post({ ...input, operation: "cancel_preparing" }));
+    expect(response.status).toBe(200);
+    expect(mocks.execute).toHaveBeenCalledWith(mocks.pool, expect.objectContaining({ nihoUserId: "owner-a" }), {
+      listingId: "listing-a", expectedMappingVersion: 1, commandId, operation: "cancel_preparing",
+    });
+    mocks.access = "EDITOR";
+    expect((await POST(post({ ...input, operation: "cancel_preparing" }))).status).toBe(403);
   });
 });

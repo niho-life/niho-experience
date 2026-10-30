@@ -77,6 +77,7 @@ const STATIC_REASONS = new Set([
   "ALL_DAY_EVENT", "FOREIGN_EVENT", "MAPPING_MISMATCH", "TIME_MISMATCH", "VISIBILITY_MISMATCH",
   "STALE_INTENT", "WRITE_UNCERTAIN", "DESIRED_MISMATCH", "AUTHORITY_CHANGED", "CONFIG_UNAVAILABLE",
   "GOOGLE_REVOKED", "GOOGLE_UNAVAILABLE", "INVALID_RESPONSE",
+  "PREPARATION_CANCELLED",
 ]);
 
 type JournalRow = Record<string, unknown> & { phase: GoogleChannelAnchorPhase; operation: "INITIALIZE" | "INSPECT" };
@@ -354,6 +355,45 @@ export class GoogleChannelAnchorRepository {
           iso(authority.source_start_at), iso(authority.source_end_at)],
       );
       return this.#snapshot(inserted.rows[0]!, authority, true);
+    });
+  }
+
+  /** Ends only an unsubmitted preparation, even if the desired target changed. */
+  async cancelPreparing(actor: HostActor, input: GoogleChannelAnchorInput): Promise<GoogleChannelAnchorRecord | null> {
+    assertActor(actor);
+    assertInput(input);
+    if (input.operation !== "inspect") throw new StoreValidationError("Inspection is required.");
+    return transaction(this.#pool, actor.providerId, async (client) => {
+      const allowed = await client.query(
+        `SELECT 1 FROM provider_google_connections c
+          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+            AND m.active=true AND m.role='OWNER'
+         WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
+        [actor.providerId, actor.nihoUserId],
+      );
+      if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+      const row = (await client.query<JournalRow>(
+        "SELECT * FROM google_channel_anchor_journals WHERE provider_id=$1 AND command_id=$2::uuid FOR UPDATE",
+        [actor.providerId, input.commandId],
+      )).rows[0];
+      if (!row) return null;
+      if (row.request_fingerprint !== fingerprint(actor.providerId, input) || row.actor_niho_user_id !== actor.nihoUserId) {
+        throw new StoreConflictError("Command ID was reused with different input.");
+      }
+      if (row.phase === "FAILED_BEFORE_INITIALIZE" && row.reason === "PREPARATION_CANCELLED") return record(row);
+      if (row.phase !== "PREPARING") return null;
+      const updated = await client.query<JournalRow>(
+        `UPDATE google_channel_anchor_journals
+            SET operation='INSPECT',operation_nonce=$3::uuid,operation_epoch=operation_epoch+1,
+                phase='FAILED_BEFORE_INITIALIZE',reason='PREPARATION_CANCELLED',updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND command_id=$2::uuid AND operation_nonce=$4::uuid AND operation_epoch=$5
+            AND phase='PREPARING' AND actor_niho_user_id=$6 AND request_fingerprint=$7
+            AND listing_id=$8 AND occurrence_id=$9 RETURNING *`,
+        [actor.providerId, input.commandId, randomUUID(), row.operation_nonce, row.operation_epoch,
+          actor.nihoUserId, row.request_fingerprint, input.listingId, input.occurrenceId],
+      );
+      if (!updated.rows[0]) throw new StoreConflictError("Google anchor preparation recovery was fenced.");
+      return record(updated.rows[0]);
     });
   }
 

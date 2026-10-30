@@ -35,7 +35,7 @@ const REQUIRED_GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events.freebusy",
   "https://www.googleapis.com/auth/calendar.app.created",
 ] as const;
-const STATIC_REASONS = new Set(["CONFIG_UNAVAILABLE", "GOOGLE_REVOKED", "GOOGLE_UNAVAILABLE", "INVALID_RESPONSE", "AUTHORITY_CHANGED", "STORE_FAILED"]);
+const STATIC_REASONS = new Set(["CONFIG_UNAVAILABLE", "GOOGLE_REVOKED", "GOOGLE_UNAVAILABLE", "INVALID_RESPONSE", "AUTHORITY_CHANGED", "STORE_FAILED", "PREPARATION_CANCELLED"]);
 
 type JournalRow = Record<string, unknown> & { phase: GoogleChannelSetupPhase; granted_scopes_digest: string };
 type AuthorityRow = Record<string, unknown> & {
@@ -201,6 +201,43 @@ export class GoogleChannelSetupRepository {
           scopesDigest(authority.granted_scopes), summary],
       );
       return this.#snapshot(inserted.rows[0]!, authority, true);
+    });
+  }
+
+  /** Fences a pre-create execution; CREATING and UNCERTAIN are never cleared. */
+  async cancelPreparing(actor: HostActor, input: { listingId: string; expectedMappingVersion: number; commandId: string }): Promise<GoogleChannelSetupRecord> {
+    assertActor(actor);
+    if (!input.listingId || input.listingId.length > 256 || !Number.isSafeInteger(input.expectedMappingVersion)
+      || input.expectedMappingVersion < 1 || !UUID_V4.test(input.commandId)) throw new StoreValidationError("Invalid Google setup command.");
+    return transaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      const allowed = await client.query(
+        `SELECT 1 FROM provider_google_connections c
+          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+            AND m.active=true AND m.role='OWNER'
+         WHERE c.provider_id=$1 AND c.connected_by_niho_user_id=$2 FOR SHARE OF c,m`,
+        [actor.providerId, actor.nihoUserId],
+      );
+      if (!allowed.rows[0]) throw new StoreAccessDeniedError();
+      const row = (await client.query<JournalRow>(
+        "SELECT * FROM google_channel_setup_journals WHERE provider_id=$1 AND command_id=$2::uuid FOR UPDATE",
+        [actor.providerId, input.commandId],
+      )).rows[0];
+      if (!row || row.listing_id !== input.listingId || row.created_by_niho_user_id !== actor.nihoUserId
+        || row.request_fingerprint !== fingerprint(actor.providerId, input.listingId, input.expectedMappingVersion)) {
+        throw new StoreConflictError("Google setup preparation does not match the command.");
+      }
+      if (row.phase === "FAILED_BEFORE_CREATE" && row.failure_reason === "PREPARATION_CANCELLED") return record(row);
+      if (row.phase !== "PREPARING") throw new StoreConflictError("Google setup may already have created a calendar.");
+      const updated = await client.query<JournalRow>(
+        `UPDATE google_channel_setup_journals
+            SET operation_nonce=$3::uuid,phase='FAILED_BEFORE_CREATE',failure_reason='PREPARATION_CANCELLED',updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND command_id=$2::uuid AND operation_nonce=$4::uuid AND phase='PREPARING'
+            AND listing_id=$5 AND created_by_niho_user_id=$6 AND request_fingerprint=$7 RETURNING *`,
+        [actor.providerId, input.commandId, randomUUID(), row.operation_nonce, input.listingId, actor.nihoUserId, row.request_fingerprint],
+      );
+      if (!updated.rows[0]) throw new StoreConflictError("Google setup preparation recovery was fenced.");
+      return record(updated.rows[0]);
     });
   }
 

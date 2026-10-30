@@ -64,6 +64,8 @@ serverは商品名から200文字以内のplainな名称を作り、既存scope 
 
 入力calendarの通常保存経路とsetup finishは、provider inventory mutexの後にopaque calendar ID順の共通advisory lockを取る。これによりprovider busy、resource busy、booking calendar、active/inactive output bindingをprovider横断で同時採用できない。lockは設定transactionだけに限定し、Google通信中は保持しない。
 
+作成前の`PREPARING`で処理が中断した場合は、同じPOSTへ`operation: "cancel_preparing"`を明示する。現在のOWNERかつGoogle接続本人と元commandのfingerprintを照合し、nonceを変更してから`FAILED_BEFORE_CREATE` / `PREPARATION_CANCELLED`へ終了する。Google通信は行わず、新commandで作成を開始できる。元mappingが変わった後も元commandの未送信状態は安全に終了できるが、`CREATING` / `UNCERTAIN`はこの操作で解除しない。
+
 このbackendに含めないもの：初期anchor、Airbnb側への実接続、bindingのactive化、setup UI、observerとtyped receipt、予約reader、本番flag有効化、PWA通し、伝播SLO実測。これらの受入が終わるまで専用calendarは配送対象ではない。
 
 ### Issue #278 の初期anchor backend
@@ -75,6 +77,8 @@ Issue #275 が正常完了したinactive bindingに対してだけ、OWNER本人
 serverはprovider inventory mutexを各transactionの最初に取り、外部通信中はDB lockを保持しない。毎回、現在OWNERかつGoogle接続本人、activeな数値Airbnb対象、未失効・非quarantine account、既存3scope、#275の`READY_FOR_CONNECTION`と一致するinactive binding、provider横断の入力calendar非衝突、live canonical occurrence、既存desired rowとshared inventoryの一致、未解決の通常配送がないことを再検証する。desired rowやoccurrenceを初期化処理から作らない。
 
 journalは`PREPARING`の後、Google event I/O前に`INITIALIZING`を保存する。provider/account/listing/occurrence/actor/command、account・mapping・binding・connection generation、calendar/scope digest、desired state/version/UTC区間、operation nonce/epochだけを保持し、credential・calendar ID・raw bodyは保持しない。同じcommandの再送はinsertせず、`INITIALIZING` / `UNCERTAIN`の明示`inspect`だけが新しいnonce/epochを取得してGET-only照合する。missing・読取失敗・設定/token失敗では`UNCERTAIN` fenceを残し、別commandや自動initialize retryで回避できない。古いcallbackはnonce/epoch CASで新しいinspection結果を上書きできない。
+
+`PREPARING`で中断したcommandの明示`inspect`は、Google通信をせずnonce/epochを更新して古い実行を無効化し、`FAILED_BEFORE_INITIALIZE` / `PREPARATION_CANCELLED`へ安全に終了する。その後は新しいcommandで準備できる。`INITIALIZING`以降はこの未送信扱いを適用せず、結果不明のfenceとGET-only照合を維持する。
 
 この段階ではbindingをactiveにせず、Airbnb接続・activation・UI・scheduler・readerを追加しない。Google側のanchor確認だけでAirbnb反映済みとは扱わない。
 

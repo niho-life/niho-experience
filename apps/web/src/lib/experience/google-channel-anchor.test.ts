@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ config: { apiMode: "http", hostConsoleEnabled: true } }));
 const mocks = vi.hoisted(() => ({
-  prepare: vi.fn(), get: vi.fn(), markInitializing: vi.fn(), assertCurrent: vi.fn(),
+  prepare: vi.fn(), cancelPreparing: vi.fn(), get: vi.fn(), markInitializing: vi.fn(), assertCurrent: vi.fn(),
   saveVerified: vi.fn(), failBefore: vi.fn(), saveStopped: vi.fn(), saveUncertain: vi.fn(),
   assertOwner: vi.fn(), saveRotated: vi.fn(), initialize: vi.fn(), inspect: vi.fn(), refresh: vi.fn(),
   open: vi.fn(), seal: vi.fn(),
@@ -12,7 +12,7 @@ vi.mock("@/lib/config", () => ({ config: state.config }));
 vi.mock("@niho-experience/experience-store", async (original) => {
   const actual = await original<typeof import("@niho-experience/experience-store")>();
   return { ...actual, GoogleChannelAnchorRepository: class {
-    prepare = mocks.prepare; get = mocks.get; markInitializing = mocks.markInitializing;
+    prepare = mocks.prepare; cancelPreparing = mocks.cancelPreparing; get = mocks.get; markInitializing = mocks.markInitializing;
     assertCurrent = mocks.assertCurrent; saveVerified = mocks.saveVerified;
     failBeforeInitialize = mocks.failBefore; saveStopped = mocks.saveStopped;
     saveUncertain = mocks.saveUncertain; assertCurrentOwnerAccess = mocks.assertOwner;

@@ -102,6 +102,62 @@ describe.skipIf(!databaseUrl)("Google output setup runtime/repository/create int
     } finally { await cleanup(value); }
   });
 
+  it("fences an abandoned PREPARING setup without Google calls and permits a new command", async () => {
+    const value = await fixture();
+    let creates = 0;
+    try {
+      const repository = new GoogleChannelSetupRepository(value.pool);
+      const original = await repository.prepare(actorA, setupInput());
+      await value.pool.query("UPDATE channel_listings SET mapping_version=mapping_version+1 WHERE id='listing-a'");
+      const neverCall = { ...injected(async () => { throw new Error("must not call Google"); }), refreshToken: async () => { throw new Error("must not refresh"); } };
+      const cancel = { ...setupInput(), operation: "cancel_preparing" as const };
+      expect((await executeGoogleChannelSetup(value.pool, actorA, cancel, neverCall)).reason).toBe("PREPARATION_CANCELLED");
+      expect((await executeGoogleChannelSetup(value.pool, actorA, cancel, neverCall)).state).toBe("FAILED_BEFORE_CREATE");
+      await expect(repository.markCreating(original)).rejects.toThrow();
+      await expect(repository.failBeforeCreate(original, "GOOGLE_UNAVAILABLE")).rejects.toBeInstanceOf(StoreConflictError);
+      const next = await executeGoogleChannelSetup(value.pool, actorA, { ...setupInput(command(2)), expectedMappingVersion: 2 }, injected(async () => {
+        creates += 1; return Response.json({ id: "synthetic-recovered-output" });
+      }));
+      expect(next.state).toBe("READY_FOR_CONNECTION");
+      expect(creates).toBe(1);
+    } finally { await cleanup(value); }
+  });
+
+  it("never cancels a CREATING or UNCERTAIN setup and rejects another actor or changed command", async () => {
+    const value = await fixture();
+    try {
+      const repository = new GoogleChannelSetupRepository(value.pool);
+      const prepared = await repository.prepare(actorA, setupInput());
+      await expect(repository.cancelPreparing({ ...actorA, nihoUserId: "other-owner" }, setupInput())).rejects.toBeInstanceOf(StoreAccessDeniedError);
+      await expect(repository.cancelPreparing(actorA, { ...setupInput(), expectedMappingVersion: 2 })).rejects.toBeInstanceOf(StoreConflictError);
+      await repository.markCreating(prepared);
+      await expect(repository.cancelPreparing(actorA, setupInput())).rejects.toBeInstanceOf(StoreConflictError);
+      await repository.markUncertain(prepared, "GOOGLE_UNAVAILABLE");
+      await expect(repository.cancelPreparing(actorA, setupInput())).rejects.toBeInstanceOf(StoreConflictError);
+      expect((await value.pool.query("SELECT phase,operation_nonce FROM google_channel_setup_journals")).rows[0]).toEqual({ phase: "UNCERTAIN", operation_nonce: prepared.operationNonce });
+    } finally { await cleanup(value); }
+  });
+
+  it("prevents a suspended pre-create execution from sending after cancellation", async () => {
+    const value = await fixture();
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    let creates = 0;
+    try {
+      const deps = injected(async () => { creates += 1; return Response.json({ id: "must-not-create" }); });
+      const original = executeGoogleChannelSetup(value.pool, actorA, setupInput(), {
+        ...deps, refreshToken: async () => { entered(); await waiting; return deps.refreshToken(); },
+      });
+      const stopped = expect(original).rejects.toBeInstanceOf(StoreConflictError);
+      await started;
+      expect((await executeGoogleChannelSetup(value.pool, actorA, { ...setupInput(), operation: "cancel_preparing" }, deps)).reason).toBe("PREPARATION_CANCELLED");
+      release(); await stopped;
+      expect(creates).toBe(0);
+    } finally { release(); await cleanup(value); }
+  });
+
   it("allows only the first concurrent same-command request to call calendars.insert", async () => {
     const value = await fixture();
     let creates = 0;

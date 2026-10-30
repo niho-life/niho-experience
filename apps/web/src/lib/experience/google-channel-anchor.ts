@@ -58,6 +58,10 @@ export async function executeGoogleChannelAnchor(
     await repository.assertCurrentOwnerAccess(actor);
     return value;
   };
+  if (input.operation === "inspect") {
+    const cancelled = await repository.cancelPreparing(actor, input);
+    if (cancelled) return ownerResult(Promise.resolve(cancelled));
+  }
   const snapshot = await repository.prepare(actor, input);
   if (!snapshot.canPerform) return ownerResult(Promise.resolve(snapshot.record));
 

@@ -143,6 +143,77 @@ describe.skipIf(!databaseUrl)("Google anchor real store/executor/helper integrat
     } finally { await cleanup(value); }
   });
 
+  it("fences a crashed PREPARING command without Google I/O and allows a fresh command", async () => {
+    const value = await fixture();
+    let event: Record<string, unknown> | undefined;
+    let writes = 0;
+    try {
+      const repository = new GoogleChannelAnchorRepository(value.pool);
+      const abandoned = await repository.prepare(actor, input());
+      const neverCallGoogle = dependencies(async () => { throw new Error("must not call Google"); });
+      const inspected = await executeGoogleChannelAnchor(value.pool, actor, input(command(1), "inspect"), {
+        ...neverCallGoogle, refreshToken: async () => { throw new Error("must not refresh token"); },
+      });
+      expect(inspected).toMatchObject({ state: "FAILED_BEFORE_INITIALIZE", reason: "PREPARATION_CANCELLED" });
+      expect((await executeGoogleChannelAnchor(value.pool, actor, input(command(1), "inspect"), neverCallGoogle)).state).toBe("FAILED_BEFORE_INITIALIZE");
+      await expect(repository.markInitializing(abandoned)).rejects.toBeInstanceOf(StoreConflictError);
+      await expect(repository.failBeforeInitialize(abandoned, "GOOGLE_UNAVAILABLE")).rejects.toBeInstanceOf(StoreConflictError);
+      const stored = (await value.pool.query("SELECT operation_nonce,operation_epoch FROM google_channel_anchor_journals")).rows[0];
+      expect(stored.operation_nonce).not.toBe(abandoned.operationNonce);
+      expect(stored.operation_epoch).toBe("2");
+      const next = await executeGoogleChannelAnchor(value.pool, actor, input(command(2)), dependencies(async (_url, init) => {
+        if (init?.method === "POST") {
+          writes += 1;
+          event = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return Response.json({ id: event.id, etag: '"ack"' });
+        }
+        return event ? Response.json({ ...event, status: "confirmed", etag: '"verified"' }) : new Response(null, { status: 404 });
+      }));
+      expect(next.state).toBe("GOOGLE_VERIFIED");
+      expect(writes).toBe(1);
+    } finally { await cleanup(value); }
+  });
+
+  it("prevents a suspended token-refresh execution from sending after PREPARING recovery", async () => {
+    const value = await fixture();
+    let writes = 0;
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    try {
+      const deps = dependencies(async () => { writes += 1; throw new Error("must not send event I/O"); });
+      const original = executeGoogleChannelAnchor(value.pool, actor, input(), {
+        ...deps, refreshToken: async () => { entered(); await blocked; return deps.refreshToken(); },
+      });
+      const stopped = expect(original).rejects.toBeInstanceOf(StoreConflictError);
+      await started;
+      const recovered = await executeGoogleChannelAnchor(value.pool, actor, input(command(1), "inspect"), deps);
+      expect(recovered.reason).toBe("PREPARATION_CANCELLED");
+      release();
+      await stopped;
+      expect(writes).toBe(0);
+      expect((await value.pool.query("SELECT phase FROM google_channel_anchor_journals")).rows[0].phase).toBe("FAILED_BEFORE_INITIALIZE");
+    } finally { release(); await cleanup(value); }
+  });
+
+  it("can end an unsubmitted command after the desired version and live rule change", async () => {
+    const value = await fixture();
+    try {
+      const repository = new GoogleChannelAnchorRepository(value.pool);
+      const abandoned = await repository.prepare(actor, input());
+      await value.pool.query("UPDATE channel_desired_states SET desired_version=desired_version+1 WHERE listing_id='listing-a'");
+      await value.pool.query("UPDATE schedule_rules SET local_start_time='11:00' WHERE id='rule-a'");
+      const recovered = await executeGoogleChannelAnchor(value.pool, actor, input(command(1), "inspect"), {
+        ...dependencies(async () => { throw new Error("must not call Google"); }),
+        refreshToken: async () => { throw new Error("must not refresh token"); },
+      });
+      expect(recovered.reason).toBe("PREPARATION_CANCELLED");
+      await expect(repository.markInitializing(abandoned)).rejects.toThrow();
+      expect((await value.pool.query("SELECT count(*)::int AS count FROM google_channel_anchor_journals WHERE phase IN ('PREPARING','INITIALIZING','UNCERTAIN')")).rows[0].count).toBe(0);
+    } finally { await cleanup(value); }
+  });
+
   it("fences the original nonce when explicit inspection claims a new operation epoch", async () => {
     const value = await fixture();
     try {
