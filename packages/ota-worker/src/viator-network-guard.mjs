@@ -72,7 +72,13 @@ export function viatorListStateCoversTarget(value, job) {
   const optionScope = optionEntries.length === 0 || (optionEntries.length === 1
     && optionEntries[0][0] === job.target.externalProductId
     && (optionEntries[0][1].length === 0 || (optionEntries[0][1].length === 1 && optionEntries[0][1][0] === job.target.externalOptionId)));
-  return value.startDate <= date && value.endDate >= date && productScope && optionScope;
+  const targetPage = value.perDayPagination[date];
+  const completeTargetPage = targetPage?.hasMore === false && targetPage.cursor >= 1;
+  // On a date-picker jump the returned range still describes the preceding UI
+  // range. The response's per-day cursor proves that the jumped date was read.
+  const dateScope = (value.startDate <= date && value.endDate >= date)
+    || (value.loadDirection === "BIDIRECTIONAL" && value.jumpToDate === date);
+  return dateScope && completeTargetPage && productScope && optionScope;
 }
 
 export function validateViatorUpdate(body, job, snapshot) {

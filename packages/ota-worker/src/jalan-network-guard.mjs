@@ -63,7 +63,7 @@ export function validateJalanSummaryUrl(url, job) {
   return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(one("callback"))
     && (one("dspBaseDate") === "" || canonicalCompactDate(one("dspBaseDate")))
     && /^\d{1,2}$/.test(one("dspRange")) && Number(one("dspRange")) >= 1 && Number(one("dspRange")) <= 31
-    && /^\d{1,3}$/.test(one("pageSize")) && Number(one("pageSize")) >= 1 && Number(one("pageSize")) <= 100
+    && /^\d{1,3}$/.test(one("pageSize")) && Number(one("pageSize")) <= 100
     && /^\d{1,4}$/.test(one("pageNo")) && Number(one("pageNo")) >= 1
     && /^[A-Za-z0-9_-]{0,64}$/.test(one("schdlKbn"))
     && /^[A-Za-z0-9_-]{0,128}$/.test(one("groupSchdlId"))

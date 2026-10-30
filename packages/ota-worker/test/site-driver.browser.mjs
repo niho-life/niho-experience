@@ -32,9 +32,9 @@ for (const definition of [
     assert.equal(fixture.state.writes, 2); assert.equal(definition.isClosed(fixture.state), false);
     if (definition.name === "Viator") assert.deepEqual(fixture.state.requests[0].availabilityListState.perDayPagination,
       { "2099-01-01": { cursor: 1, hasMore: false } });
-    assert.ok(fixture.state.reads.some((read) => (read.startDate ?? read.dspBaseDate) === fixture.state.initialDate.replaceAll("-", ""))
-      || fixture.state.reads.some((read) => read.startDate === fixture.state.initialDate));
-    assert.ok(fixture.state.reads.some((read) => (read.startDate ?? read.dspBaseDate) === "2099-01-01")
+    assert.ok(fixture.state.reads.some((read) => definition.name === "Jalan"
+      ? read.dspBaseDate === "" : read.startDate === fixture.state.initialDate));
+    assert.ok(fixture.state.reads.some((read) => read.jumpToDate === "2099-01-01")
       || fixture.state.reads.some((read) => read.dspBaseDate === "20990101"));
   });
 

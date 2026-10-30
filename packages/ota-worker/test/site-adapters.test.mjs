@@ -78,6 +78,16 @@ test("Viator bootstrap read is bounded but cannot authorize a target write", () 
   assert.equal(validateViatorReadBody({ ...bootstrap, loadDirection: "UNKNOWN" }), false);
 });
 
+test("Viator jump uses a complete canonical day cursor when returned range still precedes it", () => {
+  const jumped = { ...structuredClone(listState), startDate: "2098-12-01", endDate: "2098-12-15", loadDirection: "BIDIRECTIONAL" };
+  assert.equal(viatorListStateCoversTarget(jumped, viatorJob), true);
+  assert.equal(viatorListStateCoversTarget({ ...jumped, jumpToDate: "2099-01-02" }, viatorJob), false);
+  assert.equal(viatorListStateCoversTarget({ ...jumped, perDayPagination: {} }, viatorJob), false);
+  for (const page of [{ cursor: 0, hasMore: false }, { cursor: 1, hasMore: true }]) {
+    assert.equal(viatorListStateCoversTarget({ ...jumped, perDayPagination: { "2099-01-01": page } }, viatorJob), false);
+  }
+});
+
 test("Viator guard allows the bounded read POST and one exact write with interception preflight", async () => {
   let preflights = 0; let contextChecks = 0;
   const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: "http://127.0.0.1:4321",
@@ -213,6 +223,7 @@ test("Jalan summary query requires the observed exact keys, bounded values and n
   const base = "http://127.0.0.1/stateful/schdl/client/summary?callback=cb&dspBaseDate=20990101&dspRange=14&pageSize=14&pageNo=1&schdlKbn=&groupSchdlId=&lessonSchdlId=l000000001&includeSaleStops=true&_=1";
   assert.equal(validateJalanSummaryUrl(new URL(base), jalanJob), true);
   assert.equal(validateJalanSummaryUrl(new URL(base.replace("dspBaseDate=20990101", "dspBaseDate=")), jalanJob), true);
+  assert.equal(validateJalanSummaryUrl(new URL(base.replace("pageSize=14", "pageSize=0")), jalanJob), true);
   assert.equal(validateJalanSummaryUrl(new URL(base.replace("dspBaseDate=20990101", "dspBaseDate=invalid")), jalanJob), false);
   assert.equal(validateJalanSummaryUrl(new URL(`${base}&pageNo=2`), jalanJob), false);
   assert.equal(validateJalanSummaryUrl(new URL(`${base}&price=1`), jalanJob), false);
