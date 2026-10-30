@@ -35,7 +35,7 @@ export { CHANNEL_SITES } from "./channel-sites.ts";
 export type ChannelSite = typeof CHANNEL_SITES[number] | (string & {});
 export type ChannelConnectionMode = "BROWSER" | "GOOGLE" | "API";
 export type ChannelAction = "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
-export type ChannelJobPurpose = "AVAILABILITY" | "RESERVATION_WINDOW";
+export type ChannelJobPurpose = "AVAILABILITY" | "RESERVATION_WINDOW" | "SLOT_RETIREMENT";
 export type ChannelDesiredState = "OPEN" | "CLOSED";
 export type ChannelOutcome = "VERIFIED" | "RESERVATION_VERIFIED" | "AUTH_REQUIRED" | "NEEDS_REVIEW" | "UNKNOWN_AFTER_SAVE" | "RETRY_WAIT" | "SUPERSEDED";
 
@@ -337,6 +337,24 @@ const ACCOUNT_COLUMNS = `id,provider_id,site,external_account_id,display_name,op
   revoked_at,version,quarantined_at,created_at,updated_at`;
 const LISTING_COLUMNS = `id,provider_id,account_id,product_id,external_product_id,external_option_id,time_zone,adapter,
   adapter_version,connection_mode,can_observe,can_read_reservations,can_close,can_open,can_create,active,mapping_version,created_at,updated_at`;
+
+/**
+ * Shown through the existing desired-row error while any old-time slot of the
+ * occurrence could not be closed and read back. Other runtime errors never
+ * overwrite it; it is cleared only when no retirement still needs review.
+ */
+const SLOT_RETIREMENT_WARNING = "旧日時の掲載枠を停止できていません。掲載先で確認してください。";
+
+/**
+ * Sites whose slots are told apart by their end as well as their start (jalan-network-guard.mjs matches startHm
+ * and endHm). The others key a slot by its start only (gyg-driver.mjs: option and local start; Viator: date and start).
+ */
+const SLOT_KEYED_BY_END: ReadonlySet<string> = new Set(["Jalan"]);
+
+/** Whether two times name the same external slot on the site, so closing one would close the other. */
+function sameExternalSlot(site: unknown, aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart === bStart && (!SLOT_KEYED_BY_END.has(String(site)) || aEnd === bEnd);
+}
 
 interface DispatchCursor { readonly listingId: string; readonly ruleId: string; readonly occurrenceId: string }
 interface DispatchPage { readonly fromDate: string; readonly toDate: string; readonly after?: DispatchCursor }
@@ -1196,6 +1214,7 @@ export class ChannelRuntime {
       const listingId = text(listing, "id");
       if (page?.after && listingId < page.after.listingId) continue;
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,19))", [`channel-listing:${text(listing, "id")}`]);
+      await this.#reviewOrphanedRetirements(client, listingId);
       const rules = await client.query<DbRow>(`SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 ORDER BY id COLLATE "C"`, [listing.provider_id, listing.product_id]);
       for (const ruleRow of rules.rows) {
         const storedRule = scheduleRuleFromRow(ruleRow);
@@ -1256,21 +1275,152 @@ export class ChannelRuntime {
          source_end_at=$8,updated_at=$9,desired_changed_at=$9 WHERE listing_id=$1 AND occurrence_id=$2`,
       [listing.id, occurrence.id, desiredState, reason, desiredVersion, mappingVersion, occurrence.startUtc, occurrence.endUtc, this.#nowIso()],
     );
+    if (isoValue(current, "source_start_at") !== occurrence.startUtc || isoValue(current, "source_end_at") !== occurrence.endUtc) {
+      await this.#retireRescheduledSlot(client, listing, current, occurrence);
+    }
     return { desiredVersion };
+  }
+
+  /**
+   * Runs in the desired-row transaction when an occurrence keeps its ID but
+   * moves in time. `previous` is the locked desired row before the move. The
+   * new time stays with the normal desired row; only the old time is retired.
+   */
+  async #retireRescheduledSlot(client: PoolClient, listing: DbRow, previous: DbRow, occurrence: Occurrence): Promise<void> {
+    const nowUtc = this.#nowIso();
+    const listingId = text(listing, "id");
+    // A -> B -> A: the restored slot belongs to the desired row again (the site's slot, not only the exact times).
+    const restored = await client.query<DbRow>(
+      `UPDATE channel_slot_retirements SET status='SUPERSEDED',reason='TIME_RESTORED',updated_at=$5
+        WHERE listing_id=$1 AND occurrence_id=$2 AND source_start_at=$3 AND ($6::boolean IS FALSE OR source_end_at=$4)
+          AND status IN ('PENDING','NEEDS_REVIEW') RETURNING id`,
+      [listingId, occurrence.id, occurrence.startUtc, occurrence.endUtc, nowUtc, SLOT_KEYED_BY_END.has(String(listing.site))],
+    );
+    if (restored.rows.length > 0) {
+      await client.query(
+        `UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2
+          WHERE purpose='SLOT_RETIREMENT' AND slot_retirement_id=ANY($1::uuid[]) AND status='QUEUED'`,
+        [restored.rows.map((row) => text(row, "id")), nowUtc],
+      );
+    }
+    // GOOGLE listings are out of scope here: the Google-only output calendar
+    // is handled by a separate issue, and its delivery stops on a timing mismatch.
+    const verifiedClosed = previous.observed_state === "CLOSED"
+      && previous.observed_desired_version !== null && previous.observed_mapping_version !== null
+      && integer(previous, "observed_desired_version") === integer(previous, "desired_version")
+      && integer(previous, "observed_mapping_version") === integer(previous, "mapping_version");
+    // A slot that has already started cannot be sold, and sites drop past slots
+    // from their availability pages, so closing it would only fail as drift.
+    const oldTimeStarted = isoValue(previous, "source_start_at") <= nowUtc;
+    // Only the end moved on a site that keys slots by their start: the old time is the current slot, so nothing retires.
+    const slotMoved = !sameExternalSlot(listing.site, isoValue(previous, "source_start_at"), isoValue(previous, "source_end_at"),
+      occurrence.startUtc, occurrence.endUtc);
+    // The old time was offered under an earlier mapping (another external product or option): this listing's target
+    // is not where it was sold, so staff check it instead of closing the new target's slot at that time.
+    const mappingChanged = integer(previous, "mapping_version") !== integer(listing, "mapping_version");
+    if (listing.connection_mode !== "GOOGLE" && slotMoved && !verifiedClosed && !oldTimeStarted) {
+      // OPEN, unverified, or an older observation: fail safe and close the old time.
+      const closable = !mappingChanged && listing.can_close === true && this.#adapterSupports(listing, "SET_CLOSED");
+      const reviewReason = mappingChanged ? "MAPPING_CHANGED" : "CLOSE_UNSUPPORTED";
+      const saved = await client.query<DbRow>(
+        `INSERT INTO channel_slot_retirements
+          (id,provider_id,listing_id,occurrence_id,source_start_at,source_end_at,mapping_version,account_version,retirement_version,status,reason)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,1,$9,$10)
+         ON CONFLICT (listing_id,occurrence_id,source_start_at,source_end_at) DO UPDATE
+           SET mapping_version=EXCLUDED.mapping_version,account_version=EXCLUDED.account_version,
+               retirement_version=channel_slot_retirements.retirement_version+1,status=EXCLUDED.status,
+               reason=EXCLUDED.reason,updated_at=$11
+         RETURNING id,retirement_version`,
+        [randomUUID(), listing.provider_id, listingId, occurrence.id, previous.source_start_at, previous.source_end_at,
+          mappingChanged ? previous.mapping_version : listing.mapping_version, listing.account_version,
+          closable ? "PENDING" : "NEEDS_REVIEW", closable ? null : reviewReason, nowUtc],
+      );
+      const retirement = saved.rows[0]!;
+      if (closable) {
+        await client.query(
+          `UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$2
+            WHERE purpose='SLOT_RETIREMENT' AND slot_retirement_id=$1::uuid AND status='QUEUED'`,
+          [retirement.id, nowUtc],
+        );
+        await client.query(
+          `INSERT INTO channel_jobs
+            (id,provider_id,account_id,listing_id,occurrence_id,action,purpose,slot_retirement_id,account_version,desired_version,mapping_version,
+             target_site,target_external_account_id,target_external_product_id,target_external_option_id,target_time_zone,target_adapter,
+             target_adapter_version,target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
+           VALUES ($1,$2,$3,$4,$5,'SET_CLOSED','SLOT_RETIREMENT',$6::uuid,$7,$8,$9,$10,$11,$12,$13,'Asia/Tokyo',$14,$15,$16,$17,$18,100,NULL)
+           ON CONFLICT (slot_retirement_id,desired_version) WHERE purpose='SLOT_RETIREMENT' DO NOTHING`,
+          [randomUUID(), listing.provider_id, listing.account_id, listingId, occurrence.id, retirement.id, listing.account_version,
+            integer(retirement, "retirement_version"), listing.mapping_version, listing.site, listing.external_account_id,
+            listing.external_product_id, listing.external_option_id, listing.adapter, listing.adapter_version, listing.connection_mode,
+            previous.source_start_at, previous.source_end_at],
+        );
+      }
+    }
+    await this.#syncRetirementWarning(client, listingId, occurrence.id);
+  }
+
+  /** Keeps the desired-row warning equal to "some old-time slot of this occurrence needs review". */
+  async #syncRetirementWarning(client: PoolClient, listingId: string, occurrenceId: string): Promise<void> {
+    await client.query(
+      `UPDATE channel_desired_states d
+          SET last_error=CASE
+            WHEN EXISTS (SELECT 1 FROM channel_slot_retirements r
+              WHERE r.listing_id=d.listing_id AND r.occurrence_id=d.occurrence_id AND r.status='NEEDS_REVIEW') THEN $3
+            WHEN d.last_error=$3 THEN NULL ELSE d.last_error END
+        WHERE d.listing_id=$1 AND d.occurrence_id=$2`,
+      [listingId, occurrenceId, SLOT_RETIREMENT_WARNING],
+    );
+  }
+
+  /** Only the job's own PENDING retirement version moves; a newer or finished retirement is left alone. */
+  async #finishRetirement(client: PoolClient, job: DbRow, status: "CLOSED_VERIFIED" | "NEEDS_REVIEW" | "SUPERSEDED", reason: string | null): Promise<void> {
+    const updated = await client.query<DbRow>(
+      `UPDATE channel_slot_retirements SET status=$3,reason=$4,updated_at=$5
+        WHERE id=$1::uuid AND retirement_version=$2 AND status='PENDING' RETURNING listing_id,occurrence_id`,
+      [job.slot_retirement_id, job.desired_version, status, reason, this.#nowIso()],
+    );
+    const row = updated.rows[0];
+    if (row) await this.#syncRetirementWarning(client, text(row, "listing_id"), text(row, "occurrence_id"));
+  }
+
+  /**
+   * A PENDING retirement whose current job was superseded outside the result
+   * path (account or listing update) has no executor left. Make it visible.
+   * Callers hold the provider inventory mutex and the listing lock.
+   */
+  async #reviewOrphanedRetirements(client: PoolClient, listingId: string): Promise<void> {
+    const orphaned = await client.query<DbRow>(
+      `UPDATE channel_slot_retirements r SET status='NEEDS_REVIEW',reason='AUTHORITY_CHANGED',updated_at=$2
+        WHERE r.listing_id=$1 AND r.status='PENDING' AND NOT EXISTS (
+          SELECT 1 FROM channel_jobs j WHERE j.purpose='SLOT_RETIREMENT' AND j.slot_retirement_id=r.id
+            AND j.desired_version=r.retirement_version AND j.status IN ('QUEUED','LEASED'))
+        RETURNING r.occurrence_id`,
+      [listingId, this.#nowIso()],
+    );
+    for (const occurrenceId of new Set(orphaned.rows.map((row) => text(row, "occurrence_id")))) {
+      await this.#syncRetirementWarning(client, listingId, occurrenceId);
+    }
   }
 
   async #enqueueDesiredJob(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, desiredVersion: number): Promise<number> {
     const action = desiredAction(desiredState);
     const capability = (action === "SET_OPEN" ? listing.can_open === true : listing.can_close === true) && this.#adapterSupports(listing, action);
     if (!capability) {
-      await client.query("UPDATE channel_desired_states SET last_error=$3 WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id, `${action} is unsupported by this mapping.`]);
+      await client.query(
+        "UPDATE channel_desired_states SET last_error=CASE WHEN last_error=$4 THEN last_error ELSE $3 END WHERE listing_id=$1 AND occurrence_id=$2",
+        [listing.id, occurrence.id, `${action} is unsupported by this mapping.`, SLOT_RETIREMENT_WARNING],
+      );
       return 0;
     }
     const nowUtc = this.#nowIso();
     const accountUsable = listing.account_active === true && listing.revoked_at === null
       && (listing.delegated_until === null || isoValue(listing, "delegated_until") > nowUtc) && listing.quarantined_at === null;
     if (!accountUsable) {
-      await client.query("UPDATE channel_desired_states SET last_error='External account is inactive, expired, revoked, or quarantined.' WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id]);
+      await client.query(
+        `UPDATE channel_desired_states SET last_error=CASE WHEN last_error=$3 THEN last_error
+           ELSE 'External account is inactive, expired, revoked, or quarantined.' END WHERE listing_id=$1 AND occurrence_id=$2`,
+        [listing.id, occurrence.id, SLOT_RETIREMENT_WARNING],
+      );
       return 0;
     }
     const existing = await client.query(
@@ -1279,7 +1429,10 @@ export class ChannelRuntime {
       [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version],
     );
     if (existing.rows[0]) return 0;
-    await client.query("UPDATE channel_desired_states SET last_error=NULL WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id]);
+    await client.query(
+      "UPDATE channel_desired_states SET last_error=CASE WHEN last_error=$3 THEN last_error ELSE NULL END WHERE listing_id=$1 AND occurrence_id=$2",
+      [listing.id, occurrence.id, SLOT_RETIREMENT_WARNING],
+    );
     await client.query(
       "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',updated_at=$3 WHERE listing_id=$1 AND occurrence_id=$2 AND status='QUEUED' AND purpose='AVAILABILITY'",
       [listing.id, occurrence.id, nowUtc],
@@ -1381,12 +1534,24 @@ export class ChannelRuntime {
         return null;
       }
       if (existingLease.rows[0]) return null;
+      // An expiring retirement also updates its retirement and desired-row
+      // warning, so take those providers' inventory mutex first, as dispatchers do.
+      const retirementProviders = (await client.query<DbRow>(
+        `SELECT DISTINCT provider_id FROM channel_jobs
+          WHERE status='QUEUED' AND purpose='SLOT_RETIREMENT'
+            AND (attempt_count>=5 OR (job_deadline_at IS NOT NULL AND job_deadline_at<=$1))`, [nowUtc],
+      )).rows.map((row) => text(row, "provider_id")).sort();
+      for (const providerId of retirementProviders) await lockProviderInventory(client, providerId);
       const expired = await client.query<DbRow>(
         `UPDATE channel_jobs j SET status='FINISHED',outcome='NEEDS_REVIEW',updated_at=$1
           WHERE j.status='QUEUED' AND (j.attempt_count>=5 OR (j.job_deadline_at IS NOT NULL AND j.job_deadline_at<=$1))
-          RETURNING j.account_id`, [nowUtc],
+            AND (j.purpose<>'SLOT_RETIREMENT' OR j.provider_id=ANY($2::text[]))
+          RETURNING j.account_id,j.purpose,j.slot_retirement_id,j.desired_version`, [nowUtc, retirementProviders],
       );
-      for (const row of expired.rows) await this.#quarantine(client, text(row, "account_id"), "RETRY_DEADLINE");
+      for (const row of expired.rows) {
+        await this.#quarantine(client, text(row, "account_id"), "RETRY_DEADLINE");
+        if (row.purpose === "SLOT_RETIREMENT") await this.#finishRetirement(client, row, "NEEDS_REVIEW", "RETRY_DEADLINE");
+      }
       const deployedActions = this.#deployedActionKeys();
       const deployedReservationAdapters = this.#deployedReaderKeys();
       const result = await client.query<DbRow>(
@@ -1394,7 +1559,9 @@ export class ChannelRuntime {
           JOIN channel_external_accounts a ON a.id=j.account_id
           JOIN channel_listings l ON l.id=j.listing_id
           JOIN experience_products p ON p.provider_id=j.provider_id AND p.id=l.product_id
-          JOIN channel_desired_states d ON d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
+          LEFT JOIN channel_desired_states d ON j.purpose IN ('AVAILABILITY','RESERVATION_WINDOW')
+            AND d.listing_id=j.listing_id AND d.occurrence_id=j.occurrence_id
+          LEFT JOIN channel_slot_retirements r ON j.purpose='SLOT_RETIREMENT' AND r.id=j.slot_retirement_id
           JOIN channel_worker_accounts wa ON wa.account_id=j.account_id AND wa.worker_id=$1 AND wa.revoked_at IS NULL
           LEFT JOIN external_reservation_read_dispatch_states rs ON rs.pending_job_id=j.id
          WHERE j.status='QUEUED' AND j.next_attempt_at<=$2 AND (j.job_deadline_at IS NULL OR j.job_deadline_at>$2)
@@ -1402,15 +1569,20 @@ export class ChannelRuntime {
            -- MANUAL_HANDLING: staff own the external profile, so not even an OBSERVE may run until stop-confirmed recovery.
            AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE' AND a.quarantine_reason<>'MANUAL_HANDLING'))
            AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version AND p.status='PUBLISHED'
-           AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
-           AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
-                AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED')))
-             OR (j.purpose='RESERVATION_WINDOW' AND j.action='OBSERVE' AND rs.halted_at IS NULL))
-           AND (j.purpose='AVAILABILITY' OR (j.dispatch_worker_id=$1 AND j.dispatch_assignment_version=wa.version))
+           AND ((j.purpose IN ('AVAILABILITY','RESERVATION_WINDOW')
+               AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
+               AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
+                    AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED')))
+                 OR (j.purpose='RESERVATION_WINDOW' AND j.action='OBSERVE' AND rs.halted_at IS NULL)))
+             OR (j.purpose='SLOT_RETIREMENT' AND j.action='SET_CLOSED' AND r.status='PENDING' AND r.retirement_version=j.desired_version
+               AND r.listing_id=j.listing_id AND r.occurrence_id=j.occurrence_id
+               AND r.mapping_version=j.mapping_version AND r.account_version=j.account_version
+               AND r.source_start_at=j.source_start_at AND r.source_end_at=j.source_end_at))
+           AND (j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT') OR (j.dispatch_worker_id=$1 AND j.dispatch_assignment_version=wa.version))
            AND ((j.action='SET_OPEN' AND l.can_open) OR (j.action='SET_CLOSED' AND l.can_close)
              OR (j.action='OBSERVE' AND l.can_observe AND (j.purpose='AVAILABILITY' OR l.can_read_reservations)))
            AND (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version || '/' || j.action)=ANY($3::text[])
-           AND (j.purpose='AVAILABILITY' OR (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($4::text[]))
+           AND (j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT') OR (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($4::text[]))
            -- New OPEN stays QUEUED (no attempt/deadline) while any live Studio of the provider is held or stale.
            -- preflight does not repeat this; the seconds between claim and preflight are accepted.
            AND (j.action<>'SET_OPEN' OR NOT ${providerOpenHeldSql("j.provider_id", "$2", "$5")})
@@ -2099,6 +2271,7 @@ export class ChannelRuntime {
         await this.#quarantine(client, text(job, "account_id"), "LEASE_EXPIRED");
         return { conflict: "Lease or job deadline expired; the account remains locked." };
       }
+      if (job.purpose === "SLOT_RETIREMENT") return this.#preflightRetirement(client, job, nowUtc);
       const current = await client.query<DbRow>(
         `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,l.active AS listing_active,
                 a.site,l.product_id,l.mapping_version,l.can_open,l.can_close,l.can_observe,l.adapter,l.adapter_version,
@@ -2151,6 +2324,52 @@ export class ChannelRuntime {
     });
     if ("conflict" in result) throw new StoreConflictError(result.conflict);
     return result;
+  }
+
+  /**
+   * A retirement job is checked against its retirement row, never the
+   * new-time desired row. Closing an old slot is always the safe side, so
+   * live availability is not consulted and a vanished occurrence still closes.
+   */
+  async #preflightRetirement(client: PoolClient, job: DbRow, nowUtc: string): Promise<{ ready: true; desiredState: ChannelDesiredState } | { conflict: string }> {
+    const current = await client.query<DbRow>(
+      `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,l.active AS listing_active,
+              a.site,l.mapping_version,l.can_close,l.adapter,l.adapter_version,p.status AS product_status,
+              r.status AS retirement_status,r.retirement_version,r.listing_id AS retirement_listing_id,r.occurrence_id AS retirement_occurrence_id,
+              r.mapping_version AS retirement_mapping_version,r.account_version AS retirement_account_version,r.source_start_at,r.source_end_at
+         FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
+         JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+         JOIN channel_slot_retirements r ON r.id=$3::uuid
+        WHERE a.id=$1 AND l.id=$2 FOR SHARE OF a,l,r`,
+      [job.account_id, job.listing_id, job.slot_retirement_id],
+    );
+    const state = current.rows[0];
+    if (!state || state.account_active !== true || state.revoked_at !== null
+      || (state.delegated_until !== null && isoValue(state, "delegated_until") <= nowUtc) || state.listing_active !== true
+      || state.can_close !== true || state.product_status !== "PUBLISHED" || !this.#adapterSupports(state, "SET_CLOSED")
+      || state.quarantined_at !== null || job.action !== "SET_CLOSED") {
+      await this.#quarantine(client, text(job, "account_id"), "PREFLIGHT_AUTHORITY_STALE");
+      return { conflict: "Job authority is stale; the account remains locked." };
+    }
+    if (integer(state, "account_version") !== integer(job, "account_version")
+      || integer(state, "mapping_version") !== integer(job, "mapping_version")
+      || state.retirement_status !== "PENDING" || integer(state, "retirement_version") !== integer(job, "desired_version")
+      || state.retirement_listing_id !== job.listing_id || state.retirement_occurrence_id !== job.occurrence_id
+      || integer(state, "retirement_mapping_version") !== integer(job, "mapping_version")
+      || integer(state, "retirement_account_version") !== integer(job, "account_version")
+      || isoValue(state, "source_start_at") !== isoValue(job, "source_start_at") || isoValue(state, "source_end_at") !== isoValue(job, "source_end_at")) {
+      return { conflict: "Retirement snapshot is stale; the old lease remains locked until stopped." };
+    }
+    let occurrence: Occurrence | undefined;
+    try {
+      occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
+    } catch (error) {
+      if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
+    }
+    if (occurrence && sameExternalSlot(state.site, occurrence.startUtc, occurrence.endUtc, isoValue(job, "source_start_at"), isoValue(job, "source_end_at"))) {
+      return { conflict: "The retired slot is the current occurrence slot again; the old lease remains locked until stopped." };
+    }
+    return { ready: true, desiredState: "CLOSED" };
   }
 
   /**
@@ -2269,6 +2488,8 @@ export class ChannelRuntime {
       if (!job || job.status !== "LEASED" || job.leased_worker_id !== identity.workerId || typeof job.lease_digest !== "string"
         || !secureDigestMatch(job.lease_digest, input.leaseToken)) throw new StoreAccessDeniedError();
       const reservationJob = job.purpose === "RESERVATION_WINDOW";
+      const retirementJob = job.purpose === "SLOT_RETIREMENT";
+      const availabilityJob = !reservationJob && !retirementJob;
       if (!reservationJob && job.target_connection_mode === "GOOGLE" && input.outcome === "VERIFIED") {
         throw new StoreValidationError("GOOGLE jobs require independent Google delivery and Airbnb observation receipts.");
       }
@@ -2299,7 +2520,19 @@ export class ChannelRuntime {
       const observedMs = input.observedAtUtc === undefined ? Number.NaN : Date.parse(input.observedAtUtc);
       const observationTimeValid = Number.isFinite(observedMs) && observedMs >= Date.parse(isoValue(job, "lease_started_at"))
         && observedMs <= Math.min(Date.parse(isoValue(job, "lease_expires_at")), Date.parse(isoValue(job, "job_deadline_at")), this.#now().getTime() + 5_000);
-      const currentResult = await client.query<DbRow>(reservationJob
+      const currentResult = retirementJob
+        ? await client.query<DbRow>(
+          `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,
+                  l.active AS listing_active,l.product_id,l.mapping_version,l.adapter,l.adapter_version,l.can_open,l.can_close,l.can_observe,
+                  r.status AS retirement_status,r.retirement_version,r.listing_id AS retirement_listing_id,r.occurrence_id AS retirement_occurrence_id,
+                  r.mapping_version AS retirement_mapping_version,r.account_version AS retirement_account_version,r.source_start_at,r.source_end_at,
+                  p.status AS product_status
+             FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
+             JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+             JOIN channel_slot_retirements r ON r.id=$3::uuid
+            WHERE a.id=$1 AND l.id=$2 FOR SHARE OF a,l,p FOR UPDATE OF r`,
+          [job.account_id, job.listing_id, job.slot_retirement_id])
+        : await client.query<DbRow>(reservationJob
         ? `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,a.external_account_id,
                 l.active AS listing_active,l.product_id,l.mapping_version,l.adapter,l.adapter_version,l.connection_mode,
                 l.external_product_id,l.external_option_id,l.can_open,l.can_close,l.can_observe,l.can_read_reservations,
@@ -2321,7 +2554,19 @@ export class ChannelRuntime {
       const capability = action === "SET_OPEN" ? current?.can_open : action === "SET_CLOSED" ? current?.can_close : current?.can_observe;
       let liveOccurrenceMatches = false;
       let liveActionAllowed = action === "OBSERVE";
-      if (current && !reservationJob) {
+      // A retirement's old time must still differ from the live occurrence; a
+      // vanished occurrence still leaves the old external slot to close.
+      let retiredTimeStillOld = false;
+      if (current && retirementJob) {
+        try {
+          const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
+          retiredTimeStillOld = occurrence.startUtc !== isoValue(job, "source_start_at") || occurrence.endUtc !== isoValue(job, "source_end_at");
+        } catch (error) {
+          if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
+          retiredTimeStillOld = true;
+        }
+      }
+      if (current && availabilityJob) {
         try {
           const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
           liveOccurrenceMatches = occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")
@@ -2336,7 +2581,7 @@ export class ChannelRuntime {
       }
       const desiredStateCurrent = current !== undefined
         && (action === "OBSERVE" || (action === "SET_OPEN" && current.desired_state === "OPEN") || (action === "SET_CLOSED" && current.desired_state === "CLOSED"));
-      const availabilityVersionsCurrent = !reservationJob && assignmentCurrent && current !== undefined && current.account_active === true && current.revoked_at === null
+      const availabilityVersionsCurrent = availabilityJob && assignmentCurrent && current !== undefined && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
         && current.listing_active === true && current.product_status === "PUBLISHED" && capability === true
         && (current.quarantined_at === null || action === "OBSERVE") && this.#adapterSupports(current, action)
@@ -2358,6 +2603,20 @@ export class ChannelRuntime {
         && current.external_option_id === job.target_external_option_id
         && current.adapter === job.target_adapter && current.adapter_version === job.target_adapter_version
         && current.connection_mode === job.target_connection_mode;
+      const retirementVersionsCurrent = retirementJob && assignmentCurrent && current !== undefined
+        && current.account_active === true && current.revoked_at === null
+        && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
+        && current.quarantined_at === null && current.listing_active === true && current.product_status === "PUBLISHED"
+        && action === "SET_CLOSED" && current.can_close === true && this.#adapterSupports(current, "SET_CLOSED")
+        && integer(current, "account_version") === integer(job, "account_version")
+        && integer(current, "mapping_version") === integer(job, "mapping_version")
+        && current.retirement_status === "PENDING" && integer(current, "retirement_version") === integer(job, "desired_version")
+        && current.retirement_listing_id === job.listing_id && current.retirement_occurrence_id === job.occurrence_id
+        && integer(current, "retirement_mapping_version") === integer(job, "mapping_version")
+        && integer(current, "retirement_account_version") === integer(job, "account_version")
+        && isoValue(current, "source_start_at") === isoValue(job, "source_start_at")
+        && isoValue(current, "source_end_at") === isoValue(job, "source_end_at")
+        && retiredTimeStillOld;
       let reservationReceiptCurrent = false;
       let reservationNextDueAt: string | undefined;
       let reservationCompletedAt: string | undefined;
@@ -2399,7 +2658,8 @@ export class ChannelRuntime {
           && reservationVersionsCurrent && reservationReceiptCurrent
         : channelReadbackAccepted({
         action, expectedTarget: targetFromRow(job), resultTarget: input.target,
-        outcome: input.outcome, stopped: input.stopped, withinLease, versionsCurrent: availabilityVersionsCurrent,
+        outcome: input.outcome, stopped: input.stopped, withinLease,
+        versionsCurrent: retirementJob ? retirementVersionsCurrent : availabilityVersionsCurrent,
         occurrenceMatches: occurrenceMatchesSnapshot, observationTimeValid,
         ...(input.observedState === undefined ? {} : { observedState: input.observedState }),
         ...(input.observedBookable === undefined ? {} : { observedBookable: input.observedBookable }),
@@ -2423,6 +2683,7 @@ export class ChannelRuntime {
         await this.#quarantine(client, text(job, "account_id"), "LATE_RESULT");
         if (input.stopped) {
           await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "LATE_RESULT_STOPPED");
+          if (retirementJob) await this.#finishRetirement(client, job, "NEEDS_REVIEW", "LATE_RESULT");
           if (reservationJob) await client.query(
             `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
                last_error='LATE_RESULT',updated_at=$3 WHERE provider_id=$1 AND listing_id=$2 AND pending_job_id=$4::uuid`,
@@ -2443,11 +2704,16 @@ export class ChannelRuntime {
               WHERE provider_id=$5 AND listing_id=$6 AND pending_job_id=$1::uuid`,
             [jobId, nowUtc, reservationCompletedAt, reservationNextDueAt, job.provider_id, job.listing_id],
           );
+        } else if (retirementJob) {
+          // The readback is of the old time; the new-time desired observation is untouched.
+          await this.#finishRetirement(client, job, "CLOSED_VERIFIED", null);
         } else {
           await client.query(
             `UPDATE channel_desired_states SET observed_state=$3,observed_desired_version=$4,observed_mapping_version=$5,
-               last_verified_at=$6,last_error=NULL,updated_at=$6 WHERE listing_id=$1 AND occurrence_id=$2`,
-            [job.listing_id, job.occurrence_id, input.observedState, job.desired_version, job.mapping_version, input.observedAtUtc],
+               last_verified_at=$6,last_error=CASE WHEN last_error=$7 THEN last_error ELSE NULL END,updated_at=$6
+             WHERE listing_id=$1 AND occurrence_id=$2`,
+            [job.listing_id, job.occurrence_id, input.observedState, job.desired_version, job.mapping_version, input.observedAtUtc,
+              SLOT_RETIREMENT_WARNING],
           );
         }
         await client.query(
@@ -2493,12 +2759,20 @@ export class ChannelRuntime {
               input.outcome === "RESERVATION_VERIFIED" ? "INVALID_COMPLETE_PROOF" : failureOutcome, jobId],
           );
         }
-      } else if (!availabilityVersionsCurrent || input.outcome === "SUPERSEDED") {
+      } else if (!(retirementJob ? retirementVersionsCurrent : availabilityVersionsCurrent) || input.outcome === "SUPERSEDED") {
         if (input.outcome === "VERIFIED") await this.#quarantine(client, text(job, "account_id"), "STALE_RESULT");
         await client.query(
           "UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1::uuid",
           [jobId, nowUtc],
         );
+        // This job no longer closes the old time. If its version is still
+        // PENDING, nothing else will, so make it visible unless the old time
+        // has become the live occurrence time again.
+        if (retirementJob) {
+          await (current !== undefined && !retiredTimeStillOld
+            ? this.#finishRetirement(client, job, "SUPERSEDED", "TIME_RESTORED")
+            : this.#finishRetirement(client, job, "NEEDS_REVIEW", "AUTHORITY_CHANGED"));
+        }
       } else if (input.outcome === "RETRY_WAIT" && integer(job, "attempt_count") < 5) {
         const backoffSeconds = Math.min(60, 2 ** integer(job, "attempt_count") * 5);
         const nextAttemptAt = new Date(this.#now().getTime() + backoffSeconds * 1_000).toISOString();
@@ -2509,10 +2783,14 @@ export class ChannelRuntime {
           );
         } else {
           await this.#finishUnsafe(client, jobId, text(job, "account_id"), "NEEDS_REVIEW", "RETRY_DEADLINE");
+          if (retirementJob) await this.#finishRetirement(client, job, "NEEDS_REVIEW", "RETRY_DEADLINE");
         }
       } else {
         const outcome = input.outcome === "VERIFIED" || input.outcome === "RETRY_WAIT" ? "NEEDS_REVIEW" : input.outcome;
         await this.#finishUnsafe(client, jobId, text(job, "account_id"), outcome, outcome);
+        if (retirementJob) {
+          await this.#finishRetirement(client, job, "NEEDS_REVIEW", input.outcome === "RETRY_WAIT" ? "RETRY_DEADLINE" : outcome);
+        }
       }
       return { acceptedAsCurrent, repeated: false };
     });
@@ -2554,12 +2832,18 @@ export class ChannelRuntime {
     const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
     const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(listing, "product_id"), occurrence, this.#nowIso());
     const desiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
+    const previous = (await client.query<DbRow>(
+      "SELECT * FROM channel_desired_states WHERE listing_id=$1 AND occurrence_id=$2 FOR UPDATE", [job.listing_id, job.occurrence_id],
+    )).rows[0];
     const desired = await client.query<DbRow>(
       `UPDATE channel_desired_states SET desired_state=$3,reason=$4,desired_version=desired_version+1,mapping_version=$5,
          source_start_at=$6,source_end_at=$7,updated_at=$8,desired_changed_at=$8 WHERE listing_id=$1 AND occurrence_id=$2 RETURNING *`,
       [job.listing_id, job.occurrence_id, desiredState, availability.reason, listing.mapping_version,
         occurrence.startUtc, occurrence.endUtc, this.#nowIso()],
     );
+    if (previous && (isoValue(previous, "source_start_at") !== occurrence.startUtc || isoValue(previous, "source_end_at") !== occurrence.endUtc)) {
+      await this.#retireRescheduledSlot(client, listing, previous, occurrence);
+    }
     const state = desired.rows[0];
     if (state) await this.#enqueueDesiredJob(client, listing, occurrence, desiredState, integer(state, "desired_version"));
   }
@@ -2622,6 +2906,8 @@ export class ChannelRuntime {
       "UPDATE channel_jobs SET status='FINISHED',outcome=$3,lease_digest=NULL,lease_expires_at=NULL,updated_at=$2 WHERE id=$1",
       [job.id, this.#nowIso(), neverRan ? "SUPERSEDED" : "NEEDS_REVIEW"],
     );
+    // The old slot may still be open on the site whether or not the close ran: staff are asked to check it.
+    if (job.purpose === "SLOT_RETIREMENT") await this.#finishRetirement(client, job, "NEEDS_REVIEW", "MANUAL_RECOVERY_OBSERVE_REQUIRED");
     if (job.purpose === "RESERVATION_WINDOW") await client.query(
       `UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,halted_at=$3,
          last_error='MANUAL_RECOVERY_OBSERVE_REQUIRED',updated_at=$3
