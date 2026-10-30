@@ -102,4 +102,16 @@ describe("Google channel server executor", () => {
     expect(mocks.apply).not.toHaveBeenCalled();
     expect(mocks.inspect).not.toHaveBeenCalled();
   });
+
+  it.each(["configuration", "scope", "refresh"] as const)("keeps the original write uncertain when reconciliation fails at %s", async (failure) => {
+    if (failure === "scope") mocks.prepareReconcile.mockResolvedValue({ ...snapshot, grantedScopes: [] });
+    if (failure === "refresh") mocks.refresh.mockRejectedValueOnce(new Error("synthetic transient failure"));
+    const result = await executeGoogleChannelDelivery(
+      {} as never, {} as never, { workerId: "studio-1", credentialVersion: 1 }, snapshot.context.jobId, "lease", "reconcile",
+      failure === "configuration" ? { runtimeConfig: () => null } : undefined,
+    );
+    expect(result.phase).toBe("UNCERTAIN");
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(mocks.inspect).not.toHaveBeenCalled();
+  });
 });

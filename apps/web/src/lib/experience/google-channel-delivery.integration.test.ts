@@ -259,6 +259,17 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
       )).rejects.toBeTruthy();
 
       const beforeReconcile = methods.length;
+      for (const failedDependencies of [
+        { ...injected(syntheticFetch), runtimeConfig: () => null },
+        { ...injected(syntheticFetch), refreshToken: async () => { throw new Error("synthetic transient token failure"); } },
+      ]) {
+        const pending = await executeGoogleChannelDelivery(
+          value.pool, value.runtime, value.worker, observe.id, observe.leaseToken, "reconcile", failedDependencies,
+        );
+        expect(pending.phase).toBe("UNCERTAIN");
+        expect((await value.pool.query("SELECT phase FROM google_channel_deliveries WHERE id=$1::uuid", [first.deliveryId])).rows[0].phase).toBe("UNCERTAIN");
+        expect(methods).toHaveLength(beforeReconcile);
+      }
       const resolved = await executeGoogleChannelDelivery(
         value.pool, value.runtime, value.worker, observe.id, observe.leaseToken, "reconcile", injected(syntheticFetch),
       );

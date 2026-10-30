@@ -49,6 +49,7 @@ HTTPはredirectを追わず、request deadline、応答byte数、JSON depth/node
 同じprovider/listing/occurrenceに `DISPATCHING` / `UNCERTAIN` が一つでも残る間は、desired・mapping・jobが別でも新しいwriteを開始しない。同じintentの既存結果もbinding identityが完全一致する場合だけ再利用する。出力calendarはproviderをまたいで一つのlistingに限定し、全providerのprovider busy・resource busy・booking calendarとの共用を入力側と出力側の両方で拒否する。
 
 `reconcile` は通常のSET leaseでは実行できない。明示的なstop確認で元jobが `NEEDS_REVIEW` 終了し、同じaccount/listing/occurrence・mapping・時刻・bindingの新しい `OBSERVE` leaseがfull preflightを通った場合だけ、journalに保存した過去targetを現在authority contextから分離してGETする。旧desiredを再送せず、元dispatchが生存中の並行reconcileも許可しない。mapping・時刻・binding・owner/assignmentが変わった場合は自動回復せず手動確認に止める。GET一致は過去Google intentの証拠だけで、現在desiredやAirbnbを成功に更新しない。
+再照合の設定不足・scope不足・token更新失敗では、元の書込み結果が不明な記録を `UNCERTAIN` に保つ。Googleを読めていない段階では未確認のfenceを解除せず、障害復旧後のGET-only再試行を残す。
 内部endpointはHTTP mode、既存channel runtime flag、`EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED=true` の3条件が揃うまで404であり、新flagは既定falseである。
 
 ## 未接続・未受入

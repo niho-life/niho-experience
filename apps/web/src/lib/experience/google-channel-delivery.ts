@@ -86,7 +86,7 @@ export async function executeGoogleChannelDelivery(
   );
   if (!configured || !GOOGLE_SCOPES.every((scope) => snapshot.grantedScopes.includes(scope))) {
     return saveResult({
-      phase: "STOPPED", reason: "INVALID_RESPONSE",
+      phase: operation === "reconcile" ? "UNCERTAIN" : "STOPPED", reason: "INVALID_RESPONSE",
     });
   }
   const assertCurrent = () => repository.assertCurrent(
@@ -110,7 +110,7 @@ export async function executeGoogleChannelDelivery(
     await assertCurrent();
   } catch (error) {
     if (error instanceof StoreConflictError) throw error;
-    return saveResult({ phase: "STOPPED", reason: staticGoogleReason(error) });
+    return saveResult({ phase: operation === "reconcile" ? "UNCERTAIN" : "STOPPED", reason: staticGoogleReason(error) });
   }
 
   try {
