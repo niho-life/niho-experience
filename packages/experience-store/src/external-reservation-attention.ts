@@ -100,8 +100,10 @@ export interface AttentionSettlement {
 async function addExternalMember(client: PoolClient, caseId: string, key: ExternalReservationKey, localRevision: number, seats: number, nowUtc: string): Promise<void> {
   await client.query(
     `INSERT INTO external_reservation_conflict_members AS m
-      (case_id,member_kind,source_site,source_external_account_id,external_reservation_id,local_revision,seats,added_at)
-     VALUES ($1::uuid,'EXTERNAL',$2,$3,$4,$5,$6,$7)
+      (case_id,member_kind,source_site,source_external_account_id,external_reservation_id,local_revision,occurrence_id,seats,added_at)
+     SELECT $1::uuid,'EXTERNAL',e.source_site,e.source_external_account_id,e.external_reservation_id,$5,e.occurrence_id,$6,$7
+       FROM external_reservations e
+      WHERE e.source_site=$2 AND e.source_external_account_id=$3 AND e.external_reservation_id=$4
      ON CONFLICT (case_id,source_site,source_external_account_id,external_reservation_id) WHERE member_kind='EXTERNAL'
      DO UPDATE SET local_revision=EXCLUDED.local_revision,seats=EXCLUDED.seats WHERE m.local_revision<EXCLUDED.local_revision`,
     [caseId, key.site, key.externalAccountId, key.externalReservationId, localRevision, seats, nowUtc],
@@ -342,9 +344,10 @@ export async function settleReservationAttention(client: PoolClient, now: Date):
   };
 }
 
-function externalMemberStatus(row: DbRow, occurrenceId: string): string {
+/** MOVED compares with the occurrence the reservation had when it joined the case, not with the case's own. */
+function externalMemberStatus(row: DbRow): string {
   if (row.external_status === null || row.external_status === undefined) return "UNKNOWN";
-  if (row.external_occurrence_id !== occurrenceId && String(row.external_status) !== "CANCELLED") return "MOVED";
+  if (row.external_occurrence_id !== row.member_occurrence_id && String(row.external_status) !== "CANCELLED") return "MOVED";
   return String(row.external_status);
 }
 
@@ -372,7 +375,7 @@ export async function loadConflictCases(db: Pool | PoolClient, providerId: strin
   );
   const ids = cases.rows.map((row) => String(row.id));
   const members = ids.length === 0 ? [] : (await db.query<DbRow>(
-    `SELECT m.case_id::text,m.member_kind,m.source_site,m.external_reservation_id,m.booking_id::text,m.seats,m.added_at,
+    `SELECT m.case_id::text,m.member_kind,m.source_site,m.external_reservation_id,m.booking_id::text,m.seats,m.added_at,m.occurrence_id AS member_occurrence_id,
             e.status AS external_status,e.occurrence_id AS external_occurrence_id,b.status AS booking_status,b.hold_expires_at
        FROM external_reservation_conflict_members m
        LEFT JOIN external_reservations e ON e.source_site=m.source_site
@@ -382,14 +385,13 @@ export async function loadConflictCases(db: Pool | PoolClient, providerId: strin
     [ids],
   )).rows;
   const byCase = new Map<string, ConflictMemberView[]>();
-  const occurrenceByCase = new Map(cases.rows.map((row) => [String(row.id), String(row.occurrence_id)]));
   for (const row of members) {
     const caseId = String(row.case_id);
     const list = byCase.get(caseId) ?? [];
     const base = { seats: Number(row.seats), addedAtUtc: isoValue(row, "added_at") };
     list.push(row.member_kind === "EXTERNAL"
       ? { kind: "EXTERNAL", site: String(row.source_site), externalReservationId: String(row.external_reservation_id),
-        status: externalMemberStatus(row, occurrenceByCase.get(caseId) ?? ""), ...base }
+        status: externalMemberStatus(row), ...base }
       : { kind: "DIRECT", bookingId: String(row.booking_id), status: directMemberStatus(row, nowUtc), ...base });
     byCase.set(caseId, list);
   }

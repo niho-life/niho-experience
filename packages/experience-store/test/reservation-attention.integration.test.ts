@@ -273,6 +273,19 @@ describe("PostgreSQL external reservation attention", { skip: databaseUrl === un
       assert.deepEqual(openView.members.map((member) => [member.kind, member.site ?? null, member.externalReservationId ?? member.bookingId, member.seats, member.status]),
         [["EXTERNAL", "Airbnb", "R3", 1, "CONFIRMED"], ["DIRECT", null, directBookingId, 2, "CONFIRMED"]]);
       assert.deepEqual(view[1]!.members.map((member) => [member.externalReservationId, member.status]), [["R2", "CANCELLED"], ["R1", "CONFIRMED"]]);
+      // A partner found through a shared resource belongs to another occurrence than the case: that is not a move.
+      // Only a change from the occurrence it had when it joined is.
+      const viewOf = async () => (await runtime.conflictCases(admin, "provider-a")).find((item) => item.id === caseB)!.members.find((member) => member.externalReservationId === "R3")?.status;
+      const caseOccurrence = (await pool.query("SELECT occurrence_id FROM external_reservation_conflict_cases WHERE id=$1::uuid", [caseB])).rows[0]?.occurrence_id;
+      const joined = (await pool.query("SELECT occurrence_id FROM external_reservations WHERE external_reservation_id='R3'")).rows[0]?.occurrence_id;
+      assert.equal((await pool.query("SELECT occurrence_id FROM external_reservation_conflict_members WHERE case_id=$1::uuid AND external_reservation_id='R3'", [caseB])).rows[0]?.occurrence_id, joined);
+      await pool.query("UPDATE external_reservation_conflict_cases SET occurrence_id='shared-resource-other-occurrence' WHERE id=$1::uuid", [caseB]);
+      assert.equal(await viewOf(), "CONFIRMED");
+      await pool.query("UPDATE external_reservation_conflict_cases SET occurrence_id=$2 WHERE id=$1::uuid", [caseB, caseOccurrence]);
+      await pool.query("UPDATE external_reservations SET occurrence_id='moved-to-another-occurrence' WHERE external_reservation_id='R3'");
+      assert.equal(await viewOf(), "MOVED");
+      await pool.query("UPDATE external_reservations SET occurrence_id=$1 WHERE external_reservation_id='R3'", [joined]);
+      assert.equal(await viewOf(), "CONFIRMED");
       assert.doesNotMatch(JSON.stringify(view), /ext-air|ext-gyg|externalAccountId|public/);
       await assert.rejects(() => runtime.acknowledgeConflictCase(admin, randomUUID(), randomUUID()), StoreNotFoundError);
       await assert.rejects(() => runtime.acknowledgeConflictCase(admin, "not-a-uuid", randomUUID()), StoreValidationError);

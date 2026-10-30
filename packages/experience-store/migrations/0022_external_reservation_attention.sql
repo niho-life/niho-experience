@@ -44,6 +44,9 @@ CREATE TABLE external_reservation_conflict_members (
   source_external_account_id text,
   external_reservation_id text,
   local_revision bigint CHECK (local_revision IS NULL OR local_revision > 0),
+  -- The occurrence the external reservation had when it joined the case. A partner found through a shared
+  -- resource belongs to another occurrence than the case; only a change from this value is a move.
+  occurrence_id text CHECK (occurrence_id IS NULL OR length(occurrence_id) BETWEEN 1 AND 256),
   booking_id bigint REFERENCES bookings(id) ON DELETE RESTRICT,
   seats integer NOT NULL CHECK (seats BETWEEN 1 AND 1000),
   added_at timestamptz NOT NULL,
@@ -51,9 +54,9 @@ CREATE TABLE external_reservation_conflict_members (
     REFERENCES external_reservations(source_site, source_external_account_id, external_reservation_id) ON DELETE RESTRICT,
   CHECK (
     (member_kind = 'EXTERNAL' AND source_site IS NOT NULL AND source_external_account_id IS NOT NULL
-      AND external_reservation_id IS NOT NULL AND local_revision IS NOT NULL AND booking_id IS NULL)
+      AND external_reservation_id IS NOT NULL AND local_revision IS NOT NULL AND occurrence_id IS NOT NULL AND booking_id IS NULL)
     OR (member_kind = 'DIRECT' AND booking_id IS NOT NULL AND source_site IS NULL AND source_external_account_id IS NULL
-      AND external_reservation_id IS NULL AND local_revision IS NULL)
+      AND external_reservation_id IS NULL AND local_revision IS NULL AND occurrence_id IS NULL)
   )
 );
 
