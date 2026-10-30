@@ -1,4 +1,3 @@
-import { forwardSingleWrite } from "./single-write.mjs";
 import { MAX_JSON_BYTES, VIATOR_ORIGIN } from "./constants.mjs";
 import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 
@@ -47,6 +46,15 @@ function sameJsonValue(left, right) {
   const leftKeys = Object.keys(left).sort();
   const rightKeys = Object.keys(right).sort();
   return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index] && sameJsonValue(left[key], right[key]));
+}
+
+function isDirectAvailabilityXhr(request, supplierOrigin) {
+  try {
+    const headers = request.headers();
+    return request.resourceType() === "xhr" && !request.isNavigationRequest() && !request.redirectedFrom()
+      && request.frame().url() === `${supplierOrigin}/availability/` && headers.origin === supplierOrigin
+      && (!headers.referer || new URL(headers.referer).origin === supplierOrigin);
+  } catch { return false; }
 }
 
 export function validateViatorListState(value) {
@@ -166,7 +174,8 @@ export function createViatorNetworkGuard({ job, cloud, getSnapshot, assertWriteC
     let body;
     try { body = request.postDataJSON(); } catch { return refuse(route, permit !== null); }
     if (url.pathname === "/availability/api" && validateViatorReadBody(body)) return forward(route);
-    if (url.pathname !== "/availability/update" || !permit || !validateViatorUpdate(body, job, getSnapshot())) {
+    if (url.pathname !== "/availability/update" || !permit || !validateViatorUpdate(body, job, getSnapshot())
+      || !isDirectAvailabilityXhr(request, supplierOrigin)) {
       return refuse(route, permit !== null || url.pathname === "/availability/update");
     }
     if (permit.used) return refuse(route);
@@ -179,7 +188,11 @@ export function createViatorNetworkGuard({ job, cloud, getSnapshot, assertWriteC
     } catch (error) { fatalWrite = error; return refuse(route); }
     if (frozen || permit !== reserved || fatalWrite) return refuse(route);
     writes += 1;
-    return forwardSingleWrite(route, { sameOriginXhrPage: `${supplierOrigin}/availability/` });
+    // Keep the supplier UI's native Chrome transport and authentication context.
+    // This dispatch is consumed even on failure: never retry or fall back to
+    // APIRequestContext. Chrome may retry an identical SET below interception;
+    // only an independent read can establish the resulting availability.
+    await route.continue().catch(() => {});
   }
 
   return Object.freeze({

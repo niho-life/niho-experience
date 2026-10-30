@@ -109,6 +109,56 @@ test("Viator guard allows the bounded read POST and one exact write with interce
   assert.equal(guard.endUiAction().writes, 1);
 });
 
+test("Viator native dispatch refuses wrong source context and never falls back after failure", async () => {
+  const origin = "http://127.0.0.1:4321";
+  for (const override of [
+    { frame: () => ({ url: () => "https://foreign.example/availability/" }) },
+    { frame: () => ({ url: () => `${origin}/other/` }) },
+    { resourceType: () => "fetch" }, { isNavigationRequest: () => true }, { redirectedFrom: () => ({}) },
+    { headers: () => ({ "content-type": "application/json", origin: "https://foreign.example" }) },
+  ]) {
+    const calls = [];
+    const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: origin,
+      getSnapshot: () => ({ authorized: true, availability: "AVAILABLE", listState }),
+      cloud: { async preflight() { assert.fail("invalid source must not preflight"); } } });
+    const value = route(`${origin}/availability/update`, "POST", viatorUpdate(), calls);
+    const original = value.request(); value.request = () => ({ ...original, ...override });
+    value.fetch = async () => assert.fail("Viator must use native browser transport");
+    guard.beginUiAction(); await guard.handle(value);
+    assert.throws(() => guard.endUiAction(), (error) => error.code === "WRITE_REFUSED");
+    assert.equal(guard.writes, 0); assert.deepEqual(calls, ["abort"]);
+  }
+  const calls = [];
+  const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: origin,
+    getSnapshot: () => ({ authorized: true, availability: "AVAILABLE", listState }), cloud: { async preflight() {} } });
+  const value = route(`${origin}/availability/update`, "POST", viatorUpdate(), calls);
+  value.fetch = async () => assert.fail("must not retry with a different transport");
+  value.continue = async () => { calls.push("native"); throw new Error("synthetic disconnect"); };
+  guard.beginUiAction(); await guard.handle(value);
+  assert.equal(guard.endUiAction().writes, 1);
+  guard.beginUiAction(); await guard.handle(value);
+  assert.throws(() => guard.endUiAction(), (error) => error.code === "WRITE_REFUSED");
+  assert.equal(guard.writes, 1); assert.deepEqual(calls, ["native", "abort"]);
+});
+
+test("Viator native dispatch remains fenced by context, lease and freeze", async () => {
+  for (const blockedBy of ["context", "lease", "freeze"]) {
+    const calls = []; let guard;
+    guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: "http://127.0.0.1:4321",
+      getSnapshot: () => ({ authorized: true, availability: "AVAILABLE", listState }),
+      assertWriteContext: async () => { if (blockedBy === "context") throw Object.assign(new Error(), { code: "ACCOUNT_MISMATCH" }); },
+      cloud: { async preflight() {
+        if (blockedBy === "lease") throw Object.assign(new Error(), { code: "LEASE_LOST" });
+        if (blockedBy === "freeze") guard.freeze();
+      } } });
+    guard.beginUiAction();
+    await guard.handle(route("http://127.0.0.1:4321/availability/update", "POST", viatorUpdate(), calls));
+    if (blockedBy !== "freeze") assert.throws(() => guard.endUiAction(), (e) => e.code === (blockedBy === "lease" ? "LEASE_LOST" : "ACCOUNT_MISMATCH"));
+    else guard.endUiAction();
+    assert.deepEqual(calls, ["abort"]); assert.equal(guard.writes, 0);
+  }
+});
+
 test("Viator permits only observed UI bundles and rejects unbounded or ambiguous response state", async () => {
   const guard = createViatorNetworkGuard({ job: viatorJob, supplierOrigin: "http://127.0.0.1:4321", getSnapshot: () => null, cloud: {} });
   const asset = (path, type, calls, navigation = false) => {

@@ -18,7 +18,7 @@
 | サイト | 専用profile / 読取り | driverによる開閉 | 残ること |
 | --- | --- | --- | --- |
 | じゃらん | 許可済みsession復元・accountと枠の一致を確認 | 予約ゼロの一枠で販売→売止→販売、独立reload、各Chromeの停止まで成功。元状態へ復元済み | cloud/PWA結合、予約reader、常駐と遅延の計測 |
-| Viator | 再起動後の認証、canonical枠、全状態の予約検索とゼロ件の証拠を確認 | 単一の停止要求後に`UNKNOWN_AFTER_SAVE`、続く再取得で`AUTH_REQUIRED`。保存反映・復元は未確認 | 再認証後の状態確認・必要な復元、転送時の認証維持と再受入（#269） |
+| Viator | 再起動後の認証、canonical枠、全状態の予約検索とゼロ件の証拠を確認 | 初回停止要求後に`UNKNOWN_AFTER_SAVE`。本人再認証後の新しいnative readで元のOPENを確認済み。転送readは403、native readは成功 | Chrome通常通信による一度のUI要求・認証維持・停止/再開の再受入（#269） |
 
 じゃらんの初回実証では売止のDOM照合が止まったため復旧を優先した。状態がLI本体でなく子の`span.request-reservation`に付く点と、同列の補足spanを修正して販売へ戻し、その後の完全な停止・再開サイクルを同じdriverで再確認した。Viatorの旧DOMの「予約可能」は保存後の新しい証拠として使わない。本番flag・deployment/listing capabilityは受入前に開かない。private pilotの固定preflightによるdriver受入は、実cloudのclaim/lease/PWA結合の代替ではない。
 

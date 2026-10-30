@@ -43,7 +43,7 @@ install -m 600 packages/ota-worker/examples/config.example.json /ABSOLUTE/PRIVAT
 
 正常終了の回帰試験は、合成サーバーの保存期限付きcookieを専用profileへ保存し、所有Chromeの停止・再起動後にも保持されることを実ブラウザで確認します。cookie値や期限、Chromeの起動設定、OS keychain・暗号化は変更しません。session-only認証やサイト側の期限、challengeは別の実サイト受入対象です。
 
-Viatorの単一送信は、固定の販売画面から同じoriginへの直接のXHRであることと、元の`Origin`を照合した場合だけ、Chromiumがinterception後に付けるFetch Metadataを補います。`same-origin / cors / empty`以外の既存値、redirect、navigation、別frame URL、別origin、XHR以外は転送しません。retry・redirectは0のままです。GYG・じゃらんの転送は変更しません。合成サーバーでは通常browserと転送の差・補完後の一致を再現しましたが、実Viatorの認証失効の原因確定・再受入は[#269](https://github.com/niho-life/niho-experience/issues/269)に残ります。認証情報を保存・出力しません。
+Viatorは固定の販売画面から同じoriginへの直接XHR・元Origin・redirectなしを確認し、元要求をChromeの通常通信で一度dispatchします。同一profileのnative readは成功し、Node転送readはFetch Metadata補完後も403となることを読取りだけで切り分けました。headerを作り替える処理は除去し、セキュリティやTLS設定は変更しません。Chrome内部の同一SET再送は前節の保証範囲に含め、APIRequestContextへのfallbackは行いません。GYG・じゃらんの`route.fetch(maxRetries=0,maxRedirects=0)`は維持します。実枠の再受入は[#269](https://github.com/niho-life/niho-experience/issues/269)で追跡します。
 
 根拠は固定Playwright 1.56.1の実装と、[Fetch Metadata仕様](https://w3c.github.io/webappsec-fetch-metadata/)、[XHR仕様](https://xhr.spec.whatwg.org/)です。任意のbrowser headerを受け取る設定や、セキュリティの無効化は追加しません。
 
