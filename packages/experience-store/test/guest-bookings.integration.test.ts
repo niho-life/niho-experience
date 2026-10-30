@@ -254,6 +254,27 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("still sells an occurrence of an ended rule that the host moved to a later day", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("tea", rule("sample-old", { startsOn: day(-20), endsOn: day(-1) }));
+      assert.deepEqual((await guests.publicBookingTerms("sample-tea"))?.offers.map((offer) => offer.id), []);
+      // Moved while the rule still ran; the rule has ended since (written directly: the past cannot be moved now).
+      await pool.query(
+        `INSERT INTO schedule_occurrence_overrides (provider_id, rule_id, occurrence_id, kind, local_date, local_start_time)
+         VALUES ('provider-a', 'sample-old', $1, 'RESCHEDULE', $2::date, '15:00')`,
+        [occurrenceIdFor("sample-old", day(-2)), day(10)],
+      );
+      assert.deepEqual((await guests.publicBookingTerms("sample-tea"))?.offers.map((offer) => offer.id), ["sample-old"]);
+      const availability = await guests.listPublicAvailability("sample-tea");
+      assert.deepEqual(
+        availability?.occurrences.map(({ offerId, date, startAt, bookable }) => ({ offerId, date, startAt, bookable })),
+        [{ offerId: "sample-old", date: day(10), startAt: tokyoLocalToUtc(day(10), "15:00"), bookable: true }],
+      );
+      const held = await guests.startGuestBooking(request({ offerId: "sample-old", occurrenceDate: day(10) }));
+      assert.equal(held.booking.occurrenceId, occurrenceIdFor("sample-old", day(-2)));
+    });
+  });
+
   it("lets OWNER and EDITOR write sale terms at a version, with NIHO's question shape and fingerprint", async () => {
     await withSchema(async ({ guests }) => {
       await assert.rejects(() => guests.setSaleTerms(viewerA, "tea", TEA_TERMS, 1), StoreAccessDeniedError);
@@ -603,9 +624,11 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       );
       assert.equal(family.booking.seats, 3);
       assert.equal(family.holdExpiresAt, family.booking.holdExpiresAtUtc);
-      // 31 minutes, as NIHO, so a Stripe Checkout Session (30 minutes at least) fits inside the hold.
+      // 35 minutes: a Stripe Checkout Session (30 minutes at least, ended 60 s before the hold) still fits
+      // when it is created minutes after the hold.
       const holdMilliseconds = Date.parse(family.holdExpiresAt) - Date.parse(family.booking.createdAtUtc);
-      assert.ok(Math.abs(holdMilliseconds - 1_860_000) <= 5, String(holdMilliseconds));
+      assert.ok(Math.abs(holdMilliseconds - 2_100_000) <= 5, String(holdMilliseconds));
+      assert.ok(holdMilliseconds - (1_800_000 + 60_000) >= 180_000);
       assert.deepEqual(family.booking.pricingSnapshot, {
         currency: "JPY", unitAmount: 4000, seats: 3, totalAmount: 10_000, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2000 }, cancellationPolicy: "FREE_UNTIL_24H",

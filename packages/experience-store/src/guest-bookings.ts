@@ -44,8 +44,11 @@ import { assertCanonicalInstant, assertMoney, assertStoreIdentifier } from "./va
  * The hold and request limits are this store's (NIHO's contract does not state its numbers).
  */
 export const GUEST_BOOKING_LIMITS = {
-  /** NIHO holds seats for 31 minutes: Stripe Checkout needs 30, experience-payments keeps a 60 s margin. */
-  defaultHoldSeconds: 1_860,
+  /**
+   * 35 minutes: a Stripe Checkout Session lasts 30 minutes at least and experience-payments ends it 60 s
+   * before the hold, so the rest (4 minutes) is the time between the hold and the Session's creation.
+   */
+  defaultHoldSeconds: 2_100,
   /** Availability and checkout cover the Tokyo date of today through 89 days later. */
   windowDays: 90,
   maxPartySize: 500,
@@ -426,7 +429,12 @@ function tokyoDate(utc: string): string {
 async function activeRules(client: Queryable, providerId: string, productId: string, today: string): Promise<StoredScheduleRule[]> {
   const result = await client.query<DbRow>(
     `SELECT ${RULE_COLUMNS} FROM schedule_rules
-      WHERE provider_id=$1 AND product_id=$2 AND (ends_on IS NULL OR ends_on >= $3::date)
+      WHERE provider_id=$1 AND product_id=$2 AND (
+        ends_on IS NULL OR ends_on >= $3::date
+        -- An ended rule still sells an occurrence the host moved to today or later.
+        OR EXISTS (SELECT 1 FROM schedule_occurrence_overrides o
+                    WHERE o.provider_id=schedule_rules.provider_id AND o.rule_id=schedule_rules.id
+                      AND o.kind='RESCHEDULE' AND o.local_date >= $3::date))
       ORDER BY local_start_time, id COLLATE "C"`,
     [providerId, productId, today],
   );
