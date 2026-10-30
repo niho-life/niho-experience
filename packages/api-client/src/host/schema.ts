@@ -2,7 +2,14 @@ import { Ajv, type ValidateFunction } from "ajv";
 import addFormatsModule from "ajv-formats";
 import contractDocument from "../../contract/experience-host-api.openapi.json" with { type: "json" };
 import { toJsonSchema } from "../public-schema-validation.ts";
-import type { ExperienceProviderPageCreateRequest, ExperienceProviderPagePatchRequest, ExperienceProviderUploadPolicyRequest, ExperienceProviderUploadSignedUrlRequest } from "./types.ts";
+import type {
+  ExperienceProviderPageCreateRequest,
+  ExperienceProviderPageListingRequest,
+  ExperienceProviderPageMeetingPointUpdateRequest,
+  ExperienceProviderPagePatchRequest,
+  ExperienceProviderUploadPolicyRequest,
+  ExperienceProviderUploadSignedUrlRequest,
+} from "./types.ts";
 
 type JsonObject = Record<string, unknown>;
 const addFormats = addFormatsModule as unknown as (ajv: Ajv) => Ajv;
@@ -21,3 +28,5 @@ export const decodeExperienceProviderPageCreateRequest = (value: unknown): Exper
 export const decodeExperienceProviderPagePatchRequest = (value: unknown): ExperienceProviderPagePatchRequest | null => check<ExperienceProviderPagePatchRequest>("ExperienceProviderPagePatchRequest", value) ? value : null;
 export const decodeExperienceProviderUploadPolicyRequest = (value: unknown): ExperienceProviderUploadPolicyRequest | null => check<ExperienceProviderUploadPolicyRequest>("ExperienceProviderUploadPolicyRequest", value) ? value : null;
 export const decodeExperienceProviderUploadSignedUrlRequest = (value: unknown): ExperienceProviderUploadSignedUrlRequest | null => check<ExperienceProviderUploadSignedUrlRequest>("UploadSignedUrlRequest", value) ? value : null;
+export const decodeExperienceProviderPageMeetingPointUpdateRequest = (value: unknown): ExperienceProviderPageMeetingPointUpdateRequest | null => check<ExperienceProviderPageMeetingPointUpdateRequest>("ExperienceProviderPageMeetingPointUpdateRequest", value) ? value : null;
+export const decodeExperienceProviderPageListingRequest = (value: unknown): ExperienceProviderPageListingRequest | null => check<ExperienceProviderPageListingRequest>("AdminExperienceSiteListingRequestBody", value) ? value : null;

@@ -204,7 +204,7 @@ export function resolveConfig(env: Env) {
   const hostNotificationSettingsEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_NOTIFICATION_SETTINGS_ENABLED === "true";
   // 予約前の質問 (#105/#106) kept in the experience DB (docs/guest-questions.md): the traveler's "Ask the host", the
   // reply page and the OWNER's メッセージ. The mock keeps its own synthetic questions; http opens per environment
-  // after migration 0021 is applied and accepted. A question is taken only where the OWNER can read it: the host
+  // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
   // console is on and メッセージ is not showing NIHO's booking messages instead.
   const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && !experienceProviderOperationsApiEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");

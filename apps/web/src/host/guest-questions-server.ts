@@ -21,7 +21,7 @@ import type { HostActionResult } from "./payout";
 import type { HostThread, HostThreadMessage } from "./types";
 
 /*
- * メッセージ's 予約前の質問 (#106) kept in the experience DB (migration 0021, docs/guest-questions.md).
+ * メッセージ's 予約前の質問 (#106) kept in the experience DB (migration 0022, docs/guest-questions.md).
  * NIHO proves the account and that it is the provider's OWNER; the experience store checks its own
  * OWNER membership as well (ADR 0002). The guest's address never reaches the console. Anyone else,
  * or a deployment without EXPERIENCE_GUEST_QUESTIONS_ENABLED and the DB, keeps today's screen.

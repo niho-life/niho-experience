@@ -36,6 +36,7 @@ export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
 export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
+export type { ChannelIncidentDetail, ChannelRuntimeAccountView, ChannelRuntimeIncidentKind, ChannelRuntimeIncidentView, ChannelRuntimeListingView, ChannelRuntimeOverview, ChannelRuntimeWorkerView, ChannelWatchdogRunResult, ChannelWatchdogTransition, ChannelWorkerHealth } from "./channel-runtime-monitor.ts";
 export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";
 export { GoogleChannelSetupRepository } from "./google-channel-setup.ts";
 export type { GoogleChannelSetupPhase, GoogleChannelSetupRecord, GoogleChannelSetupSecretSnapshot } from "./google-channel-setup.ts";

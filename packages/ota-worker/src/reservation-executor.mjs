@@ -113,6 +113,7 @@ function classify(error) {
     return { outcome: "AUTH_REQUIRED", halt: true, reason: code === "AUTH" ? "AUTH_REQUIRED" : code };
   }
   if (["INVALID_READER", "INVALID_READER_RESPONSE", "UNSUPPORTED_READER", "INVALID_RESPONSE", "HTTP_ERROR",
+    "ACCOUNT_MISMATCH", "PRODUCT_MISMATCH", "DOM_DRIFT",
     "FACT_TOO_LARGE", "PAGE_TOO_LARGE", "PAGE_LIMIT", "FACT_LIMIT", "CURSOR_CYCLE", "SNAPSHOT_CHANGED"].includes(code)) {
     return { outcome: "NEEDS_REVIEW", halt: true, reason: code };
   }

@@ -46,7 +46,10 @@ export default async function HostExperiencePage({ params, searchParams }: { par
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
   const backHref = withProvider(HOST_EXPERIENCES_PATH, linkProviderId);
-  if (providerOperationsEnabled()) return <HostLiveExperienceEditor key={`${provider.id}/${id}`} providerId={provider.id} pageId={id} backHref={backHref} />;
+  const settingsHref = withProvider(HOST_SETTINGS_PATH, linkProviderId);
+  if (providerOperationsEnabled()) {
+    return <HostLiveExperienceEditor key={`${provider.id}/${id}`} providerId={provider.id} pageId={id} backHref={backHref} role={provider.memberRole} reviewStatus={provider.reviewStatus} settingsHref={settingsHref} siteUrl={config.siteUrl} />;
+  }
   const { editor, host, today } = await loadHostExperienceEditor(provider, id);
   if (editor.status === "missing") notFound();
   if (editor.status === "unavailable") return <EditorUnavailable backHref={backHref} />;
@@ -61,7 +64,7 @@ export default async function HostExperiencePage({ params, searchParams }: { par
       today={today}
       siteUrl={config.siteUrl}
       backHref={backHref}
-      settingsHref={withProvider(HOST_SETTINGS_PATH, linkProviderId)}
+      settingsHref={settingsHref}
     />
   );
 }

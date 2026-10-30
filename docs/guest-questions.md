@@ -1,6 +1,6 @@
 # 予約前の質問
 
-Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現行設計。オーナー決定（2026-10-31）により、質問と返信は NIHO（niho-app）ではなく experience DB（`packages/experience-store`、migration `0021_guest_questions.sql`）に置く。旧 `journey.ts` の仮契約（質問を NIHO が持つ前提）は、画面が読む応答の形だけを引き継ぐ。
+Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現行設計。オーナー決定（2026-10-31）により、質問と返信は NIHO（niho-app）ではなく experience DB（`packages/experience-store`、migration `0022_guest_questions.sql`）に置く。旧 `journey.ts` の仮契約（質問を NIHO が持つ前提）は、画面が読む応答の形だけを引き継ぐ。
 
 ## 流れ
 
@@ -38,7 +38,7 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 
 - `EXPERIENCE_GUEST_QUESTIONS_ENABLED`（http mode で `HOST_CONSOLE_ENABLED=true` のときだけ、既定 `false`）。`true` で、体験ページの「Ask the host」（DB で PUBLISHED の体験だけ）、公開 API、`/questions/reply`、OWNER の `/host/messages` の質問が開く。`false` の間、公開 API と返信ページは 404。
 - `EXPERIENCE_DATABASE_URL` が無いと公開 API は 503。DB を読めないときは体験ページの「Ask the host」を出さない。
-- 先に `0021_guest_questions.sql` を適用する。runtime role には 3 つの表の SELECT・INSERT・UPDATE と `outbox_messages` の INSERT が要る。
+- 先に `0022_guest_questions.sql` を適用する。runtime role には 3 つの表の SELECT・INSERT・UPDATE と `outbox_messages` の INSERT が要る。
 - mock mode は今までどおり合成の質問と画面だけを使い、DB に触れない。
 - `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` が有効な環境では、`/host/messages` は今までどおり NIHO の予約メッセージ（`HostLiveBookings`）を出す。そこではホストが質問を読めないので、`EXPERIENCE_GUEST_QUESTIONS_ENABLED` も効かない（旅行者の「Ask the host」も出さない）。質問と予約メッセージを同じ画面に並べるのは、予約の正本を移すとき（#285 のスライス 8）に行う。
 

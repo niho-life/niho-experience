@@ -101,3 +101,74 @@ describe("Admin channel BFF", () => {
 });
 
 const randomUUIDForTest = "00000000-0000-4000-8000-000000000238";
+
+describe("Admin channel runtime operations", () => {
+  const commandId = "00000000-0000-4000-8000-000000000240";
+  const actor = { nihoUserId: "verified-admin" };
+
+  it("returns an allowlisted runtime overview without worker credentials or external account IDs", async () => {
+    mocks.runtime!.runtimeOverview = vi.fn().mockResolvedValue({
+      providerId: "provider-a", generatedAtUtc: "2099-01-01T00:00:00.000Z", watchdogStale: true, openHold: true, unclosedOccurrences: 2,
+      workers: [{ id: "worker-a", displayName: "Studio", health: "DOWN", openHold: true, assignedAccounts: 1, credentialDigest: "must-not-leak" }],
+      accounts: [{
+        id: "account-a", site: "GetYourGuide", displayName: "Synthetic", active: true, version: 3, quarantineReason: "AUTH_REQUIRED",
+        externalAccountId: "must-not-leak", privateProfileRef: "must-not-leak",
+        sync: { closePending: 2, openPending: 1, overdue: 1, heldOpen: 1 }, reservationReads: { listings: 1, halted: 1 },
+        listings: [{ listingId: "listing-a", productTitle: "Synthetic tea", closePending: 2, openPending: 1, overdue: 1, reservationReads: true, readHalted: true, externalProductId: "must-not-leak" }],
+      }],
+      incidents: [{ id: "7", kind: "WORKER_STALE", subjectType: "worker", subjectId: "worker-a", openedAtUtc: "2099-01-01T00:00:00.000Z", escalated: true, acknowledged: false, assignedToMe: false, detail: { staleSeconds: 4000 }, assigneeNihoUserId: "must-not-leak" }],
+    });
+    const response = await POST(request({ action: "runtimeOverview", providerId: "provider-a" }));
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(JSON.stringify(data)).not.toContain("must-not-leak");
+    expect(data.overview.accounts[0].quarantineReason).toBe("AUTH_REQUIRED");
+    expect(mocks.runtime!.runtimeOverview).toHaveBeenCalledWith(actor, "provider-a");
+    expect((await POST(request({ action: "runtimeOverview", providerId: "provider-a", sql: "x" }))).status).toBe(400);
+  });
+
+  it("validates pause, re-authentication, reservation retry, and incident ownership inputs exactly", async () => {
+    mocks.runtime!.pauseAccount = vi.fn().mockResolvedValue({ accountId: "account-a", quarantineReason: "MANUAL_HANDLING" });
+    mocks.runtime!.confirmReauth = vi.fn().mockResolvedValue({ observeJobId: "job" });
+    mocks.runtime!.retryReservationReads = vi.fn().mockResolvedValue({ listingId: "listing-a", nextDueAtUtc: "2099-01-01T00:00:00.000Z" });
+    mocks.runtime!.acknowledgeIncident = vi.fn().mockResolvedValue({ incidentId: "7", acknowledgedAtUtc: "2099-01-01T00:00:00.000Z" });
+
+    expect((await POST(request({ action: "pauseAccount", commandId, accountId: "account-a", expectedVersion: 3 }))).status).toBe(200);
+    expect(mocks.runtime!.pauseAccount).toHaveBeenCalledWith(actor, "account-a", 3, commandId);
+    for (const body of [
+      { action: "pauseAccount", commandId, accountId: "account-a" },
+      { action: "pauseAccount", commandId, accountId: "account-a", expectedVersion: 0 },
+      { action: "pauseAccount", commandId: "not-a-uuid", accountId: "account-a", expectedVersion: 3 },
+      { action: "pauseAccount", commandId, accountId: "account-a", expectedVersion: 3, reason: "AUTH_REQUIRED" },
+    ]) expect((await POST(request(body))).status).toBe(400);
+
+    expect((await POST(request({ action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: true, reauthConfirmed: true }))).status).toBe(200);
+    expect(mocks.runtime!.confirmReauth).toHaveBeenCalledWith(actor, "account-a", true, true, commandId);
+    for (const body of [
+      { action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: true },
+      { action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: true, reauthConfirmed: false },
+      { action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: "true", reauthConfirmed: true },
+      { action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: true, reauthConfirmed: true, password: "x" },
+    ]) expect((await POST(request(body))).status).toBe(400);
+
+    expect((await POST(request({ action: "retryReservationReads", commandId, listingId: "listing-a" }))).status).toBe(200);
+    expect(mocks.runtime!.retryReservationReads).toHaveBeenCalledWith(actor, "listing-a", commandId);
+    expect((await POST(request({ action: "retryReservationReads", commandId, listingId: "listing-a", retryCount: 0 }))).status).toBe(400);
+    expect((await POST(request({ action: "retryReservationReads", listingId: "listing-a" }))).status).toBe(400);
+
+    expect((await POST(request({ action: "acknowledgeIncident", commandId, incidentId: "7" }))).status).toBe(200);
+    expect(mocks.runtime!.acknowledgeIncident).toHaveBeenCalledWith(actor, "7", commandId);
+    for (const incidentId of [7, "0", "-1", "7; drop", "1".repeat(19)]) {
+      expect((await POST(request({ action: "acknowledgeIncident", commandId, incidentId }))).status).toBe(400);
+    }
+    expect((await POST(request({ action: "acknowledgeIncident", commandId, incidentId: "7", assignee: "someone-else" }))).status).toBe(400);
+    expect((await POST(request({ action: "resolveIncident", commandId, incidentId: "7" }))).status).toBe(400);
+    expect(mocks.runtime!.acknowledgeIncident).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a store conflict on a guarded action to 409", async () => {
+    const { StoreConflictError } = await import("@niho-experience/experience-store");
+    mocks.runtime!.confirmReauth = vi.fn().mockRejectedValue(new StoreConflictError("This account is not waiting for re-authentication."));
+    expect((await POST(request({ action: "confirmReauth", commandId, accountId: "account-a", stopConfirmed: true, reauthConfirmed: true }))).status).toBe(409);
+  });
+});

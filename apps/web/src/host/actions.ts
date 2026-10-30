@@ -11,6 +11,7 @@ import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
 import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
 import { loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
+import { normalizeMeetingPoint } from "./meeting-point";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
@@ -20,7 +21,7 @@ import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
 import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfileChange, RegisterProviderInput } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
-import type { HostNotificationItem, HostPageText, HostThread } from "./types";
+import type { HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
 
 /*
  * The host console's changes to NIHO (#88/#91), as server actions: each reads the session,
@@ -107,6 +108,23 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
     refreshConsole();
     const { displayName, bio, sellerDisclosureUrl, reviewStatus } = result.data.provider;
     return { ok: true, message: "保存しました", profile: { displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl ?? "" }, reviewStatus };
+  });
+}
+
+/**
+ * 設定 › 既定の集合案内 › 保存 (OWNER / EDITOR): all five fields, trimmed, the map URL empty or https.
+ * NIHO stops every experience of the provider that is on the experience site until it checks them again.
+ */
+type MeetingPointSaved = { meetingPoint: HostMeetingDefaults };
+export async function saveProviderMeetingPoint(input: { providerId: string; meetingPoint: HostMeetingDefaults }): Promise<HostActionResult<MeetingPointSaved>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const meetingPoint = normalizeMeetingPoint(input?.meetingPoint);
+  if (!providerId || !meetingPoint) return invalid;
+  return withHostApi<MeetingPointSaved>(async (client) => {
+    const result = await client.updateExperienceProviderMeetingPoint(providerId, meetingPoint);
+    if (!result.ok) return refused(result);
+    refreshConsole();
+    return { ok: true, message: "保存しました", meetingPoint: result.data.meetingPoint };
   });
 }
 

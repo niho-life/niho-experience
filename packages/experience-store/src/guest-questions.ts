@@ -16,7 +16,7 @@ export type GuestQuestionDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAIL
 export type GuestQuestionDeliveryOutcome = "SENT" | "RETRY" | "FAILED";
 
 /**
- * The bounds migration 0021 keeps. The guest's limits match ASK_HOST_INPUT_LIMITS
+ * The bounds migration 0022 keeps. The guest's limits match ASK_HOST_INPUT_LIMITS
  * (packages/api-client/src/journey.ts); the host's match the console's MESSAGE_TEXT_LIMIT.
  */
 export const GUEST_QUESTION_LIMITS = {
@@ -244,7 +244,7 @@ function decodeCursor(cursor: unknown): { at: string; id: string } | null {
 }
 
 /**
- * 予約前の質問 (#105, #106; migration 0021). The question form and the reply page have no identity:
+ * 予約前の質問 (#105, #106; migration 0022). The question form and the reply page have no identity:
  * their methods take a slug or a one-time link. The host's methods need a current OWNER of the
  * provider (as 設定 › 通知). The mail worker (next slice) claims host replies and reports how each went.
  * The guest's email address leaves this class only in `claimReplyDeliveries`.

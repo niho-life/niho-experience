@@ -14,7 +14,18 @@ async function signIn(page: Page) {
   await page.waitForURL(/\/admin\/bookings/);
 }
 
-async function stub(page: Page, mutation?: (route: Route, body: Record<string, unknown>) => Promise<void>) {
+const runtimeOverview = (providerId: string) => ({
+  providerId, generatedAtUtc: stamp, watchdogLastRunAtUtc: stamp, watchdogStale: false, openHold: true, unclosedOccurrences: 2,
+  workers: [{ id: "worker-a", displayName: "合成Studio", lastHeartbeatAtUtc: stamp, health: "DOWN", openHold: true, openHoldSinceUtc: stamp, assignedAccounts: 1 }],
+  accounts: [{
+    id: "account-a", site: "Viator", displayName: "合成アカウント", active: true, version: 1, quarantineReason: "AUTH_REQUIRED", quarantinedAtUtc: stamp,
+    sync: { closePending: 2, openPending: 1, overdue: 1, heldOpen: 1 }, reservationReads: { listings: 1, halted: 1, lastSuccessAtUtc: stamp },
+    listings: [{ listingId: "listing-a", productTitle: "合成の茶道", closePending: 2, openPending: 1, overdue: 1, reservationReads: true, readHalted: true, readLastError: "READ_INCOMPLETE" }],
+  }],
+  incidents: [{ id: "7", kind: "WORKER_STALE", subjectType: "worker", subjectId: "worker-a", openedAtUtc: stamp, escalated: true, acknowledged: false, assignedToMe: false, detail: { closePending: 2 } }],
+});
+
+async function stub(page: Page, mutation?: (route: Route, body: Record<string, unknown>) => Promise<void>, runtime?: (providerId: string) => unknown) {
   await page.route("**/admin/api/channel-workspace**", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({ json: { providers, selected: snapshot(new URL(route.request().url()).searchParams.get("providerId") ?? "synthetic-a") } });
@@ -25,6 +36,7 @@ async function stub(page: Page, mutation?: (route: Route, body: Record<string, u
     const body = route.request().postDataJSON();
     if (body.action === "listAccounts") await route.fulfill({ json: { accounts: body.providerId === "synthetic-a" ? [account] : [] } });
     else if (body.action === "listListings") await route.fulfill({ json: { listings: body.providerId === "synthetic-a" ? [listing] : [] } });
+    else if (body.action === "runtimeOverview") await route.fulfill(runtime ? { json: { overview: runtime(body.providerId) } } : { status: 404, json: { error: "not_found" } });
     else if (mutation) await mutation(route, body);
     else await route.fulfill({ json: { saved: true } });
   });
@@ -52,6 +64,37 @@ test("channel workspace stays compact and creates an inactive account", async ({
   await expect(dialog).toHaveCount(0);
   expect(posts[0]).toMatchObject({ action: "createAccount", account: { site: "Jalan", operatingModel: 4, active: false } });
   expect(JSON.stringify(posts)).not.toMatch(/price|unitAmount|privateProfile|cookie|bearer/i);
+});
+
+test("runtime status says a stopped Studio does not close open occurrences and guards re-authentication", async ({ page }, testInfo) => {
+  await signIn(page);
+  const posts: Record<string, unknown>[] = [];
+  await stub(page, async (route, body) => { posts.push(body); await route.fulfill({ json: { saved: true } }); }, runtimeOverview);
+  await page.goto("/admin/channels");
+  const runtime = section(page, "稼働状況");
+  await expect(runtime.getByText("Studio 停止中。外部で受付中の回は自動では閉じません", { exact: true })).toBeVisible();
+  await expect(runtime.getByText("閉じられていない回: 2件", { exact: true })).toBeVisible();
+  await expect(page.getByText("停止済み")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  const axe = await new AxeBuilder({ page }).include("section[aria-labelledby='channel-runtime-title']").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(axe.violations.map((item) => item.id)).toEqual([]);
+  await testInfo.attach("channel-runtime", { body: await page.screenshot({ path: testInfo.outputPath("channel-runtime.png"), fullPage: true }), contentType: "image/png" });
+
+  await runtime.getByRole("button", { name: "再認証を確認して照合", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "再認証を確認して照合" });
+  const submit = dialog.getByRole("button", { name: "照合する", exact: true });
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: "Studioの操作が止まっている" }).check();
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: "掲載先に再ログインした" }).check();
+  await submit.click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0]).toMatchObject({ action: "confirmReauth", accountId: "account-a", stopConfirmed: true, reauthConfirmed: true });
+  await runtime.getByRole("button", { name: "担当する", exact: true }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  expect(posts[1]).toMatchObject({ action: "acknowledgeIncident", incidentId: "7" });
+  expect(JSON.stringify(posts)).not.toMatch(/password|cookie|bearer|externalAccountId/i);
 });
 
 test("unknown resource save can be retried inside its modal with the identical command", async ({ page }) => {

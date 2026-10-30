@@ -36,7 +36,7 @@ vi.mock("@/lib/host/server", async (importActual) => {
   };
 });
 
-import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, registerProvider, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
+import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, registerProvider, saveProviderMeetingPoint, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
 import { HOST_ERROR_REASON_TEXT, HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { GUEST_QUESTION_LOAD_FAILED_TEXT, GUEST_QUESTION_REPLY_FAILED_TEXT } from "./guest-questions-server";
@@ -158,6 +158,51 @@ describe("saveProviderProfile", () => {
     expect(await saveProviderProfile({ providerId: KITCHEN })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     expect(await saveProviderProfile({ providerId: "../admin", bio: "x" })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     expect(calls).toEqual([]);
+  });
+});
+
+describe("saveProviderMeetingPoint", () => {
+  const meeting = { overview: "（合成）駅の近く", address: "（合成）サンプル町 1 丁目", accessNote: "", mapUrl: "https://maps.example.test/sample", entranceNote: "（合成）木の門" };
+
+  it("mock: NIHO keeps all five fields trimmed and answers what it kept", async () => {
+    const result = await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: { ...meeting, overview: "  （合成）駅の近く  " } });
+    expect(result).toEqual({ ok: true, message: "保存しました", meetingPoint: meeting });
+    expect(state.revalidated).toContain("/ layout");
+  });
+
+  it("http: sends the trimmed values in one PUT", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => Response.json({ meetingPoint: meeting }));
+    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: { ...meeting, entranceNote: " （合成）木の門\n" } })).toMatchObject({ ok: true, meetingPoint: meeting });
+    expect(calls).toEqual([{ method: "PUT", path: `/api/experience-providers/${KITCHEN}/meeting-point`, body: meeting }]);
+  });
+
+  it("refuses a missing or unknown field, a value over NIHO's limit and a map URL that is not https, without asking NIHO", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => new Response(null, { status: 500 }));
+    for (const meetingPoint of [
+      { ...meeting, overview: "x".repeat(201) },
+      { ...meeting, address: "x".repeat(501) },
+      { ...meeting, accessNote: "x".repeat(2001) },
+      { ...meeting, entranceNote: "x".repeat(2001) },
+      { ...meeting, mapUrl: "http://maps.example.test/sample" },
+      { ...meeting, mapUrl: "https://user:secret@maps.example.test/sample" },
+      { ...meeting, mapUrl: "javascript:alert(1)" },
+      { overview: "", address: "", accessNote: "", mapUrl: "" },
+      { ...meeting, phone: "000" },
+      { ...meeting, overview: 1 },
+      null,
+    ]) expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: meetingPoint as never })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    expect(await saveProviderMeetingPoint({ providerId: "../admin", meetingPoint: meeting })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    // Spaces NIHO trims do not count toward the limit; an empty map URL is no map.
+    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: { ...meeting, overview: ` ${"x".repeat(200)} `, mapUrl: "" } })).toMatchObject({ ok: false });
+    expect(calls).toEqual([{ method: "PUT", path: `/api/experience-providers/${KITCHEN}/meeting-point`, body: { ...meeting, overview: "x".repeat(200), mapUrl: "" } }]);
+  });
+
+  it("answers NIHO's refusal in words", async () => {
+    state.config.apiMode = "http";
+    stubNiho(() => Response.json({ error: { code: "NOT_FOUND", message: "x", details: {} } }, { status: 404 }));
+    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: meeting })).toEqual({ ok: false, message: "提供者が見つかりません。権限が無いか、URL が正しくありません。" });
   });
 });
 
