@@ -6,7 +6,7 @@ import { RESERVATION_READER_KEYS } from "./constants.mjs";
 
 const CONFIG_KEYS = ["cloudOrigin", "tokenFile", "privateDir", "accountProfiles", "browserExecutable", "mode"];
 const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles", "siteAccountSessionPolicies", "googleDeliveryEnabled", "reservationReaders"];
-const SITE_PROFILE_NAMESPACES = Object.freeze({ Viator: "viator", Jalan: "jalan" });
+const SITE_PROFILE_NAMESPACES = Object.freeze({ Viator: "viator", Jalan: "jalan", Airbnb: "airbnb" });
 
 async function assertPrivatePath(path, expectedType, mode) {
   const absolute = resolve(path);
@@ -54,7 +54,9 @@ export async function loadConfig(configPath, options = {}) {
     const namespaceRoot = await realpath(await assertPrivatePath(join(profilesRoot, namespace), "directory", 0o700));
     const entries = {};
     for (const [accountId, profilePath] of Object.entries(mapping)) {
-      const accountValid = site === "Viator" ? /^\d+$/.test(accountId) : /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(accountId);
+      const accountValid = site === "Jalan"
+        ? /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(accountId)
+        : site === "Airbnb" ? /^[1-9]\d*$/.test(accountId) : /^\d+$/.test(accountId);
       if (!accountValid || typeof profilePath !== "string") throw new ContractError("INVALID_CONFIG");
       const expected = resolve(namespaceRoot, accountId);
       const parent = await assertPrivatePath(dirname(resolve(profilePath)), "directory", 0o700);
