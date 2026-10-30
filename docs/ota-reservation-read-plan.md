@@ -1,6 +1,6 @@
 # 外部予約の定期照合（#237）
 
-2026-10-30の設計と、#237の保存API・#262の配送基盤の実装。予約台帳と受入APIは[外部予約台帳](ota-external-reservations.md)、実行機の排他・停止は[worker](ota-worker.md)を再利用する。**期間readの保存API・page receipt・health、15分scheduler、固定reader executorへの配送までは実装したが、実サイトreader、ブラウザdriver、実サイト受入は未実装である。** 予約が読めない状態を予約ゼロや同期完了へ置き換えない。この段階だけで#237全体を完了または本番対応済みとは扱わない。
+2026-10-30の設計と、#237の保存API・#262の配送基盤の実装。予約台帳と受入APIは[外部予約台帳](ota-external-reservations.md)、実行機の排他・停止は[worker](ota-worker.md)を再利用する。**期間readの保存API・page receipt・health、15分scheduler、固定reader executorへの配送と、GetYourGuideのreader（既定OFF、実サイト未受入）までを実装した。Airbnb・Viator・じゃらんのreaderと実サイト受入は未実装である。** 予約が読めない状態を予約ゼロや同期完了へ置き換えない。この段階だけで#237全体を完了または本番対応済みとは扱わない。
 
 ## 今回実装した境界
 
@@ -14,7 +14,18 @@
 - `channel_jobs.purpose=RESERVATION_WINDOW` とlisting別のdurable巡回stateを追加した。既存claim routeが通常outbox処理後に最大1件をenqueueし、初回は即時、成功はhealthの15分後、失敗は1/5/15/30/60分の有界backoffにする。mapping/account/assignment等が変わったQUEUED jobは`SUPERSEDED`にするが、LEASED jobと既存browser排他はschedulerから解除しない。canonical desired rowが無いlistingは予約ゼロを捏造せず、有界延期する。
 - 配備されていないreaderは候補件数の制限前に除外する。停止した巡回は通常pollで自動解除せず、既存のスタッフによる停止確認・復旧OBSERVEが成功した場合だけ再開する。復旧操作だけでは予約healthをfreshにせず、次の完全な予約readを待つ。
 - claim DTOは予約jobだけ`purpose: RESERVATION_WINDOW`を持つ。通常OBSERVEは従来shapeのままで、予約jobはavailability driverやClaudeへ渡さず固定reader executorへ分岐する。`RESERVATION_VERIFIED`は最終COMPLETE page receiptと同じreadのcurrent health、lease epoch、worker、account/mapping/assignment、現在manifestをserver側で再確認し、通常のobserved列やquarantine recoveryを更新しない。
-- `ota-worker` はmanifestを固定readerへ渡し、reader応答を1回512facts・256 KiB、配送を最大4096page・各32facts・JSON実byte 16 KiB以下に制限する。外部cursorは512文字、snapshot tokenは256文字まで受け、分割位置とcursorのdigestから512文字以下のopaque chainを作る。選別済みfactとimmutable receiptだけを送信前にowner-only private journalへ保存し、ACK喪失時は同一payloadを最大1回だけ再送する。deadline/lease失効ではreader callbackを待ち続けず直ちにstopを開始し、有界時間内に停止を証明できなければ成功へしない。固定reader registryは空であり、合成testだけfactory注入する。unsupported readerを空の`COMPLETE`へ置換しない。
+- `ota-worker` はmanifestを固定readerへ渡し、reader応答を1回512facts・256 KiB、配送を最大4096page・各32facts・JSON実byte 16 KiB以下に制限する。外部cursorは512文字、snapshot tokenは256文字まで受け、分割位置とcursorのdigestから512文字以下のopaque chainを作る。選別済みfactとimmutable receiptだけを送信前にowner-only private journalへ保存し、ACK喪失時は同一payloadを最大1回だけ再送する。deadline/lease失効ではreader callbackを待ち続けず直ちにstopを開始し、有界時間内に停止を証明できなければ成功へしない。reader registryは`GetYourGuide/gyg-browser@1`だけを持ち、Studioのlocal configの`reservationReaders`に明示した場合だけ使う（既定は空）。未登録・未有効のreaderでは期間readを開始せず、unsupported readerを空の`COMPLETE`へ置換しない。
+
+## GetYourGuide reader（実サイト未受入）
+
+2026-10-31に追加。専用profileで実画面の`/bookings`をread-onlyで観測したquery構造（`supplierBookingEntitySearch`、`BookingSearchInput`のlimit/offset/sorts/filters、`pagination.totalItems`）に基づく。観測時の予約一覧は空だったため、各fieldの型と非空時の状態の組合せは未確認である。
+
+- 専用profileのbrowserで会社のSupplier IDを照合してから`/bookings`を通常UIで開く。画面自身の読み取りqueryが通るまで待ち、その認証headerをメモリだけに保持する。保存・ログ・journalへ出さない。
+- 読み取りは固定の名前付きquery `NihoReservationWindowRead`を同じ画面内から送る。selectは予約ID、状態、人数、開始時刻、option/商品ID、optionの所要時間だけで、顧客名・連絡先・価格・ticket・位置は取得しない。mutationと未許可の遷移は遮断する。
+- 条件はsupplierIdと開始時刻の範囲だけで、状態filterを付けない。GYG側の日時解釈が未確認のため、coverageの前後24時間まで広げて読み、coverage外の予約はfactにしない。他商品の予約は件数照合に数えるが、factにはしない。
+- `status=CANCELED`だけを取消とする。`ACTIVE`かつ`guideStatus=CONFIRMED`かつ`isPending=false`を確定とし、それ以外のACTIVEは受付中として占有を保つ。未知の値、offsetの無い開始時刻、未知の所要時間単位、24時間を超える所要時間は推測せず停止する。終了時刻はGYGのoption所要時間から求め、manifestから借りない。NIHOと時刻が一致しない予約はserverが要確認にする。
+- 完全性は、各ページの`totalItems`が変わらないこと、IDが重複しないこと、読んだ件数が総数と一致することの全てで判断する。途中の件数変化・重複・欠落はPARTIALとし、それまでのページは観測として残す。総数が4000件を超える場合は停止する。
+- local configの`reservationReaders`は既定で空であり、serverの`canReadReservations` capabilityも変えていない。非空の予約での型と状態、日時filterの解釈、状態filterなしで全状態が返ることを許可済み口座の実読取りで受け入れるまで、どちらも有効にしない。
 
 ## V1対象と実行単位
 
@@ -55,7 +66,7 @@ Claude Maxの上限、有効な掲載先session、reader未対応は異なる状
 ## 次batchに残るもの
 
 - GetYourGuide、Airbnb、Viator、じゃらん各サイトの実readerと実サイトでの全状態・全page・取消・日時変更・challenge受入。
-- browser driver、実site reader registry、既知予約欠落時の詳細再照会フローへの接続。現registryは空のため、本番capabilityは開けない。
+- GetYourGuide readerの実読取り受入（非空予約・取消・日時変更・全状態・ページ送り）と有効化。Airbnb・Viator・じゃらんのreader、既知予約欠落時の詳細再照会フローへの接続。受入前のreaderでは本番capabilityを開けない。
 - rolloutは旧worker停止の確認、migrationとserver、新worker、サイト別受入、deployment/listing capabilityの順とする。予約期間jobだけ新purpose/receiptを使い、通常の枠jobは従来shapeを維持する。
 - 許可済み実サイトでの1時間以内という同期目標の計測。15分/45分は今回保存した初期運用値であり、達成済み実測ではない。
 - Studio常駐設定、段階的なdeployment/listing capability有効化、実DB migrationと本番/ステージング受入。未対応readerを本番対応へ昇格しない。
