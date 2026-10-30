@@ -96,6 +96,35 @@ describe("host console settings", () => {
     expect(() => resolveConfig({ ...push, HOST_PUSH_ENABLED: "false" })).not.toThrow();
   });
 
+  it("opens the push job's trigger only with http push, both job settings and the experience DB", () => {
+    const push = {
+      ...http, HOST_SESSION_SECRET: secret, NIHO_FIREBASE_WEB_API_KEY: "key", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true",
+      HOST_PUSH_VAPID_PUBLIC_KEY: `B${"x".repeat(86)}`, HOST_PUSH_VAPID_PRIVATE_KEY: "p".repeat(43), HOST_PUSH_VAPID_SUBJECT: "mailto:host-push@example.test",
+    };
+    const job = {
+      HOST_PUSH_JOB_AUDIENCE: "https://experience.example/internal/host-push",
+      HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL: "host-push-job@example.iam.gserviceaccount.com",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+    };
+    const off = { hostPushJobEnabled: false, hostPushJobAudience: "", hostPushJobServiceAccountEmail: "" };
+    expect(resolveConfig({})).toMatchObject(off);
+    expect(resolveConfig({ ...push, ...job })).toMatchObject({
+      hostPushJobEnabled: true,
+      hostPushJobAudience: job.HOST_PUSH_JOB_AUDIENCE,
+      hostPushJobServiceAccountEmail: job.HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL,
+    });
+    // Push on without the job: test notifications only.
+    expect(resolveConfig(push)).toMatchObject({ hostPushEnabled: true, ...off });
+    // Push off, or mock mode: the job stays closed whatever is set.
+    expect(resolveConfig({ ...push, ...job, HOST_PUSH_ENABLED: "false" })).toMatchObject(off);
+    expect(resolveConfig({ ...push, ...job, EXPERIENCE_API_MODE: "mock" })).toMatchObject(off);
+    // Half a setting, a malformed account or no database stops the start-up.
+    expect(() => resolveConfig({ ...push, ...job, HOST_PUSH_JOB_AUDIENCE: "" })).toThrow(/HOST_PUSH_JOB_AUDIENCE/);
+    expect(() => resolveConfig({ ...push, ...job, HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL: "" })).toThrow(/HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL/);
+    expect(() => resolveConfig({ ...push, ...job, HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL: "job@example.com" })).toThrow(/HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL/);
+    expect(() => resolveConfig({ ...push, ...job, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
+  });
+
   it("allows the labelled development key in mock mode only", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true" }).hostSessionSecret).toBe(DEV_ONLY_HOST_SESSION_SECRET);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http" }).hostSessionSecret).toBe("");

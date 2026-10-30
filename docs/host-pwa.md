@@ -48,7 +48,12 @@
 
 メールに足す経路で、置き換えない。届く種類は設定 › 通知の 7 種と ON/OFF に従う（経路別の切替は作らない）。
 
-- **まだ送らない**：送信の部品（`lib/host/push/notify.ts` の `notifyHostDevices`）はあるが、どの出来事にもつないでいない。移行後の通知 job（`outbox_messages` の消費）と合わせて別 PR でつなぐ。今つながっているのは設定の「テスト通知」だけ。
+- **通知 job（outbox の消費。オーナー決定 2026-10-31）**：承認制の予約と予約者からの連絡の正本は、予約の移行（ADR 0002）までは NIHO にあり、体験 DB には無い。NIHO 側は変えず、体験 DB の `outbox_messages` に積まれた通知を送る job を先に置き、積む側（予約・連絡の transaction）は移行で足す。それまで job は空振りする。
+  - topic は 2 つ（`packages/experience-store` の `host-notification-outbox.ts`）。`host.notify.approval_deadline`：承認期限の 6 時間前と 1 時間前の 2 行（期限まで 1 時間を切っていれば 1 時間前の 1 行をすぐ。過ぎていれば積まない）。承認・辞退・取消・期限切れの transaction で `cancelApprovalDeadlineReminders` が未処理の行を閉じる。`host.notify.guest_message`：予約者からの連絡 1 件ごとに 1 行。payload は予約 ID・体験名・日時・人数だけで、予約者名・本文・金額の欄が無い。ほかの topic（`booking.confirmed` など）には触らない。
+  - 取り出しは `available_at` を lease に使う（`FOR UPDATE SKIP LOCKED` で取り、60 秒先へずらす。終わらなければ戻ってくる）。1 回の実行で最大 50 行を、送る直前に 1 行ずつ取り出す（まとめて取ると、遅い送信の間に後ろの行の lease が切れて別の実行が二重に送る）。完了・再試行は取り出したときの `attempts` と一致する行だけを更新し、lease 切れのあと別の実行が取り直した行には効かない。送れたら `processed_at`。期限を過ぎた承認期限・24 時間より古い連絡・形の違う行は送らずに閉じる。購読の読み出しが失敗したら 1・5・15・60 分後に再試行し、5 回で諦める。端末ごとの失敗は従来どおり購読の側に記録する。
+  - 届く種類は設定 › 通知に従う。承認期限は止められない。予約者からの連絡は止められる種類で、送る前に体験 DB の設定（#109、`ProviderNotificationSettings.enabledFor`。行が無ければオン）を読む。`HOST_NOTIFICATION_SETTINGS_ENABLED=false` で設定を読めない間は送らない側に倒す。設定の読み出しが失敗したら購読の読み出しと同じく再試行する。
+  - タップ先は `/host/bookings?booking=…&providerId=…`（承認期限）と `/host/messages?booking=…&providerId=…`（連絡）。同じ予約の承認期限は 1 時間前の通知が 6 時間前のものを置き換える（tag）。
+  - 起動は `POST /internal/host-push/v1/drain`。Cloud Scheduler（毎分）が専用 service account の Google ID token で呼ぶ（`HOST_PUSH_JOB_AUDIENCE`・`HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL`）。未設定・`HOST_PUSH_ENABLED=false` なら 404。応答は件数だけ。Scheduler・service account・環境変数の配線はまだしていない。
 - **ロック画面に出すもの**：通知の種類・体験名・日時（JST）・人数だけ。`HostPushEvent` 型に予約者名・メッセージ本文・金額の欄が無い（`lib/host/push/payload.ts`）。本文は `{ v: 1, title, body, url, tag, badge? }` の JSON で 3 KB まで。`url` は `/host/` 配下のパスだけ。push service へ渡す `Topic` は tag の digest。
 - **暗号と認証**：`packages/web-push`（`node:crypto` だけ）。RFC 8291 `aes128gcm`（RFC の例とバイト単位で一致することをテストで確かめる）と RFC 8292 VAPID（ES256・12 時間）。緊急度は新しい予約・承認期限・連絡・取消が `high`、ほかは `normal`。TTL は承認期限 1 時間・前日のまとめ 12 時間・ほか 24 時間。
 - **endpoint の許可リスト（SSRF 防止）**：https・既定のポート・認証情報なし・ブラウザが直列化した形で、host が `fcm.googleapis.com`・`updates.push.services.mozilla.com`・`web.push.apple.com`・`*.push.apple.com`・`*.notify.windows.com` のどれか、2048 文字まで。ほかは送る前に拒否する。redirect はたどらない。endpoint はログ・URL・エラー文に出さない。
@@ -69,7 +74,7 @@
 - `HOST_PWA_ENABLED`（既定 `false`。`HOST_CONSOLE_ENABLED=true` のときだけ効く）。mock のプレビュー（`deploy-preview.yml`）と stg（`deploy-host-staging.yml`）は `true`、本番は未設定。
 - 戻すときは `HOST_PWA_ENABLED=false` にする。manifest は 404 になり、`/host/sw.js` は自分を解除する worker を返す（404 にすると古い worker が残るため）。画面側の `HostPwaRegistrar` も `/host/` の登録を解除する。追加済みのアイコンは端末に残るが、開くと通常のページとして動く。
 - `false` でも、アプリ表示（iOS 26 は追加したサイトを既定でアプリとして開く）で印のないセッションを更新しない仕組みと、ログアウト・セッション切れの行き先 `/host/launch` は残す。ブラウザの動きは変わらない。
-- プッシュだけ止めるときは `HOST_PUSH_ENABLED=false`。BFF は 404、設定の「通知」の行は消える。端末の購読と表は残るが、送る処理はこの値を見て止める（つないだあと）。
+- プッシュだけ止めるときは `HOST_PUSH_ENABLED=false`。BFF は 404、設定の「通知」の行は消える。端末の購読と表は残るが、通知 job の route も 404 になって送らない。止めている間に積まれた行は残り、戻したときに期限を過ぎた承認期限と 24 時間より古い連絡は送らずに閉じる。
 
 ## 既知の制約
 
