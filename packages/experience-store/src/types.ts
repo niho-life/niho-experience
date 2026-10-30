@@ -201,12 +201,28 @@ export interface GoogleCalendarConfiguration {
   readonly version: number;
 }
 
+export type GuestCancellationPolicy = "FREE_UNTIL_24H" | "FREE_UNTIL_48H" | "NONE";
+
+/** A guest booking prices adults and children apart; seats = adultCount + childCount. */
+export interface PricingBreakdown {
+  readonly adultCount: number;
+  readonly childCount: number;
+  /** The child price per seat; null when the product sells no child seats (childCount is then 0). */
+  readonly childUnitAmount: number | null;
+}
+
 export interface PricingSnapshot {
   readonly currency: string;
+  /** The per-seat price; for a guest booking, the adult price. */
   readonly unitAmount: number;
   readonly seats: number;
+  /** What the guest pays. Payment confirmation compares the charge with this, never unitAmount × seats. */
   readonly totalAmount: number;
   readonly cancellationTermsRef: string;
+  /** Guest bookings (#285) only. */
+  readonly breakdown?: PricingBreakdown;
+  /** Guest bookings (#285) only: the cancellation policy fixed at booking. */
+  readonly cancellationPolicy?: GuestCancellationPolicy;
 }
 
 export interface SellerSnapshot {

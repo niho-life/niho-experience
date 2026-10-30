@@ -36,9 +36,10 @@ vi.mock("@/lib/host/server", async (importActual) => {
   };
 });
 
-import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, openPayoutConnect, registerProvider, saveProviderMeetingPoint, saveProviderProfile, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
+import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, registerProvider, saveProviderMeetingPoint, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
 import { HOST_ERROR_REASON_TEXT, HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
+import { GUEST_QUESTION_LOAD_FAILED_TEXT, GUEST_QUESTION_REPLY_FAILED_TEXT } from "./guest-questions-server";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { MOCK_KITCHEN_EXPERIENCES, MOCK_STUDIO_EXPERIENCES, PREVIEW_PAGE_ENGLISH } from "./mock/experiences";
 import { MOCK_REVIEW_REPLY_EXAMPLES } from "./mock/reviews";
@@ -388,5 +389,25 @@ describe("the session", () => {
     expect(await draftReplyEnglish({ providerId: KITCHEN, threadId: "th-3012", japanese: "はい" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(await draftReviewReplyEnglish({ providerId: KITCHEN, reviewId: "rv-5020", japanese: "はい" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(calls).toEqual([]);
+  });
+});
+
+describe("questions to the host kept in the experience DB (#106)", () => {
+  const reply = { providerId: KITCHEN, threadId: "00000000-0000-4000-8000-000000000106", japanese: "はい", english: "Yes.", commandId: "00000000-0000-4000-8000-0000000c0106" };
+
+  it("checks what the browser sent before anything else", async () => {
+    for (const input of [{}, { ...reply, providerId: "../admin" }, { ...reply, threadId: "x".repeat(201) }, { ...reply, english: "  " }, { ...reply, english: "x".repeat(MESSAGE_TEXT_LIMIT + 1) }, { ...reply, japanese: 1 }, { ...reply, commandId: "retry-1" }]) {
+      expect(await sendGuestQuestionReply(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
+    expect(await openGuestQuestionThread({ providerId: KITCHEN } as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    for (const input of [{ providerId: KITCHEN }, { providerId: KITCHEN, cursor: "x".repeat(201) }, { providerId: "../admin", cursor: "sample-cursor" }]) {
+      expect(await loadMoreGuestQuestionThreads(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
+  });
+
+  it("is closed in the preview, which keeps its synthetic threads on the screen", async () => {
+    expect(await openGuestQuestionThread({ providerId: KITCHEN, threadId: reply.threadId })).toEqual({ ok: false, message: GUEST_QUESTION_LOAD_FAILED_TEXT });
+    expect(await sendGuestQuestionReply(reply)).toEqual({ ok: false, message: GUEST_QUESTION_REPLY_FAILED_TEXT });
+    expect(await loadMoreGuestQuestionThreads({ providerId: KITCHEN, cursor: "sample-cursor" })).toEqual({ ok: false, message: GUEST_QUESTION_LOAD_FAILED_TEXT });
   });
 });

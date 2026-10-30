@@ -96,6 +96,35 @@ describe("host console settings", () => {
     expect(() => resolveConfig({ ...push, HOST_PUSH_ENABLED: "false" })).not.toThrow();
   });
 
+  it("opens the push job's trigger only with http push, both job settings and the experience DB", () => {
+    const push = {
+      ...http, HOST_SESSION_SECRET: secret, NIHO_FIREBASE_WEB_API_KEY: "key", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true",
+      HOST_PUSH_VAPID_PUBLIC_KEY: `B${"x".repeat(86)}`, HOST_PUSH_VAPID_PRIVATE_KEY: "p".repeat(43), HOST_PUSH_VAPID_SUBJECT: "mailto:host-push@example.test",
+    };
+    const job = {
+      HOST_PUSH_JOB_AUDIENCE: "https://experience.example/internal/host-push",
+      HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL: "host-push-job@example.iam.gserviceaccount.com",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+    };
+    const off = { hostPushJobEnabled: false, hostPushJobAudience: "", hostPushJobServiceAccountEmail: "" };
+    expect(resolveConfig({})).toMatchObject(off);
+    expect(resolveConfig({ ...push, ...job })).toMatchObject({
+      hostPushJobEnabled: true,
+      hostPushJobAudience: job.HOST_PUSH_JOB_AUDIENCE,
+      hostPushJobServiceAccountEmail: job.HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL,
+    });
+    // Push on without the job: test notifications only.
+    expect(resolveConfig(push)).toMatchObject({ hostPushEnabled: true, ...off });
+    // Push off, or mock mode: the job stays closed whatever is set.
+    expect(resolveConfig({ ...push, ...job, HOST_PUSH_ENABLED: "false" })).toMatchObject(off);
+    expect(resolveConfig({ ...push, ...job, EXPERIENCE_API_MODE: "mock" })).toMatchObject(off);
+    // Half a setting, a malformed account or no database stops the start-up.
+    expect(() => resolveConfig({ ...push, ...job, HOST_PUSH_JOB_AUDIENCE: "" })).toThrow(/HOST_PUSH_JOB_AUDIENCE/);
+    expect(() => resolveConfig({ ...push, ...job, HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL: "" })).toThrow(/HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL/);
+    expect(() => resolveConfig({ ...push, ...job, HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL: "job@example.com" })).toThrow(/HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL/);
+    expect(() => resolveConfig({ ...push, ...job, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
+  });
+
   it("allows the labelled development key in mock mode only", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true" }).hostSessionSecret).toBe(DEV_ONLY_HOST_SESSION_SECRET);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http" }).hostSessionSecret).toBe("");
@@ -186,6 +215,22 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ HOST_NOTIFICATION_SETTINGS_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_NOTIFICATION_SETTINGS_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_NOTIFICATION_SETTINGS_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(true);
+  });
+
+  it("keeps questions to the host in the experience DB only in http mode with their own flag (#105 #106)", () => {
+    expect(resolveConfig({}).guestQuestionsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
+    const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    expect(resolveConfig({ ...host, EXPERIENCE_GUEST_QUESTIONS_ENABLED: "1" }).guestQuestionsEnabled).toBe(false);
+    expect(resolveConfig({ ...host, EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(true);
+  });
+
+  it("takes no question the OWNER could not read (#106)", () => {
+    // No host console: nobody would see the question.
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
+    // メッセージ shows NIHO's booking messages instead of the questions.
+    const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "true", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
   });
 
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {

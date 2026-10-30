@@ -72,8 +72,8 @@ export function guestMessageView(message: Pick<HostGuestMessage, "original" | "l
   return { text: message.original, lang: message.language, original: null, note: "翻訳できませんでした", untranslated: true };
 }
 
-/** Whether NIHO could send the host's reply. */
-export const REPLY_STATUS: Record<HostMessageStatus, string> = { sent: "送信済み", failed: "送れませんでした" };
+/** Whether the host's reply reached the guest (送信待ち: queued for the email). */
+export const REPLY_STATUS: Record<HostMessageStatus, string> = { sent: "送信済み", failed: "送れませんでした", pending: "送信待ち" };
 
 /** One line of a message for a list: the Japanese the host reads (or the English the host wrote directly), spaces collapsed. */
 export function messagePreview(message: HostThreadMessage): string {
@@ -98,14 +98,14 @@ export function lastGuestMessage(thread: Pick<HostThread, "messages">): HostGues
 
 /**
  * Since when the guest has waited for the host: their first message after the host's last
- * sent reply, or null when the thread does not wait (the host had the last word). A reply NIHO
- * could not send answers nothing.
+ * sent (or queued) reply, or null when the thread does not wait (the host had the last word). A
+ * reply that could not be sent answers nothing.
  */
 export function waitingSince(thread: Pick<HostThread, "messages">): string | null {
   let since: string | null = null;
   for (const message of thread.messages) {
     if (message.from === "host") {
-      if (message.status === "sent") since = null;
+      if (message.status !== "failed") since = null;
     } else {
       since ??= message.at;
     }

@@ -81,6 +81,8 @@ const nextConfig: NextConfig = {
       { source: "/booking/:path*", headers: privatePageHeaders },
       { source: "/ja/booking/:path*", headers: privatePageHeaders },
       { source: "/preview/:path*", headers: privatePageHeaders },
+      // The guest's reply page (#105): its one-time token is in the fragment; the page is private all the same.
+      { source: "/questions/:path*", headers: privatePageHeaders },
       // editor.niho.life drafts (#253): the token is in the query, so no Referer may carry it anywhere.
       { source: "/guides/preview", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       // `:path+` leaves /host itself (the public introduction) indexable.

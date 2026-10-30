@@ -7,6 +7,7 @@
 - `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHO user ID と experience DB の `provider_memberships` を両方確認する。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
 - Google OAuth の refresh token は provider にひも付けて暗号化保存する。選択した読み取り元は接続時の primary calendar、書き込み先はアプリが作る専用 calendar。予定の件名・参加者・説明は DB とレスポンスに保存しない。
 - `experience-domain` と `experience-store` は予約枠の判定、席の原子的な仮押さえ、支払 webhook による確定・台帳記入を提供する。`experience-payments` は共通 Stripe Connect 上の Direct charge Checkout と体験イベントの署名検証を提供する。webhook の受信経路は `/api/experience/stripe/webhook`。
+- `experience-store` の `GuestBookingRepository`（`0023`、#285 の第1段）は、旅行者向けの販売条件・公開の開催枠と残席・ゲストの仮押さえ（31 分）を experience DB で扱える。結果は NIHO の公開契約（offer・availability・checkout の誤りの code）と同じ形。公開の経路と画面への接続はまだ無い（#285 の第2段）。
 - 現行の旅行者向け availability と checkout、旧 `/host/experiences` の編集、既存予約一覧はまだ NIHO API を使う。**このカレンダーの Google busy 判定は、現在販売中の旧予約枠には効かない。** 現行の枠を止める操作は NIHO 側でも行う。
 
 ## カレンダー変更の整合性
@@ -31,6 +32,7 @@
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | 既存 NIHO プラットフォームの Stripe 秘密鍵を、体験処理用の実行 ID に限定して渡す |
 | `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 体験 Connect webhook destination の署名鍵。NIHO の既存 endpoint の鍵と混用しない |
 | `HOST_NOTIFICATION_SETTINGS_ENABLED` | `true` のときだけ、http mode の `/host/settings` の通知（#109）を experience DB（`0020`）から読み書きする。既定 `false`（準備中）。DB の provider に OWNER の membership が無い提供者は準備中のまま |
+| `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `true` のときだけ、http mode で予約前の質問（#105/#106、[guest-questions.md](guest-questions.md)）を experience DB（`0022`）に置く。体験ページの「Ask the host」、`/questions/reply`、`/api/public/experiences/{slug}/questions`・`/api/public/questions/reply(/open)`、OWNER の `/host/messages` が開く。`HOST_CONSOLE_ENABLED=true` が要り、`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED=true` の環境では効かない（ホストが質問を読めないため）。既定 `false`（質問の入口は出ず、公開 API は 404）。`EXPERIENCE_DATABASE_URL` が無いと公開 API は 503 |
 
 DB migration は `packages/experience-store/migrations/` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0006` は上記の停止・移行手順を先に満たす。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
 

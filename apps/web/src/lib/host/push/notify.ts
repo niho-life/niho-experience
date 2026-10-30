@@ -48,8 +48,8 @@ export async function deliverHostPush(recipient: HostPushRecipient, message: Hos
 
 /**
  * Sends one event to the devices of the provider's active members seen in the last 30 days, four at
- * a time. Push is a second channel next to email, never a replacement. Nothing calls this yet: the
- * notification job that consumes `outbox_messages` will (docs/host-pwa.md).
+ * a time. Push is a second channel next to email, never a replacement. The notification job that
+ * consumes `outbox_messages` calls it (outbox.ts, docs/host-pwa.md).
  */
 export async function notifyHostDevices(event: HostPushEvent, deps: HostPushDeps): Promise<HostPushReport> {
   const message: HostPushSend = { payload: hostPushPayload(event), ...hostPushDelivery(event.kind), topic: hostPushTopic(event.tag) };

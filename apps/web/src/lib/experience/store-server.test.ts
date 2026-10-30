@@ -24,3 +24,9 @@ it("enables typed Google/Airbnb acceptance only in HTTP mode with both dedicated
   state.apiMode = "mock";
   expect(googleAirbnbObservationEnabled()).toBe(false);
 });
+
+it("keeps guest questions closed in the preview even with a database URL", async () => {
+  vi.stubEnv("EXPERIENCE_DATABASE_URL", "postgresql://synthetic:unused@127.0.0.1/unused");
+  const { guestQuestionRepository } = await import("./store-server");
+  expect(guestQuestionRepository()).toBeNull();
+});

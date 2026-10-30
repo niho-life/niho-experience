@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { settleReservationAttention } from "./external-reservation-attention.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 
 /** A Studio heartbeat older than this holds new OPEN writes and opens a WORKER_STALE incident. */
@@ -10,7 +11,9 @@ export const WATCHDOG_STALE_MS = 5 * 60_000;
 const WATCHDOG_ROW_LIMIT = 500;
 const OPEN_INCIDENT_LIMIT = 5_000;
 
-export type ChannelRuntimeIncidentKind = "WORKER_STALE" | "SYNC_OVERDUE" | "RESERVATION_READ_OVERDUE" | "ACCOUNT_QUARANTINED";
+export type ChannelRuntimeIncidentKind =
+  | "WORKER_STALE" | "SYNC_OVERDUE" | "RESERVATION_READ_OVERDUE" | "ACCOUNT_QUARANTINED" | "EXTERNAL_RESERVATION_CONFLICT";
+export type ChannelRuntimeIncidentSubjectType = "worker" | "account" | "conflict_case";
 export type ChannelRuntimeIncidentTransition = "opened" | "escalated" | "resolved";
 export type ChannelWorkerHealth = "FRESH" | "STALE" | "DOWN" | "NEVER";
 export type ChannelIncidentDetail = Readonly<Record<string, string | number | boolean>>;
@@ -82,7 +85,7 @@ export interface ChannelRuntimeAccountView {
 export interface ChannelRuntimeIncidentView {
   readonly id: string;
   readonly kind: ChannelRuntimeIncidentKind;
-  readonly subjectType: "worker" | "account";
+  readonly subjectType: ChannelRuntimeIncidentSubjectType;
   readonly subjectId: string;
   readonly openedAtUtc: string;
   readonly escalated: boolean;
@@ -163,7 +166,7 @@ export async function providerWorkerSignals(db: Pool | PoolClient, providerId: s
 
 interface Finding {
   readonly kind: ChannelRuntimeIncidentKind;
-  readonly subjectType: "worker" | "account";
+  readonly subjectType: ChannelRuntimeIncidentSubjectType;
   readonly subjectId: string;
   readonly providerId: string | null;
   readonly escalateNow: boolean;
@@ -177,7 +180,8 @@ function dedupeKey(kind: ChannelRuntimeIncidentKind, subjectType: string, subjec
 
 /**
  * Runs inside the caller's transaction after it took the watchdog lock.
- * It changes only incidents, the watchdog row, and stale workers' OPEN hold.
+ * It changes only incidents, the watchdog row, stale workers' OPEN hold, and
+ * the attention records (cleared conflict cases, propagation measurements).
  */
 export async function runChannelWatchdog(client: PoolClient, now: Date, deployedActions: readonly string[]): Promise<Omit<ChannelWatchdogRunResult, "skipped">> {
   const nowMs = now.getTime();
@@ -299,6 +303,17 @@ export async function runChannelWatchdog(client: PoolClient, now: Date, deployed
       kind: "ACCOUNT_QUARANTINED", subjectType: "account", subjectId: String(row.id), providerId: String(row.provider_id),
       escalateNow: since <= overdueBefore, escalateAfterOpenAge: false,
       detail: { reason: String(row.quarantine_reason), quarantinedSeconds: seconds(since, nowMs) },
+    });
+  }
+
+  // Conflict cases need customer handling, so their incidents start escalated.
+  const attention = await settleReservationAttention(client, now);
+  if (attention.casesTruncated) truncated.add("EXTERNAL_RESERVATION_CONFLICT");
+  for (const item of attention.openCases) {
+    findings.push({
+      kind: "EXTERNAL_RESERVATION_CONFLICT", subjectType: "conflict_case", subjectId: item.caseId, providerId: item.providerId,
+      escalateNow: true, escalateAfterOpenAge: false,
+      detail: { externalMembers: item.externalMembers, directMembers: item.directMembers },
     });
   }
 
@@ -498,7 +513,8 @@ export async function loadChannelRuntimeOverview(db: Pool, providerId: string, v
     openHold, unclosedOccurrences, workers, accounts,
     incidents: incidentRows.rows.map((row) => ({
       id: String(row.id), kind: String(row.kind) as ChannelRuntimeIncidentKind,
-      subjectType: row.subject_type === "worker" ? "worker" as const : "account" as const, subjectId: String(row.subject_id),
+      subjectType: row.subject_type === "worker" ? "worker" as const : row.subject_type === "conflict_case" ? "conflict_case" as const : "account" as const,
+      subjectId: String(row.subject_id),
       openedAtUtc: isoValue(row, "opened_at"), escalated: row.escalated_at !== null, acknowledged: row.acknowledged_at !== null,
       assignedToMe: row.assignee_niho_user_id === viewerNihoUserId, detail: incidentDetail(row.detail),
     })),

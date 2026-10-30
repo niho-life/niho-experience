@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { BOOKING_FIELD_INPUT_CLASS_V1, BOOKING_FIELD_LABEL_CLASS_V1 } from "@niho/experience-presentation/v1";
 import { ASK_HOST_INPUT_LIMITS, ASK_HOST_TOPICS, askHostInputProblem, createClientRequestKey, type AskHostRequest, type AskHostResult, type AskHostTopic, type ExperienceApiClient } from "@niho-experience/api-client";
-import { getBrowserApi } from "@/lib/browser-api";
+import { getBrowserApi, getSiteQuestionsApi } from "@/lib/browser-api";
 import type { Face } from "@/lib/card-model";
 import { ASK_HOST_TOPIC_LABELS } from "@/lib/journey-ui";
 import { FaceBadge } from "./Face";
@@ -41,9 +41,9 @@ function problemFor(result: Exclude<AskHostResult, { ok: true }>, target: string
 }
 
 /**
- * "Ask {host} a question": a sheet on a phone, a dialog on a desktop. Mock-only for now (Epic #103: NIHO's questions API,
- * niho-coliving/niho-app#19319). The question goes from this browser straight to NIHO; nothing the traveler types is stored,
- * put in a URL, logged or sent to analytics, and the form is cleared once the question is accepted.
+ * "Ask {host} a question": a sheet on a phone, a dialog on a desktop. The preview answers with the contract mock; a real
+ * deployment posts to this site's own route, which keeps the question in the experience DB (#105, docs/guest-questions.md).
+ * Nothing the traveler types is put in a URL, logged or sent to analytics, and the form is cleared once the question is accepted.
  */
 export function AskHost({ slug, target, face, preview, nihoWebOrigin }: { slug: string; target: string; face: Face; preview: boolean; nihoWebOrigin: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -111,14 +111,14 @@ export function AskHost({ slug, target, face, preview, nihoWebOrigin }: { slug: 
       setProblem({ tone: "danger", title: FIELD_PROBLEMS[invalid], field: invalid });
       return;
     }
-    // The same content is resent with the same key (NIHO treats it as one question); any change gets a new key.
+    // The same content is resent with the same key (one question on the server); any change gets a new key.
     const signature = JSON.stringify(draft);
     if (attempt.current?.signature !== signature) attempt.current = { signature, key: createClientRequestKey() };
     const request: AskHostRequest = { ...draft, clientRequestKey: attempt.current.key };
     setSending(true);
     let result: AskHostResult;
     try {
-      api.current ??= getBrowserApi(preview, nihoWebOrigin);
+      api.current ??= preview ? getBrowserApi(true, nihoWebOrigin) : Promise.resolve(getSiteQuestionsApi(window.location.origin));
       result = await (await api.current).askHost(slug, request);
     } catch {
       result = { ok: false, kind: "network_error" };

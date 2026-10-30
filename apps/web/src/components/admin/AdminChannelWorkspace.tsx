@@ -13,6 +13,7 @@ import {
 import { CHANNEL_SITES } from "@niho-experience/experience-store/channel-sites";
 import { useAdminLeaveProtection } from "./AdminLeaveGuard";
 import { AdminChannelRuntimePanel } from "./AdminChannelRuntimePanel";
+import { AdminReservationAttentionPanel } from "./AdminReservationAttentionPanel";
 import { HOST_DIALOG } from "@/components/host/HostConfirmDialog";
 import { consoleButtonClass, HOST_SURFACE } from "@/components/host/host-ui";
 
@@ -213,6 +214,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
 
     {!editor ? feedback : null}
     {providerId ? <AdminChannelRuntimePanel key={providerId} providerId={providerId} onChanged={() => void loadProvider(providerId)} /> : null}
+    {providerId ? <AdminReservationAttentionPanel key={`attention-${providerId}`} providerId={providerId} /> : null}
     {loading ? <p className="py-10 text-center text-ink-soft">読み込み中…</p> : null}
     {loadError ? <div role="alert" className="rounded-xl bg-danger-pale p-4"><p className="font-bold">一覧を読み込めませんでした。</p><button type="button" onClick={() => void loadProvider(providerId)} className={`${consoleButtonClass("secondary", "md", "min-h-11")} mt-3`}>再読込</button></div> : null}
 

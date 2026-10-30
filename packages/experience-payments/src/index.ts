@@ -104,12 +104,25 @@ function assertBookingForCheckout(booking: Readonly<BookingRecord>): void {
   ) {
     throw new ExperiencePaymentsValidationError("The booking seat count does not match its snapshots.");
   }
-  if (
-    !Number.isSafeInteger(booking.pricingSnapshot.unitAmount * booking.pricingSnapshot.seats) ||
-    booking.pricingSnapshot.unitAmount * booking.pricingSnapshot.seats !== booking.pricingSnapshot.totalAmount
-  ) {
+  if (!Number.isSafeInteger(expectedSnapshotTotal(booking)) || expectedSnapshotTotal(booking) !== booking.pricingSnapshot.totalAmount) {
     throw new ExperiencePaymentsValidationError("The booking pricing snapshot total is inconsistent.");
   }
+}
+
+/** unitAmount × seats, or for a guest booking (#285) adults at unitAmount plus children at their own price. */
+function expectedSnapshotTotal(booking: Readonly<BookingRecord>): number {
+  const pricing = booking.pricingSnapshot;
+  const breakdown = pricing.breakdown;
+  if (breakdown === undefined) return pricing.unitAmount * pricing.seats;
+  const { adultCount, childCount, childUnitAmount } = breakdown;
+  if (
+    !Number.isInteger(adultCount) || !Number.isInteger(childCount) || adultCount < 0 || childCount < 0 ||
+    adultCount + childCount !== pricing.seats || (childCount > 0 && childUnitAmount === null) ||
+    (childUnitAmount !== null && (!Number.isSafeInteger(childUnitAmount) || childUnitAmount < 0))
+  ) {
+    return Number.NaN;
+  }
+  return pricing.unitAmount * adultCount + (childUnitAmount ?? 0) * childCount;
 }
 
 function checkoutExpiry(

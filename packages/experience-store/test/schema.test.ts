@@ -183,6 +183,35 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /DROP |DELETE FROM|external_account_id|customer|guest|email|phone|price|amount|cookie|bearer|token|raw_response/i);
   });
 
+  it("adds a free-text-free conflict queue, wider incident kinds, and propagation measurements (#200)", async () => {
+    const sql = await readFile(new URL("../migrations/0022_external_reservation_attention.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const cases = sql.match(/CREATE TABLE external_reservation_conflict_cases \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(cases, /status IN \('OPEN','RESOLVED'\)/);
+    assert.match(cases, /resolution IN \('CONFLICT_CLEARED','CUSTOMER_CONTACTED','ACCEPTED_BOTH','CANCELLED_AT_SOURCE'\)/);
+    assert.match(cases, /CHECK \(\(acknowledged_at IS NULL\) = \(assignee_niho_user_id IS NULL\)\)/);
+    // No free-text or contact column: staff cannot type customer details into the queue.
+    assert.doesNotMatch(cases, /^\s+\w*(note|comment|memo|message|body|customer|guest|email|phone|name)\w*\s/im);
+    assert.match(sql, /CREATE UNIQUE INDEX external_reservation_conflict_cases_open[\s\S]*?\(provider_id, occurrence_id\) WHERE status = 'OPEN'/);
+    const members = sql.match(/CREATE TABLE external_reservation_conflict_members \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(members, /member_kind IN \('EXTERNAL','DIRECT'\)/);
+    assert.match(sql, /external_reservation_conflict_members_external[\s\S]*?WHERE member_kind = 'EXTERNAL'/);
+    assert.match(sql, /external_reservation_conflict_members_direct[\s\S]*?WHERE member_kind = 'DIRECT'/);
+    // 0021 is never edited; its auto-named column checks are replaced by name.
+    assert.match(sql, /DROP CONSTRAINT channel_runtime_incidents_kind_check/);
+    assert.match(sql, /DROP CONSTRAINT channel_runtime_incidents_subject_type_check/);
+    assert.match(sql, /'ACCOUNT_QUARANTINED','EXTERNAL_RESERVATION_CONFLICT'\)/);
+    assert.match(sql, /subject_type IN \('worker','account','conflict_case'\)/);
+    assert.match(sql, /\(kind = 'EXTERNAL_RESERVATION_CONFLICT'\) = \(subject_type = 'conflict_case'\)/);
+    const measurements = sql.match(/CREATE TABLE channel_propagation_measurements \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(measurements, /status IN \('OPEN','COMPLETED','NOT_REQUIRED','ABANDONED','TIMED_OUT'\)/);
+    assert.match(measurements, /UNIQUE \(source_site, source_external_account_id, external_reservation_id, local_revision\)/);
+    const targets = sql.match(/CREATE TABLE channel_propagation_targets \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(targets, /outcome IN \('PENDING','VERIFIED','NOT_REQUIRED','UNVERIFIED'\)/);
+    assert.doesNotMatch(sql.replaceAll("'CUSTOMER_CONTACTED'", ""), /DROP TABLE|DELETE FROM|UPDATE |customer|guest|email|phone|price|amount|cookie|bearer|token|raw_response/i);
+  });
+
   it("keeps host push subscriptions to one row per endpoint, with keys and a coarse device only (#177)", async () => {
     const sql = await readFile(new URL("../migrations/0004_host_push_subscriptions.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -247,5 +276,53 @@ describe("database invariants", () => {
     assert.match(table, /PRIMARY KEY \(provider_id, notification_key\)/);
     assert.match(table, /REFERENCES experience_providers\(id\)/);
     assert.doesNotMatch(table, /email|address|display_name|body\b|NEW_BOOKING|CANCELLATION/i);
+  });
+
+  it("keeps guest questions per provider, reply links only as hashes, and no IP addresses (#105 #106)", async () => {
+    const sql = await readFile(new URL("../migrations/0022_guest_questions.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.doesNotMatch(sql, /CREATE EXTENSION|\bip_address\b|\binet\b|user_agent/i);
+    const threads = sql.match(/CREATE TABLE guest_question_threads \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(threads, /FOREIGN KEY \(provider_id, product_id\) REFERENCES experience_products\(provider_id, id\)/);
+    assert.match(threads, /topic IN \('CHILDREN', 'FOOD', 'ACCESS', 'LANGUAGE', 'OTHER'\)/);
+    assert.match(threads, /guest_email_key = lower\(guest_email\)/);
+    assert.match(threads, /UNIQUE \(provider_id, product_id, client_request_key\)/);
+    const messages = sql.match(/CREATE TABLE guest_question_messages \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(messages, /FOREIGN KEY \(provider_id, thread_id\) REFERENCES guest_question_threads\(provider_id, id\)/);
+    assert.match(messages, /delivery_status IN \('PENDING', 'SENDING', 'SENT', 'FAILED'\)/);
+    assert.match(messages, /UNIQUE \(provider_id, command_id\)/);
+    assert.match(messages, /author = 'GUEST' AND length\(body\) <= 1000\) OR \(author = 'HOST' AND length\(body\) <= 4000/);
+    assert.doesNotMatch(messages, /email/i);
+    const tokens = sql.match(/CREATE TABLE guest_question_reply_tokens \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(tokens, /token_hash bytea PRIMARY KEY CHECK \(octet_length\(token_hash\) = 32\)/);
+    assert.doesNotMatch(tokens, /token_value|plain|secret|email/i);
+    assert.doesNotMatch(sql, /outbox_messages/);
+  });
+
+  it("keeps sale terms per product and guest details per booking, erasable and without IP addresses (#285)", async () => {
+    const sql = await readFile(new URL("../migrations/0023_guest_bookings.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.doesNotMatch(sql, /CREATE EXTENSION|\bip_address\b|\binet\b|user_agent|ALTER TABLE|DROP /i);
+    const terms = sql.match(/CREATE TABLE experience_product_sale_terms \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(terms, /PRIMARY KEY \(provider_id, product_id\)/);
+    assert.match(terms, /FOREIGN KEY \(provider_id, product_id\) REFERENCES experience_products\(provider_id, id\)/);
+    assert.match(terms, /cancellation_policy IN \('FREE_UNTIL_24H', 'FREE_UNTIL_48H', 'NONE'\)/);
+    assert.match(terms, /max_party_size >= minimum_participants/);
+    assert.match(terms, /booking_questions_fingerprint text NOT NULL CHECK \(booking_questions_fingerprint ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    const guests = sql.match(/CREATE TABLE booking_guests \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(guests, /PRIMARY KEY \(provider_id, booking_id\)/);
+    assert.match(guests, /FOREIGN KEY \(provider_id, booking_id\) REFERENCES bookings\(provider_id, id\)/);
+    assert.match(guests, /guest_email_key = lower\(guest_email\)/);
+    assert.match(guests, /guest_language IN \('EN', 'JA'\)/);
+    assert.match(guests, /request_fingerprint text NOT NULL/);
+    assert.match(guests, /pii_erased_at timestamptz,/);
+    // Personal columns are NULL exactly when the row was erased.
+    assert.match(guests, /pii_erased_at IS NOT NULL\s+OR \(guest_name IS NOT NULL AND guest_email IS NOT NULL/);
+    assert.match(guests, /pii_erased_at IS NULL\s+OR \(guest_name IS NULL AND guest_email IS NULL/);
+    assert.match(sql, /ON booking_guests \(provider_id, guest_email_key, created_at\)/);
+    assert.match(sql, /a booking checkout session is set once/);
+    assert.doesNotMatch(sql, /outbox_messages/);
   });
 });

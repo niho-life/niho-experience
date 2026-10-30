@@ -41,6 +41,40 @@ generationがcurrent rowより古ければ適用しない。`sourceUpdatedAtUtc`
 
 source siteまたはexternal account IDを変えるAdmin更新は、同じprovider inventory mutex内で未終了のactive外部予約を検査し、存在時は拒否する。表示名、停止、委任状態の変更はidentity変更とは分ける。
 
+## 要対応キューと反映時間の計測
+
+対象: #200。競合を残した外部予約をスタッフの要対応として表に出し、予約を検知してから他の販路で受付停止を確認するまでの時間を測る。予約の自動取消・再課金・返金・顧客への連絡はしない。手動の「対応済み」も記録だけで、予約・直販予約・在庫・jobを変えない。
+
+### 要対応キュー（`external_reservation_conflict_cases`）
+
+- 開始: active（`PENDING`/`CONFIRMED`）の外部予約の書込みが `INVENTORY_CONFLICT` になったとき、ledger と同じ transaction・provider inventory mutex の中で、その occurrence の OPEN case を作るか `last_seen_at` を更新する。OPEN case は provider×occurrence で1件。
+- メンバー: その外部予約、同じ occurrence の active な外部予約と直販予約（確定と期限内HOLD）、資源の衝突で当たった相手の予約（取れる範囲、最大50件）。同じ予約は1回だけ登録する。DUPLICATE/STALE の再送では何も作らない。
+- 自由記述の列はない。Admin へは site・外部予約ID・人数・現在の状態、直販は予約IDだけを返し、external account ID は返さない。
+- 自動解決: watchdog が、その occurrence に `review_reason='INVENTORY_CONFLICT'` の active な外部予約が残っていなければ `CONFLICT_CLEARED` で閉じる。ledger はこの flag を書込み時にだけ再計算するため、先に入った側（flag なし）が取り消されても、後から入った側の flag は残り、case は開いたままになる。その場合はスタッフが閉じる。
+- 手動解決: `CUSTOMER_CONTACTED`（お客様に連絡した）、`ACCEPTED_BOTH`（両方の予約を受け入れる）、`CANCELLED_AT_SOURCE`（予約元で取り消された）の3つだけ。UUID v4 command で冪等にし、`channel_audit_events` に残す。`CONFLICT_CLEARED` は手動では受け付けない。担当は「担当する」で自分にする。
+- incident: OPEN case ごとに `EXTERNAL_RESERVATION_CONFLICT`（subject は case）を開き、顧客対応が要るため最初から escalated にする。case が閉じた次の watchdog 実行で incident も閉じる。
+- 競合を含む予約読取は既存の契約どおり完全性の証明にならず、その外部アカウントは `NEEDS_REVIEW` で隔離される。キューはその後のスタッフ対応の入口であり、隔離の解除は既存の復旧手順による。
+
+### 反映時間の計測（`channel_propagation_measurements` / `_targets`）
+
+- 作成: ある revision で外部予約がその occurrence で新たに active になったとき（新規、別 occurrence への移動、取消からの復活）に1件。`detected_at` はその revision を書いた時刻、`source_updated_at` は観測値のまま。
+- target: 同じ商品の active な listing のうち、検知元の listing を除いたもの。0件ならその場で `NOT_REQUIRED`。
+- 判定（watchdog、同じ advisory lock 内、1回最大500件）:
+  1. 予約がその occurrence でもう active でなければ `ABANDONED`。
+  2. target ごとに、desired が CLOSED で同期済み（observed CLOSED、desired/mapping 版一致）かつ `last_verified_at >= detected_at` なら `VERIFIED`。その listing・occurrence で検知後に VERIFIED になった最新の SET_CLOSED job の作成時刻と claim 時刻（`lease_started_at`）を記録する。
+  3. この予約を反映する calendar outbox が処理済みのとき、desired が OPEN なら席が残るので `NOT_REQUIRED`。検知前に閉鎖を確認済みで desired が変わらなかった target も `NOT_REQUIRED`。outbox が未処理なら判定を保留する。
+  4. 全 target が VERIFIED か NOT_REQUIRED になれば、VERIFIED が1件以上で `COMPLETED`（`closed_verified_at` は最大値）、なければ `NOT_REQUIRED`。
+  5. 検知から24時間を超えたら `TIMED_OUT`。未確定の target は `UNVERIFIED`。`ABANDONED` の残りも `UNVERIFIED` にする。
+- 「この予約を反映する outbox」は、書込み直後の provider の最大 outbox ID（`outbox_watermark_id`）以下で、すでに処理可能な（`available_at <= now`）未処理 event。時刻だけで比べると、同じ transaction で作った event をアプリとDBの時計差で見落とすため ID で区切る。
+- 区間: 検知→他の販路で閉鎖を確認（`closed_verified_at - detected_at`、COMPLETED のみ）、検知の遅れ（`detected_at - source_updated_at`、値がある分だけ）、実行待ち（target の job claim − job 作成）。Admin の `propagationMetrics` は直近30日（最大1万件）を SQL の `percentile_cont` で集計し、status 別件数、p50/p95/最大、60分超の件数、検知元 site 別の件数と p95、未確定の件数と最古の経過時間を返す。未確定は30日で区切らない。
+
+### 対象の限界
+
+- 計測するのは同じ商品の他の listing だけである。会場・講師などの資源を共有する別商品の閉鎖は計測しない。
+- target は listing が active かだけで決める。account の停止・隔離や capability 不足で自動では閉じられない listing は、閉鎖を確認できず `TIMED_OUT` になる。
+- 確認は Studio の readback（`last_verified_at`）による。外部サイトで実際に予約が入らなかったことの証明ではない。
+- pilot の目標値（反映時間など）は、このコードと合成テストだけでは達成済みとしない。実 Studio・実販路での計測結果で判断する。
+
 ## 保持・DB権限・配備順
 
 初期保持期間はsource終了から7年とし、current ledger/tombstone、revision、read、receipt、inventory snapshotを同じ監査単位で保持する。active、未終了、未解決review、参照中snapshotは7年を過ぎても解決前に消さない。個人情報を追加しない前提を維持し、自動削除jobはこのsliceに含めない。将来の削除jobは一つの外部予約に属する参照を監査単位で処理し、currentだけ、またはreceiptだけを先に消さない。
