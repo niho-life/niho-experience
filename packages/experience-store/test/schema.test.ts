@@ -127,6 +127,17 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
   });
 
+  it("adds selected Google/Airbnb proof fields to the immutable result receipt without secrets", async () => {
+    const sql = await readFile(new URL("../migrations/0021_google_airbnb_receipts.sql", import.meta.url), "utf8");
+    assert.match(sql, /DROP CONSTRAINT channel_job_results_verified_check/);
+    assert.match(sql, /google_airbnb_delivery_id uuid REFERENCES google_channel_deliveries/);
+    assert.match(sql, /google_airbnb_evidence='EXACT_SLOT_V1'/);
+    assert.match(sql, /google_airbnb_party_size=1/);
+    assert.match(sql, /observed_manually_blocked IS NULL/);
+    assert.match(sql, /observed_state='OPEN' AND observed_bookable=true/);
+    assert.doesNotMatch(sql, /calendar_id|scope|token|raw_response|guest|email|phone|price|amount/i);
+  });
+
   it("fences OWNER calendar creation before I/O without persisting credentials or response bodies", async () => {
     const sql = await readFile(new URL("../migrations/0019_google_channel_setup.sql", import.meta.url), "utf8");
     assert.match(sql, /CREATE TABLE google_channel_setup_journals/);

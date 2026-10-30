@@ -1,7 +1,8 @@
-import type { ChannelDesiredState, ChannelOutcome, ChannelTarget } from "@niho-experience/experience-store";
+import type { ChannelDesiredState, ChannelOutcome, ChannelTarget, GoogleAirbnbProof } from "@niho-experience/experience-store";
 import { boundedObject, channelFailure, channelJson, exactKeys, internalContext } from "@/lib/experience/channel-runtime";
 
 export const runtime = "nodejs";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function target(value: unknown): ChannelTarget | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -19,6 +20,14 @@ function target(value: unknown): ChannelTarget | null {
     adapter: item.adapter, adapterVersion: item.adapterVersion, connectionMode: item.connectionMode as ChannelTarget["connectionMode"] };
 }
 
+function googleAirbnbProof(value: unknown): GoogleAirbnbProof | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (!exactKeys(item, ["deliveryId", "evidence", "partySize"]) || typeof item.deliveryId !== "string" || !UUID_V4.test(item.deliveryId)
+    || item.evidence !== "EXACT_SLOT_V1" || item.partySize !== 1) return null;
+  return { deliveryId: item.deliveryId, evidence: "EXACT_SLOT_V1", partySize: 1 };
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = await internalContext(request);
   if (context instanceof Response) return context;
@@ -26,22 +35,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["resultId", "leaseToken", "outcome", "stopped", "target"],
     ["occurrenceId", "sourceStartAtUtc", "sourceEndAtUtc", "observedState", "observedBookable", "observedManuallyBlocked", "observedAtUtc",
-      "reservationReadId", "reservationReceiptId"])) {
+      "googleAirbnbProof", "reservationReadId", "reservationReceiptId"])) {
     return channelJson({ error: "invalid_input" }, 400);
   }
   const parsedTarget = target(body.target);
+  const parsedGoogleAirbnbProof = body.googleAirbnbProof === undefined ? undefined : googleAirbnbProof(body.googleAirbnbProof);
   const outcomes = ["VERIFIED", "RESERVATION_VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"];
   const verifiedFieldsPresent = body.outcome !== "VERIFIED" || (body.occurrenceId !== undefined
     && body.sourceStartAtUtc !== undefined && body.sourceEndAtUtc !== undefined && body.observedState !== undefined
-    && body.observedBookable !== undefined && body.observedManuallyBlocked !== undefined && body.observedAtUtc !== undefined);
+    && body.observedBookable !== undefined && body.observedAtUtc !== undefined
+    && ((body.observedManuallyBlocked !== undefined && body.googleAirbnbProof === undefined)
+      || (body.observedManuallyBlocked === undefined && parsedGoogleAirbnbProof !== undefined)));
   const reservationFieldsValid = body.outcome !== "RESERVATION_VERIFIED"
     ? body.reservationReadId === undefined && body.reservationReceiptId === undefined
     : typeof body.reservationReadId === "string" && typeof body.reservationReceiptId === "string"
       && body.occurrenceId === undefined && body.sourceStartAtUtc === undefined && body.sourceEndAtUtc === undefined
       && body.observedState === undefined && body.observedBookable === undefined
-      && body.observedManuallyBlocked === undefined && body.observedAtUtc === undefined;
+      && body.observedManuallyBlocked === undefined && body.observedAtUtc === undefined
+      && body.googleAirbnbProof === undefined;
   if (typeof body.resultId !== "string" || typeof body.leaseToken !== "string" || body.leaseToken.length > 100
     || typeof body.outcome !== "string" || !outcomes.includes(body.outcome) || typeof body.stopped !== "boolean" || !parsedTarget
+    || (body.googleAirbnbProof !== undefined && parsedGoogleAirbnbProof === null)
+    || (body.outcome !== "VERIFIED" && body.googleAirbnbProof !== undefined)
     || !verifiedFieldsPresent || !reservationFieldsValid
     || (body.occurrenceId !== undefined && (typeof body.occurrenceId !== "string" || body.occurrenceId.length < 1 || body.occurrenceId.length > 256))
     || (body.sourceStartAtUtc !== undefined && typeof body.sourceStartAtUtc !== "string")
@@ -60,6 +75,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ...(body.observedBookable === undefined ? {} : { observedBookable: body.observedBookable as boolean }),
       ...(body.observedManuallyBlocked === undefined ? {} : { observedManuallyBlocked: body.observedManuallyBlocked as boolean }),
       ...(body.observedAtUtc === undefined ? {} : { observedAtUtc: body.observedAtUtc as string }),
+      ...(parsedGoogleAirbnbProof == null ? {} : { googleAirbnbProof: parsedGoogleAirbnbProof }),
       ...(body.reservationReadId === undefined ? {} : { reservationReadId: body.reservationReadId as string }),
       ...(body.reservationReceiptId === undefined ? {} : { reservationReceiptId: body.reservationReceiptId as string }),
     });
