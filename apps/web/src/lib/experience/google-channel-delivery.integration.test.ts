@@ -133,7 +133,8 @@ function injected(fetchImpl: typeof fetch) {
   };
 }
 
-describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integration", () => {
+// Each case migrates a schema and runs real database round trips: about 2 s, and 5 s on a loaded CI runner.
+describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integration", { timeout: 30_000 }, () => {
   it.each(["publication", "capability"] as const)("fences %s changes between preflight and the journal transaction", async (kind) => {
     const value = await fixture();
     let requests = 0;
@@ -282,7 +283,7 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
       expect(matched.first_verified_at.toISOString()).toBe(waiting.first_verified_at.toISOString());
       expect(matched.deadline_at.toISOString()).toBe(waiting.deadline_at.toISOString());
     } finally { await cleanup(value); }
-  }, 20_000);
+  });
 
   it.each(["OPEN", "CLOSED"] as const)("refreshes %s proof by GET in a new lease before accepting the typed receipt", async (desiredState) => {
     const value = await fixture(desiredState);
@@ -498,7 +499,7 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
     } finally {
       await cleanup(value);
     }
-  }, 20_000);
+  });
 
   it("writes once, fences a duplicate after lost ACK, and GET-only reconciles from a stop-confirmed OBSERVE lease", async () => {
     const value = await fixture();
