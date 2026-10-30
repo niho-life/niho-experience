@@ -8,13 +8,14 @@ import { createCloudClient, CloudError } from "../src/cloud-client.mjs";
 import { makeJob } from "./helpers/synthetic-gyg.mjs";
 import { validateClaim, validatePreflight } from "../src/validation.mjs";
 
-async function configFixture(origin) {
+async function configFixture(origin, overrides = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "niho-ota-config-")));
   const profiles = join(directory, "profiles"); await mkdir(profiles, { mode: 0o700 });
   const token = join(directory, "token"); await writeFile(token, "a".repeat(40), { mode: 0o600 });
   const path = join(directory, "config.json");
   await writeFile(path, JSON.stringify({ cloudOrigin: origin, tokenFile: token, privateDir: directory,
-    accountProfiles: { "10001": join(profiles, "10001") }, browserExecutable: process.execPath, mode: "deterministic" }), { mode: 0o600 });
+    accountProfiles: { "10001": join(profiles, "10001") }, browserExecutable: process.execPath, mode: "deterministic",
+    ...overrides }), { mode: 0o600 });
   return path;
 }
 
@@ -23,6 +24,14 @@ test("production config rejects arbitrary/non-HTTPS origin; localhost requires e
   const local = await configFixture("http://127.0.0.1:4321");
   await assert.rejects(loadConfig(local), (error) => error.code === "INVALID_CLOUD_ORIGIN");
   assert.equal((await loadConfig(local, { allowLocalTestOrigin: true })).cloudOrigin, "http://127.0.0.1:4321");
+});
+
+test("Google delivery config is optional, defaults off, and accepts only booleans", async () => {
+  assert.equal((await loadConfig(await configFixture("https://cloud.example"))).googleDeliveryEnabled, false);
+  assert.equal((await loadConfig(await configFixture("https://cloud.example", { googleDeliveryEnabled: false }))).googleDeliveryEnabled, false);
+  assert.equal((await loadConfig(await configFixture("https://cloud.example", { googleDeliveryEnabled: true }))).googleDeliveryEnabled, true);
+  await assert.rejects(loadConfig(await configFixture("https://cloud.example", { googleDeliveryEnabled: "true" })),
+    (error) => error.code === "INVALID_CONFIG");
 });
 
 test("config and token permissions are fail-closed", async () => {

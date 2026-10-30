@@ -1,6 +1,7 @@
 import {
   ADAPTER_REGISTRY,
   CONNECTION_MODE,
+  GOOGLE_DELIVERY_TARGET,
   MAX_JOB_MS,
   MAX_CLOCK_SKEW_MS,
   OPTIONAL_TARGET_KEYS,
@@ -48,6 +49,20 @@ function canonicalInstant(value, name) {
 
 export function validateTarget(value) {
   if (!exactKeys(value, TARGET_KEYS, OPTIONAL_TARGET_KEYS)) throw new ContractError("TARGET_MISMATCH");
+  if (value.site === GOOGLE_DELIVERY_TARGET.site) {
+    const account = nonEmptyText(value.externalAccountId, 128, "externalAccountId");
+    const product = nonEmptyText(value.externalProductId, 128, "externalProductId");
+    if (value.adapter !== GOOGLE_DELIVERY_TARGET.adapter
+      || value.adapterVersion !== GOOGLE_DELIVERY_TARGET.adapterVersion
+      || value.connectionMode !== GOOGLE_DELIVERY_TARGET.connectionMode
+      || value.timeZone !== TIME_ZONE
+      || !/^[1-9]\d*$/.test(account)
+      || !/^[1-9]\d*$/.test(product)
+      || (value.externalOptionId !== undefined && value.externalOptionId !== "")) {
+      throw new ContractError("UNSUPPORTED_TARGET");
+    }
+    return Object.freeze({ ...value });
+  }
   const adapter = ADAPTER_REGISTRY[value.site];
   if (!adapter || value.adapter !== adapter.adapter || value.adapterVersion !== adapter.adapterVersion
     || value.connectionMode !== CONNECTION_MODE || value.timeZone !== TIME_ZONE) throw new ContractError("UNSUPPORTED_TARGET");
@@ -62,6 +77,14 @@ export function validateTarget(value) {
         && /^(?:0|[1-9]\d*)$/.test(option) && Number.isSafeInteger(Number(option));
   if (!valid) throw new ContractError("TARGET_MISMATCH");
   return Object.freeze({ ...value });
+}
+
+export function isGoogleDeliveryTarget(target) {
+  return target?.site === GOOGLE_DELIVERY_TARGET.site
+    && target?.adapter === GOOGLE_DELIVERY_TARGET.adapter
+    && target?.adapterVersion === GOOGLE_DELIVERY_TARGET.adapterVersion
+    && target?.connectionMode === GOOGLE_DELIVERY_TARGET.connectionMode
+    && target?.timeZone === TIME_ZONE;
 }
 
 export function tokyoLocalFromUtc(value) {

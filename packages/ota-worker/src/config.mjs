@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 
 const CONFIG_KEYS = ["cloudOrigin", "tokenFile", "privateDir", "accountProfiles", "browserExecutable", "mode"];
-const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles", "siteAccountSessionPolicies"];
+const OPTIONAL_KEYS = ["claudeExecutable", "debugScreenshots", "siteAccountProfiles", "siteAccountSessionPolicies", "googleDeliveryEnabled"];
 const SITE_PROFILE_NAMESPACES = Object.freeze({ Viator: "viator", Jalan: "jalan" });
 
 async function assertPrivatePath(path, expectedType, mode) {
@@ -78,6 +78,7 @@ export async function loadConfig(configPath, options = {}) {
   }
   if (typeof raw.browserExecutable !== "string" || raw.browserExecutable.length < 1
     || !["deterministic", "claude-code"].includes(raw.mode)
+    || (raw.googleDeliveryEnabled !== undefined && typeof raw.googleDeliveryEnabled !== "boolean")
     || (raw.mode === "claude-code" && (typeof raw.claudeExecutable !== "string" || raw.claudeExecutable.length < 1))) {
     throw new ContractError("INVALID_CONFIG");
   }
@@ -94,6 +95,7 @@ export async function loadConfig(configPath, options = {}) {
     mode: raw.mode,
     ...(raw.claudeExecutable ? { claudeExecutable: resolve(raw.claudeExecutable) } : {}),
     debugScreenshots: raw.debugScreenshots === true,
+    googleDeliveryEnabled: raw.googleDeliveryEnabled === true,
   });
 }
 

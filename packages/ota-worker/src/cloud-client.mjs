@@ -1,5 +1,7 @@
 import { MAX_JSON_BYTES } from "./constants.mjs";
-import { ContractError, exactKeys, isPlainObject, validateClaim, validatePreflight } from "./validation.mjs";
+import {
+  ContractError, exactKeys, isGoogleDeliveryTarget, isPlainObject, validateClaim, validatePreflight, validateTarget,
+} from "./validation.mjs";
 
 export class CloudError extends Error {
   constructor(code, status) {
@@ -12,6 +14,14 @@ export class CloudError extends Error {
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_MANIFEST_JSON_BYTES = 256 * 1024;
+const GOOGLE_DELIVERY_TIMEOUT_MS = 60_000;
+const GOOGLE_DELIVERY_PHASES = new Set(["DISPATCHING", "GOOGLE_VERIFIED", "UNCERTAIN", "NOT_MATCHED", "STOPPED"]);
+const GOOGLE_DELIVERY_REASONS = new Set([
+  "ANCHOR_MISSING", "TOMBSTONE", "CANCELLED_EVENT", "STATUS_MISMATCH", "ALL_DAY_EVENT", "FOREIGN_EVENT",
+  "MAPPING_MISMATCH", "TIME_MISMATCH", "VISIBILITY_MISMATCH", "STALE_INTENT", "RECURRING_EVENT",
+  "PRECONDITION_FAILED", "DESIRED_MISMATCH", "WRITE_UNCERTAIN", "AUTHORITY_CHANGED", "GOOGLE_UNAVAILABLE",
+  "GOOGLE_REVOKED", "INVALID_RESPONSE", "NO_JOURNAL",
+]);
 
 function canonicalInstant(value) {
   const normalized = typeof value === "string" && value.endsWith("Z") && !value.includes(".") ? value.replace(/Z$/, ".000Z") : value;
@@ -23,9 +33,13 @@ async function boundedBytes(response, signal, maxBytes = MAX_JSON_BYTES) {
   if (!reader) return new Uint8Array(0);
   const chunks = [];
   let size = 0;
+  let abortListener;
   const aborted = new Promise((_, reject) => {
     if (signal.aborted) reject(new CloudError("TIMEOUT"));
-    else signal.addEventListener("abort", () => reject(new CloudError("TIMEOUT")), { once: true });
+    else {
+      abortListener = () => reject(new CloudError("TIMEOUT"));
+      signal.addEventListener("abort", abortListener, { once: true });
+    }
   });
   try {
     for (;;) {
@@ -38,6 +52,8 @@ async function boundedBytes(response, signal, maxBytes = MAX_JSON_BYTES) {
   } catch (error) {
     await reader.cancel().catch(() => {});
     throw error;
+  } finally {
+    if (abortListener) signal.removeEventListener("abort", abortListener);
   }
   const bytes = new Uint8Array(size);
   let offset = 0;
@@ -45,7 +61,7 @@ async function boundedBytes(response, signal, maxBytes = MAX_JSON_BYTES) {
   return bytes;
 }
 
-async function boundedJson(response, expectedKeys, signal, maxBytes = MAX_JSON_BYTES) {
+async function boundedJson(response, expectedKeys, signal, maxBytes = MAX_JSON_BYTES, optionalKeys = []) {
   const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/json") throw new CloudError("INVALID_RESPONSE");
   const length = Number(response.headers.get("content-length"));
@@ -59,7 +75,7 @@ async function boundedJson(response, expectedKeys, signal, maxBytes = MAX_JSON_B
     if (error instanceof CloudError) throw error;
     throw new CloudError("INVALID_RESPONSE");
   }
-  if (!isPlainObject(value) || (expectedKeys && !exactKeys(value, expectedKeys))) throw new CloudError("INVALID_RESPONSE");
+  if (!isPlainObject(value) || (expectedKeys && !exactKeys(value, expectedKeys, optionalKeys))) throw new CloudError("INVALID_RESPONSE");
   return value;
 }
 
@@ -67,32 +83,49 @@ export function createCloudClient({ origin, token, fetchImpl = globalThis.fetch,
   const fixedOrigin = new URL(origin).origin;
   if (typeof token !== "string" || !token) throw new ContractError("INVALID_TOKEN");
 
-  async function request(path, body, { allowIdle = false, responseKeys, requestTimeoutMs = timeoutMs, responseByteLimit = MAX_JSON_BYTES } = {}) {
+  async function request(path, body, { allowIdle = false, responseKeys, requestTimeoutMs = timeoutMs,
+    responseByteLimit = MAX_JSON_BYTES, responseOptionalKeys = [], signal } = {}) {
     const url = new URL(path, `${fixedOrigin}/`);
     if (url.origin !== fixedOrigin || !url.pathname.startsWith("/internal/ota/v1/")) throw new ContractError("INVALID_CLOUD_PATH");
     const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(signal?.reason);
+    if (signal?.aborted) abortFromCaller();
+    else signal?.addEventListener("abort", abortFromCaller, { once: true });
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     timer.unref?.();
+    let requestAbortListener;
     try {
-      const response = await fetchImpl(url, {
+      if (controller.signal.aborted) throw new CloudError("TIMEOUT");
+      const fetchPromise = Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw new CloudError("TIMEOUT");
+        return fetchImpl(url, {
         method: "POST",
         redirect: "error",
         signal: controller.signal,
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(body),
+        });
       });
+      const aborted = new Promise((_, reject) => {
+        requestAbortListener = () => reject(new CloudError("TIMEOUT"));
+        if (controller.signal.aborted) requestAbortListener();
+        else controller.signal.addEventListener("abort", requestAbortListener, { once: true });
+      });
+      const response = await Promise.race([fetchPromise, aborted]);
       if (response.redirected || new URL(response.url || url).origin !== fixedOrigin) throw new CloudError("REDIRECT_REFUSED", response.status);
       if (allowIdle && response.status === 204) {
         if ((await boundedBytes(response, controller.signal)).byteLength !== 0) throw new CloudError("INVALID_RESPONSE");
         return null;
       }
       if (response.status !== 200) throw new CloudError(response.status === 401 || response.status === 403 ? "AUTH" : response.status === 429 ? "RATE" : "HTTP_ERROR", response.status);
-      return await boundedJson(response, responseKeys, controller.signal, responseByteLimit);
+      return await boundedJson(response, responseKeys, controller.signal, responseByteLimit, responseOptionalKeys);
     } catch (error) {
       if (error instanceof CloudError) throw error;
       throw new CloudError(controller.signal.aborted || error?.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR");
     } finally {
       clearTimeout(timer);
+      if (requestAbortListener) controller.signal.removeEventListener("abort", requestAbortListener);
+      signal?.removeEventListener("abort", abortFromCaller);
     }
   }
 
@@ -163,6 +196,26 @@ export function createCloudClient({ origin, token, fetchImpl = globalThis.fetch,
     async preflight(job) {
       const value = await request(`internal/ota/v1/jobs/${encodeURIComponent(job.id)}/preflight`, { leaseToken: job.leaseToken }, { responseKeys: ["ready", "desiredState"] });
       return validatePreflight(value, job.desiredState);
+    },
+    async googleDelivery(job, operation, { signal } = {}) {
+      if (!isGoogleDeliveryTarget(validateTarget(job.target)) || job.purpose === "RESERVATION_WINDOW") {
+        throw new ContractError("INVALID_GOOGLE_DELIVERY_TARGET");
+      }
+      const expectedOperation = job.action === "OBSERVE" ? "reconcile"
+        : ["SET_OPEN", "SET_CLOSED"].includes(job.action) ? "dispatch" : null;
+      if (!expectedOperation || operation !== expectedOperation) throw new ContractError("INVALID_GOOGLE_DELIVERY_OPERATION");
+      const remainingMs = Date.parse(job.deadlineAtUtc) - now();
+      if (!Number.isFinite(remainingMs) || remainingMs <= 0) throw new CloudError("TIMEOUT");
+      const value = await request(`internal/ota/v1/jobs/${encodeURIComponent(job.id)}/google-delivery`,
+        { leaseToken: job.leaseToken, operation }, {
+          responseKeys: ["deliveryId", "phase", "airbnb"],
+          responseOptionalKeys: ["reason"],
+          requestTimeoutMs: Math.max(1, Math.min(GOOGLE_DELIVERY_TIMEOUT_MS, remainingMs)),
+          signal,
+        });
+      if (!UUID_V4.test(value.deliveryId) || !GOOGLE_DELIVERY_PHASES.has(value.phase) || value.airbnb !== "UNVERIFIED"
+        || (value.reason !== undefined && !GOOGLE_DELIVERY_REASONS.has(value.reason))) throw new CloudError("INVALID_RESPONSE");
+      return Object.freeze(value);
     },
     async result(jobId, payload) {
       const value = await request(`internal/ota/v1/jobs/${encodeURIComponent(jobId)}/result`, payload,

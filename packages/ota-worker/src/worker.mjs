@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BACKOFF_MS, DEFAULT_POLL_MS } from "./constants.mjs";
 import { executeJob } from "./supervisor.mjs";
-import { makeReservationResult, makeResult } from "./validation.mjs";
+import { isGoogleDeliveryTarget, makeReservationResult, makeResult } from "./validation.mjs";
 import { restartDisposition } from "./journal.mjs";
 import { createHaltLatch } from "./halt-latch.mjs";
 
@@ -17,7 +17,7 @@ const sleep = (ms, signal) => new Promise((resolve) => {
 export async function resumeJournal(journal, cloud, haltLatch = null) {
   const record = journal.current ?? await journal.load();
   const disposition = restartDisposition(record);
-  if (disposition === "EMPTY") return { status: "EMPTY" };
+  if (disposition === "EMPTY") return { status: "EMPTY", modelInvocations: 0 };
   if (disposition === "RETRY_IDENTICAL_RESULT") {
     if (record.reason) await haltLatch?.set(record.reason);
     let receipt;
@@ -26,17 +26,18 @@ export async function resumeJournal(journal, cloud, haltLatch = null) {
       if (!["AUTH", "INVALID_RESPONSE"].includes(error?.code)) throw error;
       const reason = error.code === "AUTH" ? "RESULT_AUTH" : "RESULT_INVALID_RESPONSE";
       await haltLatch?.set(reason);
-      return { status: "HALT_PENDING_RESULT", reason };
+      return { status: "HALT_PENDING_RESULT", reason, modelInvocations: 0 };
     }
     await journal.clearAfterAcknowledged(record.result.resultId);
     return {
       status: record.reason ? "HALT_AFTER_RESULT" : receipt?.acceptedAsCurrent === false ? "RESULT_ACKNOWLEDGED_NOT_CURRENT" : "RESULT_ACKNOWLEDGED",
       reason: record.reason,
       acceptedAsCurrent: receipt?.acceptedAsCurrent !== false,
+      modelInvocations: 0,
     };
   }
   if (record.phase !== "QUARANTINED") await journal.quarantine("RESTART_REQUIRES_EXPLICIT_RECOVERY");
-  return { status: "HALT_QUARANTINED" };
+  return { status: "HALT_QUARANTINED", modelInvocations: 0 };
 }
 
 export async function runWorkerOnce({ cloud, config, journal, executor = executeJob }) {
@@ -55,6 +56,8 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
   await journal.claimed(job);
   await journal.running();
   const execution = await executor({ job, cloud, config, journal });
+  const modelInvocations = job.purpose === "RESERVATION_WINDOW" || isGoogleDeliveryTarget(job.target)
+    ? 0 : config.mode === "claude-code" ? 1 : 0;
   const result = job.purpose === "RESERVATION_WINDOW"
     ? makeReservationResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped,
       reservationReadId: execution.reservationReadId, reservationReceiptId: execution.reservationReceiptId })
@@ -71,7 +74,7 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
     await haltLatch?.set(reason);
     await googleSync;
     return { status: "HALT_PENDING_RESULT", outcome: execution.outcome, stopped: execution.stopped, reason,
-      modelInvocations: job.purpose === "RESERVATION_WINDOW" ? 0 : config.mode === "claude-code" ? 1 : 0 };
+      modelInvocations };
   }
   await journal.clearAfterAcknowledged(result.resultId);
   await googleSync;
@@ -82,7 +85,7 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
     quarantine: execution.quarantine,
     reason: haltReason ?? execution.reason,
     acceptedAsCurrent: receipt?.acceptedAsCurrent !== false,
-    modelInvocations: job.purpose === "RESERVATION_WINDOW" ? 0 : config.mode === "claude-code" ? 1 : 0,
+    modelInvocations,
   };
 }
 
