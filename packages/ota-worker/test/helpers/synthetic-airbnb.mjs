@@ -79,15 +79,10 @@ export async function syntheticAirbnb() {
           shareLink: `https://www.airbnb.com/book/experiences/${state.productId}?availabilityKey=synthetic`,
           numGuests: 999, privateTitle: "discard",
         });
-        if (index < 5) rows.push({
-          __typename: "ExperienceCalendarItem", id: `other-${index}`, calendarEventId: `other-event-${index}`,
-          listingId: opaqueAirbnbId("ActivityListing", "7"), itemType: "calendarInstance", productType: "EXPERIENCE",
-          startsAt, endsAt, isAvailable: true, isVisible: true, remainingCapacity: 1,
-          shareLink: "https://www.airbnb.jp/book/experiences/7", privateTitle: "discard other listing",
-        });
-        if (index < 5) rows.push({
-          __typename: "PrivateCalendarItem", id: `private-${index}`, itemType: "privateCalendar",
-          startsAt, endsAt, numGuests: 500, privateTitle: "discard private calendar",
+        if (index < 10) rows.push({
+          __typename: "ActivityListingCalendarEvent", id: `series-${index}`, itemType: "calendarEvent",
+          listingId: opaqueAirbnbId("ActivityListing", state.productId),
+          startsAt, endsAt, privateTitle: "discard series definition",
         });
       }
       response.end(JSON.stringify({ data: { presentation: { activityHostCalendarContainer: { iCalendarItemsConnection: rows } } } })); return;

@@ -174,9 +174,14 @@ export function selectAirbnbCalendarObservation(value, job, requestVariables) {
   const end = new Date(job.sourceEndAtUtc).toISOString();
   const matches = [];
   for (const row of rows) {
+    // Series definitions have the same listing ID, but are not occurrences.
+    if (row?.__typename === "ActivityListingCalendarEvent" && row.itemType === "calendarEvent") continue;
     const claimedByListing = decodeOpaqueAirbnbId(row?.listingId, "ActivityListing") === job.target.externalProductId;
     const claimedByShareLink = canonicalShareListing(row?.shareLink) === job.target.externalProductId;
     if (!claimedByListing && !claimedByShareLink) continue;
+    // A different canonical interval cannot be this occurrence. Do not make
+    // unrelated dates' availability fields part of this slot's evidence.
+    if ((canonicalUtc(row.startsAt) && row.startsAt !== start) || (canonicalUtc(row.endsAt) && row.endsAt !== end)) continue;
     const listingDecimal = validateCalendarRow(row);
     if (listingDecimal !== job.target.externalProductId || !claimedByShareLink) fail("TARGET_MISMATCH");
     if (row.startsAt === start && row.endsAt === end) matches.push(row);

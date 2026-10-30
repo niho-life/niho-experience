@@ -190,6 +190,17 @@ test("Airbnb calendar selects exactly one visible slot and distinguishes OPEN fr
     calendarResponse([privateCalendar, unrelated, malformedOther, calendarRow()]), job, calendarVariables()), { bookable: true });
 });
 
+test("Airbnb separates same-listing series definitions and other canonical dates from the target occurrence", () => {
+  const job = makeJob();
+  const parent = { __typename: "ActivityListingCalendarEvent", itemType: "calendarEvent", id: "series",
+    listingId: opaqueAirbnbId("ActivityListing", productId), startsAt: job.sourceStartAtUtc, endsAt: job.sourceEndAtUtc };
+  const otherDate = calendarRow({ startsAt: "2099-01-02T04:00:00.000Z", endsAt: "2099-01-02T05:00:00.000Z",
+    remainingCapacity: null, isAvailable: null });
+  assert.deepEqual(selectAirbnbCalendarObservation(calendarResponse([parent, otherDate, calendarRow()]), job, calendarVariables()), { bookable: true });
+  assert.throws(() => selectAirbnbCalendarObservation(calendarResponse([parent, otherDate]), job, calendarVariables()));
+  assert.throws(() => selectAirbnbCalendarObservation(calendarResponse([parent, calendarRow(), calendarRow()]), job, calendarVariables()));
+});
+
 test("Airbnb calendar never turns missing, duplicate, partial, drift or malformed target data into CLOSED", () => {
   const job = makeJob();
   const brokenRows = [

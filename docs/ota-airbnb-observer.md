@@ -32,6 +32,8 @@ Issue #295 では、`packages/ota-worker` に Airbnb 体験カレンダーを読
 
 `bookable` は `isAvailable === true` かつ `remainingCapacity >= 1` のときだけtrueである。`isAvailable === false` でcapacityが残るrowも明示的なnot-bookableとして扱う。一方、row欠落、重複、部分response、型drift、範囲不足、非表示、account不一致は **CLOSEDに変換せず停止** する。`bookable: false` から手動block、予約数、予約ゼロ、理由を推定しない。
 
+同じlisting IDでも `ActivityListingCalendarEvent / calendarEvent` は繰り返し設定の親行であり、開催回の在庫には使わない。他のcanonical開始終了時刻の行も対象回の証拠から除外する。対象区間の `calendarInstance / EXPERIENCE` が一意であることと、その行の完全な型・本人性・掲載一致は維持する。
+
 ## 通信境界
 
 - browserが通常画面操作で発生させたGETだけを使い、既知requestの合成・replayや別transportへのfallbackを行わない。
