@@ -3,9 +3,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 const repo = new URL("../../../", import.meta.url);
-const { atomicMigrationSql, migrationBody } = await import(new URL("scripts/gcp/migration-sql.mjs", repo).href) as {
+const { atomicMigrationSql, migrationBody, pendingMigrations } = await import(new URL("scripts/gcp/migration-sql.mjs", repo).href) as {
   atomicMigrationSql(input: { name: string; source: string; ledger: string; sha256: string; escapeLiteral(value: string): string }): string;
   migrationBody(name: string, source: string): string;
+  pendingMigrations(input: { files: readonly string[]; applied: readonly string[]; allowOutOfOrder?: readonly string[] }): { pending: string[]; outOfOrder: string[] };
 };
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -37,6 +38,34 @@ describe("atomic migration SQL", () => {
       const body = migrationBody(name, await readFile(new URL(name, dir), "utf8"));
       assert.doesNotMatch(body, /^\s*(?:BEGIN|COMMIT|ROLLBACK)\s*;\s*$/im, name);
     }
+  });
+});
+
+describe("pending migrations", () => {
+  const files = ["0021_a.sql", "0022_late.sql", "0023_b.sql", "0024_c.sql", "0021_early.sql"];
+
+  it("applies every file not in the ledger, in name order", () => {
+    assert.deepEqual(pendingMigrations({ files, applied: [] }), { pending: [...files].sort(), outOfOrder: [] });
+    assert.deepEqual(pendingMigrations({ files, applied: ["0021_a.sql", "0021_early.sql", "0022_late.sql", "0023_b.sql"] }), { pending: ["0024_c.sql"], outOfOrder: [] });
+  });
+
+  it("stops at a pending file that sorts before an applied one, unless the operator names exactly those files", () => {
+    const applied = ["0021_a.sql", "0023_b.sql"];
+    assert.throws(() => pendingMigrations({ files, applied }), /sorts before an applied one/);
+    // Naming one of two is not enough.
+    assert.throws(() => pendingMigrations({ files, applied, allowOutOfOrder: ["0022_late.sql"] }), /sorts before an applied one/);
+    assert.deepEqual(
+      pendingMigrations({ files, applied, allowOutOfOrder: ["0021_early.sql", "0022_late.sql"] }),
+      { pending: ["0021_early.sql", "0022_late.sql", "0024_c.sql"], outOfOrder: ["0021_early.sql", "0022_late.sql"] },
+    );
+  });
+
+  it("refuses a named file that is already applied, unknown, or not out of order", () => {
+    const applied = ["0021_a.sql", "0023_b.sql"];
+    const both = ["0021_early.sql", "0022_late.sql"];
+    assert.throws(() => pendingMigrations({ files, applied, allowOutOfOrder: [...both, "0021_a.sql"] }), /not a pending migration/);
+    assert.throws(() => pendingMigrations({ files, applied, allowOutOfOrder: [...both, "0099_missing.sql"] }), /not a pending migration/);
+    assert.throws(() => pendingMigrations({ files, applied, allowOutOfOrder: [...both, "0024_c.sql"] }), /not out of order/);
   });
 });
 
