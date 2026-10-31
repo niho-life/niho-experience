@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExperienceProviderMeetingPoint, ExperienceProviderPageDetail, ExperienceProviderPageListingResponse, ExperienceProviderPageMeetingPointUpdateResponse, ExperienceProviderPageOffer, ExperienceProviderPhotoUploadForm } from "@niho-experience/api-client/host";
 import type { HostProviderReviewStatus, HostProviderRole } from "@/lib/host/providers";
@@ -10,9 +11,13 @@ import { consoleButtonClass } from "./host-ui";
 import { HostSubHeader } from "./HostSubHeader";
 import { HostPageBody } from "./ui";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
-import { conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, mergeLivePage, readLiveMeeting, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 import { LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, publishBlockerText, readListingResponse } from "./live-listing-state";
+import { LivePhotosSection } from "./LivePhotosSection";
 import { MeetingPointFields, MeetingPointSummary } from "./MeetingPointFields";
+
+// The detail view comes only when 「プレビュー」 is pressed.
+const HostExperiencePreview = dynamic(() => import("./HostExperiencePreview"), { ssr: false });
 
 const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
 const PHOTO_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
@@ -79,6 +84,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const [listingBusy, setListingBusy] = useState(false); const [listingUncertain, setListingUncertain] = useState(false);
   const [listingMessage, setListingMessage] = useState<{ tone: "error" | "notice"; text: string } | null>(null);
   const [confirming, setConfirming] = useState<"save" | "withdraw" | "stop" | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const stay = useRef<HTMLButtonElement>(null);
   const loadVersion = useRef(0); const meetingVersion = useRef(0); const listingVersion = useRef(0);
   const endpoint = `/host/api/provider-pages/${encodeURIComponent(providerId)}/${encodeURIComponent(pageId)}`;
@@ -270,6 +276,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
 
   async function upload(file: File) {
     if (!draft || busy) return;
+    if (draft.photos.length >= LIVE_PHOTO_LIMIT) { setError(`写真は ${LIVE_PHOTO_LIMIT} 枚までです。追加するには、どれかを外してください。`); return; }
     if (!PHOTO_CONTENT_TYPES.includes(file.type as typeof PHOTO_CONTENT_TYPES[number]) || file.size > PHOTO_MAX_BYTES) { setError("JPEG、PNG、WebPの10MB以下の写真を選んでください。"); return; }
     setBusy(true); setError("");
     try {
@@ -278,7 +285,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       const policy = await policyResponse.json() as ExperienceProviderPhotoUploadForm; const form = new FormData();
       for (const [key, value] of Object.entries(policy.fields)) form.append(key, value); form.append(PHOTO_FILE_FIELD, file);
       const uploaded = await fetch(policy.url, { method: "POST", body: form, referrerPolicy: "no-referrer" }); if (!uploaded.ok) throw new Error("写真をアップロードできませんでした。入力は保持しています。");
-      setDraft((current) => current ? { ...current, photos: [...current.photos, { objectKey: policy.objectKey, url: URL.createObjectURL(file) }], photoAlts: [...current.photoAlts, file.name.replace(/\.[^.]+$/, "")] } : current);
+      setDraft((current) => current ? appendPhoto(current, { objectKey: policy.objectKey, url: URL.createObjectURL(file) }, file.name.replace(/\.[^.]+$/, "")) : current);
       setNotice("写真をアップロードしました。並びと説明を確認して「保存」を押してください。");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "写真をアップロードできませんでした。"); } finally { setBusy(false); }
   }
@@ -306,7 +313,11 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       {listingMessage ? <p role={listingMessage.tone === "error" ? "alert" : "status"} className={`mt-3 rounded-xl p-3 text-sm ${listingMessage.tone === "error" ? "bg-danger-pale text-danger" : "bg-leaf-pale text-moss"}`}>{listingMessage.text}{listingUncertain ? <button type="button" disabled={listingBusy} onClick={() => void checkListing()} className="ml-2 font-extrabold underline">最新の状態を確認</button> : null}</p> : null}
     </FieldSection>;
   };
-  return <><HostSubHeader backHref={backHref} backLabel="体験" title={draft.title || "体験の編集"} /><HostPageBody>
+  // プレビュー shows what NIHO has saved: it waits while a save or a reconcile is under way, and says so when changes are not saved yet.
+  const previewBlocked = busy || listingBusy || Boolean(latest) || uncertain || listingUncertain;
+  const previewButton = (size: "sm" | "md") => <button type="button" disabled={previewBlocked} onClick={() => setPreviewing(true)} aria-haspopup="dialog" className={consoleButtonClass("secondary", size, DISABLED)}>プレビュー</button>;
+  return <><HostSubHeader backHref={backHref} backLabel="体験" title={draft.title || "体験の編集"} action={previewButton("sm")} /><HostPageBody>
+    <div className={`mb-3 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 ${dirty ? "" : "max-md:hidden"}`}>{dirty ? <p className="min-w-0 flex-1 basis-56 text-[0.8125rem] text-ink-soft">プレビューには保存した内容が出ます。保存すると反映されます。</p> : null}<span className="max-md:hidden">{previewButton("md")}</span></div>
     {error ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-4 text-danger">{error}{stale || uncertain ? <button type="button" disabled={busy} onClick={() => void reconcile()} className="ml-2 font-extrabold underline">最新の保存内容を読む</button> : null}</div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-leaf-pale p-4 text-moss">{notice}</p> : null}
     {latest && mergePreview ? <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4"><h2 className="font-extrabold">最新の保存内容と照合</h2><p className="mt-1 text-sm">自分の入力と、ほかの人が保存した内容を項目ごとに比較しました。</p>{conflicts.length ? <><p className="mt-2 text-sm font-extrabold">同じ項目が変更されています</p><ul className="mt-1 list-disc pl-5 text-sm">{conflicts.map((item) => <li key={item.path} className="mb-3"><strong>{item.label}</strong><dl className="mt-1 grid gap-1"><div><dt className="font-bold">自分の入力</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.local)}</dd></div><div><dt className="font-bold">最新の内容</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.remote)}</dd></div></dl></li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" className={consoleButtonClass("primary", "sm")} onClick={() => applyMerge("local")}>競合項目は自分の入力を残す</button><button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => applyMerge("remote")}>競合項目は最新を残す</button></div></> : <button type="button" className={`${consoleButtonClass("primary", "sm")} mt-3`} onClick={() => applyMerge("local")}>両方の変更を統合する</button>}</section> : null}
@@ -317,7 +328,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
         <fieldset className="flex flex-col gap-1.5 pb-3"><legend className="sr-only">集合場所の決め方</legend>{([["INHERIT", "提供者の既定を使う"], ["OVERRIDE", "この体験だけ別の場所にする"]] as const).map(([mode, label]) => <label key={mode} className="inline-flex min-h-8 items-center gap-2.5 font-bold"><input type="radio" name="live-meeting-mode" value={mode} checked={meeting.mode === mode} onChange={() => setMeeting({ ...meeting, mode })} className="size-4 shrink-0 accent-moss" />{label}</label>)}</fieldset>
         {meeting.mode === "INHERIT" ? <>{meetingDefaults ? <MeetingPointSummary value={meetingDefaults} /> : <p className="text-ink-soft">保存すると、提供者の既定の集合案内を使います。</p>}<p className="border-t border-line pt-3 text-xs text-muted">既定は <a href={`${settingsHref}#settings-meeting`} className="font-bold text-moss underline underline-offset-4">設定 › 既定の集合案内</a> で直せます。</p></> : <MeetingPointFields idPrefix="live-meeting" value={meeting.fields} onChange={(fields) => setMeeting({ ...meeting, fields })} />}
       </>}</FieldSection>
-      <FieldSection title="写真"><label className="block p-4 font-extrabold">写真を追加<input type="file" accept="image/jpeg,image/png,image/webp" className="mt-2 block w-full" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.currentTarget.value = ""; }} /></label><ul>{draft.photos.map((photo, index) => <li key={photo.objectKey} className="grid gap-2 border-t border-line p-4 sm:grid-cols-[6rem_minmax(0,1fr)_auto]"><span className="block aspect-[4/3] overflow-hidden rounded-xl bg-sand">{photo.url ? <img src={photo.url} alt="" className="size-full object-cover" /> : null}</span><label className="font-extrabold">写真の説明<input maxLength={200} className={`${INPUT} mt-1`} value={draft.photoAlts[index] ?? ""} onChange={(event) => setDraft({ ...draft, photoAlts: draft.photoAlts.map((alt, at) => at === index ? event.target.value : alt) })} /></label><span className="flex flex-wrap content-start gap-1"><button type="button" disabled={index === 0} className={consoleButtonClass("secondary", "sm")} onClick={() => { const photos = [...draft.photos]; const alts = [...draft.photoAlts]; [photos[index - 1], photos[index]] = [photos[index]!, photos[index - 1]!]; [alts[index - 1], alts[index]] = [alts[index]!, alts[index - 1]!]; setDraft({ ...draft, photos, photoAlts: alts }); }}>前へ</button><button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => setDraft({ ...draft, photos: draft.photos.filter((_, at) => at !== index), photoAlts: draft.photoAlts.filter((_, at) => at !== index) })}>削除</button></span></li>)}</ul></FieldSection>
+      <LivePhotosSection photos={draft.photos} alts={draft.photoAlts} onUpload={(file) => void upload(file)} onAlt={(index, value) => setDraft({ ...draft, photoAlts: draft.photos.map((_, at) => at === index ? value : draft.photoAlts[at] ?? "") })} onMove={(from, to) => setDraft(movePhoto(draft, from, to))} onCover={(index) => setDraft(makeCoverPhoto(draft, index))} onRemove={(index) => setDraft(removePhoto(draft, index))} />
       {draft.offers.map((offer, index) => <FieldSection key={offer.id} title={`商品 ${index + 1}`}>
         <FieldRow label="商品名" htmlFor={`offer-${index}-name`}><input id={`offer-${index}-name`} required maxLength={80} className={INPUT} value={offer.name} onChange={(event) => editOffer(index, { name: event.target.value })} /></FieldRow>
         <FieldRow label="短い説明" htmlFor={`offer-${index}-description`}><input id={`offer-${index}-description`} maxLength={160} className={INPUT} value={offer.shortDescription ?? ""} onChange={(event) => editOffer(index, { shortDescription: event.target.value || null })} /></FieldRow>
@@ -342,6 +353,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     {confirming === "save" ? <HostConfirmDialog title="保存すると掲載が止まります" description="体験サイトから一時的に外れ、NIHO が確認すると掲載に戻ります。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>保存して掲載を止める</button>} onConfirm={() => void save()} onClose={() => setConfirming(null)} /> : null}
     {confirming === "withdraw" ? <HostConfirmDialog title="申請を取り下げますか？" description="体験サイトへの掲載の申請を取り下げます。もう一度載せるには、申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>申請を取り下げる</button>} onConfirm={() => void withdrawListing(false)} onClose={() => setConfirming(null)} /> : null}
     {confirming === "stop" ? <HostConfirmDialog title="掲載を止めますか？" description="体験サイトからすぐに外れます。受け付けた予約は残ります。もう一度載せるには申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>掲載を止める</button>} onConfirm={() => void withdrawListing(true)} onClose={() => setConfirming(null)} /> : null}
+    {previewing ? <HostExperiencePreview endpoint={endpoint} unsaved={dirty} onClose={() => setPreviewing(false)} /> : null}
     {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} onDiscard={() => { setUncertain(false); setListingUncertain(false); }} /> : null}
   </HostPageBody></>;
 }
