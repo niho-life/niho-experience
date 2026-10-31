@@ -43,7 +43,7 @@ describe("provider booking list BFF", () => {
     expect(text).not.toContain("spot_private");
     expect(JSON.parse(text)).toEqual({
       bookings: [{
-        id: "booking_1", occurrenceDate: "2027-01-02", startAt: "2027-01-02T01:00:00.000Z",
+        id: "booking_1", pageId: "page_1", offerId: "offer_1", occurrenceDate: "2027-01-02", startAt: "2027-01-02T01:00:00.000Z", endAt: "2027-01-02T03:00:00.000Z",
         headCount: 2, offerName: "Walk", totalYen: 12000, guestName: "Guest",
         pageTitle: "Kamakura walk", status: "CONFIRMED", salesChannel: "EXPERIENCE_SITE",
       }],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { HostGuestBooking } from "@niho-experience/experience-store";
-import { bookingActions, bookingGroups, bookingRequestRows, bookingsHref, bookingStateRows, bookingStatusLabel, matchesBookingFilter } from "./bookings";
+import { refundedFeeShare, type HostGuestBooking } from "@niho-experience/experience-store";
+import { bookingActions, bookingGroups, bookingRequestRows, bookingsHref, bookingStateRows, bookingStatusLabel, matchesBookingFilter, refundedFeeShareYen, siteFeeBreakdown } from "./bookings";
 import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_ERASED_TEXT, siteBooking, siteBookingExperiences, siteCancellationLines } from "./site-bookings";
 
 /** 予約 for this site's bookings (#285 slice 8): the experience DB's booking as the screen shows it. Synthetic data. */
@@ -126,15 +126,13 @@ describe("siteBooking", () => {
     expect([asked.site?.cancellation?.requested, siteCancellationLines(asked)]).toEqual([true, []]);
   });
 
-  it("adds the fee, the host's amount and the cancellation policy to 申込内容, and no refund total to 状態", () => {
+  it("adds the cancellation policy to 申込内容 (the fee is 料金・精算状況), and no refund total to 状態", () => {
     const booking = siteBooking(STORED);
     expect(bookingRequestRows(booking, "Synthetic tea ceremony")).toEqual([
       { label: "体験", value: "Synthetic tea ceremony" },
       { label: "人数", value: "3名（大人 2・子ども 1）" },
       { label: "金額", value: "¥10,000" },
       { label: "内訳", value: "大人 ¥4,000 × 2 ＋ 子ども ¥2,000 × 1" },
-      { label: "手数料", value: "¥1,000（10%・サポートOFF）" },
-      { label: "受取額", value: "¥9,000" },
       { label: "言語", value: "英語" },
       { label: "申込経路", value: "体験サイト" },
       { label: "取消条件", value: "24時間前まで無料" },
@@ -142,13 +140,42 @@ describe("siteBooking", () => {
       { label: "回答", answers: booking.answers },
     ]);
     const support = siteBooking({ ...STORED, platformFee: { supportEnabled: true, basisPoints: 1500, amount: 1500 }, providerAmount: 8500, cancellationPolicy: "NONE" });
-    expect(bookingRequestRows(support, "").filter((row) => ["手数料", "受取額", "取消条件"].includes(row.label))).toEqual([
-      { label: "手数料", value: "¥1,500（15%・サポートON）" },
-      { label: "受取額", value: "¥8,500" },
-      { label: "取消条件", value: "無料取消なし" },
-    ]);
+    expect(bookingRequestRows(support, "").filter((row) => ["手数料", "受取額", "取消条件"].includes(row.label))).toEqual([{ label: "取消条件", value: "無料取消なし" }]);
     const cancelled = siteBooking({ ...STORED, status: "CANCELLED", cancelledAtUtc: "2026-11-01T00:00:00.000Z" });
     expect(bookingStateRows(cancelled).map((row) => row.label)).toEqual(["予約", "支払い", "取消"]);
+  });
+
+  it("breaks the money down as the experience DB fixed it at booking: what the guest paid, NIHO's fee and the host's amount", () => {
+    expect(siteFeeBreakdown(siteBooking(STORED))).toEqual({
+      supportEnabled: false, percent: 10, totalYen: 10000, feeYen: 1000, payoutYen: 9000,
+      refundedYen: 0, refundPendingYen: 0, feeReturnedYen: 0, feeEstimated: false, netFeeYen: 1000, netPayoutYen: 9000,
+    });
+    // Support on: 15 %, and floor(total × rate) as the store fixed it (¥1,666 of ¥11,111), whatever the screen would round.
+    const support = siteBooking({ ...STORED, totalAmount: 11111, platformFee: { supportEnabled: true, basisPoints: 1500, amount: 1666 }, providerAmount: 9445 });
+    expect(siteFeeBreakdown(support)).toMatchObject({ supportEnabled: true, percent: 15, totalYen: 11111, feeYen: 1666, payoutYen: 9445, netPayoutYen: 9445 });
+    // NIHO's bookings, and a snapshot without a fee, have no breakdown here.
+    expect(siteFeeBreakdown({ amountYen: 10000 })).toBeNull();
+    expect(siteFeeBreakdown(siteBooking({ ...STORED, platformFee: null }))).toBeNull();
+  });
+
+  it("gives NIHO's fee back with a refund in proportion, as Stripe does, and counts only the refunds Stripe finished", () => {
+    const cancelled = { ...STORED, status: "CANCELLED" as const, cancelledAtUtc: "2026-11-01T00:00:00.000Z", cancelledBy: "HOST" as const };
+    // A full refund gives the whole fee back: nothing is left to anyone.
+    expect(siteFeeBreakdown(siteBooking({ ...cancelled, refundedAmount: 10000 }))).toMatchObject({ refundedYen: 10000, feeReturnedYen: 1000, feeEstimated: false, netFeeYen: 0, netPayoutYen: 0 });
+    // A partial one: ¥3,333 of ¥10,000 gives back round(1,000 × 0.3333) = ¥333, worked out (Stripe may differ by ¥1).
+    expect(siteFeeBreakdown(siteBooking({ ...STORED, refundedAmount: 3333 }))).toMatchObject({ refundedYen: 3333, feeReturnedYen: 333, feeEstimated: true, netFeeYen: 667, netPayoutYen: 6000 });
+    // On its way: shown apart, the fee and the host's amount wait for Stripe.
+    expect(siteFeeBreakdown(siteBooking({ ...cancelled, refundPendingAmount: 10000 }))).toMatchObject({ refundedYen: 0, refundPendingYen: 10000, feeReturnedYen: 0, netFeeYen: 1000, netPayoutYen: 9000 });
+    expect(siteFeeBreakdown(siteBooking({ ...cancelled, refundedAmount: 4000, refundPendingAmount: 6000 }))).toMatchObject({ refundedYen: 4000, refundPendingYen: 6000, feeReturnedYen: 400, netPayoutYen: 5400 });
+  });
+
+  it("shares the fee back by 売上's own rule, half up, to the yen", () => {
+    for (const [fee, refunded, paid] of [[1000, 3333, 10000], [1500, 5, 10000], [1666, 5555, 11111], [3000, 15000, 30000], [1, 1, 3], [7, 1, 2], [150000, 999999, 1000000], [1000, 0, 10000], [1000, 10000, 10000]] as const) {
+      expect(refundedFeeShareYen(fee, refunded, paid), `${fee} ${refunded} ${paid}`).toBe(refundedFeeShare(fee, refunded, paid));
+    }
+    // More than was paid counts as all of it; nothing paid gives nothing back.
+    expect(refundedFeeShareYen(1000, 20000, 10000)).toBe(1000);
+    expect(refundedFeeShareYen(1000, 100, 0)).toBe(0);
   });
 
   it("lists a payment under review among これから while its day is ahead, keeping no seat", () => {

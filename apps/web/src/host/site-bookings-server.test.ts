@@ -9,16 +9,17 @@ const state = vi.hoisted(() => ({
   submit: null as null | ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>,
   session: null as null | { nihoUserId: string; idTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
+  mock: false,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, bookingCancellations: () => state.cancellations }));
 vi.mock("@niho-experience/experience-payments", () => ({ submitBookingRefund: (...args: unknown[]) => state.submit!(...args) }));
-vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
+vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers, isHostMock: () => state.mock }));
 vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
 
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
-import { cancelSiteBookingAsOwner, countSiteBookings, loadMoreSiteBookings, loadSiteBookings, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT } from "./site-bookings-server";
+import { cancelSiteBookingAsOwner, loadMoreSiteBookings, loadSiteBookings, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT } from "./site-bookings-server";
 
 const OWNER = { id: "sample-provider", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
@@ -40,10 +41,10 @@ const OTHER: HostGuestBooking = { ...STORED, publicBookingId: OTHER_ID, localDat
 
 beforeEach(() => {
   vi.useRealTimers();
+  state.mock = false;
   state.store = {
     listGuestBookingsForHost: vi.fn(async () => ({ bookings: [STORED], nextCursor: null })),
     getGuestBookingForHost: vi.fn(async () => OTHER),
-    countGuestBookingsForHost: vi.fn(async () => 3),
   };
   state.cancellations = {
     cancelAsHost: vi.fn(async () => ({ outcome: "CANCELLED", repeated: false, bookingIds: [BOOKING_ID], refunds: [REFUND] })),
@@ -89,6 +90,18 @@ describe("loadSiteBookings", () => {
     expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
   });
 
+  it("shows the preview's synthetic bookings to the OWNER with `?mock=site-bookings` only, and never asks the store in mock mode", async () => {
+    state.mock = true;
+    const preview = await loadSiteBookings(OWNER, "sample-niho-user", null, "site-bookings");
+    expect(preview).toMatchObject({ status: "live", preview: true, messages: false, nextCursor: null, today: "2026-10-21", requestedMissing: false });
+    expect(preview.status === "live" && preview.bookings.map((booking) => booking.status)).toEqual(["confirmed", "cancelled", "confirmed", "cancelled", "payment_review", "cancelled", "confirmed"]);
+    expect(preview.status === "live" && preview.bookings.every((booking) => booking.site?.fee && booking.phone === null)).toBe(true);
+    expect(await loadSiteBookings(OWNER, "sample-niho-user", "00000000-0000-4000-8000-0000000000ff", "site-bookings")).toMatchObject({ status: "live", requestedMissing: true });
+    for (const scenario of [undefined, "default", "site-sales"] as const) expect(await loadSiteBookings(OWNER, "sample-niho-user", null, scenario)).toEqual({ status: "closed" });
+    expect(await loadSiteBookings({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user", null, "site-bookings")).toEqual({ status: "closed" });
+    expect(state.store?.listGuestBookingsForHost).not.toHaveBeenCalled();
+  });
+
   it("says the bookings could not be read when the DB fails, and hands on the cursor of the rest", async () => {
     state.store!.listGuestBookingsForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
     expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toEqual({ status: "error" });
@@ -96,20 +109,6 @@ describe("loadSiteBookings", () => {
     expect(await loadSiteBookings(OWNER, "sample-niho-user", OTHER_ID)).toEqual({ status: "error" });
     state.store!.listGuestBookingsForHost!.mockResolvedValueOnce({ bookings: [STORED], nextCursor: "sample-cursor" });
     expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toMatchObject({ status: "live", nextCursor: "sample-cursor" });
-  });
-});
-
-describe("countSiteBookings", () => {
-  it("counts the OWNER's bookings, and none for anyone else, without the store, or when counting fails", async () => {
-    expect(await countSiteBookings(OWNER, "sample-niho-user")).toBe(3);
-    expect(state.store?.countGuestBookingsForHost).toHaveBeenCalledWith(ACTOR);
-    expect(await countSiteBookings({ ...OWNER, memberRole: "COHOST" }, "sample-niho-user")).toBe(0);
-    state.store!.countGuestBookingsForHost!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await countSiteBookings(OWNER, "sample-niho-user")).toBe(0);
-    state.store!.countGuestBookingsForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await countSiteBookings(OWNER, "sample-niho-user")).toBe(0);
-    state.store = null;
-    expect(await countSiteBookings(OWNER, "sample-niho-user")).toBe(0);
   });
 });
 

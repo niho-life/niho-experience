@@ -10,8 +10,10 @@ import {
   bookingWhen,
   respondByLabel,
   shortDateTime,
+  siteFeeBreakdown,
   type BookingCancellation,
   type BookingRow,
+  type SiteFeeBreakdown,
 } from "@/host/bookings";
 import { monthDayJa, yen } from "@/host/format";
 import {
@@ -73,6 +75,58 @@ function Rows({ rows }: { rows: readonly BookingRow[] }) {
 }
 
 const WAIT_LINE = "mb-2.5 text-[0.78125rem] leading-normal font-extrabold text-warn";
+
+/** Label and amount, the fee panel's rows (FeeSummaryPanel's look). */
+function AmountRows({ rows }: { rows: readonly (readonly [label: string, value: string])[] }) {
+  return (
+    <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="min-w-0 text-ink-soft">{label}</dt>
+          <dd className="text-right font-extrabold tabular-nums">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * 料金・精算状況 of a booking made on this site (#285): read from the experience DB's snapshot, so nothing is
+ * fetched or left to confirm. What it was at booking, then (once refunded) what the refunds changed.
+ */
+function SiteFeePanel({ fee }: { fee: SiteFeeBreakdown }) {
+  const headingId = useId();
+  const refunded = fee.refundedYen > 0 || fee.refundPendingYen > 0;
+  const after: [string, string][] = [];
+  if (fee.refundedYen > 0) after.push(["予約者への返金（完了）", yen(fee.refundedYen)]);
+  if (fee.refundPendingYen > 0) after.push(["予約者への返金（処理中）", yen(fee.refundPendingYen)]);
+  if (fee.refundedYen > 0) {
+    after.push([`NIHO の手数料の返還${fee.feeEstimated ? "（概算）" : ""}`, yen(fee.feeReturnedYen)]);
+    after.push(["返金後の受取額", yen(fee.netPayoutYen)]);
+  }
+  return (
+    <section aria-labelledby={headingId} className="mt-3.5 border-t border-line pt-3.5 text-[0.8125rem] leading-normal">
+      <h3 id={headingId} className="mb-2 font-sans text-xs leading-normal font-extrabold tracking-[0.04em] text-ink-soft">
+        料金・精算状況
+      </h3>
+      <div className="rounded-xl bg-sand/55 p-3">
+        <p className="mb-2 flex flex-wrap items-center gap-x-2">
+          <strong>受付時 サポート{fee.supportEnabled ? "ON" : "OFF"}</strong>
+          <span>{fee.percent}%（決済費用込み）</span>
+        </p>
+        <AmountRows rows={[["予約者の支払い", yen(fee.totalYen)], ["NIHO の手数料", yen(fee.feeYen)], ["受取額", yen(fee.payoutYen)]]} />
+        <p className="mt-2 text-xs text-muted">通訳・お手伝いの人件費は含みません。必要な場合はホストから担当者へ直接支払います。</p>
+      </div>
+      {refunded ? (
+        <div className="mt-3">
+          <AmountRows rows={after} />
+          {fee.refundPendingYen > 0 ? <p className="mt-2 text-xs text-muted">処理中の返金が終わると、手数料の返還と受取額が変わります。</p> : null}
+          {fee.feeEstimated ? <p className="mt-2 text-xs text-muted">一部返金の手数料の返還は、Stripe の計算と ¥1 ずれることがあります。</p> : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 /** メッセージ: the booking's thread (#106), with its last message, or the way to start one. */
 export interface BookingConversationLink {
@@ -146,13 +200,14 @@ export interface HostBookingDetailProps {
  * host can do now, メッセージ (the way into its thread) and 時系列. 承認・お断り・取消 are
  * asked in a dialog first. A booking made on this site (`booking.site`, #285 slices 8 and 7) can
  * be cancelled with a full refund (anything else through NIHO support); a cancelled one says who
- * cancelled, why and where its refund is. NIHO's support and fee panels, which know NIHO's
- * bookings only, are left out.
+ * cancelled, why and where its refund is, and its 料金・精算状況 comes from the experience DB
+ * (SiteFeePanel). NIHO's support and fee panels, which know NIHO's bookings only, are left out.
  */
 export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | "siteCancel" | null>(null);
   const actions = bookingActions(booking.status);
   const site = Boolean(booking.site);
+  const siteFee = siteFeeBreakdown(booking);
   // 通訳を始める: a confirmed booking of an English-speaking guest whose day has not passed (#181).
   const translate = translateEnabled && !site && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
 
@@ -244,7 +299,9 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       <DetailSection title="状態">
         <Rows rows={bookingStateRows(booking)} />
       </DetailSection>
-      {site ? null : (
+      {site ? (
+        siteFee ? <SiteFeePanel fee={siteFee} /> : null
+      ) : (
         <>
           <HostBookingSupportPanel providerId={providerId} bookingId={booking.id} preview={supportPreview} historyEnabled={supportHistoryEnabled} />
           <FeeSummaryPanel key={`host-fee-${booking.id}`} audience="host" bookingId={booking.id} actorKey={providerId} enabled={feeSummaryEnabled} />
