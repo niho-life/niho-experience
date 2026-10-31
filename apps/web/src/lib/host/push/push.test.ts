@@ -46,6 +46,9 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
     }
     const long = JSON.parse(hostPushPayload({ ...event, experienceTitle: "体".repeat(500) }));
     expect(long.body.startsWith(`${"体".repeat(79)}…`)).toBe(true);
+    // An emoji at the cut is left out whole, never halved.
+    const emoji = JSON.parse(hostPushPayload({ ...event, experienceTitle: `${"a".repeat(78)}🍵Tea` }));
+    expect(emoji.body.startsWith(`${"a".repeat(78)}…`)).toBe(true);
     expect(Buffer.byteLength(hostPushPayload({ ...event, experienceTitle: "体".repeat(500) }))).toBeLessThanOrEqual(3 * 1024);
   });
 

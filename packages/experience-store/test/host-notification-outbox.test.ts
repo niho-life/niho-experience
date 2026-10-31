@@ -91,6 +91,12 @@ describe("question and new booking payloads (#285 slice 5)", () => {
     assert.equal(payload.experienceTitle.length, 200);
     assert.ok(payload.experienceTitle.endsWith("…"));
     assert.ok(parseGuestQuestionPayload(payload));
+    // An emoji at the cut is kept whole or left out, never halved: half of a surrogate pair is not valid JSON for jsonb.
+    await enqueueGuestQuestionNotification(client, { providerId: "provider-a", threadId: question.threadId, messageId: question.messageId, experienceTitle: `${"a".repeat(198)}🍵Tea` });
+    const clipped = JSON.parse(String(calls[1]!.params[5])).experienceTitle as string;
+    assert.equal(clipped, `${"a".repeat(198)}…`);
+    assert.doesNotMatch(clipped, /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
+    calls.splice(1);
 
     await enqueueNewBookingNotification(client, { providerId: "provider-a", bookingId: newBooking.bookingId, experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T10:00:00+09:00", seats: 3 });
     assert.deepEqual(calls[1]!.params.slice(0, 5), ["provider-a", "booking", newBooking.bookingId, HOST_NOTIFICATION_TOPICS.newBooking, `host-push:new-booking:${newBooking.bookingId}`]);

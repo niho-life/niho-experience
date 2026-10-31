@@ -143,7 +143,15 @@ export function parseNewBookingPayload(value: unknown): NewBookingPayload | null
  */
 function clippedTitle(value: string): string {
   const clean = value.replace(/\s+/g, " ").trim();
-  return clean.length > TITLE_MAX ? `${clean.slice(0, TITLE_MAX - 1)}…` : clean;
+  if (clean.length <= TITLE_MAX) return clean;
+  // Whole code points only: half of a surrogate pair is not valid JSON, and jsonb would refuse the row (and the
+  // question or the payment with it).
+  let clipped = "";
+  for (const character of clean) {
+    if (clipped.length + character.length > TITLE_MAX - 1) break;
+    clipped += character;
+  }
+  return `${clipped}…`;
 }
 
 interface BookingFacts {

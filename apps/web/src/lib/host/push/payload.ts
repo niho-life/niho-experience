@@ -75,7 +75,14 @@ function whenJa(startsAt: string | undefined): string | null {
 function titleLine(title: string | undefined): string | null {
   const clean = title?.replace(/\s+/g, " ").trim();
   if (!clean) return null;
-  return clean.length > TITLE_MAX ? `${clean.slice(0, TITLE_MAX - 1)}…` : clean;
+  if (clean.length <= TITLE_MAX) return clean;
+  // Whole code points only: half of an emoji would show as a broken character on the lock screen.
+  let clipped = "";
+  for (const character of clean) {
+    if (clipped.length + character.length > TITLE_MAX - 1) break;
+    clipped += character;
+  }
+  return `${clipped}…`;
 }
 
 export function hostPushPayload(event: HostPushEvent): string {
