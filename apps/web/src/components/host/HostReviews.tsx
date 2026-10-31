@@ -149,6 +149,7 @@ function ReviewReplyComposer({ review, providerId, hidden, busy, onPublish, onCa
         englishLabel="公開される英語"
         submitLabel={busy ? "公開しています…" : "返信を公開する"}
         canSubmit={canSend && !busy}
+        disabled={busy}
         extra={
           <button type="button" onClick={onCancel} disabled={busy} className={consoleButtonClass("ghost", "md")}>
             やめる
