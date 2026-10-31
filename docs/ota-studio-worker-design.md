@@ -264,6 +264,17 @@ URL allowlistだけでは、同じドメイン内の口座変更・予約取消�
 - 旧時刻を売っていた後に掲載先（外部の商品・option）の mapping が変わっていたら、旧枠の掲載先を復元できないので新しい掲載先へは閉鎖 job を作らず、要確認（`MAPPING_CHANGED`）にする。
 - Google専用予定（Airbnb）は時刻不一致で停止する別経路のため対象外とする。新時刻側の枠の有無の確認と新規作成（`ENSURE_OCCURRENCE`）は、サイト別の能力を受け入れてから扱う。
 
+#### 新規回の作成（`ENSURE_OCCURRENCE`、#241、2026-10-31）
+
+- **出す条件**：OPEN にしたい回について、次をすべて満たし、その時刻・mapping 版で外部の回を確認済み（`channel_ensured_slots`）でなければ、`SET_OPEN` の前に `ENSURE_OCCURRENCE` を出す。
+  - 掲載が BROWSER 接続で、「作成」と「開く」の両方の能力を持つ
+  - 配備設定（`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS`）の `canCreate` と `canOpen` が有効
+- **「開く」も必須にする理由**：作った回はすぐ予約可能になるため。
+- **worker の動き**：回が無ければ作り、あれば書かずに観測を返す（`ensureCreated` で区別）。GetYourGuide の手順は[pilot記録](ota-getyourguide-pilot.md)にある。
+- **確認できた後**：確認済みとして記録し、同じ希望版の `SET_OPEN` で開く。mapping の変更や日時変更で時刻が変わると、改めて確認する。
+- **閉じる場合**：CLOSED の回は従来どおり `SET_CLOSED` で、作成しない。
+- **保留**：Studio の停止などで OPEN を保留している間は、`ENSURE_OCCURRENCE` も保留する。
+
 ## 8. 外部予約とGoogle Calendar
 
 ### 8.1 予約の逆方向取込み

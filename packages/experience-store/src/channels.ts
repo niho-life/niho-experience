@@ -53,7 +53,8 @@ import { CHANNEL_SITES } from "./channel-sites.ts";
 export { CHANNEL_SITES } from "./channel-sites.ts";
 export type ChannelSite = typeof CHANNEL_SITES[number] | (string & {});
 export type ChannelConnectionMode = "BROWSER" | "GOOGLE" | "API";
-export type ChannelAction = "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
+/** ENSURE_OCCURRENCE makes sure the external slot exists at the job's time before SET_OPEN (creatable browser listings only). */
+export type ChannelAction = "SET_OPEN" | "SET_CLOSED" | "OBSERVE" | "ENSURE_OCCURRENCE";
 export type ChannelJobPurpose = "AVAILABILITY" | "RESERVATION_WINDOW" | "SLOT_RETIREMENT";
 export type ChannelDesiredState = "OPEN" | "CLOSED";
 export type ChannelOutcome = "VERIFIED" | "RESERVATION_VERIFIED" | "AUTH_REQUIRED" | "NEEDS_REVIEW" | "UNKNOWN_AFTER_SAVE" | "RETRY_WAIT" | "SUPERSEDED";
@@ -232,6 +233,8 @@ export interface ChannelResultInput {
   readonly googleAirbnbProof?: GoogleAirbnbProof;
   readonly reservationReadId?: string;
   readonly reservationReceiptId?: string;
+  /** Only on a VERIFIED ENSURE_OCCURRENCE result: true when the worker created the slot, false when it already existed. */
+  readonly ensureCreated?: boolean;
 }
 
 export interface GoogleAirbnbProof {
@@ -375,7 +378,16 @@ const LISTING_COLUMNS = `id,provider_id,account_id,product_id,external_product_i
  * occurrence could not be closed and read back. Other runtime errors never
  * overwrite it; it is cleared only when no retirement still needs review.
  */
-const SLOT_RETIREMENT_WARNING = "旧日時の掲載枠を停止できていません。掲載先で確認してください。";
+/** The conflict arm of an availability INSERT that queues a superseded job of the same identity again; EXCLUDED carries the column defaults. */
+const REVIVE_SUPERSEDED_JOB_SQL = `DO UPDATE SET status=EXCLUDED.status,outcome=EXCLUDED.outcome,attempt_count=EXCLUDED.attempt_count,
+  next_attempt_at=EXCLUDED.next_attempt_at,job_deadline_at=EXCLUDED.job_deadline_at,priority=EXCLUDED.priority,
+  source_start_at=EXCLUDED.source_start_at,source_end_at=EXCLUDED.source_end_at,target_external_account_id=EXCLUDED.target_external_account_id,
+  target_external_product_id=EXCLUDED.target_external_product_id,target_external_option_id=EXCLUDED.target_external_option_id,
+  target_adapter=EXCLUDED.target_adapter,target_adapter_version=EXCLUDED.target_adapter_version,
+  target_connection_mode=EXCLUDED.target_connection_mode,updated_at=EXCLUDED.updated_at
+  WHERE channel_jobs.status='FINISHED' AND channel_jobs.outcome='SUPERSEDED'`;
+
+const SLOT_RETIREMENT_WARNING ="旧日時の掲載枠を停止できていません。掲載先で確認してください。";
 
 /**
  * Sites whose slots are told apart by their end as well as their start (jalan-network-guard.mjs matches startHm
@@ -605,6 +617,7 @@ export function channelReadbackAccepted(input: {
   if (input.action === "SET_CLOSED") {
     return input.observedState === "CLOSED" && !input.observedBookable && input.observedManuallyBlocked;
   }
+  // OBSERVE and ENSURE_OCCURRENCE accept either state: ENSURE confirms the slot exists, the following SET_OPEN opens it.
   return input.observedManuallyBlocked ? !input.observedBookable : true;
 }
 
@@ -651,6 +664,8 @@ export class ChannelRuntime {
     if (!supported) return false;
     if (action === "SET_OPEN") return supported.canOpen === true;
     if (action === "SET_CLOSED") return supported.canClose === true;
+    // A created slot is bookable at once, so creating also needs the open capability.
+    if (action === "ENSURE_OCCURRENCE") return supported.canCreate === true && supported.canOpen === true;
     return supported.canObserve === true;
   }
 
@@ -1656,9 +1671,32 @@ export class ChannelRuntime {
     }
   }
 
-  async #enqueueDesiredJob(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, desiredVersion: number): Promise<number> {
-    const action = desiredAction(desiredState);
-    const capability = (action === "SET_OPEN" ? listing.can_open === true : listing.can_close === true) && this.#adapterSupports(listing, action);
+  /**
+   * A creatable browser listing first makes sure the external slot exists at
+   * this exact time and mapping. Once a worker has verified it, OPEN goes to
+   * the ordinary SET_OPEN. Every other listing keeps SET_OPEN without a lookup.
+   */
+  async #openAction(client: PoolClient, listing: DbRow, occurrence: Occurrence): Promise<ChannelAction> {
+    if (listing.can_create !== true || listing.can_open !== true || listing.connection_mode !== "BROWSER"
+      || !this.#adapterSupports(listing, "ENSURE_OCCURRENCE")) return "SET_OPEN";
+    const ensured = await client.query(
+      `SELECT 1 FROM channel_ensured_slots WHERE listing_id=$1 AND occurrence_id=$2 AND source_start_at=$3 AND source_end_at=$4
+         AND mapping_version=$5`,
+      [listing.id, occurrence.id, occurrence.startUtc, occurrence.endUtc, listing.mapping_version],
+    );
+    return ensured.rows[0] ? "SET_OPEN" : "ENSURE_OCCURRENCE";
+  }
+
+  /**
+   * `reviveSuperseded` is for the SET_OPEN that follows a verified ENSURE_OCCURRENCE. Queueing the
+   * ENSURE supersedes a SET_OPEN of the same versions, and the unique availability identity would
+   * otherwise keep that finished row from ever being replaced, leaving the slot closed. The row is
+   * queued again with a fresh target snapshot; any other finished job still blocks a new one.
+   */
+  async #enqueueDesiredJob(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, desiredVersion: number, reviveSuperseded = false): Promise<number> {
+    const action =desiredState === "CLOSED" ? "SET_CLOSED" : await this.#openAction(client, listing, occurrence);
+    const capability = (action === "SET_OPEN" ? listing.can_open === true : action === "SET_CLOSED" ? listing.can_close === true : listing.can_create === true)
+      && this.#adapterSupports(listing, action);
     if (!capability) {
       await client.query(
         "UPDATE channel_desired_states SET last_error=CASE WHEN last_error=$4 THEN last_error ELSE $3 END WHERE listing_id=$1 AND occurrence_id=$2",
@@ -1679,8 +1717,9 @@ export class ChannelRuntime {
     }
     const existing = await client.query(
       `SELECT 1 FROM channel_jobs WHERE listing_id=$1 AND occurrence_id=$2 AND action=$3 AND account_version=$4
-         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL`,
-      [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version],
+         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL
+         AND NOT ($7::boolean AND status='FINISHED' AND outcome='SUPERSEDED')`,
+      [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version, reviveSuperseded],
     );
     if (existing.rows[0]) return 0;
     await client.query(
@@ -1698,7 +1737,7 @@ export class ChannelRuntime {
          target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Asia/Tokyo',$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (listing_id,occurrence_id,action,account_version,desired_version,mapping_version)
-         WHERE purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL DO NOTHING`,
+         WHERE purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL ${reviveSuperseded ? REVIVE_SUPERSEDED_JOB_SQL : "DO NOTHING"}`,
       [randomUUID(), listing.provider_id, listing.account_id, listing.id, occurrence.id, action, listing.account_version, desiredVersion,
         listing.mapping_version, listing.site, listing.external_account_id, listing.external_product_id, listing.external_option_id,
         listing.adapter, listing.adapter_version, listing.connection_mode, occurrence.startUtc, occurrence.endUtc, desiredState === "CLOSED" ? 100 : 50, null],
@@ -1721,6 +1760,7 @@ export class ChannelRuntime {
       ...(capability.canOpen === true ? [`${key}/SET_OPEN`] : []),
       ...(capability.canClose === true ? [`${key}/SET_CLOSED`] : []),
       ...(capability.canObserve === true ? [`${key}/OBSERVE`] : []),
+      ...(capability.canCreate === true && capability.canOpen === true ? [`${key}/ENSURE_OCCURRENCE`] : []),
     ]);
   }
 
@@ -1849,7 +1889,8 @@ export class ChannelRuntime {
            AND ((j.purpose IN ('AVAILABILITY','RESERVATION_WINDOW')
                AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
                AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
-                    AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED')))
+                    AND (j.action='OBSERVE' OR (j.action='SET_OPEN' AND d.desired_state='OPEN') OR (j.action='SET_CLOSED' AND d.desired_state='CLOSED')
+                      OR (j.action='ENSURE_OCCURRENCE' AND d.desired_state='OPEN')))
                  OR (j.purpose='RESERVATION_WINDOW' AND j.action='OBSERVE' AND rs.halted_at IS NULL)))
              OR (j.purpose='SLOT_RETIREMENT' AND j.action='SET_CLOSED' AND r.status='PENDING' AND r.retirement_version=j.desired_version
                AND r.listing_id=j.listing_id AND r.occurrence_id=j.occurrence_id
@@ -1863,12 +1904,14 @@ export class ChannelRuntime {
                AND gw.dispatched_worker_id=$1 AND gw.dispatched_assignment_version=wa.version
                AND gw.deadline_at>$2))
            AND ((j.action='SET_OPEN' AND l.can_open) OR (j.action='SET_CLOSED' AND l.can_close)
-             OR (j.action='OBSERVE' AND l.can_observe AND (j.purpose='AVAILABILITY' OR l.can_read_reservations)))
+             OR (j.action='OBSERVE' AND l.can_observe AND (j.purpose='AVAILABILITY' OR l.can_read_reservations))
+             OR (j.action='ENSURE_OCCURRENCE' AND l.can_create AND l.can_open AND l.connection_mode='BROWSER'))
            AND (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version || '/' || j.action)=ANY($3::text[])
            AND (j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT') OR (j.target_site || '/' || j.target_adapter || '@' || j.target_adapter_version)=ANY($4::text[]))
            -- New OPEN stays QUEUED (no attempt/deadline) while any live Studio of the provider is held or stale.
+           -- Creating a slot on an active option makes it bookable at once, so ENSURE_OCCURRENCE waits too.
            -- preflight does not repeat this; the seconds between claim and preflight are accepted.
-           AND (j.action<>'SET_OPEN' OR NOT ${providerOpenHeldSql("j.provider_id", "$2", "$5")})
+           AND (j.action NOT IN ('SET_OPEN','ENSURE_OCCURRENCE') OR NOT ${providerOpenHeldSql("j.provider_id", "$2", "$5")})
          ORDER BY j.priority DESC,j.next_attempt_at,j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`,
         [identity.workerId, nowUtc, deployedActions, deployedReservationAdapters,
           new Date(this.#now().getTime() - HEARTBEAT_STALE_MS).toISOString(), this.#googleAirbnbObservationEnabled],
@@ -2590,7 +2633,7 @@ export class ChannelRuntime {
       }
       const current = await client.query<DbRow>(
         `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,l.active AS listing_active,
-                a.site,l.product_id,l.mapping_version,l.can_open,l.can_close,l.can_observe,l.adapter,l.adapter_version,
+                a.site,l.product_id,l.mapping_version,l.can_open,l.can_close,l.can_observe,l.can_create,l.connection_mode,l.adapter,l.adapter_version,
                 d.desired_state,d.desired_version,d.mapping_version AS desired_mapping_version,d.source_start_at,d.source_end_at,p.status AS product_status
            FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
            JOIN channel_desired_states d ON d.listing_id=l.id AND d.occurrence_id=$3
@@ -2599,7 +2642,8 @@ export class ChannelRuntime {
         [job.account_id, job.listing_id, job.occurrence_id],
       );
       const state = current.rows[0];
-      const capability = job.action === "SET_OPEN" ? state?.can_open : job.action === "SET_CLOSED" ? state?.can_close : state?.can_observe;
+      const capability = job.action === "SET_OPEN" ? state?.can_open : job.action === "SET_CLOSED" ? state?.can_close
+        : job.action === "ENSURE_OCCURRENCE" ? state?.can_create === true && state.can_open === true && state.connection_mode === "BROWSER" : state?.can_observe;
       if (!state || state.account_active !== true || state.revoked_at !== null
         || (state.delegated_until !== null && isoValue(state, "delegated_until") <= nowUtc) || state.listing_active !== true || capability !== true
         || state.product_status !== "PUBLISHED" || !this.#adapterSupports(state, text(job, "action") as ChannelAction)
@@ -2614,7 +2658,8 @@ export class ChannelRuntime {
         return { conflict: "Job snapshot is stale; the old lease remains locked until stopped." };
       }
       const desiredState = text(state, "desired_state") as ChannelDesiredState;
-      if ((job.action === "SET_OPEN" && desiredState !== "OPEN") || (job.action === "SET_CLOSED" && desiredState !== "CLOSED")) {
+      if (((job.action === "SET_OPEN" || job.action === "ENSURE_OCCURRENCE") && desiredState !== "OPEN")
+        || (job.action === "SET_CLOSED" && desiredState !== "CLOSED")) {
         return { conflict: "Job desired state is stale; the old lease remains locked until stopped." };
       }
       let occurrence: Occurrence;
@@ -2637,7 +2682,9 @@ export class ChannelRuntime {
       if (job.action !== "OBSERVE" || propagationWait) {
         const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(state, "product_id"), occurrence, nowUtc);
         const liveDesiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
-        if (propagationWait ? liveDesiredState !== propagationWait.desired_state : desiredAction(liveDesiredState) !== job.action) {
+        // ENSURE_OCCURRENCE is checked like SET_OPEN: the slot it may create is bookable.
+        const expectedAction = job.action === "ENSURE_OCCURRENCE" ? "SET_OPEN" : job.action;
+        if (propagationWait ? liveDesiredState !== propagationWait.desired_state : desiredAction(liveDesiredState) !== expectedAction) {
           if (propagationWait) {
             await this.#finishGooglePropagationWait(client, propagationWait, "SUPERSEDED", "LIVE_AVAILABILITY_CHANGED", nowUtc, false);
             return { conflict: "Google propagation live availability changed; the stopped result is still required." };
@@ -2831,6 +2878,9 @@ export class ChannelRuntime {
     if (input.outcome !== "VERIFIED" && input.outcome !== "RETRY_WAIT" && input.googleAirbnbProof !== undefined) {
       throw new StoreValidationError("Google Airbnb proof requires VERIFIED or RETRY_WAIT.");
     }
+    if (input.ensureCreated !== undefined && (typeof input.ensureCreated !== "boolean" || input.outcome !== "VERIFIED")) {
+      throw new StoreValidationError("result.ensureCreated requires a VERIFIED ENSURE_OCCURRENCE result.");
+    }
     return withTransaction(this.#pool, async (client) => {
       await this.#requireWorker(client, identity);
       await this.#lockJobInventory(client, identity, jobId, input.resultId);
@@ -2849,7 +2899,7 @@ export class ChannelRuntime {
           sourceStartAtUtc: input.sourceStartAtUtc, sourceEndAtUtc: input.sourceEndAtUtc, observedState: input.observedState,
           observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc,
           googleAirbnbProof: input.googleAirbnbProof,
-          reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId });
+          reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId, ensureCreated: input.ensureCreated });
         if (repeated.rows[0].fingerprint !== resultFingerprint) throw new StoreConflictError("Result ID was already used with different input.");
         return { acceptedAsCurrent: repeated.rows[0].accepted_as_current === true, repeated: true };
       }
@@ -2891,6 +2941,10 @@ export class ChannelRuntime {
       if ((reservationJob && input.outcome === "VERIFIED") || (!reservationJob && input.outcome === "RESERVATION_VERIFIED")) {
         throw new StoreValidationError("Result outcome does not match the job purpose.");
       }
+      const ensureJob = job.action === "ENSURE_OCCURRENCE";
+      if (ensureJob ? input.outcome === "VERIFIED" && input.ensureCreated === undefined : input.ensureCreated !== undefined) {
+        throw new StoreValidationError("result.ensureCreated is required on, and only on, a VERIFIED ENSURE_OCCURRENCE result.");
+      }
       const assignment = await client.query(
         "SELECT 1 FROM channel_worker_accounts WHERE worker_id=$1 AND account_id=$2 AND revoked_at IS NULL AND version=$3 FOR SHARE",
         [identity.workerId, job.account_id, job.lease_assignment_version],
@@ -2903,7 +2957,7 @@ export class ChannelRuntime {
         sourceStartAtUtc: input.sourceStartAtUtc, sourceEndAtUtc: input.sourceEndAtUtc, observedState: input.observedState,
         observedBookable: input.observedBookable, observedManuallyBlocked: input.observedManuallyBlocked, observedAtUtc: input.observedAtUtc,
         googleAirbnbProof: input.googleAirbnbProof,
-        reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId });
+        reservationReadId: input.reservationReadId, reservationReceiptId: input.reservationReceiptId, ensureCreated: input.ensureCreated });
       const exactTarget = targetEqual(targetFromRow(job), input.target);
       const occurrenceMatchesSnapshot = input.occurrenceId === job.occurrence_id
         && input.sourceStartAtUtc === isoValue(job, "source_start_at") && input.sourceEndAtUtc === isoValue(job, "source_end_at");
@@ -2951,7 +3005,7 @@ export class ChannelRuntime {
             WHERE a.id=$1 AND l.id=$2 FOR SHARE OF a,l,p`
         : `SELECT a.active AS account_active,a.revoked_at,a.delegated_until,a.quarantined_at,a.version AS account_version,a.site,
                 l.active AS listing_active,l.product_id,l.mapping_version,l.adapter,l.adapter_version,l.can_open,l.can_close,l.can_observe,
-                d.desired_version,d.desired_state,d.mapping_version AS desired_mapping_version,d.source_start_at,d.source_end_at,
+                l.can_create,l.connection_mode,d.desired_version,d.desired_state,d.mapping_version AS desired_mapping_version,d.source_start_at,d.source_end_at,
                 p.status AS product_status
              FROM channel_external_accounts a JOIN channel_listings l ON l.account_id=a.id
              JOIN channel_desired_states d ON d.listing_id=l.id AND d.occurrence_id=$3
@@ -2960,8 +3014,10 @@ export class ChannelRuntime {
         reservationJob ? [job.account_id, job.listing_id] : [job.account_id, job.listing_id, job.occurrence_id]);
       const current = currentResult.rows[0];
       const action = text(job, "action") as ChannelAction;
-      const capability = action === "SET_OPEN" ? current?.can_open : action === "SET_CLOSED" ? current?.can_close : current?.can_observe;
+      const capability = action === "SET_OPEN" ? current?.can_open : action === "SET_CLOSED" ? current?.can_close
+        : action === "ENSURE_OCCURRENCE" ? current?.can_create === true && current.can_open === true && current.connection_mode === "BROWSER" : current?.can_observe;
       let liveOccurrenceMatches = false;
+      let liveOccurrence: Occurrence | undefined;
       let liveActionAllowed = action === "OBSERVE";
       // A retirement's old time must still differ from the live occurrence; a
       // vanished occurrence still leaves the old external slot to close.
@@ -2980,9 +3036,11 @@ export class ChannelRuntime {
           const occurrence = await this.#currentOccurrence(client, text(job, "provider_id"), text(job, "listing_id"), text(job, "occurrence_id"));
           liveOccurrenceMatches = occurrence.startUtc === isoValue(job, "source_start_at") && occurrence.endUtc === isoValue(job, "source_end_at")
             && isoValue(current, "source_start_at") === occurrence.startUtc && isoValue(current, "source_end_at") === occurrence.endUtc;
+          if (liveOccurrenceMatches) liveOccurrence = occurrence;
           if (liveOccurrenceMatches && (action !== "OBSERVE" || input.googleAirbnbProof !== undefined)) {
             const availability = await this.#liveAvailability(client, text(job, "provider_id"), text(current, "product_id"), occurrence, nowUtc);
-            const currentAction = action === "OBSERVE" ? desiredAction(text(current, "desired_state") as ChannelDesiredState) : action;
+            const currentAction = action === "OBSERVE" ? desiredAction(text(current, "desired_state") as ChannelDesiredState)
+              : action === "ENSURE_OCCURRENCE" ? "SET_OPEN" : action;
             liveActionAllowed = desiredAction(availability.bookable ? "OPEN" : "CLOSED") === currentAction;
           }
         } catch (error) {
@@ -2990,7 +3048,8 @@ export class ChannelRuntime {
         }
       }
       const desiredStateCurrent = current !== undefined
-        && (action === "OBSERVE" || (action === "SET_OPEN" && current.desired_state === "OPEN") || (action === "SET_CLOSED" && current.desired_state === "CLOSED"));
+        && (action === "OBSERVE" || ((action === "SET_OPEN" || action === "ENSURE_OCCURRENCE") && current.desired_state === "OPEN")
+          || (action === "SET_CLOSED" && current.desired_state === "CLOSED"));
       const availabilityVersionsCurrent = availabilityJob && assignmentCurrent && current !== undefined && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
         && current.listing_active === true && current.product_status === "PUBLISHED" && capability === true
@@ -3083,7 +3142,8 @@ export class ChannelRuntime {
           accountId: text(job, "account_id"), listingId: text(job, "listing_id"), occurrenceId: text(job, "occurrence_id"),
           workerId: identity.workerId, leaseEpoch, assignmentVersion: integer(job, "lease_assignment_version"),
           accountVersion: integer(job, "account_version"), mappingVersion: integer(job, "mapping_version"),
-          desiredVersion: integer(job, "desired_version"), desiredState: googleDesiredState, action,
+          // A proof was refused above unless the job action is SET_OPEN, SET_CLOSED or OBSERVE.
+          desiredVersion: integer(job, "desired_version"), desiredState: googleDesiredState, action: action as "SET_OPEN" | "SET_CLOSED" | "OBSERVE",
           sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),
           leaseStartedAtUtc: isoValue(job, "lease_started_at"), observedAtUtc: input.observedAtUtc,
         });
@@ -3121,9 +3181,9 @@ export class ChannelRuntime {
           (result_id,job_id,worker_id,lease_epoch,lease_digest,fingerprint,outcome,stopped,exact_target_match,
            occurrence_id,source_start_at,source_end_at,observed_state,observed_bookable,observed_manually_blocked,observed_at,
            accepted_as_current,reservation_read_id,reservation_receipt_id,
-           google_airbnb_delivery_id,google_airbnb_evidence,google_airbnb_party_size,google_airbnb_verified_at)
+           google_airbnb_delivery_id,google_airbnb_evidence,google_airbnb_party_size,google_airbnb_verified_at,ensure_created)
          VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::uuid,$19::uuid,
-           $20::uuid,$21,$22,$23)`,
+           $20::uuid,$21,$22,$23,$24)`,
         [input.resultId, jobId, identity.workerId, leaseEpoch, leaseDigest, resultFingerprint, input.outcome, input.stopped, exactTarget,
           reservationShape ? null : input.occurrenceId ?? job.occurrence_id,
           reservationShape ? null : input.sourceStartAtUtc ?? job.source_start_at,
@@ -3131,7 +3191,7 @@ export class ChannelRuntime {
           input.observedState ?? null, input.observedBookable ?? null, input.observedManuallyBlocked ?? null, input.observedAtUtc ?? null,
           acceptedAsCurrent, input.reservationReadId ?? null, input.reservationReceiptId ?? null,
           input.googleAirbnbProof?.deliveryId ?? null, input.googleAirbnbProof?.evidence ?? null,
-          input.googleAirbnbProof?.partySize ?? null, googleAirbnbVerifiedAtUtc ?? null],
+          input.googleAirbnbProof?.partySize ?? null, googleAirbnbVerifiedAtUtc ?? null, input.ensureCreated ?? null],
       );
       if (!withinLease) {
         if (propagationWait) {
@@ -3186,6 +3246,17 @@ export class ChannelRuntime {
             [job.listing_id, job.occurrence_id, input.observedState, job.desired_version, job.mapping_version, input.observedAtUtc,
               SLOT_RETIREMENT_WARNING],
           );
+          if (ensureJob) {
+            await client.query(
+              `INSERT INTO channel_ensured_slots
+                (listing_id,provider_id,occurrence_id,source_start_at,source_end_at,mapping_version,created,job_id,verified_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::uuid,$9)
+               ON CONFLICT (listing_id,occurrence_id,source_start_at,source_end_at,mapping_version) DO UPDATE
+                 SET created=EXCLUDED.created,job_id=EXCLUDED.job_id,verified_at=EXCLUDED.verified_at`,
+              [job.listing_id, job.provider_id, job.occurrence_id, job.source_start_at, job.source_end_at, job.mapping_version,
+                input.ensureCreated, jobId, input.observedAtUtc],
+            );
+          }
           if (propagationWait) {
             await client.query(
               `UPDATE google_airbnb_propagation_waits SET status='MATCHED',pending_job_id=NULL,
@@ -3200,6 +3271,7 @@ export class ChannelRuntime {
           [jobId, nowUtc, reservationJob ? "RESERVATION_VERIFIED" : "VERIFIED"],
         );
         if (!reservationJob && job.action === "OBSERVE" && !propagationWait) await this.#completeRecoveryObserve(client, job);
+        if (ensureJob && liveOccurrence) await this.#enqueueAfterEnsure(client, job, liveOccurrence);
       } else if (propagationWait) {
         const stale = !propagationVersionsCurrent || input.outcome === "SUPERSEDED";
         const outcome: ChannelOutcome = stale ? "SUPERSEDED" : "NEEDS_REVIEW";
@@ -3304,6 +3376,25 @@ export class ChannelRuntime {
       [jobId, outcome, this.#nowIso()],
     );
     if (outcome === "AUTH_REQUIRED" || outcome === "NEEDS_REVIEW" || outcome === "UNKNOWN_AFTER_SAVE") await this.#quarantine(client, accountId, reason);
+  }
+
+  /**
+   * The slot now exists at this time and mapping, so the same desired version
+   * continues with the ordinary SET_OPEN. Acceptance required desired OPEN and
+   * live availability bookable in this transaction.
+   */
+  async #enqueueAfterEnsure(client: PoolClient, job: DbRow, occurrence: Occurrence): Promise<void> {
+    const listing = (await client.query<DbRow>(
+      `SELECT l.*,a.site,a.external_account_id,a.active AS account_active,a.delegated_until,a.revoked_at,a.version AS account_version,a.quarantined_at
+         FROM channel_listings l JOIN channel_external_accounts a ON a.id=l.account_id
+         JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
+        WHERE l.id=$1 AND l.active=true AND p.status='PUBLISHED'`, [job.listing_id],
+    )).rows[0];
+    const desired = (await client.query<DbRow>(
+      "SELECT desired_state,desired_version FROM channel_desired_states WHERE listing_id=$1 AND occurrence_id=$2", [job.listing_id, job.occurrence_id],
+    )).rows[0];
+    if (!listing || desired?.desired_state !== "OPEN") return;
+    await this.#enqueueDesiredJob(client, listing, occurrence, "OPEN", integer(desired, "desired_version"), true);
   }
 
   async #completeRecoveryObserve(client: PoolClient, job: DbRow): Promise<void> {
