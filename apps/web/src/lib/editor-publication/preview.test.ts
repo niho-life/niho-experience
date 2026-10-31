@@ -21,7 +21,7 @@ const editorConfig = {
   guideEditorAssetOrigins: [FIXTURE_ASSET_ORIGIN],
 };
 
-const DRAFT = "synthetic-preview-token-0001";
+const DRAFT = "pv_synthetic-preview-not-a-secret-draft-000001";
 const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 
 async function load() {
@@ -43,11 +43,14 @@ describe("/guides/preview (#253)", () => {
   it("is a 404 without a well-formed token, or with any source but the editor, before anything is fetched", async () => {
     expect(guidePreviewToken({})).toBeNull();
     expect(guidePreviewToken({ token: "short" })).toBeNull();
+    expect(guidePreviewToken({ token: "synthetic-preview-token-0001" })).toBeNull();
+    expect(guidePreviewToken({ token: `${DRAFT}x` })).toBeNull();
     expect(guidePreviewToken({ token: [DRAFT, DRAFT] })).toBeNull();
     expect(guidePreviewToken({ token: `${DRAFT}/../x` })).toBeNull();
     expect(guidePreviewToken({ token: DRAFT })).toBe(DRAFT);
     const { api, readGuidePreview } = await load();
     expect(await readGuidePreview("short")).toEqual({ kind: "not-found" });
+    expect(await readGuidePreview(DRAFT.replace("pv_", "ek_"))).toEqual({ kind: "not-found" });
     state.config = { ...editorConfig, guidePublicSource: "static" };
     expect(await readGuidePreview(DRAFT)).toEqual({ kind: "not-found" });
     state.config = { ...editorConfig, guidePublicSource: "database" };
@@ -59,7 +62,7 @@ describe("/guides/preview (#253)", () => {
     const { readGuidePreview } = await load();
     expect(await readGuidePreview(DRAFT)).toMatchObject({
       kind: "ok",
-      guide: { title: "An unfinished draft (sample)", unlisted: true, description: "", relatedExperienceSlugs: [], author: { name: "Author not set" } },
+      guide: { title: "An unfinished draft (sample)", unlisted: true, description: "", relatedExperienceSlugs: [], author: { name: "Sample Writer" } },
     });
   });
 
@@ -70,13 +73,19 @@ describe("/guides/preview (#253)", () => {
     expect(api.calls).toHaveLength(2);
     delete api.state.previews[DRAFT];
     expect(await readGuidePreview(DRAFT)).toEqual({ kind: "not-found" });
-    expect(await readGuidePreview("synthetic-preview-token-gone")).toEqual({ kind: "not-found" });
-    expect(await readGuidePreview("synthetic-preview-token-0003")).toEqual({ kind: "not-found" });
+    expect(await readGuidePreview(EDITOR_FIXTURE.expiredPreviewTokens[0]!)).toEqual({ kind: "not-found" });
+    expect(await readGuidePreview("pv_synthetic-preview-not-a-secret-draft-000003")).toEqual({ kind: "not-found" });
+  });
+
+  it("explains a draft of another contract version to its writer, naming the field only", async () => {
+    const { api, readGuidePreview } = await load();
+    api.state.previews[DRAFT]!.contractVersion = "2";
+    expect(await readGuidePreview(DRAFT)).toEqual({ kind: "invalid", reason: "The preview is not contract version 1 (contractVersion)." });
   });
 
   it("explains a body outside the Markdown subset to its writer instead of rendering it", async () => {
     const { readGuidePreview } = await load();
-    expect(await readGuidePreview("synthetic-preview-token-0002")).toEqual({ kind: "invalid", reason: "line 3: Raw HTML is not supported" });
+    expect(await readGuidePreview("pv_synthetic-preview-not-a-secret-draft-000002")).toEqual({ kind: "invalid", reason: "line 3: Raw HTML is not supported" });
   });
 
   it("fails (a 500) on an outage or a refused credential, with no stale draft and no token in the error", async () => {

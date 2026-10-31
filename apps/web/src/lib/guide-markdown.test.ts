@@ -28,6 +28,19 @@ describe("guide Markdown subset", () => {
     ]);
   });
 
+  it("reads *** as bold and italic together, as editor.niho.life writes text that is both", () => {
+    const both = (value: string) => ({ type: "strong", children: [{ type: "em", children: [{ type: "text", value }] }] });
+    expect(parseGuideInline("***both*** then **bold** ***again***", 1)).toEqual([both("both"), { type: "text", value: " then " }, { type: "strong", children: [{ type: "text", value: "bold" }] }, { type: "text", value: " " }, both("again")]);
+    // The first closer says which mark is inner.
+    expect(parseGuideInline("***both** italic*", 1)).toEqual([{ type: "em", children: [{ type: "strong", children: [{ type: "text", value: "both" }] }, { type: "text", value: " italic" }] }]);
+    expect(parseGuideInline("***both* bold**", 1)).toEqual([{ type: "strong", children: [{ type: "em", children: [{ type: "text", value: "both" }] }, { type: "text", value: " bold" }] }]);
+    expect(parseGuideInline("**bold *both***", 1)).toEqual([{ type: "strong", children: [{ type: "text", value: "bold " }, { type: "em", children: [{ type: "text", value: "both" }] }] }]);
+    expect(parseGuideInline("*italic **both***", 1)).toEqual([{ type: "em", children: [{ type: "text", value: "italic " }, { type: "strong", children: [{ type: "text", value: "both" }] }] }]);
+    expect(parseGuideInline("[***both***](/a)", 1)).toEqual([{ type: "link", href: "/a", external: false, children: [both("both")] }]);
+    // Adjacent exclusive marks keep their meaning.
+    expect(parseGuideInline("**bold***italic*", 1)).toEqual([{ type: "strong", children: [{ type: "text", value: "bold" }] }, { type: "em", children: [{ type: "text", value: "italic" }] }]);
+  });
+
   it("nests italic in bold and bold in link text, and keeps escaped punctuation literal", () => {
     expect(parseGuideInline("**bold *and italic* inside**", 1)).toEqual([
       { type: "strong", children: [{ type: "text", value: "bold " }, { type: "em", children: [{ type: "text", value: "and italic" }] }, { type: "text", value: " inside" }] },
@@ -76,7 +89,10 @@ describe("guide Markdown subset", () => {
     ["An ![image](/a.png)", /A photo goes on a line of its own/],
     ["Some _underscore_ emphasis", /\\_ for a literal underscore/],
     ["Some ~~struck~~ text", /Strikethrough/],
-    ["A ***strong em*** run", /\*\*\* is not supported/],
+    ["A ****strong em**** run", /\*\*\* is not supported/],
+    ["A *** spaced*** opener", /opening \*\*\* must touch/],
+    ["A ***spaced *** closer", /closing \*\*\* must follow/],
+    ["A ***unclosed run", /Unclosed \*\*\*/],
     ["An **unclosed bold", /Unclosed \*\*/],
     ["An *unclosed italic", /Unclosed \*/],
     ["A ** spaced** opener", /must touch the text/],

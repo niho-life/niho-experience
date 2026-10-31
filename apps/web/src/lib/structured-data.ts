@@ -140,7 +140,7 @@ export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: stri
     url,
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     inLanguage: "en",
-    author: { "@type": "Person", name: guide.author.name, jobTitle: guide.author.role },
+    author: { "@type": "Person", name: guide.author.name, ...(guide.author.role ? { jobTitle: guide.author.role } : {}) },
     datePublished: guide.publishedAt,
     dateModified: guide.updatedAt,
     publisher: { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: siteName, url: `${siteUrl}/` },

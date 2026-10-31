@@ -17,6 +17,12 @@ export type EditorPreviewGuideResult = Readonly<{ ok: true; guide: Guide }> | Re
 /** Default display order for a category without one: after every ordered category. */
 export const EDITOR_CATEGORY_DEFAULT_ORDER = 1000;
 
+/**
+ * The size a cover is declared with. Contract v1 sends no pixel size for a photo, and `<img>` needs one; the page lays the
+ * hero out with `h-auto`, so the photo still shows in its own ratio. Never used for a share image (covers are not licensed).
+ */
+export const EDITOR_COVER_ASSUMED_SIZE = { width: 1600, height: 900 } as const;
+
 /** The photo URL to render, or null unless it is an https URL on an allowed editor origin. */
 export function editorPhotoUrl(url: string, policy: EditorPhotoPolicy): string | null {
   const href = guideLinkHref(url);
@@ -53,10 +59,10 @@ function hero(cover: EditorAsset, policy: EditorPhotoPolicy): GuideHero {
   return {
     src: editorPhotoUrl(cover.url, policy)!,
     alt: cover.alt,
-    width: cover.width,
-    height: cover.height,
-    // Only an explicit declaration of sharing rights opens Open Graph and `Article.image` (shareableGuideImage).
-    licensed: cover.licensed === true,
+    ...EDITOR_COVER_ASSUMED_SIZE,
+    // Only an explicit declaration of sharing rights opens Open Graph and `Article.image` (shareableGuideImage). Contract
+    // v1 declares none (the editor's consent is permission to publish on the page), so an editor cover is never shared.
+    licensed: false,
     ...(cover.credit === undefined ? {} : { caption: cover.credit }),
   };
 }
@@ -79,7 +85,6 @@ export function editorArticleToGuide(article: EditorArticle, policy: EditorPhoto
       author: article.author,
       publishedAt: dateOf(article.publishedAt),
       updatedAt: dateOf(article.updatedAt),
-      ...(article.checkedOn === undefined ? {} : { checkedAt: article.checkedOn }),
       ...(article.cover ? { hero: hero(article.cover, policy) } : {}),
       relatedExperienceSlugs: [...new Set(article.related)],
       relatedGuideSlugs: [],
@@ -91,7 +96,7 @@ export function editorArticleToGuide(article: EditorArticle, policy: EditorPhoto
 
 /** The slug a preview renders under when the draft has none yet (never linked: the preview has no canonical or JSON-LD). */
 export const EDITOR_PREVIEW_SLUG = "preview";
-export const EDITOR_PREVIEW_AUTHOR = { name: "Author not set", role: "Writer" } as const;
+export const EDITOR_PREVIEW_AUTHOR = { name: "Author not set" } as const;
 
 /**
  * A draft as a guide for `/guides/preview`. Missing lead, cover, category, author or related experiences are filled with
@@ -115,7 +120,6 @@ export function editorPreviewToGuide(preview: EditorPreview, policy: EditorPhoto
       author: preview.author ?? EDITOR_PREVIEW_AUTHOR,
       publishedAt,
       updatedAt: today < publishedAt ? publishedAt : today,
-      ...(preview.checkedOn === undefined ? {} : { checkedAt: preview.checkedOn }),
       ...(preview.cover ? { hero: hero(preview.cover, policy) } : {}),
       relatedExperienceSlugs: [...preview.related],
       relatedGuideSlugs: [],

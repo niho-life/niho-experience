@@ -19,8 +19,11 @@ export type GuidePublicFigure = Readonly<{ assetId: string; src: string; credit:
 export type GuideAuthor = Readonly<{
   /** The writer's real name as shown on the page. */
   name: string;
-  /** Their role, e.g. "Editor, NIHO Experience" or "Host of the community dinner". */
-  role: string;
+  /**
+   * Their role, e.g. "Editor, NIHO Experience" or "Host of the community dinner". Required for static and database guides
+   * (lib/guides.ts); editor.niho.life publications carry the name only.
+   */
+  role?: string;
   /** A short first-person or third-person introduction for the article footer. */
   bio?: string;
 }>;

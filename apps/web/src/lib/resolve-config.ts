@@ -52,11 +52,15 @@ function guideDraftsSetting(apiMode: "mock" | "http", value: string | undefined)
 type GuideEditorSettings = Readonly<{ apiBaseUrl: string; handle: string; token: string; assetOrigins: readonly string[] }>;
 
 const NO_GUIDE_EDITOR: GuideEditorSettings = { apiBaseUrl: "", handle: "", token: "", assetOrigins: [] };
-const GUIDE_EDITOR_HANDLE = /^[A-Za-z0-9_-]{1,128}$/;
+/**
+ * NIHO Experience reads the editor as the face `exp` (EDITOR_PUBLICATION_DEST). Any other handle is another face or an
+ * owner's site, whose publications this site never lists, so it is refused at start instead of serving an empty /guides.
+ */
+const GUIDE_EDITOR_HANDLE = "exp";
 
 const isLoopbackHost = (hostname: string) => hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 
-/** The editor's public API base (with its version path, still provisional): https, or loopback http for a local fixture server. */
+/** The editor's public API base (with its version path, `/v1`): https, or loopback http for a local fixture server. */
 function guideEditorBaseUrl(value: string): URL {
   let url: URL;
   try {
@@ -90,7 +94,7 @@ function guideEditorAssetOrigins(value: string | undefined, apiOrigin: string): 
 }
 
 /**
- * editor.niho.life's public API as the guide source (#252, provisional contract: lib/editor-publication/contract.ts).
+ * editor.niho.life's public API as the guide source (#252, contract v1: lib/editor-publication/contract.ts).
  * Every setting is required; a missing one stops the server instead of falling back to static guides.
  */
 function guideEditorSettings(env: Env): GuideEditorSettings {
@@ -100,7 +104,7 @@ function guideEditorSettings(env: Env): GuideEditorSettings {
   if (!base) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_BASE_URL in http mode");
   if (!handle) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_HANDLE in http mode");
   if (!token) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_TOKEN in http mode");
-  if (!GUIDE_EDITOR_HANDLE.test(handle)) throw new Error("GUIDE_EDITOR_API_HANDLE must be letters, digits, - or _");
+  if (handle !== GUIDE_EDITOR_HANDLE) throw new Error(`GUIDE_EDITOR_API_HANDLE must be ${GUIDE_EDITOR_HANDLE} (NIHO Experience's handle on the editor)`);
   const url = guideEditorBaseUrl(base);
   return {
     apiBaseUrl: url.href.replace(/\/+$/, ""),
