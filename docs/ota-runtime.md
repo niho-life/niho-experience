@@ -136,7 +136,7 @@ Cloud Run 側の値は配備 workflow だけが入れる。stg は repository va
 
 ### Viator の一時アクセス制限 hold
 
-Viator の robot 確認、一時アクセス制限、または対象 document / availability 通信の 403・429 を検知した場合、driver は許可済み write guard を即時 freeze し、その専用 private profile に `.niho-access-hold.json` を永続化する。hold は version、有限の理由コード、検知日時だけを持ち、URL、本文、cookie、資格情報は保存しない。同じ profile の deterministic worker、手動 helper、別 process は session policy が `none` / `prepare` / `restore` のいずれでも Chrome 起動前に拒否される。別 profile には波及しない。壊れた hold や読取不能も fail closed とする。
+Viator の robot 確認、一時アクセス制限、または対象 document / availability 通信の 403・429 を検知した場合、driver は許可済み write guard を即時 freeze し、その専用 private profile に `.niho-access-hold.json` を永続化する。hold は version、有限の理由コード、検知日時だけを持ち、URL、本文、cookie、資格情報は保存しない。同じ profile の deterministic worker、手動 helper、別 process は session policy が `none` / `prepare` / `restore` のいずれでも Chrome 起動前に拒否される。別 profile には波及しない。壊れた hold や読取不能も fail closed とする。holdの保存待ちは2秒で打ち切り、書込みやfsyncが完了しなくても所有Chromeを止め、既存workerの停止journal・Cloudへの結果報告へ進む。遅れて保存が完了しても隔離は解除しない。
 
 復旧は次の順序を崩さない。
 

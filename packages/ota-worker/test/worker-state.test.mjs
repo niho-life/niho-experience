@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { executeJob } from "../src/supervisor.mjs";
+import { createViatorAccessMonitor } from "../src/viator-access-monitor.mjs";
 import { createJournal } from "../src/journal.mjs";
 import { resumeJournal, runWorkerOnce } from "../src/worker.mjs";
 import { makeResult } from "../src/validation.mjs";
@@ -136,4 +139,49 @@ test("stopped false always creates a durable halt even for a retry outcome", asy
   assert.equal(result.status, "HALT_AFTER_RESULT");
   assert.equal(result.reason, "PROCESS_STOP_UNCONFIRMED");
   assert.equal((await createHaltLatch(directory).read()).reason, "PROCESS_STOP_UNCONFIRMED");
+});
+
+
+test("stalled access-hold persistence still journals and reports a stopped halt", { timeout: 2_000 }, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "niho-ota-held-disk-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  class Page extends EventEmitter { frames() { return []; } }
+  const page = new Page();
+  const monitor = createViatorAccessMonitor({ page, guard: { freeze() {} }, profile: "/synthetic/profile",
+    supplierOrigin: "https://supplier.viator.com", persistHoldTimeoutMs: 20, persistHold: () => new Promise(() => {}) });
+  const viator = { accountId: "999999", productId: "999999P1", optionId: "TG1", localDateTime: "2099-01-01T13:00:00" };
+  const job = makeJob(viator, "OBSERVE", { target: { site: "Viator", externalAccountId: viator.accountId,
+    externalProductId: viator.productId, externalOptionId: viator.optionId, timeZone: "Asia/Tokyo",
+    adapter: "viator-browser", adapterVersion: "1", connectionMode: "BROWSER" } });
+  let stops = 0;
+  let claims = 0;
+  const receipts = [];
+  const driver = {
+    async observeTarget() {
+      page.emit("response", { status: () => 429, url: () => "https://supplier.viator.com/availability/api",
+        request: () => ({ resourceType: () => "xhr" }) });
+      await monitor.assertAvailable();
+    },
+    async stop() { stops += 1; await monitor.stop(); return true; },
+  };
+  const config = { mode: "deterministic", privateDir: directory };
+  const cloud = {
+    async claimAllowIdle() { claims += 1; return job; },
+    async result(id, payload) {
+      assert.equal((await createHaltLatch(directory).read()).reason, "SITE_ACCESS_RESTRICTED");
+      receipts.push(payload);
+      return { acceptedAsCurrent: true, repeated: false };
+    },
+  };
+  const result = await runWorkerOnce({ cloud, config, journal: createJournal(directory),
+    executor: (args) => executeJob({ ...args, driverFactory: async () => driver }) });
+  assert.equal(result.status, "HALT_AFTER_RESULT");
+  assert.equal(result.outcome, "NEEDS_REVIEW");
+  assert.equal(result.stopped, true);
+  assert.equal(stops, 1);
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].stopped, true);
+  const restarted = await runWorkerOnce({ cloud, config, journal: createJournal(directory), executor: () => { throw new Error("must stay stopped"); } });
+  assert.equal(restarted.status, "HALT_LATCHED");
+  assert.equal(claims, 1);
 });

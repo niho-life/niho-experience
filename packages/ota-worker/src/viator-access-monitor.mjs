@@ -4,6 +4,7 @@ import { ContractError } from "./validation.mjs";
 const CAPTCHA_DOCUMENT_HOST = /(?:^|\.)captcha-delivery\.com$/i;
 const SUPPLIER_LIMIT_PATHS = new Set(["/availability/api", "/availability/update"]);
 const MAX_BODY_TEXT = 32_768;
+const HOLD_PERSIST_TIMEOUT_MS = 2_000;
 
 const RATE_LIMIT_TEXT = /too many requests|rate limit(?:ed|ing)?|try again later|リクエスト(?:が)?多すぎ|アクセスが集中/i;
 const BOT_CHALLENGE_TEXT = /(?:verify|confirm).{0,48}(?:you are|you're)\s+(?:a\s+)?(?:human|not a robot)|robot check|bot challenge|ロボットによるアクセスでないことを確認いたします[。.．]?|(?:complete|solve|verify).{0,48}captcha|captcha.{0,48}(?:challenge|verification|required)/i;
@@ -35,7 +36,11 @@ function classifyText(text) {
   return null;
 }
 
-export function createViatorAccessMonitor({ page, guard, profile, supplierOrigin, persistHold = holdProfileAccess }) {
+export function createViatorAccessMonitor({ page, guard, profile, supplierOrigin, persistHold = holdProfileAccess,
+  persistHoldTimeoutMs = HOLD_PERSIST_TIMEOUT_MS }) {
+  if (!Number.isSafeInteger(persistHoldTimeoutMs) || persistHoldTimeoutMs < 1 || persistHoldTimeoutMs > 5_000) {
+    throw new ContractError("INVALID_ACCESS_MONITOR_CONFIG");
+  }
   let reason = null;
   let holdPromise = null;
   let holdError = null;
@@ -46,7 +51,15 @@ export function createViatorAccessMonitor({ page, guard, profile, supplierOrigin
     if (reason !== null) return;
     reason = nextReason;
     guard.freeze();
-    holdPromise = Promise.resolve().then(() => persistHold(profile, nextReason)).catch((error) => { holdError = error; });
+    let timer;
+    // A stalled profile disk cannot prevent a stopped result from reaching the
+    // durable worker journal and Cloud. Late failures remain observed, but can
+    // neither clear the restriction nor replace the bounded outcome.
+    const persistence = Promise.resolve().then(() => persistHold(profile, nextReason)).then(() => null, (error) => error);
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(new ContractError("PROFILE_ACCESS_HOLD_TIMEOUT")), persistHoldTimeoutMs);
+    });
+    holdPromise = Promise.race([persistence, timeout]).then((error) => { holdError = error; }).finally(() => clearTimeout(timer));
   };
 
   const inspectFrame = async (frame) => {
@@ -115,6 +128,7 @@ export function createViatorAccessMonitor({ page, guard, profile, supplierOrigin
 
 export const viatorAccessMonitorInternals = Object.freeze({
   MAX_BODY_TEXT,
+  HOLD_PERSIST_TIMEOUT_MS,
   classifyText,
   isCaptchaDocument,
   restrictedResponse,

@@ -145,3 +145,30 @@ test("stop detaches all event handlers", async () => {
   assert.equal(fixture.freezes(), 0);
   assert.deepEqual(fixture.persisted, []);
 });
+
+
+test("a stalled hold write bounds both the operation and monitor shutdown", { timeout: 2_000 }, async () => {
+  const page = new FakePage();
+  let release;
+  let freezes = 0;
+  const persistence = new Promise((resolve) => { release = resolve; });
+  const monitor = createViatorAccessMonitor({ page, guard: { freeze() { freezes += 1; } }, profile: "/synthetic/profile",
+    supplierOrigin: "https://supplier.viator.com", persistHoldTimeoutMs: 20, persistHold: () => persistence });
+  page.emit("response", response("https://supplier.viator.com/availability/api", 429, "xhr"));
+  let guardTimer;
+  try {
+    const result = await Promise.race([
+      Promise.allSettled([monitor.assertAvailable(), monitor.stop()]),
+      new Promise((resolve) => { guardTimer = setTimeout(() => resolve("STALLED"), 300); }),
+    ]);
+    assert.notEqual(result, "STALLED", "a disk stall must not stall the stopped result");
+    assert.equal(result[0].status, "rejected");
+    assert.equal(result[0].reason.code, "SITE_ACCESS_RESTRICTED");
+    assert.equal(result[0].reason.cause.code, "PROFILE_ACCESS_HOLD_TIMEOUT");
+    assert.equal(result[1].status, "fulfilled");
+    assert.equal(freezes, 1);
+  } finally { clearTimeout(guardTimer); release(); await monitor.stop(); }
+  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(monitor.assertAvailable(), (error) => error.code === "SITE_ACCESS_RESTRICTED"
+    && error.cause.code === "PROFILE_ACCESS_HOLD_TIMEOUT", "a late successful write cannot lift the restriction");
+});
