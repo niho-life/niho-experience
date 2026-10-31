@@ -7,17 +7,22 @@ import {
   parseEditorPreview,
   parseEditorPublishedList,
   type EditorArticleBodyResult,
+  type EditorArticleSummary,
   type EditorPreviewResult,
   type EditorPublishedList,
+  type EditorPublishedPage,
+  type EditorSkip,
 } from "./contract";
 
 /**
- * Reads editor.niho.life's public API (paths and shapes: contract.ts, provisional) with a per-instance memory cache:
+ * Reads editor.niho.life's publish API (contract v1: contract.ts) with a per-instance memory cache:
  *
+ * - The list is read page by page (`nextCursor`) until its last page; each page is cached by its own URL.
  * - A response stays fresh for 30 s; after that it is revalidated with `If-None-Match`, and a 304 reuses it.
  * - Only a network failure, a timeout, a 5xx or a 429 may serve the last copy, for at most 10 minutes after it was last
  *   confirmed; a failure then backs off for the fresh period instead of making every page wait for the timeout again.
- * - 401/403 is a broken setting, never "no content": it always throws, even with a cached copy.
+ * - 401/403 is a broken setting, never "no content": it always throws, even with a cached copy. So does a 404/410 for
+ *   the list: the editor answers that when the credential may not read this handle.
  * - Article bodies are kept per ID while the list's `updatedAt` for it stays the same: no request at all. A body is kept
  *   that way only once this API has confirmed it (200/304) for that `updatedAt`: an older copy served for an outage is
  *   returned as `stale` and never kept, so the next read asks again instead of showing it until the next edit.
@@ -44,6 +49,9 @@ export class EditorPublicationError extends Error {
 }
 
 export const EDITOR_FETCH_TIMING = { freshMs: 30_000, staleMs: 10 * 60_000, timeoutMs: 5_000 } as const;
+
+/** At most this many list pages (100 items each) are read; more, or a cursor seen twice, is a contract error. */
+export const EDITOR_LIST_MAX_PAGES = 50;
 
 export type EditorPublicationClientOptions = Readonly<{
   baseUrl: string;
@@ -91,6 +99,9 @@ export function createEditorPublicationClient(options: EditorPublicationClientOp
   const entries = new Map<string, Entry>();
   const inflight = new Map<string, Promise<Cached<unknown>>>();
   const bodies = new Map<string, { updatedAt: string; result: EditorArticleBodyResult }>();
+  /** The page URLs of the last list read, and what they combined into: reused while every page is the same object. */
+  let listPages: readonly string[] = [];
+  let combined: { pages: readonly EditorPublishedPage[]; list: EditorPublishedList } | null = null;
   const url = (path: string) => `${options.baseUrl}${path}`;
 
   async function send(target: string, endpoint: EditorEndpoint, etag: string | null): Promise<Response> {
@@ -172,13 +183,67 @@ export function createEditorPublicationClient(options: EditorPublicationClientOp
     return request;
   }
 
+  /** Every page in order, to the last one. `targets` collects the page URLs asked for. */
+  async function readPages(targets: string[]): Promise<EditorPublishedPage[]> {
+    const pages: EditorPublishedPage[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    for (;;) {
+      if (pages.length === EDITOR_LIST_MAX_PAGES) throw new EditorPublicationError("contract", "list", `the published list has more than ${EDITOR_LIST_MAX_PAGES} pages`);
+      const target = url(editorPublicationPaths.list(options.handle, cursor === undefined ? {} : { cursor }));
+      targets.push(target);
+      const outcome = await cached(target, "list", EDITOR_RESPONSE_LIMITS.listBytes, parseEditorPublishedList);
+      // The editor answers 404 for a handle the credential may not read: a broken setting, not an empty list.
+      if (outcome.status !== "ok") throw new EditorPublicationError("auth", "list", `the published list answered ${outcome.status === "gone" ? 410 : 404}`);
+      pages.push(outcome.value);
+      const next = outcome.value.nextCursor;
+      if (next === null) return pages;
+      if (cursors.has(next)) throw new EditorPublicationError("contract", "list", "the published list repeats a cursor");
+      cursors.add(next);
+      cursor = next;
+    }
+  }
+
+  function combine(pages: readonly EditorPublishedPage[]): EditorPublishedList {
+    if (combined && combined.pages.length === pages.length && combined.pages.every((page, index) => page === pages[index])) return combined.list;
+    const items: EditorArticleSummary[] = [];
+    const skipped: EditorSkip[] = [];
+    const ids = new Set<string>();
+    for (const page of pages) {
+      skipped.push(...page.skipped);
+      for (const item of page.items) {
+        if (ids.has(item.id)) {
+          skipped.push({ id: item.id, slug: item.slug, reason: "id is listed twice (the first entry is kept)" });
+          continue;
+        }
+        ids.add(item.id);
+        items.push(item);
+      }
+    }
+    combined = { pages, list: { items, skipped } };
+    return combined.list;
+  }
+
   return {
     async list() {
-      const outcome = await cached(url(editorPublicationPaths.list(options.handle)), "list", EDITOR_RESPONSE_LIMITS.listBytes, parseEditorPublishedList);
-      if (outcome.status !== "ok") throw new EditorPublicationError("contract", "list", `the published list answered ${outcome.status === "gone" ? 410 : 404}`);
-      const listed = new Set(outcome.value.items.map((item) => item.id));
+      const targets: string[] = [];
+      let pages: EditorPublishedPage[];
+      try {
+        pages = await readPages(targets);
+      } catch (error) {
+        // A failed read keeps the last complete one's pages (for the stale rule) and nothing it added.
+        const kept = new Set(listPages);
+        for (const target of targets) if (!kept.has(target)) entries.delete(target);
+        throw error;
+      }
+      // Pages the list no longer reaches (an old cursor) are dropped, so the cache does not grow with every cursor seen.
+      const reached = new Set(targets);
+      for (const target of listPages) if (!reached.has(target)) entries.delete(target);
+      listPages = targets;
+      const list = combine(pages);
+      const listed = new Set(list.items.map((item) => item.id));
       for (const id of bodies.keys()) if (!listed.has(id)) bodies.delete(id);
-      return outcome.value;
+      return list;
     },
 
     async article(id, updatedAt) {

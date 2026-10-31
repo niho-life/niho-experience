@@ -61,7 +61,7 @@ database modeの有効化条件・staging受入・切戻しは [Guide CMS](../gu
 
 ### 切り替えの条件
 
-- editor の公開（設計 §14 の段階 3）が本番で使え、公開 API の契約（niho-editor #40）が確定していること。それまでは `static` を既定値のままにし、`editor` は合成 fixture でだけ動かす（`npm -w @niho-experience/web run test:e2e:guide-editor`）。
+- editor の公開（設計 §14 の段階 3）が本番で使えること。公開 API の契約は niho-editor の v1（`docs/security/editor-publish-api-v1.md`）で確定し、experience の読み取りはこれに合わせた（[Guide CMS](../guide-cms.md#editorniholife-の公開-api-を読む252-253editor-v1-契約)）。残る差（カテゴリの扱いなど）のオーナー判断も切替の前に済ませる。それまでは `static` を既定値のままにし、`editor` は合成 fixture でだけ動かす（`npm -w @niho-experience/web run test:e2e:guide-editor`）。
 - 切替は専用の配備変更で行い、切戻しは `database`（受入済みの場合）か `static` の新しい revision。手順は [Guide CMS](../guide-cms.md#切替切戻し) を正とする。
 
 ### 結果

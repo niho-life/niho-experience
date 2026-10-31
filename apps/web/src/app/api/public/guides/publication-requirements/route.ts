@@ -5,8 +5,9 @@ import { guidePublicationRequirements } from "@/lib/editor-publication/requireme
 export const dynamic = "force-dynamic";
 
 /**
- * The publication conditions editor.niho.life shows before publishing to NIHO Experience (#253). Public, static per
- * deployment and free of secrets, so it is served whatever the guide source and cached briefly by anyone.
+ * NIHO Experience's destination declaration: the publication conditions editor.niho.life shows before publishing here
+ * (#253). Public, static per deployment and free of secrets, so it is served whatever the guide source and cached briefly
+ * by anyone.
  */
 export function GET() {
   return Response.json(guidePublicationRequirements(config.siteUrl), {

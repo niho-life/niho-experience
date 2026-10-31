@@ -22,9 +22,9 @@
 | 設定 | 用途 |
 | --- | --- |
 | `EXPERIENCE_DATABASE_URL` | 体験専用 PostgreSQL。NIHOapp の業務 DB とは分離する |
-| `EXPERIENCE_GUIDE_PUBLIC_SOURCE` | `database` のときだけGuide CMSのcurrent publicationを、`editor` のときだけ editor.niho.life の公開API（#252・仮契約）を公開SSRへ接続する。http mode限定・既定`static` |
+| `EXPERIENCE_GUIDE_PUBLIC_SOURCE` | `database` のときだけGuide CMSのcurrent publicationを、`editor` のときだけ editor.niho.life の公開API（#252・editor v1 契約）を公開SSRへ接続する。http mode限定・既定`static` |
 | `GUIDE_MEDIA_BUCKET` | Guideのprivate JPEG bucket。database公開元では必須。名前・object keyを公開レスポンスへ出さない |
-| `GUIDE_EDITOR_API_BASE_URL` / `GUIDE_EDITOR_API_HANDLE` / `GUIDE_EDITOR_API_TOKEN` | editor公開元では3つとも必須（無ければ起動失敗）。base URL は版のパスを含む https（loopback の http だけ例外）。token は server-only の秘密で、公開出力・ログへ出さない。[Guide CMS](guide-cms.md#editorniholife-の公開-api-を読む252-253仮契約) |
+| `GUIDE_EDITOR_API_BASE_URL` / `GUIDE_EDITOR_API_HANDLE` / `GUIDE_EDITOR_API_TOKEN` | editor公開元では3つとも必須（無ければ起動失敗）。base URL は版のパスを含む https（loopback の http だけ例外）。handle は `exp` のみ。token は server-only の秘密（editor の面の資格。期限あり）で、公開出力・ログへ出さない。[Guide CMS](guide-cms.md#editorniholife-の公開-api-を読む252-253editor-v1-契約) |
 | `GUIDE_EDITOR_ASSET_ORIGINS` | 任意。editor の写真を配信する https origin のカンマ区切り。未設定なら base URL の origin だけ |
 | `GUIDE_EDITOR_SITE_ORIGIN` | 任意。書き手の入口（フッター「For writers」、ホストの画面の「記事を書く」）の飛び先の https origin。未設定なら両方とも出さない。公開元の flag とは独立。[Guide CMS](guide-cms.md#書き手の入口254) |
 | `EXPERIENCE_GOOGLE_CLIENT_ID` / `EXPERIENCE_GOOGLE_CLIENT_SECRET` | Google OAuth の Web client。同意済み redirect URI は `https://experience.niho.life/host/calendar/google/callback` |

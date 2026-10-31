@@ -79,7 +79,7 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
             <p className="eyebrow">{sectionLabel}</p>
             <h1 className="mt-1.5 text-[2.125rem] leading-[1.1] sm:text-[2.875rem]">{guide.title}</h1>
             <p className="mt-4 text-[0.9375rem] text-muted">
-              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role} · {editorialPreview ? "Previewed" : "Published"}{" "}
+              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role ? <>{guide.author.role} · </> : null}{editorialPreview ? "Previewed" : "Published"}{" "}
               <time dateTime={guide.publishedAt}>{formatGuideDate(guide.publishedAt)}</time> · Updated{" "}
               <time dateTime={guide.updatedAt}>{formatGuideDate(guide.updatedAt)}</time> · {guideReadMinutes(guide)} min read
             </p>
@@ -129,7 +129,8 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
           <section aria-labelledby="guide-author-heading" className="mt-14 border-t border-line pt-6">
             <h2 id="guide-author-heading" className="font-sans text-base font-extrabold tracking-normal">About the author.</h2>
             <p className="mt-2 text-[0.9375rem] leading-relaxed text-ink-soft">
-              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.bio ?? guide.author.role}
+              <b className="font-extrabold text-ink">{guide.author.name}</b>
+              {(guide.author.bio ?? guide.author.role) ? <> · {guide.author.bio ?? guide.author.role}</> : null}
             </p>
           </section>
         </div>

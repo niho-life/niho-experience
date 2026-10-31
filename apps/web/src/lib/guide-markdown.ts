@@ -12,7 +12,7 @@ export { GUIDE_ASSET_URI_PREFIX, GUIDE_ASSET_UUID_V4 };
  * - a photo on a line of its own: `![alt](src)` or `![alt](src "caption")`, src following {@link guideLinkHref}
  * - a pipe table: a header row, a `| --- |` separator row, then body rows (the first cell of each row is its heading)
  * - a `:::note` … `:::` box holding paragraphs and lists only
- * - inline `**bold**`, `*italic*`, `[text](href)` (href is a site path or an https URL) and `[CONFIRM: fact to check]`
+ * - inline `**bold**`, `*italic*`, `***both***`, `[text](href)` (href is a site path or an https URL) and `[CONFIRM: fact to check]`
  * - `\` before punctuation for a literal character (`\*`, `\[`, `\_`, `\|`)
  *
  * Anything else (raw HTML, inline images, code, quotes, `_emphasis_`, entities, other link forms, malformed tables or
@@ -75,7 +75,8 @@ export function guideLinkHref(value: string): { href: string; external: boolean 
   return https ? { href: https, external: true } : null;
 }
 
-type Frame = { type: "root" | "strong" | "em"; children: GuideInline[] };
+/** `strong-em`: a `***` that opened bold and italic together; the first closer decides which of the two is inner. */
+type Frame = { type: "root" | "strong" | "em" | "strong-em"; children: GuideInline[] };
 
 function pushText(children: GuideInline[], value: string) {
   if (!value) return;
@@ -153,6 +154,38 @@ export function parseGuideInline(text: string, line: number, inLink = false): Gu
     if (char === "*") {
       let run = 1;
       while (text[i + run] === "*") run++;
+      // Text that is both bold and italic, as editor.niho.life projects it: `***both***`, `***both** italic*`,
+      // `***both* bold**`, `**bold *both***`, `*italic **both***`. Bold is the outer mark when both close together.
+      if (top().type === "strong-em") {
+        const frame = top();
+        const before = text[i - 1] ?? "";
+        if (run > 3) throw new GuideMarkdownError("*** is not supported; use **bold** or *italic*, or \\* for a literal asterisk", line);
+        if (!before || /\s/.test(before)) throw new GuideMarkdownError(`The closing ${"*".repeat(run)} must follow text without a space`, line);
+        stack.pop();
+        if (run === 3) top().children.push({ type: "strong", children: [{ type: "em", children: frame.children }] });
+        else if (run === 2) stack.push({ type: "em", children: [{ type: "strong", children: frame.children }] });
+        else stack.push({ type: "strong", children: [{ type: "em", children: frame.children }] });
+        i += run;
+        continue;
+      }
+      if (run === 3 && stack.length === 1) {
+        const after = text[i + run] ?? "";
+        if (!after || /\s/.test(after)) throw new GuideMarkdownError("The opening *** must touch the text it marks; write \\* for a literal asterisk", line);
+        stack.push({ type: "strong-em", children: [] });
+        i += run;
+        continue;
+      }
+      // Bold and italic both open (one inside the other): `***` closes the inner, then the outer.
+      if (run === 3 && stack.length === 3) {
+        const before = text[i - 1] ?? "";
+        if (!before || /\s/.test(before)) throw new GuideMarkdownError("The closing *** must follow text without a space", line);
+        const inner = stack.pop() as Frame & { type: "strong" | "em" };
+        const outer = stack.pop() as Frame & { type: "strong" | "em" };
+        outer.children.push({ type: inner.type, children: inner.children });
+        top().children.push({ type: outer.type, children: outer.children });
+        i += run;
+        continue;
+      }
       // Two adjacent, exclusive marks share a closing/opening boundary:
       // **bold***italic* and *italic***bold**. The editor emits these when
       // authors format neighboring text without a space between them.
@@ -191,7 +224,7 @@ export function parseGuideInline(text: string, line: number, inLink = false): Gu
     pushText(top().children, char);
     i++;
   }
-  if (stack.length > 1) throw new GuideMarkdownError(`Unclosed ${top().type === "strong" ? "**" : "*"}`, line);
+  if (stack.length > 1) throw new GuideMarkdownError(`Unclosed ${top().type === "strong-em" ? "***" : top().type === "strong" ? "**" : "*"}`, line);
   return stack[0]!.children;
 }
 

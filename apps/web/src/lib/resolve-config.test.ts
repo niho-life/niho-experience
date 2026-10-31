@@ -438,12 +438,12 @@ describe("editor site entrance (#254)", () => {
   });
 });
 
-describe("editor public guide source (#252, provisional contract)", () => {
+describe("editor public guide source (#252, contract v1)", () => {
   const editor = {
     EXPERIENCE_API_MODE: "http",
     EXPERIENCE_GUIDE_PUBLIC_SOURCE: "editor",
     GUIDE_EDITOR_API_BASE_URL: "https://api.editor.example/v1/",
-    GUIDE_EDITOR_API_HANDLE: "niho-experience",
+    GUIDE_EDITOR_API_HANDLE: "exp",
     GUIDE_EDITOR_API_TOKEN: "synthetic-editor-token",
   };
 
@@ -462,7 +462,7 @@ describe("editor public guide source (#252, provisional contract)", () => {
     expect(resolveConfig(editor)).toMatchObject({
       guidePublicSource: "editor",
       guideEditorApiBaseUrl: "https://api.editor.example/v1",
-      guideEditorApiHandle: "niho-experience",
+      guideEditorApiHandle: "exp",
       guideEditorApiToken: "synthetic-editor-token",
       guideEditorAssetOrigins: ["https://api.editor.example"],
     });
@@ -473,6 +473,13 @@ describe("editor public guide source (#252, provisional contract)", () => {
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: " " })).toThrow(/GUIDE_EDITOR_API_HANDLE/);
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_TOKEN: "" })).toThrow(/GUIDE_EDITOR_API_TOKEN/);
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: "a/b" })).toThrow(/GUIDE_EDITOR_API_HANDLE/);
+  });
+
+  it("reads the editor as the face exp only: another face or an owner's site would list nothing here", () => {
+    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: " exp " }).guideEditorApiHandle).toBe("exp");
+    for (const handle of ["niho", "niho-experience", "EXP", "sample-site"]) {
+      expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: handle }), handle).toThrow(/GUIDE_EDITOR_API_HANDLE must be exp/);
+    }
   });
 
   it("accepts https, or http on loopback only, and never echoes the token in an error", () => {
