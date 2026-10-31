@@ -10,11 +10,17 @@ import type { Mailer } from "@/lib/mail/transport";
  * the next still runs. Counts only leave this module: never an address, a name, a token or a message.
  */
 export const EXPERIENCE_JOB_LIMITS = {
+  /**
+   * Emails a step sends in one run. Each is claimed just before it is sent, so its lease covers one send
+   * (the SMTP timeouts are far shorter) and no email waits behind others while its lease runs out.
+   */
   replies: 20,
   replyLeaseSeconds: 120,
   replyLinkTtlDays: 14,
   confirmations: 20,
   confirmationLeaseSeconds: 120,
+  /** A step starts no new email after this long, so a run ends well within the minute before the next one. */
+  sendBudgetMs: 40_000,
   /** Owner decision 2026-10-31 (#285): guest data and questions are kept for one year. */
   retentionDays: 365,
   erasedPerStep: 200,
@@ -81,17 +87,29 @@ async function step<K extends keyof ExperienceJobCounts>(
   }
 }
 
-/** Host replies: the reply and a one-time link to answer it (the token in the URL fragment only). */
+/** Whether a step may start another email: under its count and its time budget. */
+function mayContinue(deps: ExperienceJobDeps, startedAt: number, claimed: number, limit: number): boolean {
+  return claimed < limit && deps.now().getTime() - startedAt < EXPERIENCE_JOB_LIMITS.sendBudgetMs;
+}
+
+/**
+ * Host replies: the reply and a one-time link to answer it (the token in the URL fragment only), one claimed
+ * at a time. A transient failure ends the step: the server is struggling, and the rest waits for the next run.
+ */
 async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionReplyCounts> {
-  const replies = await deps.questions.claimReplyDeliveries({
-    limit: EXPERIENCE_JOB_LIMITS.replies,
-    leaseSeconds: EXPERIENCE_JOB_LIMITS.replyLeaseSeconds,
-    linkTtlDays: EXPERIENCE_JOB_LIMITS.replyLinkTtlDays,
-  });
+  const startedAt = deps.now().getTime();
+  let claimed = 0;
   let sent = 0;
   let retried = 0;
   let failed = 0;
-  for (const reply of replies) {
+  while (mayContinue(deps, startedAt, claimed, EXPERIENCE_JOB_LIMITS.replies)) {
+    const [reply] = await deps.questions.claimReplyDeliveries({
+      limit: 1,
+      leaseSeconds: EXPERIENCE_JOB_LIMITS.replyLeaseSeconds,
+      linkTtlDays: EXPERIENCE_JOB_LIMITS.replyLinkTtlDays,
+    });
+    if (!reply) break;
+    claimed += 1;
     const email = questionReplyEmail({
       siteUrl: deps.siteUrl,
       guestName: reply.guestName,
@@ -106,21 +124,29 @@ async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionRep
     if (status === "SENT") sent += 1;
     else if (status === "FAILED") failed += 1;
     else retried += 1;
+    if (!result.ok && result.failure === "transient") break;
   }
-  return { claimed: replies.length, sent, retried, failed };
+  return { claimed, sent, retried, failed };
 }
 
-/** Booking confirmations of guest bookings (`booking.confirmed`). */
+/** Booking confirmations of guest bookings (`booking.confirmed`), one claimed at a time, as the replies. */
 async function sendBookingConfirmations(deps: ExperienceJobDeps): Promise<BookingConfirmationCounts> {
-  const { confirmations, abandoned } = await deps.confirmations.claimBookingConfirmations({
-    limit: EXPERIENCE_JOB_LIMITS.confirmations,
-    leaseSeconds: EXPERIENCE_JOB_LIMITS.confirmationLeaseSeconds,
-  });
+  const startedAt = deps.now().getTime();
+  let claimed = 0;
+  let abandoned = 0;
   let sent = 0;
   let skipped = 0;
   let retried = 0;
   let failed = 0;
-  for (const confirmation of confirmations) {
+  while (mayContinue(deps, startedAt, claimed, EXPERIENCE_JOB_LIMITS.confirmations)) {
+    const claim = await deps.confirmations.claimBookingConfirmations({
+      limit: 1,
+      leaseSeconds: EXPERIENCE_JOB_LIMITS.confirmationLeaseSeconds,
+    });
+    abandoned += claim.abandoned;
+    const [confirmation] = claim.confirmations;
+    if (!confirmation) break;
+    claimed += 1;
     if (confirmation.email === null) {
       await deps.confirmations.completeBookingConfirmation(confirmation.id);
       skipped += 1;
@@ -132,13 +158,13 @@ async function sendBookingConfirmations(deps: ExperienceJobDeps): Promise<Bookin
       await deps.confirmations.completeBookingConfirmation(confirmation.id);
       if (result.ok) sent += 1;
       else failed += 1;
-    } else if (await deps.confirmations.retryBookingConfirmation(confirmation.id, confirmation.attempts) === "FAILED") {
-      failed += 1;
     } else {
-      retried += 1;
+      if (await deps.confirmations.retryBookingConfirmation(confirmation.id, confirmation.attempts) === "FAILED") failed += 1;
+      else retried += 1;
+      break;
     }
   }
-  return { claimed: confirmations.length, sent, skipped, retried, failed, abandoned };
+  return { claimed, sent, skipped, retried, failed, abandoned };
 }
 
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {

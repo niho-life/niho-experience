@@ -51,6 +51,19 @@ function stubs() {
   return { deps, questions, confirmations, guests, mailer, sent, results, onStepError };
 }
 
+/** A claim that hands out one row per call, as the store does for `limit: 1`. */
+function oneAtATime<T>(items: T[]) {
+  return async () => items.splice(0, 1);
+}
+function confirmationsOneAtATime(items: ClaimedBookingConfirmation[], abandoned = 0) {
+  let first = true;
+  return async () => {
+    const claim = { confirmations: items.splice(0, 1), abandoned: first ? abandoned : 0 };
+    first = false;
+    return claim;
+  };
+}
+
 let s: ReturnType<typeof stubs>;
 beforeEach(() => {
   s = stubs();
@@ -66,25 +79,49 @@ describe("runExperienceJobs", () => {
       questionErasure: { erased: 0 },
     });
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: false });
-    expect(s.questions.claimReplyDeliveries).toHaveBeenCalledWith({ limit: 20, leaseSeconds: 120, linkTtlDays: 14 });
-    expect(s.confirmations.claimBookingConfirmations).toHaveBeenCalledWith({ limit: 20, leaseSeconds: 120 });
+    // One at a time, each claimed just before it is sent: its lease covers that one send only.
+    expect(s.questions.claimReplyDeliveries).toHaveBeenCalledWith({ limit: 1, leaseSeconds: 120, linkTtlDays: 14 });
+    expect(s.confirmations.claimBookingConfirmations).toHaveBeenCalledWith({ limit: 1, leaseSeconds: 120 });
     expect(s.guests.eraseGuestData).toHaveBeenCalledWith({ endedBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.questions.eraseInactiveThreads).toHaveBeenCalledWith({ lastMessageBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.mailer.sendMail).not.toHaveBeenCalled();
   });
 
   it("emails each host reply with its one-time link and records how it went by the failure's class", async () => {
-    s.questions.claimReplyDeliveries.mockResolvedValueOnce([replyFor(1), replyFor(2), replyFor(3)]);
-    s.results.push({ ok: true }, { ok: false, failure: "transient" }, { ok: false, failure: "permanent" });
+    s.questions.claimReplyDeliveries.mockImplementation(oneAtATime([replyFor(1), replyFor(2), replyFor(3)]));
+    s.results.push({ ok: true }, { ok: false, failure: "permanent" }, { ok: false, failure: "transient" });
     const counts = await runExperienceJobs(s.deps);
     expect(counts.questionReplies).toEqual({ claimed: 3, sent: 1, retried: 1, failed: 1 });
     expect(s.questions.recordReplyDelivery.mock.calls).toEqual([
-      [replyFor(1).messageId, "SENT"], [replyFor(2).messageId, "RETRY"], [replyFor(3).messageId, "FAILED"],
+      [replyFor(1).messageId, "SENT"], [replyFor(2).messageId, "FAILED"], [replyFor(3).messageId, "RETRY"],
     ]);
     expect(s.sent.map((message) => message.to)).toEqual(["guest1@example.com", "guest2@example.com", "guest3@example.com"]);
     expect(s.sent[0]!.subject).toBe("Sample Host replied to your question about Synthetic tea ceremony");
     expect(s.sent[0]!.text).toContain(`${SITE}/questions/reply#t=${replyFor(1).replyToken}`);
     expect(s.sent[0]!.text).toContain("Hi Sample Guest 1,");
+  });
+
+  it("stops a step at a transient failure: the rest is not claimed and waits for the next run", async () => {
+    s.questions.claimReplyDeliveries.mockImplementation(oneAtATime([replyFor(1), replyFor(2)]));
+    s.confirmations.claimBookingConfirmations.mockImplementation(confirmationsOneAtATime([confirmationFor(1), confirmationFor(2)]));
+    s.results.push({ ok: false, failure: "transient" }, { ok: false, failure: "transient" });
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.questionReplies).toEqual({ claimed: 1, sent: 0, retried: 1, failed: 0 });
+    expect(counts.bookingConfirmations).toEqual({ claimed: 1, sent: 0, skipped: 0, retried: 1, failed: 0, abandoned: 0 });
+    expect(s.questions.claimReplyDeliveries).toHaveBeenCalledTimes(1);
+    expect(s.confirmations.claimBookingConfirmations).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts no new email once a step has used its time budget", async () => {
+    let clock = NOW.getTime();
+    s.deps = { ...s.deps, now: () => new Date(clock) };
+    s.questions.claimReplyDeliveries.mockImplementation(oneAtATime([replyFor(1), replyFor(2)]));
+    s.mailer.sendMail.mockImplementation(async () => {
+      clock += EXPERIENCE_JOB_LIMITS.sendBudgetMs;
+      return { ok: true as const };
+    });
+    expect((await runExperienceJobs(s.deps)).questionReplies).toEqual({ claimed: 1, sent: 1, retried: 0, failed: 0 });
+    expect(s.questions.claimReplyDeliveries).toHaveBeenCalledTimes(1);
   });
 
   it("counts a retry the store turned into FAILED (attempts used up) as failed", async () => {
@@ -95,18 +132,18 @@ describe("runExperienceJobs", () => {
   });
 
   it("emails booking confirmations, completes sent, refused and empty ones, and backs off the rest", async () => {
-    s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({
-      confirmations: [confirmationFor(1), confirmationFor(2), confirmationFor(3), confirmationFor(4, null), confirmationFor(5, facts(5), 8)],
-      abandoned: 1,
-    });
-    s.results.push({ ok: true }, { ok: false, failure: "permanent" }, { ok: false, failure: "transient" }, { ok: false, failure: "transient" });
-    s.confirmations.retryBookingConfirmation.mockResolvedValueOnce("RETRY").mockResolvedValueOnce("FAILED");
+    s.confirmations.claimBookingConfirmations.mockImplementation(confirmationsOneAtATime(
+      [confirmationFor(1), confirmationFor(2), confirmationFor(4, null), confirmationFor(5, facts(5), 8)],
+      1,
+    ));
+    s.results.push({ ok: true }, { ok: false, failure: "permanent" }, { ok: false, failure: "transient" });
+    s.confirmations.retryBookingConfirmation.mockResolvedValueOnce("FAILED");
     const counts = await runExperienceJobs(s.deps);
-    expect(counts.bookingConfirmations).toEqual({ claimed: 5, sent: 1, skipped: 1, retried: 1, failed: 2, abandoned: 1 });
+    expect(counts.bookingConfirmations).toEqual({ claimed: 4, sent: 1, skipped: 1, retried: 0, failed: 2, abandoned: 1 });
     expect(s.confirmations.completeBookingConfirmation.mock.calls).toEqual([["1"], ["2"], ["4"]]);
-    expect(s.confirmations.retryBookingConfirmation.mock.calls).toEqual([["3", 1], ["5", 8]]);
+    expect(s.confirmations.retryBookingConfirmation.mock.calls).toEqual([["5", 8]]);
     // Nothing goes to a booking whose guest data is gone.
-    expect(s.sent.map((message) => message.to)).toEqual(["booker1@example.com", "booker2@example.com", "booker3@example.com", "booker5@example.com"]);
+    expect(s.sent.map((message) => message.to)).toEqual(["booker1@example.com", "booker2@example.com", "booker5@example.com"]);
     expect(s.sent[0]!.subject).toBe("Your booking is confirmed: Synthetic walk, Sat 14 Nov 2026 10:00");
     expect(s.sent[0]!.text).toContain(`${SITE}/experiences/sample-walk`);
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
