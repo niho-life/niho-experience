@@ -322,7 +322,7 @@ node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sal
 - **NIHO のプライバシーポリシーへのリンク**：`EXPERIENCE_PRIVACY_POLICY_URL`（任意。https のみ・認証情報なし、それ以外は起動失敗）。未設定ならリンクを出さない。値は [experience-runtime.md](experience-runtime.md) の設定の表。
 - **フッター**：公開サイトのフッターに「Privacy」（日本語のページは「プライバシー」で同じ英語のページへ）。フッターの枠はコードが持つので、追加の `footerLinks`（`lib/privacy-link.ts`）で足す。予約入力の規約リンクは NIHO の詳細の `legalDocuments`（データ）から出るもので、コードのリンクではないため、ここには足していない（規約の移行〔#89〕で扱う）。
 - **翻訳の一文**：「Your message is translated into Japanese for the host with an AI service. Privacy」（Privacy は `/privacy` を新しいタブで開く。書きかけの文や、メモリにだけある返信 token を失わないため）。予約前の質問の「Ask the host」（`AskHost`）、返信ページ（`GuestReply`）、予約ページのメッセージ欄（`BookingMessages`）の送信欄の下に、訳が実際に動くときだけ出す。サーバーが `translationNoticeShown(config)`（`EXPERIENCE_TRANSLATION_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED` がともに有効。訳はメール job の段なので両方が要る。mock は常に off）で決め、真偽値だけを props で渡す。ブラウザは設定を読まない。
-- **公開前の確認**：ページの文言はオーナーが確認してから本番に出す（法務の確認を含む）。配備時に `EXPERIENCE_PRIVACY_POLICY_URL` を設定する。
+- **文言の確認**：オーナーが確認した（2026-10-31、#337）。文言を変えるときは、もう一度オーナーの確認を得る。配備時に `EXPERIENCE_PRIVACY_POLICY_URL` を設定する。
 
 ## データの置き場所
 
