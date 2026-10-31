@@ -26,10 +26,18 @@ export interface HostGoogleConnectionState {
   readonly lastSucceededAtUtc: string | null;
 }
 
-/** The feed's secret part as stored: the salt its address is derived from. */
+/** The feed as stored: the salt its address is derived from, and the SHA-256 of the address's secret part as issued. */
 export interface HostCalendarFeedRecord {
   readonly salt: Buffer;
+  /** 設定 compares it with the address derived now: under a key changed since, it is another, and the feed has stopped. */
+  readonly tokenHash: Buffer;
   readonly issuedAtUtc: string;
+}
+
+/** What readFeed hands its check of the presented address: the provider the address was issued for, and its salt. */
+export interface HostCalendarFeedIssue {
+  readonly providerId: string;
+  readonly salt: Buffer;
 }
 
 /** One booking in the feed: what a calendar event needs, nothing about the guest. */
@@ -148,13 +156,13 @@ export class HostCalendarSettings {
     });
   }
 
-  /** The feed's salt, or null while the provider has none. OWNER only. */
+  /** The feed's salt and digest, or null while the provider has none. OWNER only. */
   async getFeed(actor: HostActor): Promise<HostCalendarFeedRecord | null> {
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
-      const result = await client.query<DbRow>("SELECT feed_salt, issued_at FROM provider_calendar_feeds WHERE provider_id = $1", [actor.providerId]);
+      const result = await client.query<DbRow>("SELECT feed_salt, token_hash, issued_at FROM provider_calendar_feeds WHERE provider_id = $1", [actor.providerId]);
       const row = result.rows[0];
-      return row === undefined ? null : { salt: bytes(row, "feed_salt"), issuedAtUtc: isoValue(row, "issued_at") };
+      return row === undefined ? null : { salt: bytes(row, "feed_salt"), tokenHash: bytes(row, "token_hash"), issuedAtUtc: isoValue(row, "issued_at") };
     });
   }
 
@@ -194,17 +202,24 @@ export class HostCalendarSettings {
 
   /**
    * For the feed's address (no session: the secret is the address): the provider's confirmed bookings made on this
-   * site whose session overlaps [fromUtc, toUtc), the nearest first. Null for an unknown or replaced address, and once
-   * whoever issued it is no longer the provider's active OWNER.
+   * site whose session overlaps [fromUtc, toUtc), the nearest first. Null for an unknown or replaced address, once
+   * whoever issued it is no longer the provider's active OWNER, and when `accepts` refuses the address for the issue
+   * found (the caller derives the address again from the provider, the salt and its current key, so an address made
+   * under an earlier key answers nothing).
    */
-  async readFeed(tokenHash: Buffer, window: { readonly fromUtc: string; readonly toUtc: string }): Promise<HostCalendarFeed | null> {
+  async readFeed(
+    tokenHash: Buffer,
+    window: { readonly fromUtc: string; readonly toUtc: string },
+    accepts: (issue: HostCalendarFeedIssue) => boolean,
+  ): Promise<HostCalendarFeed | null> {
     assertFeedBytes(tokenHash, "tokenHash");
     assertCanonicalInstant(window?.fromUtc, "fromUtc");
     assertCanonicalInstant(window.toUtc, "toUtc");
     if (Date.parse(window.toUtc) <= Date.parse(window.fromUtc)) throw new StoreValidationError("toUtc must be after fromUtc.");
+    if (typeof accepts !== "function") throw new StoreValidationError("accepts must be a function.");
     return withTransaction(this.#pool, async (client) => {
       const feed = await client.query<DbRow>(
-        `SELECT f.provider_id
+        `SELECT f.provider_id, f.feed_salt
            FROM provider_calendar_feeds f
            JOIN provider_memberships m ON m.provider_id = f.provider_id AND m.niho_user_id = f.issued_by_niho_user_id
             AND m.active = true AND m.role = 'OWNER'
@@ -214,6 +229,7 @@ export class HostCalendarSettings {
       const row = feed.rows[0];
       if (row === undefined) return null;
       const providerId = text(row, "provider_id");
+      if (accepts({ providerId, salt: bytes(row, "feed_salt") }) !== true) return null;
       const bookings = await client.query<DbRow>(
         `SELECT b.id::text AS booking_id, b.product_id, (b.occurrence_snapshot->>'ruleId') AS offer_id, p.public_title,
                 ${START} AS start_utc, ${END} AS end_utc,

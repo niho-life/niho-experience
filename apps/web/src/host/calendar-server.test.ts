@@ -25,7 +25,7 @@ vi.mock("@/lib/host/server", () => ({
 vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
 
 import { CALENDAR_FEED_ISSUED_TEXT, CALENDAR_FEED_OWNER_ONLY_TEXT, CALENDAR_FEED_RENEWED_TEXT, CALENDAR_FEED_REVOKED_TEXT, GOOGLE_NOT_CONNECTED } from "./calendar";
-import { calendarFeedToken, calendarFeedTokenHash, calendarFeedUrl, issueCalendarFeedAsOwner, loadHostCalendar, revokeCalendarFeedAsOwner } from "./calendar-server";
+import { calendarFeedToken, calendarFeedTokenHash, calendarFeedTokenMatches, calendarFeedUrl, issueCalendarFeedAsOwner, loadHostCalendar, revokeCalendarFeedAsOwner } from "./calendar-server";
 import { HOST_SESSION_ENDED_TEXT } from "./errors";
 
 const KEY = Buffer.alloc(32, 7);
@@ -33,6 +33,9 @@ const SALT = Buffer.alloc(32, 1);
 const OWNER = { id: "sample-provider", memberRole: "OWNER" } as const;
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-owner", calendarRoleCeiling: "OWNER" };
 const CONNECTED: HostGoogleConnectionState = { revoked: false, blockingEnabled: true, syncStatus: "FRESH", lastSucceededAtUtc: "2026-11-01T01:05:30.000Z" };
+/** The address for the provider and salt under `key`, and what the store keeps of it. */
+const tokenUnder = (key: Buffer, salt: Buffer = SALT, providerId = "sample-provider") => createHmac("sha256", key).update(`niho-experience/calendar-feed/v1\0${providerId}\0`).update(salt).digest("base64url");
+const issuedUnder = (key: Buffer, salt: Buffer = SALT) => ({ salt, tokenHash: createHash("sha256").update(tokenUnder(key, salt)).digest(), issuedAtUtc: "2026-10-30T00:00:00.000Z" });
 
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_CALENDAR_FEED_KEY", KEY.toString("base64"));
@@ -44,7 +47,7 @@ beforeEach(() => {
   state.providers = { status: "ok", providers: [{ id: "sample-provider", memberRole: "OWNER" }] };
   state.store = {
     googleConnection: vi.fn(async () => CONNECTED),
-    getFeed: vi.fn(async () => ({ salt: SALT, issuedAtUtc: "2026-10-30T00:00:00.000Z" })),
+    getFeed: vi.fn(async () => issuedUnder(KEY)),
     issueFeed: vi.fn(async () => ({ issuedAtUtc: "2026-11-01T00:00:00.000Z", replaced: false })),
     revokeFeed: vi.fn(async () => true),
   };
@@ -78,7 +81,23 @@ describe("the feed's address", () => {
     for (const key of ["", "c2hvcnQ=", "not base64!"]) {
       vi.stubEnv("EXPERIENCE_CALENDAR_FEED_KEY", key);
       expect(() => calendarFeedToken("sample-provider", SALT)).toThrow(/key is unavailable/);
+      expect(() => calendarFeedTokenMatches(tokenUnder(KEY), { providerId: "sample-provider", salt: SALT })).toThrow(/key is unavailable/);
     }
+  });
+
+  it("is accepted only as the current key derives it for the issue found: not under an earlier key, another salt or provider, or changed", () => {
+    const issue = { providerId: "sample-provider", salt: SALT };
+    const token = tokenUnder(KEY);
+    expect(calendarFeedTokenMatches(token, issue)).toBe(true);
+    expect(calendarFeedTokenMatches(token, { ...issue, salt: Buffer.alloc(32, 2) })).toBe(false);
+    expect(calendarFeedTokenMatches(token, { ...issue, providerId: "other-provider" })).toBe(false);
+    expect(calendarFeedTokenMatches(`${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`, issue)).toBe(false);
+    // Another length is refused before the constant-time compare (which needs equal lengths).
+    expect(calendarFeedTokenMatches(token.slice(1), issue)).toBe(false);
+    expect(calendarFeedTokenMatches("", issue)).toBe(false);
+    vi.stubEnv("EXPERIENCE_CALENDAR_FEED_KEY", Buffer.alloc(32, 8).toString("base64"));
+    expect(calendarFeedTokenMatches(token, issue)).toBe(false);
+    expect(calendarFeedTokenMatches(tokenUnder(Buffer.alloc(32, 8)), issue)).toBe(true);
   });
 });
 
@@ -93,6 +112,24 @@ describe("loadHostCalendar", () => {
       googleSync: { lastCheckedAt: "2026-11-01T10:05", failing: false },
       feed: { url: calendarFeedUrl(calendarFeedToken("sample-provider", SALT)) },
     });
+  });
+
+  it("shows no address once the key changed since it was issued (it stopped), and the new one once the OWNER makes it", async () => {
+    const rotated = Buffer.alloc(32, 8);
+    vi.stubEnv("EXPERIENCE_CALENDAR_FEED_KEY", rotated.toString("base64"));
+    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ status: "live", feed: { url: null } });
+
+    state.store!.issueFeed.mockResolvedValueOnce({ issuedAtUtc: "2026-11-01T00:00:00.000Z", replaced: true });
+    const renewed = await issueCalendarFeedAsOwner("sample-provider");
+    const [, input] = state.store!.issueFeed.mock.calls[0]! as [unknown, { salt: Buffer; tokenHash: Buffer }];
+    const token = tokenUnder(rotated, input.salt);
+    expect(input.tokenHash).toEqual(createHash("sha256").update(token).digest());
+    expect(renewed).toEqual({ ok: true, message: CALENDAR_FEED_RENEWED_TEXT, url: calendarFeedUrl(token) });
+    state.store!.getFeed.mockResolvedValueOnce(issuedUnder(rotated, input.salt));
+    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ feed: { url: calendarFeedUrl(token) } });
+    // A stored digest of another length (never written by issueFeed) is no address either.
+    state.store!.getFeed.mockResolvedValueOnce({ ...issuedUnder(rotated, input.salt), tokenHash: Buffer.alloc(16) });
+    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ feed: { url: null } });
   });
 
   it("says not connected, refused by Google, or connected with failing reads", async () => {

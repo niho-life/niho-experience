@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { StoreAccessDeniedError, type HostActor, type HostCalendarSettings, type HostGoogleConnectionState } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { googleRuntimeConfig } from "@/lib/experience/google-connection";
@@ -30,7 +30,8 @@ import type { HostGoogleCalendar } from "./types";
  * Google Calendar is connected and disconnected by the host calendar routes (/host/calendar/google…); this reads where
  * it stands. The bookings feed (EXPERIENCE_HOST_CALENDAR_FEED_ENABLED) lives at an address derived from a key
  * (EXPERIENCE_CALENDAR_FEED_KEY) and a salt the store keeps per provider; the address itself is never stored or logged
- * and is recomputed for 設定 on every read.
+ * and is recomputed for 設定 on every read. The feed's route derives it again under the current key on every fetch, so
+ * changing the key stops every issued address at once, and 設定 then shows none until the OWNER makes a new one.
  */
 
 const CLOSED: HostCalendarLoad = { status: "closed" };
@@ -59,6 +60,23 @@ export function calendarFeedToken(providerId: string, salt: Buffer): string {
 /** What the store keeps to find an address: its SHA-256. */
 export function calendarFeedTokenHash(token: string): Buffer {
   return createHash("sha256").update(token, "utf8").digest();
+}
+
+/**
+ * Whether `token` is the address the current key gives the provider and salt, compared in constant time: one made
+ * under an earlier key is not. The feed's route asks this of the issue it found by the address's digest.
+ */
+export function calendarFeedTokenMatches(token: string, issue: { readonly providerId: string; readonly salt: Buffer }): boolean {
+  const expected = Buffer.from(calendarFeedToken(issue.providerId, issue.salt), "utf8");
+  const presented = Buffer.from(token, "utf8");
+  return presented.byteLength === expected.byteLength && timingSafeEqual(presented, expected);
+}
+
+/** 設定's address: derived from the stored salt under the current key, and none when the key changed since it was issued. */
+function issuedFeedUrl(providerId: string, feed: { readonly salt: Buffer; readonly tokenHash: Buffer }): string | null {
+  const token = calendarFeedToken(providerId, feed.salt);
+  const hash = calendarFeedTokenHash(token);
+  return hash.byteLength === feed.tokenHash.byteLength && timingSafeEqual(hash, feed.tokenHash) ? calendarFeedUrl(token) : null;
 }
 
 export function calendarFeedUrl(token: string): string {
@@ -98,7 +116,7 @@ export async function loadHostCalendar(provider: Pick<HostProvider, "id" | "memb
       googleSync: google?.status === "connected" && connection
         ? { lastCheckedAt: connection.lastSucceededAtUtc ? japanMinute(connection.lastSucceededAtUtc) : null, failing: connection.syncStatus === "FAILED" }
         : null,
-      feed: withFeed ? { url: feed ? calendarFeedUrl(calendarFeedToken(provider.id, feed.salt)) : null } : null,
+      feed: withFeed ? { url: feed ? issuedFeedUrl(provider.id, feed) : null } : null,
     };
   } catch (error) {
     if (error instanceof StoreAccessDeniedError) return CLOSED;

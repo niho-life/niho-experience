@@ -95,6 +95,8 @@ async function paid(context: Context, overrides: Partial<StartGuestBookingInput>
 }
 
 const hashOf = (token: string) => createHash("sha256").update(token).digest();
+/** The route's check of the address against the issue found (calendar-server.ts derives it again under the key). */
+const accept = () => true;
 const window = (fromDays: number, toDays: number) => ({
   fromUtc: new Date(Date.now() + fromDays * DAY_MS).toISOString(),
   toUtc: new Date(Date.now() + toDays * DAY_MS).toISOString(),
@@ -107,16 +109,23 @@ describe("PostgreSQL host calendar settings (#109)", { skip: databaseUrl === und
       const firstSalt = randomBytes(32);
       const first = await settings.issueFeed(ownerA, { salt: firstSalt, tokenHash: hashOf("first-token") });
       assert.equal(first.replaced, false);
-      assert.deepEqual(await settings.getFeed(ownerA), { salt: firstSalt, issuedAtUtc: first.issuedAtUtc });
-      assert.notEqual(await settings.readFeed(hashOf("first-token"), window(-1, 30)), null);
+      assert.deepEqual(await settings.getFeed(ownerA), { salt: firstSalt, tokenHash: hashOf("first-token"), issuedAtUtc: first.issuedAtUtc });
+      assert.notEqual(await settings.readFeed(hashOf("first-token"), window(-1, 30), accept), null);
+      // Found by the digest, the address is handed to the check with its issue; refused, it answers nothing.
+      const seen: unknown[] = [];
+      assert.equal(await settings.readFeed(hashOf("first-token"), window(-1, 30), (issue) => (seen.push(issue), false)), null);
+      assert.deepEqual(seen.slice(), [{ providerId: "provider-a", salt: firstSalt }]);
+      // An unknown address is not checked at all.
+      assert.equal(await settings.readFeed(hashOf("unknown-token"), window(-1, 30), (issue) => (seen.push(issue), true)), null);
+      assert.equal(seen.length, 1);
 
       // Issuing again replaces the address: the old one answers nothing.
       const secondSalt = randomBytes(32);
       const second = await settings.issueFeed(secondOwnerA, { salt: secondSalt, tokenHash: hashOf("second-token") });
       assert.equal(second.replaced, true);
-      assert.deepEqual((await settings.getFeed(ownerA))?.salt, secondSalt);
-      assert.equal(await settings.readFeed(hashOf("first-token"), window(-1, 30)), null);
-      assert.equal((await settings.readFeed(hashOf("second-token"), window(-1, 30)))?.providerId, "provider-a");
+      assert.deepEqual(await settings.getFeed(ownerA), { salt: secondSalt, tokenHash: hashOf("second-token"), issuedAtUtc: second.issuedAtUtc });
+      assert.equal(await settings.readFeed(hashOf("first-token"), window(-1, 30), accept), null);
+      assert.equal((await settings.readFeed(hashOf("second-token"), window(-1, 30), accept))?.providerId, "provider-a");
       const stored = await pool.query("SELECT issued_by_niho_user_id FROM provider_calendar_feeds");
       assert.deepEqual(stored.rows, [{ issued_by_niho_user_id: "owner-a2" }]);
 
@@ -134,24 +143,25 @@ describe("PostgreSQL host calendar settings (#109)", { skip: databaseUrl === und
         await assert.rejects(() => settings.googleConnection(actor), StoreAccessDeniedError);
         await assert.rejects(() => settings.productSlugs(actor), StoreAccessDeniedError);
       }
-      assert.notEqual(await settings.readFeed(hashOf("second-token"), window(-1, 30)), null);
+      assert.notEqual(await settings.readFeed(hashOf("second-token"), window(-1, 30), accept), null);
 
       // The issuer stops being the provider's OWNER: the address answers nothing, though the row stays.
       await pool.query("UPDATE provider_memberships SET active=false WHERE niho_user_id='owner-a2'");
-      assert.equal(await settings.readFeed(hashOf("second-token"), window(-1, 30)), null);
+      assert.equal(await settings.readFeed(hashOf("second-token"), window(-1, 30), accept), null);
       await pool.query("UPDATE provider_memberships SET active=true WHERE niho_user_id='owner-a2'");
 
       assert.equal(await settings.revokeFeed(ownerA), true);
       assert.equal(await settings.revokeFeed(ownerA), false);
       assert.equal(await settings.getFeed(ownerA), null);
-      assert.equal(await settings.readFeed(hashOf("second-token"), window(-1, 30)), null);
+      assert.equal(await settings.readFeed(hashOf("second-token"), window(-1, 30), accept), null);
 
       // Only 32-byte values, and a window that moves forward.
       await assert.rejects(() => settings.issueFeed(ownerA, { salt: randomBytes(16), tokenHash: hashOf("x") }), StoreValidationError);
       await assert.rejects(() => settings.issueFeed(ownerA, { salt: randomBytes(32), tokenHash: Buffer.from("short") }), StoreValidationError);
-      await assert.rejects(() => settings.readFeed(Buffer.alloc(8), window(-1, 30)), StoreValidationError);
-      await assert.rejects(() => settings.readFeed(hashOf("x"), window(30, -1)), StoreValidationError);
-      await assert.rejects(() => settings.readFeed(hashOf("x"), { fromUtc: "yesterday", toUtc: new Date().toISOString() }), StoreValidationError);
+      await assert.rejects(() => settings.readFeed(Buffer.alloc(8), window(-1, 30), accept), StoreValidationError);
+      await assert.rejects(() => settings.readFeed(hashOf("x"), window(30, -1), accept), StoreValidationError);
+      await assert.rejects(() => settings.readFeed(hashOf("x"), { fromUtc: "yesterday", toUtc: new Date().toISOString() }, accept), StoreValidationError);
+      await assert.rejects(() => settings.readFeed(hashOf("x"), window(-1, 30), undefined as unknown as () => boolean), StoreValidationError);
     });
   });
 
@@ -171,7 +181,7 @@ describe("PostgreSQL host calendar settings (#109)", { skip: databaseUrl === und
       await settings.issueFeed(ownerA, { salt: randomBytes(32), tokenHash: hashOf("feed-a") });
       await settings.issueFeed(ownerB, { salt: randomBytes(32), tokenHash: hashOf("feed-b") });
 
-      const all = await settings.readFeed(hashOf("feed-a"), window(-1, 30));
+      const all = await settings.readFeed(hashOf("feed-a"), window(-1, 30), accept);
       assert.equal(all?.providerId, "provider-a");
       const ids = await pool.query<{ public_booking_id: string; id: string }>("SELECT public_booking_id::text, id::text FROM bookings");
       const internal = (publicId: string) => ids.rows.find((row) => row.public_booking_id === publicId)?.id;
@@ -186,11 +196,11 @@ describe("PostgreSQL host calendar settings (#109)", { skip: databaseUrl === und
       assert.doesNotMatch(JSON.stringify(all), /Soon Guest|@example\.com|Sample Guest/);
 
       // The window: only the sessions it overlaps.
-      const near = await settings.readFeed(hashOf("feed-a"), window(-1, 7));
+      const near = await settings.readFeed(hashOf("feed-a"), window(-1, 7), accept);
       assert.deepEqual(near?.bookings.map((booking) => booking.localDate), [day(5)]);
-      assert.deepEqual((await settings.readFeed(hashOf("feed-a"), window(20, 30)))?.bookings, []);
+      assert.deepEqual((await settings.readFeed(hashOf("feed-a"), window(20, 30), accept))?.bookings, []);
       // Another provider's feed reads only its own (none here).
-      assert.deepEqual(await settings.readFeed(hashOf("feed-b"), window(-1, 30)), { providerId: "provider-b", bookings: [] });
+      assert.deepEqual(await settings.readFeed(hashOf("feed-b"), window(-1, 30), accept), { providerId: "provider-b", bookings: [] });
 
       assert.deepEqual(await settings.productSlugs(ownerA), { walk: "sample-walk" });
       assert.deepEqual(await settings.productSlugs(ownerB), { tea: "sample-tea" });

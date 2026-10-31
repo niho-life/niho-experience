@@ -3,7 +3,7 @@ import { hostCalendarSettings } from "@/lib/experience/store-server";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 import { isHostMock, siteOrigin } from "@/lib/host/server";
 import { bookingsIcs } from "@/host/calendar-feed";
-import { calendarFeedTokenHash } from "@/host/calendar-server";
+import { calendarFeedTokenHash, calendarFeedTokenMatches } from "@/host/calendar-server";
 import { addDays, todayInJapan } from "@/host/format";
 
 export const runtime = "nodejs";
@@ -16,7 +16,10 @@ const DAYS_BEFORE = 30;
 const DAYS_AFTER = 400;
 const PRIVATE = { "cache-control": "private, no-store, max-age=0", "x-robots-tag": "noindex, nofollow, noarchive", "referrer-policy": "no-referrer" };
 
-/** Every miss looks the same (no body): the flag off, a malformed, unknown or stopped address, an issuer no longer the OWNER. */
+/**
+ * Every miss looks the same (no body): the flag off, a malformed, unknown or stopped address, one made under an earlier
+ * key, an issuer no longer the OWNER.
+ */
 const notFound = () => new Response(null, { status: 404, headers: PRIVATE });
 
 function startOfJapanDay(date: string): string {
@@ -25,8 +28,10 @@ function startOfJapanDay(date: string): string {
 
 /**
  * 設定 › カレンダー's bookings feed (#109): the provider's confirmed bookings made on this site as an iCalendar file, at
- * the secret address its OWNER issued. Calendar apps fetch it without cookies, so the address is the only proof; it
- * is never logged (a failure logs the error's name only), and the answer is private and never indexed.
+ * the secret address its OWNER issued. Calendar apps fetch it without cookies, so the address is the only proof: it is
+ * found by its digest, then derived again from the provider and salt under the current key and compared in constant
+ * time, so changing EXPERIENCE_CALENDAR_FEED_KEY stops every issued address at once. It is never logged (a failure
+ * logs the error's name only), and the answer is private and never indexed.
  */
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }): Promise<Response> {
   if (!config.hostConsoleEnabled || isHostMock() || !config.hostCalendarFeedEnabled) return notFound();
@@ -37,7 +42,8 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   try {
     const now = Date.now();
     const today = todayInJapan(now);
-    const feed = await settings.readFeed(calendarFeedTokenHash(token), { fromUtc: startOfJapanDay(addDays(today, -DAYS_BEFORE)), toUtc: startOfJapanDay(addDays(today, DAYS_AFTER)) });
+    const window = { fromUtc: startOfJapanDay(addDays(today, -DAYS_BEFORE)), toUtc: startOfJapanDay(addDays(today, DAYS_AFTER)) };
+    const feed = await settings.readFeed(calendarFeedTokenHash(token), window, (issue) => calendarFeedTokenMatches(token, issue));
     if (!feed) return notFound();
     const body = bookingsIcs(feed.bookings, { origin: siteOrigin(), providerId: feed.providerId, now, besideNiho: providerOperationsEnabled() });
     return new Response(body, {
