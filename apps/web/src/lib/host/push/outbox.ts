@@ -3,6 +3,8 @@ import {
   HOST_NOTIFICATION_TOPICS,
   parseApprovalDeadlinePayload,
   parseGuestMessagePayload,
+  parseGuestQuestionPayload,
+  parseNewBookingPayload,
   STOPPABLE_HOST_NOTIFICATION_KEYS,
   type ClaimedHostNotification,
   type HostNotificationOutbox,
@@ -16,19 +18,26 @@ import type { HostPushEvent } from "./payload";
 
 /**
  * The notification job (#177 P2, owner decision 2026-10-31): sends what `outbox_messages` holds for
- * the host topics as Web Push. Until bookings and guest messages move to the experience DB (ADR
- * 0002) nothing writes those rows, so a run finds none. Logs and answers counts only: never an
- * endpoint, a payload or a booking.
+ * the host topics as Web Push. Questions to the host and guest bookings confirmed on this site write
+ * their rows (#285 slice 5); approval reminders and booking messages wait for those flows to move to
+ * the experience DB (ADR 0002). Logs and answers counts only: never an endpoint, a payload or a booking.
  */
 const MESSAGE_STALE_MS = 24 * 60 * 60 * 1000;
 const RETRY_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 
 export type HostPushEventFromOutbox = { ok: true; event: HostPushEvent } | { ok: false; reason: "invalid" | "expired" | "stale" };
 
+/** A message, question or booking older than a day is no longer news on a lock screen. */
+function staleness(message: ClaimedHostNotification, now: number): HostPushEventFromOutbox | null {
+  const createdAt = Date.parse(message.createdAt);
+  if (!Number.isFinite(createdAt)) return { ok: false, reason: "invalid" };
+  return now - createdAt > MESSAGE_STALE_MS ? { ok: false, reason: "stale" } : null;
+}
+
 /**
  * One row as a push event, or why it is not sent: a row of another shape, an approval deadline that
- * has passed, or a guest message older than a day. The event carries the experience, its time and
- * the party size only.
+ * has passed, or a message, question or new booking older than a day. The event carries the experience,
+ * its time and the party size only (a question: the experience only).
  */
 export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: number): HostPushEventFromOutbox {
   const providerId = message.providerId;
@@ -53,9 +62,8 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
   if (message.topic === HOST_NOTIFICATION_TOPICS.guestMessage) {
     const payload = parseGuestMessagePayload(message.payload);
     if (!payload) return { ok: false, reason: "invalid" };
-    const createdAt = Date.parse(message.createdAt);
-    if (!Number.isFinite(createdAt)) return { ok: false, reason: "invalid" };
-    if (now - createdAt > MESSAGE_STALE_MS) return { ok: false, reason: "stale" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
     return {
       ok: true,
       event: {
@@ -66,6 +74,43 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         seats: payload.seats,
         url: withQuery(HOST_MESSAGES_PATH, { booking: payload.bookingId, providerId }),
         tag: `message-${payload.bookingId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.guestQuestion) {
+    const payload = parseGuestQuestionPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "GUEST_MESSAGE",
+        question: true,
+        experienceTitle: payload.experienceTitle,
+        url: withQuery(HOST_MESSAGES_PATH, { thread: payload.threadId, providerId }),
+        // A guest's later answer in the same thread replaces the earlier notification.
+        tag: `question-${payload.threadId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.newBooking) {
+    const payload = parseNewBookingPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "NEW_BOOKING",
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        // The bookings made on this site (#285 slice 8), with this one opened.
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
+        tag: `booking-${payload.bookingId}`,
       },
     };
   }

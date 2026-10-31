@@ -12,6 +12,11 @@ import { HOST_APP_SCOPE } from "../routes";
 export interface HostPushEvent {
   providerId: string;
   kind: HostNotificationKey;
+  /**
+   * A question before booking (予約前の質問) rather than a message from someone who booked: still GUEST_MESSAGE
+   * (its switch in 設定 › 通知 and its delivery), with its own title.
+   */
+  question?: true;
   experienceTitle?: string;
   /** ISO 8601; shown in Japan time. */
   startsAt?: string;
@@ -44,6 +49,8 @@ export const HOST_PUSH_TITLES: Record<HostNotificationKey, string> = {
   LISTING_REVIEW: "掲載の審査結果",
 };
 
+export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
+
 export const HOST_PUSH_MAX_BYTES = 3 * 1024;
 const TITLE_MAX = 80;
 const URL_MAX = 512;
@@ -68,7 +75,14 @@ function whenJa(startsAt: string | undefined): string | null {
 function titleLine(title: string | undefined): string | null {
   const clean = title?.replace(/\s+/g, " ").trim();
   if (!clean) return null;
-  return clean.length > TITLE_MAX ? `${clean.slice(0, TITLE_MAX - 1)}…` : clean;
+  if (clean.length <= TITLE_MAX) return clean;
+  // Whole code points only: half of an emoji would show as a broken character on the lock screen.
+  let clipped = "";
+  for (const character of clean) {
+    if (clipped.length + character.length > TITLE_MAX - 1) break;
+    clipped += character;
+  }
+  return `${clipped}…`;
 }
 
 export function hostPushPayload(event: HostPushEvent): string {
@@ -77,7 +91,7 @@ export function hostPushPayload(event: HostPushEvent): string {
   const seats = Number.isInteger(event.seats) && event.seats! > 0 ? `${event.seats}名` : null;
   const message: HostPushMessage = {
     v: 1,
-    title: HOST_PUSH_TITLES[event.kind],
+    title: event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
     body: [titleLine(event.experienceTitle), whenJa(event.startsAt), seats].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,

@@ -59,11 +59,17 @@ async function threadIdFor(pool: Pool, productId: string, guestEmail: string): P
   return result.rows[0].id;
 }
 
-/** Every outbox event names ids only: never a name, an address or what anyone wrote. */
+/**
+ * Every outbox event names ids only: never a name, an address or what anyone wrote. The host's push adds the
+ * experience's title for the lock screen.
+ */
 async function assertOutboxCarriesIdsOnly(pool: Pool): Promise<void> {
   const outbox = await pool.query<{ topic: string; payload: Record<string, unknown> }>("SELECT topic, payload FROM outbox_messages WHERE aggregate_type = 'guest_question_thread'");
   assert.ok(outbox.rows.length > 0);
-  for (const row of outbox.rows) assert.deepEqual(Object.keys(row.payload).sort(), ["messageId", "threadId"]);
+  for (const row of outbox.rows) {
+    const keys = row.topic === "host.notify.guest_question" ? ["experienceTitle", "messageId", "threadId", "v"] : ["messageId", "threadId"];
+    assert.deepEqual(Object.keys(row.payload).sort(), keys);
+  }
   assert.doesNotMatch(JSON.stringify(outbox.rows), /example\.com|Sample Guest|vegetarian|Sample Answer/i);
 }
 
@@ -86,8 +92,17 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       assert.deepEqual(stored.rows, [{ guest_name: "Sample Guest", guest_email: "Guest@Example.com", guest_email_key: "guest@example.com", guest_language: "EN", needs_reply: true, host_read_at: null }]);
       const messages = await pool.query("SELECT author, source, body, body_ja, delivery_status FROM guest_question_messages");
       assert.deepEqual(messages.rows, [{ author: "GUEST", source: "SITE_FORM", body: "Is there a vegetarian option?", body_ja: null, delivery_status: null }]);
-      const outbox = await pool.query("SELECT topic, provider_id FROM outbox_messages");
-      assert.deepEqual(outbox.rows, [{ topic: "guest_question.received", provider_id: "provider-a" }]);
+      // The translation's row and the host's push (GUEST_MESSAGE), each once.
+      const outbox = await pool.query("SELECT topic, provider_id, aggregate_id, deduplication_key, payload, processed_at FROM outbox_messages ORDER BY id");
+      const threadId = await threadIdFor(pool, "tea", "Guest@Example.com");
+      const messageId = String((await pool.query("SELECT id FROM guest_question_messages")).rows[0].id);
+      assert.deepEqual(outbox.rows, [
+        { topic: "guest_question.received", provider_id: "provider-a", aggregate_id: threadId, deduplication_key: `guest_question.received:${messageId}`, payload: { threadId, messageId }, processed_at: null },
+        {
+          topic: "host.notify.guest_question", provider_id: "provider-a", aggregate_id: threadId, deduplication_key: `host-push:guest-question:${messageId}`,
+          payload: { v: 1, threadId, messageId, experienceTitle: "Synthetic tea" }, processed_at: null,
+        },
+      ]);
       await assertOutboxCarriesIdsOnly(pool);
 
       // Nothing out of bounds reaches the tables.
@@ -322,6 +337,12 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       const received = await pool.query("SELECT payload FROM outbox_messages WHERE topic = 'guest_question.received' ORDER BY id");
       assert.equal(received.rows.length, 2);
       assert.deepEqual(received.rows[1]?.payload, { threadId, messageId: thread.messages.at(-1)?.id });
+      // The answer notifies the host too; the repeated answer adds no second push.
+      const pushes = await pool.query("SELECT payload FROM outbox_messages WHERE topic = 'host.notify.guest_question' ORDER BY id");
+      assert.deepEqual(pushes.rows.map((row) => row.payload), [
+        { v: 1, threadId, messageId: thread.messages[0]?.id, experienceTitle: "Synthetic tea" },
+        { v: 1, threadId, messageId: thread.messages.at(-1)?.id, experienceTitle: "Synthetic tea" },
+      ]);
       await assertOutboxCarriesIdsOnly(pool);
 
       // An expired link neither opens nor takes an answer; an unknown one is not found.

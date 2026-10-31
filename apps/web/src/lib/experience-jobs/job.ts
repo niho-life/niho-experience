@@ -1,11 +1,12 @@
 import "server-only";
 import type { Pool } from "pg";
-import { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository } from "@niho-experience/experience-store";
+import { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { experiencePool } from "@/lib/experience/store-server";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { smtpMailer, type Mailer } from "@/lib/mail/transport";
-import { experienceJobActivity, runExperienceJobs, type ExperienceJobCounts, type ExperienceJobDeps } from "./drain";
+import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
+import { EXPERIENCE_JOB_LIMITS, experienceJobActivity, runExperienceJobs, type ExperienceJobCounts, type ExperienceJobDeps } from "./drain";
 
 export interface ExperienceJobSettings {
   readonly enabled: boolean;
@@ -18,6 +19,8 @@ export interface ExperienceJobDependencies {
   readonly verifier?: GoogleServiceTokenVerifier;
   readonly pool?: () => Pool | null;
   readonly mailer?: () => Mailer | null;
+  /** The Claude API for the guests' Japanese; null while translation is off. */
+  readonly translator?: () => Translator | null;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
 }
 
@@ -62,6 +65,8 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       questions: new GuestQuestionRepository(pool),
       confirmations: new GuestMailOutbox(pool),
       guests: new GuestBookingRepository(pool),
+      translations: new GuestQuestionTranslations(pool),
+      translator: (dependencies.translator ?? (() => anthropicTranslator({ timeoutMs: EXPERIENCE_JOB_LIMITS.translationTimeoutMs })))(),
       mailer,
       siteUrl: config.siteUrl,
       now: () => new Date(),

@@ -14,8 +14,14 @@ const NOW = Date.parse("2026-11-01T00:00:00.000Z");
 const MINUTE = 60_000;
 const APPROVAL = "host.notify.approval_deadline";
 const MESSAGE = "host.notify.guest_message";
+const QUESTION = "host.notify.guest_question";
+const NEW_BOOKING = "host.notify.new_booking";
+const THREAD = "00000000-0000-4000-8000-0000000000aa";
+const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
 const approvalPayload = { v: 1, bookingId: "bk-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2, approvalDeadlineAt: "2026-11-01T01:00:00.000Z" };
 const messagePayload = { v: 1, bookingId: "bk-2", messageId: "msg-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 3 };
+const questionPayload = { v: 1, threadId: THREAD, messageId: "00000000-0000-4000-8000-000000000101", experienceTitle: "Synthetic Tea Ceremony" };
+const newBookingPayload = { v: 1, bookingId: BOOKING, experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 4 };
 const ALLOWED_EVENT_KEYS = ["experienceTitle", "kind", "providerId", "seats", "startsAt", "tag", "url"];
 
 let nextId = 1;
@@ -83,6 +89,68 @@ describe("hostPushEventFromOutbox", () => {
     });
   });
 
+  it("turns a question to the host into a GUEST_MESSAGE push with its own title that opens the thread", () => {
+    const parsed = hostPushEventFromOutbox(row(QUESTION, questionPayload), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a",
+        kind: "GUEST_MESSAGE",
+        question: true,
+        experienceTitle: "Synthetic Tea Ceremony",
+        url: `/host/messages?thread=${THREAD}&providerId=provider-a`,
+        // The guest's later answers in the thread replace it on the device.
+        tag: `question-${THREAD}`,
+      },
+    });
+    if (parsed.ok) {
+      expect(JSON.parse(hostPushPayload(parsed.event))).toEqual({
+        v: 1,
+        title: "予約前の質問が届きました",
+        body: "Synthetic Tea Ceremony",
+        url: `/host/messages?thread=${THREAD}&providerId=provider-a`,
+        tag: `question-${THREAD}`,
+      });
+    }
+  });
+
+  it("turns a guest booking confirmed on this site into a NEW_BOOKING push that opens it among this site's bookings", () => {
+    const parsed = hostPushEventFromOutbox(row(NEW_BOOKING, newBookingPayload), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a",
+        kind: "NEW_BOOKING",
+        experienceTitle: "Synthetic Tea Ceremony",
+        startsAt: "2026-11-20T01:00:00.000Z",
+        seats: 4,
+        url: `/host/bookings?booking=${BOOKING}&source=site&providerId=provider-a`,
+        tag: `booking-${BOOKING}`,
+      },
+    });
+    if (parsed.ok) {
+      expect(JSON.parse(hostPushPayload(parsed.event))).toMatchObject({ title: "新しい予約・申込", body: "Synthetic Tea Ceremony · 11/20（金）10:00 · 4名" });
+    }
+  });
+
+  it("drops a question or a new booking older than a day, and one of another shape", () => {
+    for (const [topic, payload] of [[QUESTION, questionPayload], [NEW_BOOKING, newBookingPayload]] as const) {
+      expect(hostPushEventFromOutbox(row(topic, payload, { createdAt: new Date(NOW - 24 * 60 * MINUTE - 1).toISOString() }), NOW)).toEqual({ ok: false, reason: "stale" });
+      expect(hostPushEventFromOutbox(row(topic, payload, { createdAt: "not a time" }), NOW)).toEqual({ ok: false, reason: "invalid" });
+    }
+    for (const message of [
+      row(QUESTION, { ...questionPayload, guestName: "Sample Guest" }),
+      row(QUESTION, { ...questionPayload, text: "synthetic question text" }),
+      row(QUESTION, { ...questionPayload, threadId: "../admin" }),
+      row(QUESTION, { ...questionPayload, v: 2 }),
+      row(QUESTION, newBookingPayload),
+      row(NEW_BOOKING, { ...newBookingPayload, amount: 12000 }),
+      row(NEW_BOOKING, { ...newBookingPayload, seats: 0 }),
+      row(NEW_BOOKING, { ...newBookingPayload, startsAt: "2026-11-20 10:00" }),
+      row(NEW_BOOKING, questionPayload),
+    ]) expect(hostPushEventFromOutbox(message, NOW)).toEqual({ ok: false, reason: "invalid" });
+  });
+
   it("drops a passed deadline and a message older than a day", () => {
     expect(hostPushEventFromOutbox(row(APPROVAL, { ...approvalPayload, approvalDeadlineAt: new Date(NOW).toISOString() }), NOW)).toEqual({ ok: false, reason: "expired" });
     expect(hostPushEventFromOutbox(row(MESSAGE, messagePayload, { createdAt: new Date(NOW - 24 * 60 * MINUTE - 1).toISOString() }), NOW)).toEqual({ ok: false, reason: "stale" });
@@ -105,11 +173,11 @@ describe("hostPushEventFromOutbox", () => {
   });
 
   it("never builds an event with more than the allowed fields", () => {
-    for (const message of [row(APPROVAL, approvalPayload), row(MESSAGE, messagePayload)]) {
+    for (const message of [row(APPROVAL, approvalPayload), row(MESSAGE, messagePayload), row(QUESTION, questionPayload), row(NEW_BOOKING, newBookingPayload)]) {
       const parsed = hostPushEventFromOutbox(message, NOW);
       expect(parsed.ok).toBe(true);
       if (parsed.ok) {
-        expect(Object.keys(parsed.event).sort()).toEqual(ALLOWED_EVENT_KEYS);
+        expect(Object.keys(parsed.event).filter((key) => key !== "question").every((key) => ALLOWED_EVENT_KEYS.includes(key))).toBe(true);
         expect(hostPushPayload(parsed.event)).not.toMatch(/msg-1|synthetic message text|合成/);
       }
     }
@@ -155,6 +223,16 @@ describe("drainHostNotifications", () => {
     expect(allowed.mock.calls).toEqual([["provider-a", "APPROVAL_DEADLINE"], ["provider-a", "GUEST_MESSAGE"]]);
     expect(notify).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledExactlyOnceWith(counts);
+  });
+
+  it("asks 設定 › 通知 for GUEST_MESSAGE before a question and skips it when the OWNER turned it off; a new booking always goes", async () => {
+    const allowed = vi.fn(async (_providerId: string, kind: string) => kind !== "GUEST_MESSAGE");
+    const { outbox, notify, result } = run([row(QUESTION, questionPayload), row(NEW_BOOKING, newBookingPayload)], { allowed });
+    expect(await result).toEqual({ claimed: 2, delivered: 1, devicesSent: 2, skipped: 1, dropped: 0, retried: 0 });
+    expect(allowed.mock.calls).toEqual([["provider-a", "GUEST_MESSAGE"], ["provider-a", "NEW_BOOKING"]]);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify.mock.calls[0]![0]).toMatchObject({ kind: "NEW_BOOKING", tag: `booking-${BOOKING}` });
+    expect(outbox.complete.mock.calls).toEqual([["1", 1], ["2", 1]]);
   });
 
   it("passes the event and fresh push dependencies to the sender", async () => {

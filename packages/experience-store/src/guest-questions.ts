@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
+import { enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -198,6 +199,15 @@ async function enqueue(client: PoolClient, providerId: string, threadId: string,
   );
 }
 
+/**
+ * A guest wrote to the host: `guest_question.received` (the Japanese translation, #285 slice 5) and the
+ * host's push (GUEST_MESSAGE, which the OWNER can turn off), each its own row because a row is done once.
+ */
+async function enqueueGuestMessage(client: PoolClient, providerId: string, threadId: string, messageId: string, experienceTitle: string): Promise<void> {
+  await enqueue(client, providerId, threadId, messageId, "guest_question.received");
+  await enqueueGuestQuestionNotification(client, { providerId, threadId, messageId, experienceTitle });
+}
+
 const MESSAGE_COLUMNS = "id, author, source, body, body_ja, created_at, delivery_status";
 const THREAD_COLUMNS = `t.id, t.product_id, p.public_title, t.guest_name, t.topic, t.guest_language, t.needs_reply, t.host_read_at,
   t.last_message_at, t.created_at, to_char(t.last_message_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at`;
@@ -276,7 +286,7 @@ export class GuestQuestionRepository {
     return withTransaction(this.#pool, async (client) => {
       // A slug is unique per provider only: two published experiences with it answer neither.
       const products = await client.query<DbRow>(
-        `SELECT provider_id, id FROM experience_products WHERE slug = $1 AND status = 'PUBLISHED'
+        `SELECT provider_id, id, public_title FROM experience_products WHERE slug = $1 AND status = 'PUBLISHED'
           ORDER BY provider_id, id LIMIT 2 FOR SHARE`,
         [question.productSlug],
       );
@@ -320,7 +330,7 @@ export class GuestQuestionRepository {
            FROM guest_question_threads WHERE provider_id = $2 AND id = $3::uuid`,
         [messageId, providerId, threadId, question.message],
       );
-      await enqueue(client, providerId, threadId, messageId, "guest_question.received");
+      await enqueueGuestMessage(client, providerId, threadId, messageId, String(product.public_title));
       return RECEIVED;
     });
   }
@@ -629,7 +639,12 @@ export class GuestQuestionRepository {
         if (link.open !== true) throw new StoreNotFoundError("reply link");
         const providerId = String(link.provider_id);
         const threadId = String(link.thread_id);
-        await client.query("SELECT 1 FROM guest_question_threads WHERE provider_id = $1 AND id = $2::uuid FOR NO KEY UPDATE", [providerId, threadId]);
+        const thread = await client.query<DbRow>(
+          `SELECT p.public_title FROM guest_question_threads t
+             JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+            WHERE t.provider_id = $1 AND t.id = $2::uuid FOR NO KEY UPDATE OF t`,
+          [providerId, threadId],
+        );
         const inserted = await client.query<DbRow>(
           `INSERT INTO guest_question_messages (id, provider_id, thread_id, author, source, body, client_request_key, created_at)
            VALUES ($1::uuid, $2, $3::uuid, 'GUEST', 'REPLY_PAGE', $4, $5, clock_timestamp())
@@ -649,7 +664,7 @@ export class GuestQuestionRepository {
             WHERE t.provider_id = $1 AND t.id = $2::uuid AND m.provider_id = $1 AND m.id = $3::uuid`,
           [providerId, threadId, created.id],
         );
-        await enqueue(client, providerId, threadId, String(created.id), "guest_question.received");
+        await enqueueGuestMessage(client, providerId, threadId, String(created.id), String(thread.rows[0]!.public_title));
         return RECEIVED;
       });
     } catch (error) {

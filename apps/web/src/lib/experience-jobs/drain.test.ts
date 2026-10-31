@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BookingConfirmationEmail, ClaimedBookingConfirmation, ClaimedGuestQuestionReply } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, ClaimedBookingConfirmation, ClaimedGuestQuestionReply, ClaimedGuestTranslation, GuestTranslationClaim } from "@niho-experience/experience-store";
 
 vi.mock("server-only", () => ({}));
 
 import type { MailMessage, MailResult } from "@/lib/mail/transport";
+import type { Translator } from "@/lib/translation/anthropic";
+import { GUEST_TO_JAPANESE_SYSTEM, type TranslationResult } from "@/lib/translation/prompts";
 import { EXPERIENCE_JOB_LIMITS, experienceJobActivity, runExperienceJobs, type ExperienceJobDeps } from "./drain";
 
 /** One run of the mail job (#285 slice 5) with a stubbed store and a fake mailer: synthetic data only. */
@@ -24,6 +26,10 @@ const facts = (n: number): BookingConfirmationEmail => ({
   hostDisplayName: "Sample Host",
 });
 const confirmationFor = (n: number, email: BookingConfirmationEmail | null = facts(n), attempts = 1): ClaimedBookingConfirmation => ({ id: String(n), attempts, email });
+const translationFor = (n: number, attempts = 1): ClaimedGuestTranslation => ({
+  id: String(100 + n), attempts, messageId: `00000000-0000-4000-8000-00000000010${n}`, text: `Sample question ${n}: is there a vegetarian option?`,
+});
+const claimOf = (translations: ClaimedGuestTranslation[], closed = 0, abandoned = 0): GuestTranslationClaim => ({ translations, closed, abandoned });
 
 function stubs() {
   const questions = {
@@ -37,6 +43,11 @@ function stubs() {
     retryBookingConfirmation: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
   };
   const guests = { eraseGuestData: vi.fn(async () => 0) };
+  const translations = {
+    claimTranslations: vi.fn(async (): Promise<GuestTranslationClaim> => claimOf([])),
+    recordTranslation: vi.fn(async () => true),
+    retryTranslation: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
+  };
   const sent: MailMessage[] = [];
   const results: MailResult[] = [];
   const mailer = {
@@ -47,8 +58,8 @@ function stubs() {
     close: vi.fn(),
   };
   const onStepError = vi.fn();
-  const deps: ExperienceJobDeps = { questions, confirmations, guests, mailer, siteUrl: SITE, now: () => NOW, onStepError };
-  return { deps, questions, confirmations, guests, mailer, sent, results, onStepError };
+  const deps: ExperienceJobDeps = { questions, confirmations, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
+  return { deps, questions, confirmations, guests, translations, mailer, sent, results, onStepError };
 }
 
 /** A claim that hands out one row per call, as the store does for `limit: 1`. */
@@ -75,6 +86,7 @@ describe("runExperienceJobs", () => {
     expect(counts).toEqual({
       questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
       bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+      guestTranslations: { off: true },
       guestErasure: { erased: 0 },
       questionErasure: { erased: 0 },
     });
@@ -85,6 +97,8 @@ describe("runExperienceJobs", () => {
     expect(s.guests.eraseGuestData).toHaveBeenCalledWith({ endedBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.questions.eraseInactiveThreads).toHaveBeenCalledWith({ lastMessageBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.mailer.sendMail).not.toHaveBeenCalled();
+    // Translation is off: the store's translation queue is not touched.
+    expect(s.translations.claimTranslations).not.toHaveBeenCalled();
   });
 
   it("emails each host reply with its one-time link and records how it went by the failure's class", async () => {
@@ -168,6 +182,7 @@ describe("runExperienceJobs", () => {
     expect(counts).toEqual({
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
+      guestTranslations: { off: true },
       guestErasure: { erased: 1 },
       questionErasure: { error: "unavailable" },
     });
@@ -181,5 +196,74 @@ describe("runExperienceJobs", () => {
     s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({ confirmations: [confirmationFor(1)], abandoned: 0 });
     const counts = await runExperienceJobs(s.deps);
     expect(JSON.stringify(counts)).not.toMatch(/example\.com|Sample|sampleToken|tea|walk/i);
+  });
+});
+
+describe("runExperienceJobs › the guests' Japanese", () => {
+  /** A translator stub that answers in turn and records what it was asked. */
+  function translator(...answers: TranslationResult[]) {
+    return vi.fn<Translator>(async () => answers.shift() ?? { ok: true, text: "合成の翻訳です。" });
+  }
+
+  it("translates one claimed message at a time with the guest's text only, and keeps the Japanese", async () => {
+    const translate = translator({ ok: true, text: "合成の質問 1：ベジタリアンの選択肢はありますか？" }, { ok: true, text: "合成の質問 2" });
+    s.translations.claimTranslations
+      .mockResolvedValueOnce(claimOf([translationFor(1)], 2, 1))
+      .mockResolvedValueOnce(claimOf([translationFor(2)]))
+      .mockResolvedValueOnce(claimOf([]));
+    const counts = await runExperienceJobs({ ...s.deps, translator: translate });
+    expect(counts.guestTranslations).toEqual({ claimed: 2, translated: 2, retried: 0, failed: 0, closed: 2, abandoned: 1 });
+    expect(s.translations.claimTranslations).toHaveBeenCalledWith({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.translationLeaseSeconds });
+    expect(s.translations.recordTranslation.mock.calls).toEqual([["101", "合成の質問 1：ベジタリアンの選択肢はありますか？"], ["102", "合成の質問 2"]]);
+    expect(translate).toHaveBeenCalledTimes(2);
+    const request = translate.mock.calls[0]![0];
+    expect(request.system).toBe(GUEST_TO_JAPANESE_SYSTEM);
+    expect(request.messages).toEqual([{ role: "user", content: `<message>\n${translationFor(1).text}\n</message>` }]);
+    // No id, row or attempt reaches the API.
+    expect(JSON.stringify(translate.mock.calls)).not.toMatch(/00000000-|"10[12]"/);
+    expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
+    expect(JSON.stringify(counts)).not.toMatch(/Sample|合成/);
+  });
+
+  it("puts a message back after a refused or unusable answer and goes on, but stops the run when the API is unreachable", async () => {
+    const translate = translator({ ok: false, failure: "refused" }, { ok: false, failure: "unusable" }, { ok: false, failure: "unavailable" });
+    s.translations.claimTranslations
+      .mockResolvedValueOnce(claimOf([translationFor(1)]))
+      .mockResolvedValueOnce(claimOf([translationFor(2, 5)]))
+      .mockResolvedValueOnce(claimOf([translationFor(3, 2)]))
+      .mockResolvedValueOnce(claimOf([translationFor(4)]));
+    s.translations.retryTranslation.mockResolvedValueOnce("RETRY").mockResolvedValueOnce("FAILED").mockResolvedValueOnce("RETRY");
+    const counts = await runExperienceJobs({ ...s.deps, translator: translate });
+    expect(counts.guestTranslations).toEqual({ claimed: 3, translated: 0, retried: 2, failed: 1, closed: 0, abandoned: 0 });
+    expect(s.translations.retryTranslation.mock.calls).toEqual([["101", 1], ["102", 5], ["103", 2]]);
+    expect(s.translations.recordTranslation).not.toHaveBeenCalled();
+    // The fourth message stays queued for the next run.
+    expect(s.translations.claimTranslations).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops at the per-run limit and when the run's translation budget is spent", async () => {
+    s.translations.claimTranslations.mockImplementation(async () => claimOf([translationFor(1)]));
+    const many = await runExperienceJobs({ ...s.deps, translator: translator() });
+    expect(many.guestTranslations).toMatchObject({ claimed: EXPERIENCE_JOB_LIMITS.translations, translated: EXPERIENCE_JOB_LIMITS.translations });
+
+    let clock = NOW.getTime();
+    const slow = vi.fn<Translator>(async () => {
+      clock += 25_000;
+      return { ok: true, text: "合成の翻訳です。" };
+    });
+    s.translations.claimTranslations.mockClear();
+    const counts = await runExperienceJobs({ ...s.deps, translator: slow, now: () => new Date(clock) });
+    // 0 s, 25 s and 50 s start a call; at 75 s the budget (60 s) is spent.
+    expect(counts.guestTranslations).toMatchObject({ claimed: 3, translated: 3 });
+    expect(slow).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports a store failure as the step's failure, and the next steps still run", async () => {
+    s.translations.claimTranslations.mockRejectedValueOnce(new Error("guest1@example.com synthetic"));
+    s.guests.eraseGuestData.mockResolvedValueOnce(1);
+    const counts = await runExperienceJobs({ ...s.deps, translator: translator() });
+    expect(counts.guestTranslations).toEqual({ error: "unavailable" });
+    expect(counts.guestErasure).toEqual({ erased: 1 });
+    expect(s.onStepError).toHaveBeenCalledWith("guestTranslations", "Error");
   });
 });

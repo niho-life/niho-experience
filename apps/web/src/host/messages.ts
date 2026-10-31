@@ -16,7 +16,7 @@ export const MESSAGE_TEXT_LIMIT = BOOKING_TEXT_LIMITS.body;
 
 /** 英語にする failed (NIHO or the network): the Japanese stays, and the host can try again or write the English. */
 export const REPLY_DRAFT_FAILED_TEXT = "英語にできませんでした。作り直すか、英語を直接書いてください";
-/** 英語にする before NIHO's API can make the English of a reply (http mode). */
+/** 英語にする without an English draft in http mode (translation off, or the Claude API failed or was slow): the host writes it. */
 export const REPLY_DRAFT_UNAVAILABLE_TEXT = "英語にする機能は準備中です。英語を直接書いてください。";
 
 export interface MessagesQuery {

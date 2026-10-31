@@ -14,9 +14,12 @@ import { guestQuestionRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
+import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
+import { hostReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
+import { REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import type { HostActionResult } from "./payout";
 import type { HostThread, HostThreadMessage } from "./types";
 
@@ -34,6 +37,8 @@ export const GUEST_QUESTION_REPLY_FAILED_TEXT = "返信を送れませんでし�
 
 /** The list reads this many threads, the latest first. */
 const LIST_LIMIT = 50;
+/** 英語にする waits this long for the Claude API; after that the host writes the English. */
+export const REPLY_DRAFT_TIMEOUT_MS = 15_000;
 
 /** What a question is about, as the host reads it; "Other" names nothing. */
 const TOPIC_JA: Record<GuestQuestionTopic, string | null> = { CHILDREN: "子ども", FOOD: "食べもの", ACCESS: "アクセス", LANGUAGE: "言葉", OTHER: null };
@@ -202,4 +207,35 @@ export async function replyToGuestQuestion(providerId: string, threadId: string,
   } catch (error) {
     return failure(error, GUEST_QUESTION_REPLY_FAILED_TEXT);
   }
+}
+
+/**
+ * 英語にする for a question kept here (#285 slice 5, owner decision 2026-10-31): the Claude API's English of
+ * the host's Japanese, with the guest's last message for context, for the host to check and correct before
+ * sending; nothing is sent or saved here. Translation off: the host writes the English, as before
+ * (REPLY_DRAFT_UNAVAILABLE_TEXT). On, but the API unreachable, slow (15 s), declining or answering nothing
+ * usable: the host may try again or write the English (REPLY_DRAFT_FAILED_TEXT).
+ */
+export async function draftGuestQuestionEnglish(
+  providerId: string,
+  threadId: string,
+  japanese: string,
+  translator: () => Translator | null = () => anthropicTranslator({ timeoutMs: REPLY_DRAFT_TIMEOUT_MS }),
+): Promise<HostActionResult<{ english: string }>> {
+  const session = await readHostSession();
+  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  const translate = translator();
+  if (!translate) return { ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT };
+  const owner = await asOwner(providerId, REPLY_DRAFT_UNAVAILABLE_TEXT);
+  if (!owner.ok) return owner;
+  let guestMessage: string | null;
+  try {
+    // The OWNER's thread only; its last guest message is the context.
+    const thread = await owner.questions.getThread(owner.actor, threadId);
+    guestMessage = thread.messages.findLast((message) => message.author === "GUEST")?.body ?? null;
+  } catch (error) {
+    return failure(error, REPLY_DRAFT_FAILED_TEXT);
+  }
+  const result = await translate(hostReplyToEnglish({ japanese, guestMessage }));
+  return result.ok ? { ok: true, message: "英語にしました", english: result.text } : { ok: false, message: REPLY_DRAFT_FAILED_TEXT };
 }
