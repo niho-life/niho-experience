@@ -467,8 +467,16 @@ async function register(state: SiteSaleState, input: SiteSaleInput, deps: SiteSa
   } else {
     out(outcomeLine("NIHO's fee", "UNCHANGED"));
   }
-  printReadiness(await store.saleReadiness(providerId, input.product.id), out);
-  out("Registered. The sale is not open: the host sets the schedule in /host/calendar, then run open-sale.");
+  const readiness = await store.saleReadiness(providerId, input.product.id);
+  printReadiness(readiness, out);
+  // Running register again on a product whose sale terms are set can itself start (or keep) the sale: publishing the
+  // product or the fee setting is what loadSellable() waits for. Say what is true, so nobody sells the dates on NIHO too.
+  if (readiness.selling) {
+    out("Registered. The product is sold on this site now (its sale terms are already set and every check passes): "
+      + "do not sell the same dates on NIHO; stop-sale ends the sale here.");
+  } else {
+    out("Registered. The sale is not open: the host sets the schedule in /host/calendar, then run open-sale.");
+  }
   return SITE_SALE_EXIT.ok;
 }
 

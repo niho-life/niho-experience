@@ -249,6 +249,21 @@ describe("register-site-sale flow (#285 slice 9)", () => {
     assert.equal(same.writes.some(([method]) => method === "setProviderSaleSettings"), false);
   });
 
+  it("register says the product is sold here when the registration leaves it selling, and never claims the sale is closed then", async () => {
+    // Sale terms already set: registering again (the fee or the publication was the missing piece) opens the sale.
+    const selling = harness({ state: { ...REGISTERED, saleTerms: { version: 4 } as ProductSaleTerms }, readiness: [readiness([], true)] });
+    assert.equal(await selling.run("register", true), SITE_SALE_EXIT.ok);
+    const text = selling.lines.join("\n");
+    assert.match(text, /The product is sold on this site now/);
+    assert.match(text, /do not sell the same dates on NIHO/);
+    assert.doesNotMatch(text, /The sale is not open/);
+    // Nothing selling after the registration: the first registration's message stays.
+    const closed = harness({ readiness: [readiness(["SALE_TERMS"], false)] });
+    assert.equal(await closed.run("register", true), SITE_SALE_EXIT.ok);
+    assert.match(closed.lines.at(-1)!, /The sale is not open/);
+    assert.doesNotMatch(closed.lines.join("\n"), /sold on this site now/);
+  });
+
   it("register refuses a taken slug or an account that cannot take charges, before writing", async () => {
     for (const state of [{ ...EMPTY, slugPublishedElsewhere: true }, { ...EMPTY, slugUsedInProvider: true }]) {
       const h = harness({ state });
