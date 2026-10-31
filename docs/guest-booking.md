@@ -2,7 +2,7 @@
 
 [#285](https://github.com/niho-life/niho-experience/issues/285) の現行設計。[ADR 0002](adr/0002-experience-domain-ownership.md)（2026-10-27）により、体験の開催枠・予約・決済の状態は niho-experience が正本を持つ。旅行者の予約を NIHO の公開 API から experience DB（`packages/experience-store`）へ移す。オーナー決定（2026-10-31）：商品ごとに切り替え、切り替えた商品は NIHO で売らない。予約者の連絡先は体験の 1 年後に消す。NIHO の手数料はサポート OFF 10%・ON 15%（決済手数料込み）で、予約を受けた時点の値を予約ごとに固定する。
 
-**現在地（第5段）**：販売条件・手数料の設定・公開の残席・仮押さえ（第1段、`0023`）に、提供者ごとの手数料設定（`0025`）、Stripe Checkout の作成、公開の経路 2 本を足した（第2段）。第3段で旅行者の画面をつないだ：flag が on のとき、ここで売る商品は残席・価格・質問・規約の版を experience DB から読み、このサイトの経路で申し込み、Stripe を経て `/booking/return` に戻る。ほかの商品と flag off・mock（プレビューと e2e）は今までどおり NIHO の API を読む（下の「画面がどこから読むか」）。第4段で、支払われずに終わった Checkout の席を webhook で戻し、期限を過ぎた仮押さえを次の申込で片付けるようにした（`0026`、下の「放棄された Checkout と遅れた支払い」）。第5段で、確定した予約の確認メールと、予約者の情報・質問を 1 年後に消す job を足した（migration なし、下の「予約者へのメール」）。
+**現在地（第8段）**：販売条件・手数料の設定・公開の残席・仮押さえ（第1段、`0023`）に、提供者ごとの手数料設定（`0025`）、Stripe Checkout の作成、公開の経路 2 本を足した（第2段）。第3段で旅行者の画面をつないだ：flag が on のとき、ここで売る商品は残席・価格・質問・規約の版を experience DB から読み、このサイトの経路で申し込み、Stripe を経て `/booking/return` に戻る。ほかの商品と flag off・mock（プレビューと e2e）は今までどおり NIHO の API を読む（下の「画面がどこから読むか」）。第4段で、支払われずに終わった Checkout の席を webhook で戻し、期限を過ぎた仮押さえを次の申込で片付けるようにした（`0026`、下の「放棄された Checkout と遅れた支払い」）。第5段で、確定した予約の確認メールと、予約者の情報・質問を 1 年後に消す job を足した（migration なし、下の「予約者へのメール」）。第8段で、ここで受けた予約を提供者の OWNER がホストの画面の「予約」で読めるようにした（読むだけ、migration なし、下の「ホストの画面」）。第6・7段（予約者の予約ページ、取消と返金）はまだ無い。
 
 ## 流れ
 
@@ -54,6 +54,22 @@ NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だ
 - **保存期間**（オーナー決定 2026-10-31）：予約者の名前・アドレス・電話・備考・回答・UTM は体験の終了（取り消した予約は取消）から 1 年で消す（`eraseGuestData`）。支払いの確認中（`PAYMENT_REVIEW`）の予約は残す。返金・異議申し立て中の予約は、それができたとき（第7段）に除外へ加える。質問は最後のメッセージから 1 年でスレッドごと消す。
 - **設定**：`EXPERIENCE_GUEST_MAIL_ENABLED=true`（http mode だけ）のとき、`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_SMTP_HOST`・`EXPERIENCE_SMTP_PORT`・`EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD`、`EXPERIENCE_MAIL_FROM`・`EXPERIENCE_MAIL_REPLY_TO`、`EXPERIENCE_JOBS_AUDIENCE`・`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL` と https の `SITE_URL` が無いとサーバーは起動しない（誤りのメッセージは設定の名前だけで、値を出さない）。SMTP のユーザーとパスワードは使う場所で読み、`config` に置かない。
 - **配備時の作業（この PR では行わない）**：Cloud Scheduler の job（毎分・POST・OIDC token）とそのサービスアカウント（Cloud Run の呼び出し権限だけ）、Secret Manager の `EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD` と実行環境への配線、SMTP 事業者での experience 用の資格情報と送信ドメインの設定、runtime role への `guest_question_threads` の DELETE（`scripts/gcp/experience-db-grants.mjs`。メッセージと返信リンクは ON DELETE CASCADE で消え、PostgreSQL は表の所有者として実行する）。migration は増えない。
+
+## ホストの画面（第8段）
+
+ここで受けた予約は、提供者の OWNER が `/host/bookings`（予約）で読む。取消・返金（第7段）と予約者とのメッセージ（第6段）が来るまで、画面から予約を変える操作は無い。
+
+- **誰が**：NIHO がそのアカウントを提供者の OWNER と言い、experience DB にも現役の OWNER membership があり、NIHO の役割の上限で下げられていないこと（予約前の質問・設定 › 通知と同じ規則、ADR 0002）。商品限定運営者は対象外。EDITOR には今までどおり予約の画面が無い（404）。サブホスト（COHOST）など OWNER 以外は今までの画面（準備中、または NIHO の予約）のまま。
+- **出す予約**：確定（`CONFIRMED`）・確認待ち（`PAYMENT_REVIEW`、仮押さえの解放のあとに届いた支払い。席は無い）・取消済み（`CANCELLED`）。仮押さえ（`HOLD`）と放棄された仮押さえ（`EXPIRED`）は予約ではないので出さない。
+- **1 件ごとに出すもの**：体験、開催の日付と開始・終了の時刻（予約の occurrence snapshot。予約のある回はホストが動かせないので、今の回と同じ）、大人と子どもの人数、状態、予約者の名前と言語、申込メモ、予約の質問への回答、合計・内訳・NIHO の手数料（率とサポートの ON/OFF）・受取額（合計 − 手数料、返金前）・取消条件（すべて予約の pricing snapshot から）、申込・支払い・取消の時刻（時系列）。申込経路は「体験サイト」。
+- **出さないもの**：予約者のメールアドレス（store が選ばない。連絡は NIHO 経由、第6段からはメッセージ）。電話は store が返すが、予約の画面には渡さない（NIHO の予約と同じく「この回」だけに出す。owner 決定 2026-10-22・#103 の 5。「この回」はまだこの予約を読まない）。
+- **質問の文面**：予約は回答（質問 ID と文・選択肢 ID）だけを持ち、質問の文面は持たない。画面は今の販売条件の文面を出す。予約のあとで文面を変えると新しい文面が出て、販売条件から外した質問・選択肢は「（削除された質問）」「（削除された選択肢）」になる（予約に文面を写すには migration が要るので、この段では見送った）。
+- **消去済み**：保存期間（体験の 1 年後）を過ぎて予約者の情報を消した予約は、名前の代わりに「保存期間を過ぎたため表示できません」と出し、メモと回答は出さない。金額・人数・日時は残る。
+- **画面の形**：
+  - NIHO の予約（`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED`）が無い環境では、予約の画面（`HostBookings`）がここで受けた予約の一覧になる（今までの「準備中」の代わり）。絞り込み・体験の選択・詳細は今までどおり。一覧の上に「このサイトで受けた予約です」。回の見出しは「この回」へのリンクにしない（まだこの予約を読まない）。詳細は操作の代わりに「取消・返金は NIHO サポートへご連絡ください」（確認待ちには「仮押さえの期限のあとに支払いが届きました。席は確保されていません」も）で、NIHO の支援履歴・料金の面と通訳は出さない。
+  - NIHO の予約がある環境では、NIHO の予約（`HostLiveBookings`）のまま、題の下に「このサイトで受けた予約が N 件あります」（OWNER で 1 件以上のときだけ）。押すと `?source=site` で上の一覧になり、「NIHO の予約に戻る」で戻る。画面の中の移動は `?source=site` を保つ。
+- **一覧の読み方**：`GuestBookingRepository.listGuestBookingsForHost(actor, { from, cursor, limit })` は、開始が `from`（画面は日本時間の今日の 0 時）以後の予約を近い順に、続けてそれより前の予約を新しい順に返す（keyset。cursor は最初のページの `from` を保つ）。画面は 100 件ずつ読み、残りは「続きを見る」。`?booking=` が最初のページに無ければ `getGuestBookingForHost` で足し、ほかの提供者の予約・仮押さえ・無い ID は 404。N 件は `countGuestBookingsForHost`（数えられなければ知らせを出さない）。どれも provider で絞り、membership を確かめる。並べ替えは開始時刻の式で、提供者ごとの予約の数が小さいうちは index を足さない。読むだけなので runtime role の権限は増えない。
+- **ホーム**：「次にすること」と「これからの開催」は http mode ではまだ空のまま（NIHO の予約もまだ読まない）。ここで受けた予約を入れると「参加者を見る」が準備中の「この回」へ行くので、この段では入れない（TODO(#285)）。
 
 ## 画面がどこから読むか（第3段）
 
@@ -115,7 +131,7 @@ Stripe の戻り先 `/experiences/{slug}?checkout=cancelled`（第2段）で、�
 
 | 設定 | 内容 |
 | --- | --- |
-| `EXPERIENCE_GUEST_BOOKING_ENABLED` | `true` のとき http mode で 2 本の経路が開く。既定 `false`（404）。mock mode では効かない |
+| `EXPERIENCE_GUEST_BOOKING_ENABLED` | `true` のとき http mode で 2 本の経路が開き、OWNER の予約の画面にここで受けた予約が出る。既定 `false`（404）。mock mode では効かない。`HOST_CONSOLE_ENABLED=true` が要る（ホストが見られない販売をしない） |
 | `EXPERIENCE_BOOKING_CONSENT_VERSION` | 旅行者が同意する規約の版（1〜100 字、空白なし） |
 | `EXPERIENCE_DATABASE_URL` | experience DB |
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` / `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 体験用に絞った Stripe の秘密鍵と、体験の Connect webhook の署名鍵（Secret Manager） |
@@ -129,6 +145,5 @@ flag が `true` でこれらが欠けていると、サーバーは起動しな�
 - 第5段の残り：提供者へのメール。
 - 第6段：予約者の予約ページ。
 - 第7段：取消と返金（解放したあとに届いた支払い `PAYMENT_REVIEW` の返金を含む）。
-- 第8段：ホストの予約一覧。
 - 第9段：商品ごとの移行（販売条件と手数料設定を書き、同時に NIHO での販売を止める）。
 - 第10段：日本語の予約入力。

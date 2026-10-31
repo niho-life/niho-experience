@@ -20,6 +20,21 @@ import {
   StoreValidationError,
   type GuestCheckoutOccurrenceReason,
 } from "./errors.ts";
+import {
+  countShown,
+  cursorAfter,
+  decodeBookingCursor,
+  hostGuestBookingFromRow,
+  listBoundary,
+  listLimit,
+  publicBookingIdOf,
+  requireBookingsOwner,
+  selectOne,
+  selectSegment,
+  type HostGuestBooking,
+  type HostGuestBookingListOptions,
+  type HostGuestBookingPage,
+} from "./host-guest-bookings.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import {
@@ -862,7 +877,8 @@ function startResult(booking: BookingRecord, productTitle: string, guestEmail: s
  * ExperienceStore.createBookingHold. The public methods take a slug or a booking ID and no identity;
  * the web layer establishes nothing else. Results map 1:1 onto NIHO's public contract (offers,
  * availability, checkout errors). Names, addresses, phones, notes and answers stay in booking_guests:
- * never in outbox payloads, logs or error messages.
+ * never in outbox payloads, logs or error messages. The host's methods take a HostActor; what 予約 reads
+ * (host-guest-bookings.ts) carries the guest's name, phone, note and answers to their OWNER, never the address.
  */
 export class GuestBookingRepository {
   readonly #pool: Pool;
@@ -927,6 +943,54 @@ export class GuestBookingRepository {
           : "Sale terms version mismatch or sale terms not found in this provider.");
       }
       return termsFromRow(row);
+    });
+  }
+
+  /* ---------- the host console (OWNER): 予約 (#285 slice 8) ---------- */
+
+  /**
+   * The provider's guest bookings a host sees (CONFIRMED, PAYMENT_REVIEW, CANCELLED; never a hold) for its
+   * OWNER: those starting at `from` (now by default) or later, the nearest first, then the earlier ones, the
+   * latest first. `cursor` is the previous page's nextCursor and keeps that page's `from`. No email address.
+   */
+  async listGuestBookingsForHost(actor: HostActor, options: HostGuestBookingListOptions = {}): Promise<HostGuestBookingPage> {
+    const limit = listLimit(options.limit);
+    const cursor = decodeBookingCursor(options.cursor);
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      const from = cursor?.from ?? await listBoundary(client, options.from);
+      const rows: DbRow[] = [];
+      if (cursor === null || cursor.segment === "UPCOMING") {
+        const upcoming = await selectSegment(client, actor.providerId, "UPCOMING", from, cursor?.after ?? null, limit + 1);
+        if (upcoming.length > limit) {
+          const page = upcoming.slice(0, limit);
+          return { bookings: page.map(hostGuestBookingFromRow), nextCursor: cursorAfter(from, "UPCOMING", page.at(-1)!) };
+        }
+        rows.push(...upcoming);
+      }
+      // The rest of the page from the past; with no room left, one row says whether a past page follows.
+      const room = limit - rows.length;
+      const past = await selectSegment(client, actor.providerId, "PAST", from, cursor?.segment === "PAST" ? cursor.after : null, room + 1);
+      const page = past.slice(0, room);
+      rows.push(...page);
+      return { bookings: rows.map(hostGuestBookingFromRow), nextCursor: past.length > room ? cursorAfter(from, "PAST", page.at(-1) ?? null) : null };
+    });
+  }
+
+  /** One guest booking of the provider for its OWNER. Another provider's, a hold or none is StoreNotFoundError. */
+  async getGuestBookingForHost(actor: HostActor, publicBookingId: string): Promise<HostGuestBooking> {
+    const id = publicBookingIdOf(publicBookingId);
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      return hostGuestBookingFromRow(await selectOne(client, actor.providerId, id));
+    });
+  }
+
+  /** How many guest bookings listGuestBookingsForHost would list in all (予約's notice beside NIHO's bookings). */
+  async countGuestBookingsForHost(actor: HostActor): Promise<number> {
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      return countShown(client, actor.providerId);
     });
   }
 

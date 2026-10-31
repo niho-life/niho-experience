@@ -10,6 +10,7 @@ import type {
   HostMeetingGuideCopy,
   HostOffer,
   HostRefundChoice,
+  HostSiteBookingTerms,
 } from "./types";
 
 /*
@@ -36,8 +37,8 @@ export function bookingFilterOf(value: string | null | undefined): BookingFilter
   return BOOKING_FILTERS.find((filter) => filter.value === value)?.value ?? "upcoming";
 }
 
-/** Bookings that still lead to their session. */
-const ONGOING: ReadonlySet<HostBookingStatus> = new Set(["pending", "confirmed", "refund_needed"]);
+/** Bookings that still lead to their session. A payment under review (this site's, #285) keeps no seat but is not over. */
+const ONGOING: ReadonlySet<HostBookingStatus> = new Set(["pending", "confirmed", "refund_needed", "payment_review"]);
 /** Bookings that keep seats on their session: the 4 of "4 / 8名". */
 const SEATED: ReadonlySet<HostBookingStatus> = new Set(["pending", "confirmed"]);
 
@@ -368,29 +369,51 @@ export function meetingGuideLabel(guide: HostMeetingGuideCopy): string {
 export type BookingRow = { label: string; value: string; multiline?: boolean } | { label: string; answers: readonly HostBookingAnswer[] };
 
 /** The rows that have something to show (`condition && row` leaves out the others). */
-function rows(items: readonly (BookingRow | false | "" | null)[]): BookingRow[] {
+function rows(items: readonly (BookingRow | false | "" | null | undefined)[]): BookingRow[] {
   return items.filter((item): item is BookingRow => Boolean(item));
 }
 
-/** 申込内容: what the guest booked and wrote (never their email: NIHO keeps it). Rows with nothing to show are left out. */
+const CANCELLATION_POLICY_LABELS: Record<NonNullable<HostSiteBookingTerms["cancellationPolicy"]>, string> = {
+  FREE_UNTIL_24H: "24時間前まで無料",
+  FREE_UNTIL_48H: "48時間前まで無料",
+  NONE: "無料取消なし",
+};
+
+/** 手数料 of a booking made on this site: "¥1,000（10%・サポートOFF）". */
+export function siteFeeLabel(fee: NonNullable<HostSiteBookingTerms["fee"]>): string {
+  return `${yen(fee.amountYen)}（${fee.percent}%・サポート${fee.supportEnabled ? "ON" : "OFF"}）`;
+}
+
+/**
+ * 申込内容: what the guest booked and wrote (never their email: NIHO keeps it). Rows with nothing to show are left out.
+ * A booking made on this site (#285) adds NIHO's fee, what the host receives and the cancellation policy it was
+ * made under; its offer is the experience itself, so 商品 is left out.
+ */
 export function bookingRequestRows(booking: HostBooking, experienceTitle: string): BookingRow[] {
+  const site = booking.site;
   return rows([
     Boolean(experienceTitle) && { label: "体験", value: experienceTitle },
-    { label: "商品", value: booking.offer },
+    !site && { label: "商品", value: booking.offer },
     { label: "人数", value: peopleLabel(booking) },
     { label: "金額", value: yen(booking.amountYen) },
     { label: "内訳", value: priceBreakdown(booking) },
+    site?.fee && { label: "手数料", value: siteFeeLabel(site.fee) },
+    site && { label: "受取額", value: yen(site.payoutYen) },
     { label: "言語", value: guestLanguageLabel(booking.language) },
     { label: "申込経路", value: booking.channel },
+    site?.cancellationPolicy && { label: "取消条件", value: CANCELLATION_POLICY_LABELS[site.cancellationPolicy] },
     Boolean(booking.note.trim()) && { label: "申込メモ", value: booking.note, multiline: true },
     booking.answers.length > 0 && { label: "回答", answers: booking.answers },
     booking.meetingGuide && { label: "集合案内", value: meetingGuideLabel(booking.meetingGuide) },
   ]);
 }
 
-/** 状態: where the booking stands and what happened to the money. Rows for what has not happened are left out. */
+/**
+ * 状態: where the booking stands and what happened to the money. Rows for what has not happened are left out.
+ * This site's bookings (#285) record no refund until slice 7, so they show no 累計返金.
+ */
 export function bookingStateRows(booking: HostBooking): BookingRow[] {
-  const settled = booking.status === "cancelled" || booking.status === "refund_needed" || booking.refundedYen > 0;
+  const settled = !booking.site && (booking.status === "cancelled" || booking.status === "refund_needed" || booking.refundedYen > 0);
   return rows([
     { label: "予約", value: BOOKING_STATUS[booking.status].label },
     booking.authorizedAt && { label: "与信", value: dateTimeJa(booking.authorizedAt) },
@@ -406,14 +429,16 @@ export function bookingStateRows(booking: HostBooking): BookingRow[] {
 
 export interface BookingsQuery {
   providerId?: string | null;
+  /** `site`: the bookings made on this site, where NIHO's list is the screen's own (#285 slice 8). */
+  source?: "site" | null;
   filter?: BookingFilter;
   experience?: string | null;
   booking?: string | null;
 }
 
-/** The bookings screen's address: `?providerId=`, the filter (これから, the default, stays out), the experience and the booking. */
-export function bookingsHref({ providerId, filter, experience, booking }: BookingsQuery = {}): string {
-  return withQuery(HOST_BOOKINGS_PATH, { providerId, filter: filter === "upcoming" ? null : filter, experience, booking });
+/** The bookings screen's address: `?providerId=`, the source, the filter (これから, the default, stays out), the experience and the booking. */
+export function bookingsHref({ providerId, source, filter, experience, booking }: BookingsQuery = {}): string {
+  return withQuery(HOST_BOOKINGS_PATH, { providerId, source, filter: filter === "upcoming" ? null : filter, experience, booking });
 }
 
 /** One session as its screen's address names it (この回, #107): the day, the start, the experience and the offer. */

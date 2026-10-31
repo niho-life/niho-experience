@@ -247,6 +247,9 @@ describe("admin support console settings", () => {
     const sale = {
       EXPERIENCE_API_MODE: "http",
       SITE_URL: "https://experience.example",
+      HOST_CONSOLE_ENABLED: "true",
+      HOST_SESSION_SECRET: "s".repeat(32),
+      NIHO_FIREBASE_WEB_API_KEY: "key",
       EXPERIENCE_GUEST_BOOKING_ENABLED: "true",
       EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused",
       EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_sample",
@@ -269,6 +272,11 @@ describe("admin support console settings", () => {
       expect(() => resolveConfig({ ...sale, EXPERIENCE_BOOKING_CONSENT_VERSION: version })).toThrow(/EXPERIENCE_BOOKING_CONSENT_VERSION/);
     }
     expect(() => resolveConfig({ ...sale, SITE_URL: "http://experience.example" })).toThrow(/HTTPS/);
+    // The host sees these bookings only in the console's 予約 (#285 slice 8): no sale without it.
+    for (const hostConsole of [undefined, "false", "1"]) {
+      expect(() => resolveConfig({ ...sale, HOST_CONSOLE_ENABLED: hostConsole })).toThrow("EXPERIENCE_GUEST_BOOKING_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+    }
+    expect(resolveConfig({ ...sale, HOST_CONSOLE_ENABLED: undefined, EXPERIENCE_GUEST_BOOKING_ENABLED: "false" }).guestBookingEnabled).toBe(false);
     // A refused setting is named, never repeated.
     try {
       resolveConfig({ ...sale, EXPERIENCE_DATABASE_URL: undefined });

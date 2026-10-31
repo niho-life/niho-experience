@@ -105,6 +105,8 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   if (!provider) {
     return <HostRegisterPrompt title="ホーム" />;
   }
+  // TODO(#285): the bookings made on this site (experience DB, 予約) join 今日・明日・これからの開催 once この回
+  // reads them; until then their 参加者を見る would open a screen that does not have them.
   const { home, settings } = await loadHostConsoleData(provider);
   const link = (path: string) => withProvider(path, linkProviderId);
   // Only where it can be connected: the preview (http mode waits for NIHO's Google connection, #87).
