@@ -12,7 +12,7 @@ import type { GuestCancellationPolicy, HostActor } from "./types.ts";
 import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
 
 /*
- * 取消と返金 (#285 slice 7, migration 0029, docs/guest-booking.md「取消と返金（第7段）」) of the guest bookings made on
+ * 取消と返金 (#285 slice 7, migration 0030, docs/guest-booking.md「取消と返金（第7段）」) of the guest bookings made on
  * this site. Three people may cancel:
  *  - the guest, on their booking page (slice 6's session): before free cancellation ends, cancelled with a full
  *    refund; after it, "Ask to cancel" opens a request for NIHO support and the booking stays confirmed;
