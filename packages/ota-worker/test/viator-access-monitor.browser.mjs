@@ -12,9 +12,9 @@ const requireBrowser = (t) => {
 };
 const cloud = { async preflight(job) { return { ready: true, desiredState: job.desiredState }; } };
 
-async function driverFor(fixture, action = "SET_CLOSED") {
+async function driverFor(fixture, action = "SET_CLOSED", { responseTimeoutMs = 500, browserFactory = fixture.browserFactory } = {}) {
   return createViatorDriver({ job: fixture.makeJob(action), cloud, config: fixture.config, testOnlySupplierOrigin: fixture.origin,
-    allowLocalTestOrigin: true, headless: true, browserFactory: fixture.browserFactory, responseTimeoutMs: 500, writeResponseTimeoutMs: 500 });
+    allowLocalTestOrigin: true, headless: true, browserFactory, responseTimeoutMs, writeResponseTimeoutMs: 500 });
 }
 
 for (const [name, mutate, reason] of [
@@ -55,9 +55,21 @@ for (const status of [403, 429]) test(`Viator availability update ${status} pres
 test("Viator ordinary captcha-delivery script/image is not a challenge", { timeout: 30_000 }, async (t) => {
   if (!requireBrowser(t)) return;
   const fixture = await syntheticViator(); t.after(() => fixture.close()); fixture.state.ordinaryBotAssets = true;
+  fixture.state.readDelayMs = 800;
   const profile = fixture.config.siteAccountProfiles.Viator[fixture.state.accountId];
-  const driver = await driverFor(fixture, "OBSERVE"); t.after(() => driver.stop());
+  const assets = new Set();
+  const browserFactory = async (options) => {
+    const browser = await fixture.browserFactory(options);
+    browser.context.on("request", (request) => {
+      if (new URL(request.url()).hostname === "geo.captcha-delivery.com") assets.add(request.resourceType());
+    });
+    return browser;
+  };
+  // Exercise a slow supplier response with the production read budget. The
+  // 500ms shortcut used by negative tests is shorter than this deliberate delay.
+  const driver = await driverFor(fixture, "OBSERVE", { responseTimeoutMs: 15_000, browserFactory }); t.after(() => driver.stop());
   const observed = await driver.observeTarget();
+  assert.deepEqual([...assets].sort(), ["image", "script"]);
   assert.equal(observed.bookable, true);
   assert.equal(await assertProfileAccessAvailable(profile), true);
   assert.equal(fixture.state.writes, 0);

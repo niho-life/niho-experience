@@ -33,7 +33,7 @@ async function fixtureBase(prefix, state, handler, site, namespace) {
 export async function syntheticViator() {
   const state = { accountId: "999999", productId: "999999P1", optionId: "TG1", localDateTime: "2099-01-01T13:00:00",
     initialDate: "2098-12-19", duplicateTargetRow: false, availability: "AVAILABLE", authenticated: true, responseFailure: null,
-    documentStatus: null, readStatus: null, updateStatus: null, challengeIframe: false, restrictionText: "", ordinaryBotAssets: false,
+    documentStatus: null, readStatus: null, readDelayMs: 0, updateStatus: null, challengeIframe: false, restrictionText: "", ordinaryBotAssets: false,
     writes: 0, requests: [], reads: [] };
   const handler = async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -64,6 +64,7 @@ export async function syntheticViator() {
     }
     if (url.pathname === "/availability/api" && request.method === "POST") {
       const body = await readBody(request); state.reads.push(body);
+      if (state.readDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.readDelayMs));
       if (state.readStatus) { response.writeHead(state.readStatus, { "content-type": "application/json" }); response.end('{"syntheticLimited":true}'); return; }
       const target = body.jumpToDate === state.localDateTime.slice(0, 10);
       response.writeHead(200, { "content-type": "application/json" });
