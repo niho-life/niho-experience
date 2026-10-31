@@ -1,6 +1,6 @@
 # 本番候補の配備と公開ゲート
 
-対象: [#5](https://github.com/niho-life/niho-experience/issues/5)、[#15](https://github.com/niho-life/niho-experience/issues/15)、[#92](https://github.com/niho-life/niho-experience/issues/92)。2026-10-27 更新。**販売開始、検索公開、外部提供者登録、ホストのカレンダーは別々に受入する。**
+対象: [#5](https://github.com/niho-life/niho-experience/issues/5)、[#15](https://github.com/niho-life/niho-experience/issues/15)、[#92](https://github.com/niho-life/niho-experience/issues/92)、[#84](https://github.com/niho-life/niho-experience/issues/84)（機能のフラグ）。2026-11-01 更新。**販売開始、検索公開、外部提供者登録、ホストのカレンダーは別々に受入する。**
 
 ## 固定する構成
 
@@ -22,7 +22,7 @@
 3. `.github/workflows/deploy-production.yml` を `main` から `action=candidate` で手動起動し、入力 `commit_sha` を起動時の `main` SHA と完全一致させる。ホストカレンダーの受入前は `enable_host_calendar=false` を選ぶ。workflow は資格情報なしで build/smoke → 保護環境で image push → digest固定の `--no-traffic --tag candidate-<sha12>` → NIHO本番公開APIの一覧・revision専用URL・runtime env・robots・preview 404 を確認する。APIが未配備で404なら候補を受け入れない。実行結果に出るSHA・revision・**Cloud Run実行用image digest**・候補URLを確認する。DockerがOCI indexをpushした場合、Cloud Runの実行用digestはその `linux/amd64` 子manifestとなる。workflowは親子関係を検証し、両方のdigestを記録する。
 4. 候補URLを確認して受け入れた後、別の手動実行で `action=promote` を選び、候補実行の同じ `commit_sha`、`candidate_revision`、**実行用digest** を `candidate_image_digest` に、同じ `enable_host_calendar` を入力する。保護環境で既存revisionのcommit label・不変image digest・停止設定・候補URLを再検証し、そのrevision自体を昇格する。promotionではbuild・image push・再配備を行わない。候補SHA・revision・digest・配備run・環境変数・HTTP結果を #15 に記録する。予約停止と検索除外は維持する。
 
-`--set-env-vars` に渡す初期8項目と `HOST_CONSOLE_ENABLED` は本サービスの runtime 設定全量である。`enable_host_calendar=false` はカレンダー用 Secret と Cloud SQL 接続を除去し、`/host/calendar` の404を確認する。`true` は次の受入条件を満たした場合だけ選ぶ。固定の管理入口は候補作成・昇格前とプレビューでrevision設定とHTMLから確認する。管理リンクの認証・登録・口座状態はNIHOが判定し、セルフ登録の公開設定とは区別する。運用で値を足す際は workflow を同時に更新し、Cloud Run画面での一時変更を正本としない。`UMAMI_WEBSITE_ID` はポリシーの追記後、別PRで本番だけに追加する。
+`--set-env-vars` に渡す初期8項目、`HOST_CONSOLE_ENABLED`、下の「[機能のフラグ](#機能のフラグ84)」が本サービスの runtime 設定全量である。`enable_host_calendar=false` はカレンダー用 Secret と Cloud SQL 接続を除去し、`/host/calendar` の404を確認する。`true` は次の受入条件を満たした場合だけ選ぶ。固定の管理入口は候補作成・昇格前とプレビューでrevision設定とHTMLから確認する。管理リンクの認証・登録・口座状態はNIHOが判定し、セルフ登録の公開設定とは区別する。運用で値を足す際は workflow（機能のフラグなら `scripts/deploy/runtime-flags.mjs` の表）を同時に更新し、Cloud Run画面での一時変更を正本としない。`UMAMI_WEBSITE_ID` はポリシーの追記後、別PRで本番だけに追加する。
 
 ### ホストカレンダーの本番候補を有効にする条件（#92）
 
@@ -42,6 +42,43 @@
 | `PROD_EXPERIENCE_GOOGLE_TOKEN_KEY_REF` | `EXPERIENCE_GOOGLE_TOKEN_KEY` |
 
 Cloud Run側はSecretの数値versionを固定する。鍵を更新するときはSecretに新versionを作り、参照変数を更新して新しい候補revisionを作る。`PROD_HOST_CALENDAR_READY` をfalseに戻しても既存revisionの公開状態は変わらない。緊急停止は前の `enable_host_calendar=false` revisionへtrafficを戻し、NIHO側の旧枠も別途止める。
+
+### 機能のフラグ（#84）
+
+mock で出している機能を http mode で開くフラグを、repository variable `PROD_*` で候補 revision に渡す。どれも**未設定か `false` なら OFF**（そのフラグの環境変数・設定・Secret の参照を revision に載せない）で、今の候補は変わらない。
+
+- **表は 1 つ**：`scripts/deploy/runtime-flags.mjs` の `FLAGS`。stg（`STG_*`）と本番（`PROD_*`）の workflow が同じ表を使う。
+- **配備の前に検査**：候補・昇格の両方で、資格情報を得る前にこの script が variable を読み、次を確かめる。足りなければ variable の名前（値は出さない）を `::error` に出して止まる。
+  - フラグの値が `true`・`false`・未設定のどれか
+  - 下の「前提」のフラグが ON か。ホストの画面と DB は `enable_host_calendar=true` のときだけ配線されるので、`false` の候補ではどのフラグも ON にできない
+  - 要る設定の形と、Secret の参照が `secret-name:数字version` か
+  - 前提は `apps/web/src/lib/resolve-config.ts` の規則と同じ。加えて、予約にはメールを要る（確認メールと予約ページのため）。`apps/web/src/lib/deploy-runtime-flags.test.ts` が、表の各フラグの出力を `resolveConfig` に通して、起動が失敗せずフラグが ON になることを確かめる
+- **配備後の検証**：候補の revision の環境変数と Secret の参照のうち、表が扱う名前が、script の期待と完全に一致することを確かめる（余分なフラグも欠けも失敗）。昇格のときも variable を読み直して同じ検査をするので、候補を作ったあとで variable を変えると昇格は止まる。
+- **本番の `BOOKINGS_ENABLED` は `false` のまま**：予約のフラグを ON にしても checkout は `UNAVAILABLE` を返す。販売の開始は下の「個別ゲートと切戻し」の「予約・販売」で別に判断する。
+
+| フラグ（Cloud Run） | variable（`PROD_` の後ろ） | 前提 | 設定（variable、`PROD_` の後ろ） | Secret の参照（`PROD_` の後ろ）→ 環境変数 | workflow が入れる値 |
+| --- | --- | --- | --- | --- | --- |
+| `EXPERIENCE_GUEST_BOOKING_ENABLED` | `GUEST_BOOKING_ENABLED` | ホストの画面・DB、メール | `BOOKING_CONSENT_VERSION`、`PRIVACY_POLICY_URL`（任意） | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | — |
+| `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*` | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
+| `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `GUEST_QUESTIONS_ENABLED` | ホストの画面・DB | — | — | — |
+| `EXPERIENCE_TRANSLATION_ENABLED` | `TRANSLATION_ENABLED` | メールか質問 | — | `ANTHROPIC_API_KEY_REF` → `EXPERIENCE_ANTHROPIC_API_KEY` | — |
+| `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `GUEST_REVIEWS_ENABLED` | DB | — | — | — |
+| `EXPERIENCE_HOST_ATTENDANCE_ENABLED` | `HOST_ATTENDANCE_ENABLED` | 予約 | — | — | — |
+| `HOST_SALES_LEDGER_ENABLED` | `HOST_SALES_LEDGER_ENABLED` | ホストの画面・DB | — | — | — |
+| `HOST_SALES_PAYOUTS_ENABLED` | `HOST_SALES_PAYOUTS_ENABLED` | 売上（台帳） | — | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | — |
+| `HOST_NOTIFICATION_SETTINGS_ENABLED` | `HOST_NOTIFICATION_SETTINGS_ENABLED` | ホストの画面・DB | — | — | — |
+| `HOST_PWA_ENABLED` | `HOST_PWA_ENABLED` | ホストの画面 | — | — | — |
+| `HOST_PUSH_ENABLED` | `HOST_PUSH_ENABLED` | PWA・DB | `HOST_PUSH_VAPID_PUBLIC_KEY`、`HOST_PUSH_VAPID_SUBJECT` | `HOST_PUSH_VAPID_PRIVATE_KEY_REF` → `HOST_PUSH_VAPID_PRIVATE_KEY` | `HOST_PUSH_JOB_AUDIENCE`＝サイトの URL、`HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL`＝`experience-host-push@<project>` |
+| `EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED` | `GOOGLE_BUSY_SYNC_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_GOOGLE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-google-jobs@<project>` |
+| `EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED` | `GOOGLE_BOOKING_EVENTS_ENABLED` | ホストの画面・DB | — | — | 上と同じ |
+
+- 「ホストの画面・DB」は本番では `enable_host_calendar=true`（と `PROD_HOST_CALENDAR_READY=true`）。サイトの URL は `https://experience.niho.life`、`<project>` は `niho-app-prd`。
+- 設定の形：同意の版は英数字と `._:+-` の 1〜100 字。From・Reply-To はアドレスか `表示名 <アドレス>`（カンマ・`"`・`<>` なし）。URL は小文字の host の https。VAPID の公開鍵は base64url の P-256、subject は `mailto:` か https。`--set-env-vars` の区切りになるカンマは、どの値にも入れられない。
+- 各 Secret は Secret Manager に作り、実行 ID `experience-runtime` にその Secret だけの `secretAccessor` を付けてから参照を入れる。値と接続情報は GitHub の variable・PR に書かない。
+- job（メール・push・Google）を開くフラグは、呼び手の Cloud Scheduler と、上の名前のサービスアカウント（project の role なし、このサービスの `run.invoker` だけ）を先に作る。workflow はそれらを作らない。
+- 順番：設定と Secret の参照を先に入れ、最後にフラグの variable を `true` にする。`candidate` → 候補 URL で確認 → 同じ variable のまま `promote`。止めるときはフラグを `false` に戻して新しい候補を作るか、前の revision に traffic を戻す。
+
+**フラグを足すとき**（paneB-1・paneB-2 など）：`scripts/deploy/runtime-flags.mjs` の `FLAGS` に 1 項目（Cloud Run の名前、variable、前提、設定・Secret、workflow が入れる値）、`deploy-runtime-flags.test.ts` の `CONFIG_KEY` に 1 行、この表と [stg の表](host-calendar-staging.md#機能のフラグ84) に 1 行。workflow は変えなくてよい。
 
 `EXPERIENCE_PUBLIC_API_VERSION` は初期値 `1.0` を固定する。`1.1` はNIHO側のAPI契約PR #31 と連携B、集合概要を返すniho-app PR #19267が取り込まれた後、stgとprodのv1.1エンドポイントを `verify:live -- --api-version 1.1 --expect-private-meeting-slug <公開概要を持つAFTER_BOOKING合成slug>` で確認し、提供者bio・写真alt・`meetingOverview` と、非公開集合情報が応答に無いことを合成データで確かめてから、専用の変更PRでだけ有効化する。`1.2` はNIHO側の公開カタログ・checkout契約（niho-app #19160/#19161）が取り込まれた後、stgとprodでテーマ・開催日フィルターを `verify:live -- --api-version 1.2 --region kamakura --theme FOOD --available-on <開催予定日> --expect-slug <当日開催の合成slug> --expect-theme-excluded-slug <別テーマで当日開催のslug> --expect-date-excluded-slug <同テーマで別日開催のslug> --expect-private-meeting-slug <公開概要を持つAFTER_BOOKING合成slug>` で確認し、UTM・DNT・checkoutエラーを合成E2Eで検証してから、専用の変更PRでだけ有効化する。API未配備の環境では `1.0` のままにする。
 

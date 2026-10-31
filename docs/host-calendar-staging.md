@@ -98,11 +98,32 @@ Cloud Run `status.url` を取得して `STG_HOST_SERVICE_URL` へそのまま登
 2. 候補のimage/runtime/env/数字Secret参照/Cloud SQL接続設定を検査する。候補のGET smokeはdeployerのID tokenを使う。初回はprivateで検査し、初回昇格後の候補は公開済みserviceの設定を継承する。ID tokenは短命のため、配備後のGET直前に生成する。[auth action公式手順](https://github.com/google-github-actions/auth/blob/main/README.md) に従い `workloadIdentityUser` で生成する。Token Creatorの追加は不要。OAuth、予約作成、migrationは実行しない。
 3. 成功runのSHA・revision・digestを確認し、`action=promote` に同じ値を指定する。対象commitがmainに残り、構成が現在の保護設定と一致することを再確認する。候補を100%にした**後**、stable serviceへの未認証アクセスを許可する。初回placeholderを公開しない。`robots.txt`・host入口・配信revisionを検査し、失敗時は直前のtrafficへ戻す。初回で失敗した場合はIAM checkも有効へ戻す。昇格の成功・失敗いずれでも対象候補のtagを除去する。候補作成/GET検査が失敗した場合も今回runのtagを除去し、別候補のtagは触らない。rollbackやtag除去も失敗した場合は手動readbackして復旧する。
 4. Google Chromeでブラウザ名とstg URLを確認し、合成ホストでNIHOログイン→カレンダー→Google接続→合成busy表示→日程/休止保存→失効/切断→再接続を確認する。別提供者/別userの操作拒否、非OWNERのGoogle接続拒否、古い同期時の受付停止、cookieのHttpOnly/Secure/SameSite、tokenがstorage/公開cache/計測へ出ないことも確認する。ブラウザの画面だけでなく、専用DBへの保存・権限を非公開の管理経路で確認する。
-5. `SITE_INDEXING=block`、`HOST_SIGNUP_MODE=pilot` は固定。`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED=true` のときだけ `true`（Stripe テストモード、下の「旅行者の予約」）、それ以外は `false`。この手順（カレンダー）の受入では、ゲスト予約・販売・本番Google接続を受け入れたとは扱わない（予約は下の受入で扱う）。定期同期workerの配備もこのworkflowの対象外で、同期が古いときの受付停止を確認する。
+5. `SITE_INDEXING=block`、`HOST_SIGNUP_MODE=pilot` は固定。`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED=true` のときだけ `true`（Stripe テストモード、下の「旅行者の予約」）、それ以外は `false`。ほかの機能は下の「[機能のフラグ](#機能のフラグ84)」の Environment Variable で開く（既定は OFF。PWA だけ今までどおり ON）。この手順（カレンダー）の受入では、ゲスト予約・販売・本番Google接続を受け入れたとは扱わない（予約は下の受入で扱う）。定期同期workerの配備もこのworkflowの対象外で、同期が古いときの受付停止を確認する。
 6. 昇格せず破棄する候補は運用担当がtagを除去する。公開済みservice上では0%でもtag URLへアクセスできるため、保留候補のSHA・tag・破棄予定を運用記録で管理し、受入後に未使用tagがないことを確認する。tag除去はrevisionや配信中trafficの削除を意味しない。
 7. #92へはSHA・image digest・テスト項目と成否・未実施理由だけを残す。実ID、DB接続情報、OAuth state/code/token、cookie、Calendar ID、予定の件名/説明/参加者、スクリーンショット内の個人情報を公開しない。
 
 候補GETの成功は、DB/membershipの正しさやGoogle OAuth完了を証明しない。受入が終わるまで #92 をcloseせず、NIHOの旧提供者画面の転送・撤去、本番配備は別の受入に進める。
+
+## 機能のフラグ（#84）
+
+mock で出している機能を http mode で開くフラグを、`host-staging` Environment の Variable `STG_*` で候補 revision に渡す。表・前提・配備前の検査・配備後の検証は本番と同じで、[本番の「機能のフラグ」](production-deploy.md#機能のフラグ84) の表の `PROD_` を `STG_` に読み替える（`scripts/deploy/runtime-flags.mjs`）。staging で違うのは次の点。
+
+- **ホストの画面と DB は常にある**ので、前提の「ホストの画面・DB」はいつも満たす。サイトの URL は `STG_HOST_SERVICE_URL`、`<project>` は `niho-app-stg`。
+- **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
+- **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
+- **Secret の名前を固定**して検査する（`secret-name:数字version`）：
+
+| Environment Variable | Secret 名（値は書かない） | Cloud Run 環境変数 | 使うフラグ |
+| --- | --- | --- | --- |
+| `STG_STRIPE_PLATFORM_SECRET_KEY_REF` | `STRIPE_CONNECT_PLATFORM_SECRET_KEY`（NIHO app 既存、テストの鍵） | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | 予約、売上の入金（`STG_HOST_SALES_PAYOUTS_ENABLED`） |
+| `STG_STRIPE_WEBHOOK_SECRET_REF` | `experience-stg-stripe-webhook-secret` | `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 予約 |
+| `STG_SMTP_HOST_REF`・`STG_SMTP_PORT_REF`・`STG_SMTP_USER_REF`・`STG_SMTP_PASSWORD_REF` | `RECEIPT_DELIVERY_SMTP_HOST`・`…_PORT`・`…_USER`・`…_PASSWORD`（NIHO app 既存） | `EXPERIENCE_SMTP_*` | メール |
+| `STG_ANTHROPIC_API_KEY_REF` | `NIHO_TRANSLATE_ANTHROPIC_API_KEY`（NIHO app 既存） | `EXPERIENCE_ANTHROPIC_API_KEY` | 翻訳 |
+| `STG_HOST_PUSH_VAPID_PRIVATE_KEY_REF` | `experience-stg-host-push-vapid-private-key`（新規） | `HOST_PUSH_VAPID_PRIVATE_KEY` | push（`STG_HOST_PUSH_ENABLED`） |
+
+- 新しい Secret（push の VAPID の秘密鍵）は、管理者が作って runtime `experience-host-stg-runtime` にその Secret だけの `secretAccessor` を付ける。売上の入金は、予約で使う Stripe の鍵（Accessor は `setup-host-staging-guest-booking.sh` が付ける）を読むだけで、新しい Secret は要らない。
+- job を開くフラグ（push：`experience-host-push@niho-app-stg…`、Google の 2 つ：`experience-google-jobs@niho-app-stg…`）は、そのサービスアカウントと Cloud Scheduler を先に作る（メール job の `experience-jobs` と同じく、project の role なし、このサービスの `run.invoker` だけ）。workflow は作らない。
+- 売上の入金（`STG_HOST_SALES_PAYOUTS_ENABLED`）は `STG_HOST_SALES_LEDGER_ENABLED=true` が前提。受入は [host-sales.md](host-sales.md) の「受入」4。
 
 ## 旅行者の予約（Stripe テストモード、#285）
 
@@ -111,28 +132,32 @@ Cloud Run `status.url` を取得して `STG_HOST_SERVICE_URL` へそのまま登
 - staging だけ、旅行者の予約（[guest-booking.md](guest-booking.md)）を Stripe のテストモードで開く（`BOOKINGS_ENABLED=true`）。検索登録は止めたまま（`SITE_INDEXING=block`）。staging の Secret にはテストの鍵だけを入れる。本番は販売を止めたまま（`deploy-production.yml` は変えない）。
 - experience 専用の資格情報は新しく作らず、同じ project にある NIHO app の既存 Secret をそのまま参照する。新しく作る Secret は、このサービスを指す Stripe webhook endpoint の署名鍵 1 つだけ。
 
-切り替えは Environment Variable `STG_GUEST_BOOKING_ENABLED`。未設定・`false` なら revision は今までと同じ（`BOOKINGS_ENABLED=false`、下の値は入れず、下の Variable も検査しない）。`true` のとき、workflow は配備の前に下の Variable をすべて検査し、欠け・形の誤りがあれば配備せずに止まる。配備後の検査は、revision の環境変数と Secret 参照が下の集合と完全に一致することを確かめる（昇格時も同じ。候補の作成後に Variable を変えると昇格は止まる）。
+切り替えは Environment Variable `STG_GUEST_BOOKING_ENABLED`。予約には確認メールと予約ページが要るので、**`STG_GUEST_MAIL_ENABLED=true` も要る**（無ければ配備の前に止まる）。予約前の質問（「Ask the host」）は `STG_GUEST_QUESTIONS_ENABLED=true` で別に開く（2026-11-01 から。それまでは予約の variable だけでメールと質問も開いていた）。どれも未設定・`false` なら revision は今までと同じ（`BOOKINGS_ENABLED=false`、下の値は入れず、下の Variable も検査しない）。`true` のとき、workflow は配備の前に下の Variable をすべて検査し、欠け・形の誤りがあれば配備せずに止まる。配備後の検査は、revision の環境変数と Secret 参照が期待と完全に一致することを確かめる（昇格時も同じ。候補の作成後に Variable を変えると昇格は止まる）。検査とフラグの表は上の「[機能のフラグ](#機能のフラグ84)」と同じ `scripts/deploy/runtime-flags.mjs`。
 
 ### workflow が入れる環境変数
 
 | Cloud Run 環境変数 | 値 |
 | --- | --- |
-| `BOOKINGS_ENABLED`・`EXPERIENCE_GUEST_BOOKING_ENABLED`・`EXPERIENCE_GUEST_MAIL_ENABLED`・`EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `true` |
+| `BOOKINGS_ENABLED`・`EXPERIENCE_GUEST_BOOKING_ENABLED` | `true`（`STG_GUEST_BOOKING_ENABLED=true`） |
+| `EXPERIENCE_GUEST_MAIL_ENABLED` | `true`（`STG_GUEST_MAIL_ENABLED=true`） |
+| `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `true`（`STG_GUEST_QUESTIONS_ENABLED=true`） |
 | `EXPERIENCE_BOOKING_CONSENT_VERSION` | `STG_BOOKING_CONSENT_VERSION` |
 | `EXPERIENCE_MAIL_FROM` / `EXPERIENCE_MAIL_REPLY_TO` | `STG_MAIL_FROM` / `STG_MAIL_REPLY_TO` |
 | `EXPERIENCE_JOBS_AUDIENCE` | `STG_HOST_SERVICE_URL`（OTA watchdog と同じく、サービスのベース URL） |
 | `EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL` | `experience-jobs@niho-app-stg.iam.gserviceaccount.com` |
 | `EXPERIENCE_PRIVACY_POLICY_URL` | `STG_PRIVACY_POLICY_URL`（設定したときだけ） |
 
-翻訳：Environment Variable `STG_TRANSLATION_ENABLED=true`（`STG_GUEST_BOOKING_ENABLED=true` が前提）で `EXPERIENCE_TRANSLATION_ENABLED=true` を入れ、NIHO app の既存の `NIHO_TRANSLATE_ANTHROPIC_API_KEY` を `STG_ANTHROPIC_API_KEY_REF` で参照する（オーナー決定 2026-10-31、experience 専用の key は作らない。[guest-questions.md](guest-questions.md) の「翻訳」）。
+翻訳：Environment Variable `STG_TRANSLATION_ENABLED=true`（`STG_GUEST_MAIL_ENABLED` か `STG_GUEST_QUESTIONS_ENABLED` が `true` であることが前提）で `EXPERIENCE_TRANSLATION_ENABLED=true` を入れ、NIHO app の既存の `NIHO_TRANSLATE_ANTHROPIC_API_KEY` を `STG_ANTHROPIC_API_KEY_REF` で参照する（オーナー決定 2026-10-31、experience 専用の key は作らない。[guest-questions.md](guest-questions.md) の「翻訳」）。
 
-入れないもの：`EXPERIENCE_GUEST_REVIEWS_ENABLED`（レビュー #104/#108 は予約とは別の受入）、`HOST_PUSH_*`（VAPID と push job が未配線）。
+予約の variable では入れないもの：`EXPERIENCE_GUEST_REVIEWS_ENABLED`（レビュー #104/#108 は予約とは別の受入）、`HOST_PUSH_*`。どちらも上の「機能のフラグ」で別に開く。
 
 ### Environment Variables（値は Git に書かない）
 
 | Variable | 形 |
 | --- | --- |
 | `STG_GUEST_BOOKING_ENABLED` | `true` / `false` / 未設定 |
+| `STG_GUEST_MAIL_ENABLED` | `true` / `false` / 未設定（予約には `true` が要る） |
+| `STG_GUEST_QUESTIONS_ENABLED` | `true` / `false` / 未設定 |
 | `STG_BOOKING_CONSENT_VERSION` | 英数字と `._:+-` の 1〜100 字（app は空白なしの印字可能な ASCII を受けるが、`--set-env-vars` の区切りになるカンマを避けるため狭めた） |
 | `STG_MAIL_FROM` | NIHO app の領収書と同じ送信者。`表示名 <アドレス>`（表示名のあとに半角空白 1 つ）かアドレスだけ。表示名にカンマ・`<>"`・改行を入れない |
 | `STG_MAIL_REPLY_TO` | NIHO サポートの Reply-To。形は `STG_MAIL_FROM` と同じ |
@@ -163,12 +188,12 @@ Secret の参照（`secret-name:VERSION`、数字 version だけ。workflow は�
 
    URL が `https://niho-experience-host-stg-….a.run.app` の形でない、または実際の service の URL と違えば止まる。Cloud Scheduler API を有効にし、`experience-stg-stripe-webhook-secret` を version なしで作り、runtime に上の 6 個の Secret だけ resource 単位の `secretAccessor` を付け、`experience-jobs` を project の role なしで作って対象 service の `run.invoker` だけを付け、Scheduler job を作ってすぐ一時停止する（作成時に一時停止で作る flag が無い。その間に 1 回呼ばれても、gate が off なら 404 で何も変えない）。既存の job は検査だけで、変更・再開しない（設定が違えば止まる）。NIHO app の Secret が無ければ止まり、作らない。Secret の値と version を読まず、表示しない。既存の `setup-host-staging.sh` は変えない。
 3. **Secret の version**：Stripe のテストモードで、NIHO のプラットフォームアカウントに webhook endpoint `{STG_HOST_SERVICE_URL}/api/experience/stripe/webhook` を作る。connected account のイベントを受ける（Connect の）endpoint とし、`checkout.session.completed`・`checkout.session.async_payment_succeeded`・`checkout.session.expired`・`checkout.session.async_payment_failed`・`refund.created`・`refund.updated`・`refund.failed` を購読する（[guest-booking.md](guest-booking.md) の「体験の登録と切替」の前提）。署名鍵はこの endpoint からしか出ないので、endpoint を先に作り、その署名鍵を安全な管理端末から `experience-stg-stripe-webhook-secret` に version として足す（標準出力・shell 履歴に出さない）。NIHO app の既存 endpoint とその鍵は変えず、流用しない。NIHO app の 5 個の Secret は値を変えず、NIHO app の stg が使っている数字 version を `gcloud secrets versions list` で確かめる。
-4. **Variables**：`host-staging` Environment に上の Variable と 6 個の `*_REF` を設定し、最後に `STG_GUEST_BOOKING_ENABLED=true` にする。
+4. **Variables**：`host-staging` Environment に上の Variable と 6 個の `*_REF` を設定し、`STG_GUEST_MAIL_ENABLED=true`・`STG_GUEST_QUESTIONS_ENABLED=true` にしてから、最後に `STG_GUEST_BOOKING_ENABLED=true` にする。
 5. **配備**：上の「手動配備と受入」と同じく `candidate` → `promote`。summary は「Stripe test bookings open」と `bookings=true (Stripe test mode)` になる。
 6. **Scheduler の再開**：昇格のあと `gcloud scheduler jobs resume experience-jobs-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる（401 は audience かサービスアカウントの不一致、404 は配信中の revision で gate が off、503 は Google の鍵・DB・SMTP）。
 7. **体験の登録**：合成の提供者・テストの Connect 口座で `scripts/experience/register-site-sale.mjs`（[guest-booking.md](guest-booking.md) の「体験の登録と切替（第9段）」）を流す。`plan` が出す鍵の種類が `test` であることを確かめ、`live` なら止めて Secret の version を見直す。
 
-止めるとき：`stop-sale --yes` で販売条件を消し、仮押さえの期限（35 分）と返金の完了を待つ。Scheduler を一時停止してから `STG_GUEST_BOOKING_ENABLED` を `false` に戻して配備・昇格する。gate を戻すと Stripe の秘密も revision から外れ、それ以降の webhook は処理されない。
+止めるとき：`stop-sale --yes` で販売条件を消し、仮押さえの期限（35 分）と返金の完了を待つ。Scheduler を一時停止してから `STG_GUEST_BOOKING_ENABLED` を `false` に戻して配備・昇格する（出欠の `STG_HOST_ATTENDANCE_ENABLED` も予約が前提なので、先に `false` にする）。gate を戻すと Stripe の秘密も revision から外れ、それ以降の webhook は処理されない。
 
 ### 受入（Stripe テストモード）
 
