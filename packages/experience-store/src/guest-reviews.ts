@@ -67,7 +67,7 @@ export interface GuestReviewInvitation {
   readonly expiresAtUtc: string;
 }
 
-/** One published review, in the shape of ExperienceReview (packages/api-client/src/journey.ts). */
+/** One shown review, in the shape of ExperienceReview (packages/api-client/src/journey.ts). */
 export type PublicGuestReview = {
   id: string;
   rating: 1 | 2 | 3 | 4 | 5;
@@ -76,12 +76,13 @@ export type PublicGuestReview = {
   tags: string[];
   displayName: string;
   originLabel: string | null;
+  /** When it was written, which is when it was published. */
   publishedAt: string;
   fromBooking: true;
   reply: { hostName: string; body: string } | null;
 };
 
-/** The shape of ExperienceReviewsResponse: the summary counts every published review, whatever the limit. */
+/** The shape of ExperienceReviewsResponse: the summary counts every shown review, whatever the limit. */
 export type PublicGuestReviews = {
   summary: { count: number; average: number | null; tags: { label: string; count: number }[] };
   reviews: PublicGuestReview[];
@@ -103,9 +104,8 @@ export interface HostGuestReview {
   readonly bodyJa: string | null;
   readonly language: GuestReviewLanguage;
   readonly noteToHost: string | null;
+  /** When it was written, which is when it was published. */
   readonly submittedAtUtc: string;
-  readonly status: "PENDING" | "PUBLISHED";
-  readonly publishedAtUtc: string | null;
   readonly reply: {
     readonly english: string;
     /** The Japanese the host wrote, or null when they wrote the English directly. */
@@ -244,7 +244,7 @@ function clip(value: string, max: number): string {
 }
 
 const HOST_COLUMNS = `r.id, r.product_id, p.public_title, b.public_booking_id, (b.occurrence_snapshot->>'startUtc')::timestamptz AS session_start_at,
-  r.display_name, r.origin_label, r.rating, r.tags, r.body, r.body_ja, r.language, r.note_to_host, r.submitted_at, r.status, r.published_at,
+  r.display_name, r.origin_label, r.rating, r.tags, r.body, r.body_ja, r.language, r.note_to_host, r.submitted_at,
   r.reply_body, r.reply_body_ja, r.replied_at, r.reply_edited_at, r.reply_revision, r.report_reason, r.report_note, r.reported_at,
   to_char(r.submitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at`;
 const HOST_FROM = `guest_reviews r
@@ -279,8 +279,6 @@ function hostReviewFromRow(row: DbRow): HostGuestReview {
     language: String(row.language) as GuestReviewLanguage,
     noteToHost: nullable(row.note_to_host),
     submittedAtUtc: isoValue(row, "submitted_at"),
-    status: String(row.status) as HostGuestReview["status"],
-    publishedAtUtc: row.published_at === null || row.published_at === undefined ? null : isoValue(row, "published_at"),
     reply,
     report,
   };
@@ -288,7 +286,7 @@ function hostReviewFromRow(row: DbRow): HostGuestReview {
 
 async function hostReview(client: PoolClient, providerId: string, reviewId: string): Promise<HostGuestReview> {
   const result = await client.query<DbRow>(
-    `SELECT ${HOST_COLUMNS} FROM ${HOST_FROM} WHERE r.provider_id = $1 AND r.id = $2::uuid AND r.status IN ('PENDING', 'PUBLISHED')`,
+    `SELECT ${HOST_COLUMNS} FROM ${HOST_FROM} WHERE r.provider_id = $1 AND r.id = $2::uuid AND r.hidden_at IS NULL`,
     [providerId, reviewId],
   );
   if (!result.rows[0]) throw new StoreNotFoundError("guest review");
@@ -309,9 +307,10 @@ function decodeCursor(cursor: unknown): { at: string; id: string } | null {
 
 /**
  * 予約者のレビュー (#104, #108; migration 0027). The review page has no identity: it holds a one-time link
- * that the thank-you email (next slice) gets from `issueInvitation`. The experience page reads published
- * reviews by slug. The host's methods need a current OWNER of the provider. NIHO publishes and hides reviews;
- * this class never does. No guest email, phone or booking name is read here.
+ * that the thank-you email (next slice) gets from `issueInvitation`. A review is shown from the moment it is
+ * written (NIHO does not check it first); the experience page reads them by slug. The host's methods need a
+ * current OWNER of the provider. Once operations set a review's hidden_at in the database, no method shows or
+ * changes it; this class never sets it. No guest email, phone or booking name is read here.
  */
 export class GuestReviewRepository {
   readonly #pool: Pool;
@@ -385,7 +384,7 @@ export class GuestReviewRepository {
   }
 
   /**
-   * The guest's review through a link, PENDING until NIHO checks it. The link takes one review: the same
+   * The guest's review through a link, shown from then on. The link takes one review: the same
    * clientRequestKey again answers `received`; anything else is StoreConflictError, as is a booking that
    * already has a review. Unknown, expired or no longer reviewable: StoreNotFoundError.
    */
@@ -444,8 +443,8 @@ export class GuestReviewRepository {
   /* ---------- the experience page (public) ---------- */
 
   /**
-   * The published reviews of the one PUBLISHED experience with this slug, the latest first, and the summary of
-   * all of them. Null when no experience, or more than one, has the slug.
+   * The shown reviews of the one PUBLISHED experience with this slug, the latest first, and the summary of all
+   * of them. Null when no experience, or more than one, has the slug.
    */
   async listPublishedReviews(productSlug: string, options: { limit?: number } = {}): Promise<PublicGuestReviews | null> {
     if (typeof productSlug !== "string" || productSlug.length < 1 || productSlug.length > 160) return null;
@@ -460,20 +459,20 @@ export class GuestReviewRepository {
     const scope = [product.provider_id, product.id];
     const totals = await this.#pool.query<DbRow>(
       `SELECT count(*)::int AS count, round(avg(rating), 1)::text AS average
-         FROM guest_reviews WHERE provider_id = $1 AND product_id = $2 AND status = 'PUBLISHED'`,
+         FROM guest_reviews WHERE provider_id = $1 AND product_id = $2 AND hidden_at IS NULL`,
       scope,
     );
     const tagCounts = await this.#pool.query<DbRow>(
       `SELECT tag, count(*)::int AS count
          FROM guest_reviews, unnest(tags) AS tag
-        WHERE provider_id = $1 AND product_id = $2 AND status = 'PUBLISHED'
+        WHERE provider_id = $1 AND product_id = $2 AND hidden_at IS NULL
         GROUP BY tag`,
       scope,
     );
     const reviews = await this.#pool.query<DbRow>(
-      `SELECT id, rating, body, tags, display_name, origin_label, published_at, reply_body
-         FROM guest_reviews WHERE provider_id = $1 AND product_id = $2 AND status = 'PUBLISHED'
-        ORDER BY published_at DESC, id DESC LIMIT $3`,
+      `SELECT id, rating, body, tags, display_name, origin_label, submitted_at, reply_body
+         FROM guest_reviews WHERE provider_id = $1 AND product_id = $2 AND hidden_at IS NULL
+        ORDER BY submitted_at DESC, id DESC LIMIT $3`,
       [...scope, limit],
     );
     const count = Number(totals.rows[0]?.count ?? 0);
@@ -498,7 +497,7 @@ export class GuestReviewRepository {
         }),
         displayName: String(row.display_name),
         originLabel: nullable(row.origin_label),
-        publishedAt: isoValue(row, "published_at"),
+        publishedAt: isoValue(row, "submitted_at"),
         fromBooking: true,
         // The English only: the Japanese the host wrote stays in the host console.
         reply: row.reply_body === null || row.reply_body === undefined ? null : { hostName, body: String(row.reply_body) },
@@ -508,7 +507,7 @@ export class GuestReviewRepository {
 
   /* ---------- the host console (OWNER) ---------- */
 
-  /** The provider's reviews, waiting for NIHO or published, the latest first. `cursor` is the previous page's nextCursor. */
+  /** The provider's shown reviews, the latest first. `cursor` is the previous page's nextCursor. */
   async listReviews(actor: HostActor, options: { cursor?: string | null; limit?: number } = {}): Promise<HostGuestReviewPage> {
     const limit = boundedInteger(options.limit ?? GUEST_REVIEW_LIMITS.hostListMax, "limit", 1, GUEST_REVIEW_LIMITS.hostListMax);
     const after = decodeCursor(options.cursor);
@@ -516,7 +515,7 @@ export class GuestReviewRepository {
       await requireOwner(client, actor);
       const result = await client.query<DbRow>(
         `SELECT ${HOST_COLUMNS} FROM ${HOST_FROM}
-          WHERE r.provider_id = $1 AND r.status IN ('PENDING', 'PUBLISHED')
+          WHERE r.provider_id = $1 AND r.hidden_at IS NULL
             AND ($2::timestamptz IS NULL OR (r.submitted_at, r.id) < ($2::timestamptz, $3::uuid))
           ORDER BY r.submitted_at DESC, r.id DESC
           LIMIT $4`,
@@ -530,7 +529,7 @@ export class GuestReviewRepository {
     });
   }
 
-  /** One review. Another provider's, or one NIHO hid, is not found. */
+  /** One review. Another provider's, or a hidden one, is not found. */
   async getReview(actor: HostActor, reviewId: string): Promise<HostGuestReview> {
     const id = uuid(reviewId, "reviewId");
     return withTransaction(this.#pool, async (client) => {
@@ -540,9 +539,9 @@ export class GuestReviewRepository {
   }
 
   /**
-   * 返信: writes the one reply of a published review, or corrects it (it is never removed), when the reply is
-   * still at `expectedRevision` (0: none yet). The same commandId with the same reply answers the review as it
-   * is; anything else that does not match is StoreConflictError, as is a review that is not published.
+   * 返信: writes the one reply of a review, or corrects it (it is never removed), when the reply is still at
+   * `expectedRevision` (0: none yet). The same commandId with the same reply answers the review as it is;
+   * anything else that does not match is StoreConflictError. Another provider's or a hidden one: StoreNotFoundError.
    */
   async saveReply(actor: HostActor, reviewId: string, input: { english: string; japanese: string | null; commandId: string; expectedRevision: number }): Promise<HostGuestReview> {
     const id = uuid(reviewId, "reviewId");
@@ -553,13 +552,12 @@ export class GuestReviewRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
       const locked = await client.query<DbRow>(
-        `SELECT status, reply_revision, reply_command_id, reply_body, reply_body_ja
-           FROM guest_reviews WHERE provider_id = $1 AND id = $2::uuid FOR NO KEY UPDATE`,
+        `SELECT reply_revision, reply_command_id, reply_body, reply_body_ja
+           FROM guest_reviews WHERE provider_id = $1 AND id = $2::uuid AND hidden_at IS NULL FOR NO KEY UPDATE`,
         [actor.providerId, id],
       );
       const row = locked.rows[0];
       if (!row) throw new StoreNotFoundError("guest review");
-      if (row.status !== "PUBLISHED") throw new StoreConflictError("Only a published review takes a reply.");
       if (row.reply_command_id === commandId) {
         if (row.reply_body === english && (row.reply_body_ja ?? null) === japanese) return hostReview(client, actor.providerId, id);
         throw new StoreConflictError("The reply command ID was already used with a different reply.");
@@ -579,8 +577,9 @@ export class GuestReviewRepository {
   }
 
   /**
-   * 報告: tells NIHO about a review, once. The review stays as it is. The same commandId with the same report
-   * answers the review as it is; another report is StoreConflictError, as is a review NIHO hid.
+   * 報告: tells NIHO about a review, once. The review stays shown. The same commandId with the same report
+   * answers the review as it is; another report is StoreConflictError. Another provider's or a hidden one:
+   * StoreNotFoundError.
    */
   async reportReview(actor: HostActor, reviewId: string, input: { reason: GuestReviewReportReason; note?: string | null; commandId: string }): Promise<HostGuestReview> {
     const id = uuid(reviewId, "reviewId");
@@ -591,13 +590,12 @@ export class GuestReviewRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
       const locked = await client.query<DbRow>(
-        `SELECT status, report_reason, report_note, report_command_id
-           FROM guest_reviews WHERE provider_id = $1 AND id = $2::uuid FOR NO KEY UPDATE`,
+        `SELECT report_reason, report_note, report_command_id
+           FROM guest_reviews WHERE provider_id = $1 AND id = $2::uuid AND hidden_at IS NULL FOR NO KEY UPDATE`,
         [actor.providerId, id],
       );
       const row = locked.rows[0];
       if (!row) throw new StoreNotFoundError("guest review");
-      if (row.status === "HIDDEN") throw new StoreConflictError("The review is no longer shown.");
       if (row.report_reason !== null) {
         const same = row.report_command_id === commandId && row.report_reason === reason && (row.report_note ?? null) === note;
         if (!same) throw new StoreConflictError("The review was already reported.");

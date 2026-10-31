@@ -365,14 +365,17 @@ describe("database invariants", () => {
     assert.match(reviews, /rating smallint NOT NULL CHECK \(rating BETWEEN 1 AND 5\)/);
     assert.match(reviews, /cardinality\(tags\) <= 5\s+AND tags <@ ARRAY\['CALM_ATMOSPHERE', 'GOOD_FOR_BEGINNERS', 'EASY_TO_FIND', 'GREAT_HOST', 'GOOD_VALUE'\]::text\[\]/);
     assert.match(reviews, /position\('@' IN display_name\) = 0/);
-    assert.match(reviews, /status IN \('PENDING', 'PUBLISHED', 'HIDDEN'\)/);
     assert.match(reviews, /report_reason IN \('PERSONAL', 'UNTRUE', 'INAPPROPRIATE', 'OTHER'\)/);
-    assert.match(reviews, /CHECK \(reply_body IS NULL OR published_at IS NOT NULL\)/);
+    // Shown once written: no review status or publication step, only operations' hidden_at.
+    assert.match(reviews, /^\s+hidden_at timestamptz,$/m);
+    assert.doesNotMatch(reviews, /^\s+(status|published_at)\s/m);
+    assert.doesNotMatch(sql, /PENDING|'PUBLISHED'|'HIDDEN'|published_at/);
     // No column for the booker's contact details or name: the shown name is the guest's own.
     assert.doesNotMatch(reviews, /^\s+\w*(email|phone|guest_name)\w*\s/im);
     assert.match(sql, /CREATE TRIGGER guest_reviews_protect\s+BEFORE UPDATE ON guest_reviews/);
-    assert.match(sql, /a review does not go back to PENDING/);
-    assert.match(sql, /ON guest_reviews \(provider_id, product_id, published_at DESC, id DESC\)\s+WHERE status = 'PUBLISHED'/);
+    assert.match(sql, /a review is reported once/);
+    assert.match(sql, /ON guest_reviews \(provider_id, product_id, submitted_at DESC, id DESC\)\s+WHERE hidden_at IS NULL/);
+    assert.match(sql, /ON guest_reviews \(provider_id, submitted_at DESC, id DESC\);/);
     const links = sql.match(/CREATE TABLE guest_review_invitations \(([\s\S]*?)\n\);/)?.[1] ?? "";
     assert.match(links, /token_hash bytea PRIMARY KEY CHECK \(octet_length\(token_hash\) = 32\)/);
     assert.match(links, /FOREIGN KEY \(provider_id, booking_id\) REFERENCES bookings\(provider_id, id\)/);

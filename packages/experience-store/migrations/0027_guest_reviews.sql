@@ -1,10 +1,12 @@
 BEGIN;
 
 -- 予約者のレビュー (#104 traveler, #108 host; owner decisions 2026-10-22 / 2026-10-31): reviews live in the
--- experience DB. Only the guest of a booking made here writes one, through a one-time link, and NIHO checks it
--- before it is published. One review per booking. The name shown is what the guest typed when writing (the
--- booking's guest details are erased later and are never read for it). No email, phone or IP address is kept.
--- Additive only (new tables): no current code reads or writes them.
+-- experience DB. Only the guest of a booking made here writes one, through a one-time link. One review per
+-- booking. A review is shown as soon as it is written: NIHO does not check it first, and a host's report does
+-- not hide it. When operations must take one down, they set hidden_at in the database (there is no screen for
+-- it). The name shown is what the guest typed when writing (the booking's guest details are erased later and are
+-- never read for it). No email, phone or IP address is kept. Additive only (new tables): no current code reads
+-- or writes them.
 CREATE TABLE guest_reviews (
   id uuid PRIMARY KEY,
   provider_id text NOT NULL,
@@ -30,10 +32,10 @@ CREATE TABLE guest_reviews (
   ),
   -- あなただけへのメモ: for the host only, never published.
   note_to_host text CHECK (note_to_host IS NULL OR (btrim(note_to_host) <> '' AND length(note_to_host) <= 500)),
-  -- PENDING until NIHO checks it; HIDDEN is NIHO taking it down. The runtime never publishes a review.
-  status text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PUBLISHED', 'HIDDEN')),
+  -- Also when the review was published.
   submitted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  published_at timestamptz,
+  -- Null while shown. Set by operations in the database only; the runtime never sets it.
+  hidden_at timestamptz,
   -- 返信: the host's one public reply, corrected but never removed. reply_body is the English the page shows;
   -- reply_body_ja the Japanese the host wrote, or null when they wrote the English directly. reply_revision
   -- counts the saves (0: no reply); reply_command_id is the last save's idempotency key.
@@ -55,8 +57,6 @@ CREATE TABLE guest_reviews (
   UNIQUE (provider_id, booking_id),
   FOREIGN KEY (provider_id, product_id) REFERENCES experience_products(provider_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (provider_id, booking_id) REFERENCES bookings(provider_id, id) ON DELETE RESTRICT,
-  CHECK (status <> 'PENDING' OR published_at IS NULL),
-  CHECK (status <> 'PUBLISHED' OR published_at IS NOT NULL),
   CHECK (
     (reply_body IS NULL) = (reply_revision = 0)
     AND (reply_body IS NULL) = (replied_at IS NULL)
@@ -65,8 +65,6 @@ CREATE TABLE guest_reviews (
   ),
   CHECK (reply_body_ja IS NULL OR reply_body IS NOT NULL),
   CHECK ((reply_edited_at IS NOT NULL) = (reply_revision >= 2)),
-  -- Only a published review is answered.
-  CHECK (reply_body IS NULL OR published_at IS NOT NULL),
   CHECK (
     (report_reason IS NULL) = (report_command_id IS NULL)
     AND (report_reason IS NULL) = (reported_by_niho_user_id IS NULL)
@@ -75,17 +73,17 @@ CREATE TABLE guest_reviews (
   CHECK (report_note IS NULL OR report_reason IS NOT NULL)
 );
 
--- The experience page: its published reviews, the latest first.
+-- The experience page: its shown reviews, the latest first.
 CREATE INDEX guest_reviews_public_idx
-  ON guest_reviews (provider_id, product_id, published_at DESC, id DESC)
-  WHERE status = 'PUBLISHED';
+  ON guest_reviews (provider_id, product_id, submitted_at DESC, id DESC)
+  WHERE hidden_at IS NULL;
 
 -- レビュー's list: the provider's reviews, the latest first (keyset on submitted_at, id).
 CREATE INDEX guest_reviews_host_list_idx
   ON guest_reviews (provider_id, submitted_at DESC, id DESC);
 
--- What the guest wrote stays as it was. The translation, the publication and the report are set once; a
--- review never goes back to PENDING; the first reply keeps its date and author, and a reply is never removed.
+-- What the guest wrote stays as it was. The translation and the report are set once; the first reply keeps its
+-- date and author, and a reply is never removed.
 CREATE FUNCTION protect_guest_reviews() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -99,15 +97,6 @@ BEGIN
   END IF;
   IF OLD.body_ja IS NOT NULL AND NEW.body_ja IS DISTINCT FROM OLD.body_ja THEN
     RAISE EXCEPTION 'a review translation is set once' USING ERRCODE = 'check_violation';
-  END IF;
-  IF OLD.published_at IS NOT NULL AND NEW.published_at IS DISTINCT FROM OLD.published_at THEN
-    RAISE EXCEPTION 'a review is published once' USING ERRCODE = 'check_violation';
-  END IF;
-  IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
-       (OLD.status = 'PENDING' AND NEW.status IN ('PUBLISHED', 'HIDDEN'))
-       OR (OLD.status = 'PUBLISHED' AND NEW.status = 'HIDDEN')
-       OR (OLD.status = 'HIDDEN' AND NEW.status = 'PUBLISHED')) THEN
-    RAISE EXCEPTION 'a review does not go back to PENDING' USING ERRCODE = 'check_violation';
   END IF;
   IF OLD.report_reason IS NOT NULL AND (
        NEW.report_reason IS DISTINCT FROM OLD.report_reason OR NEW.report_note IS DISTINCT FROM OLD.report_note

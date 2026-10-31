@@ -133,9 +133,9 @@ async function reviewOf(context: Context, value: SampleBooking, overrides: Parti
   return result.rows[0]!.id;
 }
 
-/** NIHO publishes a review (the store has no way to). */
-async function publish(pool: Pool, reviewId: string, daysAgo = 0): Promise<void> {
-  await pool.query("UPDATE guest_reviews SET status = 'PUBLISHED', published_at = clock_timestamp() - make_interval(days => $2) WHERE id = $1", [reviewId, daysAgo]);
+/** Operations hide a review in the database (the store has no way to). */
+async function hide(pool: Pool, reviewId: string): Promise<void> {
+  await pool.query("UPDATE guest_reviews SET hidden_at = clock_timestamp() WHERE id = $1", [reviewId]);
 }
 
 async function insertRaw(pool: Pool, bookingId: string, overrides: Record<string, unknown> = {}): Promise<void> {
@@ -156,7 +156,7 @@ async function moveEnd(pool: Pool, value: SampleBooking, endUtc: string): Promis
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
 describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefined }, () => {
-  it("keeps one review per booking, what the guest wrote, and NIHO's publication as the database requires", async () => {
+  it("keeps one review per booking and what the guest wrote, the report and the first reply as the database requires", async () => {
     await withSchema(async (context) => {
       const { pool } = context;
       const first = await booking(pool);
@@ -168,7 +168,7 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       for (const bad of [
         { rating: 0 }, { rating: 6 }, { tags: ["PRICE"] }, { tags: ["GREAT_HOST", "GREAT_HOST", "GOOD_VALUE", "EASY_TO_FIND", "CALM_ATMOSPHERE", "GOOD_FOR_BEGINNERS"] },
         { display_name: "sample@guest" }, { display_name: " Sample" }, { display_name: "Sample\u0007" }, { body: " " }, { language: "FR" },
-        { status: "PUBLISHED" }, { report_reason: "OTHER" }, { report_note: "Synthetic" },
+        { report_reason: "OTHER" }, { report_note: "Synthetic" }, { reply_body: "Thanks" },
       ]) {
         await assert.rejects(() => insertRaw(pool, fresh.id, bad), { code: "23514" }, JSON.stringify(bad));
       }
@@ -177,15 +177,10 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET body = 'Changed' WHERE id = $1", [reviewId]), { code: "23514", message: /immutable/ });
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET tags = '{GOOD_VALUE}' WHERE id = $1", [reviewId]), { code: "23514", message: /immutable/ });
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET rating = 1 WHERE id = $1", [reviewId]), { code: "23514", message: /immutable/ });
-      // A reply only on a published review.
-      await assert.rejects(
-        () => pool.query(
-          `UPDATE guest_reviews SET reply_body = 'Thanks', reply_revision = 1, replied_at = clock_timestamp(), reply_author_niho_user_id = 'owner-a',
-                  reply_command_id = $2 WHERE id = $1`,
-          [reviewId, randomUUID()],
-        ),
-        { code: "23514" },
-      );
+      await assert.rejects(() => pool.query("UPDATE guest_reviews SET submitted_at = clock_timestamp() WHERE id = $1", [reviewId]), { code: "23514", message: /immutable/ });
+      // Operations hide a review, and show it again, in the database alone.
+      await pool.query("UPDATE guest_reviews SET hidden_at = clock_timestamp() WHERE id = $1", [reviewId]);
+      await pool.query("UPDATE guest_reviews SET hidden_at = NULL WHERE id = $1", [reviewId]);
       // A report is all or nothing, and then stays.
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET report_reason = 'OTHER' WHERE id = $1", [reviewId]), { code: "23514" });
       await pool.query(
@@ -193,19 +188,15 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         [reviewId, randomUUID()],
       );
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET report_reason = 'UNTRUE' WHERE id = $1", [reviewId]), { code: "23514", message: /reported once/ });
-      // Published once, never back to PENDING; HIDDEN and back is NIHO's.
-      await publish(pool, reviewId);
-      await assert.rejects(() => pool.query("UPDATE guest_reviews SET status = 'PENDING' WHERE id = $1", [reviewId]), { code: "23514", message: /back to PENDING/ });
-      await assert.rejects(() => pool.query("UPDATE guest_reviews SET published_at = clock_timestamp() WHERE id = $1", [reviewId]), { code: "23514", message: /published once/ });
-      await pool.query("UPDATE guest_reviews SET status = 'HIDDEN' WHERE id = $1", [reviewId]);
-      await assert.rejects(() => pool.query("UPDATE guest_reviews SET status = 'PENDING', published_at = NULL WHERE id = $1", [reviewId]), { code: "23514" });
-      await pool.query("UPDATE guest_reviews SET status = 'PUBLISHED' WHERE id = $1", [reviewId]);
+      await assert.rejects(() => pool.query("UPDATE guest_reviews SET reported_at = clock_timestamp() WHERE id = $1", [reviewId]), { code: "23514", message: /reported once/ });
       // The translation is set once.
       await pool.query("UPDATE guest_reviews SET body_ja = '穏やかで素敵な午後でした。' WHERE id = $1", [reviewId]);
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET body_ja = '別の訳' WHERE id = $1", [reviewId]), { code: "23514", message: /translation/ });
-      // The first reply keeps its author and date, and a reply is never removed.
+      // The first reply keeps its author and date, its revision only grows, and a reply is never removed.
       await context.reviews.saveReply(ownerA, reviewId, { english: "Thank you.", japanese: null, commandId: randomUUID(), expectedRevision: 0 });
       await assert.rejects(() => pool.query("UPDATE guest_reviews SET reply_author_niho_user_id = 'editor-a' WHERE id = $1", [reviewId]), { code: "23514", message: /first reply/ });
+      await assert.rejects(() => pool.query("UPDATE guest_reviews SET replied_at = clock_timestamp() WHERE id = $1", [reviewId]), { code: "23514", message: /first reply/ });
+      await assert.rejects(() => pool.query("UPDATE guest_reviews SET reply_revision = 0 WHERE id = $1", [reviewId]), { code: "23514", message: /only grows/ });
       await assert.rejects(
         () => pool.query(
           `UPDATE guest_reviews SET reply_body = NULL, reply_body_ja = NULL, reply_revision = 0, replied_at = NULL, reply_author_niho_user_id = NULL,
@@ -267,13 +258,13 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       await assert.rejects(() => reviews.submitReview(issued.token, input()), StoreConflictError);
       assert.equal(await reviews.openInvitation(issued.token), null);
       const stored = await pool.query(
-        "SELECT rating, body, tags, display_name, origin_label, note_to_host, language, status, published_at, reply_revision, r::text AS row FROM guest_reviews r",
+        "SELECT rating, body, tags, display_name, origin_label, note_to_host, language, hidden_at, reply_revision, r::text AS row FROM guest_reviews r",
       );
       assert.equal(stored.rows.length, 1);
       const { row, ...columns } = stored.rows[0];
       assert.deepEqual(columns, {
         rating: 4, body: "A calm and lovely afternoon.\nThank you!", tags: ["CALM_ATMOSPHERE", "GREAT_HOST"], display_name: "Sample Guest",
-        origin_label: "United Kingdom", note_to_host: "Sample note for the host", language: "EN", status: "PENDING", published_at: null, reply_revision: 0,
+        origin_label: "United Kingdom", note_to_host: "Sample note for the host", language: "EN", hidden_at: null, reply_revision: 0,
       });
       // Never the booker's name, email or phone.
       assert.doesNotMatch(row, /Sample Booker|booker@example\.com|\+81/);
@@ -342,25 +333,21 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
     });
   });
 
-  it("shows only the published reviews of one published experience, with a summary of all of them", async () => {
+  it("shows a review as soon as it is written, on its own published experience only, with a summary of all shown", async () => {
     await withSchema(async (context) => {
       const { pool, reviews } = context;
       const oldest = await reviewOf(context, await booking(pool), { rating: 5, tags: ["GREAT_HOST", "CALM_ATMOSPHERE"], originLabel: "United Kingdom" });
+      // Written, so shown: nobody publishes it.
+      assert.deepEqual((await reviews.listPublishedReviews("sample-tea"))?.reviews.map((item) => item.id), [oldest]);
       const middle = await reviewOf(context, await booking(pool), { rating: 4, tags: ["GREAT_HOST"], noteToHost: "Sample private note" });
       const newest = await reviewOf(context, await booking(pool), { rating: 4, tags: ["GOOD_VALUE"] });
-      const pending = await reviewOf(context, await booking(pool), { rating: 1 });
-      const hidden = await reviewOf(context, await booking(pool), { rating: 1 });
-      await publish(pool, oldest, 3);
-      await publish(pool, middle, 2);
-      await publish(pool, newest, 1);
-      await pool.query("UPDATE guest_reviews SET status = 'HIDDEN' WHERE id = $1", [hidden]);
+      // A hidden one counts nowhere: with its 1 star the average would be 3.5.
+      const hidden = await reviewOf(context, await booking(pool), { rating: 1, tags: ["EASY_TO_FIND"] });
+      await hide(pool, hidden);
       const walk = await reviewOf(context, await booking(pool, { productId: "walk" }), { rating: 2 });
-      await publish(pool, walk);
       const river = await reviewOf(context, await booking(pool, { providerId: "provider-b", productId: "river" }), { rating: 3 });
-      await publish(pool, river);
-      await publish(pool, await reviewOf(context, await booking(pool, { productId: "dup" })));
-      const draftBooking = await booking(pool, { productId: "draft" });
-      await publish(pool, await reviewOf(context, draftBooking));
+      await reviewOf(context, await booking(pool, { productId: "dup" }));
+      await reviewOf(context, await booking(pool, { productId: "draft" }));
       const reply = await reviews.saveReply(ownerA, middle, { english: "Thank you for coming.", japanese: "来てくださってありがとう。", commandId: randomUUID(), expectedRevision: 0 });
       assert.equal(reply.reply?.revision, 1);
 
@@ -372,7 +359,7 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         tags: [{ label: "Great host", count: 2 }, { label: "Calm atmosphere", count: 1 }, { label: "Good value", count: 1 }],
       });
       assert.deepEqual(page.reviews.map((item) => item.id), [newest, middle, oldest]);
-      assert.ok(!page.reviews.some((item) => item.id === pending || item.id === hidden));
+      assert.ok(!page.reviews.some((item) => item.id === hidden));
       const [first, second, third] = page.reviews;
       assert.deepEqual(Object.keys(first!).sort(), ["body", "displayName", "fromBooking", "id", "originLabel", "publishedAt", "rating", "reply", "tags"]);
       assert.deepEqual(second?.reply, { hostName: "Sample Seller A", body: "Thank you for coming." });
@@ -381,6 +368,9 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         id: oldest, rating: 5, body: "A calm and lovely afternoon.", tags: ["Calm atmosphere", "Great host"], displayName: "Sample Guest",
         originLabel: "United Kingdom", publishedAt: third?.publishedAt, fromBooking: true, reply: null,
       });
+      // Published when written.
+      const written = await pool.query<{ submitted_at: Date }>("SELECT submitted_at FROM guest_reviews WHERE id = $1", [oldest]);
+      assert.equal(third?.publishedAt, written.rows[0]?.submitted_at.toISOString());
       assert.match(third!.publishedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
       assert.ok(Date.parse(second!.publishedAt) > Date.parse(third!.publishedAt));
       // Never the host's Japanese, the private note, the booking, the guest's details or the provider's ids.
@@ -401,7 +391,6 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
 
       // A seller name longer than a review's name limit is cut to fit it.
       const long = await reviewOf(context, await booking(pool, { productId: "long" }));
-      await publish(pool, long);
       await reviews.saveReply(ownerA, long, { english: "Thanks!", japanese: null, commandId: randomUUID(), expectedRevision: 0 });
       const longPage = await reviews.listPublishedReviews("sample-long");
       assert.equal(longPage?.reviews[0]?.reply?.hostName, LONG_SELLER.slice(0, 60));
@@ -412,17 +401,15 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
   it("lets only the OWNER read, answer and report the provider's reviews, never with the booker's details", async () => {
     await withSchema(async (context) => {
       const { pool, reviews } = context;
-      const pendingBooking = await booking(pool);
-      await bookerDetails(pool, pendingBooking);
-      const pending = await reviewOf(context, pendingBooking, { noteToHost: "Sample private note", language: "JA", tags: ["GOOD_VALUE", "EASY_TO_FIND"] });
-      const publishedBooking = await booking(pool);
-      await bookerDetails(pool, publishedBooking);
-      const published = await reviewOf(context, publishedBooking);
-      await publish(pool, published);
+      const firstBooking = await booking(pool);
+      await bookerDetails(pool, firstBooking);
+      const first = await reviewOf(context, firstBooking, { noteToHost: "Sample private note", language: "JA", tags: ["GOOD_VALUE", "EASY_TO_FIND"] });
+      const secondBooking = await booking(pool);
+      await bookerDetails(pool, secondBooking);
+      const second = await reviewOf(context, secondBooking);
       const hidden = await reviewOf(context, await booking(pool));
-      await pool.query("UPDATE guest_reviews SET status = 'HIDDEN' WHERE id = $1", [hidden]);
+      await hide(pool, hidden);
       const river = await reviewOf(context, await booking(pool, { providerId: "provider-b", productId: "river" }));
-      await publish(pool, river);
 
       const reply = { english: "Thank you for coming.", japanese: "来てくださってありがとう。", commandId: randomUUID(), expectedRevision: 0 };
       const report = { reason: "PERSONAL" as const, note: "It names a person.", commandId: randomUUID() };
@@ -435,75 +422,83 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         { ...ownerA, calendarScope: "OPERATOR" as const },
       ]) {
         await assert.rejects(() => reviews.listReviews(actor), StoreAccessDeniedError);
-        await assert.rejects(() => reviews.getReview(actor, published), StoreAccessDeniedError);
-        await assert.rejects(() => reviews.saveReply(actor, published, reply), StoreAccessDeniedError);
-        await assert.rejects(() => reviews.reportReview(actor, published, report), StoreAccessDeniedError);
+        await assert.rejects(() => reviews.getReview(actor, second), StoreAccessDeniedError);
+        await assert.rejects(() => reviews.saveReply(actor, second, reply), StoreAccessDeniedError);
+        await assert.rejects(() => reviews.reportReview(actor, second, report), StoreAccessDeniedError);
       }
 
+      // Written, so listed: nothing stands between the guest and the host.
       const list = await reviews.listReviews(ownerA);
       assert.equal(list.nextCursor, null);
-      assert.deepEqual(list.reviews.map((item) => [item.id, item.status]), [[published, "PUBLISHED"], [pending, "PENDING"]]);
-      const waiting = list.reviews[1]!;
-      assert.deepEqual(waiting, {
-        id: pending, productId: "tea", productTitle: "Synthetic tea", bookingPublicId: pendingBooking.publicId, sessionStartUtc: pendingBooking.startUtc,
+      assert.deepEqual(list.reviews.map((item) => item.id), [second, first]);
+      const earliest = list.reviews[1]!;
+      assert.deepEqual(earliest, {
+        id: first, productId: "tea", productTitle: "Synthetic tea", bookingPublicId: firstBooking.publicId, sessionStartUtc: firstBooking.startUtc,
         reviewerName: "Sample Guest", reviewerOrigin: null, rating: 5, tags: ["EASY_TO_FIND", "GOOD_VALUE"], body: "A calm and lovely afternoon.", bodyJa: null,
-        language: "JA", noteToHost: "Sample private note", submittedAtUtc: waiting.submittedAtUtc, status: "PENDING", publishedAtUtc: null, reply: null, report: null,
+        language: "JA", noteToHost: "Sample private note", submittedAtUtc: earliest.submittedAtUtc, reply: null, report: null,
       } satisfies HostGuestReview);
       assert.doesNotMatch(JSON.stringify(list), /Sample Booker|booker@example\.com|\+81|owner-a/);
       assert.deepEqual((await reviews.listReviews(ownerB)).reviews.map((item) => item.id), [river]);
-      // Another provider's, one NIHO hid, or none at all is not found.
-      for (const id of [river, hidden, randomUUID()]) await assert.rejects(() => reviews.getReview(ownerA, id), StoreNotFoundError);
-      await assert.rejects(() => reviews.getReview(ownerA, "not-a-uuid"), StoreValidationError);
-      for (const id of [river, randomUUID()]) {
+      // Another provider's, a hidden one, or none at all is not found.
+      for (const id of [river, hidden, randomUUID()]) {
+        await assert.rejects(() => reviews.getReview(ownerA, id), StoreNotFoundError);
         await assert.rejects(() => reviews.saveReply(ownerA, id, reply), StoreNotFoundError);
         await assert.rejects(() => reviews.reportReview(ownerA, id, report), StoreNotFoundError);
       }
+      await assert.rejects(() => reviews.getReview(ownerA, "not-a-uuid"), StoreValidationError);
 
-      // 返信: only on a published review; the same command once; a stale revision is refused.
-      await assert.rejects(() => reviews.saveReply(ownerA, pending, reply), StoreConflictError);
-      await assert.rejects(() => reviews.saveReply(ownerA, hidden, reply), StoreConflictError);
-      const answered = await reviews.saveReply(ownerA, published, reply);
+      // 返信: on any shown review; the same command once; a stale revision is refused.
+      const answered = await reviews.saveReply(ownerA, second, reply);
       assert.equal(answered.reply?.english, "Thank you for coming.");
       assert.equal(answered.reply?.japanese, "来てくださってありがとう。");
       assert.equal(answered.reply?.revision, 1);
       assert.equal(answered.reply?.editedAtUtc, null);
-      assert.deepEqual(await reviews.saveReply(ownerA, published, reply), answered);
-      await assert.rejects(() => reviews.saveReply(ownerA, published, { ...reply, english: "Other words." }), StoreConflictError);
-      await assert.rejects(() => reviews.saveReply(ownerA, published, { ...reply, commandId: randomUUID() }), StoreConflictError);
-      const corrected = await reviews.saveReply(ownerA, published, { english: "Thank you so much for coming.", japanese: null, commandId: randomUUID(), expectedRevision: 1 });
+      assert.deepEqual(await reviews.saveReply(ownerA, second, reply), answered);
+      await assert.rejects(() => reviews.saveReply(ownerA, second, { ...reply, english: "Other words." }), StoreConflictError);
+      await assert.rejects(() => reviews.saveReply(ownerA, second, { ...reply, commandId: randomUUID() }), StoreConflictError);
+      const correction = { english: "Thank you so much for coming.", japanese: null, commandId: randomUUID(), expectedRevision: 1 };
+      const corrected = await reviews.saveReply(ownerA, second, correction);
       assert.equal(corrected.reply?.revision, 2);
       assert.equal(corrected.reply?.japanese, null);
       assert.equal(corrected.reply?.repliedAtUtc, answered.reply?.repliedAtUtc);
       assert.ok(corrected.reply?.editedAtUtc && Date.parse(corrected.reply.editedAtUtc) >= Date.parse(answered.reply!.repliedAtUtc));
-      await assert.rejects(() => reviews.saveReply(ownerA, published, { ...reply, commandId: randomUUID(), expectedRevision: 1 }), StoreConflictError);
+      assert.deepEqual(await reviews.saveReply(ownerA, second, correction), corrected);
+      await assert.rejects(() => reviews.saveReply(ownerA, second, { ...reply, commandId: randomUUID(), expectedRevision: 1 }), StoreConflictError);
       for (const bad of [{ english: " " }, { english: "x".repeat(2001) }, { japanese: "x".repeat(2001) }, { expectedRevision: -1 }, { commandId: "not-a-uuid" }]) {
-        await assert.rejects(() => reviews.saveReply(ownerA, published, { ...reply, ...bad }), StoreValidationError);
+        await assert.rejects(() => reviews.saveReply(ownerA, second, { ...reply, ...bad }), StoreValidationError);
       }
-      const authors = await pool.query("SELECT reply_author_niho_user_id, reply_revision FROM guest_reviews WHERE id = $1", [published]);
+      const authors = await pool.query("SELECT reply_author_niho_user_id, reply_revision FROM guest_reviews WHERE id = $1", [second]);
       assert.deepEqual(authors.rows, [{ reply_author_niho_user_id: "owner-a", reply_revision: 2 }]);
       // English only from the start.
       const plain = await reviewOf(context, await booking(pool));
-      await publish(pool, plain);
       assert.equal((await reviews.saveReply(ownerA, plain, { english: "See you again.", japanese: "", commandId: randomUUID(), expectedRevision: 0 })).reply?.japanese, null);
 
-      // 報告: once per review, the review left as it is.
-      await assert.rejects(() => reviews.reportReview(ownerA, hidden, report), StoreConflictError);
-      await assert.rejects(() => reviews.reportReview(ownerA, pending, { ...report, reason: "SPAM" as never }), StoreValidationError);
-      await assert.rejects(() => reviews.reportReview(ownerA, pending, { ...report, note: "x".repeat(501) }), StoreValidationError);
-      const reported = await reviews.reportReview(ownerA, pending, report);
-      assert.equal(reported.status, "PENDING");
+      // 報告: once per review, and the review stays shown.
+      await assert.rejects(() => reviews.reportReview(ownerA, first, { ...report, reason: "SPAM" as never }), StoreValidationError);
+      await assert.rejects(() => reviews.reportReview(ownerA, first, { ...report, note: "x".repeat(501) }), StoreValidationError);
+      const reported = await reviews.reportReview(ownerA, first, report);
       assert.equal(reported.report?.reason, "PERSONAL");
       assert.equal(reported.report?.note, "It names a person.");
-      assert.deepEqual(await reviews.reportReview(ownerA, pending, report), reported);
-      await assert.rejects(() => reviews.reportReview(ownerA, pending, { ...report, note: "Other words." }), StoreConflictError);
-      await assert.rejects(() => reviews.reportReview(ownerA, pending, { ...report, commandId: randomUUID() }), StoreConflictError);
-      const flagged = await reviews.reportReview(ownerA, published, { reason: "UNTRUE", commandId: randomUUID() });
-      assert.equal(flagged.status, "PUBLISHED");
+      assert.deepEqual(await reviews.reportReview(ownerA, first, report), reported);
+      await assert.rejects(() => reviews.reportReview(ownerA, first, { ...report, note: "Other words." }), StoreConflictError);
+      await assert.rejects(() => reviews.reportReview(ownerA, first, { ...report, commandId: randomUUID() }), StoreConflictError);
+      const untrue = { reason: "UNTRUE" as const, commandId: randomUUID() };
+      const flagged = await reviews.reportReview(ownerA, second, untrue);
       assert.equal(flagged.report?.note, null);
       assert.equal(flagged.reply?.revision, 2);
-      const states = await pool.query("SELECT id, status FROM guest_reviews WHERE id = ANY($1::uuid[]) ORDER BY submitted_at", [[pending, published]]);
-      assert.deepEqual(states.rows, [{ id: pending, status: "PENDING" }, { id: published, status: "PUBLISHED" }]);
-      assert.equal((await reviews.listPublishedReviews("sample-tea"))?.summary.count, 2);
+      assert.deepEqual((await reviews.listPublishedReviews("sample-tea"))?.reviews.map((item) => item.id), [plain, second, first]);
+      assert.deepEqual((await reviews.listReviews(ownerA)).reviews.map((item) => item.id), [plain, second, first]);
+
+      // Hidden in the database: gone from the page, the list, the reply and the report, retries included.
+      await hide(pool, second);
+      const page = await reviews.listPublishedReviews("sample-tea");
+      assert.deepEqual(page?.reviews.map((item) => item.id), [plain, first]);
+      assert.equal(page?.summary.count, 2);
+      assert.deepEqual((await reviews.listReviews(ownerA)).reviews.map((item) => item.id), [plain, first]);
+      await assert.rejects(() => reviews.getReview(ownerA, second), StoreNotFoundError);
+      await assert.rejects(() => reviews.saveReply(ownerA, second, correction), StoreNotFoundError);
+      await assert.rejects(() => reviews.saveReply(ownerA, second, { ...correction, commandId: randomUUID(), expectedRevision: 2 }), StoreNotFoundError);
+      await assert.rejects(() => reviews.reportReview(ownerA, second, untrue), StoreNotFoundError);
 
       // Pages, the latest first, each review once.
       for (let index = 0; index < 3; index += 1) await reviewOf(context, await booking(pool));
@@ -515,9 +510,9 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         seen.push(...next.reviews.map((item) => item.id));
         cursor = next.nextCursor;
       } while (cursor);
-      assert.equal(seen.length, 6);
-      assert.equal(new Set(seen).size, 6);
-      assert.deepEqual(seen.slice(-3), [plain, published, pending]);
+      assert.equal(seen.length, 5);
+      assert.equal(new Set(seen).size, 5);
+      assert.deepEqual(seen.slice(-2), [plain, first]);
       await assert.rejects(() => reviews.listReviews(ownerA, { cursor: "bm90LWEtY3Vyc29y" }), StoreValidationError);
       await assert.rejects(() => reviews.listReviews(ownerA, { limit: 101 }), StoreValidationError);
     });
