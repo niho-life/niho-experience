@@ -354,7 +354,9 @@ export async function draftReviewReplyEnglish(input: { providerId: string; revie
 /**
  * 体験の編集 › 英語の下書きを作る / 英語を作り直す (#110): NIHO's English of the page's Japanese,
  * field by field, for the host to check, correct and confirm; nothing is saved or published here.
- * The preview answers with its own synthetic English.
+ * The preview answers with its own synthetic English. Only the mock editor calls this: the host contract
+ * (0.2.0) has no call to draft, correct or confirm a page's English, so http mode answers that NIHO makes it
+ * and the NIHO-connected editor reads NIHO's own English from the preview (live-english.ts).
  */
 type PageEnglishDrafted = Drafted<HostPageText>;
 export async function draftPageEnglish(input: { providerId: string; experienceId: string; japanese: HostPageText }): Promise<HostActionResult<PageEnglishDrafted>> {
@@ -362,6 +364,5 @@ export async function draftPageEnglish(input: { providerId: string; experienceId
   const experienceId = text(input?.experienceId, LIMITS.experienceId);
   const japanese = pageTextFromInput(input?.japanese);
   if (!providerId || !experienceId || !japanese || !textHasWords(japanese)) return invalid;
-  // TODO(#87): NIHO's English draft of the page (niho-coliving/niho-app#19320) once the host contract has it.
   return draftEnglish(() => mockPageEnglishDraft(experienceId, japanese), { message: "英語の下書きを作りました", unavailable: PAGE_ENGLISH_UNAVAILABLE_TEXT });
 }

@@ -498,6 +498,47 @@ describe("ホスト API の mock：体験ページ・集合場所・掲載・写
     expect(await fresh.getExperienceProviderPagePreview("sample-provider-garden", page.id)).toMatchObject({ status: 404, reason: "PAGE_NOT_FOUND" });
   });
 
+  it("日本語のページのプレビューは、今の原文と合う英訳だけを返し、日本語を直した項目は null に戻る（英語のページに英訳は無い）", async () => {
+    const api = client("two-providers");
+    const before = data(await api.getExperienceProviderPagePreview(KITCHEN, DRAFT)).page;
+    expect(before.language).toBe("JA");
+    expect(before.titleEn).toBe("(Sample) Shop at the morning market, cook in the kitchen");
+    expect(before.content.highlightsEn).toEqual(["(Sample) Choose seasonal vegetables at the market", "(Sample) Finish a dish with the vegetables you chose", null]);
+    expect(before.content.knowBeforeYouGoEn).toEqual([null]);
+    expect(before.content.timeline.map((step) => [step.titleEn, step.textEn])).toEqual([["(Sample) Shopping at the market", "(Sample) You choose the vegetables."], [null, null]]);
+
+    const page = data(await api.getExperienceProviderPage(KITCHEN, DRAFT));
+    data(await api.updateExperienceProviderPage(KITCHEN, DRAFT, { content: { lead: "（サンプル）直したひとこと", highlights: ["（サンプル）朝市で旬の野菜を選ぶ", "（サンプル）新しい見どころ"] } }, page.updatedAt));
+    const after = data(await api.getExperienceProviderPagePreview(KITCHEN, DRAFT)).page;
+    expect(after.content.leadEn).toBeNull();
+    expect(after.content.highlightsEn).toEqual(["(Sample) Choose seasonal vegetables at the market", null]);
+    expect(after.content.descriptionEn).toBe("(Sample) Walk the market, choose ingredients and cook together in the kitchen. Synthetic data.");
+
+    const english = data(await api.getExperienceProviderPagePreview(KITCHEN, PUBLISHED)).page;
+    expect(english.titleEn).toBeNull();
+    expect(english.content.highlightsEn).toEqual([null, null]);
+  });
+
+  it("当日の流れは時刻・題・一言のどれも無い段を保存せず、写真から外した段と外観写真は null になる", async () => {
+    const api = client("two-providers");
+    const page = data(await api.getExperienceProviderPage(KITCHEN, PUBLISHED));
+    const [first, second, third] = page.photos.map((photo) => photo.objectKey) as [string, string, string];
+    const saved = data(await api.updateExperienceProviderPage(KITCHEN, PUBLISHED, {
+      content: { timeline: [{ time: "10:00", title: "Welcome", text: "", photoObjectKey: first }, { time: "", title: " ", text: "", photoObjectKey: second }, null], meetingPoint: { entranceNote: "Gate", exteriorPhotoObjectKey: second } },
+    }, page.updatedAt));
+    expect(saved.content.timeline).toEqual([{ time: "10:00", title: "Welcome", text: "", photoObjectKey: first }]);
+    expect(saved.content.meetingPoint).toEqual({ entranceNote: "Gate", exteriorPhotoObjectKey: second });
+
+    const kept = data(await api.updateExperienceProviderPage(KITCHEN, PUBLISHED, { photoObjectKeys: [first, third] }, saved.updatedAt));
+    expect(kept.content.meetingPoint).toEqual({ entranceNote: "Gate", exteriorPhotoObjectKey: null });
+    expect(kept.content.timeline[0]!.photoObjectKey).toBe(first);
+    const none = data(await api.updateExperienceProviderPage(KITCHEN, PUBLISHED, { photoObjectKeys: [third] }, kept.updatedAt));
+    expect(none.content.timeline[0]!.photoObjectKey).toBeNull();
+
+    const step = { time: "", title: "段", text: "", photoObjectKey: null };
+    expect(await api.updateExperienceProviderPage(KITCHEN, PUBLISHED, { content: { timeline: Array.from({ length: 7 }, () => step) } }, null)).toMatchObject({ status: 400, reason: "PAGE_CONTENT_INVALID", field: "content.timeline" });
+  });
+
   it("EDITOR は体験ページと写真を扱えるが、掲載は 404（理由なし）", async () => {
     const api = client("two-providers");
     const studio = "sample-provider-studio";

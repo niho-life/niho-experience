@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
-import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, makeCoverPhoto, mergeLiveMeeting, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { decodeExperienceProviderPagePatchRequest } from "@niho-experience/api-client/host-schema";
+import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, makeCoverPhoto, mergeLiveMeeting, mergeLivePage, movePhoto, normalizedTimeline, paddedTime, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 
 const offer = (id: string, name: string, priceYen: number) => ({ id, name, shortDescription: null, sortOrder: 0, isActive: true, priceYen, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [2], startTime: "10:00", durationMinutes: 60, cutoffDays: 1, closedDates: [], cancellationPolicy: "FREE_UNTIL_24H" as const, acceptanceMode: "APPROVAL" as const, spaceScope: "ENTIRE_FACILITY" as const, useZone: [], bookingQuestions: [] });
 const page = (): ExperienceProviderPageDetail => ({ id: "page_1", kind: "EXPERIENCE", slug: "sample-page", language: "JA", title: "元の題名", status: "DRAFT", listOnEntrance: false, publishedAt: null, unpublishedAt: null, content: { lead: "元", facts: { language: "日本語" }, highlights: [], timeline: [], description: "元", included: [], notIncluded: [], notSuitableFor: [], meetingPoint: { entranceNote: "内部", exteriorPhotoObjectKey: null }, knowBeforeYouGo: [], hostUserIds: ["hidden"] }, photos: [], coverObjectKey: null, offer: offer("offer_1", "商品", 1000), offers: [offer("offer_1", "商品", 1000)], publishBlockers: [], publicPath: "/living/sample/pages/sample-page", createdAt: "2026-10-27T00:00:00.000Z", updatedAt: "2026-10-27T01:00:00.000Z", photoAlts: [] });
@@ -164,5 +165,92 @@ describe("live editor meeting point", () => {
       expect(keys(mergeLivePage(base, mine, theirs, "remote").draft)).toEqual(["b", "c", "a"]);
       expect(keys(mergeLivePage(base, structuredClone(base), theirs).draft)).toEqual(["b", "c", "a"]);
     });
+  });
+});
+
+describe("live editor content", () => {
+  const step = (time: string, title: string, text = "", photoObjectKey: string | null = null) => ({ time, title, text, photoObjectKey });
+  const withPhotos = (keys: string[]): ExperienceProviderPageDetail => { const value = page(); value.photos = keys.map((key) => ({ objectKey: key, url: `https://images.example.test/${key}` })); value.photoAlts = keys.map(() => ""); return value; };
+
+  it("sends a row list as NIHO would keep it: trimmed, blank rows left out, and a blank row alone is no change", () => {
+    const base = page(); base.content.included = ["材料"];
+    const blank = structuredClone(base); blank.content.included = ["材料", "", "  "];
+    expect(serializeLivePagePatch(blank, base)).toEqual({});
+    const more = structuredClone(base); more.content.included = [" 材料 ", "", "昼食"]; more.content.notSuitableFor = ["", "生もの"];
+    expect(serializeLivePagePatch(more, base).content).toEqual({ included: ["材料", "昼食"], notSuitableFor: ["生もの"] });
+  });
+
+  it("sends 当日の流れ with the times padded and the steps with no time, title and line left out", () => {
+    expect(paddedTime("8:00")).toBe("08:00");
+    expect(paddedTime(" 18:30 ")).toBe("18:30");
+    expect(paddedTime("")).toBe("");
+    const base = page(); base.photos = [{ objectKey: "a", url: null }]; base.photoAlts = [""];
+    const draft = structuredClone(base);
+    draft.content.timeline = [step("8:00", " 集合 ", "駅前", "a"), step("", "", "", "a"), step("", "", "昼食"), step("", "", "")];
+    const patch = serializeLivePagePatch(draft, base);
+    expect(patch.content?.timeline).toEqual([step("08:00", "集合", "駅前", "a"), step("", "", "昼食")]);
+    expect(normalizedTimeline(draft.content.timeline)).toHaveLength(2);
+    // Only blank steps added: nothing to save.
+    const blank = structuredClone(base); blank.content.timeline = [step("", "", "")];
+    expect(serializeLivePagePatch(blank, base)).toEqual({});
+  });
+
+  it("sends the whole `facts` and `meetingPoint` objects, keeping the entrance note that is not edited here", () => {
+    const base = page(); base.photos = [{ objectKey: "a", url: null }]; base.photoAlts = [""];
+    const draft = structuredClone(base); draft.content.facts = { language: " 英語と日本語 " }; draft.content.meetingPoint = { ...draft.content.meetingPoint, exteriorPhotoObjectKey: "a" };
+    expect(serializeLivePagePatch(draft, base).content).toEqual({ facts: { language: "英語と日本語" }, meetingPoint: { entranceNote: "内部", exteriorPhotoObjectKey: "a" } });
+    // hostUserIds never goes (empty on a provider's page).
+    expect(serializeLivePagePatch(draft, base).content).not.toHaveProperty("hostUserIds");
+  });
+
+  it("refuses a time that is not 24-hour HH:mm before anything is sent, and ignores blank steps", () => {
+    const content = page().content;
+    expect(liveContentProblem({ ...content, timeline: [step("18:00", "夕食"), step("", "自由時間")] })).toBeNull();
+    expect(liveContentProblem({ ...content, timeline: [step("8:30", "朝")] })).toBeNull();
+    expect(liveContentProblem({ ...content, timeline: [step("", ""), step("25:00", "夜")] })).toBe("当日の流れ 2 の時刻は、18:00 のように 24 時間で入力してください。");
+    expect(liveContentProblem({ ...content, timeline: [step("6pm", "夕方")] })).toContain("当日の流れ 1");
+  });
+
+  it("takes a photo off a step and the exterior photo when the photo is removed from the page", () => {
+    const base = withPhotos(["a", "b"]); base.content.timeline = [step("10:00", "集合", "", "a"), step("11:00", "体験", "", "b")]; base.content.meetingPoint = { entranceNote: "内部", exteriorPhotoObjectKey: "a" };
+    const removed = removePhoto(base, 0);
+    expect(removed.content.timeline.map((item) => item.photoObjectKey)).toEqual([null, "b"]);
+    expect(removed.content.meetingPoint).toEqual({ entranceNote: "内部", exteriorPhotoObjectKey: null });
+    expect(base.content.timeline[0]!.photoObjectKey).toBe("a");
+  });
+
+  it("merges 当日の流れ and the lists as saved: blank rows are no change, both sides' change is one conflict", () => {
+    const base = page(); base.content.highlights = ["元の見どころ"]; base.content.timeline = [step("10:00", "集合")];
+    const local = structuredClone(base); const remote = structuredClone(base);
+    local.content.highlights = ["元の見どころ", ""]; remote.content.highlights = ["元の見どころ", "別の人の見どころ"];
+    local.content.timeline = [step("10:00", "自分の集合")]; remote.content.timeline = [step("10:00", "別の集合")];
+    const merged = mergeLivePage(base, local, remote);
+    expect(merged.draft.content.highlights).toEqual(["元の見どころ", "別の人の見どころ"]);
+    expect(merged.conflicts.map((item) => item.label)).toEqual(["当日の流れ"]);
+    expect(conflictValueText(merged.conflicts[0]!.local)).toBe("10:00 自分の集合");
+    expect(merged.draft.content.timeline[0]!.title).toBe("自分の集合");
+    expect(mergeLivePage(base, local, remote, "remote").draft.content.timeline[0]!.title).toBe("別の集合");
+  });
+
+  it("names the conflict of the exterior photo without showing its object key", () => {
+    const base = page(); const local = structuredClone(base); const remote = structuredClone(base);
+    local.content.meetingPoint = { entranceNote: "内部", exteriorPhotoObjectKey: "private-key-a" }; remote.content.meetingPoint = { entranceNote: "内部", exteriorPhotoObjectKey: "private-key-b" };
+    const merged = mergeLivePage(base, local, remote);
+    expect(merged.conflicts.map((item) => item.label)).toEqual(["外観写真"]);
+    expect(conflictValueText(merged.conflicts[0]!.local)).toBe("外観写真あり");
+    expect(conflictValueText({ entranceNote: "内部", exteriorPhotoObjectKey: null })).toBe("外観写真なし");
+  });
+
+  it("sends a patch the BFF's contract check accepts, for every body field at once", () => {
+    const base = withPhotos(["a", "b"]);
+    const draft = structuredClone(base);
+    draft.content = {
+      ...draft.content, lead: " ひとこと ", facts: { language: "日本語と英語" }, highlights: ["見どころ", ""], description: "説明", included: ["材料"], notIncluded: ["交通費"], notSuitableFor: ["生もの"],
+      knowBeforeYouGo: ["雨具"], timeline: [step("8:30", "集合", "駅前", "b"), step("", "", "")], meetingPoint: { entranceNote: "内部", exteriorPhotoObjectKey: "a" },
+    };
+    draft.language = "EN"; draft.title = "新しい題名";
+    const patch = serializeLivePagePatch(draft, base);
+    expect(Object.keys(patch.content!).sort()).toEqual(["description", "facts", "highlights", "included", "knowBeforeYouGo", "lead", "meetingPoint", "notIncluded", "notSuitableFor", "timeline"]);
+    expect(decodeExperienceProviderPagePatchRequest(patch)).toEqual(patch);
   });
 });

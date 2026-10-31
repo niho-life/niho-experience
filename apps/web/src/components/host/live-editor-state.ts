@@ -17,8 +17,37 @@ const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.s
 export const editLines = (value: string): string[] => value.split("\n");
 export const normalizedLines = (value: readonly string[]): string[] => value.map((item) => item.trim()).filter(Boolean);
 
-const CONTENT_FIELDS = ["lead", "facts", "highlights", "description", "included", "notIncluded", "notSuitableFor", "knowBeforeYouGo"] as const;
-const CONTENT_LABELS = { lead: "短い紹介", facts: "対応言語", highlights: "見どころ", description: "詳しい紹介", included: "含まれるもの", notIncluded: "含まれないもの", notSuitableFor: "参加に向かない方", knowBeforeYouGo: "事前案内" };
+/** "8:00" → "08:00": NIHO takes the time as zero-padded "HH:mm" (or empty). */
+export const paddedTime = (time: string): string => /^[0-9]:[0-5][0-9]$/.test(time.trim()) ? `0${time.trim()}` : time.trim();
+
+/** 当日の流れ as saved: trimmed, times padded, and the steps with no time, title and text left out (a photo alone is no step). */
+export function normalizedTimeline(steps: readonly LiveTimelineStep[]): LiveTimelineStep[] {
+  return steps.map((step) => ({ time: paddedTime(step.time), title: step.title.trim(), text: step.text.trim(), photoObjectKey: step.photoObjectKey || null })).filter((step) => step.time || step.title || step.text);
+}
+
+const TIME_VALUE = /^(?:[01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+
+/** Why the content cannot be saved as it is (a 当日の流れ time that is not "18:00"), or null. Blank steps are left out, as NIHO does. */
+export function liveContentProblem(content: LiveContent): string | null {
+  const step = content.timeline.findIndex((item) => item.time.trim() !== "" && !TIME_VALUE.test(item.time.trim()));
+  return step >= 0 ? `当日の流れ ${step + 1} の時刻は、18:00 のように 24 時間で入力してください。` : null;
+}
+
+const NORMALIZERS: Partial<Record<typeof CONTENT_FIELDS[number], (value: never) => unknown>> = {
+  highlights: normalizedLines, included: normalizedLines, notIncluded: normalizedLines, notSuitableFor: normalizedLines, knowBeforeYouGo: normalizedLines, timeline: normalizedTimeline,
+  lead: (value: string) => value.trim(), description: (value: string) => value.trim(), facts: (value: LiveContent["facts"]) => ({ language: value.language.trim() }),
+};
+
+/*
+ * 本文 (#89): the page content as NIHO keeps it. `serializeLivePagePatch` sends only the top-level keys that changed
+ * (`facts` and `meetingPoint` replace their whole object), and NIHO drops empty rows before it counts, so the editor
+ * compares and sends them dropped too: a row just added, still blank, is no change yet.
+ */
+export type LiveContent = ExperienceProviderPageDetail["content"];
+export type LiveTimelineStep = LiveContent["timeline"][number];
+
+const CONTENT_FIELDS = ["lead", "facts", "highlights", "description", "included", "notIncluded", "notSuitableFor", "knowBeforeYouGo", "timeline", "meetingPoint"] as const;
+const CONTENT_LABELS = { lead: "ひとこと紹介", facts: "当日の言語", highlights: "見どころ", description: "詳しい説明", included: "含まれるもの", notIncluded: "含まれないもの", notSuitableFor: "向かない人", knowBeforeYouGo: "注意事項", timeline: "当日の流れ", meetingPoint: "外観写真" };
 const OFFER_FIELDS = [
   "name", "shortDescription", "sortOrder", "isActive", "priceYen", "childPriceYen", "childMinAge", "childMaxAge", "adultRequiredForChild",
   "capacity", "maxPartySize", "minimumParticipants", "weekdays", "startTime", "durationMinutes", "cutoffDays", "closedDates", "cancellationPolicy",
@@ -34,6 +63,8 @@ export function conflictValueText(value: unknown): string {
   if (Array.isArray(value)) return value.length ? value.map(conflictValueText).join("、") : "なし";
   if (typeof value === "object") {
     if ("mode" in value) return value.mode === "INHERIT" ? "提供者の既定を使う" : `この体験だけ別の場所: ${"meetingPoint" in value ? meetingPlaceText(value.meetingPoint) : "未設定"}`;
+    if ("time" in value && "title" in value) return [value.time, value.title, "text" in value ? value.text : ""].filter((part) => typeof part === "string" && part !== "").join(" ") || "未設定";
+    if ("exteriorPhotoObjectKey" in value) return value.exteriorPhotoObjectKey ? "外観写真あり" : "外観写真なし";
     if ("language" in value) return conflictValueText(value.language);
     if ("name" in value) return conflictValueText(value.name);
     if ("photoAlts" in value) return `写真の並び・説明: ${conflictValueText(value.photoAlts)}`;
@@ -83,7 +114,9 @@ export function mergeLivePage(base: ExperienceProviderPageDetail, local: Experie
   draft.slug = mergeValue("slug", "公開名", base.slug, local.slug, remote.slug, choice, conflicts);
   draft.listOnEntrance = mergeValue("listOnEntrance", "入口への表示", base.listOnEntrance, local.listOnEntrance, remote.listOnEntrance, choice, conflicts);
   for (const field of CONTENT_FIELDS) {
-    (draft.content as Record<string, unknown>)[field] = mergeValue(`content.${field}`, CONTENT_LABELS[field], base.content[field], local.content[field], remote.content[field], choice, conflicts);
+    // Blank rows are no change: compare (and keep) the fields as NIHO would save them.
+    const normalize = (NORMALIZERS[field] ?? ((value: unknown) => value)) as (value: unknown) => unknown;
+    (draft.content as Record<string, unknown>)[field] = mergeValue(`content.${field}`, CONTENT_LABELS[field], normalize(base.content[field]), normalize(local.content[field]), normalize(remote.content[field]), choice, conflicts);
   }
   const photos = mergeValue(
     "photos", "写真・並び・説明",
@@ -116,14 +149,21 @@ export function serializeLivePagePatch(draft: ExperienceProviderPageDetail, base
   if (draft.listOnEntrance !== base.listOnEntrance) patch.listOnEntrance = draft.listOnEntrance;
 
   const content: NonNullable<ExperienceProviderPagePatchRequest["content"]> = {};
-  if (!equal(draft.content.lead, base.content.lead)) content.lead = draft.content.lead;
-  if (!equal(draft.content.facts, base.content.facts)) content.facts = structuredClone(draft.content.facts);
-  if (!equal(draft.content.highlights, base.content.highlights)) content.highlights = normalizedLines(draft.content.highlights);
-  if (!equal(draft.content.description, base.content.description)) content.description = draft.content.description;
-  if (!equal(draft.content.included, base.content.included)) content.included = normalizedLines(draft.content.included);
-  if (!equal(draft.content.notIncluded, base.content.notIncluded)) content.notIncluded = normalizedLines(draft.content.notIncluded);
-  if (!equal(draft.content.notSuitableFor, base.content.notSuitableFor)) content.notSuitableFor = normalizedLines(draft.content.notSuitableFor);
-  if (!equal(draft.content.knowBeforeYouGo, base.content.knowBeforeYouGo)) content.knowBeforeYouGo = normalizedLines(draft.content.knowBeforeYouGo);
+  const changed = (field: typeof CONTENT_FIELDS[number]) => {
+    const normalize = NORMALIZERS[field] as ((value: unknown) => unknown) | undefined;
+    return !equal(normalize ? normalize(draft.content[field]) : draft.content[field], normalize ? normalize(base.content[field]) : base.content[field]);
+  };
+  if (changed("lead")) content.lead = draft.content.lead.trim();
+  if (changed("facts")) content.facts = { language: draft.content.facts.language.trim() };
+  if (changed("highlights")) content.highlights = normalizedLines(draft.content.highlights);
+  if (changed("description")) content.description = draft.content.description.trim();
+  if (changed("included")) content.included = normalizedLines(draft.content.included);
+  if (changed("notIncluded")) content.notIncluded = normalizedLines(draft.content.notIncluded);
+  if (changed("notSuitableFor")) content.notSuitableFor = normalizedLines(draft.content.notSuitableFor);
+  if (changed("knowBeforeYouGo")) content.knowBeforeYouGo = normalizedLines(draft.content.knowBeforeYouGo);
+  if (changed("timeline")) content.timeline = normalizedTimeline(draft.content.timeline);
+  // The whole object goes, so 入口の案内 (not edited here) is sent back as it was read.
+  if (changed("meetingPoint")) content.meetingPoint = { entranceNote: draft.content.meetingPoint.entranceNote, exteriorPhotoObjectKey: draft.content.meetingPoint.exteriorPhotoObjectKey };
   if (Object.keys(content).length) patch.content = content;
 
   const photoObjectKeys = draft.photos.map((photo) => photo.objectKey);
@@ -157,10 +197,16 @@ export function movePhoto(draft: ExperienceProviderPageDetail, from: number, to:
 /** 代表写真にする: the photo goes first and the others keep their order. */
 export const makeCoverPhoto = (draft: ExperienceProviderPageDetail, index: number): ExperienceProviderPageDetail => movePhoto(draft, index, 0);
 
-/** 外す: only from this page's list (the uploaded file itself is not touched). */
+/**
+ * 外す: only from this page's list (the uploaded file itself is not touched). A 当日の流れ step or the 外観写真 that
+ * used the photo is left without one, as NIHO does on save, so the draft shows it at once.
+ */
 export function removePhoto(draft: ExperienceProviderPageDetail, index: number): ExperienceProviderPageDetail {
-  if (!Number.isInteger(index) || index < 0 || index >= draft.photos.length) return draft;
-  return withPhotos(draft, draft.photos.filter((_, at) => at !== index), draft.photoAlts.filter((_, at) => at !== index));
+  const removed = draft.photos[index];
+  if (!Number.isInteger(index) || !removed) return draft;
+  const next = withPhotos(draft, draft.photos.filter((_, at) => at !== index), draft.photoAlts.filter((_, at) => at !== index));
+  const { timeline, meetingPoint } = next.content;
+  return { ...next, content: { ...next.content, timeline: timeline.map((step) => step.photoObjectKey === removed.objectKey ? { ...step, photoObjectKey: null } : step), meetingPoint: meetingPoint.exteriorPhotoObjectKey === removed.objectKey ? { ...meetingPoint, exteriorPhotoObjectKey: null } : meetingPoint } };
 }
 
 /** Adds an uploaded photo last (it is the 表紙 only when the page had none), unless the page already has the limit. */

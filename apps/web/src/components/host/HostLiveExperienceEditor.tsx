@@ -1,20 +1,30 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExperienceProviderMeetingPoint, ExperienceProviderPageDetail, ExperienceProviderPageListingResponse, ExperienceProviderPageMeetingPointUpdateResponse, ExperienceProviderPageOffer, ExperienceProviderPhotoUploadForm } from "@niho-experience/api-client/host";
 import type { HostProviderReviewStatus, HostProviderRole } from "@/lib/host/providers";
-import { DISABLED } from "./editor-parts";
+import type { EditorTab } from "@/host/page-english";
+import { DISABLED, EditorPanel } from "./editor-parts";
 import { FieldRow, FieldSection, INPUT, TEXTAREA } from "./fields";
 import { HostConfirmDialog } from "./HostConfirmDialog";
+import { EDITOR_TAB_PANEL_ID, EditorLanguageTabs, editorTabId, LIVE_ENGLISH_TAB_LABEL } from "./HostEditorEnglish";
 import { consoleButtonClass } from "./host-ui";
+import { ListingSteps } from "./HostEditorRail";
+import { HostIcon } from "./HostIcon";
 import { HostSubHeader } from "./HostSubHeader";
 import { HostPageBody } from "./ui";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
-import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_ENGLISH_STATUS, liveEnglishState, readLiveEnglish } from "./live-english";
 import { LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, publishBlockerText, readListingResponse } from "./live-listing-state";
+import { LiveContentPanels, LiveExteriorPhoto } from "./LiveContentPanels";
+import { LiveEnglishPanels, LiveEnglishState, type LiveEnglishLoad } from "./LiveEnglishPanels";
+import { LivePagePanel } from "./LivePagePanel";
 import { LivePhotosSection } from "./LivePhotosSection";
 import { MeetingPointFields, MeetingPointSummary } from "./MeetingPointFields";
+import { SaveBar } from "./SaveBar";
 
 // The detail view comes only when 「プレビュー」 is pressed.
 const HostExperiencePreview = dynamic(() => import("./HostExperiencePreview"), { ssr: false });
@@ -29,6 +39,14 @@ function message(status: number): string {
   if (status === 401) return "ログインの有効期限が切れました。";
   if (status === 403 || status === 404) return "この体験を操作する権限が終了しています。";
   return "保存できませんでした。入力は保持しています。";
+}
+
+/** A page (or a re-read of it) that could not be read: not "保存できませんでした". Status 0: no answer. */
+function loadMessage(status: number): string {
+  if (status === 401) return "ログインの有効期限が切れました。";
+  if (status === 403 || status === 404) return "この体験を操作する権限が終了しています。";
+  if (status === 0) return "通信できませんでした。接続を確かめてから、もう一度試してください。";
+  return "体験を読み込めませんでした。";
 }
 
 function copyPage(value: ExperienceProviderPageDetail): ExperienceProviderPageDetail {
@@ -85,14 +103,20 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const [listingMessage, setListingMessage] = useState<{ tone: "error" | "notice"; text: string } | null>(null);
   const [confirming, setConfirming] = useState<"save" | "withdraw" | "stop" | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  // 日本語で書く / 英語（自動訳）: a Japanese page's English is NIHO's own, read from the preview (live-english.ts).
+  const [tab, setTab] = useState<EditorTab>("ja");
+  const [english, setEnglish] = useState<LiveEnglishLoad>({ kind: "loading" });
+  const [saving, setSaving] = useState(false); const [flash, setFlash] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const stay = useRef<HTMLButtonElement>(null);
-  const loadVersion = useRef(0); const meetingVersion = useRef(0); const listingVersion = useRef(0);
+  const loadVersion = useRef(0); const meetingVersion = useRef(0); const listingVersion = useRef(0); const englishVersion = useRef(0);
   const endpoint = `/host/api/provider-pages/${encodeURIComponent(providerId)}/${encodeURIComponent(pageId)}`;
   const load = useCallback(async (replace = true) => {
     const version = ++loadVersion.current;
-    const response = await fetch(endpoint, { cache: "no-store" });
-    if (!response.ok) throw new Error(message(response.status));
-    const value = await response.json() as ExperienceProviderPageDetail;
+    const response = await fetch(endpoint, { cache: "no-store" }).catch(() => null);
+    if (!response?.ok) throw new Error(loadMessage(response?.status ?? 0));
+    const value = await response.json().catch(() => null) as ExperienceProviderPageDetail | null;
+    if (!value) throw new Error(loadMessage(500));
     if (version !== loadVersion.current) return null;
     if (value.id !== pageId) throw new Error("別の体験が返されました。画面を読み込み直してください。");
     if (replace) { setSaved(value); setDraft(copyPage(value)); setLatest(null); } else setLatest(value);
@@ -117,12 +141,37 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     if (version !== listingVersion.current) return;
     if (value) { setListing(value); setListingState("ready"); } else setListingState("error");
   }, [endpoint, owner]);
+  // The English NIHO made of the saved Japanese (the preview's `*En`). Never throws: a failure is said in the English tab only.
+  const loadEnglish = useCallback(async () => {
+    const version = ++englishVersion.current;
+    setEnglish({ kind: "loading" });
+    let next: LiveEnglishLoad;
+    try {
+      const response = await fetch(`${endpoint}/preview`, { cache: "no-store" });
+      if (response.status === 404) next = { kind: "missing" };
+      else if (!response.ok) next = { kind: "error", text: response.status === 401 ? "ログインの有効期限が切れました。" : "英語を読み込めませんでした。" };
+      else { const value = readLiveEnglish(await response.json()); next = value ? { kind: "ready", english: value } : { kind: "error", text: "英語を読み込めませんでした。" }; }
+    } catch { next = { kind: "error", text: "英語を読み込めませんでした。" }; }
+    if (version === englishVersion.current) setEnglish(next);
+  }, [endpoint]);
   useEffect(() => {
     let active = true;
-    queueMicrotask(() => { if (!active) return; void load().catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : message(500)); }); void loadMeeting(); void loadListing(); });
-    return () => { active = false; loadVersion.current += 1; meetingVersion.current += 1; listingVersion.current += 1; };
+    queueMicrotask(() => { if (!active) return; void load().catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : loadMessage(500)); }); void loadMeeting(); void loadListing(); });
+    return () => { active = false; loadVersion.current += 1; meetingVersion.current += 1; listingVersion.current += 1; englishVersion.current += 1; };
   }, [load, loadMeeting, loadListing]);
-  const pageDirty = useMemo(() => saved !== null && draft !== null && JSON.stringify(saved) !== JSON.stringify(draft), [saved, draft]);
+  // 保存しました stays for a moment beside 保存.
+  useEffect(() => {
+    if (!flash) return;
+    const timer = window.setTimeout(() => setFlash(false), 2500);
+    return () => window.clearTimeout(timer);
+  }, [flash]);
+  const savedJapanese = saved?.language === "JA"; const savedVersion = saved?.updatedAt;
+  // Read again whenever the saved page changes: what NIHO made follows the saved Japanese, not the draft.
+  useEffect(() => {
+    if (!savedJapanese) return;
+    queueMicrotask(() => void loadEnglish());
+  }, [savedJapanese, savedVersion, loadEnglish]);
+  const pageDirty = useMemo(() => saved !== null && draft !== null && Object.keys(serializeLivePagePatch(draft, saved)).length > 0, [saved, draft]);
   const meetingDirty = savedMeeting !== null && meeting !== null && liveMeetingChanged(meeting, savedMeeting);
   const dirty = pageDirty || meetingDirty;
   const mergePreview = useMemo(() => saved && draft && latest ? mergeLivePage(saved, draft, latest) : null, [saved, draft, latest]);
@@ -138,14 +187,15 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   /** 保存: a listed experience leaves the site until NIHO checks it again, so the owner is asked first. */
   function requestSave() {
     if (!draft || !saved || busy || listingBusy || latest || !dirty) return;
-    const problem = meetingDirty && meeting ? liveMeetingProblem(meeting) : null;
-    if (problem) { setError(problem); setNotice(""); return; }
+    // Only the Japanese tab draws the fields: the check does not depend on the tab being open.
+    const problem = liveContentProblem(draft.content) ?? (meetingDirty && meeting ? liveMeetingProblem(meeting) : null);
+    if (problem) { setError(problem); setNotice(""); setTab("ja"); return; }
     if (owner && listing?.listing?.status === "ACTIVE") setConfirming("save");
     else void save();
   }
 
   async function save() {
-    if (!draft || !saved || busy || latest) return; setBusy(true); setError(""); setNotice(""); setStale(false);
+    if (!draft || !saved || busy || latest) return; setBusy(true); setSaving(true); setError(""); setNotice(""); setStale(false); setFlash(false);
     let version = saved.updatedAt; let pageSaved = false;
     try {
       if (pageDirty) {
@@ -185,10 +235,10 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
         setSavedMeeting(next); setMeeting(structuredClone(next));
         await loadMeeting();
       }
-      setUncertain(false); setNotice("保存しました。");
+      setUncertain(false); setFlash(true);
       void loadListing();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "保存できませんでした。入力は保持しています。"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setSaving(false); }
   }
 
   async function reconcile() {
@@ -197,7 +247,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       const [, meetingRead] = await Promise.all([load(false), meetingState === "ready" ? loadMeeting(false) : true]);
       // The page alone is not enough: a check without the meeting point would let 保存 overwrite another editor's one.
       if (!meetingRead) { setLatest(null); setStale(true); setError("集合場所の最新の保存内容を読めませんでした。もう一度「最新の保存内容を読む」を押してください。"); }
-    } catch (reason) { setError(reason instanceof Error ? reason.message : message(500)); } finally { setBusy(false); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : loadMessage(500)); } finally { setBusy(false); }
   }
   function applyMerge(choice: "local" | "remote") {
     if (!latest || !saved || !draft) return;
@@ -290,7 +340,9 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     } catch (reason) { setError(reason instanceof Error ? reason.message : "写真をアップロードできませんでした。"); } finally { setBusy(false); }
   }
 
-  if (!draft || !saved) return <><HostSubHeader backHref={backHref} backLabel="体験" title="体験の編集" /><HostPageBody><p role={error ? "alert" : undefined} className="rounded-xl bg-sand p-5">{error || "読み込み中…"}</p></HostPageBody></>;
+  /** 読み込み直す: the first read of the page failed (the editor has nothing to show yet). */
+  const retryLoad = () => { setError(""); void load().catch((reason) => setError(reason instanceof Error ? reason.message : loadMessage(500))); };
+  if (!draft || !saved) return <><HostSubHeader backHref={backHref} backLabel="体験" title="体験の編集" /><HostPageBody><p role={error ? "alert" : undefined} className="rounded-xl bg-sand p-5">{error || "読み込み中…"}{error ? <button type="button" onClick={retryLoad} className="ml-2 font-extrabold underline">読み込み直す</button> : null}</p></HostPageBody></>;
   const reviewLine = providerReviewLine(reviewStatus);
   /** 掲載 (OWNER): the state as a pill and what can be done in it, first on the page (the rail comes first on phones). */
   const listingPanel = () => {
@@ -298,6 +350,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     const withdraw = <button type="button" disabled={listingLocked} onClick={() => setConfirming("withdraw")} className={consoleButtonClass("secondary", "md", DISABLED)}>申請を取り下げる</button>;
     return <FieldSection title="掲載" status={listingState === "ready" && listing ? liveListingStatus(listing.listing) : null}>
       {listingState === "loading" ? <p className="text-ink-soft">読み込み中…</p> : listingState === "error" || !listing || !view ? <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1"><p>{LISTING_TEXT.unreadable}</p><button type="button" disabled={listingBusy} onClick={() => { setListingState("loading"); void loadListing(); }} className={consoleButtonClass("secondary", "sm", DISABLED)}>読み込み直す</button></div> : <div className="flex flex-col gap-2.5">
+        <ListingSteps status={view.kind === "request" ? "draft" : view.kind === "requested" ? "review" : view.kind === "active" ? "live" : "paused"} />
         {view.kind === "request" ? view.block === "language" ? <p>体験サイトに載せられるのは英語の体験ページだけです。</p> : <>
           {view.block === null ? <p className="whitespace-pre-wrap rounded-xl bg-sand p-3 text-sm [overflow-wrap:anywhere]">{listing.consent.text}</p> : null}
           {view.block === null && saved.status !== "PUBLISHED" ? <p className="text-xs text-muted">申請すると、保存済みの内容で体験ページを公開します。</p> : null}
@@ -316,20 +369,45 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   // プレビュー shows what NIHO has saved: it waits while a save or a reconcile is under way, and says so when changes are not saved yet.
   const previewBlocked = busy || listingBusy || Boolean(latest) || uncertain || listingUncertain;
   const previewButton = (size: "sm" | "md") => <button type="button" disabled={previewBlocked} onClick={() => setPreviewing(true)} aria-haspopup="dialog" className={consoleButtonClass("secondary", size, DISABLED)}>プレビュー</button>;
-  return <><HostSubHeader backHref={backHref} backLabel="体験" title={draft.title || "体験の編集"} action={previewButton("sm")} /><HostPageBody>
-    <div className={`mb-3 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 ${dirty ? "" : "max-md:hidden"}`}>{dirty ? <p className="min-w-0 flex-1 basis-56 text-[0.8125rem] text-ink-soft">プレビューには保存した内容が出ます。保存すると反映されます。</p> : null}<span className="max-md:hidden">{previewButton("md")}</span></div>
+  const fieldsLocked = busy || listingBusy || Boolean(latest) || uncertain || listingUncertain;
+  const writtenJapanese = draft.language === "JA";
+  const lang = writtenJapanese ? "ja" : "en";
+  const activeTab: EditorTab = writtenJapanese ? tab : "ja";
+  const savedAsEnglish = saved.language !== "JA";
+  const englishStatus = english.kind === "ready" && !savedAsEnglish ? liveEnglishState(english.english).status : null;
+  const listingView = owner && listing ? liveListingView(listing.listing, saved, siteUrl) : null;
+  const title = draft.title.trim() || "体験の編集";
+  const setLanguage = (language: ExperienceProviderPageDetail["language"]) => { setDraft((current) => current ? { ...current, language } : current); if (language !== "JA") setTab("ja"); };
+  /** 集合場所: the page's own meeting point (NIHO keeps it apart from the page) and, from the page's photos, the 外観写真. */
+  const meetingPanel = <EditorPanel id="editor-meeting" title="集合場所">
+    {meetingState === "loading" ? <p className="text-ink-soft">読み込み中…</p> : meetingState === "error" || !meeting ? <p>集合場所を読めませんでした。</p> : <>
+      <fieldset className="flex flex-col gap-1.5 pb-3"><legend className="sr-only">集合場所の決め方</legend>{([["INHERIT", "提供者の既定を使う"], ["OVERRIDE", "この体験だけ別の場所にする"]] as const).map(([mode, label]) => <label key={mode} className="inline-flex min-h-8 items-center gap-2.5 font-bold"><input type="radio" name="live-meeting-mode" value={mode} checked={meeting.mode === mode} onChange={() => setMeeting({ ...meeting, mode })} className="size-4 shrink-0 accent-moss" />{label}</label>)}</fieldset>
+      {meeting.mode === "INHERIT" ? <>{meetingDefaults ? <MeetingPointSummary value={meetingDefaults} /> : <p className="text-ink-soft">保存すると、提供者の既定の集合案内を使います。</p>}<p className="border-t border-line pt-3 text-xs text-muted">既定は <a href={`${settingsHref}#settings-meeting`} className="font-bold text-moss underline underline-offset-4">設定 › 既定の集合案内</a> で直せます。</p></> : <MeetingPointFields idPrefix="live-meeting" value={meeting.fields} onChange={(fields) => setMeeting({ ...meeting, fields })} />}
+    </>}
+    <LiveExteriorPhoto photos={draft.photos} value={draft.content.meetingPoint.exteriorPhotoObjectKey} onChange={(exteriorPhotoObjectKey) => editContent({ meetingPoint: { ...draft.content.meetingPoint, exteriorPhotoObjectKey } })} />
+  </EditorPanel>;
+  return <div ref={root}><HostSubHeader backHref={backHref} backLabel="体験" title={title} action={previewButton("sm")} /><HostPageBody>
+    <h1 className="sr-only">{title}</h1>
+    {/* PC: ‹, the title and プレビュー in one row. Phones: the title on its own; ‹ and プレビュー are in the header above. */}
+    <div className="mb-3 flex items-center gap-3 md:mb-[18px]">
+      <Link href={backHref} aria-label="体験へ戻る" className="grid size-10 shrink-0 place-items-center rounded-full bg-sand hover:bg-line max-md:hidden"><HostIcon name="chevronLeft" className="size-[18px]" /></Link>
+      <input aria-label="題名" required maxLength={95} placeholder="題名" disabled={fieldsLocked} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="-ml-2 min-w-0 flex-1 rounded-[10px] border border-transparent bg-transparent px-2 py-1 text-[1.0625rem] leading-[1.3] font-extrabold text-ink placeholder:text-muted hover:bg-sand focus:border-line-strong focus:bg-canvas disabled:opacity-70 md:ml-0 md:px-2.5 md:py-1.5 md:text-[1.375rem]" />
+      <div className="shrink-0 max-md:hidden">{previewButton("md")}</div>
+    </div>
+    {dirty ? <p className="mb-3 text-[0.8125rem] text-ink-soft">プレビューには保存した内容が出ます。保存すると反映されます。</p> : null}
     {error ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-4 text-danger">{error}{stale || uncertain ? <button type="button" disabled={busy} onClick={() => void reconcile()} className="ml-2 font-extrabold underline">最新の保存内容を読む</button> : null}</div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-leaf-pale p-4 text-moss">{notice}</p> : null}
     {latest && mergePreview ? <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4"><h2 className="font-extrabold">最新の保存内容と照合</h2><p className="mt-1 text-sm">自分の入力と、ほかの人が保存した内容を項目ごとに比較しました。</p>{conflicts.length ? <><p className="mt-2 text-sm font-extrabold">同じ項目が変更されています</p><ul className="mt-1 list-disc pl-5 text-sm">{conflicts.map((item) => <li key={item.path} className="mb-3"><strong>{item.label}</strong><dl className="mt-1 grid gap-1"><div><dt className="font-bold">自分の入力</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.local)}</dd></div><div><dt className="font-bold">最新の内容</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.remote)}</dd></div></dl></li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" className={consoleButtonClass("primary", "sm")} onClick={() => applyMerge("local")}>競合項目は自分の入力を残す</button><button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => applyMerge("remote")}>競合項目は最新を残す</button></div></> : <button type="button" className={`${consoleButtonClass("primary", "sm")} mt-3`} onClick={() => applyMerge("local")}>両方の変更を統合する</button>}</section> : null}
-    {owner ? <div className="mb-3.5">{listingPanel()}</div> : null}
-    <fieldset disabled={busy || listingBusy || Boolean(latest) || uncertain || listingUncertain} className="space-y-3.5 disabled:opacity-70">
-      <FieldSection title="掲載内容"><FieldRow label="題名" htmlFor="live-title"><input id="live-title" required maxLength={95} className={INPUT} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></FieldRow><FieldRow label="短い紹介" htmlFor="live-lead"><textarea id="live-lead" rows={3} maxLength={400} className={TEXTAREA} value={draft.content.lead} onChange={(event) => editContent({ lead: event.target.value })} /></FieldRow><FieldRow label="詳しい紹介" htmlFor="live-description"><textarea id="live-description" rows={6} maxLength={4000} className={TEXTAREA} value={draft.content.description} onChange={(event) => editContent({ description: event.target.value })} /></FieldRow><FieldRow label="対応言語" htmlFor="live-language"><input id="live-language" maxLength={60} className={INPUT} value={draft.content.facts.language} onChange={(event) => editContent({ facts: { language: event.target.value } })} /></FieldRow>{(["highlights", "included", "notIncluded", "notSuitableFor", "knowBeforeYouGo"] as const).map((key) => <FieldRow key={key} label={{ highlights: "見どころ", included: "含まれるもの", notIncluded: "含まれないもの", notSuitableFor: "参加に向かない方", knowBeforeYouGo: "事前案内" }[key]} htmlFor={`live-${key}`}><textarea id={`live-${key}`} rows={3} className={TEXTAREA} value={draft.content[key].join("\n")} onChange={(event) => editContent({ [key]: editLines(event.target.value) })} /></FieldRow>)}</FieldSection>
-      <FieldSection title="集合場所">{meetingState === "loading" ? <p className="text-ink-soft">読み込み中…</p> : meetingState === "error" || !meeting ? <p>集合場所を読めませんでした。</p> : <>
-        <fieldset className="flex flex-col gap-1.5 pb-3"><legend className="sr-only">集合場所の決め方</legend>{([["INHERIT", "提供者の既定を使う"], ["OVERRIDE", "この体験だけ別の場所にする"]] as const).map(([mode, label]) => <label key={mode} className="inline-flex min-h-8 items-center gap-2.5 font-bold"><input type="radio" name="live-meeting-mode" value={mode} checked={meeting.mode === mode} onChange={() => setMeeting({ ...meeting, mode })} className="size-4 shrink-0 accent-moss" />{label}</label>)}</fieldset>
-        {meeting.mode === "INHERIT" ? <>{meetingDefaults ? <MeetingPointSummary value={meetingDefaults} /> : <p className="text-ink-soft">保存すると、提供者の既定の集合案内を使います。</p>}<p className="border-t border-line pt-3 text-xs text-muted">既定は <a href={`${settingsHref}#settings-meeting`} className="font-bold text-moss underline underline-offset-4">設定 › 既定の集合案内</a> で直せます。</p></> : <MeetingPointFields idPrefix="live-meeting" value={meeting.fields} onChange={(fields) => setMeeting({ ...meeting, fields })} />}
-      </>}</FieldSection>
-      <LivePhotosSection photos={draft.photos} alts={draft.photoAlts} onUpload={(file) => void upload(file)} onAlt={(index, value) => setDraft({ ...draft, photoAlts: draft.photos.map((_, at) => at === index ? value : draft.photoAlts[at] ?? "") })} onMove={(from, to) => setDraft(movePhoto(draft, from, to))} onCover={(index) => setDraft(makeCoverPhoto(draft, index))} onRemove={(index) => setDraft(removePhoto(draft, index))} />
-      {draft.offers.map((offer, index) => <FieldSection key={offer.id} title={`商品 ${index + 1}`}>
+    {writtenJapanese ? <EditorLanguageTabs tab={activeTab} onTab={setTab} englishPill={englishStatus && englishStatus !== "complete" ? LIVE_ENGLISH_STATUS[englishStatus] : null} englishLabel={LIVE_ENGLISH_TAB_LABEL} /> : null}
+    <div id={writtenJapanese ? EDITOR_TAB_PANEL_ID : undefined} role={writtenJapanese ? "tabpanel" : undefined} aria-labelledby={writtenJapanese ? editorTabId(activeTab) : undefined} className="@container">
+      {writtenJapanese && activeTab === "en" ? <LiveEnglishState load={english} savedAsEnglish={savedAsEnglish} unsaved={dirty} busy={fieldsLocked} onReload={() => void loadEnglish()} /> : null}
+      {/* Two columns once the page is wide enough for the 320px rail; one column (rail first) below. */}
+      <div className="flex flex-col gap-3.5 @3xl:grid @3xl:grid-cols-[minmax(0,1fr)_320px] @3xl:items-start @3xl:gap-5">
+        <fieldset disabled={fieldsLocked} className="m-0 flex min-w-0 flex-col gap-3.5 border-0 p-0 disabled:opacity-70">
+          {activeTab === "en" ? (english.kind === "ready" && !savedAsEnglish ? <LiveEnglishPanels english={english.english} /> : null) : <>
+            <LivePhotosSection photos={draft.photos} alts={draft.photoAlts} onUpload={(file) => void upload(file)} onAlt={(index, value) => setDraft({ ...draft, photoAlts: draft.photos.map((_, at) => at === index ? value : draft.photoAlts[at] ?? "") })} onMove={(from, to) => setDraft(movePhoto(draft, from, to))} onCover={(index) => setDraft(makeCoverPhoto(draft, index))} onRemove={(index) => setDraft(removePhoto(draft, index))} />
+            <LiveContentPanels content={draft.content} photos={draft.photos} lang={lang} onContent={editContent} meeting={meetingPanel} />
+        {draft.offers.map((offer, index) => <FieldSection key={offer.id} title={`商品 ${index + 1}`}>
         <FieldRow label="商品名" htmlFor={`offer-${index}-name`}><input id={`offer-${index}-name`} required maxLength={80} className={INPUT} value={offer.name} onChange={(event) => editOffer(index, { name: event.target.value })} /></FieldRow>
         <FieldRow label="短い説明" htmlFor={`offer-${index}-description`}><input id={`offer-${index}-description`} maxLength={160} className={INPUT} value={offer.shortDescription ?? ""} onChange={(event) => editOffer(index, { shortDescription: event.target.value || null })} /></FieldRow>
         <div className="grid gap-3 p-4 sm:grid-cols-3">
@@ -345,15 +423,23 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
         <fieldset className="p-4 pt-0"><legend className="font-extrabold">開催曜日</legend><div className="mt-2 flex flex-wrap gap-3">{weekdays.map((label, day) => <label key={label} className="inline-flex items-center gap-2"><input type="checkbox" checked={offer.weekdays.includes(day)} onChange={(event) => editOffer(index, { weekdays: event.target.checked ? [...offer.weekdays, day].sort() : offer.weekdays.filter((value) => value !== day) })} />{label}</label>)}</div></fieldset>
         <FieldRow label="休みの日" htmlFor={`offer-${index}-closed`}><textarea id={`offer-${index}-closed`} rows={3} placeholder="YYYY-MM-DD（1行1件）" className={TEXTAREA} value={offer.closedDates.join("\n")} onChange={(event) => editOffer(index, { closedDates: editLines(event.target.value) })} /></FieldRow>
       </FieldSection>)}
-    </fieldset>
+          </>}
+        </fieldset>
+        <div className="order-first flex min-w-0 flex-col gap-3.5 @3xl:sticky @3xl:top-4 @3xl:order-none">
+          {owner ? listingPanel() : null}
+          <LivePagePanel language={draft.language} onLanguage={setLanguage} publicUrl={listingView?.kind === "active" ? listingView.href : null} disabled={fieldsLocked} />
+        </div>
+      </div>
+    </div>
     {draft.publishBlockers.length ? <div className="mt-4 rounded-xl bg-warn-pale p-3 text-sm"><p className="font-extrabold">公開前に確認が必要です</p><ul className="mt-1 list-disc pl-5">{draft.publishBlockers.map((blocker) => <li key={blocker}>{publishBlockerText(blocker)}</li>)}</ul></div> : null}
     <div className="mt-4 rounded-xl bg-sand p-3 text-sm text-ink-soft"><p>通常の原稿・開催条件はオーナーとサブホストが更新できます。体験サイトへの初回掲載、販売者としての同意と売上受取はオーナーが行います。</p>{owner ? null : <><p className="mt-1">体験サイトへの掲載の申請はオーナーが行います。</p><p className="mt-1">掲載中の体験は、保存すると NIHO が確認するまで体験サイトから外れます。</p></>}</div>
     {/* The owner's way to the experience site is 掲載 at the top: no 公開する beside 保存. */}
-    <div className="sticky bottom-[var(--host-tabbar)] mt-4 flex flex-wrap justify-end gap-2 border-t border-line bg-canvas py-3"><button type="button" disabled={busy || listingBusy || !dirty || Boolean(latest) || uncertain || listingUncertain} onClick={requestSave} className={consoleButtonClass("primary")}>{busy ? "処理中…" : "保存"}</button>{owner ? null : <button type="button" disabled={busy || dirty || Boolean(latest) || uncertain || draft.status === "PUBLISHED"} onClick={() => void publish()} className={consoleButtonClass("secondary")}>公開する</button>}</div>
+    {owner ? null : <div className="mt-4 flex justify-end"><button type="button" disabled={busy || dirty || Boolean(latest) || uncertain || draft.status === "PUBLISHED"} onClick={() => void publish()} className={consoleButtonClass("secondary")}>公開する</button></div>}
+    <SaveBar dirty={dirty} saving={saving} saved={flash && !dirty} disabled={busy || listingBusy || Boolean(latest) || uncertain || listingUncertain} onSave={requestSave} />
     {confirming === "save" ? <HostConfirmDialog title="保存すると掲載が止まります" description="体験サイトから一時的に外れ、NIHO が確認すると掲載に戻ります。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>保存して掲載を止める</button>} onConfirm={() => void save()} onClose={() => setConfirming(null)} /> : null}
     {confirming === "withdraw" ? <HostConfirmDialog title="申請を取り下げますか？" description="体験サイトへの掲載の申請を取り下げます。もう一度載せるには、申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>申請を取り下げる</button>} onConfirm={() => void withdrawListing(false)} onClose={() => setConfirming(null)} /> : null}
     {confirming === "stop" ? <HostConfirmDialog title="掲載を止めますか？" description="体験サイトからすぐに外れます。受け付けた予約は残ります。もう一度載せるには申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>掲載を止める</button>} onConfirm={() => void withdrawListing(true)} onClose={() => setConfirming(null)} /> : null}
     {previewing ? <HostExperiencePreview endpoint={endpoint} unsaved={dirty} onClose={() => setPreviewing(false)} /> : null}
     {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} onDiscard={() => { setUncertain(false); setListingUncertain(false); }} /> : null}
-  </HostPageBody></>;
+  </HostPageBody></div>;
 }
