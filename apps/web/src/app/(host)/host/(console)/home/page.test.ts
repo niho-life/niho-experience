@@ -12,6 +12,10 @@ const state = vi.hoisted(() => ({
   loadSiteHome: null as null | Load,
   month: { status: "closed" } as Record<string, unknown>,
   loadSiteHomeMonth: null as null | Load,
+  live: { todos: [], failed: [] } as Record<string, unknown>,
+  loadHomeTodos: null as null | Load,
+  calendar: { status: "closed" } as Record<string, unknown>,
+  loadHostCalendar: null as null | Load,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/host/data", () => ({
@@ -27,6 +31,8 @@ vi.mock("@/host/data", () => ({
 vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: async () => null }));
 vi.mock("@/host/site-sessions-server", () => ({ loadSiteHome: (...args: unknown[]) => state.loadSiteHome!(...args) }));
 vi.mock("@/host/site-sales-server", () => ({ loadSiteHomeMonth: (...args: unknown[]) => state.loadSiteHomeMonth!(...args) }));
+vi.mock("@/host/home-server", () => ({ loadHomeTodos: (...args: unknown[]) => state.loadHomeTodos!(...args) }));
+vi.mock("@/host/calendar-server", () => ({ loadHostCalendar: (...args: unknown[]) => state.loadHostCalendar!(...args) }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => false }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
 
@@ -34,6 +40,7 @@ import HostHomePage from "./page";
 import { HostHomeTodos } from "@/components/host/HostHomeTodos";
 import { SITE_SALES_HOME_LOAD_FAILED_TEXT, SITE_SALES_HOME_SCOPE_TEXT } from "@/host/site-sales";
 import { SITE_HOME_LOAD_FAILED_TEXT } from "@/host/site-sessions";
+import { GOOGLE_NOT_CONNECTED } from "@/host/calendar";
 
 /** http mode: NIHO's sessions are not read yet (TODO(#87)), so ホーム's own part is empty. */
 const CONSOLE_HOME: HostHomeData = { todos: [], sessions: { today: [], tomorrow: [], later: [] }, month: null };
@@ -50,6 +57,10 @@ beforeEach(() => {
   state.loadSiteHome = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.site);
   state.month = { status: "closed" };
   state.loadSiteHomeMonth = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.month);
+  state.live = { todos: [], failed: [] };
+  state.loadHomeTodos = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.live);
+  state.calendar = { status: "closed" };
+  state.loadHostCalendar = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.calendar);
 });
 
 /** Every element of the page's tree, with its local views (DaySessions and the like) left as elements. */
@@ -70,6 +81,8 @@ async function page() {
     later: all.filter((item) => item.type === "li" && typeof item.key === "string" && item.key.length > 0).map((item) => item.key),
     sources: named("SessionSource").map((item) => (item.props.item as HomeUpcoming).source),
     alert: all.find((item) => item.props.role === "alert")?.props.children,
+    alerts: all.filter((item) => item.props.role === "alert").map((item) => item.props.children),
+    calendarPrompt: named("CalendarPromptCard")[0]?.props.prompt,
     /** The month card's numbers ("売上 ¥7,500"), its note, or what it says instead. */
     month: all.filter((item) => item.type === "dt" || item.type === "dd").map((item) => item.props.children),
     monthText: all.filter((item) => item.type === "p").map((item) => item.props.children).filter((text) => typeof text === "string"),
@@ -128,5 +141,47 @@ describe("ホーム's month card (#91)", () => {
     const failed = await page();
     expect(failed.month).toEqual([]);
     expect(failed.alert).toBe(SITE_SALES_HOME_LOAD_FAILED_TEXT);
+  });
+});
+
+describe("ホーム's 次にすること and calendar card in http mode", () => {
+  const THREAD = { key: "thread-1", status: { label: "返信待ち", tone: "wait" }, aside: { text: "予約前の質問", tone: "muted" }, title: "「…」", detail: "", approval: null, action: { label: "返信する", href: "/host/messages?thread=1", primary: true } };
+  const DRAFT = { key: "draft-page-1", status: { label: "下書き", tone: "draft" }, aside: null, title: "題名なし の原稿を仕上げる", detail: "", approval: null, action: { label: "編集する", href: "/host/experiences/page-1", primary: false } };
+
+  it("lists what the OWNER reads after this site's payments under review, and counts the threads on the app icon", async () => {
+    state.site = { status: "live", todos: [TODO], sessions: { today: [], tomorrow: [], later: [] } };
+    state.live = { todos: [THREAD, DRAFT], failed: [] };
+    const view = await page();
+    expect(state.loadHomeTodos).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { nihoUserId: "sample-niho-user" });
+    expect(view.todos).toEqual([TODO, THREAD, DRAFT]);
+    expect(view.all.find((item) => typeof item.type === "function" && item.type.name === "HostAppBadge")?.props.count).toBe(1);
+    expect(view.alert).toBeUndefined();
+
+    state.site = { status: "closed" };
+    expect((await page()).todos).toEqual([THREAD, DRAFT]);
+  });
+
+  it("says which sources could not be read, in one line", async () => {
+    state.live = { todos: [DRAFT], failed: ["messages", "reviews"] };
+    const view = await page();
+    expect(view.todos).toEqual([DRAFT]);
+    expect(view.alerts).toEqual(["メッセージとレビューを読み込めませんでした。次にすることに出ていないものがあるかもしれません。"]);
+  });
+
+  it("shows the calendar's card from the OWNER's Google connection, and none while it is closed or connected", async () => {
+    expect((await page()).calendarPrompt).toBeUndefined();
+    expect(state.loadHostCalendar).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", { feed: false });
+
+    state.calendar = { status: "live", google: GOOGLE_NOT_CONNECTED, googleSync: null, feed: null };
+    expect((await page()).calendarPrompt).toEqual({ title: "Google カレンダーをつなぐ", text: "予定がある時間は予約を受け付けません", action: "つなぐ" });
+    state.calendar = { status: "live", google: { ...GOOGLE_NOT_CONNECTED, status: "revoked" }, googleSync: null, feed: null };
+    expect((await page()).calendarPrompt).toMatchObject({ action: "もう一度つなぐ" });
+    state.calendar = { status: "live", google: { ...GOOGLE_NOT_CONNECTED, status: "connected" }, googleSync: { lastCheckedAt: null, failing: false }, feed: null };
+    expect((await page()).calendarPrompt).toBeUndefined();
+    // Google's sign-in is not configured here: nothing to connect.
+    state.calendar = { status: "live", google: null, googleSync: null, feed: null };
+    expect((await page()).calendarPrompt).toBeUndefined();
+    state.calendar = { status: "error" };
+    expect((await page()).calendarPrompt).toBeUndefined();
   });
 });

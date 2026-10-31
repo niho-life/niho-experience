@@ -609,8 +609,8 @@ export type HostMeetingDefaults = ExperienceProviderMeetingPoint;
  * calendars. Sessions that overlap an event of the calendars chosen read as full on the
  * experience site (guests are not told why); confirmed bookings are written to one calendar,
  * one event per booking, and taken away when cancelled. Disconnecting leaves the bookings (and
- * the events written) as they are.
- * TODO(#87): NIHO's ICS feed (niho-app#19316) and Google connection (#19317) are not in the host contract yet.
+ * the events written) as they are. In http mode the experience DB keeps the connection (without the account or its
+ * calendars) and the feed's secret; 設定 reads them as HostCalendarLoad (calendar.ts, calendar-server.ts).
  */
 
 /** 未接続 / 接続中 / 接続が切れた (the host took NIHO's access away in Google). */

@@ -444,4 +444,13 @@ describe("database invariants", () => {
     assert.match(sql, /status IN \('ATTENDED', 'NO_SHOW'\)/);
     assert.doesNotMatch(sql, /guest_name|guest_email|guest_phone|ALTER TABLE|DROP |^\s*(UPDATE|DELETE) /m);
   });
+
+  it("keeps one bookings feed per provider as a salt and its address's digest, additively and without guest data (#109)", async () => {
+    const sql = await readFile(new URL("../migrations/0035_host_calendar_feeds.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE provider_calendar_feeds/);
+    assert.match(sql, /provider_id text PRIMARY KEY REFERENCES experience_providers\(id\)/);
+    assert.match(sql, /token_hash bytea NOT NULL UNIQUE CHECK \(octet_length\(token_hash\) = 32\)/);
+    assert.match(sql, /REFERENCES provider_memberships\(provider_id, niho_user_id\)/);
+    assert.doesNotMatch(sql, /guest_|token text|ALTER TABLE|DROP |^\s*(UPDATE|DELETE) /m);
+  });
 });

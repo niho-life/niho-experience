@@ -1,4 +1,4 @@
-import type { ExperienceSiteListingStatus } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageListItem, ExperienceSiteListingStatus } from "@niho-experience/api-client/host";
 import type { HostProviderReviewStatus } from "@/lib/host/providers";
 import type { PageEnglishStatus } from "./page-english";
 import type { HostBookingStatus, HostReviewStatus, ListingStatus, PaymentReadinessReason } from "./types";
@@ -28,6 +28,13 @@ export const SITE_LISTING_STATUS: Record<ExperienceSiteListingStatus | "NONE", S
   ACTIVE: { label: "掲載中", tone: "ok" },
   PAUSED: { label: "停止中", tone: "stop" },
   WITHDRAWN: { label: "未申請", tone: "draft" },
+};
+
+/** 体験の一覧 in http mode (provider operations on): NIHO's page itself, beside the preview's listing states. */
+export const PROVIDER_PAGE_STATUS: Record<ExperienceProviderPageListItem["status"], StatusLabel> = {
+  DRAFT: LISTING_STATUS.draft,
+  PUBLISHED: { label: "公開中", tone: "ok" },
+  UNPUBLISHED: LISTING_STATUS.paused,
 };
 
 /** The English of a page written in Japanese (#110): 未作成 / 下書き / 確定済み / 古い (the Japanese changed since). */

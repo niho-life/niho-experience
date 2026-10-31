@@ -99,6 +99,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   product_operator_commands: { write: I },
   product_operator_grants: { write: IU },
   product_operator_invitations: { write: IU },
+  // 設定 › カレンダー's bookings feed (#109): issued again in place, deleted when the OWNER stops it.
+  provider_calendar_feeds: { write: IUD },
   provider_google_calendar_inventory: { write: ID, updateColumns: ["fetched_at"] },
   provider_google_calendars: { write: IUD },
   provider_google_connections: { write: IUD },
