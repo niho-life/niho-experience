@@ -106,6 +106,7 @@ type DeliveryRow = Record<string, unknown> & { id: string; phase: GoogleChannelD
 type CurrentRow = Record<string, unknown> & {
   opaque_calendar_id: string; binding_version: string; binding_mapping_version: string;
   binding_connection_generation: string; current_account_version: string;
+  initialize_missing_open_anchor: boolean;
   encrypted_refresh_token: string; granted_scopes: string[];
 };
 
@@ -134,7 +135,7 @@ export class GoogleChannelDeliveryRepository {
               l.active AS listing_active,l.mapping_version AS current_mapping_version,l.adapter,l.adapter_version,l.connection_mode,
               l.can_open,l.can_close,l.can_observe,p.status AS product_status,
               a.active AS account_active,a.version AS current_account_version,a.revoked_at,a.delegated_until,a.quarantined_at,a.site,
-              wa.version AS current_assignment_version,b.opaque_calendar_id,b.binding_version,
+              wa.version AS current_assignment_version,b.opaque_calendar_id,b.binding_version,b.initialize_missing_open_anchor,
               b.mapping_version AS binding_mapping_version,b.connection_generation AS binding_connection_generation,
               c.encrypted_refresh_token,c.granted_scopes
          FROM channel_jobs j
@@ -173,6 +174,8 @@ export class GoogleChannelDeliveryRepository {
       || integer(row.desired_mapping_version) !== context.mappingVersion || integer(row.current_desired_version) !== context.desiredVersion
       || integer(row.mapping_version) !== context.mappingVersion || integer(row.desired_version) !== context.desiredVersion
       || integer(row.binding_version) < 1 || integer(row.binding_mapping_version) !== context.mappingVersion
+      || integer(row.binding_version) !== context.bindingVersion
+      || row.initialize_missing_open_anchor !== context.initializeMissingOpenAnchor
       || integer(row.binding_connection_generation) < 1
       || String(row.occurrence_id) !== context.occurrenceId || String(row.provider_id) !== context.providerId
       || String(row.account_id) !== context.accountId || String(row.listing_id) !== context.listingId
@@ -196,6 +199,8 @@ export class GoogleChannelDeliveryRepository {
       || String(delivery.listing_id) !== context.listingId || String(delivery.occurrence_id) !== context.occurrenceId
       || integer(delivery.account_version) !== integer(current.current_account_version)
       || integer(delivery.binding_version) !== integer(current.binding_version)
+      || integer(delivery.binding_version) !== context.bindingVersion
+      || current.initialize_missing_open_anchor !== context.initializeMissingOpenAnchor
       || integer(delivery.connection_generation) !== integer(current.binding_connection_generation)
       || String(delivery.binding_calendar_digest) !== digest(current.opaque_calendar_id)
       || String(delivery.granted_scopes_digest) !== scopesDigest(current.granted_scopes)) {

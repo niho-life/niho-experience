@@ -118,6 +118,10 @@ export type GoogleManagedBlockInitializationResult =
 
 export type AssertGoogleManagedBlockCurrent = () => void | Promise<void>;
 
+export interface ApplyGoogleManagedBlockOptions {
+  readonly initializeMissingOpenAnchor?: boolean;
+}
+
 type StopResult = Extract<GoogleManagedBlockResult, { changed: false }>;
 type Inspection = { ok: true; google: GoogleManagedBlockMetadata } | { ok: false; code: GoogleManagedBlockStopCode };
 type ReadResult = { kind: "FOUND"; inspection: Inspection } | { kind: "MISSING" } | { kind: "TOMBSTONE" };
@@ -463,6 +467,7 @@ export async function applyGoogleManagedBlock(
   calendarId: string,
   target: GoogleManagedBlockTarget,
   assertCurrent: AssertGoogleManagedBlockCurrent,
+  options?: ApplyGoogleManagedBlockOptions,
 ): Promise<GoogleManagedBlockResult> {
   validateTarget(target);
   if (!boundedIdentifier(calendarId, MAX_CALENDAR_ID_LENGTH) || !boundedIdentifier(accessToken, MAX_ACCESS_TOKEN_LENGTH)) {
@@ -474,7 +479,8 @@ export async function applyGoogleManagedBlock(
   await assertCurrent();
   const initial = await readEvent(config, accessToken, calendarId, target, eventId);
   if (initial.kind === "TOMBSTONE") return stop("TOMBSTONE", eventId);
-  if (initial.kind === "MISSING" && target.desiredState === "OPEN") return stop("ANCHOR_MISSING", eventId);
+  if (initial.kind === "MISSING" && target.desiredState === "OPEN"
+    && options?.initializeMissingOpenAnchor !== true) return stop("ANCHOR_MISSING", eventId);
   if (initial.kind === "FOUND" && !initial.inspection.ok) return stop(initial.inspection.code, eventId);
 
   const existing = initial.kind === "FOUND" && initial.inspection.ok ? initial.inspection.google : undefined;

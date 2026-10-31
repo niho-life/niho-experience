@@ -184,7 +184,7 @@ export class GoogleChannelSetupRepository {
           && Boolean((await client.query(
             `SELECT 1 FROM google_channel_output_bindings
               WHERE provider_id=$1 AND listing_id=$2 AND mapping_version=$3 AND connection_generation=$4
-                AND opaque_calendar_id=$5`,
+                AND opaque_calendar_id=$5 AND active=false`,
             [actor.providerId, input.listingId, row.expected_mapping_version, row.connection_generation, row.created_calendar_id],
           )).rows[0]));
         if (!currentReady) return { ...this.#snapshot(row, authority, false), record: record(row, "UNCERTAIN") };
@@ -267,7 +267,7 @@ export class GoogleChannelSetupRepository {
       const binding = await client.query(
         `SELECT 1 FROM google_channel_output_bindings
           WHERE provider_id=$1 AND listing_id=$2 AND mapping_version=$3 AND connection_generation=$4
-            AND opaque_calendar_id=$5`,
+            AND opaque_calendar_id=$5 AND active=false`,
         [actor.providerId, listingId, row.expected_mapping_version, row.connection_generation, row.created_calendar_id],
       );
       return this.#authorityMatches(row, authority, actor) && binding.rows[0] ? record(row) : record(row, "UNCERTAIN");

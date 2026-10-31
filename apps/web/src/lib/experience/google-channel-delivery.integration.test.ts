@@ -216,6 +216,33 @@ describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integra
     }
   });
 
+  it("bootstraps one missing OPEN anchor only from the current opted-in binding snapshot", async () => {
+    const value = await fixture("OPEN");
+    const methods: string[] = [];
+    let event: Record<string, unknown> | undefined;
+    try {
+      await value.pool.query(`UPDATE google_channel_output_bindings
+        SET binding_version=binding_version+1,initialize_missing_open_anchor=true WHERE provider_id='provider-a' AND listing_id='listing-a'`);
+      const result = await executeGoogleChannelDelivery(
+        value.pool, value.runtime, value.worker, value.claimed.id, value.claimed.leaseToken, "dispatch",
+        injected(async (_input, init = {}) => {
+          const method = init.method ?? "GET";
+          methods.push(method);
+          if (method === "POST") {
+            const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+            event = { ...body, status: "confirmed", etag: '"verified"' };
+            return Response.json({ id: body.id, etag: '"ack"' });
+          }
+          return event ? Response.json(event) : new Response(null, { status: 404 });
+        }),
+      );
+      expect(result).toMatchObject({ phase: "GOOGLE_VERIFIED", airbnb: "UNVERIFIED" });
+      expect(methods).toEqual(["GET", "POST", "GET"]);
+      expect((await value.pool.query("SELECT binding_version FROM google_channel_deliveries WHERE id=$1::uuid", [result.deliveryId])).rows[0].binding_version).toBe("2");
+      expect((await value.pool.query("SELECT count(*)::int AS count FROM channel_job_results")).rows[0].count).toBe(0);
+    } finally { await cleanup(value); }
+  });
+
   it.each(["OPEN", "CLOSED"] as const)("converges durable %s waits through the real Google helper without another write", async (desiredState) => {
     const value = await fixture(desiredState);
     const methods: string[] = [];

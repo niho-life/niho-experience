@@ -6,7 +6,7 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /(?:host-calendar|admin-channel-workspace)\.spec\.ts/,
+  testMatch: /(?:host-calendar|host-airbnb-google-setup|admin-channel-workspace)\.spec\.ts/,
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   workers: 1,
