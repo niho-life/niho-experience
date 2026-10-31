@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExperienceCheckoutRequest } from "@niho-experience/api-client";
-import { getBrowserApi, getSiteQuestionsApi } from "./browser-api";
+import { getBrowserApi, getSiteQuestionsApi, getSiteReviewsApi } from "./browser-api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -38,5 +38,19 @@ describe("questions to the host (#105)", () => {
     expect(init.referrerPolicy).toBe("same-origin");
     expect(init.credentials).toBe("omit");
     expect(JSON.parse(init.body as string)).toEqual(request);
+  });
+});
+
+describe("guest reviews (#104)", () => {
+  it("read this site's own route, which answers from the experience DB, without credentials", async () => {
+    const body = { summary: { count: 1, average: 5, tags: [] }, reviews: [{ id: "00000000-0000-4000-8000-000000000104", rating: 5, body: "Lovely.", tags: [], displayName: "Sample Guest", originLabel: null, publishedAt: "2026-10-30T01:00:00.000Z", fromBooking: true, reply: null }] };
+    const fetchMock = vi.fn(async () => Response.json(body));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await getSiteReviewsApi("https://experience.example").listReviews("sample-tea", { limit: 50 })).toEqual({ ok: true, data: body });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://experience.example/api/public/experiences/sample-tea/reviews?limit=50");
+    expect(init.method).toBe("GET");
+    expect(init.credentials).toBe("omit");
+    expect(init.referrerPolicy).toBe("no-referrer");
   });
 });

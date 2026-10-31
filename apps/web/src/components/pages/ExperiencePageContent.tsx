@@ -33,7 +33,7 @@ import { LocalizedLink as Link } from "@/components/LocalizedLink";
 import { AskHost } from "@/components/AskHost";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { NO_JOURNEY_EXTRAS, type Occurrence } from "@niho-experience/api-client";
-import { getJourneyExtras } from "@/lib/journey";
+import { getJourneyExtras, getLiveReviews } from "@/lib/journey";
 import { askHostTarget, conditionRows } from "@/lib/journey-ui";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
 import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
@@ -154,9 +154,11 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   }
   // Conditions, questions to the host and the FAQ have no NIHO contract yet: the mock serves them, a real API shows none (src/lib/journey.ts).
   // Related experiences and guides are English-only for now; both disappear when there are none or the catalogue cannot be read.
-  const [journey, relatedCards] = locale === "en"
-    ? await Promise.all([getJourneyExtras(e.slug, query), relatedExperienceCards(e.slug, query)])
-    : [NO_JOURNEY_EXTRAS, []];
+  const [extras, relatedCards, liveReviews] = locale === "en"
+    ? await Promise.all([getJourneyExtras(e.slug, query), relatedExperienceCards(e.slug, query), getLiveReviews(e.slug)])
+    : [NO_JOURNEY_EXTRAS, [], null];
+  // 予約者のレビュー kept in the experience DB (#104; http mode with its flag only) take the extras' place.
+  const journey = liveReviews ? { ...extras, reviews: liveReviews } : extras;
   const relatedGuides = locale === "en" ? await guidesAboutExperience(e.slug) : { guides: [], draftSlugs: [] };
   const checkoutCancelled = query.checkout === "cancelled";
   const browseContext = readBrowseContext(query);

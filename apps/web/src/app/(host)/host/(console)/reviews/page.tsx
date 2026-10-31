@@ -5,22 +5,28 @@ import { HostSubHeader } from "@/components/host/HostSubHeader";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostReviews } from "@/host/data";
+import { GUEST_REVIEW_LOAD_FAILED_TEXT, GUEST_REVIEW_OWNER_ONLY_TEXT, loadGuestReviews } from "@/host/guest-reviews-server";
 import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
 
 export const metadata: Metadata = { title: "レビュー" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** http mode until NIHO's API has the reviews (#87; niho-app#19314): nothing that pretends to work. */
-function ReviewsUnavailable({ homeHref }: { homeHref: string }) {
+const UNAVAILABLE = {
+  title: "この画面は準備中です",
+  body: "予約者のレビューは、NIHO との接続ができしだいここで読み、返信できるようになります。",
+};
+
+/** http mode until NIHO's API has the reviews (#87; niho-app#19314): nothing that pretends to work; also the live reviews' read failure. */
+function ReviewsUnavailable({ homeHref, title = UNAVAILABLE.title, body = UNAVAILABLE.body }: { homeHref: string; title?: string; body?: string }) {
   return (
     <>
       <HostSubHeader backHref={homeHref} backLabel="ホーム" title="" />
       <HostPageBody>
         <PageHead title="レビュー" />
         <section className={`${HOST_SURFACE} px-5 py-8 md:px-6 md:py-10`}>
-          <p className="font-extrabold">この画面は準備中です</p>
-          <p className="mt-1 text-ink-soft">予約者のレビューは、NIHO との接続ができしだいここで読み、返信できるようになります。</p>
+          <p className="font-extrabold">{title}</p>
+          <p className="mt-1 text-ink-soft">{body}</p>
         </section>
       </HostPageBody>
     </>
@@ -38,8 +44,16 @@ export default async function HostReviewsPage({ searchParams }: { searchParams: 
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="レビュー" />;
+  const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
+  // 予約者のレビュー kept in the experience DB (#108): the OWNER's reviews, each shown (and open to a reply) from when it was written. While closed, the screen below.
+  const live = await loadGuestReviews(provider, context.session.nihoUserId);
+  if (live.status === "live") {
+    return <HostReviews key={provider.id} reviews={live.reviews} experiences={live.experiences} now={live.now} linkProviderId={linkProviderId} providerId={provider.id} live={{ revisions: live.revisions }} />;
+  }
+  if (live.status === "error") return <ReviewsUnavailable homeHref={homeHref} title="レビューを読み込めませんでした" body={GUEST_REVIEW_LOAD_FAILED_TEXT} />;
+  if (live.status === "owner-only") return <ReviewsUnavailable homeHref={homeHref} title={GUEST_REVIEW_OWNER_ONLY_TEXT} body="オーナーのアカウントでログインすると、レビューを読んで返信できます。" />;
   const { list, experiences, now } = loadHostReviews(provider);
-  if (list.status === "unavailable") return <ReviewsUnavailable homeHref={withProvider(HOST_HOME_PATH, linkProviderId)} />;
+  if (list.status === "unavailable") return <ReviewsUnavailable homeHref={homeHref} />;
   return (
     // Keyed by provider: another provider's reviews start from their own list.
     <HostReviews key={provider.id} reviews={list.reviews} experiences={experiences} now={now} linkProviderId={linkProviderId} providerId={provider.id} />
