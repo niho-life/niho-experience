@@ -7,7 +7,7 @@ import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { getApi } from "@/lib/api";
 import { buildCardModels } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
-import { config } from "@/lib/config";
+import { guestBookingSources } from "@/lib/guest-booking-source";
 import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
 import { filterExperienceSummaries, normalizeExperienceQuery, type SearchParams } from "@/lib/filters";
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
@@ -41,9 +41,11 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
     data = { copy, cards, searchQuery, initialDate, initialGuests, days };
   } catch { return <JapaneseUnavailable />; }
   const { copy, cards, searchQuery, initialDate, initialGuests, days } = data;
+  // Where each card's availability is read: NIHO, or this site for an experience sold here (#285).
+  const bookingSources = await guestBookingSources(cards.map((card) => card.slug));
   const searchProps = { searchQuery, theme: undefined, date: initialDate ?? undefined, guests: initialGuests, filtersEnabled: false, filtersActive: Boolean(searchQuery || initialDate || initialGuests !== null) };
   return <CatalogueViewV1 copy={copy.copy} heading={copy.copy.text("catalogue.title")} intro="鎌倉の少人数制の体験を探せます。料金は日本円、時刻は日本時間（JST）です。" content={<ExperienceList
-      key={JSON.stringify([searchQuery, initialDate, initialGuests])} cards={cards} days={days} initialDate={initialDate} initialGuests={initialGuests} browseContext={{ q: searchQuery || undefined }} catalogDateFiltered={false} preview={false} nihoWebOrigin={config.nihoWebOrigin}
+      key={JSON.stringify([searchQuery, initialDate, initialGuests])} cards={cards} days={days} initialDate={initialDate} initialGuests={initialGuests} browseContext={{ q: searchQuery || undefined }} catalogDateFiltered={false} preview={false} bookingSources={bookingSources}
       search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />} inlineSearch={<ExperienceFiltersForm key="inline-search" {...searchProps} placement="inline" />} columns="three"
       empty={<EmptyResults key="empty-results" clearHref={searchQuery || initialDate || initialGuests !== null ? "/experiences" : null} searchActive={Boolean(searchQuery)} />}
     />} />;

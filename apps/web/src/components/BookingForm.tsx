@@ -18,12 +18,15 @@ import { BookingCheckoutViewV1, type BookingCheckoutViewModelV1 } from "@niho/ex
 import { PRESENTATION_PRIMITIVES_V1 } from "./PresentationV1";
 import { useSiteCopy, useSiteLocale } from "./SiteLocale";
 import { readAvailabilityFromApi } from "@/lib/browser-availability";
+import { getSiteBookingTerms } from "@/lib/browser-api";
+import type { BookingSource } from "@/lib/booking-source";
+import { withSiteSaleTerms } from "@/lib/guest-booking-terms";
 import { checkoutProblem, fullNameValidationMessage, retryUnit } from "@/lib/booking-messages";
 
 export type BookingDraft = { guestName: string; guestEmail: string; guestPhone?: string; note: string; answerSets: Record<string, Record<string, string | string[]>> };
 export type CheckoutAttempt = { signature: string; key: string };
 
-export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
+export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, bookingSource, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; /** Where `api` points; NIHO's API when left out. */ bookingSource?: BookingSource; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
   const router = useRouter();
   const copy = useSiteCopy();
   const { locale, releaseId } = useSiteLocale();
@@ -203,7 +206,11 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       // With the journey additions the detail is read as v1.4: the same detail plus the participation conditions to agree to again.
       let latest: ExperienceDetailForSite | null;
       let latestConditions: ExperienceConditions | null | undefined;
-      if (locale === "en" && journey.enabled) {
+      if (bookingSource?.kind === "site") {
+        // Sold here (#285): the offers, questions, prices and terms version come again from this site, never from NIHO's detail.
+        const terms = await getSiteBookingTerms(bookingSource.origin, experience.slug);
+        latest = terms ? withSiteSaleTerms(experience, terms) : null;
+      } else if (locale === "en" && journey.enabled) {
         const result = await api.getExperienceV14(experience.slug);
         latest = result.ok ? result.data.experience : null;
         latestConditions = result.ok ? usableConditions(result.data.experience.conditions) : undefined;

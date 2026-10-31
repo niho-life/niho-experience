@@ -36,6 +36,39 @@ describe("isAllowedCheckoutRedirect", () => {
   });
 });
 
+describe("isAllowedCheckoutRedirect on this site's own origin (#285)", () => {
+  const SITE = "https://experience.example";
+  it.each([
+    ["https://checkout.stripe.com/c/pay/cs_test_abc", true],
+    ["https://experience.example/booking/return?type=instant", true],
+    ["https://experience.example/booking/return?type=approval", true],
+    ["https://experience.example/booking/return", false],
+    ["https://experience.example/booking/return?type=other", false],
+    ["https://experience.example/booking/return?type=instant&next=https://evil.example", false],
+    ["https://experience.example/booking/return?type=instant#x", false],
+    ["https://experience.example/booking/return/x?type=instant", false],
+    ["https://experience.example/experiences/bookings/tok", false],
+    ["https://experience.example/experiences/sample-tea", false],
+    ["http://experience.example/booking/return?type=instant", false],
+    ["https://niho.life/booking/return?type=instant", false],
+    ["https://niho.life/experiences/bookings/tok", false],
+    ["https://user:pass@experience.example/booking/return?type=instant", false],
+  ])("%s → %s", (url, expected) => {
+    expect(isAllowedCheckoutRedirect(url, SITE, { thisSite: true })).toBe(expected);
+  });
+
+  it("is not accepted from NIHO's origin, and the client applies the option it was made with", async () => {
+    expect(isAllowedCheckoutRedirect("https://niho.life/booking/return?type=instant", ORIGIN)).toBe(false);
+    const paidReplay = { checkoutUrl: `${SITE}/booking/return?type=instant` };
+    const site = createExperienceApiClient({ nihoWebOrigin: SITE, thisSite: true, fetch: respond(201, paidReplay) });
+    expect(await site.startCheckout("sample-tea", BODY)).toEqual({ ok: true, checkoutUrl: paidReplay.checkoutUrl });
+    const niho = createExperienceApiClient({ nihoWebOrigin: SITE, fetch: respond(201, paidReplay) });
+    expect(await niho.startCheckout("sample-tea", BODY)).toEqual({ ok: false, kind: "unexpected_response", status: 201 });
+    const nihoPage = createExperienceApiClient({ nihoWebOrigin: SITE, thisSite: true, fetch: respond(201, { checkoutUrl: `${SITE}/experiences/bookings/tok` }) });
+    expect(await nihoPage.startCheckout("sample-tea", BODY)).toEqual({ ok: false, kind: "unexpected_response", status: 201 });
+  });
+});
+
 describe("createExperienceApiClient", () => {
   it("日本語releaseのcopy・catalog・availabilityをlocale pathからno-storeで読む", async () => {
     const values = Object.fromEntries(Array.from({ length: 342 }, (_, index) => [`copy.${index}`, `値${index}`]));

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { computeExpectedTotalYen, type ExperienceApiClient, type ExperienceOffer, type Occurrence } from "@niho-experience/api-client";
-import { getBrowserApi } from "@/lib/browser-api";
+import { getBookingApi } from "@/lib/browser-api";
+import type { BookingSource } from "@/lib/booking-source";
 import { dayLabelWithoutWeekday, dayOption } from "@/lib/date-filter";
 import type { ExperienceDetailForSite } from "@/lib/experience-types";
 import { formatDuration, formatTime, formatYen, pluralize } from "@/lib/format";
@@ -19,7 +20,7 @@ export type BookingSelection = { offerId: string; date: string; adultCount: numb
 /** Dates shown before "Show more dates" (two columns, three rows). */
 const FIRST_DATES = 6;
 
-export function SlotPicker({ experience, slug, offers, preview, availabilityIsProvisional, nihoWebOrigin, onContinue, initialOfferId, initialDate, initialAdultCount = 1, initialChildCount = 0, titleAs = "h1" }: { experience: ExperienceDetailForSite; slug: string; offers: ExperienceOffer[]; preview: boolean; availabilityIsProvisional: boolean; nihoWebOrigin: string; onContinue: (selection: BookingSelection) => void; initialOfferId?: string; initialDate?: string; initialAdultCount?: number; initialChildCount?: number; titleAs?: "h1" | "p" }) {
+export function SlotPicker({ experience, slug, offers, preview, availabilityIsProvisional, bookingSource, onContinue, initialOfferId, initialDate, initialAdultCount = 1, initialChildCount = 0, titleAs = "h1" }: { experience: ExperienceDetailForSite; slug: string; offers: ExperienceOffer[]; preview: boolean; availabilityIsProvisional: boolean; bookingSource: BookingSource; onContinue: (selection: BookingSelection) => void; initialOfferId?: string; initialDate?: string; initialAdultCount?: number; initialChildCount?: number; titleAs?: "h1" | "p" }) {
   const copy = useSiteCopy();
   const { locale, releaseId } = useSiteLocale();
   const [api, setApi] = useState<ExperienceApiClient | null>(null);
@@ -41,9 +42,9 @@ export function SlotPicker({ experience, slug, offers, preview, availabilityIsPr
 
   useEffect(() => {
     let active = true;
-    getBrowserApi(preview, nihoWebOrigin).then((client) => { if (active) setApi(client); }).catch(() => { if (active) { setError(true); setLoading(false); } });
+    getBookingApi(preview, bookingSource).then((client) => { if (active) setApi(client); }).catch(() => { if (active) { setError(true); setLoading(false); } });
     return () => { active = false; };
-  }, [preview, nihoWebOrigin]);
+  }, [preview, bookingSource]);
 
   useEffect(() => {
     if (!api) return;
@@ -83,6 +84,6 @@ export function SlotPicker({ experience, slug, offers, preview, availabilityIsPr
     line: selected ? `${dayOption(selected.date, locale).label} · ${formatTime(selected.startAt, locale)}` : copy.text("booking.chooseDateLine"),
     canContinue,
   };
-  const retry = () => { setError(false); setLoading(true); if (api) readAvailabilityFromApi(api, slug, locale, releaseId, offerId).then((nextOccurrences) => { setLoading(false); setError(nextOccurrences === null); setOccurrences(nextOccurrences ?? []); }); else getBrowserApi(preview, nihoWebOrigin).then(setApi).catch(() => { setError(true); setLoading(false); }); };
+  const retry = () => { setError(false); setLoading(true); if (api) readAvailabilityFromApi(api, slug, locale, releaseId, offerId).then((nextOccurrences) => { setLoading(false); setError(nextOccurrences === null); setOccurrences(nextOccurrences ?? []); }); else getBookingApi(preview, bookingSource).then(setApi).catch(() => { setError(true); setLoading(false); }); };
   return <BookingSelectionViewV1 model={model} titleAs={titleAs} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} callbacks={{ onOfferChange: (id) => { const item = offers.find((candidate) => candidate.id === id); setOfferId(id); setDate(""); setLoading(true); if (!item?.pricing.child) setChildCount(0); setShowAllDates(false); }, onDateChange: setDate, onCounterChange: (id, value) => id === "adult-count" ? setAdultCount(value) : setChildCount(value), onRetry: retry, onShowMore: () => setShowAllDates(true), onContinue: () => { if (locale === "en") track("slot_continue", { experience: slug, guests: headCount }); onContinue({ offerId, date, adultCount, childCount }); } }} />;
 }
