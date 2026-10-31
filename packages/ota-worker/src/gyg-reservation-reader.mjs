@@ -2,7 +2,7 @@ import { CDN_ORIGIN, SUPPLIER_ORIGIN } from "./constants.mjs";
 import { selectAccountProfile } from "./config.mjs";
 import { startManagedBrowser } from "./managed-browser.mjs";
 import { isFirebaseSessionRefresh, isNamedReadOnlyQuery, isPermittedSubresourceGet } from "./network-guard.mjs";
-import { assertAuthOrDrift, fixedTestOrigin, prepareGuardedPage } from "./browser-driver-common.mjs";
+import { assertAuthOrDrift, fixedTestOrigin, pageGraphqlFetch, prepareGuardedPage, sessionHeadersFromRequest } from "./browser-driver-common.mjs";
 import {
   MAX_RESERVATION_RESPONSE_BYTES,
   RESERVATION_OPERATION_NAME,
@@ -18,9 +18,6 @@ const BOOKINGS_PATH = "/bookings";
 const FIXED_NAVIGATIONS = new Set([COMPANY_PATH, BOOKINGS_PATH]);
 const APP_READ_TIMEOUT_MS = 15_000;
 const FETCH_TIMEOUT_MS = 15_000;
-const MAX_SESSION_HEADERS = 32;
-const MAX_SESSION_HEADER_LENGTH = 8_192;
-const SESSION_HEADER = /^(?:authorization|x-[a-z0-9-]{1,64})$/;
 const LOGIN_PATH = /login|signin|challenge|captcha|auth/i;
 
 // Read-only guard for the reservation reader. It never carries a write permit:
@@ -41,18 +38,7 @@ export function createGygReadOnlyGuard({ supplierOrigin = SUPPLIER_ORIGIN, cdnOr
   const refuseWrite = (route) => { refusedWrites += 1; return refuse(route); };
 
   function captureSession(request) {
-    let headers;
-    try { headers = request.headers?.() ?? {}; } catch { headers = {}; }
-    const captured = {};
-    let count = 0;
-    for (const [rawName, value] of Object.entries(isPlainObject(headers) ? headers : {})) {
-      const name = rawName.toLowerCase();
-      if (!SESSION_HEADER.test(name) || typeof value !== "string" || value.length > MAX_SESSION_HEADER_LENGTH
-        || /[\0\r\n]/.test(value) || count >= MAX_SESSION_HEADERS) continue;
-      captured[name] = value;
-      count += 1;
-    }
-    sessionHeaders = Object.freeze(captured);
+    sessionHeaders = sessionHeadersFromRequest(request);
     appReads += 1;
     for (const resolve of [...waiters]) resolve(true);
   }
@@ -113,45 +99,6 @@ export function createGygReadOnlyGuard({ supplierOrigin = SUPPLIER_ORIGIN, cdnOr
   });
 }
 
-// Runs inside the supplier page so the request carries the page's own
-// same-origin cookies. Error bodies are never read; success bodies are capped.
-async function pageFetch({ body, headers, maxBytes, timeoutMs }) {
-  let response;
-  try {
-    response = await fetch("/graphql", {
-      method: "POST", credentials: "same-origin", redirect: "error", headers, body, signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    return { failure: error?.name === "TimeoutError" ? "TIMEOUT" : "NETWORK_ERROR" };
-  }
-  if (response.status < 200 || response.status > 299) {
-    try { await response.body?.cancel(); } catch {}
-    return { status: response.status, bodyText: "" };
-  }
-  try {
-    const reader = response.body?.getReader();
-    if (!reader) return { status: response.status, bodyText: "" };
-    const chunks = [];
-    let size = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maxBytes) {
-        try { await reader.cancel(); } catch {}
-        return { status: response.status, tooLarge: true };
-      }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    return { status: response.status, bodyText: new TextDecoder().decode(bytes) };
-  } catch (error) {
-    return { failure: error?.name === "TimeoutError" ? "TIMEOUT" : "NETWORK_ERROR" };
-  }
-}
-
 export async function createGygReservationReader({
   target, config, testOnlySupplierOrigin, allowLocalTestOrigin = false, headless = true, browserFactory = startManagedBrowser,
 }) {
@@ -208,7 +155,7 @@ export async function createGygReservationReader({
       const headers = { ...guard.sessionHeaders(), "content-type": "application/json" };
       let result;
       try {
-        result = await page.evaluate(pageFetch, {
+        result = await page.evaluate(pageGraphqlFetch, {
           body: JSON.stringify(requestBody), headers, maxBytes: MAX_RESERVATION_RESPONSE_BYTES, timeoutMs: FETCH_TIMEOUT_MS,
         });
       } catch {

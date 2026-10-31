@@ -116,7 +116,7 @@ export function validateTokyoLocal(value) {
 export function validateClaim(value, nowMs = Date.now()) {
   if (!exactKeys(value, CLAIM_REQUIRED_KEYS, CLAIM_OPTIONAL_KEYS)) throw new ContractError("INVALID_JOB");
   if (!UUID_V4.test(value.id) || typeof value.leaseToken !== "string" || value.leaseToken.length < 1 || value.leaseToken.length > 100
-    || !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(value.action)
+    || !["SET_OPEN", "SET_CLOSED", "OBSERVE", "ENSURE_OCCURRENCE"].includes(value.action)
     || typeof value.occurrenceId !== "string" || value.occurrenceId.length < 1 || value.occurrenceId.length > 256
     || !Number.isSafeInteger(value.desiredVersion) || value.desiredVersion < 1
     || !Number.isSafeInteger(value.mappingVersion) || value.mappingVersion < 1
@@ -134,8 +134,14 @@ export function validateClaim(value, nowMs = Date.now()) {
     || value.purpose !== undefined || value.action !== "OBSERVE" || !isGoogleDeliveryTarget(target))) {
     throw new ContractError("INVALID_JOB");
   }
+  // Creating an occurrence is a browser-site capability only; it never rides a
+  // reservation window or the Google busy-calendar delivery path.
+  if (value.action === "ENSURE_OCCURRENCE" && (value.purpose !== undefined || value.googleDeliveryOperation !== undefined
+    || isGoogleDeliveryTarget(target))) throw new ContractError("INVALID_JOB");
   const localDateTime = validateTokyoLocal(tokyoLocalFromUtc(value.sourceStartAtUtc));
-  return Object.freeze({ ...value, target, localDateTime, desiredState: value.action === "SET_CLOSED" ? "CLOSED" : value.action === "SET_OPEN" ? "OPEN" : undefined });
+  const desiredState = value.action === "SET_CLOSED" ? "CLOSED"
+    : value.action === "SET_OPEN" || value.action === "ENSURE_OCCURRENCE" ? "OPEN" : undefined;
+  return Object.freeze({ ...value, target, localDateTime, desiredState });
 }
 
 export function projectRawClaim(job, leaseExpiresAtUtc = job?.leaseExpiresAtUtc, nowMs = Date.now()) {
@@ -211,9 +217,14 @@ export function makeGoogleAirbnbResult({ resultId, job, outcome, stopped, observ
   });
 }
 
-export function makeResult({ resultId, job, outcome, stopped, observation }) {
+export function makeResult({ resultId, job, outcome, stopped, observation, ensureCreated }) {
   if (!UUID_V4.test(resultId) || typeof stopped !== "boolean") throw new ContractError("INVALID_RESULT");
   if (!["VERIFIED", "AUTH_REQUIRED", "NEEDS_REVIEW", "UNKNOWN_AFTER_SAVE", "RETRY_WAIT", "SUPERSEDED"].includes(outcome)) {
+    throw new ContractError("INVALID_RESULT");
+  }
+  // ensureCreated exists only on a verified ENSURE_OCCURRENCE result.
+  const ensureVerified = job.action === "ENSURE_OCCURRENCE" && outcome === "VERIFIED";
+  if (ensureVerified ? typeof ensureCreated !== "boolean" || !observation : ensureCreated !== undefined) {
     throw new ContractError("INVALID_RESULT");
   }
   const validatedObservation = observation ? validateObservation(observation, job) : null;
@@ -232,6 +243,7 @@ export function makeResult({ resultId, job, outcome, stopped, observation }) {
       observedManuallyBlocked: validatedObservation.manuallyBlocked,
       observedAtUtc: validatedObservation.observedAtUtc,
     } : {}),
+    ...(ensureVerified ? { ensureCreated } : {}),
   });
 }
 

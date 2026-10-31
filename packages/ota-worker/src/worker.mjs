@@ -56,7 +56,7 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
   await journal.claimed(job);
   await journal.running();
   const execution = await executor({ job, cloud, config, journal });
-  const modelInvocations = job.purpose === "RESERVATION_WINDOW" || isGoogleDeliveryTarget(job.target)
+  const modelInvocations = job.purpose === "RESERVATION_WINDOW" || isGoogleDeliveryTarget(job.target) || job.action === "ENSURE_OCCURRENCE"
     ? 0 : config.mode === "claude-code" ? 1 : 0;
   const result = job.purpose === "RESERVATION_WINDOW"
     ? makeReservationResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped,
@@ -65,7 +65,8 @@ export async function runWorkerOnce({ cloud, config, journal, executor = execute
       ? makeGoogleAirbnbResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped,
         observation: execution.observation, googleAirbnbProof: execution.googleAirbnbProof,
         expectedDesiredState: execution.expectedDesiredState })
-    : makeResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped, observation: execution.observation });
+    : makeResult({ resultId: randomUUID(), job, outcome: execution.outcome, stopped: execution.stopped, observation: execution.observation,
+      ...(execution.ensureCreated !== undefined ? { ensureCreated: execution.ensureCreated } : {}) });
   const haltReason = execution.stopped !== true ? "PROCESS_STOP_UNCONFIRMED"
     : execution.halt ? execution.reason ?? execution.outcome : undefined;
   await journal.pendingResult(result, haltReason);
