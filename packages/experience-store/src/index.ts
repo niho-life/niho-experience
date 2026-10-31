@@ -44,6 +44,19 @@ export type {
   GuestQuestionTopic,
   SubmitGuestQuestionInput,
 } from "./guest-questions.ts";
+export { GUEST_REVIEW_LIMITS, GUEST_REVIEW_REPORT_REASONS, GUEST_REVIEW_TAGS, GuestReviewRepository } from "./guest-reviews.ts";
+export type {
+  GuestReviewEligibility,
+  GuestReviewInvitation,
+  GuestReviewLanguage,
+  GuestReviewReportReason,
+  GuestReviewTagValue,
+  HostGuestReview,
+  HostGuestReviewPage,
+  PublicGuestReview,
+  PublicGuestReviews,
+  SubmitGuestReviewInput,
+} from "./guest-reviews.ts";
 export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS } from "./guest-bookings.ts";
 export type {
   BookingQuestion,

@@ -58,6 +58,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   guest_question_messages: { write: IU },
   guest_question_reply_tokens: { write: IU },
   guest_question_threads: { write: IU },
+  guest_review_invitations: { write: IU },
+  guest_reviews: { write: IU },
   guide_admin_command_receipts: { write: I },
   guide_articles: { write: IU },
   guide_categories: { write: IU },

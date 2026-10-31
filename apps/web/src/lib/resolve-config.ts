@@ -264,6 +264,10 @@ export function resolveConfig(env: Env) {
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
   // console is on and メッセージ is not showing NIHO's booking messages instead.
   const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && !experienceProviderOperationsApiEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
+  // 予約者のレビュー (#104/#108) kept in the experience DB: for now only the public read of published reviews, so it
+  // does not need the host console. The mock keeps its own synthetic reviews; http opens per environment after
+  // migration 0027 is applied and accepted.
+  const guestReviewsEnabled = apiMode === "http" && env.EXPERIENCE_GUEST_REVIEWS_ENABLED === "true";
   // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted.
   const guestBooking = guestBookingSettings(apiMode, env);
@@ -361,6 +365,7 @@ export function resolveConfig(env: Env) {
     experienceTranslateApiEnabled,
     hostNotificationSettingsEnabled,
     guestQuestionsEnabled,
+    guestReviewsEnabled,
     guestBookingEnabled: guestBooking.enabled,
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
