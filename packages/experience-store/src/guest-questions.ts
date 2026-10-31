@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
-import { enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
+import { BookingMessagesClosedError, StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
+import { enqueueBookingMessageNotification, enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -13,6 +13,13 @@ export const GUEST_QUESTION_TOPICS = ["CHILDREN", "FOOD", "ACCESS", "LANGUAGE", 
 export type GuestQuestionTopic = (typeof GUEST_QUESTION_TOPICS)[number];
 export type GuestQuestionLanguage = "EN" | "JA";
 export type GuestQuestionDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAILED";
+/**
+ * Where a message was written: the experience page's question form, the question reply page, a guest's booking page
+ * (#285 slice 6b) or the host console.
+ */
+export type GuestQuestionMessageSource = "SITE_FORM" | "REPLY_PAGE" | "BOOKING_PAGE" | "HOST_CONSOLE";
+/** A question before booking, or the messages of one booking made on this site (#285 slice 6b). */
+export type GuestThreadKind = "QUESTION" | "BOOKING";
 /** What the mail worker reports for one claimed reply. RETRY puts it back with a backoff while attempts remain. */
 export type GuestQuestionDeliveryOutcome = "SENT" | "RETRY" | "FAILED";
 
@@ -30,6 +37,10 @@ export const GUEST_QUESTION_LIMITS = {
   newThreadsPerProductPerHour: 30,
   deliveryAttempts: 5,
   linkTtlDaysMax: 30,
+  /** A booking's messages (#285 slice 6b): a guest's messages per booking in an hour. */
+  bookingMessagesPerHour: 10,
+  /** A booking's messages stay open until this many days after the experience (as its page and sessions). */
+  bookingMessageDaysAfterExperience: 30,
 } as const;
 
 export interface SubmitGuestQuestionInput {
@@ -47,7 +58,7 @@ export interface SubmitGuestQuestionInput {
 export interface GuestQuestionMessage {
   readonly id: string;
   readonly author: "GUEST" | "HOST";
-  readonly source: "SITE_FORM" | "REPLY_PAGE" | "HOST_CONSOLE";
+  readonly source: GuestQuestionMessageSource;
   /** The guest's own words, or the English the guest gets. */
   readonly body: string;
   /** Guest: the Japanese translation (null until one is made). Host: the Japanese they wrote, or null when they wrote English. */
@@ -57,14 +68,35 @@ export interface GuestQuestionMessage {
   readonly deliveryStatus: GuestQuestionDeliveryStatus | null;
 }
 
+/** The booking a thread is about (#285 slice 6b), as the host reads it: never the guest's address or phone. */
+export interface GuestQuestionThreadBooking {
+  readonly publicBookingId: string;
+  readonly status: "CONFIRMED" | "PAYMENT_REVIEW" | "CANCELLED";
+  /** The occurrence as booked (the snapshot), in its own time zone. */
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly startUtc: string;
+  readonly adultCount: number;
+  readonly childCount: number;
+  /**
+   * Messages may still be written, by the guest and the host: the booking is confirmed or under payment review, and
+   * its experience ended less than 30 days ago. Otherwise the history stays readable only.
+   */
+  readonly open: boolean;
+}
+
 /** One row of メッセージ's list. Never the guest's email address. */
 export interface GuestQuestionThreadSummary {
   readonly id: string;
   readonly productId: string;
   readonly productTitle: string;
+  /** The guest's name: the question's, or the booking's (from its guest record). */
   readonly guestName: string;
-  readonly topic: GuestQuestionTopic;
+  /** What a question is about; null for a booking's thread. */
+  readonly topic: GuestQuestionTopic | null;
   readonly language: GuestQuestionLanguage;
+  /** The booking the thread is about; null for a question before booking. */
+  readonly booking: GuestQuestionThreadBooking | null;
   /** The guest wrote last and the host has not answered. */
   readonly needsReply: boolean;
   /** The OWNER opened it since the guest last wrote. */
@@ -85,8 +117,7 @@ export interface GuestQuestionThreadPage {
   readonly nextCursor: string | null;
 }
 
-/** A host reply the mail worker now sends. The raw token exists only here and in the email it builds. */
-export interface ClaimedGuestQuestionReply {
+interface ClaimedHostMessage {
   readonly messageId: string;
   readonly providerId: string;
   readonly threadId: string;
@@ -96,11 +127,43 @@ export interface ClaimedGuestQuestionReply {
   readonly experienceTitle: string;
   readonly hostDisplayName: string;
   readonly english: string;
+  /** 1 for the first try. */
+  readonly attempt: number;
+}
+
+/** A host reply to a question the mail worker now sends. The raw token exists only here and in the email it builds. */
+export interface ClaimedQuestionReply extends ClaimedHostMessage {
+  readonly kind: "QUESTION";
   /** For `/questions/reply#t=<token>`: in the URL fragment only, never in a query, a log or the outbox. */
   readonly replyToken: string;
   readonly replyLinkExpiresAtUtc: string;
-  /** 1 for the first try. */
-  readonly attempt: number;
+}
+
+/**
+ * A host message in a booking's thread (#285 slice 6b) the mail worker now sends. It carries no reply link: the
+ * worker links to the booking page with a fresh one-time grant (GuestBookingAccess), when the page is open.
+ */
+export interface ClaimedBookingMessage extends ClaimedHostMessage {
+  readonly kind: "BOOKING";
+  readonly publicBookingId: string;
+  /** The occurrence as booked (the snapshot), in its own time zone. */
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+}
+
+/** What the mail worker sends: a reply to a question, or a host message about a booking. */
+export type ClaimedGuestQuestionReply = ClaimedQuestionReply | ClaimedBookingMessage;
+
+/** Before anyone wrote in a booking's thread, what メッセージ shows of it (#285 slice 6b). */
+export interface GuestBookingThreadStart {
+  /** The booking's thread, or null before anyone wrote. */
+  readonly threadId: string | null;
+  readonly productId: string;
+  readonly productTitle: string;
+  readonly guestName: string;
+  readonly language: GuestQuestionLanguage;
+  readonly booking: GuestQuestionThreadBooking;
 }
 
 /** What the reply page shows to whoever holds the link: the guest's words and the host's English, never the Japanese. */
@@ -179,6 +242,60 @@ function validQuestion(input: SubmitGuestQuestionInput): ValidQuestion {
   };
 }
 
+/** Validated host reply input: the English the guest gets, and the Japanese the host wrote (or null). */
+interface ValidReply {
+  english: string;
+  japanese: string | null;
+  commandId: string;
+}
+
+function validReply(input: { english: string; japanese: string | null; commandId: string }): ValidReply {
+  const commandId = uuid(input?.commandId, "commandId");
+  const english = text(input?.english, "english", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
+  const japanese = input?.japanese === null || input?.japanese === undefined || (typeof input.japanese === "string" && input.japanese.trim() === "")
+    ? null
+    : text(input.japanese, "japanese", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
+  return { english, japanese, commandId };
+}
+
+/** The statuses whose booking has a thread to read (never a hold or an abandoned one). */
+const BOOKING_THREAD_STATUSES = ["CONFIRMED", "PAYMENT_REVIEW", "CANCELLED"] as const;
+const BOOKING_END = (b: string) => `(${b}.occurrence_snapshot->>'endUtc')::timestamptz`;
+
+/**
+ * SQL: the booking `b` still takes messages (#285 slice 6b): confirmed or under payment review, and its experience
+ * ended less than 30 days ago (the database's clock).
+ */
+export function bookingMessagesOpenSql(b: string): string {
+  return `(${b}.status IN ('CONFIRMED', 'PAYMENT_REVIEW') AND ${BOOKING_END(b)} + make_interval(days => ${GUEST_QUESTION_LIMITS.bookingMessageDaysAfterExperience}) > clock_timestamp())`;
+}
+
+/** One booking's messages at a time (the guest's page and the host console), so its one thread and the hourly count hold. */
+export async function lockBookingMessages(client: PoolClient, providerId: string, bookingRowId: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 59))", [`booking-messages:${providerId}/${bookingRowId}`]);
+}
+
+/** The booking's thread, locked for a new message; null before anyone wrote. Call under lockBookingMessages. */
+export async function lockedBookingThread(client: PoolClient, providerId: string, bookingRowId: string): Promise<string | null> {
+  const found = await client.query<DbRow>(
+    "SELECT id FROM guest_question_threads WHERE provider_id = $1 AND booking_id = $2::bigint FOR NO KEY UPDATE",
+    [providerId, bookingRowId],
+  );
+  return found.rows[0] ? String(found.rows[0].id) : null;
+}
+
+/** A booking's thread, started by whoever writes first. It keeps no name or address: they stay in booking_guests. */
+export async function createBookingThread(client: PoolClient, booking: { providerId: string; bookingRowId: string; productId: string; language: GuestQuestionLanguage }): Promise<string> {
+  const threadId = randomUUID();
+  await client.query(
+    `WITH now AS (SELECT clock_timestamp() AS at)
+     INSERT INTO guest_question_threads (id, provider_id, product_id, booking_id, guest_language, last_message_at, created_at)
+     SELECT $1::uuid, $2, $3, $4::bigint, $5, now.at, now.at FROM now`,
+    [threadId, booking.providerId, booking.productId, booking.bookingRowId, booking.language],
+  );
+  return threadId;
+}
+
 /** A current OWNER, not capped below OWNER by NIHO and not a product operator (as 設定 › 通知). */
 export async function requireOwner(client: PoolClient, actor: HostActor): Promise<void> {
   assertStoreIdentifier(actor.providerId, "actor.providerId");
@@ -208,9 +325,31 @@ async function enqueueGuestMessage(client: PoolClient, providerId: string, threa
   await enqueueGuestQuestionNotification(client, { providerId, threadId, messageId, experienceTitle });
 }
 
+/**
+ * A guest wrote on their booking page (#285 slice 6b): the same translation row as a question, and the host's push
+ * with the booking's time and party (GUEST_MESSAGE, which the OWNER can turn off).
+ */
+export async function enqueueBookingGuestMessage(
+  client: PoolClient,
+  input: { providerId: string; threadId: string; messageId: string; experienceTitle: string; startsAt: string; seats: number },
+): Promise<void> {
+  await enqueue(client, input.providerId, input.threadId, input.messageId, "guest_question.received");
+  await enqueueBookingMessageNotification(client, input);
+}
+
 const MESSAGE_COLUMNS = "id, author, source, body, body_ja, created_at, delivery_status";
-const THREAD_COLUMNS = `t.id, t.product_id, p.public_title, t.guest_name, t.topic, t.guest_language, t.needs_reply, t.host_read_at,
-  t.last_message_at, t.created_at, to_char(t.last_message_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at`;
+/** A thread with its experience and, for a booking's thread, the booking and its guest record (never the address). */
+const THREAD_FROM = `guest_question_threads t
+  JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+  LEFT JOIN bookings b ON b.provider_id = t.provider_id AND b.id = t.booking_id
+  LEFT JOIN booking_guests g ON g.provider_id = t.provider_id AND g.booking_id = t.booking_id`;
+const BOOKING_COLUMNS = `b.public_booking_id::text AS booking_public_id, b.status AS booking_status,
+  b.occurrence_snapshot->>'localDate' AS booking_local_date, b.occurrence_snapshot->>'localStartTime' AS booking_local_start,
+  b.occurrence_snapshot->>'startUtc' AS booking_start_utc, g.adult_count AS booking_adults, g.child_count AS booking_children,
+  ${bookingMessagesOpenSql("b")} AS booking_open`;
+const THREAD_COLUMNS = `t.id, t.product_id, p.public_title, COALESCE(t.guest_name, g.guest_name) AS guest_name, t.topic, t.guest_language,
+  t.needs_reply, t.host_read_at, t.last_message_at, t.created_at,
+  to_char(t.last_message_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at, ${BOOKING_COLUMNS}`;
 
 function messageFromRow(row: DbRow, prefix = ""): GuestQuestionMessage {
   const status = row[`${prefix}delivery_status`];
@@ -226,14 +365,31 @@ function messageFromRow(row: DbRow, prefix = ""): GuestQuestionMessage {
   };
 }
 
+/** The booking columns of BOOKING_COLUMNS as the host reads them; null for a question's thread. */
+function threadBooking(row: DbRow): GuestQuestionThreadBooking | null {
+  if (row.booking_public_id === null || row.booking_public_id === undefined) return null;
+  const status = String(row.booking_status);
+  return {
+    publicBookingId: String(row.booking_public_id),
+    status: (BOOKING_THREAD_STATUSES as readonly string[]).includes(status) ? status as GuestQuestionThreadBooking["status"] : "CANCELLED",
+    localDate: String(row.booking_local_date),
+    localStartTime: String(row.booking_local_start),
+    startUtc: new Date(String(row.booking_start_utc)).toISOString(),
+    adultCount: Number(row.booking_adults ?? 0),
+    childCount: Number(row.booking_children ?? 0),
+    open: row.booking_open === true,
+  };
+}
+
 function threadFields(row: DbRow): Omit<GuestQuestionThreadSummary, "lastMessage"> {
   return {
     id: String(row.id),
     productId: String(row.product_id),
     productTitle: String(row.public_title),
-    guestName: String(row.guest_name),
-    topic: String(row.topic) as GuestQuestionTopic,
+    guestName: String(row.guest_name ?? ""),
+    topic: row.topic === null || row.topic === undefined ? null : String(row.topic) as GuestQuestionTopic,
     language: String(row.guest_language) as GuestQuestionLanguage,
+    booking: threadBooking(row),
     needsReply: row.needs_reply === true,
     read: row.host_read_at !== null && row.host_read_at !== undefined,
     lastMessageAtUtc: isoValue(row, "last_message_at"),
@@ -253,12 +409,107 @@ function decodeCursor(cursor: unknown): { at: string; id: string } | null {
   return { at: match[1]!, id: match[2]!.toLowerCase() };
 }
 
+function threadKind(value: unknown): GuestThreadKind | null {
+  if (value === undefined || value === null) return null;
+  if (value !== "QUESTION" && value !== "BOOKING") throw new StoreValidationError("kind must be QUESTION or BOOKING.");
+  return value;
+}
+
+/** A booking made on this site with what its thread needs, read in the provider's scope. */
+interface BookingForThread {
+  bookingRowId: string;
+  threadId: string | null;
+  productId: string;
+  productTitle: string;
+  guestName: string;
+  language: GuestQuestionLanguage;
+  experienceTitle: string;
+  view: GuestQuestionThreadBooking;
+}
+
+/**
+ * The provider's booking made on this site by its public ID: confirmed, under payment review or cancelled, with a
+ * guest record not erased. null for anything else (another provider's, a hold, NIHO's, erased).
+ */
+export async function bookingForThread(client: PoolClient, providerId: string, publicBookingId: string): Promise<BookingForThread | null> {
+  const found = await client.query<DbRow>(
+    `SELECT b.id::text AS booking_row_id, b.product_id, p.public_title, g.guest_name, g.guest_language, t.id AS thread_id,
+            ${BOOKING_COLUMNS}
+       FROM bookings b
+       JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+       JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+       LEFT JOIN guest_question_threads t ON t.provider_id = b.provider_id AND t.booking_id = b.id
+      WHERE b.provider_id = $1 AND b.public_booking_id = $2::uuid AND b.status = ANY($3::text[]) AND g.pii_erased_at IS NULL`,
+    [providerId, publicBookingId, BOOKING_THREAD_STATUSES],
+  );
+  const row = found.rows[0];
+  if (!row) return null;
+  return {
+    bookingRowId: String(row.booking_row_id),
+    threadId: row.thread_id === null || row.thread_id === undefined ? null : String(row.thread_id),
+    productId: String(row.product_id),
+    productTitle: String(row.public_title),
+    guestName: String(row.guest_name ?? ""),
+    language: String(row.guest_language) as GuestQuestionLanguage,
+    experienceTitle: String(row.public_title),
+    view: threadBooking(row)!,
+  };
+}
+
+/**
+ * The host's message in a thread locked for it: the same command again answers the same message, another reply with
+ * it is refused; a closed booking's thread takes no new one. Queued for the mail worker (`guest_question.reply`).
+ */
+async function insertHostReply(client: PoolClient, actor: HostActor, threadId: string, reply: ValidReply, open: boolean): Promise<GuestQuestionMessage> {
+  const previous = await client.query<DbRow>(
+    `SELECT ${MESSAGE_COLUMNS}, thread_id, author_niho_user_id FROM guest_question_messages WHERE provider_id = $1 AND command_id = $2::uuid`,
+    [actor.providerId, reply.commandId],
+  );
+  const before = previous.rows[0];
+  if (before) {
+    const same = String(before.thread_id) === threadId && before.body === reply.english && (before.body_ja ?? null) === reply.japanese && before.author_niho_user_id === actor.nihoUserId;
+    if (!same) throw new StoreConflictError("The reply command ID was already used with a different reply.");
+    return messageFromRow(before);
+  }
+  if (!open) throw new BookingMessagesClosedError();
+  const inserted = await client.query<DbRow>(
+    `INSERT INTO guest_question_messages
+       (id, provider_id, thread_id, author, source, body, body_ja, author_niho_user_id, command_id, delivery_status, created_at)
+     VALUES ($1::uuid, $2, $3::uuid, 'HOST', 'HOST_CONSOLE', $4, $5, $6, $7::uuid, 'PENDING', clock_timestamp())
+     RETURNING ${MESSAGE_COLUMNS}`,
+    [randomUUID(), actor.providerId, threadId, reply.english, reply.japanese, actor.nihoUserId, reply.commandId],
+  );
+  const message = inserted.rows[0]!;
+  // Dated by the message itself (a Date parameter would lose the microseconds).
+  await client.query(
+    `UPDATE guest_question_threads t
+        SET needs_reply = false, last_message_at = m.created_at, host_read_at = COALESCE(t.host_read_at, m.created_at)
+       FROM guest_question_messages m
+      WHERE t.provider_id = $1 AND t.id = $2::uuid AND m.provider_id = $1 AND m.id = $3::uuid`,
+    [actor.providerId, threadId, message.id],
+  );
+  await enqueue(client, actor.providerId, threadId, String(message.id), "guest_question.reply");
+  return messageFromRow(message);
+}
+
+/** A reply's transaction: the same command ID racing on another thread is a conflict, not a database error. */
+async function replying<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new StoreConflictError("The reply command ID was already used with a different reply.");
+    throw error;
+  }
+}
+
 /**
  * 予約前の質問 (#105, #106; migration 0022). The question form and the reply page have no identity:
  * their methods take a slug or a one-time link. The host's methods need a current OWNER of the
  * provider (as 設定 › 通知). The mail job (/internal/experience-jobs/v1/drain) claims host replies, reports how each
  * went and erases questions a year after their last message.
- * The guest's email address leaves this class only in `claimReplyDeliveries`.
+ * A booking made on this site has one thread of its own in the same tables (#285 slice 6b, migration 0031): the
+ * guest writes on their booking page (GuestBookingMessages), the host answers here; its name and address stay in
+ * booking_guests. The guest's email address leaves this class only in `claimReplyDeliveries`.
  */
 export class GuestQuestionRepository {
   readonly #pool: Pool;
@@ -337,18 +588,21 @@ export class GuestQuestionRepository {
 
   /* ---------- the host console (OWNER) ---------- */
 
-  /** The provider's threads, the latest first. `cursor` is the previous page's nextCursor. */
-  async listThreads(actor: HostActor, options: { unreadOnly?: boolean; cursor?: string | null; limit?: number } = {}): Promise<GuestQuestionThreadPage> {
+  /**
+   * The provider's threads, the latest first. `cursor` is the previous page's nextCursor. `kind` keeps questions
+   * or bookings' threads only (#285 slice 6b); both when absent.
+   */
+  async listThreads(actor: HostActor, options: { unreadOnly?: boolean; cursor?: string | null; limit?: number; kind?: GuestThreadKind | null } = {}): Promise<GuestQuestionThreadPage> {
     const limit = boundedInteger(options.limit ?? 30, "limit", 1, 100);
     const after = decodeCursor(options.cursor);
+    const kind = threadKind(options.kind);
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
       const result = await client.query<DbRow>(
         `SELECT ${THREAD_COLUMNS},
                 m.id AS m_id, m.author AS m_author, m.source AS m_source, m.body AS m_body, m.body_ja AS m_body_ja,
                 m.created_at AS m_created_at, m.delivery_status AS m_delivery_status
-           FROM guest_question_threads t
-           JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+           FROM ${THREAD_FROM}
            JOIN LATERAL (
              SELECT ${MESSAGE_COLUMNS} FROM guest_question_messages
               WHERE provider_id = t.provider_id AND thread_id = t.id
@@ -357,9 +611,10 @@ export class GuestQuestionRepository {
           WHERE t.provider_id = $1
             AND (NOT $2::boolean OR t.host_read_at IS NULL)
             AND ($3::timestamptz IS NULL OR (t.last_message_at, t.id) < ($3::timestamptz, $4::uuid))
+            AND ($6::text IS NULL OR ($6::text = 'BOOKING') = (t.booking_id IS NOT NULL))
           ORDER BY t.last_message_at DESC, t.id DESC
           LIMIT $5`,
-        [actor.providerId, options.unreadOnly === true, after?.at ?? null, after?.id ?? null, limit + 1],
+        [actor.providerId, options.unreadOnly === true, after?.at ?? null, after?.id ?? null, limit + 1, kind],
       );
       const rows = result.rows.slice(0, limit);
       return {
@@ -369,14 +624,27 @@ export class GuestQuestionRepository {
     });
   }
 
+  /** How many of the provider's threads there are (of `kind` only, when given): メッセージ's notice beside NIHO's. */
+  async countThreads(actor: HostActor, options: { kind?: GuestThreadKind | null } = {}): Promise<number> {
+    const kind = threadKind(options.kind);
+    return withTransaction(this.#pool, async (client) => {
+      await requireOwner(client, actor);
+      const counted = await client.query<DbRow>(
+        `SELECT count(*)::int AS count FROM guest_question_threads t
+          WHERE t.provider_id = $1 AND ($2::text IS NULL OR ($2::text = 'BOOKING') = (t.booking_id IS NOT NULL))`,
+        [actor.providerId, kind],
+      );
+      return Number(counted.rows[0]?.count ?? 0);
+    });
+  }
+
   /** One thread with every message, oldest first. Another provider's is not found. */
   async getThread(actor: HostActor, threadId: string): Promise<GuestQuestionThread> {
     const id = uuid(threadId, "threadId");
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
       const thread = await client.query<DbRow>(
-        `SELECT ${THREAD_COLUMNS} FROM guest_question_threads t
-           JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+        `SELECT ${THREAD_COLUMNS} FROM ${THREAD_FROM}
           WHERE t.provider_id = $1 AND t.id = $2::uuid`,
         [actor.providerId, id],
       );
@@ -387,6 +655,28 @@ export class GuestQuestionRepository {
         [actor.providerId, id],
       );
       return { ...threadFields(row), messages: messages.rows.map((message) => messageFromRow(message)) };
+    });
+  }
+
+  /**
+   * A booking made on this site, as メッセージ opens it from 予約 or この回 (#285 slice 6b): its thread when someone
+   * wrote, or what to show before the host's first message starts one. Another provider's booking, a hold, an
+   * abandoned one, one of NIHO's and one whose guest data was erased are not found.
+   */
+  async findBookingThread(actor: HostActor, publicBookingId: string): Promise<GuestBookingThreadStart> {
+    const bookingId = uuid(publicBookingId, "publicBookingId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireOwner(client, actor);
+      const booking = await bookingForThread(client, actor.providerId, bookingId);
+      if (!booking) throw new StoreNotFoundError("guest booking");
+      return {
+        threadId: booking.threadId,
+        productId: booking.productId,
+        productTitle: booking.productTitle,
+        guestName: booking.guestName,
+        language: booking.language,
+        booking: booking.view,
+      };
     });
   }
 
@@ -406,65 +696,58 @@ export class GuestQuestionRepository {
   /**
    * 返信: the English the guest gets (and the Japanese the host wrote, or null), queued for the mail
    * worker. The same commandId with the same reply answers the same message; with anything else,
-   * StoreConflictError.
+   * StoreConflictError. A booking's thread that no longer takes messages (#285 slice 6b): BookingMessagesClosedError.
    */
   async reply(actor: HostActor, threadId: string, input: { english: string; japanese: string | null; commandId: string }): Promise<GuestQuestionMessage> {
     const id = uuid(threadId, "threadId");
-    const commandId = uuid(input?.commandId, "commandId");
-    const english = text(input?.english, "english", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
-    const japanese = input?.japanese === null || input?.japanese === undefined || (typeof input.japanese === "string" && input.japanese.trim() === "")
-      ? null
-      : text(input.japanese, "japanese", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
-    try {
-      return await withTransaction(this.#pool, async (client) => {
-        await requireOwner(client, actor);
-        const thread = await client.query(
-          "SELECT 1 FROM guest_question_threads WHERE provider_id = $1 AND id = $2::uuid FOR NO KEY UPDATE",
-          [actor.providerId, id],
-        );
-        if (!thread.rows[0]) throw new StoreNotFoundError("guest question");
-        const previous = await client.query<DbRow>(
-          `SELECT ${MESSAGE_COLUMNS}, thread_id, author_niho_user_id FROM guest_question_messages WHERE provider_id = $1 AND command_id = $2::uuid`,
-          [actor.providerId, commandId],
-        );
-        const before = previous.rows[0];
-        if (before) {
-          const same = String(before.thread_id) === id && before.body === english && (before.body_ja ?? null) === japanese && before.author_niho_user_id === actor.nihoUserId;
-          if (!same) throw new StoreConflictError("The reply command ID was already used with a different reply.");
-          return messageFromRow(before);
-        }
-        const inserted = await client.query<DbRow>(
-          `INSERT INTO guest_question_messages
-             (id, provider_id, thread_id, author, source, body, body_ja, author_niho_user_id, command_id, delivery_status, created_at)
-           VALUES ($1::uuid, $2, $3::uuid, 'HOST', 'HOST_CONSOLE', $4, $5, $6, $7::uuid, 'PENDING', clock_timestamp())
-           RETURNING ${MESSAGE_COLUMNS}`,
-          [randomUUID(), actor.providerId, id, english, japanese, actor.nihoUserId, commandId],
-        );
-        const message = inserted.rows[0]!;
-        // Dated by the message itself (a Date parameter would lose the microseconds).
-        await client.query(
-          `UPDATE guest_question_threads t
-              SET needs_reply = false, last_message_at = m.created_at, host_read_at = COALESCE(t.host_read_at, m.created_at)
-             FROM guest_question_messages m
-            WHERE t.provider_id = $1 AND t.id = $2::uuid AND m.provider_id = $1 AND m.id = $3::uuid`,
-          [actor.providerId, id, message.id],
-        );
-        await enqueue(client, actor.providerId, id, String(message.id), "guest_question.reply");
-        return messageFromRow(message);
-      });
-    } catch (error) {
-      // The same command ID racing on another thread.
-      if (isUniqueViolation(error)) throw new StoreConflictError("The reply command ID was already used with a different reply.");
-      throw error;
-    }
+    const reply = validReply(input);
+    return replying(() => withTransaction(this.#pool, async (client) => {
+      await requireOwner(client, actor);
+      const thread = await client.query<DbRow>(
+        `SELECT t.booking_id IS NULL OR ${bookingMessagesOpenSql("b")} AS open
+           FROM guest_question_threads t
+           LEFT JOIN bookings b ON b.provider_id = t.provider_id AND b.id = t.booking_id
+          WHERE t.provider_id = $1 AND t.id = $2::uuid FOR NO KEY UPDATE OF t`,
+        [actor.providerId, id],
+      );
+      if (!thread.rows[0]) throw new StoreNotFoundError("guest question");
+      return insertHostReply(client, actor, id, reply, thread.rows[0].open === true);
+    }));
+  }
+
+  /**
+   * 返信 to a booking made on this site (#285 slice 6b), from メッセージ opened on the booking: its thread, which this
+   * message starts when nobody wrote yet. Idempotent by commandId as `reply`. Not found as findBookingThread; a
+   * booking that no longer takes messages: BookingMessagesClosedError.
+   */
+  async replyToBooking(actor: HostActor, publicBookingId: string, input: { english: string; japanese: string | null; commandId: string }): Promise<{ threadId: string; message: GuestQuestionMessage }> {
+    const bookingId = uuid(publicBookingId, "publicBookingId");
+    const reply = validReply(input);
+    return replying(() => withTransaction(this.#pool, async (client) => {
+      await requireOwner(client, actor);
+      const booking = await bookingForThread(client, actor.providerId, bookingId);
+      if (!booking) throw new StoreNotFoundError("guest booking");
+      await lockBookingMessages(client, actor.providerId, booking.bookingRowId);
+      let threadId = await lockedBookingThread(client, actor.providerId, booking.bookingRowId);
+      if (!threadId) {
+        // A command already used elsewhere is refused before anything is started.
+        const used = await client.query("SELECT 1 FROM guest_question_messages WHERE provider_id = $1 AND command_id = $2::uuid", [actor.providerId, reply.commandId]);
+        if (used.rows[0]) throw new StoreConflictError("The reply command ID was already used with a different reply.");
+        if (!booking.view.open) throw new BookingMessagesClosedError();
+        threadId = await createBookingThread(client, { providerId: actor.providerId, bookingRowId: booking.bookingRowId, productId: booking.productId, language: booking.language });
+      }
+      return { threadId, message: await insertHostReply(client, actor, threadId, reply, booking.view.open) };
+    }));
   }
 
   /* ---------- the mail job (server-side, #285 slice 5) ---------- */
 
   /**
    * Up to `limit` host replies to email now: PENDING ones whose backoff has passed and SENDING ones
-   * whose lease ran out, with attempts left. Each becomes SENDING for `leaseSeconds` and gets a fresh
-   * one-time reply link valid for `linkTtlDays` (only its SHA-256 is stored).
+   * whose lease ran out, with attempts left. Each becomes SENDING for `leaseSeconds`. A reply to a question gets a
+   * fresh one-time reply link valid for `linkTtlDays` (only its SHA-256 is stored); a message in a booking's thread
+   * (#285 slice 6b) gets none (the worker links to the booking page) and is sent to the booking's guest record. One
+   * whose guest record was erased meanwhile has no one to go to: it becomes FAILED and is not returned.
    */
   async claimReplyDeliveries(options: { limit: number; leaseSeconds: number; linkTtlDays: number }): Promise<ClaimedGuestQuestionReply[]> {
     const limit = boundedInteger(options?.limit, "limit", 1, 50);
@@ -498,22 +781,15 @@ export class GuestQuestionRepository {
       const deliveries: ClaimedGuestQuestionReply[] = [];
       for (const row of rows) {
         const details = await client.query<DbRow>(
-          `SELECT t.guest_email, t.guest_name, t.guest_language, p.public_title, p.seller_display_name
-             FROM guest_question_threads t
-             JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+          `SELECT COALESCE(t.guest_email, g.guest_email) AS guest_email, COALESCE(t.guest_name, g.guest_name) AS guest_name,
+                  t.guest_language, t.booking_id IS NOT NULL AS for_booking, b.public_booking_id::text AS public_booking_id,
+                  b.occurrence_snapshot, p.public_title, COALESCE(b.seller_snapshot->>'displayName', p.seller_display_name) AS seller_display_name
+             FROM ${THREAD_FROM}
             WHERE t.provider_id = $1 AND t.id = $2::uuid`,
           [row.provider_id, row.thread_id],
         );
         const detail = details.rows[0]!;
-        const replyToken = randomBytes(32).toString("base64url");
-        const link = await client.query<DbRow>(
-          `WITH now AS (SELECT clock_timestamp() AS at)
-           INSERT INTO guest_question_reply_tokens (token_hash, provider_id, thread_id, host_message_id, expires_at, created_at)
-           SELECT $1, $2, $3::uuid, $4::uuid, now.at + make_interval(days => $5), now.at FROM now
-           RETURNING expires_at`,
-          [tokenDigest(replyToken), row.provider_id, row.thread_id, row.id, linkTtlDays],
-        );
-        deliveries.push({
+        const base = {
           messageId: String(row.id),
           providerId: String(row.provider_id),
           threadId: String(row.thread_id),
@@ -523,10 +799,33 @@ export class GuestQuestionRepository {
           experienceTitle: String(detail.public_title),
           hostDisplayName: String(detail.seller_display_name),
           english: String(row.body),
-          replyToken,
-          replyLinkExpiresAtUtc: isoValue(link.rows[0]!, "expires_at"),
           attempt: Number(row.delivery_attempts),
-        });
+        };
+        if (detail.for_booking === true) {
+          if (detail.guest_email === null || detail.guest_name === null) {
+            await client.query("UPDATE guest_question_messages SET delivery_status = 'FAILED', lease_until = NULL WHERE provider_id = $1 AND id = $2::uuid", [row.provider_id, row.id]);
+            continue;
+          }
+          const occurrence = (detail.occurrence_snapshot ?? {}) as Record<string, unknown>;
+          deliveries.push({
+            ...base,
+            kind: "BOOKING",
+            publicBookingId: String(detail.public_booking_id),
+            localDate: String(occurrence.localDate),
+            localStartTime: String(occurrence.localStartTime),
+            timeZone: String(occurrence.timeZone),
+          });
+          continue;
+        }
+        const replyToken = randomBytes(32).toString("base64url");
+        const link = await client.query<DbRow>(
+          `WITH now AS (SELECT clock_timestamp() AS at)
+           INSERT INTO guest_question_reply_tokens (token_hash, provider_id, thread_id, host_message_id, expires_at, created_at)
+           SELECT $1, $2, $3::uuid, $4::uuid, now.at + make_interval(days => $5), now.at FROM now
+           RETURNING expires_at`,
+          [tokenDigest(replyToken), row.provider_id, row.thread_id, row.id, linkTtlDays],
+        );
+        deliveries.push({ ...base, kind: "QUESTION", replyToken, replyLinkExpiresAtUtc: isoValue(link.rows[0]!, "expires_at") });
       }
       return deliveries;
     });
@@ -564,7 +863,8 @@ export class GuestQuestionRepository {
    * Deletes questions whose last message is older than `lastMessageBefore` (never after now), at most
    * `limit` per call; returns how many. Their messages and reply links go with them (ON DELETE CASCADE);
    * outbox rows name ids only and stay. The owner decided (2026-10-31, #285) one year after the last
-   * message; the mail job calls this with now − 1 year (docs/guest-questions.md).
+   * message; the mail job calls this with now − 1 year (docs/guest-questions.md). A booking's thread (#285 slice 6b)
+   * is not a question: it goes with its booking's guest data (eraseGuestData).
    */
   async eraseInactiveThreads(options: { readonly lastMessageBefore: string; readonly limit?: number }): Promise<number> {
     assertCanonicalInstant(options?.lastMessageBefore, "lastMessageBefore");
@@ -572,7 +872,7 @@ export class GuestQuestionRepository {
     const result = await this.#pool.query(
       `WITH due AS (
          SELECT provider_id, id FROM guest_question_threads
-          WHERE last_message_at < LEAST($1::timestamptz, clock_timestamp())
+          WHERE last_message_at < LEAST($1::timestamptz, clock_timestamp()) AND booking_id IS NULL
           ORDER BY last_message_at, id
           LIMIT $2
           FOR UPDATE SKIP LOCKED

@@ -1,14 +1,14 @@
 import "server-only";
 import type { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
-import { bookingConfirmationEmail, bookingLinkEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
 import { guestMessageToJapanese } from "@/lib/translation/prompts";
 
 /**
  * One run of the experience mail job (#285 slices 5-7, docs/guest-booking.md, docs/guest-questions.md), every
- * minute from Cloud Scheduler: host replies to guest questions, booking confirmations, the notices of
+ * minute from Cloud Scheduler: host replies to guest questions and host messages about bookings (#285 slice 6b), booking confirmations, the notices of
  * cancellations and refunds, the links "Find your booking" asked for, the refunds Stripe has not accepted (sent again,
  * #285 slice 7b), the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
  * year on and the removal of booking page links and sessions that ended. Each step is bounded and independent:
@@ -184,7 +184,9 @@ function mayContinue(deps: ExperienceJobDeps, startedAt: number, claimed: number
 
 /**
  * Host replies: the reply and a one-time link to answer it (the token in the URL fragment only), one claimed
- * at a time. A transient failure ends the step: the server is struggling, and the rest waits for the next run.
+ * at a time. A host message about a booking made on this site (#285 slice 6b) links to the booking page with a fresh
+ * one-time grant instead (none while the page is off or can no longer be opened). A transient failure ends the step:
+ * the server is struggling, and the rest waits for the next run.
  */
 async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionReplyCounts> {
   const startedAt = deps.now().getTime();
@@ -200,15 +202,22 @@ async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionRep
     });
     if (!reply) break;
     claimed += 1;
-    const email = questionReplyEmail({
-      siteUrl: deps.siteUrl,
-      guestName: reply.guestName,
-      hostName: reply.hostDisplayName,
-      experienceTitle: reply.experienceTitle,
-      reply: reply.english,
-      replyToken: reply.replyToken,
-      linkTtlDays: EXPERIENCE_JOB_LIMITS.replyLinkTtlDays,
-    });
+    let email;
+    if (reply.kind === "BOOKING") {
+      // A grant per email: the raw token goes into this email's link only (#285 slice 6).
+      const grant = deps.access ? await deps.access.issueBookingAccessGrant(reply.publicBookingId) : null;
+      email = bookingMessageEmail(reply, { siteUrl: deps.siteUrl, bookingPageGrant: grant?.token ?? null });
+    } else {
+      email = questionReplyEmail({
+        siteUrl: deps.siteUrl,
+        guestName: reply.guestName,
+        hostName: reply.hostDisplayName,
+        experienceTitle: reply.experienceTitle,
+        reply: reply.english,
+        replyToken: reply.replyToken,
+        linkTtlDays: EXPERIENCE_JOB_LIMITS.replyLinkTtlDays,
+      });
+    }
     const result = await deps.mailer.sendMail({ to: reply.guestEmail, ...email });
     const status = await deps.questions.recordReplyDelivery(reply.messageId, result.ok ? "SENT" : result.failure === "transient" ? "RETRY" : "FAILED");
     if (status === "SENT") sent += 1;

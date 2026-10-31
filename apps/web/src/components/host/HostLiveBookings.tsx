@@ -94,7 +94,7 @@ export interface HostLiveBookingsProps {
   mode?: "bookings" | "messages";
   /** 通訳を始める (#181) with the day in Japan it counts from; null while the translate BFF is closed. */
   translate?: { today: string } | null;
-  /** 予約 only: the way to the bookings made on this site (#285 slice 8), under the title; null when there are none. */
+  /** The way to the bookings made on this site (#285 slice 8) or to their messages (slice 6b), under the title; null when there are none. */
   siteNotice?: ReactNode;
 }
 
@@ -353,7 +353,7 @@ export function HostLiveBookings({ providerId, initialBookingId, mode = "booking
   const canReviewDraft = draft.subject.trim() !== "" && draft.body.trim() !== "";
 
   return <HostPageBody><PageHead title={mode === "messages" ? "メッセージ" : "予約"} />
-    {mode === "bookings" ? siteNotice : null}
+    {siteNotice}
     {mode === "messages" ? <div className="mb-3.5 rounded-xl bg-sand p-3 text-sm text-ink-soft"><p>予約後のWeb返信と、あなたが送ったメールを予約ごとに表示します。</p><p className="mt-1">予約前の質問・予約者からのメール返信の取り込み・自動翻訳は、まだ利用できません。</p></div> : null}
     {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="mb-3 rounded-xl bg-danger-pale p-4 text-danger focus:outline-none">{error}</p> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-leaf-pale p-4 text-moss">{notice}</p> : null}

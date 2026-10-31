@@ -7,7 +7,7 @@ import type { HostSessionView } from "./console-data";
 import { todayInJapan } from "./format";
 import type { HostActionResult } from "./payout";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
-import { ownerActor, runOwnerCancellation, SITE_CANCEL_NOT_CANCELLABLE_TEXT, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
+import { ownerActor, runOwnerCancellation, SITE_CANCEL_NOT_CANCELLABLE_TEXT, siteBookingMessagesEnabled, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
 import { siteHomeSessions, siteHomeTodos, siteSessionView, type SiteHome } from "./site-sessions";
 
 /*
@@ -52,6 +52,8 @@ export type HostSiteSessionLoad =
       session: HostSessionView | null;
       /** YYYY-MM-DDTHH:MM in Japan: whether the session has started. */
       now: string;
+      /** Each guest leads to their booking's messages (#285 slice 6b). */
+      messages: boolean;
     }
   | { status: "closed" }
   | { status: "error" };
@@ -69,11 +71,11 @@ export async function loadSiteSession(provider: HostProvider, nihoUserId: string
       localDate: query.date,
       localStartTime: query.start,
     });
-    return { status: "live", session: siteSessionView(stored, query), now };
+    return { status: "live", session: siteSessionView(stored, query), now, messages: siteBookingMessagesEnabled() };
   } catch (error) {
     if (error instanceof StoreAccessDeniedError) return { status: "closed" };
     // An address the store cannot read (an experience or offer that is no identifier) names no session here.
-    if (error instanceof StoreValidationError) return { status: "live", session: null, now };
+    if (error instanceof StoreValidationError) return { status: "live", session: null, now, messages: false };
     return { status: "error" };
   }
 }

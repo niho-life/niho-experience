@@ -7,11 +7,12 @@ import { StoreValidationError } from "@niho-experience/experience-store";
 const state = vi.hoisted(() => ({
   config: { guestBookingEnabled: true, guestMailEnabled: true, siteUrl: "https://experience.example" },
   access: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  messages: null as null | Record<string, ReturnType<typeof vi.fn>>,
   cookies: new Map<string, string>(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
-vi.mock("@/lib/experience/store-server", () => ({ guestBookingAccess: () => state.access }));
+vi.mock("@/lib/experience/store-server", () => ({ guestBookingAccess: () => state.access, guestBookingMessages: () => state.messages }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (state.cookies.has(name) ? { name, value: state.cookies.get(name)! } : undefined) }) }));
 vi.mock("next/navigation", async (importActual) => ({
   ...(await importActual<typeof import("next/navigation")>()),
@@ -35,6 +36,7 @@ const SESSION = "sampleSessionAbcdefghijklmnopqrstuvwxyz0123";
 const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
 const OTHER = "1f8fad5b-d9cb-469f-a165-708677289502";
 const EXPIRES = "2026-12-31T00:00:00.000Z";
+const CONVERSATION = { open: true, messages: [{ id: "m-1", from: "host", atUtc: "2026-11-01T02:30:00.000Z", body: "Welcome!" }] };
 const COOKIE = `__Host-nb_${createHash("sha256").update(BOOKING).digest("hex").slice(0, 8)}`;
 const VIEW = {
   publicBookingId: BOOKING, status: "CONFIRMED", experienceTitle: "Synthetic walk", experienceSlug: "sample-walk",
@@ -67,6 +69,7 @@ beforeEach(() => {
     endBookingSession: vi.fn(async () => {}),
     requestBookingLink: vi.fn(async () => {}),
   };
+  state.messages = { readConversation: vi.fn(async () => CONVERSATION) };
 });
 
 describe("POST /api/public/bookings/session", () => {
@@ -184,6 +187,17 @@ describe("the guest's booking pages", () => {
     expect(view.type).toBe(GuestBookingDetails);
     expect(view.props.booking).toEqual(VIEW);
     expect(state.access?.readBookingSession).toHaveBeenCalledExactlyOnceWith(SESSION, BOOKING);
+    // The messages with the host (#285 slice 6b), read with the same session.
+    expect(view.props.conversation).toEqual(CONVERSATION);
+    expect(state.messages?.readConversation).toHaveBeenCalledExactlyOnceWith(SESSION, BOOKING);
+  });
+
+  it("still shows the booking when only its messages cannot be read (#285 slice 6b)", async () => {
+    state.cookies.set(COOKIE, SESSION);
+    state.messages!.readConversation!.mockRejectedValueOnce(new Error("synthetic outage"));
+    const view = await bookingPage(BOOKING);
+    expect(view.type).toBe(GuestBookingDetails);
+    expect(view.props.conversation).toBeNull();
   });
 
   it("shows the same neutral page without a session, for another booking's cookie, an unknown ID or a refused session", async () => {

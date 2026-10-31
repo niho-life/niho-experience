@@ -21,15 +21,38 @@ export const REPLY_DRAFT_UNAVAILABLE_TEXT = "英語にする機能は準備中�
 
 export interface MessagesQuery {
   providerId?: string | null;
+  /**
+   * `site`: this site's threads beside NIHO's booking messages (#285 slice 6b), where every link keeps it. Without
+   * NIHO's (provider operations off) the screen ignores it.
+   */
+  source?: "site" | null;
   thread?: string | null;
   /** A booking's thread, or an empty one to start when it has none yet. */
   booking?: string | null;
 }
 
-/** The messages screen's address: `?providerId=`, then the thread or the booking. */
-export function messagesHref({ providerId, thread, booking }: MessagesQuery = {}): string {
-  return withQuery(HOST_MESSAGES_PATH, { providerId, thread, booking });
+/** The messages screen's address: `?providerId=`, the source, then the thread or the booking. */
+export function messagesHref({ providerId, source, thread, booking }: MessagesQuery = {}): string {
+  return withQuery(HOST_MESSAGES_PATH, { providerId, source, thread, booking });
 }
+
+/** This site's booking without a thread yet (#285 slice 6b): the empty thread's id, which the first reply replaces. */
+const NEW_BOOKING_THREAD = "new-booking-";
+const BOOKING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function newBookingThreadId(publicBookingId: string): string {
+  return `${NEW_BOOKING_THREAD}${publicBookingId.toLowerCase()}`;
+}
+
+/** The booking an empty thread's id names; null for any other id. */
+export function bookingOfNewThread(threadId: string): string | null {
+  if (!threadId.startsWith(NEW_BOOKING_THREAD)) return null;
+  const id = threadId.slice(NEW_BOOKING_THREAD.length);
+  return BOOKING_ID.test(id) ? id.toLowerCase() : null;
+}
+
+/** Under a booking's thread that takes no more messages, instead of the reply (#285 slice 6b). */
+export const BOOKING_THREAD_CLOSED_TEXT = "この予約にはメッセージを送れません（取消済み、または体験から30日を過ぎました）。";
 
 const LANGUAGE_NAMES: Record<string, string> = {
   en: "英語",

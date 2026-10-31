@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -106,6 +106,30 @@ export function guestBookingAccess(): GuestBookingAccess | null {
   if (!config.guestBookingEnabled || !config.guestMailEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestBookingAccess(pool) : null;
+}
+
+/**
+ * 予約ごとのメッセージ (#285 slice 6b), the guest's side: open with the guest's booking page (both its flags) and the
+ * experience DB.
+ */
+export function guestBookingMessages(): GuestBookingMessages | null {
+  if (!config.guestBookingEnabled || !config.guestMailEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestBookingMessages(pool) : null;
+}
+
+/**
+ * メッセージ's threads kept in the experience DB, for the host: questions (their flag, #106) and the messages of
+ * bookings made on this site (with the guest's booking page, #285 slice 6b). `kind` keeps the one that is open when
+ * only one is; null when both are. null while neither is open or without the experience DB.
+ */
+export function siteThreadRepository(): { repository: GuestQuestionRepository; kind: GuestThreadKind | null } | null {
+  const questions = config.guestQuestionsEnabled;
+  const bookings = config.guestBookingEnabled && config.guestMailEnabled;
+  if (!questions && !bookings) return null;
+  const pool = experiencePool();
+  if (!pool) return null;
+  return { repository: new GuestQuestionRepository(pool), kind: questions && bookings ? null : questions ? "QUESTION" : "BOOKING" };
 }
 
 /**

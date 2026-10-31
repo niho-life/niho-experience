@@ -1,4 +1,4 @@
-import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage } from "@niho-experience/experience-store";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -159,6 +159,43 @@ export function bookingConfirmationEmail(
     { kind: "p", text: `${host} will share the meeting details with you before the day.` },
     { kind: "link", lead: "The experience page:", label: experience, href: absolute(options.siteUrl, `/experiences/${encodeURIComponent(email.experienceSlug)}`) },
     { kind: "p", text: "Questions, or need to change or cancel? Reply to this email and NIHO support will help." },
+  ]);
+}
+
+/**
+ * "{Host} sent you a message about your booking: {experience}, {date} {time}" (#285 slice 6b): the host's English
+ * (never the Japanese they wrote) and, with a grant, a link to the booking page, where the guest answers. Without one
+ * (the page is off, or can no longer be opened) the email says replying to it reaches NIHO support.
+ */
+export function bookingMessageEmail(
+  message: Pick<ClaimedBookingMessage, "guestName" | "hostDisplayName" | "experienceTitle" | "english" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
+  options: { readonly siteUrl: string; readonly bookingPageGrant: string | null },
+): RenderedMail {
+  const host = oneLine(message.hostDisplayName);
+  const experience = oneLine(message.experienceTitle);
+  const grant = options.bookingPageGrant;
+  return mail(`${host} sent you a message about your booking: ${experience}, ${calendarDate(message.localDate, DATE_SHORT)} ${message.localStartTime}`, [
+    { kind: "p", text: `Hi ${oneLine(message.guestName)},` },
+    { kind: "p", text: `${host} sent you a message about your booking:` },
+    { kind: "quote", text: body(message.english) },
+    {
+      kind: "facts",
+      rows: [
+        ["Experience", experience],
+        ["Date", calendarDate(message.localDate, DATE_LONG)],
+        ["Time", `${message.localStartTime} ${zoneName(message.timeZone)}`],
+        ["Booking reference", message.publicBookingId],
+      ],
+    },
+    ...(grant
+      ? [{
+          kind: "link",
+          lead: `To answer ${host}, open your booking and write to them there. The link works once and opens the booking on one device, so please don't forward it. You can ask for a new link any time at ${absolute(options.siteUrl, "/bookings")}`,
+          label: "View your booking",
+          href: bookingPageLink(options.siteUrl, grant),
+        } as const]
+      : []),
+    { kind: "p", text: `Replying to this email reaches NIHO support, not ${host}.` },
   ]);
 }
 

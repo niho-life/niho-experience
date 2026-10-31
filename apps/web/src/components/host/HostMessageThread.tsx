@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 import { draftReplyEnglish } from "@/host/actions";
 import { bookingsHref, shortDateTime } from "@/host/bookings";
-import { guestMessageView, MESSAGE_TEXT_LIMIT, REPLY_STATUS, replyDraftState, threadContext, threadHeading } from "@/host/messages";
+import { BOOKING_THREAD_CLOSED_TEXT, guestMessageView, MESSAGE_TEXT_LIMIT, REPLY_STATUS, replyDraftState, threadContext, threadHeading } from "@/host/messages";
 import type { HostGuestMessage, HostReplyMessage, HostThread } from "@/host/types";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
@@ -193,7 +193,7 @@ export function HostMessageThread({ thread, experienceTitle, headingId, linkProv
             <p className="text-xs leading-normal text-muted">{threadContext(thread)}</p>
           </div>
           {thread.booking ? (
-            <Link href={bookingsHref({ providerId: linkProviderId, booking: thread.booking.id })} className={consoleButtonClass("secondary", "sm")}>
+            <Link href={bookingsHref({ providerId: linkProviderId, booking: thread.booking.id, source: thread.booking.site ? "site" : null })} className={consoleButtonClass("secondary", "sm")}>
               予約を見る
             </Link>
           ) : null}
@@ -209,7 +209,11 @@ export function HostMessageThread({ thread, experienceTitle, headingId, linkProv
           {thread.messages.map((message) => (message.from === "guest" ? <GuestBubble key={message.id} message={message} guest={thread.guest} /> : <ReplyBubble key={message.id} message={message} providerName={providerName} />))}
         </ol>
       ) : null}
-      <ReplyComposer thread={thread} providerId={providerId} onSend={onSend} />
+      {thread.booking?.closed ? (
+        <p className="border-t border-line px-4 py-3.5 text-[0.8125rem] leading-normal text-muted md:px-5">{BOOKING_THREAD_CLOSED_TEXT}</p>
+      ) : (
+        <ReplyComposer thread={thread} providerId={providerId} onSend={onSend} />
+      )}
     </section>
   );
 }

@@ -44,6 +44,17 @@ export class StoreRateLimitedError extends StoreError {
   }
 }
 
+/**
+ * A booking's messages (#285 slice 6b) take no new message: the booking is no longer confirmed or under payment review
+ * (cancelled), or its experience ended more than 30 days ago. The history stays readable.
+ */
+export class BookingMessagesClosedError extends StoreError {
+  constructor() {
+    super("This booking no longer takes messages.");
+    this.name = "BookingMessagesClosedError";
+  }
+}
+
 /** The store's subset of NIHO's PublicExperienceCheckoutErrorCode (VALIDATION_ERROR and CHECKOUT_UNAVAILABLE belong to the route). */
 export type GuestCheckoutErrorCode =
   | "INPUT_INVALID"

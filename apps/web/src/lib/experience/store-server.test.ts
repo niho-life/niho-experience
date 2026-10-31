@@ -31,6 +31,13 @@ it("keeps guest questions closed in the preview even with a database URL", async
   expect(guestQuestionRepository()).toBeNull();
 });
 
+it("keeps a booking's messages and the host's site threads closed in the preview even with a database URL (#285 slice 6b)", async () => {
+  vi.stubEnv("EXPERIENCE_DATABASE_URL", "postgresql://synthetic:unused@127.0.0.1/unused");
+  const { guestBookingMessages, siteThreadRepository } = await import("./store-server");
+  expect(guestBookingMessages()).toBeNull();
+  expect(siteThreadRepository()).toBeNull();
+});
+
 it("keeps guest reviews closed in the preview even with a database URL (#104)", async () => {
   vi.stubEnv("EXPERIENCE_DATABASE_URL", "postgresql://synthetic:unused@127.0.0.1/unused");
   const { guestReviewRepository } = await import("./store-server");

@@ -12,6 +12,7 @@ import {
   type HostGuestBooking,
   type HostGuestBookingPage,
 } from "@niho-experience/experience-store";
+import { config } from "@/lib/config";
 import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-refunds";
 import { bookingCancellations, guestBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
@@ -58,12 +59,22 @@ function screenPage(bookings: readonly HostGuestBooking[], nextCursor: string | 
   return { bookings: bookings.map(siteBooking), experiences: siteBookingExperiences(bookings), nextCursor };
 }
 
+/**
+ * Whether a booking made here has its messages with the guest (#285 slice 6b): open with the guest's booking page
+ * (booking on this site and the mail job), where the guest reads and writes them.
+ */
+export function siteBookingMessagesEnabled(): boolean {
+  return config.guestBookingEnabled && config.guestMailEnabled;
+}
+
 export type HostSiteBookingsLoad =
   | (HostSiteBookingPage & {
       status: "live";
       /** `?booking=` names none of the provider's bookings made here. */
       requestedMissing: boolean;
       today: string;
+      /** Each booking leads to its messages with the guest (#285 slice 6b). */
+      messages: boolean;
     })
   /** Not kept here for them: the flag is off, no DB, not the OWNER (NIHO or the experience DB). Today's screen. */
   | { status: "closed" }
@@ -87,7 +98,7 @@ export async function loadSiteBookings(provider: HostProvider, nihoUserId: strin
         requestedMissing = true;
       }
     }
-    return { status: "live", ...screenPage(stored, page.nextCursor), requestedMissing, today };
+    return { status: "live", ...screenPage(stored, page.nextCursor), requestedMissing, today, messages: siteBookingMessagesEnabled() };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }

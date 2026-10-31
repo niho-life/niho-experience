@@ -81,11 +81,12 @@ export interface HostBookingsProps {
   conversations: readonly BookingConversation[];
   /**
    * Bookings made on this site (#285 slice 8, experience DB, http mode), read only: a session's heading opens
-   * their この回 (slice 8b) and no booking leads to メッセージ yet. `nextCursor` reads the rest of the list (続きを見る),
+   * their この回 (slice 8b). `nextCursor` reads the rest of the list (続きを見る),
    * null when it holds them all. `besideNiho`: NIHO's bookings are the screen's own and these are its
-   * `?source=site`, which every link keeps, with the way back. Absent in mock mode.
+   * `?source=site`, which every link keeps, with the way back. `messages`: each booking leads to its messages with the
+   * guest (#285 slice 6b; メッセージ opens the booking's thread, or its empty one). Absent in mock mode.
    */
-  live?: { nextCursor: string | null; besideNiho: boolean } | null;
+  live?: { nextCursor: string | null; besideNiho: boolean; messages?: boolean } | null;
 }
 
 /**
@@ -129,8 +130,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   const titleOf = (id: string) => experiences.find((experience) => experience.id === id)?.title ?? "";
   /** The booking's thread, or the way to start one while the guest can still be written to. */
   const conversationOf = (booking: HostBooking): BookingConversationLink | null => {
-    // This site's bookings (#285) have no thread with the guest until slice 6.
-    if (booking.site) return null;
+    // This site's bookings (#285 slice 6b): メッセージ opens the booking's thread, or its empty one.
+    if (booking.site) return live?.messages ? { href: messagesHref({ providerId, source, booking: booking.id }), last: null, lastUnknown: true } : null;
     const thread = conversations.find((conversation) => conversation.bookingId === booking.id);
     if (thread) return { href: messagesHref({ providerId, thread: thread.threadId }), last: { text: thread.text, at: thread.at } };
     return bookingActions(booking.status).message ? { href: messagesHref({ providerId, booking: booking.id }), last: null } : null;

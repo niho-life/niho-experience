@@ -62,12 +62,12 @@ export interface HostSessionProps {
   /** The URL's own `?providerId=` (when well formed), carried on every link. */
   providerId: string | null;
   /**
-   * Bookings made on this site (#285 slice 8b, experience DB, http mode): no attendance and no thread with the guest
-   * (slice 6); calling the session off cancels every confirmed booking with a full refund (slice 7, `providerId` is
-   * the provider shown). `besideNiho`: NIHO's bookings are 予約's own and these are its `?source=site`, where "‹ 予約"
-   * goes back. Absent in mock mode.
+   * Bookings made on this site (#285 slice 8b, experience DB, http mode): no attendance; calling the session off
+   * cancels every confirmed booking with a full refund (slice 7, `providerId` is the provider shown). `messages`: each
+   * guest leads to their booking's thread (slice 6b). `besideNiho`: NIHO's bookings are 予約's own and these are its
+   * `?source=site`, where "‹ 予約" goes back. Absent in mock mode.
    */
-  site?: { besideNiho: boolean; providerId?: string } | null;
+  site?: { besideNiho: boolean; providerId?: string; messages?: boolean } | null;
 }
 
 /** Label 72px + value, as a booking's 申込内容. */
@@ -143,7 +143,7 @@ function Attendance({ booking, open, onMark }: { booking: HostBooking; open: boo
 
 /**
  * One guest: who, how many, from where, how to reach them on the day, what to look out for, and the way to their
- * thread (none for this site's bookings yet: `messageHref` null).
+ * thread (`messageHref` null where there is none).
  */
 function GuestRow({ booking, messageHref, aside, children }: { booking: HostBooking; messageHref: string | null; aside?: ReactNode; children?: (nameId: string) => ReactNode }) {
   const nameId = `guest-${booking.id}`;
@@ -219,8 +219,8 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   const failed = cancellation?.results.filter((result) => !result.ok) ?? [];
 
   const messageHref = (booking: HostBooking) => {
-    // This site's bookings (#285) have no thread with the guest until slice 6.
-    if (site) return null;
+    // This site's bookings (#285 slice 6b): the booking's thread, or its empty one, among this site's threads.
+    if (site) return site.messages ? messagesHref({ providerId, source: site.besideNiho ? "site" : null, booking: booking.id }) : null;
     const thread = conversations.find((conversation) => conversation.bookingId === booking.id);
     return thread ? messagesHref({ providerId, thread: thread.threadId }) : messagesHref({ providerId, booking: booking.id });
   };

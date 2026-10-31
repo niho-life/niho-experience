@@ -80,11 +80,23 @@ export interface BookingConversationLink {
   href: string;
   /** The last message in one line and when it was written; null before anyone wrote. */
   last: { text: string; at: string } | null;
+  /** This site's booking (#285 slice 6b): its last message is not read here, so nothing says whether anyone wrote. */
+  lastUnknown?: boolean;
 }
 
 /** メッセージ: the last word of the booking's thread and the way into it. Messages are read and written in メッセージ. */
 function ConversationSection({ conversation }: { conversation: BookingConversationLink }) {
   const { last } = conversation;
+  if (conversation.lastUnknown) {
+    return (
+      <DetailSection title="メッセージ">
+        <p className="text-[0.8125rem] text-muted">予約者とのやりとりは、メッセージで読み書きできます。</p>
+        <Link href={conversation.href} className={consoleButtonClass("secondary", "sm", "mt-2.5")}>
+          メッセージを開く
+        </Link>
+      </DetailSection>
+    );
+  }
   return (
     <DetailSection title="メッセージ">
       {last ? (

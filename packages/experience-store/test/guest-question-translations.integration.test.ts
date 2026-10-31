@@ -73,7 +73,8 @@ describe("PostgreSQL guest message translations (#285 slice 5)", { skip: databas
       const threadId = await threadIdFor(pool, "guest@example.com");
       await questions.reply(ownerA, threadId, { english: "Yes, we can.", japanese: "はい、できます。", commandId: randomUUID() });
       const [delivery] = await questions.claimReplyDeliveries({ limit: 5, leaseSeconds: 60, linkTtlDays: 14 });
-      await questions.submitGuestReply(delivery!.replyToken, { message: "Great, thank you! See you on Nov 14 at 10:00.", clientRequestKey: randomUUID() });
+      assert.equal(delivery?.kind, "QUESTION");
+      await questions.submitGuestReply(delivery.replyToken, { message: "Great, thank you! See you on Nov 14 at 10:00.", clientRequestKey: randomUUID() });
       // One message was translated some other way already; one thread is erased.
       await pool.query("UPDATE guest_question_messages SET body_ja = '既訳' WHERE body = 'Can I bring my child?'");
       await questions.submitQuestion(question({ guestEmail: "gone@example.com", message: "Is it wheelchair accessible?" }));

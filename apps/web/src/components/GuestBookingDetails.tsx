@@ -1,10 +1,10 @@
-import type { GuestBookingView, GuestRefundView } from "@niho-experience/experience-store";
+import type { GuestBookingConversation, GuestBookingView, GuestRefundView } from "@niho-experience/experience-store";
 import type { ReactNode } from "react";
 import { DATE_LONG, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName, zonedMoment } from "@/lib/booking-words";
 import { BookingCancel } from "./BookingCancel";
+import { BookingMessages } from "./BookingMessages";
 import { BookingSignOut } from "./BookingSignOut";
 import { FindBookingForm } from "./FindBookingForm";
-import { HandIcon } from "./HandIcon";
 import { ButtonLink, Notice, Pill } from "./ui";
 
 const STATUS = {
@@ -87,10 +87,11 @@ function CancelSection({ booking }: { booking: GuestBookingView }) {
 
 /**
  * The guest's booking (#285 slice 6, docs/guest-booking.md): what was booked, for when and whom, what was paid and the
- * cancellation policy fixed at booking, and cancelling it (slice 7). Messages with the host come later (slice 6b);
- * until then the page says so and points to NIHO support, with no control that does nothing.
+ * cancellation policy fixed at booking, cancelling it (slice 7), and the messages with the host (slice 6b): the guest's
+ * words and the host's English, and a box to write while the booking takes messages. `conversation` is null when the
+ * messages could not be read (the rest of the page still shows).
  */
-export function GuestBookingDetails({ booking, now }: { booking: GuestBookingView; now: Date }) {
+export function GuestBookingDetails({ booking, now, conversation = null }: { booking: GuestBookingView; now: Date; conversation?: GuestBookingConversation | null }) {
   const status = STATUS[booking.status];
   const policy = booking.status === "CANCELLED" ? null : cancellationWords(booking, now);
   const rows: [string, string][] = [
@@ -140,10 +141,7 @@ export function GuestBookingDetails({ booking, now }: { booking: GuestBookingVie
 
       <section aria-labelledby="booking-messages" className="mt-10 border-t border-line pt-6">
         <h2 id="booking-messages" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">Messages with your host</h2>
-        <p className="mt-3 flex items-start gap-2.5 text-[0.9375rem] text-ink-soft">
-          <HandIcon name="chat" className="size-6 shrink-0 text-moss" />
-          <span>Coming soon: you&apos;ll be able to write to {booking.hostDisplayName} here. For now, reply to your confirmation email and NIHO support will help.</span>
-        </p>
+        <BookingMessages publicBookingId={booking.publicBookingId} hostDisplayName={booking.hostDisplayName} timeZone={booking.timeZone} conversation={conversation} />
       </section>
       <CancelSection booking={booking} />
 

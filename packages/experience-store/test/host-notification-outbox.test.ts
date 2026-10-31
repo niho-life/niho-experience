@@ -5,12 +5,14 @@ import { StoreValidationError } from "../src/errors.ts";
 import {
   cancelApprovalDeadlineReminders,
   enqueueApprovalDeadlineReminders,
+  enqueueBookingMessageNotification,
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueNewBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
+  parseBookingMessagePayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
@@ -118,6 +120,40 @@ describe("question and new booking payloads (#285 slice 5)", () => {
   });
 });
 
+describe("booking message payloads (#285 slice 6b)", () => {
+  const message = {
+    v: 1, threadId: "00000000-0000-4000-8000-0000000000bb", messageId: "00000000-0000-4000-8000-000000000201",
+    experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 3,
+  };
+
+  it("reads exactly the closed shape: the thread, the message, the experience, its time and the party, never who wrote or what", () => {
+    assert.deepEqual(parseBookingMessagePayload(message), message);
+    assert.equal(parseGuestQuestionPayload(message), null);
+    assert.equal(parseGuestMessagePayload(message), null);
+    for (const extra of [{ guestName: "Sample Guest" }, { body: "synthetic text" }, { guestEmail: "guest@example.com" }, { bookingId: "bk-1" }]) {
+      assert.equal(parseBookingMessagePayload({ ...message, ...extra }), null);
+    }
+    for (const bad of [{ ...message, v: 2 }, { ...message, threadId: "../admin" }, { ...message, seats: 0 }, { ...message, startsAt: "2026-11-20T10:00:00+09:00" }, { ...message, experienceTitle: "" }]) {
+      assert.equal(parseBookingMessagePayload(bad), null, JSON.stringify(bad));
+    }
+  });
+
+  it("writes one row per message, due now, under the thread, and refuses invalid input before the database", async () => {
+    const { client, calls } = recordingClient();
+    await enqueueBookingMessageNotification(client, {
+      providerId: "provider-a", threadId: message.threadId, messageId: message.messageId, experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T10:00:00+09:00", seats: 3,
+    });
+    assert.deepEqual(calls[0]!.params.slice(0, 5), ["provider-a", "guest_question_thread", message.threadId, HOST_NOTIFICATION_TOPICS.bookingMessage, `host-push:booking-message:${message.messageId}`]);
+    assert.equal(calls[0]!.params[6], null);
+    assert.deepEqual(JSON.parse(String(calls[0]!.params[5])), message);
+    const ok = { providerId: "provider-a", threadId: message.threadId, messageId: message.messageId, experienceTitle: "Synthetic", startsAt: message.startsAt, seats: 2 };
+    for (const bad of [{ ...ok, threadId: "t/1" }, { ...ok, messageId: "" }, { ...ok, seats: 0 }, { ...ok, startsAt: "soon" }, { ...ok, experienceTitle: " " }]) {
+      await assert.rejects(() => enqueueBookingMessageNotification(client, bad), StoreValidationError);
+    }
+    assert.equal(calls.length, 1);
+  });
+});
+
 describe("host notification producers (#177 P2)", () => {
   it("schedules reminders 6 hours and 1 hour before the deadline, skipping passed ones", async () => {
     const at = async (hoursLeft: number) => {
@@ -187,7 +223,7 @@ describe("HostNotificationOutbox input checks", () => {
     assert.deepEqual(await outbox.claimDue(10, 60_000), []);
     assert.deepEqual(queries[0], [[
       HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
-      HOST_NOTIFICATION_TOPICS.cancellation,
+      HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage,
     ], 10, 60_000]);
   });
 });

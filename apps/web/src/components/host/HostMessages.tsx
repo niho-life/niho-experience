@@ -41,9 +41,11 @@ export interface HostMessagesProps {
    * Questions kept in the experience DB (#106, http mode): a thread holds its last message until it is
    * opened here, which reads it in full and counts it as read; a reply is sent to the store. `loaded`
    * names the threads the page already read in full; `nextCursor` reads the older ones (続きを見る),
-   * null when the list holds them all. Absent in mock mode.
+   * null when the list holds them all. Bookings made on this site (#285 slice 6b) have their threads among them.
+   * `besideNiho`: NIHO's booking messages are the screen's own and these are its `?source=site`, which every link
+   * keeps, with the way back. Absent in mock mode.
    */
-  live?: { loaded: readonly string[]; nextCursor: string | null } | null;
+  live?: { loaded: readonly string[]; nextCursor: string | null; besideNiho?: boolean } | null;
 }
 
 /**
@@ -75,7 +77,8 @@ export function HostMessages({ threads: initialThreads, newThread, experiences: 
   const bookingId = threadId ? null : searchParams.get("booking") || null;
   const opened = threadId ?? bookingId;
   const sub = opened !== null;
-  const listHref = messagesHref({ providerId: linkProviderId });
+  const source = live?.besideNiho ? "site" : null;
+  const listHref = messagesHref({ providerId: linkProviderId, source });
 
   const sorted = sortThreads(threads);
   const selected = threadId
@@ -156,7 +159,7 @@ export function HostMessages({ threads: initialThreads, newThread, experiences: 
   const open = (event: MouseEvent<HTMLAnchorElement>, id: string) => {
     if (!plainClick(event)) return;
     event.preventDefault();
-    window.history.pushState(null, "", messagesHref({ providerId: linkProviderId, thread: id }));
+    window.history.pushState(null, "", messagesHref({ providerId: linkProviderId, source, thread: id }));
     if (!window.matchMedia(TWO_COLUMNS).matches) {
       window.scrollTo(0, 0);
       focusDetail.current = true;
@@ -185,7 +188,7 @@ export function HostMessages({ threads: initialThreads, newThread, experiences: 
       updated = addReply(thread, reply, now);
     }
     setThreads((current) => (current.some((item) => item.id === thread.id) ? current.map((item) => (item.id === thread.id ? updated : item)) : [...current, updated]));
-    if (!sub) window.history.replaceState(null, "", messagesHref({ providerId: linkProviderId, thread: thread.id }));
+    if (!sub) window.history.replaceState(null, "", messagesHref({ providerId: linkProviderId, source, thread: updated.id }));
     return null;
   };
 
@@ -200,6 +203,15 @@ export function HostMessages({ threads: initialThreads, newThread, experiences: 
         <div data-sub={sub ? "thread" : undefined} className="lg:grid lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5">
           <div className={`min-w-0 ${sub ? "max-lg:hidden" : ""}`}>
             <PageHead title="メッセージ" />
+            {live?.besideNiho ? (
+              <p className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] leading-normal text-ink-soft">
+                <span>このサイトで受けた予約のメッセージです</span>
+                <a href={messagesHref({ providerId: linkProviderId })} className="inline-flex items-center font-extrabold text-ink underline-offset-2 hover:underline">
+                  <HostIcon name="chevronLeft" className="size-4" />
+                  NIHO のメッセージに戻る
+                </a>
+              </p>
+            ) : null}
             <section aria-label="メッセージの一覧" className={`${HOST_SURFACE} overflow-hidden`}>
               {sorted.length ? (
                 <ul>
@@ -212,7 +224,7 @@ export function HostMessages({ threads: initialThreads, newThread, experiences: 
                       <li key={thread.id} className="border-t border-line first:border-t-0">
                         <a
                           id={rowId(thread.id)}
-                          href={messagesHref({ providerId: linkProviderId, thread: thread.id })}
+                          href={messagesHref({ providerId: linkProviderId, source, thread: thread.id })}
                           aria-current={chosen ? "true" : undefined}
                           onClick={(event) => open(event, thread.id)}
                           className={`flex items-start gap-3 px-3.5 py-3 focus-visible:outline-offset-[-3px] md:px-4 ${marked}`}
