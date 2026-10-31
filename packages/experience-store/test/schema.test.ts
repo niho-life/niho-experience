@@ -353,6 +353,33 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /outbox_messages/);
   });
 
+  it("keeps one review per booking, review links only as hashes, and no guest contact or IP address (#104 #108)", async () => {
+    const sql = await readFile(new URL("../migrations/0027_guest_reviews.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.doesNotMatch(sql, /CREATE EXTENSION|\bip_address\b|\binet\b|user_agent|ALTER TABLE|DROP |outbox_messages/i);
+    const reviews = sql.match(/CREATE TABLE guest_reviews \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(reviews, /UNIQUE \(provider_id, booking_id\)/);
+    assert.match(reviews, /FOREIGN KEY \(provider_id, booking_id\) REFERENCES bookings\(provider_id, id\)/);
+    assert.match(reviews, /FOREIGN KEY \(provider_id, product_id\) REFERENCES experience_products\(provider_id, id\)/);
+    assert.match(reviews, /rating smallint NOT NULL CHECK \(rating BETWEEN 1 AND 5\)/);
+    assert.match(reviews, /cardinality\(tags\) <= 5\s+AND tags <@ ARRAY\['CALM_ATMOSPHERE', 'GOOD_FOR_BEGINNERS', 'EASY_TO_FIND', 'GREAT_HOST', 'GOOD_VALUE'\]::text\[\]/);
+    assert.match(reviews, /position\('@' IN display_name\) = 0/);
+    assert.match(reviews, /status IN \('PENDING', 'PUBLISHED', 'HIDDEN'\)/);
+    assert.match(reviews, /report_reason IN \('PERSONAL', 'UNTRUE', 'INAPPROPRIATE', 'OTHER'\)/);
+    assert.match(reviews, /CHECK \(reply_body IS NULL OR published_at IS NOT NULL\)/);
+    // No column for the booker's contact details or name: the shown name is the guest's own.
+    assert.doesNotMatch(reviews, /^\s+\w*(email|phone|guest_name)\w*\s/im);
+    assert.match(sql, /CREATE TRIGGER guest_reviews_protect\s+BEFORE UPDATE ON guest_reviews/);
+    assert.match(sql, /a review does not go back to PENDING/);
+    assert.match(sql, /ON guest_reviews \(provider_id, product_id, published_at DESC, id DESC\)\s+WHERE status = 'PUBLISHED'/);
+    const links = sql.match(/CREATE TABLE guest_review_invitations \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(links, /token_hash bytea PRIMARY KEY CHECK \(octet_length\(token_hash\) = 32\)/);
+    assert.match(links, /FOREIGN KEY \(provider_id, booking_id\) REFERENCES bookings\(provider_id, id\)/);
+    assert.match(links, /expires_at <= created_at \+ interval '60 days'/);
+    assert.doesNotMatch(links, /token_value|\btoken text|plain|secret|email|phone/i);
+  });
+
   it("keeps NIHO's fee per provider, tied to the support setting, without an actor column (#285)", async () => {
     const sql = await readFile(new URL("../migrations/0025_provider_sale_settings.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
