@@ -100,3 +100,55 @@ test("auth expiry is a halt and quarantine outcome", async () => {
   assert.equal(result.halt, true);
   assert.equal(result.quarantine, true);
 });
+
+test("deterministic mode uses its final verification exactly once", async () => {
+  const job = makeJob(state, "SET_CLOSED");
+  let verifies = 0;
+  const driver = {
+    async observeTarget() { return observation(job); },
+    async applyDesiredState() {},
+    async verifyAfterReload() { verifies += 1; return observation(job); },
+    async stop() { return true; },
+  };
+  const result = await executeJob({ job, cloud: { async preflight() {}, async renew() {} }, config: { mode: "deterministic" }, driverFactory: async () => driver });
+  assert.equal(result.outcome, "VERIFIED");
+  assert.equal(verifies, 1);
+});
+
+test("Claude mode retains one independent verification after model execution", async () => {
+  const job = makeJob(state, "SET_OPEN");
+  let verifies = 0;
+  const driver = {
+    async observeTarget() { return observation(job); }, async applyDesiredState() {},
+    async verifyAfterReload() { verifies += 1; return observation(job); }, async stop() { return true; },
+  };
+  const result = await executeJob({ job, cloud: { async preflight() {}, async renew() {} }, config: { mode: "claude-code", privateDir: "/tmp" },
+    driverFactory: async () => driver, rpcFactory: async () => ({ async close() {} }), claudeExecutor: async () => ({ status: "DONE", stopped: true }) });
+  assert.equal(result.outcome, "VERIFIED");
+  assert.equal(verifies, 1);
+});
+
+test("final mismatch, lease loss and unconfirmed stop cannot become VERIFIED", async () => {
+  const mismatchJob = makeJob(state, "SET_OPEN");
+  const mismatch = await executeJob({ job: mismatchJob, cloud: { async preflight() {}, async renew() {} }, config: { mode: "deterministic" },
+    driverFactory: async () => ({ async observeTarget() { return observation(mismatchJob); }, async applyDesiredState() {},
+      async verifyAfterReload() { return { ...observation(mismatchJob), bookable: false }; }, async stop() { return true; } }) });
+  assert.equal(mismatch.outcome, "NEEDS_REVIEW");
+
+  const stoppedJob = makeJob(state, "SET_CLOSED");
+  const unconfirmed = await executeJob({ job: stoppedJob, cloud: { async preflight() {}, async renew() {} }, config: { mode: "deterministic" },
+    driverFactory: async () => ({ async observeTarget() { return observation(stoppedJob); }, async applyDesiredState() {},
+      async verifyAfterReload() { return observation(stoppedJob); }, async stop() { return false; } }) });
+  assert.notEqual(unconfirmed.outcome, "VERIFIED");
+  assert.equal(unconfirmed.reason, "PROCESS_STOP_UNCONFIRMED");
+});
+
+test("site access restriction is a non-auth halt", async () => {
+  const job = makeJob(state, "OBSERVE");
+  const driver = { async observeTarget() { throw Object.assign(new Error("restricted"), { code: "SITE_ACCESS_RESTRICTED" }); }, async stop() { return true; } };
+  const result = await executeJob({ job, cloud: { async renew() {} }, config: { mode: "deterministic" }, driverFactory: async () => driver });
+  assert.equal(result.outcome, "NEEDS_REVIEW");
+  assert.equal(result.reason, "SITE_ACCESS_RESTRICTED");
+  assert.equal(result.halt, true);
+  assert.equal(result.quarantine, true);
+});

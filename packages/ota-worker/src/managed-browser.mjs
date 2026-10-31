@@ -8,6 +8,7 @@ import {
   validateSessionPolicy,
 } from "./managed-session-journal.mjs";
 import { ContractError } from "./validation.mjs";
+import { assertProfileAccessAvailable } from "./profile-access-hold.mjs";
 
 const MAX_SANITIZE_PAGES = 16;
 const SANITIZE_TIMEOUT_MS = 1_000;
@@ -194,6 +195,7 @@ function managedBrowserArguments(userDataDir, headless, sessionEnabled, restore)
 export async function startManagedBrowser({ executablePath, userDataDir, headless = false, sessionPolicy = "none" }) {
   validateSessionPolicy(sessionPolicy);
   await privateProfile(userDataDir);
+  await assertProfileAccessAvailable(userDataDir);
   const session = sessionPolicy === "none" ? null : await beginManagedSession(userDataDir, sessionPolicy);
   const args = managedBrowserArguments(userDataDir, headless, session !== null, session?.restore === true);
   let owned;

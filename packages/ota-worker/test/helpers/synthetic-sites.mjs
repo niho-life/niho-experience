@@ -32,15 +32,24 @@ async function fixtureBase(prefix, state, handler, site, namespace) {
 
 export async function syntheticViator() {
   const state = { accountId: "999999", productId: "999999P1", optionId: "TG1", localDateTime: "2099-01-01T13:00:00",
-    initialDate: "2098-12-19", duplicateTargetRow: false, availability: "AVAILABLE", authenticated: true, responseFailure: null, writes: 0, requests: [], reads: [] };
+    initialDate: "2098-12-19", duplicateTargetRow: false, availability: "AVAILABLE", authenticated: true, responseFailure: null,
+    documentStatus: null, readStatus: null, readDelayMs: 0, updateStatus: null, challengeIframe: false, restrictionText: "", ordinaryBotAssets: false,
+    writes: 0, requests: [], reads: [] };
   const handler = async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname === "/availability/" && request.method === "GET") {
+      if (state.documentStatus) {
+        response.writeHead(state.documentStatus, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        response.end("<!doctype html><body><h1>Access temporarily restricted</h1></body>"); return;
+      }
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       if (!state.authenticated) { response.end("<h1>Log in</h1>"); return; }
       response.end(`<!doctype html><html><head><meta charset="utf-8"></head><body><button>Synthetic product（${state.accountId}）</button>
+        <p id="synthetic-restriction"></p>${state.challengeIframe ? '<iframe src="https://geo.captcha-delivery.com/captcha/synthetic"></iframe>' : ""}
+        ${state.ordinaryBotAssets ? '<script src="https://geo.captcha-delivery.com/captcha/synthetic.js"></script><img src="https://geo.captcha-delivery.com/captcha/synthetic.png">' : ""}
         <input placeholder="日付を選択" readonly style="display:none"><input placeholder="日付を選択" readonly value="${state.initialDate}"><div id="picker"></div><div id="grid"></div>
         <script>
+          document.getElementById('synthetic-restriction').textContent=${JSON.stringify(state.restrictionText)};
           const input=document.querySelectorAll('input')[1];
           let month=new Date('${state.initialDate}T12:00:00Z');
           function drawPicker(){const picker=document.getElementById('picker');picker.replaceChildren();for(const [name,delta] of [['Go to the Previous Month',-1],['Go to the Next Month',1]]){const button=document.createElement('button');button.setAttribute('aria-label',name);button.onclick=()=>{month=new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth()+delta,1,12));drawPicker()};picker.append(button)}const grid=document.createElement('table');grid.setAttribute('role','grid');grid.setAttribute('aria-label',new Intl.DateTimeFormat('en-US',{month:'long',year:'numeric',timeZone:'UTC'}).format(month));for(let n=1;n<=new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth()+1,0)).getUTCDate();n++){const date=new Date(Date.UTC(month.getUTCFullYear(),month.getUTCMonth(),n,12));const button=document.createElement('button');button.setAttribute('aria-label',date.toDateString());button.onclick=()=>{input.value=date.toISOString().slice(0,10);picker.replaceChildren();load(input.value)};grid.append(button)}picker.append(grid)}
@@ -55,6 +64,8 @@ export async function syntheticViator() {
     }
     if (url.pathname === "/availability/api" && request.method === "POST") {
       const body = await readBody(request); state.reads.push(body);
+      if (state.readDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.readDelayMs));
+      if (state.readStatus) { response.writeHead(state.readStatus, { "content-type": "application/json" }); response.end('{"syntheticLimited":true}'); return; }
       const target = body.jumpToDate === state.localDateTime.slice(0, 10);
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ availabilities: { [body.jumpToDate]: target ? [{ productCode: state.productId, tourGradeCode: state.optionId, startTime: "14:00:00", availability: "AVAILABLE" },
@@ -65,6 +76,7 @@ export async function syntheticViator() {
         response.writeHead(403, { "content-type": "application/json" }); response.end('{"syntheticMetadataRequired":true}'); return;
       }
       const body = await readBody(request); state.requests.push(body); state.writes += 1; state.availability = body.availability;
+      if (state.updateStatus) { response.writeHead(state.updateStatus, { "content-type": "application/json" }); response.end('{"syntheticLimited":true}'); return; }
       if (state.responseFailure === "drop") { request.socket.destroy(); return; }
       if (state.responseFailure === "500") { response.writeHead(500, { "content-type": "application/json" }); response.end('{"ok":false}'); return; }
       response.writeHead(200, { "content-type": "application/json" }); response.end('{"ok":true}'); return;

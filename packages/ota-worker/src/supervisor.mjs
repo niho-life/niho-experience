@@ -22,7 +22,8 @@ function classify(error) {
   if (["AUTH_REQUIRED", "CLAUDE_AUTH_REQUIRED"].includes(code)) return { outcome: "AUTH_REQUIRED", quarantine: true, halt: true, reason: code };
   if (code === "UNKNOWN_AFTER_SAVE") return { outcome: "UNKNOWN_AFTER_SAVE", quarantine: true, halt: true, reason: code };
   if (["DOM_DRIFT", "ACCOUNT_MISMATCH", "PRODUCT_MISMATCH", "TARGET_MISMATCH", "UNSUPPORTED_TARGET", "WRITE_REFUSED", "VERIFY_FAILED", "SAVE_NOT_APPLIED", "MCP_PROTOCOL_VIOLATION",
-    "OPTION_NOT_ACTIVE", "UNSUPPORTED_SCHEDULE", "AMBIGUOUS_SCHEDULE", "OUTSIDE_SCHEDULE_VALIDITY", "SCHEDULE_AGENDA_MISMATCH"].includes(code)) {
+    "OPTION_NOT_ACTIVE", "UNSUPPORTED_SCHEDULE", "AMBIGUOUS_SCHEDULE", "OUTSIDE_SCHEDULE_VALIDITY", "SCHEDULE_AGENDA_MISMATCH",
+    "SITE_ACCESS_RESTRICTED", "PROFILE_ACCESS_HELD", "INVALID_PROFILE_ACCESS_HOLD", "PROFILE_ACCESS_HOLD_WRITE_FAILED"].includes(code)) {
     return { outcome: "NEEDS_REVIEW", quarantine: true, halt: true, reason: code };
   }
   if (["LEASE_RENEW_FAILED", "DEADLINE_EXCEEDED", "STALE_PREFLIGHT", "HTTP_ERROR", "NETWORK_ERROR", "TIMEOUT"].includes(code)) {
@@ -160,11 +161,11 @@ export async function executeJob({
     } else {
       await tools.observe_target();
       if (job.action !== "OBSERVE") await tools.apply_desired_state();
-      await tools.verify_after_reload();
+      observation = verifiedObservation(job, await tools.verify_after_reload());
     }
     if (!outcome) {
       if (!gateActive) throw abortReason;
-      observation = verifiedObservation(job, await driver.verifyAfterReload());
+      if (usesModel) observation = verifiedObservation(job, await driver.verifyAfterReload());
       if (!gateActive) throw abortReason;
       outcome = "VERIFIED";
     }

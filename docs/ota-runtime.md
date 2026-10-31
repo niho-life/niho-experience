@@ -134,6 +134,19 @@ Cloud Run 側の値は配備 workflow だけが入れる。stg は repository va
 - `retryReservationReads`（予約照合を再開）: halted かつ実行中 job のない listing だけ。account が active・未失効・委任期限内・未隔離で、listing が予約読取可能な場合に限り、停止を解いて即時 due にする。読取の健全性は更新しない。
 - `acknowledgeIncident`（担当する）: 未解決 incident の担当を自分にする。incident を手動で閉じる操作は置かない。
 
+### Viator の一時アクセス制限 hold
+
+Viator の robot 確認、一時アクセス制限、または対象 document / availability 通信の 403・429 を検知した場合、driver は許可済み write guard を即時 freeze し、その専用 private profile に `.niho-access-hold.json` を永続化する。hold は version、有限の理由コード、検知日時だけを持ち、URL、本文、cookie、資格情報は保存しない。同じ profile の deterministic worker、手動 helper、別 process は session policy が `none` / `prepare` / `restore` のいずれでも Chrome 起動前に拒否される。別 profile には波及しない。壊れた hold や読取不能も fail closed とする。holdの保存待ちは2秒で打ち切り、書込みやfsyncが完了しなくても所有Chromeを止め、既存workerの停止journal・Cloudへの結果報告へ進む。遅れて保存が完了しても隔離は解除しない。
+
+復旧は次の順序を崩さない。
+
+1. 制限検知後は job を停止し、既に送信した write の独立 readback がない場合は `UNKNOWN_AFTER_SAVE` を維持する。制限を認証切れへ読み替えない。
+2. worker の `stopped=true` と、worker が所有する Chrome process の停止を確認する。外部で受付中の回が自動で閉じたとは扱わない。
+3. CAPTCHA 回答、自動 solver、stealth、UA / IP 変更などの回避を行わず、運用者が手動で Viator 側の確認とサイト側制限の解除を確認する。現在保留中の実Viator実証をこの手順だけで再開しない。
+4. exact profile の hold は TTL や自動解除を持たない。上記確認後に運用者が明示的に hold を解除し、Admin の既存 `recover` から observe-first の独立照合を行う。Viator の session restore は有効化せず、既存受入済みの restore は Jalan だけとする。
+
+この手順はログインの無期限維持、制限原因、または再発ゼロを保証しない。原因を JavaScript や操作速度だけと断定しない。
+
 検証は合成データの実DB結合テスト、route・UI の単体テスト、stub した Admin 画面の E2E までである。Cloud Scheduler・通知の資源は用意したが一時停止中で、実Studio・実OTAでの停止／復旧の受入は未実施である。#240 はコードのマージだけでは close しない。
 
 ## 現時点の検証範囲
