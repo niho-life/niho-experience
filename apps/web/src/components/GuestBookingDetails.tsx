@@ -91,7 +91,7 @@ function CancelSection({ booking }: { booking: GuestBookingView }) {
  * words and the host's English, and a box to write while the booking takes messages. `conversation` is null when the
  * messages could not be read (the rest of the page still shows).
  */
-export function GuestBookingDetails({ booking, now, conversation = null }: { booking: GuestBookingView; now: Date; conversation?: GuestBookingConversation | null }) {
+export function GuestBookingDetails({ booking, now, conversation = null, translationNotice = false }: { booking: GuestBookingView; now: Date; conversation?: GuestBookingConversation | null; translationNotice?: boolean }) {
   const status = STATUS[booking.status];
   const policy = booking.status === "CANCELLED" ? null : cancellationWords(booking, now);
   const rows: [string, string][] = [
@@ -141,7 +141,7 @@ export function GuestBookingDetails({ booking, now, conversation = null }: { boo
 
       <section aria-labelledby="booking-messages" className="mt-10 border-t border-line pt-6">
         <h2 id="booking-messages" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">Messages with your host</h2>
-        <BookingMessages publicBookingId={booking.publicBookingId} hostDisplayName={booking.hostDisplayName} timeZone={booking.timeZone} conversation={conversation} />
+        <BookingMessages publicBookingId={booking.publicBookingId} hostDisplayName={booking.hostDisplayName} timeZone={booking.timeZone} conversation={conversation} translationNotice={translationNotice} />
       </section>
       <CancelSection booking={booking} />
 

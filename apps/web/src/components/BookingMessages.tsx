@@ -6,6 +6,7 @@ import type { GuestBookingConversation, GuestBookingMessage } from "@niho-experi
 import { zonedMoment, zoneName } from "@/lib/booking-words";
 import { BOOKING_MESSAGE_MAX_LENGTH, sendBookingMessage, type BookingMessageResult } from "@/lib/guest-booking-page";
 import { HandIcon } from "./HandIcon";
+import { TranslationNotice } from "./TranslationNotice";
 import { Notice, buttonClass } from "./ui";
 
 type Problem = { tone: "danger" | "warn"; title: string; body?: string };
@@ -65,12 +66,14 @@ function MessageList({ messages, hostDisplayName, timeZone }: { messages: readon
  * messages (cancelled, or 30 days after the experience) shows its history only. The key of a message stays the same
  * while its words do, so a retry after a lost answer never sends it twice.
  */
-export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, conversation }: {
+export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, conversation, translationNotice = false }: {
   publicBookingId: string;
   hostDisplayName: string;
   timeZone: string;
   /** null when the messages could not be read: the rest of the page still shows. */
   conversation: GuestBookingConversation | null;
+  /** The server says whether messages are translated into Japanese for the host (lib/translation-notice.ts); then one sentence says so. */
+  translationNotice?: boolean;
 }) {
   const [sent, setSent] = useState<readonly SentHere[]>([]);
   const [open, setOpen] = useState(conversation?.open ?? false);
@@ -153,6 +156,7 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
               {hostDisplayName} gets your message right away. Their answer comes here and to your email. Times are {zoneName(timeZone)}.
             </span>
           </p>
+          {translationNotice ? <TranslationNotice className="mt-2" /> : null}
           <button type="submit" disabled={sending} aria-busy={sending || undefined} className={buttonClass("primary", "mt-5 w-full sm:w-auto")}>
             {sending ? "Sending…" : "Send message"}
           </button>

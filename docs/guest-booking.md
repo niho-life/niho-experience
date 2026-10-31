@@ -314,6 +314,16 @@ node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sal
 - 鍵・接続 URL・DB や Stripe のエラー文を表示しない。Stripe の口座 ID、NIHO user ID、販売者の NIHO 口座の参照は末尾 4 字だけを出す。Stripe の口座について出すのは、鍵の種類（test / live）、国、既定の通貨、charges・payouts・details の可否だけ。
 - 開催の規則・在庫・予約を書かない。本文・写真を移さない。
 
+## 旅行者向けのプライバシー（第6段の続き）
+
+オーナー決定（2026-10-31）：ここで受けた予約と質問の旅行者向けに、短いプライバシーのページと、翻訳についての一文を足す。
+
+- **ページ**：`/privacy`（英語、index する。sitemap は `INDEXED_ENGLISH_STATIC_PATHS`、日本語版は無く hreflang の組にならない）。実装は `apps/web/src/components/PrivacyNotice.tsx` と `apps/web/src/app/(site)/privacy/page.tsx`。見出しは「What we keep」「Why we use it」「Who sees or handles it」「How long we keep it」「Cookies」「Questions or requests」。コードが実際にすることだけを書く：保存するもの（名前・アドレス・任意の電話・備考・回答・予約の日付と人数と金額・メッセージ・リンクのキャンペーンタグ）、使う目的、見る人（ホスト〔アドレスは見ない。電話は日付の画面だけ〕、Stripe〔カード情報は見ない〕、メールの事業者、Anthropic〔翻訳と英語の下書き。本文だけで名前・アドレス・予約情報は送らない〕、NIHO サポート）、保存期間（上の「予約者へのメール」の保存期間と同じ）、予約ページの cookie 1 つ（`HttpOnly`、体験の 30 日後まで）、問い合わせ先（確認メールへの返信と `/help`）。
+- **NIHO のプライバシーポリシーへのリンク**：`EXPERIENCE_PRIVACY_POLICY_URL`（任意。https のみ・認証情報なし、それ以外は起動失敗）。未設定ならリンクを出さない。値は [experience-runtime.md](experience-runtime.md) の設定の表。
+- **フッター**：公開サイトのフッターに「Privacy」（日本語のページは「プライバシー」で同じ英語のページへ）。フッターの枠はコードが持つので、追加の `footerLinks`（`lib/privacy-link.ts`）で足す。予約入力の規約リンクは NIHO の詳細の `legalDocuments`（データ）から出るもので、コードのリンクではないため、ここには足していない（規約の移行〔#89〕で扱う）。
+- **翻訳の一文**：「Your message is translated into Japanese for the host with an AI service. Privacy」（Privacy は `/privacy` を新しいタブで開く。書きかけの文や、メモリにだけある返信 token を失わないため）。予約前の質問の「Ask the host」（`AskHost`）、返信ページ（`GuestReply`）、予約ページのメッセージ欄（`BookingMessages`）の送信欄の下に、訳が実際に動くときだけ出す。サーバーが `translationNoticeShown(config)`（`EXPERIENCE_TRANSLATION_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED` がともに有効。訳はメール job の段なので両方が要る。mock は常に off）で決め、真偽値だけを props で渡す。ブラウザは設定を読まない。
+- **文言の確認**：オーナーが確認した（2026-10-31、#337）。文言を変えるときは、もう一度オーナーの確認を得る。配備時に `EXPERIENCE_PRIVACY_POLICY_URL` を設定する。
+
 ## データの置き場所
 
 - 予約者の名前・メールアドレス・電話番号・備考・回答・UTM は `booking_guests` だけに置く。`bookings`、outbox、カレンダーのイベント、Stripe の metadata（`booking_id` と出所だけ）、エラーの文、ログには出さない。経路のログは失敗の段階とエラーの class 名だけ（Stripe や DB の文は送った値を繰り返すことがあるため出さない）。

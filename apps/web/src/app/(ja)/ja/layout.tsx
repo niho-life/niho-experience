@@ -7,6 +7,7 @@ import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { config } from "@/lib/config";
 import { getPreparedJapaneseStaticRelease } from "@/lib/localized-content";
+import { privacyFooterLink } from "@/lib/privacy-link";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export default async function JapaneseRootLayout({ children }: { children: React
   return <html lang="ja"><body className="flex min-h-dvh flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-white">{data.copy.copy.text("chrome.skipToContent")}</a>
       <SiteLocaleProvider locale="ja" releaseId={data.copy.releaseId} values={data.copy.values}>
-        <CodeSiteChrome copy={data.copy.copy} locale="ja" languageSwitch={<LanguageSwitch counterparts={data.counterparts} />}>{children}</CodeSiteChrome>
+        <CodeSiteChrome copy={data.copy.copy} locale="ja" languageSwitch={<LanguageSwitch counterparts={data.counterparts} />} footerLinks={[privacyFooterLink("ja")]}>{children}</CodeSiteChrome>
       </SiteLocaleProvider>
     </body></html>;
 }

@@ -3,8 +3,10 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import type { GuestBookingConversation, GuestBookingView } from "@niho-experience/experience-store";
 import { BookingNotOpen, BookingUnavailable, GuestBookingDetails } from "@/components/GuestBookingDetails";
+import { config } from "@/lib/config";
 import { accessSecret, bookingPagesEnabled, bookingSessionCookieName, publicBookingIdOrNull } from "@/lib/experience/booking-access-http";
 import { guestBookingAccess, guestBookingMessages } from "@/lib/experience/store-server";
+import { translationNoticeShown } from "@/lib/translation-notice";
 
 // Never prerendered or cached: each request reads its own cookie. next.config.ts sends no-store and noindex for /bookings.
 export const dynamic = "force-dynamic";
@@ -40,5 +42,5 @@ export default async function GuestBookingPage({ params }: { params: Promise<{ p
   } catch {
     conversation = null;
   }
-  return <GuestBookingDetails booking={booking} now={new Date()} conversation={conversation} />;
+  return <GuestBookingDetails booking={booking} now={new Date()} conversation={conversation} translationNotice={translationNoticeShown(config)} />;
 }

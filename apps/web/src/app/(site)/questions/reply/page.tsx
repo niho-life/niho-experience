@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { GuestReply } from "@/components/GuestReply";
 import { config } from "@/lib/config";
+import { translationNoticeShown } from "@/lib/translation-notice";
 
 // Never prerendered: the flag is read per request. next.config.ts sends no-store and noindex for this path.
 export const dynamic = "force-dynamic";
@@ -14,5 +15,5 @@ export const metadata: Metadata = { title: "Reply to your host", robots: { index
  */
 export default function GuestReplyPage() {
   if (!config.guestQuestionsEnabled) notFound();
-  return <GuestReply />;
+  return <GuestReply translationNotice={translationNoticeShown(config)} />;
 }

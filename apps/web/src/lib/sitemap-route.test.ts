@@ -33,11 +33,12 @@ beforeEach(() => {
 });
 
 describe("sitemap route", () => {
-  it("serves the pre-#59 sitemap, field for field, while the Japanese site is off", async () => {
+  it("serves the English-only sitemap (static pages including /privacy, details, guides), field for field, while the Japanese site is off", async () => {
     await expect(sitemap()).resolves.toStrictEqual([
       { url: `${SITE}/` },
       { url: `${SITE}/experiences` },
       { url: `${SITE}/host` },
+      { url: `${SITE}/privacy` },
       { url: `${SITE}/experiences/tea-ceremony`, lastModified: "2026-10-20T00:00:00Z" },
       { url: `${SITE}/guides`, lastModified: "2026-10-25" },
       { url: `${SITE}/guides/rainy-day`, lastModified: "2026-10-25" },

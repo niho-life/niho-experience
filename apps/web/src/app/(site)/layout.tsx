@@ -11,6 +11,7 @@ import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { getJapaneseStaticCounterparts } from "@/lib/localized-content";
 import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
+import { privacyFooterLink } from "@/lib/privacy-link";
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 
 // Every page reads environment settings (indexing, API mode, host sign-up) at
@@ -43,6 +44,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     ...(hasGuidesPage(guides) ? [{ href: "/guides", label: "Guides" }] : []),
     // Articles are written on editor.niho.life (#254); hidden until its origin is set.
     ...(config.guideEditorSiteOrigin ? [{ href: config.guideEditorSiteOrigin, label: "For writers" }] : []),
+    // The traveler privacy notice (#285): always linked, last and quiet like the rest.
+    privacyFooterLink("en"),
   ];
 
   return (
@@ -54,7 +57,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SiteLocaleProvider locale="en">
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <AttributionCapture enabled={config.publicApiVersion === "1.2"} />
-          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={footerLinks.length ? footerLinks : undefined}>
+          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={footerLinks}>
             {children}
           </CodeSiteChrome>
         </SiteLocaleProvider>
