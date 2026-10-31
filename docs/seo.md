@@ -13,6 +13,7 @@
 | `/host` | 提供者向けの紹介（ログイン前） | する | `/host` |
 | `/guides` | ガイド記事の一覧（公開記事が 1 本以上あるときだけ。無ければ 404） | する | `/guides` |
 | `/guides/{slug}` | ガイド記事（下の「ガイド記事」） | する | 自分自身 |
+| `/privacy` | 旅行者向けのプライバシー（英語のみ、日本語版と hreflang の組にならない。[guest-booking.md](guest-booking.md)） | する | `/privacy` |
 | `/help` | 予約のヘルプ（NIHOのヘルプと問い合わせ先への案内） | しない（`noindex, follow`。理由は下の「`/help` の扱い」） | — |
 | `/host/*` | ホストの画面（ログイン後） | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |
 | `/experiences/{slug}/book` | 予約入力 | しない（`noindex` ＋ `no-store`、robots.txtでも除外） | — |

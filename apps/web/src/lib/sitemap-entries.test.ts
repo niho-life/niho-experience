@@ -25,6 +25,7 @@ describe("sitemap entries", () => {
       { url: `${SITE}/` },
       { url: `${SITE}/experiences` },
       { url: `${SITE}/host` },
+      { url: `${SITE}/privacy` },
       { url: `${SITE}/experiences/tea-ceremony`, lastModified: "2026-10-20T00:00:00Z" },
       { url: `${SITE}/experiences/zen-walk`, lastModified: "2026-10-21T00:00:00Z" },
       { url: `${SITE}/guides`, lastModified: "2026-10-25" },
@@ -32,7 +33,7 @@ describe("sitemap entries", () => {
       { url: `${SITE}/guides/first-visit`, lastModified: "2026-10-01" },
     ]);
     expect(sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese: null })).toStrictEqual([
-      { url: `${SITE}/` }, { url: `${SITE}/experiences` }, { url: `${SITE}/host` },
+      { url: `${SITE}/` }, { url: `${SITE}/experiences` }, { url: `${SITE}/host` }, { url: `${SITE}/privacy` },
     ]);
   });
 
@@ -41,6 +42,8 @@ describe("sitemap entries", () => {
       { url: `${SITE}/`, alternates: languages("/", "/ja") },
       { url: `${SITE}/experiences`, alternates: languages("/experiences", "/ja/experiences") },
       { url: `${SITE}/host`, alternates: languages("/host", "/ja/host") },
+      // English only: the privacy notice has no Japanese page, so it carries no hreflang pair.
+      { url: `${SITE}/privacy` },
       { url: `${SITE}/experiences/tea-ceremony`, lastModified: "2026-10-20T00:00:00Z", alternates: languages("/experiences/tea-ceremony", "/ja/experiences/tea-ceremony") },
       { url: `${SITE}/experiences/zen-walk`, lastModified: "2026-10-21T00:00:00Z" },
       { url: `${SITE}/ja`, alternates: languages("/", "/ja") },
@@ -59,7 +62,7 @@ describe("sitemap entries", () => {
   it("leaves out Japanese static pages that are not indexable, and pairs a page only when both sides are indexed", () => {
     const japanese: JapaneseSitemapRelease = { pages: [page("/", "/ja", true), page("/experiences", "/ja/experiences", false), page("/host", "/ja/host", true), page("/help", "/ja/help", true)], experiences: new Map() };
     const entries = sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese });
-    expect(entries.map((entry) => entry.url)).toEqual([`${SITE}/`, `${SITE}/experiences`, `${SITE}/host`, `${SITE}/ja`, `${SITE}/ja/host`, `${SITE}/ja/help`]);
+    expect(entries.map((entry) => entry.url)).toEqual([`${SITE}/`, `${SITE}/experiences`, `${SITE}/host`, `${SITE}/privacy`, `${SITE}/ja`, `${SITE}/ja/host`, `${SITE}/ja/help`]);
     expect(entries.find((entry) => entry.url === `${SITE}/experiences`)).toStrictEqual({ url: `${SITE}/experiences` });
     // English /help is noindex and not in the sitemap, so the Japanese help page points nowhere.
     expect(entries.find((entry) => entry.url === `${SITE}/ja/help`)).toStrictEqual({ url: `${SITE}/ja/help` });

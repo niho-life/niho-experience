@@ -5,6 +5,7 @@ import { BOOKING_FIELD_INPUT_CLASS_V1, BOOKING_FIELD_LABEL_CLASS_V1 } from "@nih
 import { createClientRequestKey } from "@niho-experience/api-client";
 import { REPLY_PAGE_MESSAGE_MAX_LENGTH, openReplyLink, sendGuestReply, tokenFromFragment, type ReplyLinkView } from "@/lib/guest-reply";
 import { HandIcon } from "./HandIcon";
+import { TranslationNotice } from "./TranslationNotice";
 import { ButtonLink, Notice, buttonClass } from "./ui";
 
 type View =
@@ -38,13 +39,29 @@ function Conversation({ link }: { link: ReplyLinkView }) {
   );
 }
 
+/** What to know before writing the reply: English, where the answer arrives, one reply per link, and (when it applies) the translation notice. */
+export function ReplyWritingNote({ hostDisplayName, translationNotice }: { hostDisplayName: string; translationNotice: boolean }) {
+  return (
+    <>
+      <p className="mt-3.5 flex items-start gap-2.5 text-[0.875rem] text-ink-soft">
+        <HandIcon name="mail" className="size-6 shrink-0 text-moss" />
+        <span>Write in English. {hostDisplayName}&apos;s answer comes to your email. This link works for one reply.</span>
+      </p>
+      {translationNotice ? <TranslationNotice className="mt-2" /> : null}
+    </>
+  );
+}
+
 /**
  * The guest's reply page (#105, docs/guest-questions.md). The host's reply email links to `/questions/reply#t=<token>`:
  * the token is read from the fragment, taken out of the address bar at once and kept in memory only, then posted to this
  * site's own routes. The page shows the guest's words and the host's English and takes one reply per link. Nothing typed
  * goes to analytics, a URL or storage.
  */
-export function GuestReply() {
+export function GuestReply({ translationNotice = false }: {
+  /** The server says whether the answer is translated into Japanese for the host (lib/translation-notice.ts); then one sentence says so. */
+  translationNotice?: boolean;
+} = {}) {
   const token = useRef<string | null>(null);
   const attempt = useRef<{ signature: string; key: string } | null>(null);
   const alertBox = useRef<HTMLDivElement>(null);
@@ -172,10 +189,7 @@ export function GuestReply() {
             className={`${BOOKING_FIELD_INPUT_CLASS_V1} min-h-[110px] resize-y`}
           />
         </label>
-        <p className="mt-3.5 flex items-start gap-2.5 text-[0.875rem] text-ink-soft">
-          <HandIcon name="mail" className="size-6 shrink-0 text-moss" />
-          <span>Write in English. {link.hostDisplayName}&apos;s answer comes to your email. This link works for one reply.</span>
-        </p>
+        <ReplyWritingNote hostDisplayName={link.hostDisplayName} translationNotice={translationNotice} />
         <button type="submit" disabled={sending} aria-busy={sending || undefined} className={buttonClass("primary", "mt-5 w-full sm:w-auto")}>
           {sending ? "Sending…" : "Send reply"}
         </button>

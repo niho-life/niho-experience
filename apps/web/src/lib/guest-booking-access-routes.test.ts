@@ -5,7 +5,7 @@ import { StoreValidationError } from "@niho-experience/experience-store";
 
 /** 予約者の予約ページ (#285 slice 6): its routes and the booking page against a stubbed store, synthetic data only. */
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, guestMailEnabled: true, siteUrl: "https://experience.example" },
+  config: { guestBookingEnabled: true, guestMailEnabled: true, translationEnabled: false, siteUrl: "https://experience.example" },
   access: null as null | Record<string, ReturnType<typeof vi.fn>>,
   messages: null as null | Record<string, ReturnType<typeof vi.fn>>,
   cookies: new Map<string, string>(),
@@ -61,7 +61,7 @@ function expectPrivate(response: Response): void {
 }
 
 beforeEach(() => {
-  state.config = { guestBookingEnabled: true, guestMailEnabled: true, siteUrl: ORIGIN };
+  state.config = { guestBookingEnabled: true, guestMailEnabled: true, translationEnabled: false, siteUrl: ORIGIN };
   state.cookies = new Map();
   state.access = {
     openBookingSession: vi.fn(async () => ({ sessionId: SESSION, publicBookingId: BOOKING, expiresAtUtc: EXPIRES })),
@@ -190,6 +190,14 @@ describe("the guest's booking pages", () => {
     // The messages with the host (#285 slice 6b), read with the same session.
     expect(view.props.conversation).toEqual(CONVERSATION);
     expect(state.messages?.readConversation).toHaveBeenCalledExactlyOnceWith(SESSION, BOOKING);
+  });
+
+  it("tells the page whether the guest's messages are translated into Japanese, so it may say so (privacy notice, #285)", async () => {
+    state.cookies.set(COOKIE, SESSION);
+    // Off while translation is off (the booking page itself is open: it needs the mail setting).
+    expect((await bookingPage(BOOKING)).props.translationNotice).toBe(false);
+    state.config = { ...state.config, translationEnabled: true };
+    expect((await bookingPage(BOOKING)).props.translationNotice).toBe(true);
   });
 
   it("still shows the booking when only its messages cannot be read (#285 slice 6b)", async () => {

@@ -8,6 +8,7 @@ import type { Face } from "@/lib/card-model";
 import { ASK_HOST_TOPIC_LABELS } from "@/lib/journey-ui";
 import { FaceBadge } from "./Face";
 import { HandIcon } from "./HandIcon";
+import { TranslationNotice } from "./TranslationNotice";
 import { Notice, buttonClass } from "./ui";
 
 type Field = "topic" | "message" | "guestName" | "guestEmail";
@@ -45,7 +46,15 @@ function problemFor(result: Exclude<AskHostResult, { ok: true }>, target: string
  * deployment posts to this site's own route, which keeps the question in the experience DB (#105, docs/guest-questions.md).
  * Nothing the traveler types is put in a URL, logged or sent to analytics, and the form is cleared once the question is accepted.
  */
-export function AskHost({ slug, target, face, preview, nihoWebOrigin }: { slug: string; target: string; face: Face; preview: boolean; nihoWebOrigin: string }) {
+export function AskHost({ slug, target, face, preview, nihoWebOrigin, translationNotice = false }: {
+  slug: string;
+  target: string;
+  face: Face;
+  preview: boolean;
+  nihoWebOrigin: string;
+  /** The server says whether the question is translated into Japanese for the host (lib/translation-notice.ts); then one sentence says so. */
+  translationNotice?: boolean;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const messageField = useRef<HTMLTextAreaElement>(null);
   const alertBox = useRef<HTMLDivElement>(null);
@@ -206,6 +215,7 @@ export function AskHost({ slug, target, face, preview, nihoWebOrigin }: { slug: 
                 <HandIcon name="mail" className="size-6 shrink-0 text-moss" />
                 <span>Write in English. NIHO translates your question for {subject}, and the reply comes to your email.</span>
               </p>
+              {translationNotice ? <TranslationNotice className="mt-2" /> : null}
               <button type="submit" disabled={sending || waitSeconds > 0} aria-busy={sending || undefined} className={buttonClass("primary", "mt-5 w-full")}>
                 {sending ? "Sending…" : waitSeconds > 0 ? `Please wait ${waitSeconds}s` : "Send question"}
               </button>

@@ -368,6 +368,19 @@ describe("admin support console settings", () => {
     }
   });
 
+  it("links NIHO's privacy policy from /privacy only when it is a plain https URL, and leaves the link out when unset", () => {
+    expect(resolveConfig({}).privacyPolicyUrl).toBe("");
+    expect(resolveConfig({ EXPERIENCE_PRIVACY_POLICY_URL: " " }).privacyPolicyUrl).toBe("");
+    expect(resolveConfig({ EXPERIENCE_PRIVACY_POLICY_URL: " https://policy.example/legal/privacy " }).privacyPolicyUrl).toBe("https://policy.example/legal/privacy");
+    // Both modes read it: the preview shows the same notice.
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_PRIVACY_POLICY_URL: "https://policy.example/privacy" }).privacyPolicyUrl).toBe("https://policy.example/privacy");
+    for (const value of ["http://policy.example/privacy", "https://user:secret@policy.example/privacy", "javascript:alert(1)", "/legal/privacy", "policy.example/privacy", "not a url"]) {
+      expect(() => resolveConfig({ EXPERIENCE_PRIVACY_POLICY_URL: value }), value).toThrow("EXPERIENCE_PRIVACY_POLICY_URL");
+    }
+    // The message names the setting, never its value.
+    expect(() => resolveConfig({ EXPERIENCE_PRIVACY_POLICY_URL: "https://user:secret@policy.example/privacy" })).not.toThrow(/secret/);
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {

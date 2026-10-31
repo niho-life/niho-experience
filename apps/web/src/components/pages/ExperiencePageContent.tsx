@@ -35,6 +35,7 @@ import { ReviewsSection } from "@/components/ReviewsSection";
 import { NO_JOURNEY_EXTRAS, type Occurrence } from "@niho-experience/api-client";
 import { getJourneyExtras, getLiveReviews } from "@/lib/journey";
 import { askHostTarget, conditionRows } from "@/lib/journey-ui";
+import { translationNoticeShown } from "@/lib/translation-notice";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
 import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
 import { relatedExperienceCards } from "@/lib/experience-cards";
@@ -528,7 +529,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       meeting: meeting ? { kind: "location", overview: meetingOverview ?? undefined, name: meeting.name, address: meeting.address ?? undefined, accessNote: meeting.accessNote ?? undefined, entranceNote: meeting.entranceNote ?? undefined, mapUrl: mapUrl ?? undefined, exterior: toImage(exterior, locale === "ja" ? meeting.name : `${meeting.name} from outside`) } : { kind: "after-booking", overview: meetingOverview ?? undefined },
       know: e.knowBeforeYouGo,
       conditions: journey.conditions ? conditionRows(journey.conditions) : undefined,
-      askHost: journey.questionsOpen ? <AskHost slug={e.slug} target={askHostTarget(hostNames(e))} face={faceOf(e)} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> : undefined,
+      askHost: journey.questionsOpen ? <AskHost slug={e.slug} target={askHostTarget(hostNames(e))} face={faceOf(e)} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} translationNotice={translationNoticeShown(config)} /> : undefined,
       reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews)) ?? undefined,
       reviews: journey.reviews ? { title: "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> } : undefined,
       faq: journey.faq.length ? { title: "Questions before you book", items: journey.faq } : undefined,

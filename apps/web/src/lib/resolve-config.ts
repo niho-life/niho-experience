@@ -292,6 +292,23 @@ function translationEnabledSetting(apiMode: "mock" | "http", env: Env): boolean 
   return true;
 }
 
+/**
+ * NIHO's privacy policy, linked from the traveler privacy notice at /privacy. Optional: unset (or blank) leaves the link
+ * out. A plain https URL only (no credentials), so a typo stops the server at start-up instead of printing a broken link.
+ */
+function privacyPolicyUrlSetting(value: string | undefined): string {
+  const raw = value?.trim() ?? "";
+  if (!raw) return "";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("EXPERIENCE_PRIVACY_POLICY_URL must be an absolute https URL");
+  }
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("EXPERIENCE_PRIVACY_POLICY_URL must be an https URL without credentials");
+  return url.href;
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -428,6 +445,8 @@ export function resolveConfig(env: Env) {
     nihoHostStartUrl: env.NIHO_HOST_START_URL ?? "",
     hostPilotContactUrl: env.HOST_PILOT_CONTACT_URL ?? "",
     nihoBookingHelpUrl: env.NIHO_BOOKING_HELP_URL ?? "",
+    // NIHO's privacy policy, linked from /privacy (empty hides the link).
+    privacyPolicyUrl: privacyPolicyUrlSetting(env.EXPERIENCE_PRIVACY_POLICY_URL),
     // Only the production runtime receives this public Umami website ID.
     umamiWebsiteId: env.UMAMI_WEBSITE_ID?.trim() ?? "",
     hostConsoleEnabled,
