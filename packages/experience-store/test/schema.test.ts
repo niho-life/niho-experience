@@ -353,6 +353,27 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /outbox_messages/);
   });
 
+  it("adds ENSURE_OCCURRENCE as a browser availability action with ensured slots and no external or customer data (#241)", async () => {
+    const sql = await readFile(new URL("../migrations/0026_channel_ensure_occurrence.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    // The old action CHECK is found by its definition, not an assumed name.
+    assert.match(sql, /pg_get_constraintdef\(oid\) LIKE 'CHECK \(\(action = ANY \(ARRAY\[%'/);
+    assert.match(sql, /channel_jobs_action_check CHECK \(action IN \('SET_OPEN','SET_CLOSED','OBSERVE','ENSURE_OCCURRENCE'\)\)/);
+    assert.match(sql, /action <> 'ENSURE_OCCURRENCE' OR \(purpose='AVAILABILITY' AND target_connection_mode='BROWSER'\)/);
+    const table = sql.match(/CREATE TABLE channel_ensured_slots \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /created boolean NOT NULL/);
+    assert.match(table, /job_id uuid NOT NULL REFERENCES channel_jobs\(id\) ON DELETE RESTRICT/);
+    assert.match(table, /verified_at timestamptz NOT NULL/);
+    assert.match(table, /UNIQUE \(listing_id, occurrence_id, source_start_at, source_end_at, mapping_version\)/);
+    assert.match(table, /FOREIGN KEY \(provider_id, listing_id\) REFERENCES channel_listings\(provider_id, id\)/);
+    assert.match(table, /CHECK \(source_end_at > source_start_at\)/);
+    assert.doesNotMatch(table, /external_|customer|guest|email|phone|price|amount|raw_response/i);
+    assert.match(sql, /ADD COLUMN ensure_created boolean,/);
+    assert.match(sql, /CHECK \(ensure_created IS NULL OR outcome = 'VERIFIED'\)/);
+    assert.doesNotMatch(sql, /channel_jobs_availability_identity|DROP TABLE/);
+  });
+
   it("keeps NIHO's fee per provider, tied to the support setting, without an actor column (#285)", async () => {
     const sql = await readFile(new URL("../migrations/0025_provider_sale_settings.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

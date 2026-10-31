@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["resultId", "leaseToken", "outcome", "stopped", "target"],
     ["occurrenceId", "sourceStartAtUtc", "sourceEndAtUtc", "observedState", "observedBookable", "observedManuallyBlocked", "observedAtUtc",
-      "googleAirbnbProof", "reservationReadId", "reservationReceiptId"])) {
+      "googleAirbnbProof", "reservationReadId", "reservationReceiptId", "ensureCreated"])) {
     return channelJson({ error: "invalid_input" }, 400);
   }
   const parsedTarget = target(body.target);
@@ -68,7 +68,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     || (body.observedState !== undefined && body.observedState !== "OPEN" && body.observedState !== "CLOSED")
     || (body.observedBookable !== undefined && typeof body.observedBookable !== "boolean")
     || (body.observedManuallyBlocked !== undefined && typeof body.observedManuallyBlocked !== "boolean")
-    || (body.observedAtUtc !== undefined && typeof body.observedAtUtc !== "string")) return channelJson({ error: "invalid_input" }, 400);
+    || (body.observedAtUtc !== undefined && typeof body.observedAtUtc !== "string")
+    // Only a VERIFIED ENSURE_OCCURRENCE result says whether the slot was created; the store checks the job action.
+    || (body.ensureCreated !== undefined && (typeof body.ensureCreated !== "boolean" || body.outcome !== "VERIFIED"))) {
+    return channelJson({ error: "invalid_input" }, 400);
+  }
   try {
     const result = await context.runtime.submitResult(context.worker, (await params).id, {
       resultId: body.resultId, leaseToken: body.leaseToken, outcome: body.outcome as ChannelOutcome, stopped: body.stopped,
@@ -82,6 +86,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ...(parsedGoogleAirbnbProof == null ? {} : { googleAirbnbProof: parsedGoogleAirbnbProof }),
       ...(body.reservationReadId === undefined ? {} : { reservationReadId: body.reservationReadId as string }),
       ...(body.reservationReceiptId === undefined ? {} : { reservationReceiptId: body.reservationReceiptId as string }),
+      ...(body.ensureCreated === undefined ? {} : { ensureCreated: body.ensureCreated as boolean }),
     });
     // This acknowledges the durable receipt, independently of a current-state
     // verification. The worker must not retry a recorded stale result as new work.

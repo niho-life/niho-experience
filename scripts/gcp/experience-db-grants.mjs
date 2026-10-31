@@ -21,6 +21,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   channel_admin_commands: { write: I },
   channel_audit_events: { write: I },
   channel_desired_states: { write: IU },
+  channel_ensured_slots: { write: IU },
   channel_external_accounts: { write: IU },
   channel_job_results: { write: I },
   channel_jobs: { write: IU },

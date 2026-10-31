@@ -130,6 +130,30 @@ describe("POST /internal/ota/v1/jobs/:id/result", () => {
     expect(mocks.submitResult).not.toHaveBeenCalled();
   });
 
+  it("passes ensureCreated with a structured VERIFIED observation", async () => {
+    const ensured = { ...verified, target: { ...target, site: "GetYourGuide", adapter: "gyg-browser" }, ensureCreated: false };
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify(ensured), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(200);
+    expect(mocks.submitResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), expect.objectContaining({
+      outcome: "VERIFIED", ensureCreated: false, observedManuallyBlocked: false,
+    }));
+  });
+
+  it.each([
+    { ...verified, ensureCreated: "true" },
+    { ...verified, ensureCreated: null },
+    { resultId: verified.resultId, leaseToken: "lease", outcome: "UNKNOWN_AFTER_SAVE", stopped: true, target, ensureCreated: true },
+    { resultId: verified.resultId, leaseToken: "lease", outcome: "NEEDS_REVIEW", stopped: true, target, ensureCreated: false },
+  ])("rejects ensureCreated that is not a boolean on VERIFIED %# before the store", async (body) => {
+    const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }), { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000002" }) });
+    expect(response.status).toBe(400);
+    expect(mocks.submitResult).not.toHaveBeenCalled();
+  });
+
   it("rejects mixed manual-blocked and typed proof shapes", async () => {
     const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/result", {
       method: "POST", body: JSON.stringify({ ...googleVerified, observedManuallyBlocked: false }),
