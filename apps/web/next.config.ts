@@ -92,6 +92,16 @@ const nextConfig: NextConfig = {
       // `:path+` leaves /host itself (the public introduction) indexable.
       { source: "/host/:path+", headers: hostConsoleHeaders },
       { source: "/host/invitations/:path+", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
+      // 設定 › カレンダー's bookings feed (#109): the secret is the path, read by calendar apps; never archived, never in a Referer.
+      // These headers win over the route's own (Next.js keeps a header already set), so they say the same.
+      {
+        source: "/host/calendar/feed/:path+",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store, max-age=0" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
       // The whole admin surface is private, including its entrance. Keep root and children
       // explicit so changes in path-pattern handling cannot accidentally leave /admin public.
       { source: "/admin", headers: hostConsoleHeaders },

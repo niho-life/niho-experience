@@ -5,8 +5,11 @@ import {
   calendarColor,
   calendarPanelControls,
   GOOGLE_NOT_CONNECTED,
+  GOOGLE_SYNC_FAILING_TEXT,
   googleCalendarView,
   homeCalendarPrompt,
+  liveGoogleSyncLines,
+  liveGoogleText,
   renewIcsUrl,
   writableCalendars,
   type CalendarChange,
@@ -42,13 +45,13 @@ describe("the Google Calendar's states", () => {
 
 describe("calendarPanelControls", () => {
   it("lets the preview try everything on screen", () => {
-    expect(calendarPanelControls(NOT_CONNECTED, true, CONNECTION)).toEqual({ preparing: false, connect: true, change: true, copy: true });
+    expect(calendarPanelControls(NOT_CONNECTED, true, CONNECTION)).toEqual({ connect: true, change: true, copy: true });
   });
 
-  it("is 準備中 in http mode, with nothing to press until NIHO's API is in the host contract", () => {
-    const http: HostCalendarSettings = { google: GOOGLE_NOT_CONNECTED, icsUrl: null };
-    expect(calendarPanelControls(http, false, null)).toEqual({ preparing: true, connect: false, change: false, copy: false });
-    expect(calendarPanelControls(CONNECTED, false, null)).toMatchObject({ preparing: true, connect: false, change: false });
+  it("presses nothing but URL をコピー outside the preview, and copies only an address there is", () => {
+    const none: HostCalendarSettings = { google: GOOGLE_NOT_CONNECTED, icsUrl: null };
+    expect(calendarPanelControls(none, false, null)).toEqual({ connect: false, change: false, copy: false });
+    expect(calendarPanelControls(CONNECTED, false, null)).toEqual({ connect: false, change: false, copy: true });
   });
 });
 
@@ -148,17 +151,38 @@ describe("calendar details", () => {
 
 describe("homeCalendarPrompt", () => {
   it("leads to つなぐ while Google is not connected, and to もう一度つなぐ once its access was taken away", () => {
-    expect(homeCalendarPrompt(NOT_CONNECTED, true)).toEqual({ title: "Google カレンダーをつなぐ", text: "予定がある時間は予約を受け付けません", action: "つなぐ" });
-    expect(homeCalendarPrompt({ ...CONNECTED, google: { ...CONNECTED.google, status: "revoked" } }, true)).toEqual({
+    expect(homeCalendarPrompt(NOT_CONNECTED.google)).toEqual({ title: "Google カレンダーをつなぐ", text: "予定がある時間は予約を受け付けません", action: "つなぐ" });
+    expect(homeCalendarPrompt({ ...CONNECTED.google, status: "revoked" })).toEqual({
       title: "Google カレンダーの接続が切れました",
       text: "もう一度つなぐまで、予定の確認と書き込みを止めています",
       action: "もう一度つなぐ",
     });
-    expect(homeCalendarPrompt(CONNECTED, true)).toBeNull();
+    expect(homeCalendarPrompt(CONNECTED.google)).toBeNull();
   });
 
-  it("is not shown in http mode, where the calendar cannot be connected yet", () => {
-    expect(homeCalendarPrompt(NOT_CONNECTED, false)).toBeNull();
-    expect(homeCalendarPrompt({ ...CONNECTED, google: { ...CONNECTED.google, status: "revoked" } }, false)).toBeNull();
+  it("is not shown where the calendar cannot be connected", () => {
+    expect(homeCalendarPrompt(null)).toBeNull();
+  });
+});
+
+describe("the calendar in http mode (#109)", () => {
+  const connected = { ...GOOGLE_NOT_CONNECTED, status: "connected" as const };
+
+  it("says what a connection does in the Google row (no Google account is kept to show)", () => {
+    expect(liveGoogleText(GOOGLE_NOT_CONNECTED)).toBe("つなぐと、予定がある時間は予約を受け付けません");
+    expect(liveGoogleText({ ...GOOGLE_NOT_CONNECTED, status: "revoked" })).toBe("Google カレンダーの権限が取り消されたため、予定の確認と書き込みを止めています");
+    expect(liveGoogleText(connected)).toBe("予定がある時間は予約を受け付けません");
+    expect(liveGoogleText({ ...connected, blockBusy: false })).toBe("予定がある時間も予約を受け付けます");
+  });
+
+  it("says when Google's busy times were last read, or that reading them fails and new bookings wait", () => {
+    const detail = { text: "メインのカレンダーの予定と重なる回は、体験サイトで満席と同じ扱いになります（理由は予約者に出しません）", tone: "muted" };
+    expect(liveGoogleSyncLines(connected, { lastCheckedAt: "2026-11-01T10:05", failing: false })).toEqual([detail, { text: "最後に確かめた時刻 11月1日 10:05", tone: "muted" }]);
+    expect(liveGoogleSyncLines(connected, { lastCheckedAt: "2026-11-01T10:05", failing: true })).toEqual([detail, { text: GOOGLE_SYNC_FAILING_TEXT, tone: "warn" }]);
+    expect(liveGoogleSyncLines(connected, { lastCheckedAt: null, failing: false })[1]).toEqual({ text: "まだ Google の予定を確かめていません", tone: "muted" });
+    // Nothing to say while busy times are not checked, or without a connection.
+    expect(liveGoogleSyncLines({ ...connected, blockBusy: false }, { lastCheckedAt: "2026-11-01T10:05", failing: true })).toEqual([]);
+    expect(liveGoogleSyncLines(GOOGLE_NOT_CONNECTED, null)).toEqual([]);
+    expect(liveGoogleSyncLines({ ...connected, status: "revoked" }, { lastCheckedAt: null, failing: false })).toEqual([]);
   });
 });

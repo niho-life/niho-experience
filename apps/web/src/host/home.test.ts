@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addDays, agoJa, dateWithWeekdayJa, durationJa, experienceMeta, minutesBetween, remainingJa, shortDateWithWeekdayJa, todayInJapan, yen } from "./format";
-import { homeBadgeCount, homeMonth, homeSessions, homeTodos, type HomeUpcoming } from "./home";
+import { homeBadgeCount, homeMonth, homeSessions, homeTodos, homeTodosFailedText, liveHomeTodos, pageTodos, type HomeUpcoming } from "./home";
 import { MOCK_KITCHEN_BOOKINGS, MOCK_NOW, MOCK_TODAY } from "./mock/bookings";
 import { MOCK_KITCHEN_EXPERIENCES } from "./mock/experiences";
 import { MOCK_KITCHEN_REVIEWS } from "./mock/reviews";
@@ -193,5 +193,45 @@ describe("host home", () => {
     expect(homeMonth(MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD.current)).toEqual(month("10月", "¥390,000", "−¥60,000", "¥139,500", "8件"));
     expect(homeMonth(MOCK_KITCHEN_SALES, { year: 2026, month: 9 })).toEqual(month("9月", "¥225,000", "¥0", "¥0", "4件"));
     expect(homeMonth(MOCK_KITCHEN_SALES, { year: 2026, month: 11 })).toEqual(month("11月", "¥0", "¥0", "¥0", "0件"));
+  });
+});
+
+describe("host home in http mode", () => {
+  const pages = [
+    { id: "page-draft", title: "Synthetic draft", status: "DRAFT" as const },
+    { id: "page-untitled", title: "", status: "DRAFT" as const },
+    { id: "page-checked", title: "Synthetic checked", status: "PUBLISHED" as const },
+    { id: "page-listed", title: "Synthetic listed", status: "PUBLISHED" as const },
+    { id: "page-stopped", title: "Synthetic stopped", status: "UNPUBLISHED" as const },
+  ];
+  // Asked at 01:00 on 10月30日 in Japan (the day before in UTC).
+  const listings = { "page-checked": { status: "REQUESTED" as const, consentedAt: "2026-10-29T16:00:00.000Z" }, "page-listed": { status: "ACTIVE" as const, consentedAt: "2026-10-01T00:00:00.000Z" }, "page-stopped": { status: "REQUESTED" as const, consentedAt: null } };
+
+  it("lists NIHO's drafts to finish, then the published pages NIHO is checking, as the preview's rows", () => {
+    expect(pageTodos(pages, listings)).toEqual([
+      { key: "draft-page-draft", status: { label: "下書き", tone: "draft" }, aside: null, title: "Synthetic draft の原稿を仕上げる", detail: "", approval: null, action: { label: "編集する", href: "/host/experiences/page-draft", primary: false } },
+      { key: "draft-page-untitled", status: { label: "下書き", tone: "draft" }, aside: null, title: "題名なし の原稿を仕上げる", detail: "", approval: null, action: { label: "編集する", href: "/host/experiences/page-untitled", primary: false } },
+      { key: "review-page-checked", status: { label: "審査待ち", tone: "wait" }, aside: null, title: "Synthetic checked", detail: "10月30日に申請 · NIHO が確認中", approval: null, action: null },
+    ]);
+    expect(pageTodos([{ ...pages[2]! }], { "page-checked": { status: "REQUESTED", consentedAt: null } })[0]?.detail).toBe("NIHO が確認中");
+    // A listing not read says nothing.
+    expect(pageTodos([pages[2]!], {})).toEqual([]);
+  });
+
+  it("puts the threads first, then the reviews, then NIHO's pages", () => {
+    const todos = liveHomeTodos({ threads: MOCK_KITCHEN_THREADS, reviews: MOCK_KITCHEN_REVIEWS, reviewExperiences: MOCK_KITCHEN_EXPERIENCES, pages, listings, now: MOCK_NOW });
+    const kinds = todos.map((todo) => todo.key.replace(/-.*$/, ""));
+    expect(kinds.indexOf("guest")).toBeGreaterThan(kinds.lastIndexOf("thread"));
+    expect(kinds.indexOf("draft")).toBeGreaterThan(kinds.lastIndexOf("guest"));
+    expect(kinds.at(-1)).toBe("review");
+    expect(kinds).not.toContain("booking");
+    expect(homeBadgeCount(todos)).toBe(todos.filter((todo) => todo.key.startsWith("thread-")).length);
+    expect(liveHomeTodos({ threads: [], reviews: [], reviewExperiences: [], pages: [], listings: {}, now: MOCK_NOW })).toEqual([]);
+  });
+
+  it("names the sources that could not be read", () => {
+    expect(homeTodosFailedText(["messages"])).toBe("メッセージを読み込めませんでした。次にすることに出ていないものがあるかもしれません。");
+    expect(homeTodosFailedText(["messages", "reviews"])).toBe("メッセージとレビューを読み込めませんでした。次にすることに出ていないものがあるかもしれません。");
+    expect(homeTodosFailedText(["messages", "reviews", "experiences"])).toBe("メッセージ、レビュー、NIHO の体験を読み込めませんでした。次にすることに出ていないものがあるかもしれません。");
   });
 });

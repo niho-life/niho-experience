@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { saveNotificationSettings, saveProviderMeetingPoint, saveProviderProfile, submitProviderReview } from "@/host/actions";
+import { CALENDAR_LOAD_FAILED_TEXT, type HostCalendarLoad } from "@/host/calendar";
 import { normalizeMeetingPoint, sameMeetingPoint } from "@/host/meeting-point";
 import { notificationChanges, notificationPanelView, notificationRows, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
@@ -12,7 +13,7 @@ import { HOST_CALENDAR_PATH, withProvider } from "@/lib/host/routes";
 import { DISABLED } from "./editor-parts";
 import { FIELD_DISABLED, FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
 import { MeetingPointFields } from "./MeetingPointFields";
-import { HostCalendarPanel } from "./HostCalendarPanel";
+import { HostCalendarPanel, HostLiveCalendarPanel } from "./HostCalendarPanel";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { consoleButtonClass } from "./host-ui";
 import { HostIcon } from "./HostIcon";
@@ -39,7 +40,9 @@ export interface HostSettingsFormProps {
   connectNotice: HostNotice | null;
   /** The Google account カレンダー's つなぐ connects in the preview; null in http mode. */
   googleConnection: HostGoogleConnection | null;
-  /** Mock mode: the parts NIHO cannot keep yet (カレンダー・通知) can be tried on screen, and 集合案内 is kept on screen only. */
+  /** カレンダー in http mode (#109): the experience DB's Google connection and bookings feed for the OWNER; null in the preview. */
+  liveCalendar: HostCalendarLoad | null;
+  /** Mock mode: カレンダー and 通知 can be tried on screen with synthetic data, and 集合案内 is kept on screen only. */
   preview: boolean;
   /** The account panel, passed in because its sign-out form cannot sit inside this form. */
   account: ReactNode;
@@ -52,7 +55,8 @@ export interface HostSettingsFormProps {
  * too and saved after 提供者情報 by the same 保存; changing it stops every listed experience of the
  * provider, so the host is asked first (one dialog with the review's sentence when both apply). The
  * preview keeps it on screen only. 審査を申請, the payout account and カレンダー (#109) work on their
- * own. 通知 (#109: the three notifications the owner may stop) is kept by 保存 in the experience DB
+ * own: カレンダー is the preview's synthetic panel, the OWNER's live one in http mode (`liveCalendar`), or else the link
+ * to the calendar. 通知 (#109: the three notifications the owner may stop) is kept by 保存 in the experience DB
  * once it is open there (`settings.notificationSource`), on screen only in the preview, and 準備中
  * until then.
  *
@@ -60,7 +64,7 @@ export interface HostSettingsFormProps {
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
  * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, preview, account }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
@@ -310,7 +314,9 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
         </form>
 
         {preview ? <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview /> :
+          liveCalendar?.status === "live" ? <HostLiveCalendarPanel providerId={providerId} load={liveCalendar} /> :
           <FieldSection id="settings-calendar" title="カレンダー" status={null}>
+            {liveCalendar?.status === "error" ? <p role="alert" className="pb-1 text-[0.78125rem] leading-normal font-extrabold text-danger">{CALENDAR_LOAD_FAILED_TEXT}</p> : null}
             <FieldRow label="開催枠と Google の予定" labelId="settings-calendar-link">
               <a href={withProvider(HOST_CALENDAR_PATH, providerId)} className="font-bold text-moss underline underline-offset-4">カレンダーを開く</a>
             </FieldRow>

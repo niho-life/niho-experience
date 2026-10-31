@@ -309,6 +309,28 @@ function guestMailSettings(apiMode: "mock" | "http", env: Env): GuestMailSetting
   return { enabled: true, smtpHost, smtpPort, from, replyTo, jobAudience, jobServiceAccountEmail };
 }
 
+/** The octets a padded standard base64 string decodes to; null when it is not one. Without Buffer: this module stays runtime-neutral. */
+function base64Octets(value: string): number | null {
+  if (value.length === 0 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null;
+  return (value.length / 4) * 3 - (value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0);
+}
+
+/**
+ * 設定 › カレンダー's bookings feed (#109): a secret address per provider that Apple, Outlook and the like read this
+ * site's confirmed bookings from (/host/calendar/feed/…/bookings.ics). HTTP only, with the host console that issues
+ * it. Turned on without the experience DB or the key its addresses are derived from (base64, at least 32 octets),
+ * the server stops at start-up; the messages name the settings, never their values. The key is read where it is used
+ * (host/calendar-server.ts), so it is not kept here.
+ */
+function hostCalendarFeedSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): boolean {
+  if (apiMode !== "http" || !hostConsoleEnabled || env.EXPERIENCE_HOST_CALENDAR_FEED_ENABLED !== "true") return false;
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error("EXPERIENCE_HOST_CALENDAR_FEED_ENABLED=true needs EXPERIENCE_DATABASE_URL in http mode");
+  if ((base64Octets(env.EXPERIENCE_CALENDAR_FEED_KEY?.trim() ?? "") ?? 0) < 32) {
+    throw new Error("EXPERIENCE_HOST_CALENDAR_FEED_ENABLED=true needs EXPERIENCE_CALENDAR_FEED_KEY (base64 of at least 32 random bytes) in http mode");
+  }
+  return true;
+}
+
 /**
  * 予約前の質問's translations with the Claude API (#285 slice 5, owner decision 2026-10-31): the mail job
  * translates guests' English for the host, and メッセージ's 英語にする drafts the host's English. HTTP only;
@@ -419,6 +441,9 @@ export function resolveConfig(env: Env) {
   const guestMail = guestMailSettings(apiMode, env);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
   const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
+  // 設定 › カレンダー's bookings feed (#109) for other calendars. The mock keeps its synthetic address on screen; http
+  // opens per environment after migration 0035 is applied and accepted.
+  const hostCalendarFeedEnabled = hostCalendarFeedSetting(apiMode, env, hostConsoleEnabled);
   // Translations (#285 slice 5): the guest's Japanese runs in the mail job above; the host's English draft in
   // メッセージ for questions kept here. Off, the host reads the guest's English and writes the English reply.
   const translationEnabled = translationEnabledSetting(apiMode, env);
@@ -536,6 +561,8 @@ export function resolveConfig(env: Env) {
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,
     googleJobsServiceAccountEmail: googleCalendarJobs.serviceAccountEmail,
+    // The feed's key is not here: it is read where it is used.
+    hostCalendarFeedEnabled,
     // The Claude API key is not here: it is read where it is used.
     translationEnabled,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.

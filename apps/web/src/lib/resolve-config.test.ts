@@ -244,6 +244,31 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_SALES_LEDGER_ENABLED: "true" }).hostSalesLedgerEnabled).toBe(true);
   });
 
+  it("opens 設定 › カレンダー's bookings feed only in http mode with the host console, the DB and its key (#109)", () => {
+    const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    // base64 of 32 synthetic bytes.
+    const feed = { ...host, EXPERIENCE_HOST_CALENDAR_FEED_ENABLED: "true", EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience", EXPERIENCE_CALENDAR_FEED_KEY: `${"A".repeat(43)}=` };
+    expect(resolveConfig({}).hostCalendarFeedEnabled).toBe(false);
+    expect(resolveConfig({ ...feed, EXPERIENCE_API_MODE: "mock" }).hostCalendarFeedEnabled).toBe(false);
+    expect(resolveConfig({ ...feed, HOST_CONSOLE_ENABLED: "false" }).hostCalendarFeedEnabled).toBe(false);
+    expect(resolveConfig({ ...feed, EXPERIENCE_HOST_CALENDAR_FEED_ENABLED: "1" }).hostCalendarFeedEnabled).toBe(false);
+    expect(resolveConfig(feed).hostCalendarFeedEnabled).toBe(true);
+    expect(resolveConfig({ ...feed, EXPERIENCE_CALENDAR_FEED_KEY: "B".repeat(64) }).hostCalendarFeedEnabled).toBe(true);
+    expect(() => resolveConfig({ ...feed, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
+    for (const key of ["", "A".repeat(40), `${"A".repeat(42)}==`, "not base64 at all!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"]) {
+      expect(() => resolveConfig({ ...feed, EXPERIENCE_CALENDAR_FEED_KEY: key })).toThrow(/EXPERIENCE_CALENDAR_FEED_KEY/);
+    }
+    // The message names the setting, never its value.
+    let message = "";
+    try {
+      resolveConfig({ ...feed, EXPERIENCE_CALENDAR_FEED_KEY: "c2VjcmV0" });
+    } catch (error) {
+      message = error instanceof Error ? error.message : "";
+    }
+    expect(message).toMatch(/EXPERIENCE_CALENDAR_FEED_KEY/);
+    expect(message).not.toContain("c2VjcmV0");
+  });
+
   it("keeps questions to the host in the experience DB only in http mode with their own flag (#105 #106)", () => {
     expect(resolveConfig({}).guestQuestionsEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);

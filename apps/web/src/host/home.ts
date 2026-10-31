@@ -1,6 +1,6 @@
 import { HOST_EXPERIENCES_PATH } from "@/lib/host/routes";
 import { bookingSessions, bookingsHref, seatsLabel, sessionHref, type BookingDialogSubject, type BookingExperience, type BookingSession, type SessionQuery } from "./bookings";
-import { addDays, agoJa, dateWithWeekdayJa, dayOfMonth, durationJa, listJa, missingLine, monthDayJa, remainingJa, shortDateWithWeekdayJa, weekdayJa, yen } from "./format";
+import { addDays, agoJa, dateWithWeekdayJa, dayOfMonth, durationJa, listJa, missingLine, monthDayJa, remainingJa, shortDateWithWeekdayJa, todayInJapan, weekdayJa, yen } from "./format";
 import { guestMessageView, lastGuestMessage, messagesHref, quoteJa, sortThreads, threadKind, waitingSince } from "./messages";
 import { HOME_REVIEW_LIMIT, reviewerLabel, reviewReplyStage, reviewsHref, reviewsToAttend } from "./reviews";
 import { salesSummary, type SalesFigure, type SalesMonth } from "./sales";
@@ -101,7 +101,7 @@ function requestTodos(experiences: readonly HostExperience[], bookings: readonly
  * The threads waiting for the host (#106), the longest wait first: the guest's latest words in
  * Japanese (the original when NIHO could not translate them), who and how long ago.
  */
-function threadTodos(threads: readonly HostThread[], now: string): HomeTodo[] {
+export function threadTodos(threads: readonly HostThread[], now: string): HomeTodo[] {
   return sortThreads(threads).flatMap((thread) => {
     const message = waitingSince(thread) ? lastGuestMessage(thread) : null;
     if (!message) return [];
@@ -125,7 +125,7 @@ function threadTodos(threads: readonly HostThread[], now: string): HomeTodo[] {
  * then the ones NIHO is still checking (読む), `limit` of them and one line for the rest. Each
  * opens on its own review: "★★★★★ 「…」", who and the experience.
  */
-function reviewTodos(experiences: readonly HostExperience[], reviews: readonly HostReview[], limit = HOME_REVIEW_LIMIT): HomeTodo[] {
+export function reviewTodos(experiences: readonly Pick<HostExperience, "id" | "title">[], reviews: readonly HostReview[], limit = HOME_REVIEW_LIMIT): HomeTodo[] {
   const attend = reviewsToAttend(reviews);
   const rows: HomeTodo[] = attend.slice(0, limit).map((review) => {
     const waiting = reviewReplyStage(review) === "waiting";
@@ -147,6 +147,32 @@ function reviewTodos(experiences: readonly HostExperience[], reviews: readonly H
   return rows;
 }
 
+/** A draft to finish (編集する opens the editor): what it still needs, or empty when there is nothing to add. */
+function draftTodo(id: string, title: string, detail: string): HomeTodo {
+  return {
+    key: `draft-${id}`,
+    status: LISTING_STATUS.draft,
+    aside: null,
+    title: `${title} の原稿を仕上げる`,
+    detail,
+    approval: null,
+    action: { label: "編集する", href: experiencePath(id), primary: false },
+  };
+}
+
+/** A listing NIHO is checking for the experience site, and the day it was asked for (YYYY-MM-DD in Japan) when known. */
+function listingReviewTodo(id: string, title: string, requestedOn: string | null): HomeTodo {
+  return {
+    key: `review-${id}`,
+    status: LISTING_STATUS.review,
+    aside: null,
+    title,
+    detail: [requestedOn ? `${monthDayJa(requestedOn)}に申請` : null, "NIHO が確認中"].filter(Boolean).join(" · "),
+    approval: null,
+    action: null,
+  };
+}
+
 /**
  * 次にすること, the nearest deadline first: the requests (each has one), the threads waiting
  * for an answer, the reviews to answer or read, then drafts to finish and listings under review.
@@ -159,29 +185,73 @@ export function homeTodos(
   now: string,
   reviews: readonly HostReview[] = [],
 ): HomeTodo[] {
-  const drafts: HomeTodo[] = experiences
+  const drafts = experiences
     .filter((experience) => experience.status === "draft")
-    .map((experience) => ({
-      key: `draft-${experience.id}`,
-      status: LISTING_STATUS.draft,
-      aside: null,
-      title: `${experience.title} の原稿を仕上げる`,
-      detail: experience.missing.length ? missingLine(experience.missing, listJa) : "掲載を申請できます",
-      approval: null,
-      action: { label: "編集する", href: experiencePath(experience.id), primary: false },
-    }));
-  const listingReviews: HomeTodo[] = experiences
+    .map((experience) => draftTodo(experience.id, experience.title, experience.missing.length ? missingLine(experience.missing, listJa) : "掲載を申請できます"));
+  const listingReviews = experiences
     .filter((experience) => experience.status === "review")
-    .map((experience) => ({
-      key: `review-${experience.id}`,
-      status: LISTING_STATUS.review,
-      aside: null,
-      title: experience.title,
-      detail: [experience.requestedOn ? `${monthDayJa(experience.requestedOn)}に申請` : null, "NIHO が確認中"].filter(Boolean).join(" · "),
-      approval: null,
-      action: null,
-    }));
+    .map((experience) => listingReviewTodo(experience.id, experience.title, experience.requestedOn || null));
   return [...requestTodos(experiences, bookings, today, now), ...threadTodos(threads, now), ...reviewTodos(experiences, reviews), ...drafts, ...listingReviews];
+}
+
+/** One of NIHO's experience pages as 次にすること reads it (provider operations on, #89). */
+export interface HomePage {
+  id: string;
+  title: string;
+  status: "DRAFT" | "PUBLISHED" | "UNPUBLISHED";
+}
+
+/** A published page's listing on the experience site as NIHO keeps it; only one being checked (REQUESTED) is a todo. */
+export interface HomePageListing {
+  status: "REQUESTED" | "ACTIVE" | "PAUSED" | "WITHDRAWN";
+  /** When the host asked for it (ISO 8601). */
+  consentedAt: string | null;
+}
+
+/**
+ * NIHO's pages as 次にすること, in the rows the preview has for its drafts and listings under review: the drafts to
+ * finish (NIHO's list does not say what is missing), then the published pages NIHO is checking for the experience site.
+ * `listings` holds the listings read, by page id.
+ */
+export function pageTodos(pages: readonly HomePage[], listings: Readonly<Record<string, HomePageListing | null>>): HomeTodo[] {
+  const drafts = pages.filter((page) => page.status === "DRAFT").map((page) => draftTodo(page.id, page.title || "題名なし", ""));
+  const listingReviews = pages.flatMap((page) => {
+    const listing = page.status === "PUBLISHED" ? listings[page.id] : null;
+    if (listing?.status !== "REQUESTED") return [];
+    return [listingReviewTodo(page.id, page.title || "題名なし", listing.consentedAt ? todayInJapan(Date.parse(listing.consentedAt)) : null)];
+  });
+  return [...drafts, ...listingReviews];
+}
+
+/** What 次にすること reads in http mode (home-server.ts); a source that is closed or could not be read is empty. */
+export interface LiveHomeSources {
+  threads: readonly HostThread[];
+  reviews: readonly HostReview[];
+  /** The reviewed experiences' titles, by the experience DB's product id. */
+  reviewExperiences: readonly Pick<HostExperience, "id" | "title">[];
+  pages: readonly HomePage[];
+  listings: Readonly<Record<string, HomePageListing | null>>;
+  /** YYYY-MM-DDTHH:MM in Japan: what "2 時間前" counts from. */
+  now: string;
+}
+
+/**
+ * 次にすること in http mode, in the preview's order after its requests (this site's bookings are confirmed at once): the
+ * threads waiting for an answer, the reviews to answer, the drafts to finish, the listings under review.
+ */
+export function liveHomeTodos(sources: LiveHomeSources): HomeTodo[] {
+  return [...threadTodos(sources.threads, sources.now), ...reviewTodos(sources.reviewExperiences, sources.reviews), ...pageTodos(sources.pages, sources.listings)];
+}
+
+/** Where 次にすること reads from in http mode, each of which may fail on its own. */
+export type HomeTodoSource = "messages" | "reviews" | "experiences";
+
+const HOME_TODO_SOURCE_LABEL: Record<HomeTodoSource, string> = { messages: "メッセージ", reviews: "レビュー", experiences: "NIHO の体験" };
+
+/** ホーム's line when sources could not be read: "メッセージとレビューを読み込めませんでした。…". */
+export function homeTodosFailedText(failed: readonly HomeTodoSource[]): string {
+  const names = failed.map((source) => HOME_TODO_SOURCE_LABEL[source]);
+  return `${listJa(names)}を読み込めませんでした。次にすることに出ていないものがあるかもしれません。`;
 }
 
 /** The app icon's count (#177 P2): requests waiting for approval and threads waiting for an answer. */

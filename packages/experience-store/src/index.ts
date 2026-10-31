@@ -53,6 +53,8 @@ export type {
 } from "./host-notification-outbox.ts";
 export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
+export { HostCalendarSettings } from "./host-calendar-settings.ts";
+export type { HostCalendarFeed, HostCalendarFeedBooking, HostCalendarFeedRecord, HostGoogleConnectionState } from "./host-calendar-settings.ts";
 export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
 export type {
   ClaimedBookingMessage,
