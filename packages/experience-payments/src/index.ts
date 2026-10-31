@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import Stripe from "stripe";
 import type { BookingRecord, RefundSubmission, StripeRefundAnswer, StripeRefundStatus } from "@niho-experience/experience-store";
 
@@ -746,4 +747,155 @@ export async function retrieveConnectedAccount(input: RetrieveConnectedAccountIn
   if (summary.country !== "JP") problems.push("NOT_JAPAN");
   if (summary.defaultCurrency !== "jpy") problems.push("NOT_JPY");
   return problems.length === 0 ? { kind: "ready", account: summary } : { kind: "not_ready", account: summary, problems };
+}
+
+/* ---------- the seller's payouts (#91: 売上's この口座への入金, read only) ---------- */
+
+/** The part of Stripe the payout read uses: two GETs on the connected account, nothing that writes. */
+export type ConnectedPayoutsStripeClient = Pick<Stripe, "balance" | "payouts">;
+
+export interface ReadConnectedPayoutsInput {
+  readonly accountId: string;
+  /** Payouts expected to arrive at or after this instant (Unix seconds). */
+  readonly arrivalFrom: number;
+  /** …and before this one; null or left out for no end (payouts still on their way). */
+  readonly arrivalBefore?: number | null;
+  readonly platformStripeKey?: string;
+  readonly stripe?: ConnectedPayoutsStripeClient;
+  /** Each request's own limit (milliseconds, at most 30 s): Stripe's default of 80 s is longer than a page waits. */
+  readonly timeoutMs?: number;
+}
+
+/** Stripe's payout states. PENDING is not sent to the bank yet; a PAID payout may still turn FAILED. */
+export type ConnectedPayoutStatus = "PENDING" | "IN_TRANSIT" | "PAID" | "FAILED" | "CANCELED";
+
+export interface ConnectedPayout {
+  /** A digest of the payout's ID (16 hex characters): stable for a list key, and not Stripe's ID. */
+  readonly key: string;
+  /** In the currency's smallest unit, as Stripe has it (a debit for a negative balance would be below 0). */
+  readonly amount: number;
+  /** Upper case: "JPY". */
+  readonly currency: string;
+  /** The day Stripe expects it in the bank, as the instant Stripe gives. */
+  readonly arrivalDateUtc: string;
+  readonly status: ConnectedPayoutStatus;
+}
+
+/** The account's balance in one currency: what can be paid out now, and what is not available yet. */
+export interface ConnectedBalanceAmount {
+  readonly currency: string;
+  readonly available: number;
+  readonly pending: number;
+}
+
+export type ConnectedPayoutsRead =
+  | {
+    readonly kind: "read";
+    readonly balance: readonly ConnectedBalanceAmount[];
+    /** The latest arrival first. */
+    readonly payouts: readonly ConnectedPayout[];
+    /** Stripe has more payouts in the window than one page (100). */
+    readonly more: boolean;
+  }
+  /** Stripe would not show the account to this platform key (as retrieveConnectedAccount). */
+  | { readonly kind: "unreachable" };
+
+const PAYOUT_PAGE = 100;
+const DEFAULT_PAYOUT_TIMEOUT_MS = 5_000;
+const PAYOUT_STATUSES: Readonly<Record<string, ConnectedPayoutStatus>> = {
+  pending: "PENDING",
+  in_transit: "IN_TRANSIT",
+  paid: "PAID",
+  failed: "FAILED",
+  canceled: "CANCELED",
+};
+
+function payoutsClient(platformStripeKey: string | undefined, injected: ConnectedPayoutsStripeClient | undefined): ConnectedPayoutsStripeClient {
+  if (injected !== undefined && platformStripeKey !== undefined) {
+    throw new ExperiencePaymentsValidationError("Provide either platformStripeKey or stripe, not both.");
+  }
+  if (injected !== undefined) return injected;
+  if (platformStripeKey === undefined || platformStripeKey.trim().length === 0) {
+    throw new ExperiencePaymentsValidationError("A platform Stripe key or injected Stripe client is required.");
+  }
+  return new Stripe(platformStripeKey);
+}
+
+const isUnixSeconds = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+function wholeAmount(value: unknown): number {
+  if (!Number.isSafeInteger(value)) throw new ExperiencePaymentsValidationError("Stripe returned an amount that is not a whole number.");
+  return value as number;
+}
+
+function currencyCode(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-z]{3}$/i.test(value)) throw new ExperiencePaymentsValidationError("Stripe returned an unknown currency.");
+  return value.toUpperCase();
+}
+
+/** available and pending summed per currency; the rest of the balance (Instant Payouts, Issuing) is left out. */
+function balanceOf(balance: Stripe.Balance): ConnectedBalanceAmount[] {
+  const sums = new Map<string, { available: number; pending: number }>();
+  const add = (entries: unknown, field: "available" | "pending") => {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const currency = currencyCode((entry as { currency?: unknown } | null)?.currency);
+      const sum = sums.get(currency) ?? { available: 0, pending: 0 };
+      sum[field] += wholeAmount((entry as { amount?: unknown } | null)?.amount);
+      sums.set(currency, sum);
+    }
+  };
+  add(balance?.available, "available");
+  add(balance?.pending, "pending");
+  return [...sums].map(([currency, sum]) => ({ currency, ...sum })).sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+function payoutOf(payout: Stripe.Payout): ConnectedPayout {
+  if (typeof payout?.id !== "string" || !payout.id.startsWith("po_")) throw new ExperiencePaymentsValidationError("Stripe returned something other than a payout.");
+  const status = PAYOUT_STATUSES[String(payout.status)];
+  if (!status) throw new ExperiencePaymentsValidationError("Stripe returned a payout status this package does not know.");
+  if (!isUnixSeconds(payout.arrival_date)) throw new ExperiencePaymentsValidationError("Stripe returned a payout without an arrival date.");
+  return {
+    key: createHash("sha256").update(payout.id, "utf8").digest("hex").slice(0, 16),
+    amount: wholeAmount(payout.amount),
+    currency: currencyCode(payout.currency),
+    arrivalDateUtc: new Date(payout.arrival_date * 1000).toISOString(),
+    status,
+  };
+}
+
+/**
+ * Reads a seller's connected account with the experience platform key: its balance and the payouts Stripe expects
+ * to arrive in [arrivalFrom, arrivalBefore) (one page, at most 100), for 売上's この口座への入金 (#91). Read only:
+ * two GETs on the account, nothing created or changed. The account takes NIHO's sales too, so what this returns is the
+ * account's, not this site's. Returns no Stripe ID (a payout's key is a digest), no bank detail and no failure text:
+ * only amounts, currencies, arrival days and states. "Cannot see this account" answers unreachable; any other
+ * failure, a slow answer (timeoutMs per request, one retry) included, throws.
+ */
+export async function readConnectedPayouts(input: ReadConnectedPayoutsInput): Promise<ConnectedPayoutsRead> {
+  if (typeof input.accountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.accountId)) {
+    throw new ExperiencePaymentsValidationError("accountId must be a Stripe connected account ID.");
+  }
+  const before = input.arrivalBefore ?? null;
+  if (!isUnixSeconds(input.arrivalFrom) || (before !== null && (!isUnixSeconds(before) || before <= input.arrivalFrom))) {
+    throw new ExperiencePaymentsValidationError("The arrival window must be Unix seconds, its end after its start.");
+  }
+  const timeout = input.timeoutMs ?? DEFAULT_PAYOUT_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 30_000) throw new ExperiencePaymentsValidationError("timeoutMs must be 1 to 30000.");
+  const stripe = payoutsClient(input.platformStripeKey, input.stripe);
+  const options = { stripeAccount: input.accountId, timeout, maxNetworkRetries: 1 };
+  const arrival = before === null ? { gte: input.arrivalFrom } : { gte: input.arrivalFrom, lt: before };
+  let balance: Stripe.Balance;
+  let page: Stripe.ApiList<Stripe.Payout>;
+  try {
+    [balance, page] = await Promise.all([
+      stripe.balance.retrieve({}, options),
+      stripe.payouts.list({ arrival_date: arrival, limit: PAYOUT_PAGE }, options),
+    ]);
+  } catch (error) {
+    if (accountOutOfReach(error)) return { kind: "unreachable" };
+    throw error;
+  }
+  const payouts = (Array.isArray(page?.data) ? page.data : []).map(payoutOf);
+  payouts.sort((a, b) => b.arrivalDateUtc.localeCompare(a.arrivalDateUtc));
+  return { kind: "read", balance: balanceOf(balance), payouts, more: page?.has_more === true };
 }

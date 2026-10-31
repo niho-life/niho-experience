@@ -20,7 +20,7 @@
 
 ## 出さないもの
 
-- **入金（payout）**：銀行口座への入金の予定と実績は Connect 口座の情報で、experience は持たない。「入金予定」「入金済み」は作らず、「Stripe で入金の明細を見る」へ案内する。
+- **入金（payout）を台帳から作ること**：銀行口座への入金の予定と実績は Connect 口座の情報で、experience の台帳は持たない。このサイトの集計には「入金予定」「入金済み」を入れない。入金は下の「この口座への入金」として、Stripe から読んだものを別に出す。
 - **NIHO で売っている商品の売上**：まだ NIHO で販売している体験の売上は NIHO の台帳にあり、ここには混ぜない。画面の上に「このサイトで受けた予約の売上です。NIHO で販売している体験の売上は含みません。」、ホームのカードに「このサイトで受けた予約の分」。
 - 予約者のメールアドレス、Stripe の ID（入金・イベント・返金・口座）。行のキーは `payment:{予約 ID}`・`refund:{返金 ID}`（このサービスの ID）などで、Stripe の ID はブラウザに渡らない。予約者の名前は保存期間（体験の 1 年後）までで、消したあとは体験名だけ。
 
@@ -36,8 +36,26 @@
 - flag：`HOST_SALES_LEDGER_ENABLED`（http mode と `HOST_CONSOLE_ENABLED=true` が要る。既定 `false`）。`EXPERIENCE_DATABASE_URL` が無ければ準備中のまま。予約の flag（`EXPERIENCE_GUEST_BOOKING_ENABLED`）とは独立：このサイトでの販売を止めたあとも売上は読める。
 - mock mode：今までの合成の台帳（NIHO の形：入金予定・入金済みつき）のまま。プレビューの `?mock=site-sales` のサインインだけ、合成の台帳（`apps/web/src/host/mock/site-sales.ts`）でこの画面を出す（e2e：`apps/web/e2e/host-sales.spec.ts`）。
 
+## この口座への入金（`HOST_SALES_PAYOUTS_ENABLED`）
+
+mock の「入金予定・入金済み・口座入金」に当たるものを、Stripe から読んで出す。
+
+- **何を読むか**：提供者の Connect 口座の残高（`GET /v1/balance`）と、着金日（`arrival_date`）がその月の入金（`GET /v1/payouts`、1 回 100 件まで）。どちらも `Stripe-Account` を付け、プラットフォームの鍵 `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` で読む。GET だけで、Stripe に何も書かない（`readConnectedPayouts`、`packages/experience-payments`）。
+- **どの口座か**：experience DB で、その提供者の「このサイトで売る商品」（販売条件のある商品）の `stripe_connect_account_ref` と、このサイトの予約の seller snapshot の口座（`listPayoutAccountsForHost`。OWNER の確認つき、5 口座まで）。ふつうは 1 口座。2 口座以上なら合計し、「Stripe の口座が N つあり、その合計です。」と注記する。
+- **見せ方**：この口座には NIHO で売った分の入金も入るので、このサイトの集計・明細の下に、見出し「この口座への入金」の別の区画として出す。区画の先頭に「Stripe の口座に入る入金です。NIHO で販売している体験の分も同じ口座に入るため、このサイトの売上・受取額とは一致しません。」。
+  - 今月：「入金予定」（Stripe の残高の available と pending、送金中の入金の合計）と「入金済み」（今月に着金した入金）。今月は、来月に着く送金中の入金も明細に出す。
+  - 前の月：「入金済み」だけ。
+  - 明細：着金日（日本時間）ごとに「口座入金」（負の額は「口座からの引き落とし」、赤字）、状態は「送金中」（`pending`・`in_transit`）・「入金済み」・「入金できず」・「取消」。Stripe は入金済みのあとで失敗にすることがあり、読んだ時点の Stripe の状態を出す。
+  - 円以外は明細に通貨のまま出し、集計に入れない（注記）。100 件を超える月は「一部だけ」と注記する。
+- **失敗・遅いとき**：区画だけを別に Suspense で流す。このサイトの集計・明細は先に出て、Stripe の失敗で消えない。読込中は「この口座への入金を Stripe から読み込んでいます…」。
+  - Stripe の 1 回の要求は 3.5 秒・再試行 1 回、全体で 8 秒まで。過ぎたら「Stripe の応答が遅いため…」。
+  - 口座が見えない（権限・接続が無い）ときは NIHO サポートへの案内、ほかの失敗は「時間をおいて、もう一度お試しください」。どちらも「Stripe で入金の明細を見る」を添える。
+- **出さないもの**：Stripe の ID（口座・入金。行のキーは入金 ID の SHA-256 の先頭 16 桁）、銀行の情報、明細の表記、失敗の理由の文。ログは失敗の種類（`StripeConnectionError` など、`unreachable`）だけで、Stripe の応答・メッセージは出さない。
+- **flag**：`HOST_SALES_PAYOUTS_ENABLED`。http mode で `HOST_SALES_LEDGER_ENABLED=true` と `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` が要り、無ければ起動失敗。既定 `false`（区画は出ない）。mock mode はプレビューの `?mock=site-sales` だけ、合成の入金（`MOCK_SITE_PAYOUTS`）で出す。
+
 ## 受入（flag を入れる前）
 
 1. staging で、`0030`・`0031` まで適用した DB に合成の予約を作り、全額返金・一部返金・返金の失敗（取り消し）・確認待ちの支払いを通す。画面の売上・手数料・返金・受取額が Stripe（テストモード）の Connect 口座の残高の動きと合うことを確かめる。一部返金の手数料の戻りが Stripe の値と何円ずれるかを記録する。
 2. 月末の 23 時台（日本時間）の支払いがその月に入ることを確かめる。
 3. OWNER 以外（EDITOR・サブホスト）と、experience DB の membership が無い OWNER で、売上が出ないことを確かめる。
+4. この口座への入金（`HOST_SALES_PAYOUTS_ENABLED`）：staging の Stripe テストモードで、テストの Connect 口座（日本の口座は銀行番号 `1100000`・口座番号 `0001234` で入金が成功、`1111116` などで失敗）に入金を作り、入金予定・入金済み・送金中・入金できずが Stripe のダッシュボードと合うことを確かめる。鍵が口座を読めないとき（別のプラットフォームの口座）に「NIHO サポートへ」の案内になること、Stripe の ID がページの HTML・RSC の payload・ログに出ないことを確かめる。日本の口座の既定の入金スケジュールは手動なので、自動の入金が無い口座では入金予定が残高だけになる。

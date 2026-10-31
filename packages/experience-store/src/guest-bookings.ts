@@ -44,7 +44,7 @@ import {
   type HostGuestSessionKey,
   type HostGuestSessionListOptions,
 } from "./host-guest-bookings.ts";
-import { salesWindowOf, selectSales, type HostSalesWindow, type HostSalesWindowOptions } from "./host-sales.ts";
+import { salesWindowOf, selectPayoutAccounts, selectSales, type HostSalesWindow, type HostSalesWindowOptions } from "./host-sales.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import {
@@ -1053,6 +1053,18 @@ export class GuestBookingRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireBookingsOwner(client, actor);
       return selectSales(client, actor.providerId, range);
+    });
+  }
+
+  /**
+   * この口座への入金 for the provider's OWNER (#91): the Stripe connected accounts its sales here go to (its products
+   * sold on this site, and its guest bookings' seller snapshots), at most 5, sorted. Read only. For the server only:
+   * the caller reads each account's payouts from Stripe with the platform key and never shows or logs the IDs.
+   */
+  async listPayoutAccountsForHost(actor: HostActor): Promise<string[]> {
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      return selectPayoutAccounts(client, actor.providerId);
     });
   }
 

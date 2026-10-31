@@ -244,6 +244,22 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_SALES_LEDGER_ENABLED: "true" }).hostSalesLedgerEnabled).toBe(true);
   });
 
+  it("reads この口座への入金 from Stripe only in http mode under this site's ledger, with the platform key (#91)", () => {
+    const ledger = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_SALES_LEDGER_ENABLED: "true" };
+    const key = { EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic" };
+    expect(resolveConfig({}).hostSalesPayoutsEnabled).toBe(false);
+    expect(resolveConfig({ HOST_SALES_PAYOUTS_ENABLED: "true", ...key }).hostSalesPayoutsEnabled).toBe(false);
+    expect(resolveConfig({ ...ledger, ...key }).hostSalesPayoutsEnabled).toBe(false);
+    expect(resolveConfig({ ...ledger, ...key, HOST_SALES_PAYOUTS_ENABLED: "true" }).hostSalesPayoutsEnabled).toBe(true);
+    expect(() => resolveConfig({ ...ledger, HOST_SALES_LEDGER_ENABLED: "false", ...key, HOST_SALES_PAYOUTS_ENABLED: "true" })).toThrow("HOST_SALES_PAYOUTS_ENABLED=true needs HOST_SALES_LEDGER_ENABLED=true");
+    expect(() => resolveConfig({ ...ledger, HOST_SALES_PAYOUTS_ENABLED: "true" })).toThrow("HOST_SALES_PAYOUTS_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY in http mode");
+    try {
+      resolveConfig({ ...ledger, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: " ", HOST_SALES_PAYOUTS_ENABLED: "true" });
+    } catch (error) {
+      expect(String(error)).not.toContain("sk_");
+    }
+  });
+
   it("keeps questions to the host in the experience DB only in http mode with their own flag (#105 #106)", () => {
     expect(resolveConfig({}).guestQuestionsEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
