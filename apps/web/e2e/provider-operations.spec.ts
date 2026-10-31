@@ -570,7 +570,8 @@ test("a page with no photo says a cover is needed, and 20 photos is the most", a
   await expect(section.getByLabel("写真を追加")).toBeEnabled();
 });
 
-test("owner previews the saved page as the experience site shows it, and is told that unsaved changes wait for 保存", async ({ page }) => {
+/** The synthetic preview NIHO answers: an English page with two photos and one offer on Tue/Sat. */
+function previewFixture() {
   const image = (label: string) => svgImage(label);
   const occurrence = (date: string, hour: number, bookable = true) => ({ date, startAt: `${date}T${String(hour - 9).padStart(2, "0")}:00:00.000Z`, endAt: `${date}T${String(hour - 7).padStart(2, "0")}:00:00.000Z`, seatsLeft: 5, bookable, ...(bookable ? {} : { reason: "full" }) });
   const previewOffer = { id: "offer-1", name: "午前の合成商品", shortDescription: null, sortOrder: 0, priceYen: 5000, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, currency: "JPY", capacity: 6, maxPartySize: 4, minimumParticipants: 1, durationMinutes: 120, startTime: "10:00", cancellationPolicy: "FREE_UNTIL_24H", acceptanceMode: "APPROVAL", bookingQuestions: [], bookingQuestionsFingerprint: "0".repeat(64), occurrences: [occurrence("2026-11-03", 10), occurrence("2026-11-03", 14), occurrence("2026-11-07", 10, false), occurrence("2026-11-10", 10)] };
@@ -579,6 +580,11 @@ test("owner previews the saved page as the experience site shows it, and is told
     spot: { slug: "synthetic-provider", name: "（合成）Garden House", logoUrl: null, tagline: null, taglineEn: null, landingGround: "LIGHT", landingAccent: "LEAF", landingFont: "MARU", meetingPoint: null },
     hosts: [{ displayName: "（合成）Yuki", avatarUrl: null }], offers: [previewOffer], offer: { ...previewOffer, occurrences: undefined }, occurrences: previewOffer.occurrences,
   };
+  return previewBody;
+}
+
+test("owner previews the saved page as the experience site shows it, and is told that unsaved changes wait for 保存", async ({ page }) => {
+  const previewBody = previewFixture();
   let previewStatus = 200; const previewCalls: string[] = []; const nonGet: string[] = [];
   await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
     const request = route.request(); const path = new URL(request.url()).pathname;
@@ -674,4 +680,51 @@ test("against the mock NIHO: the photos show their order and the preview shows t
   await expect(preview).toContainText("この体験ページは日本語です。体験サイトに載るのは英語のページだけです。");
   const axe = await new AxeBuilder({ page }).include("[data-testid='host-preview']").withTags(WCAG_TAGS).analyze();
   expect(axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
+});
+
+test("closing the all-photos dialog, or pressing Esc in it, leaves the preview open", async ({ page }) => {
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/preview")) return json(route, previewFixture());
+    if (path.endsWith(`/${PAGE}`)) return json(route, { ...structuredClone(pageDetail), language: "EN", title: "（合成）Morning craft workshop" });
+    if (path.endsWith("/meeting-point")) return json(route, inheritedMeeting);
+    if (path.endsWith("/listing")) return json(route, { listing: null, consent });
+    return json(route, { error: "not_found" }, 404);
+  });
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences/${PAGE}?providerId=${PROVIDER}`);
+  const open = page.getByRole("button", { name: "プレビュー", exact: true });
+  await expect(page.getByLabel("題名")).toBeVisible();
+  await open.click();
+  const preview = page.getByRole("dialog", { name: /プレビュー/ });
+  const title = preview.getByRole("heading", { level: 1, name: "（合成）Morning craft workshop" });
+  await expect(title).toBeVisible();
+  const showAll = preview.getByRole("button", { name: /Show all/ });
+  if ((page.viewportSize()?.width ?? 0) < 1024) {
+    // Phones swipe through the photos: there is no photos dialog, so Esc closes the preview itself.
+    await expect(showAll).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(preview).toHaveCount(0);
+    return;
+  }
+  // Desktop: the photos dialog is inside the preview. Its own close, and Esc, close only it.
+  const photos = preview.getByRole("dialog", { name: /photos/i });
+  await showAll.click();
+  await expect(photos).toBeVisible();
+  await photos.getByRole("button", { name: "Close" }).click();
+  await expect(photos).toBeHidden();
+  await expect(title).toBeVisible();
+  await showAll.click();
+  await expect(photos).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(photos).toBeHidden();
+  await expect(title).toBeVisible();
+  // The preview still closes by its own button and Esc.
+  await showAll.click();
+  await expect(photos).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(photos).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(preview).toHaveCount(0);
+  await expect(open).toBeFocused();
 });

@@ -86,7 +86,8 @@ export default function HostExperiencePreview({ endpoint, unsaved, onClose }: Ho
   } : undefined, [view]);
 
   const failed = state.kind === "ready" && !view;
-  return <dialog ref={dialog} aria-labelledby={`${baseId}-title`} onCancel={(event) => { event.preventDefault(); onClose(); }} onClose={onClose} data-testid="host-preview" className="m-0 h-dvh max-h-none w-screen max-w-none overflow-y-auto border-0 bg-white p-0 text-ink">
+  // React passes a nested <dialog>'s cancel and close (the photos dialog inside the gallery) up to this one: only this dialog's own end the preview.
+  return <dialog ref={dialog} aria-labelledby={`${baseId}-title`} onCancel={(event) => { if (event.target !== event.currentTarget) return; event.preventDefault(); onClose(); }} onClose={(event) => { if (event.target === event.currentTarget) onClose(); }} data-testid="host-preview" className="m-0 h-dvh max-h-none w-screen max-w-none overflow-y-auto border-0 bg-white p-0 text-ink">
     <div className="sticky top-0 z-40 border-b border-line bg-canvas px-4 py-2 md:px-6">
       <div className="mx-auto max-w-5xl">
         <div className="flex items-center justify-between gap-3">
