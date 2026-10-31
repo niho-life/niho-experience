@@ -35,7 +35,8 @@ const snapshot = {
   context: {
     jobId: "00000000-0000-4000-8000-000000000001", providerId: "provider-a", accountId: "account-a", listingId: "listing-a",
     occurrenceId: "rule@2099-01-01", workerId: "studio-1", leaseEpoch: 1, assignmentVersion: 2,
-    action: "SET_CLOSED", accountVersion: 2, desiredState: "CLOSED", desiredVersion: 4, mappingVersion: 3,
+    action: "SET_CLOSED", accountVersion: 2, bindingVersion: 6, initializeMissingOpenAnchor: false,
+    desiredState: "CLOSED", desiredVersion: 4, mappingVersion: 3,
     sourceStartAtUtc: "2099-01-01T01:00:00.000Z", sourceEndAtUtc: "2099-01-01T02:00:00.000Z",
   },
   storedTarget: {
@@ -79,7 +80,8 @@ describe("Google channel server executor", () => {
     const result = await executeGoogleChannelDelivery({} as never, {} as never, { workerId: "studio-1", credentialVersion: 1 }, snapshot.context.jobId, "lease", "dispatch");
     expect(mocks.prepareDispatch).toHaveBeenCalledBefore(mocks.refresh);
     expect(mocks.assertCurrent).toHaveBeenCalled();
-    expect(mocks.apply).toHaveBeenCalledWith(expect.anything(), "access-secret", "private-calendar", expect.objectContaining({ listingOpaqueId: "listing-a" }), expect.any(Function));
+    expect(mocks.apply).toHaveBeenCalledWith(expect.anything(), "access-secret", "private-calendar",
+      expect.objectContaining({ listingOpaqueId: "listing-a" }), expect.any(Function), { initializeMissingOpenAnchor: false });
     expect(mocks.saveResult).toHaveBeenCalledWith(expect.anything(), snapshot.context.jobId, "lease", snapshot.record.deliveryId,
       snapshot.operationNonce, "dispatch",
       expect.objectContaining({ phase: "GOOGLE_VERIFIED", changed: true, writeAcknowledged: true }));

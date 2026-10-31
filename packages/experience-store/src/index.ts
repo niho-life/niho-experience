@@ -44,6 +44,19 @@ export type {
   GuestQuestionTopic,
   SubmitGuestQuestionInput,
 } from "./guest-questions.ts";
+export { GUEST_REVIEW_LIMITS, GUEST_REVIEW_REPORT_REASONS, GUEST_REVIEW_TAGS, GuestReviewRepository } from "./guest-reviews.ts";
+export type {
+  GuestReviewEligibility,
+  GuestReviewInvitation,
+  GuestReviewLanguage,
+  GuestReviewReportReason,
+  GuestReviewTagValue,
+  HostGuestReview,
+  HostGuestReviewPage,
+  PublicGuestReview,
+  PublicGuestReviews,
+  SubmitGuestReviewInput,
+} from "./guest-reviews.ts";
 export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS } from "./guest-bookings.ts";
 export type {
   BookingQuestion,
@@ -52,6 +65,7 @@ export type {
   GuestBookingAnswer,
   GuestBookingStart,
   GuestBookingUtm,
+  GuestHoldRelease,
   ProductSaleTerms,
   ProductSaleTermsInput,
   ProviderSaleSettings,
@@ -60,6 +74,7 @@ export type {
   PublicBookingTerms,
   PublicOccurrence,
   PublicOccurrenceReason,
+  ReleaseGuestHoldInput,
   StartGuestBookingInput,
 } from "./guest-bookings.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
@@ -73,6 +88,20 @@ export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, Google
 export { GoogleChannelSetupRepository } from "./google-channel-setup.ts";
 export type { GoogleChannelSetupPhase, GoogleChannelSetupRecord, GoogleChannelSetupSecretSnapshot } from "./google-channel-setup.ts";
 export { GoogleChannelAnchorRepository } from "./google-channel-anchor.ts";
+export { GoogleChannelActivationRepository } from "./google-channel-activation.ts";
+export { GoogleChannelOptionsRepository } from "./google-channel-options.ts";
+export type {
+  GoogleChannelOptionCandidate,
+  GoogleChannelOptions,
+  GoogleChannelPendingAnchorCommand,
+  GoogleChannelPendingSetupCommand,
+} from "./google-channel-options.ts";
+export type {
+  GoogleChannelActivationApplied,
+  GoogleChannelActivationInput,
+  GoogleChannelActivationState,
+  GoogleChannelActivationStatus,
+} from "./google-channel-activation.ts";
 export type {
   GoogleChannelAnchorInput,
   GoogleChannelAnchorMetadata,

@@ -31,6 +31,12 @@ it("keeps guest questions closed in the preview even with a database URL", async
   expect(guestQuestionRepository()).toBeNull();
 });
 
+it("keeps guest reviews closed in the preview even with a database URL (#104)", async () => {
+  vi.stubEnv("EXPERIENCE_DATABASE_URL", "postgresql://synthetic:unused@127.0.0.1/unused");
+  const { guestReviewRepository } = await import("./store-server");
+  expect(guestReviewRepository()).toBeNull();
+});
+
 it("keeps guest booking closed in the preview even with a database URL (#285)", async () => {
   vi.stubEnv("EXPERIENCE_DATABASE_URL", "postgresql://synthetic:unused@127.0.0.1/unused");
   const { guestBookingRepository } = await import("./store-server");

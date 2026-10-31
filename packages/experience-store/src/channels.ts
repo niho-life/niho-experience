@@ -207,6 +207,8 @@ export interface GoogleChannelDeliveryContext {
   readonly assignmentVersion: number;
   readonly action: "SET_OPEN" | "SET_CLOSED" | "OBSERVE";
   readonly accountVersion: number;
+  readonly bindingVersion: number;
+  readonly initializeMissingOpenAnchor: boolean;
   readonly desiredState: ChannelDesiredState;
   readonly desiredVersion: number;
   readonly mappingVersion: number;
@@ -2792,12 +2794,23 @@ export class ChannelRuntime {
           throw new StoreConflictError("Live availability no longer matches the current Google intent.");
         }
       }
+      const binding = (await client.query<DbRow>(
+        `SELECT binding_version,initialize_missing_open_anchor
+           FROM google_channel_output_bindings
+          WHERE provider_id=$1 AND listing_id=$2 AND active=true FOR SHARE`,
+        [job.provider_id, job.listing_id],
+      )).rows[0];
+      if (!binding || typeof binding.initialize_missing_open_anchor !== "boolean") {
+        throw new StoreConflictError("Current Google output binding is unavailable.");
+      }
       return {
         jobId,
         providerId: text(job, "provider_id"), accountId: text(job, "account_id"), listingId: text(job, "listing_id"),
         occurrenceId: text(job, "occurrence_id"), workerId: identity.workerId,
         leaseEpoch: integer(job, "lease_epoch"), assignmentVersion: integer(job, "lease_assignment_version"),
         action: job.action as "SET_OPEN" | "SET_CLOSED" | "OBSERVE", accountVersion: integer(job, "account_version"),
+        bindingVersion: integer(binding, "binding_version"),
+        initializeMissingOpenAnchor: binding.initialize_missing_open_anchor,
         desiredState: preflight.desiredState,
         desiredVersion: integer(job, "desired_version"), mappingVersion: integer(job, "mapping_version"),
         sourceStartAtUtc: isoValue(job, "source_start_at"), sourceEndAtUtc: isoValue(job, "source_end_at"),

@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ChannelRuntime, ExperienceStore, GuestBookingRepository, GuestQuestionRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { ChannelRuntime, ExperienceStore, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -84,9 +84,25 @@ export function guestQuestionRepository(): GuestQuestionRepository | null {
   return pool ? new GuestQuestionRepository(pool) : null;
 }
 
+/** 予約者のレビュー (#104/#108): null until its flag is on and the experience DB is configured. */
+export function guestReviewRepository(): GuestReviewRepository | null {
+  if (!config.guestReviewsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestReviewRepository(pool) : null;
+}
+
 /** 旅行者の予約 (#285, docs/guest-booking.md): null until its flag is on and the experience DB is configured. */
 export function guestBookingRepository(): GuestBookingRepository | null {
   if (!config.guestBookingEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestBookingRepository(pool) : null;
+}
+
+/**
+ * The Stripe webhook's view of 旅行者の予約 (#285 slice 4). A Session this service created can end after the
+ * flag is turned off, so releasing its hold needs only the experience DB, like confirming its payment.
+ */
+export function guestHoldReleases(): Pick<GuestBookingRepository, "releaseGuestHold"> | null {
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
 }

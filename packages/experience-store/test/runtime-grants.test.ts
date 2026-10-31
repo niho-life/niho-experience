@@ -4,6 +4,12 @@ import { describe, it } from "node:test";
 
 interface RuntimeGrant { readonly write: readonly string[]; readonly updateColumns?: readonly string[] }
 
+function updateAllowed(grant: RuntimeGrant, clause: string): boolean {
+  if (grant.write.includes("UPDATE")) return true;
+  const columns = [...clause.matchAll(/(?:^|,)\s*([a-z_]+)\s*=/g)].map((match) => match[1]!);
+  return columns.length > 0 && columns.every((column) => grant.updateColumns?.includes(column));
+}
+
 const repo = new URL("../../../", import.meta.url);
 const { RUNTIME_TABLE_GRANTS } = await import(new URL("scripts/gcp/experience-db-grants.mjs", repo).href) as {
   RUNTIME_TABLE_GRANTS: Readonly<Record<string, RuntimeGrant>>;
@@ -34,6 +40,17 @@ async function sqlLiterals(): Promise<string[]> {
 }
 
 describe("Experience runtime grants", () => {
+  it("keeps activation commands append-only and limits binding mutation columns", () => {
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.google_channel_activation_commands, { write: ["INSERT"] });
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.google_channel_output_bindings?.updateColumns,
+      ["active", "binding_version", "initialize_missing_open_anchor", "updated_at"]);
+    const binding = RUNTIME_TABLE_GRANTS.google_channel_output_bindings!;
+    assert.equal(updateAllowed(binding, "active=true,binding_version=binding_version+1,updated_at=clock_timestamp()"), true);
+    assert.equal(updateAllowed(binding, "active=true,opaque_calendar_id=$1"), false);
+    assert.equal(updateAllowed(binding, "connection_generation=$1"), false);
+    assert.equal(updateAllowed(RUNTIME_TABLE_GRANTS.google_channel_activation_commands!, "applied_at=clock_timestamp()"), false);
+  });
+
   it("declares exactly the tables the migrations create", async () => {
     const dir = new URL("packages/experience-store/migrations/", repo);
     const tables = new Set<string>();
@@ -57,9 +74,14 @@ describe("Experience runtime grants", () => {
     for (const sql of await sqlLiterals()) {
       for (const match of sql.matchAll(/INSERT INTO\s+([a-z_]+)/g)) {
         need(match[1]!, "INSERT");
-        if (/ON CONFLICT[\s\S]*DO UPDATE/.test(sql)) need(match[1]!, "UPDATE");
+        const upsert = /ON CONFLICT[\s\S]*DO UPDATE\s+SET\s+([\s\S]*?)(?:\bRETURNING\b|$)/.exec(sql);
+        if (upsert && tables.has(match[1]!) && !updateAllowed(RUNTIME_TABLE_GRANTS[match[1]!]!, upsert[1]!)) {
+          missing.add(`UPDATE ${match[1]}`);
+        }
       }
-      for (const match of sql.matchAll(/\bUPDATE\s+([a-z_]+)\s/g)) need(match[1]!, "UPDATE");
+      for (const match of sql.matchAll(/\bUPDATE\s+([a-z_]+)(?:\s+(?:AS\s+)?[a-z_]+)?\s+SET\s+([\s\S]*?)(?:\bWHERE\b|\bRETURNING\b|$)/g)) {
+        if (tables.has(match[1]!) && !updateAllowed(RUNTIME_TABLE_GRANTS[match[1]!]!, match[2]!)) missing.add(`UPDATE ${match[1]}`);
+      }
       for (const match of sql.matchAll(/DELETE FROM\s+([a-z_]+)/g)) need(match[1]!, "DELETE");
       for (const lock of sql.matchAll(/FOR (?:UPDATE|SHARE|NO KEY UPDATE|KEY SHARE)(?:\s+OF\s+([a-z_][a-z0-9_]*(?:\s*,\s*[a-z_][a-z0-9_]*)*))?/g)) {
         const aliases = new Map<string, string>();

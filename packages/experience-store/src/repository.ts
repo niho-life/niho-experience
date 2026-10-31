@@ -1216,23 +1216,7 @@ export class ExperienceStore {
     if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) throw new StoreValidationError("limit must be from 1 to 5000.");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, scope.providerId);
-      const result = await client.query<DbRow>(
-        `WITH expired AS (
-           SELECT id FROM bookings
-            WHERE provider_id=$1 AND status='HOLD' AND hold_expires_at <= clock_timestamp()
-            ORDER BY hold_expires_at FOR UPDATE SKIP LOCKED LIMIT $2
-         )
-         UPDATE bookings b SET status='EXPIRED', updated_at=clock_timestamp()
-          FROM expired e WHERE b.provider_id=$1 AND b.id=e.id
-         RETURNING b.occurrence_id`,
-        [scope.providerId, limit],
-      );
-      for (const occurrenceId of new Set(result.rows.map((row) => String(row.occurrence_id)))) {
-        await enqueueCalendarRecalculation(client, {
-          providerId: scope.providerId, aggregateType: "schedule_occurrence", aggregateId: occurrenceId, cause: "booking_hold_released",
-        });
-      }
-      return result.rowCount ?? 0;
+      return expireLapsedHolds(client, scope.providerId, limit);
     });
   }
 
@@ -1423,6 +1407,31 @@ export class ExperienceStore {
  * (guest-bookings.ts). Package-internal: index.ts does not export them. Callers hold the provider
  * inventory lock, then the idempotency lock, then lock the product before materializing the occurrence.
  */
+
+/**
+ * Marks up to `limit` of the provider's holds past hold_expires_at EXPIRED, oldest first, and enqueues the
+ * recalculation of their occurrences; returns how many. Call under the provider inventory lock.
+ * Stored inventory already ignores such a hold, so this changes no availability: it keeps the status true.
+ */
+export async function expireLapsedHolds(client: PoolClient, providerId: string, limit: number): Promise<number> {
+  const result = await client.query<DbRow>(
+    `WITH expired AS (
+       SELECT id FROM bookings
+        WHERE provider_id=$1 AND status='HOLD' AND hold_expires_at <= clock_timestamp()
+        ORDER BY hold_expires_at FOR UPDATE SKIP LOCKED LIMIT $2
+     )
+     UPDATE bookings b SET status='EXPIRED', updated_at=clock_timestamp()
+      FROM expired e WHERE b.provider_id=$1 AND b.id=e.id
+     RETURNING b.occurrence_id`,
+    [providerId, limit],
+  );
+  for (const occurrenceId of new Set(result.rows.map((row) => String(row.occurrence_id)))) {
+    await enqueueCalendarRecalculation(client, {
+      providerId, aggregateType: "schedule_occurrence", aggregateId: occurrenceId, cause: "booking_hold_released",
+    });
+  }
+  return result.rowCount ?? 0;
+}
 
 /** Serializes every hold that uses one idempotency key of a provider. */
 export async function lockBookingIdempotencyKey(client: PoolClient, providerId: string, idempotencyKey: string): Promise<void> {

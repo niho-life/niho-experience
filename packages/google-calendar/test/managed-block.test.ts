@@ -346,6 +346,39 @@ describe("managed Google block protocol", () => {
     assert.equal(requests, 1);
   });
 
+  it("strictly opts an OPEN 404 into one insert followed by independent exact proof", async () => {
+    const value = target({ desiredState: "OPEN" });
+    const methods: string[] = [];
+    let inserted: Record<string, unknown> | undefined;
+    const result = await applyGoogleManagedBlock(config((_url, init) => {
+      methods.push(init.method ?? "GET");
+      if (init.method === "POST") {
+        inserted = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return json({ id: inserted.id, etag: '"ack"' });
+      }
+      return inserted ? json(ownedEvent(value)) : new Response(null, { status: 404 });
+    }), accessToken, calendarId, value, () => undefined, { initializeMissingOpenAnchor: true });
+    assert.equal(result.code, "GOOGLE_VERIFIED");
+    assert.deepEqual(methods, ["GET", "POST", "GET"]);
+    assert.equal(inserted?.visibility, "private");
+    assert.equal(inserted?.transparency, "transparent");
+  });
+
+  it("does not retry an opted-in OPEN insert after ACK loss and accepts only exact readback", async (context) => {
+    for (const matched of [true, false]) await context.test(matched ? "matched" : "missing", async () => {
+      const value = target({ desiredState: "OPEN" });
+      let request = 0;
+      const result = await applyGoogleManagedBlock(config((_url, init) => {
+        request += 1;
+        if (request === 1) return new Response(null, { status: 404 });
+        if (init.method === "POST") throw new Error("synthetic ACK loss");
+        return matched ? json(ownedEvent(value)) : new Response(null, { status: 404 });
+      }), accessToken, calendarId, value, () => undefined, { initializeMissingOpenAnchor: true });
+      assert.equal(result.code, matched ? "GOOGLE_VERIFIED" : "WRITE_UNCERTAIN");
+      assert.equal(request, 3);
+    });
+  });
+
   it("accepts a 409 only after a fresh owned exact read and rejects a foreign collision", async (context) => {
     for (const foreign of [false, true]) {
       await context.test(foreign ? "foreign collision" : "owned collision", async () => {
