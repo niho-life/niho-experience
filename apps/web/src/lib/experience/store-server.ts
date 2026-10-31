@@ -99,6 +99,16 @@ export function guestBookingRepository(): GuestBookingRepository | null {
 }
 
 /**
+ * 売上 (#91): the payment ledger of bookings made on this site, read for the OWNER. Its own flag: the sales stay
+ * readable after booking here is turned off. null until the flag is on and the experience DB is configured.
+ */
+export function hostSalesRepository(): GuestBookingRepository | null {
+  if (!config.hostSalesLedgerEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestBookingRepository(pool) : null;
+}
+
+/**
  * 予約者の予約ページ (#285 slice 6, docs/guest-booking.md): null until both its flags are on (booking on this site
  * and the mail job that sends the links) and the experience DB is configured.
  */

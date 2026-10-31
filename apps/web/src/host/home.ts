@@ -3,7 +3,7 @@ import { bookingSessions, bookingsHref, seatsLabel, sessionHref, type BookingDia
 import { addDays, agoJa, dateWithWeekdayJa, dayOfMonth, durationJa, listJa, missingLine, monthDayJa, remainingJa, shortDateWithWeekdayJa, weekdayJa, yen } from "./format";
 import { guestMessageView, lastGuestMessage, messagesHref, quoteJa, sortThreads, threadKind, waitingSince } from "./messages";
 import { HOME_REVIEW_LIMIT, reviewerLabel, reviewReplyStage, reviewsHref, reviewsToAttend } from "./reviews";
-import { salesSummary, type SalesMonth } from "./sales";
+import { salesSummary, type SalesFigure, type SalesMonth } from "./sales";
 import { attendanceCounts, dietarySummary, SESSION_PHASE_LABELS, sessionBookings, sessionPhase } from "./session";
 import { BOOKING_STATUS, LISTING_STATUS, REVIEW_STATUS, REVIEW_UNREPLIED, THREAD_WAITING, type StatusLabel } from "./status";
 import type { HostBooking, HostExperience, HostReview, HostSale, HostThread } from "./types";
@@ -54,13 +54,12 @@ export interface HomeUpcoming {
   source?: string;
 }
 
+/** ホーム's month card: its numbers, and whose they are when that needs saying. */
 export interface HomeMonth {
   label: string;
-  sales: string;
-  refunds: string;
-  /** 入金予定, as 売上 counts it. */
-  expected: string;
-  confirmed: string;
+  figures: SalesFigure[];
+  /** "このサイトで受けた予約の分" for this site's ledger (#91); null for the preview's. */
+  note: string | null;
 }
 
 export function experiencePath(id: string): string {
@@ -249,9 +248,12 @@ export function homeMonth(sales: readonly HostSale[], month: SalesMonth): HomeMo
   const summary = salesSummary(sales, month);
   return {
     label: `${month.month}月`,
-    sales: yen(summary.salesYen),
-    refunds: yen(-summary.refundsYen),
-    expected: yen(summary.expectedYen),
-    confirmed: `${summary.bookings}件`,
+    figures: [
+      { label: "売上", value: yen(summary.salesYen) },
+      { label: "返金", value: yen(-summary.refundsYen) },
+      { label: "入金予定", value: yen(summary.expectedYen) },
+      { label: "確定した予約", value: `${summary.bookings}件` },
+    ],
+    note: null,
   };
 }

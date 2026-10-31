@@ -140,6 +140,12 @@ function dateParts(date: string): { month: number; day: number } {
   return { month, day };
 }
 
+/** The date column of a row: "10/18", read out as "10月18日". */
+export function rowDate(date: string): Pick<SalesRow, "date" | "shortDate" | "dateLabel"> {
+  const { month, day } = dateParts(date);
+  return { date, shortDate: `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`, dateLabel: `${month}月${day}日` };
+}
+
 /** "10月1日〜9日" within a month, "9月16日〜10月9日" across two. */
 function daysCovered(from: string, to: string): string {
   const start = dateParts(from);
@@ -160,13 +166,10 @@ export function salesRows(sales: readonly HostSale[], month: SalesMonth): SalesR
     .map((line, order) => ({ line, order }))
     .sort((a, b) => b.line.date.localeCompare(a.line.date) || a.order - b.order)
     .map(({ line }) => {
-      const { month: m, day } = dateParts(line.date);
       const { title, detail, negative } = rowOf(line);
       return {
         key: line.id,
-        date: line.date,
-        shortDate: `${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")}`,
-        dateLabel: `${m}月${day}日`,
+        ...rowDate(line.date),
         title,
         detail,
         amount: yen(negative ? -line.amountYen : line.amountYen),
@@ -176,17 +179,36 @@ export function salesRows(sales: readonly HostSale[], month: SalesMonth): SalesR
     });
 }
 
+/** One of the month's numbers as the summary shows it: 売上 "¥390,000", 手数料 "−¥19,500". */
+export interface SalesFigure {
+  label: string;
+  value: string;
+}
+
 /** Everything the sales screen shows for one month. */
 export interface SalesPage {
   month: SalesMonth;
   label: string;
   previous: SalesMonth | null;
   next: SalesMonth | null;
-  summary: SalesSummary;
+  figures: SalesFigure[];
+  /** Under the numbers: what they leave out, or work out. */
+  notes: string[];
   rows: SalesRow[];
+}
+
+/** The preview's numbers: 売上, 手数料, 返金, 入金予定 and 入金済み. */
+export function salesFigures(summary: SalesSummary): SalesFigure[] {
+  return [
+    { label: "売上", value: yen(summary.salesYen) },
+    { label: "手数料", value: yen(-summary.feeYen) },
+    { label: "返金", value: yen(-summary.refundsYen) },
+    { label: "入金予定", value: yen(summary.expectedYen) },
+    { label: "入金済み", value: yen(summary.paidOutYen) },
+  ];
 }
 
 export function salesPage(sales: readonly HostSale[], period: SalesPeriod, requested: unknown): SalesPage {
   const month = salesMonthOf(period, requested);
-  return { month, label: monthLabelJa(month), ...salesMonthNav(period, month), summary: salesSummary(sales, month), rows: salesRows(sales, month) };
+  return { month, label: monthLabelJa(month), ...salesMonthNav(period, month), figures: salesFigures(salesSummary(sales, month)), notes: [], rows: salesRows(sales, month) };
 }

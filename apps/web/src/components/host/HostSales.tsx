@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { yen } from "@/host/format";
 import { STRIPE_DASHBOARD_URL, type SalesPayoutNotice } from "@/host/payout";
 import { monthKey, type SalesMonth, type SalesPage } from "@/host/sales";
 import { HOST_SALES_PATH, withQuery } from "@/lib/host/routes";
@@ -55,16 +54,11 @@ export function SalesPayoutNoticeView({ notice, settingsHref }: { notice: SalesP
   );
 }
 
-/** The month's numbers (mock v2 `.stats`) and the way to Stripe's own payout details. */
+/**
+ * The month's numbers (mock v2 `.stats`), the way to Stripe's own payout details, and the notes on what the numbers
+ * leave out or work out (this site's ledger, #91).
+ */
 export function SalesSummaryPanel({ page }: { page: SalesPage }) {
-  const { summary } = page;
-  const numbers = [
-    ["売上", yen(summary.salesYen)],
-    ["手数料", yen(-summary.feeYen)],
-    ["返金", yen(-summary.refundsYen)],
-    ["入金予定", yen(summary.expectedYen)],
-    ["入金済み", yen(summary.paidOutYen)],
-  ] as const;
   return (
     <section aria-labelledby="sales-summary" className={HOST_SURFACE}>
       <h2 id="sales-summary" className="sr-only">
@@ -72,7 +66,7 @@ export function SalesSummaryPanel({ page }: { page: SalesPage }) {
       </h2>
       <div className="flex flex-wrap items-center gap-x-[22px] gap-y-3 px-4 py-4 md:px-5">
         <dl className="flex flex-wrap gap-x-[18px] gap-y-3 md:gap-x-[22px]">
-          {numbers.map(([label, value]) => (
+          {page.figures.map(({ label, value }) => (
             <div key={label}>
               <dt className="text-xs font-bold text-muted">{label}</dt>
               <dd className="text-lg leading-[1.3] font-extrabold tabular-nums md:text-xl">{value}</dd>
@@ -85,8 +79,31 @@ export function SalesSummaryPanel({ page }: { page: SalesPage }) {
           <span className="sr-only">（新しいタブで開きます）</span>
         </a>
       </div>
+      {page.notes.length ? (
+        <ul className="space-y-1 border-t border-line px-4 py-3 text-[0.78125rem] leading-normal text-muted md:px-5">
+          {page.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
+}
+
+/** While the month is read (#91): where the numbers and lines will be. */
+export function SalesLoading() {
+  return (
+    <section aria-busy="true" className={`${HOST_SURFACE} px-4 py-6 md:px-5`}>
+      <p role="status" className="text-muted">
+        売上を読み込んでいます…
+      </p>
+    </section>
+  );
+}
+
+/** Above the numbers of this site's ledger (#91): whose sales these are, so NIHO's are not looked for here. */
+export function SalesScope({ text }: { text: string }) {
+  return <p className="mb-3.5 text-[0.8125rem] leading-normal text-ink-soft">{text}</p>;
 }
 
 /**

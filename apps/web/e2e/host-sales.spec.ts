@@ -314,3 +314,103 @@ test.describe("320px narrow phone", () => {
     expect(await providerPanel(page).getByRole("textbox", { name: "特商法表示 URL" }).evaluate((input) => getComputedStyle(input).fontSize)).toBe("16px");
   });
 });
+
+// 売上 of the bookings made on this site, read from the experience DB's ledger in http mode (#91). The preview's
+// `?mock=site-sales` sign-in shows the same screen from a synthetic ledger (src/host/mock/site-sales.ts).
+test.describe("this site's ledger (?mock=site-sales)", () => {
+  const notes = (page: Page, month: string) => summary(page, month).getByRole("listitem");
+
+  test("売上 shows this site's month only: its numbers, fees, refunds and lines, a month at a time", async ({ page }, testInfo) => {
+    await signIn(page, "?mock=site-sales");
+    await page.goto("/host/sales");
+    await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
+    await expect(page.getByText("このサイトで受けた予約の売上です。NIHO で販売している体験の売上は含みません。")).toBeVisible();
+    await expect(monthNav(page)).toContainText("2026年10月");
+
+    const october = summary(page, "2026年10月");
+    await expect(october.locator("dt")).toHaveText(["売上", "手数料", "返金", "受取額"]);
+    for (const [label, value] of [["売上", "¥105,000"], ["手数料", "−¥7,000"], ["返金", "−¥35,000"], ["受取額", "¥63,000"]]) await expect(figure(october, label!), label).toHaveText(value!);
+    // No payout is made up here: Stripe has them.
+    await expect(october.locator("dt", { hasText: /入金/ })).toHaveCount(0);
+    await expect(october.getByRole("link", { name: /Stripe で入金の明細を見る/ })).toHaveAttribute("href", "https://connect.stripe.com/express_login");
+    await expect(notes(page, "2026年10月")).toHaveText([
+      "受取額は、売上から NIHO の手数料と返金を引いた額です。口座への入金の予定と実績は Stripe で確認できます。",
+      "一部返金で戻る NIHO の手数料は、返金額に比例した見込みです。Stripe の計算と 1 円ずれることがあります。",
+    ]);
+
+    const rows = lines(page, "2026年10月").getByRole("listitem");
+    await expect(rows).toHaveCount(7);
+    for (const text of ["10/18", "Kamakura tea time · Mateo García", "体験サイト · 10/25 14:00 の回 · 2名 · 手数料 −¥1,200", "¥12,000", "計上済み"]) await expect(rows.nth(0)).toContainText(text);
+    const full = rows.filter({ hasText: "返金 · Hannah Kim" });
+    await expect(full).toContainText("全額返金 · 手数料の戻り ¥3,000");
+    await expect(full).toContainText("返金済み");
+    await expect(full.getByText("−¥30,000")).toHaveCSS("color", DANGER);
+    const partial = rows.filter({ hasText: "返金 · Lucas Martin" });
+    await expect(partial).toContainText("一部返金 · 手数料の戻り ¥500（見込み）");
+    await expect(partial).toContainText("返金中");
+    // Paid at 00:30 on the 5th in Japan.
+    const review = rows.filter({ hasText: "Emma Wilson" });
+    await expect(review).toContainText("10/05");
+    await expect(review).toContainText("確認待ち");
+    await expect(rows.filter({ hasText: "Sofia Rossi" }).getByText("¥45,000")).not.toHaveCSS("color", DANGER);
+    // PC: the state is a pill on the right. Phones: it follows 補足.
+    if (isDesktop(testInfo.project.name)) await expect(review.getByText("確認待ち", { exact: true })).toBeVisible();
+    else await expect(review.getByText(/· 確認待ち$/)).toBeVisible();
+
+    await monthNav(page).getByRole("link", { name: "前の月" }).click();
+    await expect(page).toHaveURL(/\/host\/sales\?month=2026-09$/);
+    const september = summary(page, "2026年9月");
+    for (const [label, value] of [["売上", "¥36,000"], ["手数料", "−¥3,600"], ["返金", "¥0"], ["受取額", "¥32,400"]]) await expect(figure(september, label!), label).toHaveText(value!);
+    // The last evening of September in Japan is September.
+    await expect(lines(page, "2026年9月").getByRole("listitem").nth(0)).toContainText("09/30");
+    await expect(notes(page, "2026年9月")).toHaveCount(1);
+    // The provider's first month, and this month the last: no way further.
+    await expect(monthNav(page).getByRole("link", { name: "前の月" })).toHaveCount(0);
+    await monthNav(page).getByRole("link", { name: "次の月" }).click();
+    await expect(page).toHaveURL(/\?month=2026-10$/);
+    await expect(monthNav(page).getByRole("link", { name: "次の月" })).toHaveCount(0);
+
+    // A month outside them opens this month.
+    for (const month of ["2026-12", "2026-08"]) {
+      await page.goto(`/host/sales?month=${month}`);
+      await expect(monthNav(page)).toContainText("2026年10月");
+    }
+  });
+
+  test("ホーム's month card is this site's", async ({ page }) => {
+    await signIn(page, "?mock=site-sales");
+    const month = page.getByRole("region", { name: "10月" });
+    await expect(month).toContainText("このサイトで受けた予約の分");
+    await expect(month.locator("dt")).toHaveText(["売上", "返金", "受取額", "支払い"]);
+    await expect(month.locator("dd")).toHaveText(["¥105,000", "−¥35,000", "¥63,000", "5件"]);
+    await month.getByRole("link", { name: "売上を見る" }).click();
+    await expect(page).toHaveURL(/\/host\/sales$/);
+  });
+
+  test("has no WCAG 2.2 AA violations", async ({ page }) => {
+    await signIn(page, "?mock=site-sales");
+    await page.goto("/host/sales");
+    await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
+    await audit(page, "/host/sales (this site)");
+    await page.goto("/host/home");
+    await audit(page, "/host/home (this site's month)");
+  });
+
+  test.describe("320px narrow phone", () => {
+    test.use({ viewport: { width: 320, height: 640 } });
+    test.beforeEach(({}, testInfo) => test.skip(testInfo.project.name !== "host-mobile-360"));
+
+    test("fits, with every amount and the month switch on screen", async ({ page }) => {
+      await signIn(page, "?mock=site-sales");
+      await page.goto("/host/sales");
+      expect(await overflowX(page), "sales").toBeLessThanOrEqual(0);
+      for (const locator of [monthNav(page).getByRole("link", { name: "前の月" }), summary(page, "2026年10月").getByRole("link", { name: /Stripe で入金の明細を見る/ }), lines(page, "2026年10月").getByText("−¥30,000")]) {
+        await locator.scrollIntoViewIfNeeded();
+        const box = await locator.boundingBox();
+        expect(box && box.x >= 0 && box.x + box.width <= 320).toBe(true);
+      }
+      await page.goto("/host/home");
+      expect(await overflowX(page), "home").toBeLessThanOrEqual(0);
+    });
+  });
+});

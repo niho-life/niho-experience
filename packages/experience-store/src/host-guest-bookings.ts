@@ -397,7 +397,7 @@ function answersOf(stored: unknown, terms: unknown): HostGuestBookingAnswer[] {
   });
 }
 
-function platformFeeOf(value: unknown): PlatformFeeSnapshot | null {
+export function platformFeeOf(value: unknown): PlatformFeeSnapshot | null {
   const fee = record(value);
   if (typeof fee.supportEnabled !== "boolean" || (fee.basisPoints !== 1000 && fee.basisPoints !== 1500)) return null;
   return { supportEnabled: fee.supportEnabled, basisPoints: fee.basisPoints, amount: amount(fee.amount, "pricing_snapshot.platformFee.amount") };
