@@ -50,6 +50,8 @@ export interface HomeUpcoming {
   dietary: string;
   /** Today's rows only: 開始前 / 開催中 / 終了, and "終了 · 出欠が未記録" (warn) while attendance is still to record. */
   phase: { text: string; tone: "warn" | "muted" } | null;
+  /** Where the row's bookings come from when it is said: "このサイトの予約" beside NIHO's bookings (#285 slice 8b). */
+  source?: string;
 }
 
 export interface HomeMonth {

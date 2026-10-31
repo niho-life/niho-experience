@@ -37,6 +37,8 @@ import {
   type SessionCancelReason,
   type SessionCancelResult,
 } from "@/host/session";
+import { SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_BOOKING_READ_ONLY_TEXT } from "@/host/site-bookings";
+import { siteSessionCountLines } from "@/host/site-sessions";
 import type { HostAttendance, HostBooking } from "@/host/types";
 import { DISABLED, useFocusAfterRender } from "./editor-parts";
 import { DANGER_BUTTON } from "./HostBookingDialogs";
@@ -57,6 +59,12 @@ export interface HostSessionProps {
   conversations: readonly BookingConversation[];
   /** The URL's own `?providerId=` (when well formed), carried on every link. */
   providerId: string | null;
+  /**
+   * Bookings made on this site (#285 slice 8b, experience DB, http mode), read only: no attendance, no thread with
+   * the guest (slice 6) and no calling off (slice 7). `besideNiho`: NIHO's bookings are 予約's own and these are its
+   * `?source=site`, where "‹ 予約" goes back. Absent in mock mode.
+   */
+  site?: { besideNiho: boolean } | null;
 }
 
 /** Label 72px + value, as a booking's 申込内容. */
@@ -130,8 +138,11 @@ function Attendance({ booking, open, onMark }: { booking: HostBooking; open: boo
   );
 }
 
-/** One guest: who, how many, from where, how to reach them on the day, what to look out for, and the way to their thread. */
-function GuestRow({ booking, messageHref, aside, children }: { booking: HostBooking; messageHref: string; aside?: ReactNode; children?: (nameId: string) => ReactNode }) {
+/**
+ * One guest: who, how many, from where, how to reach them on the day, what to look out for, and the way to their
+ * thread (none for this site's bookings yet: `messageHref` null).
+ */
+function GuestRow({ booking, messageHref, aside, children }: { booking: HostBooking; messageHref: string | null; aside?: ReactNode; children?: (nameId: string) => ReactNode }) {
   const nameId = `guest-${booking.id}`;
   return (
     <li className="border-t border-line px-4 py-3.5 first:border-t-0 md:px-5">
@@ -157,9 +168,11 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
               </p>
               {aside}
             </div>
-            <Link href={messageHref} aria-describedby={nameId} className={consoleButtonClass("secondary", "sm")}>
-              メッセージ
-            </Link>
+            {messageHref ? (
+              <Link href={messageHref} aria-describedby={nameId} className={consoleButtonClass("secondary", "sm")}>
+                メッセージ
+              </Link>
+            ) : null}
           </div>
           <Tags booking={booking} />
           <Words booking={booking} />
@@ -179,8 +192,11 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
  * Mock mode: attendance and the cancellation change this screen only (the preview note says
  * nothing is kept), and no booking fails to cancel. TODO(#87): send them to NIHO
  * (niho-app#19321) and show what it reads back, with NIHO's result for each booking.
+ *
+ * This site's bookings (`site`, #285 slice 8b) are read only: the guests with their phones, words and payments under
+ * review (確認待ち, counted with the participants as ホーム counts them), and where to ask for a cancellation.
  */
-export function HostSession({ session, now, conversations, providerId }: HostSessionProps) {
+export function HostSession({ session, now, conversations, providerId, site = null }: HostSessionProps) {
   const [bookings, setBookings] = useState<readonly HostBooking[]>(session.bookings);
   const [notice, setNotice] = useState("");
   const [cancellation, setCancellation] = useState<{ reason: SessionCancelReason; results: SessionCancelResult[] } | null>(null);
@@ -188,26 +204,27 @@ export function HostSession({ session, now, conversations, providerId }: HostSes
   const focusLater = useFocusAfterRender();
 
   const heading = sessionHeading(session);
-  const backHref = bookingsHref({ providerId });
+  const backHref = bookingsHref({ providerId, source: site?.besideNiho ? "site" : null });
   const phase = sessionPhase(session, now);
   const today = now.slice(0, 10);
   const { participants, requests } = sessionSections(session.bookings, bookings);
-  const counts = sessionCountLines(bookings, session.capacity);
+  const counts = site ? siteSessionCountLines(bookings) : sessionCountLines(bookings, session.capacity);
   const dietary = dietarySummary(bookings);
   const attendance = attendanceCounts(bookings);
   const failed = cancellation?.results.filter((result) => !result.ok) ?? [];
 
   const messageHref = (booking: HostBooking) => {
+    // This site's bookings (#285) have no thread with the guest until slice 6.
+    if (site) return null;
     const thread = conversations.find((conversation) => conversation.bookingId === booking.id);
     return thread ? messagesHref({ providerId, thread: thread.threadId }) : messagesHref({ providerId, booking: booking.id });
   };
-  const contacts: SessionContact[] = [...participants, ...requests].map((booking) => ({
-    id: booking.id,
-    guest: booking.guest,
-    people: `${booking.guests}名`,
-    status: booking.status === "confirmed" ? null : bookingStatusLabel(booking, today),
-    href: messageHref(booking),
-  }));
+  const contacts: SessionContact[] = [...participants, ...requests].flatMap((booking) => {
+    const href = messageHref(booking);
+    return href ? [{ id: booking.id, guest: booking.guest, people: `${booking.guests}名`, status: booking.status === "confirmed" ? null : bookingStatusLabel(booking, today), href }] : [];
+  });
+  // Nothing on this screen changes this site's bookings yet.
+  const cancellable = !site && canCancelSession(bookings, phase, cancellation !== null);
 
   const mark = (id: string, value: HostAttendance) => {
     const booking = bookings.find((item) => item.id === id);
@@ -230,6 +247,7 @@ export function HostSession({ session, now, conversations, providerId }: HostSes
       <HostSubHeader backHref={backHref} backLabel="予約" title={heading} />
       <HostPageBody>
         <SubPageHead backHref={backHref} backLabel="予約" title={heading} />
+        {site ? <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">このサイトで受けた予約です</p> : null}
 
         {/* 中止 and its result for each booking. The status line stays in place so the result is announced. */}
         <section aria-labelledby={cancellation ? CANCELLED_HEADING : undefined} className={cancellation ? "mb-3.5 rounded-2xl border border-danger/20 bg-danger-pale px-4 py-3.5 md:px-5" : ""}>
@@ -285,15 +303,16 @@ export function HostSession({ session, now, conversations, providerId }: HostSes
                 <span lang="en">{session.meetingArea}</span>
               </Row>
             ) : null}
-            <Row label="食べもの">{dietary || <span className="text-muted">{NO_DIETARY_TEXT}</span>}</Row>
-            {phase !== "before" ? <Row label="出欠">{attendanceSummary(attendance)}</Row> : null}
+            {/* This site's bookings keep food wishes only among the answers, shown with each guest; and no attendance. */}
+            {site ? null : <Row label="食べもの">{dietary || <span className="text-muted">{NO_DIETARY_TEXT}</span>}</Row>}
+            {phase !== "before" && !site ? <Row label="出欠">{attendanceSummary(attendance)}</Row> : null}
           </dl>
         </section>
 
         <section aria-labelledby="session-guests" className={`${HOST_SURFACE} mt-3.5`}>
           <div className="px-4 pt-4 pb-2 md:px-5">
             <SectionTitle id="session-guests">参加者</SectionTitle>
-            {phase === "before" && participants.some((booking) => booking.status === "confirmed") ? <p className="mt-0.5 text-xs text-muted">出欠は{ATTENDANCE_LOCKED_TEXT}</p> : null}
+            {phase === "before" && !site && participants.some((booking) => booking.status === "confirmed") ? <p className="mt-0.5 text-xs text-muted">出欠は{ATTENDANCE_LOCKED_TEXT}</p> : null}
           </div>
           <p role="status" className={notice ? `${NOTICE} mx-4 mb-2 md:mx-5` : "sr-only"}>
             {notice ? (
@@ -308,7 +327,15 @@ export function HostSession({ session, now, conversations, providerId }: HostSes
               {participants.map((booking) => (
                 <GuestRow key={booking.id} booking={booking} messageHref={messageHref(booking)}>
                   {() =>
-                    booking.status === "confirmed" ? (
+                    site ? (
+                      // A payment under review: paid after the hold ended, with no seat kept.
+                      booking.status === "payment_review" ? (
+                        <div className="mt-2.5">
+                          <StatusPill status={bookingStatusLabel(booking, today)} />
+                          <p className="mt-1.5 text-[0.78125rem] leading-normal font-extrabold text-warn">{SITE_BOOKING_PAYMENT_REVIEW_TEXT}</p>
+                        </div>
+                      ) : null
+                    ) : booking.status === "confirmed" ? (
                       <Attendance booking={booking} open={canRecordAttendance(booking, phase)} onMark={(value) => mark(booking.id, value)} />
                     ) : (
                       <div className="mt-2.5">
@@ -355,14 +382,15 @@ export function HostSession({ session, now, conversations, providerId }: HostSes
           </section>
         ) : null}
 
-        {contacts.length || canCancelSession(bookings, phase, cancellation !== null) ? (
+        {site ? <p className="mt-5 text-[0.8125rem] leading-normal text-ink-soft">{SITE_BOOKING_READ_ONLY_TEXT}</p> : null}
+        {contacts.length || cancellable ? (
           <div className="mt-5 flex flex-col gap-2.5 md:flex-row md:flex-wrap">
             {contacts.length ? (
               <button type="button" onClick={() => setAsking("contact")} className={consoleButtonClass("secondary", "md", "max-md:w-full")}>
                 参加者に連絡する
               </button>
             ) : null}
-            {canCancelSession(bookings, phase, cancellation !== null) ? (
+            {cancellable ? (
               <button type="button" onClick={() => setAsking("cancel")} className={`${DANGER_BUTTON} max-md:w-full`}>
                 この回を中止する（雨天・急病など）
               </button>

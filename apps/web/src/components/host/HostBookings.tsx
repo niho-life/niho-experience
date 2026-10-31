@@ -79,8 +79,8 @@ export interface HostBookingsProps {
   /** The last message of each booking's thread (メッセージ, #106). */
   conversations: readonly BookingConversation[];
   /**
-   * Bookings made on this site (#285 slice 8, experience DB, http mode), read only: a session's heading does
-   * not open この回 and no booking leads to メッセージ yet. `nextCursor` reads the rest of the list (続きを見る),
+   * Bookings made on this site (#285 slice 8, experience DB, http mode), read only: a session's heading opens
+   * their この回 (slice 8b) and no booking leads to メッセージ yet. `nextCursor` reads the rest of the list (続きを見る),
    * null when it holds them all. `besideNiho`: NIHO's bookings are the screen's own and these are its
    * `?source=site`, which every link keeps, with the way back. Absent in mock mode.
    */
@@ -258,17 +258,11 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                   <div key={group.key} className="border-t border-line first:border-t-0">
                     {/* One session: its day and time, the experience and the seats its requests and bookings keep. It opens the session (この回), apart from the rows' bookings. */}
                     <h2 className="font-sans text-xs leading-normal font-extrabold tracking-normal text-ink-soft">
-                      {live ? (
-                        // この回 does not read this site's bookings yet: the heading names the session only.
-                        <span className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 md:px-4">
-                          <SessionWords group={group} />
-                        </span>
-                      ) : (
-                        <Link href={sessionHref({ providerId, ...group })} className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 hover:bg-sand focus-visible:outline-offset-[-3px] md:px-4">
-                          <SessionWords group={group} />
-                          <HostIcon name="chevronRight" className="size-3.5 text-muted" />
-                        </Link>
-                      )}
+                      {/* This site's sessions keep `?source=site` beside NIHO's bookings, so この回 leads back here (#285 slice 8b). */}
+                      <Link href={sessionHref({ providerId, source, ...group })} className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 hover:bg-sand focus-visible:outline-offset-[-3px] md:px-4">
+                        <SessionWords group={group} />
+                        <HostIcon name="chevronRight" className="size-3.5 text-muted" />
+                      </Link>
                     </h2>
                     <ul>
                       {group.bookings.map((booking) => {

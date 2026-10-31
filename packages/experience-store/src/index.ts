@@ -81,6 +81,9 @@ export type {
   HostGuestBookingListOptions,
   HostGuestBookingPage,
   HostGuestBookingStatus,
+  HostGuestSession,
+  HostGuestSessionKey,
+  HostGuestSessionListOptions,
 } from "./host-guest-bookings.ts";
 export type {
   BookingQuestion,

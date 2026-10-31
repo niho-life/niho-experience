@@ -31,12 +31,13 @@ export const SITE_BOOKING_OWNER_ONLY_TEXT = "このサイトで受けた予約�
 /** The list reads this many bookings: the upcoming ones from today, the nearest first, then the latest past ones. */
 const LIST_LIMIT = 100;
 
-function ownerActor(providerId: string, nihoUserId: string): HostActor {
+/** NIHO said this account is the provider's OWNER; the store checks its own membership as well. */
+export function ownerActor(providerId: string, nihoUserId: string): HostActor {
   return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
-/** The start of the day in Japan: the list's これから counts today's bookings, as the screen does. */
-function startOfJapanDay(today: string): string {
+/** The start of the day in Japan: the list's これから counts today's bookings, as the screen does (ホーム's 今日 too). */
+export function startOfJapanDay(today: string): string {
   return new Date(`${today}T00:00:00+09:00`).toISOString();
 }
 

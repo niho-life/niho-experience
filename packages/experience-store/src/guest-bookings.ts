@@ -21,19 +21,28 @@ import {
   type GuestCheckoutOccurrenceReason,
 } from "./errors.ts";
 import {
+  assertSessionWindow,
   countShown,
   cursorAfter,
   decodeBookingCursor,
   hostGuestBookingFromRow,
+  hostGuestSessionFromRow,
   listBoundary,
   listLimit,
   publicBookingIdOf,
   requireBookingsOwner,
   selectOne,
   selectSegment,
+  selectSessionBookings,
+  selectSessions,
+  sessionKeyOf,
+  sessionWindowEnd,
   type HostGuestBooking,
   type HostGuestBookingListOptions,
   type HostGuestBookingPage,
+  type HostGuestSession,
+  type HostGuestSessionKey,
+  type HostGuestSessionListOptions,
 } from "./host-guest-bookings.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
@@ -991,6 +1000,38 @@ export class GuestBookingRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireBookingsOwner(client, actor);
       return countShown(client, actor.providerId);
+    });
+  }
+
+  /* ---------- the host console (OWNER): ホーム and この回 (#285 slice 8b) ---------- */
+
+  /**
+   * ホーム's 今日・明日・これからの開催 for the provider's OWNER: the sessions with guests from this site starting
+   * at `from` (now by default) or later and before `to`, the nearest first, with how many may come. Confirmed
+   * bookings and payments under review count; cancellations and holds never do. A session is what the bookings'
+   * occurrence snapshots name (HostGuestSession), as 予約 groups them. No guest's name or contact.
+   */
+  async listGuestSessionsForHost(actor: HostActor, options: HostGuestSessionListOptions = {}): Promise<HostGuestSession[]> {
+    const limit = listLimit(options.limit);
+    const to = sessionWindowEnd(options.to);
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      const from = await listBoundary(client, options.from);
+      assertSessionWindow(from, to);
+      return (await selectSessions(client, actor.providerId, from, to, limit)).map(hostGuestSessionFromRow);
+    });
+  }
+
+  /**
+   * この回 for the provider's OWNER: the bookings made here for one session (CONFIRMED, PAYMENT_REVIEW, CANCELLED;
+   * never a hold), in the order they were made, with the phone the guest gave: この回 is the one screen that shows
+   * it. None for a session without bookings here, or another provider's. No email address.
+   */
+  async listGuestBookingsForSession(actor: HostActor, session: HostGuestSessionKey): Promise<HostGuestBooking[]> {
+    const key = sessionKeyOf(session);
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      return (await selectSessionBookings(client, actor.providerId, key)).map(hostGuestBookingFromRow);
     });
   }
 

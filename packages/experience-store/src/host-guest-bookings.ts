@@ -10,7 +10,8 @@ import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
  * provider's OWNER reads of them. Read only: cancellation and refunds come with slice 7, messages with the
  * guest with slice 6. NIHO proves the account and its OWNER role; the experience DB checks its own OWNER
  * membership as well (ADR 0002), as 予約前の質問 and 設定 › 通知 do. The guest's email address is never
- * selected here: the host reaches the guest through NIHO.
+ * selected here: the host reaches the guest through NIHO. ホーム reads the sessions with guests and この回 one
+ * session's bookings (slice 8b); the phone the store returns is for この回 only (owner decision 2026-10-22, #103).
  */
 
 /** The statuses a host sees. A HOLD (checkout under way) or EXPIRED (abandoned) hold is not a booking. */
@@ -96,6 +97,47 @@ export interface HostGuestBookingListOptions {
   readonly limit?: number;
 }
 
+/**
+ * One session with guests from this site (ホーム, #285 slice 8b): an offer of an experience on one day at one
+ * time, as its bookings' occurrence snapshots name it. Those are 予約's session headings and この回's address
+ * (`?date=&start=&experience=&offer=`), so the three screens agree on what a session is, also for an occurrence
+ * a host moved before it was booked.
+ */
+export interface HostGuestSession {
+  readonly productId: string;
+  readonly productTitle: string;
+  readonly offerId: string;
+  /** YYYY-MM-DD and HH:MM in the occurrence's time zone. */
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+  readonly startUtc: string;
+  readonly endUtc: string;
+  /** The adults and children of its confirmed bookings and of its payments under review: who may come. */
+  readonly participants: number;
+  /** How many such bookings. */
+  readonly bookings: number;
+  /** How many of them are payments under review (確認待ち): they keep no seat. */
+  readonly paymentReviews: number;
+}
+
+export interface HostGuestSessionListOptions {
+  /** Sessions starting at it or later (canonical UTC). Now by default. */
+  readonly from?: string;
+  /** Sessions starting before it (canonical UTC, after `from`). No end by default. */
+  readonly to?: string;
+  /** 1-100; 50 by default. */
+  readonly limit?: number;
+}
+
+/** One session as この回's address names it: the experience, the offer, and the snapshot's local day and start. */
+export interface HostGuestSessionKey {
+  readonly productId: string;
+  readonly offerId: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+}
+
 type Segment = "UPCOMING" | "PAST";
 interface Cursor {
   readonly from: string;
@@ -107,6 +149,14 @@ interface Cursor {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
 const START = "(b.occurrence_snapshot->>'startUtc')::timestamptz";
+/** A session as the snapshot names it (HostGuestSession). */
+const RULE = "(b.occurrence_snapshot->>'ruleId')";
+const LOCAL_DATE = "(b.occurrence_snapshot->>'localDate')";
+const LOCAL_START = "(b.occurrence_snapshot->>'localStartTime')";
+/** Who may come to a session: a payment under review keeps no seat, but the guest paid and may come. Never a cancellation. */
+const SESSION_GUEST_STATUSES = ["CONFIRMED", "PAYMENT_REVIEW"] as const;
+const LOCAL_DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
+const LOCAL_TIME_FORMAT = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** A current OWNER, not capped below OWNER by NIHO and not a product operator (as 予約前の質問). */
 export async function requireBookingsOwner(client: PoolClient, actor: HostActor): Promise<void> {
@@ -211,6 +261,61 @@ export async function countShown(client: PoolClient, providerId: string): Promis
   return Number(result.rows[0]!.n);
 }
 
+/** `to` of listGuestSessionsForHost: a canonical instant, or null without one. Checked against `from` once that is known. */
+export function sessionWindowEnd(value: unknown): string | null {
+  return value === undefined ? null : instant(value, "to");
+}
+
+export function assertSessionWindow(from: string, to: string | null): void {
+  if (to !== null && Date.parse(to) <= Date.parse(from)) throw new StoreValidationError("to must be after from.");
+}
+
+/** この回's address as the store reads it: identifiers, a YYYY-MM-DD day and an HH:MM start. */
+export function sessionKeyOf(value: unknown): HostGuestSessionKey {
+  const { productId, offerId, localDate, localStartTime } = record(value);
+  if (typeof productId !== "string" || typeof offerId !== "string") throw new StoreValidationError("productId and offerId must be identifiers.");
+  assertStoreIdentifier(productId, "productId");
+  assertStoreIdentifier(offerId, "offerId");
+  if (typeof localDate !== "string" || !LOCAL_DATE_FORMAT.test(localDate)) throw new StoreValidationError("localDate must be YYYY-MM-DD.");
+  if (typeof localStartTime !== "string" || !LOCAL_TIME_FORMAT.test(localStartTime)) throw new StoreValidationError("localStartTime must be HH:MM.");
+  return { productId, offerId, localDate, localStartTime };
+}
+
+/**
+ * The provider's sessions with guests from this site starting in [from, to), the nearest first: one row per
+ * experience, offer, day and start of the snapshots. Never a guest's name or contact: only counts.
+ */
+export async function selectSessions(client: PoolClient, providerId: string, from: string, to: string | null, limit: number): Promise<DbRow[]> {
+  const result = await client.query<DbRow>(
+    `SELECT b.product_id, p.public_title, ${RULE} AS rule_id, ${LOCAL_DATE} AS local_date, ${LOCAL_START} AS local_start_time,
+            min(b.occurrence_snapshot->>'timeZone') AS time_zone, min(${START}) AS start_utc,
+            max((b.occurrence_snapshot->>'endUtc')::timestamptz) AS end_utc,
+            sum(g.adult_count + g.child_count)::int AS participants, count(*)::int AS bookings,
+            (count(*) FILTER (WHERE b.status = 'PAYMENT_REVIEW'))::int AS payment_reviews
+       FROM bookings b
+       JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+       JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+      WHERE b.provider_id = $1 AND b.status = ANY($2::text[])
+        AND ${START} >= $3::timestamptz AND ($4::timestamptz IS NULL OR ${START} < $4::timestamptz)
+      GROUP BY b.product_id, p.public_title, ${RULE}, ${LOCAL_DATE}, ${LOCAL_START}
+      ORDER BY min(${START}), b.product_id, ${RULE}
+      LIMIT $5`,
+    [providerId, SESSION_GUEST_STATUSES, from, to, limit],
+  );
+  return result.rows;
+}
+
+/** Every booking a host sees of one session (confirmed, under review, cancelled), in the order they were made. */
+export async function selectSessionBookings(client: PoolClient, providerId: string, key: HostGuestSessionKey): Promise<DbRow[]> {
+  const result = await client.query<DbRow>(
+    `${SELECT_HOST_BOOKINGS}
+       AND b.product_id = $3 AND ${RULE} = $4 AND ${LOCAL_DATE} = $5 AND ${LOCAL_START} = $6
+     ORDER BY b.created_at, b.public_booking_id`,
+    [providerId, HOST_GUEST_BOOKING_STATUSES, key.productId, key.offerId, key.localDate, key.localStartTime],
+  );
+  return result.rows;
+}
+
 /** The next page's cursor: after the page's last row, or at the start of the past once the upcoming ran out. */
 export function cursorAfter(from: string, segment: Segment, row: DbRow | null): string {
   return encodeBookingCursor({ from, segment, after: row ? { startUtc: startOf(row), id: String(row.public_booking_id) } : null });
@@ -277,6 +382,22 @@ function platformFeeOf(value: unknown): PlatformFeeSnapshot | null {
 
 const optionalIso = (row: DbRow, key: string): string | null => (row[key] === null || row[key] === undefined ? null : isoValue(row, key));
 const optionalText = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+export function hostGuestSessionFromRow(row: DbRow): HostGuestSession {
+  return {
+    productId: text(row.product_id, "product_id"),
+    productTitle: text(row.public_title, "public_title"),
+    offerId: text(row.rule_id, "occurrence_snapshot.ruleId"),
+    localDate: text(row.local_date, "occurrence_snapshot.localDate"),
+    localStartTime: text(row.local_start_time, "occurrence_snapshot.localStartTime"),
+    timeZone: text(row.time_zone, "occurrence_snapshot.timeZone"),
+    startUtc: isoValue(row, "start_utc"),
+    endUtc: isoValue(row, "end_utc"),
+    participants: amount(row.participants, "participants"),
+    bookings: amount(row.bookings, "bookings"),
+    paymentReviews: amount(row.payment_reviews, "payment_reviews"),
+  };
+}
 
 export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
   const occurrence = record(row.occurrence_snapshot);
