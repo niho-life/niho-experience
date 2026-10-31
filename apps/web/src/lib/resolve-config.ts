@@ -209,6 +209,19 @@ function googleCalendarJobSettings(apiMode: "mock" | "http", env: Env): {
   return { busySyncEnabled, bookingEventsEnabled, audience, serviceAccountEmail };
 }
 
+/**
+ * この口座への入金 on 売上 (#91): the balance and payouts of the Stripe accounts the OWNER's sales here go to, read from
+ * Stripe with the platform key (GETs only). HTTP only, and only under this site's ledger. Turned on without the ledger
+ * or the key, the server stops at start-up (the message names the setting, never its value). The key is a secret read
+ * where it is used, so it is not kept here.
+ */
+function hostSalesPayoutsSetting(apiMode: "mock" | "http", env: Env, hostSalesLedgerEnabled: boolean): boolean {
+  if (apiMode !== "http" || env.HOST_SALES_PAYOUTS_ENABLED !== "true") return false;
+  if (!hostSalesLedgerEnabled) throw new Error("HOST_SALES_PAYOUTS_ENABLED=true needs HOST_SALES_LEDGER_ENABLED=true (and HOST_CONSOLE_ENABLED=true) in http mode");
+  if (!env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim()) throw new Error("HOST_SALES_PAYOUTS_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY in http mode");
+  return true;
+}
+
 /** The terms version a traveler agrees to (consent.agreedVersion, 1-100 characters): printable ASCII without spaces. */
 const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
 
@@ -396,6 +409,9 @@ export function resolveConfig(env: Env) {
   // 売上 (#91) from the experience DB's payment ledger: the OWNER's sales of bookings made on this site. The mock keeps
   // its synthetic ledger; http opens per environment once the ledger's reads are accepted against real bookings.
   const hostSalesLedgerEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_SALES_LEDGER_ENABLED === "true";
+  // この口座への入金 (#91) under that ledger: Stripe's payouts to the OWNER's accounts, which take NIHO's sales too. The
+  // mock shows a synthetic one with its synthetic ledger; http opens per environment once read against Stripe's test mode.
+  const hostSalesPayoutsEnabled = hostSalesPayoutsSetting(apiMode, env, hostSalesLedgerEnabled);
   // 予約前の質問 (#105/#106) kept in the experience DB (docs/guest-questions.md): the traveler's "Ask the host", the
   // reply page and the OWNER's メッセージ. The mock keeps its own synthetic questions; http opens per environment
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
@@ -518,6 +534,7 @@ export function resolveConfig(env: Env) {
     experienceTranslateApiEnabled,
     hostNotificationSettingsEnabled,
     hostSalesLedgerEnabled,
+    hostSalesPayoutsEnabled,
     guestQuestionsEnabled,
     guestReviewsEnabled,
     guestBookingEnabled: guestBooking.enabled,

@@ -1,4 +1,5 @@
 import type { HostSaleEntry } from "@niho-experience/experience-store";
+import type { SitePayoutsRead } from "../site-sales-payouts";
 
 /*
  * 売上 as the experience DB's ledger gives it (#91), invented for the preview's `?mock=site-sales` sign-in: the
@@ -45,3 +46,20 @@ export const MOCK_SITE_SALES: readonly HostSaleEntry[] = [
   payment({ occurredAtUtc: "2026-09-30T14:30:00.000Z", publicBookingId: "00000000-0000-4000-8000-00000000a930", productTitle: TEA, localDate: "2026-10-03", localStartTime: "10:00", adultCount: 1, guestName: "Ava Johnson", amount: 6000 }),
   payment({ occurredAtUtc: "2026-09-20T03:00:00.000Z", publicBookingId: "00000000-0000-4000-8000-00000000a920", productTitle: DINNER, localDate: "2026-09-26", localStartTime: "18:00", adultCount: 2, guestName: "Noah Schmidt", amount: 30000 }),
 ];
+
+/**
+ * この口座への入金 as Stripe would give it for the sample kitchen's account (#91): its balance on the preview's day
+ * (2026-10-21) and its payouts in September and October, one still on its way. The account also takes NIHO's sales, so
+ * the amounts are not this ledger's. Nothing here is a real account, balance or payout.
+ */
+export const MOCK_SITE_PAYOUTS: SitePayoutsRead = {
+  accounts: 1,
+  balance: [{ currency: "JPY", available: 18_000, pending: 24_500 }],
+  payouts: [
+    { key: "5a3f0c1e9b7d2a40", amount: 38_000, currency: "JPY", arrivalDateUtc: "2026-10-23T00:00:00.000Z", status: "IN_TRANSIT" },
+    { key: "1c8e4b2f6a9d0e37", amount: 52_300, currency: "JPY", arrivalDateUtc: "2026-10-09T00:00:00.000Z", status: "PAID" },
+    { key: "9d2b7e0a4c1f8e65", amount: 27_000, currency: "JPY", arrivalDateUtc: "2026-09-25T00:00:00.000Z", status: "PAID" },
+    { key: "e4a19c3d7b5f2086", amount: 31_400, currency: "JPY", arrivalDateUtc: "2026-09-11T00:00:00.000Z", status: "PAID" },
+  ],
+  more: false,
+};
