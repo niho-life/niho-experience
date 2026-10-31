@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { loadMoreSiteBookingList } from "@/host/actions";
+import { cancelSiteBooking, loadMoreSiteBookingList } from "@/host/actions";
 import {
   actionTime,
   approveBooking,
@@ -26,6 +26,7 @@ import { messagesHref, type BookingConversation } from "@/host/messages";
 import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import type { HostBooking } from "@/host/types";
 import { useFocusAfterRender } from "./editor-parts";
+import type { SiteCancelChoice } from "./HostSiteCancelDialogs";
 import { HostBookingDetail, type BookingConversationLink } from "./HostBookingDetail";
 import { HostIcon } from "./HostIcon";
 import { HostSubHeader } from "./HostSubHeader";
@@ -106,6 +107,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   const [cursor, setCursor] = useState<string | null>(live?.nextCursor ?? null);
   const [more, setMore] = useState<{ busy: boolean; failed: string | null }>({ busy: false, failed: null });
   const [notice, setNotice] = useState<{ bookingId: string; text: string } | null>(null);
+  /** 取り消して全額を返金する on a booking made here (#285 slice 7): the one being sent, and what failed. */
+  const [siteCancel, setSiteCancel] = useState<{ bookingId: string; busy: boolean; error: string | null } | null>(null);
   const focusLater = useFocusAfterRender();
   const focusDetail = useRef(false);
   const lastOpened = useRef<string | null>(null);
@@ -192,6 +195,32 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
     setExperiences((current) => mergeSiteExperiences(current, result.experiences));
     setCursor(result.nextCursor);
     setMore({ busy: false, failed: null });
+  };
+
+  /**
+   * Live: the OWNER cancels a booking made here with a full refund. The store answers the booking as it is now, which
+   * replaces the one on the list. The command's UUID is new for each confirmation: a second confirmation of a booking
+   * already cancelled changes nothing and says so.
+   */
+  const cancelSite = async (id: string, choice: SiteCancelChoice) => {
+    if (siteCancel?.busy) return;
+    setSiteCancel({ bookingId: id, busy: true, error: null });
+    let result: Awaited<ReturnType<typeof cancelSiteBooking>>;
+    try {
+      result = await cancelSiteBooking({ providerId: providerDataId, bookingId: id, commandId: crypto.randomUUID(), reason: choice.reason, note: choice.note });
+    } catch {
+      setSiteCancel({ bookingId: id, busy: false, error: SITE_BOOKING_LOAD_FAILED_TEXT });
+      return;
+    }
+    if (!result.ok) {
+      setSiteCancel({ bookingId: id, busy: false, error: result.message });
+      return;
+    }
+    const updated = result.booking;
+    setBookings((current) => current.map((booking) => (booking.id === id ? updated : booking)));
+    if (selectedId !== id) window.history.replaceState(null, "", bookingsHref({ ...query, booking: id }));
+    setSiteCancel(null);
+    report(id, result.message);
   };
 
   /** After 承認・お断り・取消: the result in words, and focus on the booking's name (the button pressed is gone). */
@@ -337,6 +366,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 onDecline={() => {
                   if (change(shown.id, declineBooking)) report(shown.id, "申込をお断りしました");
                 }}
+                onSiteCancel={live && shown.site ? (choice) => void cancelSite(shown.id, choice) : undefined}
+                siteCancel={siteCancel?.bookingId === shown.id ? siteCancel : undefined}
                 onCancel={(cancellation: BookingCancellation) => {
                   const done = change(shown.id, (booking, at) => cancelBooking(booking, cancellation, at));
                   if (!done) return;

@@ -35,6 +35,7 @@ const URL = "https://experience.example/internal/experience-jobs/v1/drain";
 const counts = {
   questionReplies: { claimed: 2, sent: 1, retried: 1, failed: 0 },
   bookingConfirmations: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   bookingLinks: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   guestTranslations: { claimed: 1, translated: 1, retried: 0, failed: 0, closed: 0, abandoned: 0 },
   guestErasure: { erased: 0 },
@@ -44,6 +45,7 @@ const counts = {
 const idle = {
   questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
   bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   bookingLinks: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   guestTranslations: { off: true },
   guestErasure: { erased: 0 },
@@ -228,13 +230,14 @@ describe("experienceJobsDrainResponse dependencies", () => {
     expect(await response.json()).toEqual({
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
+      bookingNotices: { error: "unavailable" },
       bookingLinks: { error: "unavailable" },
       guestTranslations: { error: "unavailable" },
       guestErasure: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { error: "unavailable" },
     });
-    expect(pool.connect).toHaveBeenCalledTimes(4);
+    expect(pool.connect).toHaveBeenCalledTimes(5);
     expect(pool.query).toHaveBeenCalledTimes(3);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();

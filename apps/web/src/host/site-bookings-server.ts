@@ -1,20 +1,25 @@
 import "server-only";
 import {
   StoreAccessDeniedError,
+  StoreConflictError,
   StoreNotFoundError,
   StoreValidationError,
+  type BookingCancellations,
+  type CancellationReason,
+  type CancellationResult,
   type GuestBookingRepository,
   type HostActor,
   type HostGuestBooking,
   type HostGuestBookingPage,
 } from "@niho-experience/experience-store";
-import { guestBookingRepository } from "@/lib/experience/store-server";
+import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-refunds";
+import { bookingCancellations, guestBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
 import type { BookingExperience } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
-import { todayInJapan } from "./format";
+import { todayInJapan, yen } from "./format";
 import type { HostActionResult } from "./payout";
 import { SITE_BOOKING_LOAD_FAILED_TEXT, siteBooking, siteBookingExperiences } from "./site-bookings";
 import type { HostBooking } from "./types";
@@ -106,7 +111,7 @@ export async function countSiteBookings(provider: HostProvider, nihoUserId: stri
 type OwnerCheck = { ok: true; bookings: GuestBookingRepository; actor: HostActor } | { ok: false; message: string };
 
 /** A usable session, the store, and NIHO saying this account owns the provider. */
-async function asOwner(providerId: string): Promise<OwnerCheck> {
+export async function asOwner(providerId: string): Promise<OwnerCheck> {
   const session = await readHostSession();
   if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const bookings = guestBookingRepository();
@@ -130,4 +135,56 @@ export async function loadMoreSiteBookings(providerId: string, cursor: string): 
     if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
     return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
   }
+}
+
+export const SITE_CANCEL_FAILED_TEXT = "取り消せませんでした。時間をおいて、もう一度お試しください。";
+export const SITE_CANCEL_NOT_CANCELLABLE_TEXT = "この予約は取り消せません。すでに取り消されているか、NIHO サポートが対応中です。";
+const SITE_CANCEL_CONFLICT_TEXT = "画面を開き直して、もう一度お試しください。";
+
+export interface SiteCancelInput {
+  commandId: string;
+  reason: CancellationReason;
+  /** The host's own note (never sent to the guest); empty for none. */
+  note: string;
+}
+
+/** 取消 by the OWNER (#285 slice 7): the store's command, then the refunds to Stripe. A refund Stripe cannot take now stays requested. */
+export async function runOwnerCancellation(
+  providerId: string,
+  run: (cancellations: BookingCancellations, actor: HostActor) => Promise<CancellationResult>,
+): Promise<{ ok: true; result: CancellationResult; bookings: GuestBookingRepository; actor: HostActor } | { ok: false; message: string }> {
+  const owner = await asOwner(providerId);
+  if (!owner.ok) return owner;
+  const cancellations = bookingCancellations();
+  if (!cancellations) return { ok: false, message: SITE_CANCEL_FAILED_TEXT };
+  let result: CancellationResult;
+  try {
+    result = await run(cancellations, owner.actor);
+  } catch (error) {
+    if (error instanceof StoreAccessDeniedError) return { ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT };
+    if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+    if (error instanceof StoreNotFoundError) return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
+    if (error instanceof StoreConflictError) return { ok: false, message: SITE_CANCEL_CONFLICT_TEXT };
+    console.error("Experience host cancellation failed", { error: error instanceof Error ? error.name : typeof error });
+    return { ok: false, message: SITE_CANCEL_FAILED_TEXT };
+  }
+  await sendRefunds(result.refunds, { cancellations, submit: stripeRefundSubmitter() });
+  return { ok: true, result, bookings: owner.bookings, actor: owner.actor };
+}
+
+/**
+ * 予約 › 取り消して全額を返金する (#285 slice 7): the OWNER cancels one booking made here; the guest gets the whole
+ * payment back (the host's decision) and an email. Answers the booking as the store has it now.
+ */
+export async function cancelSiteBookingAsOwner(providerId: string, bookingId: string, input: SiteCancelInput): Promise<HostActionResult<{ booking: HostBooking }>> {
+  const done = await runOwnerCancellation(providerId, (cancellations, actor) => cancellations.cancelAsHost(actor, bookingId, input));
+  if (!done.ok) return done;
+  let booking: HostBooking;
+  try {
+    booking = siteBooking(await done.bookings.getGuestBookingForHost(done.actor, bookingId));
+  } catch {
+    return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
+  }
+  if (done.result.outcome !== "CANCELLED") return { ok: true, message: SITE_CANCEL_NOT_CANCELLABLE_TEXT, booking };
+  return { ok: true, message: `予約を取り消しました。予約者に ${yen(booking.amountYen)} を全額返金します`, booking };
 }

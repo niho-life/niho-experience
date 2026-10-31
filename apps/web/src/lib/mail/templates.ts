@@ -1,5 +1,5 @@
-import type { BookingConfirmationEmail, BookingLinkEmail } from "@niho-experience/experience-store";
-import { DATE_LONG, DATE_SHORT, calendarDate, cancellationWords, money, party, zoneName } from "@/lib/booking-words";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail } from "@niho-experience/experience-store";
+import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
  * The emails guests get from this site (#285 slice 5): plain English, a text part and a minimal HTML part
@@ -189,5 +189,61 @@ export function bookingLinkEmail(email: BookingLinkEmail, options: { readonly si
     },
     { kind: "p", text: "If you didn't ask for this, you can ignore this email." },
     { kind: "p", text: "Questions? Reply to this email and NIHO support will help." },
+  ]);
+}
+
+/**
+ * The notices of 取消と返金 (#285 slice 7): the booking was cancelled (by the guest, the host or NIHO support, with the
+ * refund started), the refund is done, or support declined the guest's request to cancel (with support's words).
+ * Each names the booking; a cancelled one says why in the fixed words of its reason, never the host's own note. A
+ * refund is called done only in the email Stripe's confirmation triggers. With a grant, a link to the booking page.
+ */
+export function bookingNoticeEmail(email: BookingNoticeEmail, options: { readonly siteUrl: string; readonly bookingPageGrant?: string | null }): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  const when = `${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`;
+  const facts: Block = {
+    kind: "facts",
+    rows: [
+      ["Experience", experience],
+      ["Date", calendarDate(email.localDate, DATE_LONG)],
+      ["Time", `${email.localStartTime} ${zoneName(email.timeZone)}`],
+      ["Booking reference", email.publicBookingId],
+    ],
+  };
+  const grant = options.bookingPageGrant;
+  const page: Block[] = grant
+    ? [{ kind: "link", lead: "See your booking on our site. The link works once, so please don't forward it.", label: "View your booking", href: bookingPageLink(options.siteUrl, grant) }]
+    : [];
+  const greeting: Block = { kind: "p", text: `Hi ${oneLine(email.guestName)},` };
+  if (email.kind === "CANCELLED") {
+    const host = oneLine(email.hostDisplayName);
+    const refund = email.refundAmount > 0
+      ? `We've started a refund of ${money(email.refundAmount, email.currency)} to the card you paid with. We'll email you again when it's done.`
+      : "No refund is due for this booking.";
+    return mail(`Your booking is cancelled: ${experience}, ${when}`, [
+      greeting,
+      { kind: "p", text: cancelledBy({ cancelledBy: email.cancelledBy, cancellationReason: email.reason, hostDisplayName: host }) },
+      facts,
+      { kind: "p", text: refund },
+      ...page,
+      { kind: "p", text: "Questions? Reply to this email and NIHO support will help." },
+    ]);
+  }
+  if (email.kind === "REFUNDED") {
+    return mail(`Your refund is done: ${experience}, ${when}`, [
+      greeting,
+      { kind: "p", text: `We've refunded ${money(email.amount, email.currency)} to the card you paid with. ${REFUND_TIMING}` },
+      facts,
+      ...page,
+      { kind: "p", text: "Questions? Reply to this email and NIHO support will help." },
+    ]);
+  }
+  return mail(`About your request to cancel: ${experience}, ${when}`, [
+    greeting,
+    { kind: "p", text: "NIHO support looked at your request to cancel this booking. Your booking stays confirmed." },
+    { kind: "quote", text: body(email.message) },
+    facts,
+    ...page,
+    { kind: "p", text: "To reply, answer this email and NIHO support will help." },
   ]);
 }

@@ -66,6 +66,13 @@ const STORED: HostGuestBooking = {
   bookedAtUtc: "2026-10-31T03:04:00.000Z",
   paidAtUtc: "2026-10-31T03:06:00.000Z",
   cancelledAtUtc: null,
+  cancelledBy: null,
+  cancellationReason: null,
+  cancellationNote: null,
+  refundedAmount: 0,
+  refundPendingAmount: 0,
+  refundFailed: false,
+  cancellationRequested: false,
 };
 const REVIEW: HostGuestBooking = { ...STORED, publicBookingId: "00000000-0000-4000-8000-000000000286", status: "PAYMENT_REVIEW", adultCount: 1, childCount: 0, guest: { name: "Review Guest", phone: null, note: null, answers: [] } };
 const CANCELLED: HostGuestBooking = { ...STORED, publicBookingId: "00000000-0000-4000-8000-000000000287", status: "CANCELLED", cancelledAtUtc: "2026-10-31T05:00:00.000Z" };

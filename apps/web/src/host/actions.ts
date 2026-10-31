@@ -19,10 +19,14 @@ import { mockEnglishDraft } from "./mock/threads";
 import { changeNotificationSettings } from "./notification-settings-server";
 import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
-import { loadMoreSiteBookings, type HostSiteBookingPage } from "./site-bookings-server";
+import { SITE_CANCEL_NOTE_MAX, SITE_CANCEL_REASONS, SITE_SESSION_CANCEL_REASONS } from "./site-bookings";
+import { cancelSiteBookingAsOwner, loadMoreSiteBookings, type HostSiteBookingPage } from "./site-bookings-server";
+import { cancelSiteSessionAsOwner } from "./site-sessions-server";
+import type { HostSessionView } from "./console-data";
+import { sessionQueryOf } from "./session";
 import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfileChange, RegisterProviderInput } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
-import type { HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
+import type { HostBooking, HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
 
 /*
  * The host console's changes to NIHO (#88/#91), as server actions: each reads the session,
@@ -266,6 +270,42 @@ export async function loadMoreSiteBookingList(input: { providerId: string; curso
   const cursor = text(input?.cursor, LIMITS.cursor);
   if (!providerId || !cursor) return invalid;
   return loadMoreSiteBookings(providerId, cursor);
+}
+
+const BOOKING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The reason and note a cancel dialog sends: one of the fixed reasons, and the host's own words (maybe none). */
+function cancelInput(input: { commandId?: unknown; reason?: unknown; note?: unknown } | null | undefined, reasons: readonly { value: string }[]) {
+  const commandId = typeof input?.commandId === "string" && COMMAND_ID.test(input.commandId) ? input.commandId : null;
+  const reason = reasons.find((item) => item.value === input?.reason)?.value ?? null;
+  const note = text(input?.note ?? "", SITE_CANCEL_NOTE_MAX);
+  return commandId && reason && note !== null ? { commandId, reason: reason as (typeof SITE_CANCEL_REASONS)[number]["value"], note } : null;
+}
+
+/**
+ * 予約 › 取り消して全額を返金する (#285 slice 7, experience DB): the OWNER cancels one booking made on this site. The
+ * guest gets a full refund. `commandId` is the dialog's UUID: the same command again is the same cancellation.
+ */
+export async function cancelSiteBooking(input: { providerId: string; bookingId: string; commandId: string; reason: string; note: string }): Promise<HostActionResult<{ booking: HostBooking }>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const bookingId = typeof input?.bookingId === "string" && BOOKING_ID.test(input.bookingId) ? input.bookingId.toLowerCase() : null;
+  const cancellation = cancelInput(input, SITE_CANCEL_REASONS);
+  if (!providerId || !bookingId || !cancellation) return invalid;
+  return cancelSiteBookingAsOwner(providerId, bookingId, cancellation);
+}
+
+/**
+ * この回 › この回を中止する (#285 slice 7, experience DB): every confirmed booking of the session made on this site is
+ * cancelled with a full refund, and the session takes no new bookings.
+ */
+export async function cancelSiteSession(input: {
+  providerId: string; date: string; start: string; experience: string; offer: string; commandId: string; reason: string; note: string;
+}): Promise<HostActionResult<{ session: HostSessionView | null; cancelled: number }>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const query = sessionQueryOf({ date: input?.date, start: input?.start, experience: input?.experience, offer: input?.offer });
+  const cancellation = cancelInput(input, SITE_SESSION_CANCEL_REASONS);
+  if (!providerId || !query || !cancellation) return invalid;
+  return cancelSiteSessionAsOwner(providerId, query, cancellation);
 }
 
 /**

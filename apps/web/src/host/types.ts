@@ -379,6 +379,26 @@ export interface HostSiteBookingTerms {
   payoutYen: number;
   /** 取消条件; null for a booking that has none recorded. */
   cancellationPolicy: "FREE_UNTIL_24H" | "FREE_UNTIL_48H" | "NONE" | null;
+  /** 取消と返金 (#285 slice 7): who cancelled, why, and where its refunds are. Absent on the preview's bookings. */
+  cancellation?: HostSiteCancellation;
+}
+
+/** A booking made on this site, cancelled or asked to be: what 予約's detail says of it. */
+export interface HostSiteCancellation {
+  /** null while it is not cancelled. */
+  by: "guest" | "host" | "support" | null;
+  /** The fixed reason in Japanese; null without one. */
+  reason: string | null;
+  /** The host's or support's own note (never shown to the guest). */
+  note: string | null;
+  /** Refunded (Stripe finished). */
+  refundedYen: number;
+  /** On its way (Stripe has not finished). */
+  refundPendingYen: number;
+  /** A refund failed and NIHO support has not settled it. */
+  refundFailed: boolean;
+  /** The guest asked NIHO support to cancel after free cancellation ended; support has not answered. */
+  requested: boolean;
 }
 
 /*

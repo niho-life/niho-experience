@@ -1453,20 +1453,29 @@ export class GuestBookingRepository {
    * (a cancelled one: was cancelled) before `endedBefore` (never after now), at most `limit` per call;
    * returns how many were erased. A payment still under review keeps its guest. The owner decided
    * (2026-10-31, #285) one year, as NIHO's data inventory does; the job that calls this with
-   * now − 1 year comes with the mail worker (#285 slice 5). Refunds and disputes join the exclusion
-   * when they exist (slice 7).
+   * now − 1 year comes with the mail worker (#285 slice 5). A booking whose refund is not settled (Stripe
+   * has not answered, or it failed and support has not closed it) or whose "Ask to cancel" is still open
+   * keeps its guest too (#285 slice 7); with the guest go the host's cancellation note and support's words
+   * to the guest. Disputes join the exclusion when they exist.
    */
   async eraseGuestData(options: { readonly endedBefore: string; readonly limit?: number }): Promise<number> {
     assertCanonicalInstant(options.endedBefore, "endedBefore");
     const limit = options.limit ?? 1_000;
     if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) throw new StoreValidationError("limit must be from 1 to 5000.");
-    const result = await this.#pool.query(
+    const result = await this.#pool.query<DbRow>(
       `WITH due AS (
          SELECT g.provider_id, g.booking_id
            FROM booking_guests g
            JOIN bookings b ON b.provider_id=g.provider_id AND b.id=g.booking_id
           WHERE g.pii_erased_at IS NULL
             AND b.status <> 'PAYMENT_REVIEW'
+            AND NOT EXISTS (
+              SELECT 1 FROM booking_refunds r
+               WHERE r.provider_id = b.provider_id AND r.booking_id = b.id
+                 AND (r.status IN ('REQUESTED', 'PENDING') OR (r.status = 'FAILED' AND r.closed_at IS NULL)))
+            AND NOT EXISTS (
+              SELECT 1 FROM booking_cancellation_requests q
+               WHERE q.provider_id = b.provider_id AND q.booking_id = b.id AND q.status = 'OPEN')
             AND CASE WHEN b.status = 'CANCELLED' THEN COALESCE(b.cancelled_at, (b.occurrence_snapshot->>'endUtc')::timestamptz)
                      ELSE (b.occurrence_snapshot->>'endUtc')::timestamptz END
                 < LEAST($1::timestamptz, clock_timestamp())
@@ -1474,13 +1483,25 @@ export class GuestBookingRepository {
           LIMIT $2
           FOR UPDATE OF g SKIP LOCKED
        )
-       UPDATE booking_guests g
-          SET guest_name=NULL, guest_email=NULL, guest_email_key=NULL, guest_phone=NULL, note=NULL,
-              answers=NULL, utm=NULL, pii_erased_at=clock_timestamp()
-         FROM due
-        WHERE g.provider_id=due.provider_id AND g.booking_id=due.booking_id`,
+       , erased AS (
+         UPDATE booking_guests g
+            SET guest_name=NULL, guest_email=NULL, guest_email_key=NULL, guest_phone=NULL, note=NULL,
+                answers=NULL, utm=NULL, pii_erased_at=clock_timestamp()
+           FROM due
+          WHERE g.provider_id=due.provider_id AND g.booking_id=due.booking_id
+          RETURNING g.provider_id, g.booking_id
+       ), notes AS (
+         UPDATE bookings b SET cancellation_note=NULL
+           FROM erased e
+          WHERE b.provider_id=e.provider_id AND b.id=e.booking_id AND b.cancellation_note IS NOT NULL
+       ), messages AS (
+         UPDATE booking_cancellation_requests q SET decline_message=NULL
+           FROM erased e
+          WHERE q.provider_id=e.provider_id AND q.booking_id=e.booking_id AND q.decline_message IS NOT NULL
+       )
+       SELECT count(*)::int AS erased FROM erased`,
       [options.endedBefore, limit],
     );
-    return result.rowCount ?? 0;
+    return Number(result.rows[0]?.erased ?? 0);
   }
 }

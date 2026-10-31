@@ -5,8 +5,9 @@ import { assertStoreIdentifier } from "./validation.ts";
 
 /**
  * The host app's push notifications kept in `outbox_messages` (#177 P2, owner decision 2026-10-31).
- * A guest question or an answer from the reply page (`guestQuestion`) and a guest booking confirmed on
- * this site (`newBooking`, #285) write their rows in their own transactions; the approval and booking
+ * A guest question or an answer from the reply page (`guestQuestion`), a guest booking confirmed on
+ * this site (`newBooking`, #285) and one a guest or NIHO support cancelled (`cancellation`, #285 slice 7)
+ * write their rows in their own transactions; the approval and booking
  * message rows wait for those flows to move to the experience DB (ADR 0002). The job claims only these
  * topics: `booking.confirmed`, `guest_question.*` and every other topic stay untouched.
  */
@@ -15,6 +16,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   guestMessage: "host.notify.guest_message",
   guestQuestion: "host.notify.guest_question",
   newBooking: "host.notify.new_booking",
+  cancellation: "host.notify.cancellation",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -61,6 +63,12 @@ export interface NewBookingPayload {
   readonly startsAt: string;
   readonly seats: number;
 }
+
+/**
+ * A guest booking made on this site that the guest or NIHO support cancelled (#285 slice 7): the same facts as
+ * a new booking. A host who cancels gets nothing for their own cancellation.
+ */
+export type CancellationPayload = NewBookingPayload;
 
 /** One claimed row. `id` is the row's bigint as text; the payload is parsed by the consumer. */
 export interface ClaimedHostNotification {
@@ -135,6 +143,11 @@ export function parseNewBookingPayload(value: unknown): NewBookingPayload | null
   const { bookingId, experienceTitle, startsAt, seats: count } = value;
   if (!publicId(bookingId) || !title(experienceTitle) || !storedInstant(startsAt) || !seats(count)) return null;
   return { v: 1, bookingId, experienceTitle, startsAt, seats: count };
+}
+
+/** The cancellation's payload (the same keys as a new booking's), or null for anything else. */
+export function parseCancellationPayload(value: unknown): CancellationPayload | null {
+  return parseNewBookingPayload(value);
 }
 
 /**
@@ -287,6 +300,24 @@ export async function enqueueNewBookingNotification(client: PoolClient, input: B
     bookingId: facts.bookingId,
     topic: HOST_NOTIFICATION_TOPICS.newBooking,
     deduplicationKey: `host-push:new-booking:${facts.bookingId}`,
+    payload,
+    availableAt: null,
+  });
+}
+
+/**
+ * A guest booking made on this site was cancelled by the guest or by NIHO support (#285 slice 7): one CANCELLATION
+ * notification (it cannot be turned off), due now. Called in the cancelling transaction. 1 when added, 0 for a repeat.
+ */
+export async function enqueueCancellationNotification(client: PoolClient, input: BookingFacts): Promise<number> {
+  const facts = { ...input, experienceTitle: typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "" };
+  const { startsAt } = validBooking(facts);
+  const payload: CancellationPayload = { v: 1, bookingId: facts.bookingId, experienceTitle: facts.experienceTitle, startsAt, seats: facts.seats };
+  return insertRow(client, {
+    providerId: facts.providerId,
+    bookingId: facts.bookingId,
+    topic: HOST_NOTIFICATION_TOPICS.cancellation,
+    deduplicationKey: `host-push:cancellation:${facts.bookingId}`,
     payload,
     availableAt: null,
   });

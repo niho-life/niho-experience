@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -115,4 +115,14 @@ export function guestBookingAccess(): GuestBookingAccess | null {
 export function guestHoldReleases(): Pick<GuestBookingRepository, "releaseGuestHold"> | null {
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
+}
+
+/**
+ * 取消と返金 (#285 slice 7, docs/guest-booking.md). Each caller checks its own flag and actor (the guest's page, the
+ * host console, Admin); the Stripe webhook needs only the experience DB, since a refund Stripe finishes after a flag
+ * was turned off must still be recorded.
+ */
+export function bookingCancellations(): BookingCancellations | null {
+  const pool = experiencePool();
+  return pool ? new BookingCancellations(pool) : null;
 }

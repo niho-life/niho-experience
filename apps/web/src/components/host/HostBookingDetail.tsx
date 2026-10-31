@@ -14,10 +14,17 @@ import {
   type BookingRow,
 } from "@/host/bookings";
 import { monthDayJa, yen } from "@/host/format";
-import { SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_BOOKING_READ_ONLY_TEXT } from "@/host/site-bookings";
+import {
+  SITE_BOOKING_PAYMENT_REVIEW_TEXT,
+  SITE_BOOKING_REQUESTED_TEXT,
+  SITE_BOOKING_SUPPORT_HANDLES_TEXT,
+  SITE_BOOKING_SUPPORT_TEXT,
+  siteCancellationLines,
+} from "@/host/site-bookings";
 import { translationOffered } from "@/host/translate";
 import type { HostBooking } from "@/host/types";
 import { BookingCancelDialog, BookingDecisionDialog, DANGER_BUTTON } from "./HostBookingDialogs";
+import { SiteBookingCancelDialog, type SiteCancelChoice } from "./HostSiteCancelDialogs";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { HostBookingSupportPanel } from "./HostBookingSupportPanel";
@@ -116,17 +123,22 @@ export interface HostBookingDetailProps {
   onApprove: () => void;
   onDecline: () => void;
   onCancel: (cancellation: BookingCancellation) => void;
+  /** A booking made on this site (#285 slice 7): 取り消して全額を返金する, sent by the page. Absent where it cannot be sent (mock mode). */
+  onSiteCancel?: (choice: SiteCancelChoice) => void;
+  /** While the page sends it, and what failed. */
+  siteCancel?: { busy: boolean; error: string | null };
 }
 
 /**
  * One booking (mock v2 `bookingDetail`): the guest and the state, 申込内容, 状態, what the
  * host can do now, メッセージ (the way into its thread) and 時系列. 承認・お断り・取消 are
- * asked in a dialog first. A booking made on this site (`booking.site`, #285 slice 8) is read
- * only until cancellation and refunds come here (slice 7): a note takes the place of the
- * actions, and NIHO's support and fee panels, which know NIHO's bookings only, are left out.
+ * asked in a dialog first. A booking made on this site (`booking.site`, #285 slices 8 and 7) can
+ * be cancelled with a full refund (anything else through NIHO support); a cancelled one says who
+ * cancelled, why and where its refund is. NIHO's support and fee panels, which know NIHO's
+ * bookings only, are left out.
  */
-export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel }: HostBookingDetailProps) {
-  const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | null>(null);
+export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
+  const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | "siteCancel" | null>(null);
   const actions = bookingActions(booking.status);
   const site = Boolean(booking.site);
   // 通訳を始める: a confirmed booking of an English-speaking guest whose day has not passed (#181).
@@ -134,10 +146,33 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
 
   let next: ReactNode = null;
   if (site) {
+    const cancellation = booking.site?.cancellation;
+    const note = "text-[0.8125rem] leading-normal text-ink-soft";
     next = (
       <>
-        {booking.status === "payment_review" ? <p className={WAIT_LINE}>{SITE_BOOKING_PAYMENT_REVIEW_TEXT}</p> : null}
-        <p className="text-[0.8125rem] text-ink-soft">{SITE_BOOKING_READ_ONLY_TEXT}</p>
+        {booking.status === "payment_review" ? (
+          <>
+            <p className={WAIT_LINE}>{SITE_BOOKING_PAYMENT_REVIEW_TEXT}</p>
+            <p className={note}>{SITE_BOOKING_SUPPORT_HANDLES_TEXT}</p>
+          </>
+        ) : null}
+        {booking.status === "confirmed" && cancellation?.requested ? (
+          <>
+            <p className={WAIT_LINE}>{SITE_BOOKING_REQUESTED_TEXT}</p>
+            <p className={`${note} mb-2.5`}>{SITE_BOOKING_SUPPORT_HANDLES_TEXT}</p>
+          </>
+        ) : null}
+        {siteCancellationLines(booking).map((line) => <p key={line} className={note}>{line}</p>)}
+        {cancellation?.note ? <p className={`${note} [overflow-wrap:anywhere]`}>メモ：{cancellation.note}</p> : null}
+        {booking.status === "confirmed" && onSiteCancel ? (
+          <>
+            {siteCancel?.error ? <p role="alert" className="mb-2 text-[0.8125rem] leading-normal font-bold text-danger">{siteCancel.error}</p> : null}
+            <button type="button" disabled={siteCancel?.busy} aria-busy={siteCancel?.busy || undefined} onClick={() => setAsking("siteCancel")} className={DANGER_BUTTON}>
+              {siteCancel?.busy ? "取り消しています…" : "取り消して全額を返金する"}
+            </button>
+            <p className={`${note} mt-2`}>{SITE_BOOKING_SUPPORT_TEXT}</p>
+          </>
+        ) : null}
       </>
     );
   } else if (actions.approve) {
@@ -227,6 +262,9 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
         <BookingDecisionDialog kind={asking} booking={booking} onConfirm={asking === "approve" ? onApprove : onDecline} onClose={() => setAsking(null)} />
       ) : null}
       {asking === "cancel" ? <BookingCancelDialog booking={booking} onConfirm={onCancel} onClose={() => setAsking(null)} /> : null}
+      {asking === "siteCancel" && onSiteCancel ? (
+        <SiteBookingCancelDialog guest={booking.guest} when={bookingWhen(booking)} amountYen={booking.amountYen} onConfirm={onSiteCancel} onClose={() => setAsking(null)} />
+      ) : null}
     </section>
   );
 }

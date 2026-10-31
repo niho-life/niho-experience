@@ -1,5 +1,7 @@
-import type { GuestBookingView } from "@niho-experience/experience-store";
-import { DATE_LONG, calendarDate, cancellationWords, money, party, zoneName, zonedMoment } from "@/lib/booking-words";
+import type { GuestBookingView, GuestRefundView } from "@niho-experience/experience-store";
+import type { ReactNode } from "react";
+import { DATE_LONG, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName, zonedMoment } from "@/lib/booking-words";
+import { BookingCancel } from "./BookingCancel";
 import { BookingSignOut } from "./BookingSignOut";
 import { FindBookingForm } from "./FindBookingForm";
 import { HandIcon } from "./HandIcon";
@@ -11,10 +13,82 @@ const STATUS = {
   CANCELLED: { label: "Cancelled", tone: "muted" },
 } as const;
 
+const moment = (instant: string, timeZone: string) => `${zonedMoment(Date.parse(instant), timeZone)} ${zoneName(timeZone)}`;
+
+/** One refund in words: on its way, done (with when), or failed (support will write). */
+function refundLine(refund: GuestRefundView, timeZone: string): string {
+  const sum = money(refund.amount, refund.currency);
+  if (refund.status === "REFUNDED") return `${sum} was refunded to the card you paid with${refund.refundedAtUtc ? ` on ${moment(refund.refundedAtUtc, timeZone)}` : ""}. ${REFUND_TIMING}`;
+  if (refund.status === "FAILED") return `We couldn't refund ${sum} to your card. NIHO support will email you about it.`;
+  return `A refund of ${sum} is on its way to the card you paid with. We'll email you when it's done.`;
+}
+
 /**
- * The guest's booking (#285 slice 6, docs/guest-booking.md), read only: what was booked, for when and whom, what was
- * paid and the cancellation policy fixed at booking. Messages with the host and cancellation come later (slices 6b
- * and 7); until then the page says so and points to NIHO support, with no control that does nothing.
+ * 取消 (#285 slice 7): what the guest can do now, decided by the snapshot's terms and the database's clock. Before the
+ * deadline, "Cancel and get a full refund"; after it (or with no free cancellation), "Ask to cancel", which NIHO support
+ * answers by email while the booking stays confirmed. A cancelled booking shows its refunds as they are, never a
+ * refund that has not been made.
+ */
+function CancelSection({ booking }: { booking: GuestBookingView }) {
+  const p = "mt-3 text-[0.9375rem] text-ink-soft";
+  let body: ReactNode;
+  if (booking.status === "CANCELLED") {
+    body = booking.refunds.length
+      ? booking.refunds.map((refund, index) => <p key={index} className={p}>{refundLine(refund, booking.timeZone)}</p>)
+      : <p className={p}>No refund was made for this booking.</p>;
+  } else if (booking.status === "PAYMENT_REVIEW") {
+    body = <p className={p}>NIHO support will email you about your payment. For questions, reply to your confirmation email.</p>;
+  } else if (booking.experienceEnded) {
+    body = <p className={p}>This experience has ended. For questions about it, reply to your confirmation email and NIHO support will help.</p>;
+  } else if (booking.freeCancellationOpen && booking.freeCancellationUntilUtc) {
+    const total = money(booking.totalAmount, booking.currency);
+    body = (
+      <>
+        <p className={p}>You can cancel for free until {moment(booking.freeCancellationUntilUtc, booking.timeZone)}. We&apos;ll refund {total} in full to the card you paid with.</p>
+        <BookingCancel
+          publicBookingId={booking.publicBookingId}
+          choice="FULL_REFUND"
+          shownDeadlineUtc={booking.freeCancellationUntilUtc}
+          refundWords={`We'll refund ${total} in full to the card you paid with. ${REFUND_TIMING}`}
+        />
+      </>
+    );
+  } else if (booking.cancellationRequest?.status === "OPEN") {
+    body = <p className={p}>You asked to cancel on {moment(booking.cancellationRequest.requestedAtUtc, booking.timeZone)}. NIHO support will reply by email. Your booking stays confirmed until then.</p>;
+  } else if (booking.cancellationRequest?.status === "DECLINED") {
+    body = (
+      <>
+        <p className={p}>NIHO support replied to your request to cancel. Your booking stays confirmed.</p>
+        {booking.cancellationRequest.declineMessage ? (
+          <blockquote className="mt-3 border-l-4 border-line pl-4 text-[0.9375rem] whitespace-pre-line [overflow-wrap:anywhere]">{booking.cancellationRequest.declineMessage}</blockquote>
+        ) : null}
+        <p className={p}>To reply, answer the email from NIHO support.</p>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <p className={p}>
+          {booking.cancellationPolicy === "NONE" ? "This booking is non-refundable." : "Free cancellation has ended."} You can still ask to cancel: NIHO support will look at your request and reply by email. Your booking stays confirmed until then.
+        </p>
+        <BookingCancel publicBookingId={booking.publicBookingId} choice="REQUEST" shownDeadlineUtc={booking.freeCancellationUntilUtc} refundWords={null} />
+      </>
+    );
+  }
+  return (
+    <section aria-labelledby="booking-changes" className="mt-8">
+      <h2 id="booking-changes" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">
+        {booking.status === "CANCELLED" ? "Refund" : "Cancel"}
+      </h2>
+      {body}
+    </section>
+  );
+}
+
+/**
+ * The guest's booking (#285 slice 6, docs/guest-booking.md): what was booked, for when and whom, what was paid and the
+ * cancellation policy fixed at booking, and cancelling it (slice 7). Messages with the host come later (slice 6b);
+ * until then the page says so and points to NIHO support, with no control that does nothing.
  */
 export function GuestBookingDetails({ booking, now }: { booking: GuestBookingView; now: Date }) {
   const status = STATUS[booking.status];
@@ -46,7 +120,8 @@ export function GuestBookingDetails({ booking, now }: { booking: GuestBookingVie
       {booking.status === "CANCELLED" ? (
         <div className="mt-5">
           <Notice tone="neutral" title="This booking was cancelled">
-            {booking.cancelledAtUtc ? `Cancelled on ${zonedMoment(Date.parse(booking.cancelledAtUtc), booking.timeZone)} ${zoneName(booking.timeZone)}.` : null}
+            {cancelledBy(booking)}
+            {booking.cancelledAtUtc ? ` Cancelled on ${moment(booking.cancelledAtUtc, booking.timeZone)}.` : null}
           </Notice>
         </div>
       ) : null}
@@ -70,13 +145,7 @@ export function GuestBookingDetails({ booking, now }: { booking: GuestBookingVie
           <span>Coming soon: you&apos;ll be able to write to {booking.hostDisplayName} here. For now, reply to your confirmation email and NIHO support will help.</span>
         </p>
       </section>
-      <section aria-labelledby="booking-changes" className="mt-8">
-        <h2 id="booking-changes" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">Change or cancel</h2>
-        <p className="mt-3 flex items-start gap-2.5 text-[0.9375rem] text-ink-soft">
-          <HandIcon name="mail" className="size-6 shrink-0 text-moss" />
-          <span>Coming soon on this page. For now, reply to your confirmation email and NIHO support will help.</span>
-        </p>
-      </section>
+      <CancelSection booking={booking} />
 
       <section aria-labelledby="booking-device" className="mt-10 border-t border-line pt-6">
         <h2 id="booking-device" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">This device</h2>

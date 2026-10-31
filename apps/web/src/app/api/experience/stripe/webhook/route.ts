@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
-import { verifyDirectCheckoutWebhook, ExperiencePaymentsValidationError, isEndedCheckoutEvent } from "@niho-experience/experience-payments";
-import { experiencePool, experienceStore, guestHoldReleases } from "@/lib/experience/store-server";
+import { verifyDirectCheckoutWebhook, ExperiencePaymentsValidationError, isEndedCheckoutEvent, isRefundEvent } from "@niho-experience/experience-payments";
+import { bookingCancellations, experiencePool, experienceStore, guestHoldReleases } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
 const MAX_WEBHOOK_BYTES = 256 * 1024;
@@ -12,7 +12,8 @@ function reply(status: number): Response {
 /**
  * Connect events share the NIHO platform; only events marked for this service are processed. A paid Session
  * confirms its booking; a Session that ended unpaid (expired, or a delayed payment that failed) gives the
- * guest's hold back (#285 slice 4, docs/guest-booking.md). Payloads are never logged.
+ * guest's hold back (#285 slice 4, docs/guest-booking.md); a refund this service made moves its booking's
+ * refund forward (refund.created / refund.updated / refund.failed, slice 7). Payloads are never logged.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const secret = process.env.EXPERIENCE_STRIPE_WEBHOOK_SECRET;
@@ -20,7 +21,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   const pool = experiencePool();
   const store = experienceStore();
   const releases = guestHoldReleases();
-  if (!secret || !platformKey || !pool || !store || !releases) return reply(503);
+  const cancellations = bookingCancellations();
+  if (!secret || !platformKey || !pool || !store || !releases || !cancellations) return reply(503);
   const signature = request.headers.get("stripe-signature");
   if (!signature) return reply(400);
   if (Number(request.headers.get("content-length") ?? 0) > MAX_WEBHOOK_BYTES) return reply(413);
@@ -36,6 +38,23 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!event) return reply(204);
 
   try {
+    if (isRefundEvent(event)) {
+      await cancellations.applyRefundEvent({
+        publicBookingId: event.publicBookingId,
+        refundId: event.refundId,
+        stripeRefundRef: event.stripeRefundRef,
+        connectedAccountId: event.connectedAccountId,
+        stripePaymentRef: event.paymentIntentRef,
+        amount: event.amount,
+        currency: event.currency,
+        status: event.status,
+        failureCode: event.failureCode,
+        stripeEventId: event.eventId,
+        stripeEventType: event.eventType,
+        eventOccurredAtUtc: event.eventOccurredAtUtc,
+      });
+      return reply(204);
+    }
     if (isEndedCheckoutEvent(event)) {
       await releases.releaseGuestHold({
         publicBookingId: event.publicBookingId,

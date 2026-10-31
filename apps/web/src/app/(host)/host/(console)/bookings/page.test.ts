@@ -20,7 +20,7 @@ vi.mock("next/navigation", async (importActual) => ({
     throw new Error("NOT_FOUND");
   },
 }));
-vi.mock("@/host/actions", () => ({ loadMoreSiteBookingList: vi.fn() }));
+vi.mock("@/host/actions", () => ({ loadMoreSiteBookingList: vi.fn(), cancelSiteBooking: vi.fn() }));
 vi.mock("@/host/data", () => ({
   hostPageContext: async () => ({
     session: { nihoUserId: "sample-niho-user" },

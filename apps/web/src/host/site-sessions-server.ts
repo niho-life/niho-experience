@@ -5,7 +5,9 @@ import type { HostProvider } from "@/lib/host/providers";
 import { actionTime, type SessionQuery } from "./bookings";
 import type { HostSessionView } from "./console-data";
 import { todayInJapan } from "./format";
-import { ownerActor, startOfJapanDay } from "./site-bookings-server";
+import type { HostActionResult } from "./payout";
+import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
+import { ownerActor, runOwnerCancellation, SITE_CANCEL_NOT_CANCELLABLE_TEXT, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
 import { siteHomeSessions, siteHomeTodos, siteSessionView, type SiteHome } from "./site-sessions";
 
 /*
@@ -74,4 +76,27 @@ export async function loadSiteSession(provider: HostProvider, nihoUserId: string
     if (error instanceof StoreValidationError) return { status: "live", session: null, now };
     return { status: "error" };
   }
+}
+
+/**
+ * この回 › この回を中止する (#285 slice 7): the OWNER calls off the session; every confirmed booking made here is
+ * cancelled with a full refund and an email, and the session takes no new bookings. Payments under review stay for
+ * NIHO support. Answers the session as the store has it now.
+ */
+export async function cancelSiteSessionAsOwner(providerId: string, query: SessionQuery, input: SiteCancelInput): Promise<HostActionResult<{ session: HostSessionView | null; cancelled: number }>> {
+  const done = await runOwnerCancellation(providerId, (cancellations, actor) => cancellations.cancelSessionAsHost(actor, {
+    productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start,
+  }, input));
+  if (!done.ok) return done;
+  let session: HostSessionView | null;
+  try {
+    session = siteSessionView(await done.bookings.listGuestBookingsForSession(done.actor, {
+      productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start,
+    }), query);
+  } catch {
+    return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
+  }
+  const cancelled = done.result.bookingIds.length;
+  if (done.result.outcome !== "CANCELLED") return { ok: true, message: SITE_CANCEL_NOT_CANCELLABLE_TEXT, session, cancelled: 0 };
+  return { ok: true, message: `この回を中止し、${cancelled} 件の予約を取り消しました。予約者に全額を返金します。新しい予約は受け付けません`, session, cancelled };
 }

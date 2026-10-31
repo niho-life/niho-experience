@@ -4,6 +4,8 @@ import type {
   BookingConfirmationEmail,
   BookingLinkClaim,
   BookingLinkEmail,
+  BookingNoticeClaim,
+  BookingNoticeEmail,
   ClaimedBookingConfirmation,
   ClaimedBookingLink,
   ClaimedGuestQuestionReply,
@@ -57,6 +59,11 @@ function stubs() {
     completeBookingLink: vi.fn(async () => {}),
     retryBookingLink: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
   };
+  const notices = {
+    claimBookingNotices: vi.fn(async (): Promise<BookingNoticeClaim> => ({ notices: [], abandoned: 0 })),
+    completeBookingNotice: vi.fn(async () => {}),
+    retryBookingNotice: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
+  };
   const guests = { eraseGuestData: vi.fn(async () => 0) };
   const translations = {
     claimTranslations: vi.fn(async (): Promise<GuestTranslationClaim> => claimOf([])),
@@ -73,8 +80,8 @@ function stubs() {
     close: vi.fn(),
   };
   const onStepError = vi.fn();
-  const deps: ExperienceJobDeps = { questions, confirmations, bookingLinks, access: null, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
-  return { deps, questions, confirmations, bookingLinks, guests, translations, mailer, sent, results, onStepError };
+  const deps: ExperienceJobDeps = { questions, confirmations, notices, bookingLinks, access: null, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
+  return { deps, questions, confirmations, notices, bookingLinks, guests, translations, mailer, sent, results, onStepError };
 }
 
 /** A claim that hands out one row per call, as the store does for `limit: 1`. */
@@ -101,6 +108,7 @@ describe("runExperienceJobs", () => {
     expect(counts).toEqual({
       questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
       bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+      bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
       bookingLinks: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 0 },
@@ -199,6 +207,7 @@ describe("runExperienceJobs", () => {
     expect(counts).toEqual({
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
+      bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
       bookingLinks: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 1 },
@@ -366,5 +375,48 @@ describe("runExperienceJobs › the guests' Japanese", () => {
     expect(counts.guestTranslations).toEqual({ error: "unavailable" });
     expect(counts.guestErasure).toEqual({ erased: 1 });
     expect(s.onStepError).toHaveBeenCalledWith("guestTranslations", "Error");
+  });
+});
+
+describe("the notices of cancellations and refunds (#285 slice 7)", () => {
+  const noticeFacts = (n: number) => ({
+    publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728951${n}`, guestEmail: `notice${n}@example.com`, guestName: `Sample Notice ${n}`,
+    experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+    hostDisplayName: "Sample Host",
+  });
+  const noticeFor = (n: number, email: BookingNoticeEmail | null, attempts = 1) => ({ id: String(300 + n), attempts, email });
+  function noticesOneAtATime(items: ReturnType<typeof noticeFor>[], abandoned = 0) {
+    let first = true;
+    return async (): Promise<BookingNoticeClaim> => {
+      const claim = { notices: items.splice(0, 1), abandoned: first ? abandoned : 0 };
+      first = false;
+      return claim;
+    };
+  }
+
+  it("sends each notice with a fresh booking page link, skips one with nothing to say, and stops at a transient failure", async () => {
+    const issue = vi.fn(async (): Promise<BookingAccessGrant | null> => ({ token: TOKEN, expiresAtUtc: "2026-12-01T00:00:00.000Z" }));
+    const access = { issueBookingAccessGrant: issue, purgeExpiredAccess: vi.fn(async () => 0) };
+    s.notices.claimBookingNotices.mockImplementation(noticesOneAtATime([
+      noticeFor(1, { ...noticeFacts(1), kind: "CANCELLED", cancelledBy: "HOST", reason: "WEATHER", refundAmount: 3000, currency: "JPY" }),
+      noticeFor(2, null),
+      noticeFor(3, { ...noticeFacts(3), kind: "REFUNDED", amount: 3000, currency: "JPY" }),
+      noticeFor(4, { ...noticeFacts(4), kind: "REQUEST_DECLINED", message: "Sample reply from support." }),
+      noticeFor(5, { ...noticeFacts(5), kind: "REFUNDED", amount: 3000, currency: "JPY" }),
+    ], 1));
+    s.results.push({ ok: true }, { ok: false, failure: "permanent" }, { ok: false, failure: "transient" });
+    const counts = await runExperienceJobs({ ...s.deps, access });
+    expect(counts.bookingNotices).toEqual({ claimed: 4, sent: 1, skipped: 1, retried: 1, failed: 1, abandoned: 1 });
+    expect(s.notices.claimBookingNotices).toHaveBeenCalledWith({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.noticeLeaseSeconds });
+    expect(s.notices.completeBookingNotice.mock.calls).toEqual([["301"], ["302"], ["303"]]);
+    expect(s.notices.retryBookingNotice.mock.calls).toEqual([["304", 1]]);
+    const cancelled = s.sent.find((message) => message.to === "notice1@example.com")!;
+    expect(cancelled.subject).toBe("Your booking is cancelled: Synthetic walk, Sat 14 Nov 2026 10:00");
+    expect(cancelled.text).toContain("Sample Host cancelled this booking because of the weather.");
+    expect(cancelled.text).toContain("We've started a refund of ¥3,000 to the card you paid with.");
+    expect(cancelled.text).toContain(`${SITE}/bookings/open#g=${TOKEN}`);
+    expect(s.sent.find((message) => message.to === "notice3@example.com")!.subject).toBe("Your refund is done: Synthetic walk, Sat 14 Nov 2026 10:00");
+    expect(s.sent.find((message) => message.to === "notice4@example.com")!.text).toContain("Sample reply from support.");
+    expect(JSON.stringify(counts)).not.toMatch(/example\.com|Sample/);
   });
 });

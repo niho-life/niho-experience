@@ -2,6 +2,7 @@ import "server-only";
 import {
   HOST_NOTIFICATION_TOPICS,
   parseApprovalDeadlinePayload,
+  parseCancellationPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
@@ -18,8 +19,8 @@ import type { HostPushEvent } from "./payload";
 
 /**
  * The notification job (#177 P2, owner decision 2026-10-31): sends what `outbox_messages` holds for
- * the host topics as Web Push. Questions to the host and guest bookings confirmed on this site write
- * their rows (#285 slice 5); approval reminders and booking messages wait for those flows to move to
+ * the host topics as Web Push. Questions to the host, guest bookings confirmed on this site (#285 slice 5)
+ * and those the guest or NIHO support cancelled (slice 7) write their rows; approval reminders and booking messages wait for those flows to move to
  * the experience DB (ADR 0002). Logs and answers counts only: never an endpoint, a payload or a booking.
  */
 const MESSAGE_STALE_MS = 24 * 60 * 60 * 1000;
@@ -111,6 +112,25 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         // The bookings made on this site (#285 slice 8), with this one opened.
         url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
         tag: `booking-${payload.bookingId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.cancellation) {
+    const payload = parseCancellationPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "CANCELLATION",
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        // The bookings made on this site (#285 slice 8), with the cancelled one opened.
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
+        tag: `cancellation-${payload.bookingId}`,
       },
     };
   }

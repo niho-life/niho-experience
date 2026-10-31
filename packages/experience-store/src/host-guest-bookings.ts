@@ -7,8 +7,8 @@ import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
 
 /*
  * 予約 for bookings travelers made on this site (#285 slice 8, docs/guest-booking.md「ホストの画面」): what the
- * provider's OWNER reads of them. Read only: cancellation and refunds come with slice 7, messages with the
- * guest with slice 6. NIHO proves the account and its OWNER role; the experience DB checks its own OWNER
+ * provider's OWNER reads of them, with who cancelled, why and how much went back (slice 7: the changes are in
+ * booking-cancellations.ts). Messages with the guest come with slice 6. NIHO proves the account and its OWNER role; the experience DB checks its own OWNER
  * membership as well (ADR 0002), as 予約前の質問 and 設定 › 通知 do. The guest's email address is never
  * selected here: the host reaches the guest through NIHO. ホーム reads the sessions with guests and この回 one
  * session's bookings (slice 8b); the phone the store returns is for この回 only (owner decision 2026-10-22, #103).
@@ -80,6 +80,20 @@ export interface HostGuestBooking {
   /** When the payment arrived (the confirmation, or the webhook event of one under review); null without one. */
   readonly paidAtUtc: string | null;
   readonly cancelledAtUtc: string | null;
+  /** 取消と返金 (#285 slice 7): who cancelled, null while it is not cancelled. */
+  readonly cancelledBy: "GUEST" | "HOST" | "SUPPORT" | null;
+  /** The fixed reason (CANCELLATION_REASONS); null while it is not cancelled. */
+  readonly cancellationReason: string | null;
+  /** The host's or support's own note; null without one (and once the guest's data was erased). */
+  readonly cancellationNote: string | null;
+  /** What Stripe has refunded (SUCCEEDED). */
+  readonly refundedAmount: number;
+  /** What is on its way (Stripe has not finished). */
+  readonly refundPendingAmount: number;
+  /** A refund failed and support has not settled it yet. */
+  readonly refundFailed: boolean;
+  /** The guest asked support to cancel ("Ask to cancel", past free cancellation) and support has not answered. */
+  readonly cancellationRequested: boolean;
 }
 
 export interface HostGuestBookingPage {
@@ -224,7 +238,16 @@ const SELECT_HOST_BOOKINGS = `
             WHERE e.provider_id = b.provider_id AND e.booking_id = b.id AND e.outcome IN ('CONFIRMED', 'PAYMENT_REVIEW')
          )) AS paid_at,
          g.guest_name, g.guest_phone, g.note, g.answers, g.guest_language, g.adult_count, g.child_count,
-         g.pii_erased_at IS NOT NULL AS erased, t.booking_questions
+         g.pii_erased_at IS NOT NULL AS erased, t.booking_questions,
+         b.cancelled_by, b.cancellation_reason, b.cancellation_note,
+         (SELECT COALESCE(sum(r.amount) FILTER (WHERE r.status = 'SUCCEEDED'), 0)::text
+            FROM booking_refunds r WHERE r.provider_id = b.provider_id AND r.booking_id = b.id) AS refunded_amount,
+         (SELECT COALESCE(sum(r.amount) FILTER (WHERE r.status IN ('REQUESTED', 'PENDING')), 0)::text
+            FROM booking_refunds r WHERE r.provider_id = b.provider_id AND r.booking_id = b.id) AS refund_pending_amount,
+         EXISTS (SELECT 1 FROM booking_refunds r
+                  WHERE r.provider_id = b.provider_id AND r.booking_id = b.id AND r.status = 'FAILED' AND r.closed_at IS NULL) AS refund_failed,
+         EXISTS (SELECT 1 FROM booking_cancellation_requests q
+                  WHERE q.provider_id = b.provider_id AND q.booking_id = b.id AND q.status = 'OPEN') AS cancellation_requested
     FROM bookings b
     JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
     JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
@@ -437,5 +460,12 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
     bookedAtUtc: isoValue(row, "created_at"),
     paidAtUtc: optionalIso(row, "paid_at"),
     cancelledAtUtc: optionalIso(row, "cancelled_at"),
+    cancelledBy: row.cancelled_by === "GUEST" || row.cancelled_by === "HOST" || row.cancelled_by === "SUPPORT" ? row.cancelled_by : null,
+    cancellationReason: optionalText(row.cancellation_reason),
+    cancellationNote: erased ? null : optionalText(row.cancellation_note),
+    refundedAmount: amount(row.refunded_amount ?? 0, "refunded_amount"),
+    refundPendingAmount: amount(row.refund_pending_amount ?? 0, "refund_pending_amount"),
+    refundFailed: row.refund_failed === true,
+    cancellationRequested: row.cancellation_requested === true,
   };
 }
