@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
 import { MIGRATION_LEDGER_TABLE, RUNTIME_TABLE_GRANTS } from "./experience-db-grants.mjs";
-import { atomicMigrationSql } from "./migration-sql.mjs";
+import { atomicMigrationSql, pendingMigrations } from "./migration-sql.mjs";
 
 const { Client } = pg;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -189,10 +189,10 @@ try {
     assert(sources.has(name), `Applied migration ${name} is missing from this checkout`);
     assert(sources.get(name) && sha256(sources.get(name)) === digest, `Applied migration ${name} was edited after it was applied`);
   }
-  const pending = files.filter((name) => !recorded.has(name));
-  const lastApplied = [...recorded.keys()].sort().at(-1);
-  assert(lastApplied === undefined || pending.every((name) => name > lastApplied),
-    "A pending migration sorts before an applied one; resolve the ordering by hand");
+  // EXPERIENCE_DB_ALLOW_OUT_OF_ORDER: comma-separated file names the operator checked (docs/host-calendar-staging.md).
+  const allowOutOfOrder = (process.env.EXPERIENCE_DB_ALLOW_OUT_OF_ORDER ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+  const { pending, outOfOrder } = pendingMigrations({ files, applied: [...recorded.keys()], allowOutOfOrder });
+  if (outOfOrder.length > 0) console.log(`Applying out of order, as the operator named: ${outOfOrder.join(", ")}`);
 
   for (const name of pending) {
     step = `apply ${name}`;

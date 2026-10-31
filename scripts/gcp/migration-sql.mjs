@@ -33,6 +33,29 @@ export function atomicMigrationSql({ name, source, ledger, sha256, escapeLiteral
   ].join("\n");
 }
 
+/**
+ * The files a run applies, in name order: every file not in the ledger. A pending file that sorts before the
+ * last applied one stops the run, unless the operator names it in `allowOutOfOrder` after checking that it
+ * changes nothing the later applied files depend on (a file merged after a later one was already applied).
+ * A named file that is not pending, or a pending file out of order that is not named, still stops the run.
+ */
+export function pendingMigrations({ files, applied, allowOutOfOrder = [] }) {
+  const recorded = new Set(applied);
+  const pending = [...files].sort().filter((name) => !recorded.has(name));
+  const lastApplied = [...recorded].sort().at(-1);
+  const allowed = new Set(allowOutOfOrder);
+  for (const name of allowed) {
+    assert(pending.includes(name), `EXPERIENCE_DB_ALLOW_OUT_OF_ORDER names ${name}, which is not a pending migration`);
+  }
+  const outOfOrder = lastApplied === undefined ? [] : pending.filter((name) => name < lastApplied);
+  const unexpected = outOfOrder.filter((name) => !allowed.has(name));
+  assert(unexpected.length === 0, "A pending migration sorts before an applied one; resolve the ordering by hand");
+  for (const name of allowed) {
+    assert(outOfOrder.includes(name), `EXPERIENCE_DB_ALLOW_OUT_OF_ORDER names ${name}, which is not out of order`);
+  }
+  return { pending, outOfOrder };
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
