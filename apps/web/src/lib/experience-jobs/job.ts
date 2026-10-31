@@ -1,7 +1,8 @@
 import "server-only";
 import type { Pool } from "pg";
-import { GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
+import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { smtpMailer, type Mailer } from "@/lib/mail/transport";
@@ -21,8 +22,13 @@ export interface ExperienceJobDependencies {
   readonly mailer?: () => Mailer | null;
   /** The Claude API for the guests' Japanese; null while translation is off. */
   readonly translator?: () => Translator | null;
-  /** Whether the guest's booking page is on (#285 slice 6): its links go into the emails only then. */
+  /**
+   * Whether booking on this site is on (#285 slice 6): the booking page's links go into the emails, and refunds
+   * Stripe never accepted are sent again (#285 slice 7b), only then.
+   */
   readonly bookingPages?: boolean;
+  /** Stripe with the platform key for sending refunds again; null without the key. */
+  readonly refundSubmitter?: () => RefundSendDeps["submit"];
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
 }
 
@@ -63,6 +69,8 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
   if (!mailer) return internalServiceJson({ error: "unavailable" }, 503);
   const errors: Record<string, string> = {};
   const outbox = new GuestMailOutbox(pool);
+  const guestBooking = dependencies.bookingPages ?? config.guestBookingEnabled;
+  const submit = guestBooking ? (dependencies.refundSubmitter ?? stripeRefundSubmitter)() : null;
   try {
     const counts = await (dependencies.run ?? runExperienceJobs)({
       questions: new GuestQuestionRepository(pool),
@@ -70,7 +78,8 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       notices: outbox,
       bookingLinks: outbox,
       // The page needs both flags; this job runs only with guest mail on, so booking on this site decides.
-      access: (dependencies.bookingPages ?? config.guestBookingEnabled) ? new GuestBookingAccess(pool) : null,
+      access: guestBooking ? new GuestBookingAccess(pool) : null,
+      refunds: submit ? { cancellations: new BookingCancellations(pool), submit } : null,
       guests: new GuestBookingRepository(pool),
       translations: new GuestQuestionTranslations(pool),
       translator: (dependencies.translator ?? (() => anthropicTranslator({ timeoutMs: EXPERIENCE_JOB_LIMITS.translationTimeoutMs })))(),

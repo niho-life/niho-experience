@@ -39,7 +39,7 @@ const ERROR_TEXT: Record<string, string> = {
 };
 
 const REFUND_STATE = {
-  REQUESTED: () => "Stripe の受付待ち（10 分以上）",
+  REQUESTED: () => "Stripe の受付待ち（10 分以上。自動の再送は 8 回まで）",
   PENDING: () => "Stripe の処理中（7 日以上）",
   FAILED: (code: string | null) => `返金に失敗（${code ?? "理由不明"}）`,
 } as const;
@@ -98,7 +98,9 @@ export function AdminSiteBookings({ initial }: { initial: SupportQueue }) {
       setPending(null);
       setForm(null);
       const waiting = result.refunds?.some((refund) => refund.status === "REQUESTED");
-      setMessage({ tone: "ok", text: `${OUTCOME_TEXT[result.outcome ?? ""] ?? "完了しました"}${waiting ? "（Stripe がまだ受け付けていない返金があります。しばらくして一覧に出たら、もう一度送ってください）" : ""}` });
+      // A refund the automatic resend is sending right now is not sent a second time (the same lease).
+      const inProgress = result.outcome === "REFUND_RETRIED" && result.refunds?.length === 0;
+      setMessage({ tone: "ok", text: `${inProgress ? "この返金は、ちょうど自動の再送が進めています。少し待って、一覧を読み直してください" : OUTCOME_TEXT[result.outcome ?? ""] ?? "完了しました"}${waiting ? "（Stripe がまだ受け付けていない返金があります。約 2 分後から自動で送り直します。一覧に残り続けたら、もう一度送ってください）" : ""}` });
       await refresh();
     } catch {
       setMessage({ tone: "error", text: "通信できませんでした。もう一度お試しください（同じ操作として送り直します）" });

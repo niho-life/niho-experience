@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 
 /** The experience mail job's trigger (#285 slice 5) with a synthetic Google identity, pool, mailer and run. */
 const mocks = vi.hoisted(() => ({
@@ -37,6 +37,7 @@ const counts = {
   bookingConfirmations: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   bookingLinks: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  bookingRefunds: { claimed: 1, sent: 1, failed: 0, retried: 0 },
   guestTranslations: { claimed: 1, translated: 1, retried: 0, failed: 0, closed: 0, abandoned: 0 },
   guestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
@@ -47,6 +48,7 @@ const idle = {
   bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   bookingLinks: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  bookingRefunds: { claimed: 0, sent: 0, failed: 0, retried: 0 },
   guestTranslations: { off: true },
   guestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
@@ -70,6 +72,8 @@ const payload = (overrides: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // No Stripe platform key unless a test sets one: refunds are not resent.
+  vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "");
   mocks.config.guestMailEnabled = true;
   mocks.verifyIdToken.mockResolvedValue(payload());
   mocks.pool.mockReturnValue(fakePool);
@@ -146,14 +150,28 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     expect(deps.access).toBeInstanceOf(GuestBookingAccess);
     expect(deps.guests).toBeInstanceOf(GuestBookingRepository);
     expect(deps.translations).toBeInstanceOf(GuestQuestionTranslations);
-    // Translation is off in this configuration: no Claude API.
+    // Translation is off in this configuration: no Claude API. Nor is there a Stripe key, so refunds are not resent.
     expect(deps.translator).toBeNull();
+    expect(deps.refunds).toBeNull();
     expect(deps.mailer).toBe(fakeMailer);
     expect(deps.siteUrl).toBe("https://experience.example");
     expect(deps.now()).toBeInstanceOf(Date);
     expect(fakeMailer.close).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledExactlyOnceWith(`[experience-jobs] drain ${JSON.stringify(counts)}`);
     info.mockRestore();
+  });
+
+  it("hands the run Stripe from the platform key in the environment, to send refunds again", async () => {
+    vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic_platform_key_only");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      expect((await post()).status).toBe(200);
+      const deps = mocks.run.mock.calls[0]![0];
+      expect(deps.refunds?.cancellations).toBeInstanceOf(BookingCancellations);
+      expect(typeof deps.refunds?.submit).toBe("function");
+    } finally {
+      vi.mocked(console.info).mockRestore();
+    }
   });
 
   it("puts no booking page link in the emails while booking on this site is off", async () => {
@@ -216,6 +234,33 @@ describe("experienceJobsDrainResponse dependencies", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("resends refunds Stripe never accepted only with booking on this site on and the platform Stripe key present", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const submit = vi.fn();
+    const run = vi.fn<(deps: unknown) => Promise<typeof counts>>(async () => counts);
+    const respond = (extra: Parameters<typeof experienceJobsDrainResponse>[1]) => experienceJobsDrainResponse(request, {
+      settings, verifier: verifier({ ok: true, claims }), pool: () => fakePool as never, mailer: () => fakeMailer, translator: () => null, run, ...extra,
+    });
+    const refundsOf = (call: number) => (run.mock.calls[call]![0] as { refunds: { cancellations: unknown; submit: unknown } | null }).refunds;
+    try {
+      expect((await respond({ bookingPages: true, refundSubmitter: () => submit })).status).toBe(200);
+      expect(refundsOf(0)?.cancellations).toBeInstanceOf(BookingCancellations);
+      expect(refundsOf(0)?.submit).toBe(submit);
+
+      // No platform key: off.
+      expect((await respond({ bookingPages: true, refundSubmitter: () => null })).status).toBe(200);
+      expect(refundsOf(1)).toBeNull();
+
+      // Booking on this site off: off, and the key is not even read.
+      const refundSubmitter = vi.fn(() => submit);
+      expect((await respond({ bookingPages: false, refundSubmitter })).status).toBe(200);
+      expect(refundsOf(2)).toBeNull();
+      expect(refundSubmitter).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("runs every step against an unreachable database and reports each as failed, without its message", async () => {
     const { runExperienceJobs: realRun } = await vi.importActual<typeof import("@/lib/experience-jobs/drain")>("@/lib/experience-jobs/drain");
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -224,7 +269,7 @@ describe("experienceJobsDrainResponse dependencies", () => {
     const mailer = { sendMail: vi.fn(), close: vi.fn() };
     const translator = vi.fn();
     const response = await experienceJobsDrainResponse(request, {
-      settings, verifier: verifier({ ok: true, claims }), pool: () => pool as never, mailer: () => mailer, translator: () => translator, run: realRun,
+      settings, verifier: verifier({ ok: true, claims }), pool: () => pool as never, mailer: () => mailer, translator: () => translator, refundSubmitter: () => vi.fn(), run: realRun,
     });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
@@ -232,13 +277,15 @@ describe("experienceJobsDrainResponse dependencies", () => {
       bookingConfirmations: { error: "unavailable" },
       bookingNotices: { error: "unavailable" },
       bookingLinks: { error: "unavailable" },
+      bookingRefunds: { error: "unavailable" },
       guestTranslations: { error: "unavailable" },
       guestErasure: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { error: "unavailable" },
     });
     expect(pool.connect).toHaveBeenCalledTimes(5);
-    expect(pool.query).toHaveBeenCalledTimes(3);
+    // The three steps that query directly, and the claim of refunds to send again.
+    expect(pool.query).toHaveBeenCalledTimes(4);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();
     expect(mailer.close).toHaveBeenCalledOnce();

@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { GuestBookingAccess } from "../src/booking-access.ts";
-import { BookingCancellations, GUEST_NOTICE_TOPICS, type RefundSubmission } from "../src/booking-cancellations.ts";
+import { BOOKING_CANCELLATION_LIMITS, BookingCancellations, GUEST_NOTICE_TOPICS, type RefundSubmission } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
@@ -160,6 +160,33 @@ function refundEvent(submission: RefundSubmission, status: "pending" | "succeede
     eventOccurredAtUtc: new Date().toISOString(), ...overrides,
   };
 }
+
+/** A cancelled booking whose refund Stripe has not accepted, asked for `minutesAgo` minutes ago. */
+async function requestedRefund(context: Context, guestEmail: string, minutesAgo: number): Promise<RefundSubmission> {
+  const made = await paid(context, { guestEmail });
+  const cancelled = await context.cancellations.cancelAsHost(ownerA, made.publicBookingId, { commandId: randomUUID(), reason: "WEATHER" });
+  const refund = cancelled.refunds[0]!;
+  await context.pool.query("UPDATE booking_refunds SET created_at = clock_timestamp() - make_interval(mins => $2) WHERE id = $1::uuid", [refund.refundId, minutesAgo]);
+  return refund;
+}
+
+/** How many times a sender took the refund, and when last (seconds ago). */
+async function sendState(pool: Pool, refundId: string) {
+  const row = (await pool.query(
+    "SELECT status, send_attempts, extract(epoch FROM clock_timestamp() - send_claimed_at)::float AS claimed_ago FROM booking_refunds WHERE id = $1::uuid",
+    [refundId],
+  )).rows[0];
+  return { status: String(row.status), attempts: Number(row.send_attempts), claimedAgo: row.claimed_ago === null ? null : Number(row.claimed_ago) };
+}
+
+async function setSendState(pool: Pool, refundId: string, attempts: number, claimedSecondsAgo: number | null): Promise<void> {
+  await pool.query(
+    "UPDATE booking_refunds SET send_attempts = $2, send_claimed_at = CASE WHEN $3::float8 IS NULL THEN NULL ELSE clock_timestamp() - make_interval(secs => $3::float8) END WHERE id = $1::uuid",
+    [refundId, attempts, claimedSecondsAgo],
+  );
+}
+
+const AUTO = { limit: 10, olderThanSeconds: 120, leaseSeconds: 120 } as const;
 
 describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: databaseUrl === undefined }, () => {
   it("cancels for the guest before free cancellation ends: a full refund with NIHO's fee, seats back, the guest and host told", async () => {
@@ -569,6 +596,128 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
         [pending.publicBookingId, false, null],
         [asking.publicBookingId, false, null],
       ]);
+    });
+  });
+  it("sends a refund Stripe has not accepted again from the job: after a grace period, one holder at a time, with a growing wait and a cap", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      // A request's own send goes first: nothing younger than the grace period is taken.
+      const fresh = await requestedRefund(context, "fresh@example.com", 0);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+      assert.deepEqual(await sendState(pool, fresh.refundId), { status: "REQUESTED", attempts: 0, claimedAgo: null });
+      await pool.query("UPDATE booking_refunds SET created_at = clock_timestamp() - interval '119 seconds' WHERE id = $1::uuid", [fresh.refundId]);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+      await pool.query("UPDATE booking_refunds SET created_at = clock_timestamp() - interval '121 seconds' WHERE id = $1::uuid", [fresh.refundId]);
+
+      // Taken with exactly what the booking and the refund say, as the request's own send had it; one attempt.
+      const claimed = await cancellations.claimRefundsToSend(AUTO);
+      assert.deepEqual(claimed, [fresh]);
+      assert.equal((await sendState(pool, fresh.refundId)).attempts, 1);
+      // Held: another run (or the same one again) gets nothing while the lease runs.
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+      assert.deepEqual(await cancellations.claimRefundsToSend({ ...AUTO, leaseSeconds: 3600 }), []);
+
+      // Oldest first, at most `limit`; refunds Stripe accepted, refused or finished are never returned.
+      const accepted = await requestedRefund(context, "accepted@example.com", 60);
+      const succeeded = await requestedRefund(context, "succeeded@example.com", 59);
+      const refused = await requestedRefund(context, "refused@example.com", 58);
+      const olderOne = await requestedRefund(context, "older-one@example.com", 30);
+      const olderTwo = await requestedRefund(context, "older-two@example.com", 20);
+      const olderThree = await requestedRefund(context, "older-three@example.com", 10);
+      assert.equal(await cancellations.recordRefundSubmission(accepted.refundId, { kind: "accepted", stripeRefundRef: "re_test_E1", status: "pending" }), "PENDING");
+      assert.equal(await cancellations.recordRefundSubmission(succeeded.refundId, { kind: "accepted", stripeRefundRef: "re_test_E2", status: "succeeded" }), "SUCCEEDED");
+      assert.equal(await cancellations.recordRefundSubmission(refused.refundId, { kind: "rejected", failureCode: "charge_already_refunded" }), "FAILED");
+      assert.deepEqual((await cancellations.claimRefundsToSend({ ...AUTO, limit: 2 })).map((refund) => refund.refundId), [olderOne.refundId, olderTwo.refundId]);
+      assert.deepEqual((await cancellations.claimRefundsToSend(AUTO)).map((refund) => refund.refundId), [olderThree.refundId]);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+      for (const done of [accepted, succeeded, refused]) {
+        await setSendState(pool, done.refundId, 0, null);
+        assert.equal((await sendState(pool, done.refundId)).attempts, 0);
+      }
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+
+      // The wait grows with each try: 2, 4, 8 … minutes, an hour at most; the lease is its floor.
+      const ladder: readonly [number, number][] = [[1, 120], [2, 240], [3, 480], [4, 960], [5, 1920], [6, 3600], [7, 3600]];
+      for (const [attempts, waitSeconds] of ladder) {
+        await setSendState(pool, fresh.refundId, attempts, waitSeconds - 5);
+        assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), [], `${attempts} tries: still waiting`);
+        assert.equal((await sendState(pool, fresh.refundId)).attempts, attempts);
+        await setSendState(pool, fresh.refundId, attempts, waitSeconds + 5);
+        assert.deepEqual((await cancellations.claimRefundsToSend(AUTO)).map((refund) => refund.refundId), [fresh.refundId], `${attempts} tries: due`);
+        assert.equal((await sendState(pool, fresh.refundId)).attempts, attempts + 1);
+      }
+      // A longer lease than the wait is the floor.
+      await setSendState(pool, fresh.refundId, 1, 200);
+      assert.deepEqual(await cancellations.claimRefundsToSend({ ...AUTO, leaseSeconds: 600 }), []);
+
+      // After the last automatic attempt the refund stays for support, however long ago it was tried.
+      await setSendState(pool, fresh.refundId, BOOKING_CANCELLATION_LIMITS.refundAutoSendAttempts, 30 * 86_400);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+      // Eight tries take hours: by then it is on support's list (Stripe has not answered for ten minutes).
+      await pool.query("UPDATE booking_refunds SET created_at = clock_timestamp() - interval '4 hours' WHERE id = $1::uuid", [fresh.refundId]);
+      assert.deepEqual((await cancellations.supportQueue()).refunds.filter((refund) => refund.refundId === fresh.refundId).map((refund) => refund.refundStatus), ["REQUESTED"]);
+      // Support can still send it, and that is not an automatic attempt.
+      const resent = await cancellations.retryRefund(support, fresh.refundId, { commandId: randomUUID() });
+      assert.equal(resent.outcome, "REFUND_RETRIED");
+      assert.deepEqual(resent.refunds, [fresh]);
+      assert.equal((await sendState(pool, fresh.refundId)).attempts, BOOKING_CANCELLATION_LIMITS.refundAutoSendAttempts);
+      // And when Stripe takes it, the job never sends it again.
+      assert.equal(await cancellations.recordRefundSubmission(fresh.refundId, { kind: "accepted", stripeRefundRef: "re_test_E3", status: "pending" }), "PENDING");
+      await setSendState(pool, fresh.refundId, 1, 30 * 86_400);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+
+      // A claim names its bounds.
+      for (const bad of [{ ...AUTO, limit: 0 }, { ...AUTO, limit: 51 }, { ...AUTO, limit: 1.5 }, { ...AUTO, olderThanSeconds: -1 }, { ...AUTO, leaseSeconds: 29 }, { ...AUTO, leaseSeconds: 3601 }]) {
+        await assert.rejects(cancellations.claimRefundsToSend(bad), StoreValidationError);
+      }
+    });
+  });
+
+  it("never lets the job and support's resend, or two job runs, send the same refund at the same time", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const refund = await requestedRefund(context, "race@example.com", 10);
+
+      // Two runs of the job at once: one of them holds it.
+      const runs = await Promise.all([1, 2, 3, 4].map(() => cancellations.claimRefundsToSend(AUTO)));
+      assert.deepEqual(runs.flat().map((item) => item.refundId), [refund.refundId]);
+      assert.equal((await sendState(pool, refund.refundId)).attempts, 1);
+
+      // Support presses 「もう一度送る」 while the job holds it: nothing for support to send, and the command is still recorded.
+      const commandId = randomUUID();
+      const blocked = await cancellations.retryRefund(support, refund.refundId, { commandId });
+      assert.equal(blocked.outcome, "REFUND_RETRIED");
+      assert.deepEqual(blocked.refunds, []);
+      // Its lease is the job's: once it ran out, the same command sends it, and the job waits behind support.
+      await setSendState(pool, refund.refundId, 1, BOOKING_CANCELLATION_LIMITS.refundSendLeaseSeconds + 5);
+      const again = await cancellations.retryRefund(support, refund.refundId, { commandId });
+      assert.equal(again.repeated, true);
+      assert.deepEqual(again.refunds, [refund]);
+      assert.deepEqual((await cancellations.retryRefund(support, refund.refundId, { commandId })).refunds, []);
+      assert.deepEqual(await cancellations.claimRefundsToSend({ ...AUTO, leaseSeconds: 30 }), []);
+      assert.equal((await sendState(pool, refund.refundId)).attempts, 1);
+
+      // Many rounds of the job against support's click: exactly one of them gets the refund each time.
+      for (let round = 0; round < 10; round += 1) {
+        await setSendState(pool, refund.refundId, 0, null);
+        const [fromJob, fromSupport] = await Promise.all([
+          cancellations.claimRefundsToSend(AUTO),
+          cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID() }),
+        ]);
+        assert.equal(fromJob.length + fromSupport.refunds.length, 1, `round ${round}`);
+      }
+
+      // A second click and a second job run after one another are held too.
+      await setSendState(pool, refund.refundId, 0, null);
+      assert.equal((await cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID() })).refunds.length, 1);
+      assert.equal((await cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID() })).refunds.length, 0);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+
+      // Money moves once whatever the order: the answer is recorded once, and what Stripe accepted is not sent again.
+      assert.equal(await cancellations.recordRefundSubmission(refund.refundId, { kind: "accepted", stripeRefundRef: "re_test_F1", status: "pending" }), "PENDING");
+      await setSendState(pool, refund.refundId, 0, null);
+      assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
+      assert.deepEqual((await cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID() })).outcome, "NOT_CANCELLABLE");
     });
   });
 });
