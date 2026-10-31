@@ -337,6 +337,9 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       const second = await paid(context, { occurrenceDate: date, guestEmail: "second@example.com", adultCount: 1, childCount: 0, expectedTotalYen: 3000 });
       const review = await paid(context, { occurrenceDate: date, guestEmail: "review@example.com", adultCount: 1, childCount: 0, expectedTotalYen: 3000 }, 1);
       assert.equal((await booking(pool, review.publicBookingId)).status, "PAYMENT_REVIEW");
+      // A guest still on Stripe's Checkout: a hold that has not been paid.
+      const held = await guests.startGuestBooking(request({ occurrenceDate: date, guestEmail: "held@example.com", adultCount: 1, childCount: 0, expectedTotalYen: 3000 }));
+      assert.equal((await booking(pool, held.publicBookingId)).status, "HOLD");
       const key = { productId: "walk", offerId: "sample-walk-am", localDate: date, localStartTime: "10:00" };
       await assert.rejects(cancellations.cancelSessionAsHost(ownerA, key, { commandId: randomUUID(), reason: "GUEST_REQUEST" as never }), StoreValidationError);
       const commandId = randomUUID();
@@ -347,7 +350,16 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.equal((await booking(pool, review.publicBookingId)).status, "PAYMENT_REVIEW");
       const closed = await pool.query("SELECT desired_state FROM schedule_occurrence_sales_states WHERE rule_id='sample-walk-am'");
       assert.deepEqual(closed.rows.map((state) => state.desired_state), ["CLOSED"]);
-      const repeated = await cancellations.cancelSessionAsHost(ownerA, key, { commandId, reason: "WEATHER" });
+      // The unpaid hold goes with the session; a payment that arrives later is for support, not a booking for a session called off.
+      assert.equal((await booking(pool, held.publicBookingId)).status, "EXPIRED");
+      events += 1;
+      await context.store.confirmBookingPayment({ providerId: "provider-a" }, {
+        publicBookingId: held.publicBookingId, connectedAccountId: ACCOUNT, stripePaymentRef: `pi_sample_${events}`,
+        stripeEventId: `evt_sample_${events}`, stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(),
+        amount: held.totalAmount, currency: "JPY",
+      });
+      assert.equal((await booking(pool, held.publicBookingId)).status, "PAYMENT_REVIEW");
+      const repeated =await cancellations.cancelSessionAsHost(ownerA, key, { commandId, reason: "WEATHER" });
       assert.equal(repeated.repeated, true);
       assert.equal(repeated.refunds.length, 2);
       const nothing = await cancellations.cancelSessionAsHost(ownerA, key, { commandId: randomUUID(), reason: "WEATHER" });
@@ -496,6 +508,23 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.deepEqual((await cancellations.supportQueue()).refunds.map((refund) => refund.refundStatus), ["PENDING"]);
       assert.equal(await cancellations.recordRefundSubmission(thirdRefund.refundId, { kind: "accepted", stripeRefundRef: "re_test_C1", status: "succeeded" }), "SUCCEEDED");
       assert.equal((await cancellations.supportQueue()).refunds.length, 0);
+    });
+  });
+
+  it("does not subtract a refund from the ledger when an older pending answer arrives after its failure", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context, { guestEmail: "late-answer@example.com" });
+      const refund = (await cancellations.cancelAsHost(ownerA, made.publicBookingId, { commandId: randomUUID(), reason: "ILLNESS" })).refunds[0]!;
+      // The failure webhook is recorded first; the API's "pending" answer, older than it, is recorded after.
+      assert.equal((await cancellations.applyRefundEvent(refundEvent(refund, "failed", { stripeRefundRef: "re_test_LATE1" }))).status, "FAILED");
+      assert.equal(await cancellations.recordRefundSubmission(refund.refundId, { kind: "accepted", stripeRefundRef: "re_test_LATE1", status: "pending" }), "FAILED");
+      // Nothing was subtracted, so nothing needs reversing: the capture is the only entry.
+      assert.deepEqual((await ledger(pool, made.publicBookingId)).map((entry) => [entry.kind, entry.amount]), [["PAYMENT_CAPTURED", 7500]]);
+      assert.equal((await refunds(pool, made.publicBookingId))[0]?.status, "FAILED");
+      // The same answer again changes nothing either.
+      assert.equal(await cancellations.recordRefundSubmission(refund.refundId, { kind: "accepted", stripeRefundRef: "re_test_LATE1", status: "pending" }), "FAILED");
+      assert.equal((await ledger(pool, made.publicBookingId)).length, 1);
     });
   });
 

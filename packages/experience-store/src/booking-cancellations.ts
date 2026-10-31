@@ -601,8 +601,9 @@ async function settleRefund(
       WHERE id = $1::uuid`,
     [refund.id, status, input.stripeRefundRef, input.failureCode],
   );
-  // The money left the seller's balance once Stripe accepted the refund (whatever it says next).
-  if (accepted && input.wanted !== "FAILED") {
+  // The money left the seller's balance once Stripe accepted the refund (whatever it says next). A refund already
+  // failed stays failed: an older "pending" answer arriving after the failure must not subtract what nothing reverses.
+  if (accepted && input.wanted !== "FAILED" && refund.status !== "FAILED") {
     await client.query(
       `INSERT INTO payment_ledger_entries (provider_id, entry_id, booking_id, kind, amount, currency, stripe_payment_ref, stripe_event_id, occurred_at)
        VALUES ($1, $2, $3, 'REFUND', $4, $5, $6, $7, COALESCE($8::timestamptz, clock_timestamp()))
@@ -814,6 +815,12 @@ export class BookingCancellations {
       }
       // No new bookings for the called-off occurrence(s): what この回を中止 promises.
       for (const occurrence of new Map(bookings.map((booking) => [booking.occurrenceId, booking.ruleId]))) {
+        // A hold still waiting for its payment goes too: a payment that arrives for an expired hold lands in
+        // PAYMENT_REVIEW (confirmBookingPayment), for support, instead of confirming a booking for a session called off.
+        await client.query(
+          "UPDATE bookings SET status = 'EXPIRED', updated_at = clock_timestamp() WHERE provider_id = $1 AND occurrence_id = $2 AND status = 'HOLD'",
+          [actor.providerId, occurrence[0]],
+        );
         await client.query(
           `INSERT INTO schedule_occurrence_sales_states (provider_id, rule_id, occurrence_id, desired_state)
            VALUES ($1, $2, $3, 'CLOSED')
