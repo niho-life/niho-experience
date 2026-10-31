@@ -1,4 +1,4 @@
-import type { HostGuestBooking, HostGuestSession } from "@niho-experience/experience-store";
+import type { BookingAttendanceStatus, HostGuestBooking, HostGuestSession, HostSessionAttendance } from "@niho-experience/experience-store";
 import { actionTime, seatsLabel, sessionHref, type SessionQuery } from "./bookings";
 import type { HostHomeData, HostSessionView } from "./console-data";
 import { addDays, dateWithWeekdayJa, dayOfMonth, durationJa, shortDateWithWeekdayJa, weekdayJa } from "./format";
@@ -6,13 +6,14 @@ import type { HomeSessions, HomeTodo, HomeUpcoming } from "./home";
 import { SESSION_PHASE_LABELS, sessionPhase } from "./session";
 import { siteBooking } from "./site-bookings";
 import { BOOKING_STATUS } from "./status";
-import type { HostBooking } from "./types";
+import type { HostAttendance, HostBooking } from "./types";
 
 /*
  * ホーム and この回 for the bookings travelers made on this site (#285 slice 8b, docs/guest-booking.md「ホストの画面」):
  * the experience DB's sessions as ホーム's rows and 次にすること, and one session's bookings as この回 shows them.
  * A session is what the bookings' occurrence snapshots name (the day, the start, the experience and the offer), as
- * 予約 groups them. Read only: no attendance, no thread with the guest (slice 6) and no calling off (slice 7).
+ * 予約 groups them. この回 also has each guest's thread (slice 6b), calling the session off (slice 7) and, with
+ * EXPERIENCE_HOST_ATTENDANCE_ENABLED, 出欠 and the session's capacity (#107).
  * Type-only use of the store: the screens' client code shares these rules and texts.
  */
 
@@ -23,6 +24,12 @@ export const SITE_PAYMENT_REVIEW_TODO_TITLE = "確認待ちの支払いがあり
 /** ホーム when the sessions could not be read: the rows and todos above may be missing some. */
 export const SITE_HOME_LOAD_FAILED_TEXT = "このサイトで受けた予約を読み込めませんでした。開催と次にすることに出ていない予約があるかもしれません。";
 export const SITE_SESSION_LOAD_FAILED_TEXT = "参加者を読み込めませんでした。時間をおいて、もう一度お試しください。";
+/** 出欠 (#107) when it could not be kept: the mark the screen had stays. */
+export const SITE_ATTENDANCE_FAILED_TEXT = "出欠を記録できませんでした。時間をおいて、もう一度お試しください。";
+/** The store's NOT_STARTED: the browser thought the session had started, the database did not. */
+export const SITE_ATTENDANCE_NOT_STARTED_TEXT = "まだ開始時刻前のため、出欠は付けられません。開始後にもう一度お試しください。";
+/** The store's NOT_CONFIRMED: the booking was cancelled (or is under review) since the screen opened. */
+export const SITE_ATTENDANCE_NOT_CONFIRMED_TEXT = "この予約は確定していないため、出欠を付けられません。画面を開き直してください。";
 
 /** ホーム's part from this site: the sessions by day and 次にすること. */
 export interface SiteHome {
@@ -123,11 +130,27 @@ export function siteSessionBooking(stored: HostGuestBooking): HostBooking {
   return { ...siteBooking(stored), phone: stored.guest?.phone ?? null };
 }
 
-/** この回 of this site's bookings for the session `query` names; null when it has none of the provider's. */
-export function siteSessionView(stored: readonly HostGuestBooking[], query: SessionQuery): HostSessionView | null {
+const ATTENDANCE: Record<BookingAttendanceStatus, HostAttendance> = { ATTENDED: "attended", NO_SHOW: "no_show" };
+const STORED_ATTENDANCE: Record<HostAttendance, BookingAttendanceStatus> = { attended: "ATTENDED", no_show: "NO_SHOW" };
+
+/** 来た / 来なかった as the store keeps it, and back. */
+export function siteAttendance(status: BookingAttendanceStatus): HostAttendance {
+  return ATTENDANCE[status];
+}
+
+export function storedAttendance(value: HostAttendance): BookingAttendanceStatus {
+  return STORED_ATTENDANCE[value];
+}
+
+/**
+ * この回 of this site's bookings for the session `query` names; null when it has none of the provider's. With
+ * `attendance` (#107, its flag on) each booking carries its mark and the session the occurrence's capacity now.
+ */
+export function siteSessionView(stored: readonly HostGuestBooking[], query: SessionQuery, attendance: HostSessionAttendance | null = null): HostSessionView | null {
   const first = stored[0];
   if (!first) return null;
-  const bookings = stored.map(siteSessionBooking);
+  const marks = new Map(attendance?.marks.map((mark) => [mark.publicBookingId, siteAttendance(mark.status)]));
+  const bookings = stored.map((booking) => ({ ...siteSessionBooking(booking), attendance: marks.get(booking.publicBookingId) ?? null }));
   return {
     date: query.date,
     start: query.start,
@@ -136,8 +159,8 @@ export function siteSessionView(stored: readonly HostGuestBooking[], query: Sess
     offerId: query.offer,
     title: first.productTitle,
     offer: first.productTitle,
-    // Unknown here, as on 予約: the bookings keep it only as it was when each was made.
-    capacity: null,
+    // The occurrence's now (#107); unknown without it, as on 予約: the bookings keep it only as it was when each was made.
+    capacity: attendance?.capacity ?? null,
     // Not in the experience DB's booking: 集合 is left out.
     meetingArea: "",
     bookings,
@@ -146,10 +169,12 @@ export function siteSessionView(stored: readonly HostGuestBooking[], query: Sess
 
 /**
  * この回's count of this site's guests: "参加 4 名" counts the confirmed bookings and the payments under review, as
- * ホーム does, and "うち確認待ち 1 名（席は確保されていません）" says how many of them keep no seat.
+ * ホーム does ("参加 4 名 · 定員 8" when the capacity is known, #107), and "うち確認待ち 1 名（席は確保されていません）"
+ * says how many of them keep no seat.
  */
-export function siteSessionCountLines(bookings: readonly Pick<HostBooking, "status" | "guests">[]): { main: string; pending: string | null } {
+export function siteSessionCountLines(bookings: readonly Pick<HostBooking, "status" | "guests">[], capacity: number | null = null): { main: string; pending: string | null } {
   const sum = (status: HostBooking["status"]) => bookings.filter((booking) => booking.status === status).reduce((total, booking) => total + booking.guests, 0);
   const review = sum("payment_review");
-  return { main: `参加 ${sum("confirmed") + review} 名`, pending: review ? `うち確認待ち ${review} 名（席は確保されていません）` : null };
+  const main = `参加 ${sum("confirmed") + review} 名`;
+  return { main: capacity ? `${main} · 定員 ${capacity}` : main, pending: review ? `うち確認待ち ${review} 名（席は確保されていません）` : null };
 }

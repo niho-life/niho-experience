@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
-import { bookingsHref, bookingStatusLabel, respondByLabel } from "@/host/bookings";
+import { useEffect, useState, type ReactNode } from "react";
+import { actionTime, bookingsHref, bookingStatusLabel, respondByLabel } from "@/host/bookings";
 import type { HostSessionView } from "@/host/console-data";
-import { shortDateWithWeekdayJa } from "@/host/format";
+import { shortDateWithWeekdayJa, todayInJapan } from "@/host/format";
 import { messagesHref, type BookingConversation } from "@/host/messages";
 import {
   ATTENDANCE_CHOICES,
@@ -37,9 +37,9 @@ import {
   type SessionCancelReason,
   type SessionCancelResult,
 } from "@/host/session";
-import { cancelSiteSession } from "@/host/actions";
-import { SITE_BOOKING_LOAD_FAILED_TEXT, SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_SESSION_SUPPORT_TEXT } from "@/host/site-bookings";
-import { siteSessionCountLines } from "@/host/site-sessions";
+import { cancelSiteSession, recordSiteAttendance } from "@/host/actions";
+import { SITE_BOOKING_LOAD_FAILED_TEXT, SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_SESSION_SUPPORT_TEXT, siteCancellationLines } from "@/host/site-bookings";
+import { SITE_ATTENDANCE_FAILED_TEXT, siteSessionCountLines } from "@/host/site-sessions";
 import type { HostAttendance, HostBooking } from "@/host/types";
 import { DISABLED, useFocusAfterRender } from "./editor-parts";
 import { DANGER_BUTTON } from "./HostBookingDialogs";
@@ -51,23 +51,29 @@ import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostPageBody, InitialAvatar, SectionTitle, StatusPill, SubPageHead } from "./ui";
 
 const CANCELLED_HEADING = "session-cancelled";
+/** This site's bookings: how often the screen's clock moves on, so 出欠 opens at the start without a reload. */
+const CLOCK_MS = 30_000;
 const NOTICE = "flex items-start gap-1.5 rounded-xl bg-leaf-pale px-3 py-2 text-[0.8125rem] leading-normal font-bold text-moss";
 
 export interface HostSessionProps {
   session: HostSessionView;
-  /** The moment the session is seen from (YYYY-MM-DDTHH:MM, JST; the preview's fixed one in mock mode): whether it has started, and when an action is dated. */
+  /**
+   * The moment the session is seen from (YYYY-MM-DDTHH:MM, JST; the preview's fixed one in mock mode): whether it has
+   * started, and when an action is dated. This site's bookings move on from it with the time in Japan.
+   */
   now: string;
   /** The threads of the session's bookings (#106). */
   conversations: readonly BookingConversation[];
   /** The URL's own `?providerId=` (when well formed), carried on every link. */
   providerId: string | null;
   /**
-   * Bookings made on this site (#285 slice 8b, experience DB, http mode): no attendance; calling the session off
-   * cancels every confirmed booking with a full refund (slice 7, `providerId` is the provider shown). `messages`: each
-   * guest leads to their booking's thread (slice 6b). `besideNiho`: NIHO's bookings are 予約's own and these are its
-   * `?source=site`, where "‹ 予約" goes back. Absent in mock mode.
+   * Bookings made on this site (#285 slice 8b, experience DB, http mode): calling the session off cancels every
+   * confirmed booking with a full refund (slice 7, `providerId` is the provider shown). `messages`: each guest leads
+   * to their booking's thread (slice 6b). `attendance`: 出欠 is kept in the experience DB (#107, its flag), sent for
+   * `providerId`. `besideNiho`: NIHO's bookings are 予約's own and these are its `?source=site`, where "‹ 予約" goes
+   * back. Absent in mock mode.
    */
-  site?: { besideNiho: boolean; providerId?: string; messages?: boolean } | null;
+  site?: { besideNiho: boolean; providerId?: string; messages?: boolean; attendance?: boolean } | null;
 }
 
 /** Label 72px + value, as a booking's 申込内容. */
@@ -114,11 +120,14 @@ function Words({ booking }: { booking: HostBooking }) {
 
 const SEGMENT = "inline-flex h-11 items-center justify-center gap-1 rounded-full border px-3 text-[0.875rem] font-extrabold";
 
-/** 来た / 来なかった: 44px toggles, both unpressed while 未記録; disabled before the start. */
-function Attendance({ booking, open, onMark }: { booking: HostBooking; open: boolean; onMark: (value: HostAttendance) => void }) {
+/**
+ * 来た / 来なかった: 44px toggles, both unpressed while 未記録; disabled before the start, and while a mark is being
+ * kept (`saving`, this site's bookings). `noShowNote`: what 来なかった means for the guest, where it is so.
+ */
+function Attendance({ booking, open, saving = false, noShowNote = true, onMark }: { booking: HostBooking; open: boolean; saving?: boolean; noShowNote?: boolean; onMark: (value: HostAttendance) => void }) {
   return (
     <>
-      <div role="group" aria-label={`${booking.guest} さんの出欠`} className="mt-3 grid max-w-[320px] grid-cols-2 gap-2">
+      <div role="group" aria-label={`${booking.guest} さんの出欠`} aria-busy={saving || undefined} className="mt-3 grid max-w-[320px] grid-cols-2 gap-2">
         {ATTENDANCE_CHOICES.map((choice) => {
           const pressed = booking.attendance === choice.value;
           return (
@@ -126,7 +135,7 @@ function Attendance({ booking, open, onMark }: { booking: HostBooking; open: boo
               key={choice.value}
               type="button"
               aria-pressed={pressed}
-              disabled={!open}
+              disabled={!open || saving}
               onClick={() => onMark(choice.value)}
               className={`${SEGMENT} ${DISABLED} ${pressed ? (choice.value === "attended" ? "border-moss bg-leaf-pale text-moss" : "border-ink-soft bg-sand text-ink") : "border-line-strong bg-canvas text-ink-soft hover:bg-sand"}`}
             >
@@ -136,7 +145,7 @@ function Attendance({ booking, open, onMark }: { booking: HostBooking; open: boo
           );
         })}
       </div>
-      {booking.attendance === "no_show" ? <p className="mt-1.5 text-xs text-muted">{NO_SHOW_NOTE}</p> : null}
+      {saving ? <p className="mt-1.5 text-xs text-muted">記録しています…</p> : booking.attendance === "no_show" && noShowNote ? <p className="mt-1.5 text-xs text-muted">{NO_SHOW_NOTE}</p> : null}
     </>
   );
 }
@@ -197,7 +206,10 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
  * (niho-app#19321) and show what it reads back, with NIHO's result for each booking.
  *
  * This site's bookings (`site`, #285 slices 8b and 7): the guests with their phones, words and payments under review
- * (確認待ち, counted with the participants as ホーム counts them), and, before the start, この回を中止 with full refunds.
+ * (確認待ち, counted with the participants as ホーム counts them), and, before the start, この回を中止 with full refunds;
+ * afterwards each guest's row says how their booking was cancelled and where its refund is. With `site.attendance`
+ * (#107) the capacity and 来た / 来なかった, kept in the experience DB one booking at a time: the screen shows what the
+ * store kept, and a failure leaves the mark as it was.
  */
 export function HostSession({ session, now, conversations, providerId, site = null }: HostSessionProps) {
   const [bookings, setBookings] = useState<readonly HostBooking[]>(session.bookings);
@@ -206,14 +218,32 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   const [asking, setAsking] = useState<"contact" | "cancel" | "siteCancel" | null>(null);
   /** この回を中止 of this site's bookings (#285 slice 7): while it is sent, and what failed. */
   const [siteCancel, setSiteCancel] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  /** 出欠 of this site's bookings (#107): the bookings whose mark is being kept, and the last failure. */
+  const [saving, setSaving] = useState<ReadonlySet<string>>(() => new Set());
+  const [attendanceError, setAttendanceError] = useState("");
   const focusLater = useFocusAfterRender();
+  // The moment the screen stands at: the page's for the preview (fixed) and the first render; this site's bookings
+  // follow the time in Japan from then on (the store still decides by its own clock).
+  const [clock, setClock] = useState(now);
+  const live = site !== null;
+  useEffect(() => {
+    if (!live) return;
+    const tick = () => {
+      const at = Date.now();
+      setClock(actionTime(todayInJapan(at), at));
+    };
+    const timer = window.setInterval(tick, CLOCK_MS);
+    return () => window.clearInterval(timer);
+  }, [live]);
 
   const heading = sessionHeading(session);
   const backHref = bookingsHref({ providerId, source: site?.besideNiho ? "site" : null });
-  const phase = sessionPhase(session, now);
-  const today = now.slice(0, 10);
+  const phase = sessionPhase(session, clock);
+  const today = clock.slice(0, 10);
   const { participants, requests } = sessionSections(session.bookings, bookings);
-  const counts = site ? siteSessionCountLines(bookings) : sessionCountLines(bookings, session.capacity);
+  const counts = site ? siteSessionCountLines(bookings, session.capacity) : sessionCountLines(bookings, session.capacity);
+  // 出欠 is recorded in mock mode (on this screen) and for this site's bookings where it is kept (#107).
+  const recordsAttendance = !site || Boolean(site.attendance && site.providerId);
   const dietary = dietarySummary(bookings);
   const attendance = attendanceCounts(bookings);
   const failed = cancellation?.results.filter((result) => !result.ok) ?? [];
@@ -259,8 +289,37 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   const mark = (id: string, value: HostAttendance) => {
     const booking = bookings.find((item) => item.id === id);
     if (!booking || !canRecordAttendance(booking, phase)) return;
+    if (site) {
+      void markSite(booking, value);
+      return;
+    }
     setBookings(bookings.map((item) => (item.id === id ? recordAttendance(item, value, phase) : item)));
     setNotice(attendanceNotice(booking, value));
+  };
+
+  /** Live (#107): the store keeps the mark once the session has started by its clock; the row shows what it kept. */
+  const markSite = async (booking: HostBooking, value: HostAttendance) => {
+    if (!site?.providerId || saving.has(booking.id)) return;
+    setSaving((current) => new Set(current).add(booking.id));
+    setAttendanceError("");
+    let result: Awaited<ReturnType<typeof recordSiteAttendance>>;
+    try {
+      result = await recordSiteAttendance({ providerId: site.providerId, bookingId: booking.id, attendance: value });
+    } catch {
+      result = { ok: false, message: SITE_ATTENDANCE_FAILED_TEXT };
+    }
+    setSaving((current) => {
+      const next = new Set(current);
+      next.delete(booking.id);
+      return next;
+    });
+    if (!result.ok) {
+      setAttendanceError(`${booking.guest} さん: ${result.message}`);
+      return;
+    }
+    const kept = result.attendance;
+    setBookings((current) => current.map((item) => (item.id === booking.id ? { ...item, attendance: kept } : item)));
+    setNotice(kept ? attendanceNotice(booking, kept) : "");
   };
 
   /** 中止, or 失敗した予約をもう一度: only what is still to cancel is tried, and each booking's latest result is kept. */
@@ -314,7 +373,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
             {cancellation ? (
               <p className="text-xs font-extrabold text-danger">中止</p>
             ) : (
-              <p className={`text-xs font-extrabold ${phase === "before" ? "text-muted" : "text-moss"}`}>{sessionPhaseLine(session, now)}</p>
+              <p className={`text-xs font-extrabold ${phase === "before" ? "text-muted" : "text-moss"}`}>{sessionPhaseLine(session, clock)}</p>
             )}
           </div>
           <dl>
@@ -335,15 +394,16 @@ export function HostSession({ session, now, conversations, providerId, site = nu
             ) : null}
             {/* This site's bookings keep food wishes only among the answers, shown with each guest; and no attendance. */}
             {site ? null : <Row label="食べもの">{dietary || <span className="text-muted">{NO_DIETARY_TEXT}</span>}</Row>}
-            {phase !== "before" && !site ? <Row label="出欠">{attendanceSummary(attendance)}</Row> : null}
+            {phase !== "before" && recordsAttendance ? <Row label="出欠">{attendanceSummary(attendance)}</Row> : null}
           </dl>
         </section>
 
         <section aria-labelledby="session-guests" className={`${HOST_SURFACE} mt-3.5`}>
           <div className="px-4 pt-4 pb-2 md:px-5">
             <SectionTitle id="session-guests">参加者</SectionTitle>
-            {phase === "before" && !site && participants.some((booking) => booking.status === "confirmed") ? <p className="mt-0.5 text-xs text-muted">出欠は{ATTENDANCE_LOCKED_TEXT}</p> : null}
+            {phase === "before" && recordsAttendance && participants.some((booking) => booking.status === "confirmed") ? <p className="mt-0.5 text-xs text-muted">出欠は{ATTENDANCE_LOCKED_TEXT}</p> : null}
           </div>
+          {attendanceError ? <p role="alert" className="mx-4 mb-2 text-[0.8125rem] leading-normal font-bold text-danger md:mx-5">{attendanceError}</p> : null}
           <p role="status" className={notice ? `${NOTICE} mx-4 mb-2 md:mx-5` : "sr-only"}>
             {notice ? (
               <>
@@ -364,6 +424,19 @@ export function HostSession({ session, now, conversations, providerId, site = nu
                           <StatusPill status={bookingStatusLabel(booking, today)} />
                           <p className="mt-1.5 text-[0.78125rem] leading-normal font-extrabold text-warn">{SITE_BOOKING_PAYMENT_REVIEW_TEXT}</p>
                         </div>
+                      ) : booking.status === "cancelled" ? (
+                        // Cancelled on this screen (この回を中止): how it went for this booking, and where its refund is.
+                        <div className="mt-2.5">
+                          <StatusPill status={bookingStatusLabel(booking, today)} />
+                          <ul aria-label="取消と返金" className="mt-1.5 text-[0.78125rem] leading-normal">
+                            {siteCancellationLines(booking).map((line) => (
+                              <li key={line} className={line.startsWith("返金に失敗") ? "font-extrabold text-danger" : "text-ink-soft"}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : recordsAttendance ? (
+                        // 来なかった keeps the guest's thanks and review request as they are: nothing here holds them back yet.
+                        <Attendance booking={booking} open={canRecordAttendance(booking, phase)} saving={saving.has(booking.id)} noShowNote={false} onMark={(value) => mark(booking.id, value)} />
                       ) : null
                     ) : booking.status === "confirmed" ? (
                       <Attendance booking={booking} open={canRecordAttendance(booking, phase)} onMark={(value) => mark(booking.id, value)} />

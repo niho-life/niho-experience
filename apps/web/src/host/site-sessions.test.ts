@@ -13,7 +13,9 @@ import {
   siteSessionBooking,
   siteSessionCountLines,
   siteSessionHref,
+  siteAttendance,
   siteSessionView,
+  storedAttendance,
   withSiteHome,
 } from "./site-sessions";
 
@@ -170,5 +172,19 @@ describe("この回 of this site's bookings", () => {
     expect(sessionSections(bookings, bookings)).toEqual({ participants: [bookings[0], bookings[1]], requests: [] });
     expect(siteSessionCountLines(bookings)).toEqual({ main: "参加 4 名", pending: "うち確認待ち 1 名（席は確保されていません）" });
     expect(siteSessionCountLines(bookings.slice(0, 1))).toEqual({ main: "参加 3 名", pending: null });
+  });
+
+  it("carries each booking's 出欠 and the occurrence's capacity where attendance is kept (#107)", () => {
+    const attendance = {
+      capacity: 8,
+      marks: [{ publicBookingId: STORED.publicBookingId, status: "NO_SHOW" as const, recordedAtUtc: "2026-11-01T01:20:00.000Z" }],
+    };
+    const view = siteSessionView([STORED, REVIEW, ERASED], QUERY, attendance)!;
+    expect(view.capacity).toBe(8);
+    expect(view.bookings.map((booking) => booking.attendance)).toEqual(["no_show", null, null]);
+    expect(siteSessionCountLines(view.bookings, view.capacity)).toEqual({ main: "参加 7 名 · 定員 8", pending: "うち確認待ち 1 名（席は確保されていません）" });
+    // A capacity the store could not tell (bookings on more than one occurrence) is left out, as before.
+    expect(siteSessionView([STORED], QUERY, { capacity: null, marks: [] })!.capacity).toBeNull();
+    expect([siteAttendance("ATTENDED"), siteAttendance("NO_SHOW"), storedAttendance("attended"), storedAttendance("no_show")]).toEqual(["attended", "no_show", "ATTENDED", "NO_SHOW"]);
   });
 });
