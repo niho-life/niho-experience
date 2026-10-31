@@ -11,7 +11,12 @@ import {
   type HostActor,
 } from "@niho-experience/experience-store";
 import { siteOrigin } from "@/lib/host/server";
+import { GOOGLE_BUSY_NOTICE_AFTER_MINUTES, googleBusyFailureReason, googleBusyRetryMinutes, noticeGoogleBusyFailure } from "./google-busy-failure";
 import { googleTokenKey, openGoogleRefreshToken, sealGoogleRefreshToken } from "./google-token-crypto";
+
+/** The busy jobs read each input every 15 minutes; a read is trusted for 25, so one late run does not close bookings. */
+export const GOOGLE_BUSY_DUE_MINUTES = 15;
+export const GOOGLE_BUSY_FRESH_MINUTES = 25;
 
 export function googleRuntimeConfig(): { google: GoogleConfig; key: Buffer } | null {
   const clientId = process.env.EXPERIENCE_GOOGLE_CLIENT_ID;
@@ -63,13 +68,14 @@ export async function saveGoogleConnection(
        ON CONFLICT (provider_id) DO UPDATE SET
          opaque_calendar_id=EXCLUDED.opaque_calendar_id, blocking_enabled=true, sync_status='STALE',
          fresh_until=NULL, coverage_start=NULL, coverage_end=NULL,
+         next_sync_due_at=clock_timestamp(), sync_lease_expires_at=NULL, failing_since=NULL,
          version=provider_google_calendars.version+1, updated_at=clock_timestamp()`,
       [actor.providerId, busyCalendarId],
     );
     await client.query("DELETE FROM google_busy_intervals WHERE provider_id=$1", [actor.providerId]);
     await client.query(
       `UPDATE resource_google_calendars SET sync_status='STALE',fresh_until=NULL,sync_dirty=true,next_sync_due_at=clock_timestamp(),
-         sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
+         sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,failing_since=NULL,updated_at=clock_timestamp()
         WHERE provider_id=$1 AND enabled=true`,
       [actor.providerId],
     );
@@ -108,7 +114,11 @@ async function loadConnection(pool: Pool, providerId: string): Promise<StoredGoo
   return result.rows[0] ?? null;
 }
 
-/** Refreshes the cached 90-day busy window. Every failed attempt closes new bookings. */
+/**
+ * Refreshes the cached 90-day busy window of the provider-wide input. Every failed attempt closes new bookings until a
+ * read succeeds; the run of failures is told to the OWNER once (google-busy-failure.ts). The host's calendar screen and
+ * the Google busy job (#238) both call this.
+ */
 export async function syncGoogleBusy(pool: Pool, store: ExperienceStore, providerId: string): Promise<void> {
   const runtime = googleRuntimeConfig();
   const connection = await loadConnection(pool, providerId);
@@ -129,13 +139,82 @@ export async function syncGoogleBusy(pool: Pool, store: ExperienceStore, provide
     await store.recordGoogleBusySync({ providerId }, {
       connectionGeneration: Number(connection.connection_generation),
       opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString(),
-      freshUntilUtc: new Date(now.getTime() + 2 * 60_000).toISOString(),
+      freshUntilUtc: new Date(now.getTime() + GOOGLE_BUSY_FRESH_MINUTES * 60_000).toISOString(),
       coverageStartUtc: fromUtc, coverageEndUtc: toUtc, busyIntervals,
     });
+    await pool.query(
+      `UPDATE provider_google_calendars SET failing_since=NULL,next_sync_due_at=clock_timestamp()+$3::integer*interval '1 minute'
+        WHERE provider_id=$1 AND opaque_calendar_id=$2`,
+      [providerId, connection.busy_calendar_id, GOOGLE_BUSY_DUE_MINUTES],
+    );
   } catch (error) {
     await store.recordGoogleSyncFailure({ providerId }, { connectionGeneration: Number(connection.connection_generation), opaqueCalendarId: connection.busy_calendar_id, attemptedAtUtc: now.toISOString() });
+    await recordProviderBusyFailure(pool, providerId, connection, googleBusyFailureReason(error));
     throw error;
   }
+}
+
+/** The run of failures for the provider-wide input, for the connection that failed only (a reconnect starts over). */
+async function recordProviderBusyFailure(pool: Pool, providerId: string, connection: StoredGoogleConnection, reason: "REVOKED" | "UNAVAILABLE"): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const failed = await client.query<{ failing_since: Date; long_failing: boolean }>(
+      `UPDATE provider_google_calendars g SET failing_since=COALESCE(g.failing_since,clock_timestamp()),
+         next_sync_due_at=clock_timestamp()+$4::integer*interval '1 minute'
+        WHERE g.provider_id=$1 AND g.opaque_calendar_id=$2 AND EXISTS (SELECT 1 FROM provider_google_connections c
+          WHERE c.provider_id=g.provider_id AND c.connection_generation=$3)
+        RETURNING g.failing_since,g.failing_since<=clock_timestamp()-$5::integer*interval '1 minute' AS long_failing`,
+      [providerId, connection.busy_calendar_id, connection.connection_generation, googleBusyRetryMinutes(reason), GOOGLE_BUSY_NOTICE_AFTER_MINUTES],
+    );
+    const row = failed.rows[0];
+    if (row) await noticeGoogleBusyFailure(client, {
+      providerId, input: "PROVIDER", inputId: providerId, reason, connectionGeneration: Number(connection.connection_generation),
+      failingSince: row.failing_since, longFailing: row.long_failing,
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The Google busy job's provider-wide step (#238): claims the provider whose input is due longest (a 60-second lease,
+ * so an overlapping run skips it) and reads it. Null when none is due.
+ */
+export async function syncOneDueProviderGoogle(pool: Pool, store: ExperienceStore): Promise<{ applied: boolean } | null> {
+  // The lease as text: a JavaScript Date would drop the microseconds that releasing it compares.
+  const claimed = await pool.query<{ provider_id: string; lease: string }>(
+    `UPDATE provider_google_calendars g SET sync_lease_expires_at=clock_timestamp()+interval '60 seconds'
+      WHERE g.provider_id=(
+        SELECT d.provider_id FROM provider_google_calendars d
+          JOIN provider_google_connections c ON c.provider_id=d.provider_id AND c.busy_calendar_id=d.opaque_calendar_id
+          JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
+            AND m.active=true AND m.role='OWNER'
+         WHERE d.blocking_enabled=true AND d.next_sync_due_at<=clock_timestamp()
+           AND (d.sync_lease_expires_at IS NULL OR d.sync_lease_expires_at<=clock_timestamp())
+         ORDER BY d.next_sync_due_at,d.provider_id COLLATE "C" LIMIT 1 FOR UPDATE OF d SKIP LOCKED)
+      RETURNING g.provider_id,g.sync_lease_expires_at::text AS lease`,
+  );
+  const claim = claimed.rows[0];
+  if (!claim) return null;
+  let applied = false;
+  try {
+    await syncGoogleBusy(pool, store, claim.provider_id);
+    applied = true;
+  } catch {
+    // Recorded by syncGoogleBusy when the read began; the due time moves on either way, so a broken input is not retried at once.
+  }
+  await pool.query(
+    `UPDATE provider_google_calendars SET sync_lease_expires_at=NULL,
+       next_sync_due_at=CASE WHEN $3 THEN next_sync_due_at ELSE GREATEST(next_sync_due_at,clock_timestamp()+interval '5 minutes') END
+      WHERE provider_id=$1 AND sync_lease_expires_at=$2::timestamptz`,
+    [claim.provider_id, claim.lease, applied],
+  );
+  return { applied };
 }
 
 export async function disconnectGoogleCalendar(pool: Pool, actor: HostActor): Promise<void> {
@@ -152,7 +231,7 @@ export async function disconnectGoogleCalendar(pool: Pool, actor: HostActor): Pr
     await client.query("DELETE FROM provider_google_calendars WHERE provider_id=$1", [actor.providerId]);
     await client.query(
       `UPDATE resource_google_calendars SET sync_status='STALE',fresh_until=NULL,sync_dirty=true,
-         next_sync_due_at=clock_timestamp(),sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
+         next_sync_due_at=clock_timestamp(),sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,failing_since=NULL,updated_at=clock_timestamp()
         WHERE provider_id=$1 AND enabled=true`,
       [actor.providerId],
     );
@@ -180,4 +259,23 @@ export async function initializeBookingCalendar(token: GoogleTokenSet): Promise<
 
 export async function connectedCalendarId(pool: Pool, providerId: string): Promise<string | null> {
   return (await loadConnection(pool, providerId))?.busy_calendar_id ?? null;
+}
+
+/**
+ * An access token for one connection generation, or null once the OWNER reconnected or left (the work is then for a
+ * calendar this site no longer writes). A rotated refresh token is kept for that generation only.
+ */
+export async function googleAccessTokenForConnection(pool: Pool, providerId: string, generation: number): Promise<string | null> {
+  const runtime = googleRuntimeConfig();
+  if (!runtime) throw new Error("Google connection is unavailable");
+  const connection = await loadConnection(pool, providerId);
+  if (!connection || Number(connection.connection_generation) !== generation) return null;
+  const token = await refreshGoogleToken(runtime.google, openGoogleRefreshToken(runtime.key, providerId, connection.encrypted_refresh_token), connection.granted_scopes);
+  if (token.refreshToken) {
+    await pool.query(`UPDATE provider_google_connections c SET encrypted_refresh_token=$3,updated_at=clock_timestamp()
+      WHERE c.provider_id=$1 AND c.connection_generation=$2 AND EXISTS (SELECT 1 FROM provider_memberships m
+        WHERE m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id AND m.active=true AND m.role='OWNER')`,
+    [providerId, generation, sealGoogleRefreshToken(runtime.key, providerId, token.refreshToken)]);
+  }
+  return token.accessToken;
 }

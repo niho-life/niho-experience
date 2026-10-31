@@ -192,6 +192,22 @@ describe("hostPushEventFromOutbox", () => {
     expect(await hostNotificationAllowed("provider-a", "CANCELLATION", () => ({ enabledFor: async () => false }))).toBe(true);
   });
 
+  it("says a Google calendar cannot be read with a fixed line, opens the calendar, and never names the calendar", async () => {
+    for (const reason of ["REVOKED", "UNAVAILABLE"] as const) {
+      const parsed = hostPushEventFromOutbox(row("host.notify.google_calendar_attention", { v: 1, input: "RESOURCE", reason }), NOW);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) continue;
+      expect(parsed.event).toMatchObject({ kind: "GOOGLE_CALENDAR_ATTENTION", url: "/host/calendar", tag: "google-calendar-attention" });
+      const message = JSON.parse(hostPushPayload(parsed.event));
+      expect(message.title).toBe("Googleカレンダーを確認してください");
+      expect(message.body).toMatch(/新しい予約を止めています。受けた予約はそのままです。$/);
+    }
+    for (const payload of [{ v: 1, input: "RESOURCE", reason: "REVOKED", calendarId: "cal-secret" }, { v: 1, input: "ROOM", reason: "REVOKED" }, { v: 2, input: "PROVIDER", reason: "UNAVAILABLE" }]) {
+      expect(hostPushEventFromOutbox(row("host.notify.google_calendar_attention", payload), NOW)).toEqual({ ok: false, reason: "invalid" });
+    }
+    expect(await hostNotificationAllowed("provider-a", "GOOGLE_CALENDAR_ATTENTION", () => ({ enabledFor: async () => false }))).toBe(true);
+  });
+
   it("drops a question or a new booking older than a day, and one of another shape", () => {
     for (const [topic, payload] of [[QUESTION, questionPayload], [NEW_BOOKING, newBookingPayload]] as const) {
       expect(hostPushEventFromOutbox(row(topic, payload, { createdAt: new Date(NOW - 24 * 60 * MINUTE - 1).toISOString() }), NOW)).toEqual({ ok: false, reason: "stale" });

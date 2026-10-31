@@ -9,9 +9,15 @@ import { HOST_APP_SCOPE } from "../routes";
  * the date and time and the party size. There is deliberately no field for a guest's name, a
  * message's text or an amount, so none can reach a lock screen.
  */
+/**
+ * What a push is about: one of 設定 › 通知's notifications, or a Google calendar this site cannot read (#238), which
+ * always comes and has no switch there.
+ */
+export type HostPushKind = HostNotificationKey | "GOOGLE_CALENDAR_ATTENTION";
+
 export interface HostPushEvent {
   providerId: string;
-  kind: HostNotificationKey;
+  kind: HostPushKind;
   /**
    * A question before booking (予約前の質問) rather than a message from someone who booked: still GUEST_MESSAGE
    * (its switch in 設定 › 通知 and its delivery), with its own title.
@@ -21,6 +27,8 @@ export interface HostPushEvent {
   /** ISO 8601; shown in Japan time. */
   startsAt?: string;
   seats?: number;
+  /** A fixed line from this site in place of the experience, time and party (GOOGLE_CALENDAR_ATTENTION). */
+  note?: string;
   /** Where a tap opens: a path under /host/. */
   url: string;
   /** Replaces the device's earlier notification with the same tag (and the push service's queued one). */
@@ -39,7 +47,7 @@ export interface HostPushMessage {
   badge?: number;
 }
 
-export const HOST_PUSH_TITLES: Record<HostNotificationKey, string> = {
+export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   NEW_BOOKING: "新しい予約・申込",
   APPROVAL_DEADLINE: "承認の期限が近づいています",
   CANCELLATION: "予約が取り消されました",
@@ -47,6 +55,7 @@ export const HOST_PUSH_TITLES: Record<HostNotificationKey, string> = {
   DAY_BEFORE_SUMMARY: "明日の参加者のまとめ",
   NEW_REVIEW: "新しいレビュー",
   LISTING_REVIEW: "掲載の審査結果",
+  GOOGLE_CALENDAR_ATTENTION: "Googleカレンダーを確認してください",
 };
 
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
@@ -92,7 +101,7 @@ export function hostPushPayload(event: HostPushEvent): string {
   const message: HostPushMessage = {
     v: 1,
     title: event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
-    body: [titleLine(event.experienceTitle), whenJa(event.startsAt), seats].filter(Boolean).join(" · "),
+    body: event.note ?? [titleLine(event.experienceTitle), whenJa(event.startsAt), seats].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
     ...(Number.isInteger(event.badgeCount) && event.badgeCount! >= 0 ? { badge: event.badgeCount } : {}),
@@ -109,8 +118,10 @@ export function hostPushTestPayload(): string {
 }
 
 /** Time-critical kinds go out at once; a deadline or a summary is useless once it has passed. */
-export function hostPushDelivery(kind: HostNotificationKey): { urgency: "high" | "normal"; ttlSeconds: number } {
-  const urgent = kind === "NEW_BOOKING" || kind === "APPROVAL_DEADLINE" || kind === "GUEST_MESSAGE" || kind === "CANCELLATION";
+export function hostPushDelivery(kind: HostPushKind): { urgency: "high" | "normal"; ttlSeconds: number } {
+  // A calendar that cannot be read keeps new bookings closed until the host acts.
+  const urgent = kind === "NEW_BOOKING" || kind === "APPROVAL_DEADLINE" || kind === "GUEST_MESSAGE" || kind === "CANCELLATION"
+    || kind === "GOOGLE_CALENDAR_ATTENTION";
   const ttlSeconds = kind === "APPROVAL_DEADLINE" ? 60 * 60 : kind === "DAY_BEFORE_SUMMARY" ? 12 * 60 * 60 : 24 * 60 * 60;
   return { urgency: urgent ? "high" : "normal", ttlSeconds };
 }

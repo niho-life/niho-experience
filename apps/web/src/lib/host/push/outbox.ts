@@ -4,6 +4,7 @@ import {
   parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
+  parseGoogleCalendarAttentionPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
@@ -11,12 +12,18 @@ import {
   type ClaimedHostNotification,
   type HostNotificationOutbox,
   type ProviderNotificationSettings,
+  type StoppableHostNotificationKey,
 } from "@niho-experience/experience-store";
-import type { HostNotificationKey } from "@/host/types";
 import { providerNotificationSettings } from "@/lib/experience/store-server";
-import { HOST_BOOKINGS_PATH, HOST_MESSAGES_PATH, withQuery } from "../routes";
+import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_MESSAGES_PATH, withQuery } from "../routes";
 import { notifyHostDevices, type HostPushDeps, type HostPushReport } from "./notify";
-import type { HostPushEvent } from "./payload";
+import type { HostPushEvent, HostPushKind } from "./payload";
+
+/** The line under "Googleカレンダーを確認してください": what is closed and what is not. Never which calendar. */
+export const GOOGLE_CALENDAR_ATTENTION_NOTES = {
+  REVOKED: "Google との接続が切れました。つなぎ直すまで、その予定を使う体験の新しい予約を止めています。受けた予約はそのままです。",
+  UNAVAILABLE: "Google の予定を読めません。読めるまで、その予定を使う体験の新しい予約を止めています。受けた予約はそのままです。",
+} as const;
 
 /**
  * The notification job (#177 P2, owner decision 2026-10-31): sends what `outbox_messages` holds for
@@ -155,10 +162,27 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
       },
     };
   }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.googleCalendarAttention) {
+    const payload = parseGoogleCalendarAttentionPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "GOOGLE_CALENDAR_ATTENTION",
+        note: GOOGLE_CALENDAR_ATTENTION_NOTES[payload.reason],
+        // The calendar screen shows which experiences wait and where to reconnect or choose the calendar again.
+        url: HOST_CALENDAR_PATH,
+        tag: "google-calendar-attention",
+      },
+    };
+  }
   return { ok: false, reason: "invalid" };
 }
 
-const isStoppable = (kind: HostNotificationKey) => (STOPPABLE_HOST_NOTIFICATION_KEYS as readonly string[]).includes(kind);
+const isStoppable = (kind: HostPushKind): kind is StoppableHostNotificationKey => (STOPPABLE_HOST_NOTIFICATION_KEYS as readonly string[]).includes(kind);
 
 /**
  * Whether the provider gets this kind (設定 › 通知, #109). The locked kinds always come. A stoppable
@@ -167,7 +191,7 @@ const isStoppable = (kind: HostNotificationKey) => (STOPPABLE_HOST_NOTIFICATION_
  */
 export async function hostNotificationAllowed(
   providerId: string,
-  kind: HostNotificationKey,
+  kind: HostPushKind,
   settings: () => Pick<ProviderNotificationSettings, "enabledFor"> | null = providerNotificationSettings,
 ): Promise<boolean> {
   if (!isStoppable(kind)) return true;
@@ -192,7 +216,7 @@ export interface HostNotificationDrainDeps {
   outbox: Pick<HostNotificationOutbox, "claimDue" | "complete" | "retryAt">;
   /** Built per row, so each send has its own clock. */
   pushDeps: () => HostPushDeps;
-  allowed: (providerId: string, kind: HostNotificationKey) => Promise<boolean>;
+  allowed: (providerId: string, kind: HostPushKind) => Promise<boolean>;
   now: () => number;
   notify?: (event: HostPushEvent, deps: HostPushDeps) => Promise<HostPushReport>;
   limit?: number;

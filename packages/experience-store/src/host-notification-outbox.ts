@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { isoValue, type DbRow } from "./rows.ts";
@@ -8,7 +9,8 @@ import { assertStoreIdentifier } from "./validation.ts";
  * A guest question or an answer from the reply page (`guestQuestion`), a guest booking confirmed on
  * this site (`newBooking`, #285), one a guest or NIHO support cancelled (`cancellation`, #285 slice 7) and a
  * message a guest wrote on their booking page (`bookingMessage`, #285 slice 6b) write their rows in their own transactions; the approval and NIHO's booking
- * message rows (`guestMessage`) wait for those flows to move to the experience DB (ADR 0002). The job claims only these
+ * message rows (`guestMessage`) wait for those flows to move to the experience DB (ADR 0002). A Google calendar this
+ * site cannot read (`googleCalendarAttention`, #238) is written by the Google calendar job. The job claims only these
  * topics: `booking.confirmed`, `guest_question.*` and every other topic stay untouched.
  */
 export const HOST_NOTIFICATION_TOPICS = {
@@ -18,6 +20,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   newBooking: "host.notify.new_booking",
   cancellation: "host.notify.cancellation",
   bookingMessage: "host.notify.booking_message",
+  googleCalendarAttention: "host.notify.google_calendar_attention",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -84,6 +87,17 @@ export interface NewBookingPayload {
  */
 export type CancellationPayload = NewBookingPayload;
 
+/**
+ * A Google calendar this site reads for busy times could not be read (#238): the provider-wide one (`PROVIDER`) or a
+ * venue's or instructor's (`RESOURCE`). `REVOKED`: Google refused the connection; `UNAVAILABLE`: the reads keep failing.
+ * New bookings that need it stay closed until a read succeeds. Never the calendar's ID or name, or whose it is.
+ */
+export interface GoogleCalendarAttentionPayload {
+  readonly v: 1;
+  readonly input: "PROVIDER" | "RESOURCE";
+  readonly reason: "REVOKED" | "UNAVAILABLE";
+}
+
 /** One claimed row. `id` is the row's bigint as text; the payload is parsed by the consumer. */
 export interface ClaimedHostNotification {
   readonly id: string;
@@ -106,6 +120,7 @@ const MESSAGE_KEYS = ["bookingId", "experienceTitle", "messageId", "seats", "sta
 const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
+const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const publicId = (value: unknown): value is string => typeof value === "string" && PUBLIC_ID.test(value);
@@ -171,6 +186,13 @@ export function parseNewBookingPayload(value: unknown): NewBookingPayload | null
 /** The cancellation's payload (the same keys as a new booking's), or null for anything else. */
 export function parseCancellationPayload(value: unknown): CancellationPayload | null {
   return parseNewBookingPayload(value);
+}
+
+export function parseGoogleCalendarAttentionPayload(value: unknown): GoogleCalendarAttentionPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, GOOGLE_ATTENTION_KEYS) || value.v !== 1) return null;
+  if (value.input !== "PROVIDER" && value.input !== "RESOURCE") return null;
+  if (value.reason !== "REVOKED" && value.reason !== "UNAVAILABLE") return null;
+  return { v: 1, input: value.input, reason: value.reason };
 }
 
 /**
@@ -370,6 +392,47 @@ export async function enqueueCancellationNotification(client: PoolClient, input:
     bookingId: facts.bookingId,
     topic: HOST_NOTIFICATION_TOPICS.cancellation,
     deduplicationKey: `host-push:cancellation:${facts.bookingId}`,
+    payload,
+    availableAt: null,
+  });
+}
+
+/**
+ * A Google calendar input could not be read (#238): one GOOGLE_CALENDAR_ATTENTION notification (it cannot be turned off),
+ * due now. A refused connection (`REVOKED`) is told once per connection generation, however many inputs it fails; reads
+ * that keep failing (`UNAVAILABLE`) once per input and run of failures (`failingSinceUtc` is when the run began), so the
+ * job's every retry adds nothing new. `inputId` is the resource ID (`RESOURCE`) or the provider ID (`PROVIDER`). Called in
+ * the transaction that records the failure. 1 when added, 0 for a repeat.
+ */
+export async function enqueueGoogleCalendarAttentionNotification(
+  client: PoolClient,
+  input: {
+    readonly providerId: string;
+    readonly input: GoogleCalendarAttentionPayload["input"];
+    readonly inputId: string;
+    readonly reason: GoogleCalendarAttentionPayload["reason"];
+    readonly connectionGeneration: number;
+    readonly failingSinceUtc: string;
+  },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  if (input.input !== "PROVIDER" && input.input !== "RESOURCE") throw new StoreValidationError("input must be PROVIDER or RESOURCE.");
+  if (input.reason !== "REVOKED" && input.reason !== "UNAVAILABLE") throw new StoreValidationError("reason must be REVOKED or UNAVAILABLE.");
+  if (typeof input.inputId !== "string" || input.inputId.length < 1 || input.inputId.length > 256) throw new StoreValidationError("inputId must contain 1-256 characters.");
+  if (!Number.isSafeInteger(input.connectionGeneration) || input.connectionGeneration < 1) throw new StoreValidationError("connectionGeneration must be a positive integer.");
+  const since = canonicalInstant(input.failingSinceUtc);
+  if (since === null) throw new StoreValidationError("failingSinceUtc must be an ISO 8601 instant.");
+  const payload: GoogleCalendarAttentionPayload = { v: 1, input: input.input, reason: input.reason };
+  // A digest keeps the key short and the resource ID out of it.
+  const inputKey = createHash("sha256").update(`${input.input}\0${input.inputId}`).digest("hex").slice(0, 32);
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.inputId,
+    aggregateType: "google_calendar",
+    topic: HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
+    deduplicationKey: input.reason === "REVOKED"
+      ? `host-push:google-calendar:revoked:${input.connectionGeneration}`
+      : `host-push:google-calendar:${inputKey}:${Date.parse(since)}`,
     payload,
     availableAt: null,
   });

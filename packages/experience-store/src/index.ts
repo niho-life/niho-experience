@@ -14,6 +14,8 @@ export { ExperienceStore } from "./repository.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export { ResourceGoogleRepository } from "./resource-google.ts";
+export { GoogleBookingCalendarEvents } from "./google-booking-calendar.ts";
+export type { BookingCalendarOutcome, BookingCalendarWork } from "./google-booking-calendar.ts";
 export type { ResourceGoogleOwnerSnapshot, ResourceGoogleSetting } from "./resource-google.ts";
 export { ProductOperatorRepository } from "./product-operators.ts";
 export type { CreatedProductOperatorInvitation, CreateProductOperatorInvitationInput, PreparedProductOperatorInvitation, ProductOperatorAdminActor, ProductOperatorAdminSnapshot } from "./product-operators.ts";
@@ -26,12 +28,14 @@ export {
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueCancellationNotification,
+  enqueueGoogleCalendarAttentionNotification,
   enqueueNewBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
+  parseGoogleCalendarAttentionPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
@@ -41,6 +45,7 @@ export type {
   BookingMessagePayload,
   CancellationPayload,
   ClaimedHostNotification,
+  GoogleCalendarAttentionPayload,
   GuestMessagePayload,
   GuestQuestionPayload,
   HostNotificationTopic,

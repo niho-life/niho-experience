@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { Pool, PoolClient } from "pg";
 import { listGoogleCalendars, queryGoogleBusyByCalendar, refreshGoogleToken, watchGoogleCalendar } from "@niho-experience/google-calendar";
 import { enqueueCalendarRecalculation, ResourceGoogleRepository, StoreConflictError, type HostActor, type WorkerIdentity } from "@niho-experience/experience-store";
+import { GOOGLE_BUSY_NOTICE_AFTER_MINUTES, googleBusyFailureReason, googleBusyRetryMinutes, noticeGoogleBusyFailure, type GoogleBusyFailureReason } from "./google-busy-failure";
 import { openGoogleRefreshToken, sealGoogleRefreshToken } from "./google-token-crypto";
 import { googleRuntimeConfig } from "./google-connection";
 
@@ -60,13 +61,19 @@ export async function refreshResourceGoogleOwnerSnapshot(pool: Pool, actor: Host
   }
 }
 
+/**
+ * Who reads the due resources: the OTA worker (Studio, through /internal/ota/v1/google-sync, with its account
+ * assignment re-checked after the external call) or the Google busy job that Cloud Scheduler runs on this server (#238).
+ */
+export type ResourceGoogleClaimant = { readonly kind: "worker"; readonly worker: WorkerIdentity } | { readonly kind: "scheduler" };
+
 interface DueClaim {
   claimId: string;
   leaseEpoch: number;
   providerId: string;
   generation: number;
-  assignmentAccountId: string;
-  assignmentVersion: number;
+  /** The worker's account assignment; null for the scheduler. */
+  assignment: { accountId: string; version: number } | null;
   refreshToken: string;
   scopes: string[];
   resources: readonly { resourceId: string; calendarId: string; settingsVersion: number; needsWatch: boolean }[];
@@ -79,16 +86,28 @@ async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<
   finally { client.release(); }
 }
 
-async function claimDue(pool: Pool, worker: WorkerIdentity): Promise<DueClaim | null> {
+async function claimDue(pool: Pool, claimant: ResourceGoogleClaimant): Promise<DueClaim | null> {
   return transaction(pool, async (client) => {
-    const currentWorker = await client.query<{ version: string }>(
-      `SELECT version FROM channel_workers WHERE id=$1 AND revoked_at IS NULL AND credential_expires_at>clock_timestamp() FOR UPDATE`,
-      [worker.workerId],
-    );
-    if (!currentWorker.rows[0] || Number(currentWorker.rows[0].version) !== worker.credentialVersion) return null;
+    const workerId = claimant.kind === "worker" ? claimant.worker.workerId : null;
+    if (claimant.kind === "worker") {
+      const currentWorker = await client.query<{ version: string }>(
+        `SELECT version FROM channel_workers WHERE id=$1 AND revoked_at IS NULL AND credential_expires_at>clock_timestamp() FOR UPDATE`,
+        [claimant.worker.workerId],
+      );
+      if (!currentWorker.rows[0] || Number(currentWorker.rows[0].version) !== claimant.worker.credentialVersion) return null;
+    }
+    const assignmentJoin = claimant.kind === "worker"
+      ? `JOIN LATERAL (
+           SELECT wa.account_id,wa.version FROM channel_worker_accounts wa
+           JOIN channel_external_accounts a ON a.id=wa.account_id
+           WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL AND a.provider_id=g.provider_id
+             AND a.active=true AND a.revoked_at IS NULL
+           ORDER BY wa.account_id COLLATE "C" LIMIT 1
+         ) assignment ON true`
+      : "CROSS JOIN LATERAL (SELECT NULL::text AS account_id,NULL::bigint AS version) assignment";
     const due = await client.query<{
       provider_id: string; connection_generation: string; encrypted_refresh_token: string; granted_scopes: string[];
-      assignment_account_id: string; assignment_version: string;
+      assignment_account_id: string | null; assignment_version: string | null;
     }>(
       `SELECT g.provider_id,c.connection_generation,c.encrypted_refresh_token,c.granted_scopes,
           assignment.account_id AS assignment_account_id,assignment.version AS assignment_version
@@ -96,17 +115,11 @@ async function claimDue(pool: Pool, worker: WorkerIdentity): Promise<DueClaim | 
          JOIN provider_google_connections c ON c.provider_id=g.provider_id AND c.connection_generation=g.connection_generation
          JOIN provider_memberships owner_membership ON owner_membership.provider_id=c.provider_id
           AND owner_membership.niho_user_id=c.connected_by_niho_user_id AND owner_membership.active=true AND owner_membership.role='OWNER'
-         JOIN LATERAL (
-           SELECT wa.account_id,wa.version FROM channel_worker_accounts wa
-           JOIN channel_external_accounts a ON a.id=wa.account_id
-           WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL AND a.provider_id=g.provider_id
-             AND a.active=true AND a.revoked_at IS NULL
-           ORDER BY wa.account_id COLLATE "C" LIMIT 1
-         ) assignment ON true
+         ${assignmentJoin}
         WHERE g.enabled=true AND g.next_sync_due_at<=clock_timestamp()
           AND (g.sync_claim_id IS NULL OR g.sync_lease_expires_at<=clock_timestamp())
         ORDER BY g.next_sync_due_at,g.provider_id COLLATE "C" LIMIT 1 FOR UPDATE OF g SKIP LOCKED`,
-      [worker.workerId],
+      workerId === null ? [] : [workerId],
     );
     const selected = due.rows[0];
     if (!selected) return null;
@@ -129,41 +142,52 @@ async function claimDue(pool: Pool, worker: WorkerIdentity): Promise<DueClaim | 
       `UPDATE resource_google_calendars SET sync_claim_id=$3::uuid,sync_claimed_by=$4,
          sync_lease_epoch=$5,sync_lease_expires_at=clock_timestamp()+interval '45 seconds',last_attempted_at=clock_timestamp(),updated_at=clock_timestamp()
         WHERE provider_id=$1 AND resource_id=ANY($2::text[])`,
-      [selected.provider_id, rows.rows.map((row) => row.resource_id), claimId, worker.workerId, leaseEpoch],
+      [selected.provider_id, rows.rows.map((row) => row.resource_id), claimId, workerId, leaseEpoch],
     );
     return {
       claimId, leaseEpoch, providerId: selected.provider_id, generation: Number(selected.connection_generation),
-      assignmentAccountId: selected.assignment_account_id, assignmentVersion: Number(selected.assignment_version),
+      assignment: selected.assignment_account_id === null ? null
+        : { accountId: selected.assignment_account_id, version: Number(selected.assignment_version) },
       refreshToken: selected.encrypted_refresh_token, scopes: selected.granted_scopes,
       resources: rows.rows.map((row) => ({ resourceId: row.resource_id, calendarId: row.opaque_calendar_id, settingsVersion: Number(row.settings_version), needsWatch: row.needs_watch })),
     };
   });
 }
 
-async function finishClaim(pool: Pool, worker: WorkerIdentity, claim: DueClaim, input: {
+async function finishClaim(pool: Pool, claimant: ResourceGoogleClaimant, claim: DueClaim, input: {
   outcome: "APPLIED" | "FAILED" | "SUPERSEDED";
+  /** Why a FAILED read failed. */
+  reason?: GoogleBusyFailureReason;
   fromUtc: string;
   toUtc: string;
   busyByCalendar?: ReadonlyMap<string, readonly { startUtc: string; endUtc: string }[]>;
   watches?: ReadonlyMap<string, { channelId: string; googleResourceId: string; tokenDigest: string; expiresAtUtc: string }>;
 }): Promise<boolean> {
+  const workerId = claimant.kind === "worker" ? claimant.worker.workerId : null;
   return transaction(pool, async (client) => {
-    const currentWorker = await client.query<{ version: string; authorized: boolean }>(
-      `SELECT version,revoked_at IS NULL AND credential_expires_at>clock_timestamp() AS authorized
-         FROM channel_workers WHERE id=$1 FOR UPDATE`,
-      [worker.workerId],
-    );
-    const workerRow = currentWorker.rows[0];
-    const workerCurrent = workerRow !== undefined && workerRow.authorized && Number(workerRow.version) === worker.credentialVersion;
+    let workerCurrent = true;
+    if (claimant.kind === "worker") {
+      const currentWorker = await client.query<{ version: string; authorized: boolean }>(
+        `SELECT version,revoked_at IS NULL AND credential_expires_at>clock_timestamp() AS authorized
+           FROM channel_workers WHERE id=$1 FOR UPDATE`,
+        [claimant.worker.workerId],
+      );
+      const workerRow = currentWorker.rows[0];
+      workerCurrent = workerRow !== undefined && workerRow.authorized && Number(workerRow.version) === claimant.worker.credentialVersion;
+    }
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,31))", [`provider-inventory:${claim.providerId}`]);
-    const assignment = await client.query(
-      `SELECT 1 FROM channel_worker_accounts wa
-        JOIN channel_external_accounts a ON a.id=wa.account_id
-       WHERE wa.worker_id=$1 AND wa.account_id=$2 AND wa.version=$3 AND wa.revoked_at IS NULL
-         AND a.provider_id=$4 AND a.active=true AND a.revoked_at IS NULL
-       FOR SHARE OF wa,a`,
-      [worker.workerId, claim.assignmentAccountId, claim.assignmentVersion, claim.providerId],
-    );
+    let assignmentCurrent = claimant.kind === "scheduler";
+    if (claimant.kind === "worker" && claim.assignment) {
+      const assignment = await client.query(
+        `SELECT 1 FROM channel_worker_accounts wa
+          JOIN channel_external_accounts a ON a.id=wa.account_id
+         WHERE wa.worker_id=$1 AND wa.account_id=$2 AND wa.version=$3 AND wa.revoked_at IS NULL
+           AND a.provider_id=$4 AND a.active=true AND a.revoked_at IS NULL
+         FOR SHARE OF wa,a`,
+        [claimant.worker.workerId, claim.assignment.accountId, claim.assignment.version, claim.providerId],
+      );
+      assignmentCurrent = assignment.rowCount === 1;
+    }
     const current = await client.query<{ connection_generation: string }>(
       `SELECT c.connection_generation FROM provider_google_connections c
         JOIN provider_memberships m ON m.provider_id=c.provider_id AND m.niho_user_id=c.connected_by_niho_user_id
@@ -180,26 +204,26 @@ async function finishClaim(pool: Pool, worker: WorkerIdentity, claim: DueClaim, 
         `SELECT settings_version,opaque_calendar_id,connection_generation,sync_lease_epoch,enabled,
             sync_lease_expires_at>clock_timestamp() AS lease_current
            FROM resource_google_calendars
-          WHERE provider_id=$1 AND resource_id=$2 AND sync_claim_id=$3::uuid AND sync_claimed_by=$4 FOR UPDATE`,
-        [claim.providerId, resource.resourceId, claim.claimId, worker.workerId],
+          WHERE provider_id=$1 AND resource_id=$2 AND sync_claim_id=$3::uuid AND sync_claimed_by IS NOT DISTINCT FROM $4 FOR UPDATE`,
+        [claim.providerId, resource.resourceId, claim.claimId, workerId],
       );
       const setting = row.rows[0];
       settings.push({ resource, current: setting !== undefined && setting.enabled && setting.lease_current
         && Number(setting.settings_version) === resource.settingsVersion && setting.opaque_calendar_id === resource.calendarId
         && Number(setting.connection_generation) === claim.generation && Number(setting.sync_lease_epoch) === claim.leaseEpoch });
     }
-    const claimCurrent = workerCurrent && assignment.rowCount === 1 && currentGeneration === claim.generation
+    const claimCurrent = workerCurrent && assignmentCurrent && currentGeneration === claim.generation
       && input.outcome !== "SUPERSEDED" && settings.length === claim.resources.length && settings.every((setting) => setting.current);
     if (!claimCurrent) {
       await client.query(
         `UPDATE resource_google_calendars SET sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND sync_claim_id=$2::uuid AND sync_claimed_by=$3`,
-        [claim.providerId, claim.claimId, worker.workerId],
+          WHERE provider_id=$1 AND sync_claim_id=$2::uuid AND sync_claimed_by IS NOT DISTINCT FROM $3`,
+        [claim.providerId, claim.claimId, workerId],
       );
       await client.query(
-        `INSERT INTO resource_google_sync_receipts (claim_id,provider_id,worker_id,lease_epoch,outcome,calendars_attempted)
-         VALUES ($1,$2,$3,$4,'SUPERSEDED',$5) ON CONFLICT (claim_id) DO NOTHING`,
-        [claim.claimId, claim.providerId, worker.workerId, claim.leaseEpoch, claim.resources.length],
+        `INSERT INTO resource_google_sync_receipts (claim_id,provider_id,worker_id,claimant,lease_epoch,outcome,calendars_attempted)
+         VALUES ($1,$2,$3,$4,$5,'SUPERSEDED',$6) ON CONFLICT (claim_id) DO NOTHING`,
+        [claim.claimId, claim.providerId, workerId, claimant.kind === "worker" ? "WORKER" : "SCHEDULER", claim.leaseEpoch, claim.resources.length],
       );
       return false;
     }
@@ -224,7 +248,7 @@ async function finishClaim(pool: Pool, worker: WorkerIdentity, claim: DueClaim, 
         }
         await client.query(
           `UPDATE resource_google_calendars SET sync_status='FRESH',last_succeeded_at=clock_timestamp(),
-             fresh_until=$6,coverage_start=$4,coverage_end=$5,sync_dirty=false,
+             fresh_until=$6,coverage_start=$4,coverage_end=$5,sync_dirty=false,failing_since=NULL,
              next_sync_due_at=$7,sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
             WHERE provider_id=$1 AND resource_id=$2 AND settings_version=$3`,
           [claim.providerId, resource.resourceId, resource.settingsVersion, input.fromUtc, input.toUtc, freshUntilUtc, nextDueUtc],
@@ -240,36 +264,54 @@ async function finishClaim(pool: Pool, worker: WorkerIdentity, claim: DueClaim, 
         await enqueueCalendarRecalculation(client, { providerId: claim.providerId, aggregateType: "resource_google_calendar", aggregateId: resource.resourceId, cause: "resource_google_busy_changed" });
         await enqueueCalendarRecalculation(client, { providerId: claim.providerId, aggregateType: "resource_google_calendar", aggregateId: resource.resourceId, cause: "resource_google_freshness_expired", availableAtUtc: freshUntilUtc });
       } else if (input.outcome === "FAILED") {
-        await client.query(
+        const reason = input.reason ?? "UNAVAILABLE";
+        const failed = await client.query<{ failing_since: Date; long_failing: boolean }>(
           `UPDATE resource_google_calendars SET sync_status='FAILED',fresh_until=NULL,sync_dirty=true,
-             next_sync_due_at=clock_timestamp()+interval '5 minutes',sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
-            WHERE provider_id=$1 AND resource_id=$2 AND settings_version=$3`,
-          [claim.providerId, resource.resourceId, resource.settingsVersion],
+             failing_since=COALESCE(failing_since,clock_timestamp()),
+             next_sync_due_at=clock_timestamp()+$4::integer*interval '1 minute',sync_claim_id=NULL,sync_claimed_by=NULL,sync_lease_expires_at=NULL,updated_at=clock_timestamp()
+            WHERE provider_id=$1 AND resource_id=$2 AND settings_version=$3
+            RETURNING failing_since,failing_since<=clock_timestamp()-$5::integer*interval '1 minute' AS long_failing`,
+          [claim.providerId, resource.resourceId, resource.settingsVersion, googleBusyRetryMinutes(reason), GOOGLE_BUSY_NOTICE_AFTER_MINUTES],
         );
         await enqueueCalendarRecalculation(client, { providerId: claim.providerId, aggregateType: "resource_google_calendar", aggregateId: resource.resourceId, cause: "resource_google_sync_failed" });
+        const row = failed.rows[0];
+        if (row) await noticeGoogleBusyFailure(client, {
+          providerId: claim.providerId, input: "RESOURCE", inputId: resource.resourceId, reason,
+          connectionGeneration: claim.generation, failingSince: row.failing_since, longFailing: row.long_failing,
+        });
       }
     }
     await client.query(
-      `INSERT INTO resource_google_sync_receipts (claim_id,provider_id,worker_id,lease_epoch,outcome,calendars_attempted)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (claim_id) DO NOTHING`,
-      [claim.claimId, claim.providerId, worker.workerId, claim.leaseEpoch,
+      `INSERT INTO resource_google_sync_receipts (claim_id,provider_id,worker_id,claimant,lease_epoch,outcome,calendars_attempted)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (claim_id) DO NOTHING`,
+      [claim.claimId, claim.providerId, workerId, claimant.kind === "worker" ? "WORKER" : "SCHEDULER", claim.leaseEpoch,
         input.outcome === "FAILED" ? "FAILED" : "APPLIED", settings.length],
     );
     return input.outcome === "APPLIED";
   });
 }
 
-/** A calendar's permission failure must not invalidate another resource. */
+/** The OTA worker's poll (/internal/ota/v1/google-sync). */
 export async function syncOneDueResourceGoogle(pool: Pool, worker: WorkerIdentity): Promise<{ processed: boolean; applied: boolean }> {
+  return syncOneDueResource(pool, { kind: "worker", worker });
+}
+
+/** The Google busy job's poll (#238): the same claim and checks without a worker or an OTA account. */
+export async function syncOneDueResourceGoogleAsScheduler(pool: Pool): Promise<{ processed: boolean; applied: boolean }> {
+  return syncOneDueResource(pool, { kind: "scheduler" });
+}
+
+/** A calendar's permission failure must not invalidate another resource. */
+async function syncOneDueResource(pool: Pool, claimant: ResourceGoogleClaimant): Promise<{ processed: boolean; applied: boolean }> {
   if (!resourceGoogleEnabled()) return { processed: false, applied: false };
-  const claim = await claimDue(pool, worker);
+  const claim = await claimDue(pool, claimant);
   if (!claim) return { processed: false, applied: false };
   const runtime = googleRuntimeConfig();
   const now = Date.now();
   const fromUtc = new Date(now - 86_400_000).toISOString();
   const toUtc = new Date(now + 90 * 86_400_000).toISOString();
   if (!runtime) {
-    await finishClaim(pool, worker, claim, { outcome: "FAILED", fromUtc, toUtc });
+    await finishClaim(pool, claimant, claim, { outcome: "FAILED", reason: "UNAVAILABLE", fromUtc, toUtc });
     return { processed: true, applied: false };
   }
   try {
@@ -298,14 +340,14 @@ export async function syncOneDueResourceGoogle(pool: Pool, worker: WorkerIdentit
     const [keyed] = await Promise.all([
       queryGoogleBusyByCalendar(runtime.google, token.accessToken, uniqueIds, fromUtc, toUtc), watchWork,
     ]);
-    const applied = await finishClaim(pool, worker, claim, {
+    const applied = await finishClaim(pool, claimant, claim, {
       outcome: "APPLIED", fromUtc, toUtc,
       busyByCalendar: new Map(keyed.map((calendar) => [calendar.id, calendar.busyIntervals])),
       watches,
     });
     return { processed: true, applied };
-  } catch {
-    await finishClaim(pool, worker, claim, { outcome: "FAILED", fromUtc, toUtc });
+  } catch (error) {
+    await finishClaim(pool, claimant, claim, { outcome: "FAILED", reason: googleBusyFailureReason(error), fromUtc, toUtc });
     return { processed: true, applied: false };
   }
 }

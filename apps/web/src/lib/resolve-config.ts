@@ -180,6 +180,35 @@ function hostPushJobSettings(apiMode: "mock" | "http", hostPushEnabled: boolean,
   return { enabled: true, audience, serviceAccountEmail };
 }
 
+/**
+ * The Google calendar jobs (#238): Cloud Scheduler re-checks the providers' and resources' busy calendars
+ * (POST /internal/google-calendar/v1/busy-sync) and writes confirmed bookings to each provider's booking calendar
+ * (POST /internal/google-calendar/v1/booking-events) with a Google ID token of its own service account. Each job is
+ * on only in http mode with its flag; either needs both identity settings, the experience DB and the Google OAuth
+ * client and token key, or the start-up stops.
+ */
+function googleCalendarJobSettings(apiMode: "mock" | "http", env: Env): {
+  busySyncEnabled: boolean;
+  bookingEventsEnabled: boolean;
+  audience: string;
+  serviceAccountEmail: string;
+} {
+  const busySyncEnabled = apiMode === "http" && env.EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED === "true";
+  const bookingEventsEnabled = apiMode === "http" && env.EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED === "true";
+  if (!busySyncEnabled && !bookingEventsEnabled) return { busySyncEnabled, bookingEventsEnabled, audience: "", serviceAccountEmail: "" };
+  const name = busySyncEnabled ? "EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED" : "EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED";
+  const audience = env.EXPERIENCE_GOOGLE_JOBS_AUDIENCE?.trim() ?? "";
+  const serviceAccountEmail = env.EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
+  if (!audience) throw new Error(`${name} needs EXPERIENCE_GOOGLE_JOBS_AUDIENCE in http mode`);
+  if (!SERVICE_ACCOUNT_EMAIL.test(serviceAccountEmail)) {
+    throw new Error(`${name} needs EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL (a service account) in http mode`);
+  }
+  for (const required of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_GOOGLE_CLIENT_ID", "EXPERIENCE_GOOGLE_CLIENT_SECRET", "EXPERIENCE_GOOGLE_TOKEN_KEY"]) {
+    if (!env[required]?.trim()) throw new Error(`${name} needs ${required} in http mode`);
+  }
+  return { busySyncEnabled, bookingEventsEnabled, audience, serviceAccountEmail };
+}
+
 /** The terms version a traveler agrees to (consent.agreedVersion, 1-100 characters): printable ASCII without spaces. */
 const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
 
@@ -388,6 +417,8 @@ export function resolveConfig(env: Env) {
   // Scheduler through its own service account. Independent of the two flags above: a payment confirmed after
   // guest booking is turned off still gets its email.
   const guestMail = guestMailSettings(apiMode, env);
+  // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
+  const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
   // Translations (#285 slice 5): the guest's Japanese runs in the mail job above; the host's English draft in
   // メッセージ for questions kept here. Off, the host reads the guest's English and writes the English reply.
   const translationEnabled = translationEnabledSetting(apiMode, env);
@@ -501,6 +532,10 @@ export function resolveConfig(env: Env) {
     guestMailReplyTo: guestMail.replyTo,
     experienceJobsAudience: guestMail.jobAudience,
     experienceJobsServiceAccountEmail: guestMail.jobServiceAccountEmail,
+    googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
+    googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
+    googleJobsAudience: googleCalendarJobs.audience,
+    googleJobsServiceAccountEmail: googleCalendarJobs.serviceAccountEmail,
     // The Claude API key is not here: it is read where it is used.
     translationEnabled,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.

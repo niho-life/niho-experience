@@ -6,6 +6,7 @@
 
 - `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHO user ID と experience DB の `provider_memberships` を両方確認する。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
 - Google OAuth の refresh token は provider にひも付けて暗号化保存する。選択した読み取り元は接続時の primary calendar、書き込み先はアプリが作る専用 calendar。予定の件名・参加者・説明は DB とレスポンスに保存しない。
+- Google の busy の定期照合と、専用 calendar への確定予約の書き込みは、Cloud Scheduler が呼ぶ 2 つの job（#238、`0034`）。下の「Google の job」を参照。
 - `experience-domain` と `experience-store` は予約枠の判定、席の原子的な仮押さえ、支払 webhook による確定・台帳記入を提供する。`experience-payments` は共通 Stripe Connect 上の Direct charge Checkout と体験イベントの署名検証を提供する。webhook の受信経路は `/api/experience/stripe/webhook`。
 - `experience-store` の `GuestBookingRepository`（`0023`・`0025`、#285 の第1・2段）は、旅行者向けの販売条件・提供者ごとの NIHO の手数料・公開の開催枠と残席・ゲストの仮押さえ（35 分）を experience DB で扱える。`EXPERIENCE_GUEST_BOOKING_ENABLED` のとき、NIHO と同じ path の `GET /api/public/experiences/{slug}/availability` と `POST …/checkout` がこれと Stripe Checkout（手数料は予約の snapshot から）で答える。第3段から、ここで売る商品（販売条件と提供者の手数料設定がある商品）の旅行者の残席・価格・質問・申込は、flag が on のときこの経路と experience DB から読む。ほかの商品と flag off・mock は NIHO の API のまま。第8段から、ここで受けた予約を提供者の OWNER が `/host/bookings` で読める（読むだけ）。設計は [guest-booking.md](guest-booking.md)。
 - ここで売る商品を除く旅行者向け availability と checkout、旧 `/host/experiences` の編集、既存予約一覧はまだ NIHO API を使う。**このカレンダーの Google busy 判定は、現在販売中の旧予約枠には効かない。** 現行の枠を止める操作は NIHO 側でも行う。
@@ -45,6 +46,9 @@
 | `EXPERIENCE_ANTHROPIC_API_KEY` | experience 専用の Anthropic API key（Secret Manager）。使う場所で読み、`config`・ログに置かない |
 | `EXPERIENCE_PRIVACY_POLICY_URL` | 任意。旅行者向けのプライバシーのページ `/privacy`（[guest-booking.md](guest-booking.md) の「プライバシーのページ」）が「NIHO privacy policy」として貼る NIHO のプライバシーポリシーの URL。https のみ・認証情報なし（それ以外は起動失敗。メッセージは設定の名前だけ）。未設定ならリンクを出さない。mock mode でも読む |
 | `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `true` のときだけ、http mode で予約前の質問（#105/#106、[guest-questions.md](guest-questions.md)）を experience DB（`0022`）に置く。体験ページの「Ask the host」、`/questions/reply`、`/api/public/experiences/{slug}/questions`・`/api/public/questions/reply(/open)`、OWNER の `/host/messages` が開く。`HOST_CONSOLE_ENABLED=true` が要り、`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED=true` の環境では効かない（ホストが質問を読めないため）。既定 `false`（質問の入口は出ず、公開 API は 404）。`EXPERIENCE_DATABASE_URL` が無いと公開 API は 503 |
+| `EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED` | `true` のときだけ、http mode で Google の busy の定期照合 job `POST /internal/google-calendar/v1/busy-sync`（#238）を開く。提供者全体の入力と、`EXPERIENCE_RESOURCE_GOOGLE_ENABLED` のときは会場・講師の入力も読む。下の job の ID の 2 つ、`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_GOOGLE_CLIENT_ID`/`SECRET`、`EXPERIENCE_GOOGLE_TOKEN_KEY` が無いと起動失敗。既定 `false`（404） |
+| `EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED` | `true` のときだけ、http mode で確定予約を専用 calendar へ書く job `POST /internal/google-calendar/v1/booking-events`（#238）を開く。必要な設定は上と同じ。既定 `false`（404） |
+| `EXPERIENCE_GOOGLE_JOBS_AUDIENCE` / `EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL` | 2 つの Google の job を呼ぶ Cloud Scheduler の OIDC token の audience と、そのサービスアカウント。メール job とは別にする。ほかの呼び手は 401 |
 | `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `true` のときだけ、http mode で `GET /api/public/experiences/{slug}/reviews`（#104/#108、[guest-reviews.md](guest-reviews.md)）が experience DB（`0027`）のレビューと集計で答える。レビューは NIHO の確認なしで投稿されたらすぐ公開される（owner 2026-10-31）。既定 `false`（404）。`EXPERIENCE_DATABASE_URL` が無いと 503。投稿の画面（#285 スライス 6）ができるまでは、`true` にしても 0 件の応答になる。同じフラグで、体験詳細の「Reviews」（英語のページ。先頭 3 件と集計、"Show all" はこの route）と、OWNER の `/host/reviews`（一覧・返信 1 つ・報告）も experience DB から読む（`HOST_CONSOLE_ENABLED=true` が要る）。フラグ OFF・mock mode の画面は今までどおり |
 
 DB migration は `packages/experience-store/migrations/` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0006` は上記の停止・移行手順を先に満たす。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない（ここで売る体験は、移行用の ID で動く登録スクリプト。[guest-booking.md](guest-booking.md) の「体験の登録と切替（第9段）」）。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
@@ -55,8 +59,16 @@ Guide CMSの公開切替は販売正本の切替と分離する。まずstaging�
 
 1. NIHO の安定した user ID、provider ID、Connect 口座の readiness を渡す限定契約を確定し、権限付きで provider・membership・商品を移す。体験コンテンツの編集 UI と公開 SSR を新正本へ接続する。
 2. 旅行者の availability・入力・checkout を experience API へ切り替える。ゲスト連絡先、同意、質問、条件、返金・取消、メール・通知の扱いを旧契約と比較して受け入れる。レビュー（#104/#108）は保存と公開の読み取り API までを experience DB に置いた（`0027`、[guest-reviews.md](guest-reviews.md)）。残りは、投稿のお礼メールと書く画面、出欠による資格の除外、英訳の下書き（NIHO の事前確認は無し・直接公開）。新旧で同じ開催回を同時に販売しない。
-3. Google busy の定期再照合と outbox の確定予約書き込みを独立 job で実行する。Google 失効時は新規予約を閉じ、既存予約は保持して提供者に通知する。
+3. Google busy の定期再照合と確定予約の書き込みは、独立した 2 つの job として実装した（#238、下の「Google の job」）。残りは staging での受入：Cloud Scheduler の 2 job と専用サービスアカウント、実 OAuth の接続・失効・再接続、watch の webhook の到達、専用 calendar への書き込みを確かめてから flag を開く。
 4. Stripe Connect webhook を同じプラットフォームの NIHO アプリ決済から振り分け、署名・販売者口座・金額・イベント再送・期限切れを staging で検証する。旧予約の返金責任を整理する。
 5. データ移行、backup、監査、障害・切戻し手順を受け入れたあと、旧編集を read-only にし、公開予約の参照先を切り替える。
 
 公開 PR と CI は合成データのみを使い、本番 DB・Google/Stripe Secret には接続しない。
+
+## Google の job
+
+Cloud Scheduler が 5 分ごとに、専用サービスアカウントの OIDC token で呼ぶ。応答とログは件数だけ（calendar ID・予約・token を出さない）。Studio の OTA worker の `/internal/ota/v1/google-sync` も同じ資源の入力を読めるが、lease で重ならない。
+
+- **busy-sync**：提供者全体の入力（接続時の primary）と、会場・講師ごとの入力を、15 分ごとの due で読む。読めた結果は 25 分有効で、1 回遅れても受付を閉じない。watch の通知（本文は使わない）はその入力を今すぐ due にするだけ。worker や Airbnb の口座が無い提供者も読む。
+- **読めないとき**：その入力を使う体験の新規予約をすぐ閉じ、読めるまで再開しない。受けた予約はそのまま。Google が接続を拒んだら（token の拒否）、接続ごとに 1 回すぐ OWNER へ host push「Googleカレンダーを確認してください」（設定 › 通知では止められない）を送り、30 分ごとに読み直す。ほかの失敗は 5 分ごとに読み直し、15 分続いたら入力ごとに 1 回知らせる。通知に calendar の ID・名前・資源名は載せない。再接続すると提供者全体の入力はすぐ読み直す。会場・講師の入力は、別の Google アカウントの可能性があるため OWNER が設定で選び直すまで確認待ちのまま（#258 の世代の設計）。
+- **booking-events**：確定予約と書き込み済みの台帳（`google_booking_calendar_events`）の差分で、専用 calendar に予約ごとの決定的な event ID で書き、確定でなくなった予約の event を消す。`outbox_messages` の `booking.confirmed` はメール job が消費するので共有しない。event は体験名・時間・人数・非公開の設定だけで、予約者の名前・連絡先は書かない。失敗は 1・5・15・60 分後に再試行。再接続後は新しい専用 calendar へ書き直す。scope は `calendar.app.created` のまま広げない。
