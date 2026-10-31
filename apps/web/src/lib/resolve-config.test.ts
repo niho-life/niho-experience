@@ -238,6 +238,10 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ HOST_NOTIFICATION_SETTINGS_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_NOTIFICATION_SETTINGS_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_NOTIFICATION_SETTINGS_ENABLED: "true" }).hostNotificationSettingsEnabled).toBe(true);
+    expect(resolveConfig({}).hostSalesLedgerEnabled).toBe(false);
+    expect(resolveConfig({ HOST_SALES_LEDGER_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).hostSalesLedgerEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_SALES_LEDGER_ENABLED: "true" }).hostSalesLedgerEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", HOST_SALES_LEDGER_ENABLED: "true" }).hostSalesLedgerEnabled).toBe(true);
   });
 
   it("keeps questions to the host in the experience DB only in http mode with their own flag (#105 #106)", () => {

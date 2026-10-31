@@ -185,8 +185,13 @@ describe("host home", () => {
   });
 
   it("sums the month as 売上 does: sales, refunds and what is still to be paid out, without counting payouts as sales", () => {
-    expect(homeMonth(MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD.current)).toEqual({ label: "10月", sales: "¥390,000", refunds: "−¥60,000", expected: "¥139,500", confirmed: "8件" });
-    expect(homeMonth(MOCK_KITCHEN_SALES, { year: 2026, month: 9 })).toEqual({ label: "9月", sales: "¥225,000", refunds: "¥0", expected: "¥0", confirmed: "4件" });
-    expect(homeMonth(MOCK_KITCHEN_SALES, { year: 2026, month: 11 })).toEqual({ label: "11月", sales: "¥0", refunds: "¥0", expected: "¥0", confirmed: "0件" });
+    const month = (label: string, sales: string, refunds: string, expected: string, confirmed: string) => ({
+      label,
+      figures: [{ label: "売上", value: sales }, { label: "返金", value: refunds }, { label: "入金予定", value: expected }, { label: "確定した予約", value: confirmed }],
+      note: null,
+    });
+    expect(homeMonth(MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD.current)).toEqual(month("10月", "¥390,000", "−¥60,000", "¥139,500", "8件"));
+    expect(homeMonth(MOCK_KITCHEN_SALES, { year: 2026, month: 9 })).toEqual(month("9月", "¥225,000", "¥0", "¥0", "4件"));
+    expect(homeMonth(MOCK_KITCHEN_SALES, { year: 2026, month: 11 })).toEqual(month("11月", "¥0", "¥0", "¥0", "0件"));
   });
 });

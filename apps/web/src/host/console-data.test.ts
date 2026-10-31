@@ -42,7 +42,7 @@ describe("console data per provider", () => {
     expect(home.todos.map((todo) => todo.status?.label)).toEqual(["承認待ち", "承認待ち", "返信待ち", "返信待ち", "返信待ち", "未返信", "未返信", "公開前", "下書き", "審査待ち"]);
     expect([home.sessions.today, home.sessions.tomorrow, home.sessions.later].map((sessions) => sessions.length)).toEqual([1, 1, 3]);
     // The preview keeps its own "today": the synthetic dates stay upcoming whenever it is opened.
-    expect(home.month).toEqual({ label: "10月", sales: "¥390,000", refunds: "−¥60,000", expected: "¥139,500", confirmed: "8件" });
+    expect(home.month).toEqual({ label: "10月", figures: [{ label: "売上", value: "¥390,000" }, { label: "返金", value: "−¥60,000" }, { label: "入金予定", value: "¥139,500" }, { label: "確定した予約", value: "8件" }], note: null });
   });
 
   it("gives the sample studio one draft and nothing booked", () => {
@@ -60,7 +60,7 @@ describe("console data per provider", () => {
       ["Write Your Own Kanji with a Kamakura Calligrapher の原稿を仕上げる", "表紙写真と料金が未入力 · 英語が未確定", "/host/experiences/calligraphy"],
     ]);
     expect(home.sessions).toEqual({ today: [], tomorrow: [], later: [] });
-    expect(home.month).toEqual({ label: "10月", sales: "¥0", refunds: "¥0", expected: "¥0", confirmed: "0件" });
+    expect(home.month).toEqual({ label: "10月", figures: [{ label: "売上", value: "¥0" }, { label: "返金", value: "¥0" }, { label: "入金予定", value: "¥0" }, { label: "確定した予約", value: "0件" }], note: null });
   });
 
   it("covers every provider the synthetic NIHO returns", async () => {
@@ -82,7 +82,7 @@ describe("console data per provider", () => {
         calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
         notifications: { email: { addresses: [] }, items: [] },
       });
-      expect(hostHome(snapshot).month, id).toEqual({ label: "10月", sales: "¥0", refunds: "¥0", expected: "¥0", confirmed: "0件" });
+      expect(hostHome(snapshot).month, id).toEqual({ label: "10月", figures: [{ label: "売上", value: "¥0" }, { label: "返金", value: "¥0" }, { label: "入金予定", value: "¥0" }, { label: "確定した予約", value: "0件" }], note: null });
     }
   });
 

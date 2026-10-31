@@ -131,9 +131,10 @@ describe("sales rows", () => {
 
   it("puts one month's page together from ?month=", () => {
     const september = salesPage(MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD, "2026-09");
-    expect([september.label, september.previous, september.next, september.rows.length, september.summary.expectedYen]).toEqual(["2026年9月", null, OCTOBER, 6, 0]);
+    expect([september.label, september.previous, september.next, september.rows.length, september.figures.find((figure) => figure.label === "入金予定")?.value]).toEqual(["2026年9月", null, OCTOBER, 6, "¥0"]);
     const november = salesPage(MOCK_KITCHEN_SALES, MOCK_SALES_PERIOD, "2026-11");
     expect([november.label, november.previous, november.next, november.rows]).toEqual(["2026年11月", OCTOBER, null, []]);
-    expect(salesPage([], MOCK_SALES_PERIOD, undefined)).toMatchObject({ label: "2026年10月", rows: [], summary: { salesYen: 0, expectedYen: 0 } });
+    expect(salesPage([], MOCK_SALES_PERIOD, undefined)).toMatchObject({ label: "2026年10月", rows: [], notes: [] });
+    expect(salesPage([], MOCK_SALES_PERIOD, undefined).figures.map((figure) => figure.value)).toEqual(["¥0", "¥0", "¥0", "¥0", "¥0"]);
   });
 });
