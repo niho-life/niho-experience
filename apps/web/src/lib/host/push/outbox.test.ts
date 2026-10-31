@@ -133,6 +133,30 @@ describe("hostPushEventFromOutbox", () => {
     }
   });
 
+  it("turns a guest booking the guest or support cancelled into a CANCELLATION push that opens it (#285 slice 7)", () => {
+    const parsed = hostPushEventFromOutbox(row("host.notify.cancellation", newBookingPayload), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a",
+        kind: "CANCELLATION",
+        experienceTitle: "Synthetic Tea Ceremony",
+        startsAt: "2026-11-20T01:00:00.000Z",
+        seats: 4,
+        url: `/host/bookings?booking=${BOOKING}&source=site&providerId=provider-a`,
+        tag: `cancellation-${BOOKING}`,
+      },
+    });
+    if (parsed.ok) {
+      expect(JSON.parse(hostPushPayload(parsed.event))).toMatchObject({ title: "予約が取り消されました", body: "Synthetic Tea Ceremony · 11/20（金）10:00 · 4名" });
+    }
+    expect(hostPushEventFromOutbox(row("host.notify.cancellation", { ...newBookingPayload, amount: 7500 }), NOW)).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("sends a cancellation whatever the OWNER turned off in 設定 › 通知", async () => {
+    expect(await hostNotificationAllowed("provider-a", "CANCELLATION", () => ({ enabledFor: async () => false }))).toBe(true);
+  });
+
   it("drops a question or a new booking older than a day, and one of another shape", () => {
     for (const [topic, payload] of [[QUESTION, questionPayload], [NEW_BOOKING, newBookingPayload]] as const) {
       expect(hostPushEventFromOutbox(row(topic, payload, { createdAt: new Date(NOW - 24 * 60 * MINUTE - 1).toISOString() }), NOW)).toEqual({ ok: false, reason: "stale" });

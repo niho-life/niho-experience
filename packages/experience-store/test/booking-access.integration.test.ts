@@ -150,6 +150,9 @@ describe("PostgreSQL guest booking access (#285 slice 6)", { skip: databaseUrl =
         adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H",
         freeCancellationUntilUtc: new Date(Date.parse(snapshot.startUtc) - 48 * 3_600_000).toISOString(),
         hostDisplayName: "Sample Seller A", guestName: "Sample Guest", bookedAtUtc: booking.booking.createdAtUtc, cancelledAtUtc: null,
+        // 取消と返金 (slice 7): nothing cancelled, refunded or asked; the experience is ahead.
+        cancelledBy: null, cancellationReason: null, experienceEnded: false, refunds: [], cancellationRequest: null,
+        freeCancellationOpen: Date.parse(snapshot.startUtc) - 48 * 3_600_000 > Date.now(),
       });
       assert.doesNotMatch(JSON.stringify(view), /example\.com/i);
 

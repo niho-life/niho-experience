@@ -187,6 +187,7 @@ describe("HostNotificationOutbox input checks", () => {
     assert.deepEqual(await outbox.claimDue(10, 60_000), []);
     assert.deepEqual(queries[0], [[
       HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
+      HOST_NOTIFICATION_TOPICS.cancellation,
     ], 10, 60_000]);
   });
 });

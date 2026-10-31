@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import type { BookingRecord } from "@niho-experience/experience-store";
+import type { BookingRecord, RefundSubmission, StripeRefundAnswer, StripeRefundStatus } from "@niho-experience/experience-store";
 
 const STRIPE_MINIMUM_EXPIRY_SECONDS = 30 * 60;
 const STRIPE_MAXIMUM_EXPIRY_SECONDS = 24 * 60 * 60;
@@ -10,11 +10,16 @@ const CONNECTED_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,}$/;
 const EVENT_ID = /^evt_[A-Za-z0-9]{8,}$/;
 const PAYMENT_INTENT_ID = /^pi_[A-Za-z0-9]{8,}$/;
 const CHECKOUT_SESSION_ID = /^cs_[A-Za-z0-9_]{1,250}$/;
+const REFUND_ID = /^(re|pyr)_[A-Za-z0-9_]{1,250}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REFUND_STATUSES: ReadonlySet<string> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const REFUND_EVENTS: ReadonlySet<string> = new Set(["refund.created", "refund.updated", "refund.failed"]);
+const FAILURE_CODE = /^[a-z0-9_]{1,80}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONTROL = /[\u0000-\u001F\u007F]/;
 
-export type PaymentsStripeClient = Pick<Stripe, "checkout" | "webhooks">;
+export type PaymentsStripeClient = Pick<Stripe, "checkout" | "webhooks" | "refunds">;
 
 export interface CreateDirectCheckoutInput {
   readonly booking: Readonly<BookingRecord>;
@@ -93,11 +98,44 @@ export interface VerifiedDirectCheckoutEndedEvent {
   readonly checkoutSessionId: string;
 }
 
-export type VerifiedDirectCheckoutEvent = VerifiedDirectCheckoutPaidEvent | VerifiedDirectCheckoutEndedEvent;
+/**
+ * A refund this service made (#285 slice 7): its metadata names the booking and our refund. Experience Store's
+ * BookingCancellations.applyRefundEvent takes it. A refund made elsewhere (the Dashboard, NIHO) is not one.
+ */
+export interface VerifiedRefundEvent {
+  readonly eventId: string;
+  readonly eventType: "refund.created" | "refund.updated" | "refund.failed";
+  readonly eventOccurredAtUtc: string;
+  readonly connectedAccountId: string;
+  readonly publicBookingId: string;
+  /** Ours (booking_refunds.id). */
+  readonly refundId: string;
+  readonly stripeRefundRef: string;
+  readonly paymentIntentRef: string;
+  readonly amount: number;
+  /** Uppercase ISO currency. */
+  readonly currency: string;
+  readonly status: StripeRefundStatus;
+  /** Stripe's failure_reason when it failed; null otherwise. */
+  readonly failureCode: string | null;
+}
 
-/** Tells the two kinds apart (each kind's eventType is a union, so comparing it narrows only one way). */
+export type VerifiedDirectCheckoutEvent = VerifiedDirectCheckoutPaidEvent | VerifiedDirectCheckoutEndedEvent | VerifiedRefundEvent;
+
+/** Tells the kinds apart (each kind's eventType is a union, so comparing it narrows only one way). */
 export function isEndedCheckoutEvent(event: VerifiedDirectCheckoutEvent): event is VerifiedDirectCheckoutEndedEvent {
   return event.eventType === "checkout.session.expired" || event.eventType === "checkout.session.async_payment_failed";
+}
+
+export function isRefundEvent(event: VerifiedDirectCheckoutEvent): event is VerifiedRefundEvent {
+  return REFUND_EVENTS.has(event.eventType);
+}
+
+export interface SubmitBookingRefundInput {
+  /** What BookingCancellations returned: every field comes from the stored booking and refund. */
+  readonly refund: RefundSubmission;
+  readonly platformStripeKey?: string;
+  readonly stripe?: PaymentsStripeClient;
 }
 
 export class ExperiencePaymentsValidationError extends Error {
@@ -356,6 +394,77 @@ export async function retrieveDirectCheckout(input: RetrieveDirectCheckoutInput)
   return { status: "expired" };
 }
 
+function assertRefundSubmission(refund: RefundSubmission): void {
+  if (typeof refund?.refundId !== "string" || !UUID.test(refund.refundId)) throw new ExperiencePaymentsValidationError("refund.refundId must be a UUID.");
+  if (typeof refund.publicBookingId !== "string" || !UUID_V4.test(refund.publicBookingId)) throw new ExperiencePaymentsValidationError("refund.publicBookingId must be a UUID v4.");
+  if (typeof refund.connectedAccountId !== "string" || !CONNECTED_ACCOUNT_ID.test(refund.connectedAccountId)) throw new ExperiencePaymentsValidationError("refund.connectedAccountId is malformed.");
+  if (typeof refund.stripePaymentRef !== "string" || !PAYMENT_INTENT_ID.test(refund.stripePaymentRef)) throw new ExperiencePaymentsValidationError("refund.stripePaymentRef is malformed.");
+  assertPositiveAmount(refund.amount, "refund.amount");
+  if (typeof refund.currency !== "string" || !CURRENCY.test(refund.currency)) throw new ExperiencePaymentsValidationError("refund.currency must be three uppercase letters.");
+  if (refund.kind !== "FULL" && refund.kind !== "PARTIAL") throw new ExperiencePaymentsValidationError("refund.kind must be FULL or PARTIAL.");
+  // NIHO's fee goes back with a full refund only; a partial one keeps it (docs/guest-booking.md).
+  if (refund.refundApplicationFee !== (refund.kind === "FULL")) throw new ExperiencePaymentsValidationError("refund.refundApplicationFee must be true for a full refund only.");
+}
+
+function refundStatusOf(value: unknown): StripeRefundStatus {
+  if (value === null || value === undefined) return "pending";
+  if (typeof value !== "string" || !REFUND_STATUSES.has(value)) throw new ExperiencePaymentsValidationError("The refund status is unknown.");
+  return value as StripeRefundStatus;
+}
+
+function failureCodeOf(value: unknown): string | null {
+  return typeof value === "string" && FAILURE_CODE.test(value) ? value : null;
+}
+
+/** Stripe refused the request for good (a 4xx that is not a conflict or a limit): sending it again changes nothing. */
+function definitiveRefusal(error: unknown): string | null {
+  const type = (error as { type?: unknown } | null)?.type;
+  if (type !== "StripeInvalidRequestError" && type !== "StripePermissionError") return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && FAILURE_CODE.test(code) ? code : type === "StripePermissionError" ? "permission_denied" : "invalid_request";
+}
+
+/**
+ * Sends one refund to Stripe on the seller's account (Direct charge) for the booking's PaymentIntent (#285 slice 7).
+ * It looks for the refund at Stripe first (by our refund ID in its metadata), so sending it again, also after
+ * Stripe's idempotency keys expired, never makes a second refund; otherwise it creates it with our refund ID as the
+ * idempotency key. NIHO's fee goes back with every refund, in proportion to it (refund_application_fee). Returns Stripe's answer for
+ * BookingCancellations.recordRefundSubmission: accepted (with Stripe's status; pending is not done), or refused for
+ * good. Any other failure (network, Stripe's 5xx, a limit, a conflict) throws: the refund stays requested and is
+ * sent again later.
+ */
+export async function submitBookingRefund(input: SubmitBookingRefundInput): Promise<StripeRefundAnswer> {
+  const refund = input.refund;
+  assertRefundSubmission(refund);
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  const options = { stripeAccount: refund.connectedAccountId };
+  const existing = await stripe.refunds.list({ payment_intent: refund.stripePaymentRef, limit: 100 }, options);
+  const found = existing.data.find((item) => item.metadata?.refund_id === refund.refundId);
+  let created: Stripe.Refund;
+  if (found) {
+    created = found;
+  } else {
+    try {
+      created = await stripe.refunds.create(
+        {
+          payment_intent: refund.stripePaymentRef,
+          amount: refund.amount,
+          refund_application_fee: refund.refundApplicationFee,
+          metadata: { source: "niho-experience", booking_id: refund.publicBookingId.toLowerCase(), refund_id: refund.refundId.toLowerCase() },
+        },
+        { ...options, idempotencyKey: `experience-refund:${refund.refundId.toLowerCase()}` },
+      );
+    } catch (error) {
+      const refused = definitiveRefusal(error);
+      if (refused !== null) return { kind: "rejected", failureCode: refused };
+      throw error;
+    }
+  }
+  if (typeof created.id !== "string" || !REFUND_ID.test(created.id)) throw new ExperiencePaymentsValidationError("Stripe returned a refund without a valid ID.");
+  if (created.amount !== refund.amount) throw new ExperiencePaymentsValidationError("Stripe returned a refund of another amount.");
+  return { kind: "accepted", stripeRefundRef: created.id, status: refundStatusOf(created.status), failureCode: failureCodeOf(created.failure_reason) };
+}
+
 function asRecord(value: unknown, field: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new ExperiencePaymentsValidationError(`${field} is malformed.`);
@@ -423,11 +532,61 @@ function checkoutEventEnvelope(event: Stripe.Event): CheckoutEventEnvelope | nul
   };
 }
 
+/** The checks every event of this service passes: its ID, connected account and time. */
+function eventBasics(event: Stripe.Event): { eventId: string; eventOccurredAtUtc: string; connectedAccountId: string } {
+  if (!EVENT_ID.test(event.id)) {
+    throw new ExperiencePaymentsValidationError("The Stripe event ID is malformed.");
+  }
+  if (event.account === undefined || !CONNECTED_ACCOUNT_ID.test(event.account)) {
+    throw new ExperiencePaymentsValidationError("A valid connected account ID is required on the Stripe event.");
+  }
+  if (!Number.isSafeInteger(event.created) || event.created <= 0) {
+    throw new ExperiencePaymentsValidationError("The Stripe event time is invalid.");
+  }
+  return { eventId: event.id, eventOccurredAtUtc: new Date(event.created * 1_000).toISOString(), connectedAccountId: event.account };
+}
+
 /**
- * Verifies and validates a Connect Checkout webhook. This function never writes to storage.
+ * A refund event of this service (#285 slice 7): a Refund whose metadata says niho-experience and names the booking
+ * and our refund, exactly. null for a refund made elsewhere (no such metadata): this service did not make it.
+ */
+function refundEvent(event: Stripe.Event, eventType: VerifiedRefundEvent["eventType"]): VerifiedRefundEvent | null {
+  const basics = eventBasics(event);
+  const refund = asRecord(event.data.object, "refund");
+  if (refund.object !== "refund") throw new ExperiencePaymentsValidationError("The Stripe event does not contain a Refund.");
+  const metadataValue = refund.metadata;
+  if (metadataValue === null || typeof metadataValue !== "object" || Array.isArray(metadataValue) || (metadataValue as Record<string, unknown>).source !== "niho-experience") return null;
+  const metadata = metadataValue as Record<string, unknown>;
+  if (Object.keys(metadata).length !== 3 || typeof metadata.booking_id !== "string" || typeof metadata.refund_id !== "string") {
+    throw new ExperiencePaymentsValidationError("Refund metadata is malformed.");
+  }
+  if (!UUID_V4.test(metadata.booking_id) || !UUID.test(metadata.refund_id)) throw new ExperiencePaymentsValidationError("Refund metadata IDs are malformed.");
+  if (typeof refund.id !== "string" || !REFUND_ID.test(refund.id)) throw new ExperiencePaymentsValidationError("The Refund ID is malformed.");
+  if (typeof refund.amount !== "number") throw new ExperiencePaymentsValidationError("The Refund amount is missing.");
+  assertPositiveAmount(refund.amount, "refund amount");
+  const currency = refund.currency;
+  if (typeof currency !== "string" || !CURRENCY.test(currency.toUpperCase())) throw new ExperiencePaymentsValidationError("The Refund currency is invalid.");
+  return {
+    ...basics,
+    eventType,
+    publicBookingId: metadata.booking_id.toLowerCase(),
+    refundId: metadata.refund_id.toLowerCase(),
+    stripeRefundRef: refund.id,
+    paymentIntentRef: paymentIntentReference(refund.payment_intent),
+    amount: refund.amount,
+    currency: currency.toUpperCase(),
+    status: refundStatusOf(refund.status),
+    failureCode: failureCodeOf(refund.failure_reason),
+  };
+}
+
+/**
+ * Verifies and validates a Connect webhook of this service. This function never writes to storage.
  * A paid Session (completed, or a delayed payment that succeeded) returns the payment fields; a Session
  * that ended unpaid (expired, or a delayed payment that failed) returns its Session ID instead, so the
- * caller can release that hold. Any other event, or another service's Session, returns null.
+ * caller can release that hold. A refund this service made (refund.created, refund.updated, refund.failed,
+ * #285 slice 7) returns its status for the booking's refund. Any other event (charge.refunded among them:
+ * its charge carries none of this service's metadata), or another service's Session or refund, returns null.
  */
 export function verifyDirectCheckoutWebhook(
   input: VerifyDirectCheckoutWebhookInput,
@@ -447,6 +606,9 @@ export function verifyDirectCheckoutWebhook(
     throw new ExperiencePaymentsValidationError("Stripe webhook signature verification failed.", { cause: error });
   }
 
+  if (event.type === "refund.created" || event.type === "refund.updated" || event.type === "refund.failed") {
+    return refundEvent(event, event.type);
+  }
   if (event.type === "checkout.session.expired" || event.type === "checkout.session.async_payment_failed") {
     const envelope = checkoutEventEnvelope(event);
     if (envelope === null) return null;

@@ -67,6 +67,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
     const counts = await (dependencies.run ?? runExperienceJobs)({
       questions: new GuestQuestionRepository(pool),
       confirmations: outbox,
+      notices: outbox,
       bookingLinks: outbox,
       // The page needs both flags; this job runs only with guest mail on, so booking on this site decides.
       access: (dependencies.bookingPages ?? config.guestBookingEnabled) ? new GuestBookingAccess(pool) : null,

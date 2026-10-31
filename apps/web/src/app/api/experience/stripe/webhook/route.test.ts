@@ -4,18 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The experience Stripe webhook (#285): the real experience-payments verifies a synthetic, correctly signed
- * Connect event; the store is stubbed. A paid Session confirms, an unpaid ending releases the hold (slice 4).
+ * Connect event; the store is stubbed. A paid Session confirms, an unpaid ending releases the hold (slice 4), and a
+ * refund this service made moves its booking's refund forward (slice 7).
  */
 const state = vi.hoisted(() => ({
   pool: null as null | { query: ReturnType<typeof vi.fn> },
   confirm: null as null | ReturnType<typeof vi.fn>,
   release: null as null | ReturnType<typeof vi.fn>,
+  refund: null as null | ReturnType<typeof vi.fn>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePool: () => state.pool,
   experienceStore: () => (state.confirm ? { confirmBookingPayment: state.confirm } : null),
   guestHoldReleases: () => (state.release ? { releaseGuestHold: state.release } : null),
+  bookingCancellations: () => (state.refund ? { applyRefundEvent: state.refund } : null),
 }));
 
 import { POST } from "./route";
@@ -58,6 +61,7 @@ beforeEach(() => {
   state.pool = { query: vi.fn().mockResolvedValue({ rows: [{ provider_id: "provider-sample" }] }) };
   state.confirm = vi.fn().mockResolvedValue({ duplicateEvent: false });
   state.release = vi.fn().mockResolvedValue({ status: "EXPIRED", released: true, duplicateEvent: false });
+  state.refund = vi.fn().mockResolvedValue({ status: "SUCCEEDED", duplicateEvent: false });
   errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -111,6 +115,41 @@ describe("experience Stripe webhook", () => {
     expect(state.release).not.toHaveBeenCalled();
     state.release = null;
     expect((await POST(delivery(event("checkout.session.expired")))).status).toBe(503);
+  });
+
+  const REFUND_ID = "6f1c2b9e-3a4d-4c5e-8f70-112233445566";
+  function refundDelivery(type: string, refund: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...event(type),
+      data: {
+        object: {
+          id: "re_test_Synthetic285", object: "refund", amount: 8000, currency: "jpy", payment_intent: "pi_Synthetic285", status: "succeeded",
+          failure_reason: null, metadata: { source: "niho-experience", booking_id: BOOKING_ID, refund_id: REFUND_ID }, ...refund,
+        },
+      },
+    };
+  }
+
+  it.each(["refund.created", "refund.updated", "refund.failed"])("moves this service's refund forward on %s (#285 slice 7)", async (type) => {
+    const response = await POST(delivery(refundDelivery(type, type === "refund.failed" ? { status: "failed", failure_reason: "lost_or_stolen_card" } : {})));
+    expect(response.status).toBe(204);
+    expect(state.refund).toHaveBeenCalledWith({
+      publicBookingId: BOOKING_ID, refundId: REFUND_ID, stripeRefundRef: "re_test_Synthetic285", connectedAccountId: "acct_SampleA0001",
+      stripePaymentRef: "pi_Synthetic285", amount: 8000, currency: "JPY",
+      status: type === "refund.failed" ? "failed" : "succeeded", failureCode: type === "refund.failed" ? "lost_or_stolen_card" : null,
+      stripeEventId: "evt_Synthetic285", stripeEventType: type, eventOccurredAtUtc: "2026-11-01T00:50:00.000Z",
+    });
+    expect(state.confirm).not.toHaveBeenCalled();
+    expect(state.release).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a refund made elsewhere, refuses a malformed one, and asks Stripe to retry when it cannot be recorded", async () => {
+    expect((await POST(delivery(refundDelivery("refund.updated", { metadata: {} })))).status).toBe(204);
+    expect(state.refund).not.toHaveBeenCalled();
+    expect((await POST(delivery(refundDelivery("refund.updated", { metadata: { source: "niho-experience", booking_id: BOOKING_ID } })))).status).toBe(400);
+    state.refund!.mockRejectedValue(new Error(`no refund ${REFUND_ID}`));
+    expect((await POST(delivery(refundDelivery("refund.updated")))).status).toBe(503);
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/6f1c2b9e|re_test|acct_|evt_/);
   });
 
   it("asks Stripe to retry when the release cannot be recorded, without logging the event", async () => {

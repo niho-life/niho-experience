@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
-export function AdminShell({ actorName, unreadCount = null, channelManager = false, children }: { actorName: string | null; unreadCount?: number | null; channelManager?: boolean; children: ReactNode }) {
+export function AdminShell({ actorName, unreadCount = null, channelManager = false, siteBookings = false, children }: { actorName: string | null; unreadCount?: number | null; channelManager?: boolean; siteBookings?: boolean; children: ReactNode }) {
   const pathname = usePathname();
   const bookingsCurrent = pathname.startsWith("/admin/bookings");
   const notificationsCurrent = pathname.startsWith("/admin/notifications");
   const preparationsCurrent = pathname.startsWith("/admin/preparations");
   const operatorsCurrent = pathname.startsWith("/admin/operators");
   const channelsCurrent = pathname.startsWith("/admin/channels");
+  const siteBookingsCurrent = pathname.startsWith("/admin/site-bookings");
   const navClass = "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full px-3 font-extrabold hover:bg-sand";
   return (
     <div className="min-h-dvh bg-sand/45 text-[0.875rem] leading-[1.6]">
@@ -19,6 +20,7 @@ export function AdminShell({ actorName, unreadCount = null, channelManager = fal
           <Link href="/admin/bookings" className="min-w-0 font-extrabold tracking-[0.04em]">NIHO 管理</Link>
           <nav aria-label="管理メニュー" className="order-3 col-span-2 flex min-w-0 gap-1 overflow-x-auto sm:order-none sm:col-auto sm:flex-1">
             <Link href="/admin/bookings" className={`${navClass} ${bookingsCurrent ? "bg-sand" : ""}`} aria-current={bookingsCurrent ? "page" : undefined}>予約支援</Link>
+            {siteBookings ? <Link href="/admin/site-bookings" className={`${navClass} ${siteBookingsCurrent ? "bg-sand" : ""}`} aria-current={siteBookingsCurrent ? "page" : undefined}>サイト予約</Link> : null}
             <Link href="/admin/preparations" className={`${navClass} ${preparationsCurrent ? "bg-sand" : ""}`} aria-current={preparationsCurrent ? "page" : undefined}>掲載準備</Link>
             <Link href="/admin/operators" className={`${navClass} ${operatorsCurrent ? "bg-sand" : ""}`} aria-current={operatorsCurrent ? "page" : undefined}>運営者</Link>
             {channelManager ? <Link href="/admin/channels" className={`${navClass} ${channelsCurrent ? "bg-sand" : ""}`} aria-current={channelsCurrent ? "page" : undefined}>掲載先</Link> : null}

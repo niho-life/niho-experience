@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
+import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import type { DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -7,7 +8,8 @@ import type { GuestCancellationPolicy } from "./types.ts";
 
 /**
  * The booking emails to a guest who booked on this site (#285, docs/guest-booking.md): the confirmation
- * (slice 5) and the link to the booking page "Find your booking" asks for (slice 6, BOOKING_LINK_TOPIC).
+ * (slice 5), the link to the booking page "Find your booking" asks for (slice 6, BOOKING_LINK_TOPIC), and the
+ * notices of a cancellation, a refund done and a declined "Ask to cancel" (slice 7, GUEST_NOTICE_TOPICS).
  * `confirmBookingPayment` writes `booking.confirmed` to `outbox_messages`; the mail job claims only the rows
  * of guest bookings (those with a `booking_guests` row). Other bookings' rows and every other topic stay
  * untouched, as `HostNotificationOutbox` leaves this topic alone. Like that consumer, there is no lease
@@ -20,6 +22,8 @@ export const GUEST_MAIL_LIMITS = {
   confirmationAttempts: 8,
   /** Claims of one booking link email, the first included: 2, 4, 8 and 16 minutes (the guest is waiting for it). */
   linkAttempts: 5,
+  /** Claims of one cancellation, refund or declined-request email: as a confirmation. */
+  noticeAttempts: 8,
   claimLimitMax: 50,
   leaseSecondsMin: 30,
   leaseSecondsMax: 3600,
@@ -95,6 +99,50 @@ export interface BookingLinkClaim {
   readonly abandoned: number;
 }
 
+/** What every notice says of its booking. */
+export interface BookingNoticeFacts {
+  readonly publicBookingId: string;
+  readonly guestEmail: string;
+  readonly guestName: string;
+  readonly experienceTitle: string;
+  readonly experienceSlug: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+  readonly hostDisplayName: string;
+}
+
+/** A cancellation, a refund Stripe finished, or support's answer to "Ask to cancel" (#285 slice 7). */
+export type BookingNoticeEmail =
+  | (BookingNoticeFacts & {
+      readonly kind: "CANCELLED";
+      readonly cancelledBy: "GUEST" | "HOST" | "SUPPORT";
+      readonly reason: string | null;
+      /** The refund requested with the cancellation (and not failed), in the currency's smallest unit; 0 for none. */
+      readonly refundAmount: number;
+      readonly currency: string;
+    })
+  | (BookingNoticeFacts & { readonly kind: "REFUNDED"; readonly amount: number; readonly currency: string })
+  | (BookingNoticeFacts & { readonly kind: "REQUEST_DECLINED"; readonly message: string });
+
+export interface ClaimedBookingNotice {
+  readonly id: string;
+  readonly attempts: number;
+  /**
+   * What to send, or null when nothing should go out: the guest's details were erased, the booking is not in the
+   * state the notice was about any more (a declined request whose booking was cancelled after all), or the refund
+   * did not succeed after all. The job completes such a row unsent.
+   */
+  readonly email: BookingNoticeEmail | null;
+}
+
+export interface BookingNoticeClaim {
+  readonly notices: readonly ClaimedBookingNotice[];
+  readonly abandoned: number;
+}
+
+const NOTICE_TOPICS: readonly string[] = Object.values(GUEST_NOTICE_TOPICS);
+
 /** After a transient failure: tried again later, given up (attempts used up), or no longer this claim's row. */
 export type BookingConfirmationRetry = "RETRY" | "FAILED" | "STALE";
 
@@ -112,7 +160,7 @@ const BOOKING_OF = (row: string) =>
 
 /** This consumer's rows: the topic, of a booking that has a guest record. */
 const GUEST_ROW = (row: string) =>
-  `${row}.topic = $1 AND ${row}.aggregate_type = 'booking' AND ${row}.processed_at IS NULL
+  `${row}.topic = ANY($1::text[]) AND ${row}.aggregate_type = 'booking' AND ${row}.processed_at IS NULL
    AND EXISTS (SELECT 1 FROM bookings b JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
                 WHERE ${BOOKING_OF(row)})`;
 
@@ -177,6 +225,44 @@ function linkEmailFromRow(row: DbRow): BookingLinkEmail | null {
   };
 }
 
+function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
+  if (row.guest_email === null || row.guest_name === null) return null;
+  const occurrence = record(row.occurrence_snapshot);
+  const seller = record(row.seller_snapshot);
+  const facts: BookingNoticeFacts = {
+    publicBookingId: text(row.public_booking_id, "public_booking_id"),
+    guestEmail: text(row.guest_email, "guest_email"),
+    guestName: text(row.guest_name, "guest_name"),
+    experienceTitle: text(row.public_title, "public_title"),
+    experienceSlug: text(row.slug, "slug"),
+    localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
+    localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
+    timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
+    hostDisplayName: text(seller.displayName, "seller_snapshot.displayName"),
+  };
+  if (row.topic === GUEST_NOTICE_TOPICS.cancelled) {
+    const by = row.cancelled_by;
+    if (row.status !== "CANCELLED" || (by !== "GUEST" && by !== "HOST" && by !== "SUPPORT")) return null;
+    return {
+      ...facts,
+      kind: "CANCELLED",
+      cancelledBy: by,
+      reason: typeof row.cancellation_reason === "string" ? row.cancellation_reason : null,
+      refundAmount: count(row.refunding_amount ?? 0, "refunding_amount"),
+      currency: text(record(row.pricing_snapshot).currency, "pricing_snapshot.currency"),
+    };
+  }
+  if (row.topic === GUEST_NOTICE_TOPICS.refunded) {
+    if (row.refund_status !== "SUCCEEDED") return null;
+    return { ...facts, kind: "REFUNDED", amount: count(row.refund_amount, "refund_amount"), currency: text(row.refund_currency, "refund_currency") };
+  }
+  if (row.topic === GUEST_NOTICE_TOPICS.requestDeclined) {
+    if (row.status !== "CONFIRMED" || typeof row.decline_message !== "string") return null;
+    return { ...facts, kind: "REQUEST_DECLINED", message: row.decline_message };
+  }
+  return null;
+}
+
 /** bigint ids as text, in numeric order. */
 const byId = (a: { id: string }, b: { id: string }) => a.id.length - b.id.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -236,14 +322,38 @@ export class GuestMailOutbox {
     return this.#retry(BOOKING_LINK_TOPIC, GUEST_MAIL_LIMITS.linkAttempts, id, attempts);
   }
 
-  async #claim(topic: string, maxAttempts: number, options: { limit: number; leaseSeconds: number }): Promise<{ rows: DbRow[]; abandoned: number }> {
+  /**
+   * Up to `limit` due notices of a cancellation, a refund done or a declined request (#285 slice 7), as
+   * claimBookingConfirmations. Each says what it says at the time it is sent: a refund that failed after all
+   * sends nothing.
+   */
+  async claimBookingNotices(options: { limit: number; leaseSeconds: number }): Promise<BookingNoticeClaim> {
+    const { rows, abandoned } = await this.#claim(NOTICE_TOPICS, GUEST_MAIL_LIMITS.noticeAttempts, options);
+    const notices = rows
+      .map((row): ClaimedBookingNotice => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: noticeFromRow(row) }))
+      .sort(byId);
+    return { notices, abandoned };
+  }
+
+  /** As completeBookingConfirmation, for a notice. */
+  async completeBookingNotice(id: string): Promise<void> {
+    await this.#complete(NOTICE_TOPICS, id);
+  }
+
+  /** As retryBookingConfirmation, for a notice (GUEST_MAIL_LIMITS.noticeAttempts). */
+  async retryBookingNotice(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(NOTICE_TOPICS, GUEST_MAIL_LIMITS.noticeAttempts, id, attempts);
+  }
+
+  async #claim(topic: string | readonly string[], maxAttempts: number, options: { limit: number; leaseSeconds: number }): Promise<{ rows: DbRow[]; abandoned: number }> {
+    const topics = typeof topic === "string" ? [topic] : [...topic];
     const limit = boundedInteger(options?.limit, "limit", 1, GUEST_MAIL_LIMITS.claimLimitMax);
     const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", GUEST_MAIL_LIMITS.leaseSecondsMin, GUEST_MAIL_LIMITS.leaseSecondsMax);
     return withTransaction(this.#pool, async (client) => {
       const abandoned = await client.query(
         `UPDATE outbox_messages m SET processed_at = clock_timestamp()
           WHERE ${GUEST_ROW("m")} AND m.attempts >= $2 AND m.available_at <= clock_timestamp()`,
-        [topic, maxAttempts],
+        [topics, maxAttempts],
       );
       const claimed = await client.query<DbRow>(
         `WITH due AS (
@@ -257,31 +367,38 @@ export class GuestMailOutbox {
               SET available_at = clock_timestamp() + make_interval(secs => $4), attempts = o.attempts + 1
              FROM due
             WHERE o.id = due.id
-           RETURNING o.id, o.attempts, o.provider_id, o.aggregate_id
+           RETURNING o.id, o.attempts, o.provider_id, o.aggregate_id, o.topic, o.payload
          )
-         SELECT c.id::text AS id, c.attempts, b.public_booking_id::text AS public_booking_id, b.status,
-                b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot,
+         SELECT c.id::text AS id, c.attempts, c.topic, b.public_booking_id::text AS public_booking_id, b.status,
+                b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot, b.cancelled_by, b.cancellation_reason,
                 (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
-                g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug
+                g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
+                (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
+                  WHERE x.provider_id = b.provider_id AND x.booking_id = b.id AND x.status <> 'FAILED') AS refunding_amount,
+                r.status AS refund_status, r.amount AS refund_amount, r.currency AS refund_currency, q.decline_message
            FROM claimed c
            JOIN bookings b ON ${BOOKING_OF("c")}
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
-           JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id`,
-        [topic, maxAttempts, limit, leaseSeconds, BOOKING_ACCESS_LIMITS.daysAfterExperience],
+           JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+           LEFT JOIN booking_refunds r ON r.provider_id = b.provider_id AND r.booking_id = b.id
+                 AND r.id = (CASE WHEN c.payload->>'refundId' ~ ${UUID_TEXT} THEN (c.payload->>'refundId')::uuid END)
+           LEFT JOIN booking_cancellation_requests q ON q.provider_id = b.provider_id AND q.booking_id = b.id
+                 AND q.id = (CASE WHEN c.payload->>'requestId' ~ ${UUID_TEXT} THEN (c.payload->>'requestId')::uuid END)`,
+        [topics, maxAttempts, limit, leaseSeconds, BOOKING_ACCESS_LIMITS.daysAfterExperience],
       );
       return { rows: claimed.rows, abandoned: abandoned.rowCount ?? 0 };
     });
   }
 
-  async #complete(topic: string, id: string): Promise<void> {
+  async #complete(topic: string | readonly string[], id: string): Promise<void> {
     assertRowId(id);
     await this.#pool.query(
       `UPDATE outbox_messages m SET processed_at = clock_timestamp() WHERE m.id = $2 AND ${GUEST_ROW("m")}`,
-      [topic, id],
+      [typeof topic === "string" ? [topic] : [...topic], id],
     );
   }
 
-  async #retry(topic: string, maxAttempts: number, id: string, attempts: number): Promise<BookingConfirmationRetry> {
+  async #retry(topic: string | readonly string[], maxAttempts: number, id: string, attempts: number): Promise<BookingConfirmationRetry> {
     assertRowId(id);
     boundedInteger(attempts, "attempts", 1, maxAttempts);
     const updated = await this.#pool.query<DbRow>(
@@ -290,7 +407,7 @@ export class GuestMailOutbox {
               processed_at = CASE WHEN m.attempts < $3 THEN NULL ELSE clock_timestamp() END
         WHERE m.id = $2 AND m.attempts = $4 AND ${GUEST_ROW("m")}
         RETURNING m.processed_at IS NOT NULL AS gave_up`,
-      [topic, id, maxAttempts, attempts],
+      [typeof topic === "string" ? [topic] : [...topic], id, maxAttempts, attempts],
     );
     const row = updated.rows[0];
     if (!row) return "STALE";

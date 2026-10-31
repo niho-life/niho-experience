@@ -74,3 +74,35 @@ export async function signOutOfBooking(publicBookingId: string, fetchImpl: Fetch
   const response = await post(fetchImpl, "/api/public/bookings/sign-out", { publicBookingId }, true);
   return response?.status === 204;
 }
+
+export type BookingCancelChoice = "FULL_REFUND" | "REQUEST";
+export type BookingCancelOutcome = "CANCELLED" | "REQUESTED" | "CHANGED" | "NOT_CANCELLABLE";
+export type BookingCancelResult =
+  | { kind: "done"; outcome: BookingCancelOutcome }
+  /** The session no longer opens this booking: the page shows its neutral state again. */
+  | { kind: "closed" }
+  /** The same command was refused (its input changed): the page starts over. */
+  | { kind: "conflict" }
+  /** No answer, or a server failure: whether it went through is unknown; sending the same command again is safe. */
+  | { kind: "failed" };
+
+const OUTCOMES: ReadonlySet<string> = new Set(["CANCELLED", "REQUESTED", "CHANGED", "NOT_CANCELLABLE"]);
+
+/**
+ * 取消 (#285 slice 7): "Cancel and get a full refund" or "Ask to cancel". `commandId` is the page's UUID for this
+ * attempt, sent again as it is after a lost answer (the same command never cancels or refunds twice).
+ * `shownDeadlineUtc` is the free cancellation deadline the page showed: the server refuses when it no longer holds.
+ */
+export async function cancelBooking(
+  input: { publicBookingId: string; commandId: string; choice: BookingCancelChoice; shownDeadlineUtc: string | null },
+  fetchImpl: Fetch = browserFetch,
+): Promise<BookingCancelResult> {
+  const response = await post(fetchImpl, "/api/public/bookings/cancel", input, true);
+  if (!response) return { kind: "failed" };
+  if (response.status === 404) return { kind: "closed" };
+  if (response.status === 409) return { kind: "conflict" };
+  if (response.status !== 200) return { kind: "failed" };
+  const body: unknown = await response.json().catch(() => null);
+  const outcome = typeof body === "object" && body !== null ? (body as Record<string, unknown>).outcome : undefined;
+  return typeof outcome === "string" && OUTCOMES.has(outcome) ? { kind: "done", outcome: outcome as BookingCancelOutcome } : { kind: "failed" };
+}

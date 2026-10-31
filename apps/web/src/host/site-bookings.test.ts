@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HostGuestBooking } from "@niho-experience/experience-store";
 import { bookingActions, bookingGroups, bookingRequestRows, bookingsHref, bookingStateRows, bookingStatusLabel, matchesBookingFilter } from "./bookings";
-import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_ERASED_TEXT, siteBooking, siteBookingExperiences } from "./site-bookings";
+import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_ERASED_TEXT, siteBooking, siteBookingExperiences, siteCancellationLines } from "./site-bookings";
 
 /** 予約 for this site's bookings (#285 slice 8): the experience DB's booking as the screen shows it. Synthetic data. */
 const STORED: HostGuestBooking = {
@@ -37,6 +37,13 @@ const STORED: HostGuestBooking = {
   bookedAtUtc: "2026-10-31T03:04:00.000Z",
   paidAtUtc: "2026-10-31T03:06:00.000Z",
   cancelledAtUtc: null,
+  cancelledBy: null,
+  cancellationReason: null,
+  cancellationNote: null,
+  refundedAmount: 0,
+  refundPendingAmount: 0,
+  refundFailed: false,
+  cancellationRequested: false,
 };
 
 describe("siteBooking", () => {
@@ -79,7 +86,10 @@ describe("siteBooking", () => {
       cancelMessage: null,
       refundedYen: 0,
       timeline: [{ at: "2026-10-31T12:04", text: "申込" }, { at: "2026-10-31T12:06", text: "支払い" }],
-      site: { fee: { amountYen: 1000, percent: 10, supportEnabled: false }, payoutYen: 9000, cancellationPolicy: "FREE_UNTIL_24H" },
+      site: {
+        fee: { amountYen: 1000, percent: 10, supportEnabled: false }, payoutYen: 9000, cancellationPolicy: "FREE_UNTIL_24H",
+        cancellation: { by: null, reason: null, note: null, refundedYen: 0, refundPendingYen: 0, refundFailed: false, requested: false },
+      },
     });
     expect(JSON.stringify(booking)).not.toMatch(/@|\+81/);
   });
@@ -95,8 +105,25 @@ describe("siteBooking", () => {
 
     const erased = siteBooking({ ...STORED, guest: null, platformFee: null, cancellationPolicy: null, paidAtUtc: null, childCount: 0, childUnitAmount: null });
     expect({ guest: erased.guest, note: erased.note, answers: erased.answers, site: erased.site, timeline: erased.timeline.length }).toEqual({
-      guest: SITE_BOOKING_ERASED_TEXT, note: "", answers: [], site: { fee: null, payoutYen: 9000, cancellationPolicy: null }, timeline: 1,
+      guest: SITE_BOOKING_ERASED_TEXT, note: "", answers: [], site: { fee: null, payoutYen: 9000, cancellationPolicy: null, cancellation: { by: null, reason: null, note: null, refundedYen: 0, refundPendingYen: 0, refundFailed: false, requested: false } }, timeline: 1,
     });
+  });
+
+  it("says who cancelled, why and where the refund is, with the host's own note (#285 slice 7)", () => {
+    const cancelled = siteBooking({
+      ...STORED, status: "CANCELLED", cancelledAtUtc: "2026-11-01T00:00:00.000Z", cancelledBy: "HOST", cancellationReason: "WEATHER",
+      cancellationNote: "Typhoon", refundedAmount: 4000, refundPendingAmount: 6000,
+    });
+    expect(cancelled.refundedYen).toBe(4000);
+    expect(cancelled.timeline.at(-1)).toEqual({ at: "2026-11-01T09:00", text: "取消（ホスト）" });
+    expect(cancelled.site?.cancellation).toEqual({ by: "host", reason: "雨・荒天", note: "Typhoon", refundedYen: 4000, refundPendingYen: 6000, refundFailed: false, requested: false });
+    expect(siteCancellationLines(cancelled)).toEqual(["11/1 に取消（ホスト · 雨・荒天）", "¥4,000 を返金済み", "¥6,000 を返金中（Stripe の処理待ち）"]);
+    const failed = siteBooking({ ...STORED, status: "CANCELLED", cancelledAtUtc: "2026-11-01T00:00:00.000Z", cancelledBy: "SUPPORT", cancellationReason: "LATE_PAYMENT", refundFailed: true });
+    expect(siteCancellationLines(failed)).toEqual(["11/1 に取消（NIHO サポート · 支払いの遅れ）", "返金に失敗しました。NIHO サポートが対応します"]);
+    const guest = siteBooking({ ...STORED, status: "CANCELLED", cancelledAtUtc: "2026-11-01T00:00:00.000Z", cancelledBy: "GUEST", cancellationReason: "GUEST_REQUEST" });
+    expect(siteCancellationLines(guest)).toEqual(["11/1 に取消（予約者 · 予約者からの依頼）", "返金なし"]);
+    const asked = siteBooking({ ...STORED, cancellationRequested: true });
+    expect([asked.site?.cancellation?.requested, siteCancellationLines(asked)]).toEqual([true, []]);
   });
 
   it("adds the fee, the host's amount and the cancellation policy to 申込内容, and no refund total to 状態", () => {

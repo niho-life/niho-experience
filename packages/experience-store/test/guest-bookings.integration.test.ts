@@ -1132,6 +1132,9 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
         currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000,
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 }, providerAmount: 9000,
         cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: tea.booking.createdAtUtc, cancelledAtUtc: null,
+        // 取消と返金 (slice 7): nothing cancelled, refunded or asked.
+        cancelledBy: null, cancellationReason: null, cancellationNote: null,
+        refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false,
       });
       assert.match(String(paidAtUtc), /^\d{4}-\d{2}-\d{2}T/);
       assert.deepEqual(

@@ -1,14 +1,14 @@
 import "server-only";
 import type { GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
-import { bookingConfirmationEmail, bookingLinkEmail, questionReplyEmail } from "@/lib/mail/templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
 import { guestMessageToJapanese } from "@/lib/translation/prompts";
 
 /**
- * One run of the experience mail job (#285 slices 5 and 6, docs/guest-booking.md, docs/guest-questions.md), every
- * minute from Cloud Scheduler: host replies to guest questions, booking confirmations, the links "Find your
- * booking" asked for, the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
+ * One run of the experience mail job (#285 slices 5-7, docs/guest-booking.md, docs/guest-questions.md), every
+ * minute from Cloud Scheduler: host replies to guest questions, booking confirmations, the notices of
+ * cancellations and refunds, the links "Find your booking" asked for, the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
  * year on and the removal of booking page links and sessions that ended. Each step is bounded and independent:
  * one that fails is reported and the next still runs. Counts only leave this module: never an address, a name,
  * a token or a message.
@@ -23,6 +23,9 @@ export const EXPERIENCE_JOB_LIMITS = {
   replyLinkTtlDays: 14,
   confirmations: 20,
   confirmationLeaseSeconds: 120,
+  /** 取消と返金 (#285 slice 7): cancellation, refund and declined-request emails a run sends, as the confirmations. */
+  notices: 20,
+  noticeLeaseSeconds: 120,
   /** "Find your booking" (#285 slice 6): link emails a run sends, one claimed at a time like the confirmations. */
   bookingLinks: 20,
   bookingLinkLeaseSeconds: 120,
@@ -74,6 +77,8 @@ export interface TranslationCounts {
 
 /** The links "Find your booking" asked for: as the confirmations. */
 export type BookingLinkCounts = BookingConfirmationCounts;
+/** The notices of a cancellation, a refund done or a declined request: as the confirmations. */
+export type BookingNoticeCounts = BookingConfirmationCounts;
 
 /**
  * A step that is turned off: translation (EXPERIENCE_TRANSLATION_ENABLED; guest messages wait untranslated) or the
@@ -99,6 +104,7 @@ export interface FailedStep {
 export interface ExperienceJobCounts {
   readonly questionReplies: QuestionReplyCounts | FailedStep;
   readonly bookingConfirmations: BookingConfirmationCounts | FailedStep;
+  readonly bookingNotices: BookingNoticeCounts | FailedStep;
   readonly bookingLinks: BookingLinkCounts | StepOff | FailedStep;
   readonly guestTranslations: TranslationCounts | StepOff | FailedStep;
   readonly guestErasure: ErasureCounts | FailedStep;
@@ -110,6 +116,7 @@ export interface ExperienceJobDeps {
   readonly questions: Pick<GuestQuestionRepository, "claimReplyDeliveries" | "recordReplyDelivery" | "eraseInactiveThreads">;
   readonly confirmations: Pick<GuestMailOutbox, "claimBookingConfirmations" | "completeBookingConfirmation" | "retryBookingConfirmation">;
   readonly bookingLinks: Pick<GuestMailOutbox, "claimBookingLinks" | "completeBookingLink" | "retryBookingLink">;
+  readonly notices: Pick<GuestMailOutbox, "claimBookingNotices" | "completeBookingNotice" | "retryBookingNotice">;
   /**
    * The guest's booking page (#285 slice 6), or null while it is off: each email that links to it gets a fresh
    * one-time grant from here, built into the link's URL fragment.
@@ -225,6 +232,40 @@ async function sendBookingConfirmations(deps: ExperienceJobDeps): Promise<Bookin
 }
 
 /**
+ * 取消と返金 (#285 slice 7): the guest's notices of a cancellation, a refund Stripe finished and a declined request, one
+ * claimed at a time as the confirmations, each with a fresh link to the booking page while the page is on.
+ */
+async function sendBookingNotices(deps: ExperienceJobDeps): Promise<BookingNoticeCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.notices)) {
+    const claim = await deps.notices.claimBookingNotices({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.noticeLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [notice] = claim.notices;
+    if (!notice) break;
+    counts.claimed += 1;
+    if (notice.email === null) {
+      await deps.notices.completeBookingNotice(notice.id);
+      counts.skipped += 1;
+      continue;
+    }
+    const grant = deps.access ? await deps.access.issueBookingAccessGrant(notice.email.publicBookingId) : null;
+    const email = bookingNoticeEmail(notice.email, { siteUrl: deps.siteUrl, bookingPageGrant: grant?.token ?? null });
+    const result = await deps.mailer.sendMail({ to: notice.email.guestEmail, ...email });
+    if (result.ok || result.failure === "permanent") {
+      await deps.notices.completeBookingNotice(notice.id);
+      if (result.ok) counts.sent += 1;
+      else counts.failed += 1;
+    } else {
+      if (await deps.notices.retryBookingNotice(notice.id, notice.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
+/**
  * The links "Find your booking" asked for (#285 slice 6), one claimed at a time as the confirmations, each with a
  * fresh one-time grant. A booking whose page can no longer be opened (cancelled, erased, long over) gets nothing.
  */
@@ -290,6 +331,7 @@ async function translateGuestMessages(deps: ExperienceJobDeps, translator: Trans
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
+  const bookingNotices = await step(deps, "bookingNotices", () => sendBookingNotices(deps));
   const access = deps.access;
   const bookingLinks: ExperienceJobCounts["bookingLinks"] = access
     ? await step(deps, "bookingLinks", () => sendBookingLinks(deps, access))
@@ -308,7 +350,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const bookingAccessPurge: ExperienceJobCounts["bookingAccessPurge"] = access
     ? await step(deps, "bookingAccessPurge", async () => ({ purged: await access.purgeExpiredAccess({ limit: EXPERIENCE_JOB_LIMITS.accessPurgedPerStep }) }))
     : { off: true };
-  return { questionReplies, bookingConfirmations, bookingLinks, guestTranslations, guestErasure, questionErasure, bookingAccessPurge };
+  return { questionReplies, bookingConfirmations, bookingNotices, bookingLinks, guestTranslations, guestErasure, questionErasure, bookingAccessPurge };
 }
 
 /** True when the run did or failed anything worth a log line. */

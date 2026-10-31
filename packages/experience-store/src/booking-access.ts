@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -80,6 +80,36 @@ export interface GuestBookingView {
   readonly guestName: string;
   readonly bookedAtUtc: string;
   readonly cancelledAtUtc: string | null;
+  /** Who cancelled (取消と返金, #285 slice 7); null while it is not cancelled. */
+  readonly cancelledBy: GuestCancelledBy | null;
+  /** Why, as a fixed reason (CANCELLATION_REASONS); null while it is not cancelled. */
+  readonly cancellationReason: string | null;
+  /** Free cancellation is still open by the database's clock: the page offers "Cancel and get a full refund". */
+  readonly freeCancellationOpen: boolean;
+  /** The experience has ended: nothing is offered any more. */
+  readonly experienceEnded: boolean;
+  /** The booking's refunds, oldest first; one support settled by hand or tried again is left out. */
+  readonly refunds: readonly GuestRefundView[];
+  /** The guest's latest "Ask to cancel" while it is open or after support declined it; null otherwise. */
+  readonly cancellationRequest: GuestCancellationRequestView | null;
+}
+
+export type GuestCancelledBy = "GUEST" | "HOST" | "SUPPORT";
+
+/** A refund as the guest reads it: on its way (Stripe has not finished), done, or failed. */
+export interface GuestRefundView {
+  readonly status: "PROCESSING" | "REFUNDED" | "FAILED";
+  readonly amount: number;
+  readonly currency: string;
+  /** When Stripe finished it; null until then. */
+  readonly refundedAtUtc: string | null;
+}
+
+export interface GuestCancellationRequestView {
+  readonly status: "OPEN" | "DECLINED";
+  readonly requestedAtUtc: string;
+  /** Support's words when it declined; null while open (and once erased). */
+  readonly declineMessage: string | null;
 }
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -143,7 +173,64 @@ function viewFromRow(row: DbRow): GuestBookingView {
     guestName: text(row.guest_name, "guest_name"),
     bookedAtUtc: isoValue(row, "created_at"),
     cancelledAtUtc: row.cancelled_at === null || row.cancelled_at === undefined ? null : isoValue(row, "cancelled_at"),
+    cancelledBy: CANCELLED_BY.has(String(row.cancelled_by)) ? row.cancelled_by as GuestCancelledBy : null,
+    cancellationReason: typeof row.cancellation_reason === "string" ? row.cancellation_reason : null,
+    freeCancellationOpen: status === "CONFIRMED" && hours !== undefined && Date.parse(startUtc) - hours * 3_600_000 > Date.parse(isoValue(row, "db_now")),
+    experienceEnded: row.ended === true,
+    refunds: (Array.isArray(row.refunds) ? row.refunds : []).map(refundView),
+    cancellationRequest: requestView(row.request),
   };
+}
+
+const CANCELLED_BY: ReadonlySet<string> = new Set(["GUEST", "HOST", "SUPPORT"]);
+
+/** A timestamp from a JSON aggregate (PostgreSQL's own text form), as a canonical UTC instant. */
+function jsonInstant(value: unknown, key: string): string {
+  const at = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(at)) throw new StoreError(`Database returned an invalid ${key}.`);
+  return new Date(at).toISOString();
+}
+
+function refundView(value: unknown): GuestRefundView {
+  const refund = record(value);
+  const status = refund.status === "SUCCEEDED" ? "REFUNDED" : refund.status === "FAILED" ? "FAILED" : "PROCESSING";
+  return {
+    status,
+    amount: count(refund.amount, "booking_refunds.amount"),
+    currency: text(refund.currency, "booking_refunds.currency"),
+    refundedAtUtc: status === "REFUNDED" && refund.settled_at ? jsonInstant(refund.settled_at, "booking_refunds.settled_at") : null,
+  };
+}
+
+function requestView(value: unknown): GuestCancellationRequestView | null {
+  if (value === null || value === undefined) return null;
+  const request = record(value);
+  if (request.status !== "OPEN" && request.status !== "DECLINED") return null;
+  return {
+    status: request.status,
+    requestedAtUtc: jsonInstant(request.created_at, "booking_cancellation_requests.created_at"),
+    declineMessage: request.status === "DECLINED" && typeof request.decline_message === "string" ? request.decline_message : null,
+  };
+}
+
+/**
+ * The booking a session may act on (取消, #285 slice 7), under the same checks as readBookingSession: its
+ * provider and row id, or null alike for anything else. Used inside the cancelling transaction.
+ */
+export async function sessionBookingRef(client: PoolClient, sessionId: string, publicBookingId: string): Promise<{ providerId: string; bookingId: string } | null> {
+  if (!isSecret(sessionId) || !isBookingId(publicBookingId)) return null;
+  const found = await client.query<DbRow>(
+    `SELECT s.provider_id, s.booking_id::text AS booking_id
+       FROM booking_sessions s
+       JOIN booking_guests g ON g.provider_id = s.provider_id AND g.booking_id = s.booking_id
+       JOIN bookings b ON b.provider_id = s.provider_id AND b.id = s.booking_id
+      WHERE s.session_hash = $1 AND b.public_booking_id = $2::uuid
+        AND s.revoked_at IS NULL AND s.idle_expires_at > clock_timestamp() AND s.absolute_expires_at > clock_timestamp()
+        AND s.access_version = g.access_version AND g.pii_erased_at IS NULL AND b.status = ANY($3::text[])`,
+    [digest(sessionId), publicBookingId.toLowerCase(), GUEST_BOOKING_VIEW_STATUSES],
+  );
+  const row = found.rows[0];
+  return row ? { providerId: text(row.provider_id, "provider_id"), bookingId: text(row.booking_id, "booking_id") } : null;
 }
 
 /** The guest's side of a booking made on this site: links, sessions and "Find your booking". */
@@ -223,8 +310,15 @@ export class GuestBookingAccess {
     if (!isSecret(sessionId) || !isBookingId(publicBookingId)) return null;
     const found = await this.#pool.query<DbRow>(
       `SELECT b.public_booking_id::text AS public_booking_id, b.status, b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot,
-              b.created_at, b.cancelled_at, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
-              s.last_seen_at <= clock_timestamp() - make_interval(secs => $4) AS stale
+              b.created_at, b.cancelled_at, b.cancelled_by, b.cancellation_reason, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
+              s.last_seen_at <= clock_timestamp() - make_interval(secs => $4) AS stale,
+              clock_timestamp() AS db_now, ${END} <= clock_timestamp() AS ended,
+              (SELECT jsonb_agg(jsonb_build_object('status', r.status, 'amount', r.amount, 'currency', r.currency, 'settled_at', r.settled_at) ORDER BY r.created_at)
+                 FROM booking_refunds r WHERE r.provider_id = b.provider_id AND r.booking_id = b.id AND r.closed_at IS NULL) AS refunds,
+              (SELECT jsonb_build_object('status', q.status, 'created_at', q.created_at, 'decline_message', q.decline_message)
+                 FROM booking_cancellation_requests q
+                WHERE q.provider_id = b.provider_id AND q.booking_id = b.id AND q.status IN ('OPEN', 'DECLINED')
+                ORDER BY q.created_at DESC LIMIT 1) AS request
          FROM booking_sessions s
          JOIN booking_guests g ON g.provider_id = s.provider_id AND g.booking_id = s.booking_id
          JOIN bookings b ON b.provider_id = s.provider_id AND b.id = s.booking_id

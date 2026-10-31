@@ -23,7 +23,7 @@ const STORED: HostGuestBooking = {
   localDate: "2026-11-01", localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: "2026-11-01T01:00:00.000Z", endUtc: "2026-11-01T02:30:00.000Z",
   adultCount: 2, childCount: 0, language: "JA", guest: { name: "Sample Guest", phone: "+81 90 0000 0000", note: null, answers: [] },
   currency: "JPY", adultUnitAmount: 4000, childUnitAmount: null, totalAmount: 8000, platformFee: { supportEnabled: false, basisPoints: 1000, amount: 800 },
-  providerAmount: 7200, cancellationPolicy: "NONE", bookedAtUtc: "2026-10-31T03:04:00.000Z", paidAtUtc: "2026-10-31T03:06:00.000Z", cancelledAtUtc: null,
+  providerAmount: 7200, cancellationPolicy: "NONE", bookedAtUtc: "2026-10-31T03:04:00.000Z", paidAtUtc: "2026-10-31T03:06:00.000Z", cancelledAtUtc: null, cancelledBy: null, cancellationReason: null, cancellationNote: null, refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false,
 };
 
 beforeEach(() => {

@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import Stripe from "stripe";
-import type { BookingRecord } from "@niho-experience/experience-store";
+import type { BookingRecord, RefundSubmission } from "@niho-experience/experience-store";
 import {
   createDirectCheckout,
   ExperiencePaymentsHoldTooShortError,
   ExperiencePaymentsValidationError,
   isEndedCheckoutEvent,
+  isRefundEvent,
   retrieveDirectCheckout,
+  submitBookingRefund,
   verifyDirectCheckoutWebhook,
   type PaymentsStripeClient,
 } from "../src/index.ts";
@@ -432,5 +434,129 @@ describe("verifyDirectCheckoutWebhook", () => {
     );
     const valid = ended({});
     assert.throws(() => verifyDirectCheckoutWebhook({ ...valid, rawBody: Buffer.from("{}") }), /signature verification failed/);
+  });
+});
+
+describe("submitBookingRefund (#285 slice 7)", () => {
+  const REFUND_ID = "6f1c2b9e-3a4d-4c5e-8f70-112233445566";
+  const fullRefund: RefundSubmission = {
+    refundId: REFUND_ID, publicBookingId: BOOKING_ID, connectedAccountId: "acct_Synthetic123", stripePaymentRef: "pi_Synthetic123",
+    kind: "FULL", amount: 8_000, currency: "JPY", refundApplicationFee: true,
+  };
+  function stripeWith(options: { listed?: unknown[]; created?: Record<string, unknown>; createError?: unknown }, calls: { list: unknown[][]; create: unknown[][] }) {
+    return {
+      refunds: {
+        list: async (...args: unknown[]) => { calls.list.push(args); return { data: options.listed ?? [] }; },
+        create: async (...args: unknown[]) => {
+          calls.create.push(args);
+          if (options.createError) throw options.createError;
+          return options.created ?? { id: "re_test_Synthetic1", amount: 8_000, status: "pending", failure_reason: null, metadata: {} };
+        },
+      },
+    } as unknown as PaymentsStripeClient;
+  }
+
+  it("refunds on the seller's account with our refund ID as the idempotency key, giving NIHO's fee back in full", async () => {
+    const calls = { list: [] as unknown[][], create: [] as unknown[][] };
+    const answer = await submitBookingRefund({ refund: fullRefund, stripe: stripeWith({}, calls) });
+    assert.deepEqual(answer, { kind: "accepted", stripeRefundRef: "re_test_Synthetic1", status: "pending", failureCode: null });
+    assert.deepEqual(calls.list[0], [{ payment_intent: "pi_Synthetic123", limit: 100 }, { stripeAccount: "acct_Synthetic123" }]);
+    assert.deepEqual(calls.create[0], [
+      {
+        payment_intent: "pi_Synthetic123", amount: 8_000, refund_application_fee: true,
+        metadata: { source: "niho-experience", booking_id: BOOKING_ID, refund_id: REFUND_ID },
+      },
+      { stripeAccount: "acct_Synthetic123", idempotencyKey: `experience-refund:${REFUND_ID}` },
+    ]);
+  });
+
+  it("keeps NIHO's fee on a partial refund, and finds a refund made before instead of making another", async () => {
+    const calls = { list: [] as unknown[][], create: [] as unknown[][] };
+    const partial: RefundSubmission = { ...fullRefund, kind: "PARTIAL", amount: 3_000, refundApplicationFee: false };
+    await submitBookingRefund({ refund: partial, stripe: stripeWith({ created: { id: "re_test_Partial1", amount: 3_000, status: "succeeded" } }, calls) });
+    assert.equal((calls.create[0]![0] as Record<string, unknown>).refund_application_fee, false);
+
+    const again = { list: [] as unknown[][], create: [] as unknown[][] };
+    const listed = [
+      { id: "re_test_Other", amount: 8_000, status: "succeeded", metadata: {} },
+      { id: "re_test_Mine", amount: 8_000, status: "succeeded", failure_reason: null, metadata: { source: "niho-experience", booking_id: BOOKING_ID, refund_id: REFUND_ID } },
+    ];
+    const answer = await submitBookingRefund({ refund: fullRefund, stripe: stripeWith({ listed }, again) });
+    assert.deepEqual(answer, { kind: "accepted", stripeRefundRef: "re_test_Mine", status: "succeeded", failureCode: null });
+    assert.equal(again.create.length, 0);
+  });
+
+  it("answers a refusal for good as rejected, and throws for anything that may succeed later", async () => {
+    const calls = { list: [] as unknown[][], create: [] as unknown[][] };
+    const refused = new Stripe.errors.StripeInvalidRequestError({ message: "Charge has already been refunded.", code: "charge_already_refunded", type: "invalid_request_error" } as never);
+    assert.deepEqual(await submitBookingRefund({ refund: fullRefund, stripe: stripeWith({ createError: refused }, calls) }), { kind: "rejected", failureCode: "charge_already_refunded" });
+    const offline = new Stripe.errors.StripeConnectionError({ message: "offline", type: "api_error" } as never);
+    await assert.rejects(submitBookingRefund({ refund: fullRefund, stripe: stripeWith({ createError: offline }, calls) }), /offline/);
+    await assert.rejects(
+      submitBookingRefund({ refund: fullRefund, stripe: stripeWith({ created: { id: "re_test_Synthetic1", amount: 7_999, status: "pending" } }, calls) }),
+      /another amount/,
+    );
+  });
+
+  it("refuses a refund whose fee choice, IDs or amount are not what the store hands out", async () => {
+    const calls = { list: [] as unknown[][], create: [] as unknown[][] };
+    const stripe = stripeWith({}, calls);
+    for (const refund of [
+      { ...fullRefund, refundApplicationFee: false },
+      { ...fullRefund, kind: "PARTIAL" as const },
+      { ...fullRefund, refundId: "not-a-uuid" },
+      { ...fullRefund, connectedAccountId: "acct_x" },
+      { ...fullRefund, stripePaymentRef: "ch_Synthetic123" },
+      { ...fullRefund, amount: 0 },
+      { ...fullRefund, currency: "jpy" },
+    ]) {
+      await assert.rejects(submitBookingRefund({ refund, stripe }), ExperiencePaymentsValidationError);
+    }
+    assert.equal(calls.list.length + calls.create.length, 0);
+  });
+});
+
+describe("refund webhooks (#285 slice 7)", () => {
+  const REFUND_ID = "6f1c2b9e-3a4d-4c5e-8f70-112233445566";
+  function refundEventOf(options: { type?: string; metadata?: Record<string, string> | null; status?: string | null; failureReason?: string | null; amount?: unknown; object?: string; account?: string } = {}) {
+    return {
+      id: "evt_SyntheticRefund1", object: "event", api_version: "2025-12-15.clover", created: 1_793_494_200, livemode: false, pending_webhooks: 1, request: null,
+      type: options.type ?? "refund.updated",
+      account: options.account ?? "acct_Synthetic123",
+      data: {
+        object: {
+          id: "re_test_Synthetic1", object: options.object ?? "refund", amount: options.amount === undefined ? 8_000 : options.amount, currency: "jpy",
+          payment_intent: "pi_Synthetic123", status: options.status === undefined ? "succeeded" : options.status,
+          failure_reason: options.failureReason ?? null,
+          metadata: options.metadata === undefined ? { source: "niho-experience", booking_id: BOOKING_ID, refund_id: REFUND_ID } : options.metadata,
+        },
+      },
+    };
+  }
+
+  it("returns the status of a refund this service made, for its booking and refund", () => {
+    const event = verifyDirectCheckoutWebhook(signedPayload(refundEventOf()));
+    assert.deepEqual(event, {
+      eventId: "evt_SyntheticRefund1", eventType: "refund.updated", eventOccurredAtUtc: "2026-11-01T00:50:00.000Z", connectedAccountId: "acct_Synthetic123",
+      publicBookingId: BOOKING_ID, refundId: REFUND_ID, stripeRefundRef: "re_test_Synthetic1", paymentIntentRef: "pi_Synthetic123",
+      amount: 8_000, currency: "JPY", status: "succeeded", failureCode: null,
+    });
+    assert.ok(event && isRefundEvent(event) && !isEndedCheckoutEvent(event));
+    const failed = verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ type: "refund.failed", status: "failed", failureReason: "expired_or_canceled_card" })));
+    assert.deepEqual([failed && isRefundEvent(failed) && failed.status, failed && isRefundEvent(failed) && failed.failureCode], ["failed", "expired_or_canceled_card"]);
+    const created = verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ type: "refund.created", status: null })));
+    assert.equal(created && isRefundEvent(created) && created.status, "pending");
+  });
+
+  it("ignores refunds made elsewhere and charge.refunded, and refuses malformed ones", () => {
+    assert.equal(verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ metadata: {} }))), null);
+    assert.equal(verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ metadata: null }))), null);
+    assert.equal(verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ type: "charge.refunded", object: "charge" }))), null);
+    assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ account: "" }))), /connected account ID is required/);
+    assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ metadata: { source: "niho-experience", booking_id: BOOKING_ID } }))), /metadata is malformed/);
+    assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ metadata: { source: "niho-experience", booking_id: BOOKING_ID, refund_id: "x" } }))), /IDs are malformed/);
+    assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ status: "lost" }))), /status is unknown/);
+    assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ amount: 0 }))), /refund amount/);
+    assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ object: "charge" }))), /does not contain a Refund/);
   });
 });

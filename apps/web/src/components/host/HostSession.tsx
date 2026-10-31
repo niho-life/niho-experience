@@ -37,13 +37,15 @@ import {
   type SessionCancelReason,
   type SessionCancelResult,
 } from "@/host/session";
-import { SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_BOOKING_READ_ONLY_TEXT } from "@/host/site-bookings";
+import { cancelSiteSession } from "@/host/actions";
+import { SITE_BOOKING_LOAD_FAILED_TEXT, SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_SESSION_SUPPORT_TEXT } from "@/host/site-bookings";
 import { siteSessionCountLines } from "@/host/site-sessions";
 import type { HostAttendance, HostBooking } from "@/host/types";
 import { DISABLED, useFocusAfterRender } from "./editor-parts";
 import { DANGER_BUTTON } from "./HostBookingDialogs";
 import { HostIcon } from "./HostIcon";
 import { SessionCancelDialog, SessionContactDialog, type SessionContact } from "./HostSessionDialogs";
+import { SiteSessionCancelDialog, type SiteCancelChoice } from "./HostSiteCancelDialogs";
 import { HostSubHeader } from "./HostSubHeader";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostPageBody, InitialAvatar, SectionTitle, StatusPill, SubPageHead } from "./ui";
@@ -60,11 +62,12 @@ export interface HostSessionProps {
   /** The URL's own `?providerId=` (when well formed), carried on every link. */
   providerId: string | null;
   /**
-   * Bookings made on this site (#285 slice 8b, experience DB, http mode), read only: no attendance, no thread with
-   * the guest (slice 6) and no calling off (slice 7). `besideNiho`: NIHO's bookings are 予約's own and these are its
-   * `?source=site`, where "‹ 予約" goes back. Absent in mock mode.
+   * Bookings made on this site (#285 slice 8b, experience DB, http mode): no attendance and no thread with the guest
+   * (slice 6); calling the session off cancels every confirmed booking with a full refund (slice 7, `providerId` is
+   * the provider shown). `besideNiho`: NIHO's bookings are 予約's own and these are its `?source=site`, where "‹ 予約"
+   * goes back. Absent in mock mode.
    */
-  site?: { besideNiho: boolean } | null;
+  site?: { besideNiho: boolean; providerId?: string } | null;
 }
 
 /** Label 72px + value, as a booking's 申込内容. */
@@ -193,14 +196,16 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
  * nothing is kept), and no booking fails to cancel. TODO(#87): send them to NIHO
  * (niho-app#19321) and show what it reads back, with NIHO's result for each booking.
  *
- * This site's bookings (`site`, #285 slice 8b) are read only: the guests with their phones, words and payments under
- * review (確認待ち, counted with the participants as ホーム counts them), and where to ask for a cancellation.
+ * This site's bookings (`site`, #285 slices 8b and 7): the guests with their phones, words and payments under review
+ * (確認待ち, counted with the participants as ホーム counts them), and, before the start, この回を中止 with full refunds.
  */
 export function HostSession({ session, now, conversations, providerId, site = null }: HostSessionProps) {
   const [bookings, setBookings] = useState<readonly HostBooking[]>(session.bookings);
   const [notice, setNotice] = useState("");
   const [cancellation, setCancellation] = useState<{ reason: SessionCancelReason; results: SessionCancelResult[] } | null>(null);
-  const [asking, setAsking] = useState<"contact" | "cancel" | null>(null);
+  const [asking, setAsking] = useState<"contact" | "cancel" | "siteCancel" | null>(null);
+  /** この回を中止 of this site's bookings (#285 slice 7): while it is sent, and what failed. */
+  const [siteCancel, setSiteCancel] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const focusLater = useFocusAfterRender();
 
   const heading = sessionHeading(session);
@@ -223,8 +228,33 @@ export function HostSession({ session, now, conversations, providerId, site = nu
     const href = messageHref(booking);
     return href ? [{ id: booking.id, guest: booking.guest, people: `${booking.guests}名`, status: booking.status === "confirmed" ? null : bookingStatusLabel(booking, today), href }] : [];
   });
-  // Nothing on this screen changes this site's bookings yet.
+  // This site's bookings are called off with their own action (full refunds, by the store), below.
   const cancellable = !site && canCancelSession(bookings, phase, cancellation !== null);
+  const siteConfirmed = site ? bookings.filter((booking) => booking.status === "confirmed") : [];
+  const siteCancellable = Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
+
+  /** Live: the OWNER calls the session off; the store answers the session as it is now. */
+  const cancelSite = async (choice: SiteCancelChoice) => {
+    if (!site?.providerId || siteCancel.busy) return;
+    setSiteCancel({ busy: true, error: null });
+    let result: Awaited<ReturnType<typeof cancelSiteSession>>;
+    try {
+      result = await cancelSiteSession({
+        providerId: site.providerId, date: session.date, start: session.start, experience: session.experienceId, offer: session.offerId,
+        commandId: crypto.randomUUID(), reason: choice.reason, note: choice.note,
+      });
+    } catch {
+      setSiteCancel({ busy: false, error: SITE_BOOKING_LOAD_FAILED_TEXT });
+      return;
+    }
+    if (!result.ok) {
+      setSiteCancel({ busy: false, error: result.message });
+      return;
+    }
+    if (result.session) setBookings(result.session.bookings);
+    setSiteCancel({ busy: false, error: null });
+    setNotice(result.message);
+  };
 
   const mark = (id: string, value: HostAttendance) => {
     const booking = bookings.find((item) => item.id === id);
@@ -382,7 +412,17 @@ export function HostSession({ session, now, conversations, providerId, site = nu
           </section>
         ) : null}
 
-        {site ? <p className="mt-5 text-[0.8125rem] leading-normal text-ink-soft">{SITE_BOOKING_READ_ONLY_TEXT}</p> : null}
+        {site ? (
+          <div className="mt-5">
+            {siteCancel.error ? <p role="alert" className="mb-2 text-[0.8125rem] leading-normal font-bold text-danger">{siteCancel.error}</p> : null}
+            {siteCancellable ? (
+              <button type="button" disabled={siteCancel.busy} aria-busy={siteCancel.busy || undefined} onClick={() => setAsking("siteCancel")} className={`${DANGER_BUTTON} mb-2 max-md:w-full`}>
+                {siteCancel.busy ? "中止しています…" : "この回を中止する（全員に全額返金）"}
+              </button>
+            ) : null}
+            <p className="text-[0.8125rem] leading-normal text-ink-soft">{SITE_SESSION_SUPPORT_TEXT}</p>
+          </div>
+        ) : null}
         {contacts.length || cancellable ? (
           <div className="mt-5 flex flex-col gap-2.5 md:flex-row md:flex-wrap">
             {contacts.length ? (
@@ -400,6 +440,15 @@ export function HostSession({ session, now, conversations, providerId, site = nu
       </HostPageBody>
 
       {asking === "contact" ? <SessionContactDialog contacts={contacts} onClose={() => setAsking(null)} /> : null}
+      {asking === "siteCancel" ? (
+        <SiteSessionCancelDialog
+          when={`${shortDateWithWeekdayJa(session.date)}${session.start}`}
+          bookings={siteConfirmed.length}
+          refundYen={siteConfirmed.reduce((total, booking) => total + booking.amountYen, 0)}
+          onConfirm={(choice) => void cancelSite(choice)}
+          onClose={() => setAsking(null)}
+        />
+      ) : null}
       {asking === "cancel" ? (
         <SessionCancelDialog
           when={`${shortDateWithWeekdayJa(session.date)}${session.start}`}

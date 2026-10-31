@@ -53,3 +53,40 @@ export function cancellationWords(
   }
   return `Free cancellation until ${zonedMoment(deadline, booking.timeZone)} ${zoneName(booking.timeZone)} (${hours} hours before the start). After that, the booking is non-refundable.`;
 }
+
+/** How long a card refund takes to show, as Stripe tells cardholders. */
+export const REFUND_TIMING = "Banks usually take 5–10 business days to show a refund on your statement.";
+
+/**
+ * Why a booking was cancelled, as the guest reads it (#285 slice 7): the fixed reason the host or support chose,
+ * never their own note. An empty string for a reason without words.
+ */
+export function cancelledBecause(reason: string | null): string {
+  switch (reason) {
+    case "WEATHER":
+      return " because of the weather";
+    case "ILLNESS":
+      return " because the host is ill or injured";
+    case "HOST_UNAVAILABLE":
+      return " because the host can't run it on this date";
+    default:
+      return "";
+  }
+}
+
+/** "{Host} cancelled this booking because of the weather." and the like; the first words of a notice. */
+export function cancelledBy(
+  booking: { readonly cancelledBy: "GUEST" | "HOST" | "SUPPORT" | null; readonly cancellationReason: string | null; readonly hostDisplayName: string },
+): string {
+  if (booking.cancellationReason === "LATE_PAYMENT") {
+    return "Your payment reached us after your hold on the place ended, so the booking couldn't be confirmed.";
+  }
+  if (booking.cancelledBy === "GUEST") return "You cancelled this booking.";
+  if (booking.cancelledBy === "HOST") return `${booking.hostDisplayName} cancelled this booking${cancelledBecause(booking.cancellationReason)}. We're very sorry.`;
+  if (booking.cancelledBy === "SUPPORT") {
+    return booking.cancellationReason === "GUEST_REQUEST"
+      ? "NIHO support cancelled this booking, as you asked."
+      : `NIHO support cancelled this booking${cancelledBecause(booking.cancellationReason)}.`;
+  }
+  return "This booking was cancelled.";
+}

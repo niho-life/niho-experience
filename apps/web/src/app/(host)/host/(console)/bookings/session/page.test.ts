@@ -57,7 +57,7 @@ describe("この回 without NIHO's bookings (provider operations off)", () => {
     state.site = LIVE;
     const view = await page();
     expect(view.type).toBe(HostSession);
-    expect(view.props).toEqual({ session: VIEW, now: "2026-11-01T09:00", conversations: [], providerId: "sample-provider", site: { besideNiho: false } });
+    expect(view.props).toEqual({ session: VIEW, now: "2026-11-01T09:00", conversations: [], providerId: "sample-provider", site: { besideNiho: false, providerId: "sample-provider" } });
     expect(state.loadSiteSession).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", QUERY);
     expect(state.loadHostSession).not.toHaveBeenCalled();
   });
@@ -87,7 +87,7 @@ describe("この回 beside NIHO's bookings (provider operations on)", () => {
     state.site = LIVE;
     const view = await page({ ...QUERY, source: "site" });
     expect(view.type).toBe(HostSession);
-    expect(view.props.site).toEqual({ besideNiho: true });
+    expect(view.props.site).toEqual({ besideNiho: true, providerId: "sample-provider" });
     state.site = { status: "error" };
     expect((await page({ ...QUERY, source: "site" })).props).toMatchObject({ backHref: "/host/bookings?providerId=sample-provider&source=site" });
   });
