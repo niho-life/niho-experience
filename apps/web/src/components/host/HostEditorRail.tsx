@@ -28,7 +28,7 @@ const STEP_DOT: Record<StepState, string> = { done: "bg-moss", current: "bg-leaf
 const STEP_SPOKEN: Record<StepState, string> = { done: "（済み）", current: "（現在）", todo: "" };
 
 /** 下書き → 審査 → 掲載中: done steps have a deep green dot, the current one a leaf dot with a ring. */
-function ListingSteps({ status }: { status: ListingStatus }) {
+export function ListingSteps({ status }: { status: ListingStatus }) {
   const states = STEP_STATES[status];
   return (
     <ol aria-label="掲載までの流れ" className="mb-3 flex flex-wrap items-center gap-y-1">

@@ -58,6 +58,12 @@ export type MockPage = {
   photoObjectKeys: string[];
   photoAlts: string[];
   offers: ExperienceProviderPageOffer[];
+  /**
+   * 日本語のページの鮮度確認済みの自動英訳（合成）: 日本語の原文 → 英語。今の原文と一致する項目だけが
+   * プレビューの `*En` に出る。日本語を直すと原文が変わり、その項目の英語は null に戻る（作り直されるまで）。
+   * 英語のページでは使わない。
+   */
+  englishOf: Record<string, string>;
   /** 商品ごとの確定した申込の件数。 */
   offerBookings: Record<string, number>;
   /** 確定した申込のうち、開催日が 7 日以内の件数。 */
@@ -191,6 +197,7 @@ export function seedKitchenPages(base: Date, owner: { vesselSpotId: string; vess
         ],
       },
     ],
+    englishOf: {},
     offerBookings: { "sample-offer-kitchen-cooking": 3 },
     bookingsThisWeek: 1,
     meetingPoint: { mode: "INHERIT" },
@@ -225,11 +232,34 @@ export function seedKitchenPages(base: Date, owner: { vesselSpotId: string; vess
       ...emptyContent(),
       lead: "（サンプル）朝市で野菜を選び、台所で一緒に料理します。合成データです。",
       facts: { language: "日本語" },
+      highlights: ["（サンプル）朝市で旬の野菜を選ぶ", "（サンプル）選んだ野菜で一品を仕上げる", "（サンプル）できた料理をみんなで味わう"],
+      description: "（サンプル）朝市を歩いて食材を選び、台所で一緒に料理します。合成データです。",
+      included: ["（サンプル）食材と調理道具", "（サンプル）お茶"],
+      notIncluded: ["（サンプル）駅からの交通費"],
+      notSuitableFor: ["（サンプル）生ものが苦手な方"],
+      timeline: [
+        { time: "08:30", title: "（サンプル）朝市で買い物", text: "（サンプル）野菜を選びます。", photoObjectKey: null },
+        { time: "10:00", title: "（サンプル）台所で調理", text: "", photoObjectKey: null },
+      ],
+      knowBeforeYouGo: ["（サンプル）歩きやすい靴で来てください。"],
       hostUserIds: [hostUserId],
     },
     photoObjectKeys: [],
     photoAlts: [],
     offers: [{ ...defaultOffer("sample-offer-kitchen-market", "（サンプル）朝市と料理"), startTime: "08:30" }],
+    // 一部の項目だけ英訳がある（作られていない項目と、日本語を直すと空に戻る動きを画面で確かめる合成データ）
+    englishOf: {
+      "（サンプル）朝市で買って、台所で作る": "(Sample) Shop at the morning market, cook in the kitchen",
+      "（サンプル）朝市で野菜を選び、台所で一緒に料理します。合成データです。": "(Sample) Pick vegetables at the morning market and cook together in the kitchen. Synthetic data.",
+      "日本語": "Japanese",
+      "（サンプル）朝市で旬の野菜を選ぶ": "(Sample) Choose seasonal vegetables at the market",
+      "（サンプル）選んだ野菜で一品を仕上げる": "(Sample) Finish a dish with the vegetables you chose",
+      "（サンプル）朝市を歩いて食材を選び、台所で一緒に料理します。合成データです。": "(Sample) Walk the market, choose ingredients and cook together in the kitchen. Synthetic data.",
+      "（サンプル）食材と調理道具": "(Sample) Ingredients and cooking tools",
+      "（サンプル）駅からの交通費": "(Sample) Transport from the station",
+      "（サンプル）朝市で買い物": "(Sample) Shopping at the market",
+      "（サンプル）野菜を選びます。": "(Sample) You choose the vegetables.",
+    },
     offerBookings: {},
     bookingsThisWeek: 0,
     meetingPoint: {
@@ -406,6 +436,8 @@ function applyContentInput(base: ExperienceProviderPageContent, value: unknown, 
           const photoObjectKey = photoKey(entry.photoObjectKey, `${at}.photoObjectKey`);
           for (const part of [time, title, text, photoObjectKey]) if (isInvalid(part)) return part;
           if (time !== "" && !TIME_PATTERN.test(time as string)) return invalid("PAGE_CONTENT_INVALID", `${at}.time`);
+          // 時刻・題・一言のどれも無い段は保存しない（数えるのはそのあと）
+          if (time === "" && title === "" && text === "") continue;
           timeline.push({ time: time as string, title: title as string, text: text as string, photoObjectKey: photoObjectKey as string | null });
         }
         if (timeline.length > 6) return invalid("PAGE_CONTENT_INVALID", field);
@@ -650,34 +682,36 @@ async function preview(owner: MockPageOwner, page: MockPage, now: Date, hostUser
   );
   const offers = summaries.map((summary, index) => ({ ...summary, occurrences: occurrencesOf(owner, active[index]!, now) }));
   const { content } = page;
-  const untranslated = (items: string[]) => items.map(() => null);
+  // 鮮度確認済みの自動英訳は日本語のページだけ。今の原文に対応する英語があるものだけ入り、無い・古い項目は null
+  const english = (text: string): string | null => (page.language === "JA" ? (page.englishOf[text] ?? null) : null);
+  const englishList = (items: string[]) => items.map(english);
   return {
     page: {
       slug: page.slug,
       kind: "EXPERIENCE",
       language: page.language,
       title: page.title,
-      titleEn: null,
+      titleEn: english(page.title),
       content: {
         lead: content.lead,
-        leadEn: null,
-        facts: { language: content.facts.language, languageEn: null },
+        leadEn: english(content.lead),
+        facts: { language: content.facts.language, languageEn: english(content.facts.language) },
         highlights: [...content.highlights],
-        highlightsEn: untranslated(content.highlights),
+        highlightsEn: englishList(content.highlights),
         timeline: content.timeline.map((item) => {
           const photoIndex = item.photoObjectKey ? page.photoObjectKeys.indexOf(item.photoObjectKey) : -1;
-          return { time: item.time, title: item.title, titleEn: null, text: item.text, textEn: null, photoIndex: photoIndex >= 0 ? photoIndex : null };
+          return { time: item.time, title: item.title, titleEn: english(item.title), text: item.text, textEn: english(item.text), photoIndex: photoIndex >= 0 ? photoIndex : null };
         }),
         description: content.description,
-        descriptionEn: null,
+        descriptionEn: english(content.description),
         included: [...content.included],
-        includedEn: untranslated(content.included),
+        includedEn: englishList(content.included),
         notIncluded: [...content.notIncluded],
-        notIncludedEn: untranslated(content.notIncluded),
+        notIncludedEn: englishList(content.notIncluded),
         notSuitableFor: [...content.notSuitableFor],
-        notSuitableForEn: untranslated(content.notSuitableFor),
+        notSuitableForEn: englishList(content.notSuitableFor),
         knowBeforeYouGo: [...content.knowBeforeYouGo],
-        knowBeforeYouGoEn: untranslated(content.knowBeforeYouGo),
+        knowBeforeYouGoEn: englishList(content.knowBeforeYouGo),
       },
       photos: page.photoObjectKeys.map((objectKey) => ({ url: photoUrl(objectKey, "w1024") })),
       coverUrl: page.photoObjectKeys[0] ? photoUrl(page.photoObjectKeys[0], "w1024") : null,
@@ -768,6 +802,7 @@ export function createMockPageRoutes(context: MockPagesContext) {
       photoObjectKeys: [],
       photoAlts: [],
       offers: [defaultOffer(`sample-offer-new-${created}`, body.language === "JA" ? "体験" : "Experience")],
+      englishOf: {},
       offerBookings: {},
       bookingsThisWeek: 0,
       meetingPoint: { mode: "INHERIT" },
@@ -828,6 +863,9 @@ export function createMockPageRoutes(context: MockPagesContext) {
       next.photoObjectKeys = [...(keys as string[])];
       next.photoAlts = alts;
     }
+    // 当日の流れと外観写真の写真は photoObjectKeys の中から選ぶ。保存後の写真に無いものは null になる
+    next.content.timeline = next.content.timeline.map((step) => (step.photoObjectKey && !next.photoObjectKeys.includes(step.photoObjectKey) ? { ...step, photoObjectKey: null } : step));
+    if (next.content.meetingPoint.exteriorPhotoObjectKey && !next.photoObjectKeys.includes(next.content.meetingPoint.exteriorPhotoObjectKey)) next.content.meetingPoint = { ...next.content.meetingPoint, exteriorPhotoObjectKey: null };
     if ("offer" in body) {
       const [first] = [...next.offers].sort(bySortOrder);
       if (!first) return errors.pageInvalid("PAGE_OFFER_INVALID", "offer");
