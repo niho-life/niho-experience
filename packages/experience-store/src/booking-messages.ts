@@ -15,7 +15,7 @@ import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 
 /*
- * 予約ごとのメッセージ (#285 slice 6b, migration 0031, docs/guest-booking.md): the guest's side of the messages of one
+ * 予約ごとのメッセージ (#285 slice 6b, migration 0032, docs/guest-booking.md): the guest's side of the messages of one
  * booking made on this site. The guest reads and writes on their booking page with the session of that booking
  * (slice 6a, booking-access.ts); there is no other identity. The host answers in メッセージ (GuestQuestionRepository).
  * The guest reads their own words and the host's English, never the Japanese the host wrote, and nothing here

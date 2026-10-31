@@ -507,7 +507,7 @@ async function replying<T>(work: () => Promise<T>): Promise<T> {
  * their methods take a slug or a one-time link. The host's methods need a current OWNER of the
  * provider (as 設定 › 通知). The mail job (/internal/experience-jobs/v1/drain) claims host replies, reports how each
  * went and erases questions a year after their last message.
- * A booking made on this site has one thread of its own in the same tables (#285 slice 6b, migration 0031): the
+ * A booking made on this site has one thread of its own in the same tables (#285 slice 6b, migration 0032): the
  * guest writes on their booking page (GuestBookingMessages), the host answers here; its name and address stay in
  * booking_guests. The guest's email address leaves this class only in `claimReplyDeliveries`.
  */
