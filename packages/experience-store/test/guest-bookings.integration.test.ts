@@ -1233,3 +1233,114 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
     });
   });
 });
+
+describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285 slice 8b)", { skip: databaseUrl === undefined }, () => {
+  /** bookForHost, a second confirmed guest on the first tea session, and a tea occurrence moved to 15:00 on day 8 before it was booked. */
+  async function bookSessions(context: Context) {
+    const booked = await bookForHost(context);
+    const { store, guests } = context;
+    const second = await guests.startGuestBooking(request({ guestEmail: "second@example.com", guestName: "Second Guest" }));
+    await payFor(store, second, 4000, "host-second");
+    await store.saveOccurrenceOverride(ownerA, "tea", "sample-am", { kind: "RESCHEDULE", occurrenceId: occurrenceIdFor("sample-am", day(8)), localDate: day(8), localStartTime: "15:00" }, null, randomUUID());
+    const moved = await guests.startGuestBooking(request({ occurrenceDate: day(8), guestEmail: "moved@example.com" }));
+    await payFor(store, moved, 4000, "host-moved");
+    return { ...booked, second, moved };
+  }
+
+  const key = (productId: string, offerId: string, localDate: string, localStartTime: string) => ({ productId, offerId, localDate, localStartTime });
+
+  it("lists the sessions ahead with who may come, counting payments under review and never a cancellation, a hold or a guest's details", async () => {
+    await withSchema(async (context) => {
+      const { tea, walk, moved } = await bookSessions(context);
+      const { guests } = context;
+      const sessions = await guests.listGuestSessionsForHost(ownerA);
+      const snapshot = tea.booking.occurrenceSnapshot;
+      assert.deepEqual(sessions[0], {
+        productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo",
+        startUtc: snapshot.startUtc, endUtc: snapshot.endUtc, participants: 4, bookings: 2, paymentReviews: 0,
+      });
+      assert.deepEqual(sessions.map((session) => [session.productId, session.localDate, session.localStartTime, session.participants, session.bookings, session.paymentReviews]), [
+        ["tea", day(2), "10:00", 4, 2, 0],
+        ["walk", day(2), "14:00", 1, 1, 0],
+        // The payment under review: the guest paid after the hold ended and may come, without a seat.
+        ["tea", day(4), "10:00", 1, 1, 1],
+        // The occurrence moved before it was booked: its snapshot's day and start, not the rule's 10:00.
+        ["tea", day(8), "15:00", 1, 1, 0],
+      ]);
+      assert.equal(sessions[1]!.startUtc, walk.booking.occurrenceSnapshot.startUtc);
+      assert.equal(sessions[3]!.startUtc, moved.booking.occurrenceSnapshot.startUtc);
+      assert.doesNotMatch(JSON.stringify(sessions), /@|example\.com|Sample Guest|\+81/);
+
+      // A window and a limit; the past session from 2020 once `from` reaches back to it.
+      const window = await guests.listGuestSessionsForHost(ownerA, { from: tokyoLocalToUtc(day(2), "00:00"), to: tokyoLocalToUtc(day(3), "00:00") });
+      assert.deepEqual(window.map((session) => session.productId), ["tea", "walk"]);
+      assert.deepEqual((await guests.listGuestSessionsForHost(ownerA, { limit: 1 })).map((session) => session.localDate), [day(2)]);
+      const all = await guests.listGuestSessionsForHost(ownerA, { from: "2019-12-31T15:00:00.000Z" });
+      assert.deepEqual(all[0] && [all[0].productId, all[0].localDate, all[0].localStartTime, all[0].participants], ["walk", "2020-01-01", "14:00", 1]);
+      assert.equal(all.length, 5);
+
+      const from = tokyoLocalToUtc(day(2), "00:00");
+      for (const options of [{ limit: 0 }, { limit: 101 }, { from: "yesterday" }, { to: "tomorrow" }, { from, to: from }, { from, to: tokyoLocalToUtc(day(1), "00:00") }]) {
+        await assert.rejects(() => guests.listGuestSessionsForHost(ownerA, options), StoreValidationError, JSON.stringify(options));
+      }
+    });
+  });
+
+  it("reads one session's bookings by the snapshot's day and start, in booking order, with the phone and never an address", async () => {
+    await withSchema(async (context) => {
+      const { tea, second, review, cancelled, held, moved } = await bookSessions(context);
+      const { guests } = context;
+      const first = await guests.listGuestBookingsForSession(ownerA, key("tea", "sample-am", day(2), "10:00"));
+      assert.deepEqual(first.map((booking) => booking.publicBookingId), [tea.publicBookingId, second.publicBookingId]);
+      assert.deepEqual(first[0], await guests.getGuestBookingForHost(ownerA, tea.publicBookingId));
+      assert.deepEqual(first.map((booking) => [booking.guest?.name, booking.guest?.phone]), [["Sample Guest", "+81 90 1234 5678"], ["Second Guest", null]]);
+      assert.doesNotMatch(JSON.stringify(first), /@|example\.com/);
+
+      // Every status a host sees: under review, and cancelled (この回 leaves it out); a hold is not a booking.
+      assert.deepEqual((await guests.listGuestBookingsForSession(ownerA, key("tea", "sample-am", day(4), "10:00"))).map((booking) => [booking.publicBookingId, booking.status]), [[review.publicBookingId, "PAYMENT_REVIEW"]]);
+      assert.deepEqual((await guests.listGuestBookingsForSession(ownerA, key("tea", "sample-am", day(5), "10:00"))).map((booking) => [booking.publicBookingId, booking.status]), [[cancelled.publicBookingId, "CANCELLED"]]);
+      assert.ok(held.booking.occurrenceSnapshot.localDate === day(3));
+      assert.deepEqual(await guests.listGuestBookingsForSession(ownerA, key("tea", "sample-am", day(3), "10:00")), []);
+
+      // The moved occurrence is at its snapshot's start; the rule's own start, another offer or experience has none.
+      assert.deepEqual((await guests.listGuestBookingsForSession(ownerA, key("tea", "sample-am", day(8), "15:00"))).map((booking) => booking.publicBookingId), [moved.publicBookingId]);
+      for (const other of [key("tea", "sample-am", day(8), "10:00"), key("tea", "sample-pm", day(2), "10:00"), key("walk", "sample-am", day(2), "10:00")]) {
+        assert.deepEqual(await guests.listGuestBookingsForSession(ownerA, other), [], JSON.stringify(other));
+      }
+
+      for (const bad of [key("", "sample-am", day(2), "10:00"), key("tea", "sample am", day(2), "10:00"), key("tea", "sample-am", "2026/11/05", "10:00"), key("tea", "sample-am", day(2), "25:00"), key("tea", "sample-am", day(2), "10:00:00")]) {
+        await assert.rejects(() => guests.listGuestBookingsForSession(ownerA, bad), StoreValidationError, JSON.stringify(bad));
+      }
+    });
+  });
+
+  it("answers only a current OWNER of the provider, and only with that provider's sessions", async () => {
+    await withSchema(async (context) => {
+      await bookSessions(context);
+      const { pool, guests } = context;
+      const session = key("tea", "sample-am", day(2), "10:00");
+      const denied = [editorA, viewerA, { ...ownerA, calendarRoleCeiling: "EDITOR" as const }, { ...ownerA, calendarScope: "OPERATOR" as const }, { providerId: "provider-a", nihoUserId: "stranger" }];
+      for (const actor of denied) {
+        await assert.rejects(() => guests.listGuestSessionsForHost(actor), StoreAccessDeniedError, actor.nihoUserId);
+        await assert.rejects(() => guests.listGuestBookingsForSession(actor, session), StoreAccessDeniedError, actor.nihoUserId);
+      }
+      assert.deepEqual(await guests.listGuestSessionsForHost(ownerB, { from: "2019-12-31T15:00:00.000Z" }), []);
+      assert.deepEqual(await guests.listGuestBookingsForSession(ownerB, session), []);
+      await pool.query("UPDATE provider_memberships SET active=false WHERE niho_user_id='owner-a'");
+      await assert.rejects(() => guests.listGuestSessionsForHost(ownerA), StoreAccessDeniedError);
+      await assert.rejects(() => guests.listGuestBookingsForSession(ownerA, session), StoreAccessDeniedError);
+    });
+  });
+
+  it("keeps an erased guest's party in the session and shows the booking without the guest", async () => {
+    await withSchema(async (context) => {
+      const { past } = await bookSessions(context);
+      const { guests } = context;
+      assert.equal(await guests.eraseGuestData({ endedBefore: "2021-01-01T00:00:00.000Z" }), 1);
+      const [session] = await guests.listGuestSessionsForHost(ownerA, { from: "2019-12-31T15:00:00.000Z", to: "2020-01-02T00:00:00.000Z" });
+      assert.deepEqual(session && [session.localDate, session.participants, session.bookings], ["2020-01-01", 1, 1]);
+      const [erased] = await guests.listGuestBookingsForSession(ownerA, key("walk", "sample-walk-pm", "2020-01-01", "14:00"));
+      assert.deepEqual(erased && [erased.publicBookingId, erased.guest, erased.adultCount], [past.publicBookingId, null, 1]);
+    });
+  });
+});

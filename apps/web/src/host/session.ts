@@ -137,17 +137,21 @@ export function guestWords(booking: Pick<HostBooking, "note" | "answers">): { no
 }
 
 /**
- * 参加者 (確定) and 承認待ち as the screen opened. A booking this screen cancels (この回を中止)
- * stays where it was, with its new state, so the host still sees and can write to everyone.
+ * 参加者 (確定, and this site's payments under review: the guest paid and may come, #285) and 承認待ち as the
+ * screen opened. A booking this screen cancels (この回を中止) stays where it was, with its new state, so the host
+ * still sees and can write to everyone.
  */
 export interface SessionSections {
   participants: HostBooking[];
   requests: HostBooking[];
 }
 
+const PARTICIPANTS: ReadonlySet<HostBookingStatus> = new Set(["confirmed", "payment_review"]);
+const REQUESTS: ReadonlySet<HostBookingStatus> = new Set(["pending"]);
+
 export function sessionSections(opened: readonly Pick<HostBooking, "id" | "status">[], current: readonly HostBooking[]): SessionSections {
-  const asNow = (status: HostBookingStatus) => opened.filter((booking) => booking.status === status).flatMap((booking) => current.filter((item) => item.id === booking.id));
-  return { participants: asNow("confirmed"), requests: asNow("pending") };
+  const asNow = (statuses: ReadonlySet<HostBookingStatus>) => opened.filter((booking) => statuses.has(booking.status)).flatMap((booking) => current.filter((item) => item.id === booking.id));
+  return { participants: asNow(PARTICIPANTS), requests: asNow(REQUESTS) };
 }
 
 // 出欠

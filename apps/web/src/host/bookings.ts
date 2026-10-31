@@ -451,9 +451,12 @@ export interface SessionQuery {
   offer: string;
 }
 
-/** この回's address, under 予約: `?providerId=`, then the session. */
-export function sessionHref({ providerId, ...session }: SessionQuery & { providerId?: string | null }): string {
-  return withQuery(HOST_BOOKING_SESSION_PATH, { providerId, date: session.date, start: session.start, experience: session.experience, offer: session.offer });
+/**
+ * この回's address, under 予約: `?providerId=`, the source (`site`: a session of this site's bookings beside NIHO's,
+ * #285 slice 8b, so "‹ 予約" goes back to them), then the session.
+ */
+export function sessionHref({ providerId, source, ...session }: SessionQuery & { providerId?: string | null; source?: "site" | null }): string {
+  return withQuery(HOST_BOOKING_SESSION_PATH, { providerId, source, date: session.date, start: session.start, experience: session.experience, offer: session.offer });
 }
 
 /** The session a booking belongs to, as この回's address names it. */
