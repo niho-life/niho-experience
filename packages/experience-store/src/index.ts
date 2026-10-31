@@ -22,12 +22,23 @@ export {
   cancelApprovalDeadlineReminders,
   enqueueApprovalDeadlineReminders,
   enqueueGuestMessageNotification,
+  enqueueGuestQuestionNotification,
+  enqueueNewBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
   parseGuestMessagePayload,
+  parseGuestQuestionPayload,
+  parseNewBookingPayload,
 } from "./host-notification-outbox.ts";
-export type { ApprovalDeadlinePayload, ClaimedHostNotification, GuestMessagePayload, HostNotificationTopic } from "./host-notification-outbox.ts";
+export type {
+  ApprovalDeadlinePayload,
+  ClaimedHostNotification,
+  GuestMessagePayload,
+  GuestQuestionPayload,
+  HostNotificationTopic,
+  NewBookingPayload,
+} from "./host-notification-outbox.ts";
 export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
 export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
@@ -45,6 +56,8 @@ export type {
   SubmitGuestQuestionInput,
 } from "./guest-questions.ts";
 export { GUEST_MAIL_LIMITS, GUEST_MAIL_TOPIC, GuestMailOutbox } from "./guest-mail-outbox.ts";
+export { GUEST_TRANSLATION_LIMITS, GUEST_TRANSLATION_TOPIC, GuestQuestionTranslations } from "./guest-question-translations.ts";
+export type { ClaimedGuestTranslation, GuestTranslationClaim, GuestTranslationRetry } from "./guest-question-translations.ts";
 export type { BookingConfirmationClaim, BookingConfirmationEmail, BookingConfirmationRetry, ClaimedBookingConfirmation } from "./guest-mail-outbox.ts";
 export { GUEST_REVIEW_LIMITS, GUEST_REVIEW_REPORT_REASONS, GUEST_REVIEW_TAGS, GuestReviewRepository } from "./guest-reviews.ts";
 export type {

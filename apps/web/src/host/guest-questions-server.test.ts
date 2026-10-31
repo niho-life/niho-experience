@@ -13,8 +13,12 @@ vi.mock("@/lib/experience/store-server", () => ({ guestQuestionRepository: () =>
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
 vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
 
+import { APIConnectionTimeoutError, InternalServerError } from "@anthropic-ai/sdk";
+import { createTranslator, type Translator } from "@/lib/translation/anthropic";
+import { HOST_TO_ENGLISH_SYSTEM, TRANSLATION_MODEL } from "@/lib/translation/prompts";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import {
+  draftGuestQuestionEnglish,
   GUEST_QUESTION_LOAD_FAILED_TEXT,
   GUEST_QUESTION_MISSING_TEXT,
   GUEST_QUESTION_OWNER_ONLY_TEXT,
@@ -24,7 +28,9 @@ import {
   loadMoreGuestQuestions,
   openGuestQuestion,
   replyToGuestQuestion,
+  REPLY_DRAFT_TIMEOUT_MS,
 } from "./guest-questions-server";
+import { REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 
 const THREAD_ID = "00000000-0000-4000-8000-000000000106";
 const COMMAND_ID = "00000000-0000-4000-8000-0000000c0106";
@@ -170,5 +176,60 @@ describe("openGuestQuestion and replyToGuestQuestion", () => {
     expect(await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_REPLY_FAILED_TEXT });
     state.store!.getThread!.mockRejectedValueOnce(new StoreValidationError("synthetic"));
     expect(await openGuestQuestion("sample-provider", "not-a-uuid")).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+  });
+});
+
+describe("draftGuestQuestionEnglish (英語にする, #285 slice 5)", () => {
+  const JAPANESE = "はい、ベジタリアンの方にも対応できます。";
+  const reply = (text: string) => ({ content: [{ type: "text" as const, text }], stop_reason: "end_turn" as const });
+  /** The real translator over a stubbed Claude API call. */
+  function api(answer: () => Promise<ReturnType<typeof reply> | { content: []; stop_reason: "refusal" }>) {
+    const create = vi.fn(answer);
+    return { create, translator: () => createTranslator(create as never, REPLY_DRAFT_TIMEOUT_MS) as Translator };
+  }
+
+  it("drafts the English of the OWNER's Japanese with the guest's last message as context, waiting 15 s once", async () => {
+    const { create, translator } = api(async () => reply("Yes, we can also cater for vegetarians."));
+    expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: true, message: "英語にしました", english: "Yes, we can also cater for vegetarians." });
+    expect(state.store?.getThread).toHaveBeenCalledWith(ACTOR, THREAD_ID);
+    expect(create).toHaveBeenCalledOnce();
+    const [body, options] = create.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    expect(options).toEqual({ timeout: 15_000, maxRetries: 0 });
+    expect(body).toMatchObject({ model: TRANSLATION_MODEL, system: HOST_TO_ENGLISH_SYSTEM });
+    // The guest's last message (the answer from the reply page), then the host's Japanese; nothing else.
+    expect(body.messages).toEqual([{ role: "user", content: `<traveler_message>\nThank you!\n</traveler_message>\n\n<reply>\n${JAPANESE}\n</reply>` }]);
+    expect(JSON.stringify(body)).not.toMatch(/Sample Guest|sample-provider|sample-niho-user|Synthetic tea|00000000-/);
+    // Nothing is sent or saved.
+    expect(state.store?.reply).not.toHaveBeenCalled();
+    expect(state.store?.markThreadRead).not.toHaveBeenCalled();
+  });
+
+  it("lets the host write the English when translation is off, and try again when the API times out, fails, declines or answers nothing usable", async () => {
+    // Off: as before this slice.
+    expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, () => null)).toEqual({ ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT });
+    for (const answer of [
+      async () => Promise.reject(new APIConnectionTimeoutError()),
+      async () => Promise.reject(new InternalServerError(529, undefined, "overloaded", new Headers())),
+      async () => ({ content: [] as [], stop_reason: "refusal" as const }),
+      async () => reply("   "),
+    ]) {
+      const { translator } = api(answer as never);
+      expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: REPLY_DRAFT_FAILED_TEXT });
+    }
+  });
+
+  it("calls nothing unless the session is usable and this account is the OWNER of the thread", async () => {
+    const { create, translator } = api(async () => reply("Yes."));
+    state.session = null;
+    expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
+    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    expect(await draftGuestQuestionEnglish("sample-other", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT });
+    state.store!.getThread!.mockRejectedValueOnce(new StoreNotFoundError("guest question"));
+    expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_QUESTION_MISSING_TEXT });
+    state.store!.getThread!.mockRejectedValueOnce(new Error("synthetic"));
+    expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: REPLY_DRAFT_FAILED_TEXT });
+    state.store = null;
+    expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT });
+    expect(create).not.toHaveBeenCalled();
   });
 });

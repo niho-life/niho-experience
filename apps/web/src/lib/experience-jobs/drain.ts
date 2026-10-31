@@ -1,13 +1,16 @@
 import "server-only";
-import type { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository } from "@niho-experience/experience-store";
+import type { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { bookingConfirmationEmail, questionReplyEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
+import type { Translator } from "@/lib/translation/anthropic";
+import { guestMessageToJapanese } from "@/lib/translation/prompts";
 
 /**
  * One run of the experience mail job (#285 slice 5, docs/guest-booking.md, docs/guest-questions.md), every
- * minute from Cloud Scheduler: host replies to guest questions, booking confirmations, then the erasure of
- * guest data and questions a year on. Each step is bounded and independent: one that fails is reported and
- * the next still runs. Counts only leave this module: never an address, a name, a token or a message.
+ * minute from Cloud Scheduler: host replies to guest questions, booking confirmations, the Japanese of what
+ * guests wrote to hosts, then the erasure of guest data and questions a year on. Each step is bounded and
+ * independent: one that fails is reported and the next still runs. Counts only leave this module: never an
+ * address, a name, a token or a message.
  */
 export const EXPERIENCE_JOB_LIMITS = {
   /**
@@ -24,6 +27,13 @@ export const EXPERIENCE_JOB_LIMITS = {
   /** Owner decision 2026-10-31 (#285): guest data and questions are kept for one year. */
   retentionDays: 365,
   erasedPerStep: 200,
+  /** Guest messages translated per run, one claim at a time, within the run's translation budget. */
+  translations: 10,
+  translationLeaseSeconds: 120,
+  /** One Claude API call; the job tries a failed message again later. */
+  translationTimeoutMs: 30_000,
+  /** No new translation starts after this much of the run, so a slow API cannot hold the job. */
+  translationBudgetMs: 60_000,
 } as const;
 
 export interface QuestionReplyCounts {
@@ -44,6 +54,23 @@ export interface BookingConfirmationCounts {
   readonly abandoned: number;
 }
 
+export interface TranslationCounts {
+  readonly claimed: number;
+  readonly translated: number;
+  readonly retried: number;
+  /** Given up after the last attempt: the host reads the guest's English. */
+  readonly failed: number;
+  /** Closed without a call: written in Japanese, already translated, or erased. */
+  readonly closed: number;
+  /** A last attempt whose lease ran out without a report, closed untranslated. */
+  readonly abandoned: number;
+}
+
+/** Translation is turned off (EXPERIENCE_TRANSLATION_ENABLED): guest messages wait untranslated. */
+export interface StepOff {
+  readonly off: true;
+}
+
 export interface ErasureCounts {
   readonly erased: number;
 }
@@ -56,6 +83,7 @@ export interface FailedStep {
 export interface ExperienceJobCounts {
   readonly questionReplies: QuestionReplyCounts | FailedStep;
   readonly bookingConfirmations: BookingConfirmationCounts | FailedStep;
+  readonly guestTranslations: TranslationCounts | StepOff | FailedStep;
   readonly guestErasure: ErasureCounts | FailedStep;
   readonly questionErasure: ErasureCounts | FailedStep;
 }
@@ -64,6 +92,9 @@ export interface ExperienceJobDeps {
   readonly questions: Pick<GuestQuestionRepository, "claimReplyDeliveries" | "recordReplyDelivery" | "eraseInactiveThreads">;
   readonly confirmations: Pick<GuestMailOutbox, "claimBookingConfirmations" | "completeBookingConfirmation" | "retryBookingConfirmation">;
   readonly guests: Pick<GuestBookingRepository, "eraseGuestData">;
+  readonly translations: Pick<GuestQuestionTranslations, "claimTranslations" | "recordTranslation" | "retryTranslation">;
+  /** The Claude API, or null while translation is off. */
+  readonly translator: Translator | null;
   readonly mailer: Mailer;
   /** SITE_URL: the origin of every link in the emails. */
   readonly siteUrl: string;
@@ -167,9 +198,42 @@ async function sendBookingConfirmations(deps: ExperienceJobDeps): Promise<Bookin
   return { claimed, sent, skipped, retried, failed, abandoned };
 }
 
+/**
+ * What guests wrote to hosts, in Japanese: one message claimed right before its call, so each call has the
+ * whole lease. A failed call puts the message back for later (2, 4, 8, 16 minutes; given up after 5 tries,
+ * when the host reads the English). When the API cannot be reached the step stops for this run instead of
+ * waiting out a timeout per message.
+ */
+async function translateGuestMessages(deps: ExperienceJobDeps, translator: Translator): Promise<TranslationCounts> {
+  const started = deps.now().getTime();
+  const counts = { claimed: 0, translated: 0, retried: 0, failed: 0, closed: 0, abandoned: 0 };
+  while (counts.claimed < EXPERIENCE_JOB_LIMITS.translations && deps.now().getTime() - started < EXPERIENCE_JOB_LIMITS.translationBudgetMs) {
+    const claim = await deps.translations.claimTranslations({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.translationLeaseSeconds });
+    counts.closed += claim.closed;
+    counts.abandoned += claim.abandoned;
+    const [message] = claim.translations;
+    if (!message) break;
+    counts.claimed += 1;
+    const result = await translator(guestMessageToJapanese(message.text));
+    if (result.ok) {
+      await deps.translations.recordTranslation(message.id, result.text);
+      counts.translated += 1;
+      continue;
+    }
+    if (await deps.translations.retryTranslation(message.id, message.attempts) === "FAILED") counts.failed += 1;
+    else counts.retried += 1;
+    if (result.failure === "unavailable") break;
+  }
+  return counts;
+}
+
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
+  const translator = deps.translator;
+  const guestTranslations: ExperienceJobCounts["guestTranslations"] = translator
+    ? await step(deps, "guestTranslations", () => translateGuestMessages(deps, translator))
+    : { off: true };
   const cutoff = () => new Date(deps.now().getTime() - EXPERIENCE_JOB_LIMITS.retentionDays * 86_400_000).toISOString();
   const guestErasure = await step(deps, "guestErasure", async () => ({
     erased: await deps.guests.eraseGuestData({ endedBefore: cutoff(), limit: EXPERIENCE_JOB_LIMITS.erasedPerStep }),
@@ -177,13 +241,13 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const questionErasure = await step(deps, "questionErasure", async () => ({
     erased: await deps.questions.eraseInactiveThreads({ lastMessageBefore: cutoff(), limit: EXPERIENCE_JOB_LIMITS.erasedPerStep }),
   }));
-  return { questionReplies, bookingConfirmations, guestErasure, questionErasure };
+  return { questionReplies, bookingConfirmations, guestTranslations, guestErasure, questionErasure };
 }
 
 /** True when the run did or failed anything worth a log line. */
 export function experienceJobActivity(counts: ExperienceJobCounts): { failed: boolean; active: boolean } {
   const steps = Object.values(counts) as (object & Record<string, unknown>)[];
   const failed = steps.some(isFailedStep);
-  const active = failed || steps.some((value) => ["claimed", "abandoned", "erased"].some((key) => typeof value[key] === "number" && (value[key] as number) > 0));
+  const active = failed || steps.some((value) => ["claimed", "abandoned", "closed", "erased"].some((key) => typeof value[key] === "number" && (value[key] as number) > 0));
   return { failed, active };
 }

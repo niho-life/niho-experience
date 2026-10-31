@@ -28,6 +28,7 @@ import {
   type DbRow,
 } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
+import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
 import {
@@ -1185,6 +1186,27 @@ export class ExperienceStore {
           JSON.stringify({ publicBookingId: updatedBooking.publicBookingId, providerId: scope.providerId, outcome }),
         ],
       );
+      if (outcome === "CONFIRMED") {
+        // A guest booking made on this site (#285): the host's push (NEW_BOOKING, always sent). A payment
+        // that lands in PAYMENT_REVIEW has no seat and is not announced as a booking.
+        const guest = await client.query<DbRow>(
+          `SELECT g.adult_count + g.child_count AS party, p.public_title
+             FROM booking_guests g
+             JOIN experience_products p ON p.provider_id = g.provider_id AND p.id = $3
+            WHERE g.provider_id = $1 AND g.booking_id = $2`,
+          [scope.providerId, bookingRow.id, updatedBooking.productId],
+        );
+        const guestRow = guest.rows[0];
+        if (guestRow !== undefined) {
+          await enqueueNewBookingNotification(client, {
+            providerId: scope.providerId,
+            bookingId: updatedBooking.publicBookingId,
+            experienceTitle: String(guestRow.public_title),
+            startsAt: updatedBooking.occurrenceSnapshot.startUtc,
+            seats: Number(guestRow.party),
+          });
+        }
+      }
       await enqueueCalendarRecalculation(client, {
         providerId: scope.providerId,
         aggregateType: "schedule_occurrence",

@@ -5,18 +5,22 @@ import { assertStoreIdentifier } from "./validation.ts";
 
 /**
  * The host app's push notifications kept in `outbox_messages` (#177 P2, owner decision 2026-10-31).
- * The booking and message transactions write these rows when bookings move to the experience DB
- * (ADR 0002); until then nothing writes them and the job that consumes them finds none. The job
- * claims only these topics: `booking.confirmed` and every other topic stay untouched.
+ * A guest question or an answer from the reply page (`guestQuestion`) and a guest booking confirmed on
+ * this site (`newBooking`, #285) write their rows in their own transactions; the approval and booking
+ * message rows wait for those flows to move to the experience DB (ADR 0002). The job claims only these
+ * topics: `booking.confirmed`, `guest_question.*` and every other topic stay untouched.
  */
 export const HOST_NOTIFICATION_TOPICS = {
   approvalDeadline: "host.notify.approval_deadline",
   guestMessage: "host.notify.guest_message",
+  guestQuestion: "host.notify.guest_question",
+  newBooking: "host.notify.new_booking",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
 const TOPICS: readonly string[] = Object.values(HOST_NOTIFICATION_TOPICS);
 const AGGREGATE_TYPE = "booking";
+const QUESTION_AGGREGATE_TYPE = "guest_question_thread";
 
 /**
  * What a row may carry: the booking, the experience, its date and time and the party size. There
@@ -41,6 +45,23 @@ export interface GuestMessagePayload {
   readonly seats: number;
 }
 
+/** A question to the host (予約前の質問): the thread and the message only, never who wrote it or what. */
+export interface GuestQuestionPayload {
+  readonly v: 1;
+  readonly threadId: string;
+  readonly messageId: string;
+  readonly experienceTitle: string;
+}
+
+/** A guest booking confirmed on this site. `seats` is the party (adults and children). */
+export interface NewBookingPayload {
+  readonly v: 1;
+  readonly bookingId: string;
+  readonly experienceTitle: string;
+  readonly startsAt: string;
+  readonly seats: number;
+}
+
 /** One claimed row. `id` is the row's bigint as text; the payload is parsed by the consumer. */
 export interface ClaimedHostNotification {
   readonly id: string;
@@ -60,6 +81,8 @@ const SEATS_MAX = 500;
 const HOUR_MS = 60 * 60 * 1000;
 const APPROVAL_KEYS = ["approvalDeadlineAt", "bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const MESSAGE_KEYS = ["bookingId", "experienceTitle", "messageId", "seats", "startsAt", "v"];
+const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
+const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const publicId = (value: unknown): value is string => typeof value === "string" && PUBLIC_ID.test(value);
@@ -98,6 +121,31 @@ export function parseGuestMessagePayload(value: unknown): GuestMessagePayload | 
   return { v: 1, bookingId, messageId, experienceTitle, startsAt, seats: count };
 }
 
+/** The question's payload, or null for anything else. */
+export function parseGuestQuestionPayload(value: unknown): GuestQuestionPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, QUESTION_KEYS) || value.v !== 1) return null;
+  const { threadId, messageId, experienceTitle } = value;
+  if (!publicId(threadId) || !publicId(messageId) || !title(experienceTitle)) return null;
+  return { v: 1, threadId, messageId, experienceTitle };
+}
+
+/** The new booking's payload, or null for anything else. */
+export function parseNewBookingPayload(value: unknown): NewBookingPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, NEW_BOOKING_KEYS) || value.v !== 1) return null;
+  const { bookingId, experienceTitle, startsAt, seats: count } = value;
+  if (!publicId(bookingId) || !title(experienceTitle) || !storedInstant(startsAt) || !seats(count)) return null;
+  return { v: 1, bookingId, experienceTitle, startsAt, seats: count };
+}
+
+/**
+ * An experience's title as a row carries it: a product title may be longer than a row allows (300
+ * against 200), and a notification must not fail the guest's question or the payment over it.
+ */
+function clippedTitle(value: string): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  return clean.length > TITLE_MAX ? `${clean.slice(0, TITLE_MAX - 1)}…` : clean;
+}
+
 interface BookingFacts {
   readonly providerId: string;
   readonly bookingId: string;
@@ -118,13 +166,13 @@ function validBooking(input: BookingFacts): { startsAt: string } {
 
 async function insertRow(
   client: PoolClient,
-  row: { providerId: string; bookingId: string; topic: HostNotificationTopic; deduplicationKey: string; payload: object; availableAt: string | null },
+  row: { providerId: string; bookingId: string; topic: HostNotificationTopic; deduplicationKey: string; payload: object; availableAt: string | null; aggregateType?: string },
 ): Promise<number> {
   const result = await client.query(
     `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload, available_at)
      VALUES ($1, $2, $3, $4, $5, $6::jsonb, COALESCE($7::timestamptz, clock_timestamp()))
      ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
-    [row.providerId, AGGREGATE_TYPE, row.bookingId, row.topic, row.deduplicationKey, JSON.stringify(row.payload), row.availableAt],
+    [row.providerId, row.aggregateType ?? AGGREGATE_TYPE, row.bookingId, row.topic, row.deduplicationKey, JSON.stringify(row.payload), row.availableAt],
   );
   return result.rowCount ?? 0;
 }
@@ -187,6 +235,50 @@ export async function enqueueGuestMessageNotification(client: PoolClient, input:
     bookingId: input.bookingId,
     topic: HOST_NOTIFICATION_TOPICS.guestMessage,
     deduplicationKey: `host-push:guest-message:${input.messageId}`,
+    payload,
+    availableAt: null,
+  });
+}
+
+/**
+ * A guest asked the host a question or answered through the reply page (予約前の質問): one notification
+ * per message, due now, sent as GUEST_MESSAGE (stoppable in 設定 › 通知). Called in the message's own
+ * transaction. 1 when added, 0 for a repeat.
+ */
+export async function enqueueGuestQuestionNotification(
+  client: PoolClient,
+  input: { readonly providerId: string; readonly threadId: string; readonly messageId: string; readonly experienceTitle: string },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  if (!publicId(input.threadId)) throw new StoreValidationError("threadId must contain 1-48 letters, digits, '_' or '-'.");
+  if (!publicId(input.messageId)) throw new StoreValidationError("messageId must contain 1-48 letters, digits, '_' or '-'.");
+  const experienceTitle = typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "";
+  if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must contain text.");
+  const payload: GuestQuestionPayload = { v: 1, threadId: input.threadId, messageId: input.messageId, experienceTitle };
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.threadId,
+    aggregateType: QUESTION_AGGREGATE_TYPE,
+    topic: HOST_NOTIFICATION_TOPICS.guestQuestion,
+    deduplicationKey: `host-push:guest-question:${input.messageId}`,
+    payload,
+    availableAt: null,
+  });
+}
+
+/**
+ * A guest booking made on this site was confirmed: one NEW_BOOKING notification (it cannot be turned
+ * off), due now. Called in the confirming transaction. 1 when added, 0 for a repeat.
+ */
+export async function enqueueNewBookingNotification(client: PoolClient, input: BookingFacts): Promise<number> {
+  const facts = { ...input, experienceTitle: typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "" };
+  const { startsAt } = validBooking(facts);
+  const payload: NewBookingPayload = { v: 1, bookingId: facts.bookingId, experienceTitle: facts.experienceTitle, startsAt, seats: facts.seats };
+  return insertRow(client, {
+    providerId: facts.providerId,
+    bookingId: facts.bookingId,
+    topic: HOST_NOTIFICATION_TOPICS.newBooking,
+    deduplicationKey: `host-push:new-booking:${facts.bookingId}`,
     payload,
     availableAt: null,
   });

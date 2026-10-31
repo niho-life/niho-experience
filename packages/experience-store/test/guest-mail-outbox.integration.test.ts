@@ -113,7 +113,8 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
          VALUES ('provider-a','booking','not-a-uuid','booking.confirmed','sample-foreign','{}'::jsonb)`,
       );
       const before = await outboxRows(pool);
-      assert.equal(before.length, 4);
+      // The family's confirmation also wrote the host's push (host.notify.new_booking), another consumer's row.
+      assert.equal(before.length, 5);
 
       const claim = await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 });
       assert.equal(claim.abandoned, 0);
@@ -224,6 +225,34 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       assert.equal(claim.confirmations.length, 2);
       assert.deepEqual(claim.confirmations.map((row) => row.email), [null, null]);
       assert.doesNotMatch(JSON.stringify(claim), /example\.com|Sample Guest/);
+    });
+  });
+
+  it("writes the host's NEW_BOOKING push when a guest booking is confirmed, once, and not for other bookings or a payment under review", async () => {
+    await withSchema(async (context) => {
+      const { pool, store, guests } = context;
+      const family = await confirmedGuest(context, "push-family", { adultCount: 2, childCount: 1, expectedTotalYen: 7500, guestName: "Sample Parent", guestEmail: "parent@example.com" });
+      // The same Stripe event again (a webhook retry) adds nothing.
+      assert.equal((await payFor(store, family, family.totalAmount, "push-family")).duplicateEvent, true);
+      const plain = await store.createBookingHold({ providerId: "provider-a" }, { productId: "walk", occurrenceId: occurrenceIdFor(RULE.id, day(3)), seats: 1, idempotencyKey: "sample-plain-push" });
+      assert.equal((await payFor(store, plain, 3000, "push-plain")).booking.status, "CONFIRMED");
+      const review = await guests.startGuestBooking(request({ guestEmail: "review@example.com" }));
+      assert.equal((await payFor(store, review, 2000, "push-review")).booking.status, "PAYMENT_REVIEW");
+
+      const pushes = (await pool.query(
+        `SELECT provider_id, aggregate_type, aggregate_id, deduplication_key, payload, processed_at
+           FROM outbox_messages WHERE topic = 'host.notify.new_booking'`,
+      )).rows;
+      assert.deepEqual(pushes, [{
+        provider_id: "provider-a",
+        aggregate_type: "booking",
+        aggregate_id: family.publicBookingId,
+        deduplication_key: `host-push:new-booking:${family.publicBookingId}`,
+        // The party is the adults and children; never a name, an address or an amount.
+        payload: { v: 1, bookingId: family.publicBookingId, experienceTitle: "Synthetic walk", startsAt: family.booking.occurrenceSnapshot.startUtc, seats: 3 },
+        processed_at: null,
+      }]);
+      assert.doesNotMatch(JSON.stringify(pushes), /example\.com|Sample Parent|7500/);
     });
   });
 });

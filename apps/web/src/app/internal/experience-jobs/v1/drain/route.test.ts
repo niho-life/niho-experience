@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository } from "@niho-experience/experience-store";
+import { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 
 /** The experience mail job's trigger (#285 slice 5) with a synthetic Google identity, pool, mailer and run. */
 const mocks = vi.hoisted(() => ({
@@ -34,12 +34,14 @@ const URL = "https://experience.example/internal/experience-jobs/v1/drain";
 const counts = {
   questionReplies: { claimed: 2, sent: 1, retried: 1, failed: 0 },
   bookingConfirmations: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  guestTranslations: { claimed: 1, translated: 1, retried: 0, failed: 0, closed: 0, abandoned: 0 },
   guestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
 };
 const idle = {
   questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
   bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  guestTranslations: { off: true },
   guestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
 };
@@ -133,6 +135,9 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     expect(deps.questions).toBeInstanceOf(GuestQuestionRepository);
     expect(deps.confirmations).toBeInstanceOf(GuestMailOutbox);
     expect(deps.guests).toBeInstanceOf(GuestBookingRepository);
+    expect(deps.translations).toBeInstanceOf(GuestQuestionTranslations);
+    // Translation is off in this configuration: no Claude API.
+    expect(deps.translator).toBeNull();
     expect(deps.mailer).toBe(fakeMailer);
     expect(deps.siteUrl).toBe("https://experience.example");
     expect(deps.now()).toBeInstanceOf(Date);
@@ -195,17 +200,22 @@ describe("experienceJobsDrainResponse dependencies", () => {
     const down = Object.assign(new Error("connect ECONNREFUSED 10.0.0.1:5432 (guest@example.com)"), { code: "ECONNREFUSED" });
     const pool = { query: vi.fn().mockRejectedValue(down), connect: vi.fn().mockRejectedValue(down) };
     const mailer = { sendMail: vi.fn(), close: vi.fn() };
-    const response = await experienceJobsDrainResponse(request, { settings, verifier: verifier({ ok: true, claims }), pool: () => pool as never, mailer: () => mailer, run: realRun });
+    const translator = vi.fn();
+    const response = await experienceJobsDrainResponse(request, {
+      settings, verifier: verifier({ ok: true, claims }), pool: () => pool as never, mailer: () => mailer, translator: () => translator, run: realRun,
+    });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
+      guestTranslations: { error: "unavailable" },
       guestErasure: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
     });
-    expect(pool.connect).toHaveBeenCalledTimes(2);
+    expect(pool.connect).toHaveBeenCalledTimes(3);
     expect(pool.query).toHaveBeenCalledTimes(2);
     expect(mailer.sendMail).not.toHaveBeenCalled();
+    expect(translator).not.toHaveBeenCalled();
     expect(mailer.close).toHaveBeenCalledOnce();
     expect(error).toHaveBeenCalledOnce();
     expect(JSON.stringify(error.mock.calls)).not.toMatch(/example\.com|10\.0\.0\.1|ECONNREFUSED/);

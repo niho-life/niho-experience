@@ -297,7 +297,7 @@ describe("英語にする (#106)", () => {
     expect((await draftReplyEnglish({ ...ok, japanese: "あ".repeat(MESSAGE_TEXT_LIMIT) })).ok).toBe(true);
   });
 
-  it("http: not until NIHO's API makes the English, and nothing is sent to NIHO", async () => {
+  it("http: without the Claude API (translation off) the host writes the English, and nothing is sent to NIHO", async () => {
     state.config.apiMode = "http";
     const calls = stubNiho(() => new Response(null, { status: 500 }));
     expect(await draftReplyEnglish({ providerId: KITCHEN, threadId: example.threadId, japanese: example.japanese })).toEqual({ ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT });

@@ -10,7 +10,7 @@ import { openStripe, stepNotice, syncStripe } from "./connect";
 import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
 import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
-import { loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
+import { draftGuestQuestionEnglish, loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
 import { normalizeMeetingPoint } from "./meeting-point";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
@@ -227,16 +227,17 @@ async function draftEnglish<T>(mockEnglish: () => T, { message = "英語にし�
 type EnglishDrafted = Drafted<string>;
 
 /**
- * メッセージ › 英語にする (#106): NIHO's English of the host's Japanese reply, for the host to
- * check (and correct) before it is sent; nothing is sent here. The preview answers with its own
- * synthetic English.
+ * メッセージ › 英語にする (#106): an English draft of the host's Japanese reply, for the host to
+ * check (and correct) before it is sent; nothing is sent here. In http mode, for a question kept in
+ * the experience DB, the Claude API makes it (#285 slice 5); without it the host writes the English.
+ * The preview answers with its own synthetic English.
  */
 export async function draftReplyEnglish(input: { providerId: string; threadId: string; japanese: string }): Promise<HostActionResult<EnglishDrafted>> {
   const providerId = nihoIdOrNull(input?.providerId);
   const threadId = text(input?.threadId, LIMITS.threadId);
   const japanese = text(input?.japanese, MESSAGE_TEXT_LIMIT);
   if (!providerId || !threadId || !japanese?.trim()) return invalid;
-  // TODO(#87): NIHO's translation for the thread (niho-app#19319/#19238) once the host contract has it.
+  if (!isHostMock()) return draftGuestQuestionEnglish(providerId, threadId, japanese);
   return draftEnglish(() => mockEnglishDraft(threadId, japanese));
 }
 

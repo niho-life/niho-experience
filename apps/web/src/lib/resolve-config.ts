@@ -276,6 +276,18 @@ function guestMailSettings(apiMode: "mock" | "http", env: Env): GuestMailSetting
   return { enabled: true, smtpHost, smtpPort, from, replyTo, jobAudience, jobServiceAccountEmail };
 }
 
+/**
+ * 予約前の質問's translations with the Claude API (#285 slice 5, owner decision 2026-10-31): the mail job
+ * translates guests' English for the host, and メッセージ's 英語にする drafts the host's English. HTTP only;
+ * turned on without its key, the server stops at start-up (the message names the setting, never its value).
+ * The key is a secret read where it is used (lib/translation/anthropic.ts), so it is not kept here.
+ */
+function translationEnabledSetting(apiMode: "mock" | "http", env: Env): boolean {
+  if (apiMode !== "http" || env.EXPERIENCE_TRANSLATION_ENABLED !== "true") return false;
+  if (!env.EXPERIENCE_ANTHROPIC_API_KEY?.trim()) throw new Error("EXPERIENCE_TRANSLATION_ENABLED=true needs EXPERIENCE_ANTHROPIC_API_KEY in http mode");
+  return true;
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -348,6 +360,9 @@ export function resolveConfig(env: Env) {
   // Scheduler through its own service account. Independent of the two flags above: a payment confirmed after
   // guest booking is turned off still gets its email.
   const guestMail = guestMailSettings(apiMode, env);
+  // Translations (#285 slice 5): the guest's Japanese runs in the mail job above; the host's English draft in
+  // メッセージ for questions kept here. Off, the host reads the guest's English and writes the English reply.
+  const translationEnabled = translationEnabledSetting(apiMode, env);
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
@@ -454,6 +469,8 @@ export function resolveConfig(env: Env) {
     guestMailReplyTo: guestMail.replyTo,
     experienceJobsAudience: guestMail.jobAudience,
     experienceJobsServiceAccountEmail: guestMail.jobServiceAccountEmail,
+    // The Claude API key is not here: it is read where it is used.
+    translationEnabled,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.
     hostSessionSecret,
     adminSessionSecret,

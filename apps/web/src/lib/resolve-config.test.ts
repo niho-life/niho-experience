@@ -353,6 +353,21 @@ describe("admin support console settings", () => {
     }
   });
 
+  it("translates with the Claude API only in http mode with its own flag, and refuses to start without its key (#285)", () => {
+    const translation = { EXPERIENCE_API_MODE: "http", EXPERIENCE_TRANSLATION_ENABLED: "true", EXPERIENCE_ANTHROPIC_API_KEY: "sample-anthropic-key" };
+    expect(resolveConfig({}).translationEnabled).toBe(false);
+    // The mock never calls the API; "1" is not "true".
+    expect(resolveConfig({ ...translation, EXPERIENCE_API_MODE: "mock" }).translationEnabled).toBe(false);
+    expect(resolveConfig({ ...translation, EXPERIENCE_TRANSLATION_ENABLED: "1" }).translationEnabled).toBe(false);
+    const on = resolveConfig(translation);
+    expect(on.translationEnabled).toBe(true);
+    // The key is read where it is used, never kept in config.
+    expect(JSON.stringify(on)).not.toMatch(/sample-anthropic-key/);
+    for (const value of [undefined, " "]) {
+      expect(() => resolveConfig({ ...translation, EXPERIENCE_ANTHROPIC_API_KEY: value })).toThrow("EXPERIENCE_ANTHROPIC_API_KEY");
+    }
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {

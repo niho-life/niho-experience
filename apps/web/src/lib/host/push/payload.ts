@@ -12,6 +12,11 @@ import { HOST_APP_SCOPE } from "../routes";
 export interface HostPushEvent {
   providerId: string;
   kind: HostNotificationKey;
+  /**
+   * A question before booking (予約前の質問) rather than a message from someone who booked: still GUEST_MESSAGE
+   * (its switch in 設定 › 通知 and its delivery), with its own title.
+   */
+  question?: true;
   experienceTitle?: string;
   /** ISO 8601; shown in Japan time. */
   startsAt?: string;
@@ -43,6 +48,8 @@ export const HOST_PUSH_TITLES: Record<HostNotificationKey, string> = {
   NEW_REVIEW: "新しいレビュー",
   LISTING_REVIEW: "掲載の審査結果",
 };
+
+export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
 
 export const HOST_PUSH_MAX_BYTES = 3 * 1024;
 const TITLE_MAX = 80;
@@ -77,7 +84,7 @@ export function hostPushPayload(event: HostPushEvent): string {
   const seats = Number.isInteger(event.seats) && event.seats! > 0 ? `${event.seats}名` : null;
   const message: HostPushMessage = {
     v: 1,
-    title: HOST_PUSH_TITLES[event.kind],
+    title: event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
     body: [titleLine(event.experienceTitle), whenJa(event.startsAt), seats].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
