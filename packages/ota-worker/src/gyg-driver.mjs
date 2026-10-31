@@ -5,6 +5,7 @@ import { startManagedBrowser } from "./managed-browser.mjs";
 import { createNetworkGuard } from "./network-guard.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
 import { selectAccountProfile } from "./config.mjs";
+import { createGygEnsureOccurrence } from "./gyg-ensure-occurrence.mjs";
 
 function fixedOrigin(value, testOnly) {
   if (value === undefined) return SUPPLIER_ORIGIN;
@@ -115,6 +116,7 @@ export async function createGygDriver({ job, cloud, config, now = () => new Date
 
   async function applyDesiredState() {
     assertActive();
+    if (job.action === "ENSURE_OCCURRENCE") throw new ContractError("WRITE_REFUSED");
     if (job.action === "OBSERVE") return Object.freeze({ changed: false, readOnly: true, observation: await observeTarget(), responseObserved: true });
     const before = await observeTarget();
     const desiredBlocked = job.desiredState === "CLOSED";
@@ -157,12 +159,18 @@ export async function createGygDriver({ job, cloud, config, now = () => new Date
     return observation;
   }
 
+  const ensureOccurrence = createGygEnsureOccurrence({
+    job, page, guard, cloud, supplierOrigin, availabilityUrl, rowId,
+    verifyAccount, observeAtCurrentPage, authOrDrift, assertActive,
+  });
+
   return Object.freeze({
     pid: browser.pid,
     guard,
     observeTarget,
     applyDesiredState,
     verifyAfterReload,
+    ensureOccurrence,
     async debugScreenshot() {
       if (!config.debugScreenshots) throw new ContractError("DEBUG_SCREENSHOT_DISABLED");
       const directory = join(config.privateDir, "debug");
