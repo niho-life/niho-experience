@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { loadMoreSiteBookingList } from "@/host/actions";
 import {
   actionTime,
   approveBooking,
@@ -18,15 +19,17 @@ import {
   sessionHref,
   type BookingCancellation,
   type BookingExperience,
+  type BookingGroup,
 } from "@/host/bookings";
 import { yen } from "@/host/format";
 import { messagesHref, type BookingConversation } from "@/host/messages";
+import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import type { HostBooking } from "@/host/types";
 import { useFocusAfterRender } from "./editor-parts";
 import { HostBookingDetail, type BookingConversationLink } from "./HostBookingDetail";
 import { HostIcon } from "./HostIcon";
 import { HostSubHeader } from "./HostSubHeader";
-import { HOST_SURFACE } from "./host-ui";
+import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostPageBody, PageHead, StatusPill } from "./ui";
 
 /** The list and one booking side by side from lg (64rem); below it, one of them at a time. */
@@ -42,6 +45,19 @@ function actionNow(today: string): string {
 /** A plain left click moves inside the screen; a click meant for a new tab or window follows the link as usual. */
 function plainClick(event: MouseEvent): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+/** A session heading's words: its day and time, the experience and the seats. */
+function SessionWords({ group }: { group: BookingGroup }) {
+  return (
+    <>
+      <span className="shrink-0">{group.label}</span>
+      <span className="sr-only"> · </span>
+      <span className="min-w-0 flex-1 truncate text-muted">{group.title}</span>
+      <span className="sr-only"> · </span>
+      <span className="shrink-0 tabular-nums">{group.seats}</span>
+    </>
+  );
 }
 
 export interface HostBookingsProps {
@@ -62,6 +78,13 @@ export interface HostBookingsProps {
   translateEnabled: boolean;
   /** The last message of each booking's thread (メッセージ, #106). */
   conversations: readonly BookingConversation[];
+  /**
+   * Bookings made on this site (#285 slice 8, experience DB, http mode), read only: a session's heading does
+   * not open この回 and no booking leads to メッセージ yet. `nextCursor` reads the rest of the list (続きを見る),
+   * null when it holds them all. `besideNiho`: NIHO's bookings are the screen's own and these are its
+   * `?source=site`, which every link keeps, with the way back. Absent in mock mode.
+   */
+  live?: { nextCursor: string | null; besideNiho: boolean } | null;
 }
 
 /**
@@ -75,9 +98,13 @@ export interface HostBookingsProps {
  * メッセージ leads to the booking's thread (#106). TODO(#87): send the actions to NIHO and show
  * the booking it reads back. A session's heading opens its own screen (この回, #107).
  */
-export function HostBookings({ bookings: initialBookings, experiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, conversations }: HostBookingsProps) {
+export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, conversations, live = null }: HostBookingsProps) {
   const searchParams = useSearchParams();
   const [bookings, setBookings] = useState<readonly HostBooking[]>(initialBookings);
+  /** Live: the experiences the loaded bookings name, and where the rest of the list starts (null once all are here). */
+  const [experiences, setExperiences] = useState(initialExperiences);
+  const [cursor, setCursor] = useState<string | null>(live?.nextCursor ?? null);
+  const [more, setMore] = useState<{ busy: boolean; failed: string | null }>({ busy: false, failed: null });
   const [notice, setNotice] = useState<{ bookingId: string; text: string } | null>(null);
   const focusLater = useFocusAfterRender();
   const focusDetail = useRef(false);
@@ -88,7 +115,8 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
   const experienceId = experiences.some((experience) => experience.id === requestedExperience) ? requestedExperience : null;
   const selectedId = searchParams.get("booking") || null;
   const sub = selectedId !== null;
-  const query = { providerId, filter, experience: experienceId };
+  const source = live?.besideNiho ? "site" : null;
+  const query = { providerId, source, filter, experience: experienceId } as const;
   const listHref = bookingsHref(query);
 
   const groups = bookingGroups(bookings, experiences, { filter, experienceId }, today);
@@ -98,6 +126,8 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
   const titleOf = (id: string) => experiences.find((experience) => experience.id === id)?.title ?? "";
   /** The booking's thread, or the way to start one while the guest can still be written to. */
   const conversationOf = (booking: HostBooking): BookingConversationLink | null => {
+    // This site's bookings (#285) have no thread with the guest until slice 6.
+    if (booking.site) return null;
     const thread = conversations.find((conversation) => conversation.bookingId === booking.id);
     if (thread) return { href: messagesHref({ providerId, thread: thread.threadId }), last: { text: thread.text, at: thread.at } };
     return bookingActions(booking.status).message ? { href: messagesHref({ providerId, booking: booking.id }), last: null } : null;
@@ -143,6 +173,27 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
     return { before, after };
   };
 
+  /** Live: 続きを見る joins the next page to the list (a booking already on it keeps what it holds). */
+  const loadMore = async () => {
+    if (!cursor || more.busy) return;
+    setMore({ busy: true, failed: null });
+    let result: Awaited<ReturnType<typeof loadMoreSiteBookingList>>;
+    try {
+      result = await loadMoreSiteBookingList({ providerId: providerDataId, cursor });
+    } catch {
+      setMore({ busy: false, failed: SITE_BOOKING_LOAD_FAILED_TEXT });
+      return;
+    }
+    if (!result.ok) {
+      setMore({ busy: false, failed: result.message });
+      return;
+    }
+    setBookings((current) => mergeSiteBookings(current, result.bookings));
+    setExperiences((current) => mergeSiteExperiences(current, result.experiences));
+    setCursor(result.nextCursor);
+    setMore({ busy: false, failed: null });
+  };
+
   /** After 承認・お断り・取消: the result in words, and focus on the booking's name (the button pressed is gone). */
   const report = (id: string, text: string) => {
     setNotice({ bookingId: id, text });
@@ -159,7 +210,7 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
               <select
                 aria-label="体験"
                 value={experienceId ?? ""}
-                onChange={(event) => window.history.pushState(null, "", bookingsHref({ providerId, filter, experience: event.currentTarget.value || null }))}
+                onChange={(event) => window.history.pushState(null, "", bookingsHref({ providerId, source, filter, experience: event.currentTarget.value || null }))}
                 className="block min-h-10 w-auto max-w-full min-w-0 rounded-[10px] border border-line-strong bg-canvas py-2 pr-2 pl-3 text-[1rem] leading-normal text-ink md:max-w-[300px] md:text-[0.875rem]"
               >
                 <option value="">すべての体験</option>
@@ -170,11 +221,22 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
                 ))}
               </select>
             </PageHead>
+            {live ? (
+              <p className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] leading-normal text-ink-soft">
+                <span>このサイトで受けた予約です</span>
+                {live.besideNiho ? (
+                  <Link href={bookingsHref({ providerId })} className="inline-flex items-center font-extrabold text-ink underline-offset-2 hover:underline">
+                    <HostIcon name="chevronLeft" className="size-4" />
+                    NIHO の予約に戻る
+                  </Link>
+                ) : null}
+              </p>
+            ) : null}
 
             <ul aria-label="予約の絞り込み" className="-mx-1.5 mb-1.5 flex gap-2 overflow-x-auto p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {BOOKING_FILTERS.map((item) => {
                 const current = item.value === filter;
-                const href = bookingsHref({ providerId, filter: item.value, experience: experienceId });
+                const href = bookingsHref({ providerId, source, filter: item.value, experience: experienceId });
                 return (
                   <li key={item.value} className="shrink-0">
                     <a
@@ -196,14 +258,17 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
                   <div key={group.key} className="border-t border-line first:border-t-0">
                     {/* One session: its day and time, the experience and the seats its requests and bookings keep. It opens the session (この回), apart from the rows' bookings. */}
                     <h2 className="font-sans text-xs leading-normal font-extrabold tracking-normal text-ink-soft">
-                      <Link href={sessionHref({ providerId, ...group })} className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 hover:bg-sand focus-visible:outline-offset-[-3px] md:px-4">
-                        <span className="shrink-0">{group.label}</span>
-                        <span className="sr-only"> · </span>
-                        <span className="min-w-0 flex-1 truncate text-muted">{group.title}</span>
-                        <span className="sr-only"> · </span>
-                        <span className="shrink-0 tabular-nums">{group.seats}</span>
-                        <HostIcon name="chevronRight" className="size-3.5 text-muted" />
-                      </Link>
+                      {live ? (
+                        // この回 does not read this site's bookings yet: the heading names the session only.
+                        <span className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 md:px-4">
+                          <SessionWords group={group} />
+                        </span>
+                      ) : (
+                        <Link href={sessionHref({ providerId, ...group })} className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 hover:bg-sand focus-visible:outline-offset-[-3px] md:px-4">
+                          <SessionWords group={group} />
+                          <HostIcon name="chevronRight" className="size-3.5 text-muted" />
+                        </Link>
+                      )}
                     </h2>
                     <ul>
                       {group.bookings.map((booking) => {
@@ -235,6 +300,14 @@ export function HostBookings({ bookings: initialBookings, experiences, today, no
               ) : (
                 <p className="px-4 py-6 text-muted md:px-5">{bookings.length ? "該当する予約はありません" : "まだ予約はありません"}</p>
               )}
+              {live && cursor ? (
+                <div className="border-t border-line p-3">
+                  {more.failed ? <p role="alert" className="mb-2 text-[0.8125rem] text-ink-soft">{more.failed}</p> : null}
+                  <button type="button" disabled={more.busy} onClick={() => void loadMore()} className={consoleButtonClass("secondary", "sm")}>
+                    {more.busy ? "読み込み中…" : "続きを見る"}
+                  </button>
+                </div>
+              ) : null}
             </section>
           </div>
 

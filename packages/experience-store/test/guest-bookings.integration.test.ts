@@ -1053,3 +1053,183 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 });
+
+interface HostBooked {
+  readonly tea: GuestBookingStart;
+  readonly walk: GuestBookingStart;
+  readonly held: GuestBookingStart;
+  readonly expired: GuestBookingStart;
+  readonly review: GuestBookingStart;
+  readonly cancelled: GuestBookingStart;
+  readonly past: GuestBookingStart;
+}
+
+/**
+ * One booking of each kind for provider-a: two confirmed on day 2 (10:00 and 14:00), a hold, an abandoned
+ * hold, a payment under review (day 4), a cancellation (day 5) and a confirmed walk that took place in 2020.
+ */
+async function bookForHost({ pool, store, guests, addRule }: Context): Promise<HostBooked> {
+  await addRule("tea", rule("sample-am"));
+  await addRule("walk", rule("sample-walk-pm", { localStartTime: "14:00" }));
+  const tea = await guests.startGuestBooking(request({
+    adultCount: 2, childCount: 1, expectedTotalYen: 10000, guestPhone: "+81 90 1234 5678", note: "Sample note",
+    answers: [{ questionId: "diet", optionIds: ["veg"] }, { questionId: "interests", optionIds: ["tea", "garden"] }, { questionId: "arrival", text: "Kamakura" }],
+  }));
+  await payFor(store, tea, 10000, "host-tea");
+  const walk = await guests.startGuestBooking(walkRequest({ offerId: "sample-walk-pm", guestEmail: "walker@example.com", guestLanguage: "JA" }));
+  await payFor(store, walk, 3000, "host-walk");
+  const held = await guests.startGuestBooking(request({ occurrenceDate: day(3), guestEmail: "held@example.com" }));
+  const expired = await guests.startGuestBooking(request({ occurrenceDate: day(3), guestEmail: "expired@example.com" }));
+  await guests.attachCheckoutSession(expired.publicBookingId, "cs_test_host_expired");
+  await endSession(guests, expired, "cs_test_host_expired", "host-expired");
+  const review = await guests.startGuestBooking(request({ occurrenceDate: day(4), guestEmail: "review@example.com" }));
+  await payFor(store, review, 1, "host-review");
+  const cancelled = await guests.startGuestBooking(request({ occurrenceDate: day(5), guestEmail: "cancelled@example.com" }));
+  await payFor(store, cancelled, 4000, "host-cancelled");
+  const past = await guests.startGuestBooking(walkRequest({ offerId: "sample-walk-pm", occurrenceDate: day(6), guestEmail: "past@example.com" }));
+  await payFor(store, past, 3000, "host-past");
+  // Cancellation comes with slice 7; until then the test writes it, and moves one occurrence into the past.
+  await pool.query("UPDATE bookings SET status='CANCELLED', confirmed_at=NULL, cancelled_at=clock_timestamp() WHERE public_booking_id=$1", [cancelled.publicBookingId]);
+  await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+  await pool.query(
+    `UPDATE bookings SET occurrence_snapshot = occurrence_snapshot || jsonb_build_object(
+       'localDate', '2020-01-01', 'startUtc', '2020-01-01T05:00:00.000Z', 'endUtc', '2020-01-01T06:30:00.000Z')
+     WHERE public_booking_id=$1`,
+    [past.publicBookingId],
+  );
+  await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+  return { tea, walk, held, expired, review, cancelled, past };
+}
+
+const ids = (page: { bookings: readonly { publicBookingId: string }[] }) => page.bookings.map((booking) => booking.publicBookingId);
+
+describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { skip: databaseUrl === undefined }, () => {
+  it("lists the OWNER's bookings upcoming first, then past, with the snapshot, fee and answers, and never a hold or an address", async () => {
+    await withSchema(async (context) => {
+      const { tea, walk, held, expired, review, cancelled, past } = await bookForHost(context);
+      const { guests } = context;
+      const page = await guests.listGuestBookingsForHost(ownerA);
+      assert.deepEqual(ids(page), [tea, walk, review, cancelled, past].map((start) => start.publicBookingId));
+      assert.equal(page.nextCursor, null);
+      assert.deepEqual(page.bookings.map((booking) => booking.status), ["CONFIRMED", "CONFIRMED", "PAYMENT_REVIEW", "CANCELLED", "CONFIRMED"]);
+      assert.ok(!ids(page).includes(held.publicBookingId) && !ids(page).includes(expired.publicBookingId));
+      assert.doesNotMatch(JSON.stringify(page), /@|example\.com/);
+
+      const snapshot = tea.booking.occurrenceSnapshot;
+      const { paidAtUtc, ...shown } = page.bookings[0]!;
+      assert.deepEqual(shown, {
+        publicBookingId: tea.publicBookingId, productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", status: "CONFIRMED",
+        localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: snapshot.startUtc, endUtc: snapshot.endUtc,
+        adultCount: 2, childCount: 1, language: "EN",
+        guest: {
+          name: "Sample Guest", phone: "+81 90 1234 5678", note: "Sample note",
+          answers: [
+            { questionId: "diet", prompt: "Food needs", text: null, options: [{ id: "veg", label: "Vegetarian" }] },
+            { questionId: "interests", prompt: "What interests you?", text: null, options: [{ id: "tea", label: "Tea" }, { id: "garden", label: "Garden" }] },
+            { questionId: "arrival", prompt: "Arrival station", text: "Kamakura", options: [] },
+          ],
+        },
+        currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000,
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 }, providerAmount: 9000,
+        cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: tea.booking.createdAtUtc, cancelledAtUtc: null,
+      });
+      assert.match(String(paidAtUtc), /^\d{4}-\d{2}-\d{2}T/);
+      assert.deepEqual(
+        { language: page.bookings[1]!.language, start: page.bookings[1]!.localStartTime, child: page.bookings[1]!.childUnitAmount, policy: page.bookings[1]!.cancellationPolicy, guest: page.bookings[1]!.guest },
+        { language: "JA", start: "14:00", child: null, policy: "NONE", guest: { name: "Sample Guest", phone: null, note: null, answers: [] } },
+      );
+      // A payment under review and one cancelled after it was paid both say when the money came.
+      const [, , underReview, cancellation, earlier] = page.bookings;
+      assert.ok(underReview!.paidAtUtc !== null && cancellation!.paidAtUtc !== null && cancellation!.cancelledAtUtc !== null);
+      assert.deepEqual({ date: earlier!.localDate, start: earlier!.startUtc }, { date: "2020-01-01", start: "2020-01-01T05:00:00.000Z" });
+
+      // The same booking alone; holds, abandoned holds and unknown IDs are not found.
+      assert.deepEqual(await guests.getGuestBookingForHost(ownerA, tea.publicBookingId), page.bookings[0]);
+      for (const id of [held.publicBookingId, expired.publicBookingId, randomUUID()]) {
+        await assert.rejects(() => guests.getGuestBookingForHost(ownerA, id), StoreNotFoundError);
+      }
+      await assert.rejects(() => guests.getGuestBookingForHost(ownerA, "not-a-booking"), StoreValidationError);
+      assert.equal(await guests.countGuestBookingsForHost(ownerA), 5);
+    });
+  });
+
+  it("pages with a cursor that keeps its boundary, from the upcoming into the past", async () => {
+    await withSchema(async (context) => {
+      const { tea, walk, review, cancelled, past } = await bookForHost(context);
+      const { guests } = context;
+      const all = ids(await guests.listGuestBookingsForHost(ownerA, { limit: 100 }));
+      const walked: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const next: Awaited<ReturnType<GuestBookingRepository["listGuestBookingsForHost"]>> = await guests.listGuestBookingsForHost(ownerA, { limit: 1, cursor });
+        assert.equal(next.bookings.length, 1);
+        walked.push(...ids(next));
+        cursor = next.nextCursor;
+      } while (cursor !== null);
+      assert.deepEqual(walked, all);
+
+      // A page that ends with the last upcoming booking points at the start of the past.
+      const upcoming = await guests.listGuestBookingsForHost(ownerA, { limit: 4 });
+      assert.deepEqual(ids(upcoming), [tea, walk, review, cancelled].map((start) => start.publicBookingId));
+      assert.notEqual(upcoming.nextCursor, null);
+      assert.deepEqual(await guests.listGuestBookingsForHost(ownerA, { cursor: upcoming.nextCursor }).then((page) => [ids(page), page.nextCursor]), [[past.publicBookingId], null]);
+
+      // Past `from`, everything is past, the latest first; the cursor keeps that boundary.
+      const later = new Date(Date.now() + 400 * 86_400_000).toISOString();
+      const first = await guests.listGuestBookingsForHost(ownerA, { from: later, limit: 2 });
+      assert.deepEqual(ids(first), [cancelled, review].map((start) => start.publicBookingId));
+      const rest = await guests.listGuestBookingsForHost(ownerA, { cursor: first.nextCursor, limit: 10 });
+      assert.deepEqual(ids(rest), [walk, tea, past].map((start) => start.publicBookingId));
+      assert.equal(rest.nextCursor, null);
+
+      for (const options of [{ limit: 0 }, { limit: 101 }, { cursor: "nope" }, { cursor: Buffer.from("[\"x\",\"PAST\"]").toString("base64url") }, { from: "yesterday" }]) {
+        await assert.rejects(() => guests.listGuestBookingsForHost(ownerA, options), StoreValidationError, JSON.stringify(options));
+      }
+    });
+  });
+
+  it("answers only a current OWNER of the provider in the experience DB, and only for that provider", async () => {
+    await withSchema(async (context) => {
+      const { tea } = await bookForHost(context);
+      const { pool, guests } = context;
+      const denied = [editorA, viewerA, { ...ownerA, calendarRoleCeiling: "EDITOR" as const }, { ...ownerA, calendarScope: "OPERATOR" as const }, { providerId: "provider-a", nihoUserId: "stranger" }];
+      for (const actor of denied) {
+        await assert.rejects(() => guests.listGuestBookingsForHost(actor), StoreAccessDeniedError, actor.nihoUserId);
+        await assert.rejects(() => guests.getGuestBookingForHost(actor, tea.publicBookingId), StoreAccessDeniedError, actor.nihoUserId);
+        await assert.rejects(() => guests.countGuestBookingsForHost(actor), StoreAccessDeniedError, actor.nihoUserId);
+      }
+      // Another provider's OWNER sees none of them, and not one by its ID.
+      assert.deepEqual(await guests.listGuestBookingsForHost(ownerB), { bookings: [], nextCursor: null });
+      assert.equal(await guests.countGuestBookingsForHost(ownerB), 0);
+      await assert.rejects(() => guests.getGuestBookingForHost(ownerB, tea.publicBookingId), StoreNotFoundError);
+      // An OWNER whose membership ended.
+      await pool.query("UPDATE provider_memberships SET active=false WHERE niho_user_id='owner-a'");
+      await assert.rejects(() => guests.listGuestBookingsForHost(ownerA), StoreAccessDeniedError);
+    });
+  });
+
+  it("shows a booking whose guest was erased without the guest, and the questions as the terms word them now", async () => {
+    await withSchema(async (context) => {
+      const { tea, past } = await bookForHost(context);
+      const { guests } = context;
+      assert.equal(await guests.eraseGuestData({ endedBefore: "2021-01-01T00:00:00.000Z" }), 1);
+      const erased = await guests.getGuestBookingForHost(ownerA, past.publicBookingId);
+      assert.equal(erased.guest, null);
+      assert.deepEqual(
+        { title: erased.productTitle, total: erased.totalAmount, providerAmount: erased.providerAmount, adults: erased.adultCount, status: erased.status },
+        { title: "Synthetic walk", total: 3000, providerAmount: 2700, adults: 1, status: "CONFIRMED" },
+      );
+
+      // The booking keeps the answers; a reworded question shows its new words, a dropped one none.
+      await guests.setSaleTerms(ownerA, "tea", {
+        ...TEA_TERMS,
+        bookingQuestions: [{ ...QUESTIONS[0]!, prompt: "Dietary needs", options: [{ id: "veg", label: "Vegetarian meal" }, { id: "none", label: "None" }] }],
+      }, 1);
+      assert.deepEqual((await guests.getGuestBookingForHost(ownerA, tea.publicBookingId)).guest?.answers, [
+        { questionId: "diet", prompt: "Dietary needs", text: null, options: [{ id: "veg", label: "Vegetarian meal" }] },
+        { questionId: "interests", prompt: null, text: null, options: [{ id: "tea", label: null }, { id: "garden", label: null }] },
+        { questionId: "arrival", prompt: null, text: "Kamakura", options: [] },
+      ]);
+    });
+  });
+});

@@ -182,10 +182,13 @@ const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
 /**
  * 旅行者の予約 on this site (#285, docs/guest-booking.md): availability and checkout from the experience DB with
  * Stripe Checkout on the provider's account. HTTP only. Turned on without everything a sale needs, the server
- * stops at start-up instead of taking bookings it cannot charge or confirm. Error messages never echo values.
+ * stops at start-up instead of taking bookings it cannot charge or confirm. That includes the host console:
+ * the host sees these bookings only in its 予約 (#285 slice 8), and a sale the host cannot see is not taken.
+ * Error messages never echo values.
  */
-function guestBookingSettings(apiMode: "mock" | "http", env: Env): { enabled: boolean; consentVersion: string } {
+function guestBookingSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): { enabled: boolean; consentVersion: string } {
   if (apiMode !== "http" || env.EXPERIENCE_GUEST_BOOKING_ENABLED !== "true") return { enabled: false, consentVersion: "" };
+  if (!hostConsoleEnabled) throw new Error("EXPERIENCE_GUEST_BOOKING_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
   for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET"]) {
     if (!env[name]?.trim()) throw new Error(`EXPERIENCE_GUEST_BOOKING_ENABLED=true needs ${name} in http mode`);
   }
@@ -338,8 +341,9 @@ export function resolveConfig(env: Env) {
   // migration 0027 is applied and accepted.
   const guestReviewsEnabled = apiMode === "http" && env.EXPERIENCE_GUEST_REVIEWS_ENABLED === "true";
   // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
-  // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted.
-  const guestBooking = guestBookingSettings(apiMode, env);
+  // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
+  // and only with the host console that shows the OWNER these bookings.
+  const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
   // 予約者へのメール (#285 slice 5): host replies, booking confirmations and the one-year erasure, run by Cloud
   // Scheduler through its own service account. Independent of the two flags above: a payment confirmed after
   // guest booking is turned off still gets its email.

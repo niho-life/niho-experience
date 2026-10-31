@@ -60,6 +60,15 @@ export type {
   SubmitGuestReviewInput,
 } from "./guest-reviews.ts";
 export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS } from "./guest-bookings.ts";
+export { HOST_GUEST_BOOKING_LIMITS, HOST_GUEST_BOOKING_STATUSES } from "./host-guest-bookings.ts";
+export type {
+  HostGuestBooking,
+  HostGuestBookingAnswer,
+  HostGuestBookingGuest,
+  HostGuestBookingListOptions,
+  HostGuestBookingPage,
+  HostGuestBookingStatus,
+} from "./host-guest-bookings.ts";
 export type {
   BookingQuestion,
   BookingQuestionInputType,

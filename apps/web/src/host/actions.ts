@@ -19,6 +19,7 @@ import { mockEnglishDraft } from "./mock/threads";
 import { changeNotificationSettings } from "./notification-settings-server";
 import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
+import { loadMoreSiteBookings, type HostSiteBookingPage } from "./site-bookings-server";
 import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfileChange, RegisterProviderInput } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
 import type { HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
@@ -256,6 +257,14 @@ export async function loadMoreGuestQuestionThreads(input: { providerId: string; 
   const cursor = text(input?.cursor, LIMITS.cursor);
   if (!providerId || !cursor) return invalid;
   return loadMoreGuestQuestions(providerId, cursor);
+}
+
+/** 予約 › 続きを見る (#285 slice 8, experience DB): the bookings made on this site after the list's last one. */
+export async function loadMoreSiteBookingList(input: { providerId: string; cursor: string }): Promise<HostActionResult<HostSiteBookingPage>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const cursor = text(input?.cursor, LIMITS.cursor);
+  if (!providerId || !cursor) return invalid;
+  return loadMoreSiteBookings(providerId, cursor);
 }
 
 /**

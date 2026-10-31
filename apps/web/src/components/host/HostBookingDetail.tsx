@@ -14,6 +14,7 @@ import {
   type BookingRow,
 } from "@/host/bookings";
 import { monthDayJa, yen } from "@/host/format";
+import { SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_BOOKING_READ_ONLY_TEXT } from "@/host/site-bookings";
 import { translationOffered } from "@/host/translate";
 import type { HostBooking } from "@/host/types";
 import { BookingCancelDialog, BookingDecisionDialog, DANGER_BUTTON } from "./HostBookingDialogs";
@@ -120,16 +121,26 @@ export interface HostBookingDetailProps {
 /**
  * One booking (mock v2 `bookingDetail`): the guest and the state, 申込内容, 状態, what the
  * host can do now, メッセージ (the way into its thread) and 時系列. 承認・お断り・取消 are
- * asked in a dialog first.
+ * asked in a dialog first. A booking made on this site (`booking.site`, #285 slice 8) is read
+ * only until cancellation and refunds come here (slice 7): a note takes the place of the
+ * actions, and NIHO's support and fee panels, which know NIHO's bookings only, are left out.
  */
 export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | null>(null);
   const actions = bookingActions(booking.status);
+  const site = Boolean(booking.site);
   // 通訳を始める: a confirmed booking of an English-speaking guest whose day has not passed (#181).
-  const translate = translateEnabled && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
+  const translate = translateEnabled && !site && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
 
   let next: ReactNode = null;
-  if (actions.approve) {
+  if (site) {
+    next = (
+      <>
+        {booking.status === "payment_review" ? <p className={WAIT_LINE}>{SITE_BOOKING_PAYMENT_REVIEW_TEXT}</p> : null}
+        <p className="text-[0.8125rem] text-ink-soft">{SITE_BOOKING_READ_ONLY_TEXT}</p>
+      </>
+    );
+  } else if (actions.approve) {
     next = (
       <>
         {booking.respondBy ? <p className={WAIT_LINE}>承認期限 {respondByLabel(booking.respondBy, today)}</p> : null}
@@ -186,8 +197,12 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       <DetailSection title="状態">
         <Rows rows={bookingStateRows(booking)} />
       </DetailSection>
-      <HostBookingSupportPanel providerId={providerId} bookingId={booking.id} preview={supportPreview} historyEnabled={supportHistoryEnabled} />
-      <FeeSummaryPanel key={`host-fee-${booking.id}`} audience="host" bookingId={booking.id} actorKey={providerId} enabled={feeSummaryEnabled} />
+      {site ? null : (
+        <>
+          <HostBookingSupportPanel providerId={providerId} bookingId={booking.id} preview={supportPreview} historyEnabled={supportHistoryEnabled} />
+          <FeeSummaryPanel key={`host-fee-${booking.id}`} audience="host" bookingId={booking.id} actorKey={providerId} enabled={feeSummaryEnabled} />
+        </>
+      )}
       {next || translate ? (
         <div className="mt-3.5 border-t border-line pt-3.5">
           {next}

@@ -269,8 +269,10 @@ export interface HostExperience extends HostExperienceContent, HostListing {
  * A booking's one state (#90), in the words of NIHO's provider bookings: a request waiting
  * for the host (承認待ち), a booking (確定), one the traveler asked to cancel (要返金), and
  * the ends: 取消済み, お断り (declined by the host) and 期限切れ (not answered in time).
+ * A booking made on this site (#285) may also be 確認待ち: its payment arrived after its hold
+ * was released, so it holds no seat until NIHO settles it (refunds come with slice 7).
  */
-export type HostBookingStatus = "pending" | "confirmed" | "refund_needed" | "cancelled" | "declined" | "expired";
+export type HostBookingStatus = "pending" | "confirmed" | "refund_needed" | "cancelled" | "declined" | "expired" | "payment_review";
 
 /** The language the guest booked in; the cancellation message starts in it. */
 export type HostGuestLanguage = "en" | "ja";
@@ -365,6 +367,18 @@ export interface HostBooking {
   /** 累計返金. */
   refundedYen: number;
   timeline: readonly HostBookingEvent[];
+  /** A booking made on this site (#285, experience DB); absent on NIHO's bookings and the preview's. */
+  site?: HostSiteBookingTerms;
+}
+
+/** What a booking made on this site fixed when it was made (its pricing snapshot), for 申込内容. */
+export interface HostSiteBookingTerms {
+  /** NIHO's fee; null for a booking that has none recorded. */
+  fee: { amountYen: number; percent: number; supportEnabled: boolean } | null;
+  /** The total less NIHO's fee: what the host receives, before any refund. */
+  payoutYen: number;
+  /** 取消条件; null for a booking that has none recorded. */
+  cancellationPolicy: "FREE_UNTIL_24H" | "FREE_UNTIL_48H" | "NONE" | null;
 }
 
 /*

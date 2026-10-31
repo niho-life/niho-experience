@@ -45,6 +45,7 @@ export const BOOKING_STATUS: Record<HostBookingStatus, StatusLabel> = {
   cancelled: { label: "取消済み", tone: "stop" },
   declined: { label: "お断り", tone: "draft" },
   expired: { label: "期限切れ", tone: "draft" },
+  payment_review: { label: "確認待ち", tone: "wait" },
 };
 
 /** A booking whose day has passed stays 確定, in the quiet tone (mock v2). */
