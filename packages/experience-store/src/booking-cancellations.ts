@@ -52,7 +52,7 @@ export const BOOKING_CANCELLATION_LIMITS = {
   /** Bookings one session's cancellation may take. */
   sessionBookingsMax: 500,
   /**
-   * 返金の自動再送 (#285 slice 7b, migration 0030): the job sends a refund Stripe has not accepted again at most this many
+   * 返金の自動再送 (#285 slice 7b, migration 0031): the job sends a refund Stripe has not accepted again at most this many
    * times, waiting 2, 4, 8 … minutes between tries (refundResendBackoffMaxSeconds at most); after that the refund stays
    * requested for support (the queue shows it as before).
    */
@@ -1123,7 +1123,7 @@ export class BookingCancellations {
   /* ---------- sending refunds again ---------- */
 
   /**
-   * 返金の自動再送 (#285 slice 7b, migration 0030): for the job, up to `limit` refunds Stripe has not accepted (REQUESTED),
+   * 返金の自動再送 (#285 slice 7b, migration 0031): for the job, up to `limit` refunds Stripe has not accepted (REQUESTED),
    * oldest first, to send now. A refund waits `olderThanSeconds` after it was asked for, so the request's own send
    * goes first; it is then taken for `leaseSeconds` (and a refund the job took before is not taken again until
    * 2, 4, 8 … minutes have passed, up to an hour), so two runs never hold the same refund, and support's 「もう一度送る」
