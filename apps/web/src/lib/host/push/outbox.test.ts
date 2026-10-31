@@ -16,11 +16,13 @@ const APPROVAL = "host.notify.approval_deadline";
 const MESSAGE = "host.notify.guest_message";
 const QUESTION = "host.notify.guest_question";
 const NEW_BOOKING = "host.notify.new_booking";
+const BOOKING_MESSAGE = "host.notify.booking_message";
 const THREAD = "00000000-0000-4000-8000-0000000000aa";
 const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
 const approvalPayload = { v: 1, bookingId: "bk-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2, approvalDeadlineAt: "2026-11-01T01:00:00.000Z" };
 const messagePayload = { v: 1, bookingId: "bk-2", messageId: "msg-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 3 };
 const questionPayload = { v: 1, threadId: THREAD, messageId: "00000000-0000-4000-8000-000000000101", experienceTitle: "Synthetic Tea Ceremony" };
+const bookingMessagePayload = { v: 1, threadId: THREAD, messageId: "00000000-0000-4000-8000-000000000201", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 3 };
 const newBookingPayload = { v: 1, bookingId: BOOKING, experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 4 };
 const ALLOWED_EVENT_KEYS = ["experienceTitle", "kind", "providerId", "seats", "startsAt", "tag", "url"];
 
@@ -112,6 +114,39 @@ describe("hostPushEventFromOutbox", () => {
         tag: `question-${THREAD}`,
       });
     }
+  });
+
+  it("turns a guest's message on their booking page into a GUEST_MESSAGE push that opens this site's thread (#285 slice 6b)", () => {
+    const parsed = hostPushEventFromOutbox(row(BOOKING_MESSAGE, bookingMessagePayload), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a",
+        kind: "GUEST_MESSAGE",
+        experienceTitle: "Synthetic Tea Ceremony",
+        startsAt: "2026-11-20T01:00:00.000Z",
+        seats: 3,
+        url: `/host/messages?thread=${THREAD}&source=site&providerId=provider-a`,
+        tag: `booking-message-${THREAD}`,
+      },
+    });
+    if (parsed.ok) {
+      const payload = JSON.parse(hostPushPayload(parsed.event));
+      expect(payload.title).toBe("予約者から連絡があります");
+      expect(payload.body).toContain("Synthetic Tea Ceremony");
+      expect(payload.body).toContain("3名");
+    }
+    expect(hostPushEventFromOutbox(row(BOOKING_MESSAGE, { ...bookingMessagePayload, body: "synthetic text" }), NOW)).toEqual({ ok: false, reason: "invalid" });
+    expect(hostPushEventFromOutbox(row(BOOKING_MESSAGE, bookingMessagePayload, { createdAt: new Date(NOW - 25 * 60 * MINUTE).toISOString() }), NOW)).toEqual({ ok: false, reason: "stale" });
+  });
+
+  it("asks 設定 › 通知 for GUEST_MESSAGE before a booking message and skips it when the OWNER turned it off", async () => {
+    const allowed = vi.fn(async () => false);
+    const { outbox, notify, result } = run([row(BOOKING_MESSAGE, bookingMessagePayload)], { allowed });
+    expect(await result).toMatchObject({ claimed: 1, delivered: 0, skipped: 1 });
+    expect(allowed.mock.calls).toEqual([["provider-a", "GUEST_MESSAGE"]]);
+    expect(notify).not.toHaveBeenCalled();
+    expect(outbox.complete.mock.calls).toEqual([["1", 1]]);
   });
 
   it("turns a guest booking confirmed on this site into a NEW_BOOKING push that opens it among this site's bookings", () => {

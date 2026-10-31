@@ -2,6 +2,7 @@ import "server-only";
 import {
   HOST_NOTIFICATION_TOPICS,
   parseApprovalDeadlinePayload,
+  parseBookingMessagePayload,
   parseCancellationPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
@@ -19,8 +20,8 @@ import type { HostPushEvent } from "./payload";
 
 /**
  * The notification job (#177 P2, owner decision 2026-10-31): sends what `outbox_messages` holds for
- * the host topics as Web Push. Questions to the host, guest bookings confirmed on this site (#285 slice 5)
- * and those the guest or NIHO support cancelled (slice 7) write their rows; approval reminders and booking messages wait for those flows to move to
+ * the host topics as Web Push. Questions to the host, guest bookings confirmed on this site (#285 slice 5),
+ * those the guest or NIHO support cancelled (slice 7) and what a guest wrote on their booking page (slice 6b) write their rows; approval reminders and booking messages wait for those flows to move to
  * the experience DB (ADR 0002). Logs and answers counts only: never an endpoint, a payload or a booking.
  */
 const MESSAGE_STALE_MS = 24 * 60 * 60 * 1000;
@@ -93,6 +94,26 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         url: withQuery(HOST_MESSAGES_PATH, { thread: payload.threadId, providerId }),
         // A guest's later answer in the same thread replaces the earlier notification.
         tag: `question-${payload.threadId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.bookingMessage) {
+    const payload = parseBookingMessagePayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "GUEST_MESSAGE",
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        // This site's threads (#285 slice 6b), with this one opened; `source=site` keeps them beside NIHO's messages.
+        url: withQuery(HOST_MESSAGES_PATH, { thread: payload.threadId, source: "site", providerId }),
+        // The guest's next message in the same booking replaces the earlier notification.
+        tag: `booking-message-${payload.threadId}`,
       },
     };
   }

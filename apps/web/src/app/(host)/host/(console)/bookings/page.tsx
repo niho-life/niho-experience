@@ -70,7 +70,7 @@ function SiteBookings({ site, provider, linkProviderId, besideNiho }: { site: Ex
       feeSummaryEnabled={false}
       translateEnabled={false}
       conversations={[]}
-      live={{ nextCursor: site.nextCursor, besideNiho }}
+      live={{ nextCursor: site.nextCursor, besideNiho, messages: site.messages }}
     />
   );
 }

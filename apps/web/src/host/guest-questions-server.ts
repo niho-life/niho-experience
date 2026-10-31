@@ -1,16 +1,20 @@
 import "server-only";
 import {
+  BookingMessagesClosedError,
   StoreAccessDeniedError,
   StoreNotFoundError,
   StoreValidationError,
+  type GuestBookingThreadStart,
   type GuestQuestionMessage,
   type GuestQuestionRepository,
+  type GuestQuestionThreadBooking,
   type GuestQuestionThreadPage,
   type GuestQuestionThreadSummary,
   type GuestQuestionTopic,
+  type GuestThreadKind,
   type HostActor,
 } from "@niho-experience/experience-store";
-import { guestQuestionRepository } from "@/lib/experience/store-server";
+import { siteThreadRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
@@ -19,15 +23,20 @@ import { hostReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
-import { REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, newBookingThreadId, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import type { HostActionResult } from "./payout";
-import type { HostThread, HostThreadMessage } from "./types";
+import type { HostThread, HostThreadBooking, HostThreadMessage } from "./types";
 
 /*
  * メッセージ's 予約前の質問 (#106) kept in the experience DB (migration 0022, docs/guest-questions.md).
  * NIHO proves the account and that it is the provider's OWNER; the experience store checks its own
  * OWNER membership as well (ADR 0002). The guest's address never reaches the console. Anyone else,
  * or a deployment without EXPERIENCE_GUEST_QUESTIONS_ENABLED and the DB, keeps today's screen.
+ *
+ * A booking made on this site has its own thread in the same tables (#285 slice 6b, docs/guest-booking.md): the guest
+ * writes on their booking page, the host reads and answers here. They are open with the guest's booking page
+ * (siteThreadRepository): with only one of the two open, the screen shows that kind only. A booking without a thread
+ * yet opens as an empty one (`?booking=`), which the host's first message starts.
  */
 
 export const GUEST_QUESTION_OWNER_ONLY_TEXT = "予約前の質問はオーナーが読み書きできます";
@@ -65,15 +74,32 @@ export function hostThreadMessage(message: GuestQuestionMessage, language: Guest
 
 type StoredThread = Omit<GuestQuestionThreadSummary, "lastMessage">;
 
-export function hostThread(thread: StoredThread, messages: readonly GuestQuestionMessage[]): HostThread {
+/** This site's booking as a thread shows it: its date, start and party, and whether it still takes messages. */
+export function hostThreadBooking(booking: GuestQuestionThreadBooking): HostThreadBooking {
+  return {
+    id: booking.publicBookingId,
+    date: booking.localDate,
+    start: booking.localStartTime,
+    guests: booking.adultCount + booking.childCount,
+    site: true,
+    ...(booking.open ? {} : { closed: true as const }),
+  };
+}
+
+export function hostThread(thread: Pick<StoredThread, "id" | "productId" | "guestName" | "topic" | "language" | "booking">, messages: readonly GuestQuestionMessage[]): HostThread {
   return {
     id: thread.id,
     experienceId: thread.productId,
     guest: thread.guestName,
-    topic: TOPIC_JA[thread.topic] ?? null,
-    booking: null,
+    topic: thread.topic ? (TOPIC_JA[thread.topic] ?? null) : null,
+    booking: thread.booking ? hostThreadBooking(thread.booking) : null,
     messages: messages.map((message) => hostThreadMessage(message, thread.language)),
   };
+}
+
+/** A booking made on this site before anyone wrote: its empty thread, which the host's first message starts. */
+export function emptyBookingThread(start: GuestBookingThreadStart): HostThread {
+  return hostThread({ id: newBookingThreadId(start.booking.publicBookingId), productId: start.productId, guestName: start.guestName, topic: null, language: start.language, booking: start.booking }, []);
 }
 
 /** One page of the list as メッセージ shows it: each thread holds its last message only. */
@@ -91,10 +117,16 @@ function listPage(page: GuestQuestionThreadPage): HostGuestQuestionPage {
   };
 }
 
-/** Opening a thread: it counts as read, then every message. */
-async function openThread(questions: GuestQuestionRepository, actor: HostActor, threadId: string): Promise<{ thread: HostThread; experience: { id: string; title: string } }> {
-  await questions.markThreadRead(actor, threadId);
+/** Whether a stored thread is of the kind open here (null: both). */
+function ofKind(thread: { booking: unknown }, kind: GuestThreadKind | null): boolean {
+  return kind === null || (kind === "BOOKING") === (thread.booking !== null);
+}
+
+/** Opening a thread: every message, then it counts as read. A thread of a kind closed here is not found. */
+async function openThread(questions: GuestQuestionRepository, actor: HostActor, threadId: string, kind: GuestThreadKind | null): Promise<{ thread: HostThread; experience: { id: string; title: string } }> {
   const stored = await questions.getThread(actor, threadId);
+  if (!ofKind(stored, kind)) throw new StoreNotFoundError("guest question");
+  await questions.markThreadRead(actor, threadId);
   return { thread: hostThread(stored, stored.messages), experience: { id: stored.productId, title: stored.productTitle } };
 }
 
@@ -104,8 +136,10 @@ export type HostGuestQuestionsLoad =
       /** The latest first. A thread not opened yet holds its last message only (`loaded` lists the whole ones). */
       threads: HostThread[];
       loaded: string[];
-      /** `?thread=` names none of the provider's threads. */
+      /** `?thread=` (or `?booking=`) names none of the provider's threads or bookings made on this site. */
       requestedMissing: boolean;
+      /** `?booking=` names this site's booking nobody wrote in yet: its empty thread, which the first reply starts. */
+      newThread: HostThread | null;
       experiences: { id: string; title: string }[];
       /** さらに表示 reads the older threads from here; null when every thread is on the list. */
       nextCursor: string | null;
@@ -116,57 +150,89 @@ export type HostGuestQuestionsLoad =
   | { status: "closed" }
   | { status: "error" };
 
-/** メッセージ for an OWNER (NIHO's role): the provider's questions, and the one `?thread=` names, opened. */
-export async function loadGuestQuestions(provider: HostProvider, nihoUserId: string, requestedThread: string | null): Promise<HostGuestQuestionsLoad> {
-  const questions = guestQuestionRepository();
-  if (!questions || provider.memberRole !== "OWNER") return { status: "closed" };
+/**
+ * メッセージ for an OWNER (NIHO's role): the provider's questions and this site's bookings' threads, and the one
+ * `?thread=` names, opened; or this site's booking `?booking=` names (#285 slice 6b), its thread opened or, before
+ * anyone wrote, its empty one.
+ */
+export async function loadGuestQuestions(provider: HostProvider, nihoUserId: string, requestedThread: string | null, requestedBooking: string | null = null): Promise<HostGuestQuestionsLoad> {
+  const site = siteThreadRepository();
+  if (!site || provider.memberRole !== "OWNER") return { status: "closed" };
+  const { repository: questions, kind } = site;
   const actor = ownerActor(provider.id, nihoUserId);
   try {
-    const page = await questions.listThreads(actor, { limit: LIST_LIMIT });
+    const page = await questions.listThreads(actor, { limit: LIST_LIMIT, kind });
     const { threads } = listPage(page);
     const experiences = new Map(page.threads.map((summary) => [summary.productId, summary.productTitle]));
     const loaded: string[] = [];
     let requestedMissing = false;
-    if (requestedThread) {
-      try {
-        const opened = await openThread(questions, actor, requestedThread);
-        const index = threads.findIndex((thread) => thread.id === opened.thread.id);
-        if (index >= 0) threads[index] = opened.thread;
-        else threads.push(opened.thread);
-        experiences.set(opened.experience.id, opened.experience.title);
-        loaded.push(opened.thread.id);
-      } catch (error) {
-        if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
-        requestedMissing = true;
+    let newThread: HostThread | null = null;
+    const show = (opened: { thread: HostThread; experience: { id: string; title: string } }) => {
+      const index = threads.findIndex((thread) => thread.id === opened.thread.id);
+      if (index >= 0) threads[index] = opened.thread;
+      else threads.push(opened.thread);
+      experiences.set(opened.experience.id, opened.experience.title);
+      loaded.push(opened.thread.id);
+    };
+    try {
+      if (requestedThread) {
+        show(await openThread(questions, actor, requestedThread, kind));
+      } else if (requestedBooking && kind !== "QUESTION") {
+        const start = await questions.findBookingThread(actor, requestedBooking);
+        if (start.threadId) {
+          show(await openThread(questions, actor, start.threadId, kind));
+        } else {
+          newThread = emptyBookingThread(start);
+          experiences.set(start.productId, start.productTitle);
+          loaded.push(newThread.id);
+        }
       }
+    } catch (error) {
+      if (!(error instanceof StoreNotFoundError || error instanceof StoreValidationError)) throw error;
+      requestedMissing = true;
     }
     const now = Date.now();
     const today = todayInJapan(now);
-    return { status: "live", threads, loaded, requestedMissing, experiences: [...experiences].map(([id, title]) => ({ id, title })), nextCursor: page.nextCursor, today, now: actionTime(today, now) };
+    return { status: "live", threads, loaded, requestedMissing, newThread, experiences: [...experiences].map(([id, title]) => ({ id, title })), nextCursor: page.nextCursor, today, now: actionTime(today, now) };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }
 }
 
-type OwnerCheck = { ok: true; questions: GuestQuestionRepository; actor: HostActor } | { ok: false; message: string };
+/**
+ * Beside NIHO's booking messages (provider operations): how many bookings made on this site have a thread, for the
+ * notice that leads to them (`?source=site`). 0 when they are closed here, for anyone but the OWNER, or unreadable.
+ */
+export async function countSiteBookingThreads(provider: HostProvider, nihoUserId: string): Promise<number> {
+  const site = siteThreadRepository();
+  if (!site || site.kind === "QUESTION" || provider.memberRole !== "OWNER") return 0;
+  try {
+    return await site.repository.countThreads(ownerActor(provider.id, nihoUserId), { kind: "BOOKING" });
+  } catch {
+    return 0;
+  }
+}
+
+type OwnerCheck = { ok: true; questions: GuestQuestionRepository; kind: GuestThreadKind | null; actor: HostActor } | { ok: false; message: string };
 
 /** A usable session, the store, and NIHO saying this account owns the provider. */
 async function asOwner(providerId: string, failed: string): Promise<OwnerCheck> {
   const session = await readHostSession();
   if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
-  const questions = guestQuestionRepository();
-  if (!questions) return { ok: false, message: failed };
+  const site = siteThreadRepository();
+  if (!site) return { ok: false, message: failed };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? failed : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT };
-  return { ok: true, questions, actor: ownerActor(providerId, session.nihoUserId) };
+  return { ok: true, questions: site.repository, kind: site.kind, actor: ownerActor(providerId, session.nihoUserId) };
 }
 
 function failure(error: unknown, failed: string): { ok: false; message: string } {
   if (error instanceof StoreAccessDeniedError) return { ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT };
   if (error instanceof StoreNotFoundError) return { ok: false, message: GUEST_QUESTION_MISSING_TEXT };
   if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+  if (error instanceof BookingMessagesClosedError) return { ok: false, message: BOOKING_THREAD_CLOSED_TEXT };
   return { ok: false, message: failed };
 }
 
@@ -175,7 +241,7 @@ export async function openGuestQuestion(providerId: string, threadId: string): P
   const owner = await asOwner(providerId, GUEST_QUESTION_LOAD_FAILED_TEXT);
   if (!owner.ok) return owner;
   try {
-    return { ok: true, message: "", thread: (await openThread(owner.questions, owner.actor, threadId)).thread };
+    return { ok: true, message: "", thread: (await openThread(owner.questions, owner.actor, threadId, owner.kind)).thread };
   } catch (error) {
     return failure(error, GUEST_QUESTION_LOAD_FAILED_TEXT);
   }
@@ -186,7 +252,7 @@ export async function loadMoreGuestQuestions(providerId: string, cursor: string)
   const owner = await asOwner(providerId, GUEST_QUESTION_LOAD_FAILED_TEXT);
   if (!owner.ok) return owner;
   try {
-    return { ok: true, message: "", ...listPage(await owner.questions.listThreads(owner.actor, { limit: LIST_LIMIT, cursor })) };
+    return { ok: true, message: "", ...listPage(await owner.questions.listThreads(owner.actor, { limit: LIST_LIMIT, cursor, kind: owner.kind })) };
   } catch (error) {
     return failure(error, GUEST_QUESTION_LOAD_FAILED_TEXT);
   }
@@ -195,14 +261,24 @@ export async function loadMoreGuestQuestions(providerId: string, cursor: string)
 /**
  * この英語で送る: the English the guest gets by email, with the Japanese the host wrote (none when they
  * wrote the English directly). `commandId` comes from the browser, so a retry is the same reply.
- * Answers the thread as it is now, the reply waiting for the email (送信待ち).
+ * Answers the thread as it is now, the reply waiting for the email (送信待ち). The empty thread of this site's
+ * booking (#285 slice 6b) is started by it, and answered with its stored id.
  */
 export async function replyToGuestQuestion(providerId: string, threadId: string, reply: { japanese: string; english: string; commandId: string }): Promise<HostActionResult<{ thread: HostThread }>> {
   const owner = await asOwner(providerId, GUEST_QUESTION_REPLY_FAILED_TEXT);
   if (!owner.ok) return owner;
+  const input = { english: reply.english, japanese: reply.japanese.trim() || null, commandId: reply.commandId };
+  const bookingId = bookingOfNewThread(threadId);
   try {
-    await owner.questions.reply(owner.actor, threadId, { english: reply.english, japanese: reply.japanese.trim() || null, commandId: reply.commandId });
-    const stored = await owner.questions.getThread(owner.actor, threadId);
+    let storedId = threadId;
+    if (bookingId) {
+      if (owner.kind === "QUESTION") throw new StoreNotFoundError("guest booking");
+      storedId = (await owner.questions.replyToBooking(owner.actor, bookingId, input)).threadId;
+    } else {
+      if (owner.kind !== null && !ofKind(await owner.questions.getThread(owner.actor, threadId), owner.kind)) throw new StoreNotFoundError("guest question");
+      await owner.questions.reply(owner.actor, threadId, input);
+    }
+    const stored = await owner.questions.getThread(owner.actor, storedId);
     return { ok: true, message: "送りました", thread: hostThread(stored, stored.messages) };
   } catch (error) {
     return failure(error, GUEST_QUESTION_REPLY_FAILED_TEXT);
@@ -228,11 +304,15 @@ export async function draftGuestQuestionEnglish(
   if (!translate) return { ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT };
   const owner = await asOwner(providerId, REPLY_DRAFT_UNAVAILABLE_TEXT);
   if (!owner.ok) return owner;
-  let guestMessage: string | null;
+  let guestMessage: string | null = null;
   try {
-    // The OWNER's thread only; its last guest message is the context.
-    const thread = await owner.questions.getThread(owner.actor, threadId);
-    guestMessage = thread.messages.findLast((message) => message.author === "GUEST")?.body ?? null;
+    // The OWNER's thread only; its last guest message is the context. This site's booking nobody wrote in yet has none.
+    const bookingId = bookingOfNewThread(threadId);
+    const storedId = bookingId ? (await owner.questions.findBookingThread(owner.actor, bookingId)).threadId : threadId;
+    if (storedId) {
+      const thread = await owner.questions.getThread(owner.actor, storedId);
+      guestMessage = thread.messages.findLast((message) => message.author === "GUEST")?.body ?? null;
+    }
   } catch (error) {
     return failure(error, REPLY_DRAFT_FAILED_TEXT);
   }

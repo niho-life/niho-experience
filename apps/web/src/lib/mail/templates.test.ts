@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookingConfirmationEmail, BookingLinkEmail } from "@niho-experience/experience-store";
-import { bookingConfirmationEmail, bookingLinkEmail, questionReplyEmail, type RenderedMail } from "./templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, questionReplyEmail, type RenderedMail } from "./templates";
 
 /** The guest emails (#285 slice 5) with synthetic data only. */
 const SITE = "https://experience.example";
@@ -186,5 +186,27 @@ describe("the booking page links (#285 slice 6)", () => {
     expect(linesWith(mail, "Sample Guest")).toEqual(["Hi Sample Guest,"]);
     expect(`${mail.subject}${mail.text}${mail.html}`).not.toMatch(/guest@example\.com/);
     expect(mail.html).not.toMatch(/<img|<script|<link|<style|src=|url\(|@import/i);
+  });
+
+  it("emails a host message about a booking: the host's English, the booking, and the page with the grant in the fragment only (#285 slice 6b)", () => {
+    const message = {
+      ...link, hostDisplayName: "Sample <Host>", english: "Welcome!\nMeet at the <north> gate.",
+    };
+    const mail = bookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: GRANT });
+    expect(mail.subject).toBe("Sample <Host> sent you a message about your booking: Synthetic tea ceremony, Sat 14 Nov 2026 10:00");
+    expect(mail.text).toContain("Welcome!\nMeet at the <north> gate.");
+    expect(mail.html).toContain("Welcome!<br>Meet at the &lt;north&gt; gate.");
+    expect(mail.html).not.toContain("<north>");
+    expect(mail.text).toContain(`Booking reference: ${confirmation.publicBookingId}`);
+    expect(mail.text).toContain("To answer Sample <Host>, open your booking and write to them there.");
+    expect(mail.text).toContain("Replying to this email reaches NIHO support, not Sample <Host>.");
+    grantOnlyInFragment(mail);
+    expect(linesWith(mail, "Sample Guest")).toEqual(["Hi Sample Guest,"]);
+    expect(`${mail.subject}${mail.text}${mail.html}`).not.toMatch(/guest@example\.com|questions\/reply/);
+    expect(mail.html).not.toMatch(/<img|<script|<link|<style|src=|url\(|@import/i);
+    // Without a grant (the page is off, or can no longer be opened): no link at all.
+    const plain = bookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: null });
+    expect(plain.text).not.toContain("/bookings");
+    expect(plain.text).toContain("Replying to this email reaches NIHO support");
   });
 });

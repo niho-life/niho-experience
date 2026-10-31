@@ -1,4 +1,5 @@
 export {
+  BookingMessagesClosedError,
   BookingUnavailableError,
   GuestCheckoutError,
   StoreAccessDeniedError,
@@ -21,6 +22,7 @@ export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export {
   cancelApprovalDeadlineReminders,
   enqueueApprovalDeadlineReminders,
+  enqueueBookingMessageNotification,
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueCancellationNotification,
@@ -28,6 +30,7 @@ export {
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
+  parseBookingMessagePayload,
   parseCancellationPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
@@ -35,6 +38,7 @@ export {
 } from "./host-notification-outbox.ts";
 export type {
   ApprovalDeadlinePayload,
+  BookingMessagePayload,
   CancellationPayload,
   ClaimedHostNotification,
   GuestMessagePayload,
@@ -46,18 +50,26 @@ export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NO
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
 export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
 export type {
+  ClaimedBookingMessage,
   ClaimedGuestQuestionReply,
+  ClaimedQuestionReply,
+  GuestBookingThreadStart,
   GuestQuestionDeliveryOutcome,
   GuestQuestionDeliveryStatus,
   GuestQuestionLanguage,
   GuestQuestionMessage,
+  GuestQuestionMessageSource,
   GuestQuestionReplyLink,
   GuestQuestionThread,
+  GuestQuestionThreadBooking,
   GuestQuestionThreadPage,
   GuestQuestionThreadSummary,
   GuestQuestionTopic,
+  GuestThreadKind,
   SubmitGuestQuestionInput,
 } from "./guest-questions.ts";
+export { GuestBookingMessages } from "./booking-messages.ts";
+export type { GuestBookingConversation, GuestBookingMessage, SendGuestBookingMessageInput } from "./booking-messages.ts";
 export { GUEST_MAIL_LIMITS, GUEST_MAIL_TOPIC, GuestMailOutbox } from "./guest-mail-outbox.ts";
 export { GUEST_TRANSLATION_LIMITS, GUEST_TRANSLATION_TOPIC, GuestQuestionTranslations } from "./guest-question-translations.ts";
 export type { ClaimedGuestTranslation, GuestTranslationClaim, GuestTranslationRetry } from "./guest-question-translations.ts";

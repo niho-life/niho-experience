@@ -4,9 +4,17 @@ import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "../src/errors.ts";
-import { GuestQuestionRepository, type SubmitGuestQuestionInput } from "../src/guest-questions.ts";
+import { GuestQuestionRepository, type ClaimedQuestionReply, type SubmitGuestQuestionInput } from "../src/guest-questions.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
+
+/** Replies to questions only: each carries its reply link. */
+async function claimQuestions(questions: GuestQuestionRepository, options: { limit: number; leaseSeconds: number; linkTtlDays: number }): Promise<ClaimedQuestionReply[]> {
+  return (await questions.claimReplyDeliveries(options)).map((reply) => {
+    assert.equal(reply.kind, "QUESTION");
+    return reply as ClaimedQuestionReply;
+  });
+}
 const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
 const ownerB = { providerId: "provider-b", nihoUserId: "owner-b" } as const;
 
@@ -241,7 +249,7 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       const threadId = await threadIdFor(pool, "tea", "guest@example.com");
       const sent = await questions.reply(ownerA, threadId, { english: "Yes, we can.", japanese: "はい。", commandId: randomUUID() });
 
-      const [claimed, ...others] = await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
+      const [claimed, ...others] = await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
       assert.equal(others.length, 0);
       assert.ok(claimed);
       assert.equal(claimed.messageId, sent.id);
@@ -266,18 +274,18 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       await assertOutboxCarriesIdsOnly(pool);
 
       // Leased: nobody else takes it until the lease runs out, then it is tried again with a new link.
-      assert.deepEqual(await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 }), []);
+      assert.deepEqual(await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 }), []);
       await pool.query("UPDATE guest_question_messages SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", [sent.id]);
-      const [again] = await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
+      const [again] = await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
       assert.equal(again?.messageId, sent.id);
       assert.equal(again?.attempt, 2);
       assert.notEqual(again?.replyToken, claimed.replyToken);
 
       // RETRY waits before the next try; SENT stays SENT.
       assert.equal(await questions.recordReplyDelivery(sent.id, "RETRY"), "PENDING");
-      assert.deepEqual(await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 }), []);
+      assert.deepEqual(await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 }), []);
       await pool.query("UPDATE guest_question_messages SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", [sent.id]);
-      assert.equal((await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 }))[0]?.attempt, 3);
+      assert.equal((await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 }))[0]?.attempt, 3);
       assert.equal(await questions.recordReplyDelivery(sent.id, "SENT"), "SENT");
       assert.equal(await questions.recordReplyDelivery(sent.id, "SENT"), "SENT");
       assert.equal(await questions.recordReplyDelivery(sent.id, "RETRY"), "SENT");
@@ -286,16 +294,16 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
 
       // FAILED is final; so is a last attempt whose lease ran out.
       const failing = await questions.reply(ownerA, threadId, { english: "One more thing.", japanese: null, commandId: randomUUID() });
-      await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
+      await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
       assert.equal(await questions.recordReplyDelivery(failing.id, "FAILED"), "FAILED");
       const exhausted = await questions.reply(ownerA, threadId, { english: "And another.", japanese: null, commandId: randomUUID() });
       await pool.query("UPDATE guest_question_messages SET delivery_status = 'SENDING', delivery_attempts = 5, lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", [exhausted.id]);
-      assert.deepEqual(await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 }), []);
+      assert.deepEqual(await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 }), []);
       assert.equal((await questions.getThread(ownerA, threadId)).messages.at(-1)?.deliveryStatus, "FAILED");
 
       await assert.rejects(() => questions.recordReplyDelivery(randomUUID(), "SENT"), StoreNotFoundError);
       await assert.rejects(() => questions.recordReplyDelivery(sent.id, "LOST" as never), StoreValidationError);
-      await assert.rejects(() => questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 31 }), StoreValidationError);
+      await assert.rejects(() => claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 31 }), StoreValidationError);
     });
   });
 
@@ -305,7 +313,7 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       const threadId = await threadIdFor(pool, "tea", "guest@example.com");
       await questions.markThreadRead(ownerA, threadId);
       await questions.reply(ownerA, threadId, { english: "Yes, we can.", japanese: "はい、できます。", commandId: randomUUID() });
-      const [claimed] = await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
+      const [claimed] = await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 });
       assert.ok(claimed);
 
       const link = await questions.openReplyLink(claimed.replyToken);
@@ -347,7 +355,7 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
 
       // An expired link neither opens nor takes an answer; an unknown one is not found.
       await questions.reply(ownerA, threadId, { english: "Glad to help.", japanese: null, commandId: randomUUID() });
-      const [later] = await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 1 });
+      const [later] = await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 1 });
       assert.ok(later);
       await pool.query("UPDATE guest_question_reply_tokens SET created_at = created_at - interval '2 days', expires_at = expires_at - interval '2 days' WHERE used_at IS NULL");
       assert.equal(await questions.openReplyLink(later.replyToken), null);
@@ -367,7 +375,7 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       const recent = await threadIdFor(pool, "tea", "recent@example.com");
       await questions.reply(ownerA, old, { english: "Yes, we can.", japanese: null, commandId: randomUUID() });
       await questions.reply(ownerA, recent, { english: "Of course.", japanese: null, commandId: randomUUID() });
-      assert.equal((await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 })).length, 2);
+      assert.equal((await claimQuestions(questions, { limit: 10, leaseSeconds: 60, linkTtlDays: 14 })).length, 2);
       // The old threads' last messages were 400 and 500 days ago; the recent one's 300 days ago.
       await pool.query("UPDATE guest_question_threads SET last_message_at = clock_timestamp() - interval '400 days' WHERE id = $1", [old]);
       await pool.query("UPDATE guest_question_threads SET last_message_at = clock_timestamp() - interval '500 days' WHERE id = $1", [older]);

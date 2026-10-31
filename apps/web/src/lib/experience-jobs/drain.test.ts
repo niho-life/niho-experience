@@ -8,7 +8,9 @@ import type {
   BookingNoticeEmail,
   ClaimedBookingConfirmation,
   ClaimedBookingLink,
+  ClaimedBookingMessage,
   ClaimedGuestQuestionReply,
+  ClaimedQuestionReply,
   ClaimedGuestTranslation,
   GuestTranslationClaim,
   RefundStatus,
@@ -29,10 +31,20 @@ const SITE = "https://experience.example";
 const NOW = new Date("2026-11-01T00:00:00.000Z");
 const TOKEN = "sampleTokenAbcdefghijklmnopqrstuvwxyz0123456";
 
-const replyFor = (n: number): ClaimedGuestQuestionReply => ({
+const replyFor = (n: number): ClaimedQuestionReply => ({
+  kind: "QUESTION",
   messageId: `00000000-0000-4000-8000-00000000000${n}`, providerId: "provider-a", threadId: "00000000-0000-4000-8000-0000000000aa",
   guestEmail: `guest${n}@example.com`, guestName: `Sample Guest ${n}`, guestLanguage: "EN", experienceTitle: "Synthetic tea ceremony",
   hostDisplayName: "Sample Host", english: "Yes, we can.", replyToken: `${TOKEN.slice(0, -1)}${n}`, replyLinkExpiresAtUtc: "2026-11-15T00:00:00.000Z", attempt: 1,
+});
+
+/** A host message about a booking made on this site (#285 slice 6b): no reply link of its own. */
+const bookingMessageFor = (n: number): ClaimedBookingMessage => ({
+  kind: "BOOKING",
+  messageId: `00000000-0000-4000-8000-00000000020${n}`, providerId: "provider-a", threadId: "00000000-0000-4000-8000-0000000000bb",
+  guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`, guestLanguage: "EN", experienceTitle: "Synthetic walk",
+  hostDisplayName: "Sample Host", english: "See you at the station.", attempt: 1,
+  publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
 });
 
 const facts = (n: number): BookingConfirmationEmail => ({
@@ -277,6 +289,34 @@ describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => 
     expect(counts.bookingAccessPurge).toEqual({ purged: 0 });
     expect(access.purgeExpiredAccess).toHaveBeenCalledWith({ limit: EXPERIENCE_JOB_LIMITS.accessPurgedPerStep });
     expect(JSON.stringify(counts)).not.toContain(GRANT);
+  });
+
+  it("emails a host message about a booking with the host's English and a fresh grant to the booking page, never a reply link (#285 slice 6b)", async () => {
+    const access = withAccess();
+    s.questions.claimReplyDeliveries.mockImplementation(oneAtATime<ClaimedGuestQuestionReply>([bookingMessageFor(1), replyFor(2)]));
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.questionReplies).toEqual({ claimed: 2, sent: 2, retried: 0, failed: 0 });
+    expect(access.issueBookingAccessGrant).toHaveBeenCalledWith(bookingMessageFor(1).publicBookingId);
+    expect(s.sent[0]!.to).toBe("booker1@example.com");
+    expect(s.sent[0]!.subject).toBe("Sample Host sent you a message about your booking: Synthetic walk, Sat 14 Nov 2026 10:00");
+    expect(s.sent[0]!.text).toContain("See you at the station.");
+    expect(s.sent[0]!.text).toContain(`${SITE}/bookings/open#g=${GRANT}`);
+    expect(s.sent[0]!.text).not.toContain("/questions/reply");
+    // The reply to a question keeps its own one-time link.
+    expect(s.sent[1]!.text).toContain(`${SITE}/questions/reply#t=${replyFor(2).replyToken}`);
+    expect(s.questions.recordReplyDelivery.mock.calls).toEqual([[bookingMessageFor(1).messageId, "SENT"], [replyFor(2).messageId, "SENT"]]);
+    expect(JSON.stringify(counts)).not.toContain(GRANT);
+  });
+
+  it("emails a host message about a booking without a link while the page is off or no grant can be issued", async () => {
+    s.questions.claimReplyDeliveries.mockResolvedValueOnce([bookingMessageFor(1)]);
+    await runExperienceJobs(s.deps);
+    expect(s.sent[0]!.text).not.toContain("/bookings/open");
+    expect(s.sent[0]!.text).toContain("Replying to this email reaches NIHO support, not Sample Host.");
+    withAccess(null);
+    s.questions.claimReplyDeliveries.mockResolvedValueOnce([bookingMessageFor(2)]);
+    await runExperienceJobs(s.deps);
+    expect(s.sent[1]!.text).not.toContain("/bookings/open");
   });
 
   it("sends the confirmation without a link while the page is off or no grant can be issued", async () => {

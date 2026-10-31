@@ -1456,7 +1456,8 @@ export class GuestBookingRepository {
    * now − 1 year comes with the mail worker (#285 slice 5). A booking whose refund is not settled (Stripe
    * has not answered, or it failed and support has not closed it) or whose "Ask to cancel" is still open
    * keeps its guest too (#285 slice 7); with the guest go the host's cancellation note and support's words
-   * to the guest. Disputes join the exclusion when they exist.
+   * to the guest, and the booking's messages with the host (its thread, #285 slice 6b). Disputes join the
+   * exclusion when they exist.
    */
   async eraseGuestData(options: { readonly endedBefore: string; readonly limit?: number }): Promise<number> {
     assertCanonicalInstant(options.endedBefore, "endedBefore");
@@ -1498,6 +1499,11 @@ export class GuestBookingRepository {
          UPDATE booking_cancellation_requests q SET decline_message=NULL
            FROM erased e
           WHERE q.provider_id=e.provider_id AND q.booking_id=e.booking_id AND q.decline_message IS NOT NULL
+       ), threads AS (
+         -- The booking's messages with the host (#285 slice 6b): the thread and every message go (ON DELETE CASCADE).
+         DELETE FROM guest_question_threads t
+          USING erased e
+          WHERE t.provider_id=e.provider_id AND t.booking_id=e.booking_id
        )
        SELECT count(*)::int AS erased FROM erased`,
       [options.endedBefore, limit],

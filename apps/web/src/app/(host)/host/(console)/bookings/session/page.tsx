@@ -73,7 +73,7 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
           now={site.now}
           conversations={[]}
           providerId={linkProviderId}
-          site={{ besideNiho, providerId: provider.id }}
+          site={{ besideNiho, providerId: provider.id, messages: site.messages }}
         />
       );
     }

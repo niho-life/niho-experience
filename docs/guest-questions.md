@@ -2,6 +2,8 @@
 
 Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現行設計。オーナー決定（2026-10-31）により、質問と返信は NIHO（niho-app）ではなく experience DB（`packages/experience-store`、migration `0022_guest_questions.sql`）に置く。旧 `journey.ts` の仮契約（質問を NIHO が持つ前提）は、画面が読む応答の形だけを引き継ぐ。
 
+予約者とホストの予約ごとのメッセージ（#285 第6段の続き・6b）も同じ表に置く（`0032`、予約 1 件につきスレッド 1 つ）。予約のスレッドは名前・アドレス・話題を持たず、予約者の記録から読む。設計は [guest-booking.md](guest-booking.md) の「予約ごとのメッセージ（第6段の続き）」。下の訳・push・メール・消去の規則のうち、予約のスレッドで違うところはそちらに書く。
+
 ## 流れ
 
 1. **質問**：旅行者が体験ページの「Ask the host」から、話題・本文・名前・メールアドレスを送る。ブラウザはこのサイトの `POST /api/public/experiences/{slug}/questions` へ送り、`GuestQuestionRepository.submitQuestion` がスレッドと最初のメッセージ（`SITE_FORM`）と outbox 2 行（翻訳の `guest_question.received` と、ホストへの push の `host.notify.guest_question`。下の「ホストへの通知」「翻訳」）を1トランザクションで作る。PUBLISHED の商品がちょうど1件ある slug だけ受け付ける（slug は provider ごとの一意なので、複数の provider が同じ slug を公開していると受け付けない）。
@@ -35,7 +37,7 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 ## データの境界
 
 - 旅行者のメールアドレスは experience DB の `guest_question_threads` と、メール job が `claimReplyDeliveries` で受け取る値にだけある。ホストの画面・ホスト向け API・outbox・ログ・計測・URL には出さない。メール job の応答とログは件数だけ。
-- 質問は最後のメッセージから 1 年でスレッドごと消す（オーナー決定 2026-10-31）。メール job が毎回 `eraseInactiveThreads`（1 回 200 件まで）を呼ぶ。メッセージと返信リンクは ON DELETE CASCADE で一緒に消え、ID だけの outbox の行は残る。
+- 質問は最後のメッセージから 1 年でスレッドごと消す（オーナー決定 2026-10-31）。メール job が毎回 `eraseInactiveThreads`（1 回 200 件まで）を呼ぶ。予約のスレッド（6b）はこれで消さず、予約者の情報の消去（`eraseGuestData`、体験の 1 年後）と一緒に消える。メッセージと返信リンクは ON DELETE CASCADE で一緒に消え、ID だけの outbox の行は残る。
 - outbox の payload は `{ threadId, messageId }` だけ（ホストの push の行は体験名と版 `v` も持つ）。名前・アドレス・本文は入れない。
 - 返信ページの token は 32 byte の乱数（base64url）。DB には SHA-256 だけを置き、生の token はメール（URL の fragment）にしか無い。fragment はサーバー・Referer に送られない。ページは `referrer: no-referrer`・noindex で、`/questions/*` は no-store。Umami の送信前処理はこのページを送らない。
 - 公開の route は Origin がこのサイトのものでない POST を 403 で拒み（Sec-Fetch-Site を送るブラウザは same-origin であること）、16 KB を超える本文を 413 で拒む。本文・token はログに出さない。
@@ -68,7 +70,8 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 - migration は無い。runtime role の権限も増えない（`outbox_messages` と `guest_question_messages` の INSERT・UPDATE は既にある）。
 - **配備時の作業（この PR では行わない）**：Anthropic Console で experience 専用の workspace と API key を作り、Secret Manager に `EXPERIENCE_ANTHROPIC_API_KEY` として置いて実行環境へ数値 version で配線する（ほかの秘密と同じ）。workspace に利用上限を設ける。旅行者向けのプライバシー表示に Anthropic への送信を足す。
 - mock mode は今までどおり合成の質問と画面だけを使い、DB に触れない。
-- `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` が有効な環境では、`/host/messages` は今までどおり NIHO の予約メッセージ（`HostLiveBookings`）を出す。そこではホストが質問を読めないので、`EXPERIENCE_GUEST_QUESTIONS_ENABLED` も効かない（旅行者の「Ask the host」も出さない）。質問と予約メッセージを同じ画面に並べるのは、予約の正本を移すとき（#285 のスライス 8）に行う。
+- `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` が有効な環境では、`/host/messages` は今までどおり NIHO の予約メッセージ（`HostLiveBookings`）を出す。そこではホストが質問を読めないので、`EXPERIENCE_GUEST_QUESTIONS_ENABLED` も効かない（旅行者の「Ask the host」も出さない）。このサイトで受けた予約のメッセージ（6b）は、題の下の知らせから `?source=site` で開く（[guest-booking.md](guest-booking.md)）。
+- 予約のスレッド（6b）は予約ページ（`EXPERIENCE_GUEST_BOOKING_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED`）が開いているときに出る。質問の flag と片方だけが開いているときは、`/host/messages` はその種類のスレッドだけを出す。
 
 ## 次のスライスで足すもの
 

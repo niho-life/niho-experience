@@ -106,3 +106,46 @@ export async function cancelBooking(
   const outcome = typeof body === "object" && body !== null ? (body as Record<string, unknown>).outcome : undefined;
   return typeof outcome === "string" && OUTCOMES.has(outcome) ? { kind: "done", outcome: outcome as BookingCancelOutcome } : { kind: "failed" };
 }
+
+/** What the guest may write to the host in one message (the store's GUEST_QUESTION_LIMITS.guestMessageMaxLength). */
+export const BOOKING_MESSAGE_MAX_LENGTH = 1000;
+
+export type BookingMessageResult =
+  | { kind: "sent" }
+  /** The booking takes no more messages (cancelled, or 30 days after the experience): the history stays. */
+  | { kind: "closed" }
+  /** 10 messages an hour: try again after `retryAfterSeconds`. */
+  | { kind: "limited"; retryAfterSeconds: number }
+  /** An empty or too long message. */
+  | { kind: "invalid" }
+  /** The key was used with other words: the page starts the message again with a new key. */
+  | { kind: "conflict" }
+  /** The session no longer opens this booking: the page shows its neutral state again. */
+  | { kind: "signedOut" }
+  /** No answer, or a server failure: whether it went through is unknown; sending the same words with the same key is safe. */
+  | { kind: "failed" };
+
+/**
+ * 予約ごとのメッセージ (#285 slice 6b): the guest's message to the host about this booking. `clientRequestKey` is the
+ * page's key for these words, sent again as it is after a lost answer (the same key never sends twice).
+ */
+export async function sendBookingMessage(
+  input: { publicBookingId: string; clientRequestKey: string; message: string },
+  fetchImpl: Fetch = browserFetch,
+): Promise<BookingMessageResult> {
+  const response = await post(fetchImpl, "/api/public/bookings/messages", input, true);
+  if (!response) return { kind: "failed" };
+  if (response.status === 200) return { kind: "sent" };
+  if (response.status === 404) return { kind: "signedOut" };
+  if (response.status === 422) return { kind: "invalid" };
+  if (response.status === 429) {
+    const seconds = Number(response.headers.get("retry-after"));
+    return { kind: "limited", retryAfterSeconds: Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 3600 };
+  }
+  if (response.status === 409) {
+    const body: unknown = await response.json().catch(() => null);
+    const error = typeof body === "object" && body !== null ? (body as Record<string, unknown>).error : undefined;
+    return error === "CLOSED" ? { kind: "closed" } : { kind: "conflict" };
+  }
+  return { kind: "failed" };
+}

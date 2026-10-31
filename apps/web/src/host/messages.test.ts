@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   addReply,
   bookingConversations,
+  bookingOfNewThread,
   emptyThreadFor,
   guestMessageView,
   languageNameJa,
   listTimeLabel,
   messagePreview,
   messagesHref,
+  newBookingThreadId,
   quoteJa,
   replyDraftState,
   sortThreads,
@@ -80,6 +82,16 @@ describe("the threads", () => {
     expect(messagesHref()).toBe("/host/messages");
     expect(messagesHref({ thread: "th-3012" })).toBe("/host/messages?thread=th-3012");
     expect(messagesHref({ providerId: "sample-provider-kitchen", booking: "bk-2044" })).toBe("/host/messages?providerId=sample-provider-kitchen&booking=bk-2044");
+    // This site's threads beside NIHO's (#285 slice 6b) keep ?source=site.
+    expect(messagesHref({ providerId: "sample-provider-kitchen", source: "site", thread: "th-1" })).toBe("/host/messages?providerId=sample-provider-kitchen&source=site&thread=th-1");
+  });
+
+  it("names this site's booking without a thread by an id only that booking reads back (#285 slice 6b)", () => {
+    const booking = "0F8FAD5B-D9CB-469F-A165-708677289501";
+    const id = newBookingThreadId(booking);
+    expect(id).toBe("new-booking-0f8fad5b-d9cb-469f-a165-708677289501");
+    expect(bookingOfNewThread(id)).toBe(booking.toLowerCase());
+    for (const other of ["00000000-0000-4000-8000-000000000106", "th-bk-2044", "new-booking-../admin", "new-booking-"]) expect(bookingOfNewThread(other)).toBeNull();
   });
 });
 
