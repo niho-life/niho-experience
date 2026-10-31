@@ -1,6 +1,6 @@
 # Google専用予定writerのHTTP protocol
 
-更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 と Issue #302 で同一lease内のGoogle/Airbnb typed receiptとその現在権威検証を追加し、Issue #306 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Issue #307 では typed receipt が確認した既知の伝播不一致を最大60分GET-onlyで追うbackend待機状態とclaim連携を追加し、Issue #308でそのclaim marker、worker caller、native observer、typed result journalをdefault-offで接続した。Issue #315 で検証済みinactive bindingをOWNERが明示的にactive化するdefault-off backendを追加した。Google/Airbnbへの本番実接続と本番有効化は未完了である。
+更新日：2026-10-31。Issue #270 で HTTP 境界に加え、既存 `ChannelRuntime` の job/lease/preflight を正本とする専用binding、永続配送journal、server executor、内部配送API、GET-only再照合を実装した。Issue #273 で OTA worker からこの内部配送APIだけを呼ぶ caller を接続した。Issue #275 で OWNER 本人が専用calendarを1個作成し、inactive bindingとして保存するdefault-off backendを追加した。Issue #278 でそのinactive calendarへ決定的な初期anchorを最大1回insertし、結果不明時をGET-onlyで照合するdefault-off backendを追加した。PR #291 と Issue #302 で同一lease内のGoogle/Airbnb typed receiptとその現在権威検証を追加し、Issue #306 で後続leaseが現在intentをGET-onlyで再証明するserver operation `observe` を追加した。Airbnbの読取り専用observerはPR #301で別途実装・単体実サイト検証済みである。Issue #307 では typed receipt が確認した既知の伝播不一致を最大60分GET-onlyで追うbackend待機状態とclaim連携を追加し、Issue #308でそのclaim marker、worker caller、native observer、typed result journalをdefault-offで接続した。Issue #315 で検証済みinactive bindingをOWNERが明示的にactive化するdefault-off backendを追加し、Issue #317でこの既存command群を回の詳細から一操作ずつ進めるOWNER専用UIとread-only optionsを追加した。Google/Airbnbへの本番実接続と本番有効化は未完了である。
 
 公式根拠：
 
@@ -122,8 +122,16 @@ transactionはprovider inventory mutexを最初に取り、Airbnb account/listin
 
 このbatchにUI、deactivation、本番flag有効化、NIHOapp変更は含めない。停止は既存admin pauseを使い、activation成功だけでAirbnb同期済みとは表示しない。
 
+### Issue #317 のOWNER setup UI
+
+`GET /host/calendar/google-output/options` はactivationと同じdefault-off gateで閉じ、provider/product/occurrenceを一つずつ受ける。fresh MEMBER OWNERとExperience側の現在OWNERを確認し、provider inventory mutex内で、対象商品のactiveな数値Airbnb/GOOGLE/`airbnb-google-busy@1` listingとlive canonical occurrenceだけを選ぶ。Google接続がないOWNERにも候補と既存OAuth導線を返すが、別OWNERが作成した接続は403にする。GETはdesired、binding、journalを作成せず、外部account/product ID、calendar ID、credential、scope、nonce、actor IDを返さない。
+
+候補DTOは内部listing ID、表示用account名、現在mapping、canonical local date、完全一致する既存desired versionだけを含む。復元用には、同じactorの未解決setup/anchor command IDと、そのcommandが保存した元mapping/desired versionだけを追加する。UIは既存setup/anchor GETのcommand IDと一致した場合だけ、元versionで`cancel_preparing`または`inspect`を送る。現在値から古いcommand入力を作り直さない。
+
+回の既存native dialog内に「Airbnb連携」を折りたたみ、OWNER以外はoptions自体を取得しない。候補選択、Google OAuth、calendar準備、anchor準備、固定Airbnb週URL、接続確認checkbox、activationを一操作ずつ分ける。mutating HTTPはsingle-flight、45秒deadlineとし、不明ACK後は新commandを自動再送せずGETだけで確認する。読取りは15秒で打ち切る。再読取りは候補と現在versionも取得し直し、選択したlistingを維持して接続確認checkboxを外す。Google未接続ではsetup/anchor/activation GETを先行させずOAuth導線を出す。準備中は同じ回の日時変更・受付開閉も止め、通信断後はdialogを閉じられる状態へ戻す。activationの`APPLIED`はGETで`ACTIVE`を読めるまで「連携中」にしない。`ACTIVE`は接続設定だけを表し、通常のchannel statusを「反映済み」へ上書きしない。
+
 実DBを使う結合testは、実 `ChannelRuntime` / repository / `applyGoogleManagedBlock` / `inspectGoogleManagedBlock` と合成fetchを接続し、ACK喪失、duplicate write抑止、stop-confirmed OBSERVEからのGET-only再照合、binding/desired失効、operation fencing、cross-provider calendar衝突を永続状態とwrite回数で確認する。token refresh/configだけを合成注入し、実Google・実Airbnb・実credentialは使わない。helperにはlocalhostでzero-byte ACK bodyの10秒deadlineを確認するtestもあるが、socket listenを禁止するsandboxではその1件を実行できない。
 
-現在実装済みなのは、setup/anchor/activationのdefault-off backend、Google writerとfresh GET、Airbnb observer・typed receipt・永続待機・worker caller・ホストの短い状態表示である。未接続・未受入は、専用calendarの本番provisioning、Google同意とAirbnb側接続、OAuth/setup/activation UI、本番flag、PWAから実GoogleとAirbnbを通す停止・再開・復元、伝播の実測である。Airbnbを直接読む単独pilotは#301で確認済みだが、Google変更による反映を証明するものではない。NIHOapp Draftと既存daemon/runtime configは変更していない。
+現在実装済みなのは、setup/anchor/activationのdefault-off backendとOWNER専用UI、Google writerとfresh GET、Airbnb observer・typed receipt・永続待機・worker caller・ホストの短い状態表示である。未接続・未受入は、専用calendarの本番provisioning、Google同意とAirbnb側接続、本番flag、PWAから実GoogleとAirbnbを通す停止・再開・復元、伝播の実測である。Airbnbを直接読む単独pilotは#301で確認済みだが、Google変更による反映を証明するものではない。NIHOapp Draftと既存daemon/runtime configは変更していない。
 
 Airbnb制御用のGoogle書出しcalendarはbooking/provider busy/resource busy入力から除外し、自己書込による永久busy循環を防ぐ。Google専用calendarをAirbnb対象listingへ実接続できること、実GoogleとAirbnbを通すtyped acceptance、PWA通し、停止・再開それぞれの最大60分伝播実測は別受入である。NIHOapp Draftと本番flagは変更していない。したがって本変更は#239の一部であり、#239 / #201 / #194を完了させない。
