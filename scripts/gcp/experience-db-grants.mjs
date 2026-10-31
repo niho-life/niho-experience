@@ -11,9 +11,12 @@ const ID = ["INSERT", "DELETE"];
 const IUD = ["INSERT", "UPDATE", "DELETE"];
 
 export const RUNTIME_TABLE_GRANTS = Object.freeze({
+  // DELETE: the mail job removes grants and sessions that can no longer open or read a booking.
+  booking_access_grants: { write: IUD },
   booking_guests: { write: IU },
   booking_inventory_snapshots: { write: I },
   booking_resource_occupancies: { write: I },
+  booking_sessions: { write: IUD },
   bookings: { write: IU },
   calendar_commands: { write: I, updateColumns: ["created_at"] },
   calendar_outbox_events: { write: IU },

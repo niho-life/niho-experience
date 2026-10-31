@@ -11,7 +11,8 @@ export function readReturnType(value: string | string[] | undefined): BookingRet
 type Step = { icon: HandIconName; title: string; text: string };
 
 /**
- * What happens after payment, for both senders: NIHO (its own bookings) and this site (experiences it sells, #285 slice 5).
+ * What happens after payment, for both senders: NIHO (its own bookings) and this site (experiences it sells, #285 slice 5;
+ * its email links to the guest's booking page since slice 6, as NIHO's links to its own).
  * The confirmation, the booking status and the emails belong to whichever confirmed the payment, so the words promise only
  * what both do and name neither. This page never says a booking is complete or paid (a return URL proves nothing). It only
  * says what to expect next, and its wording may follow the kind of booking (a fixed word on the URL, never free text, so
@@ -27,7 +28,7 @@ export function BookingReturn({ type, showReview }: { type: BookingReturnType | 
       ? "Your confirmation comes by email once your payment goes through."
       : "We email you about your booking. If the host needs to approve your request, the email says so.";
   const steps: Step[] = [
-    { icon: "mail", title: approval ? "An email about your request" : "Your confirmation email", text: approval ? "It tells you the request is with the host. Another follows when they answer." : "The experience, the date and time, your group and what you paid." },
+    { icon: "mail", title: approval ? "An email about your request" : "Your confirmation email", text: approval ? "It tells you the request is with the host. Another follows when they answer." : "The experience, the date and time, your group, what you paid and a link to your booking." },
     { icon: "pin", title: "Meeting details", text: "Where to meet reaches you before the day." },
     { icon: "cal", title: "Meet your host", text: "On the day, meet your host where the meeting details say." },
     ...(showReview ? [{ icon: "chat" as const, title: "Share how it went", text: "After the experience, we ask how it was." }] : []),

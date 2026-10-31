@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 
 /** The experience mail job's trigger (#285 slice 5) with a synthetic Google identity, pool, mailer and run. */
 const mocks = vi.hoisted(() => ({
   config: {
     guestMailEnabled: true,
+    guestBookingEnabled: true,
     experienceJobsAudience: "https://experience.example/internal/experience-jobs",
     experienceJobsServiceAccountEmail: "experience-jobs@example.iam.gserviceaccount.com",
     siteUrl: "https://experience.example",
@@ -34,16 +35,20 @@ const URL = "https://experience.example/internal/experience-jobs/v1/drain";
 const counts = {
   questionReplies: { claimed: 2, sent: 1, retried: 1, failed: 0 },
   bookingConfirmations: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  bookingLinks: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   guestTranslations: { claimed: 1, translated: 1, retried: 0, failed: 0, closed: 0, abandoned: 0 },
   guestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
+  bookingAccessPurge: { purged: 2 },
 };
 const idle = {
   questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
   bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  bookingLinks: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   guestTranslations: { off: true },
   guestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
+  bookingAccessPurge: { purged: 0 },
 };
 const fakePool = { query: vi.fn(), connect: vi.fn() };
 const fakeMailer = { sendMail: vi.fn(), close: vi.fn() };
@@ -134,6 +139,9 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     const deps = mocks.run.mock.calls[0]![0];
     expect(deps.questions).toBeInstanceOf(GuestQuestionRepository);
     expect(deps.confirmations).toBeInstanceOf(GuestMailOutbox);
+    expect(deps.bookingLinks).toBe(deps.confirmations);
+    // The guest's booking page is on (#285 slice 6): its links go into the emails.
+    expect(deps.access).toBeInstanceOf(GuestBookingAccess);
     expect(deps.guests).toBeInstanceOf(GuestBookingRepository);
     expect(deps.translations).toBeInstanceOf(GuestQuestionTranslations);
     // Translation is off in this configuration: no Claude API.
@@ -144,6 +152,18 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     expect(fakeMailer.close).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledExactlyOnceWith(`[experience-jobs] drain ${JSON.stringify(counts)}`);
     info.mockRestore();
+  });
+
+  it("puts no booking page link in the emails while booking on this site is off", async () => {
+    mocks.config.guestBookingEnabled = false;
+    try {
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      expect((await post()).status).toBe(200);
+      expect(mocks.run.mock.calls[0]![0].access).toBeNull();
+    } finally {
+      mocks.config.guestBookingEnabled = true;
+      vi.mocked(console.info).mockRestore();
+    }
   });
 
   it("logs nothing for a run that found nothing", async () => {
@@ -208,12 +228,14 @@ describe("experienceJobsDrainResponse dependencies", () => {
     expect(await response.json()).toEqual({
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
+      bookingLinks: { error: "unavailable" },
       guestTranslations: { error: "unavailable" },
       guestErasure: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
+      bookingAccessPurge: { error: "unavailable" },
     });
-    expect(pool.connect).toHaveBeenCalledTimes(3);
-    expect(pool.query).toHaveBeenCalledTimes(2);
+    expect(pool.connect).toHaveBeenCalledTimes(4);
+    expect(pool.query).toHaveBeenCalledTimes(3);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();
     expect(mailer.close).toHaveBeenCalledOnce();

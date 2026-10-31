@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BookingConfirmationEmail, ClaimedBookingConfirmation, ClaimedGuestQuestionReply, ClaimedGuestTranslation, GuestTranslationClaim } from "@niho-experience/experience-store";
+import type {
+  BookingAccessGrant,
+  BookingConfirmationEmail,
+  BookingLinkClaim,
+  BookingLinkEmail,
+  ClaimedBookingConfirmation,
+  ClaimedBookingLink,
+  ClaimedGuestQuestionReply,
+  ClaimedGuestTranslation,
+  GuestTranslationClaim,
+} from "@niho-experience/experience-store";
 
 vi.mock("server-only", () => ({}));
 
@@ -42,6 +52,11 @@ function stubs() {
     completeBookingConfirmation: vi.fn(async () => {}),
     retryBookingConfirmation: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
   };
+  const bookingLinks = {
+    claimBookingLinks: vi.fn(async (): Promise<BookingLinkClaim> => ({ links: [], abandoned: 0 })),
+    completeBookingLink: vi.fn(async () => {}),
+    retryBookingLink: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
+  };
   const guests = { eraseGuestData: vi.fn(async () => 0) };
   const translations = {
     claimTranslations: vi.fn(async (): Promise<GuestTranslationClaim> => claimOf([])),
@@ -58,8 +73,8 @@ function stubs() {
     close: vi.fn(),
   };
   const onStepError = vi.fn();
-  const deps: ExperienceJobDeps = { questions, confirmations, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
-  return { deps, questions, confirmations, guests, translations, mailer, sent, results, onStepError };
+  const deps: ExperienceJobDeps = { questions, confirmations, bookingLinks, access: null, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
+  return { deps, questions, confirmations, bookingLinks, guests, translations, mailer, sent, results, onStepError };
 }
 
 /** A claim that hands out one row per call, as the store does for `limit: 1`. */
@@ -86,9 +101,11 @@ describe("runExperienceJobs", () => {
     expect(counts).toEqual({
       questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
       bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+      bookingLinks: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 0 },
       questionErasure: { erased: 0 },
+      bookingAccessPurge: { off: true },
     });
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: false });
     // One at a time, each claimed just before it is sent: its lease covers that one send only.
@@ -182,9 +199,11 @@ describe("runExperienceJobs", () => {
     expect(counts).toEqual({
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
+      bookingLinks: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 1 },
       questionErasure: { error: "unavailable" },
+      bookingAccessPurge: { off: true },
     });
     expect(s.onStepError.mock.calls).toEqual([["questionReplies", "Error"], ["bookingConfirmations", "TypeError"], ["questionErasure", "RangeError"]]);
     expect(experienceJobActivity(counts)).toEqual({ failed: true, active: true });
@@ -196,6 +215,88 @@ describe("runExperienceJobs", () => {
     s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({ confirmations: [confirmationFor(1)], abandoned: 0 });
     const counts = await runExperienceJobs(s.deps);
     expect(JSON.stringify(counts)).not.toMatch(/example\.com|Sample|sampleToken|tea|walk/i);
+  });
+});
+
+describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => {
+  const GRANT = "sampleGrantAbcdefghijklmnopqrstuvwxyz012345";
+  const linkFacts = (n: number): BookingLinkEmail => ({
+    publicBookingId: facts(n).publicBookingId, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`,
+    experienceTitle: "Synthetic walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+  });
+  const linkFor = (n: number, email: BookingLinkEmail | null = linkFacts(n), attempts = 1): ClaimedBookingLink => ({ id: String(200 + n), attempts, email });
+  function linksOneAtATime(items: ClaimedBookingLink[], abandoned = 0) {
+    let first = true;
+    return async (): Promise<BookingLinkClaim> => {
+      const claim = { links: items.splice(0, 1), abandoned: first ? abandoned : 0 };
+      first = false;
+      return claim;
+    };
+  }
+  function withAccess(grant: BookingAccessGrant | null = { token: GRANT, expiresAtUtc: "2026-12-01T00:00:00.000Z" }) {
+    const access = {
+      issueBookingAccessGrant: vi.fn(async (): Promise<BookingAccessGrant | null> => grant),
+      purgeExpiredAccess: vi.fn(async () => 0),
+    };
+    s.deps = { ...s.deps, access };
+    return access;
+  }
+
+  it("links the confirmation to the booking page with a fresh grant in the URL fragment", async () => {
+    const access = withAccess();
+    s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({ confirmations: [confirmationFor(1)], abandoned: 0 });
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.bookingConfirmations).toMatchObject({ sent: 1 });
+    expect(access.issueBookingAccessGrant).toHaveBeenCalledExactlyOnceWith(facts(1).publicBookingId);
+    expect(s.sent[0]!.html).toContain(">View your booking</a>");
+    expect(s.sent[0]!.text).toContain(`${SITE}/bookings/open#g=${GRANT}`);
+    expect(s.sent[0]!.html).toContain(`href="${SITE}/bookings/open#g=${GRANT}"`);
+    expect(counts.bookingLinks).toEqual({ claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 });
+    expect(counts.bookingAccessPurge).toEqual({ purged: 0 });
+    expect(access.purgeExpiredAccess).toHaveBeenCalledWith({ limit: EXPERIENCE_JOB_LIMITS.accessPurgedPerStep });
+    expect(JSON.stringify(counts)).not.toContain(GRANT);
+  });
+
+  it("sends the confirmation without a link while the page is off or no grant can be issued", async () => {
+    s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({ confirmations: [confirmationFor(1)], abandoned: 0 });
+    await runExperienceJobs(s.deps);
+    expect(s.sent[0]!.text).not.toContain("/bookings/open");
+    expect(s.bookingLinks.claimBookingLinks).not.toHaveBeenCalled();
+    withAccess(null);
+    s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({ confirmations: [confirmationFor(2)], abandoned: 0 });
+    await runExperienceJobs(s.deps);
+    expect(s.sent[1]!.text).not.toContain("/bookings/open");
+    expect(s.sent[1]!.subject).toBe("Your booking is confirmed: Synthetic walk, Sat 14 Nov 2026 10:00");
+  });
+
+  it("emails the links Find your booking asked for, skips what can no longer be opened, and backs off the rest", async () => {
+    const access = withAccess();
+    access.issueBookingAccessGrant.mockResolvedValueOnce({ token: GRANT, expiresAtUtc: "2026-12-01T00:00:00.000Z" }).mockResolvedValueOnce(null);
+    s.bookingLinks.claimBookingLinks.mockImplementation(linksOneAtATime([linkFor(1), linkFor(2), linkFor(3, null), linkFor(4), linkFor(5)], 1));
+    s.results.push({ ok: true }, { ok: false, failure: "transient" });
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.bookingLinks).toEqual({ claimed: 4, sent: 1, skipped: 2, retried: 1, failed: 0, abandoned: 1 });
+    expect(s.bookingLinks.completeBookingLink.mock.calls).toEqual([["201"], ["202"], ["203"]]);
+    expect(s.bookingLinks.retryBookingLink.mock.calls).toEqual([["204", 1]]);
+    // A grant per email; none for a booking the store says can no longer be opened.
+    expect(access.issueBookingAccessGrant.mock.calls).toEqual([[linkFacts(1).publicBookingId], [linkFacts(2).publicBookingId], [linkFacts(4).publicBookingId]]);
+    expect(s.sent.map((message) => message.to)).toEqual(["booker1@example.com", "booker4@example.com"]);
+    expect(s.sent[0]!.subject).toBe("Your booking link: Synthetic walk, Sat 14 Nov 2026 10:00");
+    expect(s.sent[0]!.text).toContain(`${SITE}/bookings/open#g=${GRANT}`);
+    expect(s.sent[0]!.text).toContain("Hi Sample Booker 1,");
+    expect(JSON.stringify(counts)).not.toMatch(/example\.com|Sample|sampleGrant/);
+    expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
+  });
+
+  it("reports the purge and a failed link step without stopping the others", async () => {
+    const access = withAccess();
+    access.purgeExpiredAccess.mockResolvedValueOnce(4);
+    s.bookingLinks.claimBookingLinks.mockRejectedValueOnce(new TypeError("synthetic"));
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.bookingLinks).toEqual({ error: "unavailable" });
+    expect(counts.bookingAccessPurge).toEqual({ purged: 4 });
+    expect(s.onStepError.mock.calls).toEqual([["bookingLinks", "TypeError"]]);
+    expect(experienceJobActivity(counts)).toEqual({ failed: true, active: true });
   });
 });
 

@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ChannelRuntime, ExperienceStore, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -96,6 +96,16 @@ export function guestBookingRepository(): GuestBookingRepository | null {
   if (!config.guestBookingEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
+}
+
+/**
+ * 予約者の予約ページ (#285 slice 6, docs/guest-booking.md): null until both its flags are on (booking on this site
+ * and the mail job that sends the links) and the experience DB is configured.
+ */
+export function guestBookingAccess(): GuestBookingAccess | null {
+  if (!config.guestBookingEnabled || !config.guestMailEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestBookingAccess(pool) : null;
 }
 
 /**

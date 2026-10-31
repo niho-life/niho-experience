@@ -1,11 +1,13 @@
 import type { Pool } from "pg";
+import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import type { DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { GuestCancellationPolicy } from "./types.ts";
 
 /**
- * The booking confirmation emailed to a guest who booked on this site (#285 slice 5, docs/guest-booking.md).
+ * The booking emails to a guest who booked on this site (#285, docs/guest-booking.md): the confirmation
+ * (slice 5) and the link to the booking page "Find your booking" asks for (slice 6, BOOKING_LINK_TOPIC).
  * `confirmBookingPayment` writes `booking.confirmed` to `outbox_messages`; the mail job claims only the rows
  * of guest bookings (those with a `booking_guests` row). Other bookings' rows and every other topic stay
  * untouched, as `HostNotificationOutbox` leaves this topic alone. Like that consumer, there is no lease
@@ -16,6 +18,8 @@ export const GUEST_MAIL_TOPIC = "booking.confirmed";
 export const GUEST_MAIL_LIMITS = {
   /** Claims of one confirmation, the first included. Retries wait 2, 4, 8, 16, 32, 60 and 60 minutes (about 3 hours). */
   confirmationAttempts: 8,
+  /** Claims of one booking link email, the first included: 2, 4, 8 and 16 minutes (the guest is waiting for it). */
+  linkAttempts: 5,
   claimLimitMax: 50,
   leaseSecondsMin: 30,
   leaseSecondsMax: 3600,
@@ -61,6 +65,33 @@ export interface ClaimedBookingConfirmation {
 export interface BookingConfirmationClaim {
   readonly confirmations: readonly ClaimedBookingConfirmation[];
   /** Rows whose last attempt's lease ran out without a report: closed unsent. */
+  readonly abandoned: number;
+}
+
+/** What the email with a link to the booking says ("Find your booking"). The job adds the link's grant. */
+export interface BookingLinkEmail {
+  readonly publicBookingId: string;
+  readonly guestEmail: string;
+  readonly guestName: string;
+  readonly experienceTitle: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+}
+
+/** One claimed BOOKING_LINK_TOPIC row. */
+export interface ClaimedBookingLink {
+  readonly id: string;
+  readonly attempts: number;
+  /**
+   * What to send, or null when the page can no longer be opened: the guest's details were erased, the booking
+   * was cancelled, or the experience ended more than 30 days ago. The job completes such a row unsent.
+   */
+  readonly email: BookingLinkEmail | null;
+}
+
+export interface BookingLinkClaim {
+  readonly links: readonly ClaimedBookingLink[];
   readonly abandoned: number;
 }
 
@@ -132,10 +163,24 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
   };
 }
 
+function linkEmailFromRow(row: DbRow): BookingLinkEmail | null {
+  if ((row.status !== "CONFIRMED" && row.status !== "PAYMENT_REVIEW") || row.link_open !== true || row.guest_email === null || row.guest_name === null) return null;
+  const occurrence = record(row.occurrence_snapshot);
+  return {
+    publicBookingId: text(row.public_booking_id, "public_booking_id"),
+    guestEmail: text(row.guest_email, "guest_email"),
+    guestName: text(row.guest_name, "guest_name"),
+    experienceTitle: text(row.public_title, "public_title"),
+    localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
+    localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
+    timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
+  };
+}
+
 /** bigint ids as text, in numeric order. */
 const byId = (a: { id: string }, b: { id: string }) => a.id.length - b.id.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-/** The mail job's side of `booking.confirmed` for guest bookings. */
+/** The mail job's side of `booking.confirmed` and BOOKING_LINK_TOPIC for guest bookings. */
 export class GuestMailOutbox {
   readonly #pool: Pool;
 
@@ -148,13 +193,57 @@ export class GuestMailOutbox {
    * Concurrent claimers never share a row. A row whose last attempt's lease ran out is closed first.
    */
   async claimBookingConfirmations(options: { limit: number; leaseSeconds: number }): Promise<BookingConfirmationClaim> {
+    const { rows, abandoned } = await this.#claim(GUEST_MAIL_TOPIC, GUEST_MAIL_LIMITS.confirmationAttempts, options);
+    const confirmations = rows
+      .map((row): ClaimedBookingConfirmation => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: emailFromRow(row) }))
+      .sort(byId);
+    return { confirmations, abandoned };
+  }
+
+  /**
+   * Sent, refused for good, or nothing to send: the row is done. A late report after the lease ran out
+   * still closes it, so a confirmation that went out is not sent again by a later claim. Only this
+   * consumer's rows: any other id changes nothing.
+   */
+  async completeBookingConfirmation(id: string): Promise<void> {
+    await this.#complete(GUEST_MAIL_TOPIC, id);
+  }
+
+  /**
+   * A transient failure for the claim counted `attempts`: wait 2^attempts minutes (60 at most), or give up
+   * once the attempts are used up. Once the lease ran out and another run claimed the row, nothing changes.
+   */
+  async retryBookingConfirmation(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(GUEST_MAIL_TOPIC, GUEST_MAIL_LIMITS.confirmationAttempts, id, attempts);
+  }
+
+  /** Up to `limit` due booking link emails ("Find your booking"), as claimBookingConfirmations. */
+  async claimBookingLinks(options: { limit: number; leaseSeconds: number }): Promise<BookingLinkClaim> {
+    const { rows, abandoned } = await this.#claim(BOOKING_LINK_TOPIC, GUEST_MAIL_LIMITS.linkAttempts, options);
+    const links = rows
+      .map((row): ClaimedBookingLink => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: linkEmailFromRow(row) }))
+      .sort(byId);
+    return { links, abandoned };
+  }
+
+  /** As completeBookingConfirmation, for a booking link email. */
+  async completeBookingLink(id: string): Promise<void> {
+    await this.#complete(BOOKING_LINK_TOPIC, id);
+  }
+
+  /** As retryBookingConfirmation, for a booking link email (GUEST_MAIL_LIMITS.linkAttempts). */
+  async retryBookingLink(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(BOOKING_LINK_TOPIC, GUEST_MAIL_LIMITS.linkAttempts, id, attempts);
+  }
+
+  async #claim(topic: string, maxAttempts: number, options: { limit: number; leaseSeconds: number }): Promise<{ rows: DbRow[]; abandoned: number }> {
     const limit = boundedInteger(options?.limit, "limit", 1, GUEST_MAIL_LIMITS.claimLimitMax);
     const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", GUEST_MAIL_LIMITS.leaseSecondsMin, GUEST_MAIL_LIMITS.leaseSecondsMax);
     return withTransaction(this.#pool, async (client) => {
       const abandoned = await client.query(
         `UPDATE outbox_messages m SET processed_at = clock_timestamp()
           WHERE ${GUEST_ROW("m")} AND m.attempts >= $2 AND m.available_at <= clock_timestamp()`,
-        [GUEST_MAIL_TOPIC, GUEST_MAIL_LIMITS.confirmationAttempts],
+        [topic, maxAttempts],
       );
       const claimed = await client.query<DbRow>(
         `WITH due AS (
@@ -172,47 +261,36 @@ export class GuestMailOutbox {
          )
          SELECT c.id::text AS id, c.attempts, b.public_booking_id::text AS public_booking_id, b.status,
                 b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot,
+                (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
                 g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug
            FROM claimed c
            JOIN bookings b ON ${BOOKING_OF("c")}
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
            JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id`,
-        [GUEST_MAIL_TOPIC, GUEST_MAIL_LIMITS.confirmationAttempts, limit, leaseSeconds],
+        [topic, maxAttempts, limit, leaseSeconds, BOOKING_ACCESS_LIMITS.daysAfterExperience],
       );
-      const confirmations = claimed.rows
-        .map((row): ClaimedBookingConfirmation => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: emailFromRow(row) }))
-        .sort(byId);
-      return { confirmations, abandoned: abandoned.rowCount ?? 0 };
+      return { rows: claimed.rows, abandoned: abandoned.rowCount ?? 0 };
     });
   }
 
-  /**
-   * Sent, refused for good, or nothing to send: the row is done. A late report after the lease ran out
-   * still closes it, so a confirmation that went out is not sent again by a later claim. Only this
-   * consumer's rows: any other id changes nothing.
-   */
-  async completeBookingConfirmation(id: string): Promise<void> {
+  async #complete(topic: string, id: string): Promise<void> {
     assertRowId(id);
     await this.#pool.query(
       `UPDATE outbox_messages m SET processed_at = clock_timestamp() WHERE m.id = $2 AND ${GUEST_ROW("m")}`,
-      [GUEST_MAIL_TOPIC, id],
+      [topic, id],
     );
   }
 
-  /**
-   * A transient failure for the claim counted `attempts`: wait 2^attempts minutes (60 at most), or give up
-   * once the attempts are used up. Once the lease ran out and another run claimed the row, nothing changes.
-   */
-  async retryBookingConfirmation(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+  async #retry(topic: string, maxAttempts: number, id: string, attempts: number): Promise<BookingConfirmationRetry> {
     assertRowId(id);
-    boundedInteger(attempts, "attempts", 1, GUEST_MAIL_LIMITS.confirmationAttempts);
+    boundedInteger(attempts, "attempts", 1, maxAttempts);
     const updated = await this.#pool.query<DbRow>(
       `UPDATE outbox_messages m
           SET available_at = CASE WHEN m.attempts < $3 THEN clock_timestamp() + make_interval(mins => LEAST(power(2, m.attempts), 60)::int) ELSE m.available_at END,
               processed_at = CASE WHEN m.attempts < $3 THEN NULL ELSE clock_timestamp() END
         WHERE m.id = $2 AND m.attempts = $4 AND ${GUEST_ROW("m")}
         RETURNING m.processed_at IS NOT NULL AS gave_up`,
-      [GUEST_MAIL_TOPIC, id, GUEST_MAIL_LIMITS.confirmationAttempts, attempts],
+      [topic, id, maxAttempts, attempts],
     );
     const row = updated.rows[0];
     if (!row) return "STALE";

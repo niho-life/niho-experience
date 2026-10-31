@@ -106,7 +106,7 @@ export function AnalyticsSetup({ mode, websiteId }: { mode: "debug" | "off" | "u
       return () => setAnalyticsSink(null);
     }
 
-    if (!shouldStartUmami(websiteId, navigator.doNotTrack)) {
+    if (!shouldStartUmami(websiteId, navigator.doNotTrack, window.location.pathname)) {
       setAnalyticsSink(null);
       return;
     }
