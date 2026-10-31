@@ -209,7 +209,7 @@ export const REVIEW_LIMITS = { bodyMaxLength: 2000, tagMaxLength: 40, displayNam
 export type ExperienceReviewReply = { hostName: string; body: string };
 
 /**
- * 公開してよいレビュー 1 件。予約者だけが書き、NIHO が確認してから公開する（owner 決定 2026-10-22）。
+ * 公開してよいレビュー 1 件。予約者だけが書き、投稿されたらそのまま公開する（NIHO は公開前に確認しない：owner 決定 2026-10-31。2026-10-22 の「確認してから公開」を置き換え）。
  * 表示名は「名＋国・地域」で、姓・メール・予約の識別子は含めない。
  */
 export type ExperienceReview = {

@@ -60,6 +60,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // DELETE: the mail job erases a question a year after its last message; its messages and reply
   // links go by ON DELETE CASCADE, which PostgreSQL runs as the table owner.
   guest_question_threads: { write: IUD },
+  guest_review_invitations: { write: IU },
+  guest_reviews: { write: IU },
   guide_admin_command_receipts: { write: I },
   guide_articles: { write: IU },
   guide_categories: { write: IU },

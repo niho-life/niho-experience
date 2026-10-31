@@ -179,7 +179,7 @@ function validQuestion(input: SubmitGuestQuestionInput): ValidQuestion {
 }
 
 /** A current OWNER, not capped below OWNER by NIHO and not a product operator (as 設定 › 通知). */
-async function requireOwner(client: PoolClient, actor: HostActor): Promise<void> {
+export async function requireOwner(client: PoolClient, actor: HostActor): Promise<void> {
   assertStoreIdentifier(actor.providerId, "actor.providerId");
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
   if (await calendarMembershipRole(client, actor, ["OWNER"]) !== "OWNER") throw new StoreAccessDeniedError();

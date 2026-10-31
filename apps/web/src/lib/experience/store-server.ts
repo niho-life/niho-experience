@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ChannelRuntime, ExperienceStore, GuestBookingRepository, GuestQuestionRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
+import { ChannelRuntime, ExperienceStore, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -82,6 +82,13 @@ export function guestQuestionRepository(): GuestQuestionRepository | null {
   if (!config.guestQuestionsEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestQuestionRepository(pool) : null;
+}
+
+/** 予約者のレビュー (#104/#108): null until its flag is on and the experience DB is configured. */
+export function guestReviewRepository(): GuestReviewRepository | null {
+  if (!config.guestReviewsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestReviewRepository(pool) : null;
 }
 
 /** 旅行者の予約 (#285, docs/guest-booking.md): null until its flag is on and the experience DB is configured. */
