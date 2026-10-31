@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createAirbnbOutputCalendar, GOOGLE_SCOPES, GoogleCalendarError, googleAuthorizationUrl, queryGoogleBusy, queryGoogleBusyByCalendar, refreshGoogleToken, watchGoogleCalendar, writeConfirmedBooking, type GoogleConfig } from "../src/index.ts";
+import { createAirbnbOutputCalendar, GOOGLE_SCOPES, GoogleCalendarError, googleAuthorizationUrl, queryGoogleBusy, queryGoogleBusyByCalendar, refreshGoogleToken, removeBookingEvent, watchGoogleCalendar, writeConfirmedBooking, type GoogleConfig } from "../src/index.ts";
 
 const base = { clientId: "synthetic-client", clientSecret: "synthetic-secret", redirectUri: "https://experience.example.test/host/calendar/google/callback" };
 
@@ -60,16 +60,64 @@ describe("Google Calendar boundary", () => {
     assert.equal("summary" in payload!, false);
   });
 
-  it("uses a stable private event ID and treats a retry conflict as written", async () => {
-    const payloads: Record<string, unknown>[] = [];
-    const grant = config((_url, init) => { payloads.push(JSON.parse(String(init.body))); return new Response(null, { status: 409 }); });
-    const booking = { id: "booking_123", title: "予約", startUtc: "2026-11-01T01:00:00Z", endUtc: "2026-11-01T02:00:00Z" };
+  it("writes a booking under a stable private event ID: updates first, inserts when missing, restores a deleted one", async () => {
+    const events = new Map<string, { status: string; body: Record<string, unknown> }>();
+    const seen: { method: string; url: string; body?: Record<string, unknown> }[] = [];
+    const grant = config((url, init) => {
+      const method = String(init.method);
+      const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      seen.push({ method, url, ...(body ? { body } : {}) });
+      const id = decodeURIComponent(url.split("/events")[1]?.replace(/^\//, "") ?? "");
+      if (method === "PUT") {
+        if (!events.has(id)) return new Response(null, { status: 404 });
+        events.set(id, { status: String(body!.status), body: body! });
+        return Response.json({ id });
+      }
+      if (method === "POST") {
+        if (events.has(String(body!.id))) return new Response(null, { status: 409 });
+        events.set(String(body!.id), { status: "confirmed", body: body! });
+        return Response.json({ id: body!.id });
+      }
+      if (method === "DELETE") {
+        if (!events.has(id) || events.get(id)!.status === "cancelled") return new Response(null, { status: 410 });
+        events.get(id)!.status = "cancelled";
+        return new Response(null, { status: 204 });
+      }
+      return new Response(null, { status: 500 });
+    });
+    const booking = { id: "8d4f5d55-8c5d-4c1d-9c55-0d1f2c3b4a5e", title: "Tea ceremony (2)", startUtc: "2026-11-01T01:00:00Z", endUtc: "2026-11-01T02:00:00Z" };
     const first = await writeConfirmedBooking(grant, "token", "booking-calendar", booking);
-    const second = await writeConfirmedBooking(grant, "token", "booking-calendar", booking);
-    assert.equal(first, second);
     assert.match(first, /^[0-9a-v]{5,1024}$/);
-    assert.equal(payloads[0]?.visibility, "private");
-    assert.equal("attendees" in payloads[0]!, false);
+    assert.deepEqual(seen.map((item) => item.method), ["PUT", "POST"]);
+    const sent = seen[1]!.body!;
+    assert.deepEqual(Object.keys(sent).sort(), ["end", "id", "start", "status", "summary", "transparency", "visibility"]);
+    assert.equal(sent.visibility, "private");
+    assert.deepEqual(sent.start, { dateTime: "2026-11-01T01:00:00.000Z" });
+    assert.equal(await writeConfirmedBooking(grant, "token", "booking-calendar", { ...booking, startUtc: "2026-11-01T03:00:00Z", endUtc: "2026-11-01T04:00:00Z" }), first);
+    assert.deepEqual(events.get(first)!.body.start, { dateTime: "2026-11-01T03:00:00.000Z" });
+    await removeBookingEvent(grant, "token", "booking-calendar", booking.id);
+    await removeBookingEvent(grant, "token", "booking-calendar", booking.id);
+    assert.equal(events.get(first)!.status, "cancelled");
+    assert.equal(await writeConfirmedBooking(grant, "token", "booking-calendar", booking), first);
+    assert.equal(events.get(first)!.status, "confirmed");
+    assert.ok(seen.every((item) => item.url.startsWith("https://www.googleapis.com/calendar/v3/calendars/booking-calendar/events")));
+  });
+
+  it("updates after an insert conflict and maps a refused token to REVOKED", async () => {
+    let puts = 0;
+    const raced = config((url, init) => {
+      if (init.method === "PUT") return (puts += 1) === 1 ? new Response(null, { status: 404 }) : Response.json({ id: url.split("/").at(-1) });
+      return new Response(null, { status: 409 });
+    });
+    const booking = { id: "booking_123", title: "予約", startUtc: "2026-11-01T01:00:00Z", endUtc: "2026-11-01T02:00:00Z" };
+    assert.match(await writeConfirmedBooking(raced, "token", "booking-calendar", booking), /^[0-9a-v]+$/);
+    assert.equal(puts, 2);
+    const wrongId = config(() => Response.json({ id: "someone-else" }));
+    await assert.rejects(writeConfirmedBooking(wrongId, "token", "booking-calendar", booking), (error: unknown) => error instanceof GoogleCalendarError && error.reason === "INVALID_RESPONSE");
+    const refused = config(() => new Response(null, { status: 401 }));
+    await assert.rejects(writeConfirmedBooking(refused, "token", "booking-calendar", booking), (error: unknown) => error instanceof GoogleCalendarError && error.reason === "REVOKED");
+    await assert.rejects(removeBookingEvent(refused, "token", "booking-calendar", booking.id), (error: unknown) => error instanceof GoogleCalendarError && error.reason === "REVOKED");
+    await assert.rejects(writeConfirmedBooking(refused, "token", "booking-calendar", { ...booking, endUtc: booking.startUtc }), TypeError);
   });
 
   it("creates the dedicated Airbnb calendar at the fixed path with only server summary and timezone", async () => {

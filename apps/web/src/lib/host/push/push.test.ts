@@ -31,7 +31,7 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
   it("leaves out what it does not know, and has a title for every kind", () => {
     expect(JSON.parse(hostPushPayload({ providerId: "p", kind: "LISTING_REVIEW", url: "/host/experiences", tag: "listing-1" })).body).toBe("");
     expect(JSON.parse(hostPushPayload({ ...event, startsAt: "not a date", seats: 0 })).body).toBe("Kamakura Community Dinner with Locals");
-    expect(Object.keys(HOST_PUSH_TITLES)).toEqual(["NEW_BOOKING", "APPROVAL_DEADLINE", "CANCELLATION", "GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW", "LISTING_REVIEW"]);
+    expect(Object.keys(HOST_PUSH_TITLES)).toEqual(["NEW_BOOKING", "APPROVAL_DEADLINE", "CANCELLATION", "GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW", "LISTING_REVIEW", "GOOGLE_CALENDAR_ATTENTION"]);
   });
 
   it("carries no names, message text or amounts, even when a caller passes them", () => {

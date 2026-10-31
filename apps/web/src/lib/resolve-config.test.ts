@@ -125,6 +125,29 @@ describe("host console settings", () => {
     expect(() => resolveConfig({ ...push, ...job, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
   });
 
+  it("opens each Google calendar job only in http mode with its flag, the job identity, the DB and the Google client", () => {
+    const google = {
+      EXPERIENCE_API_MODE: "http",
+      EXPERIENCE_GOOGLE_JOBS_AUDIENCE: "https://experience.example/internal/google-calendar",
+      EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL: "google-calendar-job@example.iam.gserviceaccount.com",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+      EXPERIENCE_GOOGLE_CLIENT_ID: "synthetic-client", EXPERIENCE_GOOGLE_CLIENT_SECRET: "synthetic-secret", EXPERIENCE_GOOGLE_TOKEN_KEY: "k".repeat(44),
+    };
+    const off = { googleBusySyncEnabled: false, googleBookingEventsEnabled: false, googleJobsAudience: "", googleJobsServiceAccountEmail: "" };
+    expect(resolveConfig({})).toMatchObject(off);
+    expect(resolveConfig(google)).toMatchObject(off);
+    expect(resolveConfig({ ...google, EXPERIENCE_API_MODE: "mock", EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED: "true" })).toMatchObject(off);
+    expect(resolveConfig({ ...google, EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED: "true" })).toMatchObject({
+      ...off, googleBusySyncEnabled: true,
+      googleJobsAudience: google.EXPERIENCE_GOOGLE_JOBS_AUDIENCE, googleJobsServiceAccountEmail: google.EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL,
+    });
+    expect(resolveConfig({ ...google, EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED: "true" })).toMatchObject({ googleBusySyncEnabled: false, googleBookingEventsEnabled: true });
+    for (const missing of ["EXPERIENCE_GOOGLE_JOBS_AUDIENCE", "EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL", "EXPERIENCE_DATABASE_URL", "EXPERIENCE_GOOGLE_CLIENT_ID", "EXPERIENCE_GOOGLE_TOKEN_KEY"]) {
+      expect(() => resolveConfig({ ...google, EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED: "true", [missing]: "" })).toThrow(new RegExp(missing));
+    }
+    expect(() => resolveConfig({ ...google, EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED: "true", EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL: "job@example.com" })).toThrow(/SERVICE_ACCOUNT_EMAIL/);
+  });
+
   it("allows the labelled development key in mock mode only", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true" }).hostSessionSecret).toBe(DEV_ONLY_HOST_SESSION_SECRET);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http" }).hostSessionSecret).toBe("");

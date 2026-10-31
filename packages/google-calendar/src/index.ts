@@ -178,23 +178,57 @@ export async function createAirbnbOutputCalendar(config: GoogleConfig, accessTok
   return result.id;
 }
 
-function bookingEventId(bookingId: string): string {
+/** The booking calendar's event for one booking: the same ID on every attempt and every connection. */
+export function bookingEventId(bookingId: string): string {
+  if (!bookingId || bookingId.length > 256) throw new TypeError("Invalid booking event");
   return sha256Base32Hex(bookingId);
 }
 
-/** Deterministic Google event ID makes a retried outbox job safe. No guest contact fields. */
-export async function writeConfirmedBooking(config: GoogleConfig, accessToken: string, calendarId: string, booking: { id: string; title: string; startUtc: string; endUtc: string }): Promise<string> {
-  if (!booking.id || !Number.isFinite(Date.parse(booking.startUtc)) || !Number.isFinite(Date.parse(booking.endUtc))) throw new TypeError("Invalid booking event");
+export interface BookingCalendarEvent { id: string; title: string; startUtc: string; endUtc: string }
+
+/**
+ * Writes one confirmed booking to the app-created booking calendar (the `calendar.app.created` scope) under a
+ * deterministic event ID, so a retried job neither duplicates nor loses it. An update first (it also restores an
+ * event deleted earlier, which Google keeps as cancelled under the same ID), then an insert when there is none.
+ * Only the title, the time and the privacy fields are sent: no guest's name, contact or note.
+ */
+export async function writeConfirmedBooking(config: GoogleConfig, accessToken: string, calendarId: string, booking: BookingCalendarEvent): Promise<string> {
+  if (!calendarId || calendarId.length > 512 || !booking.title || booking.title.length > 300
+    || !Number.isFinite(Date.parse(booking.startUtc)) || !Number.isFinite(Date.parse(booking.endUtc))
+    || Date.parse(booking.startUtc) >= Date.parse(booking.endUtc)) throw new TypeError("Invalid booking event");
   const eventId = bookingEventId(booking.id);
-  const path = `/calendars/${encodeURIComponent(calendarId)}/events`;
-  const response = await request(config, `${GOOGLE_API}${path}`, {
-    method: "POST", headers: { authorization: `Bearer ${accessToken}`, accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ id: eventId, summary: booking.title, start: { dateTime: booking.startUtc }, end: { dateTime: booking.endUtc }, visibility: "private", transparency: "opaque" }),
+  const events = `${GOOGLE_API}/calendars/${encodeURIComponent(calendarId)}/events`;
+  const headers = { authorization: `Bearer ${accessToken}`, accept: "application/json", "content-type": "application/json" };
+  const body = {
+    summary: booking.title, start: { dateTime: new Date(booking.startUtc).toISOString() }, end: { dateTime: new Date(booking.endUtc).toISOString() },
+    visibility: "private", transparency: "opaque", status: "confirmed",
+  };
+  const failed = (response: Response) => new GoogleCalendarError(response.status === 401 || response.status === 403 ? "REVOKED" : "UNAVAILABLE");
+  const written = async (response: Response) => {
+    const result = await boundedJson(response);
+    if (result.id !== eventId) throw new GoogleCalendarError("INVALID_RESPONSE");
+    return eventId;
+  };
+  const update = () => request(config, `${events}/${eventId}`, { method: "PUT", headers, body: JSON.stringify(body) });
+  const first = await update();
+  if (first.ok) return written(first);
+  if (first.status !== 404) throw failed(first);
+  const inserted = await request(config, events, { method: "POST", headers, body: JSON.stringify({ id: eventId, ...body }) });
+  if (inserted.ok) return written(inserted);
+  // Another attempt inserted it between the two requests.
+  if (inserted.status !== 409) throw failed(inserted);
+  const again = await update();
+  if (again.ok) return written(again);
+  throw failed(again);
+}
+
+/** Deletes a booking's event (a cancelled booking). One already gone counts as deleted. */
+export async function removeBookingEvent(config: GoogleConfig, accessToken: string, calendarId: string, bookingId: string): Promise<void> {
+  if (!calendarId || calendarId.length > 512) throw new TypeError("Invalid booking event");
+  const eventId = bookingEventId(bookingId);
+  const response = await request(config, `${GOOGLE_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, {
+    method: "DELETE", headers: { authorization: `Bearer ${accessToken}` },
   });
-  // Google returns conflict when a retried outbox job has already written the event.
-  if (response.status === 409) return eventId;
-  if (!response.ok) throw new GoogleCalendarError(response.status === 401 || response.status === 403 ? "REVOKED" : "UNAVAILABLE");
-  const result = await boundedJson(response);
-  if (result.id !== eventId) throw new GoogleCalendarError("INVALID_RESPONSE");
-  return eventId;
+  if (response.ok || response.status === 404 || response.status === 410) return;
+  throw new GoogleCalendarError(response.status === 401 || response.status === 403 ? "REVOKED" : "UNAVAILABLE");
 }

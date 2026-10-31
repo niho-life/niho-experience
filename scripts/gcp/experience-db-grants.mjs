@@ -58,6 +58,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   external_reservation_window_page_receipts: { write: IU },
   external_reservations: { write: IU },
   google_busy_intervals: { write: ID },
+  // What the booking-events job wrote to each booking calendar (#238): claimed, then marked written or absent.
+  google_booking_calendar_events: { write: IU },
   google_channel_activation_commands: { write: I },
   google_channel_anchor_journals: { write: IU },
   google_channel_deliveries: { write: IU },
