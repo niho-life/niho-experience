@@ -11,7 +11,11 @@ import type {
   ClaimedGuestQuestionReply,
   ClaimedGuestTranslation,
   GuestTranslationClaim,
+  RefundStatus,
+  RefundSubmission,
+  StripeRefundAnswer,
 } from "@niho-experience/experience-store";
+import { BOOKING_CANCELLATION_LIMITS } from "@niho-experience/experience-store";
 
 vi.mock("server-only", () => ({}));
 
@@ -70,6 +74,11 @@ function stubs() {
     recordTranslation: vi.fn(async () => true),
     retryTranslation: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
   };
+  const cancellations = {
+    claimRefundsToSend: vi.fn(async (): Promise<RefundSubmission[]> => []),
+    recordRefundSubmission: vi.fn(async (_refundId: string, answer: StripeRefundAnswer): Promise<RefundStatus> => (answer.kind === "rejected" ? "FAILED" : "PENDING")),
+  };
+  const submit = vi.fn<(refund: RefundSubmission) => Promise<StripeRefundAnswer>>(async () => ({ kind: "accepted", stripeRefundRef: "re_test_1", status: "pending" }));
   const sent: MailMessage[] = [];
   const results: MailResult[] = [];
   const mailer = {
@@ -80,8 +89,8 @@ function stubs() {
     close: vi.fn(),
   };
   const onStepError = vi.fn();
-  const deps: ExperienceJobDeps = { questions, confirmations, notices, bookingLinks, access: null, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
-  return { deps, questions, confirmations, notices, bookingLinks, guests, translations, mailer, sent, results, onStepError };
+  const deps: ExperienceJobDeps = { questions, confirmations, notices, bookingLinks, access: null, refunds: null, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
+  return { deps, questions, confirmations, notices, bookingLinks, guests, translations, cancellations, submit, mailer, sent, results, onStepError };
 }
 
 /** A claim that hands out one row per call, as the store does for `limit: 1`. */
@@ -110,6 +119,7 @@ describe("runExperienceJobs", () => {
       bookingConfirmations: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
       bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
       bookingLinks: { off: true },
+      bookingRefunds: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 0 },
       questionErasure: { erased: 0 },
@@ -122,8 +132,10 @@ describe("runExperienceJobs", () => {
     expect(s.guests.eraseGuestData).toHaveBeenCalledWith({ endedBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.questions.eraseInactiveThreads).toHaveBeenCalledWith({ lastMessageBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.mailer.sendMail).not.toHaveBeenCalled();
-    // Translation is off: the store's translation queue is not touched.
+    // Translation is off: the store's translation queue is not touched. Neither are the refunds while resending is off.
     expect(s.translations.claimTranslations).not.toHaveBeenCalled();
+    expect(s.cancellations.claimRefundsToSend).not.toHaveBeenCalled();
+    expect(s.submit).not.toHaveBeenCalled();
   });
 
   it("emails each host reply with its one-time link and records how it went by the failure's class", async () => {
@@ -209,6 +221,7 @@ describe("runExperienceJobs", () => {
       bookingConfirmations: { error: "unavailable" },
       bookingNotices: { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
       bookingLinks: { off: true },
+      bookingRefunds: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 1 },
       questionErasure: { error: "unavailable" },
@@ -418,5 +431,114 @@ describe("the notices of cancellations and refunds (#285 slice 7)", () => {
     expect(s.sent.find((message) => message.to === "notice3@example.com")!.subject).toBe("Your refund is done: Synthetic walk, Sat 14 Nov 2026 10:00");
     expect(s.sent.find((message) => message.to === "notice4@example.com")!.text).toContain("Sample reply from support.");
     expect(JSON.stringify(counts)).not.toMatch(/example\.com|Sample/);
+  });
+});
+
+describe("resending the refunds Stripe has not accepted (#285 slice 7b)", () => {
+  const refundFor = (n: number): RefundSubmission => ({
+    refundId: `00000000-0000-4000-8000-00000000020${n}`, publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728952${n}`, connectedAccountId: "acct_SampleA0001",
+    stripePaymentRef: `pi_sample_${n}`, kind: "FULL", amount: 3000, currency: "JPY", refundApplicationFee: true,
+  });
+  function refundsOneAtATime(items: RefundSubmission[]) {
+    return async (): Promise<RefundSubmission[]> => items.splice(0, 1);
+  }
+  const withRefunds = (): ExperienceJobDeps => ({ ...s.deps, refunds: { cancellations: s.cancellations, submit: s.submit } });
+
+  it("keeps the job's lease equal to the lease support's resend takes in the store", () => {
+    expect(EXPERIENCE_JOB_LIMITS.refundLeaseSeconds).toBe(BOOKING_CANCELLATION_LIMITS.refundSendLeaseSeconds);
+    expect(EXPERIENCE_JOB_LIMITS.refundLeaseSeconds).toBeGreaterThanOrEqual(BOOKING_CANCELLATION_LIMITS.refundLeaseSecondsMin);
+  });
+
+  it("is off without the Stripe key or while booking on this site is off: nothing is claimed", async () => {
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.bookingRefunds).toEqual({ off: true });
+    expect(s.cancellations.claimRefundsToSend).not.toHaveBeenCalled();
+    expect(experienceJobActivity(counts)).toEqual({ failed: false, active: false });
+  });
+
+  it("claims one at a time after a grace period, sends each with the stored refund's own fields, and records Stripe's answer", async () => {
+    s.cancellations.claimRefundsToSend.mockImplementation(refundsOneAtATime([refundFor(1), refundFor(2), refundFor(3)]));
+    s.submit
+      .mockResolvedValueOnce({ kind: "accepted", stripeRefundRef: "re_test_1", status: "pending" })
+      .mockResolvedValueOnce({ kind: "accepted", stripeRefundRef: "re_test_2", status: "succeeded" })
+      .mockResolvedValueOnce({ kind: "rejected", failureCode: "charge_already_refunded" });
+    s.cancellations.recordRefundSubmission.mockResolvedValueOnce("PENDING").mockResolvedValueOnce("SUCCEEDED").mockResolvedValueOnce("FAILED");
+    const counts = await runExperienceJobs(withRefunds());
+    expect(counts.bookingRefunds).toEqual({ claimed: 3, sent: 2, failed: 1, retried: 0 });
+    expect(s.cancellations.claimRefundsToSend).toHaveBeenCalledWith({ limit: 1, olderThanSeconds: 120, leaseSeconds: 120 });
+    expect(s.submit.mock.calls).toEqual([[refundFor(1)], [refundFor(2)], [refundFor(3)]]);
+    expect(s.cancellations.recordRefundSubmission.mock.calls).toEqual([
+      [refundFor(1).refundId, { kind: "accepted", stripeRefundRef: "re_test_1", status: "pending" }],
+      [refundFor(2).refundId, { kind: "accepted", stripeRefundRef: "re_test_2", status: "succeeded" }],
+      [refundFor(3).refundId, { kind: "rejected", failureCode: "charge_already_refunded" }],
+    ]);
+    expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
+    // Counts only: no refund, booking, payment or account.
+    expect(JSON.stringify(counts)).not.toMatch(/0000|0f8fad5b|pi_sample|acct_|re_test/);
+  });
+
+  it("stops the step when Stripe cannot be reached: the rest is not claimed, and the refund is tried again later", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      s.cancellations.claimRefundsToSend.mockImplementation(refundsOneAtATime([refundFor(1), refundFor(2)]));
+      s.submit.mockRejectedValueOnce(Object.assign(new Error("connect ECONNREFUSED pi_sample_1 acct_SampleA0001"), { name: "StripeConnectionError" }));
+      const counts = await runExperienceJobs(withRefunds());
+      expect(counts.bookingRefunds).toEqual({ claimed: 1, sent: 0, failed: 0, retried: 1 });
+      expect(s.cancellations.claimRefundsToSend).toHaveBeenCalledTimes(1);
+      expect(s.cancellations.recordRefundSubmission).not.toHaveBeenCalled();
+      // The log names the step and the error's class, never Stripe's message.
+      expect(log.mock.calls).toEqual([["Experience refund could not be sent", { stage: "stripe", error: "StripeConnectionError" }]]);
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/pi_sample|acct_|ECONNREFUSED/);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("counts an answer Stripe gave but the store could not record as retried, and stops", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      s.cancellations.claimRefundsToSend.mockImplementation(refundsOneAtATime([refundFor(1), refundFor(2)]));
+      s.cancellations.recordRefundSubmission.mockRejectedValueOnce(new Error("synthetic"));
+      const counts = await runExperienceJobs(withRefunds());
+      expect(counts.bookingRefunds).toEqual({ claimed: 1, sent: 0, failed: 0, retried: 1 });
+      expect(s.submit).toHaveBeenCalledTimes(1);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("stops at the per-run limit and when the step's time budget is spent", async () => {
+    s.cancellations.claimRefundsToSend.mockImplementation(async () => [refundFor(1)]);
+    const many = await runExperienceJobs(withRefunds());
+    expect(many.bookingRefunds).toEqual({ claimed: EXPERIENCE_JOB_LIMITS.refunds, sent: EXPERIENCE_JOB_LIMITS.refunds, failed: 0, retried: 0 });
+
+    let clock = NOW.getTime();
+    s.submit.mockImplementation(async () => {
+      clock += EXPERIENCE_JOB_LIMITS.sendBudgetMs;
+      return { kind: "accepted", stripeRefundRef: "re_test_1", status: "pending" };
+    });
+    s.cancellations.claimRefundsToSend.mockClear();
+    const slow = await runExperienceJobs({ ...withRefunds(), now: () => new Date(clock) });
+    expect(slow.bookingRefunds).toEqual({ claimed: 1, sent: 1, failed: 0, retried: 0 });
+    expect(s.cancellations.claimRefundsToSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a store failure as the step's failure by its class only, and the next steps still run", async () => {
+    s.cancellations.claimRefundsToSend.mockRejectedValueOnce(new TypeError("pi_sample_1 synthetic"));
+    s.guests.eraseGuestData.mockResolvedValueOnce(1);
+    const counts = await runExperienceJobs(withRefunds());
+    expect(counts.bookingRefunds).toEqual({ error: "unavailable" });
+    expect(counts.guestErasure).toEqual({ erased: 1 });
+    expect(s.onStepError).toHaveBeenCalledWith("bookingRefunds", "TypeError");
+    expect(s.submit).not.toHaveBeenCalled();
+  });
+
+  it("runs after the mail steps and before translation", async () => {
+    const order: string[] = [];
+    s.confirmations.claimBookingConfirmations.mockImplementation(async () => { order.push("mail"); return { confirmations: [], abandoned: 0 }; });
+    s.cancellations.claimRefundsToSend.mockImplementation(async () => { order.push("refunds"); return []; });
+    s.translations.claimTranslations.mockImplementation(async () => { order.push("translation"); return claimOf([]); });
+    await runExperienceJobs({ ...withRefunds(), translator: vi.fn<Translator>() });
+    expect(order).toEqual(["mail", "refunds", "translation"]);
   });
 });

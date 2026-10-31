@@ -51,6 +51,24 @@ export const BOOKING_CANCELLATION_LIMITS = {
   queueLimitMax: 200,
   /** Bookings one session's cancellation may take. */
   sessionBookingsMax: 500,
+  /**
+   * 返金の自動再送 (#285 slice 7b, migration 0030): the job sends a refund Stripe has not accepted again at most this many
+   * times, waiting 2, 4, 8 … minutes between tries (refundResendBackoffMaxSeconds at most); after that the refund stays
+   * requested for support (the queue shows it as before).
+   */
+  refundAutoSendAttempts: 8,
+  /** The wait after the n-th try is this times 2^n seconds (2, 4, 8 … minutes), at most refundResendBackoffMaxSeconds. */
+  refundResendBackoffBaseSeconds: 60,
+  refundResendBackoffMaxSeconds: 3600,
+  /** Refunds one claim may take. */
+  refundClaimLimitMax: 50,
+  refundLeaseSecondsMin: 30,
+  refundLeaseSecondsMax: 3600,
+  /**
+   * How long support's 「もう一度送る」 holds a refund, so that the job (or a second click) does not send it at the same
+   * time. The same as the job's lease (EXPERIENCE_JOB_LIMITS.refundLeaseSeconds: a test keeps them equal).
+   */
+  refundSendLeaseSeconds: 120,
 } as const;
 
 /** The guest's emails about a cancellation; the mail job sends them (GuestMailOutbox.claimBookingNotices). */
@@ -225,6 +243,11 @@ const LOCK_COMMAND = 47;
 function commandIdOf(value: unknown): string {
   if (typeof value !== "string" || !UUID.test(value)) throw new StoreValidationError("commandId must be a UUID.");
   return value.toLowerCase();
+}
+
+function boundedInteger(value: unknown, path: string, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new StoreValidationError(`${path} must be an integer from ${min} to ${max}.`);
+  return value;
 }
 
 function reasonOf(value: unknown, allowed: readonly CancellationReason[]): CancellationReason {
@@ -978,7 +1001,7 @@ export class BookingCancellations {
       const previous = await previousResult(client, key);
       if (previous) {
         const again = await unsubmittedRefunds(client, commandId);
-        return { ...previous, repeated: true, refunds: again.length > 0 ? again : await this.#requested(client, refundId) };
+        return { ...previous, repeated: true, refunds: again.length > 0 ? again : await this.#leaseRequested(client, refundId) };
       }
       const found = await client.query<DbRow>(
         `SELECT r.id::text AS id, r.kind, r.amount, r.status, r.closed_at, r.requested_by, r.booking_id::text AS booking_id, b.public_booking_id::text AS public_booking_id
@@ -990,7 +1013,7 @@ export class BookingCancellations {
       const bookingIds = [text(row.public_booking_id, "public_booking_id")];
       if (row.status === "REQUESTED") {
         await recordResult(client, key, { outcome: "REFUND_RETRIED", bookingIds });
-        return { outcome: "REFUND_RETRIED", repeated: false, bookingIds, refunds: await this.#requested(client, refundId) };
+        return { outcome: "REFUND_RETRIED", repeated: false, bookingIds, refunds: await this.#leaseRequested(client, refundId) };
       }
       if (row.status !== "FAILED" || row.closed_at !== null) {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
@@ -1097,6 +1120,56 @@ export class BookingCancellations {
     };
   }
 
+  /* ---------- sending refunds again ---------- */
+
+  /**
+   * 返金の自動再送 (#285 slice 7b, migration 0030): for the job, up to `limit` refunds Stripe has not accepted (REQUESTED),
+   * oldest first, to send now. A refund waits `olderThanSeconds` after it was asked for, so the request's own send
+   * goes first; it is then taken for `leaseSeconds` (and a refund the job took before is not taken again until
+   * 2, 4, 8 … minutes have passed, up to an hour), so two runs never hold the same refund, and support's 「もう一度送る」
+   * (which takes the same lease) never sends it at the same time as the job. Each claim counts as an attempt; after
+   * BOOKING_CANCELLATION_LIMITS.refundAutoSendAttempts the job leaves the refund to support, who still sees it in
+   * supportQueue and can send it. Refunds Stripe accepted (PENDING and later) and failed ones are never returned.
+   * The caller sends them (the refund's id is Stripe's idempotency key, so a send that ran twice still refunds once)
+   * and records the answer with recordRefundSubmission.
+   */
+  async claimRefundsToSend(options: { readonly limit: number; readonly olderThanSeconds: number; readonly leaseSeconds: number }): Promise<RefundSubmission[]> {
+    const limit = boundedInteger(options?.limit, "limit", 1, BOOKING_CANCELLATION_LIMITS.refundClaimLimitMax);
+    const olderThanSeconds = boundedInteger(options?.olderThanSeconds, "olderThanSeconds", 0, 86_400);
+    const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", BOOKING_CANCELLATION_LIMITS.refundLeaseSecondsMin, BOOKING_CANCELLATION_LIMITS.refundLeaseSecondsMax);
+    const claimed = await this.#pool.query<DbRow>(
+      `WITH due AS (
+         SELECT r.id FROM booking_refunds r
+          WHERE r.status = 'REQUESTED'
+            AND r.send_attempts < $4
+            AND r.created_at <= clock_timestamp() - make_interval(secs => $2::double precision)
+            AND (r.send_claimed_at IS NULL OR r.send_claimed_at <= clock_timestamp() - make_interval(
+                  secs => GREATEST($3::double precision, LEAST($5::double precision * power(2, LEAST(r.send_attempts, 20)), $6::double precision))))
+          ORDER BY r.created_at, r.id
+          LIMIT $1
+          FOR UPDATE SKIP LOCKED
+       ), taken AS (
+         UPDATE booking_refunds r
+            SET send_attempts = r.send_attempts + 1, send_claimed_at = clock_timestamp()
+           FROM due WHERE r.id = due.id
+         RETURNING r.id, r.provider_id, r.booking_id, r.kind, r.amount, r.currency, r.refund_application_fee, r.stripe_payment_ref, r.created_at
+       )
+       SELECT r.id::text AS id, r.kind, r.amount, r.currency, r.refund_application_fee, r.stripe_payment_ref,
+              b.public_booking_id::text AS public_booking_id, b.seller_snapshot
+         FROM taken r JOIN bookings b ON b.provider_id = r.provider_id AND b.id = r.booking_id
+        ORDER BY r.created_at, r.id`,
+      [
+        limit,
+        olderThanSeconds,
+        leaseSeconds,
+        BOOKING_CANCELLATION_LIMITS.refundAutoSendAttempts,
+        BOOKING_CANCELLATION_LIMITS.refundResendBackoffBaseSeconds,
+        BOOKING_CANCELLATION_LIMITS.refundResendBackoffMaxSeconds,
+      ],
+    );
+    return claimed.rows.map(submissionFromRow);
+  }
+
   /* ---------- Stripe ---------- */
 
   /**
@@ -1181,13 +1254,23 @@ export class BookingCancellations {
     });
   }
 
-  async #requested(client: PoolClient, refundId: string): Promise<RefundSubmission[]> {
+  /**
+   * A refund Stripe has not accepted, for support's 「もう一度送る」 to send: taken for BOOKING_CANCELLATION_LIMITS.refundSendLeaseSeconds
+   * unless the job (or an earlier click) holds it, in which case there is nothing for this caller to send: whoever
+   * holds it sends it. Taking it does not count as an automatic attempt.
+   */
+  async #leaseRequested(client: PoolClient, refundId: string): Promise<RefundSubmission[]> {
     const found = await client.query<DbRow>(
-      `SELECT r.id::text AS id, r.kind, r.amount, r.currency, r.refund_application_fee, r.stripe_payment_ref,
+      `WITH taken AS (
+         UPDATE booking_refunds SET send_claimed_at = clock_timestamp()
+          WHERE id = $1::uuid AND status = 'REQUESTED'
+            AND (send_claimed_at IS NULL OR send_claimed_at <= clock_timestamp() - make_interval(secs => $2::double precision))
+          RETURNING id, provider_id, booking_id, kind, amount, currency, refund_application_fee, stripe_payment_ref
+       )
+       SELECT r.id::text AS id, r.kind, r.amount, r.currency, r.refund_application_fee, r.stripe_payment_ref,
               b.public_booking_id::text AS public_booking_id, b.seller_snapshot
-         FROM booking_refunds r JOIN bookings b ON b.provider_id = r.provider_id AND b.id = r.booking_id
-        WHERE r.id = $1::uuid AND r.status = 'REQUESTED'`,
-      [refundId],
+         FROM taken r JOIN bookings b ON b.provider_id = r.provider_id AND b.id = r.booking_id`,
+      [refundId, BOOKING_CANCELLATION_LIMITS.refundSendLeaseSeconds],
     );
     return found.rows.map(submissionFromRow);
   }

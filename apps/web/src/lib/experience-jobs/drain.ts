@@ -1,5 +1,6 @@
 import "server-only";
-import type { GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import type { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
@@ -8,7 +9,8 @@ import { guestMessageToJapanese } from "@/lib/translation/prompts";
 /**
  * One run of the experience mail job (#285 slices 5-7, docs/guest-booking.md, docs/guest-questions.md), every
  * minute from Cloud Scheduler: host replies to guest questions, booking confirmations, the notices of
- * cancellations and refunds, the links "Find your booking" asked for, the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
+ * cancellations and refunds, the links "Find your booking" asked for, the refunds Stripe has not accepted (sent again,
+ * #285 slice 7b), the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
  * year on and the removal of booking page links and sessions that ended. Each step is bounded and independent:
  * one that fails is reported and the next still runs. Counts only leave this module: never an address, a name,
  * a token or a message.
@@ -29,6 +31,14 @@ export const EXPERIENCE_JOB_LIMITS = {
   /** "Find your booking" (#285 slice 6): link emails a run sends, one claimed at a time like the confirmations. */
   bookingLinks: 20,
   bookingLinkLeaseSeconds: 120,
+  /**
+   * 返金の自動再送 (#285 slice 7b): refunds Stripe has not accepted that a run sends again, one claimed at a time. A
+   * refund waits refundGraceSeconds after it was asked for, so the request's own send goes first. The lease is the
+   * store's for support's 「もう一度送る」 too (BOOKING_CANCELLATION_LIMITS.refundSendLeaseSeconds: a test keeps them equal).
+   */
+  refunds: 10,
+  refundGraceSeconds: 120,
+  refundLeaseSeconds: 120,
   /** Ended booking page grants and sessions removed per run (each kind). */
   accessPurgedPerStep: 500,
   /** A step starts no new email after this long, so a run ends well within the minute before the next one. */
@@ -80,9 +90,21 @@ export type BookingLinkCounts = BookingConfirmationCounts;
 /** The notices of a cancellation, a refund done or a declined request: as the confirmations. */
 export type BookingNoticeCounts = BookingConfirmationCounts;
 
+/** The refunds Stripe had not accepted, sent again (#285 slice 7b). Counts only: no refund, booking or guest. */
+export interface RefundResendCounts {
+  readonly claimed: number;
+  /** Stripe accepted it (pending, or already done). */
+  readonly sent: number;
+  /** Stripe refused it for good: the refund failed and shows to support. */
+  readonly failed: number;
+  /** Stripe could not be reached (or its answer not recorded): the step stops, and the refund is tried again later, up to a limit. */
+  readonly retried: number;
+}
+
 /**
  * A step that is turned off: translation (EXPERIENCE_TRANSLATION_ENABLED; guest messages wait untranslated) or the
- * guest's booking page (EXPERIENCE_GUEST_BOOKING_ENABLED; link emails wait, confirmations go without the link).
+ * guest's booking page (EXPERIENCE_GUEST_BOOKING_ENABLED; link emails wait, confirmations go without the link), or the
+ * resending of refunds (that flag, and the Stripe key; the refunds wait for the same command or support).
  */
 export interface StepOff {
   readonly off: true;
@@ -106,6 +128,7 @@ export interface ExperienceJobCounts {
   readonly bookingConfirmations: BookingConfirmationCounts | FailedStep;
   readonly bookingNotices: BookingNoticeCounts | FailedStep;
   readonly bookingLinks: BookingLinkCounts | StepOff | FailedStep;
+  readonly bookingRefunds: RefundResendCounts | StepOff | FailedStep;
   readonly guestTranslations: TranslationCounts | StepOff | FailedStep;
   readonly guestErasure: ErasureCounts | FailedStep;
   readonly questionErasure: ErasureCounts | FailedStep;
@@ -122,6 +145,11 @@ export interface ExperienceJobDeps {
    * one-time grant from here, built into the link's URL fragment.
    */
   readonly access: Pick<GuestBookingAccess, "issueBookingAccessGrant" | "purgeExpiredAccess"> | null;
+  /**
+   * The store and Stripe (the platform key) for the refunds a cancellation asked for that Stripe never accepted
+   * (#285 slice 7b), or null while booking on this site is off or the key is missing.
+   */
+  readonly refunds: { readonly cancellations: Pick<BookingCancellations, "claimRefundsToSend" | "recordRefundSubmission">; readonly submit: NonNullable<RefundSendDeps["submit"]> } | null;
   readonly guests: Pick<GuestBookingRepository, "eraseGuestData">;
   readonly translations: Pick<GuestQuestionTranslations, "claimTranslations" | "recordTranslation" | "retryTranslation">;
   /** The Claude API, or null while translation is off. */
@@ -300,6 +328,35 @@ async function sendBookingLinks(deps: ExperienceJobDeps, access: NonNullable<Exp
 }
 
 /**
+ * 返金の自動再送 (#285 slice 7b): a cancellation commits its refund first and sends it after, so a send that never
+ * reached Stripe (Stripe down, the process stopped) leaves a refund the guest was told had started. The store hands out
+ * one that is old enough, not held and under its attempt limit, one claimed at a time; Stripe is asked by our refund ID
+ * first and the create carries it as the idempotency key, so a send that ran twice still refunds once. When Stripe
+ * cannot be reached the step stops for this run. A refund still unsent after the limit stays on support's list.
+ */
+async function resendRefunds(deps: ExperienceJobDeps, refunds: NonNullable<ExperienceJobDeps["refunds"]>): Promise<RefundResendCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, failed: 0, retried: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.refunds)) {
+    const [refund] = await refunds.cancellations.claimRefundsToSend({
+      limit: 1,
+      olderThanSeconds: EXPERIENCE_JOB_LIMITS.refundGraceSeconds,
+      leaseSeconds: EXPERIENCE_JOB_LIMITS.refundLeaseSeconds,
+    });
+    if (!refund) break;
+    counts.claimed += 1;
+    const [result] = await sendRefunds([refund], { cancellations: refunds.cancellations, submit: refunds.submit });
+    if (result?.status === "REQUESTED") {
+      counts.retried += 1;
+      break;
+    }
+    if (result?.status === "FAILED") counts.failed += 1;
+    else counts.sent += 1;
+  }
+  return counts;
+}
+
+/**
  * What guests wrote to hosts, in Japanese: one message claimed right before its call, so each call has the
  * whole lease. A failed call puts the message back for later (2, 4, 8, 16 minutes; given up after 5 tries,
  * when the host reads the English). When the API cannot be reached the step stops for this run instead of
@@ -336,6 +393,10 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const bookingLinks: ExperienceJobCounts["bookingLinks"] = access
     ? await step(deps, "bookingLinks", () => sendBookingLinks(deps, access))
     : { off: true };
+  const refunds = deps.refunds;
+  const bookingRefunds: ExperienceJobCounts["bookingRefunds"] = refunds
+    ? await step(deps, "bookingRefunds", () => resendRefunds(deps, refunds))
+    : { off: true };
   const translator = deps.translator;
   const guestTranslations: ExperienceJobCounts["guestTranslations"] = translator
     ? await step(deps, "guestTranslations", () => translateGuestMessages(deps, translator))
@@ -350,7 +411,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const bookingAccessPurge: ExperienceJobCounts["bookingAccessPurge"] = access
     ? await step(deps, "bookingAccessPurge", async () => ({ purged: await access.purgeExpiredAccess({ limit: EXPERIENCE_JOB_LIMITS.accessPurgedPerStep }) }))
     : { off: true };
-  return { questionReplies, bookingConfirmations, bookingNotices, bookingLinks, guestTranslations, guestErasure, questionErasure, bookingAccessPurge };
+  return { questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, questionErasure, bookingAccessPurge };
 }
 
 /** True when the run did or failed anything worth a log line. */
