@@ -101,6 +101,12 @@ export function salesWindowOf(value: unknown): HostSalesWindowOptions {
 }
 
 /**
+ * The order of a booking's entries: time, then a reversal after the refunds of the same instant (Stripe's event times
+ * are whole seconds, and a refund that failed at once carries its refund's second), then the entry ID.
+ */
+const entryOrder = (alias: string) => `(${alias}.occurred_at, (${alias}.entry_id LIKE '${REVERSAL_PREFIX}%')::int, ${alias}.entry_id)`;
+
+/**
  * The ledger entries of the provider's guest bookings (those a host sees) in [from, to). `refunded_before` is what
  * the booking had refunded, net of reversals, before the entry: the fee Stripe gives back follows it.
  */
@@ -115,7 +121,7 @@ const SELECT_SALES = `
          (SELECT COALESCE(-sum(x.amount), 0)::text FROM payment_ledger_entries x
            WHERE x.provider_id = l.provider_id AND x.booking_id = l.booking_id
              AND (x.kind = 'REFUND' OR (x.kind = 'ADJUSTMENT' AND x.entry_id LIKE '${REVERSAL_PREFIX}%'))
-             AND (x.occurred_at, x.entry_id) < (l.occurred_at, l.entry_id)) AS refunded_before
+             AND ${entryOrder("x")} < ${entryOrder("l")}) AS refunded_before
     FROM payment_ledger_entries l
     JOIN bookings b ON b.provider_id = l.provider_id AND b.id = l.booking_id
     JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
@@ -127,7 +133,7 @@ const SELECT_SALES = `
      AND l.entry_id IN ('${REFUND_PREFIX}' || r.id::text, '${REVERSAL_PREFIX}' || r.id::text)
    WHERE l.provider_id = $1 AND b.status = ANY($2::text[])
      AND l.occurred_at >= $3::timestamptz AND l.occurred_at < $4::timestamptz
-   ORDER BY l.occurred_at DESC, l.entry_id DESC
+   ORDER BY l.occurred_at DESC, (l.entry_id LIKE '${REVERSAL_PREFIX}%')::int DESC, l.entry_id DESC
    LIMIT $5`;
 
 export async function selectSales(client: PoolClient, providerId: string, window: HostSalesWindowOptions): Promise<HostSalesWindow> {

@@ -162,6 +162,24 @@ describe("売上: the ledger of guest bookings for the OWNER", { skip: !database
     });
   });
 
+  it("keeps a refund before its reversal when Stripe dates both the same second", async () => {
+    await withSchema(async (context) => {
+      const booking = await paid(context, "same-second@example.com", "2026-11-03T01:00:00.000Z");
+      const cancelled = await context.cancellations.cancelAsHost(ownerA, booking.publicBookingId, { commandId: randomUUID(), reason: "ILLNESS" });
+      await refundEvent(context, cancelled.refunds[0]!, "pending", "2026-11-04T01:00:00.000Z");
+      await refundEvent(context, cancelled.refunds[0]!, "failed", "2026-11-04T01:00:00.000Z");
+      const sales = await context.guests.listGuestSalesForHost(ownerA, NOVEMBER);
+      // The fee goes back with the refund and comes back with its reversal: ¥750 kept in all, ¥6,750 to the host.
+      assert.deepEqual(sales.entries.map(line), [
+        ["REFUND_REVERSAL", 7500, "JPY", 750, 6750, false, "FULL", "FAILED"],
+        ["REFUND", -7500, "JPY", -750, -6750, false, "FULL", "FAILED"],
+        ["PAYMENT", 7500, "JPY", 750, 6750, false, null, null],
+      ]);
+      assert.equal(sales.entries.reduce((sum, entry) => sum + entry.platformFeeAmount!, 0), 750);
+      assert.equal(sales.entries.reduce((sum, entry) => sum + entry.providerAmount!, 0), 6750);
+    });
+  });
+
   it("keeps amounts once the guest's details are erased, and reads an empty window and provider", async () => {
     await withSchema(async (context) => {
       const booking = await paid(context, "erased@example.com", "2026-11-10T01:00:00.000Z");
