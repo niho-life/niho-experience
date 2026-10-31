@@ -123,10 +123,12 @@ export interface ReplyDraftFieldsProps {
   canSubmit: boolean;
   /** Buttons next to the submit one (やめる). */
   extra?: ReactNode;
+  /** The screen is sending the reply: nothing the host could still change is editable, so what is sent is what stays on screen. */
+  disabled?: boolean;
 }
 
 /** The Japanese, the English to check, what stops the English, and the buttons. The form around it is the screen's. */
-export function ReplyDraftFields({ draft, japaneseRef, maxLength, englishLabel, submitLabel, canSubmit, extra }: ReplyDraftFieldsProps) {
+export function ReplyDraftFields({ draft, japaneseRef, maxLength, englishLabel, submitLabel, canSubmit, extra, disabled = false }: ReplyDraftFieldsProps) {
   const submit = (
     <button type="submit" disabled={!canSubmit || draft.drafting} className={consoleButtonClass("primary", "md", `${extra ? "" : "ml-auto "}${DISABLED}`)}>
       {submitLabel}
@@ -143,6 +145,7 @@ export function ReplyDraftFields({ draft, japaneseRef, maxLength, englishLabel, 
         rows={3}
         maxLength={maxLength}
         value={draft.japanese}
+        readOnly={disabled}
         onChange={(event) => draft.setJapanese(event.currentTarget.value)}
         className={`${TEXTAREA} mt-1.5 min-h-[76px]`}
       />
@@ -159,6 +162,7 @@ export function ReplyDraftFields({ draft, japaneseRef, maxLength, englishLabel, 
               rows={3}
               maxLength={maxLength}
               value={draft.english}
+              readOnly={disabled}
               onChange={(event) => draft.setEnglish(event.currentTarget.value)}
               className={`${TEXTAREA} min-h-[76px]`}
             />
@@ -183,11 +187,11 @@ export function ReplyDraftFields({ draft, japaneseRef, maxLength, englishLabel, 
       ) : null}
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={draft.makeEnglish} disabled={!draft.japanese.trim() || draft.drafting} className={consoleButtonClass("secondary", "sm", DISABLED)}>
+        <button type="button" onClick={draft.makeEnglish} disabled={!draft.japanese.trim() || draft.drafting || disabled} className={consoleButtonClass("secondary", "sm", DISABLED)}>
           {draft.drafting ? "英語にしています…" : draft.hasEnglish ? "英語を作り直す" : "英語にする"}
         </button>
         {draft.editing ? null : (
-          <button type="button" onClick={draft.writeEnglish} className={consoleButtonClass(draft.hasEnglish ? "secondary" : "ghost", "sm")}>
+          <button type="button" onClick={draft.writeEnglish} disabled={disabled} className={consoleButtonClass(draft.hasEnglish ? "secondary" : "ghost", "sm", DISABLED)}>
             {draft.hasEnglish ? "英語を直す" : "英語を直接書く"}
           </button>
         )}

@@ -14,6 +14,15 @@ export function getSiteQuestionsApi(siteOrigin: string) {
 }
 
 /**
+ * Browser only: 予約者のレビュー (#104) are kept in the experience DB (docs/guest-reviews.md), so "Show all"
+ * reads this site's own route, not NIHO's. A GET the route does not check the Origin of: the client's
+ * no-referrer stays.
+ */
+export function getSiteReviewsApi(siteOrigin: string) {
+  return createExperienceApiClient({ nihoWebOrigin: siteOrigin });
+}
+
+/**
  * Browser only: an experience sold on this site (#285, docs/guest-booking.md) reads availability and starts its
  * checkout at this site's own routes, at NIHO's paths and in NIHO's shapes. As for questions, `same-origin` lets
  * the checkout POST carry this site's Origin, which the route checks. `thisSite` accepts the site's own
