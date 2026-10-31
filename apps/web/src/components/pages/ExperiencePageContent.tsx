@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DetailViewV1, EN_STATIC_COPY_V1, type DetailViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
+import NextLink from "next/link";
 import { notFound } from "next/navigation";
 import { TrackView } from "@/components/Analytics";
 import { BookingCard, BookingDatesController, MobileBookingBar, type BookingSummary } from "@/components/DetailBooking";
@@ -26,7 +27,7 @@ import { iconForText } from "@/lib/themes";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { publicMetadata } from "@/lib/public-metadata";
 import { experienceAlternates } from "@/lib/locale-metadata";
-import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease, japaneseBookingAllowed, type SiteLocale } from "@/lib/localized-content";
+import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease, type SiteLocale } from "@/lib/localized-content";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { LocalizedLink as Link } from "@/components/LocalizedLink";
 import { AskHost } from "@/components/AskHost";
@@ -42,6 +43,7 @@ import { videoForExperience } from "@/lib/videos";
 import { YouTubeVideo } from "@/components/YouTubeVideo";
 import { dayOption } from "@/lib/date-filter";
 import { detailFromTokyoLine, detailGuideHeading, detailNextDates } from "@/lib/detail-page";
+import { bookingSourceOf, detailForSale, guestBookingSale, japaneseBookingOpen, siteNextDates, type GuestBookingSale } from "@/lib/guest-booking-source";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -133,13 +135,18 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const query = await searchParams;
   const slug = (await params).slug;
   let e: ExperienceDetailForSite, copy = EN_STATIC_COPY_V1, japaneseBookingReady = true, japaneseReleaseId: string | null = null;
+  // Where this experience is sold (#285): NIHO, this site (the sale comes from the experience DB), or unknown (not bookable now).
+  let sale: GuestBookingSale = { kind: "niho" };
   try {
     if (locale === "ja") {
-      const [selected, siteCopy] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy()]);
+      const [selected, siteCopy, selectedSale] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), guestBookingSale(slug)]);
       assertSameJapaneseRelease(siteCopy.releaseId, selected);
-      e = selected.experience; copy = siteCopy.copy; japaneseBookingReady = japaneseBookingAllowed(selected); japaneseReleaseId = selected.releaseId;
+      sale = selectedSale;
+      e = selected.experience; copy = siteCopy.copy; japaneseBookingReady = japaneseBookingOpen(sale, selected); japaneseReleaseId = selected.releaseId;
     } else {
-      e = await readExperience(slug, query);
+      const detail = await readExperience(slug, query);
+      sale = await guestBookingSale(detail.slug);
+      e = detailForSale(detail, sale);
     }
   } catch (error) {
     if (locale === "ja") return <JapaneseUnavailable />;
@@ -191,7 +198,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const adultPrices = e.offers.map((offer) => offer.pricing.adultPriceYen);
   const canBook = config.bookingsEnabled && e.booking.checkoutAvailable && japaneseBookingReady;
   const approval = e.offers.filter((offer) => offer.acceptanceMode === "APPROVAL").length;
-  const upcomingDates = canBook ? await readInitialAvailability(e.slug, query, locale, japaneseReleaseId) : [];
+  const upcomingDates = !canBook ? [] : sale.kind === "site" ? await siteNextDates(e.slug) : await readInitialAvailability(e.slug, query, locale, japaneseReleaseId);
   const hostStoryGuide = relatedGuides.guides.find((guide) => "pillar" in guide && guide.pillar === "hosts" && !relatedGuides.draftSlugs.includes(guide.slug));
 
   const assurances: BookingSummary["assurances"] = [];
@@ -223,7 +230,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     assurances,
     preview: isPreview,
     availabilityIsProvisional: isPreview && config.mockCatalog === "pilot",
-    nihoWebOrigin: config.nihoWebOrigin,
+    bookingSource: bookingSourceOf(sale),
     browseContext,
     preferredOfferId,
   };
@@ -535,7 +542,8 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       notSuitable: e.notSuitableFor,
       cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
       booking: includeBooking ? bookingCardModel(booking, <BookingDatesController summary={booking} />) : undefined,
-      checkoutCancelled: !japaneseBookingReady ? <div className="mt-5"><Notice tone="warn" title={copy.text("booking.unavailableJa")} role="status" /></div> : checkoutCancelled ? <div className="mt-5"><Notice tone="info" title={copy.text("detail.checkoutCancelled")} role="status" action={<Link href={bookingHref} className="font-bold text-moss underline underline-offset-4">{copy.text("detail.chooseDate")}</Link>} /></div> : undefined,
+      checkoutCancelled: !japaneseBookingReady ? <div className="mt-5"><Notice tone="warn" title={copy.text("booking.unavailableJa")} role="status" action={sale.kind === "niho" ? undefined : <EnglishPageLink slug={e.slug} />} /></div>
+        : checkoutCancelled ? <div className="mt-5">{sale.kind === "site" ? <SiteCheckoutCancelled bookingHref={bookingHref} /> : <Notice tone="info" title={copy.text("detail.checkoutCancelled")} role="status" action={<Link href={bookingHref} className="font-bold text-moss underline underline-offset-4">{copy.text("detail.chooseDate")}</Link>} />}</div> : undefined,
     };
     return <DetailViewV1 model={model} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} headings={{ overview: blockText(props, "overviewHeading", copy.text("detail.whatYouDo")), details: blockText(props, "detailsHeading", copy.text("detail.timeline")) }} />;
   };
@@ -555,6 +563,28 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
     </div> : null}
     <MobileBookingBar summary={booking} />
   </>;
+}
+
+/**
+ * Stripe's cancel URL for an experience sold here (#285): `?checkout=cancelled`, which carries nothing else. The
+ * guest's hold stays until it expires, and nothing was charged.
+ */
+function SiteCheckoutCancelled({ bookingHref }: { bookingHref: string }) {
+  return (
+    <Notice
+      tone="info"
+      title="Payment was not completed"
+      role="status"
+      action={<Link href={bookingHref} className="font-bold text-moss underline underline-offset-4">Choose a date</Link>}
+    >
+      You haven&apos;t been charged. You can choose a date and try again.
+    </Notice>
+  );
+}
+
+/** Japanese booking of an experience sold here (or that may be) waits for #285 slice 10; the English page takes bookings. */
+function EnglishPageLink({ slug }: { slug: string }) {
+  return <NextLink href={`/experiences/${slug}`} hrefLang="en" lang="en" className="font-bold text-moss underline underline-offset-4">View the English page</NextLink>;
 }
 
 function NextDateBand({ dates, locale, bookingHref }: { dates: readonly Occurrence[]; locale: SiteLocale; bookingHref: string }) {

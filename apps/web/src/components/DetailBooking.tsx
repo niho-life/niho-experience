@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { Occurrence } from "@niho-experience/api-client";
-import { readAvailability } from "@/lib/browser-availability";
+import { readBookingAvailability } from "@/lib/browser-availability";
+import type { BookingSource } from "@/lib/booking-source";
 import { browseHref, type BrowseContext } from "@/lib/browse-context";
 import { dayLabelWithoutWeekday, dayOption, nextBookable } from "@/lib/date-filter";
 import { formatTime, formatYen } from "@/lib/format";
@@ -28,7 +29,8 @@ export type BookingSummary = {
   assurances: { icon: HandIconName; text: string }[];
   preview: boolean;
   availabilityIsProvisional: boolean;
-  nihoWebOrigin: string;
+  /** NIHO's API, or this site's routes for an experience sold here (#285). */
+  bookingSource: BookingSource;
   browseContext?: Partial<BrowseContext>;
   preferredOfferId?: string;
 };
@@ -38,18 +40,18 @@ const NEXT_DATES = 3;
 /** Next bookable sessions read in the browser (never cached, never shown as seat counts). */
 function useNextDates(summary: BookingSummary): Occurrence[] | null | "failed" {
   const [dates, setDates] = useState<Occurrence[] | null | "failed">(null);
-  const { slug, preview, nihoWebOrigin, canBook } = summary;
+  const { slug, preview, bookingSource, canBook } = summary;
   const { locale, releaseId } = useSiteLocale();
   useEffect(() => {
     if (!canBook) return;
     let active = true;
-    readAvailability(slug, preview, nihoWebOrigin, locale, releaseId).then((read) => {
+    readBookingAvailability(slug, preview, bookingSource, locale, releaseId).then((read) => {
       if (active) setDates(read.ok ? nextBookable(read.occurrences, NEXT_DATES) : "failed");
     });
     return () => {
       active = false;
     };
-  }, [slug, preview, nihoWebOrigin, canBook, locale, releaseId]);
+  }, [slug, preview, bookingSource, canBook, locale, releaseId]);
   return dates;
 }
 

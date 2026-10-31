@@ -17,6 +17,7 @@ import { filterExperienceSummaries, normalizeExperienceDate, normalizeExperience
 import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } from "@/lib/public-metadata";
 import { englishAlternates } from "@/lib/locale-metadata";
 import { guideCatalogForSite } from "@/lib/guide-registry";
+import { guestBookingSources } from "@/lib/guest-booking-source";
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   const query = await searchParams;
@@ -41,6 +42,8 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const items = filterExperienceSummaries(catalog, searchQuery);
   const cards = withReviewLines(buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview), await getReviewSummaries(items.map((item) => item.slug)));
 
+  // Where each card's availability is read: NIHO, or this site for an experience sold here (#285).
+  const bookingSources = await guestBookingSources(cards.map((card) => card.slug));
   const now = new Date();
   const finderDays = upcomingDays(now, FINDER_DAYS);
   const catalogDate = config.publicApiVersion === "1.2" ? normalizeExperienceDate(query.date) : undefined;
@@ -70,7 +73,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
         browseContext={{ q: searchQuery || undefined, theme }}
         catalogDateFiltered={config.publicApiVersion === "1.2" && Boolean(date)}
         preview={isPreview}
-        nihoWebOrigin={config.nihoWebOrigin}
+        bookingSources={bookingSources}
         search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />}
         inlineSearch={<ExperienceFiltersForm key="inline-search" {...searchProps} placement="inline" />}
         columns="three"

@@ -3,13 +3,13 @@ import { HomeViewV1, type ExperienceCardModelV1, type HomeViewModelV1 } from "@n
 import { EmptyResults } from "@/components/States";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { CardDates, type CardDatesSource } from "@/components/CardDates";
+import { guestBookingSources } from "@/lib/guest-booking-source";
 import { HomeFinder } from "@/components/HomeFinder";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { getApi } from "@/lib/api";
 import { buildCardModels } from "@/lib/card-model";
 import type { CardModel } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
-import { config } from "@/lib/config";
 import { upcomingDays } from "@/lib/date-filter";
 import { imageAlt } from "@/lib/experience-copy";
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
@@ -39,7 +39,7 @@ export default async function JapaneseHome() {
     data = { copy, catalog, cards };
   } catch { return <JapaneseUnavailable />; }
   const { copy, cards } = data;
-  const cardDates: CardDatesSource = { kind: "read", preview: false, nihoWebOrigin: config.nihoWebOrigin };
+  const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
   const model: HomeViewModelV1 = {
     hero: { src: HERO_PHOTO.src, alt: HERO_PHOTO.alt, position: HERO_PHOTO.position },
     finder: <HomeFinder days={upcomingDays(new Date(), 14, "ja")} />,

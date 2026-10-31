@@ -7,7 +7,7 @@ import { hostNames } from "@/lib/card-model";
 import { JOURNEY_PROBLEMS, askHostTarget, freeCancellationDeadline } from "@/lib/journey-ui";
 import { dayOption } from "@/lib/date-filter";
 import { formatDuration, formatYen } from "@/lib/format";
-import { formatClock } from "@/lib/schedule";
+import { formatClock, occurrenceTiming } from "@/lib/schedule";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { track } from "@/lib/analytics";
 import { readBookingAttribution } from "@/lib/booking-attribution";
@@ -18,12 +18,15 @@ import { BookingCheckoutViewV1, type BookingCheckoutViewModelV1 } from "@niho/ex
 import { PRESENTATION_PRIMITIVES_V1 } from "./PresentationV1";
 import { useSiteCopy, useSiteLocale } from "./SiteLocale";
 import { readAvailabilityFromApi } from "@/lib/browser-availability";
+import { getSiteBookingTerms } from "@/lib/browser-api";
+import type { BookingSource } from "@/lib/booking-source";
+import { withSiteSaleTerms } from "@/lib/guest-booking-terms";
 import { checkoutProblem, fullNameValidationMessage, retryUnit } from "@/lib/booking-messages";
 
 export type BookingDraft = { guestName: string; guestEmail: string; guestPhone?: string; note: string; answerSets: Record<string, Record<string, string | string[]>> };
 export type CheckoutAttempt = { signature: string; key: string };
 
-export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
+export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, bookingSource, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; /** Where `api` points; NIHO's API when left out. */ bookingSource?: BookingSource; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
   const router = useRouter();
   const copy = useSiteCopy();
   const { locale, releaseId } = useSiteLocale();
@@ -56,6 +59,7 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
   const guestPhone = draft.guestPhone ?? "";
   const [conditionsAgreed, setConditionsAgreed] = useState(false);
   const [startAt, setStartAt] = useState<string | null>(null);
+  const [endAt, setEndAt] = useState<string | null>(null);
   const conditionsInvalid = invalidField === "conditions" || invalidField === "conditionsConsent" || invalidField === "conditionsConsent.version";
 
   useEffect(() => {
@@ -66,8 +70,9 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       const occurrence = occurrences?.find((item) => item.offerId === offer.id && item.date === selection.date);
       setAvailabilityOk(selectionValid && !!occurrence?.bookable && occurrence.seatsLeft >= headCount);
       setStartAt(occurrence?.startAt ?? null);
+      setEndAt(occurrence?.endAt ?? null);
       setChecking(false);
-    }).catch(() => { if (active) { setAvailabilityOk(false); setStartAt(null); setChecking(false); } });
+    }).catch(() => { if (active) { setAvailabilityOk(false); setStartAt(null); setEndAt(null); setChecking(false); } });
     return () => { active = false; };
   }, [api, experience.slug, offer.id, selection.date, headCount, selectionValid, locale, releaseId]);
   // The free-cancellation row follows the clock: if the deadline passes while the form is open, it turns to "Not available for this date".
@@ -203,7 +208,11 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       // With the journey additions the detail is read as v1.4: the same detail plus the participation conditions to agree to again.
       let latest: ExperienceDetailForSite | null;
       let latestConditions: ExperienceConditions | null | undefined;
-      if (locale === "en" && journey.enabled) {
+      if (bookingSource?.kind === "site") {
+        // Sold here (#285): the offers, questions, prices and terms version come again from this site, never from NIHO's detail.
+        const terms = await getSiteBookingTerms(bookingSource.origin, experience.slug);
+        latest = terms ? withSiteSaleTerms(experience, terms) : null;
+      } else if (locale === "en" && journey.enabled) {
         const result = await api.getExperienceV14(experience.slug);
         latest = result.ok ? result.data.experience : null;
         latestConditions = result.ok ? usableConditions(result.data.experience.conditions) : undefined;
@@ -228,14 +237,16 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
 
   const approval = offer.acceptanceMode === "APPROVAL";
   const day = dayOption(selection.date, locale);
-  const when = `${day.label} · ${formatClock(offer.startTime, locale)}`;
+  // The chosen date's own time: a host may have moved this occurrence (#285).
+  const timing = occurrenceTiming(offer, startAt && endAt ? { startAt, endAt } : null);
+  const when = `${day.label} · ${formatClock(timing.startTime, locale)}`;
   const guests = locale === "ja" ? `大人${selection.adultCount}名${selection.childCount ? `、子ども${selection.childCount}名` : ""}` : `${selection.adultCount} adult${selection.adultCount === 1 ? "" : "s"}${selection.childCount ? `, ${selection.childCount} child${selection.childCount === 1 ? "" : "ren"}` : ""}`;
   const legalDocuments = experience.booking.legalDocuments.flatMap((doc) => { const url = safeHttpsUrl(doc.url); return url ? [{ kind: doc.kind, url }] : []; });
   // "Free cancellation until Thu 12 Nov, 7:00 AM Japan time": the policy's hours counted back from the date's start (contract: FREE_UNTIL_24H / 48H).
   const freeCancellation = locale === "en" ? freeCancellationDeadline(startAt ?? "", offer.cancellationPolicy.freeCancellationHoursBefore, new Date(clockNow)) : null;
   const hostTarget = askHostTarget(hostNames(experience));
   const model: BookingCheckoutViewModelV1 = {
-    summary: { title: experience.title, image: experience.cover ? { src: experience.cover.url, alt: "" } : null, summary: `${formatDuration(offer.durationMinutes, locale)} · ${formatClock(offer.startTime, locale)} JST · ${offer.name}` },
+    summary: { title: experience.title, image: experience.cover ? { src: experience.cover.url, alt: "" } : null, summary: `${formatDuration(timing.durationMinutes, locale)} · ${formatClock(timing.startTime, locale)} JST · ${offer.name}` },
     availability: checkingAvailability ? "checking" : needsFreshDetails ? "stale" : availabilityOk ? "ready" : "unavailable",
     refreshing,
     refreshDisabled: refreshing || !api,

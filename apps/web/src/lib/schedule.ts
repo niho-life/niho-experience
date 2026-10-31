@@ -63,3 +63,24 @@ export function joinAnd(items: string[]): string {
   if (items.length <= 1) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
 }
+
+/** "14:00": the time of an instant in Japan, written as offers write their start time. */
+export function japanClock(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
+}
+
+/**
+ * The start time and length of the chosen date: the occurrence's own once it is read, since a host may move
+ * one occurrence away from its offer's usual time (#285); the offer's until then, or if the times are unusable.
+ */
+export function occurrenceTiming(
+  offer: Pick<ExperienceOffer, "startTime" | "durationMinutes">,
+  occurrence: { startAt: string; endAt: string } | null,
+): { startTime: string; durationMinutes: number } {
+  const usual = { startTime: offer.startTime, durationMinutes: offer.durationMinutes };
+  if (!occurrence) return usual;
+  const start = Date.parse(occurrence.startAt);
+  const minutes = Math.round((Date.parse(occurrence.endAt) - start) / 60_000);
+  if (!Number.isFinite(start) || !Number.isFinite(minutes) || minutes <= 0) return usual;
+  return { startTime: japanClock(occurrence.startAt), durationMinutes: minutes };
+}

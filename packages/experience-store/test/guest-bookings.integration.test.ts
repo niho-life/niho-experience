@@ -259,6 +259,34 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("names in one query the slugs for sale here, by the rules publicBookingTerms applies", async () => {
+    await withSchema(async ({ pool, guests }) => {
+      const all = ["sample-dup", "sample-walk", "sample-draft", "sample-archived", "sample-noterms", "sample-usd", "sample-cheap", "sample-tea", "sample-missing", "sample-kids", "sample-tea", ""];
+      // The asked order is kept and repeats are dropped; no schedule rule is needed to be for sale.
+      assert.deepEqual(await guests.sellableSlugs(all), ["sample-walk", "sample-tea", "sample-kids"]);
+      for (const slug of all) assert.equal((await guests.sellableSlugs([slug])).length === 1, await guests.publicBookingTerms(slug) !== null, slug);
+      assert.deepEqual(await guests.sellableSlugs([]), []);
+      await assert.rejects(() => guests.sellableSlugs(Array.from({ length: 201 }, (_, index) => `sample-${index}`)), StoreValidationError);
+
+      // A second published product with the slug, unpublishing, and a provider without sale settings each stop the sale.
+      await pool.query("UPDATE experience_products SET slug='sample-tea' WHERE provider_id='provider-b' AND id='dup'");
+      await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE id='kids'");
+      assert.deepEqual(await guests.sellableSlugs(["sample-tea", "sample-walk", "sample-kids"]), ["sample-walk"]);
+      await pool.query("DELETE FROM provider_sale_settings WHERE provider_id='provider-a'");
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
+
+      // A price whose fee Stripe would refuse is not for sale: with support on, 15 % of ¥6 rounds down to ¥0.
+      await guests.setProviderSaleSettings("provider-a", { supportEnabled: true });
+      await pool.query("UPDATE experience_products SET unit_amount=4000 WHERE id='walk'");
+      await pool.query("UPDATE experience_product_sale_terms SET child_price_amount=6, child_min_age=4, child_max_age=12, child_adult_required=false WHERE product_id='walk'");
+      assert.equal(await guests.publicBookingTerms("sample-walk"), null);
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
+      await pool.query("UPDATE experience_product_sale_terms SET child_adult_required=true WHERE product_id='walk'");
+      assert.notEqual(await guests.publicBookingTerms("sample-walk"), null);
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), ["sample-walk"]);
+    });
+  });
+
   it("sells a provider's products only with its sale settings, and fixes NIHO's fee on each booking", async () => {
     await withSchema(async ({ pool, store, guests, addRule }) => {
       await addRule("walk", rule("sample-walk-am"));

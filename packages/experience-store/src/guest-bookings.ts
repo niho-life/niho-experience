@@ -268,6 +268,8 @@ const WEEKDAY_NUMBER: Readonly<Record<Weekday, number>> = {
 /** bookings.idempotency_key holds 256 characters: "guest-checkout:" + product id + ":" + a 120-character key. */
 const MAX_SELLABLE_PRODUCT_ID_LENGTH = 120;
 const MAX_LISTED_OCCURRENCES = 2_000;
+/** sellableSlugs answers for one page of cards. */
+const MAX_SELLABLE_SLUGS_ASKED = 200;
 
 const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
 const TERMS_COLUMNS = `
@@ -435,8 +437,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   );
   if (products.rows.length !== 1) return null;
   const product = productFromRow(products.rows[0]!);
-  if (product.currency !== "JPY" || product.unitAmount < GUEST_BOOKING_LIMITS.minimumChargeYen
-    || product.id.length > MAX_SELLABLE_PRODUCT_ID_LENGTH) return null;
+  if (!sellableProduct(product)) return null;
   const terms = await client.query<DbRow>(
     `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2${lock ? " FOR SHARE" : ""}`,
     [product.providerId, product.id],
@@ -448,13 +449,22 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   );
   if (settings.rows[0] === undefined) return null;
   const sellable = { product, terms: termsFromRow(terms.rows[0]), settings: saleSettingsFromRow(settings.rows[0]) };
-  return chargeablePlatformFee(smallestCharge(sellable), sellable.settings.platformFeeBasisPoints) ? sellable : null;
+  return chargeableFee(product.unitAmount, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints) ? sellable : null;
 }
 
-/** The smallest total a party may pay: one adult, or one child where children may come alone. */
-function smallestCharge({ product, terms }: Pick<Sellable, "product" | "terms">): number {
-  const child = terms.childPricing;
-  return child !== null && !child.adultRequired ? Math.min(product.unitAmount, child.priceYen) : product.unitAmount;
+/** A JPY price Stripe can charge, and an ID that fits the guest idempotency key (loadSellable, sellableSlugs). */
+function sellableProduct(product: Pick<ProductRecord, "id" | "currency" | "unitAmount">): boolean {
+  return product.currency === "JPY" && product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
+    && product.id.length <= MAX_SELLABLE_PRODUCT_ID_LENGTH;
+}
+
+/**
+ * NIHO's fee on the smallest total a party may pay (one adult, or one child where children may come alone)
+ * is one that Stripe accepts.
+ */
+function chargeableFee(unitAmount: number, child: ChildPricing | null, basisPoints: number): boolean {
+  const smallest = child !== null && !child.adultRequired ? Math.min(unitAmount, child.priceYen) : unitAmount;
+  return chargeablePlatformFee(smallest, basisPoints);
 }
 
 async function databaseNow(client: Queryable): Promise<string> {
@@ -962,6 +972,46 @@ export class GuestBookingRepository {
       offers: rules.map((stored) => offerFor(sellable, stored)),
       conditionsVersion: sellable.terms.conditionsVersion,
     };
+  }
+
+  /**
+   * Which of these slugs are for sale here, by the rules of publicBookingTerms (exactly one PUBLISHED product
+   * with the slug, its sale terms, its provider's sale settings, a chargeable JPY price and fee), read in one
+   * query: a page of cards asks once for all of them. The order of `slugs` is kept; repeats are dropped.
+   */
+  async sellableSlugs(slugs: readonly string[]): Promise<string[]> {
+    if (!Array.isArray(slugs) || slugs.length > MAX_SELLABLE_SLUGS_ASKED) {
+      throw new StoreValidationError(`slugs must be an array of at most ${MAX_SELLABLE_SLUGS_ASKED}.`);
+    }
+    const asked = [...new Set(slugs.filter((slug) => typeof slug === "string" && slug.length >= 1 && slug.length <= 160))];
+    if (asked.length === 0) return [];
+    const result = await this.#pool.query<DbRow>(
+      `SELECT p.slug, p.id, p.currency, p.unit_amount,
+              t.product_id IS NOT NULL AS has_terms, t.child_price_amount, t.child_min_age, t.child_max_age, t.child_adult_required,
+              s.platform_fee_basis_points
+         FROM experience_products p
+         LEFT JOIN experience_product_sale_terms t ON t.provider_id=p.provider_id AND t.product_id=p.id
+         LEFT JOIN provider_sale_settings s ON s.provider_id=p.provider_id
+        WHERE p.slug=ANY($1::text[]) AND p.status='PUBLISHED'`,
+      [asked],
+    );
+    const rowsBySlug = new Map<string, DbRow[]>();
+    for (const row of result.rows) rowsBySlug.set(String(row.slug), [...(rowsBySlug.get(String(row.slug)) ?? []), row]);
+    return asked.filter((slug) => {
+      const rows = rowsBySlug.get(slug);
+      // A second published product with the slug stops the sale, as in loadSellable.
+      if (rows?.length !== 1) return false;
+      const row = rows[0]!;
+      if (row.has_terms !== true || row.platform_fee_basis_points === null) return false;
+      if (!sellableProduct({ id: String(row.id), currency: String(row.currency), unitAmount: Number(row.unit_amount) })) return false;
+      const child: ChildPricing | null = row.child_price_amount === null ? null : {
+        priceYen: Number(row.child_price_amount),
+        minAge: Number(row.child_min_age),
+        maxAge: Number(row.child_max_age),
+        adultRequired: row.child_adult_required === true,
+      };
+      return chargeableFee(Number(row.unit_amount), child, Number(row.platform_fee_basis_points));
+    });
   }
 
   /**

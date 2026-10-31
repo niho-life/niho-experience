@@ -3,6 +3,7 @@ import Link from "next/link";
 import { GuideBody } from "@/components/GuideBody";
 import { GuideExperienceCta, GuideFaq, GuideTeasers } from "@/components/GuideBlocks";
 import type { CardDatesSource } from "@/components/CardDates";
+import { guestBookingSources } from "@/lib/guest-booking-source";
 import { JsonLd } from "@/components/JsonLd";
 import { Notice } from "@/components/ui";
 import { YouTubeVideo } from "@/components/YouTubeVideo";
@@ -42,7 +43,7 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
   const listed = await readListedExperiences(query);
   const featured = listed ? listedExperienceSlugs(guide, listed).flatMap((slug) => listed.filter((item) => item.slug === slug)) : [];
   const [ctaCard, ...otherCards] = await cardsFor(featured, query);
-  const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
+  const cardDates: CardDatesSource = { kind: "read", preview: isPreview, sources: await guestBookingSources(featured.map((item) => item.slug)) };
   const hero = guide.hero ? { ...guide.hero, href: guideLinkHref(guide.hero.src)?.href ?? null } : null;
   const pillar = guidePillarDetails(guide.pillar);
   const sectionLabel = guide.category?.label ?? pillar?.label ?? "Draft preview";
