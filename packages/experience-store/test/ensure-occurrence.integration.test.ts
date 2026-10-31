@@ -270,6 +270,49 @@ describe("PostgreSQL ENSURE_OCCURRENCE for creatable browser listings", { skip: 
     }, false);
   });
 
+  it("opens the slot after an ENSURE that replaced a queued SET_OPEN of the same versions when canCreate is deployed later", async () => {
+    // The listing already allows creation, but the deployment that queued the SET_OPEN had no canCreate.
+    await withRuntime("ensure_switch", { listing: "CREATE" }, async (context) => {
+      const { pool, worker } = context;
+      const occurrenceId = "morning@2099-01-05";
+      const start = utc("2099-01-05", "10:00");
+      assert.deepEqual(await queued(pool, occurrenceId), [
+        { purpose: "AVAILABILITY", action: "SET_OPEN", desiredVersion: 1, mappingVersion: 1, start },
+      ]);
+      const [superseded] = await jobs(pool, occurrenceId);
+
+      // The deployment now has canCreate: reconciling replaces the queued SET_OPEN with an ENSURE.
+      const runtime = new ChannelRuntime(pool, { now: () => now, supportedAdapters: { [ADAPTER]: WITH_CREATE } });
+      assert.equal((await runtime.reconcileListing(admin, "listing", randomUUID())).jobs > 0, true);
+      assert.deepEqual((await jobs(pool, occurrenceId)).map(({ action, status, outcome }) => ({ action, status, outcome })), [
+        { action: "SET_OPEN", status: "FINISHED", outcome: "SUPERSEDED" },
+        { action: "ENSURE_OCCURRENCE", status: "QUEUED", outcome: null },
+      ]);
+
+      const ensure = await claimFor({ ...context, runtime }, occurrenceId, "ENSURE_OCCURRENCE");
+      assert.deepEqual(await runtime.submitResult(worker, ensure.id, readback(ensure, { ensureCreated: false })), { acceptedAsCurrent: true, repeated: false });
+
+      // The superseded SET_OPEN row is queued again rather than blocking the follow-up for good.
+      const after = await jobs(pool, occurrenceId);
+      assert.deepEqual(after.map(({ action, status, outcome }) => ({ action, status, outcome })), [
+        { action: "SET_OPEN", status: "QUEUED", outcome: null },
+        { action: "ENSURE_OCCURRENCE", status: "FINISHED", outcome: "VERIFIED" },
+      ]);
+      assert.equal(after.find((job) => job.action === "SET_OPEN")?.id, superseded?.id);
+      const open = await claimFor({ ...context, runtime }, occurrenceId, "SET_OPEN");
+      assert.equal(open.desiredVersion, 1);
+      assert.deepEqual(await runtime.submitResult(worker, open.id, readback(open)), { acceptedAsCurrent: true, repeated: false });
+      assert.equal((await desired(pool, occurrenceId)).observedState, "OPEN");
+      assert.deepEqual(await queued(pool, occurrenceId), []);
+
+      // Only a job superseded in that swap comes back: a SET_OPEN that finished some other way is not queued again.
+      const other = "morning@2099-01-06";
+      await pool.query("UPDATE channel_jobs SET status='FINISHED',outcome='NEEDS_REVIEW' WHERE listing_id='listing' AND occurrence_id=$1", [other]);
+      assert.equal((await runtime.reconcileListing(admin, "listing", randomUUID())).jobs >= 0, true);
+      assert.deepEqual((await jobs(pool, other)).filter((job) => job.action === "SET_OPEN").map((job) => job.outcome), ["NEEDS_REVIEW"]);
+    }, false);
+  });
+
   it("ensures again after a mapping change and at a rescheduled time, while the old time still retires", async () => {
     await withRuntime("ensure_moves", { listing: "CREATE" }, async (context) => {
       const { pool, runtime, store, worker } = context;

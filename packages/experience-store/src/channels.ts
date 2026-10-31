@@ -378,7 +378,16 @@ const LISTING_COLUMNS = `id,provider_id,account_id,product_id,external_product_i
  * occurrence could not be closed and read back. Other runtime errors never
  * overwrite it; it is cleared only when no retirement still needs review.
  */
-const SLOT_RETIREMENT_WARNING = "旧日時の掲載枠を停止できていません。掲載先で確認してください。";
+/** The conflict arm of an availability INSERT that queues a superseded job of the same identity again; EXCLUDED carries the column defaults. */
+const REVIVE_SUPERSEDED_JOB_SQL = `DO UPDATE SET status=EXCLUDED.status,outcome=EXCLUDED.outcome,attempt_count=EXCLUDED.attempt_count,
+  next_attempt_at=EXCLUDED.next_attempt_at,job_deadline_at=EXCLUDED.job_deadline_at,priority=EXCLUDED.priority,
+  source_start_at=EXCLUDED.source_start_at,source_end_at=EXCLUDED.source_end_at,target_external_account_id=EXCLUDED.target_external_account_id,
+  target_external_product_id=EXCLUDED.target_external_product_id,target_external_option_id=EXCLUDED.target_external_option_id,
+  target_adapter=EXCLUDED.target_adapter,target_adapter_version=EXCLUDED.target_adapter_version,
+  target_connection_mode=EXCLUDED.target_connection_mode,updated_at=EXCLUDED.updated_at
+  WHERE channel_jobs.status='FINISHED' AND channel_jobs.outcome='SUPERSEDED'`;
+
+const SLOT_RETIREMENT_WARNING ="旧日時の掲載枠を停止できていません。掲載先で確認してください。";
 
 /**
  * Sites whose slots are told apart by their end as well as their start (jalan-network-guard.mjs matches startHm
@@ -1678,8 +1687,14 @@ export class ChannelRuntime {
     return ensured.rows[0] ? "SET_OPEN" : "ENSURE_OCCURRENCE";
   }
 
-  async #enqueueDesiredJob(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, desiredVersion: number): Promise<number> {
-    const action = desiredState === "CLOSED" ? "SET_CLOSED" : await this.#openAction(client, listing, occurrence);
+  /**
+   * `reviveSuperseded` is for the SET_OPEN that follows a verified ENSURE_OCCURRENCE. Queueing the
+   * ENSURE supersedes a SET_OPEN of the same versions, and the unique availability identity would
+   * otherwise keep that finished row from ever being replaced, leaving the slot closed. The row is
+   * queued again with a fresh target snapshot; any other finished job still blocks a new one.
+   */
+  async #enqueueDesiredJob(client: PoolClient, listing: DbRow, occurrence: Occurrence, desiredState: ChannelDesiredState, desiredVersion: number, reviveSuperseded = false): Promise<number> {
+    const action =desiredState === "CLOSED" ? "SET_CLOSED" : await this.#openAction(client, listing, occurrence);
     const capability = (action === "SET_OPEN" ? listing.can_open === true : action === "SET_CLOSED" ? listing.can_close === true : listing.can_create === true)
       && this.#adapterSupports(listing, action);
     if (!capability) {
@@ -1702,8 +1717,9 @@ export class ChannelRuntime {
     }
     const existing = await client.query(
       `SELECT 1 FROM channel_jobs WHERE listing_id=$1 AND occurrence_id=$2 AND action=$3 AND account_version=$4
-         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL`,
-      [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version],
+         AND desired_version=$5 AND mapping_version=$6 AND purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL
+         AND NOT ($7::boolean AND status='FINISHED' AND outcome='SUPERSEDED')`,
+      [listing.id, occurrence.id, action, listing.account_version, desiredVersion, listing.mapping_version, reviveSuperseded],
     );
     if (existing.rows[0]) return 0;
     await client.query(
@@ -1721,7 +1737,7 @@ export class ChannelRuntime {
          target_connection_mode,source_start_at,source_end_at,priority,job_deadline_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Asia/Tokyo',$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (listing_id,occurrence_id,action,account_version,desired_version,mapping_version)
-         WHERE purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL DO NOTHING`,
+         WHERE purpose='AVAILABILITY' AND google_propagation_delivery_id IS NULL ${reviveSuperseded ? REVIVE_SUPERSEDED_JOB_SQL : "DO NOTHING"}`,
       [randomUUID(), listing.provider_id, listing.account_id, listing.id, occurrence.id, action, listing.account_version, desiredVersion,
         listing.mapping_version, listing.site, listing.external_account_id, listing.external_product_id, listing.external_option_id,
         listing.adapter, listing.adapter_version, listing.connection_mode, occurrence.startUtc, occurrence.endUtc, desiredState === "CLOSED" ? 100 : 50, null],
@@ -3378,7 +3394,7 @@ export class ChannelRuntime {
       "SELECT desired_state,desired_version FROM channel_desired_states WHERE listing_id=$1 AND occurrence_id=$2", [job.listing_id, job.occurrence_id],
     )).rows[0];
     if (!listing || desired?.desired_state !== "OPEN") return;
-    await this.#enqueueDesiredJob(client, listing, occurrence, "OPEN", integer(desired, "desired_version"));
+    await this.#enqueueDesiredJob(client, listing, occurrence, "OPEN", integer(desired, "desired_version"), true);
   }
 
   async #completeRecoveryObserve(client: PoolClient, job: DbRow): Promise<void> {
