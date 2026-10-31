@@ -125,6 +125,46 @@ test("a NIHO booking named in the address opens from NIHO, and one NIHO does not
   if (narrow(page)) await expect(page.getByRole("link", { name: "予約へ戻る" })).toBeVisible();
 });
 
+test("a message to NIHO's booking shown first keeps it on screen when the window narrows, still locked until checked", async ({ page }) => {
+  test.skip(narrow(page), "The first booking shows beside the list from lg only");
+  await stubNiho(page);
+  let posts = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  // Registered last, so it runs first: NIHO's answer to the message waits, then cannot be confirmed (503).
+  await page.route(`**/host/api/provider-operations/${PROVIDER}/bookings/niho-request/message`, async (route) => {
+    posts += 1;
+    await gate;
+    await json(route, { error: "synthetic" }, 503);
+  });
+  await signIn(page);
+  await page.goto("/host/bookings?filter=pending");
+  const niho = nihoDetail(page);
+  const heading = niho.getByRole("heading", { level: 2, name: "合成予約者 niho-request" });
+  // From lg, the first booking shows beside the list without being chosen.
+  await expect(heading).toBeVisible();
+  await expect(page).not.toHaveURL(/booking=/);
+  await niho.getByLabel("件名").fill("合成の件名");
+  await niho.getByLabel("本文").fill("合成の本文");
+  await niho.getByRole("button", { name: "送信内容を確認" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "この内容で送る" }).click();
+  // The window narrows below lg while NIHO has the message: the booking stays (it is the chosen one now).
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(heading).toBeVisible();
+  await expect(niho.getByRole("button", { name: "確認中…", exact: true })).toBeDisabled();
+  await expect(page).toHaveURL(/booking=niho-request/);
+  release();
+  await expect(niho.getByText("直前の操作結果を確認してください")).toBeVisible();
+  await expect(niho.getByRole("button", { name: "送信内容を確認" })).toBeDisabled();
+  await expect(niho.getByLabel("本文")).toHaveValue("合成の本文");
+  // Wide again: the page still keeps the host on this booking until the result is checked.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(niho.getByText("直前の操作結果を確認してください")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "体験" })).toBeDisabled();
+  await expect(niho.getByRole("button", { name: "送信内容を確認" })).toBeDisabled();
+  expect(posts).toBe(1);
+});
+
 test("NIHO's list loading, failing and refused: this site's bookings stay, with why and a way to try again", async ({ page }) => {
   let answer: number | null = 503;
   let release!: () => void;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bookingWhen, type BookingDialogSubject } from "@/host/bookings";
 import { yen } from "@/host/format";
 import type { HostLiveBookingDetailResponse, HostLiveBookingStatusResponse, HostLiveMessageReceiptResponse } from "@/host/live-bookings";
@@ -150,7 +150,9 @@ export function HostNihoBookingDetail({ providerId, bookingId, mode = "bookings"
   const draft = drafts[bookingId] ?? EMPTY_DRAFT;
   const locked = acting || Boolean(uncertain);
 
-  useEffect(() => { onLock({ acting, uncertain: Boolean(uncertain) }); }, [acting, uncertain, onLock]);
+  // Before the browser handles anything else (a resize, a click): the page keeps this booking on screen from the
+  // render an action starts in, so a window narrowing at that moment cannot take it away (#84).
+  useLayoutEffect(() => { onLock({ acting, uncertain: Boolean(uncertain) }); }, [acting, uncertain, onLock]);
   useEffect(() => () => onLock({ acting: false, uncertain: false }), [onLock]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 

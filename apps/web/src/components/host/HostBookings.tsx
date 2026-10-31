@@ -185,11 +185,13 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   const first = groups[0]?.bookings[0] ?? null;
   /**
    * This site's or the preview's booking, or NIHO's (by id: one NIHO's list has not read yet is read on its own).
-   * From lg the first booking of the list shows until one is chosen; below lg the list does.
+   * From lg the first booking of the list shows until one is chosen; below lg the list does. NIHO's first booking with
+   * an action (or a result to check) stays whatever the width: it becomes the chosen one (below), and keeps what it
+   * holds until then.
    */
   const shown: { site: HostBooking } | { niho: string } | null = sub
     ? selected ? { site: selected } : niho && nihoList.state !== "revoked" && selectedId ? { niho: selectedId } : null
-    : !first ? null : !isNiho(first) ? { site: first } : twoColumns ? { niho: first.id } : null;
+    : !first ? null : !isNiho(first) ? { site: first } : twoColumns || nihoLocked ? { niho: first.id } : null;
   const shownSite = shown && "site" in shown ? shown.site : null;
   const shownNiho = shown && "niho" in shown ? shown.niho : null;
   const shownId = shownSite?.id ?? shownNiho;
@@ -245,6 +247,18 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
     }
     void loadNiho();
   }, [loadNiho]);
+
+  /**
+   * An action with NIHO on the booking shown without being chosen (the first of the list, from lg) makes it the chosen
+   * one: below lg it is then the screen, with its result to check, instead of a list that cannot be left (#84).
+   */
+  const pinNiho = nihoLocked && !sub ? shownNiho : null;
+  useEffect(() => {
+    if (!pinNiho) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("booking", pinNiho);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+  }, [pinNiho]);
 
   /** Applies an action to one booking. One shown without being chosen (the first of the list) becomes the chosen one, so it stays on screen. */
   const change = (id: string, apply: (booking: HostBooking, at: string) => HostBooking): { before: HostBooking; after: HostBooking } | null => {
