@@ -435,4 +435,13 @@ describe("database invariants", () => {
     assert.match(sql, /outcome IN \('CONFIRMED', 'PAYMENT_REVIEW', 'DUPLICATE', 'EXPIRED', 'IGNORED'\)/);
     assert.doesNotMatch(sql, /CREATE TABLE|ADD COLUMN|DROP COLUMN|UPDATE |DELETE /);
   });
+
+  it("keeps one attendance mark per booking, additively and without guest data (#107)", async () => {
+    const sql = await readFile(new URL("../migrations/0033_booking_attendance.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE booking_attendance/);
+    assert.match(sql, /PRIMARY KEY \(provider_id, booking_id\)/);
+    assert.match(sql, /REFERENCES bookings\(provider_id, id\)/);
+    assert.match(sql, /status IN \('ATTENDED', 'NO_SHOW'\)/);
+    assert.doesNotMatch(sql, /guest_name|guest_email|guest_phone|ALTER TABLE|DROP |^\s*(UPDATE|DELETE) /m);
+  });
 });

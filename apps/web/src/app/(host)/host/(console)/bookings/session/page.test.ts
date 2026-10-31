@@ -62,6 +62,11 @@ describe("この回 without NIHO's bookings (provider operations off)", () => {
     expect(state.loadHostSession).not.toHaveBeenCalled();
   });
 
+  it("passes on whether 出欠 is kept for these bookings (#107)", async () => {
+    state.site = { ...LIVE, messages: true, attendance: true };
+    expect((await page()).props.site).toEqual({ besideNiho: false, providerId: "sample-provider", messages: true, attendance: true });
+  });
+
   it("keeps today's screen while this site's bookings are closed to the account", async () => {
     const view = await page();
     expect((view.type as { name: string }).name).toBe("SessionUnavailable");
