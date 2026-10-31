@@ -13,6 +13,8 @@ const IUD = ["INSERT", "UPDATE", "DELETE"];
 export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // DELETE: the mail job removes grants and sessions that can no longer open or read a booking.
   booking_access_grants: { write: IUD },
+  // 出欠 (#107): one row per booking, its mark replaced when the host corrects it.
+  booking_attendance: { write: IU },
   // 取消と返金 (#285 slice 7): commands are append-only; refunds and requests move through their states.
   booking_cancellation_commands: { write: I },
   booking_cancellation_requests: { write: IU },
