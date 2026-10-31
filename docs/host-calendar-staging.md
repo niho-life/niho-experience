@@ -1,6 +1,6 @@
 # ホスト・Google Calendar の staging 受入準備（#92）
 
-[ADR 0002](adr/0002-experience-domain-ownership.md) に従い、`niho-app-stg` 内に Experience 専用サービスを置く。通常の mock preview、本番、NIHO app のサービスとは実行ID・配備ID・Artifact Registry・OIDC poolを分ける。販売・検索登録は常に停止する。この手順を用意しただけでは受入完了にならない。
+[ADR 0002](adr/0002-experience-domain-ownership.md) に従い、`niho-app-stg` 内に Experience 専用サービスを置く。通常の mock preview、本番、NIHO app のサービスとは実行ID・配備ID・Artifact Registry・OIDC poolを分ける。検索登録は常に停止する（`SITE_INDEXING=block`）。販売は、オーナー決定（2026-10-31）により staging だけ Stripe のテストモードで開ける。Environment Variable `STG_GUEST_BOOKING_ENABLED=true` のときだけで、未設定・`false` なら今までどおり止める（`BOOKINGS_ENABLED=false`。下の「[旅行者の予約（Stripe テストモード、#285）](#旅行者の予約stripe-テストモード285)」）。本番の販売は止めたまま。この手順を用意しただけでは受入完了にならない。
 
 API契約は、このリポの体験業務 v1 と、固定された NIHO host/account 契約を使う。移行元公開APIは `1.0` を維持する。NIHO側 #19282/#19283 の merge・stg配備・契約確認が済むまで readiness を有効にしない。NIHO app のコード・配備設定は連携担当が変更する。
 
@@ -11,8 +11,10 @@ API契約は、このリポの体験業務 v1 と、固定された NIHO host/ac
 | Project / region | `niho-app-stg` / `asia-northeast1` |
 | Cloud Run | `niho-experience-host-stg`。初回placeholderはprivate、候補は0%配信（公開状態はservice単位で継承） |
 | Artifact Registry | `experience-host-stg`。このrepoに限りdeployerがwriter、Cloud Run service agentがreader |
-| Runtime SA | `experience-host-stg-runtime`。6個の対象SecretだけAccessor、既存SQL instanceだけ条件付きClient |
+| Runtime SA | `experience-host-stg-runtime`。下の「Secret Manager」の表の6個のExperience専用Secretと、旅行者の予約で使う6個（新規の webhook 署名鍵1個と NIHO app の既存Secret 5個）だけにresource単位でAccessor、既存SQL instanceだけ条件付きClient |
 | Deployer SA | `experience-host-stg-deployer`。対象Cloud Run serviceだけ `run.admin` / `run.invoker`、runtime SAだけ `serviceAccountUser` |
+| Jobs SA | `experience-jobs`。Cloud Scheduler の OIDC token 専用。projectのroleなし、対象Cloud Run serviceだけ `run.invoker` |
+| Cloud Scheduler | `experience-jobs-drain-stg`（`asia-northeast1`）。毎分 `POST {STG_HOST_SERVICE_URL}/internal/experience-jobs/v1/drain`、audience は `STG_HOST_SERVICE_URL`。一時停止で作り、予約を開く配備のあとに再開する |
 | OIDC | 専用pool `experience-host-staging` / provider `github`。固定repo ID・repo名・main・手動workflow・`host-staging` Environmentを検査 |
 | Cloud SQL / VPC | 既存のprivate IPのみ・connector必須の `niho-app-db-stg` を使用するが、Experience専用DB・DBユーザーを別途作る。Cloud Runは既存 `default` VPC/subnetへのDirect VPC egress（private rangesのみ）とCloud SQL接続を併用する。NIHO業務DBへ接続しない |
 
@@ -57,7 +59,7 @@ CONFIRM_EXPERIENCE_DB_MIGRATE=niho-app-stg \
 
 ## Secret Manager（値は管理者だけが登録）
 
-Secretはすべて `niho-app-stg` に新規のExperience専用品として作成する。Firebase keyもNIHO **stg** の値を使う。versionは数字へ固定し、`latest` やaliasを使わない。
+下表の6個は `niho-app-stg` に新規のExperience専用品として作成する（旅行者の予約で使うSecretは下の「旅行者の予約」）。Firebase keyもNIHO **stg** の値を使う。versionは数字へ固定し、`latest` やaliasを使わない。
 
 | Environment Variable | Secret名（値は書かない） | Cloud Run環境変数 |
 | --- | --- | --- |
@@ -72,7 +74,7 @@ Secretはすべて `niho-app-stg` に新規のExperience専用品として作成
 
 DB URLはExperience専用DB・限定ユーザーを使い、[Cloud RunのUnix socket接続](https://docs.cloud.google.com/sql/docs/postgres/connect-run) に合わせて `/cloudsql/niho-app-stg:asia-northeast1:niho-app-db-stg` をhostとして `pg` が解釈できる形で設定する。既存NIHO backendと同じくCloud SQL接続とDirect VPC egressを併用し、connector必須の共有instanceへ到達させる。資格情報のURL encode、DB名、socket指定、接続とDMLの可否を非公開の管理経路で確認する。workflowは値を取得・表示しない。
 
-管理者は各Secretに対して、次のresource単位のbindingを6件だけ追加する（`SECRET_NAME` は上表のいずれかへ置換）。既存NIHOのSecretへの権限は追加しない。
+管理者は各Secretに対して、次のresource単位のbindingを6件だけ追加する（`SECRET_NAME` は上表のいずれかへ置換）。既存NIHOのSecretへの権限は、旅行者の予約で参照する5個だけに `scripts/gcp/setup-host-staging-guest-booking.sh` がresource単位で追加する（オーナー決定 2026-10-31。それまでの「追加しない」を改めた）。ほかのNIHOのSecretとproject全体には追加しない。
 
 ```sh
 gcloud secrets add-iam-policy-binding SECRET_NAME \
@@ -96,8 +98,89 @@ Cloud Run `status.url` を取得して `STG_HOST_SERVICE_URL` へそのまま登
 2. 候補のimage/runtime/env/数字Secret参照/Cloud SQL接続設定を検査する。候補のGET smokeはdeployerのID tokenを使う。初回はprivateで検査し、初回昇格後の候補は公開済みserviceの設定を継承する。ID tokenは短命のため、配備後のGET直前に生成する。[auth action公式手順](https://github.com/google-github-actions/auth/blob/main/README.md) に従い `workloadIdentityUser` で生成する。Token Creatorの追加は不要。OAuth、予約作成、migrationは実行しない。
 3. 成功runのSHA・revision・digestを確認し、`action=promote` に同じ値を指定する。対象commitがmainに残り、構成が現在の保護設定と一致することを再確認する。候補を100%にした**後**、stable serviceへの未認証アクセスを許可する。初回placeholderを公開しない。`robots.txt`・host入口・配信revisionを検査し、失敗時は直前のtrafficへ戻す。初回で失敗した場合はIAM checkも有効へ戻す。昇格の成功・失敗いずれでも対象候補のtagを除去する。候補作成/GET検査が失敗した場合も今回runのtagを除去し、別候補のtagは触らない。rollbackやtag除去も失敗した場合は手動readbackして復旧する。
 4. Google Chromeでブラウザ名とstg URLを確認し、合成ホストでNIHOログイン→カレンダー→Google接続→合成busy表示→日程/休止保存→失効/切断→再接続を確認する。別提供者/別userの操作拒否、非OWNERのGoogle接続拒否、古い同期時の受付停止、cookieのHttpOnly/Secure/SameSite、tokenがstorage/公開cache/計測へ出ないことも確認する。ブラウザの画面だけでなく、専用DBへの保存・権限を非公開の管理経路で確認する。
-5. `BOOKINGS_ENABLED=false`、`SITE_INDEXING=block`、`HOST_SIGNUP_MODE=pilot` は固定。Stripe/ゲスト予約/販売/本番Google接続を受け入れたとは扱わない。定期同期workerの配備もこのworkflowの対象外で、同期が古いときの受付停止を確認する。
+5. `SITE_INDEXING=block`、`HOST_SIGNUP_MODE=pilot` は固定。`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED=true` のときだけ `true`（Stripe テストモード、下の「旅行者の予約」）、それ以外は `false`。この手順（カレンダー）の受入では、ゲスト予約・販売・本番Google接続を受け入れたとは扱わない（予約は下の受入で扱う）。定期同期workerの配備もこのworkflowの対象外で、同期が古いときの受付停止を確認する。
 6. 昇格せず破棄する候補は運用担当がtagを除去する。公開済みservice上では0%でもtag URLへアクセスできるため、保留候補のSHA・tag・破棄予定を運用記録で管理し、受入後に未使用tagがないことを確認する。tag除去はrevisionや配信中trafficの削除を意味しない。
 7. #92へはSHA・image digest・テスト項目と成否・未実施理由だけを残す。実ID、DB接続情報、OAuth state/code/token、cookie、Calendar ID、予定の件名/説明/参加者、スクリーンショット内の個人情報を公開しない。
 
 候補GETの成功は、DB/membershipの正しさやGoogle OAuth完了を証明しない。受入が終わるまで #92 をcloseせず、NIHOの旧提供者画面の転送・撤去、本番配備は別の受入に進める。
+
+## 旅行者の予約（Stripe テストモード、#285）
+
+オーナー決定（2026-10-31）：
+
+- staging だけ、旅行者の予約（[guest-booking.md](guest-booking.md)）を Stripe のテストモードで開く（`BOOKINGS_ENABLED=true`）。検索登録は止めたまま（`SITE_INDEXING=block`）。staging の Secret にはテストの鍵だけを入れる。本番は販売を止めたまま（`deploy-production.yml` は変えない）。
+- experience 専用の資格情報は新しく作らず、同じ project にある NIHO app の既存 Secret をそのまま参照する。新しく作る Secret は、このサービスを指す Stripe webhook endpoint の署名鍵 1 つだけ。
+
+切り替えは Environment Variable `STG_GUEST_BOOKING_ENABLED`。未設定・`false` なら revision は今までと同じ（`BOOKINGS_ENABLED=false`、下の値は入れず、下の Variable も検査しない）。`true` のとき、workflow は配備の前に下の Variable をすべて検査し、欠け・形の誤りがあれば配備せずに止まる。配備後の検査は、revision の環境変数と Secret 参照が下の集合と完全に一致することを確かめる（昇格時も同じ。候補の作成後に Variable を変えると昇格は止まる）。
+
+### workflow が入れる環境変数
+
+| Cloud Run 環境変数 | 値 |
+| --- | --- |
+| `BOOKINGS_ENABLED`・`EXPERIENCE_GUEST_BOOKING_ENABLED`・`EXPERIENCE_GUEST_MAIL_ENABLED`・`EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `true` |
+| `EXPERIENCE_BOOKING_CONSENT_VERSION` | `STG_BOOKING_CONSENT_VERSION` |
+| `EXPERIENCE_MAIL_FROM` / `EXPERIENCE_MAIL_REPLY_TO` | `STG_MAIL_FROM` / `STG_MAIL_REPLY_TO` |
+| `EXPERIENCE_JOBS_AUDIENCE` | `STG_HOST_SERVICE_URL`（OTA watchdog と同じく、サービスのベース URL） |
+| `EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL` | `experience-jobs@niho-app-stg.iam.gserviceaccount.com` |
+| `EXPERIENCE_PRIVACY_POLICY_URL` | `STG_PRIVACY_POLICY_URL`（設定したときだけ） |
+
+翻訳：Environment Variable `STG_TRANSLATION_ENABLED=true`（`STG_GUEST_BOOKING_ENABLED=true` が前提）で `EXPERIENCE_TRANSLATION_ENABLED=true` を入れ、NIHO app の既存の `NIHO_TRANSLATE_ANTHROPIC_API_KEY` を `STG_ANTHROPIC_API_KEY_REF` で参照する（オーナー決定 2026-10-31、experience 専用の key は作らない。[guest-questions.md](guest-questions.md) の「翻訳」）。
+
+入れないもの：`EXPERIENCE_GUEST_REVIEWS_ENABLED`（レビュー #104/#108 は予約とは別の受入）、`HOST_PUSH_*`（VAPID と push job が未配線）。
+
+### Environment Variables（値は Git に書かない）
+
+| Variable | 形 |
+| --- | --- |
+| `STG_GUEST_BOOKING_ENABLED` | `true` / `false` / 未設定 |
+| `STG_BOOKING_CONSENT_VERSION` | 英数字と `._:+-` の 1〜100 字（app は空白なしの印字可能な ASCII を受けるが、`--set-env-vars` の区切りになるカンマを避けるため狭めた） |
+| `STG_MAIL_FROM` | NIHO app の領収書と同じ送信者。`表示名 <アドレス>`（表示名のあとに半角空白 1 つ）かアドレスだけ。表示名にカンマ・`<>"`・改行を入れない |
+| `STG_MAIL_REPLY_TO` | NIHO サポートの Reply-To。形は `STG_MAIL_FROM` と同じ |
+| `STG_PRIVACY_POLICY_URL` | 任意。NIHO のプライバシーポリシーの https URL（小文字の host とパスだけ。query・カンマ・認証情報なし） |
+
+Secret の参照（`secret-name:VERSION`、数字 version だけ。workflow は下の Secret 名に固定した正規表現で検査する）：
+
+| Environment Variable | Secret 名（値は書かない） | Cloud Run 環境変数 | 持ち主 |
+| --- | --- | --- | --- |
+| `STG_SMTP_HOST_REF` | `RECEIPT_DELIVERY_SMTP_HOST` | `EXPERIENCE_SMTP_HOST` | NIHO app 既存 |
+| `STG_SMTP_PORT_REF` | `RECEIPT_DELIVERY_SMTP_PORT` | `EXPERIENCE_SMTP_PORT` | NIHO app 既存 |
+| `STG_SMTP_USER_REF` | `RECEIPT_DELIVERY_SMTP_USER` | `EXPERIENCE_SMTP_USER` | NIHO app 既存 |
+| `STG_SMTP_PASSWORD_REF` | `RECEIPT_DELIVERY_SMTP_PASSWORD` | `EXPERIENCE_SMTP_PASSWORD` | NIHO app 既存 |
+| `STG_STRIPE_PLATFORM_SECRET_KEY_REF` | `STRIPE_CONNECT_PLATFORM_SECRET_KEY` | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | NIHO app 既存（Connect プラットフォームの鍵。staging はテストの鍵） |
+| `STG_STRIPE_WEBHOOK_SECRET_REF` | `experience-stg-stripe-webhook-secret` | `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 新規（このサービスの webhook endpoint の署名鍵） |
+| `STG_ANTHROPIC_API_KEY_REF` | `NIHO_TRANSLATE_ANTHROPIC_API_KEY` | `EXPERIENCE_ANTHROPIC_API_KEY` | NIHO app の既存（`STG_TRANSLATION_ENABLED=true` のときだけ） |
+
+### 順番
+
+1. 前提：experience DB に main の migration（`0032` まで）を `apply-experience-db-migrations.mjs` で適用し、runtime の権限を宣言に合わせてある（上の「以降のmigrationとruntime権限」）。上の初期設定・Secret・固定 URL の準備と配備ができている。
+2. **setup**：管理者がレビュー済み SHA から実行する。明示的な GCP 変更である。
+
+   ```sh
+   CONFIRM_HOST_STAGING_GUEST_BOOKING_SETUP=niho-app-stg \
+   STG_HOST_SERVICE_URL="<Environment Variable と同じ stable URL>" \
+     bash scripts/gcp/setup-host-staging-guest-booking.sh
+   ```
+
+   URL が `https://niho-experience-host-stg-….a.run.app` の形でない、または実際の service の URL と違えば止まる。Cloud Scheduler API を有効にし、`experience-stg-stripe-webhook-secret` を version なしで作り、runtime に上の 6 個の Secret だけ resource 単位の `secretAccessor` を付け、`experience-jobs` を project の role なしで作って対象 service の `run.invoker` だけを付け、Scheduler job を作ってすぐ一時停止する（作成時に一時停止で作る flag が無い。その間に 1 回呼ばれても、gate が off なら 404 で何も変えない）。既存の job は検査だけで、変更・再開しない（設定が違えば止まる）。NIHO app の Secret が無ければ止まり、作らない。Secret の値と version を読まず、表示しない。既存の `setup-host-staging.sh` は変えない。
+3. **Secret の version**：Stripe のテストモードで、NIHO のプラットフォームアカウントに webhook endpoint `{STG_HOST_SERVICE_URL}/api/experience/stripe/webhook` を作る。connected account のイベントを受ける（Connect の）endpoint とし、`checkout.session.completed`・`checkout.session.async_payment_succeeded`・`checkout.session.expired`・`checkout.session.async_payment_failed`・`refund.created`・`refund.updated`・`refund.failed` を購読する（[guest-booking.md](guest-booking.md) の「体験の登録と切替」の前提）。署名鍵はこの endpoint からしか出ないので、endpoint を先に作り、その署名鍵を安全な管理端末から `experience-stg-stripe-webhook-secret` に version として足す（標準出力・shell 履歴に出さない）。NIHO app の既存 endpoint とその鍵は変えず、流用しない。NIHO app の 5 個の Secret は値を変えず、NIHO app の stg が使っている数字 version を `gcloud secrets versions list` で確かめる。
+4. **Variables**：`host-staging` Environment に上の Variable と 6 個の `*_REF` を設定し、最後に `STG_GUEST_BOOKING_ENABLED=true` にする。
+5. **配備**：上の「手動配備と受入」と同じく `candidate` → `promote`。summary は「Stripe test bookings open」と `bookings=true (Stripe test mode)` になる。
+6. **Scheduler の再開**：昇格のあと `gcloud scheduler jobs resume experience-jobs-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる（401 は audience かサービスアカウントの不一致、404 は配信中の revision で gate が off、503 は Google の鍵・DB・SMTP）。
+7. **体験の登録**：合成の提供者・テストの Connect 口座で `scripts/experience/register-site-sale.mjs`（[guest-booking.md](guest-booking.md) の「体験の登録と切替（第9段）」）を流す。`plan` が出す鍵の種類が `test` であることを確かめ、`live` なら止めて Secret の version を見直す。
+
+止めるとき：`stop-sale --yes` で販売条件を消し、仮押さえの期限（35 分）と返金の完了を待つ。Scheduler を一時停止してから `STG_GUEST_BOOKING_ENABLED` を `false` に戻して配備・昇格する。gate を戻すと Stripe の秘密も revision から外れ、それ以降の webhook は処理されない。
+
+### 受入（Stripe テストモード）
+
+Google Chrome でブラウザ名と stable URL を確かめてから行う。予約者のアドレスはテスト用の受信箱を使う。
+
+1. **体験ページ**：登録した体験の英語の詳細に日程と予約の入口が出て、残席・料金・質問が入力どおり。ほかの商品は NIHO のまま。`robots.txt` が `Disallow: /` のまま。
+2. **予約**：Stripe のテストカード（`4242 4242 4242 4242`、未来の期限、任意の CVC）で 1 件予約する。`/booking/return` は予約の完了を約束しない。Stripe のテストモードで endpoint への配信が 2xx、`/host/bookings` に確定として出る。NIHO app 側の予約・台帳が増えない（NIHO の既存 webhook がこの Session を処理しない）。
+3. **確認メール**：Scheduler の次の実行（1 分以内）で「Your booking is confirmed」が届く。From・Reply-To が設定どおりで、リンクの origin が stable URL。
+4. **予約ページ**：メールのリンクから「Open your booking」で `/bookings/{id}` が開く。cookie `__Host-nb_…` が `HttpOnly`・`Secure`・`SameSite=Lax`。使用済みのリンクは開けない。`/bookings` の「Find your booking」で同じアドレスにリンクのメールが届く。
+5. **メッセージ**：予約ページから送ると OWNER の `/host/messages` に出る。ホストの返信は次の job の実行でメールになり、予約ページに出る。体験ページの「Ask the host」から質問し、返信メールの `/questions/reply` で答えられる。
+6. **取消と返金**：予約者が無料取消の期限内に「Cancel and get a full refund」で取り消し、Stripe のテストモードで返金ができ、`refund.*` の webhook のあと取消のメールが届く。別の予約で OWNER の取消（予約 1 件）も確かめる。サポートの取消・承認（Admin）は staging で開いていないので対象外。
+7. **ホストの画面**：OWNER で予約・ホーム・この回（予約者の電話はここだけ）にこの予約が出る。OWNER でない・別の提供者のアカウントでは見えない。
+8. **翻訳（英語にする）**：`STG_TRANSLATION_ENABLED` が off の間は、「英語にする」は使えないことを伝える文（`REPLY_DRAFT_UNAVAILABLE_TEXT`）を出し、旅行者の英語の日本語訳も作られない（訳の待ち行は残り、on にすると古いものから訳す）。on にしたら、旅行者の文の訳はメール job の次の実行（毎分、1 回 10 件・60 秒まで）で `/host/messages` に出て、「英語にする」はその場で（15 秒まで）下書きを返すことを確かめる。
+
+#285 へは SHA・image digest・項目と成否・未実施の理由だけを残す。予約者の名前・アドレス・電話、予約番号、grant・cookie、Stripe の ID、メールの本文、スクリーンショット内の個人情報を公開しない。
