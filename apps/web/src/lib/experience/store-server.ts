@@ -90,3 +90,12 @@ export function guestBookingRepository(): GuestBookingRepository | null {
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
 }
+
+/**
+ * The Stripe webhook's view of 旅行者の予約 (#285 slice 4). A Session this service created can end after the
+ * flag is turned off, so releasing its hold needs only the experience DB, like confirming its payment.
+ */
+export function guestHoldReleases(): Pick<GuestBookingRepository, "releaseGuestHold"> | null {
+  const pool = experiencePool();
+  return pool ? new GuestBookingRepository(pool) : null;
+}
