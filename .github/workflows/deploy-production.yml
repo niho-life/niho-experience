@@ -191,7 +191,8 @@ jobs:
           else
             env_vars+=',HOST_CONSOLE_ENABLED=false'
             # Every flag needs the host console and its database (the resolve step refused any otherwise).
-            test -z "$FLAG_ENV" && test -z "$FLAG_SECRETS"
+            test -z "$FLAG_ENV"
+            test -z "$FLAG_SECRETS"
             runtime_options+=(--clear-secrets --clear-cloudsql-instances --clear-network)
             # The watchdog needs the Experience database, which only the host calendar wires.
             [[ -z "$CHANNEL_WATCHDOG" || "$CHANNEL_WATCHDOG" = false ]]
