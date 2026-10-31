@@ -662,3 +662,88 @@ export function verifyDirectCheckoutWebhook(
     currency: currency.toUpperCase(),
   };
 }
+
+/* ---------- the seller's connected account (#285 slice 9: the operator's registration) ---------- */
+
+/** The part of Stripe the account check uses (the platform key reads its connected accounts). */
+export type ConnectedAccountStripeClient = Pick<Stripe, "accounts">;
+
+export interface RetrieveConnectedAccountInput {
+  readonly accountId: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: ConnectedAccountStripeClient;
+}
+
+/** What the operator may see of the account: the last 4 characters of its ID and the facts checked, nothing else. */
+export interface ConnectedAccountSummary {
+  readonly idLast4: string;
+  readonly country: string | null;
+  readonly defaultCurrency: string | null;
+  readonly chargesEnabled: boolean;
+  readonly payoutsEnabled: boolean;
+  readonly detailsSubmitted: boolean;
+}
+
+export type ConnectedAccountProblem = "CHARGES_DISABLED" | "PAYOUTS_DISABLED" | "DETAILS_NOT_SUBMITTED" | "NOT_JAPAN" | "NOT_JPY";
+
+export type ConnectedAccountCheck =
+  | { readonly kind: "ready"; readonly account: ConnectedAccountSummary }
+  | { readonly kind: "not_ready"; readonly account: ConnectedAccountSummary; readonly problems: readonly ConnectedAccountProblem[] }
+  /** Stripe would not show the account to this platform key: not connected to the platform, or the key may not read accounts. */
+  | { readonly kind: "unreachable" };
+
+function accountsClient(platformStripeKey: string | undefined, injected: ConnectedAccountStripeClient | undefined): ConnectedAccountStripeClient {
+  if (injected !== undefined && platformStripeKey !== undefined) {
+    throw new ExperiencePaymentsValidationError("Provide either platformStripeKey or stripe, not both.");
+  }
+  if (injected !== undefined) return injected;
+  if (platformStripeKey === undefined || platformStripeKey.trim().length === 0) {
+    throw new ExperiencePaymentsValidationError("A platform Stripe key or injected Stripe client is required.");
+  }
+  return new Stripe(platformStripeKey);
+}
+
+/** Stripe answered that this key cannot see the account (or that it does not exist for this platform). */
+function accountOutOfReach(error: unknown): boolean {
+  const type = (error as { type?: unknown } | null)?.type;
+  if (type === "StripePermissionError") return true;
+  const code = (error as { code?: unknown } | null)?.code;
+  return type === "StripeInvalidRequestError" && (code === "resource_missing" || code === "account_invalid");
+}
+
+/**
+ * Reads a seller's connected account with the experience platform key (owner decision 2026-10-31, #330: the
+ * account is checked directly with Stripe, not through NIHO). It is ready to take this site's Direct charges in
+ * JPY when Stripe shows it to the platform and it has charges and payouts enabled, its details submitted, Japan
+ * as its country and JPY as its default currency. Returns no other account detail. A network, key or Stripe
+ * failure other than "cannot see this account" throws.
+ */
+export async function retrieveConnectedAccount(input: RetrieveConnectedAccountInput): Promise<ConnectedAccountCheck> {
+  if (typeof input.accountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.accountId)) {
+    throw new ExperiencePaymentsValidationError("accountId must be a Stripe connected account ID.");
+  }
+  const stripe = accountsClient(input.platformStripeKey, input.stripe);
+  let account: Stripe.Account;
+  try {
+    account = await stripe.accounts.retrieve(input.accountId);
+  } catch (error) {
+    if (accountOutOfReach(error)) return { kind: "unreachable" };
+    throw error;
+  }
+  if (account?.id !== input.accountId) throw new ExperiencePaymentsValidationError("Stripe returned another account.");
+  const summary: ConnectedAccountSummary = {
+    idLast4: input.accountId.slice(-4),
+    country: typeof account.country === "string" ? account.country.toUpperCase() : null,
+    defaultCurrency: typeof account.default_currency === "string" ? account.default_currency.toLowerCase() : null,
+    chargesEnabled: account.charges_enabled === true,
+    payoutsEnabled: account.payouts_enabled === true,
+    detailsSubmitted: account.details_submitted === true,
+  };
+  const problems: ConnectedAccountProblem[] = [];
+  if (!summary.chargesEnabled) problems.push("CHARGES_DISABLED");
+  if (!summary.payoutsEnabled) problems.push("PAYOUTS_DISABLED");
+  if (!summary.detailsSubmitted) problems.push("DETAILS_NOT_SUBMITTED");
+  if (summary.country !== "JP") problems.push("NOT_JAPAN");
+  if (summary.defaultCurrency !== "jpy") problems.push("NOT_JPY");
+  return problems.length === 0 ? { kind: "ready", account: summary } : { kind: "not_ready", account: summary, problems };
+}

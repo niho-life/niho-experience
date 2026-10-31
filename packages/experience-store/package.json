@@ -13,6 +13,14 @@
     "./channel-sites": {
       "types": "./src/channel-sites.ts",
       "default": "./src/channel-sites.ts"
+    },
+    "./site-sale-registration": {
+      "types": "./src/site-sale-registration.ts",
+      "default": "./src/site-sale-registration.ts"
+    },
+    "./site-sale-script": {
+      "types": "./src/site-sale-script.ts",
+      "default": "./src/site-sale-script.ts"
     }
   },
   "scripts": {

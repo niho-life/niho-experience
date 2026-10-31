@@ -8,9 +8,11 @@ import {
   ExperiencePaymentsValidationError,
   isEndedCheckoutEvent,
   isRefundEvent,
+  retrieveConnectedAccount,
   retrieveDirectCheckout,
   submitBookingRefund,
   verifyDirectCheckoutWebhook,
+  type ConnectedAccountStripeClient,
   type PaymentsStripeClient,
 } from "../src/index.ts";
 
@@ -558,5 +560,67 @@ describe("refund webhooks (#285 slice 7)", () => {
     assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ status: "lost" }))), /status is unknown/);
     assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ amount: 0 }))), /refund amount/);
     assert.throws(() => verifyDirectCheckoutWebhook(signedPayload(refundEventOf({ object: "charge" }))), /does not contain a Refund/);
+  });
+});
+
+describe("retrieveConnectedAccount (#285 slice 9)", () => {
+  const ACCOUNT = "acct_SampleSeller0001";
+  const READY = { id: ACCOUNT, object: "account", country: "JP", default_currency: "jpy", charges_enabled: true, payouts_enabled: true, details_submitted: true, email: "seller@example.com" };
+  function stripeWith(answer: { account?: Record<string, unknown>; error?: unknown }, calls: unknown[][] = []) {
+    return {
+      accounts: {
+        retrieve: async (...args: unknown[]) => {
+          calls.push(args);
+          if (answer.error) throw answer.error;
+          return answer.account ?? READY;
+        },
+      },
+    } as unknown as ConnectedAccountStripeClient;
+  }
+  function stripeError(type: string, code?: string): Error {
+    return Object.assign(new Error("synthetic Stripe error naming acct_SampleSeller0001"), { type, code });
+  }
+
+  it("reads the account with the platform key and returns only the last 4 of its ID and the checked facts", async () => {
+    const calls: unknown[][] = [];
+    const answer = await retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({}, calls) });
+    assert.deepEqual(calls, [[ACCOUNT]]);
+    assert.deepEqual(answer, {
+      kind: "ready",
+      account: { idLast4: "0001", country: "JP", defaultCurrency: "jpy", chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true },
+    });
+    assert.equal(JSON.stringify(answer).includes("example.com"), false);
+  });
+
+  it("lists what keeps the account from taking JPY charges here", async () => {
+    const answer = await retrieveConnectedAccount({
+      accountId: ACCOUNT,
+      stripe: stripeWith({ account: { ...READY, country: "US", default_currency: "usd", charges_enabled: false, payouts_enabled: false, details_submitted: false } }),
+    });
+    assert.deepEqual(answer, {
+      kind: "not_ready",
+      account: { idLast4: "0001", country: "US", defaultCurrency: "usd", chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false },
+      problems: ["CHARGES_DISABLED", "PAYOUTS_DISABLED", "DETAILS_NOT_SUBMITTED", "NOT_JAPAN", "NOT_JPY"],
+    });
+    const missing = await retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ account: { ...READY, country: undefined, default_currency: undefined } }) });
+    assert.deepEqual(missing.kind === "not_ready" && missing.problems, ["NOT_JAPAN", "NOT_JPY"]);
+  });
+
+  it("answers unreachable when Stripe will not show the account to this platform, and throws on other failures", async () => {
+    assert.deepEqual(await retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ error: stripeError("StripePermissionError") }) }), { kind: "unreachable" });
+    assert.deepEqual(await retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ error: stripeError("StripeInvalidRequestError", "resource_missing") }) }), { kind: "unreachable" });
+    assert.deepEqual(await retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ error: stripeError("StripeInvalidRequestError", "account_invalid") }) }), { kind: "unreachable" });
+    await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ error: stripeError("StripeInvalidRequestError", "parameter_invalid") }) }), /synthetic Stripe error/);
+    await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ error: stripeError("StripeConnectionError") }) }), /synthetic Stripe error/);
+    await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT, stripe: stripeWith({ account: { ...READY, id: "acct_SampleOther0002" } }) }), /another account/);
+  });
+
+  it("refuses a malformed account ID before calling Stripe, and needs exactly one of key or client", async () => {
+    const calls: unknown[][] = [];
+    await assert.rejects(retrieveConnectedAccount({ accountId: "cus_Sample0001", stripe: stripeWith({}, calls) }), ExperiencePaymentsValidationError);
+    await assert.rejects(retrieveConnectedAccount({ accountId: `${ACCOUNT}\n`, stripe: stripeWith({}, calls) }), ExperiencePaymentsValidationError);
+    assert.deepEqual(calls, []);
+    await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT }), /platform Stripe key/);
+    await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT, platformStripeKey: "sk_test_synthetic", stripe: stripeWith({}) }), /either platformStripeKey or stripe/);
   });
 });

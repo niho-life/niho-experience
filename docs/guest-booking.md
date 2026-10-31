@@ -2,7 +2,7 @@
 
 [#285](https://github.com/niho-life/niho-experience/issues/285) の現行設計。[ADR 0002](adr/0002-experience-domain-ownership.md)（2026-10-27）により、体験の開催枠・予約・決済の状態は niho-experience が正本を持つ。旅行者の予約を NIHO の公開 API から experience DB（`packages/experience-store`）へ移す。オーナー決定（2026-10-31）：商品ごとに切り替え、切り替えた商品は NIHO で売らない。予約者の連絡先は体験の 1 年後に消す。NIHO の手数料はサポート OFF 10%・ON 15%（決済手数料込み）で、予約を受けた時点の値を予約ごとに固定する。
 
-**現在地（第6段の続き・6b）**：販売条件・手数料の設定・公開の残席・仮押さえ（第1段、`0023`）に、提供者ごとの手数料設定（`0025`）、Stripe Checkout の作成、公開の経路 2 本を足した（第2段）。第3段で旅行者の画面をつないだ：flag が on のとき、ここで売る商品は残席・価格・質問・規約の版を experience DB から読み、このサイトの経路で申し込み、Stripe を経て `/booking/return` に戻る。ほかの商品と flag off・mock（プレビューと e2e）は今までどおり NIHO の API を読む（下の「画面がどこから読むか」）。第4段で、支払われずに終わった Checkout の席を webhook で戻し、期限を過ぎた仮押さえを次の申込で片付けるようにした（`0026`、下の「放棄された Checkout と遅れた支払い」）。第5段で、確定した予約の確認メールと、予約者の情報・質問を 1 年後に消す job を足した（migration なし、下の「予約者へのメール」）。続けて、確定した予約をホストのアプリに push し（下の「ホストへの通知」）、予約前の質問を Claude API で訳すようにした（migration なし、[guest-questions.md](guest-questions.md)）。第8段で、ここで受けた予約を提供者の OWNER がホストの画面の「予約」で読めるようにし、続けてホームの開催・次にすることと「この回」（予約者の電話はここだけ）にも入れた（読むだけ、migration なし、下の「ホストの画面」）。第6段の前半（6a）で、確認メールのリンクから開く予約者の予約ページ（読むだけ）と「Find your booking」を足した（`0029`、下の「予約者の予約ページ」）。第7段で、予約者・提供者の OWNER・NIHO サポートによる取消と、Stripe での返金を足し（`0030`、下の「取消と返金（第7段）」）、Stripe が受けなかった返金をメール job が自動で送り直すようにした（7b、`0031`）。6b で、予約ページでの予約者とホストのメッセージを足した（`0032`、下の「予約ごとのメッセージ（第6段の続き）」）。
+**現在地（第9段）**：販売条件・手数料の設定・公開の残席・仮押さえ（第1段、`0023`）に、提供者ごとの手数料設定（`0025`）、Stripe Checkout の作成、公開の経路 2 本を足した（第2段）。第3段で旅行者の画面をつないだ：flag が on のとき、ここで売る商品は残席・価格・質問・規約の版を experience DB から読み、このサイトの経路で申し込み、Stripe を経て `/booking/return` に戻る。ほかの商品と flag off・mock（プレビューと e2e）は今までどおり NIHO の API を読む（下の「画面がどこから読むか」）。第4段で、支払われずに終わった Checkout の席を webhook で戻し、期限を過ぎた仮押さえを次の申込で片付けるようにした（`0026`、下の「放棄された Checkout と遅れた支払い」）。第5段で、確定した予約の確認メールと、予約者の情報・質問を 1 年後に消す job を足した（migration なし、下の「予約者へのメール」）。続けて、確定した予約をホストのアプリに push し（下の「ホストへの通知」）、予約前の質問を Claude API で訳すようにした（migration なし、[guest-questions.md](guest-questions.md)）。第8段で、ここで受けた予約を提供者の OWNER がホストの画面の「予約」で読めるようにし、続けてホームの開催・次にすることと「この回」（予約者の電話はここだけ）にも入れた（読むだけ、migration なし、下の「ホストの画面」）。第6段の前半（6a）で、確認メールのリンクから開く予約者の予約ページ（読むだけ）と「Find your booking」を足した（`0029`、下の「予約者の予約ページ」）。第7段で、予約者・提供者の OWNER・NIHO サポートによる取消と、Stripe での返金を足し（`0030`、下の「取消と返金（第7段）」）、Stripe が受けなかった返金をメール job が自動で送り直すようにした（7b、`0031`）。6b で、予約ページでの予約者とホストのメッセージを足した（`0032`、下の「予約ごとのメッセージ（第6段の続き）」）。第9段で、ここで売る体験を experience DB に登録し、販売を開く・止める運用者のスクリプトを足した（migration なし、下の「体験の登録と切替（第9段）」）。
 
 ## 流れ
 
@@ -220,11 +220,99 @@ Stripe の戻り先 `/experiences/{slug}?checkout=cancelled`（第2段）で、�
 - 提供者ごとの設定 `provider_sale_settings`（`0025`）：`support_enabled` と `platform_fee_basis_points`（OFF は 1000、ON は 1500。DB の CHECK で組み合わせを固定）。**行が無い提供者の商品は売らない**。OFF・10% に補完しない（[admin-support.md](admin-support.md) の支援条件）。
 - 予約の `pricing_snapshot.platformFee` に `{ supportEnabled, basisPoints, amount }` を固定する。`amount` は合計 × 率 ÷ 10000 の**円未満切り捨て**（api-contract.md §9.2・§9.3 に率はあるが丸めの定めが無いため、率を超えて取らない側にした）。Stripe は手数料が 1 円以上かつ請求額未満であることを求めるので、そうならない商品は売らない（¥50 の最低額と同じ扱い。今の率と最低額では起きない）。
 - 設定を変えると、その後の予約から新しい率になる。受けた予約とその再送は受けたときの率のまま。
-- 書き込みは `GuestBookingRepository.setProviderSaleSettings(providerId, { supportEnabled }, expectedVersion?)` だけ。NIHO 側のサーバーからの移行処理・Admin だけが呼ぶ。提供者本人が NIHO の手数料を決めないよう actor を取らず、ホストの経路からは呼ばない。この段ではどの経路からも呼ばれない。
+- 書き込みは `GuestBookingRepository.setProviderSaleSettings(providerId, { supportEnabled }, expectedVersion?)` だけ。移行処理・Admin だけが呼ぶ。提供者本人が NIHO の手数料を決めないよう actor を取らず、ホストの経路からは呼ばない。第9段の登録スクリプト（`register`、下の「体験の登録と切替（第9段）」）が移行用の ID で呼ぶ。どの経路からも呼ばれない。
 
 ## 「この商品はここで売る」
 
-商品の販売条件（`experience_product_sale_terms`）と提供者の手数料設定の両方があり、flag が on なら、その商品はこのサイトで売られる。**書き込むことが「この商品はここで売る」の意味になる**。同じ開催回を NIHO とこのサイトで同時に売らないため、書き込みは NIHO でその商品の販売を止めるのと同時に行う（第9段で商品ごとに行う）。NIHO でまだ売っている商品には書かない。手数料設定は提供者単位なので、提供者に設定を書くと、販売条件のある商品がすべて売られる。
+商品の販売条件（`experience_product_sale_terms`）と提供者の手数料設定の両方があり、flag が on なら、その商品はこのサイトで売られる。**書き込むことが「この商品はここで売る」の意味になる**。同じ開催回を NIHO とこのサイトで同時に売らないため、書き込みは NIHO でその商品の販売を止めるのと同時に行う（商品ごとに、下の「体験の登録と切替（第9段）」の `open-sale` で書く）。NIHO でまだ売っている商品には書かない。手数料設定は提供者単位なので、提供者に設定を書くと、販売条件のある商品がすべて売られる。
+
+## 体験の登録と切替（第9段）
+
+オーナー決定（2026-10-31、[#330](https://github.com/niho-life/niho-experience/issues/330)）：ここで売る体験は experience 側で新しく登録する（NIHO から書き出す API は作らない）。
+
+- provider は NIHO の provider と**同じ ID** で登録する。`/host` は provider の一覧を NIHO から受け取り、同じ ID で experience DB の provider と membership を引く。
+- 提供者の OWNER は NIHO user ID で結ぶ。
+- 本文・写真は当面、同じ slug の NIHO のページから読む（上の「画面がどこから読むか」）。experience DB の商品は販売に要る項目だけを持ち、本文（`content`）は空のまま。
+- 販売者の Stripe Connect 口座は、experience のプラットフォーム鍵で Stripe に直接確かめる（NIHO の口座の契約は使わない）。
+- 開催の規則はホストが `/host/calendar` で作る。
+- 販売条件を書くと販売が開き、消すと止まる（上の「この商品はここで売る」）。
+
+### スクリプト
+
+`scripts/experience/register-site-sale.mjs`。Node 24 が store の TypeScript をそのまま読むので build は要らない（checkout で `npm ci` 済みのこと）。検証と手順の本体は `packages/experience-store/src/site-sale-script.ts`、DB の処理は `site-sale-registration.ts` にあり、合成データのテストがある。
+
+```sh
+node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sale|status] <入力.json> [--yes]
+```
+
+| コマンド | すること |
+| --- | --- |
+| `plan`（既定） | 読むだけ。`register` と `open-sale` が何を変えるかと、販売の準備（readiness）を出す |
+| `register --yes` | 販売者の Stripe 口座を確かめてから、provider・OWNER の membership・商品（`PUBLISHED`、JPY）・NIHO の手数料設定を書く。**販売条件は書かない**（販売は開かない） |
+| `open-sale --yes` | 登録が入力どおりか、販売条件にかかわる項目以外の readiness がすべて通るか、登録済みの Stripe 口座をもう一度確かめてから販売条件を書く。書いたあと、公開の予約条件がこの商品を返すこと（売られていること）を確かめる |
+| `stop-sale --yes` | 販売条件を消す（無ければ何もしない） |
+| `status` | readiness だけ |
+
+- 書くコマンドは `--yes` が無いと計画を出すだけで何も書かない。同じ入力で何度流しても、同じ値は書き直さない（version も進めない）。値が違えば、計画のときに読んだ version で書き、その間にほかが変えていれば止まる。
+- 終了コード：0 完了、1 入力・readiness・Stripe 口座・`--yes` の欠け・競合で断った、2 想定外の失敗（DB・Stripe の接続など）。
+- readiness の項目：`PROVIDER`（provider がある）、`OWNER`（有効な OWNER が 1 人以上）、`PRODUCT`、`PUBLISHED`、`UNIQUE_SLUG`（ほかに同じ slug の `PUBLISHED` が無い。あると両方売れない）、`JPY`、`MINIMUM_PRICE`（¥50 以上）、`FEE_SETTINGS`（手数料設定があり、最小の請求で Stripe が受ける額）、`SALE_TERMS`、`NO_CONDITIONS`（参加の条件の版が無い。上の「参加の条件」）、`SCHEDULE`（有効な開催の規則があり、今から 90 日の公開の範囲に受付中の回が 1 つ以上ある）。
+
+入力（`scripts/experience/site-sale.example.json` が合成の見本）：
+
+| 項目 | 内容 |
+| --- | --- |
+| `provider.id` | NIHO の provider ID（英数字・`_`・`-` の 1〜64 字） |
+| `provider.displayName` | 計画の表示で取り違えを防ぐためだけに使う。experience DB には provider の名前の列が無く、`/host` は NIHO の名前を出す |
+| `owner.nihoUserId` | OWNER にする NIHO user ID |
+| `supportEnabled` | NIHO のサポート（ON 15%、OFF 10%）。provider のすべての商品に効く |
+| `product.id`・`slug`・`title`・`unitAmountYen` | 商品の ID（120 字まで）、NIHO のページと同じ slug、表示名、大人 1 人の料金（円、¥50 以上） |
+| `product.cancellationTermsRef`・`sellerNihoAccountRef`・`stripeConnectAccountRef`・`sellerDisplayName` | 予約の snapshot に入る取消条件の参照、販売者の NIHO 口座の参照、販売者の Connect 口座（`acct_…`）、販売者の表示名 |
+| `saleTerms` | `setSaleTerms` と同じ形（子どもの料金・人数・取消条件・予約の質問）。`conditionsVersion` は `null` だけ（このサイトはまだ条件を出せない） |
+
+知らない項目・欠けた項目・形の違う値は断る。誤りは項目と規則だけを出し、値を繰り返さない。実の値の入力ファイルはリポジトリ・Issue・PR に置かず、作業端末の一時置き場で使って終わったら消す。
+
+### 接続する ID
+
+- runtime role は provider と membership を書けず、販売条件を消せない（`scripts/gcp/experience-db-grants.mjs`）。この登録のために runtime の権限は足さない。スクリプトは migration と同じ移行用の ID で動かす：[production-deploy.md](production-deploy.md) の migration と同じ経路（管理者の接続を bastion 経由で experience DB へ）の接続 URL を `EXPERIENCE_DATABASE_URL` に、移行用の role の名前を `EXPERIENCE_DATABASE_ROLE` に渡す（接続の開始時にその role になる。無い role なら接続できずに止まる）。
+- 書くコマンドは最初に、この接続が登録の表へ書けるかを確かめる。runtime の URL では何も書かずに 1 で止まる。
+- store の登録の処理（`SiteSaleRegistration`）は actor を取らないので、`index.ts` から出さず、`apps/web` から読まない。`experience-db-grants.mjs` の `OPERATOR_ONLY_SOURCES` に載せ、`runtime-grants.test.ts` が runtime の権限の照合から外したうえで、`index.ts` と `apps/web` がこれを読まないことを確かめる。どの経路からも呼べない。
+- `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`（`register` と `open-sale`）：環境の体験用の鍵を Secret Manager から環境変数で渡す。connected account を読む権限が要る（制限付きの鍵なら Connect の account の読み取りを足す）。口座が「このプラットフォームにつながっていない／読めない」も、口座の状態が足りないのも 1 で止まる。
+
+### 前提
+
+1. flag と設定：`EXPERIENCE_GUEST_BOOKING_ENABLED=true` と上の「flag と設定」の値、`HOST_CONSOLE_ENABLED=true`（ホストが `/host/bookings` で予約を読む）、`EXPERIENCE_GUEST_MAIL_ENABLED=true` と SMTP・送信者・job の設定（確認メール、予約ページ、返金の送り直し）。
+2. migration：`0032` まで適用済み。
+3. Stripe：体験の Connect webhook の endpoint が `checkout.session.completed`・`checkout.session.async_payment_succeeded`・`checkout.session.expired`・`checkout.session.async_payment_failed`・`refund.created`・`refund.updated`・`refund.failed` を購読し、署名鍵が `EXPERIENCE_STRIPE_WEBHOOK_SECRET` にある。
+4. メールと job：Cloud Scheduler がメール job を定期に呼んでいる。
+5. ホストが NIHO のアカウントで `/host` に入れ、NIHO の provider 一覧にその provider が出る。
+
+### 手順（商品ごと）
+
+1. 入力ファイルを作る（NIHO の provider ID、OWNER の NIHO user ID、同じ slug、料金、販売者の口座、販売条件）。値は NIHO の管理画面と Stripe で確かめる。
+2. `plan` で変更と readiness を見る。slug の重複、ほかの商品への手数料の影響の警告を読む。
+3. `register --yes`。
+4. ホストが `/host/calendar` で開催の規則を作る（まだ売っていない）。
+5. NIHO ですでに売れている回を塞ぐ：その回を `/host/calendar` で受付停止にするか、外部予約として入れて席を減らす。NIHO の予約はこのサイトの予約には移らない（照会・取消・返金は NIHO のまま）。
+6. `status` で `ready to open: yes` を確かめ、NIHO でこの商品の販売を止めるのと同時に `open-sale --yes`。
+7. 公開ページを確かめる：英語の詳細ページに日程と予約の入口が出る、残席・料金・質問が入力どおり、ほかの商品は NIHO のまま。staging では Stripe のテストモード（test の鍵とテストカード）で 1 件予約し、確認メール、`/host/bookings`、予約ページ、取消と返金（第7段）まで通す。
+
+### NIHO 側で起きること
+
+- このサイトの画面は、この商品の残席と申込に NIHO の checkout を呼ばなくなる（上の「画面がどこから読むか」）。
+- NIHO の掲載は止めない：本文・写真・ホスト・集合場所はまだ NIHO の詳細から読む。
+- すべての商品を移したら、NIHO の体験の予約受付を止める（NIHO 側の作業）。それまでに NIHO で移行済みの商品の回が売れたら、その回を `/host/calendar` で塞ぐ。
+
+### 切り戻し
+
+- `stop-sale --yes`：販売条件を消すと、この商品はここで売られなくなり、画面は NIHO の API を読む状態に戻る（NIHO で受付を止めていれば予約の入口は出ない）。ここで受けた回を NIHO で売り直すなら、NIHO 側でその回を塞ぐ。
+- ここで受けた予約はそのまま残る。予約者の予約ページ・OWNER・サポートの取消と返金（第7段）で扱う。決済中の仮押さえは、支払われれば確定する。
+- provider・OWNER・商品・手数料設定は消さない（販売条件が無ければ売らない。手数料設定は provider のほかの商品にも効く）。
+
+### スクリプトがしないこと
+
+- NIHO に書かない（NIHO の API も DB も呼ばない）。NIHO での販売停止は NIHO 側の作業。
+- 鍵・接続 URL・DB や Stripe のエラー文を表示しない。Stripe の口座 ID、NIHO user ID、販売者の NIHO 口座の参照は末尾 4 字だけを出す。Stripe の口座について出すのは、鍵の種類（test / live）、国、既定の通貨、charges・payouts・details の可否だけ。
+- 開催の規則・在庫・予約を書かない。本文・写真を移さない。
 
 ## データの置き場所
 
@@ -253,5 +341,5 @@ flag が `true` でこれらが欠けていると、サーバーは起動しな�
 - 第5段の残り：提供者へのメール。
 - 第6段の残り：サポートが予約のリンクを止める操作（`revokeBookingAccess`）の画面。予約のメッセージの件数をホームの「次にすること」に出すこと。
 - 第7段の残り：異議申し立て。
-- 第9段：商品ごとの移行（販売条件と手数料設定を書き、同時に NIHO での販売を止める）。
+- 第9段の残り：実際の商品ごとの切替（上の「体験の登録と切替（第9段）」の手順で行う）。
 - 第10段：日本語の予約入力。
