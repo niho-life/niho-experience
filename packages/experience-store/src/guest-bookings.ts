@@ -44,6 +44,7 @@ import {
   type HostGuestSessionKey,
   type HostGuestSessionListOptions,
 } from "./host-guest-bookings.ts";
+import { salesWindowOf, selectSales, type HostSalesWindow, type HostSalesWindowOptions } from "./host-sales.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import {
@@ -1036,6 +1037,22 @@ export class GuestBookingRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireBookingsOwner(client, actor);
       return (await selectSessionBookings(client, actor.providerId, key)).map(hostGuestBookingFromRow);
+    });
+  }
+
+  /* ---------- the host console (OWNER): 売上 (#91) ---------- */
+
+  /**
+   * 売上 for the provider's OWNER: the payment ledger's entries for the provider's guest bookings in [from, to) (at
+   * most 92 days), the latest first, each with NIHO's fee it moved and what it moved for the provider, and when the
+   * provider's first entry was (where 売上's months begin). Read only; never an email address or a Stripe ID. What
+   * Stripe paid out to the bank is not here.
+   */
+  async listGuestSalesForHost(actor: HostActor, window: HostSalesWindowOptions): Promise<HostSalesWindow> {
+    const range = salesWindowOf(window);
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      return selectSales(client, actor.providerId, range);
     });
   }
 

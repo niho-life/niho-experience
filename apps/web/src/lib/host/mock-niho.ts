@@ -16,12 +16,13 @@ export function mockToken(prefix: string): string {
 
 /** `?mock=` on /host/auth/mock-login → the session's scenario (anything else is the default). */
 export function hostMockScenario(value: unknown): HostMockScenario {
-  return value === "empty" || value === "payments-pending" || value === "calendar-revoked" || value === "cohost" ? value : "default";
+  return value === "empty" || value === "payments-pending" || value === "calendar-revoked" || value === "cohost" || value === "site-sales" ? value : "default";
 }
 
 /**
  * The console's scenario names → the api-client mock's. `default` is two providers (an OWNER and an
  * EDITOR); `calendar-revoked` is the same two, and only the console's own data differs (console-data.ts).
+ * `site-sales` is the same two too: 売上 and ホーム's month read a synthetic ledger of bookings made on this site (#91).
  */
 export const HOST_MOCK_SCENARIO_MAP: Record<HostMockScenario, MockHostScenario> = {
   default: "two-providers",
@@ -29,6 +30,7 @@ export const HOST_MOCK_SCENARIO_MAP: Record<HostMockScenario, MockHostScenario> 
   "payments-pending": "payments-pending",
   "calendar-revoked": "two-providers",
   cohost: "cohost",
+  "site-sales": "two-providers",
 };
 
 const loadMock = () => import("@niho-experience/api-client/host/mock");

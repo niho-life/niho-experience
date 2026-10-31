@@ -13,7 +13,8 @@ const MOCK_CONNECTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
  * `?mock=empty` gives an account with no providers, `?mock=payments-pending`
  * one whose payout account is not connected and `?mock=calendar-revoked` the
  * usual two with the kitchen's Google Calendar access taken away in Google
- * (#109); `?expired=1` starts with an
+ * (#109), `?mock=site-sales` the usual two with 売上 read from a synthetic ledger
+ * of bookings made on this site (#91); `?expired=1` starts with an
  * expired ID token to exercise the refresh-then-reload path, and `?surface=app`
  * signs in as the installed app does (#177). 404 in http mode.
  */

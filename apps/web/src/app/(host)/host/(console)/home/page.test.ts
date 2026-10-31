@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   providerOperations: false,
   site: { status: "closed" } as Record<string, unknown>,
   loadSiteHome: null as null | Load,
+  month: { status: "closed" } as Record<string, unknown>,
+  loadSiteHomeMonth: null as null | Load,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/host/data", () => ({
@@ -24,11 +26,13 @@ vi.mock("@/host/data", () => ({
 }));
 vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: async () => null }));
 vi.mock("@/host/site-sessions-server", () => ({ loadSiteHome: (...args: unknown[]) => state.loadSiteHome!(...args) }));
+vi.mock("@/host/site-sales-server", () => ({ loadSiteHomeMonth: (...args: unknown[]) => state.loadSiteHomeMonth!(...args) }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => false }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
 
 import HostHomePage from "./page";
 import { HostHomeTodos } from "@/components/host/HostHomeTodos";
+import { SITE_SALES_HOME_LOAD_FAILED_TEXT, SITE_SALES_HOME_SCOPE_TEXT } from "@/host/site-sales";
 import { SITE_HOME_LOAD_FAILED_TEXT } from "@/host/site-sessions";
 
 /** http mode: NIHO's sessions are not read yet (TODO(#87)), so ホーム's own part is empty. */
@@ -44,6 +48,8 @@ beforeEach(() => {
   state.providerOperations = false;
   state.site = { status: "closed" };
   state.loadSiteHome = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.site);
+  state.month = { status: "closed" };
+  state.loadSiteHomeMonth = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.month);
 });
 
 /** Every element of the page's tree, with its local views (DaySessions and the like) left as elements. */
@@ -64,6 +70,9 @@ async function page() {
     later: all.filter((item) => item.type === "li" && typeof item.key === "string" && item.key.length > 0).map((item) => item.key),
     sources: named("SessionSource").map((item) => (item.props.item as HomeUpcoming).source),
     alert: all.find((item) => item.props.role === "alert")?.props.children,
+    /** The month card's numbers ("売上 ¥7,500"), its note, or what it says instead. */
+    month: all.filter((item) => item.type === "dt" || item.type === "dd").map((item) => item.props.children),
+    monthText: all.filter((item) => item.type === "p").map((item) => item.props.children).filter((text) => typeof text === "string"),
   };
 }
 
@@ -98,5 +107,26 @@ describe("ホーム with this site's bookings", () => {
     const failed = await page();
     expect(failed.todos).toBe(CONSOLE_HOME.todos);
     expect(failed.alert).toBe(SITE_HOME_LOAD_FAILED_TEXT);
+  });
+});
+
+describe("ホーム's month card (#91)", () => {
+  it("is this site's sales this month when the ledger is open to the OWNER, and says whose they are", async () => {
+    state.month = { status: "live", month: { label: "11月", figures: [{ label: "売上", value: "¥7,500" }, { label: "受取額", value: "¥6,750" }], note: SITE_SALES_HOME_SCOPE_TEXT } };
+    const view = await page();
+    expect(state.loadSiteHomeMonth).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { nihoUserId: "sample-niho-user" });
+    expect(view.month).toEqual(["売上", "¥7,500", "受取額", "¥6,750"]);
+    expect(view.monthText).toContain(SITE_SALES_HOME_SCOPE_TEXT);
+  });
+
+  it("keeps 準備中 while it is closed, and says when it could not be read", async () => {
+    const closed = await page();
+    expect(closed.month).toEqual([]);
+    expect(closed.monthText).toContain("売上の集計は準備中です。");
+
+    state.month = { status: "error" };
+    const failed = await page();
+    expect(failed.month).toEqual([]);
+    expect(failed.alert).toBe(SITE_SALES_HOME_LOAD_FAILED_TEXT);
   });
 });

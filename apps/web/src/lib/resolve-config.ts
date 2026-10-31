@@ -364,6 +364,9 @@ export function resolveConfig(env: Env) {
   // 設定 › 通知 (#109) kept in the experience DB. The mock keeps the switches on screen; http opens per
   // environment after migration 0020 and the provider's experience OWNER membership are accepted.
   const hostNotificationSettingsEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_NOTIFICATION_SETTINGS_ENABLED === "true";
+  // 売上 (#91) from the experience DB's payment ledger: the OWNER's sales of bookings made on this site. The mock keeps
+  // its synthetic ledger; http opens per environment once the ledger's reads are accepted against real bookings.
+  const hostSalesLedgerEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_SALES_LEDGER_ENABLED === "true";
   // 予約前の質問 (#105/#106) kept in the experience DB (docs/guest-questions.md): the traveler's "Ask the host", the
   // reply page and the OWNER's メッセージ. The mock keeps its own synthetic questions; http opens per environment
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
@@ -483,6 +486,7 @@ export function resolveConfig(env: Env) {
     experienceProviderOperationsPreviewEnabled,
     experienceTranslateApiEnabled,
     hostNotificationSettingsEnabled,
+    hostSalesLedgerEnabled,
     guestQuestionsEnabled,
     guestReviewsEnabled,
     guestBookingEnabled: guestBooking.enabled,

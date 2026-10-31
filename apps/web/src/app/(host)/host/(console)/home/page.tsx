@@ -10,6 +10,8 @@ import { HostPageBody, MoreLink, PageHead, SectionTitle } from "@/components/hos
 import { homeCalendarPrompt, type HomeCalendarPrompt } from "@/host/calendar";
 import { hostPageContext, loadHostConsoleData } from "@/host/data";
 import { homeBadgeCount, type HomeUpcoming } from "@/host/home";
+import { SITE_SALES_HOME_LOAD_FAILED_TEXT } from "@/host/site-sales";
+import { loadSiteHomeMonth } from "@/host/site-sales-server";
 import { SITE_HOME_LOAD_FAILED_TEXT, withSiteHome } from "@/host/site-sessions";
 import { loadSiteHome } from "@/host/site-sessions-server";
 import { config } from "@/lib/config";
@@ -106,6 +108,9 @@ function CalendarPromptCard({ prompt, href }: { prompt: HomeCalendarPrompt; href
  * With EXPERIENCE_GUEST_BOOKING_ENABLED (http mode), the OWNER's sessions with bookings made on this site and their
  * payments under review join them (#285 slice 8b; この回 reads those bookings). Without NIHO's bookings (provider
  * operations off) they fill the screen; beside NIHO's, each of their rows says "このサイトの予約".
+ *
+ * With HOST_SALES_LEDGER_ENABLED (http mode), the month card is the OWNER's sales of bookings made on this site this
+ * month in Japan (#91), read from the experience DB's ledger as 売上 reads it, and says whose they are.
  */
 export default async function HostHomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -118,11 +123,13 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   if (!provider) {
     return <HostRegisterPrompt title="ホーム" />;
   }
-  const [{ home: consoleHome, settings }, site] = await Promise.all([
+  const [{ home: consoleHome, settings }, site, siteMonth] = await Promise.all([
     loadHostConsoleData(provider),
     loadSiteHome(provider, context.session.nihoUserId, providerOperationsEnabled()),
+    loadSiteHomeMonth(provider, context.session),
   ]);
   const home = site.status === "live" ? withSiteHome(consoleHome, site) : consoleHome;
+  const month = siteMonth.status === "live" ? siteMonth.month : siteMonth.status === "error" ? null : home.month;
   const link = (path: string) => withProvider(path, linkProviderId);
   // Only where it can be connected: the preview (http mode waits for NIHO's Google connection, #87).
   const calendarPrompt = homeCalendarPrompt(settings.calendar, isHostMock());
@@ -185,23 +192,23 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
 
         {provider.memberRole === "OWNER" ? <section aria-labelledby="home-month" className={HOST_SURFACE}>
           <div className="flex items-center justify-between gap-2.5 px-4 pt-4 pb-2 md:px-5">
-            <SectionTitle id="home-month">{home.month?.label ?? "今月"}</SectionTitle>
+            <SectionTitle id="home-month">{month?.label ?? "今月"}</SectionTitle>
             <MoreLink href={link(HOST_SALES_PATH)}>売上を見る</MoreLink>
           </div>
-          {home.month ? (
-            <dl className="flex flex-wrap items-center gap-[18px] px-4 pb-[18px] md:gap-[22px] md:px-5">
-              {[
-                ["売上", home.month.sales],
-                ["返金", home.month.refunds],
-                ["入金予定", home.month.expected],
-                ["確定した予約", home.month.confirmed],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <dt className="text-xs font-bold text-muted">{label}</dt>
-                  <dd className="text-lg leading-[1.3] font-extrabold tabular-nums md:text-xl">{value}</dd>
-                </div>
-              ))}
-            </dl>
+          {month ? (
+            <>
+              {month.note ? <p className="-mt-1 px-4 pb-2 text-xs leading-normal text-muted md:px-5">{month.note}</p> : null}
+              <dl className="flex flex-wrap items-center gap-[18px] px-4 pb-[18px] md:gap-[22px] md:px-5">
+                {month.figures.map(({ label, value }) => (
+                  <div key={label}>
+                    <dt className="text-xs font-bold text-muted">{label}</dt>
+                    <dd className="text-lg leading-[1.3] font-extrabold tabular-nums md:text-xl">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
+          ) : siteMonth.status === "error" ? (
+            <p role="alert" className="px-4 pb-4 text-warn md:px-5">{SITE_SALES_HOME_LOAD_FAILED_TEXT}</p>
           ) : (
             <p className="px-4 pb-4 text-muted md:px-5">売上の集計は準備中です。</p>
           )}

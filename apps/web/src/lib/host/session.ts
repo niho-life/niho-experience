@@ -20,10 +20,11 @@ const ICON_URL_MAX = 1024;
 
 /**
  * Mock sessions only (`?mock=` on /host/auth/mock-login); mock-niho.ts maps them to the api-client mock's scenarios.
- * `calendar-revoked` is the default providers with the kitchen's Google Calendar access taken away in Google (#109).
+ * `calendar-revoked` is the default providers with the kitchen's Google Calendar access taken away in Google (#109);
+ * `site-sales` the same providers, with 売上 read from a synthetic ledger of bookings made on this site (#91).
  */
-export type HostMockScenario = "default" | "empty" | "payments-pending" | "calendar-revoked" | "cohost";
-export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked", "cohost"];
+export type HostMockScenario = "default" | "empty" | "payments-pending" | "calendar-revoked" | "cohost" | "site-sales";
+export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "empty", "payments-pending", "calendar-revoked", "cohost", "site-sales"];
 
 /**
  * Where the sign-in started (#177). iOS and macOS Safari copy the browser's cookies into a home-screen
