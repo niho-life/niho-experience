@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Occurrence } from "@niho-experience/api-client";
-import { readAvailability } from "@/lib/browser-availability";
+import { readBookingAvailability } from "@/lib/browser-availability";
+import { bookingSourceFor, type BookingSources } from "@/lib/booking-source";
 import { dayOption, nextBookableDays } from "@/lib/date-filter";
 import { HandIcon } from "./HandIcon";
 import { useSiteCopy, useSiteLocale } from "./SiteLocale";
@@ -12,8 +13,11 @@ const NEXT_DATES = 3;
 export type CardDatesSource =
   /** The list has already read availability for every card: null while loading or after a failure. */
   | { kind: "given"; occurrences: readonly Occurrence[] | null }
-  /** The home page: read this experience's availability in the browser (shared with other reads of the same slug). */
-  | { kind: "read"; preview: boolean; nihoWebOrigin: string };
+  /**
+   * The home page: read this experience's availability in the browser (shared with other reads of the same slug),
+   * from where the server says each experience is sold (#285).
+   */
+  | { kind: "read"; preview: boolean; sources: BookingSources };
 
 /** The next bookable dates (one per day), soonest first. Seats left are never shown. */
 export function nextDateKeys(occurrences: readonly Occurrence[], limit = NEXT_DATES): string[] {
@@ -23,18 +27,19 @@ export function nextDateKeys(occurrences: readonly Occurrence[], limit = NEXT_DA
 function useOccurrences(slug: string, source: CardDatesSource): readonly Occurrence[] | null {
   const [read, setRead] = useState<readonly Occurrence[] | null>(null);
   const preview = source.kind === "read" ? source.preview : false;
-  const origin = source.kind === "read" ? source.nihoWebOrigin : null;
+  const sources = source.kind === "read" ? source.sources : null;
+  const booking = useMemo(() => (sources ? bookingSourceFor(sources, slug) : null), [sources, slug]);
   const { locale, releaseId } = useSiteLocale();
   useEffect(() => {
-    if (origin === null) return;
+    if (booking === null) return;
     let active = true;
-    readAvailability(slug, preview, origin, locale, releaseId).then((result) => {
+    readBookingAvailability(slug, preview, booking, locale, releaseId).then((result) => {
       if (active && result.ok) setRead(result.occurrences);
     });
     return () => {
       active = false;
     };
-  }, [slug, preview, origin, locale, releaseId]);
+  }, [slug, preview, booking, locale, releaseId]);
   return source.kind === "given" ? source.occurrences : read;
 }
 

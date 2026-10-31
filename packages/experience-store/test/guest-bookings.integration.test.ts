@@ -12,6 +12,7 @@ import {
   StoreValidationError,
 } from "../src/errors.ts";
 import {
+  GUEST_BOOKING_LIMITS,
   GuestBookingRepository,
   type BookingQuestion,
   type GuestBookingStart,
@@ -185,6 +186,36 @@ async function payFor(store: ExperienceStore, start: GuestBookingStart, amount: 
   });
 }
 
+/** A Stripe Checkout Session that ended unpaid, as the webhook passes it on (#285 slice 4). */
+async function endSession(
+  guests: GuestBookingRepository,
+  start: GuestBookingStart,
+  session: string,
+  event: string,
+  overrides: Partial<Parameters<GuestBookingRepository["releaseGuestHold"]>[0]> = {},
+) {
+  return guests.releaseGuestHold({
+    publicBookingId: start.publicBookingId, checkoutSessionRef: session, connectedAccountId: start.stripeConnectAccountRef,
+    stripeEventId: `evt_sample_${event}`, stripeEventType: "checkout.session.expired", eventOccurredAtUtc: new Date().toISOString(),
+    ...overrides,
+  });
+}
+
+async function statusOf(pool: Pool, start: GuestBookingStart): Promise<string> {
+  return String((await pool.query("SELECT status FROM bookings WHERE public_booking_id=$1", [start.publicBookingId])).rows[0].status);
+}
+
+/** Moves holds' expiry into the past, as if their 35 minutes were over. */
+async function lapse(pool: Pool, starts: readonly GuestBookingStart[]): Promise<void> {
+  await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+  await pool.query(
+    `UPDATE bookings SET created_at=clock_timestamp()-interval '40 minutes', hold_expires_at=clock_timestamp()-interval '5 minutes'
+      WHERE public_booking_id = ANY($1::uuid[])`,
+    [starts.map((start) => start.publicBookingId)],
+  );
+  await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+}
+
 describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }, () => {
   it("sells only what exactly one published JPY product with sale terms offers, and maps rules to offers", async () => {
     await withSchema(async ({ pool, guests, addRule }) => {
@@ -256,6 +287,34 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await pool.query("UPDATE experience_products SET status='PUBLISHED', slug='sample-tea' WHERE provider_id='provider-b' AND id='dup'");
       assert.equal(await guests.publicBookingTerms("sample-tea"), null);
       await assert.rejects(() => guests.startGuestBooking(request()), StoreNotFoundError);
+    });
+  });
+
+  it("names in one query the slugs for sale here, by the rules publicBookingTerms applies", async () => {
+    await withSchema(async ({ pool, guests }) => {
+      const all = ["sample-dup", "sample-walk", "sample-draft", "sample-archived", "sample-noterms", "sample-usd", "sample-cheap", "sample-tea", "sample-missing", "sample-kids", "sample-tea", ""];
+      // The asked order is kept and repeats are dropped; no schedule rule is needed to be for sale.
+      assert.deepEqual(await guests.sellableSlugs(all), ["sample-walk", "sample-tea", "sample-kids"]);
+      for (const slug of all) assert.equal((await guests.sellableSlugs([slug])).length === 1, await guests.publicBookingTerms(slug) !== null, slug);
+      assert.deepEqual(await guests.sellableSlugs([]), []);
+      await assert.rejects(() => guests.sellableSlugs(Array.from({ length: 201 }, (_, index) => `sample-${index}`)), StoreValidationError);
+
+      // A second published product with the slug, unpublishing, and a provider without sale settings each stop the sale.
+      await pool.query("UPDATE experience_products SET slug='sample-tea' WHERE provider_id='provider-b' AND id='dup'");
+      await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE id='kids'");
+      assert.deepEqual(await guests.sellableSlugs(["sample-tea", "sample-walk", "sample-kids"]), ["sample-walk"]);
+      await pool.query("DELETE FROM provider_sale_settings WHERE provider_id='provider-a'");
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
+
+      // A price whose fee Stripe would refuse is not for sale: with support on, 15 % of ¥6 rounds down to ¥0.
+      await guests.setProviderSaleSettings("provider-a", { supportEnabled: true });
+      await pool.query("UPDATE experience_products SET unit_amount=4000 WHERE id='walk'");
+      await pool.query("UPDATE experience_product_sale_terms SET child_price_amount=6, child_min_age=4, child_max_age=12, child_adult_required=false WHERE product_id='walk'");
+      assert.equal(await guests.publicBookingTerms("sample-walk"), null);
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
+      await pool.query("UPDATE experience_product_sale_terms SET child_adult_required=true WHERE product_id='walk'");
+      assert.notEqual(await guests.publicBookingTerms("sample-walk"), null);
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), ["sample-walk"]);
     });
   });
 
@@ -840,6 +899,157 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
 
       await assert.rejects(() => guests.eraseGuestData({ endedBefore: "yesterday" }), StoreValidationError);
       await assert.rejects(() => guests.eraseGuestData({ endedBefore: new Date().toISOString(), limit: 0 }), StoreValidationError);
+    });
+  });
+  it("gives a hold's seats back once when its Checkout Session ends unpaid (#285 slice 4)", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am", { capacity: 2 }));
+      const walkDay = async () => state(occurrence((await guests.listPublicAvailability("sample-walk"))!.occurrences, "sample-walk-am", day(2)));
+      const held = await guests.startGuestBooking(walkRequest({ adultCount: 2, expectedTotalYen: 6000 }));
+      await guests.attachCheckoutSession(held.publicBookingId, "cs_test_sample1");
+      assert.deepEqual(await walkDay(), { bookable: false, seatsLeft: 0, reason: "FULL" });
+
+      assert.deepEqual(await endSession(guests, held, "cs_test_sample1", "expired"), { status: "EXPIRED", released: true, duplicateEvent: false });
+      assert.equal(await statusOf(pool, held), "EXPIRED");
+      assert.deepEqual(await walkDay(), { bookable: true, seatsLeft: 2, reason: null });
+      const recalculated = await pool.query(
+        "SELECT count(*)::int AS n FROM calendar_outbox_events WHERE aggregate_id=$1 AND payload->>'cause'='booking_hold_released'",
+        [held.booking.occurrenceId],
+      );
+      assert.equal(recalculated.rows[0].n, 1);
+
+      // Stripe delivers again, or sends the other ending: nothing changes, each event is recorded once.
+      assert.deepEqual(await endSession(guests, held, "cs_test_sample1", "expired"), { status: "EXPIRED", released: false, duplicateEvent: true });
+      assert.deepEqual(
+        await endSession(guests, held, "cs_test_sample1", "failed", { stripeEventType: "checkout.session.async_payment_failed" }),
+        { status: "EXPIRED", released: false, duplicateEvent: false },
+      );
+      const recorded = await pool.query("SELECT event_id, event_type, outcome FROM stripe_webhook_events ORDER BY processed_at, event_id");
+      assert.deepEqual(recorded.rows, [
+        { event_id: "evt_sample_expired", event_type: "checkout.session.expired", outcome: "EXPIRED" },
+        { event_id: "evt_sample_failed", event_type: "checkout.session.async_payment_failed", outcome: "IGNORED" },
+      ]);
+
+      // The seats are another guest's to take.
+      const next = await guests.startGuestBooking(walkRequest({ adultCount: 2, expectedTotalYen: 6000, guestEmail: "next@example.com" }));
+      assert.equal(next.status, "HOLD");
+    });
+  });
+
+  it("releases nothing for another Session or seller, or a booking no longer held", async () => {
+    await withSchema(async ({ pool, store, guests, addRule }) => {
+      await addRule("tea", rule("sample-am"));
+      const held = await guests.startGuestBooking(request());
+      await guests.attachCheckoutSession(held.publicBookingId, "cs_test_sample1");
+
+      // A Session that is not the one recorded: recorded, ignored.
+      assert.deepEqual(await endSession(guests, held, "cs_test_other", "other-session"), { status: "HOLD", released: false, duplicateEvent: false });
+      // No Session recorded yet (the route failed after Stripe created it): the hold lapses on its own.
+      const unattached = await guests.startGuestBooking(request({ guestEmail: "unattached@example.com" }));
+      assert.deepEqual(await endSession(guests, unattached, "cs_test_sample2", "unattached"), { status: "HOLD", released: false, duplicateEvent: false });
+      // A hold made without a guest record has no Session.
+      const plain = await store.createBookingHold({ providerId: "provider-a" }, { productId: "tea", occurrenceId: occurrenceIdFor("sample-am", day(3)), seats: 1, idempotencyKey: "sample-plain" });
+      const plainStart = { ...held, publicBookingId: plain.publicBookingId, booking: plain };
+      assert.deepEqual(await endSession(guests, plainStart, "cs_test_sample3", "plain"), { status: "HOLD", released: false, duplicateEvent: false });
+
+      // Another seller's account is refused and leaves no record.
+      await assert.rejects(() => endSession(guests, held, "cs_test_sample1", "wrong-account", { connectedAccountId: "acct_SampleB0001" }), StoreConflictError);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM stripe_webhook_events WHERE event_id='evt_sample_wrong-account'")).rows[0].n, 0);
+      assert.equal(await statusOf(pool, held), "HOLD");
+
+      // Paid, or paid and under review: never touched.
+      const paid = await guests.startGuestBooking(request({ guestEmail: "paid@example.com" }));
+      await guests.attachCheckoutSession(paid.publicBookingId, "cs_test_sample4");
+      await payFor(store, paid, 4000, "paid");
+      assert.deepEqual(await endSession(guests, paid, "cs_test_sample4", "paid-expired"), { status: "CONFIRMED", released: false, duplicateEvent: false });
+      const review = await guests.startGuestBooking(request({ guestEmail: "review@example.com" }));
+      await guests.attachCheckoutSession(review.publicBookingId, "cs_test_sample5");
+      await payFor(store, review, 1, "review");
+      assert.deepEqual(await endSession(guests, review, "cs_test_sample5", "review-expired"), { status: "PAYMENT_REVIEW", released: false, duplicateEvent: false });
+
+      const outcomes = await pool.query("SELECT event_id, outcome FROM stripe_webhook_events WHERE outcome IN ('EXPIRED','IGNORED') ORDER BY event_id");
+      assert.deepEqual(outcomes.rows.map((row) => `${row.event_id}:${row.outcome}`), [
+        "evt_sample_other-session:IGNORED", "evt_sample_paid-expired:IGNORED", "evt_sample_plain:IGNORED",
+        "evt_sample_review-expired:IGNORED", "evt_sample_unattached:IGNORED",
+      ]);
+
+      // An event ID recorded for one booking is not another's; unknown bookings and bad input are refused.
+      await assert.rejects(() => endSession(guests, unattached, "cs_test_sample2", "other-session"), StoreConflictError);
+      await assert.rejects(() => endSession(guests, { ...held, publicBookingId: randomUUID() }, "cs_test_sample1", "unknown"), StoreNotFoundError);
+      await assert.rejects(() => endSession(guests, held, "cs bad", "bad-session"), StoreValidationError);
+      await assert.rejects(
+        () => endSession(guests, held, "cs_test_sample1", "completed", { stripeEventType: "checkout.session.completed" as "checkout.session.expired" }),
+        StoreValidationError,
+      );
+      await assert.rejects(() => endSession(guests, held, "cs_test_sample1", "bad-time", { eventOccurredAtUtc: "yesterday" }), StoreValidationError);
+      for (const start of [held, unattached]) assert.equal(await statusOf(pool, start), "HOLD");
+    });
+  });
+
+  it("takes a payment that arrives after the release for review, never the seats again", async () => {
+    await withSchema(async ({ pool, store, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am", { capacity: 2 }));
+      const walkDay = async () => state(occurrence((await guests.listPublicAvailability("sample-walk"))!.occurrences, "sample-walk-am", day(2)));
+      const abandoned = await guests.startGuestBooking(walkRequest({ adultCount: 2, expectedTotalYen: 6000 }));
+      await guests.attachCheckoutSession(abandoned.publicBookingId, "cs_test_sample1");
+      assert.equal((await endSession(guests, abandoned, "cs_test_sample1", "expired")).released, true);
+      const next = await guests.startGuestBooking(walkRequest({ adultCount: 2, expectedTotalYen: 6000, guestEmail: "next@example.com" }));
+      assert.deepEqual(await walkDay(), { bookable: false, seatsLeft: 0, reason: "FULL" });
+
+      // The late payment is recorded for review (the refund is #285 slice 7); the next guest keeps the seats.
+      const late = await payFor(store, abandoned, 6000, "late");
+      assert.deepEqual({ status: late.booking.status, duplicateEvent: late.duplicateEvent }, { status: "PAYMENT_REVIEW", duplicateEvent: false });
+      assert.equal(await statusOf(pool, next), "HOLD");
+      assert.deepEqual(await walkDay(), { bookable: false, seatsLeft: 0, reason: "FULL" });
+      const ledger = await pool.query("SELECT kind, amount::int AS amount FROM payment_ledger_entries WHERE stripe_event_id='evt_sample_late'");
+      assert.deepEqual(ledger.rows, [{ kind: "PAYMENT_CAPTURED", amount: 6000 }]);
+      const review = await pool.query("SELECT topic FROM outbox_messages WHERE deduplication_key='evt_sample_late'");
+      assert.deepEqual(review.rows, [{ topic: "booking.payment_review_required" }]);
+      // An expiry that arrives after the payment changes nothing.
+      assert.deepEqual(await endSession(guests, abandoned, "cs_test_sample1", "expired-again"), { status: "PAYMENT_REVIEW", released: false, duplicateEvent: false });
+      assert.equal((await payFor(store, next, 6000, "next")).booking.status, "CONFIRMED");
+      const outcomes = await pool.query("SELECT event_id, outcome FROM stripe_webhook_events ORDER BY processed_at, event_id");
+      assert.deepEqual(outcomes.rows.map((row) => `${row.event_id}:${row.outcome}`), [
+        "evt_sample_expired:EXPIRED", "evt_sample_late:PAYMENT_REVIEW", "evt_sample_expired-again:IGNORED", "evt_sample_next:CONFIRMED",
+      ]);
+    });
+  });
+
+  it("marks the provider's lapsed holds EXPIRED on a new checkout, with seats and hold limits as before", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("tea", rule("sample-am"));
+      await addRule("walk", rule("sample-walk-am", { capacity: 2 }));
+      const walkDay = async () => state(occurrence((await guests.listPublicAvailability("sample-walk"))!.occurrences, "sample-walk-am", day(2)));
+      const first = await guests.startGuestBooking(request({ occurrenceDate: day(2) }));
+      const second = await guests.startGuestBooking(request({ occurrenceDate: day(3) }));
+      const walk = await guests.startGuestBooking(walkRequest({ adultCount: 2, expectedTotalYen: 6000, guestEmail: "walker@example.com" }));
+      await refused(guests.startGuestBooking(request({ occurrenceDate: day(4) })), "HOLD_LIMIT");
+      assert.deepEqual(await walkDay(), { bookable: false, seatsLeft: 0, reason: "FULL" });
+
+      // Lapsed but still HOLD: stored inventory already leaves them out.
+      await lapse(pool, [first, second, walk]);
+      assert.deepEqual(await walkDay(), { bookable: true, seatsLeft: 2, reason: null });
+      const lapsedHolds = async () => Number((await pool.query(
+        "SELECT count(*)::int AS n FROM bookings WHERE status='HOLD' AND hold_expires_at <= clock_timestamp()",
+      )).rows[0].n);
+      assert.equal(await lapsedHolds(), 3);
+
+      // A request refused after the release rolls it back with its transaction; one that gets through marks them EXPIRED.
+      await refused(guests.startGuestBooking(walkRequest({ adultCount: 3, expectedTotalYen: 9000, guestEmail: "party@example.com" })), "FULL", { seatsLeft: 2 });
+      assert.equal(await lapsedHolds(), 3);
+      const third = await guests.startGuestBooking(request({ occurrenceDate: day(4) }));
+      assert.equal(third.status, "HOLD");
+      assert.equal(await lapsedHolds(), 0);
+      for (const start of [first, second, walk]) assert.equal(await statusOf(pool, start), "EXPIRED");
+      const released = await pool.query(
+        "SELECT DISTINCT aggregate_id FROM calendar_outbox_events WHERE payload->>'cause'='booking_hold_released' ORDER BY aggregate_id",
+      );
+      assert.deepEqual(released.rows.map((row) => row.aggregate_id), [first.booking.occurrenceId, second.booking.occurrenceId, walk.booking.occurrenceId].sort());
+      assert.equal((await guests.startGuestBooking(walkRequest({ adultCount: 2, expectedTotalYen: 6000, guestEmail: "next@example.com" }))).status, "HOLD");
+      // The guest's limit counts its active holds exactly: the new one and one more.
+      await guests.startGuestBooking(request({ occurrenceDate: day(5) }));
+      await refused(guests.startGuestBooking(request({ occurrenceDate: day(6) })), "HOLD_LIMIT");
+      assert.equal(GUEST_BOOKING_LIMITS.lapsedHoldsExpiredPerCheckout, 100);
     });
   });
 });

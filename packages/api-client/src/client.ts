@@ -39,6 +39,11 @@ export type ExperienceApiClientOptions = {
    * 省略時は `cache: "no-store"`。残席・checkout には使わない。応答の `Cache-Control` より長く保持しない。
    */
   cacheableReadInit?: RequestInit;
+  /**
+   * origin が NIHO ではなく体験サイト自身（旅行者の予約 #285、docs/guest-booking.md）。checkout の遷移先として、
+   * Stripe の Checkout に加えてこのサイトの `/booking/return?type=…` を受け付け、NIHO の予約確認ページは受け付けない。
+   */
+  thisSite?: boolean;
 };
 
 export type ReadFailure =
@@ -78,11 +83,16 @@ export function normalizeOrigin(value: string): string {
   return url.origin;
 }
 
+/** 体験サイトの支払い後のページ（BookingReturn の `?type=instant|approval`）。支払い済みの再送への応答（#285 第2段）。 */
+const SITE_RETURN_PATH = "/booking/return";
+const SITE_RETURN_QUERY = /^\?type=(?:instant|approval)$/;
+
 /**
  * checkout の応答の遷移先として受け付ける URL か。Stripe の Checkout か、NIHO の origin の予約確認ページだけ。
+ * `thisSite`（origin が体験サイト自身）のときは、NIHO の予約確認ページの代わりにこのサイトの `/booking/return?type=…` だけ。
  * 想定外の URL（別ドメイン・javascript: 等）には遷移しない。
  */
-export function isAllowedCheckoutRedirect(candidate: string, nihoWebOrigin: string): boolean {
+export function isAllowedCheckoutRedirect(candidate: string, nihoWebOrigin: string, options: { thisSite?: boolean } = {}): boolean {
   let url: URL;
   try {
     url = new URL(candidate);
@@ -91,6 +101,7 @@ export function isAllowedCheckoutRedirect(candidate: string, nihoWebOrigin: stri
   }
   if (url.protocol !== "https:" || url.username || url.password) return false;
   if (url.origin === STRIPE_CHECKOUT_ORIGIN) return true;
+  if (options.thisSite) return url.origin === normalizeOrigin(nihoWebOrigin) && url.pathname === SITE_RETURN_PATH && SITE_RETURN_QUERY.test(url.search) && !url.hash;
   return url.origin === normalizeOrigin(nihoWebOrigin) && /^\/living\/[^/]+\/pages\/[^/]+\/bookings\/[^/]+$|^\/experiences\/bookings\/[^/]+$/.test(url.pathname);
 }
 
@@ -300,6 +311,7 @@ function hasSelectedAvailabilityShape(value: unknown): boolean {
 
 export function createExperienceApiClient(options: ExperienceApiClientOptions) {
   const origin = normalizeOrigin(options.nihoWebOrigin);
+  const redirectOptions = { thisSite: options.thisSite === true };
   const fetchImpl: FetchLike = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -425,7 +437,7 @@ export function createExperienceApiClient(options: ExperienceApiClientOptions) {
       const parsed: unknown = await response.json().catch(() => undefined);
       if (response.status === 201) {
         const checkoutUrl = isObject(parsed) ? parsed.checkoutUrl : undefined;
-        if (typeof checkoutUrl === "string" && isAllowedCheckoutRedirect(checkoutUrl, origin)) {
+        if (typeof checkoutUrl === "string" && isAllowedCheckoutRedirect(checkoutUrl, origin, redirectOptions)) {
           return { ok: true, checkoutUrl };
         }
         return { ok: false, kind: "unexpected_response", status: response.status };
@@ -480,7 +492,7 @@ export function createExperienceApiClient(options: ExperienceApiClientOptions) {
       const parsed: unknown = await response.json().catch(() => undefined);
       if (response.status === 201) {
         const checkoutUrl = isObject(parsed) ? parsed.checkoutUrl : undefined;
-        return typeof checkoutUrl === "string" && isAllowedCheckoutRedirect(checkoutUrl, origin)
+        return typeof checkoutUrl === "string" && isAllowedCheckoutRedirect(checkoutUrl, origin, redirectOptions)
           ? { ok: true, checkoutUrl }
           : { ok: false, kind: "unexpected_response", status: response.status };
       }

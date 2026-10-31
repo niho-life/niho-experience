@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { Occurrence } from "@niho-experience/api-client";
-import { readAvailability } from "@/lib/browser-availability";
+import { readBookingAvailability } from "@/lib/browser-availability";
+import { bookingSourceFor, type BookingSources } from "@/lib/booking-source";
 import type { BrowseContext } from "@/lib/browse-context";
 import type { CardModel } from "@/lib/card-model";
 import { dayOption, fitsPartySize, matchingOccurrence, MAX_GUESTS, type DayOption } from "@/lib/date-filter";
@@ -29,7 +30,7 @@ export function ExperienceList({
   browseContext,
   catalogDateFiltered,
   preview,
-  nihoWebOrigin,
+  bookingSources,
   empty,
   search,
   inlineSearch,
@@ -42,7 +43,8 @@ export function ExperienceList({
   browseContext?: Partial<BrowseContext>;
   catalogDateFiltered: boolean;
   preview: boolean;
-  nihoWebOrigin: string;
+  /** Where each card's availability is read: NIHO's API, or this site's for an experience sold here (#285). */
+  bookingSources: BookingSources;
   columns?: "two" | "three";
   /** Shown instead of the list when the server returned no experiences (search or empty catalog). */
   empty: ReactNode;
@@ -70,7 +72,7 @@ export function ExperienceList({
   useEffect(() => {
     if (!cards.length) return;
     let active = true;
-    Promise.all(cards.map((card) => readAvailability(card.slug, preview, nihoWebOrigin, locale, releaseId))).then((reads) => {
+    Promise.all(cards.map((card) => readBookingAvailability(card.slug, preview, bookingSourceFor(bookingSources, card.slug), locale, releaseId))).then((reads) => {
       if (!active) return;
       if (reads.some((read) => !read.ok)) {
         setAvailability({ state: "failed" });
@@ -85,7 +87,7 @@ export function ExperienceList({
     return () => {
       active = false;
     };
-  }, [cards, preview, nihoWebOrigin, readAttempt, locale, releaseId]);
+  }, [cards, preview, bookingSources, readAttempt, locale, releaseId]);
 
   const ready = availability.state === "ready" ? availability.bySlug : null;
   const failed = availability.state === "failed";

@@ -6,6 +6,7 @@ import {
   createDirectCheckout,
   ExperiencePaymentsHoldTooShortError,
   ExperiencePaymentsValidationError,
+  isEndedCheckoutEvent,
   retrieveDirectCheckout,
   verifyDirectCheckoutWebhook,
   type PaymentsStripeClient,
@@ -255,6 +256,8 @@ interface SyntheticEventOptions {
   amountTotal?: number | null;
   currency?: string | null;
   paymentIntent?: string | null | { id: string };
+  sessionId?: string;
+  status?: string;
 }
 
 function syntheticEvent(options: SyntheticEventOptions = {}): Record<string, unknown> {
@@ -270,9 +273,10 @@ function syntheticEvent(options: SyntheticEventOptions = {}): Record<string, unk
     account: options.account === undefined ? "acct_Synthetic123" : options.account,
     data: {
       object: {
-        id: "cs_test_synthetic",
+        id: options.sessionId ?? "cs_test_synthetic",
         object: "checkout.session",
         mode: "payment",
+        status: options.status ?? "complete",
         payment_status: options.paymentStatus ?? "paid",
         metadata: options.metadata === undefined ? { source: "niho-experience", booking_id: BOOKING_ID } : options.metadata,
         amount_total: options.amountTotal === undefined ? 8_000 : options.amountTotal,
@@ -381,5 +385,52 @@ describe("verifyDirectCheckoutWebhook", () => {
       () => verifyDirectCheckoutWebhook(signedPayload(syntheticEvent({ amountTotal: 0 }))),
       /positive safe integer/,
     );
+  });
+
+  it("returns the Session of an unpaid expiry or failed delayed payment, without payment fields (#285 slice 4)", () => {
+    const expired = syntheticEvent({
+      type: "checkout.session.expired", status: "expired", paymentStatus: "unpaid", amountTotal: null, currency: null, paymentIntent: null,
+    });
+    assert.deepEqual(verifyDirectCheckoutWebhook(signedPayload(expired)), {
+      eventId: "evt_Synthetic123",
+      eventType: "checkout.session.expired",
+      eventOccurredAtUtc: "2026-11-01T00:50:00.000Z",
+      connectedAccountId: "acct_Synthetic123",
+      publicBookingId: BOOKING_ID,
+      checkoutSessionId: "cs_test_synthetic",
+    });
+    const failed = syntheticEvent({ type: "checkout.session.async_payment_failed", paymentStatus: "unpaid", metadata: { source: "niho-experience", booking_id: BOOKING_ID.toUpperCase() } });
+    const verified = verifyDirectCheckoutWebhook(signedPayload(failed));
+    assert.ok(verified !== null && isEndedCheckoutEvent(verified));
+    assert.equal(isEndedCheckoutEvent(verifyDirectCheckoutWebhook(signedPayload(syntheticEvent()))!), false);
+    assert.deepEqual(verified, {
+      eventId: "evt_Synthetic123",
+      eventType: "checkout.session.async_payment_failed",
+      eventOccurredAtUtc: "2026-11-01T00:50:00.000Z",
+      connectedAccountId: "acct_Synthetic123",
+      publicBookingId: BOOKING_ID,
+      checkoutSessionId: "cs_test_synthetic",
+    });
+  });
+
+  it("checks an ended Session as strictly as a paid one, and never ends a paid Session", () => {
+    const ended = (options: SyntheticEventOptions) => signedPayload(syntheticEvent({ type: "checkout.session.expired", status: "expired", paymentStatus: "unpaid", ...options }));
+    // Another service's Session on the shared platform is acknowledged and ignored.
+    assert.equal(verifyDirectCheckoutWebhook(ended({ metadata: { booking_id: BOOKING_ID } })), null);
+    assert.equal(verifyDirectCheckoutWebhook(ended({ metadata: null })), null);
+    assert.throws(() => verifyDirectCheckoutWebhook(ended({ account: "" })), /connected account ID is required/);
+    assert.throws(() => verifyDirectCheckoutWebhook(ended({ metadata: { source: "niho-experience", booking_id: "not-a-booking-id" } })), /UUID v4/);
+    assert.throws(
+      () => verifyDirectCheckoutWebhook(ended({ metadata: { source: "niho-experience", booking_id: BOOKING_ID, guest_email: "guest@example.test" } })),
+      /metadata is malformed/,
+    );
+    assert.throws(() => verifyDirectCheckoutWebhook(ended({ sessionId: "pi_Synthetic123" })), /Session ID is malformed/);
+    assert.throws(() => verifyDirectCheckoutWebhook(ended({ paymentStatus: "paid" })), /ended Checkout Session is paid/);
+    assert.throws(
+      () => verifyDirectCheckoutWebhook(signedPayload(syntheticEvent({ type: "checkout.session.async_payment_failed", paymentStatus: "paid" }))),
+      /ended Checkout Session is paid/,
+    );
+    const valid = ended({});
+    assert.throws(() => verifyDirectCheckoutWebhook({ ...valid, rawBody: Buffer.from("{}") }), /signature verification failed/);
   });
 });

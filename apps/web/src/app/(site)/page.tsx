@@ -4,6 +4,7 @@ import { HomeFinder } from "@/components/HomeFinder";
 import { EmptyResults, ErrorState } from "@/components/States";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { CardDates, type CardDatesSource } from "@/components/CardDates";
+import { guestBookingSources } from "@/lib/guest-booking-source";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels, cardFaceOf, type CardModel, type Face } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
@@ -108,7 +109,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const details = await loadDetails(api, summaries, config.publicApiVersion !== "1.0");
   const cards = withReviewLines(buildCardModels(summaries, details, isPilotPreview), await getReviewSummaries(summaries.map((summary) => summary.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
-  const cardDates: CardDatesSource = { kind: "read", preview: isPreview, nihoWebOrigin: config.nihoWebOrigin };
+  const cardDates: CardDatesSource = { kind: "read", preview: isPreview, sources: await guestBookingSources(cards.map((card) => card.slug)) };
   // An explicit home feature makes this noindex editorial preview visible without opening /guides or the sitemap.
   const homePreview = guideCatalogResult.source === "static"
     ? PUBLISHED_GUIDES.find((guide) => guide.slug === "kamakura-after-4-pm" && guide.unlisted)

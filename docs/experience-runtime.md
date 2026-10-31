@@ -7,8 +7,8 @@
 - `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHO user ID と experience DB の `provider_memberships` を両方確認する。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
 - Google OAuth の refresh token は provider にひも付けて暗号化保存する。選択した読み取り元は接続時の primary calendar、書き込み先はアプリが作る専用 calendar。予定の件名・参加者・説明は DB とレスポンスに保存しない。
 - `experience-domain` と `experience-store` は予約枠の判定、席の原子的な仮押さえ、支払 webhook による確定・台帳記入を提供する。`experience-payments` は共通 Stripe Connect 上の Direct charge Checkout と体験イベントの署名検証を提供する。webhook の受信経路は `/api/experience/stripe/webhook`。
-- `experience-store` の `GuestBookingRepository`（`0023`・`0025`、#285 の第1・2段）は、旅行者向けの販売条件・提供者ごとの NIHO の手数料・公開の開催枠と残席・ゲストの仮押さえ（35 分）を experience DB で扱える。`EXPERIENCE_GUEST_BOOKING_ENABLED` のとき、NIHO と同じ path の `GET /api/public/experiences/{slug}/availability` と `POST …/checkout` がこれと Stripe Checkout（手数料は予約の snapshot から）で答える。旅行者の画面はまだ NIHO の API を読む（第3段で切り替える）。設計は [guest-booking.md](guest-booking.md)。
-- 現行の旅行者向け availability と checkout、旧 `/host/experiences` の編集、既存予約一覧はまだ NIHO API を使う。**このカレンダーの Google busy 判定は、現在販売中の旧予約枠には効かない。** 現行の枠を止める操作は NIHO 側でも行う。
+- `experience-store` の `GuestBookingRepository`（`0023`・`0025`、#285 の第1・2段）は、旅行者向けの販売条件・提供者ごとの NIHO の手数料・公開の開催枠と残席・ゲストの仮押さえ（35 分）を experience DB で扱える。`EXPERIENCE_GUEST_BOOKING_ENABLED` のとき、NIHO と同じ path の `GET /api/public/experiences/{slug}/availability` と `POST …/checkout` がこれと Stripe Checkout（手数料は予約の snapshot から）で答える。第3段から、ここで売る商品（販売条件と提供者の手数料設定がある商品）の旅行者の残席・価格・質問・申込は、flag が on のときこの経路と experience DB から読む。ほかの商品と flag off・mock は NIHO の API のまま。設計は [guest-booking.md](guest-booking.md)。
+- ここで売る商品を除く旅行者向け availability と checkout、旧 `/host/experiences` の編集、既存予約一覧はまだ NIHO API を使う。**このカレンダーの Google busy 判定は、現在販売中の旧予約枠には効かない。** 現行の枠を止める操作は NIHO 側でも行う。
 
 ## カレンダー変更の整合性
 
@@ -35,6 +35,7 @@
 | `EXPERIENCE_GUEST_BOOKING_ENABLED` | `true` のときだけ、http mode で旅行者の予約（#285、[guest-booking.md](guest-booking.md)）の `/api/public/experiences/{slug}/availability`・`/checkout` を experience DB（`0023`・`0025`）と Stripe で開く。`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、`EXPERIENCE_STRIPE_WEBHOOK_SECRET`、`EXPERIENCE_BOOKING_CONSENT_VERSION` と https の `SITE_URL` が無いと起動失敗。既定 `false`（2 本とも 404）。商品の販売条件と提供者の手数料設定を書くことが「この商品はここで売る」の意味になるので、NIHO での販売停止と同時に行う |
 | `EXPERIENCE_BOOKING_CONSENT_VERSION` | 旅行者が checkout で同意する規約の版（`consent.agreedVersion`、1〜100 字・空白なし）。違う版の申込は 422 `CONSENT_OUTDATED` |
 | `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `true` のときだけ、http mode で予約前の質問（#105/#106、[guest-questions.md](guest-questions.md)）を experience DB（`0022`）に置く。体験ページの「Ask the host」、`/questions/reply`、`/api/public/experiences/{slug}/questions`・`/api/public/questions/reply(/open)`、OWNER の `/host/messages` が開く。`HOST_CONSOLE_ENABLED=true` が要り、`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED=true` の環境では効かない（ホストが質問を読めないため）。既定 `false`（質問の入口は出ず、公開 API は 404）。`EXPERIENCE_DATABASE_URL` が無いと公開 API は 503 |
+| `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `true` のときだけ、http mode で `GET /api/public/experiences/{slug}/reviews`（#104/#108、[guest-reviews.md](guest-reviews.md)）が experience DB（`0027`）のレビューと集計で答える。レビューは NIHO の確認なしで投稿されたらすぐ公開される（owner 2026-10-31）。既定 `false`（404）。`EXPERIENCE_DATABASE_URL` が無いと 503。投稿の画面（#285 スライス 6）ができるまでは、`true` にしても 0 件の応答になる。画面（体験詳細・`/host/reviews`）の接続は後続の PR |
 
 DB migration は `packages/experience-store/migrations/` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0006` は上記の停止・移行手順を先に満たす。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
 
@@ -43,7 +44,7 @@ Guide CMSの公開切替は販売正本の切替と分離する。まずstaging�
 ## 切替前の残作業
 
 1. NIHO の安定した user ID、provider ID、Connect 口座の readiness を渡す限定契約を確定し、権限付きで provider・membership・商品を移す。体験コンテンツの編集 UI と公開 SSR を新正本へ接続する。
-2. 旅行者の availability・入力・checkout を experience API へ切り替える。ゲスト連絡先、同意、質問、条件、返金・取消、メール・通知の扱いを旧契約と比較して受け入れる。新旧で同じ開催回を同時に販売しない。
+2. 旅行者の availability・入力・checkout を experience API へ切り替える。ゲスト連絡先、同意、質問、条件、返金・取消、メール・通知の扱いを旧契約と比較して受け入れる。レビュー（#104/#108）は保存と公開の読み取り API までを experience DB に置いた（`0027`、[guest-reviews.md](guest-reviews.md)）。残りは、投稿のお礼メールと書く画面、出欠による資格の除外、英訳の下書き（NIHO の事前確認は無し・直接公開）。新旧で同じ開催回を同時に販売しない。
 3. Google busy の定期再照合と outbox の確定予約書き込みを独立 job で実行する。Google 失効時は新規予約を閉じ、既存予約は保持して提供者に通知する。
 4. Stripe Connect webhook を同じプラットフォームの NIHO アプリ決済から振り分け、署名・販売者口座・金額・イベント再送・期限切れを staging で検証する。旧予約の返金責任を整理する。
 5. データ移行、backup、監査、障害・切戻し手順を受け入れたあと、旧編集を read-only にし、公開予約の参照先を切り替える。

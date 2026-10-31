@@ -1,4 +1,6 @@
-import { createExperienceApiClient } from "@niho-experience/api-client";
+import { createExperienceApiClient, type ExperienceApiClient } from "@niho-experience/api-client";
+import type { BookingSource } from "./booking-source";
+import { parseSiteSaleTerms, type SiteSaleTerms } from "./guest-booking-terms";
 
 const previewAvailabilityFailures = new Set<string>();
 
@@ -9,6 +11,38 @@ const previewAvailabilityFailures = new Set<string>();
  */
 export function getSiteQuestionsApi(siteOrigin: string) {
   return createExperienceApiClient({ nihoWebOrigin: siteOrigin, fetch: (input, init) => fetch(input, { ...init, referrerPolicy: "same-origin" }) });
+}
+
+/**
+ * Browser only: an experience sold on this site (#285, docs/guest-booking.md) reads availability and starts its
+ * checkout at this site's own routes, at NIHO's paths and in NIHO's shapes. As for questions, `same-origin` lets
+ * the checkout POST carry this site's Origin, which the route checks. `thisSite` accepts the site's own
+ * `/booking/return` as a checkout answer (a booking already paid) and no NIHO booking page.
+ */
+export function getSiteBookingApi(siteOrigin: string) {
+  return createExperienceApiClient({ nihoWebOrigin: siteOrigin, thisSite: true, fetch: (input, init) => fetch(input, { ...init, referrerPolicy: "same-origin" }) });
+}
+
+/** Browser only: the client for one experience's availability and checkout, from where the server says it is sold. */
+export async function getBookingApi(preview: boolean, source: BookingSource): Promise<ExperienceApiClient> {
+  if (source.kind === "closed") throw new Error("Booking source unknown");
+  return source.kind === "site" ? getSiteBookingApi(source.origin) : getBrowserApi(preview, source.origin);
+}
+
+/**
+ * Browser only: the sale terms of an experience sold here, read again from this site after the checkout said the
+ * questions, the price or the terms changed (`/api/public/experiences/{slug}/booking-terms`). Null on any failure.
+ */
+export async function getSiteBookingTerms(siteOrigin: string, slug: string): Promise<SiteSaleTerms | null> {
+  try {
+    const response = await fetch(`${new URL(siteOrigin).origin}/api/public/experiences/${encodeURIComponent(slug)}/booking-terms`, {
+      method: "GET", headers: { accept: "application/json" }, cache: "no-store", credentials: "omit", redirect: "error",
+      referrerPolicy: "same-origin", signal: AbortSignal.timeout(10_000),
+    });
+    return response.status === 200 ? parseSiteSaleTerms(await response.json()) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Browser only: availability and guest checkout use this client directly. */

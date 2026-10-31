@@ -23,6 +23,9 @@ Pass the exact raw request bytes, the `Stripe-Signature` header and the Connect 
 
 - `checkout.session.completed` with `payment_status=paid`
 - `checkout.session.async_payment_succeeded` with `payment_status=paid`
+- `checkout.session.expired` and `checkout.session.async_payment_failed` (#285 slice 4) with any `payment_status` but `paid`, returning the Checkout Session ID instead of payment fields. The caller passes them to `GuestBookingRepository.releaseGuestHold`, which gives the hold back only when the booking is still held, the Session is the one recorded for it and the account is its seller's.
+
+Every accepted type passes the same envelope checks: event ID, connected account, event time, a payment-mode Session, and metadata with exactly the source marker and a UUID v4 `booking_id`.
 
 Before creating Checkout, the caller must use NIHO's trusted server-to-server account contract to verify that the snapshotted connected account still belongs to the seller and its v2 merchant `card_payments` capability is active.
 
@@ -38,6 +41,6 @@ The endpoint must be configured as a Stripe Connect webhook so the signed Event 
 ## Public API
 
 - `createDirectCheckout(input)` returns only `checkoutSessionId` and the Stripe-hosted `checkoutUrl`. The public checkout route (`apps/web`, docs/guest-booking.md) records the Session on the booking with `GuestBookingRepository.attachCheckoutSession`.
-- `verifyDirectCheckoutWebhook(input)` returns the validated event ID/type/time, connected account ID, booking ID, PaymentIntent reference, amount and uppercase currency, or `null` for an unrelated event.
+- `verifyDirectCheckoutWebhook(input)` returns, for a paid Session (`VerifiedDirectCheckoutPaidEvent`), the validated event ID/type/time, connected account ID, booking ID, PaymentIntent reference, amount and uppercase currency; for a Session that ended unpaid (`VerifiedDirectCheckoutEndedEvent`), the event ID/type/time, connected account ID, booking ID and Checkout Session ID; or `null` for an unrelated event. `isEndedCheckoutEvent(event)` tells the two apart.
 
 Use Stripe Node SDK `22.6.0` on Node 24. All repository tests use synthetic identifiers and secrets.

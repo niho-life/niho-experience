@@ -225,6 +225,16 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...host, EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(true);
   });
 
+  it("reads published reviews from the experience DB only in http mode with their own flag (#104)", () => {
+    expect(resolveConfig({}).guestReviewsEnabled).toBe(false);
+    // The mock keeps its synthetic reviews, whatever is set; "1" is not "true".
+    expect(resolveConfig({ EXPERIENCE_GUEST_REVIEWS_ENABLED: "true" }).guestReviewsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "mock", EXPERIENCE_GUEST_REVIEWS_ENABLED: "true" }).guestReviewsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_REVIEWS_ENABLED: "1" }).guestReviewsEnabled).toBe(false);
+    // The public read does not wait for the host console.
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_REVIEWS_ENABLED: "true" }).guestReviewsEnabled).toBe(true);
+  });
+
   it("takes no question the OWNER could not read (#106)", () => {
     // No host console: nobody would see the question.
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
