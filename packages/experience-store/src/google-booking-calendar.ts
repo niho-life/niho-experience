@@ -9,8 +9,10 @@ import { withTransaction } from "./transaction.ts";
  * (`provider_google_connections.booking_calendar_id`, the `calendar.app.created` scope). The job compares each
  * booking with what it wrote (`google_booking_calendar_events`) instead of reading `outbox_messages`, whose
  * `booking.confirmed` rows the mail job completes: a confirmed booking whose event is missing or at other times is
- * written, a written one that is no longer confirmed is deleted. Only the current connection is written; a
- * reconnect (a new generation, a new booking calendar) writes every booking again.
+ * written, one that is no longer confirmed is deleted when its event is or may be there. A write is recorded as
+ * PENDING when it is claimed, so a write whose answer was lost (or whose run was cut off) is still deleted by the
+ * event's deterministic ID once the booking is cancelled. Only the current connection is written; a reconnect (a new
+ * generation, a new booking calendar) writes every booking again.
  */
 export interface BookingCalendarWork {
   readonly claimId: string;
@@ -59,7 +61,7 @@ const CANDIDATES = `
       FROM google_booking_calendar_events e
       JOIN connection c ON c.provider_id=e.provider_id AND c.connection_generation=e.connection_generation
       JOIN bookings b ON b.provider_id=e.provider_id AND b.id=e.booking_id
-     WHERE e.state='WRITTEN' AND b.status<>'CONFIRMED' AND e.next_attempt_at<=clock_timestamp()
+     WHERE e.state IN ('WRITTEN','PENDING') AND b.status<>'CONFIRMED' AND e.next_attempt_at<=clock_timestamp()
        AND (e.lease_expires_at IS NULL OR e.lease_expires_at<=clock_timestamp())
   )
   SELECT provider_id,booking_id::text AS booking_id,connection_generation,calendar_id,action
@@ -97,10 +99,13 @@ export class GoogleBookingCalendarEvents {
       const row = await this.#pool.query<DbRow>(
         `WITH claimed AS (
            INSERT INTO google_booking_calendar_events
-             (provider_id,booking_id,connection_generation,opaque_calendar_id,claim_id,lease_expires_at,attempts)
-           VALUES ($1,$2::bigint,$3,$4,$5::uuid,clock_timestamp()+$6::integer*interval '1 millisecond',1)
+             (provider_id,booking_id,connection_generation,opaque_calendar_id,state,claim_id,lease_expires_at,attempts)
+           VALUES ($1,$2::bigint,$3,$4,'PENDING',$5::uuid,clock_timestamp()+$6::integer*interval '1 millisecond',1)
            ON CONFLICT (provider_id,booking_id,connection_generation) DO UPDATE
              SET claim_id=EXCLUDED.claim_id,lease_expires_at=EXCLUDED.lease_expires_at,
+                 -- A write may leave an event behind whatever its answer; a removal changes nothing until it is done.
+                 state=CASE WHEN $7='WRITE' AND google_booking_calendar_events.state='ABSENT' THEN 'PENDING'
+                   ELSE google_booking_calendar_events.state END,
                  attempts=google_booking_calendar_events.attempts+1,updated_at=clock_timestamp()
              WHERE google_booking_calendar_events.next_attempt_at<=clock_timestamp()
                AND (google_booking_calendar_events.lease_expires_at IS NULL
@@ -111,7 +116,7 @@ export class GoogleBookingCalendarEvents {
            FROM claimed
            JOIN bookings b ON b.provider_id=claimed.provider_id AND b.id=claimed.booking_id
            JOIN experience_products p ON p.provider_id=b.provider_id AND p.id=b.product_id`,
-        [candidate.provider_id, candidate.booking_id, candidate.connection_generation, candidate.calendar_id, claimId, leaseMs],
+        [candidate.provider_id, candidate.booking_id, candidate.connection_generation, candidate.calendar_id, claimId, leaseMs, candidate.action],
       );
       const claim = row.rows[0];
       if (!claim) continue;
@@ -133,7 +138,8 @@ export class GoogleBookingCalendarEvents {
   }
 
   /**
-   * Records what this claim did. A failure is tried again 1, 5, 15 and 60 minutes later (then hourly). False when the
+   * Records what this claim did. A failure is tried again 1, 5, 15 and 60 minutes later (then hourly) and keeps the
+   * row's state: a failed write stays PENDING, so a cancellation in between still deletes the event. False when the
    * lease ran out and another run holds the row: this claim then changes nothing.
    */
   async finish(work: BookingCalendarWork, outcome: BookingCalendarOutcome): Promise<boolean> {

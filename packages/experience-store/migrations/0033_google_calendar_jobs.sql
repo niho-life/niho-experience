@@ -30,8 +30,9 @@ CREATE TABLE google_booking_calendar_events (
   booking_id bigint NOT NULL,
   connection_generation bigint NOT NULL CHECK (connection_generation > 0),
   opaque_calendar_id text NOT NULL CHECK (length(opaque_calendar_id) BETWEEN 1 AND 512),
-  -- WRITTEN: the event is on the calendar for the times below. ABSENT: not there (deleted, or not written yet).
-  state text NOT NULL DEFAULT 'ABSENT' CHECK (state IN ('WRITTEN','ABSENT')),
+  -- WRITTEN: the event is on the calendar for the times below. PENDING: a write was started and its outcome is not
+  -- known (a timeout, a run cut off), so the event may be there. ABSENT: not there (deleted, or never written).
+  state text NOT NULL DEFAULT 'ABSENT' CHECK (state IN ('WRITTEN','PENDING','ABSENT')),
   written_start_at timestamptz,
   written_end_at timestamptz,
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
@@ -48,8 +49,8 @@ CREATE TABLE google_booking_calendar_events (
   CHECK ((claim_id IS NULL) = (lease_expires_at IS NULL))
 );
 
-CREATE INDEX google_booking_calendar_events_written_idx
+CREATE INDEX google_booking_calendar_events_present_idx
   ON google_booking_calendar_events (provider_id, connection_generation)
-  WHERE state = 'WRITTEN';
+  WHERE state <> 'ABSENT';
 
 COMMIT;

@@ -115,6 +115,30 @@ describe("Google booking calendar events", { skip: databaseUrl === undefined }, 
       const [afterReconnect] = await events.claimDue(10, 60_000);
       assert.deepEqual([afterReconnect?.publicBookingId, afterReconnect?.calendarId, afterReconnect?.connectionGeneration], [second.publicId, "booking-a2", await generation()]);
       await events.finish(afterReconnect!, "WRITTEN");
+      // A write whose answer was lost: the booking is cancelled before a retry succeeds, and the event is still deleted.
+      const cancel = (id: string) => pool.query("UPDATE bookings SET status='CANCELLED',confirmed_at=NULL,cancelled_at=clock_timestamp() WHERE id=$1::bigint", [id]);
+      const lost = await booking(pool, "tea", "2099-01-05T01:00:00.000Z");
+      const [attempt] = await events.claimDue(10, 60_000);
+      assert.equal(attempt?.publicBookingId, lost.publicId);
+      await events.finish(attempt!, "FAILED");
+      await cancel(lost.id);
+      await pool.query("UPDATE google_booking_calendar_events SET next_attempt_at=clock_timestamp()-interval '1 second'");
+      const [cleanup] = await events.claimDue(10, 60_000);
+      assert.deepEqual([cleanup?.action, cleanup?.publicBookingId], ["REMOVE", lost.publicId]);
+      await events.finish(cleanup!, "REMOVED");
+      // A run cut off mid-write (its lease ran out with nothing recorded) is deleted the same way.
+      const cut = await booking(pool, "tea", "2099-01-06T01:00:00.000Z");
+      const [unfinished] = await events.claimDue(10, 60_000);
+      assert.equal(unfinished?.publicBookingId, cut.publicId);
+      await cancel(cut.id);
+      await pool.query("UPDATE google_booking_calendar_events SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE claim_id IS NOT NULL");
+      const [afterCut] = await events.claimDue(10, 60_000);
+      assert.deepEqual([afterCut?.action, afterCut?.publicBookingId], ["REMOVE", cut.publicId]);
+      await events.finish(afterCut!, "REMOVED");
+      assert.deepEqual(await events.claimDue(10, 60_000), []);
+      const states = await pool.query("SELECT DISTINCT state FROM google_booking_calendar_events e JOIN bookings b ON b.id=e.booking_id WHERE b.status='CANCELLED'");
+      assert.deepEqual(states.rows.map((row) => row.state), ["ABSENT"]);
+
       // The OWNER who connected leaves: nothing is written for that connection.
       await booking(pool, "tea", "2099-01-04T01:00:00.000Z");
       await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id='provider-a'");
