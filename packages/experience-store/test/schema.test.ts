@@ -365,4 +365,11 @@ describe("database invariants", () => {
     assert.match(table, /version bigint NOT NULL DEFAULT 1/);
     assert.doesNotMatch(table, /niho_user_id|email|default (true|false)/i);
   });
+
+  it("only widens the recorded Stripe event outcomes for Sessions that ended unpaid (#285 slice 4)", async () => {
+    const sql = await readFile(new URL("../migrations/0026_checkout_session_release.sql", import.meta.url), "utf8");
+    assert.match(sql, /DROP CONSTRAINT stripe_webhook_events_outcome_check/);
+    assert.match(sql, /outcome IN \('CONFIRMED', 'PAYMENT_REVIEW', 'DUPLICATE', 'EXPIRED', 'IGNORED'\)/);
+    assert.doesNotMatch(sql, /CREATE TABLE|ADD COLUMN|DROP COLUMN|UPDATE |DELETE /);
+  });
 });

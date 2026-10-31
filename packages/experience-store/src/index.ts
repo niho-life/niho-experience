@@ -52,6 +52,7 @@ export type {
   GuestBookingAnswer,
   GuestBookingStart,
   GuestBookingUtm,
+  GuestHoldRelease,
   ProductSaleTerms,
   ProductSaleTermsInput,
   ProviderSaleSettings,
@@ -60,6 +61,7 @@ export type {
   PublicBookingTerms,
   PublicOccurrence,
   PublicOccurrenceReason,
+  ReleaseGuestHoldInput,
   StartGuestBookingInput,
 } from "./guest-bookings.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";

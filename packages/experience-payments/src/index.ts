@@ -9,6 +9,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const CONNECTED_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,}$/;
 const EVENT_ID = /^evt_[A-Za-z0-9]{8,}$/;
 const PAYMENT_INTENT_ID = /^pi_[A-Za-z0-9]{8,}$/;
+const CHECKOUT_SESSION_ID = /^cs_[A-Za-z0-9_]{1,250}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONTROL = /[\u0000-\u001F\u007F]/;
@@ -66,7 +67,8 @@ export interface VerifyDirectCheckoutWebhookInput {
   readonly stripe?: PaymentsStripeClient;
 }
 
-export interface VerifiedDirectCheckoutEvent {
+/** A paid Session: Experience Store's confirmBookingPayment takes it. */
+export interface VerifiedDirectCheckoutPaidEvent {
   readonly eventId: string;
   readonly eventType: "checkout.session.completed" | "checkout.session.async_payment_succeeded";
   readonly eventOccurredAtUtc: string;
@@ -76,6 +78,26 @@ export interface VerifiedDirectCheckoutEvent {
   readonly amountTotal: number;
   /** Uppercase ISO currency, matching Experience Store snapshots. */
   readonly currency: string;
+}
+
+/**
+ * A Session that ended unpaid (#285 slice 4): it expired, or its delayed payment failed. Experience Store's
+ * GuestBookingRepository.releaseGuestHold takes it. It has no payment fields.
+ */
+export interface VerifiedDirectCheckoutEndedEvent {
+  readonly eventId: string;
+  readonly eventType: "checkout.session.expired" | "checkout.session.async_payment_failed";
+  readonly eventOccurredAtUtc: string;
+  readonly connectedAccountId: string;
+  readonly publicBookingId: string;
+  readonly checkoutSessionId: string;
+}
+
+export type VerifiedDirectCheckoutEvent = VerifiedDirectCheckoutPaidEvent | VerifiedDirectCheckoutEndedEvent;
+
+/** Tells the two kinds apart (each kind's eventType is a union, so comparing it narrows only one way). */
+export function isEndedCheckoutEvent(event: VerifiedDirectCheckoutEvent): event is VerifiedDirectCheckoutEndedEvent {
+  return event.eventType === "checkout.session.expired" || event.eventType === "checkout.session.async_payment_failed";
 }
 
 export class ExperiencePaymentsValidationError extends Error {
@@ -319,7 +341,7 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
  * is refused.
  */
 export async function retrieveDirectCheckout(input: RetrieveDirectCheckoutInput): Promise<RetrievedDirectCheckout> {
-  if (typeof input.checkoutSessionId !== "string" || !/^cs_[A-Za-z0-9_]{1,250}$/.test(input.checkoutSessionId)) {
+  if (typeof input.checkoutSessionId !== "string" || !CHECKOUT_SESSION_ID.test(input.checkoutSessionId)) {
     throw new ExperiencePaymentsValidationError("checkoutSessionId is malformed.");
   }
   const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
@@ -349,7 +371,64 @@ function paymentIntentReference(value: unknown): string {
   return reference;
 }
 
-/** Verifies and validates a Connect Checkout webhook. This function never writes to storage. */
+interface CheckoutEventEnvelope {
+  readonly eventId: string;
+  readonly eventOccurredAtUtc: string;
+  readonly connectedAccountId: string;
+  readonly publicBookingId: string;
+  readonly session: Record<string, unknown>;
+}
+
+/**
+ * The checks every Checkout event of this service passes, whatever its type: the event ID, connected
+ * account and time, a payment Session, and metadata naming one booking. null for another service's Session.
+ */
+function checkoutEventEnvelope(event: Stripe.Event): CheckoutEventEnvelope | null {
+  if (!EVENT_ID.test(event.id)) {
+    throw new ExperiencePaymentsValidationError("The Stripe event ID is malformed.");
+  }
+  if (event.account === undefined || !CONNECTED_ACCOUNT_ID.test(event.account)) {
+    throw new ExperiencePaymentsValidationError("A valid connected account ID is required on the Stripe event.");
+  }
+  if (!Number.isSafeInteger(event.created) || event.created <= 0) {
+    throw new ExperiencePaymentsValidationError("The Stripe event time is invalid.");
+  }
+
+  const session = asRecord(event.data.object, "checkout session");
+  if (session.object !== "checkout.session" || session.mode !== "payment") {
+    throw new ExperiencePaymentsValidationError("The Stripe event does not contain a payment Checkout Session.");
+  }
+  const metadataValue = session.metadata;
+  if (metadataValue === null || typeof metadataValue !== "object" || Array.isArray(metadataValue) || (metadataValue as Record<string, unknown>).source !== "niho-experience") return null;
+
+  const metadata = asRecord(session.metadata, "checkout session metadata");
+  const metadataKeys = Object.keys(metadata);
+  if (metadataKeys.length !== 2 || metadata.source !== "niho-experience" || typeof metadata.booking_id !== "string") {
+    throw new ExperiencePaymentsValidationError("Checkout Session metadata is malformed.");
+  }
+  if (!UUID_V4.test(metadata.booking_id)) {
+    throw new ExperiencePaymentsValidationError("Checkout Session booking_id must be a UUID v4.");
+  }
+
+  const eventDate = new Date(event.created * 1_000);
+  if (!Number.isFinite(eventDate.getTime())) {
+    throw new ExperiencePaymentsValidationError("The Stripe event time is invalid.");
+  }
+  return {
+    eventId: event.id,
+    eventOccurredAtUtc: eventDate.toISOString(),
+    connectedAccountId: event.account,
+    publicBookingId: metadata.booking_id.toLowerCase(),
+    session,
+  };
+}
+
+/**
+ * Verifies and validates a Connect Checkout webhook. This function never writes to storage.
+ * A paid Session (completed, or a delayed payment that succeeded) returns the payment fields; a Session
+ * that ended unpaid (expired, or a delayed payment that failed) returns its Session ID instead, so the
+ * caller can release that hold. Any other event, or another service's Session, returns null.
+ */
 export function verifyDirectCheckoutWebhook(
   input: VerifyDirectCheckoutWebhookInput,
 ): VerifiedDirectCheckoutEvent | null {
@@ -368,36 +447,34 @@ export function verifyDirectCheckoutWebhook(
     throw new ExperiencePaymentsValidationError("Stripe webhook signature verification failed.", { cause: error });
   }
 
+  if (event.type === "checkout.session.expired" || event.type === "checkout.session.async_payment_failed") {
+    const envelope = checkoutEventEnvelope(event);
+    if (envelope === null) return null;
+    // An ended Session never gives back the seats of a paid one.
+    if (envelope.session.payment_status === "paid") {
+      throw new ExperiencePaymentsValidationError("The ended Checkout Session is paid.");
+    }
+    const checkoutSessionId = envelope.session.id;
+    if (typeof checkoutSessionId !== "string" || !CHECKOUT_SESSION_ID.test(checkoutSessionId)) {
+      throw new ExperiencePaymentsValidationError("The Checkout Session ID is malformed.");
+    }
+    return {
+      eventId: envelope.eventId,
+      eventType: event.type,
+      eventOccurredAtUtc: envelope.eventOccurredAtUtc,
+      connectedAccountId: envelope.connectedAccountId,
+      publicBookingId: envelope.publicBookingId,
+      checkoutSessionId,
+    };
+  }
   if (event.type !== "checkout.session.completed" && event.type !== "checkout.session.async_payment_succeeded") {
     return null;
   }
-  if (!EVENT_ID.test(event.id)) {
-    throw new ExperiencePaymentsValidationError("The Stripe event ID is malformed.");
-  }
-  if (event.account === undefined || !CONNECTED_ACCOUNT_ID.test(event.account)) {
-    throw new ExperiencePaymentsValidationError("A valid connected account ID is required on the Stripe event.");
-  }
-  if (!Number.isSafeInteger(event.created) || event.created <= 0) {
-    throw new ExperiencePaymentsValidationError("The Stripe event time is invalid.");
-  }
-
-  const session = asRecord(event.data.object, "checkout session");
-  if (session.object !== "checkout.session" || session.mode !== "payment") {
-    throw new ExperiencePaymentsValidationError("The Stripe event does not contain a payment Checkout Session.");
-  }
-  const metadataValue = session.metadata;
-  if (metadataValue === null || typeof metadataValue !== "object" || Array.isArray(metadataValue) || (metadataValue as Record<string, unknown>).source !== "niho-experience") return null;
+  const envelope = checkoutEventEnvelope(event);
+  if (envelope === null) return null;
+  const { session } = envelope;
   if (session.payment_status !== "paid") {
     throw new ExperiencePaymentsValidationError("The Checkout Session is not paid.");
-  }
-
-  const metadata = asRecord(session.metadata, "checkout session metadata");
-  const metadataKeys = Object.keys(metadata);
-  if (metadataKeys.length !== 2 || metadata.source !== "niho-experience" || typeof metadata.booking_id !== "string") {
-    throw new ExperiencePaymentsValidationError("Checkout Session metadata is malformed.");
-  }
-  if (!UUID_V4.test(metadata.booking_id)) {
-    throw new ExperiencePaymentsValidationError("Checkout Session booking_id must be a UUID v4.");
   }
 
   if (typeof session.amount_total !== "number") {
@@ -412,17 +489,12 @@ export function verifyDirectCheckoutWebhook(
     throw new ExperiencePaymentsValidationError("Checkout Session currency is invalid.");
   }
 
-  const eventDate = new Date(event.created * 1_000);
-  if (!Number.isFinite(eventDate.getTime())) {
-    throw new ExperiencePaymentsValidationError("The Stripe event time is invalid.");
-  }
-  const eventOccurredAtUtc = eventDate.toISOString();
   return {
-    eventId: event.id,
+    eventId: envelope.eventId,
     eventType: event.type,
-    eventOccurredAtUtc,
-    connectedAccountId: event.account,
-    publicBookingId: metadata.booking_id.toLowerCase(),
+    eventOccurredAtUtc: envelope.eventOccurredAtUtc,
+    connectedAccountId: envelope.connectedAccountId,
+    publicBookingId: envelope.publicBookingId,
     paymentIntentRef: paymentIntentReference(session.payment_intent),
     amountTotal,
     currency: currency.toUpperCase(),

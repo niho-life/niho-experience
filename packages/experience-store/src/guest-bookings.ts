@@ -21,12 +21,14 @@ import {
   type GuestCheckoutOccurrenceReason,
 } from "./errors.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
+import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import {
   BOOKING_COLUMNS,
   OVERRIDE_COLUMNS,
   PRODUCT_COLUMNS,
   RULE_COLUMNS,
   SALES_STATE_COLUMNS,
+  expireLapsedHolds,
   lockBookingIdempotencyKey,
   materializeAndLockOccurrence,
   placeBookingHold,
@@ -35,7 +37,7 @@ import {
 import { bookingFromRow, isoValue, overrideFromRow, productFromRow, salesStateFromRow, scheduleRuleFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { BookingRecord, BookingStatus, GuestCancellationPolicy, HostActor, ProductRecord, StoredScheduleRule } from "./types.ts";
-import { assertCanonicalInstant, assertMoney, assertStoreIdentifier, chargeablePlatformFee } from "./validation.ts";
+import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, chargeablePlatformFee } from "./validation.ts";
 
 /**
  * The bounds of the public booking flow. Input bounds follow NIHO's public checkout contract
@@ -68,6 +70,8 @@ export const GUEST_BOOKING_LIMITS = {
   activeHoldsPerGuestPerProduct: 2,
   activeHoldsPerProduct: 30,
   bookingsPerGuestPerHour: 5,
+  /** How many of the provider's lapsed holds a new checkout marks EXPIRED on its way (#285 slice 4). */
+  lapsedHoldsExpiredPerCheckout: 100,
 } as const;
 
 /** NIHO's fee on a guest booking, in basis points (owner decision 2026-10-31, #285; payment fees included). */
@@ -243,6 +247,27 @@ export interface GuestBookingStart {
   readonly booking: BookingRecord;
 }
 
+/** A guest's Stripe Checkout Session that ended unpaid: experience-payments' VerifiedDirectCheckoutEndedEvent. */
+export interface ReleaseGuestHoldInput {
+  readonly publicBookingId: string;
+  /** The Session the event is about. */
+  readonly checkoutSessionRef: string;
+  /** The Stripe Connect account on the verified webhook envelope. */
+  readonly connectedAccountId: string;
+  readonly stripeEventId: string;
+  readonly stripeEventType: "checkout.session.expired" | "checkout.session.async_payment_failed";
+  readonly eventOccurredAtUtc: string;
+}
+
+export interface GuestHoldRelease {
+  /** The booking's status after the event. */
+  readonly status: BookingStatus;
+  /** This event gave the seats back (HOLD became EXPIRED). */
+  readonly released: boolean;
+  /** The event was recorded before; nothing changed. */
+  readonly duplicateEvent: boolean;
+}
+
 type Queryable = Pool | PoolClient;
 type InputType = BookingQuestionInputType;
 
@@ -259,6 +284,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^\+?[0-9 ().-]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_REF = /^[A-Za-z0-9_-]{1,256}$/;
+const ENDED_SESSION_EVENTS: ReadonlySet<string> = new Set(["checkout.session.expired", "checkout.session.async_payment_failed"]);
 /** Control characters other than tab and line breaks. */
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const ANY_CONTROL = /[\u0000-\u001F\u007F]/;
@@ -1147,6 +1173,13 @@ export class GuestBookingRepository {
       if (request.bookingQuestionsFingerprint !== terms.bookingQuestionsFingerprint) throw new GuestCheckoutError("QUESTIONS_CHANGED");
       const answers = checkedAnswers(terms.bookingQuestions, request.answers);
 
+      // Lapsed holds of the provider become EXPIRED here, under the provider inventory lock this transaction
+      // already holds, so a stale HOLD does not linger without a scheduled job (#285 slice 4). It is
+      // bookkeeping: stored inventory (evaluateStoredInventories counts a HOLD only while hold_expires_at is
+      // after now) and the hold limits below (hold_expires_at > clock_timestamp()) already leave such a hold
+      // out, so no answer changes. Bounded, so the limits keep their time condition for the rest.
+      await expireLapsedHolds(client, providerId, GUEST_BOOKING_LIMITS.lapsedHoldsExpiredPerCheckout);
+
       const started = await client.query<DbRow>(
         `SELECT count(*)::int AS started,
                 GREATEST(1, ceil(extract(epoch FROM min(created_at) + interval '60 minutes' - clock_timestamp())))::int AS retry_after
@@ -1236,6 +1269,77 @@ export class GuestBookingRepository {
         "UPDATE booking_guests SET checkout_session_ref=$3 WHERE provider_id=$1 AND booking_id=$2",
         [row.provider_id, row.booking_id, sessionRef],
       );
+    });
+  }
+
+  /**
+   * Gives back the seats of a guest's hold whose Stripe Checkout Session ended unpaid (#285 slice 4): under
+   * the provider inventory lock, a booking still HOLD whose recorded Session (booking_guests) is this one
+   * becomes EXPIRED and its occurrence is recalculated. Anything else changes nothing: the same event again,
+   * a booking already expired, confirmed, under payment review or cancelled, a Session other than the one
+   * recorded (or none). Each event is recorded once in stripe_webhook_events, as confirmBookingPayment
+   * records payments, with the outcome EXPIRED or IGNORED (migration 0026). A payment that still arrives for
+   * the released hold goes to PAYMENT_REVIEW there, never taking the seats again. StoreNotFoundError when
+   * the booking does not exist; StoreConflictError when the event's account is not the booking's seller or
+   * its ID was recorded for another booking.
+   */
+  async releaseGuestHold(input: ReleaseGuestHoldInput): Promise<GuestHoldRelease> {
+    if (typeof input.publicBookingId !== "string" || !UUID.test(input.publicBookingId)) throw new StoreValidationError("publicBookingId must be a UUID.");
+    if (typeof input.checkoutSessionRef !== "string" || !SESSION_REF.test(input.checkoutSessionRef)) throw new StoreValidationError("checkoutSessionRef is invalid.");
+    assertNonEmptyText(input.connectedAccountId, "connectedAccountId", 256);
+    assertNonEmptyText(input.stripeEventId, "stripeEventId", 256);
+    if (!ENDED_SESSION_EVENTS.has(input.stripeEventType)) throw new StoreValidationError("stripeEventType must end a Checkout Session unpaid.");
+    assertCanonicalInstant(input.eventOccurredAtUtc, "eventOccurredAtUtc");
+    const located = await this.#pool.query<DbRow>("SELECT provider_id FROM bookings WHERE public_booking_id=$1::uuid", [input.publicBookingId]);
+    if (located.rows[0] === undefined) throw new StoreNotFoundError("booking");
+    const providerId = String(located.rows[0].provider_id);
+
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      // The lock confirmBookingPayment takes for the same event ID.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 1))", [input.stripeEventId]);
+      const found = await client.query<DbRow>(
+        `SELECT id, ${BOOKING_COLUMNS} FROM bookings
+          WHERE provider_id=$1 AND public_booking_id=$2::uuid FOR UPDATE`,
+        [providerId, input.publicBookingId],
+      );
+      const row = found.rows[0];
+      if (row === undefined) throw new StoreNotFoundError("booking");
+      const booking = bookingFromRow(row);
+      if (booking.sellerSnapshot.stripeConnectAccountRef !== input.connectedAccountId) {
+        throw new StoreConflictError("Stripe event account does not match the booking seller snapshot.");
+      }
+      const recorded = await client.query<DbRow>(
+        `SELECT event_id FROM stripe_webhook_events
+          WHERE event_id=$1 AND provider_id=$2 AND booking_id=$3`,
+        [input.stripeEventId, providerId, row.id],
+      );
+      if (recorded.rows[0] !== undefined) return { status: booking.status, released: false, duplicateEvent: true };
+
+      const guest = await client.query<DbRow>(
+        "SELECT checkout_session_ref FROM booking_guests WHERE provider_id=$1 AND booking_id=$2",
+        [providerId, row.id],
+      );
+      const release = booking.status === "HOLD" && guest.rows[0]?.checkout_session_ref === input.checkoutSessionRef;
+      const inserted = await client.query<DbRow>(
+        `INSERT INTO stripe_webhook_events
+           (event_id, provider_id, event_type, booking_id, occurred_at, outcome)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT DO NOTHING RETURNING event_id`,
+        [input.stripeEventId, providerId, input.stripeEventType, row.id, input.eventOccurredAtUtc, release ? "EXPIRED" : "IGNORED"],
+      );
+      // Under the event lock, an ID that is taken but not for this booking belongs to another one.
+      if (inserted.rows[0] === undefined) throw new StoreConflictError("Stripe event ID is already used outside this booking scope.");
+      if (!release) return { status: booking.status, released: false, duplicateEvent: false };
+
+      await client.query(
+        "UPDATE bookings SET status='EXPIRED', updated_at=clock_timestamp() WHERE provider_id=$1 AND id=$2",
+        [providerId, row.id],
+      );
+      await enqueueCalendarRecalculation(client, {
+        providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_hold_released",
+      });
+      return { status: "EXPIRED", released: true, duplicateEvent: false };
     });
   }
 
