@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const PROVIDER = "sample-provider-kitchen";
@@ -459,4 +460,218 @@ test("a capture confirmation conflict requires a fresh authoritative read before
   await expect(page.getByRole("button", { name: "承認する", exact: true })).toHaveCount(0);
   expect(captures).toBe(1);
   await noOverflow(page);
+});
+
+const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+const svgImage = (label: string) => `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#e8dcc8"/><text x="24" y="160" font-size="28">${label}</text></svg>`)}`;
+const consent = { version: "synthetic-listing-consent-2", text: "（合成）体験サイトへの掲載と、NIHO の確認に同意します。" };
+const inheritedMeeting = { mode: "INHERIT", meetingPoint: { overview: "（合成）駅から歩いて 10 分", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から歩きます。", mapUrl: "https://maps.example.test/synthetic", entranceNote: "（合成）木の門の呼び鈴" } };
+
+test("owner reorders photos, picks the cover and removes one: one PATCH carries the order, and a clash with another editor's photos never overwrites theirs", async ({ page }) => {
+  const version = (hour: number) => `2026-10-27T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  const photo = (key: string) => ({ objectKey: key, url: svgImage(key) });
+  let serverPage = { ...structuredClone(pageDetail), language: "EN", updatedAt: version(1), photos: ["photo-a", "photo-b", "photo-c"].map(photo), photoAlts: ["入口", "道場", "食卓"] };
+  const patches: { expectedUpdatedAt: string; patch: Record<string, unknown> }[] = [];
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const request = route.request(); const path = new URL(request.url()).pathname; const method = request.method();
+    if (path.endsWith(`/${PAGE}`) && method === "GET") return json(route, serverPage);
+    if (path.endsWith(`/${PAGE}`) && method === "PATCH") {
+      const body = request.postDataJSON(); patches.push(body);
+      if (body.expectedUpdatedAt !== serverPage.updatedAt) return json(route, { error: "PAGE_UPDATED" }, 409);
+      const keys: string[] = body.patch.photoObjectKeys ?? serverPage.photos.map((item) => item.objectKey);
+      const known = new Map(serverPage.photos.map((item) => [item.objectKey, item]));
+      serverPage = { ...serverPage, ...body.patch, photos: keys.map((key) => known.get(key)!), photoAlts: body.patch.photoAlts ?? serverPage.photoAlts, updatedAt: version(2) };
+      return json(route, serverPage);
+    }
+    if (path.endsWith("/meeting-point") && method === "GET") return json(route, inheritedMeeting);
+    if (path.endsWith("/listing") && method === "GET") return json(route, { listing: null, consent });
+    return json(route, { error: "not_found" }, 404);
+  });
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences/${PAGE}?providerId=${PROVIDER}`);
+  const section = page.getByRole("region", { name: "写真", exact: true });
+  const alts = () => section.getByRole("textbox").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+  await expect(section.getByRole("listitem")).toHaveCount(3);
+  await expect(section).toContainText("3 / 20 枚");
+  await expect(section.getByRole("listitem").first()).toContainText("表紙");
+  await expect(section.getByRole("button", { name: "写真 1 を前へ" })).toBeDisabled();
+  await expect(section.getByRole("button", { name: "写真 3 を後ろへ" })).toBeDisabled();
+  await expect(section.getByRole("button", { name: "写真 1 を表紙にする" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+
+  // 表紙にする: the photo and its description go first; focus stays in that photo's row (the cover has no 前へ or 表紙にする left).
+  await section.getByRole("button", { name: "写真 3 を表紙にする" }).click();
+  expect(await alts()).toEqual(["食卓", "入口", "道場"]);
+  await expect(section.getByRole("button", { name: "写真 1 を後ろへ" })).toBeFocused();
+  await expect(section.getByRole("status")).toContainText("写真 3 を表紙にしました。");
+  // 後ろへ: the focus follows the same button to its new place.
+  await section.getByRole("button", { name: "写真 1 を後ろへ" }).click();
+  expect(await alts()).toEqual(["入口", "食卓", "道場"]);
+  await expect(section.getByRole("button", { name: "写真 2 を後ろへ" })).toBeFocused();
+  await expect(section.getByRole("status")).toContainText("写真 1 を 2 番目にしました。");
+  // 外す: the focus goes to a photo still there.
+  await section.getByRole("button", { name: "写真 3 を外す" }).click();
+  expect(await alts()).toEqual(["入口", "食卓"]);
+  await expect(section.getByRole("button", { name: "写真 2 を外す" })).toBeFocused();
+  await section.getByLabel("写真 1 の説明（表紙）").fill(" 入口の門 ");
+  expect(patches).toEqual([]);
+
+  // One 保存: the order and the descriptions together, against the version that was read.
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  expect(patches).toEqual([{ expectedUpdatedAt: version(1), patch: { photoObjectKeys: ["photo-a", "photo-c"], photoAlts: ["入口の門", "食卓"] } }]);
+  expect(await alts()).toEqual(["入口の門", "食卓"]);
+
+  // Another editor changes a description while I change the order: the save is refused, and neither side is overwritten.
+  await section.getByRole("button", { name: "写真 2 を表紙にする" }).click();
+  expect(await alts()).toEqual(["食卓", "入口の門"]);
+  serverPage = { ...serverPage, photoAlts: ["別の人が直した説明", "食卓"], updatedAt: version(4) };
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "ほかの人が先に保存しました" })).toBeVisible();
+  expect(patches).toHaveLength(2);
+  expect(patches[1]).toEqual({ expectedUpdatedAt: version(2), patch: { photoObjectKeys: ["photo-c", "photo-a"], photoAlts: ["食卓", "入口の門"] } });
+  expect(await alts()).toEqual(["食卓", "入口の門"]);
+  await page.getByRole("button", { name: "最新の保存内容を読む" }).click();
+  await expect(page.getByText("同じ項目が変更されています")).toBeVisible();
+  await expect(page.getByText("写真・並び・説明", { exact: true })).toBeVisible();
+  await expect(page.getByText("写真の並び・説明: 別の人が直した説明、食卓")).toBeVisible();
+  await page.getByRole("button", { name: "競合項目は最新を残す" }).click();
+  expect(await alts()).toEqual(["別の人が直した説明", "食卓"]);
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  expect(patches).toHaveLength(2);
+  await noOverflow(page);
+  const axe = await new AxeBuilder({ page }).include("section[aria-labelledby]").withTags(WCAG_TAGS).analyze();
+  expect(axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
+});
+
+test("a page with no photo says a cover is needed, and 20 photos is the most", async ({ page }) => {
+  const photos = Array.from({ length: 20 }, (_, at) => ({ objectKey: `photo-${at}`, url: svgImage(`${at + 1}`) }));
+  let serverPage = { ...structuredClone(pageDetail), language: "EN", photos: [] as typeof photos, photoAlts: [] as string[], publishBlockers: ["COVER_REQUIRED"] };
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith(`/${PAGE}`)) return json(route, serverPage);
+    if (path.endsWith("/meeting-point")) return json(route, inheritedMeeting);
+    if (path.endsWith("/listing")) return json(route, { listing: null, consent });
+    return json(route, { error: "not_found" }, 404);
+  });
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences/${PAGE}?providerId=${PROVIDER}`);
+  const section = page.getByRole("region", { name: "写真", exact: true });
+  await expect(section).toContainText("表紙の写真がありません。掲載を申請するには、写真を 1 枚以上追加して保存してください。");
+  await expect(page.getByText("表紙の写真を追加してください。")).toBeVisible();
+  await expect(section.getByLabel("写真を追加")).toBeEnabled();
+  serverPage = { ...serverPage, photos, photoAlts: photos.map((_, at) => `説明 ${at + 1}`), publishBlockers: [] };
+  await page.reload();
+  await expect(section.getByRole("listitem")).toHaveCount(20);
+  await expect(section).toContainText("20 / 20 枚");
+  await expect(section.getByLabel("写真を追加")).toBeDisabled();
+  await expect(section).toContainText("写真は 20 枚までです。追加するには、どれかを外してください。");
+  await section.getByRole("button", { name: "写真 20 を外す" }).click();
+  await expect(section.getByLabel("写真を追加")).toBeEnabled();
+});
+
+test("owner previews the saved page as the experience site shows it, and is told that unsaved changes wait for 保存", async ({ page }) => {
+  const image = (label: string) => svgImage(label);
+  const occurrence = (date: string, hour: number, bookable = true) => ({ date, startAt: `${date}T${String(hour - 9).padStart(2, "0")}:00:00.000Z`, endAt: `${date}T${String(hour - 7).padStart(2, "0")}:00:00.000Z`, seatsLeft: 5, bookable, ...(bookable ? {} : { reason: "full" }) });
+  const previewOffer = { id: "offer-1", name: "午前の合成商品", shortDescription: null, sortOrder: 0, priceYen: 5000, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, currency: "JPY", capacity: 6, maxPartySize: 4, minimumParticipants: 1, durationMinutes: 120, startTime: "10:00", cancellationPolicy: "FREE_UNTIL_24H", acceptanceMode: "APPROVAL", bookingQuestions: [], bookingQuestionsFingerprint: "0".repeat(64), occurrences: [occurrence("2026-11-03", 10), occurrence("2026-11-03", 14), occurrence("2026-11-07", 10, false), occurrence("2026-11-10", 10)] };
+  const previewBody = {
+    page: { slug: "synthetic-workshop", kind: "EXPERIENCE", language: "EN", title: "（合成）Morning craft workshop", titleEn: null, content: { lead: "（合成）A calm morning making something by hand.", leadEn: null, facts: { language: "English, with an English-speaking guide", languageEn: null }, highlights: ["（合成）Tea with your host"], highlightsEn: [null], timeline: [], description: "（合成）First paragraph.\n\n（合成）Second paragraph.", descriptionEn: null, included: ["（合成）Materials"], includedEn: [null], notIncluded: [], notIncludedEn: [], notSuitableFor: [], notSuitableForEn: [], knowBeforeYouGo: ["（合成）Wear comfortable clothes"], knowBeforeYouGoEn: [null] }, photos: [{ url: image("one") }, { url: image("two") }], coverUrl: image("one") },
+    spot: { slug: "synthetic-provider", name: "（合成）Garden House", logoUrl: null, tagline: null, taglineEn: null, landingGround: "LIGHT", landingAccent: "LEAF", landingFont: "MARU", meetingPoint: null },
+    hosts: [{ displayName: "（合成）Yuki", avatarUrl: null }], offers: [previewOffer], offer: { ...previewOffer, occurrences: undefined }, occurrences: previewOffer.occurrences,
+  };
+  let previewStatus = 200; const previewCalls: string[] = []; const nonGet: string[] = [];
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const request = route.request(); const path = new URL(request.url()).pathname;
+    if (request.method() !== "GET") nonGet.push(`${request.method()} ${path}`);
+    if (path.endsWith("/preview")) { previewCalls.push(request.url()); return previewStatus === 200 ? json(route, previewBody) : json(route, { error: "permission_ended" }, previewStatus); }
+    if (path.endsWith(`/${PAGE}`)) return json(route, { ...structuredClone(pageDetail), language: "EN", title: "（合成）Morning craft workshop" });
+    if (path.endsWith("/meeting-point")) return json(route, inheritedMeeting);
+    if (path.endsWith("/listing")) return json(route, { listing: null, consent });
+    return json(route, { error: "not_found" }, 404);
+  });
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences/${PAGE}?providerId=${PROVIDER}`);
+  const open = page.getByRole("button", { name: "プレビュー", exact: true });
+  await expect(page.getByLabel("題名")).toBeVisible();
+  await open.click();
+  const preview = page.getByRole("dialog", { name: /プレビュー/ });
+  // The traveler's detail: its h1, its price card with the next bookable days, the host line.
+  await expect(preview.getByRole("heading", { level: 1, name: "（合成）Morning craft workshop" })).toBeVisible();
+  await expect(preview).toContainText("保存した内容を表示しています。");
+  await expect(preview).toContainText("（合成）Yuki");
+  await expect(preview).toContainText("¥5,000");
+  await expect(preview).toContainText("Tue, Nov 3");
+  await expect(preview).toContainText("Tue, Nov 10");
+  await expect(preview).toContainText("集合場所は予約が確定した方にだけ届くため、プレビューには出ません。");
+  await expect(preview).toContainText("The meeting point is shared after your booking is confirmed.");
+  await expect(preview.getByRole("link")).toHaveCount(0);
+  // One read per opening (the dev server's StrictMode may repeat the effect): only ever the same query-less GET.
+  const firstReads = previewCalls.length;
+  expect(firstReads).toBeGreaterThan(0);
+  expect(previewCalls.every((url) => new URL(url).search === "")).toBe(true);
+  expect(nonGet).toEqual([]);
+  expect(await preview.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const axe = await new AxeBuilder({ page }).include("[data-testid='host-preview']").withTags(WCAG_TAGS).analyze();
+  expect(axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath("preview.png"), scale: "css" });
+
+  // Esc closes it and the focus is back on プレビュー; the editor underneath is as it was.
+  await page.keyboard.press("Escape");
+  await expect(preview).toHaveCount(0);
+  await expect(open).toBeFocused();
+
+  // An unsaved change: the preview still shows the saved page and says that 保存 puts the change in.
+  await page.getByLabel("題名").fill("（合成）まだ保存していない題名");
+  await expect(page.getByText("プレビューには保存した内容が出ます。保存すると反映されます。")).toBeVisible();
+  await open.click();
+  await expect(preview).toContainText("未保存の変更があります。プレビューには保存した内容だけが出ます。保存すると反映されます。");
+  await expect(preview.getByRole("heading", { level: 1 })).toHaveText("（合成）Morning craft workshop");
+  expect(previewCalls.length).toBeGreaterThan(firstReads);
+  await preview.getByRole("button", { name: "閉じる" }).click();
+  await expect(preview).toHaveCount(0);
+  await expect(page.getByLabel("題名")).toHaveValue("（合成）まだ保存していない題名");
+
+  // A page NIHO cannot assemble (no active offer) says what is missing, with nothing invented.
+  previewStatus = 404;
+  await open.click();
+  await expect(preview.getByRole("alert")).toContainText("プレビューできる状態ではありません。");
+  await expect(preview.getByRole("heading", { level: 1 })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(nonGet).toEqual([]);
+});
+
+test("against the mock NIHO: the photos show their order and the preview shows the traveler's detail for an English page and a Japanese draft", async ({ page }) => {
+  // The mock NIHO is rebuilt for every request (nothing a save sends is kept), so this reads only: the order is changed on the screen, not saved.
+  await page.goto("/host/auth/mock-login");
+  await page.goto("/host/experiences/sample-page-kitchen-cooking?providerId=sample-provider-kitchen");
+  const section = page.getByRole("region", { name: "写真", exact: true });
+  const alts = () => section.getByRole("textbox").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+  await expect(page.getByLabel("題名")).toBeVisible();
+  const before = await alts();
+  expect(before.length).toBeGreaterThanOrEqual(2);
+  await expect(section.getByRole("listitem").first()).toContainText("表紙");
+  await section.getByRole("button", { name: "写真 2 を表紙にする" }).click();
+  expect(await alts()).toEqual([before[1], before[0], ...before.slice(2)]);
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
+
+  const open = page.getByRole("button", { name: "プレビュー", exact: true });
+  await open.click();
+  const preview = page.getByRole("dialog", { name: /プレビュー/ });
+  await expect(preview.getByRole("heading", { level: 1 })).toHaveText(/Cook a seasonal home meal together/);
+  // The unsaved order is not in the preview: it shows what NIHO has.
+  await expect(preview).toContainText("未保存の変更があります。プレビューには保存した内容だけが出ます。保存すると反映されます。");
+  await expect(preview).toContainText("The meeting point is shared after your booking is confirmed.");
+  await expect(preview).not.toContainText("この体験ページは日本語です");
+  await page.keyboard.press("Escape");
+  await expect(preview).toHaveCount(0);
+  expect(await alts()).toEqual([before[1], before[0], ...before.slice(2)]);
+
+  // A Japanese page: the experience site lists English pages only, and the preview says so.
+  await page.goto("/host/experiences/sample-page-kitchen-market?providerId=sample-provider-kitchen");
+  await expect(page.getByLabel("題名")).toBeVisible();
+  await open.click();
+  await expect(preview.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(preview).toContainText("この体験ページは日本語です。体験サイトに載るのは英語のページだけです。");
+  const axe = await new AxeBuilder({ page }).include("[data-testid='host-preview']").withTags(WCAG_TAGS).analyze();
+  expect(axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
 });
