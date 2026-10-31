@@ -193,6 +193,18 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /CREATE TABLE .*desired/i);
   });
 
+  it("adds immutable OWNER activation evidence and an opt-in bootstrap fence", async () => {
+    const sql = await readFile(new URL("../migrations/0026_google_channel_activation.sql", import.meta.url), "utf8");
+    const commands = sql.match(/CREATE TABLE google_channel_activation_commands \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(sql, /ADD COLUMN initialize_missing_open_anchor boolean NOT NULL DEFAULT false/);
+    assert.match(commands, /request_fingerprint text NOT NULL/);
+    assert.match(commands, /binding_version_after = binding_version_before \+ 1/);
+    assert.match(commands, /setup_command_id uuid NOT NULL/);
+    assert.match(commands, /anchor_command_id uuid NOT NULL/);
+    assert.doesNotMatch(sql, /access_token|refresh_token|raw_response|calendar_id text|customer|guest|email|phone/i);
+    assert.doesNotMatch(sql, /UPDATE google_channel_activation_commands|DELETE FROM google_channel_activation_commands/);
+  });
+
   it("adds OPEN hold, desired change age, deduplicated incidents, and one watchdog row without private data", async () => {
     const sql = await readFile(new URL("../migrations/0021_channel_runtime_watchdog.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

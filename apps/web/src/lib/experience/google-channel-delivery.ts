@@ -132,6 +132,7 @@ export async function executeGoogleChannelDelivery(
 
     const result = await applyGoogleManagedBlock(
       configured.google, accessToken, snapshot.calendarId, target(snapshot), assertCurrent,
+      { initializeMissingOpenAnchor: snapshot.context.initializeMissingOpenAnchor === true },
     );
     if (result.code === "GOOGLE_VERIFIED") {
       return saveResult({

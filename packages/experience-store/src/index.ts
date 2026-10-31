@@ -73,6 +73,13 @@ export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, Google
 export { GoogleChannelSetupRepository } from "./google-channel-setup.ts";
 export type { GoogleChannelSetupPhase, GoogleChannelSetupRecord, GoogleChannelSetupSecretSnapshot } from "./google-channel-setup.ts";
 export { GoogleChannelAnchorRepository } from "./google-channel-anchor.ts";
+export { GoogleChannelActivationRepository } from "./google-channel-activation.ts";
+export type {
+  GoogleChannelActivationApplied,
+  GoogleChannelActivationInput,
+  GoogleChannelActivationState,
+  GoogleChannelActivationStatus,
+} from "./google-channel-activation.ts";
 export type {
   GoogleChannelAnchorInput,
   GoogleChannelAnchorMetadata,
