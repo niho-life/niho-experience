@@ -229,6 +229,15 @@ describe("host home in http mode", () => {
     expect(liveHomeTodos({ threads: [], reviews: [], reviewExperiences: [], pages: [], listings: {}, now: MOCK_NOW })).toEqual([]);
   });
 
+  it("opens each waiting thread among this site's threads in メッセージ (source=site); the preview's rows keep theirs", () => {
+    const live = liveHomeTodos({ threads: MOCK_KITCHEN_THREADS, reviews: [], reviewExperiences: [], pages: [], listings: {}, now: MOCK_NOW });
+    const preview = homeTodos(MOCK_KITCHEN_EXPERIENCES, [], MOCK_KITCHEN_THREADS, MOCK_TODAY, MOCK_NOW);
+    expect(live.map((todo) => todo.key)).toEqual(preview.filter((todo) => todo.key.startsWith("thread-")).map((todo) => todo.key));
+    expect(live.find((todo) => todo.key === "thread-th-3012")?.action).toEqual({ label: "返信する", href: "/host/messages?source=site&thread=th-3012", primary: true });
+    for (const todo of live) expect(todo.action?.href).toBe(`/host/messages?source=site&thread=${todo.key.slice("thread-".length)}`);
+    for (const todo of preview.filter((row) => row.key.startsWith("thread-"))) expect(todo.action?.href).toBe(`/host/messages?thread=${todo.key.slice("thread-".length)}`);
+  });
+
   it("names the sources that could not be read", () => {
     expect(homeTodosFailedText(["messages"])).toBe("メッセージを読み込めませんでした。次にすることに出ていないものがあるかもしれません。");
     expect(homeTodosFailedText(["messages", "reviews"])).toBe("メッセージとレビューを読み込めませんでした。次にすることに出ていないものがあるかもしれません。");

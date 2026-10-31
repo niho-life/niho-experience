@@ -44,6 +44,10 @@ vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnab
 import HostMessagesPage from "./page";
 import { HostLiveBookings } from "@/components/host/HostLiveBookings";
 import { HostMessages } from "@/components/host/HostMessages";
+import { liveHomeTodos } from "@/host/home";
+import { MOCK_NOW } from "@/host/mock/bookings";
+import { MOCK_KITCHEN_THREADS } from "@/host/mock/threads";
+import { withProvider } from "@/lib/host/routes";
 
 const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
 const NEW_THREAD = { id: `new-booking-${BOOKING}`, experienceId: "walk", guest: "Sample Booker", topic: null, booking: { id: BOOKING, date: "2026-11-14", start: "10:00", guests: 3, site: true }, messages: [] };
@@ -131,4 +135,23 @@ describe("メッセージ beside NIHO's booking messages (provider operations on
     expect(live.props.siteNotice).toBeNull();
     expect(state.countSiteBookingThreads).toHaveBeenCalled();
   });
+});
+
+describe("ホーム's 返信する in http mode (#106)", () => {
+  // The link as ホーム draws it: the todo's href, then the provider.
+  const todo = liveHomeTodos({ threads: MOCK_KITCHEN_THREADS, reviews: [], reviewExperiences: [], pages: [], listings: {}, now: MOCK_NOW }).find((row) => row.key === "thread-th-3012");
+  const query = Object.fromEntries(new URL(withProvider(todo!.action!.href, "sample-provider"), "https://experience.example").searchParams);
+
+  for (const providerOperations of [false, true]) {
+    it(`opens the thread among this site's threads with provider operations ${providerOperations ? "on" : "off"}`, async () => {
+      state.providerOperations = providerOperations;
+      state.site = { ...LIVE, newThread: null, loaded: [] };
+      expect(query).toEqual({ source: "site", thread: "th-3012", providerId: "sample-provider" });
+      const view = await page(query);
+      expect(view.type).toBe(HostMessages);
+      expect(view.props.live).toMatchObject({ besideNiho: providerOperations });
+      expect(state.loadGuestQuestions).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", "th-3012", null);
+      expect(state.countSiteBookingThreads).not.toHaveBeenCalled();
+    });
+  }
 });
