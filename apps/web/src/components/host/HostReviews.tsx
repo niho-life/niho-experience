@@ -4,6 +4,8 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { draftReviewReplyEnglish } from "@/host/actions";
 import { guestMessageView } from "@/host/messages";
+import type { HostNotice } from "@/host/payout";
+import { publishGuestReviewReply, reportGuestReview } from "@/host/review-actions";
 import {
   publishReviewReply,
   ratingLabel,
@@ -39,6 +41,7 @@ import { HostIcon } from "./HostIcon";
 import { HostNoticeLine } from "./HostNoticeLine";
 import { HostSubHeader } from "./HostSubHeader";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
+import { replySignature, reportSignature, reviewAttempt, withRevision, withSavedReview, type ReviewAttempt, type ReviewWrite } from "./live-review-state";
 import { ReplyDraftFields, useReplyDraft } from "./ReplyDraftFields";
 import { HostPageBody, InitialAvatar, PageHead, RatingStars, StatusPill } from "./ui";
 
@@ -117,9 +120,10 @@ export interface ReplyInput {
 /**
  * 返信する / 返信を直す: 日本語で書く → 英語にする → "公開される英語" (英語を作り直す / 英語を直す)
  * → 返信を公開する. A correction starts from the published reply and waits for a change. Hidden
- * (not dropped) while another review's reply is open, so the Japanese written so far stays.
+ * (not dropped) while another review's reply is open, so the Japanese written so far stays; so
+ * does a reply the store could not take (`busy` while it is sent, live).
  */
-function ReviewReplyComposer({ review, providerId, hidden, onPublish, onCancel }: { review: HostReview; providerId: string; hidden: boolean; onPublish: (reply: ReplyInput) => void; onCancel: () => void }) {
+function ReviewReplyComposer({ review, providerId, hidden, busy, onPublish, onCancel }: { review: HostReview; providerId: string; hidden: boolean; busy: boolean; onPublish: (reply: ReplyInput) => void; onCancel: () => void }) {
   const japaneseField = useRef<HTMLTextAreaElement>(null);
   const published = review.reply;
   const draft = useReplyDraft((japanese) => draftReviewReplyEnglish({ providerId, reviewId: review.id, japanese }), { initial: published ? replyDraftFrom(published) : undefined });
@@ -132,21 +136,22 @@ function ReviewReplyComposer({ review, providerId, hidden, onPublish, onCancel }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!canSend || draft.drafting) return;
+    if (!canSend || draft.drafting || busy) return;
     onPublish({ japanese: draft.japanese, english: draft.english });
   };
 
   return (
-    <form onSubmit={submit} hidden={hidden} aria-label={`${review.reviewer.name} さんへの返信`} className="mt-3 border-t border-dashed border-line-strong pt-3">
+    <form onSubmit={submit} hidden={hidden} aria-label={`${review.reviewer.name} さんへの返信`} aria-busy={busy || undefined} className="mt-3 border-t border-dashed border-line-strong pt-3">
       <ReplyDraftFields
         draft={draft}
         japaneseRef={japaneseField}
         maxLength={REVIEW_REPLY_TEXT_LIMIT}
         englishLabel="公開される英語"
-        submitLabel="返信を公開する"
-        canSubmit={canSend}
+        submitLabel={busy ? "公開しています…" : "返信を公開する"}
+        canSubmit={canSend && !busy}
+        disabled={busy}
         extra={
-          <button type="button" onClick={onCancel} className={consoleButtonClass("ghost", "md")}>
+          <button type="button" onClick={onCancel} disabled={busy} className={consoleButtonClass("ghost", "md")}>
             やめる
           </button>
         }
@@ -227,7 +232,9 @@ interface ReviewRowProps {
   kept: boolean;
   /** …and it is the one shown. */
   composing: boolean;
-  notice: string;
+  /** Live: its reply or report is with the store. */
+  busy: ReviewWrite | null;
+  notice: HostNotice | null;
   onReply: () => void;
   onCancel: () => void;
   onPublish: (reply: ReplyInput) => void;
@@ -239,7 +246,7 @@ interface ReviewRowProps {
  * the guest's words (translated, with the original), the note for the host, the reply (or why
  * there is none yet) and 報告する.
  */
-function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composing, notice, onReply, onCancel, onPublish, onReport }: ReviewRowProps) {
+function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composing, busy, notice, onReply, onCancel, onPublish, onReport }: ReviewRowProps) {
   const stage = reviewReplyStage(review);
   const tags = reviewTagLabels(review.tags);
   return (
@@ -281,7 +288,7 @@ function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composin
           ) : null}
 
           {stage === "replied" && !composing ? <PublishedReply review={review} /> : null}
-          {kept ? <ReviewReplyComposer review={review} providerId={providerId} hidden={!composing} onPublish={onPublish} onCancel={onCancel} /> : null}
+          {kept ? <ReviewReplyComposer review={review} providerId={providerId} hidden={!composing} busy={busy === "reply"} onPublish={onPublish} onCancel={onCancel} /> : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {stage === "waiting" ? (
@@ -297,12 +304,12 @@ function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composin
                 報告済み
               </span>
             ) : (
-              <button type="button" aria-describedby={headingId(review.id)} onClick={onReport} className={consoleButtonClass("ghost", "sm", "ml-auto")}>
-                報告する
+              <button type="button" aria-describedby={headingId(review.id)} onClick={onReport} disabled={busy !== null} className={consoleButtonClass("ghost", "sm", "ml-auto")}>
+                {busy === "report" ? "報告しています…" : "報告する"}
               </button>
             )}
           </div>
-          <HostNoticeLine notice={notice ? { tone: "success", message: notice } : null} className="mt-2" />
+          <HostNoticeLine notice={notice} className="mt-2" />
         </div>
       </div>
     </li>
@@ -319,7 +326,19 @@ export interface HostReviewsProps {
   linkProviderId: string | null;
   /** The provider shown: 英語にする asks NIHO for its reviews. */
   providerId: string;
+  /**
+   * Reviews kept in the experience DB (#108, http mode): each is published when written (none is
+   * 公開前, so every one takes a reply); a reply and a report go to the store, and the review it
+   * answers replaces the one on the screen. `revisions` holds each review's reply revision (0: none
+   * yet), which a correction is checked against. Absent in mock mode.
+   */
+  live?: { revisions: Readonly<Record<string, number>> } | null;
 }
+
+const LIVE_FAILED: Record<ReviewWrite, string> = {
+  reply: "返信を公開できませんでした。時間をおいて、もう一度お試しください。",
+  report: "報告できませんでした。時間をおいて、もう一度お試しください。",
+};
 
 /**
  * レビュー (#108, the journey mock's H4): every review of the provider's experiences, the newest
@@ -328,16 +347,22 @@ export interface HostReviewsProps {
  * tabs). `#review-{id}` (ホーム's rows) scrolls to one review and focuses its name.
  *
  * Mock mode: a reply and a report change this screen only (the preview note says nothing is kept).
- * TODO(#87): publish the reply and send the report to NIHO (niho-app#19314), and show what it reads back.
+ * Reviews kept in the experience DB (`live`, #108) send them to the store and show the review it
+ * reads back; one that fails keeps what the host wrote and says why.
  */
-export function HostReviews({ reviews: initialReviews, experiences, now, linkProviderId, providerId }: HostReviewsProps) {
+export function HostReviews({ reviews: initialReviews, experiences, now, linkProviderId, providerId, live = null }: HostReviewsProps) {
   const searchParams = useSearchParams();
   const [reviews, setReviews] = useState<readonly HostReview[]>(initialReviews);
   /** The reviews whose reply was opened and is kept, and the one shown: one at a time. */
   const [drafts, setDrafts] = useState<readonly string[]>([]);
   const [composing, setComposing] = useState<string | null>(null);
-  const [notices, setNotices] = useState<Readonly<Record<string, string>>>({});
+  const [notices, setNotices] = useState<Readonly<Record<string, HostNotice | null>>>({});
   const [reporting, setReporting] = useState<HostReview | null>(null);
+  /** Live: each reply's revision, what is with the store (by review), and the command id of each try. */
+  const [revisions, setRevisions] = useState<Readonly<Record<string, number>>>(live?.revisions ?? {});
+  const [busy, setBusy] = useState<Readonly<Record<string, ReviewWrite>>>({});
+  const sending = useRef<Set<string>>(new Set());
+  const attempts = useRef<Map<string, ReviewAttempt>>(new Map());
   const focusLater = useFocusAfterRender();
 
   const requested = searchParams.get("experience");
@@ -359,15 +384,17 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
     return () => window.removeEventListener("hashchange", focusRequested);
   }, []);
 
-  const replace = (updated: HostReview) => setReviews(reviews.map((review) => (review.id === updated.id ? updated : review)));
-  const say = (id: string, text: string) => setNotices({ ...notices, [id]: text });
+  // Functional updates: a live answer arrives after other changes on the screen.
+  const replace = (updated: HostReview) => setReviews((current) => withSavedReview(current, updated));
+  const say = (id: string, text: string) => setNotices((current) => ({ ...current, [id]: text ? { tone: "success", message: text } : null }));
+  const fail = (id: string, text: string) => setNotices((current) => ({ ...current, [id]: { tone: "error", message: text } }));
   const drop = (id: string) => {
-    setDrafts(drafts.filter((draft) => draft !== id));
-    if (composing === id) setComposing(null);
+    setDrafts((current) => current.filter((draft) => draft !== id));
+    setComposing((current) => (current === id ? null : current));
   };
 
   const reply = (id: string) => {
-    if (!drafts.includes(id)) setDrafts([...drafts, id]);
+    setDrafts((current) => (current.includes(id) ? current : [...current, id]));
     setComposing(id);
     say(id, "");
   };
@@ -378,7 +405,70 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
     focusLater(replyButtonId(id));
   };
 
+  /**
+   * Live: one reply or report with the store at a time per review. The same try again (a failure
+   * retried as it was) keeps its command id, so the store takes it once. Null when it failed.
+   */
+  const sendLive = async <T,>(review: HostReview, write: ReviewWrite, signature: string, run: (commandId: string) => Promise<T>): Promise<T | null> => {
+    if (sending.current.has(review.id)) return null;
+    const key = `${write}:${review.id}`;
+    const attempt = reviewAttempt(attempts.current.get(key), signature, () => crypto.randomUUID());
+    attempts.current.set(key, attempt);
+    sending.current.add(review.id);
+    setBusy((current) => ({ ...current, [review.id]: write }));
+    say(review.id, "");
+    try {
+      return await run(attempt.commandId);
+    } catch {
+      fail(review.id, LIVE_FAILED[write]);
+      return null;
+    } finally {
+      sending.current.delete(review.id);
+      setBusy((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== review.id)));
+    }
+  };
+
+  /** Live: the review the store answered, and its reply revision for the next correction. */
+  const settle = (write: ReviewWrite, saved: { review: HostReview; revision: number }) => {
+    attempts.current.delete(`${write}:${saved.review.id}`);
+    replace(saved.review);
+    setRevisions((current) => withRevision(current, saved.review.id, saved.revision));
+  };
+
+  const publishLive = async (review: HostReview, input: ReplyInput) => {
+    const result = await sendLive(review, "reply", replySignature(review.id, input), (commandId) =>
+      publishGuestReviewReply({ providerId, reviewId: review.id, japanese: input.japanese, english: input.english, commandId, expectedRevision: revisions[review.id] ?? 0 }),
+    );
+    if (!result) return;
+    if (!result.ok) {
+      // What the host wrote stays on the screen.
+      fail(review.id, result.message);
+      return;
+    }
+    settle("reply", result);
+    drop(review.id);
+    say(review.id, result.message);
+    focusLater(replyHeadingId(review.id));
+  };
+
+  /** The dialog closes at once: the review's name takes focus, and the line under it says how the report went. */
+  const reportLive = async (review: HostReview, reason: HostReviewReportReason, note: string) => {
+    focusLater(headingId(review.id));
+    const result = await sendLive(review, "report", reportSignature(review.id, reason, note), (commandId) => reportGuestReview({ providerId, reviewId: review.id, reason, note, commandId }));
+    if (!result) return;
+    if (!result.ok) {
+      fail(review.id, result.message);
+      return;
+    }
+    settle("report", result);
+    say(review.id, result.message);
+  };
+
   const publish = (review: HostReview, input: ReplyInput) => {
+    if (live) {
+      void publishLive(review, input);
+      return;
+    }
     const updated = publishReviewReply(review, input, now);
     if (updated === review) return;
     replace(updated);
@@ -387,8 +477,12 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
     focusLater(replyHeadingId(review.id));
   };
 
-  // TODO(#87): send the reason and the host's word to NIHO; the preview keeps the report on this screen.
+  // Mock mode keeps the report on this screen.
   const report = (review: HostReview, reason: HostReviewReportReason, note: string) => {
+    if (live) {
+      void reportLive(review, reason, note);
+      return;
+    }
     replace(reportReview(review, reason, now, note));
     say(review.id, REVIEW_REPORTED_TEXT);
     focusLater(headingId(review.id));
@@ -448,7 +542,8 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
                   providerId={providerId}
                   kept={drafts.includes(review.id)}
                   composing={composing === review.id}
-                  notice={notices[review.id] ?? ""}
+                  busy={busy[review.id] ?? null}
+                  notice={notices[review.id] ?? null}
                   onReply={() => reply(review.id)}
                   onCancel={() => cancel(review.id)}
                   onPublish={(input) => publish(review, input)}

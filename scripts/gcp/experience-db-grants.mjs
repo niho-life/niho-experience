@@ -58,7 +58,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   google_airbnb_propagation_waits: { write: IU },
   guest_question_messages: { write: IU },
   guest_question_reply_tokens: { write: IU },
-  guest_question_threads: { write: IU },
+  // DELETE: the mail job erases a question a year after its last message; its messages and reply
+  // links go by ON DELETE CASCADE, which PostgreSQL runs as the table owner.
+  guest_question_threads: { write: IUD },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
   guide_admin_command_receipts: { write: I },
@@ -75,7 +77,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   guide_writer_grants: { write: IU },
   host_push_subscriptions: { write: IUD },
   inventory_resources: { write: IU },
-  // Read by the host notification job, which also marks rows done and moves their lease.
+  // Read by the host notification and guest mail jobs, which also mark rows done and move their lease.
   outbox_messages: { write: IU },
   // Append-only; the ledger trigger also rejects mutation.
   payment_ledger_entries: { write: I },

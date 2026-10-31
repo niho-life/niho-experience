@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
-import { conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, mergeLivePage, readLiveMeeting, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, makeCoverPhoto, mergeLiveMeeting, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 
 const offer = (id: string, name: string, priceYen: number) => ({ id, name, shortDescription: null, sortOrder: 0, isActive: true, priceYen, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [2], startTime: "10:00", durationMinutes: 60, cutoffDays: 1, closedDates: [], cancellationPolicy: "FREE_UNTIL_24H" as const, acceptanceMode: "APPROVAL" as const, spaceScope: "ENTIRE_FACILITY" as const, useZone: [], bookingQuestions: [] });
 const page = (): ExperienceProviderPageDetail => ({ id: "page_1", kind: "EXPERIENCE", slug: "sample-page", language: "JA", title: "元の題名", status: "DRAFT", listOnEntrance: false, publishedAt: null, unpublishedAt: null, content: { lead: "元", facts: { language: "日本語" }, highlights: [], timeline: [], description: "元", included: [], notIncluded: [], notSuitableFor: [], meetingPoint: { entranceNote: "内部", exteriorPhotoObjectKey: null }, knowBeforeYouGo: [], hostUserIds: ["hidden"] }, photos: [], coverObjectKey: null, offer: offer("offer_1", "商品", 1000), offers: [offer("offer_1", "商品", 1000)], publishBlockers: [], publicPath: "/living/sample/pages/sample-page", createdAt: "2026-10-27T00:00:00.000Z", updatedAt: "2026-10-27T01:00:00.000Z", photoAlts: [] });
@@ -102,5 +102,67 @@ describe("live editor meeting point", () => {
     expect(mergeLiveMeeting(base, local, remote, "remote").draft).toEqual(remote);
     expect(conflictValueText(mine.conflict!.local)).toBe("この体験だけ別の場所: （合成）自分 / （合成）サンプル町 1 丁目");
     expect(conflictValueText(mergeLiveMeeting(override(), inherit(), override({ address: "（合成）別" })).conflict!.local)).toBe("提供者の既定を使う");
+  });
+  describe("photo order", () => {
+    const withPhotos = (keys: string[]): ExperienceProviderPageDetail => { const value = page(); value.photos = keys.map((key) => ({ objectKey: key, url: `https://images.example.test/${key}` })); value.photoAlts = keys.map((key) => `${key}の説明`); return value; };
+    const keys = (value: ExperienceProviderPageDetail) => value.photos.map((photo) => photo.objectKey);
+
+    it("moves a photo and its description together, the others keeping their order", () => {
+      const base = withPhotos(["a", "b", "c"]);
+      const moved = movePhoto(base, 2, 0);
+      expect(keys(moved)).toEqual(["c", "a", "b"]);
+      expect(moved.photoAlts).toEqual(["cの説明", "aの説明", "bの説明"]);
+      expect(keys(movePhoto(base, 0, 1))).toEqual(["b", "a", "c"]);
+      expect(keys(base)).toEqual(["a", "b", "c"]);
+    });
+    it("leaves the draft as it was for a move that changes nothing or leaves the list", () => {
+      const base = withPhotos(["a", "b"]);
+      for (const [from, to] of [[0, 0], [-1, 0], [0, 2], [2, 0], [0.5, 1]] as const) expect(movePhoto(base, from, to)).toBe(base);
+      expect(makeCoverPhoto(base, 0)).toBe(base);
+      expect(removePhoto(base, 5)).toBe(base);
+    });
+    it("makes a photo the cover by putting it first, and keeps the counts equal when descriptions ran short", () => {
+      const base = withPhotos(["a", "b", "c"]); base.photoAlts = ["aの説明"];
+      const cover = makeCoverPhoto(base, 1);
+      expect(keys(cover)).toEqual(["b", "a", "c"]);
+      expect(cover.photoAlts).toEqual(["", "aの説明", ""]);
+    });
+    it("removes a photo with its description, and the next one becomes the cover when the first goes", () => {
+      const removed = removePhoto(withPhotos(["a", "b", "c"]), 0);
+      expect(keys(removed)).toEqual(["b", "c"]);
+      expect(removed.photoAlts).toEqual(["bの説明", "cの説明"]);
+      expect(removePhoto(removePhoto(removed, 0), 0).photos).toEqual([]);
+    });
+    it("appends an uploaded photo last, once, and not beyond the limit", () => {
+      const base = withPhotos(["a"]);
+      const added = appendPhoto(base, { objectKey: "b", url: "blob:b" }, "新しい写真");
+      expect(keys(added)).toEqual(["a", "b"]);
+      expect(added.photoAlts).toEqual(["aの説明", "新しい写真"]);
+      expect(appendPhoto(added, { objectKey: "b", url: "blob:b" }, "again")).toBe(added);
+      const full = withPhotos(Array.from({ length: LIVE_PHOTO_LIMIT }, (_, at) => `p${at}`));
+      expect(appendPhoto(full, { objectKey: "extra", url: "blob:x" }, "")).toBe(full);
+      expect(appendPhoto(base, { objectKey: "long", url: "blob:l" }, "あ".repeat(300)).photoAlts[1]).toHaveLength(200);
+    });
+    it("sends the order and the descriptions together, only when either changed", () => {
+      const base = withPhotos(["a", "b", "c"]);
+      expect(serializeLivePagePatch(structuredClone(base), base)).toEqual({});
+      expect(serializeLivePagePatch(makeCoverPhoto(base, 2), base)).toEqual({ photoObjectKeys: ["c", "a", "b"], photoAlts: ["cの説明", "aの説明", "bの説明"] });
+      const retitled = structuredClone(base); retitled.photoAlts[1] = " 入口 ";
+      expect(serializeLivePagePatch(retitled, base)).toEqual({ photoObjectKeys: ["a", "b", "c"], photoAlts: ["aの説明", "入口", "cの説明"] });
+      expect(serializeLivePagePatch(removePhoto(base, 1), base)).toMatchObject({ photoObjectKeys: ["a", "c"], photoAlts: ["aの説明", "cの説明"] });
+    });
+    it("keeps my order over a page nobody else changed, and asks about a different order on both sides", () => {
+      const base = withPhotos(["a", "b", "c"]);
+      const mine = makeCoverPhoto(base, 2);
+      const calm = mergeLivePage(base, mine, structuredClone(base));
+      expect(calm.conflicts).toEqual([]);
+      expect(keys(calm.draft)).toEqual(["c", "a", "b"]);
+      const theirs = movePhoto(base, 0, 2);
+      const clash = mergeLivePage(base, mine, theirs);
+      expect(clash.conflicts).toMatchObject([{ path: "photos", label: "写真・並び・説明" }]);
+      expect(keys(clash.draft)).toEqual(["c", "a", "b"]);
+      expect(keys(mergeLivePage(base, mine, theirs, "remote").draft)).toEqual(["b", "c", "a"]);
+      expect(keys(mergeLivePage(base, structuredClone(base), theirs).draft)).toEqual(["b", "c", "a"]);
+    });
   });
 });

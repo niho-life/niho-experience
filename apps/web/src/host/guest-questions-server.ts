@@ -39,7 +39,7 @@ const LIST_LIMIT = 50;
 const TOPIC_JA: Record<GuestQuestionTopic, string | null> = { CHILDREN: "子ども", FOOD: "食べもの", ACCESS: "アクセス", LANGUAGE: "言葉", OTHER: null };
 
 /** YYYY-MM-DDTHH:MM in Japan, as the console dates messages. */
-function japanMinute(utc: string): string {
+export function japanMinute(utc: string): string {
   const at = Date.parse(utc);
   return actionTime(todayInJapan(at), at);
 }

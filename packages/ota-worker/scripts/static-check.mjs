@@ -12,5 +12,6 @@ await Promise.all([
   "src/airbnb-observer.mjs", "src/airbnb-protocol.mjs", "src/airbnb-network-guard.mjs",
   "src/network-guard.mjs", "src/viator-network-guard.mjs", "src/jalan-network-guard.mjs", "src/worker.mjs",
   "src/mcp-stdio.mjs", "src/healthcheck.mjs", "src/reservation-executor.mjs", "src/reservation-reader-registry.mjs",
-  "src/gyg-reservation-reader.mjs", "src/gyg-reservation-protocol.mjs",
+  "src/gyg-reservation-reader.mjs", "src/gyg-reservation-protocol.mjs", "src/gyg-schedule-protocol.mjs", "src/gyg-ensure-occurrence.mjs",
+  "src/browser-driver-common.mjs",
 ].map((path) => import(join(root, path))));

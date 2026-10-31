@@ -3,7 +3,7 @@
 import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { REVIEW_LIMITS, type ExperienceReview, type JourneyReviews } from "@niho-experience/api-client";
-import { getBrowserApi } from "@/lib/browser-api";
+import { getBrowserApi, getSiteReviewsApi } from "@/lib/browser-api";
 import { initialOf } from "@/lib/card-model";
 import { averageLabel, countLabel, monthYear, ratingLabel, reviewDisplay } from "@/lib/reviews-ui";
 import { HandIcon } from "./HandIcon";
@@ -56,7 +56,10 @@ function ReviewItem({ item, showStars }: { item: ExperienceReview; showStars: bo
 
 type All = { status: "idle" | "loading" | "error" } | { status: "ready"; items: ExperienceReview[] };
 
-/** "Show all N reviews": a dialog like the photos, read from NIHO when it is opened (the page itself carries only the newest). */
+/**
+ * "Show all N reviews": a dialog like the photos, read when it is opened (the page itself carries only the newest):
+ * from this site's route, which reads the experience DB (#104), or from the preview's mock.
+ */
 function AllReviews({ slug, count, showStars, preview, nihoWebOrigin }: { slug: string; count: number; showStars: boolean; preview: boolean; nihoWebOrigin: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const headingId = useId();
@@ -65,7 +68,7 @@ function AllReviews({ slug, count, showStars, preview, nihoWebOrigin }: { slug: 
   async function load() {
     setAll({ status: "loading" });
     try {
-      const api = await getBrowserApi(preview, nihoWebOrigin);
+      const api = preview ? await getBrowserApi(true, nihoWebOrigin) : getSiteReviewsApi(window.location.origin);
       const result = await api.listReviews(slug, { limit: REVIEW_LIMITS.listMaxItems });
       setAll(result.ok ? { status: "ready", items: result.data.reviews } : { status: "error" });
     } catch {

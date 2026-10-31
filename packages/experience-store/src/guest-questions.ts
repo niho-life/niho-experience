@@ -5,7 +5,7 @@ import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor } from "./types.ts";
-import { assertStoreIdentifier } from "./validation.ts";
+import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
 
 /** What a question is about, as the traveler's form offers it (ASK_HOST_TOPICS). */
 export const GUEST_QUESTION_TOPICS = ["CHILDREN", "FOOD", "ACCESS", "LANGUAGE", "OTHER"] as const;
@@ -246,7 +246,8 @@ function decodeCursor(cursor: unknown): { at: string; id: string } | null {
 /**
  * 予約前の質問 (#105, #106; migration 0022). The question form and the reply page have no identity:
  * their methods take a slug or a one-time link. The host's methods need a current OWNER of the
- * provider (as 設定 › 通知). The mail worker (next slice) claims host replies and reports how each went.
+ * provider (as 設定 › 通知). The mail job (/internal/experience-jobs/v1/drain) claims host replies, reports how each
+ * went and erases questions a year after their last message.
  * The guest's email address leaves this class only in `claimReplyDeliveries`.
  */
 export class GuestQuestionRepository {
@@ -448,7 +449,7 @@ export class GuestQuestionRepository {
     }
   }
 
-  /* ---------- the mail worker (server-side, next slice) ---------- */
+  /* ---------- the mail job (server-side, #285 slice 5) ---------- */
 
   /**
    * Up to `limit` host replies to email now: PENDING ones whose backoff has passed and SENDING ones
@@ -547,6 +548,31 @@ export class GuestQuestionRepository {
     const current = await this.#pool.query<DbRow>("SELECT delivery_status FROM guest_question_messages WHERE id = $1::uuid AND author = 'HOST'", [id]);
     if (!current.rows[0]) throw new StoreNotFoundError("host reply");
     return String(current.rows[0].delivery_status) as GuestQuestionDeliveryStatus;
+  }
+
+  /**
+   * Deletes questions whose last message is older than `lastMessageBefore` (never after now), at most
+   * `limit` per call; returns how many. Their messages and reply links go with them (ON DELETE CASCADE);
+   * outbox rows name ids only and stay. The owner decided (2026-10-31, #285) one year after the last
+   * message; the mail job calls this with now − 1 year (docs/guest-questions.md).
+   */
+  async eraseInactiveThreads(options: { readonly lastMessageBefore: string; readonly limit?: number }): Promise<number> {
+    assertCanonicalInstant(options?.lastMessageBefore, "lastMessageBefore");
+    const limit = boundedInteger(options.limit ?? 500, "limit", 1, 5_000);
+    const result = await this.#pool.query(
+      `WITH due AS (
+         SELECT provider_id, id FROM guest_question_threads
+          WHERE last_message_at < LEAST($1::timestamptz, clock_timestamp())
+          ORDER BY last_message_at, id
+          LIMIT $2
+          FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM guest_question_threads t
+        USING due
+        WHERE t.provider_id = due.provider_id AND t.id = due.id`,
+      [options.lastMessageBefore, limit],
+    );
+    return result.rowCount ?? 0;
   }
 
   /* ---------- the guest's reply page (one-time link) ---------- */

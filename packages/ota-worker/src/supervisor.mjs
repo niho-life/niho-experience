@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { selectDriverFactory } from "./driver-registry.mjs";
 import { createSupervisorRpc } from "./mcp-rpc.mjs";
 import { runClaude } from "./claude-runner.mjs";
-import { ContractError, isGoogleDeliveryTarget, validateObservation } from "./validation.mjs";
+import { ContractError, exactKeys, isGoogleDeliveryTarget, validateObservation } from "./validation.mjs";
 import { MAX_JOB_MS } from "./constants.mjs";
 import { executeReservationWindow } from "./reservation-executor.mjs";
 import { selectReservationReaderFactory } from "./reservation-reader-registry.mjs";
@@ -22,6 +22,7 @@ function classify(error) {
   if (["AUTH_REQUIRED", "CLAUDE_AUTH_REQUIRED"].includes(code)) return { outcome: "AUTH_REQUIRED", quarantine: true, halt: true, reason: code };
   if (code === "UNKNOWN_AFTER_SAVE") return { outcome: "UNKNOWN_AFTER_SAVE", quarantine: true, halt: true, reason: code };
   if (["DOM_DRIFT", "ACCOUNT_MISMATCH", "PRODUCT_MISMATCH", "TARGET_MISMATCH", "UNSUPPORTED_TARGET", "WRITE_REFUSED", "VERIFY_FAILED", "SAVE_NOT_APPLIED", "MCP_PROTOCOL_VIOLATION",
+    "OPTION_NOT_ACTIVE", "UNSUPPORTED_SCHEDULE", "AMBIGUOUS_SCHEDULE", "OUTSIDE_SCHEDULE_VALIDITY", "SCHEDULE_AGENDA_MISMATCH",
     "SITE_ACCESS_RESTRICTED", "PROFILE_ACCESS_HELD", "INVALID_PROFILE_ACCESS_HOLD", "PROFILE_ACCESS_HOLD_WRITE_FAILED"].includes(code)) {
     return { outcome: "NEEDS_REVIEW", quarantine: true, halt: true, reason: code };
   }
@@ -77,6 +78,10 @@ export async function executeJob({
   let halt = false;
   let reason = null;
   let setupStopUnconfirmed = false;
+  let ensureCreated;
+  // ENSURE_OCCURRENCE runs only the deterministic driver path in every mode.
+  const ensureJob = job.action === "ENSURE_OCCURRENCE";
+  const usesModel = config.mode === "claude-code" && !ensureJob;
 
   const abort = (error) => {
     if (!gateActive) return;
@@ -130,7 +135,16 @@ export async function executeJob({
       apply_desired_state: () => { assertGate(); return driver.applyDesiredState(); },
       verify_after_reload: () => { assertGate(); return driver.verifyAfterReload(); },
     });
-    if (config.mode === "claude-code") {
+    if (ensureJob) {
+      if (typeof driver.ensureOccurrence !== "function") throw new ContractError("UNSUPPORTED_TARGET");
+      assertGate();
+      const ensured = await driver.ensureOccurrence();
+      if (!gateActive) throw abortReason;
+      if (!exactKeys(ensured, ["created", "observation"]) || typeof ensured.created !== "boolean") throw new ContractError("VERIFY_FAILED");
+      observation = validateObservation(ensured.observation, job);
+      ensureCreated = ensured.created;
+      outcome = "VERIFIED";
+    } else if (usesModel) {
       const socketPath = join(config.privateDir, "ota-supervisor.sock");
       rpc = await rpcFactory(socketPath, tools, {
         onProtocolViolation: () => abort(new ContractError("MCP_PROTOCOL_VIOLATION")),
@@ -151,13 +165,13 @@ export async function executeJob({
     }
     if (!outcome) {
       if (!gateActive) throw abortReason;
-      if (config.mode === "claude-code") observation = verifiedObservation(job, await driver.verifyAfterReload());
+      if (usesModel) observation = verifiedObservation(job, await driver.verifyAfterReload());
       if (!gateActive) throw abortReason;
       outcome = "VERIFIED";
     }
   } catch (error) {
     if ((abortReason ?? error)?.code === "PROCESS_STOP_UNCONFIRMED") setupStopUnconfirmed = true;
-    if (config.mode === "claude-code" && !modelReturned) modelStopped = error?.stopped === true;
+    if (usesModel && !modelReturned) modelStopped = error?.stopped === true;
     const result = classify(abortReason ?? error);
     outcome = result.outcome; quarantine = result.quarantine; halt = result.halt; reason = result.reason;
   } finally {
@@ -177,7 +191,10 @@ export async function executeJob({
     if (outcome === "VERIFIED") outcome = "NEEDS_REVIEW";
     quarantine = true; halt = true; reason = "PROCESS_STOP_UNCONFIRMED";
   }
-  return Object.freeze({ outcome, stopped, observation, quarantine, halt, reason });
+  return Object.freeze({
+    outcome, stopped, observation, quarantine, halt, reason,
+    ...(ensureJob && outcome === "VERIFIED" ? { ensureCreated } : {}),
+  });
 }
 
 export const supervisorInternals = Object.freeze({ classify, wait, verifiedObservation });

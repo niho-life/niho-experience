@@ -1,7 +1,10 @@
 import "server-only";
-import { NO_JOURNEY_EXTRAS, usableConditions, usableFaq, type ExperienceReviewSummary, type JourneyDetailExtras } from "@niho-experience/api-client";
+import { NO_JOURNEY_EXTRAS, usableConditions, usableFaq, type ExperienceReviewSummary, type JourneyDetailExtras, type JourneyReviews } from "@niho-experience/api-client";
 import { config } from "./config";
-import { guestQuestionRepository } from "./experience/store-server";
+import { guestQuestionRepository, guestReviewRepository } from "./experience/store-server";
+
+/** The experience page renders the newest reviews; "Show all" reads the rest in the browser. */
+const DETAIL_REVIEW_LIMIT = 3;
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -35,6 +38,24 @@ async function questionsOpen(slug: string): Promise<boolean> {
     return await questions.questionsOpen(slug);
   } catch {
     return false;
+  }
+}
+
+/**
+ * http mode: 予約者のレビュー (#104) of an experience the experience DB has PUBLISHED, once
+ * EXPERIENCE_GUEST_REVIEWS_ENABLED is on (docs/guest-reviews.md): the newest and the summary of all.
+ * Null while it is off, without the DB, or for an experience not published there: no section, no "New".
+ * A DB that cannot be read is `unavailable`, which the page tells apart from no reviews.
+ */
+export async function getLiveReviews(slug: string): Promise<JourneyReviews | null> {
+  const reviews = guestReviewRepository();
+  if (!reviews) return null;
+  try {
+    const found = await reviews.listPublishedReviews(slug, { limit: DETAIL_REVIEW_LIMIT });
+    return found ? { status: "ok", summary: found.summary, items: found.reviews } : null;
+  } catch (error) {
+    console.error("Experience page guest reviews failed", { error: error instanceof Error ? error.name : typeof error });
+    return { status: "unavailable" };
   }
 }
 

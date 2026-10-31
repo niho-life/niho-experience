@@ -2,7 +2,7 @@
 
 Epic #103 の「レビュー」（旅行者の表示 #104、ホストの一覧と返信 #108）の現行設計。オーナー決定（2026-10-27 ADR 0002、2026-10-31「進めて」）により、レビューの保存先は NIHO（niho-app）ではなく experience DB（`packages/experience-store`、migration `0027_guest_reviews.sql`）に置く。旧 `journey.ts` の仮契約（NIHO #19314 が持つ前提）は、画面が読む応答の形だけを引き継ぐ。
 
-この文書は **PR 1（保存と公開の読み取り）** の範囲を書く。画面の接続（体験詳細・`/host/reviews`）は PR 2 で足し、足したら本書を更新する。
+この文書は保存と公開の読み取り（PR 1）と、画面の接続（PR 2：体験詳細・`/host/reviews`）を書く。
 
 ## 決まっていること
 
@@ -16,7 +16,7 @@ Epic #103 の「レビュー」（旅行者の表示 #104、ホストの一覧�
 1. **お礼メール（後続スライス）**：体験が終わったあと、メール job が `issueInvitation` で予約ごとの一度きりのリンクを作って送る。リンクは `…#t=<token>` の fragment にだけ置く（質問の返信ページと同じ）。メール種別と送信は #285 のスライス 5 以降。
 2. **投稿（画面は #285 スライス 6）**：予約者がリンクを開くと `openInvitation` が体験名とホスト名だけを返し、`submitReview` がレビューを作る。**作った時点で公開される**。表示名は予約者がその場で入力する（`booking_guests` は 1 年で消えるので参照しない）。メール・電話・氏名はレビューに入れない。
 3. **読み取り**：`GET /api/public/experiences/{slug}/reviews`（公開、フラグ ON のときだけ）。
-4. **返信・報告**：提供者の OWNER が `/host/reviews`（PR 2）から `saveReply` / `reportReview`。
+4. **返信・報告**：提供者の OWNER が `/host/reviews` から `saveReply` / `reportReview`。
 
 ## 状態
 
@@ -52,6 +52,12 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 - `reportReview(actor, reviewId, { reason, note, commandId })`：理由は `PERSONAL` / `UNTRUE` / `INAPPROPRIATE` / `OTHER`。1 レビューに 1 回。同じ内容の再送は同じ結果、別内容は `StoreConflictError`。
 
 英語の下書き（日本語から英語）は翻訳モジュール（#285 5b）ができてから。それまでは提供者が英語を直接書く。
+
+## 画面
+
+- **体験詳細（英語のページ）**：`getLiveReviews(slug)`（`apps/web/src/lib/journey.ts`）が、フラグ ON の http mode で先頭 3 件と集計を DB から読み、`JourneyReviews` として既存の「Reviews」の節に渡す。フラグ OFF・DB なし・その slug が experience DB で `PUBLISHED` でないときは `null`（節も "New" の印も出さない）、読めなかったときは `unavailable`（再試行つきの通知。件数 0 とは別）。見せ方（0 件の "be one of the first"、1〜2 件は件数と本文だけ・星なし、3 件以上は平均・タグ・"Show all N reviews"）と、構造化データを 3 件以上のときだけ出す規則は #113 のまま。"Show all" は、プレビューでなければこのサイトの `GET …/reviews?limit=50`（`getSiteReviewsApi`）を読む。
+- **`/host/reviews`**：`loadGuestReviews`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER の一覧（先頭 100 件。それ以上は未対応で `TODO(#108)`）を既存の `HostReview` の形に写す。全件が公開中なので「公開前」の状態は無く、全件に返信できる。返信・報告は server action（`review-actions.ts`）が入力を検めたうえで store を呼ぶ。ブラウザは試行ごとに command id を持ち、失敗して同じ内容でやり直すと同じ id を使うので、store は 1 回だけ受ける。返信の revision は一覧と一緒に画面へ渡し、保存のたびに更新する（ほかの画面で返信が変わっていれば「読み込み直してください」）。フラグ OFF・mock mode は今までの画面（mock の一覧／http の「準備中」）。
+- 予約者の英語の本文・メモには日本語訳がまだ無い（翻訳モジュール 5b まで `null`）ので、画面は原文に「翻訳できませんでした」を添えて出す（メッセージと同じ扱い）。
 
 ## flag と配備
 

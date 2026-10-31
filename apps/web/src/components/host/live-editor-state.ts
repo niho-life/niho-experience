@@ -137,6 +137,39 @@ export function serializeLivePagePatch(draft: ExperienceProviderPageDetail, base
 }
 
 /*
+ * 写真の並び (#89): `photoObjectKeys` is the display order and its first one is the 表紙, `photoAlts` the same
+ * order and count, so a photo and its description always move together. Each helper answers a new draft
+ * (the same one when the move changes nothing), and the count stays equal even if the descriptions ran short.
+ */
+export const LIVE_PHOTO_LIMIT = 20;
+
+const withPhotos = (draft: ExperienceProviderPageDetail, photos: ExperienceProviderPageDetail["photos"], alts: readonly string[]): ExperienceProviderPageDetail => ({ ...draft, photos, photoAlts: photos.map((_, at) => alts[at] ?? "") });
+
+/** Moves the photo at `from` to `to`, the ones between shifting by one. */
+export function movePhoto(draft: ExperienceProviderPageDetail, from: number, to: number): ExperienceProviderPageDetail {
+  const last = draft.photos.length - 1;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from > last || to < 0 || to > last || from === to) return draft;
+  const photos = [...draft.photos]; const alts = draft.photos.map((_, at) => draft.photoAlts[at] ?? "");
+  photos.splice(to, 0, ...photos.splice(from, 1)); alts.splice(to, 0, ...alts.splice(from, 1));
+  return withPhotos(draft, photos, alts);
+}
+
+/** 代表写真にする: the photo goes first and the others keep their order. */
+export const makeCoverPhoto = (draft: ExperienceProviderPageDetail, index: number): ExperienceProviderPageDetail => movePhoto(draft, index, 0);
+
+/** 外す: only from this page's list (the uploaded file itself is not touched). */
+export function removePhoto(draft: ExperienceProviderPageDetail, index: number): ExperienceProviderPageDetail {
+  if (!Number.isInteger(index) || index < 0 || index >= draft.photos.length) return draft;
+  return withPhotos(draft, draft.photos.filter((_, at) => at !== index), draft.photoAlts.filter((_, at) => at !== index));
+}
+
+/** Adds an uploaded photo last (it is the 表紙 only when the page had none), unless the page already has the limit. */
+export function appendPhoto(draft: ExperienceProviderPageDetail, photo: ExperienceProviderPageDetail["photos"][number], alt: string): ExperienceProviderPageDetail {
+  if (draft.photos.length >= LIVE_PHOTO_LIMIT || draft.photos.some((item) => item.objectKey === photo.objectKey)) return draft;
+  return withPhotos(draft, [...draft.photos, photo], [...draft.photoAlts, alt.slice(0, 200)]);
+}
+
+/*
  * 集合場所 (#89): the page's own meeting point (`/pages/{pageId}/meeting-point`), not the page
  * content's `meetingPoint`. INHERIT uses the provider's default (設定 › 既定の集合案内); OVERRIDE saves
  * `fields`. With INHERIT `fields` stays as it was (hidden), so choosing OVERRIDE again starts from it.
