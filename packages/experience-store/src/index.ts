@@ -102,6 +102,7 @@ export type {
   GuestReviewTagValue,
   HostGuestReview,
   HostGuestReviewPage,
+  HostGuestReviewProductSummary,
   PublicGuestReview,
   PublicGuestReviews,
   SubmitGuestReviewInput,
@@ -163,7 +164,7 @@ export type {
   HostGuestSessionKey,
   HostGuestSessionListOptions,
 } from "./host-guest-bookings.ts";
-export { HOST_SALES_LIMITS } from "./host-sales.ts";
+export { HOST_SALES_LIMITS, refundedFeeShare } from "./host-sales.ts";
 export type { HostSaleEntry, HostSaleEntryKind, HostSaleRefund, HostSalesWindow, HostSalesWindowOptions } from "./host-sales.ts";
 export type {
   BookingQuestion,

@@ -8,17 +8,22 @@ import {
   type GuestReviewRepository,
   type HostActor,
   type HostGuestReview,
+  type HostGuestReviewPage,
+  type HostGuestReviewProductSummary,
 } from "@niho-experience/experience-store";
 import { guestReviewRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
+import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
+import { reviewReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
-import { japanMinute } from "./guest-questions-server";
+import { japanMinute, REPLY_DRAFT_TIMEOUT_MS } from "./guest-questions-server";
+import { REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import type { HostActionResult } from "./payout";
-import { REVIEW_REPORTED_TEXT } from "./reviews";
+import { REVIEW_REPORTED_TEXT, type ReviewCount } from "./reviews";
 import type { HostReview, HostReviewReportReason } from "./types";
 
 /*
@@ -39,7 +44,7 @@ export const GUEST_REVIEW_REPLY_CHANGED_TEXT = "返信がほかの画面で変�
 export const GUEST_REVIEW_REPORT_FAILED_TEXT = "報告できませんでした。時間をおいて、もう一度お試しください。";
 export const GUEST_REVIEW_ALREADY_REPORTED_TEXT = "すでに報告されています";
 
-/** The list reads this many reviews, the latest first. */
+/** The list reads this many reviews at a time, the latest first (続きを見る reads the next ones). */
 const LIST_LIMIT = 100;
 
 const REASON_FROM_STORE: Record<GuestReviewReportReason, HostReviewReportReason> = { PERSONAL: "personal", UNTRUE: "untrue", INAPPROPRIATE: "inappropriate", OTHER: "other" };
@@ -80,16 +85,36 @@ export function hostReviewFrom(review: HostGuestReview): HostReview {
 /** The reply's revision a correction is checked against (0: no reply yet). */
 const revisionOf = (review: HostGuestReview): number => review.reply?.revision ?? 0;
 
+/** One page of reviews as レビュー shows them. */
+export interface HostGuestReviewPageView {
+  /** The latest first. */
+  reviews: HostReview[];
+  /** Each review's reply revision, by review id. */
+  revisions: Record<string, number>;
+  /** 続きを見る reads the rest from here; null when every review is on the screen. */
+  nextCursor: string | null;
+}
+
+function pageView(page: HostGuestReviewPage): HostGuestReviewPageView {
+  return {
+    reviews: page.reviews.map(hostReviewFrom),
+    revisions: Object.fromEntries(page.reviews.map((review) => [review.id, revisionOf(review)])),
+    nextCursor: page.nextCursor,
+  };
+}
+
+function countOf(summary: HostGuestReviewProductSummary): ReviewCount {
+  return { experienceId: summary.productId, title: summary.productTitle, count: summary.count, ratingTotal: summary.ratingTotal };
+}
+
 export type HostGuestReviewsLoad =
-  | {
+  | (HostGuestReviewPageView & {
       status: "live";
-      /** The latest first. */
-      reviews: HostReview[];
-      /** Each review's reply revision, by review id. */
-      revisions: Record<string, number>;
+      /** Every shown review counted by experience: the average, and the experiences the select offers. */
+      counts: ReviewCount[];
       experiences: { id: string; title: string }[];
       now: string;
-    }
+    })
   /** Not kept here: the flag is off or no DB. Today's screen. */
   | { status: "closed" }
   /** Kept here, but NIHO or the experience DB does not say this account is the provider's OWNER. */
@@ -102,14 +127,15 @@ export async function loadGuestReviews(provider: Pick<HostProvider, "id" | "memb
   if (!store) return { status: "closed" };
   if (provider.memberRole !== "OWNER") return { status: "owner-only" };
   try {
-    // TODO(#108): the reviews past the first LIST_LIMIT (the page's nextCursor) are not read yet.
-    const page = await store.listReviews(ownerActor(provider.id, nihoUserId), { limit: LIST_LIMIT });
+    const actor = ownerActor(provider.id, nihoUserId);
+    const [page, summary] = await Promise.all([store.listReviews(actor, { limit: LIST_LIMIT }), store.summarizeReviews(actor)]);
+    const counts = summary.map(countOf);
     const now = Date.now();
     return {
       status: "live",
-      reviews: page.reviews.map(hostReviewFrom),
-      revisions: Object.fromEntries(page.reviews.map((review) => [review.id, revisionOf(review)])),
-      experiences: [...new Map(page.reviews.map((review) => [review.productId, review.productTitle]))].map(([id, title]) => ({ id, title })),
+      ...pageView(page),
+      counts,
+      experiences: counts.map((count) => ({ id: count.experienceId, title: count.title })),
       now: actionTime(todayInJapan(now), now),
     };
   } catch (error) {
@@ -130,6 +156,52 @@ async function asOwner(providerId: string, failed: string): Promise<OwnerCheck> 
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
   return { ok: true, store, actor: ownerActor(providerId, session.nihoUserId) };
+}
+
+/** 続きを見る: the reviews after the screen's last one, from the cursor the previous page gave. */
+export async function loadMoreGuestReviews(providerId: string, cursor: string): Promise<HostActionResult<HostGuestReviewPageView>> {
+  const owner = await asOwner(providerId, GUEST_REVIEW_LOAD_FAILED_TEXT);
+  if (!owner.ok) return owner;
+  try {
+    return { ok: true, message: "", ...pageView(await owner.store.listReviews(owner.actor, { cursor, limit: LIST_LIMIT })) };
+  } catch (error) {
+    if (error instanceof StoreAccessDeniedError) return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
+    if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+    return { ok: false, message: GUEST_REVIEW_LOAD_FAILED_TEXT };
+  }
+}
+
+/**
+ * 英語にする for a review kept here (#108): the Claude API's English of the host's Japanese reply, with the
+ * review as context, for the host to check and correct before publishing; nothing is published or saved
+ * here. As for a question (draftGuestQuestionEnglish): translation off, the host writes the English
+ * (REPLY_DRAFT_UNAVAILABLE_TEXT); on, but the API unreachable, slow (15 s), declining or answering nothing
+ * usable, the host may try again or write the English (REPLY_DRAFT_FAILED_TEXT).
+ */
+export async function draftGuestReviewEnglish(
+  providerId: string,
+  reviewId: string,
+  japanese: string,
+  translator: () => Translator | null = () => anthropicTranslator({ timeoutMs: REPLY_DRAFT_TIMEOUT_MS }),
+): Promise<HostActionResult<{ english: string }>> {
+  const session = await readHostSession();
+  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  const translate = translator();
+  if (!translate) return { ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT };
+  const owner = await asOwner(providerId, REPLY_DRAFT_UNAVAILABLE_TEXT);
+  if (!owner.ok) return owner;
+  let review: HostGuestReview;
+  try {
+    // The OWNER's shown review only; its words are the context.
+    review = await owner.store.getReview(owner.actor, reviewId);
+  } catch (error) {
+    if (error instanceof StoreAccessDeniedError) return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
+    if (error instanceof StoreNotFoundError) return { ok: false, message: GUEST_REVIEW_MISSING_TEXT };
+    if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+    return { ok: false, message: REPLY_DRAFT_FAILED_TEXT };
+  }
+  const result = await translate(reviewReplyToEnglish({ japanese, review: review.body }));
+  return result.ok ? { ok: true, message: "英語にしました", english: result.text } : { ok: false, message: REPLY_DRAFT_FAILED_TEXT };
 }
 
 function failure(error: unknown, kind: "reply" | "report"): { ok: false; message: string } {

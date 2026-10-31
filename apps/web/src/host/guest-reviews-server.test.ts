@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError, type HostActor, type HostGuestReview } from "@niho-experience/experience-store";
 import type { HostProvider } from "@/lib/host/providers";
+import { createTranslator, type Translator } from "@/lib/translation/anthropic";
+import { REVIEW_REPLY_TO_ENGLISH_SYSTEM, TRANSLATION_MODEL } from "@/lib/translation/prompts";
 
 /** レビュー's reviews against a stubbed experience store and NIHO provider list (#108). */
 const state = vi.hoisted(() => ({
@@ -9,13 +11,15 @@ const state = vi.hoisted(() => ({
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
 }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/experience/store-server", () => ({ guestReviewRepository: () => state.store, guestQuestionRepository: () => null }));
+vi.mock("@/lib/experience/store-server", () => ({ guestReviewRepository: () => state.store, guestQuestionRepository: () => null, siteThreadRepository: () => null }));
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
 vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
 
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import {
+  draftGuestReviewEnglish,
   GUEST_REVIEW_ALREADY_REPORTED_TEXT,
+  GUEST_REVIEW_LOAD_FAILED_TEXT,
   GUEST_REVIEW_MISSING_TEXT,
   GUEST_REVIEW_OWNER_ONLY_TEXT,
   GUEST_REVIEW_REPLY_CHANGED_TEXT,
@@ -23,10 +27,13 @@ import {
   GUEST_REVIEW_REPORT_FAILED_TEXT,
   hostReviewFrom,
   loadGuestReviews,
+  loadMoreGuestReviews,
   reportGuestReview,
   saveGuestReviewReply,
 } from "./guest-reviews-server";
-import { publishGuestReviewReply, reportGuestReview as reportGuestReviewAction } from "./review-actions";
+import { REPLY_DRAFT_TIMEOUT_MS } from "./guest-questions-server";
+import { REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { loadMoreReviewList, publishGuestReviewReply, reportGuestReview as reportGuestReviewAction } from "./review-actions";
 import { REVIEW_REPLY_TEXT_LIMIT, REVIEW_REPORT_NOTE_LIMIT, REVIEW_REPORTED_TEXT, reviewReplyStage, reviewSummary, reviewSummaryNotes } from "./reviews";
 
 const REVIEW_ID = "00000000-0000-4000-8000-000000000108";
@@ -61,6 +68,7 @@ const REPLIED: HostGuestReview = { ...STORED, reply: REPLY };
 beforeEach(() => {
   state.store = {
     listReviews: vi.fn(async () => ({ reviews: [STORED], nextCursor: null })),
+    summarizeReviews: vi.fn(async () => [{ productId: "tea", productTitle: "Synthetic tea", count: 1, ratingTotal: 5 }]),
     getReview: vi.fn(async () => STORED),
     saveReply: vi.fn(async () => REPLIED),
     reportReview: vi.fn(async () => ({ ...STORED, report: { reason: "UNTRUE", note: null, reportedAtUtc: "2026-10-31T02:00:00.000Z" } })),
@@ -117,15 +125,28 @@ describe("hostReviewFrom", () => {
 });
 
 describe("loadGuestReviews", () => {
-  it("lists the OWNER's reviews the moment they are written, with each reply's revision and the experiences they name", async () => {
+  it("lists the OWNER's reviews the moment they are written, with each reply's revision, and counts all of them by experience", async () => {
     const older: HostGuestReview = { ...REPLIED, id: OTHER_REVIEW_ID, productId: "walk", productTitle: "Synthetic walk", reply: { ...REPLY, revision: 3 }, submittedAtUtc: "2026-10-20T01:00:00.000Z" };
-    state.store!.listReviews!.mockResolvedValueOnce({ reviews: [STORED, older], nextCursor: null });
+    state.store!.listReviews!.mockResolvedValueOnce({ reviews: [STORED, older], nextCursor: "c2Vjb25k" });
+    // More reviews than the first page holds: the counts and the select come from all of them.
+    state.store!.summarizeReviews!.mockResolvedValueOnce([
+      { productId: "tea", productTitle: "Synthetic tea", count: 130, ratingTotal: 600 },
+      { productId: "walk", productTitle: "Synthetic walk", count: 2, ratingTotal: 9 },
+      { productId: "river", productTitle: "Synthetic river", count: 1, ratingTotal: 4 },
+    ]);
     const load = await loadGuestReviews(OWNER, "sample-niho-user");
     expect(state.store?.listReviews).toHaveBeenCalledWith(ACTOR, { limit: 100 });
+    expect(state.store?.summarizeReviews).toHaveBeenCalledWith(ACTOR);
     expect(load).toMatchObject({
       status: "live",
       revisions: { [REVIEW_ID]: 0, [OTHER_REVIEW_ID]: 3 },
-      experiences: [{ id: "tea", title: "Synthetic tea" }, { id: "walk", title: "Synthetic walk" }],
+      nextCursor: "c2Vjb25k",
+      counts: [
+        { experienceId: "tea", title: "Synthetic tea", count: 130, ratingTotal: 600 },
+        { experienceId: "walk", title: "Synthetic walk", count: 2, ratingTotal: 9 },
+        { experienceId: "river", title: "Synthetic river", count: 1, ratingTotal: 4 },
+      ],
+      experiences: [{ id: "tea", title: "Synthetic tea" }, { id: "walk", title: "Synthetic walk" }, { id: "river", title: "Synthetic river" }],
       now: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
     });
     expect(load.status === "live" && load.reviews.map((review) => [review.id, review.status, reviewReplyStage(review)])).toEqual([
@@ -140,6 +161,8 @@ describe("loadGuestReviews", () => {
     expect(await loadGuestReviews({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user")).toEqual({ status: "owner-only" });
     state.store!.listReviews!.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "owner-only" });
+    state.store!.summarizeReviews!.mockRejectedValueOnce(new StoreAccessDeniedError());
+    expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "owner-only" });
     state.store = null;
     expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "closed" });
     expect(await loadGuestReviews({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user")).toEqual({ status: "closed" });
@@ -148,6 +171,78 @@ describe("loadGuestReviews", () => {
   it("says the reviews could not be read when the DB fails", async () => {
     state.store!.listReviews!.mockRejectedValueOnce(new Error("synthetic outage"));
     expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "error" });
+  });
+});
+
+describe("loadMoreGuestReviews (続きを見る)", () => {
+  it("reads the page after the screen's last review, with each reply's revision and where the next page starts", async () => {
+    state.store!.listReviews!.mockResolvedValueOnce({ reviews: [REPLIED], nextCursor: null });
+    const more = await loadMoreGuestReviews("sample-provider", "c2Vjb25k");
+    expect(state.store?.listReviews).toHaveBeenCalledWith(ACTOR, { cursor: "c2Vjb25k", limit: 100 });
+    expect(more).toEqual({ ok: true, message: "", reviews: [hostReviewFrom(REPLIED)], revisions: { [REVIEW_ID]: 1 }, nextCursor: null });
+  });
+
+  it("says why it could not: the session, the OWNER, a cursor that is not one, or the DB", async () => {
+    state.store!.listReviews!.mockRejectedValueOnce(new StoreValidationError("cursor is invalid."));
+    expect(await loadMoreGuestReviews("sample-provider", "bad")).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    state.store!.listReviews!.mockRejectedValueOnce(new StoreAccessDeniedError());
+    expect(await loadMoreGuestReviews("sample-provider", "c2Vjb25k")).toEqual({ ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT });
+    state.store!.listReviews!.mockRejectedValueOnce(new Error("synthetic outage"));
+    expect(await loadMoreGuestReviews("sample-provider", "c2Vjb25k")).toEqual({ ok: false, message: GUEST_REVIEW_LOAD_FAILED_TEXT });
+    expect(await loadMoreGuestReviews("sample-other", "c2Vjb25k")).toEqual({ ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT });
+    state.session = null;
+    expect(await loadMoreGuestReviews("sample-provider", "c2Vjb25k")).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
+    // The action refuses what the screen never sends, before the store is asked.
+    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    state.store!.listReviews!.mockClear();
+    for (const input of [{ providerId: "not a provider", cursor: "c2Vjb25k" }, { providerId: "sample-provider", cursor: "" }, { providerId: "sample-provider", cursor: "c".repeat(201) }, null]) {
+      expect(await loadMoreReviewList(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
+    expect(state.store?.listReviews).not.toHaveBeenCalled();
+  });
+});
+
+describe("draftGuestReviewEnglish (英語にする, #108)", () => {
+  const JAPANESE = "来てくださってありがとうございました。またお待ちしています。";
+  const reply = (text: string) => ({ content: [{ type: "text" as const, text }], stop_reason: "end_turn" as const });
+  /** The real translator over a stubbed Claude API call. */
+  function api(answer: () => Promise<ReturnType<typeof reply> | { content: []; stop_reason: "refusal" }>) {
+    const create = vi.fn(answer);
+    return { create, translator: () => createTranslator(create as never, REPLY_DRAFT_TIMEOUT_MS) as Translator };
+  }
+
+  it("drafts the English of the OWNER's Japanese with the review as context, waiting 15 s once, and publishes nothing", async () => {
+    const { create, translator } = api(async () => reply("Thank you so much for coming. We hope to see you again."));
+    expect(await draftGuestReviewEnglish("sample-provider", REVIEW_ID, JAPANESE, translator)).toEqual({ ok: true, message: "英語にしました", english: "Thank you so much for coming. We hope to see you again." });
+    expect(state.store?.getReview).toHaveBeenCalledWith(ACTOR, REVIEW_ID);
+    const [body, options] = create.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    expect(options).toEqual({ timeout: 15_000, maxRetries: 0 });
+    expect(body).toMatchObject({ model: TRANSLATION_MODEL, system: REVIEW_REPLY_TO_ENGLISH_SYSTEM });
+    // The review's words, then the host's Japanese; never the reviewer, the experience, the provider or an id.
+    expect(body.messages).toEqual([{ role: "user", content: `<review>\nA calm and lovely afternoon.\n</review>\n\n<reply>\n${JAPANESE}\n</reply>` }]);
+    expect(JSON.stringify(body)).not.toMatch(/Sample Guest|United Kingdom|sample-provider|sample-niho-user|Synthetic tea|NB-SAMPLE|00000000-/);
+    expect(state.store?.saveReply).not.toHaveBeenCalled();
+  });
+
+  it("lets the host write the English when translation is off, and try again when the API fails or declines", async () => {
+    expect(await draftGuestReviewEnglish("sample-provider", REVIEW_ID, JAPANESE, () => null)).toEqual({ ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT });
+    const refused = api(async () => ({ content: [], stop_reason: "refusal" }));
+    expect(await draftGuestReviewEnglish("sample-provider", REVIEW_ID, JAPANESE, refused.translator)).toEqual({ ok: false, message: REPLY_DRAFT_FAILED_TEXT });
+    const down = api(async () => { throw new Error("synthetic outage"); });
+    expect(await draftGuestReviewEnglish("sample-provider", REVIEW_ID, JAPANESE, down.translator)).toEqual({ ok: false, message: REPLY_DRAFT_FAILED_TEXT });
+  });
+
+  it("asks the Claude API nothing without a usable session, for another provider, or for a review that is not shown", async () => {
+    const { create, translator } = api(async () => reply("Thanks!"));
+    state.session = null;
+    expect(await draftGuestReviewEnglish("sample-provider", REVIEW_ID, JAPANESE, translator)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
+    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    expect(await draftGuestReviewEnglish("sample-other", REVIEW_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT });
+    state.store!.getReview!.mockRejectedValueOnce(new StoreNotFoundError("guest review"));
+    expect(await draftGuestReviewEnglish("sample-provider", OTHER_REVIEW_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_REVIEW_MISSING_TEXT });
+    state.store!.getReview!.mockRejectedValueOnce(new StoreValidationError("reviewId is invalid."));
+    expect(await draftGuestReviewEnglish("sample-provider", "not-a-uuid", JAPANESE, translator)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

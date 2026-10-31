@@ -22,6 +22,7 @@ import {
   reviewsToAttend,
   reviewSummary,
   reviewSummaryNotes,
+  reviewSummaryOfCounts,
   reviewTagLabels,
   sortReviews,
 } from "./reviews";
@@ -35,29 +36,41 @@ const grace = byId("rv-4912");
 const AT = MOCK_NOW;
 
 describe("the reviews' summary", () => {
-  it("averages the published reviews only, to one decimal, and counts the ones NIHO is checking apart", () => {
-    expect(reviewSummary(MOCK_KITCHEN_REVIEWS)).toEqual({ published: 5, pending: 1, average: "4.8", onSite: true });
-    expect(reviewSummaryNotes(reviewSummary(MOCK_KITCHEN_REVIEWS))).toEqual(["公開前 1 件"]);
+  it("averages the published reviews, to one decimal: each one is published when written", () => {
+    // 5, 4, 5, 5, 4, 5 → 4.666… → 4.7.
+    expect(reviewSummary(MOCK_KITCHEN_REVIEWS)).toEqual({ published: 6, average: "4.7", onSite: true });
+    expect(reviewSummaryNotes(reviewSummary(MOCK_KITCHEN_REVIEWS))).toEqual([]);
+    expect(MOCK_KITCHEN_REVIEWS.every((review) => review.status === "published" && review.publishedAt !== null)).toBe(true);
     // 4, 5, 5 → 4.666… → 4.7; the stars are whole numbers from 1 to 5 whatever came.
     expect(reviewSummary([{ status: "published", rating: 4 }, { status: "published", rating: 5 }, { status: "published", rating: 5 }]).average).toBe("4.7");
     expect(reviewSummary([{ status: "published", rating: 9 }, { status: "published", rating: 0 }]).average).toBe("3.0");
   });
 
   it("says the experience site waits for three published reviews, and says nothing without reviews", () => {
-    const two = reviewSummary([oliver, grace, yuki]);
-    expect(two).toEqual({ published: 2, pending: 1, average: "5.0", onSite: false });
-    expect(reviewSummaryNotes(two)).toEqual(["公開前 1 件", REVIEW_SITE_AVERAGE_TEXT]);
+    const two = reviewSummary([oliver, grace]);
+    expect(two).toEqual({ published: 2, average: "5.0", onSite: false });
+    expect(reviewSummaryNotes(two)).toEqual([REVIEW_SITE_AVERAGE_TEXT]);
     expect(REVIEW_SITE_AVERAGE_TEXT).toBe("体験サイトでは 3 件から平均を出します");
-    // Only one NIHO is checking: no average yet, and the site's rule still applies.
-    expect(reviewSummary([yuki])).toEqual({ published: 0, pending: 1, average: null, onSite: false });
-    expect(reviewSummaryNotes(reviewSummary([yuki]))).toEqual(["公開前 1 件", REVIEW_SITE_AVERAGE_TEXT]);
     expect(reviewSummaryNotes(reviewSummary([]))).toEqual([]);
   });
 
+  it("averages the experience DB's counts of every review, whatever page the screen has read (#108)", () => {
+    const counts = [
+      { experienceId: "tea", title: "Synthetic tea", count: 120, ratingTotal: 571 },
+      { experienceId: "river", title: "Synthetic river", count: 2, ratingTotal: 9 },
+    ];
+    // (571 + 9) / 122 = 4.754… → 4.8.
+    expect(reviewSummaryOfCounts(counts, null)).toEqual({ published: 122, average: "4.8", onSite: true });
+    expect(reviewSummaryOfCounts(counts, "tea")).toEqual({ published: 120, average: "4.8", onSite: true });
+    expect(reviewSummaryOfCounts(counts, "river")).toEqual({ published: 2, average: "4.5", onSite: false });
+    expect(reviewSummaryOfCounts(counts, "kintsugi")).toEqual({ published: 0, average: null, onSite: false });
+    expect(reviewSummaryOfCounts([], null)).toEqual({ published: 0, average: null, onSite: false });
+  });
+
   it("gives 体験 each experience's published average and count, or nothing", () => {
-    expect(experienceRating(MOCK_KITCHEN_REVIEWS, "community-dinner")).toEqual({ average: "4.8", count: 5 });
+    expect(experienceRating(MOCK_KITCHEN_REVIEWS, "community-dinner")).toEqual({ average: "4.7", count: 6 });
     expect(experienceRating(MOCK_KITCHEN_REVIEWS, "kintsugi")).toBeNull();
-    expect(experienceRating([yuki], "community-dinner")).toBeNull();
+    expect(experienceRating([], "community-dinner")).toBeNull();
   });
 });
 
@@ -97,8 +110,8 @@ describe("the reviews' list", () => {
 });
 
 describe("replies and reports", () => {
-  it("lets the host reply once NIHO has published the review, and correct the reply after", () => {
-    expect([reviewReplyStage(yuki), reviewReplyStage(oliver), reviewReplyStage(grace)]).toEqual(["waiting", "open", "replied"]);
+  it("lets the host reply to any review, and correct the reply after", () => {
+    expect([reviewReplyStage(yuki), reviewReplyStage(oliver), reviewReplyStage(grace)]).toEqual(["open", "open", "replied"]);
   });
 
   it("publishes the first reply, then dates each correction and keeps the first publication", () => {
@@ -108,10 +121,9 @@ describe("replies and reports", () => {
     expect(corrected.reply).toEqual({ japanese: "ありがとうございました！", english: "Thank you so much!", publishedAt: AT, editedAt: "2026-10-22T09:00" });
     expect(replyDates(corrected.reply!)).toEqual({ published: "10月21日に公開", edited: "10月22日に直しました" });
     expect(replyDates(replied.reply!)).toEqual({ published: "10月21日に公開", edited: null });
-    // Nothing without English, without a change, or before NIHO publishes the review.
+    // Nothing without English or without a change.
     expect(publishReviewReply(oliver, { japanese: "はい", english: " " }, AT)).toBe(oliver);
     expect(publishReviewReply(corrected, { japanese: "ありがとうございました！", english: "Thank you so much!" }, AT)).toBe(corrected);
-    expect(publishReviewReply(yuki, { japanese: "はい", english: "Yes" }, AT)).toBe(yuki);
   });
 
   it("asks for the English again after the Japanese changes, and for a change before a correction is published", () => {
@@ -133,12 +145,12 @@ describe("replies and reports", () => {
     const reported = reportReview(oliver, "personal", AT);
     expect(reported).toEqual({ ...oliver, report: { at: AT, reason: "personal" } });
     expect(reportReview(reported, "other", "2026-10-22T09:00")).toBe(reported);
-    expect(reportReview(yuki, "untrue", AT).status).toBe("pending");
+    expect(reportReview(yuki, "untrue", AT)).toMatchObject({ status: "published", reply: null, report: { at: AT, reason: "untrue" } });
     expect(reportReview(oliver, "other", AT, "  当日の内容が違います。  ").report).toEqual({ at: AT, reason: "other", note: "当日の内容が違います。" });
   });
 
-  it("brings the published reviews without a reply to ホーム first, then the ones NIHO is checking", () => {
-    expect(reviewsToAttend(MOCK_KITCHEN_REVIEWS).map((review) => review.id)).toEqual(["rv-5020", "rv-4906", "rv-5013"]);
+  it("brings the reviews without a reply to ホーム, the newest first", () => {
+    expect(reviewsToAttend(MOCK_KITCHEN_REVIEWS).map((review) => review.id)).toEqual(["rv-5013", "rv-5020", "rv-4906"]);
   });
 });
 
@@ -155,7 +167,9 @@ describe("the preview's reviews", () => {
       expect(booked.has(review.bookingId), review.id).toBe(false);
       booked.add(review.bookingId);
       expect(review.tags.length > 0 && review.tags.every((tag) => REVIEW_TAGS.some((choice) => choice.value === tag)), review.id).toBe(true);
-      expect(review.status === "published" ? review.publishedAt !== null && review.publishedAt > review.writtenAt : review.publishedAt === null && review.reply === null, review.id).toBe(true);
+      // Published when written (owner decision 2026-10-31); a reply comes after.
+      expect([review.status, review.publishedAt], review.id).toEqual(["published", review.writtenAt]);
+      expect(!review.reply || review.reply.publishedAt > review.writtenAt, review.id).toBe(true);
     }
     // No review from a guest who did not come.
     const noShows = MOCK_KITCHEN_BOOKINGS.filter((booking) => booking.attendance === "no_show").map((booking) => booking.id);

@@ -11,7 +11,8 @@ const OLIVER_EN = "Thank you for coming to dinner! We are so happy you are makin
 const PREVIEW_EN = "[Preview] NIHO's English draft of your message appears here.";
 const STALE = "日本語を変えました。英語を作り直してください";
 const DRAFT_FAILED = "英語にできませんでした。作り直すか、英語を直接書いてください";
-const WAITING = "NIHO が確認中です。公開されたら返信できます";
+const YUKI_JA = "駅からの道が分かりやすかったと聞いてうれしいです。次の回からは、席の間隔を広げます。ありがとうございました。";
+const YUKI_EN = "We are glad the way from the station was easy to find. From the next dinner, everyone will have more room at the table. Thank you!";
 
 const isDesktop = (projectName: string) => projectName === "host-desktop";
 const menu = (page: Page) => page.getByRole("navigation", { name: "ホストのメニュー" });
@@ -44,15 +45,16 @@ function recordSent(page: Page): string[] {
 
 test("ホーム's 読んで返信する opens the review; the reply's English is made, checked and only then published, and can be corrected", async ({ page }) => {
   await signIn(page);
-  // After the threads: the published reviews without a reply, then the one NIHO is checking.
+  // After the threads: the reviews without a reply, the newest first (each is published when written).
   const oliverRow = todos(page).filter({ hasText: "Oliver さん" });
   for (const text of ["未返信", "レビュー", "「ここに暮らす人たちと 6 品を作り、終電の時間まで話し込みまし…」", "Oliver さん · イギリス · Kamakura Community Dinner with Locals"]) await expect(oliverRow).toContainText(text);
   await expect(oliverRow.getByRole("img", { name: "5 点", exact: true })).toBeVisible();
-  await expect(todos(page).nth(5)).toContainText("Oliver さん");
-  await expect(todos(page).nth(6)).toContainText("Ella さん · オーストラリア");
-  const yukiRow = todos(page).nth(7);
-  for (const text of ["公開前", "由紀 さん · 日本"]) await expect(yukiRow).toContainText(text);
-  await expect(yukiRow.getByRole("link", { name: "読む" })).toHaveAttribute("href", "/host/reviews#review-rv-5013");
+  const yukiRow = todos(page).nth(5);
+  for (const text of ["未返信", "由紀 さん · 日本"]) await expect(yukiRow).toContainText(text);
+  await expect(yukiRow).not.toContainText("公開前");
+  await expect(yukiRow.getByRole("link", { name: "読んで返信する" })).toHaveAttribute("href", "/host/reviews#review-rv-5013");
+  await expect(todos(page).nth(6)).toContainText("Oliver さん");
+  await expect(todos(page).nth(7)).toContainText("Ella さん · オーストラリア");
   const open = oliverRow.getByRole("link", { name: "読んで返信する" });
   await expect(open).toHaveAttribute("href", "/host/reviews#review-rv-5020");
 
@@ -167,17 +169,23 @@ test("one reply is open at a time and keeps what was written; やめる drops it
   await expect(oliverJapanese).toHaveValue("");
 });
 
-test("a review NIHO is checking can be read and reported, not answered; a report asks for a reason and the review stays", async ({ page }) => {
+test("a review takes a reply from when it is written (nothing is 公開前); a report asks for a reason and the review stays", async ({ page }) => {
   await signIn(page);
   await page.goto("/host/reviews#review-rv-5013");
   const yuki = reviewItem(page, "由紀 さん · 日本");
   await expect(yuki.getByRole("heading", { level: 2 })).toBeFocused();
-  for (const text of ["公開前", "10/13（火）Kamakura Community Dinner with Locals", WAITING, "席が少し窮屈だったので、星は 4 つにしました。"]) await expect(yuki).toContainText(text);
+  for (const text of ["10/13（火）Kamakura Community Dinner with Locals", "席が少し窮屈だったので、星は 4 つにしました。"]) await expect(yuki).toContainText(text);
   await expect(yuki.getByRole("img", { name: "5 点中 4 点", exact: true })).toBeVisible();
+  // Published when written (owner decision 2026-10-31): no 公開前, no waiting for NIHO.
+  for (const text of ["公開前", "NIHO が確認中です"]) await expect(list(page)).not.toContainText(text);
   // Written in Japanese: nothing to translate.
   await expect(yuki).not.toContainText("翻訳");
-  await expect(yuki.getByRole("button", { name: /返信/ })).toHaveCount(0);
-  await expect(yuki.getByRole("form")).toHaveCount(0);
+  await yuki.getByRole("button", { name: "返信する", exact: true }).click();
+  const form = replyForm(yuki, "由紀");
+  await form.getByRole("textbox", { name: "日本語で書く" }).fill(YUKI_JA);
+  await form.getByRole("button", { name: "英語にする" }).click();
+  await expect(form.getByText(YUKI_EN)).toBeVisible();
+  await form.getByRole("button", { name: "やめる" }).click();
 
   const sent = recordSent(page);
   const report = yuki.getByRole("button", { name: "報告する" });
@@ -233,9 +241,9 @@ test("体験 links each experience's average to its reviews; レビュー is a s
   await signIn(page);
   await page.goto("/host/experiences");
   const rows = page.getByRole("region", { name: "体験の一覧" }).getByRole("listitem");
-  const rating = rows.nth(0).getByRole("link", { name: "レビュー 4.8 点 · 5 件" });
+  const rating = rows.nth(0).getByRole("link", { name: "レビュー 4.7 点 · 6 件" });
   await expect(rating).toHaveAttribute("href", "/host/reviews?experience=community-dinner");
-  await expect(rating).toContainText("★ 4.8");
+  await expect(rating).toContainText("★ 4.7");
   // The row's own link opens the editor, apart from the reviews; experiences without a published review have none.
   await expect(rows.nth(0).getByRole("link")).toHaveCount(2);
   await expect(rows.nth(0).getByRole("link").first()).toHaveAttribute("href", "/host/experiences/community-dinner");
@@ -247,9 +255,10 @@ test("体験 links each experience's average to its reviews; レビュー is a s
   const select = page.getByRole("combobox", { name: "体験" });
   await expect(select).toHaveValue("community-dinner");
   await expect(reviewHeadings(page)).toHaveCount(6);
-  const summary = page.locator("main p", { hasText: "公開 5 件" });
-  await expect(summary).toContainText("4.8");
-  await expect(page.getByRole("list", { name: "レビューの要約" }).getByRole("listitem")).toHaveText(["公開前 1 件"]);
+  const summary = page.locator("main p", { hasText: "公開 6 件" });
+  await expect(summary).toContainText("4.7");
+  // Six published reviews: the site shows the average, and nothing waits to be published.
+  await expect(page.getByRole("list", { name: "レビューの要約" })).toHaveCount(0);
   if (isDesktop(testInfo.project.name)) {
     // The summary on the right of the title; the menu keeps ホーム.
     const titleBox = (await page.getByRole("heading", { level: 1 }).boundingBox())!;
@@ -346,7 +355,7 @@ test.describe("320px narrow phone", () => {
     await page.goto("/host/home");
     await inside(todos(page).filter({ hasText: "Oliver さん" }).getByRole("link", { name: "読んで返信する" }), "home: 読んで返信する");
     await page.goto("/host/experiences");
-    await inside(page.getByRole("link", { name: "レビュー 4.8 点 · 5 件" }), "experiences: ★ 4.8 · 5 件");
+    await inside(page.getByRole("link", { name: "レビュー 4.7 点 · 6 件" }), "experiences: ★ 4.7 · 6 件");
 
     await page.goto("/host/reviews");
     await inside(page.getByRole("link", { name: "ホームへ戻る" }), "‹ ホーム");

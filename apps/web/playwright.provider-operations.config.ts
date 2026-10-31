@@ -6,7 +6,8 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /provider-operations\.spec\.ts/,
+  // Also 予約's one list of NIHO's bookings and this site's (#84), which needs the provider operations preview.
+  testMatch: /(provider-operations|host-bookings-unified)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   reporter: "list",
