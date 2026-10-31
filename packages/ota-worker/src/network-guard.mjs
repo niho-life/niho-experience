@@ -116,15 +116,47 @@ function countRootFields(tokens, start, end) {
   return index === end ? count : -1;
 }
 
+// The names a mutation declares; `$` only precedes a name in a variable definition.
+function declaredVariableNames(tokens, start, end) {
+  const names = [];
+  for (let index = start; index < end - 1; index += 1) {
+    if (tokens[index].type === "$" && tokens[index + 1].type === "NAME") names.push(tokens[index + 1].value);
+  }
+  return names;
+}
+
+// The root field's arguments as variable names, or null when any argument is
+// a literal (or anything but a bare `$variable`), which no variable could vouch for.
+function rootFieldVariableArguments(tokens, start) {
+  let index = start + 1;
+  if (tokens[index]?.type === ":") index += 2;
+  if (tokens[index]?.type !== "(") return [];
+  const end = skipBalanced(tokens, index, "(", ")") - 1;
+  const names = [];
+  for (index += 1; index < end; index += 4) {
+    if (tokens[index]?.type !== "NAME" || tokens[index + 1]?.type !== ":"
+      || tokens[index + 2]?.type !== "$" || tokens[index + 3]?.type !== "NAME") return null;
+    names.push(tokens[index + 3].value);
+  }
+  return index === end ? names : null;
+}
+
+const sameNames = (left, right) => left.length === right.length && left.every((name) => right.includes(name));
+
 // One named mutation with exactly one root field (fragments allowed). The
-// field name itself is not pinned; the variables are checked separately.
-export function isSingleRootMutation(source, operationName) {
+// field and argument names are not pinned, but every argument must be a
+// reference to a declared variable and each declared variable must be used once,
+// so the write is fully determined by the variables. `variableNames`, when
+// given, are the variables the caller validated; the mutation must declare those.
+export function isSingleRootMutation(source, operationName, variableNames) {
   try {
     if (typeof operationName !== "string" || !/^[_A-Za-z][_0-9A-Za-z]*$/.test(operationName)) return false;
     const tokens = tokenizeGraphql(source);
     let index = 0;
     let mutations = 0;
     let rootFields = -1;
+    let declared = [];
+    let rootArguments = null;
     while (index < tokens.length) {
       const keyword = tokens[index];
       if (keyword?.type !== "NAME") return false;
@@ -134,7 +166,11 @@ export function isSingleRootMutation(source, operationName) {
       } else if (keyword.value === "mutation" && tokens[index + 1]?.type === "NAME" && tokens[index + 1].value === operationName) {
         mutations += 1;
         index += 2;
-        if (tokens[index]?.type === "(") index = skipBalanced(tokens, index, "(", ")");
+        if (tokens[index]?.type === "(") {
+          const close = skipBalanced(tokens, index, "(", ")");
+          declared = declaredVariableNames(tokens, index, close);
+          index = close;
+        }
       } else {
         return false;
       }
@@ -144,10 +180,15 @@ export function isSingleRootMutation(source, operationName) {
         if (tokens[index]?.type === "(") index = skipBalanced(tokens, index, "(", ")");
       }
       const end = skipBalanced(tokens, index, "{", "}");
-      if (keyword.value === "mutation") rootFields = countRootFields(tokens, index + 1, end - 1);
+      if (keyword.value === "mutation") {
+        rootFields = countRootFields(tokens, index + 1, end - 1);
+        if (rootFields === 1) rootArguments = rootFieldVariableArguments(tokens, index + 1);
+      }
       index = end;
     }
-    return mutations === 1 && rootFields === 1;
+    return mutations === 1 && rootFields === 1 && rootArguments !== null
+      && new Set(rootArguments).size === rootArguments.length && sameNames(rootArguments, declared)
+      && (variableNames === undefined || sameNames(declared, variableNames));
   } catch {
     return false;
   }
@@ -157,7 +198,7 @@ export function isSingleRootMutation(source, operationName) {
 // or null when anything else differs from the schedule read before the write.
 export function rewriteScheduleStepBody(body, plan) {
   if (!exactKeys(body, ["operationName", "query", "variables"]) || body.operationName !== SCHEDULE_STEP_OPERATION
-    || !isSingleRootMutation(body.query, SCHEDULE_STEP_OPERATION) || !plan) return null;
+    || !isPlainObject(body.variables) || !isSingleRootMutation(body.query, SCHEDULE_STEP_OPERATION, Object.keys(body.variables)) || !plan) return null;
   const variables = rewriteScheduleStepVariables(body.variables, plan);
   return variables ? { ...body, variables } : null;
 }

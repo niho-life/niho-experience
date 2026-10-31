@@ -258,12 +258,30 @@ test("schedule step rewrite replaces only specialDates when the screen matches t
     (value) => { value.query = "mutation SupplierPortalUpdateScheduleStep { a { ok } b { ok } }"; },
     (value) => { value.query = "query SupplierPortalUpdateScheduleStep { a { ok } }"; },
     (value) => { value.query = `${SYNTHETIC_STEP_MUTATION} mutation Other { a { ok } }`; },
+    // The write must come from the validated variables: a literal target, a variable the write never
+    // uses, or a query that declares something other than the validated variables is refused.
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("scheduleId: $scheduleId", "scheduleId: 7002"); },
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("input: $input", "input: {}"); },
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("input: $input", 'input: "$input"'); },
+    (value) => { value.query = "mutation SupplierPortalUpdateScheduleStep($input: SyntheticScheduleStepInput!) { updateScheduleStep(scheduleId: 7002, input: $input) { success } }"; },
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("(scheduleId: $scheduleId, input: $input)", "(input: $input)"); },
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("(scheduleId: $scheduleId, input: $input)", "(scheduleId: $scheduleId, input: $input, other: $input)"); },
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("($scheduleId: Int!,", "($scheduleId: Int!, $other: Int,"); },
+    (value) => { value.query = SYNTHETIC_STEP_MUTATION.replace("{ updateScheduleStep(", "{ updateScheduleStep @include(if: true) ("); },
+    (value) => { value.variables = { other: 1, scheduleId: value.variables.scheduleId, input: value.variables.input }; },
   ];
   for (const mutate of mismatches) {
     const value = stepBody(); mutate(value);
     assert.equal(rewriteScheduleStepBody(value, plan), null, String(mutate));
   }
+  // The names are not pinned: an alias and other variable names still pass while every argument is a variable.
+  assert.ok(rewriteScheduleStepBody(stepBody(blockJson(), (value) => {
+    value.query = SYNTHETIC_STEP_MUTATION.replace("{ updateScheduleStep(", "{ saved: updateScheduleStep(");
+    return value;
+  }), plan));
   assert.equal(isSingleRootMutation(`fragment F on Result { ok } ${SYNTHETIC_STEP_MUTATION}`, SCHEDULE_STEP_OPERATION), true);
+  assert.equal(isSingleRootMutation(SYNTHETIC_STEP_MUTATION, SCHEDULE_STEP_OPERATION, ["input", "scheduleId"]), true);
+  assert.equal(isSingleRootMutation(SYNTHETIC_STEP_MUTATION, SCHEDULE_STEP_OPERATION, ["scheduleId"]), false);
   assert.equal(isSingleRootMutation("mutation SupplierPortalUpdateScheduleStep { ...F }", SCHEDULE_STEP_OPERATION), false);
 });
 
