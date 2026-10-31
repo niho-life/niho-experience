@@ -350,7 +350,7 @@ export function HostNihoBookingDetail({ providerId, bookingId, mode = "bookings"
             <Row label="人数">{peopleText(booking)}</Row>
             <Row label="金額">{yen(booking.totalYen)}</Row>
             <Row label="申込経路">{nihoChannelLabel(booking.salesChannel)}</Row>
-            <Row label="予約時のメモ" multiline>{booking.note || "なし"}</Row>
+            {booking.note?.trim() ? <Row label="申込メモ" multiline>{booking.note}</Row> : null}
             {booking.answers?.length ? (
               <Row label="回答">
                 <ul className="flex flex-col gap-1.5">

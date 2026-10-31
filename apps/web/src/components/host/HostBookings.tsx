@@ -312,7 +312,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
 
   return (
     <>
-      {sub ? <HostSubHeader backHref={listHref} backLabel="予約" title={selected?.guest ?? "予約"} onBack={(event) => move(event, listHref)} /> : null}
+      {sub ? <HostSubHeader backHref={listHref} backLabel="予約" title={rows.find((row) => row.id === selectedId)?.guest ?? "予約"} onBack={(event) => move(event, listHref)} /> : null}
       <HostPageBody>
         <div data-sub={sub ? "detail" : undefined} className="lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-5">
           <div className={`min-w-0 ${sub ? "max-lg:hidden" : ""}`}>
