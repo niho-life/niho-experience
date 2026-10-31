@@ -27,7 +27,7 @@ Pass the exact raw request bytes, the `Stripe-Signature` header and the Connect 
 
 Every accepted type passes the same envelope checks: event ID, connected account, event time, a payment-mode Session, and metadata with exactly the source marker and a UUID v4 `booking_id`.
 
-Before creating Checkout, the caller must use NIHO's trusted server-to-server account contract to verify that the snapshotted connected account still belongs to the seller and its v2 merchant `card_payments` capability is active.
+Before creating Checkout, the caller must use NIHO's trusted server-to-server account contract to verify that the snapshotted connected account still belongs to the seller and its v2 merchant `card_payments` capability is active. For experiences sold on this site the owner decided on 2026-10-31 (#330) to check the account directly with Stripe instead: `retrieveConnectedAccount({ accountId, platformStripeKey | stripe })` reads it with the experience platform key and answers `ready` when it has charges and payouts enabled, its details submitted, `JP` as its country and `jpy` as its default currency, `not_ready` with the failing items otherwise, or `unreachable` when Stripe will not show it to the platform (not connected, or a key without read access to connected accounts); any other failure throws. The answer carries the last 4 characters of the ID and the checked facts only. The operator's registration script (`scripts/experience/register-site-sale.mjs`, docs/guest-booking.md) calls it before it registers a product and again before it opens the sale.
 
 Before calling `ExperienceStore.confirmBookingPayment`, the route must load the booking in its trusted provider scope and atomically check all of the following against the returned values:
 

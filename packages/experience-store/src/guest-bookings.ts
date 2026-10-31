@@ -316,18 +316,22 @@ const WEEKDAY_NUMBER: Readonly<Record<Weekday, number>> = {
   SUNDAY: 0, MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4, FRIDAY: 5, SATURDAY: 6,
 };
 /** bookings.idempotency_key holds 256 characters: "guest-checkout:" + product id + ":" + a 120-character key. */
-const MAX_SELLABLE_PRODUCT_ID_LENGTH = 120;
+export const MAX_SELLABLE_PRODUCT_ID_LENGTH = 120;
 const MAX_LISTED_OCCURRENCES = 2_000;
 /** sellableSlugs answers for one page of cards. */
 const MAX_SELLABLE_SLUGS_ASKED = 200;
 
-const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
-const TERMS_COLUMNS = `
+export const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
+export const TERMS_COLUMNS = `
   provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
   minimum_participants, max_party_size, cancellation_policy, booking_questions,
   booking_questions_fingerprint, conditions_version, version, updated_at`;
 
 /* ---------- sale terms ---------- */
+
+// The exported helpers in this part (columns, row mappers, validation, what is for sale, the schedule
+// expansion) are shared with site-sale-registration.ts (the operator's registration, #285 slice 9);
+// index.ts does not export them.
 
 function plainText(value: unknown, path: string, max: number): string {
   if (typeof value !== "string" || ANY_CONTROL.test(value)) throw new StoreValidationError(`${path} must be one line of text.`);
@@ -385,7 +389,7 @@ function validQuestions(value: unknown): BookingQuestion[] {
 }
 
 /** NIHO's computation (packages/api-client/test/contract.test.ts): SHA-256 of the canonical questions JSON. */
-function questionsFingerprint(questions: readonly BookingQuestion[]): string {
+export function questionsFingerprint(questions: readonly BookingQuestion[]): string {
   const canonical = questions.map((question) => ({
     id: question.id,
     prompt: question.prompt,
@@ -397,7 +401,7 @@ function questionsFingerprint(questions: readonly BookingQuestion[]): string {
   return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
 }
 
-function validSaleTerms(input: ProductSaleTermsInput): ProductSaleTermsInput {
+export function validSaleTerms(input: ProductSaleTermsInput): ProductSaleTermsInput {
   if (input === null || typeof input !== "object") throw new StoreValidationError("terms must be an object.");
   let childPricing: ChildPricing | null = null;
   if (input.childPricing !== null) {
@@ -431,7 +435,7 @@ function validSaleTerms(input: ProductSaleTermsInput): ProductSaleTermsInput {
   };
 }
 
-function termsFromRow(row: DbRow): ProductSaleTerms {
+export function termsFromRow(row: DbRow): ProductSaleTerms {
   return {
     providerId: String(row.provider_id),
     productId: String(row.product_id),
@@ -452,7 +456,7 @@ function termsFromRow(row: DbRow): ProductSaleTerms {
   };
 }
 
-function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
+export function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
   return {
     providerId: String(row.provider_id),
     supportEnabled: row.support_enabled === true,
@@ -503,7 +507,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
 }
 
 /** A JPY price Stripe can charge, and an ID that fits the guest idempotency key (loadSellable, sellableSlugs). */
-function sellableProduct(product: Pick<ProductRecord, "id" | "currency" | "unitAmount">): boolean {
+export function sellableProduct(product: Pick<ProductRecord, "id" | "currency" | "unitAmount">): boolean {
   return product.currency === "JPY" && product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
     && product.id.length <= MAX_SELLABLE_PRODUCT_ID_LENGTH;
 }
@@ -512,22 +516,22 @@ function sellableProduct(product: Pick<ProductRecord, "id" | "currency" | "unitA
  * NIHO's fee on the smallest total a party may pay (one adult, or one child where children may come alone)
  * is one that Stripe accepts.
  */
-function chargeableFee(unitAmount: number, child: ChildPricing | null, basisPoints: number): boolean {
+export function chargeableFee(unitAmount: number, child: ChildPricing | null, basisPoints: number): boolean {
   const smallest = child !== null && !child.adultRequired ? Math.min(unitAmount, child.priceYen) : unitAmount;
   return chargeablePlatformFee(smallest, basisPoints);
 }
 
-async function databaseNow(client: Queryable): Promise<string> {
+export async function databaseNow(client: Queryable): Promise<string> {
   const result = await client.query<DbRow>("SELECT clock_timestamp() AS now");
   return isoValue(result.rows[0]!, "now");
 }
 
-function tokyoDate(utc: string): string {
+export function tokyoDate(utc: string): string {
   return new Date(Date.parse(utc) + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
 }
 
 /** A public offer is a schedule rule that has not ended and whose ID is a valid public offer ID. */
-async function activeRules(client: Queryable, providerId: string, productId: string, today: string): Promise<StoredScheduleRule[]> {
+export async function activeRules(client: Queryable, providerId: string, productId: string, today: string): Promise<StoredScheduleRule[]> {
   const result = await client.query<DbRow>(
     `SELECT ${RULE_COLUMNS} FROM schedule_rules
       WHERE provider_id=$1 AND product_id=$2 AND (
@@ -586,7 +590,7 @@ function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBooking
 }
 
 /** The same expansion as the host calendar: every stored override (moves, legacy CLOSE) and sales state. */
-async function expandRules(
+export async function expandRules(
   client: Queryable,
   providerId: string,
   rules: readonly StoredScheduleRule[],

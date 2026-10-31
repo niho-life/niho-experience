@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 interface RuntimeGrant { readonly write: readonly string[]; readonly updateColumns?: readonly string[] }
 
@@ -11,23 +13,28 @@ function updateAllowed(grant: RuntimeGrant, clause: string): boolean {
 }
 
 const repo = new URL("../../../", import.meta.url);
-const { RUNTIME_TABLE_GRANTS } = await import(new URL("scripts/gcp/experience-db-grants.mjs", repo).href) as {
+const { OPERATOR_ONLY_SOURCES, RUNTIME_TABLE_GRANTS } = await import(new URL("scripts/gcp/experience-db-grants.mjs", repo).href) as {
+  OPERATOR_ONLY_SOURCES: readonly string[];
   RUNTIME_TABLE_GRANTS: Readonly<Record<string, RuntimeGrant>>;
 };
+const operatorOnly = new Set(OPERATOR_ONLY_SOURCES.map((source) => fileURLToPath(new URL(source, repo))));
 
-async function sourceFiles(dir: URL): Promise<string[]> {
+async function sourceFiles(dir: URL, extensions: readonly string[] = [".ts"]): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true, recursive: true });
   return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts"))
-    .map((entry) => `${entry.parentPath}/${entry.name}`);
+    .filter((entry) => entry.isFile() && extensions.some((extension) => entry.name.endsWith(extension)) && !entry.name.endsWith(".test.ts"))
+    .map((entry) => resolve(entry.parentPath, entry.name));
 }
 
-/** SQL lives in template, double-, or single-quoted literals in the store and the web server code. */
+/**
+ * SQL lives in template, double-, or single-quoted literals in the store and the web server code. The
+ * operator-only sources run with the migration identity, not the runtime, and are left out.
+ */
 async function sqlLiterals(): Promise<string[]> {
   const files = [
     ...await sourceFiles(new URL("packages/experience-store/src/", repo)),
     ...await sourceFiles(new URL("apps/web/src/", repo)),
-  ];
+  ].filter((file) => !operatorOnly.has(file));
   const literals: string[] = [];
   for (const file of files) {
     const text = await readFile(file, "utf8");
@@ -40,6 +47,21 @@ async function sqlLiterals(): Promise<string[]> {
 }
 
 describe("Experience runtime grants", () => {
+  it("keeps the operator-only sources out of the runtime's reach", async () => {
+    assert.ok(OPERATOR_ONLY_SOURCES.length > 0);
+    const index = await readFile(new URL("packages/experience-store/src/index.ts", repo), "utf8");
+    const web = await sourceFiles(new URL("apps/web/src/", repo), [".ts", ".tsx", ".js", ".mjs"]);
+    for (const source of OPERATOR_ONLY_SOURCES) {
+      // The file exists (a renamed one would silently fall back into the runtime scan otherwise).
+      await readFile(new URL(source, repo), "utf8");
+      const module = basename(source, ".ts");
+      assert.equal(index.includes(module), false, `index.ts exports ${module}`);
+      for (const file of web) {
+        assert.equal((await readFile(file, "utf8")).includes(module), false, `${file} reaches ${module}`);
+      }
+    }
+  });
+
   it("keeps activation commands append-only and limits binding mutation columns", () => {
     assert.deepEqual(RUNTIME_TABLE_GRANTS.google_channel_activation_commands, { write: ["INSERT"] });
     assert.deepEqual(RUNTIME_TABLE_GRANTS.google_channel_output_bindings?.updateColumns,

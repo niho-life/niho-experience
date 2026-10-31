@@ -115,3 +115,11 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
 
 /** Owned by the migration role; the runtime gets no privilege on it. */
 export const MIGRATION_LEDGER_TABLE = "experience_schema_migrations";
+
+// Store sources that only the operator's scripts run, with the migration identity (never the runtime):
+// their writes (providers, memberships, products, sale terms; #285 slice 9 registration) need no runtime
+// grant. `runtime-grants.test.ts` leaves them out of the runtime scan and fails if apps/web or the
+// store's index.ts reaches one of them.
+export const OPERATOR_ONLY_SOURCES = Object.freeze([
+  "packages/experience-store/src/site-sale-registration.ts",
+]);
