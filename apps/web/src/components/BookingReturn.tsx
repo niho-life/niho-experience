@@ -1,7 +1,7 @@
 import { HandIcon, type HandIconName } from "./HandIcon";
 import { ButtonLink } from "./ui";
 
-/** The kind of booking NIHO puts on the return URL (`?type=instant|approval`). Anything else, or nothing, is the neutral page. */
+/** The kind of booking on the return URL (`?type=instant|approval`). Anything else, or nothing, is the neutral page. */
 export type BookingReturnType = "instant" | "approval";
 
 export function readReturnType(value: string | string[] | undefined): BookingReturnType | null {
@@ -11,24 +11,26 @@ export function readReturnType(value: string | string[] | undefined): BookingRet
 type Step = { icon: HandIconName; title: string; text: string };
 
 /**
- * What happens after payment. NIHO owns payment, confirmation and the booking status; this page never says a booking is
- * complete or paid (a return URL proves nothing). It only says what to expect next, and its wording may follow the kind of
- * booking (a fixed word on the URL, never free text, so nobody can put their own wording on this page).
+ * What happens after payment, for both senders: NIHO (its own bookings) and this site (experiences it sells, #285 slice 5).
+ * The confirmation, the booking status and the emails belong to whichever confirmed the payment, so the words promise only
+ * what both do and name neither. This page never says a booking is complete or paid (a return URL proves nothing). It only
+ * says what to expect next, and its wording may follow the kind of booking (a fixed word on the URL, never free text, so
+ * nobody can put their own wording on this page).
  */
 export function BookingReturn({ type, showReview }: { type: BookingReturnType | null; showReview: boolean }) {
   const approval = type === "approval";
   const eyebrow = type ? "thank you" : "almost there";
   const heading = approval ? "The host will review your request" : type ? "Check your email for your booking" : "Check your email";
   const lead = approval
-    ? "You are charged only if they accept. NIHO emails you either way."
+    ? "You are charged only if they accept. We email you either way."
     : type
-      ? "NIHO confirms your booking by email, with a link to your booking."
-      : "NIHO sends your booking link by email. If the host needs to approve your request, the email says so.";
+      ? "Your confirmation comes by email once your payment goes through."
+      : "We email you about your booking. If the host needs to approve your request, the email says so.";
   const steps: Step[] = [
-    { icon: "mail", title: "Email from NIHO", text: approval ? "It tells you the request is with the host. Another follows when they answer." : "Your booking link, with the meeting details and a way to add the date to your calendar." },
-    { icon: "cal", title: "A reminder the day before", text: "A short email with the details you need." },
-    { icon: "pin", title: "Meet your host", text: "On the day, open your booking link for the meeting details." },
-    ...(showReview ? [{ icon: "chat" as const, title: "Share how it went", text: "After the experience, NIHO asks how it was." }] : []),
+    { icon: "mail", title: approval ? "An email about your request" : "Your confirmation email", text: approval ? "It tells you the request is with the host. Another follows when they answer." : "The experience, the date and time, your group and what you paid." },
+    { icon: "pin", title: "Meeting details", text: "Where to meet reaches you before the day." },
+    { icon: "cal", title: "Meet your host", text: "On the day, meet your host where the meeting details say." },
+    ...(showReview ? [{ icon: "chat" as const, title: "Share how it went", text: "After the experience, we ask how it was." }] : []),
   ];
 
   return (
@@ -51,7 +53,7 @@ export function BookingReturn({ type, showReview }: { type: BookingReturnType | 
           </li>
         ))}
       </ol>
-      <p className="mt-8 text-sm text-muted">This page can&apos;t show your booking status. The link in NIHO&apos;s email can.</p>
+      <p className="mt-8 text-sm text-muted">This page can&apos;t show your booking status. The email you get from us does.</p>
       <div className="mt-6 flex flex-wrap gap-3">
         <ButtonLink href="/help">Didn&apos;t get the email?</ButtonLink>
         <ButtonLink href="/experiences" variant="secondary">Browse experiences</ButtonLink>

@@ -335,4 +335,42 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       await assert.rejects(() => questions.submitGuestReply(later.replyToken, { message: " ", clientRequestKey: randomUUID() }), StoreValidationError);
     });
   });
+
+  it("erases questions a year after their last message, with their messages and reply links, a bounded batch at a time", async () => {
+    await withSchema(async (pool, questions) => {
+      await questions.submitQuestion(question({ guestEmail: "old@example.com" }));
+      await questions.submitQuestion(question({ guestEmail: "older@example.com" }));
+      await questions.submitQuestion(question({ guestEmail: "recent@example.com" }));
+      const old = await threadIdFor(pool, "tea", "old@example.com");
+      const older = await threadIdFor(pool, "tea", "older@example.com");
+      const recent = await threadIdFor(pool, "tea", "recent@example.com");
+      await questions.reply(ownerA, old, { english: "Yes, we can.", japanese: null, commandId: randomUUID() });
+      await questions.reply(ownerA, recent, { english: "Of course.", japanese: null, commandId: randomUUID() });
+      assert.equal((await questions.claimReplyDeliveries({ limit: 10, leaseSeconds: 60, linkTtlDays: 14 })).length, 2);
+      // The old threads' last messages were 400 and 500 days ago; the recent one's 300 days ago.
+      await pool.query("UPDATE guest_question_threads SET last_message_at = clock_timestamp() - interval '400 days' WHERE id = $1", [old]);
+      await pool.query("UPDATE guest_question_threads SET last_message_at = clock_timestamp() - interval '500 days' WHERE id = $1", [older]);
+      await pool.query("UPDATE guest_question_threads SET last_message_at = clock_timestamp() - interval '300 days' WHERE id = $1", [recent]);
+      const outboxBefore = (await pool.query("SELECT count(*)::int AS n FROM outbox_messages")).rows[0].n as number;
+
+      const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString();
+      assert.equal(await questions.eraseInactiveThreads({ lastMessageBefore: yearAgo, limit: 1 }), 1);
+      assert.deepEqual((await pool.query("SELECT id FROM guest_question_threads WHERE id = $1", [older])).rows, []);
+      assert.equal(await questions.eraseInactiveThreads({ lastMessageBefore: yearAgo }), 1);
+      assert.equal(await questions.eraseInactiveThreads({ lastMessageBefore: yearAgo }), 0);
+
+      const left = await pool.query("SELECT t.id, t.guest_email FROM guest_question_threads t");
+      assert.deepEqual(left.rows, [{ id: recent, guest_email: "recent@example.com" }]);
+      const messages = await pool.query("SELECT DISTINCT thread_id FROM guest_question_messages");
+      assert.deepEqual(messages.rows, [{ thread_id: recent }]);
+      const tokens = await pool.query("SELECT DISTINCT thread_id FROM guest_question_reply_tokens");
+      assert.deepEqual(tokens.rows, [{ thread_id: recent }]);
+      // Outbox rows name ids only and stay.
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox_messages")).rows[0].n, outboxBefore);
+      await assertOutboxCarriesIdsOnly(pool);
+
+      await assert.rejects(() => questions.eraseInactiveThreads({ lastMessageBefore: "last year" }), StoreValidationError);
+      await assert.rejects(() => questions.eraseInactiveThreads({ lastMessageBefore: yearAgo, limit: 0 }), StoreValidationError);
+    });
+  });
 });

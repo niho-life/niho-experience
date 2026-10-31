@@ -134,7 +134,7 @@ test.describe("/booking/return", () => {
   test("an instant booking and one that needs approval get their own headings", async ({ page }) => {
     await page.goto("/booking/return?type=instant");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Check your email for your booking");
-    await expect(page.locator("main")).toContainText("NIHO confirms your booking by email");
+    await expect(page.locator("main")).toContainText("Your confirmation comes by email once your payment goes through.");
     await page.goto("/booking/return?type=approval");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("The host will review your request");
     await expect(page.locator("main")).toContainText("You are charged only if they accept");

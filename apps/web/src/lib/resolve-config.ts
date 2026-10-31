@@ -204,6 +204,75 @@ function guestBookingSettings(apiMode: "mock" | "http", env: Env): { enabled: bo
   return { enabled: true, consentVersion };
 }
 
+/** An email address: one line, no display name. */
+const MAIL_ADDRESS = /^[^\s<>@",;]+@[^\s<>@",;]+\.[^\s<>@",;]+$/;
+/** An SMTP host name or IPv4 address. */
+const SMTP_HOST = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
+
+export interface Mailbox {
+  readonly name: string;
+  readonly address: string;
+}
+
+/** `Display Name <address>` or a bare address, printable and on one line; null for anything else. */
+function mailbox(value: string): Mailbox | null {
+  if (!value || /[\u0000-\u001F\u007F]/.test(value)) return null;
+  const named = /^([^<>"]{1,100}?)\s*<([^<>]+)>$/.exec(value);
+  const name = named ? named[1]!.trim() : "";
+  const address = named ? named[2]!.trim() : value;
+  return MAIL_ADDRESS.test(address) && address.length <= 254 ? { name, address } : null;
+}
+
+type GuestMailSettings = Readonly<{
+  enabled: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  from: Mailbox | null;
+  replyTo: Mailbox | null;
+  jobAudience: string;
+  jobServiceAccountEmail: string;
+}>;
+
+const NO_GUEST_MAIL: GuestMailSettings = { enabled: false, smtpHost: "", smtpPort: 0, from: null, replyTo: null, jobAudience: "", jobServiceAccountEmail: "" };
+
+/**
+ * 予約者へのメール (#285 slice 5, docs/guest-booking.md): the job behind POST /internal/experience-jobs/v1/drain
+ * sends host replies and booking confirmations over SMTP (the provider NIHO uses, with experience's own
+ * credentials) and erases guest data after a year. HTTP only. Turned on without everything it needs, the
+ * server stops at start-up; messages name the setting, never its value. The SMTP user and password are
+ * secrets read where they are used (lib/mail/transport.ts), like the Stripe keys, so they are not kept here.
+ */
+function guestMailSettings(apiMode: "mock" | "http", env: Env): GuestMailSettings {
+  if (apiMode !== "http" || env.EXPERIENCE_GUEST_MAIL_ENABLED !== "true") return NO_GUEST_MAIL;
+  for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_SMTP_USER", "EXPERIENCE_SMTP_PASSWORD"]) {
+    if (!env[name]?.trim()) throw new Error(`EXPERIENCE_GUEST_MAIL_ENABLED=true needs ${name} in http mode`);
+  }
+  const smtpHost = env.EXPERIENCE_SMTP_HOST?.trim() ?? "";
+  if (!SMTP_HOST.test(smtpHost)) throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_SMTP_HOST (a host name) in http mode");
+  const portText = env.EXPERIENCE_SMTP_PORT?.trim() ?? "";
+  const smtpPort = /^[0-9]{1,5}$/.test(portText) ? Number(portText) : 0;
+  if (smtpPort < 1 || smtpPort > 65_535) throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_SMTP_PORT (1-65535) in http mode");
+  const from = mailbox(env.EXPERIENCE_MAIL_FROM?.trim() ?? "");
+  if (!from) throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_MAIL_FROM (Name <address> or an address) in http mode");
+  const replyTo = mailbox(env.EXPERIENCE_MAIL_REPLY_TO?.trim() ?? "");
+  if (!replyTo) throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_MAIL_REPLY_TO (Name <address> or an address) in http mode");
+  const jobAudience = env.EXPERIENCE_JOBS_AUDIENCE?.trim() ?? "";
+  const jobServiceAccountEmail = env.EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
+  if (!jobAudience) throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_JOBS_AUDIENCE in http mode");
+  if (!SERVICE_ACCOUNT_EMAIL.test(jobServiceAccountEmail)) {
+    throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL (a service account) in http mode");
+  }
+  // Links in the emails are absolute: https (loopback http in development).
+  let siteOrigin: string;
+  try {
+    siteOrigin = new URL(env.SITE_URL ?? "http://localhost:3000").origin;
+  } catch {
+    throw new Error("SITE_URL must be an absolute URL");
+  }
+  deploymentOrigin(siteOrigin, "SITE_URL (for EXPERIENCE_GUEST_MAIL_ENABLED)");
+  return { enabled: true, smtpHost, smtpPort, from, replyTo, jobAudience, jobServiceAccountEmail };
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -267,6 +336,10 @@ export function resolveConfig(env: Env) {
   // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted.
   const guestBooking = guestBookingSettings(apiMode, env);
+  // 予約者へのメール (#285 slice 5): host replies, booking confirmations and the one-year erasure, run by Cloud
+  // Scheduler through its own service account. Independent of the two flags above: a payment confirmed after
+  // guest booking is turned off still gets its email.
+  const guestMail = guestMailSettings(apiMode, env);
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
@@ -364,6 +437,14 @@ export function resolveConfig(env: Env) {
     guestBookingEnabled: guestBooking.enabled,
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
+    // The mail job (empty while off). SMTP credentials are not here: they are read where they are used.
+    guestMailEnabled: guestMail.enabled,
+    guestMailSmtpHost: guestMail.smtpHost,
+    guestMailSmtpPort: guestMail.smtpPort,
+    guestMailFrom: guestMail.from,
+    guestMailReplyTo: guestMail.replyTo,
+    experienceJobsAudience: guestMail.jobAudience,
+    experienceJobsServiceAccountEmail: guestMail.jobServiceAccountEmail,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.
     hostSessionSecret,
     adminSessionSecret,
