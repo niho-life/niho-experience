@@ -36,9 +36,10 @@ vi.mock("@/lib/host/server", async (importActual) => {
   };
 });
 
-import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, registerProvider, saveProviderMeetingPoint, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
+import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, recordSiteAttendance, registerProvider, saveProviderMeetingPoint, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
 import { HOST_ERROR_REASON_TEXT, HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
+import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
 import { GUEST_QUESTION_LOAD_FAILED_TEXT, GUEST_QUESTION_REPLY_FAILED_TEXT } from "./guest-questions-server";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { MOCK_KITCHEN_EXPERIENCES, MOCK_STUDIO_EXPERIENCES, PREVIEW_PAGE_ENGLISH } from "./mock/experiences";
@@ -389,6 +390,26 @@ describe("the session", () => {
     expect(await draftReplyEnglish({ providerId: KITCHEN, threadId: "th-3012", japanese: "はい" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(await draftReviewReplyEnglish({ providerId: KITCHEN, reviewId: "rv-5020", japanese: "はい" })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(calls).toEqual([]);
+  });
+});
+
+describe("出欠 of the bookings made on this site (#107)", () => {
+  const mark = { providerId: KITCHEN, bookingId: "00000000-0000-4000-8000-000000000107", attendance: "attended" as const };
+
+  it("refuses what is not a provider, a booking and one of the two marks before reaching the store", async () => {
+    for (const input of [
+      { ...mark, providerId: "" },
+      { ...mark, bookingId: "bk-2038" },
+      { ...mark, attendance: "late" },
+      { ...mark, attendance: undefined },
+      null,
+    ]) {
+      expect(await recordSiteAttendance(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    }
+  });
+
+  it("keeps nothing where the bookings made here are not kept (the mock, or the flag off)", async () => {
+    expect(await recordSiteAttendance(mark)).toEqual({ ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT });
   });
 });
 

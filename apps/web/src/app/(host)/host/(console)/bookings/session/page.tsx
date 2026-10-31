@@ -47,7 +47,8 @@ function SessionUnavailable({ backHref, title = UNAVAILABLE.title, body = UNAVAI
  *
  * With EXPERIENCE_GUEST_BOOKING_ENABLED (http mode), the OWNER sees the session's bookings made on this site, read
  * only and with the guests' phones (#285 slice 8b), as 予約 chooses between the sources: in place of 準備中 while
- * NIHO's bookings are not connected, or for `?source=site` beside them (ホーム's and 予約's links carry it).
+ * NIHO's bookings are not connected, or for `?source=site` beside them (ホーム's and 予約's links carry it). With
+ * EXPERIENCE_HOST_ATTENDANCE_ENABLED as well, the session's capacity and 来た / 来なかった kept in the experience DB (#107).
  */
 export default async function HostSessionPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -73,7 +74,7 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
           now={site.now}
           conversations={[]}
           providerId={linkProviderId}
-          site={{ besideNiho, providerId: provider.id, messages: site.messages }}
+          site={{ besideNiho, providerId: provider.id, messages: site.messages, attendance: site.attendance }}
         />
       );
     }

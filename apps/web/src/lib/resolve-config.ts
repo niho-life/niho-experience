@@ -380,6 +380,10 @@ export function resolveConfig(env: Env) {
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
+  // 出欠 (#107) of the bookings made on this site, kept in the experience DB (migration 0033), with the capacity of
+  // their session on この回. Only where those bookings are (the flag above); the mock records attendance on screen
+  // only. http opens per environment after 0033 is applied and accepted.
+  const hostAttendanceEnabled = guestBooking.enabled && env.EXPERIENCE_HOST_ATTENDANCE_ENABLED === "true";
   // 予約者へのメール (#285 slice 5): host replies, booking confirmations and the one-year erasure, run by Cloud
   // Scheduler through its own service account. Independent of the two flags above: a payment confirmed after
   // guest booking is turned off still gets its email.
@@ -488,6 +492,7 @@ export function resolveConfig(env: Env) {
     guestBookingEnabled: guestBooking.enabled,
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
+    hostAttendanceEnabled,
     // The mail job (empty while off). SMTP credentials are not here: they are read where they are used.
     guestMailEnabled: guestMail.enabled,
     guestMailSmtpHost: guestMail.smtpHost,

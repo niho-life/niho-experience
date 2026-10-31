@@ -141,6 +141,41 @@ test("today's session, once started, records who came and lets the host correct 
   expect(sent).toEqual([]);
 });
 
+test("出欠 works from the keyboard alone, and the summary follows it (#107)", async ({ page }) => {
+  await signIn(page);
+  await page.goto(TEA);
+  const tom = attendance(page, "Tom Becker");
+  const came = tom.getByRole("button", { name: "来た" });
+  const missed = tom.getByRole("button", { name: "来なかった" });
+  // Tab reaches the toggles in reading order: 来た, then 来なかった.
+  await came.focus();
+  await expect(came).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(came).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("status").filter({ hasText: "Tom Becker さん: 来た" })).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(missed).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(missed).toHaveAttribute("aria-pressed", "true");
+  await expect(came).toHaveAttribute("aria-pressed", "false");
+  await expect(value(summary(page), "出欠")).toHaveText("来た 0 件 · 来なかった 1 件 · 未記録 1 件");
+  // The focus stays where the host pressed, for the next guest.
+  await expect(missed).toBeFocused();
+  for (const button of [came, missed]) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+});
+
+test("a session with no confirmed guest says so, and offers no attendance (#107)", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/bookings/session?date=2026-10-29&start=18%3A00&experience=community-dinner&offer=offer-dinner");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("10/29（木）Kamakura Community Dinner with Locals");
+  await expect(guests(page)).toContainText("確定した参加者はいません。");
+  await expect(guests(page)).not.toContainText("開始後に付けられます");
+  await expect(page.getByRole("group", { name: /さんの出欠$/ })).toHaveCount(0);
+  await expect(value(summary(page), "人数")).toContainText("参加 0 名 · 定員 8");
+  await expect(guest(requests(page), "Ana Souza")).toContainText("承認期限");
+  expect(await overflowX(page)).toBeLessThanOrEqual(0);
+});
+
 test("参加者に連絡する lists the guests and opens each one's thread: one at a time, never to everyone", async ({ page }) => {
   await signIn(page);
   await page.goto(DINNER);

@@ -21,12 +21,12 @@ import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
 import { SITE_CANCEL_NOTE_MAX, SITE_CANCEL_REASONS, SITE_SESSION_CANCEL_REASONS } from "./site-bookings";
 import { cancelSiteBookingAsOwner, loadMoreSiteBookings, type HostSiteBookingPage } from "./site-bookings-server";
-import { cancelSiteSessionAsOwner } from "./site-sessions-server";
+import { cancelSiteSessionAsOwner, recordSiteAttendanceAsOwner } from "./site-sessions-server";
 import type { HostSessionView } from "./console-data";
 import { sessionQueryOf } from "./session";
 import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfileChange, RegisterProviderInput } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
-import type { HostBooking, HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
+import type { HostAttendance, HostBooking, HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
 
 /*
  * The host console's changes to NIHO (#88/#91), as server actions: each reads the session,
@@ -306,6 +306,20 @@ export async function cancelSiteSession(input: {
   const cancellation = cancelInput(input, SITE_SESSION_CANCEL_REASONS);
   if (!providerId || !query || !cancellation) return invalid;
   return cancelSiteSessionAsOwner(providerId, query, cancellation);
+}
+
+const ATTENDANCE_VALUES: ReadonlySet<unknown> = new Set<HostAttendance>(["attended", "no_show"]);
+
+/**
+ * この回 › 来た / 来なかった (#107, experience DB): the OWNER marks a confirmed booking made on this site once its
+ * session has started, or corrects the mark. The same mark again changes nothing.
+ */
+export async function recordSiteAttendance(input: { providerId: string; bookingId: string; attendance: HostAttendance }): Promise<HostActionResult<{ attendance: HostAttendance | null }>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const bookingId = typeof input?.bookingId === "string" && BOOKING_ID.test(input.bookingId) ? input.bookingId.toLowerCase() : null;
+  const attendance = ATTENDANCE_VALUES.has(input?.attendance) ? input.attendance : null;
+  if (!providerId || !bookingId || !attendance) return invalid;
+  return recordSiteAttendanceAsOwner(providerId, bookingId, attendance);
 }
 
 /**

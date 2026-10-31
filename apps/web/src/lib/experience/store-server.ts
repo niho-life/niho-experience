@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -96,6 +96,13 @@ export function guestBookingRepository(): GuestBookingRepository | null {
   if (!config.guestBookingEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
+}
+
+/** 出欠 (#107): null until its flag (and so booking on this site) is on and the experience DB is configured. */
+export function bookingAttendance(): BookingAttendance | null {
+  if (!config.hostAttendanceEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new BookingAttendance(pool) : null;
 }
 
 /**

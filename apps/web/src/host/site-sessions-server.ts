@@ -1,14 +1,26 @@
 import "server-only";
-import { StoreAccessDeniedError, StoreValidationError } from "@niho-experience/experience-store";
-import { guestBookingRepository } from "@/lib/experience/store-server";
+import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError, type HostSessionAttendance } from "@niho-experience/experience-store";
+import { bookingAttendance, guestBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { actionTime, type SessionQuery } from "./bookings";
 import type { HostSessionView } from "./console-data";
 import { todayInJapan } from "./format";
+import { HOST_INVALID_INPUT_TEXT } from "./errors";
 import type { HostActionResult } from "./payout";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
-import { ownerActor, runOwnerCancellation, SITE_CANCEL_NOT_CANCELLABLE_TEXT, siteBookingMessagesEnabled, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
-import { siteHomeSessions, siteHomeTodos, siteSessionView, type SiteHome } from "./site-sessions";
+import { asOwner, ownerActor, runOwnerCancellation, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT, siteBookingMessagesEnabled, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
+import {
+  SITE_ATTENDANCE_FAILED_TEXT,
+  SITE_ATTENDANCE_NOT_CONFIRMED_TEXT,
+  SITE_ATTENDANCE_NOT_STARTED_TEXT,
+  siteAttendance,
+  siteHomeSessions,
+  siteHomeTodos,
+  siteSessionView,
+  storedAttendance,
+  type SiteHome,
+} from "./site-sessions";
+import type { HostAttendance } from "./types";
 
 /*
  * ホーム and この回 for the bookings made on this site, kept in the experience DB (#285 slice 8b,
@@ -54,29 +66,57 @@ export type HostSiteSessionLoad =
       now: string;
       /** Each guest leads to their booking's messages (#285 slice 6b). */
       messages: boolean;
+      /** 出欠 is kept for these bookings, and the capacity read (#107, EXPERIENCE_HOST_ATTENDANCE_ENABLED). */
+      attendance: boolean;
     }
   | { status: "closed" }
   | { status: "error" };
 
-/** この回 for an OWNER (NIHO's role): this site's bookings for the session `?date=&start=&experience=&offer=` names. */
+/**
+ * この回 for an OWNER (NIHO's role): this site's bookings for the session `?date=&start=&experience=&offer=` names,
+ * with their 出欠 and the session's capacity where attendance is kept (#107). A failure to read either is the
+ * screen's: a mark shown as 未記録 that is not would be put right by mistake.
+ */
 export async function loadSiteSession(provider: HostProvider, nihoUserId: string, query: SessionQuery): Promise<HostSiteSessionLoad> {
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
+  const attendance = bookingAttendance();
   const clock = Date.now();
   const now = actionTime(todayInJapan(clock), clock);
+  const actor = ownerActor(provider.id, nihoUserId);
+  const key = { productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start };
   try {
-    const stored = await bookings.listGuestBookingsForSession(ownerActor(provider.id, nihoUserId), {
-      productId: query.experience,
-      offerId: query.offer,
-      localDate: query.date,
-      localStartTime: query.start,
-    });
-    return { status: "live", session: siteSessionView(stored, query), now, messages: siteBookingMessagesEnabled() };
+    const stored = await bookings.listGuestBookingsForSession(actor, key);
+    const marks: HostSessionAttendance | null = attendance && stored.length ? await attendance.readSessionForHost(actor, key) : null;
+    return { status: "live", session: siteSessionView(stored, query, marks), now, messages: siteBookingMessagesEnabled(), attendance: attendance !== null };
   } catch (error) {
     if (error instanceof StoreAccessDeniedError) return { status: "closed" };
     // An address the store cannot read (an experience or offer that is no identifier) names no session here.
-    if (error instanceof StoreValidationError) return { status: "live", session: null, now, messages: false };
+    if (error instanceof StoreValidationError) return { status: "live", session: null, now, messages: false, attendance: false };
     return { status: "error" };
+  }
+}
+
+/**
+ * この回 › 来た / 来なかった (#107): the OWNER marks a confirmed booking made here once its session has started (the
+ * store decides by the database's clock), or corrects the mark. Answers the booking's mark as stored now.
+ */
+export async function recordSiteAttendanceAsOwner(providerId: string, bookingId: string, value: HostAttendance): Promise<HostActionResult<{ attendance: HostAttendance | null }>> {
+  const owner = await asOwner(providerId);
+  if (!owner.ok) return owner;
+  const attendance = bookingAttendance();
+  if (!attendance) return { ok: false, message: SITE_ATTENDANCE_FAILED_TEXT };
+  try {
+    const result = await attendance.recordAsHost(owner.actor, bookingId, storedAttendance(value));
+    if (result.outcome === "NOT_STARTED") return { ok: false, message: SITE_ATTENDANCE_NOT_STARTED_TEXT };
+    if (result.outcome === "NOT_CONFIRMED") return { ok: false, message: SITE_ATTENDANCE_NOT_CONFIRMED_TEXT };
+    return { ok: true, message: "", attendance: result.mark ? siteAttendance(result.mark.status) : null };
+  } catch (error) {
+    if (error instanceof StoreAccessDeniedError) return { ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT };
+    if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+    if (error instanceof StoreNotFoundError) return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
+    console.error("Experience host attendance failed", { error: error instanceof Error ? error.name : typeof error });
+    return { ok: false, message: SITE_ATTENDANCE_FAILED_TEXT };
   }
 }
 
@@ -91,10 +131,11 @@ export async function cancelSiteSessionAsOwner(providerId: string, query: Sessio
   }, input));
   if (!done.ok) return done;
   let session: HostSessionView | null;
+  const key = { productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start };
   try {
-    session = siteSessionView(await done.bookings.listGuestBookingsForSession(done.actor, {
-      productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start,
-    }), query);
+    const stored = await done.bookings.listGuestBookingsForSession(done.actor, key);
+    const attendance = bookingAttendance();
+    session = siteSessionView(stored, query, attendance && stored.length ? await attendance.readSessionForHost(done.actor, key) : null);
   } catch {
     return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
   }

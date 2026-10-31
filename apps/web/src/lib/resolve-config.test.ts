@@ -276,6 +276,12 @@ describe("admin support console settings", () => {
       expect(() => resolveConfig({ ...sale, EXPERIENCE_BOOKING_CONSENT_VERSION: version })).toThrow(/EXPERIENCE_BOOKING_CONSENT_VERSION/);
     }
     expect(() => resolveConfig({ ...sale, SITE_URL: "http://experience.example" })).toThrow(/HTTPS/);
+    // 出欠 (#107): its own flag, and only where the bookings made here are.
+    expect(resolveConfig(sale).hostAttendanceEnabled).toBe(false);
+    expect(resolveConfig({ ...sale, EXPERIENCE_HOST_ATTENDANCE_ENABLED: "1" }).hostAttendanceEnabled).toBe(false);
+    expect(resolveConfig({ ...sale, EXPERIENCE_HOST_ATTENDANCE_ENABLED: "true" }).hostAttendanceEnabled).toBe(true);
+    expect(resolveConfig({ ...sale, EXPERIENCE_GUEST_BOOKING_ENABLED: "false", EXPERIENCE_HOST_ATTENDANCE_ENABLED: "true" }).hostAttendanceEnabled).toBe(false);
+    expect(resolveConfig({ ...sale, EXPERIENCE_API_MODE: "mock", EXPERIENCE_HOST_ATTENDANCE_ENABLED: "true" }).hostAttendanceEnabled).toBe(false);
     // The host sees these bookings only in the console's 予約 (#285 slice 8): no sale without it.
     for (const hostConsole of [undefined, "false", "1"]) {
       expect(() => resolveConfig({ ...sale, HOST_CONSOLE_ENABLED: hostConsole })).toThrow("EXPERIENCE_GUEST_BOOKING_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
