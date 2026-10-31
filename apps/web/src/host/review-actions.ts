@@ -2,7 +2,7 @@
 
 import { nihoIdOrNull } from "@/lib/host/providers";
 import { HOST_INVALID_INPUT_TEXT } from "./errors";
-import { reportGuestReview as reportStoredReview, saveGuestReviewReply } from "./guest-reviews-server";
+import { loadMoreGuestReviews, reportGuestReview as reportStoredReview, saveGuestReviewReply, type HostGuestReviewPageView } from "./guest-reviews-server";
 import type { HostActionResult } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT, REVIEW_REPORT_NOTE_LIMIT, REVIEW_REPORT_REASONS } from "./reviews";
 import type { HostReview } from "./types";
@@ -17,6 +17,8 @@ type Saved = { review: HostReview; revision: number };
 
 const invalid = { ok: false, message: HOST_INVALID_INPUT_TEXT } as const;
 const REVIEW_ID_LIMIT = 200;
+/** The store's cursors are short; anything longer is not one. */
+const CURSOR_LIMIT = 200;
 const COMMAND_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A string from the browser, at most `max` characters long. */
@@ -50,4 +52,12 @@ export async function reportGuestReview(input: { providerId: string; reviewId: s
   const commandId = commandIdOrNull(input?.commandId);
   if (!providerId || !reviewId || !reason || note === null || !commandId) return invalid;
   return reportStoredReview(providerId, reviewId, { reason, note, commandId });
+}
+
+/** 続きを見る: the next page of the provider's reviews, from the cursor the screen holds. */
+export async function loadMoreReviewList(input: { providerId: string; cursor: string }): Promise<HostActionResult<HostGuestReviewPageView>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const cursor = text(input?.cursor, CURSOR_LIMIT);
+  if (!providerId || !cursor) return invalid;
+  return loadMoreGuestReviews(providerId, cursor);
 }

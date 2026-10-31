@@ -102,6 +102,7 @@ export type {
   GuestReviewTagValue,
   HostGuestReview,
   HostGuestReviewPage,
+  HostGuestReviewProductSummary,
   PublicGuestReview,
   PublicGuestReviews,
   SubmitGuestReviewInput,

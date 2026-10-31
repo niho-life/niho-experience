@@ -90,7 +90,7 @@ describe("host home", () => {
     expect(homeBadgeCount(homeTodos(MOCK_KITCHEN_EXPERIENCES, [], [], MOCK_TODAY, MOCK_NOW, MOCK_KITCHEN_REVIEWS))).toBe(0);
   });
 
-  it("brings up the published reviews without a reply, the newest first, then the ones NIHO is checking, after the threads (#108)", () => {
+  it("brings up the reviews without a reply, the newest first, after the threads (#108)", () => {
     const rows = homeTodos(MOCK_KITCHEN_EXPERIENCES, MOCK_KITCHEN_BOOKINGS, MOCK_KITCHEN_THREADS, MOCK_TODAY, MOCK_NOW, MOCK_KITCHEN_REVIEWS);
     expect(rows.map((todo) => todo.key)).toEqual([
       "booking-bk-2041",
@@ -98,13 +98,13 @@ describe("host home", () => {
       "thread-th-3010",
       "thread-th-3004",
       "thread-th-3012",
+      "guest-review-rv-5013",
       "guest-review-rv-5020",
       "guest-review-rv-4906",
-      "guest-review-rv-5013",
       "draft-coffee",
       "review-kintsugi",
     ]);
-    expect(rows[5]).toEqual({
+    expect(rows[6]).toEqual({
       key: "guest-review-rv-5020",
       status: { label: "未返信", tone: "draft" },
       aside: { text: "レビュー", tone: "muted" },
@@ -114,8 +114,8 @@ describe("host home", () => {
       approval: null,
       action: { label: "読んで返信する", href: "/host/reviews#review-rv-5020", primary: false },
     });
-    // NIHO is still checking this one: to read, after the ones to answer although it is newer.
-    expect(rows[7]).toMatchObject({ status: { label: "公開前", tone: "wait" }, rating: 4, detail: "由紀 さん · 日本 · Kamakura Community Dinner with Locals", action: { label: "読む", href: "/host/reviews#review-rv-5013" } });
+    // Published when written (owner decision 2026-10-31): the newest comes first, to answer like the others.
+    expect(rows[5]).toMatchObject({ status: { label: "未返信", tone: "draft" }, rating: 4, detail: "由紀 さん · 日本 · Kamakura Community Dinner with Locals", action: { label: "読んで返信する", href: "/host/reviews#review-rv-5013" } });
     // Replied reviews wait for nothing.
     expect(rows.some((todo) => todo.key === "guest-review-rv-4912")).toBe(false);
   });
@@ -123,7 +123,7 @@ describe("host home", () => {
   it("brings up three reviews at most, and one line for the rest", () => {
     const more = [5, 6, 7].map((day): HostReview => ({ ...MOCK_KITCHEN_REVIEWS[0]!, id: `extra-${day}`, writtenAt: `2026-10-0${day}T09:00`, privateNote: null }));
     const rows = homeTodos(MOCK_KITCHEN_EXPERIENCES, [], [], MOCK_TODAY, MOCK_NOW, [...MOCK_KITCHEN_REVIEWS, ...more]).filter((todo) => todo.key.startsWith("guest-review"));
-    expect(rows.map((todo) => todo.key)).toEqual(["guest-review-rv-5020", "guest-review-extra-7", "guest-review-extra-6", "guest-reviews-more"]);
+    expect(rows.map((todo) => todo.key)).toEqual(["guest-review-rv-5013", "guest-review-rv-5020", "guest-review-extra-7", "guest-reviews-more"]);
     expect(rows[3]).toEqual({
       key: "guest-reviews-more",
       status: null,

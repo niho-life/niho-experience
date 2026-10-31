@@ -34,8 +34,8 @@ function ReviewsUnavailable({ homeHref, title = UNAVAILABLE.title, body = UNAVAI
 }
 
 /**
- * レビュー (#108): every review of the provider's experiences, published or still checked by NIHO,
- * with the replies and reports. A screen under ホーム: the menu keeps ホーム selected, phones go
+ * レビュー (#108): every review of the provider's experiences (each published when written), with the
+ * replies and reports. A screen under ホーム: the menu keeps ホーム selected, phones go
  * back with "‹ ホーム". The client screen reads `?experience=` and `#review-{id}` itself.
  */
 export default async function HostReviewsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -45,10 +45,20 @@ export default async function HostReviewsPage({ searchParams }: { searchParams: 
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="レビュー" />;
   const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
-  // 予約者のレビュー kept in the experience DB (#108): the OWNER's reviews, each shown (and open to a reply) from when it was written. While closed, the screen below.
+  // 予約者のレビュー kept in the experience DB (#108): the OWNER's reviews, each shown (and open to a reply) from when it was written, a page at a time. While closed, the screen below.
   const live = await loadGuestReviews(provider, context.session.nihoUserId);
   if (live.status === "live") {
-    return <HostReviews key={provider.id} reviews={live.reviews} experiences={live.experiences} now={live.now} linkProviderId={linkProviderId} providerId={provider.id} live={{ revisions: live.revisions }} />;
+    return (
+      <HostReviews
+        key={provider.id}
+        reviews={live.reviews}
+        experiences={live.experiences}
+        now={live.now}
+        linkProviderId={linkProviderId}
+        providerId={provider.id}
+        live={{ revisions: live.revisions, nextCursor: live.nextCursor, counts: live.counts }}
+      />
+    );
   }
   if (live.status === "error") return <ReviewsUnavailable homeHref={homeHref} title="レビューを読み込めませんでした" body={GUEST_REVIEW_LOAD_FAILED_TEXT} />;
   if (live.status === "owner-only") return <ReviewsUnavailable homeHref={homeHref} title={GUEST_REVIEW_OWNER_ONLY_TEXT} body="オーナーのアカウントでログインすると、レビューを読んで返信できます。" />;
