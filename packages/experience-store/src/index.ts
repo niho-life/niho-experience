@@ -44,6 +44,8 @@ export type {
   GuestQuestionTopic,
   SubmitGuestQuestionInput,
 } from "./guest-questions.ts";
+export { GUEST_MAIL_LIMITS, GUEST_MAIL_TOPIC, GuestMailOutbox } from "./guest-mail-outbox.ts";
+export type { BookingConfirmationClaim, BookingConfirmationEmail, BookingConfirmationRetry, ClaimedBookingConfirmation } from "./guest-mail-outbox.ts";
 export { GUEST_REVIEW_LIMITS, GUEST_REVIEW_REPORT_REASONS, GUEST_REVIEW_TAGS, GuestReviewRepository } from "./guest-reviews.ts";
 export type {
   GuestReviewEligibility,

@@ -277,6 +277,74 @@ describe("admin support console settings", () => {
     }
   });
 
+  it("sends guest mail only in http mode with its own flag, and refuses to start without SMTP, the senders and the job identity (#285)", () => {
+    const mail = {
+      EXPERIENCE_API_MODE: "http",
+      SITE_URL: "https://experience.example",
+      EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused",
+      EXPERIENCE_SMTP_HOST: "smtp.example.com",
+      EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user",
+      EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>",
+      EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+    };
+    const off = {
+      guestMailEnabled: false, guestMailSmtpHost: "", guestMailSmtpPort: 0, guestMailFrom: null, guestMailReplyTo: null,
+      experienceJobsAudience: "", experienceJobsServiceAccountEmail: "",
+    };
+    expect(resolveConfig({})).toMatchObject(off);
+    // The mock never sends; "1" is not "true".
+    expect(resolveConfig({ ...mail, EXPERIENCE_API_MODE: "mock" })).toMatchObject(off);
+    expect(resolveConfig({ ...mail, EXPERIENCE_GUEST_MAIL_ENABLED: "1" })).toMatchObject(off);
+    const on = resolveConfig(mail);
+    expect(on).toMatchObject({
+      guestMailEnabled: true,
+      guestMailSmtpHost: "smtp.example.com",
+      guestMailSmtpPort: 587,
+      guestMailFrom: { name: "NIHO Experiences", address: "experiences@example.com" },
+      guestMailReplyTo: { name: "", address: "support@example.com" },
+      experienceJobsAudience: mail.EXPERIENCE_JOBS_AUDIENCE,
+      experienceJobsServiceAccountEmail: mail.EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL,
+    });
+    // The SMTP credentials are read where they are used, never kept in config.
+    expect(JSON.stringify(on)).not.toMatch(/sample-smtp-user|sample-smtp-password/);
+    expect(resolveConfig({ ...mail, SITE_URL: "http://localhost:3000" }).guestMailEnabled).toBe(true);
+
+    for (const name of [
+      "EXPERIENCE_DATABASE_URL", "EXPERIENCE_SMTP_HOST", "EXPERIENCE_SMTP_PORT", "EXPERIENCE_SMTP_USER", "EXPERIENCE_SMTP_PASSWORD",
+      "EXPERIENCE_MAIL_FROM", "EXPERIENCE_MAIL_REPLY_TO", "EXPERIENCE_JOBS_AUDIENCE", "EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL",
+    ]) {
+      expect(() => resolveConfig({ ...mail, [name]: undefined })).toThrow(name);
+      expect(() => resolveConfig({ ...mail, [name]: " " })).toThrow(name);
+    }
+    for (const [name, value] of [
+      ["EXPERIENCE_SMTP_HOST", "smtp://smtp.example.com"],
+      ["EXPERIENCE_SMTP_HOST", "smtp.example.com:587"],
+      ["EXPERIENCE_SMTP_PORT", "0"],
+      ["EXPERIENCE_SMTP_PORT", "65536"],
+      ["EXPERIENCE_SMTP_PORT", "587a"],
+      ["EXPERIENCE_MAIL_FROM", "NIHO Experiences"],
+      ["EXPERIENCE_MAIL_FROM", "NIHO <experiences@example.com>\r\nBcc: other@example.com"],
+      ["EXPERIENCE_MAIL_REPLY_TO", "support@example.com, other@example.com"],
+      ["EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL", "experience-jobs@example.com"],
+    ] as const) {
+      expect(() => resolveConfig({ ...mail, [name]: value })).toThrow(name);
+    }
+    expect(() => resolveConfig({ ...mail, SITE_URL: "http://experience.example" })).toThrow(/HTTPS/);
+    // A refused setting is named, never repeated.
+    for (const name of ["EXPERIENCE_SMTP_HOST", "EXPERIENCE_SMTP_PORT", "EXPERIENCE_MAIL_FROM"]) {
+      try {
+        resolveConfig({ ...mail, [name]: "bad value <sample-smtp-password>" });
+      } catch (error) {
+        expect(String(error)).not.toMatch(/sample-smtp|bad value/);
+      }
+    }
+  });
+
   it("closes real Admin auth unless its dedicated secret, Firebase key and exact origin are explicit", () => {
     const http = { EXPERIENCE_API_MODE: "http", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: "https://experience.example" };
     const configured = {
