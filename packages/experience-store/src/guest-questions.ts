@@ -559,7 +559,7 @@ export class GuestQuestionRepository {
                 GREATEST(1, ceil(extract(epoch FROM min(created_at) FILTER (WHERE guest_email_key = lower($3)) + interval '60 minutes' - clock_timestamp())))::int AS guest_retry,
                 GREATEST(1, ceil(extract(epoch FROM min(created_at) + interval '60 minutes' - clock_timestamp())))::int AS product_retry
            FROM guest_question_threads
-          WHERE provider_id = $1 AND product_id = $2 AND created_at > clock_timestamp() - interval '60 minutes'`,
+          WHERE provider_id = $1 AND product_id = $2 AND booking_id IS NULL AND created_at > clock_timestamp() - interval '60 minutes'`,
         [providerId, productId, question.guestEmail],
       );
       const count = counts.rows[0]!;

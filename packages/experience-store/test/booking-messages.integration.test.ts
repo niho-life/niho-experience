@@ -333,6 +333,21 @@ describe("PostgreSQL booking messages (#285 slice 6b)", { skip: databaseUrl === 
     });
   });
 
+  it("keeps booking threads out of the hourly limit on new questions before booking", async () => {
+    await withSchema(async (context) => {
+      const { messages, questions } = context;
+      const booking = await confirmed(context);
+      await messages.sendMessage(await session(context, booking.publicBookingId), booking.publicBookingId, { message: "Hello", clientRequestKey: "booking-thread-0001" });
+      const ask = (index: number) => questions.submitQuestion({
+        productSlug: "sample-walk", topic: "FOOD", message: "Is there a vegetarian option?", guestName: "Asker",
+        guestEmail: `asker-${index}@example.com`, clientRequestKey: randomUUID(),
+      });
+      // Thirty new questions an hour per experience, and the booking's thread beside them is not one of the thirty.
+      for (let index = 0; index < 30; index += 1) assert.deepEqual(await ask(index), { status: "received" });
+      await assert.rejects(() => ask(30), StoreRateLimitedError);
+    });
+  });
+
   it("erases a booking's thread with its guest data, not a year after its last message", async () => {
     await withSchema(async (context) => {
       const { pool, guests, messages, questions } = context;
