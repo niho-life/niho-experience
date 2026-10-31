@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -99,6 +99,13 @@ export function guestReviewRepository(): GuestReviewRepository | null {
   if (!config.guestReviewsEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestReviewRepository(pool) : null;
+}
+
+/** 体験の一覧's ★ (#108): every shown review counted by experience, behind レビュー's flag and the experience DB. */
+export function guestReviewRatings(): GuestReviewRatings | null {
+  if (!config.guestReviewsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestReviewRatings(pool) : null;
 }
 
 /** 旅行者の予約 (#285, docs/guest-booking.md): null until its flag is on and the experience DB is configured. */

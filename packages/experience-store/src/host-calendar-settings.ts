@@ -147,15 +147,6 @@ export class HostCalendarSettings {
     });
   }
 
-  /** The experiences' public paths by id (体験の一覧 joins NIHO's pages to this site's products by slug). OWNER only. */
-  async productSlugs(actor: HostActor): Promise<Readonly<Record<string, string>>> {
-    return withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
-      const result = await client.query<DbRow>("SELECT id, slug FROM experience_products WHERE provider_id = $1", [actor.providerId]);
-      return Object.fromEntries(result.rows.map((row) => [text(row, "id"), text(row, "slug")]));
-    });
-  }
-
   /** The feed's salt and digest, or null while the provider has none. OWNER only. */
   async getFeed(actor: HostActor): Promise<HostCalendarFeedRecord | null> {
     return withTransaction(this.#pool, async (client) => {

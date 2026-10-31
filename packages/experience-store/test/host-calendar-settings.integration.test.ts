@@ -141,7 +141,6 @@ describe("PostgreSQL host calendar settings (#109)", { skip: databaseUrl === und
         await assert.rejects(() => settings.issueFeed(actor, { salt: randomBytes(32), tokenHash: hashOf("other") }), StoreAccessDeniedError);
         await assert.rejects(() => settings.revokeFeed(actor), StoreAccessDeniedError);
         await assert.rejects(() => settings.googleConnection(actor), StoreAccessDeniedError);
-        await assert.rejects(() => settings.productSlugs(actor), StoreAccessDeniedError);
       }
       assert.notEqual(await settings.readFeed(hashOf("second-token"), window(-1, 30), accept), null);
 
@@ -202,8 +201,6 @@ describe("PostgreSQL host calendar settings (#109)", { skip: databaseUrl === und
       // Another provider's feed reads only its own (none here).
       assert.deepEqual(await settings.readFeed(hashOf("feed-b"), window(-1, 30), accept), { providerId: "provider-b", bookings: [] });
 
-      assert.deepEqual(await settings.productSlugs(ownerA), { walk: "sample-walk" });
-      assert.deepEqual(await settings.productSlugs(ownerB), { tea: "sample-tea" });
     });
   });
 
