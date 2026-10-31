@@ -176,6 +176,34 @@ function hostPushJobSettings(apiMode: "mock" | "http", hostPushEnabled: boolean,
   return { enabled: true, audience, serviceAccountEmail };
 }
 
+/** The terms version a traveler agrees to (consent.agreedVersion, 1-100 characters): printable ASCII without spaces. */
+const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
+
+/**
+ * 旅行者の予約 on this site (#285, docs/guest-booking.md): availability and checkout from the experience DB with
+ * Stripe Checkout on the provider's account. HTTP only. Turned on without everything a sale needs, the server
+ * stops at start-up instead of taking bookings it cannot charge or confirm. Error messages never echo values.
+ */
+function guestBookingSettings(apiMode: "mock" | "http", env: Env): { enabled: boolean; consentVersion: string } {
+  if (apiMode !== "http" || env.EXPERIENCE_GUEST_BOOKING_ENABLED !== "true") return { enabled: false, consentVersion: "" };
+  for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET"]) {
+    if (!env[name]?.trim()) throw new Error(`EXPERIENCE_GUEST_BOOKING_ENABLED=true needs ${name} in http mode`);
+  }
+  const consentVersion = env.EXPERIENCE_BOOKING_CONSENT_VERSION?.trim() ?? "";
+  if (!BOOKING_CONSENT_VERSION.test(consentVersion)) {
+    throw new Error("EXPERIENCE_GUEST_BOOKING_ENABLED=true needs EXPERIENCE_BOOKING_CONSENT_VERSION (1-100 printable characters, no spaces) in http mode");
+  }
+  // Stripe returns the guest to this origin, which must be https (loopback http in development).
+  let siteOrigin: string;
+  try {
+    siteOrigin = new URL(env.SITE_URL ?? "http://localhost:3000").origin;
+  } catch {
+    throw new Error("SITE_URL must be an absolute URL");
+  }
+  deploymentOrigin(siteOrigin, "SITE_URL (for EXPERIENCE_GUEST_BOOKING_ENABLED)");
+  return { enabled: true, consentVersion };
+}
+
 /** Pure so it can be unit-tested; see config.ts for the server instance. */
 export function resolveConfig(env: Env) {
   const apiMode = env.EXPERIENCE_API_MODE === "http" ? "http" : "mock";
@@ -236,6 +264,9 @@ export function resolveConfig(env: Env) {
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
   // console is on and メッセージ is not showing NIHO's booking messages instead.
   const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && !experienceProviderOperationsApiEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
+  // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
+  // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted.
+  const guestBooking = guestBookingSettings(apiMode, env);
   const hostSessionSecret = env.HOST_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
@@ -330,6 +361,9 @@ export function resolveConfig(env: Env) {
     experienceTranslateApiEnabled,
     hostNotificationSettingsEnabled,
     guestQuestionsEnabled,
+    guestBookingEnabled: guestBooking.enabled,
+    // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
+    guestBookingConsentVersion: guestBooking.consentVersion,
     // Comma-separated keys: the first seals new cookies, the rest still open old ones while keys rotate.
     hostSessionSecret,
     adminSessionSecret,

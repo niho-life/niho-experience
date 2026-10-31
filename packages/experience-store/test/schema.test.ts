@@ -352,4 +352,17 @@ describe("database invariants", () => {
     assert.match(sql, /a booking checkout session is set once/);
     assert.doesNotMatch(sql, /outbox_messages/);
   });
+
+  it("keeps NIHO's fee per provider, tied to the support setting, without an actor column (#285)", async () => {
+    const sql = await readFile(new URL("../migrations/0025_provider_sale_settings.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.doesNotMatch(sql, /ALTER TABLE|DROP |outbox_messages/i);
+    const table = sql.match(/CREATE TABLE provider_sale_settings \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(table, /provider_id text PRIMARY KEY REFERENCES experience_providers\(id\)/);
+    assert.match(table, /platform_fee_basis_points integer NOT NULL CHECK \(platform_fee_basis_points IN \(1000, 1500\)\)/);
+    assert.match(table, /\(support_enabled AND platform_fee_basis_points = 1500\)\s+OR \(NOT support_enabled AND platform_fee_basis_points = 1000\)/);
+    assert.match(table, /version bigint NOT NULL DEFAULT 1/);
+    assert.doesNotMatch(table, /niho_user_id|email|default (true|false)/i);
+  });
 });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expandOccurrences, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "../src/errors.ts";
-import { buildSnapshots, effectiveGoogleSyncStatus, normalizeCurrency, validateBusySync } from "../src/validation.ts";
+import { buildSnapshots, chargeablePlatformFee, effectiveGoogleSyncStatus, normalizeCurrency, platformFeeAmount, validateBusySync } from "../src/validation.ts";
 
 const rule: ScheduleRule = {
   id: "tea-am",
@@ -62,5 +62,30 @@ describe("store boundary validation", () => {
     assert.equal(snapshots.occurrenceSnapshot.startUtc, occurrence.startUtc);
     assert.equal(snapshots.sellerSnapshot.experienceProviderId, "provider-a");
     assert.equal(normalizeCurrency("usd"), "USD");
+  });
+
+  it("rounds NIHO's fee down to the yen and keeps it a fee Stripe accepts (#285)", () => {
+    assert.equal(platformFeeAmount(3333, 1000), 333);
+    assert.equal(platformFeeAmount(3333, 1500), 499);
+    assert.equal(platformFeeAmount(50, 1500), 7);
+    assert.equal(chargeablePlatformFee(50, 1000), true);
+    // Below ¥10 at 10 % (¥7 at 15 %) the fee would be ¥0: Stripe takes no such application fee.
+    assert.equal(chargeablePlatformFee(9, 1000), false);
+    assert.equal(chargeablePlatformFee(7, 1500), true);
+    assert.equal(chargeablePlatformFee(6, 1500), false);
+
+    const occurrence = expandOccurrences({ rule, fromDate: "2099-01-01", toDate: "2099-01-01" })[0]!;
+    const product = {
+      providerId: "provider-a", currency: "JPY", unitAmount: 3333, cancellationTermsRef: "terms-v1",
+      sellerNihoAccountRef: "niho-seller-a", stripeConnectAccountRef: "acct_synthetic", sellerDisplayName: "Synthetic Seller",
+    };
+    const guest = (supportEnabled: boolean, basisPoints: 1000 | 1500) => ({
+      breakdown: { adultCount: 1, childCount: 1, childUnitAmount: 0 }, cancellationPolicy: "NONE" as const, platformFee: { supportEnabled, basisPoints },
+    });
+    assert.deepEqual(buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", product, guest(true, 1500)).pricingSnapshot.platformFee, {
+      supportEnabled: true, basisPoints: 1500, amount: 499,
+    });
+    assert.throws(() => buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", product, guest(true, 1000)), StoreValidationError);
+    assert.throws(() => buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", { ...product, unitAmount: 6 }, guest(true, 1500)), StoreValidationError);
   });
 });

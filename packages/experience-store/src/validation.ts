@@ -8,7 +8,7 @@ import {
   type Occurrence,
 } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "./errors.ts";
-import type { GuestCancellationPolicy, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
+import type { GuestCancellationPolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -75,6 +75,29 @@ export function effectiveGoogleSyncStatus(
 export interface GuestPricingInput {
   readonly breakdown: PricingBreakdown;
   readonly cancellationPolicy: GuestCancellationPolicy;
+  /** The provider's sale settings at booking; the amount follows from the total. */
+  readonly platformFee: Omit<PlatformFeeSnapshot, "amount">;
+}
+
+/**
+ * NIHO's fee on a total, in yen. Rounded down: docs/api-contract.md (§9.2, §9.3) states the rates but no
+ * rounding, and rounding down never charges the provider more than the rate.
+ */
+export function platformFeeAmount(totalAmount: number, basisPoints: number): number {
+  return Math.floor((totalAmount * basisPoints) / 10_000);
+}
+
+/** Stripe takes an application fee only above zero and below the charge. */
+export function chargeablePlatformFee(totalAmount: number, basisPoints: number): boolean {
+  const amount = platformFeeAmount(totalAmount, basisPoints);
+  return Number.isSafeInteger(amount) && amount >= 1 && amount < totalAmount;
+}
+
+function guestPlatformFee(settings: GuestPricingInput["platformFee"], totalAmount: number): PlatformFeeSnapshot {
+  const { supportEnabled, basisPoints } = settings;
+  if (basisPoints !== (supportEnabled ? 1500 : 1000)) throw new StoreValidationError("The platform fee does not match the support setting.");
+  if (!chargeablePlatformFee(totalAmount, basisPoints)) throw new StoreValidationError("The platform fee must be at least 1 and below the booking total.");
+  return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints) };
 }
 
 export function buildSnapshots(
@@ -116,7 +139,11 @@ export function buildSnapshots(
       seats,
       totalAmount,
       cancellationTermsRef: product.cancellationTermsRef,
-      ...(guest === undefined ? {} : { breakdown: { ...guest.breakdown }, cancellationPolicy: guest.cancellationPolicy }),
+      ...(guest === undefined ? {} : {
+        breakdown: { ...guest.breakdown },
+        cancellationPolicy: guest.cancellationPolicy,
+        platformFee: guestPlatformFee(guest.platformFee, totalAmount),
+      }),
     },
     sellerSnapshot: {
       experienceProviderId: product.providerId,

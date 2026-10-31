@@ -2,7 +2,8 @@ import { ASK_HOST_TOPICS, askHostInputProblem, type AskHostTopic } from "@niho-e
 import { StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { guestQuestionRepository } from "@/lib/experience/store-server";
-import { clientRequestKey, fromThisSite, guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody } from "@/lib/experience/guest-questions-http";
+import { fromThisSite } from "@/lib/experience/public-http";
+import { clientRequestKey, guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody } from "@/lib/experience/guest-questions-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
