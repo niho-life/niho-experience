@@ -47,6 +47,32 @@ describe("この口座への入金", () => {
     expect(panel.rows.map((row) => row.date)).toEqual(["2026-11-30", "2026-11-01"]);
   });
 
+  it("this month: a payout due last month and still on its way is in 入金予定 and the 明細, once; when paid, it is last month's", () => {
+    const OCTOBER = { year: 2026, month: 10 };
+    // What this month's read has: last month's payouts too (the read looks back to October 1).
+    const lastMonth = (status: ConnectedPayout["status"]) => read({
+      balance: [{ currency: "JPY", available: 5_000, pending: 1_000 }],
+      payouts: [
+        payout({ key: "b000000000000001", amount: 40_500, status: "PAID", arrivalDateUtc: "2026-11-05T00:00:00.000Z" }),
+        // Due 10/31 in Japan, and Stripe still says in transit on 11/1: it has left the balance already.
+        payout({ key: "b000000000000002", amount: 12_000, status, arrivalDateUtc: "2026-10-31T00:00:00.000Z" }),
+        payout({ key: "b000000000000003", amount: 9_000, status: "PAID", arrivalDateUtc: "2026-10-20T00:00:00.000Z" }),
+        payout({ key: "b000000000000004", amount: 6_000, status: "FAILED", arrivalDateUtc: "2026-10-15T00:00:00.000Z" }),
+      ],
+    });
+    const inTransit = sitePayoutsPanel(lastMonth("IN_TRANSIT"), NOVEMBER, true);
+    expect(inTransit.figures).toEqual([{ label: "入金予定", value: "¥18,000" }, { label: "入金済み", value: "¥40,500" }]);
+    expect(inTransit.rows.map((row) => [row.key, row.date, row.status.label])).toEqual([["payout:b000000000000001", "2026-11-05", "入金済み"], ["payout:b000000000000002", "2026-10-31", "送金中"]]);
+    expect(sitePayoutsPanel(lastMonth("PENDING"), NOVEMBER, true).figures[0]).toEqual({ label: "入金予定", value: "¥18,000" });
+    // October itself still shows it on its day, not yet in 入金済み.
+    expect(sitePayoutsPanel(lastMonth("IN_TRANSIT"), OCTOBER, false).figures).toEqual([{ label: "入金済み", value: "¥9,000" }]);
+
+    const paid = sitePayoutsPanel(lastMonth("PAID"), NOVEMBER, true);
+    expect(paid.figures).toEqual([{ label: "入金予定", value: "¥6,000" }, { label: "入金済み", value: "¥40,500" }]);
+    expect(paid.rows.map((row) => row.date)).toEqual(["2026-11-05"]);
+    expect(sitePayoutsPanel(lastMonth("PAID"), OCTOBER, false).figures).toEqual([{ label: "入金済み", value: "¥21,000" }]);
+  });
+
   it("a debit is red with a minus; another currency stays out of the numbers, with a note", () => {
     const panel = sitePayoutsPanel(read({
       balance: [{ currency: "JPY", available: -3_000, pending: 0 }, { currency: "USD", available: 0, pending: 500 }],

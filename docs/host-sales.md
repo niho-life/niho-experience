@@ -40,10 +40,10 @@
 
 mock の「入金予定・入金済み・口座入金」に当たるものを、Stripe から読んで出す。
 
-- **何を読むか**：提供者の Connect 口座の残高（`GET /v1/balance`）と、着金日（`arrival_date`）がその月の入金（`GET /v1/payouts`、1 回 100 件まで）。どちらも `Stripe-Account` を付け、プラットフォームの鍵 `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` で読む。GET だけで、Stripe に何も書かない（`readConnectedPayouts`、`packages/experience-payments`）。
+- **何を読むか**：提供者の Connect 口座の残高（`GET /v1/balance`）と、着金日（`arrival_date`）がその月の入金（`GET /v1/payouts`、1 回 100 件まで）。今月は、前の月の 1 日から先の入金を終わり無しで読む（前の月に着く予定で、まだ送金中のものを入金予定に入れるため）。どちらも `Stripe-Account` を付け、プラットフォームの鍵 `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` で読む。GET だけで、Stripe に何も書かない（`readConnectedPayouts`、`packages/experience-payments`）。
 - **どの口座か**：experience DB で、その提供者の「このサイトで売る商品」（販売条件のある商品）の `stripe_connect_account_ref` と、このサイトの予約の seller snapshot の口座（`listPayoutAccountsForHost`。OWNER の確認つき、5 口座まで）。ふつうは 1 口座。2 口座以上なら合計し、「Stripe の口座が N つあり、その合計です。」と注記する。
 - **見せ方**：この口座には NIHO で売った分の入金も入るので、このサイトの集計・明細の下に、見出し「この口座への入金」の別の区画として出す。区画の先頭に「Stripe の口座に入る入金です。NIHO で販売している体験の分も同じ口座に入るため、このサイトの売上・受取額とは一致しません。」。
-  - 今月：「入金予定」（Stripe の残高の available と pending、送金中の入金の合計）と「入金済み」（今月に着金した入金）。今月は、来月に着く送金中の入金も明細に出す。
+  - 今月：「入金予定」（Stripe の残高の available と pending、送金中の入金の合計）と「入金済み」（今月に着金した入金）。今月は、来月に着く送金中の入金と、前の月の着金予定日を過ぎてもまだ送金中の入金（10/31 着の予定で 11/1 に送金中など。残高からは出ているため）も、入金予定と明細に入れる。前の月の入金は、入金済みになればその月の入金済みに入り、今月には出さない。
   - 前の月：「入金済み」だけ。
   - 明細：着金日（日本時間）ごとに「口座入金」（負の額は「口座からの引き落とし」、赤字）、状態は「送金中」（`pending`・`in_transit`）・「入金済み」・「入金できず」・「取消」。Stripe は入金済みのあとで失敗にすることがあり、読んだ時点の Stripe の状態を出す。
   - 円以外は明細に通貨のまま出し、集計に入れない（注記）。100 件を超える月は「一部だけ」と注記する。

@@ -66,10 +66,14 @@ const DETAIL: Record<ConnectedPayoutStatus, string> = {
 
 const arrivalMonth = (payout: ConnectedPayout) => monthKey(japanMonthOf(payout.arrivalDateUtc));
 
-/** The month's payouts: those arriving in it, and in this month also those still on their way to a later day. */
+/**
+ * The month's payouts: those arriving in it, and in this month also every one still on its way, whether due on a later
+ * day or on an earlier one Stripe has not marked paid yet (due 10/31, still in transit on 11/1: it has left the balance,
+ * so 入金予定 counts it here). An earlier month's payout that is paid, failed or canceled stays that month's.
+ */
 function monthPayouts(read: SitePayoutsRead, month: SalesMonth, current: boolean): ConnectedPayout[] {
   const key = monthKey(month);
-  return read.payouts.filter((payout) => arrivalMonth(payout) === key || (current && arrivalMonth(payout) > key && ON_ITS_WAY.has(payout.status)));
+  return read.payouts.filter((payout) => arrivalMonth(payout) === key || (current && ON_ITS_WAY.has(payout.status)));
 }
 
 function rowOf(payout: ConnectedPayout): SalesRow {
@@ -87,7 +91,8 @@ function rowOf(payout: ConnectedPayout): SalesRow {
 
 /**
  * The month's 入金済み (payouts in yen Stripe paid that month) and, for this month only, 入金予定: the yen balance
- * (available and not yet available) and the payouts still on their way. A paid payout may still turn failed: Stripe's
+ * (available and not yet available) and the payouts still on their way (each once, whatever month it is due in: a
+ * payout out of the balance is not in it any more). A paid payout may still turn failed: Stripe's
  * word at the time of reading is what is shown. 明細: each payout on its arrival day in Japan, the latest first.
  */
 export function sitePayoutsPanel(read: SitePayoutsRead, month: SalesMonth, current: boolean): SitePayoutsPanel {

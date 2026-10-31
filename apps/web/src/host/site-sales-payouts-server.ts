@@ -9,7 +9,7 @@ import type { HostSession } from "@/lib/host/session";
 import { todayInJapan } from "./format";
 import { MOCK_TODAY } from "./mock/bookings";
 import { MOCK_SITE_PAYOUTS } from "./mock/site-sales";
-import { monthKey, type SalesMonth } from "./sales";
+import { addMonths, monthKey, type SalesMonth } from "./sales";
 import { ownerActor } from "./site-bookings-server";
 import { japanMonthWindow, requestedSiteSalesMonth } from "./site-sales";
 import {
@@ -116,15 +116,20 @@ function errorName(error: unknown): string {
 }
 
 /**
- * この口座への入金 for `month` (the month 売上 shows): the payouts arriving in it (this month: also those still on their
- * way), and for this month the balance. The store's OWNER check failing leaves the section out, as 売上 does.
+ * この口座への入金 for `month` (the month 売上 shows): the payouts arriving in it, and for this month the balance and
+ * every payout still on its way. This month's read has no end (those due later) and starts at the previous month's
+ * first day: a payout due last month that Stripe has not marked paid yet (due 10/31, still in transit on 11/1) has left
+ * the balance already, so 入金予定 would miss it otherwise. Stripe settles a payout on or soon after its arrival day, so
+ * a month back is ample, and the read stays one page (100) of about two months of payouts. The store's OWNER check
+ * failing leaves the section out, as 売上 does.
  */
 export async function loadSitePayouts(provider: Pick<HostProvider, "id" | "memberRole">, session: Pick<HostSession, "nihoUserId" | "mockScenario">, month: SalesMonth): Promise<HostSitePayoutsLoad> {
   try {
     const reader = await readerFor(provider, session);
     if (!reader) return { status: "closed" };
     const current = monthKey(month) === monthKey(requestedSiteSalesMonth(null, reader.today));
-    const { from, to } = japanMonthWindow(month);
+    const { from } = japanMonthWindow(current ? addMonths(month, -1) : month);
+    const { to } = japanMonthWindow(month);
     const read = await withinDeadline(reader.read({ from: Date.parse(from) / 1000, before: current ? null : Date.parse(to) / 1000 }));
     if (read === "unreachable") {
       console.error("Experience host payouts read failed", { error: "unreachable" });

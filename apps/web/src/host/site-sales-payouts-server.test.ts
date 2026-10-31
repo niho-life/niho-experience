@@ -57,13 +57,40 @@ afterEach(() => {
 });
 
 describe("この口座への入金 from Stripe", () => {
-  it("reads this month's payouts with no end and the balance, with the platform key, after the store's OWNER check", async () => {
+  it("reads this month's payouts from last month's first day with no end, and the balance, with the platform key, after the store's OWNER check", async () => {
     const load = await loadSitePayouts(OWNER, SESSION, NOVEMBER);
     expect(state.store!.listPayoutAccountsForHost).toHaveBeenCalledWith(ACTOR);
-    expect(state.stripe).toHaveBeenCalledWith({ accountId: ACCOUNT, arrivalFrom: NOVEMBER_FROM, arrivalBefore: null, platformStripeKey: "sk_test_synthetic", timeoutMs: 3_500 });
+    expect(state.stripe).toHaveBeenCalledWith({ accountId: ACCOUNT, arrivalFrom: OCTOBER_FROM, arrivalBefore: null, platformStripeKey: "sk_test_synthetic", timeoutMs: 3_500 });
     expect(load).toMatchObject({ status: "live", panel: { figures: [{ label: "入金予定", value: "¥3,000" }, { label: "入金済み", value: "¥40,500" }] } });
     // Nothing of the account reaches the page.
     expect(JSON.stringify(load)).not.toContain("acct_");
+  });
+
+  it("on 11/1, counts in 入金予定 a payout due 10/31 that is still in transit; once paid, it is October's", async () => {
+    vi.setSystemTime(new Date("2026-11-01T03:00:00.000Z"));
+    const due1031 = (status: string) => ({
+      kind: "read",
+      balance: [{ currency: "JPY", available: 1_000, pending: 2_000 }],
+      payouts: [
+        { key: "c000000000000001", amount: 12_000, currency: "JPY", arrivalDateUtc: "2026-10-31T00:00:00.000Z", status },
+        { key: "c000000000000002", amount: 9_000, currency: "JPY", arrivalDateUtc: "2026-10-20T00:00:00.000Z", status: "PAID" },
+      ],
+      more: false,
+    });
+    state.stripe.mockResolvedValueOnce(due1031("IN_TRANSIT"));
+    const inTransit = await loadSitePayouts(OWNER, SESSION, NOVEMBER);
+    expect(state.stripe).toHaveBeenLastCalledWith(expect.objectContaining({ arrivalFrom: OCTOBER_FROM, arrivalBefore: null }));
+    expect(inTransit).toMatchObject({ status: "live", panel: { figures: [{ label: "入金予定", value: "¥15,000" }, { label: "入金済み", value: "¥0" }] } });
+    expect(inTransit.status === "live" && inTransit.panel.rows.map((row) => [row.date, row.status.label])).toEqual([["2026-10-31", "送金中"]]);
+
+    state.stripe.mockResolvedValueOnce(due1031("PAID"));
+    const paid = await loadSitePayouts(OWNER, SESSION, NOVEMBER);
+    expect(paid).toMatchObject({ status: "live", panel: { figures: [{ label: "入金予定", value: "¥3,000" }, { label: "入金済み", value: "¥0" }], rows: [] } });
+
+    state.stripe.mockResolvedValueOnce(due1031("PAID"));
+    const october = await loadSitePayouts(OWNER, SESSION, OCTOBER);
+    expect(state.stripe).toHaveBeenLastCalledWith(expect.objectContaining({ arrivalFrom: OCTOBER_FROM, arrivalBefore: NOVEMBER_FROM }));
+    expect(october).toMatchObject({ status: "live", panel: { figures: [{ label: "入金済み", value: "¥21,000" }] } });
   });
 
   it("reads an earlier month within it, and sums the provider's accounts", async () => {
