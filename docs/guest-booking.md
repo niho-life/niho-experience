@@ -2,7 +2,7 @@
 
 [#285](https://github.com/niho-life/niho-experience/issues/285) の現行設計。[ADR 0002](adr/0002-experience-domain-ownership.md)（2026-10-27）により、体験の開催枠・予約・決済の状態は niho-experience が正本を持つ。旅行者の予約を NIHO の公開 API から experience DB（`packages/experience-store`）へ移す。オーナー決定（2026-10-31）：商品ごとに切り替え、切り替えた商品は NIHO で売らない。予約者の連絡先は体験の 1 年後に消す。NIHO の手数料はサポート OFF 10%・ON 15%（決済手数料込み）で、予約を受けた時点の値を予約ごとに固定する。
 
-**現在地（第8段）**：販売条件・手数料の設定・公開の残席・仮押さえ（第1段、`0023`）に、提供者ごとの手数料設定（`0025`）、Stripe Checkout の作成、公開の経路 2 本を足した（第2段）。第3段で旅行者の画面をつないだ：flag が on のとき、ここで売る商品は残席・価格・質問・規約の版を experience DB から読み、このサイトの経路で申し込み、Stripe を経て `/booking/return` に戻る。ほかの商品と flag off・mock（プレビューと e2e）は今までどおり NIHO の API を読む（下の「画面がどこから読むか」）。第4段で、支払われずに終わった Checkout の席を webhook で戻し、期限を過ぎた仮押さえを次の申込で片付けるようにした（`0026`、下の「放棄された Checkout と遅れた支払い」）。第5段で、確定した予約の確認メールと、予約者の情報・質問を 1 年後に消す job を足した（migration なし、下の「予約者へのメール」）。続けて、確定した予約をホストのアプリに push し（下の「ホストへの通知」）、予約前の質問を Claude API で訳すようにした（migration なし、[guest-questions.md](guest-questions.md)）。第8段で、ここで受けた予約を提供者の OWNER がホストの画面の「予約」で読めるようにし、続けてホームの開催・次にすることと「この回」（予約者の電話はここだけ）にも入れた（読むだけ、migration なし、下の「ホストの画面」）。第6・7段（予約者の予約ページ、取消と返金）はまだ無い。
+**現在地（第8段）**：販売条件・手数料の設定・公開の残席・仮押さえ（第1段、`0023`）に、提供者ごとの手数料設定（`0025`）、Stripe Checkout の作成、公開の経路 2 本を足した（第2段）。第3段で旅行者の画面をつないだ：flag が on のとき、ここで売る商品は残席・価格・質問・規約の版を experience DB から読み、このサイトの経路で申し込み、Stripe を経て `/booking/return` に戻る。ほかの商品と flag off・mock（プレビューと e2e）は今までどおり NIHO の API を読む（下の「画面がどこから読むか」）。第4段で、支払われずに終わった Checkout の席を webhook で戻し、期限を過ぎた仮押さえを次の申込で片付けるようにした（`0026`、下の「放棄された Checkout と遅れた支払い」）。第5段で、確定した予約の確認メールと、予約者の情報・質問を 1 年後に消す job を足した（migration なし、下の「予約者へのメール」）。続けて、確定した予約をホストのアプリに push し（下の「ホストへの通知」）、予約前の質問を Claude API で訳すようにした（migration なし、[guest-questions.md](guest-questions.md)）。第8段で、ここで受けた予約を提供者の OWNER がホストの画面の「予約」で読めるようにし、続けてホームの開催・次にすることと「この回」（予約者の電話はここだけ）にも入れた（読むだけ、migration なし、下の「ホストの画面」）。第6段の前半（6a）で、確認メールのリンクから開く予約者の予約ページ（読むだけ）と「Find your booking」を足した（`0029`、下の「予約者の予約ページ」）。予約ページでのホストとのメッセージ（6b）と第7段（取消と返金）はまだ無い。
 
 ## 流れ
 
@@ -45,15 +45,49 @@ NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だ
 
 このサイトで売った予約の確認メールは、NIHO ではなくこのサイトが送る。NIHO で売る商品の予約は今までどおり NIHO が送る。
 
-- **いつ・何を**：webhook が `confirmBookingPayment` で予約を確定すると、同じトランザクションで outbox に `booking.confirmed` が積まれる（payload は予約 ID だけ）。メール job はこのサイトの予約（`booking_guests` の行がある予約）の行だけを `GuestMailOutbox` で取り、予約者に「Your booking is confirmed: {体験}, {日付} {時刻}」を送る。本文は体験名、日付と開始時刻（日本時間。ホストが動かした回はその時刻）、大人と子どもの人数、支払った合計、予約時に固定した取消条件（無料取消の期限の時刻つき。期限を過ぎていれば返金なしと書く）、ホスト名、予約番号（public booking id）、体験ページへのリンク。集合場所は書かない（今は NIHO の内容のため）。ホストが集合の詳細を伝えることと、このメールへの返信は NIHO サポートに届くことを書く。ホストの返信（予約前の質問）も同じ job が送る（[guest-questions.md](guest-questions.md)）。
+- **いつ・何を**：webhook が `confirmBookingPayment` で予約を確定すると、同じトランザクションで outbox に `booking.confirmed` が積まれる（payload は予約 ID だけ）。メール job はこのサイトの予約（`booking_guests` の行がある予約）の行だけを `GuestMailOutbox` で取り、予約者に「Your booking is confirmed: {体験}, {日付} {時刻}」を送る。本文は体験名、日付と開始時刻（日本時間。ホストが動かした回はその時刻）、大人と子どもの人数、支払った合計、予約時に固定した取消条件（無料取消の期限の時刻つき。期限を過ぎていれば返金なしと書く）、ホスト名、予約番号（public booking id）、体験ページへのリンク。集合場所は書かない（今は NIHO の内容のため）。ホストが集合の詳細を伝えることと、このメールへの返信は NIHO サポートに届くことを書く。予約ページ（第6段）が開いているときは、送る直前に発行した一度きりの grant で「View your booking」のリンク（`{SITE_URL}/bookings/open#g=<grant>`）を入れる（下の「予約者の予約ページ」）。ホストの返信（予約前の質問）も同じ job が送る（[guest-questions.md](guest-questions.md)）。
 - **送り方**：NIHO と同じ SMTP 事業者を experience 専用の資格情報で使い、nodemailer で送る（`apps/web/src/lib/mail/`）。From は `EXPERIENCE_MAIL_FROM`（表示名とアドレス）、Reply-To は `EXPERIENCE_MAIL_REPLY_TO`（NIHO サポート）。本文は英語の text と最小限の HTML で、画像・計測・外部の読み込みは無く、リンクは `SITE_URL` からの絶対 URL。予約者の名前は挨拶にだけ出し、アドレスは宛先にだけ使う。port 465 は最初から TLS、ほかの port は STARTTLS 必須（平文では送らない）。`Auto-Submitted: auto-generated` を付ける（不在の自動返信を抑える）。nodemailer のログは使わない（宛先や本文が出るため）。
 - **失敗**：接続・timeout・TLS・ログイン・送信者の拒否・4xx は一時的な失敗で、2・4・8・16・32・60・60 分待って送り直し、8 回目で諦める（約 3 時間）。宛先や本文への 5xx は恒久的な失敗で、送り直さずに閉じる。SMTP への接続やログイン自体が失敗した回は、残りのメールを試さずに送り直しへ回す（障害時に 1 回の実行がメールの数だけ timeout を待たないため）。予約者の情報がもう消えている、または予約がもう確定でない（取消済み）ときは送らずに閉じる。送ったあとに記録できずに lease（2 分）が切れると、もう一度送ることがある（at-least-once）。
-- **戻り先のページ**：`/booking/return` は NIHO の予約とこのサイトの予約の両方が戻る。どちらにも正しいように送り手を名乗らず、両方が送るものだけを書く（確認のメール、集合の詳細、当日）。NIHO だけが送る前日のリマインダーと予約ページへのリンクの約束は外した。予約の完了は今までどおり示さない。
+- **戻り先のページ**：`/booking/return` は NIHO の予約とこのサイトの予約の両方が戻る。どちらにも正しいように送り手を名乗らず、両方が送るものだけを書く（確認のメール、集合の詳細、当日）。NIHO だけが送る前日のリマインダーの約束は外した。確認メールに予約へのリンクがあることは、第6段から両方に当てはまる（NIHO は NIHO の予約ページ、このサイトは下の予約ページ）ので書く。予約の完了は今までどおり示さない。
 - **`booking.confirmed` の処理済み**：このサイトの予約の行の `processed_at` はこの job が使う。ほかの予約の行と、ほかの topic には触らない（ホストの push job がこの topic に触らないのと同じ）。同じ出来事を別に処理するもの（ホストへの通知など）は別の topic を積む。outbox の行は処理済みを 1 つしか持たないため（ホストへの push は `host.notify.new_booking`、下の「ホストへの通知」）。
-- **job**：`POST /internal/experience-jobs/v1/drain`。Cloud Scheduler が毎分、専用のサービスアカウントの Google ID token（audience は `EXPERIENCE_JOBS_AUDIENCE`）で呼ぶ。ホストの push job（`/internal/host-push/v1/drain`）と同じ形。1 回の実行は ①ホストの返信 ②予約の確認 ③旅行者の質問・答えの日本語訳（10 件まで、`EXPERIENCE_TRANSLATION_ENABLED` のときだけ。[guest-questions.md](guest-questions.md) の「翻訳」）④予約者の情報の消去 ⑤質問の消去 の順で、各段は独立している（1 つが失敗しても残りは動く）。①②はメールを 1 件ずつ送る直前に取る（リースは 1 通の送信だけを覆い、待っているメールのリースが切れて別の実行に取り直されることはない）。各段 20 件・40 秒まで、一時的な失敗が出たらその段の残りは次の回へ回す。④⑤は各 200 件まで。応答と 1 行のログは件数だけで、宛先・名前・token・本文・DB の文は出さない。どれかの段が失敗した回は件数とともに 503。flag が off なら 404、設定したサービスアカウント以外は 401、Google の鍵・experience DB・SMTP の資格情報が無ければ 503。
+- **job**：`POST /internal/experience-jobs/v1/drain`。Cloud Scheduler が毎分、専用のサービスアカウントの Google ID token（audience は `EXPERIENCE_JOBS_AUDIENCE`）で呼ぶ。ホストの push job（`/internal/host-push/v1/drain`）と同じ形。1 回の実行は ①ホストの返信 ②予約の確認 ③「Find your booking」のリンク（第6段、予約ページが開いているときだけ）④旅行者の質問・答えの日本語訳（10 件まで、`EXPERIENCE_TRANSLATION_ENABLED` のときだけ。[guest-questions.md](guest-questions.md) の「翻訳」）⑤予約者の情報の消去 ⑥質問の消去 ⑦予約ページの使えなくなった grant とセッションの削除（第6段）の順で、各段は独立している（1 つが失敗しても残りは動く）。①②③はメールを 1 件ずつ送る直前に取る（リースは 1 通の送信だけを覆い、待っているメールのリースが切れて別の実行に取り直されることはない）。各段 20 件・40 秒まで、一時的な失敗が出たらその段の残りは次の回へ回す。⑤⑥は各 200 件まで、⑦は grant とセッションを各 500 件まで。応答と 1 行のログは件数だけで、宛先・名前・token・本文・DB の文は出さない。どれかの段が失敗した回は件数とともに 503。flag が off なら 404、設定したサービスアカウント以外は 401、Google の鍵・experience DB・SMTP の資格情報が無ければ 503。
 - **保存期間**（オーナー決定 2026-10-31）：予約者の名前・アドレス・電話・備考・回答・UTM は体験の終了（取り消した予約は取消）から 1 年で消す（`eraseGuestData`）。支払いの確認中（`PAYMENT_REVIEW`）の予約は残す。返金・異議申し立て中の予約は、それができたとき（第7段）に除外へ加える。質問は最後のメッセージから 1 年でスレッドごと消す。
 - **設定**：`EXPERIENCE_GUEST_MAIL_ENABLED=true`（http mode だけ）のとき、`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_SMTP_HOST`・`EXPERIENCE_SMTP_PORT`・`EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD`、`EXPERIENCE_MAIL_FROM`・`EXPERIENCE_MAIL_REPLY_TO`、`EXPERIENCE_JOBS_AUDIENCE`・`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL` と https の `SITE_URL` が無いとサーバーは起動しない（誤りのメッセージは設定の名前だけで、値を出さない）。SMTP のユーザーとパスワードは使う場所で読み、`config` に置かない。
 - **配備時の作業（この PR では行わない）**：Cloud Scheduler の job（毎分・POST・OIDC token）とそのサービスアカウント（Cloud Run の呼び出し権限だけ）、Secret Manager の `EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD` と実行環境への配線、SMTP 事業者での experience 用の資格情報と送信ドメインの設定、runtime role への `guest_question_threads` の DELETE（`scripts/gcp/experience-db-grants.mjs`。メッセージと返信リンクは ON DELETE CASCADE で消え、PostgreSQL は表の所有者として実行する）。migration は増えない。
+
+## 予約者の予約ページ（第6段）
+
+オーナー決定（2026-10-27）：旅行者は体験サイトで完結し、会話と取消のある予約ページは `/bookings/{publicBookingId}` に置く。旅行者のアカウントと「すべての予約の一覧」は作らない。オーナー決定（2026-10-31、#285）：確認メールのリンクから、その 1 件の予約のセッションに入る（設計 v1）。この段の前半（6a）は読むだけのページで、メッセージは 6b、取消は第7段で足す。
+
+- **リンクは何か**：メールのリンク `{SITE_URL}/bookings/open#g=<grant>` は、その 1 件の予約を開ける持参人の資格（bearer credential）で、本人確認でも強い認証でもない。メールを読める人・転送された人は、まだ使われていなければ開ける。メールとページは「転送しないで」と書く。
+- **流れ**：
+  1. メール job が確認メール（第5段）と「Find your booking」のメールを組むときに、メールごとに一度きりの grant を発行する（`GuestBookingAccess.issueBookingAccessGrant`）。token は 32 byte の乱数（base64url）で、生の値はメールのリンクの fragment にだけある。DB には SHA-256 だけを置く。
+  2. `/bookings/open`（client）は fragment から grant を読み、すぐに `history.replaceState` でアドレスバーから消してメモリだけに置く。予約の内容は何も読まず、「Open your booking」のボタンだけを出す（リンクを開いて JavaScript を走らせるスキャナーは何も開かない）。押すと `POST /api/public/bookings/session` へ `{ grant }` を送る（same-origin の確認は public-http.ts と同じ。`referrerPolicy: "same-origin"`）。
+  3. 経路は grant を使用済みにして同じトランザクションでセッションを作り（`openBookingSession`。1 つの grant は 1 回だけ）、その予約の cookie を付けて `{ publicBookingId }` を返す。ページは `/bookings/{publicBookingId}` へ移る（`location.replace`。戻るでこのページに戻らない）。不明・使用済み・期限切れ・取り消された grant と、開けない予約は区別せずに本文なしの 404 で、ページは「This link can't be used any more」と「Send me a new link」（下の「Find your booking」）。
+  4. `/bookings/{publicBookingId}`（サーバーで描く）はその予約の cookie だけを読み、`readBookingSession` で予約を読む。cookie が無い・セッションが無効・ID が予約の形でないときは、どれも同じ中立のページ（「Open this booking from your email」と「Send me a new link」）で、予約があるかどうかを示さない。DB が答えないときは「We couldn't open your booking」（予約の有無によらない）。
+- **出すもの**：体験名（体験ページへのリンク）、日付と開始時刻（予約の occurrence snapshot、日本時間）、大人と子どもの人数、支払った合計、予約時に固定した取消条件と無料取消の期限、ホスト名、状態（確定・支払いの確認中・取消済み）、申込の日時、予約番号、予約者自身の名前。メールアドレス・電話・メモ・回答は出さない（store が返さない）。ホストとのメッセージと変更・取消は「Coming soon」と NIHO サポートへの案内だけで、動かないボタンは置かない。支払いの確認中は「席はまだ確保されていない、NIHO サポートから連絡する」、取消済みは取消の日時。
+- **開ける予約**：`CONFIRMED`・`PAYMENT_REVIEW`・`CANCELLED` で、`booking_guests` の行があるもの。仮押さえ（`HOLD`）・放棄（`EXPIRED`）・予約者の情報を消した予約は開けず、grant も発行しない。
+- **cookie**：名前は `__Host-nb_<予約 ID の SHA-256 の先頭 8 文字>`（予約ごとに 1 つ。1 台の端末で複数の予約を持てる）。値は生のセッション ID（32 byte の乱数。DB には SHA-256 だけ）。`Secure; HttpOnly; SameSite=Lax; Path=/`、`Domain` なし、`Max-Age` はセッションの絶対期限まで。JavaScript から読めず、storage にも置かない。ページはその予約の名前の cookie だけを読み、セッションも開いた 1 件の予約しか読まない。
+- **期限**：grant は発行から 30 日（体験の終了から 30 日を越えない）で、1 回だけ。セッションは 30 日使わなければ切れ（最後の利用は 1 時間に 1 回だけ書く）、体験の終了から 30 日で必ず切れる。体験の終了から 30 日を過ぎた予約には grant を出さない。
+- **サインアウト**：「Sign out on this device」は `POST /api/public/bookings/sign-out`（`{ publicBookingId }`、same-origin）。その端末のセッションを終え（`endBookingSession`）、cookie を消す。セッションの有無によらず 204。
+- **サポートによる取り消し**：`GuestBookingAccess.revokeBookingAccess(publicBookingId)` が `booking_guests.access_version` を上げ、それまでに出した grant とセッションがすべて使えなくなる（その後に送るリンクは使える）。画面と経路はまだ無く、サポートの作業として呼ぶ。
+- **Find your booking**：`/bookings` でメールアドレスを入れると `POST /api/public/bookings/link`。`requestBookingLink` が、そのアドレス（`lower`）の確定・支払いの確認中の予約のうち、体験がこれからか終わって 30 日以内のものに、近い順に 10 件まで、outbox に `booking.access_link`（ID だけ）を積む。予約ごとに 1 時間 3 通まで（アドレスごとの advisory lock の下で数える）。経路の答えは一致の有無・上限によらず同じ 202 で、ページは「If we have a booking for this address, we've emailed you a link.」。形の誤ったアドレスだけ 422。メールは request の中では送らず（応答の時間をそろえる）、job が送る直前に新しい grant を発行して「Your booking link: {体験}, {日付} {時刻}」を送る。そのときに予約が取消済み・消去済み・期限切れなら送らずに閉じる。一時的な失敗は 2・4・8・16 分待って送り直し、5 回で諦める。IP アドレスは保存しない。
+- **掃除**：メール job の最後の段（`purgeExpiredAccess`）が、使用済み・期限切れの grant と、サインアウト・期限切れのセッションを消す（各 500 件まで）。
+- **flag**：`EXPERIENCE_GUEST_BOOKING_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED` の両方が on のときだけ、3 つのページと 3 本の経路が開く（どちらかが off なら 404）。予約の flag が off の間、job は確認メールにリンクを入れず、「Find your booking」のメールも送らない（行は残る）。新しい設定は無い。
+- **ヘッダー**：`/bookings` と `/bookings/*` は `Cache-Control: private, no-store`・`X-Robots-Tag: noindex`（next.config.ts）、ページは `referrer: no-referrer`・noindex。経路の答えも `private, no-store`・`no-referrer`・noindex で、本文・token・アドレスはログに出さない。`/bookings` で開いた文書では Umami を読み込まない（`shouldStartUmami`。送信前処理ももとから `/bookings` を送らない）。
+- **防ぐもの**：
+  - メールのスキャナーとリンクのプレビュー：grant は fragment にあり、GET ではサーバーに届かない。JavaScript を走らせても、ボタンを押すまで何も送らない。
+  - Referer・アクセスログ・プロキシ・計測への漏れ：grant は fragment、セッションは HttpOnly cookie で、どちらも URL のパスや query に入らない。fragment はすぐに消し、ページは `no-referrer`。
+  - ほかの予約の読み取り：セッションは開いた 1 件の予約だけを読み、予約 ID と照らす。cookie も予約ごと。
+  - CSRF：POST は Origin（と送られるなら Sec-Fetch-Site）がこのサイトのものだけ。cookie は `SameSite=Lax` で、ページの GET は何も変えない。
+  - cache：ページも経路も `private, no-store`。
+  - DB の中身の漏えい：grant とセッションは SHA-256 だけ。
+  - 予約の有無の推測：中立のページと「Find your booking」の答えは、予約の有無で変わらない。
+- **防がないもの**：
+  - 盗まれたメールボックス・転送されたメール：メールを読める人はリンクを使える（まだ使われていなければ）。「Find your booking」のメールもそのアドレスに届く。気づいたらサポートが `revokeBookingAccess` で止める。
+  - 開いたままの端末：その端末の cookie で予約を読める（サインアウトか期限まで）。
+  - 応答が届かなかった開封：grant を使ったあとに応答が失われると、そのリンクはもう使えない（新しいリンクを頼む）。
+- **runtime role**：`booking_access_grants`・`booking_sessions` の SELECT・INSERT・UPDATE・DELETE（`scripts/gcp/experience-db-grants.mjs`）。`booking_guests`（`access_version` の UPDATE）と `outbox_messages` は今までの権限で足りる。先に `0029` を適用する（既存の書き手は新しい表と列を読まないので、新しい版より先に適用してよい）。
 
 ## ホストへの通知（第5段）
 
@@ -140,25 +174,26 @@ Stripe の戻り先 `/experiences/{slug}?checkout=cancelled`（第2段）で、�
 - 予約者の名前・メールアドレス・電話番号・備考・回答・UTM は `booking_guests` だけに置く。`bookings`、outbox、カレンダーのイベント、Stripe の metadata（`booking_id` と出所だけ）、エラーの文、ログには出さない。経路のログは失敗の段階とエラーの class 名だけ（Stripe や DB の文は送った値を繰り返すことがあるため出さない）。
 - メールアドレスは Stripe Checkout の入力欄の初期値として Stripe へ渡る（Stripe 側にも残る）。消去済みの予約では渡さない。
 - 予約者の情報は体験の終了（取り消した予約は取消）から 1 年後に `eraseGuestData` で消す。メール job が毎回呼ぶ（下の「予約者へのメール」）。支払いの確認中の予約は残す。
+- 予約ページ（第6段）の grant とセッションは SHA-256 だけを置き、生の値はメールのリンクの fragment と予約者の HttpOnly cookie にしか無い。予約者の情報の消去と同じ予約の行（`booking_guests`）に紐づき、使えなくなったものはメール job が消す。
 - IP アドレスは保存しない。
 
 ## flag と設定
 
 | 設定 | 内容 |
 | --- | --- |
-| `EXPERIENCE_GUEST_BOOKING_ENABLED` | `true` のとき http mode で 2 本の経路が開き、OWNER の予約の画面にここで受けた予約が出る。既定 `false`（404）。mock mode では効かない。`HOST_CONSOLE_ENABLED=true` が要る（ホストが見られない販売をしない） |
+| `EXPERIENCE_GUEST_BOOKING_ENABLED` | `true` のとき http mode で 2 本の経路が開き、OWNER の予約の画面にここで受けた予約が出る。`EXPERIENCE_GUEST_MAIL_ENABLED` も `true` なら予約者の予約ページ（第6段）も開く。既定 `false`（404）。mock mode では効かない。`HOST_CONSOLE_ENABLED=true` が要る（ホストが見られない販売をしない） |
 | `EXPERIENCE_BOOKING_CONSENT_VERSION` | 旅行者が同意する規約の版（1〜100 字、空白なし） |
 | `EXPERIENCE_DATABASE_URL` | experience DB |
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` / `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 体験用に絞った Stripe の秘密鍵と、体験の Connect webhook の署名鍵（Secret Manager） |
 | `SITE_URL` | Stripe の戻り先の origin。https（開発の loopback だけ http） |
 | `EXPERIENCE_GUEST_MAIL_ENABLED` ほか | 予約者へのメールと消去の job。下の「予約者へのメール」。予約の flag とは独立（flag を off にしたあとに確定した支払いにも確認メールを送るため） |
 
-flag が `true` でこれらが欠けていると、サーバーは起動しない（設定の欠けた販売をしない）。先に `0023`・`0025`・`0026` を適用する。webhook（支払いの確定と仮押さえの解放）は flag によらず、experience DB と Stripe の 2 つの秘密だけで動く（flag を off にしたあとに終わる Session も処理するため）。runtime role には `provider_sale_settings` の SELECT が要り、INSERT・UPDATE は移行処理・Admin の ID だけに与える。
+flag が `true` でこれらが欠けていると、サーバーは起動しない（設定の欠けた販売をしない）。先に `0023`・`0025`・`0026`・`0029` を適用する。webhook（支払いの確定と仮押さえの解放）は flag によらず、experience DB と Stripe の 2 つの秘密だけで動く（flag を off にしたあとに終わる Session も処理するため）。runtime role には `provider_sale_settings` の SELECT が要り、INSERT・UPDATE は移行処理・Admin の ID だけに与える。
 
 ## 後の段で足すもの
 
 - 第5段の残り：提供者へのメール。
-- 第6段：予約者の予約ページ。
+- 第6段の残り（6b）：予約ページでのホストとのメッセージ。サポートが予約のリンクを止める操作（`revokeBookingAccess`）の画面。
 - 第7段：取消と返金（解放したあとに届いた支払い `PAYMENT_REVIEW` の返金を含む）。
 - 第9段：商品ごとの移行（販売条件と手数料設定を書き、同時に NIHO での販売を止める）。
 - 第10段：日本語の予約入力。

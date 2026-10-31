@@ -58,7 +58,15 @@ export type {
 export { GUEST_MAIL_LIMITS, GUEST_MAIL_TOPIC, GuestMailOutbox } from "./guest-mail-outbox.ts";
 export { GUEST_TRANSLATION_LIMITS, GUEST_TRANSLATION_TOPIC, GuestQuestionTranslations } from "./guest-question-translations.ts";
 export type { ClaimedGuestTranslation, GuestTranslationClaim, GuestTranslationRetry } from "./guest-question-translations.ts";
-export type { BookingConfirmationClaim, BookingConfirmationEmail, BookingConfirmationRetry, ClaimedBookingConfirmation } from "./guest-mail-outbox.ts";
+export type {
+  BookingConfirmationClaim,
+  BookingConfirmationEmail,
+  BookingConfirmationRetry,
+  BookingLinkClaim,
+  BookingLinkEmail,
+  ClaimedBookingConfirmation,
+  ClaimedBookingLink,
+} from "./guest-mail-outbox.ts";
 export { GUEST_REVIEW_LIMITS, GUEST_REVIEW_REPORT_REASONS, GUEST_REVIEW_TAGS, GuestReviewRepository } from "./guest-reviews.ts";
 export type {
   GuestReviewEligibility,
@@ -72,6 +80,8 @@ export type {
   PublicGuestReviews,
   SubmitGuestReviewInput,
 } from "./guest-reviews.ts";
+export { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC, GUEST_BOOKING_VIEW_STATUSES, GuestBookingAccess } from "./booking-access.ts";
+export type { BookingAccessGrant, GuestBookingView, GuestBookingViewStatus, OpenedBookingSession } from "./booking-access.ts";
 export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS } from "./guest-bookings.ts";
 export { HOST_GUEST_BOOKING_LIMITS, HOST_GUEST_BOOKING_STATUSES } from "./host-guest-bookings.ts";
 export type {

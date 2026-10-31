@@ -45,6 +45,19 @@ describe("Japanese private page headers", () => {
   });
 });
 
+describe("guest booking page headers (#285 slice 6)", () => {
+  it("keeps Find your booking, the link page and every booking private, no-store, and non-indexable", async () => {
+    const headers = await nextConfig.headers!();
+    for (const source of ["/bookings", "/bookings/:path+"]) {
+      const rule = headers.find((candidate) => candidate.source === source);
+      expect(rule?.headers).toEqual(expect.arrayContaining([
+        { key: "Cache-Control", value: "private, no-store, max-age=0" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ]));
+    }
+  });
+});
+
 describe("structured data", () => {
   it("omits experience data in preview", () => {
     expect(experienceJsonLd(dinner, SITE, true)).toBeNull();

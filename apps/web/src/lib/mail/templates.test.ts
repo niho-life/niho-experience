@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BookingConfirmationEmail } from "@niho-experience/experience-store";
-import { bookingConfirmationEmail, questionReplyEmail, type RenderedMail } from "./templates";
+import type { BookingConfirmationEmail, BookingLinkEmail } from "@niho-experience/experience-store";
+import { bookingConfirmationEmail, bookingLinkEmail, questionReplyEmail, type RenderedMail } from "./templates";
 
 /** The guest emails (#285 slice 5) with synthetic data only. */
 const SITE = "https://experience.example";
@@ -139,5 +139,52 @@ describe("bookingConfirmationEmail", () => {
     expect(mail.html).not.toContain("<i>");
     expect(mail.html).toContain("Host &amp; Co");
     expect(linesWith(mail, "https://")).toEqual([`${SITE}/experiences/..%2Fsample%20tea%3Fx`]);
+  });
+});
+
+describe("the booking page links (#285 slice 6)", () => {
+  const GRANT = "sampleGrantAbcdefghijklmnopqrstuvwxyz012345";
+  const link: BookingLinkEmail = {
+    publicBookingId: confirmation.publicBookingId, guestEmail: "guest@example.com", guestName: "Sample Guest",
+    experienceTitle: "Synthetic tea ceremony", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+  };
+
+  /** The grant appears only right after `/bookings/open#g=`: never in a path, a query or the subject. */
+  function grantOnlyInFragment(mail: RenderedMail): void {
+    expect(mail.subject).not.toContain(GRANT);
+    for (const part of [mail.text, mail.html]) {
+      const at = [...part.matchAll(new RegExp(GRANT, "g"))].map((match) => part.slice(0, match.index));
+      expect(at.length).toBeGreaterThan(0);
+      expect(at.every((before) => before.endsWith(`${SITE}/bookings/open#g=`))).toBe(true);
+    }
+    expect(linesWith(mail, GRANT)).toEqual([`${SITE}/bookings/open#g=${GRANT}`]);
+    expect(mail.html).toContain(`<a href="${SITE}/bookings/open#g=${GRANT}" style="color:#2f5d2a">View your booking</a>`);
+    expect(links(mail).every((href) => href.startsWith(`${SITE}/`))).toBe(true);
+  }
+
+  it("adds the booking page to the confirmation only with a grant, the grant in the fragment only", () => {
+    const mail = bookingConfirmationEmail(confirmation, { siteUrl: SITE, now: NOW, bookingPageGrant: GRANT });
+    grantOnlyInFragment(mail);
+    expect(mail.text).toContain(`The link works once and opens the booking on one device, so please don't forward it. You can ask for a new link any time at ${SITE}/bookings\n`);
+    expect(linesWith(mail, "https://").filter((line) => !line.startsWith("See your booking"))).toEqual([`${SITE}/bookings/open#g=${GRANT}`, `${SITE}/experiences/sample-tea`]);
+    for (const grant of [null, undefined]) {
+      expect(bookingConfirmationEmail(confirmation, { siteUrl: SITE, now: NOW, bookingPageGrant: grant }).text).not.toContain("/bookings");
+    }
+  });
+
+  it("emails the link Find your booking asked for: the booking it opens, the grant in the fragment, nothing else personal", () => {
+    const mail = bookingLinkEmail(link, { siteUrl: SITE, bookingPageGrant: GRANT });
+    expect(mail.subject).toBe("Your booking link: Synthetic tea ceremony, Sat 14 Nov 2026 10:00");
+    expect(mail.text).toContain([
+      "Experience: Synthetic tea ceremony",
+      "Date: Saturday 14 November 2026",
+      "Time: 10:00 Japan time",
+      `Booking reference: ${confirmation.publicBookingId}`,
+    ].join("\n"));
+    expect(mail.text).toContain("If you didn't ask for this, you can ignore this email.");
+    grantOnlyInFragment(mail);
+    expect(linesWith(mail, "Sample Guest")).toEqual(["Hi Sample Guest,"]);
+    expect(`${mail.subject}${mail.text}${mail.html}`).not.toMatch(/guest@example\.com/);
+    expect(mail.html).not.toMatch(/<img|<script|<link|<style|src=|url\(|@import/i);
   });
 });

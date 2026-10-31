@@ -39,8 +39,17 @@ export function analyticsModeForRuntime(apiMode: "http" | "mock", siteUrl: strin
   return siteUrl === "https://experience.niho.life" && UMAMI_WEBSITE_ID.test(websiteId) ? "umami" : "off";
 }
 
-export function shouldStartUmami(websiteId: string, doNotTrack: string | null | undefined): boolean {
-  return UMAMI_WEBSITE_ID.test(websiteId) && !doNotTrackEnabled(doNotTrack);
+/**
+ * The guest's booking pages (#285 slice 6): a page opened on one carries a one-time link in its fragment or shows a
+ * booking, so no third-party script starts in that document (Umami's payloads would be dropped below anyway).
+ */
+export function isPrivateLandingPath(pathname: string): boolean {
+  return pathname === "/bookings" || pathname.startsWith("/bookings/");
+}
+
+/** `pathname` is where the document was opened. */
+export function shouldStartUmami(websiteId: string, doNotTrack: string | null | undefined, pathname = "/"): boolean {
+  return UMAMI_WEBSITE_ID.test(websiteId) && !doNotTrackEnabled(doNotTrack) && !isPrivateLandingPath(pathname);
 }
 
 /** Removes query values outside the approved UTM set before Umami sees a URL. */

@@ -1,6 +1,6 @@
 import "server-only";
 import type { Pool } from "pg";
-import { GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { experiencePool } from "@/lib/experience/store-server";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
@@ -21,6 +21,8 @@ export interface ExperienceJobDependencies {
   readonly mailer?: () => Mailer | null;
   /** The Claude API for the guests' Japanese; null while translation is off. */
   readonly translator?: () => Translator | null;
+  /** Whether the guest's booking page is on (#285 slice 6): its links go into the emails only then. */
+  readonly bookingPages?: boolean;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
 }
 
@@ -60,10 +62,14 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
   const mailer = (dependencies.mailer ?? smtpMailer)();
   if (!mailer) return internalServiceJson({ error: "unavailable" }, 503);
   const errors: Record<string, string> = {};
+  const outbox = new GuestMailOutbox(pool);
   try {
     const counts = await (dependencies.run ?? runExperienceJobs)({
       questions: new GuestQuestionRepository(pool),
-      confirmations: new GuestMailOutbox(pool),
+      confirmations: outbox,
+      bookingLinks: outbox,
+      // The page needs both flags; this job runs only with guest mail on, so booking on this site decides.
+      access: (dependencies.bookingPages ?? config.guestBookingEnabled) ? new GuestBookingAccess(pool) : null,
       guests: new GuestBookingRepository(pool),
       translations: new GuestQuestionTranslations(pool),
       translator: (dependencies.translator ?? (() => anthropicTranslator({ timeoutMs: EXPERIENCE_JOB_LIMITS.translationTimeoutMs })))(),

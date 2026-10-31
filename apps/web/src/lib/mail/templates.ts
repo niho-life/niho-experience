@@ -1,4 +1,5 @@
-import type { BookingConfirmationEmail } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail } from "@niho-experience/experience-store";
+import { DATE_LONG, DATE_SHORT, calendarDate, cancellationWords, money, party, zoneName } from "@/lib/booking-words";
 
 /**
  * The emails guests get from this site (#285 slice 5): plain English, a text part and a minimal HTML part
@@ -112,61 +113,25 @@ export function questionReplyEmail(input: QuestionReplyMailInput): RenderedMail 
   ]);
 }
 
-const DATE_LONG = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
-const DATE_SHORT = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" });
-
-/** A calendar date (YYYY-MM-DD) in words; the date itself, whatever the server's zone. */
-function calendarDate(localDate: string, format: Intl.DateTimeFormat): string {
-  const [year, month, day] = localDate.split("-").map(Number);
-  return format.format(new Date(Date.UTC(year!, month! - 1, day!))).replace(",", "");
-}
-
-const zoneName = (timeZone: string) => (timeZone === "Asia/Tokyo" ? "Japan time" : timeZone);
-
-/** "Fri 13 Nov, 10:00" for an instant in the experience's time zone. */
-function zonedMoment(instant: number, timeZone: string): string {
-  const date = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short", day: "numeric", month: "short" }).format(instant).replace(",", "");
-  const clock = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(instant);
-  return `${date}, ${clock}`;
-}
-
-function money(amount: number, currency: string): string {
-  const format = new Intl.NumberFormat("en-US", { style: "currency", currency });
-  const digits = format.resolvedOptions().maximumFractionDigits ?? 0;
-  return format.format(amount / 10 ** digits);
-}
-
-function party(adults: number, children: number): string {
-  const parts = [
-    ...(adults ? [`${adults} adult${adults === 1 ? "" : "s"}`] : []),
-    ...(children ? [`${children} child${children === 1 ? "" : "ren"}`] : []),
-  ];
-  return parts.join(", ");
-}
-
-const HOURS: Readonly<Record<string, number>> = { FREE_UNTIL_24H: 24, FREE_UNTIL_48H: 48 };
-
-/** The policy fixed at booking, in plain words, with the moment free cancellation ends. */
-function cancellationWords(email: BookingConfirmationEmail, now: Date): string | null {
-  if (email.cancellationPolicy === null) return null;
-  if (email.cancellationPolicy === "NONE") return "This booking is non-refundable.";
-  const hours = HOURS[email.cancellationPolicy]!;
-  const deadline = Date.parse(email.startUtc) - hours * 3_600_000;
-  if (!Number.isFinite(deadline) || deadline <= now.getTime()) {
-    return `Free cancellation ends ${hours} hours before the start, so this booking is now non-refundable.`;
-  }
-  return `Free cancellation until ${zonedMoment(deadline, email.timeZone)} ${zoneName(email.timeZone)} (${hours} hours before the start). After that, the booking is non-refundable.`;
+/** `{SITE_URL}/bookings/open#g=<grant>`: the one-time grant is placed in the fragment only, never in a path or query. */
+function bookingPageLink(siteUrl: string, grant: string): string {
+  return `${absolute(siteUrl, "/bookings/open")}#g=${encodeURIComponent(grant)}`;
 }
 
 /**
  * "Your booking is confirmed: {experience}, {date} {time}". The meeting point is not included (it is NIHO
  * content today): the email says the host shares the meeting details and that replying reaches NIHO support.
+ * With a grant (#285 slice 6) it links to the guest's booking page; without one (the page is off) it does not.
  */
-export function bookingConfirmationEmail(email: BookingConfirmationEmail, options: { readonly siteUrl: string; readonly now: Date }): RenderedMail {
+export function bookingConfirmationEmail(
+  email: BookingConfirmationEmail,
+  options: { readonly siteUrl: string; readonly now: Date; readonly bookingPageGrant?: string | null },
+): RenderedMail {
   const experience = oneLine(email.experienceTitle);
   const host = oneLine(email.hostDisplayName);
   const time = `${email.localStartTime} ${zoneName(email.timeZone)}`;
   const policy = cancellationWords(email, options.now);
+  const grant = options.bookingPageGrant;
   return mail(`Your booking is confirmed: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, [
     { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
     { kind: "p", text: "Your booking is confirmed and paid. Here are the details." },
@@ -183,8 +148,46 @@ export function bookingConfirmationEmail(email: BookingConfirmationEmail, option
       ],
     },
     ...(policy ? [{ kind: "p", text: policy } as const] : []),
+    ...(grant
+      ? [{
+          kind: "link",
+          lead: `See your booking on our site. The link works once and opens the booking on one device, so please don't forward it. You can ask for a new link any time at ${absolute(options.siteUrl, "/bookings")}`,
+          label: "View your booking",
+          href: bookingPageLink(options.siteUrl, grant),
+        } as const]
+      : []),
     { kind: "p", text: `${host} will share the meeting details with you before the day.` },
     { kind: "link", lead: "The experience page:", label: experience, href: absolute(options.siteUrl, `/experiences/${encodeURIComponent(email.experienceSlug)}`) },
     { kind: "p", text: "Questions, or need to change or cancel? Reply to this email and NIHO support will help." },
+  ]);
+}
+
+/**
+ * "Your booking link: {experience}, {date} {time}" for "Find your booking" (#285 slice 6): the booking it is for and a
+ * one-time link to its page. The guest asked for it on the site; someone else may have typed their address, so the
+ * email says it can be ignored.
+ */
+export function bookingLinkEmail(email: BookingLinkEmail, options: { readonly siteUrl: string; readonly bookingPageGrant: string }): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  return mail(`Your booking link: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, [
+    { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
+    { kind: "p", text: "Here is the link to your booking that was asked for on NIHO Experience." },
+    {
+      kind: "facts",
+      rows: [
+        ["Experience", experience],
+        ["Date", calendarDate(email.localDate, DATE_LONG)],
+        ["Time", `${email.localStartTime} ${zoneName(email.timeZone)}`],
+        ["Booking reference", email.publicBookingId],
+      ],
+    },
+    {
+      kind: "link",
+      lead: `The link works once, for up to 30 days, and opens the booking on one device, so please don't forward it. You can ask for a new link any time at ${absolute(options.siteUrl, "/bookings")}`,
+      label: "View your booking",
+      href: bookingPageLink(options.siteUrl, options.bookingPageGrant),
+    },
+    { kind: "p", text: "If you didn't ask for this, you can ignore this email." },
+    { kind: "p", text: "Questions? Reply to this email and NIHO support will help." },
   ]);
 }
