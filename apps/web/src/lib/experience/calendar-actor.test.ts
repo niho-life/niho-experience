@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ session: null as Record<string, unknown> | null, load: { status: "ok", providers: [] } as Record<string, unknown>, assignments: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: null as Record<string, unknown> | null, load: { status: "ok", providers: [] } as Record<string, unknown>, assignments: vi.fn(), config: { hostMailEnabled: false } }));
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/config", () => ({ get config() { return mocks.config; } }));
 vi.mock("@/lib/host/server", async () => {
   const { NextResponse } = await import("next/server");
   return { readHostSession: async () => mocks.session, loadHostProviders: async () => mocks.load,
@@ -23,6 +24,16 @@ describe("calendar actor", () => {
     const result = await calendarActor("provider-a");
     expect(result).toMatchObject({ actor: { providerId: "provider-a", nihoUserId: "operator-a", calendarScope: "OPERATOR" }, access: { kind: "OPERATOR" } });
     expect(await resolveCalendarContext({ providerId: "provider-a" })).toMatchObject({ choice: { kind: "OPERATOR", id: "provider-a", memberRole: null } });
+  });
+
+  it("gives an operator 設定 for their own email address while this site emails hosts (#194)", async () => {
+    expect((await resolveCalendarContext({ providerId: "provider-a" }))?.choice).toMatchObject({ kind: "OPERATOR", screens: ["/host/calendar"] });
+    mocks.config = { hostMailEnabled: true };
+    try {
+      expect((await resolveCalendarContext({ providerId: "provider-a" }))?.choice).toMatchObject({ kind: "OPERATOR", screens: ["/host/calendar", "/host/settings"] });
+    } finally {
+      mocks.config = { hostMailEnabled: false };
+    }
   });
 
   it("fails closed when NIHO identity cannot be refreshed and never substitutes the grant for identity", async () => {

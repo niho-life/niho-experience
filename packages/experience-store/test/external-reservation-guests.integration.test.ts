@@ -7,6 +7,8 @@ import type { Pool } from "pg";
 import { ChannelRuntime, type ExternalReservationObservation, type WorkerIdentity } from "../src/channels.ts";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { ExternalReservationGuests } from "../src/external-reservation-guests.ts";
+import { HostMailOutbox } from "../src/host-mail-outbox.ts";
+import { HostNotificationAddresses } from "../src/host-notification-addresses.ts";
 import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox, parseOtaBookingPayload } from "../src/host-notification-outbox.ts";
 import { HostOtaBookings } from "../src/host-ota-bookings.ts";
 import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
@@ -188,6 +190,12 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       const { externalReservationObservationFingerprint } = await import("../src/external-reservation-ledger.ts");
       assert.equal(plainFingerprint, externalReservationObservationFingerprint({ ...r1Facts, externalOptionId: "morning" }));
 
+      // Their addresses here (#194 PR A): the OWNER, an EDITOR and both operators signed in; their emails follow the push.
+      const addresses = new HostNotificationAddresses(pool);
+      for (const userId of ["owner-a", "editor-a", "operator-tea", "operator-solo"]) {
+        assert.equal(await addresses.recordLogin({ nihoUserId: userId, verifiedEmail: `${userId}@example.test` }), "stored");
+      }
+
       // Next read: R1 again with a phone the site shows only now (no new revision), and a new R2.
       clock.now = new Date(at(1_000));
       const r1Again = observation("gyg", "R1", "2099-01-03", 2, at(30), { guest: { phone: "+81 90-0000-0000" } });
@@ -259,6 +267,20 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       await windowRead("listing-air", [observation("air", "R3", "2099-01-05", 1, at(2_900), { guest: { name: "Synthetic Dropped" } })], plain);
       assert.equal(await guestRow("R3"), undefined);
       assert.equal((await notifications()).length, 3);
+
+      // Email (#194 PR A): one row per person the push goes to, without the name; the job reads the kept name when it sends.
+      const mailRows = (await pool.query("SELECT payload FROM outbox_messages WHERE topic='host.mail.ota_booking' ORDER BY id")).rows as { payload: Record<string, unknown> }[];
+      assert.deepEqual(mailRows.map((row) => [row.payload.change, row.payload.to]), [
+        ["NEW", "operator-tea"], ["NEW", "owner-a"], ["CANCELLED", "operator-tea"], ["CANCELLED", "owner-a"], ["RESCHEDULED", "operator-tea"], ["RESCHEDULED", "owner-a"],
+      ]);
+      assert.equal(mailRows.some((row) => "guestName" in row.payload), false);
+      const mails = await new HostMailOutbox(pool).claimBookingMails({ limit: 10, leaseSeconds: 60 });
+      assert.deepEqual(mails.mails.map((mail) => [mail.payload.change, mail.to, mail.guestName]), [
+        ["NEW", "operator-tea@example.test", "Synthetic Second"], ["NEW", "owner-a@example.test", "Synthetic Second"],
+        ["CANCELLED", "operator-tea@example.test", "Synthetic Traveler"], ["CANCELLED", "owner-a@example.test", "Synthetic Traveler"],
+        ["RESCHEDULED", "operator-tea@example.test", "Synthetic Second"], ["RESCHEDULED", "owner-a@example.test", "Synthetic Second"],
+      ]);
+      for (const mail of mails.mails) await new HostMailOutbox(pool).completeBookingMail(mail.id);
 
       // Who reads them: the OWNER every product's, an operator the assigned product's only, nobody else.
       const bookings = new HostOtaBookings(pool);

@@ -12,14 +12,16 @@ export interface RenderedMail {
   readonly html: string;
 }
 
-type Block =
+export type MailBlock =
   | { readonly kind: "p"; readonly text: string }
   | { readonly kind: "quote"; readonly text: string }
   | { readonly kind: "facts"; readonly rows: readonly (readonly [string, string])[] }
   | { readonly kind: "link"; readonly lead: string; readonly label: string; readonly href: string };
 
+type Block = MailBlock;
+
 /** A subject is a header and a name sits in a sentence: one line, no control characters. */
-function oneLine(value: string): string {
+export function oneLine(value: string): string {
   return value.replace(/[\u0000-\u001F\u007F\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
@@ -50,7 +52,7 @@ function renderText(blocks: readonly Block[]): string {
 
 const P = 'style="margin:0 0 16px"';
 
-function renderHtml(subject: string, blocks: readonly Block[]): string {
+function renderHtml(subject: string, blocks: readonly Block[], lang: "en" | "ja"): string {
   const content = blocks.map((block) => {
     switch (block.kind) {
       case "p":
@@ -65,7 +67,7 @@ function renderHtml(subject: string, blocks: readonly Block[]): string {
     }
   }).join("\n");
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
 <body style="margin:0;padding:24px 16px;background:#ffffff;color:#1f2a1c;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5">
 <div style="max-width:560px;margin:0 auto">
@@ -76,13 +78,14 @@ ${content}
 `;
 }
 
-function mail(subject: string, blocks: readonly Block[]): RenderedMail {
+/** One email: the subject on one line, then a text part and an HTML part of the same blocks. Hosts' emails are Japanese (#194). */
+export function mail(subject: string, blocks: readonly MailBlock[], lang: "en" | "ja" = "en"): RenderedMail {
   const line = oneLine(subject);
-  return { subject: line, text: renderText(blocks), html: renderHtml(line, blocks) };
+  return { subject: line, text: renderText(blocks), html: renderHtml(line, blocks, lang) };
 }
 
 /** `https://experience.example` + a path; the site origin is checked at start-up (resolve-config). */
-function absolute(siteUrl: string, path: string): string {
+export function absolute(siteUrl: string, path: string): string {
   return new URL(path, `${siteUrl.replace(/\/+$/, "")}/`).href;
 }
 

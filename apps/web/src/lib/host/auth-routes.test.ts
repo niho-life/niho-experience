@@ -14,10 +14,12 @@ const state = vi.hoisted(() => ({
   },
   /** The experience DB's pool for push bookkeeping (#177 P2); null = not configured. */
   pool: null as { query: (sql: string, params: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }> } | null,
+  /** ホストへのメールの宛先 (#194): the sign-in's copy; null while EXPERIENCE_HOST_MAIL_ENABLED is off. */
+  addresses: null as { recordLogin: (input: { nihoUserId: string; verifiedEmail: string | null; invitation?: boolean }) => Promise<string> } | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
-vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool }));
+vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool, hostNotificationAddresses: () => state.addresses }));
 
 import { GET as login } from "@/app/(host)/host/auth/login/route";
 import { GET as callback } from "@/app/(host)/host/auth/callback/route";
@@ -118,6 +120,48 @@ describe("login and callback (http mode)", () => {
     expect(openSession(session.value)).toMatchObject({ refreshToken: "refresh-1", idToken: "id-1", connectionId: "conn_1", displayName: "合成 ホスト" });
     // Firebase's own refresh token is not kept.
     expect(JSON.stringify(openSession(session.value))).not.toContain("firebase-refresh");
+  });
+
+  it("copies the NIHO account's verified address for this site's emails, never into the cookie, and logs in whatever happens to it (#194)", async () => {
+    const idToken = (claims: Record<string, unknown>) => `${Buffer.from('{"alg":"RS256"}').toString("base64url")}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.synthetic-signature`;
+    const recorded: unknown[] = [];
+    state.addresses = { recordLogin: async (input) => { recorded.push(input); return "stored"; } };
+    try {
+      for (const [claims, expected] of [
+        [{ sub: "u1", email: "host@example.test", email_verified: true }, "host@example.test"],
+        // Not verified, or another account's token: nothing is copied (and an earlier copy is cleared).
+        [{ sub: "u1", email: "host@example.test", email_verified: false }, null],
+        [{ sub: "u2", email: "host@example.test", email_verified: true }, null],
+      ] as const) {
+        const { location, cookie } = await startLogin();
+        const token = idToken(claims);
+        handler = (url) => {
+          if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } });
+          if (url.hostname === "identitytoolkit.googleapis.com") return json(200, { idToken: token, expiresIn: "3600" });
+          throw new Error(`unexpected ${url.href}`);
+        };
+        const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
+        expect(response.status).toBe(303);
+        expect(recorded.at(-1)).toEqual({ nihoUserId: "u1", verifiedEmail: expected, invitation: false });
+        const session = setCookies(response).get(SESSION_COOKIE)!;
+        expect(JSON.stringify(openSession(session.value))).not.toContain("host@example.test");
+      }
+      // The experience DB failing does not stop the sign-in.
+      state.addresses = { recordLogin: async () => { throw new Error("synthetic outage host@example.test"); } };
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { location, cookie } = await startLogin();
+      handler = (url) => {
+        if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { customToken: "custom-1", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: new Date(Date.now() + 90 * 24 * 60 * MIN).toISOString(), user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: null } });
+        if (url.hostname === "identitytoolkit.googleapis.com") return json(200, { idToken: idToken({ sub: "u1", email: "host@example.test", email_verified: true }), expiresIn: "3600" });
+        throw new Error(`unexpected ${url.href}`);
+      };
+      const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
+      expect(response.headers.get("location")).toBe("/host/home");
+      expect(String(error.mock.calls)).not.toContain("host@example.test");
+      error.mockRestore();
+    } finally {
+      state.addresses = null;
+    }
   });
 
   it("keeps only a validated preparation case in sealed login state and returns to its fixed page", async () => {

@@ -1,0 +1,44 @@
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { hostAddressConfirmationEmail, hostBookingEmail } from "./host-templates";
+
+/** The hosts' emails (#194): Japanese, the push's words, nothing more. Synthetic data only. */
+const SITE = "https://experience.example";
+const ota = {
+  providerId: "provider-a", kind: "CANCELLATION" as const, experienceTitle: "Synthetic <tea>", startsAt: "2026-11-14T01:00:00.000Z", seats: 2,
+  ota: { site: "GetYourGuide", change: "CANCELLED" as const }, guestName: "Synthetic\nGuest <b>", productId: "tea",
+  url: "/host/bookings?ota=4f1c2b3a-5d6e-4f70-8a91-b2c3d4e5f607&providerId=provider-a", tag: "ota-4f1c2b3a-5d6e-4f70-8a91-b2c3d4e5f607",
+};
+
+describe("host emails", () => {
+  it("words an OTA cancellation as its push, escaped, with where to handle it", () => {
+    const mail = hostBookingEmail(ota, { siteUrl: SITE });
+    expect(mail.subject).toBe("GetYourGuide の予約が取り消されました：Synthetic <tea> 11/14（土）10:00");
+    expect(mail.text).toContain("GetYourGuide の予約が取り消されました。");
+    expect(mail.text).toContain("予約者: Synthetic Guest <b> 様");
+    expect(mail.text).toContain("取消・返金・予約者とのやりとりは GetYourGuide で行ってください。");
+    expect(mail.html).toContain("Synthetic &lt;tea&gt;");
+    expect(mail.html).toContain("Synthetic Guest &lt;b&gt; 様");
+    expect(mail.html).not.toContain("<b>");
+    expect(mail.html).toContain(`href="${SITE}/host/bookings?ota=4f1c2b3a-5d6e-4f70-8a91-b2c3d4e5f607&amp;providerId=provider-a"`);
+  });
+
+  it("words this site's cancellation without a site or a guest", () => {
+    const mail = hostBookingEmail({ providerId: "provider-a", kind: "CANCELLATION", experienceTitle: "Synthetic walk", startsAt: "2026-11-14T01:00:00.000Z", seats: 1, url: "/host/bookings?booking=b1&source=site&providerId=provider-a", tag: "cancellation-b1" }, { siteUrl: SITE });
+    expect(mail.subject).toBe("予約が取り消されました：Synthetic walk 11/14（土）10:00");
+    expect(mail.text).toContain("このサイトで受けた予約が取り消されました。");
+    expect(mail.text).toContain("予約: 体験サイト");
+    expect(mail.text).not.toContain("予約者:");
+    expect(mail.text).not.toContain("で行ってください");
+  });
+
+  it("puts the confirmation token in the fragment only, with its end in Japan time", () => {
+    const mail = hostAddressConfirmationEmail({ siteUrl: SITE, token: "tok_EN-123", expiresAt: "2026-11-01T06:05:00.000Z" });
+    expect(mail.subject).toBe("通知の宛先の確認");
+    expect(mail.text).toContain(`${SITE}/host/notification-email#t=tok_EN-123`);
+    expect(mail.text).toContain("11/1 15:05 まで、1 回だけ使えます");
+    expect(mail.html).toContain('<html lang="ja">');
+  });
+});

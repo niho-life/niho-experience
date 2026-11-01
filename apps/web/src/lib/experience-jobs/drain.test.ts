@@ -13,6 +13,9 @@ import type {
   ClaimedQuestionReply,
   ClaimedGuestTranslation,
   GuestTranslationClaim,
+  ClaimedHostBookingMail,
+  HostAddressConfirmationClaim,
+  HostBookingMailClaim,
   RefundStatus,
   RefundSubmission,
   StripeRefundAnswer,
@@ -30,6 +33,7 @@ import { EXPERIENCE_JOB_LIMITS, experienceJobActivity, runExperienceJobs, type E
 const SITE = "https://experience.example";
 const NOW = new Date("2026-11-01T00:00:00.000Z");
 const TOKEN = "sampleTokenAbcdefghijklmnopqrstuvwxyz0123456";
+const HOST_TOKEN = "hostConfirmTokenAbcdefghijklmnopqrstuvwxyz01";
 
 const replyFor = (n: number): ClaimedQuestionReply => ({
   kind: "QUESTION",
@@ -102,8 +106,22 @@ function stubs() {
     close: vi.fn(),
   };
   const onStepError = vi.fn();
-  const deps: ExperienceJobDeps = { questions, confirmations, notices, bookingLinks, access: null, refunds: null, guests, otaGuests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
-  return { deps, questions, confirmations, notices, bookingLinks, guests, otaGuests, translations, cancellations, submit, mailer, sent, results, onStepError };
+  const hostAddresses = { purge: vi.fn(async () => 0) };
+  const hostOutbox = {
+    claimBookingMails: vi.fn(async (): Promise<HostBookingMailClaim> => ({ mails: [], abandoned: 0 })),
+    completeBookingMail: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    retryBookingMail: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
+    claimAddressConfirmations: vi.fn(async (): Promise<HostAddressConfirmationClaim> => ({ confirmations: [], abandoned: 0 })),
+    issueAddressConfirmationToken: vi.fn<(id: string) => Promise<string | null>>(async () => HOST_TOKEN),
+    completeAddressConfirmation: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    retryAddressConfirmation: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
+  };
+  const allowed = vi.fn<(providerId: string, kind: string) => Promise<boolean>>(async () => true);
+  const deps: ExperienceJobDeps = {
+    questions, confirmations, notices, bookingLinks, access: null, refunds: null, guests, otaGuests, translations, translator: null,
+    hostMail: null, hostAddresses, mailer, siteUrl: SITE, now: () => NOW, onStepError,
+  };
+  return { deps, questions, confirmations, notices, bookingLinks, guests, otaGuests, translations, cancellations, submit, mailer, sent, results, onStepError, hostAddresses, hostOutbox, allowed };
 }
 
 /** A claim that hands out one row per call, as the store does for `limit: 1`. */
@@ -138,8 +156,13 @@ describe("runExperienceJobs", () => {
       otaGuestErasure: { erased: 0 },
       questionErasure: { erased: 0 },
       bookingAccessPurge: { off: true },
+      hostAddressConfirmations: { off: true },
+      hostBookingMails: { off: true },
+      hostAddressPurge: { purged: 0 },
     });
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: false });
+    // The addresses of hosts whose access ended go whatever host email's flag (#194).
+    expect(s.hostAddresses.purge).toHaveBeenCalledWith({ limit: EXPERIENCE_JOB_LIMITS.hostAddressesPurgedPerStep });
     // One at a time, each claimed just before it is sent: its lease covers that one send only.
     expect(s.questions.claimReplyDeliveries).toHaveBeenCalledWith({ limit: 1, leaseSeconds: 120, linkTtlDays: 14 });
     expect(s.confirmations.claimBookingConfirmations).toHaveBeenCalledWith({ limit: 1, leaseSeconds: 120 });
@@ -245,6 +268,9 @@ describe("runExperienceJobs", () => {
       otaGuestErasure: { erased: 0 },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { off: true },
+      hostAddressConfirmations: { off: true },
+      hostBookingMails: { off: true },
+      hostAddressPurge: { purged: 0 },
     });
     expect(s.onStepError.mock.calls).toEqual([["questionReplies", "Error"], ["bookingConfirmations", "TypeError"], ["questionErasure", "RangeError"]]);
     expect(experienceJobActivity(counts)).toEqual({ failed: true, active: true });
@@ -587,5 +613,93 @@ describe("resending the refunds Stripe has not accepted (#285 slice 7b)", () => 
     s.translations.claimTranslations.mockImplementation(async () => { order.push("translation"); return claimOf([]); });
     await runExperienceJobs({ ...withRefunds(), translator: vi.fn<Translator>() });
     expect(order).toEqual(["mail", "refunds", "translation"]);
+  });
+});
+
+/** ホストへのメール (#194): a booking's email row as the store hands it out (the push's payload, the address in use now). */
+const REF = "4f1c2b3a-5d6e-4f70-8a91-b2c3d4e5f607";
+const hostMailOf = (n: number, overrides: Partial<ClaimedHostBookingMail> = {}): ClaimedHostBookingMail => ({
+  id: String(500 + n), attempts: 1, providerId: "provider-a", notificationTopic: "host.notify.new_booking",
+  payload: { v: 1, bookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, experienceTitle: "Synthetic walk", startsAt: "2026-11-14T01:00:00.000Z", seats: 2 },
+  createdAt: "2026-10-31T23:50:00.000Z", to: `owner${n}@example.test`, guestName: null, ...overrides,
+});
+const otaMail = (n: number, overrides: Partial<ClaimedHostBookingMail> = {}) => hostMailOf(n, {
+  notificationTopic: "host.notify.ota_booking",
+  payload: { v: 1, change: "RESCHEDULED", site: "Jalan", ref: REF, productId: "tea", experienceTitle: "Synthetic tea", startsAt: "2026-11-16T01:00:00.000Z", previousStartsAt: "2026-11-15T01:00:00.000Z", seats: 3 },
+  guestName: "Synthetic Guest", ...overrides,
+});
+function hostMailsOneAtATime(items: ClaimedHostBookingMail[]) {
+  return async (): Promise<HostBookingMailClaim> => ({ mails: items.splice(0, 1), abandoned: 0 });
+}
+
+describe("host emails (#194)", () => {
+  const withHostMail = () => ({ ...s.deps, hostMail: { outbox: s.hostOutbox, allowed: s.allowed } });
+
+  it("emails each booking's people what its push says, at the address in use, and skips what should not go", async () => {
+    s.hostOutbox.claimBookingMails.mockImplementation(hostMailsOneAtATime([
+      hostMailOf(1),
+      otaMail(2),
+      // No address, or no longer the booking's person.
+      hostMailOf(3, { to: null }),
+      // A day old: no longer news.
+      hostMailOf(4, { createdAt: "2026-10-30T00:00:00.000Z" }),
+      // Turned off in 設定 › 通知.
+      hostMailOf(5, { notificationTopic: "host.notify.cancellation" }),
+    ]));
+    s.allowed.mockImplementation(async (_providerId: string, kind: string) => kind !== "CANCELLATION");
+    const counts = await runExperienceJobs(withHostMail());
+    expect(counts.hostBookingMails).toEqual({ claimed: 5, sent: 2, skipped: 3, retried: 0, failed: 0, abandoned: 0 });
+    expect(s.hostOutbox.claimBookingMails).toHaveBeenCalledWith({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.hostMailLeaseSeconds });
+    expect(s.hostOutbox.completeBookingMail.mock.calls.map(([id]) => id)).toEqual(["501", "502", "503", "504", "505"]);
+    expect(s.sent.map((mail) => mail.to)).toEqual(["owner1@example.test", "owner2@example.test"]);
+
+    const [site, ota] = s.sent;
+    expect(site!.subject).toBe("新しい予約・申込：Synthetic walk 11/14（土）10:00");
+    expect(site!.text).toContain("このサイトで新しい予約を受けました。");
+    expect(site!.text).toContain("人数: 2名");
+    expect(site!.text).toContain(`${SITE}/host/bookings?booking=0f8fad5b-d9cb-469f-a165-708677289501&source=site&providerId=provider-a`);
+    expect(site!.html).toContain('<html lang="ja">');
+
+    expect(ota!.subject).toBe("じゃらん の予約の日時が変わりました：Synthetic tea 11/16（月）10:00");
+    expect(ota!.text).toContain("予約サイト: じゃらん");
+    expect(ota!.text).toContain("日時（変更前 → 変更後）: 11/15（日）10:00 → 11/16（月）10:00");
+    expect(ota!.text).toContain("予約者: Synthetic Guest 様");
+    expect(ota!.text).toContain("人数: 3名");
+    expect(ota!.text).toContain(`${SITE}/host/bookings?ota=${REF}&providerId=provider-a`);
+    expect(ota!.text).toContain("取消・返金・予約者とのやりとりは じゃらん で行ってください。");
+    expect(ota!.text).toContain(`${SITE}/host/settings#settings-notification`);
+    // Only the push's facts: no product ID or reservation handle in the words, only in the link.
+    expect(ota!.text.replace(/https:\S+/g, "")).not.toMatch(/productId|4f1c2b3a/);
+  });
+
+  it("tries a transient failure again later and stops the step; a permanent one is closed", async () => {
+    s.hostOutbox.claimBookingMails.mockImplementation(hostMailsOneAtATime([hostMailOf(1), hostMailOf(2), hostMailOf(3)]));
+    s.results.push({ ok: false, failure: "permanent" }, { ok: false, failure: "transient" });
+    const counts = await runExperienceJobs(withHostMail());
+    expect(counts.hostBookingMails).toEqual({ claimed: 2, sent: 0, skipped: 0, retried: 1, failed: 1, abandoned: 0 });
+    expect(s.hostOutbox.retryBookingMail).toHaveBeenCalledWith("502", 1);
+    expect(s.hostOutbox.completeBookingMail.mock.calls as unknown[]).toEqual([["501"]]);
+  });
+
+  it("sends the confirmation link with a token made right before it goes, and nothing for a request no longer open", async () => {
+    const rows = [
+      { id: "601", attempts: 1, confirmation: { confirmationId: "7c9e6679-7425-40de-944b-e07fc1f90ae7", email: "desk@example.test", expiresAt: "2026-11-01T01:00:00.000Z" } },
+      { id: "602", attempts: 1, confirmation: null },
+      { id: "603", attempts: 1, confirmation: { confirmationId: "16fd2706-8baf-433b-82eb-8c7fada847da", email: "late@example.test", expiresAt: "2026-11-01T00:30:00.000Z" } },
+    ];
+    s.hostOutbox.claimAddressConfirmations.mockImplementation(async () => ({ confirmations: rows.splice(0, 1), abandoned: 0 }));
+    s.hostOutbox.issueAddressConfirmationToken.mockResolvedValueOnce(HOST_TOKEN).mockResolvedValueOnce(null);
+    const counts = await runExperienceJobs(withHostMail());
+    expect(counts.hostAddressConfirmations).toEqual({ claimed: 3, sent: 1, skipped: 2, retried: 0, failed: 0, abandoned: 0 });
+    expect(s.hostOutbox.issueAddressConfirmationToken.mock.calls as unknown[]).toEqual([["7c9e6679-7425-40de-944b-e07fc1f90ae7"], ["16fd2706-8baf-433b-82eb-8c7fada847da"]]);
+    expect(s.sent).toHaveLength(1);
+    const [mail] = s.sent;
+    expect(mail!.to).toBe("desk@example.test");
+    expect(mail!.subject).toBe("通知の宛先の確認");
+    expect(mail!.text).toContain(`${SITE}/host/notification-email#t=${HOST_TOKEN}`);
+    expect(mail!.text).toContain("11/1 10:00 まで、1 回だけ使えます");
+    expect(mail!.text).toContain("心当たりがなければ、このメールは無視してください。");
+    // The token is in the fragment only.
+    expect(mail!.text).not.toContain(`?t=${HOST_TOKEN}`);
   });
 });

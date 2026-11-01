@@ -18,7 +18,7 @@ operator response は許可商品だけを返す。予約人数、空席数、Go
 例外は OTA の予約（#194、オーナー決定 2026-11-01）。担当の商品の分だけ、詳細（予約者の名前・連絡先・OTA の予約番号を含む）を読め、通知を受ける。
 
 - **読む**：`HostOtaBookings`（[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」）。読める商品は有効で期限内の grant からサーバーで決め、リクエストからは取らない。`calendarScope=OPERATOR` のときは local の OWNER 行があっても OWNER として扱わない。担当外の商品を指定すると拒否、詳細は「見つかりません」。外部 account ID・外部予約 ID・listing・calendar ID・金額は返さない。
-- **通知**：OTA の予約の新規・取消・日時変更の push は、商品の OWNER と担当の運営者の端末だけに送る（`HostPushSubscriptions.productRecipients`）。grant の失効・期限切れの後は送らない。
+- **通知**：OTA の予約の新規・取消・日時変更の push は、商品の OWNER と担当の運営者の端末だけに送る（`HostPushSubscriptions.productRecipients`）。同じ人へメールも送る（`EXPERIENCE_HOST_MAIL_ENABLED`、宛先はログインで写した NIHO の確認済みのメールか、設定 › 通知で選んだアドレス）。grant の失効・期限切れの後は送らず、宛先も消す（membership も grant も無くなった人）。運営者のメニューには、このサイトがホストへメールを送る間（`EXPERIENCE_HOST_MAIL_ENABLED`）だけ「設定」が加わり、設定 › 通知 › 宛先と「アカウント」だけを出す（提供者の設定は出さない。`calendarConsoleChoices` の `screens`）。
 - このサイトで受けた予約（`booking_guests` のある予約）・NIHO の予約・売上・返金は、今までどおり OWNER だけ。
 - 画面（予約の一覧・詳細・ホーム・この回）につなぐのは #194 の PR 2。
 

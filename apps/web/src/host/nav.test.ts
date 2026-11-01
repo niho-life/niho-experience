@@ -22,6 +22,13 @@ describe("host navigation", () => {
     expect(hostNavForChoice({ kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null }).map((item) => item.href)).toEqual(["/host/calendar"]);
   });
 
+  it("gives an operator 設定 for their own email address only where the server says so (#194)", () => {
+    const operator = { kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null } as const;
+    expect(hostNavForChoice({ ...operator, screens: ["/host/calendar", "/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
+    // Never a provider screen it was not given, and カレンダー always.
+    expect(hostNavForChoice({ ...operator, screens: ["/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
+  });
+
   it("selects exactly one item on each top page", () => {
     expect(selected("/host/home")).toEqual(["ホーム"]);
     expect(selected("/host/home/")).toEqual(["ホーム"]);

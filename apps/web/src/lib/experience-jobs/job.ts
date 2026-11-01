@@ -1,10 +1,11 @@
 import "server-only";
 import type { Pool } from "pg";
-import { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
+import { hostNotificationAllowed } from "@/lib/host/push/outbox";
 import { smtpMailer, type Mailer } from "@/lib/mail/transport";
 import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
 import { EXPERIENCE_JOB_LIMITS, experienceJobActivity, runExperienceJobs, type ExperienceJobCounts, type ExperienceJobDeps } from "./drain";
@@ -29,6 +30,8 @@ export interface ExperienceJobDependencies {
   readonly bookingPages?: boolean;
   /** Stripe with the platform key for sending refunds again; null without the key. */
   readonly refundSubmitter?: () => RefundSendDeps["submit"];
+  /** Whether hosts get emails (#194, EXPERIENCE_HOST_MAIL_ENABLED): their address confirmations and booking emails. */
+  readonly hostMail?: boolean;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
 }
 
@@ -82,6 +85,8 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       refunds: submit ? { cancellations: new BookingCancellations(pool), submit } : null,
       guests: new GuestBookingRepository(pool),
       otaGuests: new ExternalReservationGuests(pool),
+      hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
+      hostAddresses: new HostNotificationAddresses(pool),
       translations: new GuestQuestionTranslations(pool),
       translator: (dependencies.translator ?? (() => anthropicTranslator({ timeoutMs: EXPERIENCE_JOB_LIMITS.translationTimeoutMs })))(),
       mailer,

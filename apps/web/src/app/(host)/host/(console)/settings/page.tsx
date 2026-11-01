@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { FieldRow, FieldSection } from "@/components/host/fields";
 import { HostAppInstall } from "@/components/host/HostAppInstall";
+import { HostNotificationAddress } from "@/components/host/HostNotificationAddress";
 import { HostPushToggle } from "@/components/host/HostPushToggle";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
@@ -12,8 +13,12 @@ import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
 import { loadHostCalendar } from "@/host/calendar-server";
 import { hostPageContext, loadHostConsoleData, loadHostPayout } from "@/host/data";
+import { NOTIFICATION_ADDRESS_TEXT, previewNotificationAddress } from "@/host/notification-address";
+import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
+import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 import { HOST_LOGOUT_PATH } from "@/lib/host/routes";
+import type { HostSession } from "@/lib/host/session";
 import { isHostMock } from "@/lib/host/server";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
@@ -26,43 +31,10 @@ function connectStep(value: string | string[] | undefined): "return" | "refresh"
   return value === "return" || value === "refresh" ? value : null;
 }
 
-/**
- * 設定 (mock v2): provider (and its review), payout account, calendar (#109), default meeting point,
- * notifications (#109), this device as an app and its push (#177, HOST_PWA_ENABLED / HOST_PUSH_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
- * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one.
- */
-export default async function HostSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const query = await searchParams;
-  const context = await hostPageContext(query);
-  if (!context) return null;
-  const { session, provider, providerNotFound } = context;
-  if (!provider) return <HostRegisterPrompt title="設定" />;
-  // Stripe's way back belongs to the provider it names, never to the one shown in its place.
-  const connect = providerNotFound ? null : connectStep(query.connect);
-  const [{ settings, googleConnection }, payout, liveCalendar] = await Promise.all([
-    loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
-    loadHostPayout(provider, { connect }),
-    // カレンダー in http mode (#109): the OWNER's Google connection and bookings feed.
-    isHostMock() ? null : loadHostCalendar(provider, session.nihoUserId, { feed: true }),
-  ]);
-  if (payout.redirectTo) redirect(payout.redirectTo);
+/** アカウント: the NIHO account and ログアウト (its form cannot sit inside the settings form). */
+function AccountPanel({ session }: { session: Pick<HostSession, "displayName" | "iconUrl"> }) {
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
-
-  // この端末 (#177): the app, and push on this device while HOST_PUSH_ENABLED is on (P2).
-  const devicePanel = config.hostPwaEnabled ? (
-    <FieldSection id="settings-device" title="この端末">
-      <FieldRow label="アプリ" labelId="settings-device-app-label">
-        <HostAppInstall labelId="settings-device-app-label" />
-      </FieldRow>
-      {config.hostPushEnabled ? (
-        <FieldRow label="通知" labelId="settings-device-push-label">
-          <HostPushToggle labelId="settings-device-push-label" vapidPublicKey={config.hostPushVapidPublicKey} />
-        </FieldRow>
-      ) : null}
-    </FieldSection>
-  ) : null;
-
-  const accountPanel = (
+  return (
     <FieldSection id="settings-account" title="アカウント">
       <FieldRow label="NIHO アカウント" labelId="settings-account-label">
         <div role="group" aria-labelledby="settings-account-label" className="flex min-h-10 flex-wrap items-center gap-2.5">
@@ -83,6 +55,82 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
       </div>
     </FieldSection>
   );
+}
+
+/**
+ * 設定 for a product operator (#194, docs/product-operators.md): no provider settings, only where this site's emails go
+ * (the OTA bookings of their products come to them) and the account. Only while this site emails hosts.
+ */
+async function OperatorSettings({ providerId, session }: { providerId: string; session: HostSession }) {
+  const load = await loadNotificationAddress(session.nihoUserId);
+  return (
+    <HostPageBody>
+      <PageHead title="設定" />
+      <FieldSection id="settings-notification" title="通知">
+        <FieldRow label="宛先" labelId="settings-notification-to">
+          {load.status === "live" ? (
+            <HostNotificationAddress providerId={providerId} initial={load.address} labelId="settings-notification-to" />
+          ) : (
+            <p role="alert" className="flex min-h-10 items-center text-danger">{NOTIFICATION_ADDRESS_TEXT.loadFailed}</p>
+          )}
+        </FieldRow>
+        <FieldRow label="届く通知" labelId="settings-notification-items">
+          <p className="flex min-h-10 items-center text-ink-soft">担当の体験の、予約サイトでの新しい予約・取消・日時変更が届きます。</p>
+        </FieldRow>
+      </FieldSection>
+      <div className="mt-3.5">
+        <AccountPanel session={session} />
+      </div>
+    </HostPageBody>
+  );
+}
+
+/**
+ * 設定 (mock v2): provider (and its review), payout account, calendar (#109), default meeting point,
+ * notifications (#109, and their address #194), this device as an app and its push (#177, HOST_PWA_ENABLED / HOST_PUSH_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
+ * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one.
+ */
+export default async function HostSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const query = await searchParams;
+  const context = await hostPageContext(query);
+  if (!context) return null;
+  const { session, provider, providerNotFound } = context;
+  if (!provider) {
+    // A product operator (#194): their own address for this site's emails, while it sends them.
+    const calendar = config.hostMailEnabled ? await resolveCalendarContext(query) : null;
+    if (calendar?.choice?.kind === "OPERATOR") return <OperatorSettings providerId={calendar.choice.id} session={session} />;
+    return <HostRegisterPrompt title="設定" />;
+  }
+  // Stripe's way back belongs to the provider it names, never to the one shown in its place.
+  const connect = providerNotFound ? null : connectStep(query.connect);
+  const [{ settings, googleConnection }, payout, liveCalendar, addressLoad] = await Promise.all([
+    loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
+    loadHostPayout(provider, { connect }),
+    // カレンダー in http mode (#109): the OWNER's Google connection and bookings feed.
+    isHostMock() ? null : loadHostCalendar(provider, session.nihoUserId, { feed: true }),
+    // 宛先 (#194): the person's own address (the session's NIHO user); the preview's stays on screen.
+    isHostMock() ? null : loadNotificationAddress(session.nihoUserId),
+  ]);
+  if (payout.redirectTo) redirect(payout.redirectTo);
+  const notificationAddress = isHostMock()
+    ? previewNotificationAddress(settings.notifications?.email.addresses[0] ?? null)
+    : addressLoad?.status === "live" ? addressLoad.address : addressLoad?.status === "error" ? "error" as const : null;
+
+  // この端末 (#177): the app, and push on this device while HOST_PUSH_ENABLED is on (P2).
+  const devicePanel = config.hostPwaEnabled ? (
+    <FieldSection id="settings-device" title="この端末">
+      <FieldRow label="アプリ" labelId="settings-device-app-label">
+        <HostAppInstall labelId="settings-device-app-label" />
+      </FieldRow>
+      {config.hostPushEnabled ? (
+        <FieldRow label="通知" labelId="settings-device-push-label">
+          <HostPushToggle labelId="settings-device-push-label" vapidPublicKey={config.hostPushVapidPublicKey} />
+        </FieldRow>
+      ) : null}
+    </FieldSection>
+  ) : null;
+
+  const accountPanel = <AccountPanel session={session} />;
 
   return (
     <HostPageBody>
@@ -98,6 +146,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         googleConnection={googleConnection}
         liveCalendar={liveCalendar}
         preview={isHostMock()}
+        notificationAddress={notificationAddress}
         account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>

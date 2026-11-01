@@ -1,0 +1,72 @@
+import "server-only";
+import { otaSiteLabel } from "@/host/ota-sites";
+import { hostPushLines, whenJa, type HostPushEvent } from "@/lib/host/push/payload";
+import { HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
+import { absolute, mail, oneLine, type MailBlock, type RenderedMail } from "./templates";
+
+/*
+ * The emails hosts get from this site (#194, owner decision 2026-11-01): Japanese, like the host console, in the same plain
+ * text and minimal HTML as the guests' (no images, tracking or remote resources; absolute links only). A booking's email says
+ * what its push says, no more: the site it came from, the experience, the time, an OTA guest's name and the party size, with
+ * a link into /host. Never a guest's contact, an amount or a site's IDs.
+ */
+
+const NOTIFICATION_SETTINGS = `${HOST_SETTINGS_PATH}#settings-notification`;
+
+const SETTINGS_LEAD = "宛先と届く通知は、ホストの画面の「設定 › 通知」で変えられます。";
+const REPLY: MailBlock = { kind: "p", text: "このメールに返信すると NIHO サポートに届きます。" };
+
+/**
+ * 「{OTA} で新しい予約：{体験} {日時}」 and the like: the push's words for the same booking (`event`, the push the job would
+ * send), and the link the push opens. An OTA booking adds where its cancellations, refunds and messages are handled.
+ */
+export function hostBookingEmail(event: HostPushEvent, options: { readonly siteUrl: string }): RenderedMail {
+  const lines = hostPushLines(event);
+  const site = event.ota ? otaSiteLabel(event.ota.site) : null;
+  const rows: (readonly [string, string])[] = [
+    ...(site ? [["予約サイト", site] as const] : [["予約", "体験サイト"] as const]),
+    ...(lines.experience ? [["体験", lines.experience] as const] : []),
+    ...(lines.when ? [[event.ota?.change === "RESCHEDULED" ? "日時（変更前 → 変更後）" : "日時", lines.when] as const] : []),
+    ...(lines.guest ? [["予約者", `${oneLine(lines.guest)} 様`] as const] : []),
+    ...(lines.seats ? [["人数", lines.seats] as const] : []),
+  ];
+  const lead = event.ota
+    ? event.ota.change === "NEW" ? `${site} で新しい予約がありました。` : event.ota.change === "CANCELLED" ? `${site} の予約が取り消されました。` : `${site} の予約の日時が変わりました。`
+    : event.kind === "CANCELLATION" ? "このサイトで受けた予約が取り消されました。" : "このサイトで新しい予約を受けました。";
+  const subject = [lines.title, [lines.experience, event.ota?.change === "RESCHEDULED" ? whenJa(event.startsAt) : lines.when].filter(Boolean).join(" ")].filter(Boolean).join("：");
+  return mail(subject, [
+    { kind: "p", text: lead },
+    { kind: "facts", rows },
+    {
+      kind: "link",
+      lead: event.ota ? "予約者の連絡先と予約サイトの予約番号は、ホストの画面で確かめられます。" : "予約の内容は、ホストの画面で確かめられます。",
+      label: "予約を開く",
+      href: absolute(options.siteUrl, event.url),
+    },
+    ...(site ? [{ kind: "p", text: `取消・返金・予約者とのやりとりは ${site} で行ってください。` } as const] : []),
+    { kind: "link", lead: SETTINGS_LEAD, label: "設定 › 通知", href: absolute(options.siteUrl, NOTIFICATION_SETTINGS) },
+    REPLY,
+  ], "ja");
+}
+
+const JST = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/**
+ * 「通知の宛先の確認」: the link that makes this address the one this site emails (`/host/notification-email#t=<token>`; the
+ * token in the fragment only). It works once and until `expiresAt`. Someone else may have typed the address: the email says
+ * nothing changes unless the link is opened.
+ */
+export function hostAddressConfirmationEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string }): RenderedMail {
+  const until = JST.format(new Date(input.expiresAt));
+  return mail("通知の宛先の確認", [
+    { kind: "p", text: "NIHO 体験ホストの通知を、このアドレスで受け取るための確認です。" },
+    {
+      kind: "link",
+      lead: `下のリンクを開いて「このアドレスに切り替える」を押すと、予約などの通知がこのアドレスに届くようになります。リンクは ${until} まで、1 回だけ使えます。`,
+      label: "宛先を切り替える",
+      href: `${absolute(input.siteUrl, HOST_NOTIFICATION_EMAIL_PATH)}#t=${encodeURIComponent(input.token)}`,
+    },
+    { kind: "p", text: "心当たりがなければ、このメールは無視してください。宛先は変わりません。" },
+    REPLY,
+  ], "ja");
+}

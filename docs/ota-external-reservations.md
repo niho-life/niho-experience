@@ -122,7 +122,7 @@ OTA の予約の新規・取消・日時変更を、商品の OWNER と運営者
   - 宛先は商品の OWNER と運営者の端末だけ（`HostPushSubscriptions.productRecipients`）。EDITOR・VIEWER・別の商品の運営者には送らない。
   - 題は「GetYourGuide で新しい予約」「Airbnb の予約が取り消されました」「じゃらん の予約の日時が変わりました」。本文は「体験 · 日時（変更は 前 → 後） · 名前 様 · 人数」。
   - タップで `/host/bookings?ota=<host_ref>&providerId=…`（画面は #194 の PR 2）。
-- **メールはまだ送らない**：experience DB にはホストのメールアドレスが無い（アドレスは NIHO の正本）。宛先の取り方をオーナーが決めるまで、メールの topic は積まない。
+- **メール**（オーナー決定 2026-11-01、`EXPERIENCE_HOST_MAIL_ENABLED`）：同じ revision で、push と同じ人（商品の OWNER と運営者）のうち宛先がある人ごとに `host.mail.ota_booking` を 1 行積む（重複キーは push と同じ `host_ref`・local revision と、その人の ID の digest）。行に予約者の名前は入れず、メール job が送るときに `external_reservation_guests` から読む（消去済みなら載せない）。送るときに、その人がまだ OWNER か有効な grant を持つかと、今の宛先を読み直す。中身は push と同じ（OTA の名前・体験・日時・予約者の名前・人数と `/host` のリンク）で、連絡先・金額・外部 ID は無い。宛先の既定は、`/host` のログインで写した NIHO の確認済みのメール（[guest-booking.md](guest-booking.md) の「ホストへのメール」）。
 
 ## 保持・DB権限・配備順
 

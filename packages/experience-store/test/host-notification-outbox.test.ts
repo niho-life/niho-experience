@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PoolClient } from "pg";
 import { StoreValidationError } from "../src/errors.ts";
+import { HOST_MAIL_TOPICS } from "../src/host-mail-shared.ts";
 import {
   cancelApprovalDeadlineReminders,
   enqueueApprovalDeadlineReminders,
@@ -266,13 +267,17 @@ describe("OTA booking notifications (#194)", () => {
     };
     assert.equal(await enqueueOtaBookingNotification(client, { ...input, guestName: "Synthetic Guest" }), 1);
     assert.equal(await enqueueOtaBookingNotification(client, { ...input, guestName: null }), 1);
+    // Each call writes the push and its emails (#194 PR A): the email rows have no name and go to the product's people.
     assert.deepEqual(calls[0]!.params.slice(0, 5), ["provider-a", "external_reservation", ref, HOST_NOTIFICATION_TOPICS.otaBooking, `host-push:ota-booking:${ref}:3`]);
     assert.deepEqual(JSON.parse(calls[0]!.params[5] as string), { ...base, guestName: "Synthetic Guest" });
-    assert.deepEqual(JSON.parse(calls[1]!.params[5] as string), base);
+    assert.deepEqual(calls[1]!.params.slice(0, 5), ["provider-a", "external_reservation", ref, HOST_MAIL_TOPICS.otaBooking, `host-mail:ota-booking:${ref}:3`]);
+    assert.deepEqual([JSON.parse(calls[1]!.params[5] as string), calls[1]!.params[6]], [base, "tea"]);
+    assert.deepEqual(JSON.parse(calls[2]!.params[5] as string), base);
+    assert.deepEqual(JSON.parse(calls[3]!.params[5] as string), base);
     await assert.rejects(() => enqueueOtaBookingNotification(client, { ...input, change: "RESCHEDULED" }), StoreValidationError);
     await assert.rejects(() => enqueueOtaBookingNotification(client, { ...input, localRevision: 0 }), StoreValidationError);
     await assert.rejects(() => enqueueOtaBookingNotification(client, { ...input, guestName: "x".repeat(201) }), StoreValidationError);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4);
   });
 
   it("drops the guest's name from an OTA row once it is done", async () => {

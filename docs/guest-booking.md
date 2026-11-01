@@ -113,7 +113,20 @@ NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だ
 - **いつ**：`confirmBookingPayment` が予約者の予約（`booking_guests` の行がある予約）を `CONFIRMED` にしたトランザクションで、outbox に `host.notify.new_booking` を 1 行積む（重複キーは予約 ID。webhook の再送で増えない）。支払いの確認中（`PAYMENT_REVIEW`、席が無い）と、予約者の記録の無い予約は積まない。
 - **送る**：既存の通知 job（`POST /internal/host-push/v1/drain`、#177、[host-pwa.md](host-pwa.md)）。設定 › 通知の「新しい予約・申込」（`NEW_BOOKING`）は止められない種類なので、設定を読まずに送る。24 時間より古い行は送らずに閉じる。
 - **中身**：payload は `{ v: 1, bookingId, experienceTitle, startsAt, seats }`（`seats` は大人と子どもの人数、`startsAt` は予約の開催回の snapshot、体験名は 200 字まで）。予約者の名前・アドレス・金額は入らない。ロック画面は「新しい予約・申込」と体験名・日時（日本時間）・人数。タップで `/host/bookings?booking=…&source=site&providerId=…`（ここで受けた予約の一覧で、その予約を開く）。tag は `booking-{予約 ID}`。
-- ホストへのメールはまだ送らない（「後の段で足すもの」）。migration と runtime role の権限は増えない。
+- **メール**（#194、オーナー決定 2026-11-01。`EXPERIENCE_HOST_MAIL_ENABLED`）：同じ予約の確定（`host.mail.new_booking`）と、予約者かサポートによる取消（`host.mail.cancellation`）を、提供者の OWNER へメールでも送る（予約の画面を読めるのは OWNER だけなので、push と違い EDITOR・VIEWER には送らない）。下の「ホストへのメール」。
+
+## ホストへのメール（#194）
+
+オーナー決定（2026-11-01、[#194](https://github.com/niho-life/niho-experience/issues/194#issuecomment-6551695490)）：宛先の既定は、`/host` にログインしたときに NIHO の確認済みのメールを experience DB に写したもの。ホストは設定 › 通知で、通知を受け取るアドレスを変えられる。
+
+- **宛先の写し**：ログインの callback が、Firebase が返した ID token の `email` と `email_verified` を読む（NIHO は自分の user ID で custom token を作るので、その ID token は NIHO のアカウントのもの。NIHO の API も同じ claim を読む）。`email_verified` が `true` で `sub` が NIHO の user ID と同じときだけ、`0038` の `host_notification_addresses` に NIHO user ID ごとに写す。確認されていない・無いときは写さず、前の写しを消す。写すのは、提供者の membership か商品の運営者の grant がある人と、招待を受けるためのログイン（grant の前なので 24 時間だけ残す）だけ。cookie・ブラウザには渡さない。写せなくてもログインは止めない。
+- **宛先の変更**（設定 › 通知 › 宛先、[design-system.md](design-system.md)）：ログインした本人が、どの役割でも自分の宛先を見て変えられる。商品の運営者だけの人は、メニューの「設定」から宛先とアカウントだけの設定を開く（[product-operators.md](product-operators.md)）。「確認のメールを送る」で `host_notification_address_confirmations` に依頼を 1 行と outbox に `host.mail.address_confirmation` を積み、メール job が送る直前に一度きりの token（32 byte、SHA-256 だけを保存、リンクの fragment `/host/notification-email#t=…` にだけある）を作って「通知の宛先の確認」を送る。リンクを開いて「このアドレスに切り替える」を押すと切り替わる（ページを開くだけでは変わらない）。依頼から 1 時間・1 回だけ。新しい依頼・「取り消す」・「ログインのメールに戻す」で前の依頼は使えなくなる。1 時間に 5 回まで。切り替えたあとのログインでも、選んだアドレスはそのまま。
+- **何を送るか**：push と同じ中身（[host-pwa.md](host-pwa.md) の通知 job）。題は push の題と体験・日時（「GetYourGuide で新しい予約：{体験} 11/14（土）10:00」）、本文は予約サイト（OTA のとき）・体験・日時（変更は前 → 後）・予約者の名前（OTA のときだけ）・人数と、push と同じ `/host` のリンク。OTA の予約は「取消・返金・予約者とのやりとりは {OTA} で行ってください」。予約者の連絡先・金額・外部 ID は載せない。日本語で、画像・計測・外部の読み込みは無い（予約者へのメールと同じ作り）。
+- **宛先**：push と同じ人。このサイトの予約は提供者の OWNER、OTA の予約は商品の OWNER と担当の運営者（`productRecipients` と同じ規則）。予約・台帳の transaction で、宛先がある人ごとに outbox に 1 行（`host.mail.*`、payload は push と同じ事実と NIHO user ID。予約者の名前は入れない）を積み、送るときに、その人がまだ宛先か（OWNER のまま、grant が有効）と、今の宛先（選んだアドレス、無ければログインの写し）を読み直す。OTA の予約者の名前は、送るときに `external_reservation_guests` から読む（消去済みなら載せない）。
+- **設定 › 通知（#109）**：push と同じ判定（`hostNotificationAllowed`）。新しい予約・取消はどちらも止められない種類。
+- **送り方**：メール job（`POST /internal/experience-jobs/v1/drain`）の段 `hostAddressConfirmations`・`hostBookingMails`。1 件ずつ取り、失敗は予約者へのメールと同じ（一時的な失敗は 2・4・8…60 分あとに送り直し、8 回で諦める。恒久的な失敗は閉じる）。24 時間より古い行は送らずに閉じる（push と同じ）。flag が off の間は段も off で、行は残る。
+- **消す**：段 `hostAddressPurge`（flag と関係なく動く）が、有効な membership も期限内の grant も無くなった人の宛先と依頼を消す。依頼は 1 日で消す。
+- **flag と配備**：`EXPERIENCE_HOST_MAIL_ENABLED`（既定 OFF、`HOST_CONSOLE_ENABLED` とメールが要る。[production-deploy.md](production-deploy.md) の「機能のフラグ」）。`0038` を新しいコードより先に適用する。runtime role に `host_notification_addresses`・`host_notification_address_confirmations` の INSERT・UPDATE・DELETE（`scripts/gcp/experience-db-grants.mjs`）。新しい Secret は無い。
 
 ## ホストの画面（第8段）
 
@@ -325,7 +338,7 @@ node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sal
 - **フッター**：公開サイトのフッターに「Privacy」（日本語のページは「プライバシー」で同じ英語のページへ）。フッターの枠はコードが持つので、追加の `footerLinks`（`lib/privacy-link.ts`）で足す。予約入力の規約リンクは NIHO の詳細の `legalDocuments`（データ）から出るもので、コードのリンクではないため、ここには足していない（規約の移行〔#89〕で扱う）。
 - **翻訳の一文**：「Your message is translated into Japanese for the host with an AI service. Privacy」（Privacy は `/privacy` を新しいタブで開く。書きかけの文や、メモリにだけある返信 token を失わないため）。予約前の質問の「Ask the host」（`AskHost`）、返信ページ（`GuestReply`）、予約ページのメッセージ欄（`BookingMessages`）の送信欄の下に、訳が実際に動くときだけ出す。サーバーが `translationNoticeShown(config)`（`EXPERIENCE_TRANSLATION_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED` がともに有効。訳はメール job の段なので両方が要る。mock は常に off）で決め、真偽値だけを props で渡す。ブラウザは設定を読まない。
 - **文言の確認**：オーナーが確認した（2026-10-31、#337）。文言を変えるときは、もう一度オーナーの確認を得る。配備時に `EXPERIENCE_PRIVACY_POLICY_URL` を設定する。
-- **OTA で予約した旅行者（#194）**：`/privacy` はこのサイトで予約・質問した旅行者向けで、OTA の予約者の情報（OTA から受け取り、ホストが予約に応じるために使い、1 年で消す）はまだ書いていない。文言の変更はオーナーの確認が要るため、#194 の flag を本番で on にする前に、追記するかどうかをオーナーに確かめる。
+- **OTA で予約した旅行者（#194、オーナー決定 2026-11-01）**：見出し「If you booked through a partner site」の段落を足した。予約サイト（Airbnb・GetYourGuide・Viator・じゃらん〔Jalan〕など）から名前・人数・メール・電話・言語・メモを受け取り、体験の運営と連絡に使い、体験の 1 年後まで持つこと。flag と関係なく常に出す。この段落はオーナーの文言確認を待たずに公開してよい（同じ決定）。
 
 ## データの置き場所
 
@@ -353,7 +366,7 @@ flag が `true` でこれらが欠けていると、サーバーは起動しな�
 
 ## 後の段で足すもの
 
-- 第5段の残り：提供者へのメール。
+- 第5段の残り：予約前の質問・予約者からの連絡の、提供者へのメール（予約の確定と取消は #194 で足した。上の「ホストへのメール」）。
 - 第6段の残り：サポートが予約のリンクを止める操作（`revokeBookingAccess`）の画面。予約のメッセージの件数をホームの「次にすること」に出すこと。
 - 第7段の残り：異議申し立て。
 - 第9段の残り：実際の商品ごとの切替（上の「体験の登録と切替（第9段）」の手順で行う）。

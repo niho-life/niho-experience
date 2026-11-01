@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type
 import { saveNotificationSettings, saveProviderMeetingPoint, saveProviderProfile, submitProviderReview } from "@/host/actions";
 import { CALENDAR_LOAD_FAILED_TEXT, type HostCalendarLoad } from "@/host/calendar";
 import { normalizeMeetingPoint, sameMeetingPoint } from "@/host/meeting-point";
+import type { HostNotificationAddressView } from "@/host/notification-address";
 import { notificationChanges, notificationPanelView, notificationRows, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
 import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
@@ -46,6 +47,8 @@ export interface HostSettingsFormProps {
   preview: boolean;
   /** The account panel, passed in because its sign-out form cannot sit inside this form. */
   account: ReactNode;
+  /** 設定 › 通知 › 宛先 (#194): this person's address for this site's emails; "error" when unreadable; null while none are sent. */
+  notificationAddress: HostNotificationAddressView | "error" | null;
 }
 
 /**
@@ -64,7 +67,7 @@ export interface HostSettingsFormProps {
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
  * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
@@ -330,7 +333,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
           )}
         </FieldSection>
 
-        <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} />
+        <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} providerId={providerId} address={notificationAddress} />
       </div>
 
       <div className="mt-3.5">{account}</div>
