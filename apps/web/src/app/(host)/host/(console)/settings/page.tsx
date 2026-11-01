@@ -11,6 +11,8 @@ import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsP
 import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostConsoleData, loadHostPayout } from "@/host/data";
+import { previewNotificationAddress } from "@/host/notification-address";
+import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
 import { HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { isHostMock } from "@/lib/host/server";
@@ -27,7 +29,7 @@ function connectStep(value: string | string[] | undefined): "return" | "refresh"
 
 /**
  * 設定 (mock v2): provider (and its review), payout account, calendar (#109), default meeting point,
- * notifications (#109), this device as an app and its push (#177, HOST_PWA_ENABLED / HOST_PUSH_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
+ * notifications (#109, and their address #194), this device as an app and its push (#177, HOST_PWA_ENABLED / HOST_PUSH_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
  * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one.
  */
 export default async function HostSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -38,8 +40,16 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   if (!provider) return <HostRegisterPrompt title="設定" />;
   // Stripe's way back belongs to the provider it names, never to the one shown in its place.
   const connect = providerNotFound ? null : connectStep(query.connect);
-  const [{ settings, googleConnection }, payout] = await Promise.all([loadHostConsoleData(provider, { notifications: true, meetingPoint: true }), loadHostPayout(provider, { connect })]);
+  const [{ settings, googleConnection }, payout, addressLoad] = await Promise.all([
+    loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
+    loadHostPayout(provider, { connect }),
+    // 宛先 (#194): the person's own address (the session's NIHO user); the preview's stays on screen.
+    isHostMock() ? null : loadNotificationAddress(session.nihoUserId),
+  ]);
   if (payout.redirectTo) redirect(payout.redirectTo);
+  const notificationAddress = isHostMock()
+    ? previewNotificationAddress(settings.notifications?.email.addresses[0] ?? null)
+    : addressLoad?.status === "live" ? addressLoad.address : addressLoad?.status === "error" ? "error" as const : null;
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
 
   // この端末 (#177): the app, and push on this device while HOST_PUSH_ENABLED is on (P2).
@@ -91,6 +101,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         connectNotice={payout.notice}
         googleConnection={googleConnection}
         preview={isHostMock()}
+        notificationAddress={notificationAddress}
         account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>

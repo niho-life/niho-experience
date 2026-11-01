@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostNotificationAddresses, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -77,6 +77,16 @@ export function providerNotificationSettings(): ProviderNotificationSettings | n
   if (!config.hostNotificationSettingsEnabled) return null;
   const pool = experiencePool();
   return pool ? new ProviderNotificationSettings(pool) : null;
+}
+
+/**
+ * ホストへのメールの宛先 (#194): the sign-in's verified address and the host's choice in 設定 › 通知. null until its flag
+ * (EXPERIENCE_HOST_MAIL_ENABLED) is on and the experience DB is configured.
+ */
+export function hostNotificationAddresses(): HostNotificationAddresses | null {
+  if (!config.hostMailEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new HostNotificationAddresses(pool) : null;
 }
 
 /** 予約前の質問 (#105/#106): null until its flag is on and the experience DB is configured. */

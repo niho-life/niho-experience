@@ -7,7 +7,7 @@ import { PRIVACY_PATH } from "@/lib/privacy-link";
 export function generateMetadata(): Metadata {
   return {
     title: "Privacy",
-    description: "What we keep when you book an experience or ask a host a question on this site, who handles it, and for how long.",
+    description: "What we keep when you book an experience or ask a host a question on this site, or book through a partner site, who handles it, and for how long.",
     alternates: { canonical: `${config.siteUrl}${PRIVACY_PATH}` },
   };
 }

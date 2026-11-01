@@ -43,6 +43,9 @@ const counts = {
   otaGuestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
   bookingAccessPurge: { purged: 2 },
+  hostAddressConfirmations: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  hostBookingMails: { claimed: 2, sent: 2, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
+  hostAddressPurge: { purged: 1 },
 };
 const idle = {
   questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
@@ -55,6 +58,9 @@ const idle = {
   otaGuestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
   bookingAccessPurge: { purged: 0 },
+  hostAddressConfirmations: { off: true },
+  hostBookingMails: { off: true },
+  hostAddressPurge: { purged: 0 },
 };
 const fakePool = { query: vi.fn(), connect: vi.fn() };
 const fakeMailer = { sendMail: vi.fn(), close: vi.fn() };
@@ -285,10 +291,14 @@ describe("experienceJobsDrainResponse dependencies", () => {
       otaGuestErasure: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { error: "unavailable" },
+      // Host email is off here (#194); the addresses of hosts whose access ended still go.
+      hostAddressConfirmations: { off: true },
+      hostBookingMails: { off: true },
+      hostAddressPurge: { error: "unavailable" },
     });
     expect(pool.connect).toHaveBeenCalledTimes(5);
-    // The four steps that query directly, and the claim of refunds to send again.
-    expect(pool.query).toHaveBeenCalledTimes(5);
+    // The five steps that query directly, and the claim of refunds to send again.
+    expect(pool.query).toHaveBeenCalledTimes(6);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();
     expect(mailer.close).toHaveBeenCalledOnce();

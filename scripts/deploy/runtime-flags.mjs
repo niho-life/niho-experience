@@ -124,6 +124,9 @@ export const FLAGS = Object.freeze([
   // Neither opens an OTA read; the channel runtime keeps its own gates.
   { env: "EXPERIENCE_OTA_GUEST_DETAILS_ENABLED", variable: "OTA_GUEST_DETAILS_ENABLED", needs: ["DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"] },
   { env: "EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED", variable: "OTA_BOOKING_NOTIFICATIONS_ENABLED", needs: ["HOST_PUSH_ENABLED", "DATABASE"] },
+  // ホストへのメール (#194): the sign-in's verified address, the host's choice in 設定 › 通知, and booking emails to hosts,
+  // all sent by the mail job.
+  { env: "EXPERIENCE_HOST_MAIL_ENABLED", variable: "HOST_MAIL_ENABLED", needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"] },
 ]);
 
 const PROD_SECRET_REF = /^[A-Za-z0-9_-]+:[1-9][0-9]*$/;

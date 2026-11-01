@@ -455,4 +455,14 @@ describe("database invariants", () => {
     const code = sql.replace(/--.*$/gm, "");
     assert.doesNotMatch(code, /amount|price|currency|ALTER TABLE external_reservation_revisions|DROP |^\s*(UPDATE|DELETE) /im);
   });
+
+  it("keeps a host's notification address per NIHO user, and a confirmation link only as a digest, additively (#194)", async () => {
+    const sql = await readFile(new URL("../migrations/0038_host_notification_addresses.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE host_notification_addresses \(\n  niho_user_id text PRIMARY KEY/);
+    assert.match(sql, /CREATE TABLE host_notification_address_confirmations/);
+    assert.match(sql, /token_hash bytea UNIQUE CHECK \(octet_length\(token_hash\) = 32\)/);
+    // No raw token column, and nothing existing is changed.
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /\btoken text|ALTER TABLE|DROP |^\s*(UPDATE|DELETE|INSERT) /im);
+  });
 });

@@ -56,6 +56,12 @@ export type {
   OtaBookingChange,
   OtaBookingPayload,
 } from "./host-notification-outbox.ts";
+export { HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, isHostEmail } from "./host-mail-shared.ts";
+export type { HostBookingMailTopic, HostMailTopic } from "./host-mail-shared.ts";
+export { HOST_MAIL_LIMITS, HOST_MAIL_NOTIFICATION_TOPICS, HostMailOutbox } from "./host-mail-outbox.ts";
+export type { ClaimedHostAddressConfirmation, ClaimedHostBookingMail, HostAddressConfirmationClaim, HostBookingMailClaim, HostMailRetry } from "./host-mail-outbox.ts";
+export { HostNotificationAddresses } from "./host-notification-addresses.ts";
+export type { HostLoginEmailOutcome, HostNotificationAddress, HostNotificationAddressChange } from "./host-notification-addresses.ts";
 export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
 export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
