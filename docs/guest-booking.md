@@ -325,6 +325,7 @@ node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sal
 - **フッター**：公開サイトのフッターに「Privacy」（日本語のページは「プライバシー」で同じ英語のページへ）。フッターの枠はコードが持つので、追加の `footerLinks`（`lib/privacy-link.ts`）で足す。予約入力の規約リンクは NIHO の詳細の `legalDocuments`（データ）から出るもので、コードのリンクではないため、ここには足していない（規約の移行〔#89〕で扱う）。
 - **翻訳の一文**：「Your message is translated into Japanese for the host with an AI service. Privacy」（Privacy は `/privacy` を新しいタブで開く。書きかけの文や、メモリにだけある返信 token を失わないため）。予約前の質問の「Ask the host」（`AskHost`）、返信ページ（`GuestReply`）、予約ページのメッセージ欄（`BookingMessages`）の送信欄の下に、訳が実際に動くときだけ出す。サーバーが `translationNoticeShown(config)`（`EXPERIENCE_TRANSLATION_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED` がともに有効。訳はメール job の段なので両方が要る。mock は常に off）で決め、真偽値だけを props で渡す。ブラウザは設定を読まない。
 - **文言の確認**：オーナーが確認した（2026-10-31、#337）。文言を変えるときは、もう一度オーナーの確認を得る。配備時に `EXPERIENCE_PRIVACY_POLICY_URL` を設定する。
+- **OTA で予約した旅行者（#194）**：`/privacy` はこのサイトで予約・質問した旅行者向けで、OTA の予約者の情報（OTA から受け取り、ホストが予約に応じるために使い、1 年で消す）はまだ書いていない。文言の変更はオーナーの確認が要るため、#194 の flag を本番で on にする前に、追記するかどうかをオーナーに確かめる。
 
 ## データの置き場所
 
@@ -334,6 +335,7 @@ node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sal
 - 予約ページ（第6段）の grant とセッションは SHA-256 だけを置き、生の値はメールのリンクの fragment と予約者の HttpOnly cookie にしか無い。予約者の情報の消去と同じ予約の行（`booking_guests`）に紐づき、使えなくなったものはメール job が消す。
 - 予約ごとのメッセージ（6b）は `guest_question_threads`・`guest_question_messages` に置き、予約者の名前とアドレスは写さずに `booking_guests` から読む。予約者の情報の消去で一緒に消える。
 - IP アドレスは保存しない。
+- OTA で受けた予約の予約者（#194、オーナー決定 2026-11-01）は、このサイトの予約者とは別の表 `external_reservation_guests` に置く（[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」）。OTA の reader が読めた名前・人数の内訳・連絡先・言語・予約番号・メモだけで、金額は置かない。台帳・revision・ログ・エラーの文には出さず、push には名前だけを送るまでの間だけ載せる。体験の終了（取消は取消を読んだ時）から 1 年後に、同じメール job の段（`otaGuestErasure`）が消す。
 
 ## flag と設定
 

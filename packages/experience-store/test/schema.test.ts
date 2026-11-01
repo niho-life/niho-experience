@@ -444,4 +444,15 @@ describe("database invariants", () => {
     assert.match(sql, /status IN \('ATTENDED', 'NO_SHOW'\)/);
     assert.doesNotMatch(sql, /guest_name|guest_email|guest_phone|ALTER TABLE|DROP |^\s*(UPDATE|DELETE) /m);
   });
+
+  it("keeps an OTA reservation's guest apart from the ledger, never an amount, and erased data erased (#194)", async () => {
+    const sql = await readFile(new URL("../migrations/0036_external_reservation_guests.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE external_reservation_guests/);
+    assert.match(sql, /REFERENCES external_reservations\(source_site, source_external_account_id, external_reservation_id\)/);
+    assert.match(sql, /ADD COLUMN host_ref uuid NOT NULL DEFAULT gen_random_uuid\(\)/);
+    assert.match(sql, /erased guest data stays erased/);
+    // No amount column, and the ledger's audit tables are not touched (the comments may say so).
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /amount|price|currency|ALTER TABLE external_reservation_revisions|DROP |^\s*(UPDATE|DELETE) /im);
+  });
 });

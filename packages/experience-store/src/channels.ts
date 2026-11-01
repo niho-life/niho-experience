@@ -15,7 +15,8 @@ import { isoValue, overrideFromRow, salesStateFromRow, scheduleRuleFromRow, type
 import { withTransaction } from "./transaction.ts";
 import { evaluateStoredInventory, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
-import { applyExternalReservationObservations } from "./external-reservation-ledger.ts";
+import { applyExternalReservationObservations, type ExternalReservationApplyOptions } from "./external-reservation-ledger.ts";
+import { canonicalExternalReservationGuest, type ExternalReservationGuestDetails } from "./external-reservation-guests.ts";
 import {
   MANUAL_CONFLICT_RESOLUTIONS,
   loadConflictCases,
@@ -266,6 +267,12 @@ export interface ExternalReservationObservation {
   readonly sourceUpdatedAtUtc?: string;
   /** Opaque equality token. It is never ordered or interpreted. */
   readonly sourceRevision?: string;
+  /**
+   * What the site says about the guest (#194, owner decision 2026-11-01), only what its reader can see. Kept apart from
+   * the inventory facts above: it never changes the ledger's fingerprint, order or seats, and is kept only while
+   * EXPERIENCE_OTA_GUEST_DETAILS_ENABLED is on.
+   */
+  readonly guest?: ExternalReservationGuestDetails;
 }
 
 export interface SubmitReservationReadInput {
@@ -362,6 +369,10 @@ export interface ChannelRuntimeOptions {
   readonly supportedAdapters?: Readonly<Record<string, ChannelCapabilities>>;
   /** Accept Airbnb receipts only after a fresh Google DISPATCH or GET-only OBSERVE proof. Default OFF. */
   readonly googleAirbnbObservationEnabled?: boolean;
+  /** Keep the guest details a reader sends with a reservation (#194). Default OFF: they are checked and dropped. */
+  readonly otaGuestDetailsEnabled?: boolean;
+  /** Tell the product's OWNER and operators of new, cancelled and moved external reservations by push (#194). Default OFF. */
+  readonly otaBookingNotificationsEnabled?: boolean;
 }
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -427,7 +438,7 @@ function fingerprint(value: unknown): string {
   return digest(JSON.stringify(value));
 }
 
-function canonicalReservationObservation(value: ExternalReservationObservation): ExternalReservationObservation {
+function canonicalReservationObservation(value: ExternalReservationObservation, index: number): ExternalReservationObservation {
   return {
     externalReservationId: value.externalReservationId,
     externalProductId: value.externalProductId,
@@ -438,6 +449,7 @@ function canonicalReservationObservation(value: ExternalReservationObservation):
     seats: value.seats,
     ...(value.sourceUpdatedAtUtc === undefined ? {} : { sourceUpdatedAtUtc: value.sourceUpdatedAtUtc }),
     ...(value.sourceRevision === undefined ? {} : { sourceRevision: value.sourceRevision }),
+    ...(value.guest === undefined ? {} : { guest: canonicalExternalReservationGuest(value.guest, value.seats, `observations[${index}].guest`) }),
   };
 }
 
@@ -449,7 +461,7 @@ function validateReservationObservations(values: readonly ExternalReservationObs
       throw new StoreValidationError(`observations[${index}] must be an object.`);
     }
     const keys = Object.keys(observation);
-    const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision"];
+    const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision", "guest"];
     if (keys.some((key) => !allowed.includes(key))) throw new StoreValidationError(`observations[${index}] has unknown fields.`);
     assertNonEmptyText(observation.externalReservationId, `observations[${index}].externalReservationId`, 256);
     assertNonEmptyText(observation.externalProductId, `observations[${index}].externalProductId`, 256);
@@ -467,6 +479,12 @@ function validateReservationObservations(values: readonly ExternalReservationObs
     reservationIds.add(observation.externalReservationId);
   }
   return values.map(canonicalReservationObservation);
+}
+
+/** Without the guest details: what a fingerprint of the inventory facts covers. */
+function reservationInventoryFacts(observation: ExternalReservationObservation): ExternalReservationObservation {
+  const { guest: _guest, ...facts } = observation;
+  return facts;
 }
 
 function digest(value: string): string {
@@ -630,12 +648,17 @@ export class ChannelRuntime {
   readonly #now: () => Date;
   readonly #supportedAdapters: Readonly<Record<string, ChannelCapabilities>>;
   readonly #googleAirbnbObservationEnabled: boolean;
+  readonly #otaLedgerOptions: ExternalReservationApplyOptions;
 
   constructor(pool: Pool, options: ChannelRuntimeOptions = {}) {
     this.#pool = pool;
     this.#now = options.now ?? (() => new Date());
     this.#supportedAdapters = options.supportedAdapters ?? {};
     this.#googleAirbnbObservationEnabled = options.googleAirbnbObservationEnabled ?? false;
+    this.#otaLedgerOptions = {
+      guestDetails: options.otaGuestDetailsEnabled === true,
+      notifications: options.otaBookingNotificationsEnabled === true,
+    };
   }
 
   #nowIso(): string { return this.#now().toISOString(); }
@@ -2247,7 +2270,9 @@ export class ChannelRuntime {
       leaseToken: input.leaseToken, pageNumber: input.pageNumber,
       previousReceiptId: input.previousReceiptId ?? "", sourceCursor: input.sourceCursor ?? "",
       nextSourceCursor: input.nextSourceCursor ?? "",
-      snapshotToken: input.snapshotToken ?? "", observations,
+      // The inventory facts only: the receipt's fingerprint lasts the ledger's 7 years, a guest's details one (#194).
+      // A resend that differs in the guest details alone is the same page, and keeps what the first one kept.
+      snapshotToken: input.snapshotToken ?? "", observations: observations.map(reservationInventoryFacts),
       terminal: input.terminal === undefined ? null : {
         status: input.terminal.status,
         completedAtUtc: input.terminal.completedAtUtc,
@@ -2357,7 +2382,8 @@ export class ChannelRuntime {
       const newObservations: ExternalReservationObservation[] = [];
       let duplicateFacts = 0;
       for (const observation of observations) {
-        const observationFingerprint = fingerprint(observation);
+        // The inventory facts only: a guest's details are not compared across pages, and no digest of them is kept.
+        const observationFingerprint = fingerprint(reservationInventoryFacts(observation));
         const seen = await client.query<DbRow>(
           `SELECT observation_fingerprint FROM external_reservation_window_facts
             WHERE read_id=$1::uuid AND external_reservation_id=$2`, [input.readId, observation.externalReservationId],
@@ -2387,7 +2413,7 @@ export class ChannelRuntime {
       }, newObservations, async (observation) => {
         const matches = targetsByTime.get(`${observation.sourceStartAtUtc}\n${observation.sourceEndAtUtc}`) ?? [];
         return matches.length === 1 ? { occurrence: matches[0]! } : null;
-      }, () => this.#nowIso());
+      }, () => this.#nowIso(), this.#otaLedgerOptions);
 
       let missingActiveReservations = 0;
       let healthUpdated = false;
@@ -2496,7 +2522,7 @@ export class ChannelRuntime {
         throw new StoreValidationError(`observations[${index}] must be an object.`);
       }
       const keys = Object.keys(observation);
-      const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision"];
+      const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision", "guest"];
       if (keys.some((key) => !allowed.includes(key))) throw new StoreValidationError(`observations[${index}] has unknown fields.`);
       assertNonEmptyText(observation.externalReservationId, `observations[${index}].externalReservationId`, 256);
       assertNonEmptyText(observation.externalProductId, `observations[${index}].externalProductId`, 256);
@@ -2513,10 +2539,11 @@ export class ChannelRuntime {
       if (reservationIds.has(observation.externalReservationId)) throw new StoreValidationError("Duplicate external reservation IDs are not allowed in one batch.");
       reservationIds.add(observation.externalReservationId);
     }
+    // The guest details are checked here and kept apart: the receipt's lasting fingerprint covers the inventory facts only.
     const observations = input.observations.map(canonicalReservationObservation);
     const requestFingerprint = fingerprint({ jobId, workerId: identity.workerId,
       receiptId: input.receiptId, readId: input.readId, leaseToken: input.leaseToken,
-      batchStatus: input.batchStatus, observations });
+      batchStatus: input.batchStatus, observations: observations.map(reservationInventoryFacts) });
     return withTransaction(this.#pool, async (client) => {
       // Match preflight/result: serialize the worker before provider/job locks.
       await this.#requireWorker(client, identity);
@@ -2573,7 +2600,7 @@ export class ChannelRuntime {
         productId, targetSite, targetExternalAccountId: targetAccount,
         targetExternalProductId: text(read, "target_external_product_id"), targetExternalOptionId: targetOption,
       }, observations, async (observation) => observation.sourceStartAtUtc === targetStart && observation.sourceEndAtUtc === targetEnd
-        ? { occurrence: authority.occurrence } : null, () => this.#nowIso());
+        ? { occurrence: authority.occurrence } : null, () => this.#nowIso(), this.#otaLedgerOptions);
       const storedResult = {
         receiptId: input.receiptId, readId: input.readId, generation, batchStatus: input.batchStatus,
         applied, duplicates, stale, needsReview,

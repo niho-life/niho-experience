@@ -9,6 +9,7 @@ import {
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueNewBookingNotification,
+  enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
@@ -16,6 +17,7 @@ import {
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseOtaBookingPayload,
 } from "../src/host-notification-outbox.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -224,6 +226,60 @@ describe("HostNotificationOutbox input checks", () => {
     assert.deepEqual(queries[0], [[
       HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
       HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage, HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
+      HOST_NOTIFICATION_TOPICS.otaBooking,
     ], 10, 60_000]);
+  });
+});
+
+describe("OTA booking notifications (#194)", () => {
+  const ref = "0b8f5a8e-2c1d-4e7f-9a3b-5c6d7e8f9a0b";
+  const base = {
+    v: 1, change: "NEW", site: "GetYourGuide", ref, productId: "tea", experienceTitle: "Synthetic Tea Ceremony",
+    startsAt: "2099-01-02T01:00:00.000Z", seats: 2,
+  } as const;
+
+  it("reads exactly the closed shape: a move carries its old time, a name only when given", () => {
+    assert.deepEqual(parseOtaBookingPayload(base), base);
+    assert.deepEqual(parseOtaBookingPayload({ ...base, guestName: "Synthetic Guest" }), { ...base, guestName: "Synthetic Guest" });
+    const moved = { ...base, change: "RESCHEDULED", previousStartsAt: "2099-01-01T01:00:00.000Z" };
+    assert.deepEqual(parseOtaBookingPayload(moved), moved);
+    for (const bad of [
+      { ...base, change: "RESCHEDULED" },
+      { ...base, previousStartsAt: "2099-01-01T01:00:00.000Z" },
+      { ...base, change: "MOVED" },
+      { ...base, ref: "not-a-uuid" },
+      { ...base, site: "Get Your Guide" },
+      { ...base, seats: 0 },
+      { ...base, startsAt: "2099-01-02T10:00:00+09:00" },
+      { ...base, guestName: " padded " },
+      { ...base, guestName: "line\nbreak" },
+      { ...base, guestEmail: "guest@example.test" },
+      { ...base, amount: 1000 },
+    ]) assert.equal(parseOtaBookingPayload(bad), null, JSON.stringify(bad));
+  });
+
+  it("writes one row per ledger revision, with the name only when there is one", async () => {
+    const { client, calls } = recordingClient();
+    const input = {
+      providerId: "provider-a", change: "NEW" as const, site: "GetYourGuide", ref, localRevision: 3, productId: "tea",
+      experienceTitle: "Synthetic Tea Ceremony", startsAt: "2099-01-02T10:00:00+09:00", seats: 2,
+    };
+    assert.equal(await enqueueOtaBookingNotification(client, { ...input, guestName: "Synthetic Guest" }), 1);
+    assert.equal(await enqueueOtaBookingNotification(client, { ...input, guestName: null }), 1);
+    assert.deepEqual(calls[0]!.params.slice(0, 5), ["provider-a", "external_reservation", ref, HOST_NOTIFICATION_TOPICS.otaBooking, `host-push:ota-booking:${ref}:3`]);
+    assert.deepEqual(JSON.parse(calls[0]!.params[5] as string), { ...base, guestName: "Synthetic Guest" });
+    assert.deepEqual(JSON.parse(calls[1]!.params[5] as string), base);
+    await assert.rejects(() => enqueueOtaBookingNotification(client, { ...input, change: "RESCHEDULED" }), StoreValidationError);
+    await assert.rejects(() => enqueueOtaBookingNotification(client, { ...input, localRevision: 0 }), StoreValidationError);
+    await assert.rejects(() => enqueueOtaBookingNotification(client, { ...input, guestName: "x".repeat(201) }), StoreValidationError);
+    assert.equal(calls.length, 2);
+  });
+
+  it("drops the guest's name from an OTA row once it is done", async () => {
+    const queries: { sql: string; params: unknown[] }[] = [];
+    const outbox = new HostNotificationOutbox({ query: async (sql: string, params: unknown[]) => { queries.push({ sql, params }); return { rows: [] }; } } as never);
+    await outbox.complete("7", 1);
+    assert.match(queries[0]!.sql, /payload - 'guestName'/);
+    assert.equal(queries[0]!.params[3], HOST_NOTIFICATION_TOPICS.otaBooking);
   });
 });

@@ -147,6 +147,30 @@ export class HostPushSubscriptions {
     return result.rows.map(recipientFromRow);
   }
 
+  /**
+   * The devices of one product's people (#194, an OTA booking): the provider's active OWNER and the product's active,
+   * unexpired operators (docs/product-operators.md), seen since `seenAfter`. EDITOR and VIEWER members get nothing
+   * here: they do not see the product's bookings. A device appears once even when its person is both.
+   */
+  async productRecipients(providerId: string, productId: string, seenAfter: Date): Promise<HostPushRecipient[]> {
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(productId, "productId");
+    if (Number.isNaN(seenAfter.getTime())) throw new StoreValidationError("seenAfter must be a valid time.");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT s.id::text AS id, s.endpoint, s.p256dh, s.auth
+         FROM host_push_subscriptions s
+        WHERE s.last_seen_at >= $3
+          AND (EXISTS (SELECT 1 FROM provider_memberships m
+                        WHERE m.provider_id = $1 AND m.niho_user_id = s.niho_user_id AND m.active = true AND m.role = 'OWNER')
+               OR EXISTS (SELECT 1 FROM product_operator_grants g
+                           WHERE g.provider_id = $1 AND g.product_id = $2 AND g.niho_user_id = s.niho_user_id AND g.active = true
+                             AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp())))
+        ORDER BY s.id`,
+      [providerId, productId, seenAfter.toISOString()],
+    );
+    return result.rows.map(recipientFromRow);
+  }
+
   async recordSent(id: string): Promise<void> {
     assertRowId(id);
     await this.#pool.query("UPDATE host_push_subscriptions SET last_success_at = clock_timestamp(), failure_count = 0 WHERE id = $1", [id]);

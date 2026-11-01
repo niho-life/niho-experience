@@ -120,6 +120,10 @@ export const FLAGS = Object.freeze([
     needs: ["HOST_CONSOLE", "DATABASE"],
     fixed: { EXPERIENCE_GOOGLE_JOBS_AUDIENCE: siteUrl, EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL: serviceAccount("experience-google-jobs") },
   },
+  // OTA の予約 (#194): the guest details OTA readers send (erased by the mail job) and the pushes about OTA bookings.
+  // Neither opens an OTA read; the channel runtime keeps its own gates.
+  { env: "EXPERIENCE_OTA_GUEST_DETAILS_ENABLED", variable: "OTA_GUEST_DETAILS_ENABLED", needs: ["DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"] },
+  { env: "EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED", variable: "OTA_BOOKING_NOTIFICATIONS_ENABLED", needs: ["HOST_PUSH_ENABLED", "DATABASE"] },
 ]);
 
 const PROD_SECRET_REF = /^[A-Za-z0-9_-]+:[1-9][0-9]*$/;

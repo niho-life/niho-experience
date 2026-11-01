@@ -10,8 +10,10 @@ import { assertStoreIdentifier } from "./validation.ts";
  * this site (`newBooking`, #285), one a guest or NIHO support cancelled (`cancellation`, #285 slice 7) and a
  * message a guest wrote on their booking page (`bookingMessage`, #285 slice 6b) write their rows in their own transactions; the approval and NIHO's booking
  * message rows (`guestMessage`) wait for those flows to move to the experience DB (ADR 0002). A Google calendar this
- * site cannot read (`googleCalendarAttention`, #238) is written by the Google calendar job. The job claims only these
- * topics: `booking.confirmed`, `guest_question.*` and every other topic stay untouched.
+ * site cannot read (`googleCalendarAttention`, #238) is written by the Google calendar job. A booking on a reservation
+ * site that was new, cancelled or moved (`otaBooking`, #194, owner decision 2026-11-01) is written by the external
+ * ledger's transaction. The job claims only these topics: `booking.confirmed`, `guest_question.*` and every other topic
+ * stay untouched.
  */
 export const HOST_NOTIFICATION_TOPICS = {
   approvalDeadline: "host.notify.approval_deadline",
@@ -21,6 +23,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   cancellation: "host.notify.cancellation",
   bookingMessage: "host.notify.booking_message",
   googleCalendarAttention: "host.notify.google_calendar_attention",
+  otaBooking: "host.notify.ota_booking",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -98,6 +101,31 @@ export interface GoogleCalendarAttentionPayload {
   readonly reason: "REVOKED" | "UNAVAILABLE";
 }
 
+/** What happened to a booking on a reservation site, as the ledger read it. */
+export const OTA_BOOKING_CHANGES = ["NEW", "CANCELLED", "RESCHEDULED"] as const;
+export type OtaBookingChange = (typeof OTA_BOOKING_CHANGES)[number];
+
+/**
+ * A booking on a reservation site (Airbnb, GetYourGuide, …) that is new, cancelled or moved (#194). The owner decided
+ * (2026-11-01) that the host learns which site it came from and who booked: the site, the experience, its time, the
+ * party size and the guest's name, never a contact or an amount (those are in /host). `ref` is the reservation's host
+ * handle (external_reservations.host_ref), never the site's account or reservation ID. `previousStartsAt` is the time it
+ * moved from (RESCHEDULED only). `guestName` is there only when the site gave one and the guest details are kept; the
+ * push job removes it from the row once the row is done, and the mail job's erasure from a row never sent.
+ */
+export interface OtaBookingPayload {
+  readonly v: 1;
+  readonly change: OtaBookingChange;
+  readonly site: string;
+  readonly ref: string;
+  readonly productId: string;
+  readonly experienceTitle: string;
+  readonly startsAt: string;
+  readonly previousStartsAt?: string;
+  readonly seats: number;
+  readonly guestName?: string;
+}
+
 /** One claimed row. `id` is the row's bigint as text; the payload is parsed by the consumer. */
 export interface ClaimedHostNotification {
   readonly id: string;
@@ -121,6 +149,11 @@ const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
 const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
+const OTA_BOOKING_KEYS = ["change", "experienceTitle", "productId", "ref", "seats", "site", "startsAt", "v"];
+const OTA_SITE = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
+const HOST_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const GUEST_NAME_MAX = 200;
+const OTA_SEATS_MAX = 1_000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const publicId = (value: unknown): value is string => typeof value === "string" && PUBLIC_ID.test(value);
@@ -193,6 +226,27 @@ export function parseGoogleCalendarAttentionPayload(value: unknown): GoogleCalen
   if (value.input !== "PROVIDER" && value.input !== "RESOURCE") return null;
   if (value.reason !== "REVOKED" && value.reason !== "UNAVAILABLE") return null;
   return { v: 1, input: value.input, reason: value.reason };
+}
+
+const guestName = (value: unknown): value is string => typeof value === "string" && value.length >= 1 && value.length <= GUEST_NAME_MAX
+  && value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value);
+
+/** The OTA booking's payload, or null for anything else (an unknown key, a wrong type, a move without its old time). */
+export function parseOtaBookingPayload(value: unknown): OtaBookingPayload | null {
+  if (!isRecord(value) || value.v !== 1) return null;
+  const optional = [...(value.change === "RESCHEDULED" ? ["previousStartsAt"] : []), ...("guestName" in value ? ["guestName"] : [])];
+  if (!hasExactKeys(value, [...OTA_BOOKING_KEYS, ...optional].sort())) return null;
+  const { change, site, ref, productId, experienceTitle, startsAt, previousStartsAt, seats: count, guestName: name } = value;
+  if (!(OTA_BOOKING_CHANGES as readonly unknown[]).includes(change) || typeof site !== "string" || !OTA_SITE.test(site)
+    || typeof ref !== "string" || !HOST_REF.test(ref) || typeof productId !== "string" || productId.length < 1 || productId.length > 256
+    || !title(experienceTitle) || !storedInstant(startsAt) || !Number.isInteger(count) || (count as number) < 1 || (count as number) > OTA_SEATS_MAX
+    || (change === "RESCHEDULED" && !storedInstant(previousStartsAt)) || (name !== undefined && !guestName(name))) return null;
+  return {
+    v: 1, change: change as OtaBookingChange, site, ref, productId, experienceTitle, startsAt,
+    ...(change === "RESCHEDULED" ? { previousStartsAt: previousStartsAt as string } : {}),
+    seats: count as number,
+    ...(name === undefined ? {} : { guestName: name as string }),
+  };
 }
 
 /**
@@ -438,6 +492,51 @@ export async function enqueueGoogleCalendarAttentionNotification(
   });
 }
 
+/**
+ * A booking on a reservation site was new, cancelled or moved (#194): one OTA_BOOKING notification per ledger revision
+ * (NEW_BOOKING or CANCELLATION in 設定 › 通知, which cannot be turned off), due now. The push goes to the product's OWNER
+ * and its operators only. Called in the ledger's transaction. 1 when added, 0 for a repeat.
+ */
+export async function enqueueOtaBookingNotification(
+  client: PoolClient,
+  input: {
+    readonly providerId: string;
+    readonly change: OtaBookingChange;
+    readonly site: string;
+    readonly ref: string;
+    /** The ledger revision this is about: one notification each. */
+    readonly localRevision: number;
+    readonly productId: string;
+    readonly experienceTitle: string;
+    readonly startsAt: string;
+    readonly previousStartsAt?: string;
+    readonly seats: number;
+    readonly guestName?: string | null;
+  },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  if (!Number.isSafeInteger(input.localRevision) || input.localRevision < 1) throw new StoreValidationError("localRevision must be a positive integer.");
+  const startsAt = canonicalInstant(input.startsAt);
+  const previousStartsAt = input.previousStartsAt === undefined ? undefined : canonicalInstant(input.previousStartsAt);
+  const payload = {
+    v: 1, change: input.change, site: input.site, ref: input.ref, productId: input.productId,
+    experienceTitle: typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "",
+    startsAt, ...(input.change === "RESCHEDULED" ? { previousStartsAt } : {}), seats: input.seats,
+    ...(typeof input.guestName === "string" ? { guestName: input.guestName } : {}),
+  };
+  // The same check the push job makes: a row it would drop is refused here instead.
+  if (parseOtaBookingPayload(payload) === null) throw new StoreValidationError("The OTA booking notification is invalid.");
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.ref,
+    aggregateType: "external_reservation",
+    topic: HOST_NOTIFICATION_TOPICS.otaBooking,
+    deduplicationKey: `host-push:ota-booking:${input.ref}:${input.localRevision}`,
+    payload,
+    availableAt: null,
+  });
+}
+
 function assertRowId(id: string): void {
   if (!ROW_ID.test(id)) throw new StoreValidationError("id must be an outbox row id.");
 }
@@ -491,14 +590,16 @@ export class HostNotificationOutbox {
   /**
    * Sent, skipped or given up: the row is done. A row already closed (a cancelled reminder) stays as it is.
    * `attempts` is the claim's count: once the lease ran out and another run claimed the row again, this claim
-   * no longer changes it.
+   * no longer changes it. An OTA booking's row loses the guest's name here: it was only there for the push.
    */
   async complete(id: string, attempts: number): Promise<void> {
     assertRowId(id);
     assertAttempts(attempts);
     await this.#pool.query(
-      "UPDATE outbox_messages SET processed_at = clock_timestamp() WHERE id = $1 AND topic = ANY($2::text[]) AND processed_at IS NULL AND attempts = $3",
-      [id, TOPICS, attempts],
+      `UPDATE outbox_messages SET processed_at = clock_timestamp(),
+              payload = CASE WHEN topic = $4 THEN payload - 'guestName' ELSE payload END
+        WHERE id = $1 AND topic = ANY($2::text[]) AND processed_at IS NULL AND attempts = $3`,
+      [id, TOPICS, attempts, HOST_NOTIFICATION_TOPICS.otaBooking],
     );
   }
 

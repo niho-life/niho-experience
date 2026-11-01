@@ -1,6 +1,6 @@
 import "server-only";
 import type { Pool } from "pg";
-import { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
@@ -81,6 +81,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       access: guestBooking ? new GuestBookingAccess(pool) : null,
       refunds: submit ? { cancellations: new BookingCancellations(pool), submit } : null,
       guests: new GuestBookingRepository(pool),
+      otaGuests: new ExternalReservationGuests(pool),
       translations: new GuestQuestionTranslations(pool),
       translator: (dependencies.translator ?? (() => anthropicTranslator({ timeoutMs: EXPERIENCE_JOB_LIMITS.translationTimeoutMs })))(),
       mailer,

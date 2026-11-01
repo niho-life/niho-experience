@@ -84,6 +84,12 @@ test("the fixed reservation query is a named read-only query selecting only sche
   assert.doesNotMatch(RESERVATION_QUERY, /bookingReference|customer|traveler|email|phone|price|amount|ticket|location|address|mutation|subscription/i);
 });
 
+test("adds no guest details: their fields were never observed on a non-empty booking (#194, #237)", () => {
+  const fact = bookingFact(parsedItem(booking(21)), { target, ...coverage });
+  assert.ok(fact);
+  assert.equal("guest" in fact, false);
+});
+
 test("search request is the exact observed input with a 24h margin on both coverage edges", () => {
   const request = buildSearchRequest({
     supplierId: "10001", coverageFromUtc: "2099-01-01T00:00:00.000Z", coverageToUtc: "2099-02-01T00:00:00.000Z", offset: 50, limit: 50,
