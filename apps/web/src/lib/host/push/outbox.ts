@@ -8,6 +8,7 @@ import {
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseOtaBookingPayload,
   STOPPABLE_HOST_NOTIFICATION_KEYS,
   type ClaimedHostNotification,
   type HostNotificationOutbox,
@@ -159,6 +160,31 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         // The bookings made on this site (#285 slice 8), with the cancelled one opened.
         url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
         tag: `cancellation-${payload.bookingId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.otaBooking) {
+    const payload = parseOtaBookingPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        // 設定 › 通知's 新しい予約・申込 (a move too) or 予約の取消: both always come.
+        kind: payload.change === "CANCELLED" ? "CANCELLATION" : "NEW_BOOKING",
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        ota: { site: payload.site, change: payload.change, ...(payload.previousStartsAt === undefined ? {} : { previousStartsAt: payload.previousStartsAt }) },
+        ...(payload.guestName === undefined ? {} : { guestName: payload.guestName }),
+        // The product's OWNER and operators only (#194).
+        productId: payload.productId,
+        // The bookings, with this one opened (its handle, never the site's IDs).
+        url: withQuery(HOST_BOOKINGS_PATH, { ota: payload.ref, providerId }),
+        // A later change of the same booking replaces the earlier notification.
+        tag: `ota-${payload.ref}`,
       },
     };
   }

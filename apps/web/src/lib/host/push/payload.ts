@@ -1,13 +1,15 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { shortDateWithWeekdayJa, todayInJapan } from "@/host/format";
+import { otaSiteLabel } from "@/host/ota-sites";
 import type { HostNotificationKey } from "@/host/types";
 import { HOST_APP_SCOPE } from "../routes";
 
 /**
  * What a push to the host app may say (#177 P2, owner decision 2026-10-28): the kind, the experience,
- * the date and time and the party size. There is deliberately no field for a guest's name, a
- * message's text or an amount, so none can reach a lock screen.
+ * the date and time and the party size. There is deliberately no field for a message's text, a contact or an
+ * amount, so none can reach a lock screen. A guest's name comes only with a booking made on a reservation site
+ * (`ota`, #194, owner decision 2026-11-01): the host learns there which site it came from and who booked.
  */
 /**
  * What a push is about: one of 設定 › 通知's notifications, or a Google calendar this site cannot read (#238), which
@@ -35,6 +37,15 @@ export interface HostPushEvent {
   tag: string;
   /** The app icon's count (Badging API), where the device has one. */
   badgeCount?: number;
+  /**
+   * A booking made on a reservation site (#194): which site, and whether it is new, cancelled or moved (from
+   * `previousStartsAt`). It sets the title; `kind` stays the 設定 › 通知 notification it counts as.
+   */
+  ota?: { site: string; change: "NEW" | "CANCELLED" | "RESCHEDULED"; previousStartsAt?: string };
+  /** The guest's name, with `ota` only. */
+  guestName?: string;
+  /** Only this product's people (its OWNER and operators) get it, instead of every member of the provider. */
+  productId?: string;
 }
 
 /** The JSON the service worker reads (lib/host/service-worker.ts). */
@@ -59,6 +70,12 @@ export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
 };
 
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
+
+/** A booking on a reservation site: the site's name goes first, so the host sees where it came from. */
+export function hostPushOtaTitle(ota: NonNullable<HostPushEvent["ota"]>): string {
+  const site = otaSiteLabel(ota.site);
+  return ota.change === "NEW" ? `${site} で新しい予約` : ota.change === "CANCELLED" ? `${site} の予約が取り消されました` : `${site} の予約の日時が変わりました`;
+}
 
 export const HOST_PUSH_MAX_BYTES = 3 * 1024;
 const TITLE_MAX = 80;
@@ -94,14 +111,23 @@ function titleLine(title: string | undefined): string | null {
   return `${clipped}…`;
 }
 
+/** "10/22（木）18:00 → 10/24（土）18:00" for a move, else the time alone. */
+function whenLine(event: HostPushEvent): string | null {
+  const when = whenJa(event.startsAt);
+  const before = event.ota?.change === "RESCHEDULED" ? whenJa(event.ota.previousStartsAt) : null;
+  return before && when ? `${before} → ${when}` : when;
+}
+
 export function hostPushPayload(event: HostPushEvent): string {
   const tag = event.tag.trim();
   if (!tag || tag.length > TAG_MAX) throw new Error("A host push tag must be 1-64 characters");
   const seats = Number.isInteger(event.seats) && event.seats! > 0 ? `${event.seats}名` : null;
+  const guest = event.ota ? titleLine(event.guestName) : null;
   const message: HostPushMessage = {
     v: 1,
-    title: event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
-    body: event.note ?? [titleLine(event.experienceTitle), whenJa(event.startsAt), seats].filter(Boolean).join(" · "),
+    title: event.ota ? hostPushOtaTitle(event.ota)
+      : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
+    body: event.note ?? [titleLine(event.experienceTitle), whenLine(event), guest ? `${guest} 様` : null, seats].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
     ...(Number.isInteger(event.badgeCount) && event.badgeCount! >= 0 ? { badge: event.badgeCount } : {}),

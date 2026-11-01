@@ -4,7 +4,7 @@ import { generateVapidKeys } from "@niho-experience/web-push";
 vi.mock("server-only", () => ({}));
 
 import { HOST_PUSH_SEEN_WITHIN_MS, notifyHostDevices, type HostPushDeps } from "./notify";
-import { HOST_PUSH_TITLES, hostPushDelivery, hostPushPayload, hostPushTestPayload, hostPushTopic, type HostPushEvent } from "./payload";
+import { HOST_PUSH_TITLES, hostPushDelivery, hostPushOtaTitle, hostPushPayload, hostPushTestPayload, hostPushTopic, type HostPushEvent } from "./payload";
 
 const event: HostPushEvent = {
   providerId: "sample-provider-kitchen",
@@ -38,6 +38,24 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
     const smuggled = { ...event, guestName: "合成 予約者", message: "アレルギーがあります", amount: 12000 } as HostPushEvent;
     const json = hostPushPayload(smuggled);
     expect(json).not.toMatch(/合成 予約者|アレルギー|12000|¥/);
+  });
+
+  it("names the reservation site and the guest of an OTA booking, never a contact (#194)", () => {
+    const ota: HostPushEvent = {
+      ...event, kind: "NEW_BOOKING", ota: { site: "GetYourGuide", change: "NEW" }, guestName: "Synthetic Traveler",
+      url: "/host/bookings?ota=0b8f5a8e-2c1d-4e7f-9a3b-5c6d7e8f9a0b", tag: "ota-0b8f5a8e-2c1d-4e7f-9a3b-5c6d7e8f9a0b",
+    };
+    expect(JSON.parse(hostPushPayload(ota))).toMatchObject({
+      title: "GetYourGuide で新しい予約", body: "Kamakura Community Dinner with Locals · 10/22（木）18:00 · Synthetic Traveler 様 · 3名",
+    });
+    const moved = JSON.parse(hostPushPayload({ ...ota, ota: { site: "Jalan", change: "RESCHEDULED", previousStartsAt: "2026-10-20T09:00:00Z" } }));
+    expect(moved).toMatchObject({ title: "じゃらん の予約の日時が変わりました", body: "Kamakura Community Dinner with Locals · 10/20（火）18:00 → 10/22（木）18:00 · Synthetic Traveler 様 · 3名" });
+    expect(hostPushOtaTitle({ site: "Airbnb", change: "CANCELLED" })).toBe("Airbnb の予約が取り消されました");
+    expect(hostPushOtaTitle({ site: "NewSite", change: "NEW" })).toBe("NewSite で新しい予約");
+    // Without a name the line is the experience, time and party.
+    expect(JSON.parse(hostPushPayload({ ...ota, guestName: undefined })).body).toBe("Kamakura Community Dinner with Locals · 10/22（木）18:00 · 3名");
+    const smuggled = { ...ota, guestEmail: "traveler@example.test", phone: "+81 90-0000-0000", amount: 12000 } as HostPushEvent;
+    expect(hostPushPayload(smuggled)).not.toMatch(/example\.test|90-0000|12000/);
   });
 
   it("opens only pages under /host/, and stays within 3 KB", () => {
@@ -75,6 +93,7 @@ describe("notifyHostDevices", () => {
     let peak = 0;
     const subscriptions: HostPushDeps["subscriptions"] = {
       recipients: vi.fn(async () => Object.keys(statuses).map(device)),
+      productRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       recordSent: vi.fn(async (id: string) => { log.push(`sent ${id}`); }),
       recordFailure: vi.fn(async (id: string) => { log.push(`failure ${id}`); }),
       removeById: vi.fn(async (id: string) => { log.push(`removed ${id}`); }),
@@ -100,6 +119,13 @@ describe("notifyHostDevices", () => {
     expect(run.log.sort()).toEqual(["failure 4", "failure 5", "failure 6", "removed 2", "removed 3", "sent 1", "sent 7"]);
     expect(run.peak()).toBeLessThanOrEqual(4);
     expect(run.subscriptions.recipients).toHaveBeenCalledWith("sample-provider-kitchen", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+  });
+
+  it("sends an event about one product to that product's people only (#194)", async () => {
+    const run = deps({ 1: 201 });
+    expect(await notifyHostDevices({ ...event, productId: "tea" }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
+    expect(run.subscriptions.productRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "tea", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+    expect(run.subscriptions.recipients).not.toHaveBeenCalled();
   });
 
   it("refuses an event that would leave the app before sending anything", async () => {

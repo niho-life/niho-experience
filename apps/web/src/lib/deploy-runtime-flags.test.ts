@@ -75,6 +75,8 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   HOST_PUSH_ENABLED: "hostPushEnabled",
   EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED: "googleBusySyncEnabled",
   EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED: "googleBookingEventsEnabled",
+  EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "otaGuestDetailsEnabled",
+  EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "otaBookingNotificationsEnabled",
 };
 
 const byEnv = new Map(FLAGS.map((flag) => [flag.env, flag]));

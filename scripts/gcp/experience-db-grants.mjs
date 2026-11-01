@@ -48,6 +48,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_providers: { write: [], updateColumns: ["created_at"] },
   external_reservation_conflict_cases: { write: IU },
   external_reservation_conflict_members: { write: IU },
+  // OTA の予約者 (#194): the ledger keeps what a reader sent; the mail job's erasure blanks it (no DELETE).
+  external_reservation_guests: { write: IU },
   external_reservation_inventory_snapshots: { write: I },
   external_reservation_listing_health: { write: IU },
   external_reservation_read_dispatch_states: { write: IU },

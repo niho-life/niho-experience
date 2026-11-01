@@ -77,6 +77,21 @@ describe("external reservation input validation", () => {
     }), StoreValidationError);
   });
 
+  it("checks a fact's guest details on both read paths before a database call (#194)", async () => {
+    const jobId = "00000000-0000-4000-8000-000000000003";
+    const window = { receiptId: base.receiptId, readId: base.readId, leaseToken: base.leaseToken, pageNumber: 0, nextSourceCursor: "next" };
+    const guest = { name: "Synthetic Traveler", email: "traveler@example.test", partyBreakdown: [{ band: "ADULT" as const, count: 1 }] };
+    for (const bad of [{ ...guest, price: 1 }, { ...guest, email: "nope" }, { ...guest, partyBreakdown: [{ band: "ADULT" as const, count: 2 }] }, {}]) {
+      const observations = [{ ...observation, guest: bad as never }];
+      await assert.rejects(() => runtime.submitReservationRead(worker, jobId, { ...base, observations }), StoreValidationError);
+      await assert.rejects(() => runtime.submitReservationWindowPage(worker, jobId, { ...window, observations }), StoreValidationError);
+    }
+    // A valid one passes the checks and goes on to the database (none here).
+    const observations = [{ ...observation, guest }];
+    await assert.rejects(() => runtime.submitReservationRead(worker, jobId, { ...base, observations }), (error) => !(error instanceof StoreValidationError));
+    await assert.rejects(() => runtime.submitReservationWindowPage(worker, jobId, { ...window, observations }), (error) => !(error instanceof StoreValidationError));
+  });
+
   it("rejects invalid window page order, bounds, and terminal evidence before a database call", async () => {
     const windowBase = {
       receiptId: base.receiptId, readId: base.readId, leaseToken: base.leaseToken, pageNumber: 0,

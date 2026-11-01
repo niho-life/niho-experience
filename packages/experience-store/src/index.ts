@@ -30,8 +30,10 @@ export {
   enqueueCancellationNotification,
   enqueueGoogleCalendarAttentionNotification,
   enqueueNewBookingNotification,
+  enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
+  OTA_BOOKING_CHANGES,
   parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
@@ -39,6 +41,7 @@ export {
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseOtaBookingPayload,
 } from "./host-notification-outbox.ts";
 export type {
   ApprovalDeadlinePayload,
@@ -50,6 +53,8 @@ export type {
   GuestQuestionPayload,
   HostNotificationTopic,
   NewBookingPayload,
+  OtaBookingChange,
+  OtaBookingPayload,
 } from "./host-notification-outbox.ts";
 export { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings, STOPPABLE_HOST_NOTIFICATION_KEYS } from "./notification-settings.ts";
 export type { HostNotificationChanges, HostNotificationItem, HostNotificationKey, StoppableHostNotificationKey } from "./notification-settings.ts";
@@ -194,6 +199,16 @@ export { GuideAdminRepository } from "./guide-admin.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
 export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
 export { MANUAL_CONFLICT_RESOLUTIONS } from "./external-reservation-attention.ts";
+export {
+  canonicalExternalReservationGuest,
+  EXTERNAL_RESERVATION_GUEST_KEYS,
+  EXTERNAL_RESERVATION_GUEST_LIMITS,
+  EXTERNAL_RESERVATION_PARTY_BANDS,
+  ExternalReservationGuests,
+} from "./external-reservation-guests.ts";
+export type { ExternalReservationGuestDetails, ExternalReservationPartyBand, ExternalReservationPartyCount } from "./external-reservation-guests.ts";
+export { HOST_OTA_BOOKING_LIMITS, HostOtaBookings } from "./host-ota-bookings.ts";
+export type { HostOtaBooking, HostOtaBookingGuest, HostOtaBookingListOptions } from "./host-ota-bookings.ts";
 export type { ConflictCaseResolution, ConflictCaseView, ConflictMemberView, DurationSummary, ManualConflictResolution, PropagationMetrics, PropagationStatus } from "./external-reservation-attention.ts";
 export type { ChannelIncidentDetail, ChannelRuntimeAccountView, ChannelRuntimeIncidentKind, ChannelRuntimeIncidentSubjectType, ChannelRuntimeIncidentView, ChannelRuntimeListingView, ChannelRuntimeOverview, ChannelRuntimeWorkerView, ChannelWatchdogRunResult, ChannelWatchdogTransition, ChannelWorkerHealth } from "./channel-runtime-monitor.ts";
 export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";

@@ -15,6 +15,13 @@ calendar read/write は共通の商品predicateを使う。mutationのlock順は
 
 operator response は許可商品だけを返す。予約人数、空席数、Google busy interval、外部account/calendar IDを返さない。日時変更可否は内部の予約状態から `canReschedule` として返し、availability判定はproviderと同じinventory evaluatorをサーバー内で使う。予約、CSV、通知、売上、返金、Google管理、商品原稿は従来どおりprovider membershipを必要とする。
 
+例外は OTA の予約（#194、オーナー決定 2026-11-01）。担当の商品の分だけ、詳細（予約者の名前・連絡先・OTA の予約番号を含む）を読め、通知を受ける。
+
+- **読む**：`HostOtaBookings`（[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」）。読める商品は有効で期限内の grant からサーバーで決め、リクエストからは取らない。`calendarScope=OPERATOR` のときは local の OWNER 行があっても OWNER として扱わない。担当外の商品を指定すると拒否、詳細は「見つかりません」。外部 account ID・外部予約 ID・listing・calendar ID・金額は返さない。
+- **通知**：OTA の予約の新規・取消・日時変更の push は、商品の OWNER と担当の運営者の端末だけに送る（`HostPushSubscriptions.productRecipients`）。grant の失効・期限切れの後は送らない。
+- このサイトで受けた予約（`booking_guests` のある予約）・NIHO の予約・売上・返金は、今までどおり OWNER だけ。
+- 画面（予約の一覧・詳細・ホーム・この回）につなぐのは #194 の PR 2。
+
 grant失効は新しいcalendar変更を止めるだけで、providerが所有する既存枠、予約、channel jobを削除しない。external account/listingの委任解除とversion fenceは別の台帳契約として維持する。
 
 現在のNIHO provider一覧にない運営者と、NIHOで権限を下げられた担当者には、サーバーで `calendarScope=OPERATOR` を設定する。この値はリクエストから採らず、Storeの全カレンダー認可でもprovider所属を根拠に使わない。Experience側に古いOWNER行が残っていても担当外商品へ広がらず、カレンダー以外のStore操作も拒否する。

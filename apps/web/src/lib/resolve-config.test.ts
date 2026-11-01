@@ -359,6 +359,33 @@ describe("admin support console settings", () => {
     }
   });
 
+  it("keeps OTA guest details only where the mail job erases them, and pushes OTA bookings only with push (#194)", () => {
+    const http = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true" };
+    const secret = "s".repeat(32);
+    const mail = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+    };
+    const push = {
+      ...http, HOST_SESSION_SECRET: secret, NIHO_FIREBASE_WEB_API_KEY: "key", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true",
+      HOST_PUSH_VAPID_PUBLIC_KEY: `B${"x".repeat(86)}`, HOST_PUSH_VAPID_PRIVATE_KEY: "p".repeat(43), HOST_PUSH_VAPID_SUBJECT: "mailto:host-push@example.test",
+    };
+    expect(resolveConfig({})).toMatchObject({ otaGuestDetailsEnabled: false, otaBookingNotificationsEnabled: false });
+    // The mock never keeps or sends them; "1" is not "true".
+    expect(resolveConfig({ EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "true", EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "true" }))
+      .toMatchObject({ otaGuestDetailsEnabled: false, otaBookingNotificationsEnabled: false });
+    expect(resolveConfig({ ...mail, EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "1" }).otaGuestDetailsEnabled).toBe(false);
+    expect(resolveConfig({ ...mail, EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "true" }).otaGuestDetailsEnabled).toBe(true);
+    expect(() => resolveConfig({ ...http, EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "true" })).toThrow("EXPERIENCE_OTA_GUEST_DETAILS_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true");
+    expect(resolveConfig({ ...push, EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "true" }).otaBookingNotificationsEnabled).toBe(true);
+    expect(() => resolveConfig({ ...push, HOST_PUSH_ENABLED: "false", EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED=true needs HOST_PUSH_ENABLED=true");
+  });
+
   it("sends guest mail only in http mode with its own flag, and refuses to start without SMTP, the senders and the job identity (#285)", () => {
     const mail = {
       EXPERIENCE_API_MODE: "http",

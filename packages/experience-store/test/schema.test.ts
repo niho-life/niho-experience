@@ -446,11 +446,22 @@ describe("database invariants", () => {
   });
 
   it("keeps one bookings feed per provider as a salt and its address's digest, additively and without guest data (#109)", async () => {
-    const sql = await readFile(new URL("../migrations/0035_host_calendar_feeds.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../migrations/0037_host_calendar_feeds.sql", import.meta.url), "utf8");
     assert.match(sql, /CREATE TABLE provider_calendar_feeds/);
     assert.match(sql, /provider_id text PRIMARY KEY REFERENCES experience_providers\(id\)/);
     assert.match(sql, /token_hash bytea NOT NULL UNIQUE CHECK \(octet_length\(token_hash\) = 32\)/);
     assert.match(sql, /REFERENCES provider_memberships\(provider_id, niho_user_id\)/);
     assert.doesNotMatch(sql, /guest_|token text|ALTER TABLE|DROP |^\s*(UPDATE|DELETE) /m);
+  });
+
+  it("keeps an OTA reservation's guest apart from the ledger, never an amount, and erased data erased (#194)", async () => {
+    const sql = await readFile(new URL("../migrations/0036_external_reservation_guests.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE external_reservation_guests/);
+    assert.match(sql, /REFERENCES external_reservations\(source_site, source_external_account_id, external_reservation_id\)/);
+    assert.match(sql, /ADD COLUMN host_ref uuid NOT NULL DEFAULT gen_random_uuid\(\)/);
+    assert.match(sql, /erased guest data stays erased/);
+    // No amount column, and the ledger's audit tables are not touched (the comments may say so).
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /amount|price|currency|ALTER TABLE external_reservation_revisions|DROP |^\s*(UPDATE|DELETE) /im);
   });
 });

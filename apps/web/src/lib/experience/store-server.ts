@@ -57,6 +57,8 @@ export function channelRuntime(): ChannelRuntime | null {
   return pool ? new ChannelRuntime(pool, {
     supportedAdapters: supportedChannelAdapters(),
     googleAirbnbObservationEnabled: googleAirbnbObservationEnabled(),
+    otaGuestDetailsEnabled: config.otaGuestDetailsEnabled,
+    otaBookingNotificationsEnabled: config.otaBookingNotificationsEnabled,
   }) : null;
 }
 

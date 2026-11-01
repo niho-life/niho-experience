@@ -81,6 +81,7 @@ function stubs() {
     retryBookingNotice: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
   };
   const guests = { eraseGuestData: vi.fn(async () => 0) };
+  const otaGuests = { eraseGuestDetails: vi.fn(async () => 0) };
   const translations = {
     claimTranslations: vi.fn(async (): Promise<GuestTranslationClaim> => claimOf([])),
     recordTranslation: vi.fn(async () => true),
@@ -101,8 +102,8 @@ function stubs() {
     close: vi.fn(),
   };
   const onStepError = vi.fn();
-  const deps: ExperienceJobDeps = { questions, confirmations, notices, bookingLinks, access: null, refunds: null, guests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
-  return { deps, questions, confirmations, notices, bookingLinks, guests, translations, cancellations, submit, mailer, sent, results, onStepError };
+  const deps: ExperienceJobDeps = { questions, confirmations, notices, bookingLinks, access: null, refunds: null, guests, otaGuests, translations, translator: null, mailer, siteUrl: SITE, now: () => NOW, onStepError };
+  return { deps, questions, confirmations, notices, bookingLinks, guests, otaGuests, translations, cancellations, submit, mailer, sent, results, onStepError };
 }
 
 /** A claim that hands out one row per call, as the store does for `limit: 1`. */
@@ -134,6 +135,7 @@ describe("runExperienceJobs", () => {
       bookingRefunds: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 0 },
+      otaGuestErasure: { erased: 0 },
       questionErasure: { erased: 0 },
       bookingAccessPurge: { off: true },
     });
@@ -142,6 +144,8 @@ describe("runExperienceJobs", () => {
     expect(s.questions.claimReplyDeliveries).toHaveBeenCalledWith({ limit: 1, leaseSeconds: 120, linkTtlDays: 14 });
     expect(s.confirmations.claimBookingConfirmations).toHaveBeenCalledWith({ limit: 1, leaseSeconds: 120 });
     expect(s.guests.eraseGuestData).toHaveBeenCalledWith({ endedBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
+    // The guests of OTA bookings (#194) on the same year.
+    expect(s.otaGuests.eraseGuestDetails).toHaveBeenCalledWith({ endedBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.questions.eraseInactiveThreads).toHaveBeenCalledWith({ lastMessageBefore: "2025-11-01T00:00:00.000Z", limit: EXPERIENCE_JOB_LIMITS.erasedPerStep });
     expect(s.mailer.sendMail).not.toHaveBeenCalled();
     // Translation is off: the store's translation queue is not touched. Neither are the refunds while resending is off.
@@ -214,9 +218,11 @@ describe("runExperienceJobs", () => {
 
   it("reports the erasure counts", async () => {
     s.guests.eraseGuestData.mockResolvedValueOnce(3);
+    s.otaGuests.eraseGuestDetails.mockResolvedValueOnce(4);
     s.questions.eraseInactiveThreads.mockResolvedValueOnce(2);
     const counts = await runExperienceJobs(s.deps);
     expect(counts.guestErasure).toEqual({ erased: 3 });
+    expect(counts.otaGuestErasure).toEqual({ erased: 4 });
     expect(counts.questionErasure).toEqual({ erased: 2 });
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
   });
@@ -236,6 +242,7 @@ describe("runExperienceJobs", () => {
       bookingRefunds: { off: true },
       guestTranslations: { off: true },
       guestErasure: { erased: 1 },
+      otaGuestErasure: { erased: 0 },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { off: true },
     });

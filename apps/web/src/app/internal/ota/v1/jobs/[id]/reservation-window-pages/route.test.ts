@@ -57,4 +57,35 @@ describe("POST /internal/ota/v1/jobs/:id/reservation-window-pages", () => {
     }
     expect(mocks.submit).not.toHaveBeenCalled();
   });
+
+  it("passes the guest details a reader may add (#194), and refuses anything else in them", async () => {
+    const guest = { name: "Synthetic Traveler", partyBreakdown: [{ band: "ADULT", count: 1 }], email: "traveler@example.test",
+      phone: "+81 90-0000-0000", language: "en", bookingReference: "GYG-SYNTH-1", notes: "Synthetic note." };
+    const withGuest = { ...valid, observations: [{ ...observation, guest }] };
+    const ok = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/reservation-window-pages", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(withGuest),
+    }), { params: Promise.resolve({ id: "job" }) });
+    expect(ok.status).toBe(200);
+    expect(mocks.submit).toHaveBeenCalledWith(expect.anything(), "job", withGuest);
+    mocks.submit.mockClear();
+    for (const bad of [
+      { ...guest, price: 12_000 },
+      { ...guest, email: "not-an-address" },
+      { ...guest, partyBreakdown: [{ band: "ADULT", count: 2 }] },
+      { ...guest, partyBreakdown: [{ band: "PET", count: 1 }] },
+      { ...guest, phone: "+81 90 0000 0000 ext. 1" },
+      { ...guest, language: "English" },
+      { ...guest, bookingReference: "has space" },
+      { ...guest, name: "" },
+      { ...guest, notes: "carriage\rreturn" },
+      {},
+      "Synthetic Traveler",
+    ]) {
+      const response = await POST(new Request("https://example.test/internal/ota/v1/jobs/job/reservation-window-pages", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...valid, observations: [{ ...observation, guest: bad }] }),
+      }), { params: Promise.resolve({ id: "job" }) });
+      expect(response.status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
 });

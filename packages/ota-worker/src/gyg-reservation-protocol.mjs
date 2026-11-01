@@ -2,8 +2,14 @@ import { ADAPTER_REGISTRY, CONNECTION_MODE, OPTIONAL_TARGET_KEYS, TARGET_KEYS } 
 import { ContractError, exactKeys, isPlainObject, validateTarget } from "./validation.mjs";
 
 // Observed GetYourGuide supplier contract (read-only). Only scheduling fields
-// are selected; guest names, contacts, prices, tickets and locations exist on
-// the Booking type but must never be requested.
+// are selected. Guest names, contacts, prices, tickets and locations exist on
+// the Booking type. Since the owner decision of 2026-11-01 (#194) a fact may
+// carry the guest's name, party, contact, language, booking reference and notes
+// (reservation-guest.mjs), but none of those fields' names, types or values
+// were observed: the read of /bookings saw no non-empty booking. This reader
+// therefore selects none of them and adds no `guest` until a real-page read of
+// a non-empty booking is accepted (#237). Prices, tickets and locations are
+// never requested.
 export const RESERVATION_OPERATION_NAME = "NihoReservationWindowRead";
 export const RESERVATION_QUERY = "query NihoReservationWindowRead($input: BookingSearchInput!) { bookings: supplierBookingEntitySearch(input: $input) { items { id status guideStatus isPending totalNumberOfParticipants tourStart activityOption { id activity { id } duration { value unit } } } pagination { totalItems } } }";
 export const RESERVATION_PAGE_SIZE = 50;
