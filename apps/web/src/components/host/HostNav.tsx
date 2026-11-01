@@ -38,6 +38,9 @@ export interface HostChromeProps {
   editorUrl?: string;
 }
 
+/** The bottom tabs of a product operator: one column per screen they have. */
+const OPERATOR_TAB_COLUMNS: Readonly<Record<number, string>> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3" };
+
 export function hostNavForRole(role: HostProviderRole | null | undefined) {
   if (role === "OWNER") return HOST_NAV;
   if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings");
@@ -45,7 +48,12 @@ export function hostNavForRole(role: HostProviderRole | null | undefined) {
 }
 
 export function hostNavForChoice(choice: HostConsoleChoice | null | undefined) {
-  return choice?.kind === "OPERATOR" ? HOST_NAV.filter((item) => item.href === "/host/calendar") : hostNavForRole(choice?.memberRole);
+  if (choice?.kind === "OPERATOR") {
+    // A product operator's screens (docs/product-operators.md): カレンダー, and 設定 for their own email address (#194).
+    const screens = choice.screens ?? ["/host/calendar"];
+    return HOST_NAV.filter((item) => item.href === "/host/calendar" || screens.includes(item.href));
+  }
+  return hostNavForRole(choice?.memberRole);
 }
 
 /** The chosen provider lives in `?providerId=`; every console link carries it. */
@@ -271,7 +279,7 @@ export function HostTabBar({ providers }: { providers: readonly HostConsoleChoic
       {/* Keeps the end of the page clear of the fixed bar. */}
       <div aria-hidden="true" className="h-[var(--host-tabbar)] md:hidden" />
       <nav aria-label={NAV_LABEL} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-canvas px-1 pt-1.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:hidden">
-        <ul className={`grid ${current?.kind === "OPERATOR" ? "grid-cols-1" : current?.memberRole === "OWNER" ? "grid-cols-6" : current?.memberRole === "EDITOR" ? "grid-cols-4" : "grid-cols-5"}`}>
+        <ul className={`grid ${current?.kind === "OPERATOR" ? (OPERATOR_TAB_COLUMNS[hostNavForChoice(current).length] ?? "grid-cols-3") : current?.memberRole === "OWNER" ? "grid-cols-6" : current?.memberRole === "EDITOR" ? "grid-cols-4" : "grid-cols-5"}`}>
           {hostNavForChoice(current).map((item) => {
             const active = isHostNavActive(pathname, item.href);
             return (

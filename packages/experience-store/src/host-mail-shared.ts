@@ -88,6 +88,8 @@ export async function enqueueHostBookingMails(
                 AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp())) r
        JOIN host_notification_addresses a ON a.niho_user_id = r.niho_user_id
       WHERE COALESCE(a.override_email, a.login_email) IS NOT NULL
+      -- One order whatever the collation, so the rows (and their emails) come in the same order every time.
+      ORDER BY r.niho_user_id COLLATE "C"
      ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
     [input.providerId, input.aggregateType, input.aggregateId, input.topic, `host-mail:${input.deduplicationKey}`, JSON.stringify(input.payload), input.productId ?? null],
   );

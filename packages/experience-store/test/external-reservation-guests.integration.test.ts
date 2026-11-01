@@ -271,14 +271,14 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       // Email (#194 PR A): one row per person the push goes to, without the name; the job reads the kept name when it sends.
       const mailRows = (await pool.query("SELECT payload FROM outbox_messages WHERE topic='host.mail.ota_booking' ORDER BY id")).rows as { payload: Record<string, unknown> }[];
       assert.deepEqual(mailRows.map((row) => [row.payload.change, row.payload.to]), [
-        ["NEW", "owner-a"], ["NEW", "operator-tea"], ["CANCELLED", "owner-a"], ["CANCELLED", "operator-tea"], ["RESCHEDULED", "owner-a"], ["RESCHEDULED", "operator-tea"],
+        ["NEW", "operator-tea"], ["NEW", "owner-a"], ["CANCELLED", "operator-tea"], ["CANCELLED", "owner-a"], ["RESCHEDULED", "operator-tea"], ["RESCHEDULED", "owner-a"],
       ]);
       assert.equal(mailRows.some((row) => "guestName" in row.payload), false);
       const mails = await new HostMailOutbox(pool).claimBookingMails({ limit: 10, leaseSeconds: 60 });
       assert.deepEqual(mails.mails.map((mail) => [mail.payload.change, mail.to, mail.guestName]), [
-        ["NEW", "owner-a@example.test", "Synthetic Second"], ["NEW", "operator-tea@example.test", "Synthetic Second"],
-        ["CANCELLED", "owner-a@example.test", "Synthetic Traveler"], ["CANCELLED", "operator-tea@example.test", "Synthetic Traveler"],
-        ["RESCHEDULED", "owner-a@example.test", "Synthetic Second"], ["RESCHEDULED", "operator-tea@example.test", "Synthetic Second"],
+        ["NEW", "operator-tea@example.test", "Synthetic Second"], ["NEW", "owner-a@example.test", "Synthetic Second"],
+        ["CANCELLED", "operator-tea@example.test", "Synthetic Traveler"], ["CANCELLED", "owner-a@example.test", "Synthetic Traveler"],
+        ["RESCHEDULED", "operator-tea@example.test", "Synthetic Second"], ["RESCHEDULED", "owner-a@example.test", "Synthetic Second"],
       ]);
       for (const mail of mails.mails) await new HostMailOutbox(pool).completeBookingMail(mail.id);
 

@@ -205,11 +205,12 @@ describe("PostgreSQL host notification addresses (#194)", { skip: databaseUrl ==
       });
       const rows = (await pool.query("SELECT topic, payload FROM outbox_messages WHERE topic LIKE 'host.mail.%' ORDER BY id")).rows as { topic: string; payload: Record<string, unknown> }[];
       // This site's bookings: the OWNER only (the repeat adds nothing). The OTA booking: the OWNER and the product's operator.
+      // Each booking's people in one order (by their ID, whatever the collation).
       assert.deepEqual(rows.map((row) => [row.topic, row.payload.to]), [
         [HOST_MAIL_TOPICS.newBooking, "owner-a"],
         [HOST_MAIL_TOPICS.cancellation, "owner-a"],
-        [HOST_MAIL_TOPICS.otaBooking, "owner-a"],
         [HOST_MAIL_TOPICS.otaBooking, "operator-tea"],
+        [HOST_MAIL_TOPICS.otaBooking, "owner-a"],
       ]);
       // No guest name is written into the email rows.
       assert.equal(rows.some((row) => "guestName" in row.payload), false);
@@ -226,11 +227,11 @@ describe("PostgreSQL host notification addresses (#194)", { skip: databaseUrl ==
       assert.deepEqual(claim.mails.map((mail) => [mail.notificationTopic, mail.to, mail.guestName, "to" in mail.payload]), [
         [HOST_NOTIFICATION_TOPICS.newBooking, "desk@example.test", null, false],
         [HOST_NOTIFICATION_TOPICS.cancellation, "desk@example.test", null, false],
-        // The reservation is not in the ledger here, so there is no kept name to read.
-        [HOST_NOTIFICATION_TOPICS.otaBooking, "desk@example.test", null, false],
+        // The operator's grant ended: not sent. The reservation is not in the ledger here, so there is no kept name to read.
         [HOST_NOTIFICATION_TOPICS.otaBooking, null, null, false],
+        [HOST_NOTIFICATION_TOPICS.otaBooking, "desk@example.test", null, false],
       ]);
-      assert.deepEqual(claim.mails[2]!.payload, {
+      assert.deepEqual(claim.mails[3]!.payload, {
         v: 1, change: "RESCHEDULED", site: "GetYourGuide", ref, productId: "tea", experienceTitle: "Synthetic tea",
         startsAt: "2099-01-06T01:00:00.000Z", previousStartsAt: "2099-01-04T01:00:00.000Z", seats: 1,
       });
