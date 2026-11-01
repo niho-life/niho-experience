@@ -25,7 +25,7 @@ begin/submitは毎回、worker credential version、assignment version、account
 
 ## 冪等性、順序、quarantine
 
-取込transactionは既存preflight/resultと同じくworker rowで同一workerの要求を直列化し、jobからproviderをnolockで特定して`provider-inventory:{providerId}` advisory mutexを取る。その後にreceipt、job/assignment/account/listing、read、ledgerを一定順序でlockする。workerを持つ処理はworker→providerの順を守り、provider取得後のworker lockを避ける。receiptにはpayload全体のSHA-256 fingerprintと結果を耐久保存する。同じreceipt + 同じpayloadは再適用せず同じ結果を返し、payload改変または同じreadへの別receiptは409とする。受付済みreceiptはjob終了・lease期限後も現在のcredentialと元のassignment version・account権限を検証して再送でき、在庫やoutboxを再適用しない。batch途中のDB失敗はreceipt、ledger、revision、占有snapshot、calendar outboxをすべてrollbackする。
+取込transactionは既存preflight/resultと同じくworker rowで同一workerの要求を直列化し、jobからproviderをnolockで特定して`provider-inventory:{providerId}` advisory mutexを取る。その後にreceipt、job/assignment/account/listing、read、ledgerを一定順序でlockする。workerを持つ処理はworker→providerの順を守り、provider取得後のworker lockを避ける。receiptにはpayload全体（予約者の情報を除く。#194）のSHA-256 fingerprintと結果を耐久保存する。同じreceipt + 同じpayloadは再適用せず同じ結果を返し、payload改変または同じreadへの別receiptは409とする。受付済みreceiptはjob終了・lease期限後も現在のcredentialと元のassignment version・account権限を検証して再送でき、在庫やoutboxを再適用しない。batch途中のDB失敗はreceipt、ledger、revision、占有snapshot、calendar outboxをすべてrollbackする。
 
 generationがcurrent rowより古ければ適用しない。`sourceUpdatedAtUtc` が双方にある場合は古い時刻をstaleとし、同時刻で内容が違えば要確認にする。`sourceRevision` はopaque equality情報であり大小比較しない。更新時刻がない新しい事実は、新しい正規read generationからだけ反映できる。取消先着もtombstoneとして残り、古いCONFIRMED再送で復活しない。
 
@@ -87,7 +87,8 @@ source siteまたはexternal account IDを変えるAdmin更新は、同じprovid
   - `notes`：予約者が OTA に書いたこと（1,000 字まで、改行とタブ以外の制御文字なし）。
   - これ以外の項目（金額・チケット・住所・cookie など）を入れた事実は、ページごと 400（worker は送る前に止める）。
 - **保存**：`0036_external_reservation_guests.sql` の `external_reservation_guests`（外部予約 1 件に 1 行）。台帳・revision・receipt には入れない。
-  - 台帳の fingerprint は在庫の事実だけで計算する。名前や電話が後から読めても新しい revision にならない。7 年の監査に予約者の情報の digest も残らない。
+  - 台帳・window の事実・receipt の fingerprint は、どれも在庫の事実だけで計算する。名前や電話が後から読めても新しい revision にならない。7 年の監査に予約者の情報の digest も残らない。
+  - そのため、同じ receipt の再送で予約者の情報だけが違うときは同じページとして扱い、最初に保存した内容を残す（worker は ACK を失ったときも同じ payload を送る）。
   - 同じ予約を読み直すたびに、読めた項目で上書きし、読めなかった項目は前の値を残す（サイトが日付の後に連絡先を隠すことがあるため）。
   - 正しい対象（商品・option・時刻が job と一致）の事実のときだけ保存する。要確認（`TARGET_MISMATCH`）や古い版（STALE）の情報では書き換えない。
   - `EXPERIENCE_OTA_GUEST_DETAILS_ENABLED`（既定 OFF）が off の間は、検証だけして捨てる。

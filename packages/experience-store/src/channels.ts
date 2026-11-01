@@ -2270,7 +2270,9 @@ export class ChannelRuntime {
       leaseToken: input.leaseToken, pageNumber: input.pageNumber,
       previousReceiptId: input.previousReceiptId ?? "", sourceCursor: input.sourceCursor ?? "",
       nextSourceCursor: input.nextSourceCursor ?? "",
-      snapshotToken: input.snapshotToken ?? "", observations,
+      // The inventory facts only: the receipt's fingerprint lasts the ledger's 7 years, a guest's details one (#194).
+      // A resend that differs in the guest details alone is the same page, and keeps what the first one kept.
+      snapshotToken: input.snapshotToken ?? "", observations: observations.map(reservationInventoryFacts),
       terminal: input.terminal === undefined ? null : {
         status: input.terminal.status,
         completedAtUtc: input.terminal.completedAtUtc,
@@ -2520,7 +2522,7 @@ export class ChannelRuntime {
         throw new StoreValidationError(`observations[${index}] must be an object.`);
       }
       const keys = Object.keys(observation);
-      const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision"];
+      const allowed = ["externalReservationId", "externalProductId", "externalOptionId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats", "sourceUpdatedAtUtc", "sourceRevision", "guest"];
       if (keys.some((key) => !allowed.includes(key))) throw new StoreValidationError(`observations[${index}] has unknown fields.`);
       assertNonEmptyText(observation.externalReservationId, `observations[${index}].externalReservationId`, 256);
       assertNonEmptyText(observation.externalProductId, `observations[${index}].externalProductId`, 256);
@@ -2537,10 +2539,11 @@ export class ChannelRuntime {
       if (reservationIds.has(observation.externalReservationId)) throw new StoreValidationError("Duplicate external reservation IDs are not allowed in one batch.");
       reservationIds.add(observation.externalReservationId);
     }
+    // The guest details are checked here and kept apart: the receipt's lasting fingerprint covers the inventory facts only.
     const observations = input.observations.map(canonicalReservationObservation);
     const requestFingerprint = fingerprint({ jobId, workerId: identity.workerId,
       receiptId: input.receiptId, readId: input.readId, leaseToken: input.leaseToken,
-      batchStatus: input.batchStatus, observations });
+      batchStatus: input.batchStatus, observations: observations.map(reservationInventoryFacts) });
     return withTransaction(this.#pool, async (client) => {
       // Match preflight/result: serialize the worker before provider/job locks.
       await this.#requireWorker(client, identity);

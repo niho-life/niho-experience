@@ -147,8 +147,13 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
           resultId: randomUUID(), leaseToken: job.leaseToken, outcome: "RESERVATION_VERIFIED", stopped: true, target: job.target,
           reservationReadId: cycle.readId, reservationReceiptId: receipt.receiptId,
         });
+        lastPage = { jobId: job.id, page: {
+          receiptId: cycle.receiptId, readId: cycle.readId, leaseToken: job.leaseToken, pageNumber: 0, observations,
+          terminal: { status: "COMPLETE", completedAtUtc: clock.now.toISOString(), allPagesRead: true, allStatusesIncluded: true, coverageComplete: true },
+        } };
         return receipt;
       };
+      let lastPage: { jobId: string; page: Parameters<ChannelRuntime["submitReservationWindowPage"]>[2] } | null = null;
       const guestRow = async (id: string) => (await pool.query(
         `SELECT guest_name,party_breakdown,guest_email,guest_phone,guest_language,booking_reference,source_notes,pii_erased_at
            FROM external_reservation_guests WHERE external_reservation_id=$1`, [id],
@@ -191,6 +196,14 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       assert.deepEqual([second.applied, second.duplicates], [1, 1]);
       assert.equal((await guestRow("R1"))?.guest_phone, "+81 90-0000-0000");
       assert.equal((await guestRow("R1"))?.guest_name, "Synthetic Traveler");
+      // The receipt's lasting fingerprint has no guest details: the same page with other details is the same page,
+      // answered from the receipt, and keeps what the first one kept.
+      const replay = lastPage!;
+      const resent = await runtime.submitReservationWindowPage(worker, replay.jobId, {
+        ...replay.page, observations: replay.page.observations.map((item) => ({ ...item, guest: { name: "Synthetic Changed" } })),
+      });
+      assert.equal(resent.repeated, true);
+      assert.equal((await guestRow("R2"))?.guest_name, "Synthetic Second");
       const r2Ref = await hostRef("R2");
       let rows = await notifications();
       assert.equal(rows.length, 1);
