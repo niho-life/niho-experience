@@ -24,6 +24,7 @@ import {
 import { yen } from "@/host/format";
 import { messagesHref, type BookingConversation } from "@/host/messages";
 import { nihoBookingExperiences, nihoBookingRow, nihoRowStatusLabel, type NihoBookingRow } from "@/host/niho-bookings";
+import { OTA_BOOKINGS_LIST_TEXT, otaStatusLabel } from "@/host/ota-bookings";
 import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import type { HostBooking } from "@/host/types";
 import { useFocusAfterRender } from "./editor-parts";
@@ -32,6 +33,7 @@ import { HostBookingDetail, type BookingConversationLink } from "./HostBookingDe
 import { HostIcon } from "./HostIcon";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
 import { HostNihoBookingDetail, type NihoDetailLock, type NihoReplyDraft } from "./HostNihoBookingDetail";
+import { HostOtaBookingDetail, OtaSourceBadge } from "./HostOtaBookingDetail";
 import { HostSubHeader } from "./HostSubHeader";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostPageBody, PageHead, StatusPill } from "./ui";
@@ -125,6 +127,12 @@ export interface HostBookingsProps {
    * bookings keep NIHO's, ADR 0002). Absent while NIHO's bookings are not connected.
    */
   niho?: { providerId: string; translate: { today: string } | null } | null;
+  /**
+   * Bookings made on reservation sites (#194 PR B, EXPERIENCE_OTA_GUEST_DETAILS_ENABLED): on the same list with their
+   * site's badge, read only (their site keeps cancelling, refunding and the guest's messages). One opens with `?booking=`
+   * or the push's `?ota=`. Their sessions open この回 like this site's. Absent while they are not shown.
+   */
+  ota?: { bookings: readonly HostBooking[]; experiences: readonly BookingExperience[] } | null;
 }
 
 /**
@@ -139,7 +147,7 @@ export interface HostBookingsProps {
  * メッセージ leads to the booking's thread (#106). TODO(#87): send the actions to NIHO and show
  * the booking it reads back. A session's heading opens its own screen (この回, #107).
  */
-export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, conversations, live = null, niho = null }: HostBookingsProps) {
+export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, conversations, live = null, niho = null, ota = null }: HostBookingsProps) {
   const searchParams = useSearchParams();
   const [bookings, setBookings] = useState<readonly HostBooking[]>(initialBookings);
   /** Live: the experiences the loaded bookings name, and where the rest of the list starts (null once all are here). */
@@ -160,8 +168,12 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   const dropNihoLock = useCallback(() => setNihoLock(UNLOCKED), []);
   const nihoList = useNihoBookingList(niho?.providerId ?? providerDataId, { enabled: Boolean(niho), onRevoke: dropNihoLock });
   const nihoRows = useMemo(() => nihoList.items.map(nihoBookingRow), [nihoList.items]);
-  const listExperiences = useMemo(() => (niho ? mergeSiteExperiences(experiences, nihoBookingExperiences(nihoList.items)) : experiences), [niho, experiences, nihoList.items]);
-  const rows: readonly ListRow[] = niho ? [...bookings, ...nihoRows] : bookings;
+  const listExperiences = useMemo(() => {
+    const withOta = ota ? mergeSiteExperiences(experiences, ota.experiences) : experiences;
+    return niho ? mergeSiteExperiences(withOta, nihoBookingExperiences(nihoList.items)) : withOta;
+  }, [niho, ota, experiences, nihoList.items]);
+  const otaRows = ota?.bookings ?? [];
+  const rows: readonly ListRow[] = [...bookings, ...otaRows, ...(niho ? nihoRows : [])];
   const nihoLocked = nihoLock.acting || nihoLock.uncertain;
   const hasDraft = Object.values(drafts).some((draft) => draft.subject.trim() || draft.body.trim());
   const leaveMode: HostLeaveMode = nihoLock.acting ? "saving" : nihoLock.uncertain ? "unknown" : hasDraft ? "dirty" : null;
@@ -173,7 +185,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   // The select's choice for that title, and every experience of the title (NIHO's page and this site's product).
   const experienceId = requestedExperience ? (choices.find((choice) => choice.title === requestedExperience.title)?.id ?? null) : null;
   const sameExperience = requestedExperience ? new Set(listExperiences.filter((experience) => experience.title === requestedExperience.title).map((experience) => experience.id)) : null;
-  const selectedId = searchParams.get("booking") || null;
+  // `?ota=` is the push's link to an OTA booking (#194); `?booking=` names any booking of the list.
+  const selectedId = searchParams.get("booking") || searchParams.get("ota") || null;
   const sub = selectedId !== null;
   /** This site's sessions and messages keep `?source=site` beside NIHO's bookings: この回 and メッセージ read them there. */
   const siteSource = niho ? "site" : null;
@@ -181,7 +194,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   const listHref = bookingsHref(query);
 
   const groups = bookingGroups(sameExperience ? rows.filter((row) => sameExperience.has(row.experienceId)) : rows, listExperiences, { filter, experienceId: null }, today);
-  const selected = selectedId ? (bookings.find((booking) => booking.id === selectedId) ?? null) : null;
+  const selected = selectedId ? (bookings.find((booking) => booking.id === selectedId) ?? otaRows.find((booking) => booking.id === selectedId.toLowerCase()) ?? null) : null;
   const first = groups[0]?.bookings[0] ?? null;
   /**
    * This site's or the preview's booking, or NIHO's (by id: one NIHO's list has not read yet is read on its own).
@@ -351,6 +364,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 {niho ? "NIHO の予約と、このサイトで受けた予約です。申込経路で見分けられます" : "このサイトで受けた予約です"}
               </p>
             ) : null}
+            {ota ? <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">{OTA_BOOKINGS_LIST_TEXT}</p> : null}
             {niho && nihoList.state === "loading" ? (
               <p role="status" className="mb-2.5 text-[0.8125rem] leading-normal text-muted">
                 NIHO の予約を読み込み中…
@@ -392,8 +406,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                   <div key={group.key} className="border-t border-line first:border-t-0">
                     {/* One session: its day and time, the experience and the seats its requests and bookings keep. It opens the session (この回), apart from the rows' bookings. */}
                     <h2 className="font-sans text-xs leading-normal font-extrabold tracking-normal text-ink-soft">
-                      {group.bookings.every(isNiho) ? (
-                        // NIHO's sessions keep NIHO's この回 (ADR 0002): the heading names the session only.
+                      {group.bookings.every((row) => isNiho(row) || (row.ota && !row.offerId)) ? (
+                        // NIHO's sessions keep NIHO's この回 (ADR 0002), and an OTA booking waiting for staff has no session: the heading names it only.
                         <span className="flex min-h-9 items-center gap-2 bg-sand/60 px-3.5 py-2 md:px-4">
                           <SessionWords group={group} />
                         </span>
@@ -420,10 +434,13 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                               className={`flex min-h-[52px] items-center gap-3 px-3.5 py-3 focus-visible:outline-offset-[-3px] md:px-4 ${marked}`}
                             >
                               <span className="min-w-0 flex-1">
-                                <span className="block text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere]">{booking.guest}</span>
+                                <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                  <span className="text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere]">{booking.guest}</span>
+                                  {!isNiho(booking) && booking.ota ? <OtaSourceBadge site={booking.ota.siteLabel} /> : null}
+                                </span>
                                 <span className="block text-[0.78125rem] leading-normal text-muted">{bookingRowDetail(booking)}</span>
                               </span>
-                              <StatusPill status={isNiho(booking) ? nihoRowStatusLabel(booking, today) : bookingStatusLabel(booking, today)} />
+                              <StatusPill status={isNiho(booking) ? nihoRowStatusLabel(booking, today) : booking.ota ? otaStatusLabel(booking, today) : bookingStatusLabel(booking, today)} />
                               <HostIcon name="chevronRight" className="size-4 text-line-strong max-md:hidden" />
                             </a>
                           </li>
@@ -470,6 +487,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 onRevoke={nihoList.revoke}
                 onChanged={reloadNiho}
               />
+            ) : shownSite?.ota ? (
+              <HostOtaBookingDetail key={shownSite.id} booking={shownSite} experienceTitle={titleOf(shownSite.experienceId)} today={today} headingId={DETAIL_HEADING} />
             ) : shownSite ? (
               <HostBookingDetail
                 // Each booking starts with its dialogs closed.

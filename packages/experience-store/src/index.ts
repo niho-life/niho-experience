@@ -214,7 +214,7 @@ export {
 } from "./external-reservation-guests.ts";
 export type { ExternalReservationGuestDetails, ExternalReservationPartyBand, ExternalReservationPartyCount } from "./external-reservation-guests.ts";
 export { HOST_OTA_BOOKING_LIMITS, HostOtaBookings } from "./host-ota-bookings.ts";
-export type { HostOtaBooking, HostOtaBookingGuest, HostOtaBookingListOptions } from "./host-ota-bookings.ts";
+export type { HostOtaAttendanceResult, HostOtaAttendanceStatus, HostOtaBooking, HostOtaBookingGuest, HostOtaBookingListOptions } from "./host-ota-bookings.ts";
 export type { ConflictCaseResolution, ConflictCaseView, ConflictMemberView, DurationSummary, ManualConflictResolution, PropagationMetrics, PropagationStatus } from "./external-reservation-attention.ts";
 export type { ChannelIncidentDetail, ChannelRuntimeAccountView, ChannelRuntimeIncidentKind, ChannelRuntimeIncidentSubjectType, ChannelRuntimeIncidentView, ChannelRuntimeListingView, ChannelRuntimeOverview, ChannelRuntimeWorkerView, ChannelWatchdogRunResult, ChannelWatchdogTransition, ChannelWorkerHealth } from "./channel-runtime-monitor.ts";
 export type { GoogleChannelDeliveryOperation, GoogleChannelDeliveryPhase, GoogleChannelDeliveryRecord, GoogleChannelDeliverySecretSnapshot, GoogleChannelSelectedMetadata, GoogleChannelStoredTarget } from "./google-channel-delivery.ts";

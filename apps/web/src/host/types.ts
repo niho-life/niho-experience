@@ -369,6 +369,37 @@ export interface HostBooking {
   timeline: readonly HostBookingEvent[];
   /** A booking made on this site (#285, experience DB); absent on NIHO's bookings and the preview's. */
   site?: HostSiteBookingTerms;
+  /** A booking made on a reservation site (#194, the experience DB's external ledger); absent on the others. */
+  ota?: HostOtaBookingTerms;
+}
+
+/**
+ * What 予約 and この回 show of a booking made on a reservation site (#194 PR B, owner decision 2026-11-01): where it came
+ * from, the site's booking reference and how to reach the guest. No amount, no site IDs; nothing here changes it.
+ */
+export interface HostOtaBookingTerms {
+  /** The host's handle for it (`?ota=`, the push's link). Not the site's reservation ID. */
+  ref: string;
+  /** The reservation site as the experience DB names it (GetYourGuide, Jalan, …), and its name in the console. */
+  site: string;
+  siteLabel: string;
+  bookingReference: string | null;
+  email: string | null;
+  phone: string | null;
+  /** A BCP 47 tag as the site gave it (en-US). */
+  languageTag: string | null;
+  /** What the guest wrote to the site. */
+  notes: string | null;
+  /** "大人 2・子ども 1" by the site's age bands; null when it gave none. */
+  party: string | null;
+  /** The site has not confirmed it yet (it keeps its seat). */
+  pending: boolean;
+  /** Kept for NIHO's staff: a double booking, or a time that matched no session. */
+  needsReview: boolean;
+  /** The guest's details were erased (a year after the experience). */
+  erased: boolean;
+  /** The site's reader gave any guest detail. */
+  hasDetails: boolean;
 }
 
 /** What a booking made on this site fixed when it was made (its pricing snapshot), for 申込内容. */

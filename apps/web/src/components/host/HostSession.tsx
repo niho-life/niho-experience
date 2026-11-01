@@ -37,13 +37,15 @@ import {
   type SessionCancelReason,
   type SessionCancelResult,
 } from "@/host/session";
-import { cancelSiteSession, recordSiteAttendance } from "@/host/actions";
+import { cancelSiteSession, recordOtaAttendance, recordSiteAttendance } from "@/host/actions";
 import { SITE_BOOKING_LOAD_FAILED_TEXT, SITE_BOOKING_PAYMENT_REVIEW_TEXT, SITE_SESSION_SUPPORT_TEXT, siteCancellationLines } from "@/host/site-bookings";
 import { SITE_ATTENDANCE_FAILED_TEXT, siteSessionCountLines } from "@/host/site-sessions";
 import type { HostAttendance, HostBooking } from "@/host/types";
 import { DISABLED, useFocusAfterRender } from "./editor-parts";
 import { DANGER_BUTTON } from "./HostBookingDialogs";
 import { HostIcon } from "./HostIcon";
+import { OtaSourceBadge } from "./HostOtaBookingDetail";
+import { OTA_BOOKING_PENDING_TEXT, otaStatusLabel } from "@/host/ota-bookings";
 import { SessionCancelDialog, SessionContactDialog, type SessionContact } from "./HostSessionDialogs";
 import { SiteSessionCancelDialog, type SiteCancelChoice } from "./HostSiteCancelDialogs";
 import { HostSubHeader } from "./HostSubHeader";
@@ -74,6 +76,12 @@ export interface HostSessionProps {
    * back. Absent in mock mode.
    */
   site?: { besideNiho: boolean; providerId?: string; messages?: boolean; attendance?: boolean } | null;
+  /**
+   * Bookings made on reservation sites among the session's (#194 PR B): their guests with their site's badge and the
+   * phone the site gave, never cancelled or written to from here (their site does that). `attendance`: their 出欠 is
+   * kept in the experience DB (0039), sent for `site.providerId`.
+   */
+  ota?: { attendance: boolean } | null;
 }
 
 /** Label 72px + value, as a booking's 申込内容. */
@@ -150,6 +158,16 @@ function Attendance({ booking, open, saving = false, noShowNote = true, onMark }
   );
 }
 
+/** An OTA booking its site has not confirmed yet (#194): its pill and why there is no attendance. */
+function OtaPending({ booking, today }: { booking: HostBooking; today: string }) {
+  return (
+    <div className="mt-2.5">
+      <StatusPill status={otaStatusLabel(booking, today)} />
+      <p className="mt-1.5 text-[0.78125rem] leading-normal font-extrabold text-warn">{OTA_BOOKING_PENDING_TEXT} 確定するまで出欠は付けられません。</p>
+    </div>
+  );
+}
+
 /**
  * One guest: who, how many, from where, how to reach them on the day, what to look out for, and the way to their
  * thread (`messageHref` null where there is none).
@@ -211,7 +229,7 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
  * (#107) the capacity and 来た / 来なかった, kept in the experience DB one booking at a time: the screen shows what the
  * store kept, and a failure leaves the mark as it was.
  */
-export function HostSession({ session, now, conversations, providerId, site = null }: HostSessionProps) {
+export function HostSession({ session, now, conversations, providerId, site = null, ota = null }: HostSessionProps) {
   const [bookings, setBookings] = useState<readonly HostBooking[]>(session.bookings);
   const [notice, setNotice] = useState("");
   const [cancellation, setCancellation] = useState<{ reason: SessionCancelReason; results: SessionCancelResult[] } | null>(null);
@@ -242,13 +260,17 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   const today = clock.slice(0, 10);
   const { participants, requests } = sessionSections(session.bookings, bookings);
   const counts = site ? siteSessionCountLines(bookings, session.capacity) : sessionCountLines(bookings, session.capacity);
-  // 出欠 is recorded in mock mode (on this screen) and for this site's bookings where it is kept (#107).
-  const recordsAttendance = !site || Boolean(site.attendance && site.providerId);
+  // 出欠 is recorded in mock mode (on this screen) and for this site's bookings where it is kept (#107), and for the OTA
+  // ones where theirs is (#194).
+  const recordsAttendance = !site || Boolean(site.providerId && (site.attendance || (ota?.attendance && bookings.some((booking) => booking.ota))));
   const dietary = dietarySummary(bookings);
-  const attendance = attendanceCounts(bookings);
+  // An OTA booking its site has not confirmed takes no mark (#194).
+  const attendance = attendanceCounts(bookings.filter((booking) => !booking.ota?.pending));
   const failed = cancellation?.results.filter((result) => !result.ok) ?? [];
 
   const messageHref = (booking: HostBooking) => {
+    // An OTA booking's guest is written to on its site (#194).
+    if (booking.ota) return null;
     // This site's bookings (#285 slice 6b): the booking's thread, or its empty one, among this site's threads.
     if (site) return site.messages ? messagesHref({ providerId, source: site.besideNiho ? "site" : null, booking: booking.id }) : null;
     const thread = conversations.find((conversation) => conversation.bookingId === booking.id);
@@ -258,9 +280,12 @@ export function HostSession({ session, now, conversations, providerId, site = nu
     const href = messageHref(booking);
     return href ? [{ id: booking.id, guest: booking.guest, people: `${booking.guests}名`, status: booking.status === "confirmed" ? null : bookingStatusLabel(booking, today), href }] : [];
   });
+  // OTA bookings are cancelled on their site (#194): calling the session off here leaves them as they are.
+  const own = bookings.filter((booking) => !booking.ota);
+  const otaGuests = bookings.length - own.length;
   // This site's bookings are called off with their own action (full refunds, by the store), below.
-  const cancellable = !site && canCancelSession(bookings, phase, cancellation !== null);
-  const siteConfirmed = site ? bookings.filter((booking) => booking.status === "confirmed") : [];
+  const cancellable = !site && canCancelSession(own, phase, cancellation !== null);
+  const siteConfirmed = site ? own.filter((booking) => booking.status === "confirmed") : [];
   const siteCancellable = Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
 
   /** Live: the OWNER calls the session off; the store answers the session as it is now. */
@@ -281,14 +306,15 @@ export function HostSession({ session, now, conversations, providerId, site = nu
       setSiteCancel({ busy: false, error: result.message });
       return;
     }
-    if (result.session) setBookings(result.session.bookings);
+    // The store answers this site's bookings; the OTA ones stay as they were.
+    if (result.session) setBookings([...result.session.bookings, ...bookings.filter((booking) => booking.ota)]);
     setSiteCancel({ busy: false, error: null });
     setNotice(result.message);
   };
 
   const mark = (id: string, value: HostAttendance) => {
     const booking = bookings.find((item) => item.id === id);
-    if (!booking || !canRecordAttendance(booking, phase)) return;
+    if (!booking || booking.ota?.pending || !canRecordAttendance(booking, phase)) return;
     if (site) {
       void markSite(booking, value);
       return;
@@ -304,7 +330,9 @@ export function HostSession({ session, now, conversations, providerId, site = nu
     setAttendanceError("");
     let result: Awaited<ReturnType<typeof recordSiteAttendance>>;
     try {
-      result = await recordSiteAttendance({ providerId: site.providerId, bookingId: booking.id, attendance: value });
+      result = booking.ota
+        ? await recordOtaAttendance({ providerId: site.providerId, ref: booking.id, attendance: value })
+        : await recordSiteAttendance({ providerId: site.providerId, bookingId: booking.id, attendance: value });
     } catch {
       result = { ok: false, message: SITE_ATTENDANCE_FAILED_TEXT };
     }
@@ -324,9 +352,9 @@ export function HostSession({ session, now, conversations, providerId, site = nu
 
   /** 中止, or 失敗した予約をもう一度: only what is still to cancel is tried, and each booking's latest result is kept. */
   const cancel = (reason: SessionCancelReason) => {
-    const done = cancelSession(bookings, reason, now);
+    const done = cancelSession(own, reason, now);
     const results = cancellation ? mergeCancelResults(cancellation.results, done.results) : done.results;
-    setBookings(done.bookings);
+    setBookings(bookings.map((booking) => done.bookings.find((item) => item.id === booking.id) ?? booking));
     setCancellation({ reason, results });
     focusLater(CANCELLED_HEADING);
   };
@@ -336,7 +364,13 @@ export function HostSession({ session, now, conversations, providerId, site = nu
       <HostSubHeader backHref={backHref} backLabel="予約" title={heading} />
       <HostPageBody>
         <SubPageHead backHref={backHref} backLabel="予約" title={heading} />
-        {site ? <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">このサイトで受けた予約です</p> : null}
+        {site ? (
+          <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">
+            {!otaGuests ? "このサイトで受けた予約です" : own.length ? "このサイトと予約サイトで受けた予約です。予約サイトの予約の取消・連絡は、その予約サイトで行ってください" : "予約サイトで受けた予約です。取消・返金・予約者とのやりとりは、その予約サイトで行ってください"}
+          </p>
+        ) : otaGuests ? (
+          <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">予約サイトの予約の取消・連絡は、その予約サイトで行ってください</p>
+        ) : null}
 
         {/* 中止 and its result for each booking. The status line stays in place so the result is announced. */}
         <section aria-labelledby={cancellation ? CANCELLED_HEADING : undefined} className={cancellation ? "mb-3.5 rounded-2xl border border-danger/20 bg-danger-pale px-4 py-3.5 md:px-5" : ""}>
@@ -415,7 +449,12 @@ export function HostSession({ session, now, conversations, providerId, site = nu
           {participants.length ? (
             <ul>
               {participants.map((booking) => (
-                <GuestRow key={booking.id} booking={booking} messageHref={messageHref(booking)}>
+                <GuestRow
+                  key={booking.id}
+                  booking={booking}
+                  messageHref={messageHref(booking)}
+                  aside={booking.ota ? <p className="mt-1 flex flex-wrap items-center gap-1.5"><OtaSourceBadge site={booking.ota.siteLabel} />{booking.ota.bookingReference ? <span className="text-xs text-muted">予約番号 {booking.ota.bookingReference}</span> : null}</p> : null}
+                >
                   {() =>
                     site ? (
                       // A payment under review: paid after the hold ended, with no seat kept.
@@ -434,10 +473,15 @@ export function HostSession({ session, now, conversations, providerId, site = nu
                             ))}
                           </ul>
                         </div>
-                      ) : recordsAttendance ? (
+                      ) : booking.ota?.pending ? (
+                        // Not confirmed by its site yet (#194): no attendance until it is.
+                        <OtaPending booking={booking} today={today} />
+                      ) : (booking.ota ? ota?.attendance && site.providerId : site.attendance && site.providerId) ? (
                         // 来なかった keeps the guest's thanks and review request as they are: nothing here holds them back yet.
                         <Attendance booking={booking} open={canRecordAttendance(booking, phase)} saving={saving.has(booking.id)} noShowNote={false} onMark={(value) => mark(booking.id, value)} />
                       ) : null
+                    ) : booking.ota?.pending ? (
+                      <OtaPending booking={booking} today={today} />
                     ) : booking.status === "confirmed" ? (
                       <Attendance booking={booking} open={canRecordAttendance(booking, phase)} onMark={(value) => mark(booking.id, value)} />
                     ) : (
@@ -485,7 +529,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
           </section>
         ) : null}
 
-        {site ? (
+        {site && own.length ? (
           <div className="mt-5">
             {siteCancel.error ? <p role="alert" className="mb-2 text-[0.8125rem] leading-normal font-bold text-danger">{siteCancel.error}</p> : null}
             {siteCancellable ? (

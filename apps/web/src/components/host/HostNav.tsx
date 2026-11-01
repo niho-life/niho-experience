@@ -49,7 +49,8 @@ export function hostNavForRole(role: HostProviderRole | null | undefined) {
 
 export function hostNavForChoice(choice: HostConsoleChoice | null | undefined) {
   if (choice?.kind === "OPERATOR") {
-    // A product operator's screens (docs/product-operators.md): カレンダー, and 設定 for their own email address (#194).
+    // A product operator's screens (docs/product-operators.md): カレンダー, 予約 for the OTA bookings of their products and
+    // 設定 for their own email address (#194).
     const screens = choice.screens ?? ["/host/calendar"];
     return HOST_NAV.filter((item) => item.href === "/host/calendar" || screens.includes(item.href));
   }

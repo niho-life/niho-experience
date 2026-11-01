@@ -2,7 +2,7 @@ import "server-only";
 import type { HostActor, ProductOperatorAssignment } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { nihoIdOrNull, selectProvider, toProviderChoice, type HostConsoleChoice, type HostProvider, type HostProviderRole } from "@/lib/host/providers";
-import { HOST_CALENDAR_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
+import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
 import { loadHostProviders, noStoreJson, readHostSession } from "@/lib/host/server";
 import { idTokenUsable } from "@/lib/host/session";
 import { productOperatorRepository } from "./store-server";
@@ -56,8 +56,9 @@ export function calendarConsoleChoices(providers: readonly HostProvider[], assig
   const assignedIds = new Set(assignments.map((item) => item.providerId));
   const members = providers.filter((provider) => provider.memberRole === "OWNER" || provider.memberRole === "EDITOR" || !assignedIds.has(provider.id)).map(toProviderChoice);
   const memberIds = new Set(members.map((choice) => choice.id));
-  // カレンダー, and 設定 for the operator's own email address while this site emails hosts (#194).
-  const screens = [HOST_CALENDAR_PATH, ...(config.hostMailEnabled ? [HOST_SETTINGS_PATH] : [])];
+  // カレンダー, 予約 for the OTA bookings of their products while they are shown (#194 PR B), and 設定 for the operator's own
+  // email address while this site emails hosts (#194).
+  const screens = [HOST_CALENDAR_PATH, ...(config.otaGuestDetailsEnabled ? [HOST_BOOKINGS_PATH] : []), ...(config.hostMailEnabled ? [HOST_SETTINGS_PATH] : [])];
   const operators: HostConsoleChoice[] = [...new Map(assignments.filter((item) => !memberIds.has(item.providerId)).map((item) => [item.providerId, {
     kind: "OPERATOR" as const, id: item.providerId, displayName: item.sellerDisplayName, memberRole: null, screens,
   }])).values()];

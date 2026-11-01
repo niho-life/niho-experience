@@ -12,6 +12,8 @@ import { loadHostCalendar } from "@/host/calendar-server";
 import { hostPageContext, loadHostConsoleData } from "@/host/data";
 import { homeBadgeCount, homeTodosFailedText, type HomeUpcoming } from "@/host/home";
 import { loadHomeTodos } from "@/host/home-server";
+import { OTA_BOOKING_LOAD_FAILED_TEXT } from "@/host/ota-bookings";
+import { loadOtaHomeTodos } from "@/host/ota-bookings-server";
 import { SITE_SALES_HOME_LOAD_FAILED_TEXT } from "@/host/site-sales";
 import { loadSiteHomeMonth } from "@/host/site-sales-server";
 import { SITE_HOME_LOAD_FAILED_TEXT, withSiteHome } from "@/host/site-sessions";
@@ -114,6 +116,9 @@ function CalendarPromptCard({ prompt, href }: { prompt: HomeCalendarPrompt; href
  * With HOST_SALES_LEDGER_ENABLED (http mode), the month card is the OWNER's sales of bookings made on this site this
  * month in Japan (#91), read from the experience DB's ledger as 売上 reads it, and says whose they are.
  *
+ * With EXPERIENCE_OTA_GUEST_DETAILS_ENABLED (#194 PR B), 次にすること lists the bookings made on reservation sites in the last
+ * three days whose session is ahead, each leading to its detail (`?ota=`); the preview shows them with `?mock=ota-bookings`.
+ *
  * In http mode 次にすること also lists, after this site's payments under review, the threads and reviews waiting for the
  * OWNER and NIHO's drafts and listings under review (home-server.ts; one line says which could not be read), and the
  * calendar's card follows the experience DB's Google connection for the OWNER where Google's sign-in is configured.
@@ -129,16 +134,21 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   if (!provider) {
     return <HostRegisterPrompt title="ホーム" />;
   }
-  const [{ home: consoleHome, settings }, site, siteMonth, live, liveCalendar] = await Promise.all([
+  const [{ home: consoleHome, settings }, site, siteMonth, live, liveCalendar, ota] = await Promise.all([
     loadHostConsoleData(provider),
     loadSiteHome(provider, context.session.nihoUserId, providerOperationsEnabled()),
     loadSiteHomeMonth(provider, context.session),
     loadHomeTodos(provider, context.session),
     loadHostCalendar(provider, context.session.nihoUserId, { feed: false }),
+    // New bookings made on reservation sites (#194 PR B).
+    loadOtaHomeTodos(provider.id, context.session.nihoUserId, provider, context.session.mockScenario),
   ]);
   const withSite = site.status === "live" ? withSiteHome(consoleHome, site) : consoleHome;
-  // This site's payments under review first, then what the OWNER reads in http mode (the preview has none of it).
-  const home = live.todos.length ? { ...withSite, todos: [...(site.status === "live" ? site.todos : []), ...live.todos, ...consoleHome.todos] } : withSite;
+  // This site's payments under review first, then the new OTA bookings, then what the OWNER reads in http mode (the
+  // preview has none of it).
+  const home = live.todos.length || ota.todos.length
+    ? { ...withSite, todos: [...(site.status === "live" ? site.todos : []), ...ota.todos, ...live.todos, ...consoleHome.todos] }
+    : withSite;
   const month = siteMonth.status === "live" ? siteMonth.month : siteMonth.status === "error" ? null : home.month;
   const link = (path: string) => withProvider(path, linkProviderId);
   // Only where it can be connected: the preview's synthetic calendar, or the OWNER's in http mode.
@@ -158,6 +168,11 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
       {site.status === "error" ? (
         <p role="alert" className="mb-3.5 rounded-2xl border border-warn/20 bg-warn-pale px-4 py-3 text-warn">
           {SITE_HOME_LOAD_FAILED_TEXT}
+        </p>
+      ) : null}
+      {ota.failed ? (
+        <p role="alert" className="mb-3.5 rounded-2xl border border-warn/20 bg-warn-pale px-4 py-3 text-warn">
+          {OTA_BOOKING_LOAD_FAILED_TEXT}
         </p>
       ) : null}
       {live.failed.length ? (

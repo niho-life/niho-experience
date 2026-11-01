@@ -17,7 +17,17 @@ import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
  * happen on the site: nothing here changes a reservation.
  */
 
-export const HOST_OTA_BOOKING_LIMITS = { listDefault: 100, listMax: 200, windowDaysMax: 120 } as const;
+export const HOST_OTA_BOOKING_LIMITS = { listDefault: 100, listMax: 200, windowDaysMax: 120, attendanceRefsMax: 200 } as const;
+
+/** 出欠 of an OTA booking (#194 PR B, migration 0039): 来た / 来なかった, as this site's bookings (0033). */
+export type HostOtaAttendanceStatus = "ATTENDED" | "NO_SHOW";
+
+export interface HostOtaAttendanceResult {
+  /** RECORDED: kept (also when it was already this one). NOT_STARTED: the session has not started. NOT_CONFIRMED: cancelled or still PENDING on the site. */
+  readonly outcome: "RECORDED" | "NOT_STARTED" | "NOT_CONFIRMED";
+  /** The booking's mark as stored now; null while it has none. */
+  readonly status: HostOtaAttendanceStatus | null;
+}
 
 export interface HostOtaBookingGuest {
   readonly name: string | null;
@@ -72,6 +82,8 @@ export interface HostOtaBookingListOptions {
   readonly productId?: string;
   /** One session only (この回). */
   readonly occurrenceId?: string;
+  /** The sessions of one schedule rule (offer) only: この回 narrows to it before the limit (a session may have moved). */
+  readonly offerId?: string;
   /** 1-200; 100 by default. */
   readonly limit?: number;
 }
@@ -174,6 +186,7 @@ function window(options: HostOtaBookingListOptions): { fromUtc: string; toUtc: s
   if (options.occurrenceId !== undefined && (typeof options.occurrenceId !== "string" || options.occurrenceId.length < 1 || options.occurrenceId.length > 256)) {
     throw new StoreValidationError("occurrenceId is invalid.");
   }
+  if (options.offerId !== undefined) assertStoreIdentifier(options.offerId, "offerId");
   return { fromUtc: options.fromUtc, toUtc: options.toUtc, limit };
 }
 
@@ -199,11 +212,78 @@ export class HostOtaBookings {
         `${SELECT_OTA_BOOKINGS}
            AND e.source_start_at >= $3 AND e.source_start_at < $4
            AND ($5::text IS NULL OR e.occurrence_id=$5)
+           AND ($7::text IS NULL OR (e.occurrence_id IS NOT NULL AND replace(split_part(e.occurrence_id,'@',1),'%3A',':')=$7))
          ORDER BY e.source_start_at, e.host_ref
          LIMIT $6`,
-        [actor.providerId, scope, fromUtc, toUtc, options.occurrenceId ?? null, limit],
+        [actor.providerId, scope, fromUtc, toUtc, options.occurrenceId ?? null, limit, options.offerId ?? null],
       );
       return result.rows.map(hostOtaBookingFromRow);
+    });
+  }
+
+  /**
+   * この回's 出欠 (#194 PR B): the marks of the OTA bookings `refs` names that the actor may read (any other is left out).
+   * Read only with EXPERIENCE_HOST_ATTENDANCE_ENABLED, once 0039 is applied.
+   */
+  async attendanceForHost(actor: HostActor, refs: readonly string[]): Promise<ReadonlyMap<string, HostOtaAttendanceStatus>> {
+    if (!Array.isArray(refs) || refs.length > HOST_OTA_BOOKING_LIMITS.attendanceRefsMax || refs.some((ref) => typeof ref !== "string" || !UUID.test(ref))) {
+      throw new StoreValidationError(`refs must be at most ${HOST_OTA_BOOKING_LIMITS.attendanceRefsMax} UUIDs.`);
+    }
+    if (refs.length === 0) return new Map();
+    return withTransaction(this.#pool, async (client) => {
+      const products = await readableProducts(client, actor);
+      const result = await client.query<DbRow>(
+        `SELECT a.host_ref::text AS host_ref, a.status
+           FROM external_reservation_attendance a
+           JOIN external_reservations e ON e.host_ref = a.host_ref
+          WHERE e.provider_id = $1 AND ($2::text[] IS NULL OR e.product_id = ANY($2::text[])) AND a.host_ref = ANY($3::uuid[])`,
+        [actor.providerId, products, refs.map((ref) => ref.toLowerCase())],
+      );
+      return new Map(result.rows.map((row) => [String(row.host_ref), row.status === "NO_SHOW" ? "NO_SHOW" : "ATTENDED"] as const));
+    });
+  }
+
+  /**
+   * 来た / 来なかった by the product's OWNER or its operator for one confirmed OTA booking, once its session has started
+   * (the session's own time where the ledger placed it, else the site's; the database's clock). The same mark again changes
+   * nothing; another replaces it. The reservation row is held, so the ledger does not pass it halfway. StoreNotFoundError
+   * for one the actor may not read.
+   */
+  async recordAttendanceAsHost(actor: HostActor, ref: string, status: HostOtaAttendanceStatus): Promise<HostOtaAttendanceResult> {
+    if (typeof ref !== "string" || !UUID.test(ref)) throw new StoreValidationError("ref must be a UUID.");
+    if (status !== "ATTENDED" && status !== "NO_SHOW") throw new StoreValidationError("attendance must be ATTENDED or NO_SHOW.");
+    return withTransaction(this.#pool, async (client) => {
+      const products = await readableProducts(client, actor);
+      const found = await client.query<DbRow>(
+        `SELECT e.host_ref::text AS host_ref, e.status,
+                COALESCE(s.occurrence_start_at, e.source_start_at) <= clock_timestamp() AS started
+           FROM external_reservations e
+           LEFT JOIN external_reservation_inventory_snapshots s ON s.source_site=e.source_site
+            AND s.source_external_account_id=e.source_external_account_id AND s.external_reservation_id=e.external_reservation_id
+            AND s.local_revision=e.local_revision AND e.occurrence_id IS NOT NULL
+          WHERE e.provider_id = $1 AND ($2::text[] IS NULL OR e.product_id = ANY($2::text[])) AND e.host_ref = $3::uuid
+          FOR SHARE OF e`,
+        [actor.providerId, products, ref.toLowerCase()],
+      );
+      const row = found.rows[0];
+      if (!row) throw new StoreNotFoundError("OTA booking");
+      const current = async (): Promise<HostOtaAttendanceStatus | null> => {
+        const mark = await client.query<DbRow>("SELECT status FROM external_reservation_attendance WHERE host_ref = $1::uuid", [row.host_ref]);
+        const value = mark.rows[0]?.status;
+        return value === "ATTENDED" || value === "NO_SHOW" ? value : null;
+      };
+      if (row.status !== "CONFIRMED") return { outcome: "NOT_CONFIRMED", status: await current() };
+      if (row.started !== true) return { outcome: "NOT_STARTED", status: await current() };
+      await client.query(
+        `INSERT INTO external_reservation_attendance (host_ref, provider_id, status, recorded_by)
+         VALUES ($1::uuid, $2, $3, $4)
+         ON CONFLICT (host_ref) DO UPDATE
+           SET status = EXCLUDED.status, recorded_by = EXCLUDED.recorded_by,
+               version = external_reservation_attendance.version + 1, updated_at = clock_timestamp()
+           WHERE external_reservation_attendance.status <> EXCLUDED.status`,
+        [row.host_ref, actor.providerId, status, actor.nihoUserId],
+      );
+      return { outcome: "RECORDED", status: await current() };
     });
   }
 

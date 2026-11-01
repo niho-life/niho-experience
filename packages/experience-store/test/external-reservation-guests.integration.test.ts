@@ -311,6 +311,30 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       // A NIHO-capped operator scope never reads as the OWNER, even with a stale local OWNER row.
       await assert.rejects(() => bookings.listForHost({ ...owner, calendarScope: "OPERATOR" }, window), StoreAccessDeniedError);
       assert.deepEqual((await bookings.listForHost(owner, { ...window, occurrenceId: occurrenceIdFor("tea-am", "2099-01-06") })).map((item) => item.ref), [r2Ref]);
+      // この回 narrows to one offer's sessions before the limit (#194 PR B); a booking with no session is not among them.
+      assert.deepEqual((await bookings.listForHost(owner, { ...window, productId: "tea", offerId: "tea-am" })).map((item) => item.ref).sort(), ownerList.filter((item) => item.offerId === "tea-am").map((item) => item.ref).sort());
+      assert.deepEqual(await bookings.listForHost(owner, { ...window, productId: "tea", offerId: "tea-pm" }), []);
+      await assert.rejects(() => bookings.listForHost(owner, { ...window, offerId: "" }), StoreValidationError);
+
+      // 出欠 (#194 PR B, 0039): the OWNER and the product's operator, once the session has started, for a confirmed booking.
+      assert.deepEqual(await bookings.recordAttendanceAsHost(owner, r2Ref, "ATTENDED"), { outcome: "NOT_STARTED", status: null });
+      assert.deepEqual(await bookings.recordAttendanceAsHost(owner, await hostRef("R1"), "ATTENDED"), { outcome: "NOT_CONFIRMED", status: null });
+      await pool.query("SET session_replication_role = replica");
+      await pool.query(
+        "UPDATE external_reservation_inventory_snapshots SET occurrence_start_at=clock_timestamp()-interval '1 hour', occurrence_end_at=clock_timestamp() WHERE external_reservation_id='R2'",
+      );
+      await pool.query("SET session_replication_role = origin");
+      assert.deepEqual(await bookings.recordAttendanceAsHost(teaOperator, r2Ref, "NO_SHOW"), { outcome: "RECORDED", status: "NO_SHOW" });
+      assert.deepEqual(await bookings.recordAttendanceAsHost(owner, r2Ref, "ATTENDED"), { outcome: "RECORDED", status: "ATTENDED" });
+      assert.deepEqual([...await bookings.attendanceForHost(owner, [r2Ref, await hostRef("R1")])], [[r2Ref, "ATTENDED"]]);
+      assert.deepEqual([...await bookings.attendanceForHost(teaOperator, [r2Ref])], [[r2Ref, "ATTENDED"]]);
+      await assert.rejects(() => bookings.recordAttendanceAsHost(soloOperator, r2Ref, "ATTENDED"), StoreNotFoundError);
+      assert.deepEqual([...await bookings.attendanceForHost(soloOperator, [r2Ref])], []);
+      await assert.rejects(() => bookings.recordAttendanceAsHost(editor, r2Ref, "ATTENDED"), StoreAccessDeniedError);
+      await assert.rejects(() => bookings.recordAttendanceAsHost(owner, r2Ref, "LATE" as never), StoreValidationError);
+      await assert.rejects(() => bookings.attendanceForHost(owner, ["not-a-uuid"]), StoreValidationError);
+      const recorded = await pool.query("SELECT status, recorded_by, version FROM external_reservation_attendance");
+      assert.deepEqual(recorded.rows, [{ status: "ATTENDED", recorded_by: "owner-a", version: "2" }]);
 
       // Push: the product's OWNER and its operators, never an EDITOR, another product's operator or another provider.
       const subscriptions = new HostPushSubscriptions(pool);

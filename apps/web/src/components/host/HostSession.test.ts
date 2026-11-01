@@ -3,8 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { HostGuestBooking } from "@niho-experience/experience-store";
 
-vi.mock("@/host/actions", () => ({ cancelSiteSession: vi.fn(), recordSiteAttendance: vi.fn() }));
+vi.mock("@/host/actions", () => ({ cancelSiteSession: vi.fn(), recordSiteAttendance: vi.fn(), recordOtaAttendance: vi.fn() }));
 
+import { MOCK_OTA_BOOKINGS } from "@/host/mock/ota-bookings";
+import { otaBooking } from "@/host/ota-bookings";
 import { siteSessionView } from "@/host/site-sessions";
 import { HostSession } from "./HostSession";
 
@@ -90,5 +92,46 @@ describe("HostSession for this site's bookings", () => {
     const html = render("2026-11-01T10:30", false, undefined, true);
     expect(html).not.toContain("さんの出欠");
     expect(html).not.toContain("未記録");
+  });
+});
+
+describe("HostSession with OTA bookings (#194 PR B)", () => {
+  const ota = (index: number, overrides: Record<string, unknown> = {}) => {
+    const booking = otaBooking({ ...MOCK_OTA_BOOKINGS[index]!, ...overrides });
+    return { ...booking, date: QUERY.date, start: QUERY.start, experienceId: QUERY.experience, offerId: QUERY.offer, phone: booking.ota?.phone ?? null };
+  };
+  const renderWith = (now: string, extra: ReturnType<typeof ota>[], attendance: boolean) => {
+    const session = { ...siteSessionView([CONFIRMED], QUERY, attendance ? { capacity: 8, marks: [] } : null)! };
+    return renderToStaticMarkup(createElement(HostSession, {
+      session: { ...session, bookings: [...session.bookings, ...extra] }, now, conversations: [], providerId: "sample-provider",
+      site: { besideNiho: false, providerId: "sample-provider", attendance }, ota: { attendance },
+    }));
+  };
+
+  it("lists the OTA guests with their site's badge, reference and phone, never calls them off or writes to them", () => {
+    const html = renderWith("2026-11-01T09:00", [ota(0)], false);
+    expect(html).toContain("このサイトと予約サイトで受けた予約です");
+    expect(html).toContain("Sample Traveler");
+    expect(html).toContain("GetYourGuide");
+    expect(html).toContain("予約番号 GYG-SAMPLE-1042");
+    expect(html).toContain('href="tel:');
+    // Calling it off refunds this site's one booking only.
+    expect(html).toContain("この回を中止する（全員に全額返金）");
+  });
+
+  it("takes 出欠 for a confirmed OTA booking after the start, and none for one its site has not confirmed", () => {
+    const html = renderWith("2026-11-01T10:30", [ota(0), ota(2)], true);
+    expect(attendanceButtons(html, "Sample Traveler").map(([label]) => label)).toEqual(["来た", "来なかった"]);
+    expect(attendanceButtons(html, "見本 花子")).toEqual([]);
+    expect(html).toContain("確定待ち");
+    expect(html).toContain("確定するまで出欠は付けられません。");
+  });
+
+  it("is a session of OTA guests alone, with nothing of this site's to call off", () => {
+    const session = { date: QUERY.date, start: QUERY.start, end: "20:00", experienceId: QUERY.experience, offerId: QUERY.offer, title: "Dinner", offer: "Dinner", capacity: null, meetingArea: "", bookings: [ota(0)] };
+    const html = renderToStaticMarkup(createElement(HostSession, { session, now: "2026-11-01T09:00", conversations: [], providerId: "sample-provider", site: { besideNiho: false, providerId: "sample-provider" }, ota: { attendance: false } }));
+    expect(html).toContain("予約サイトで受けた予約です。取消・返金・予約者とのやりとりは、その予約サイトで行ってください");
+    expect(html).not.toContain("この回を中止する");
+    expect(html).not.toContain("一部だけの返金は NIHO サポートへご連絡ください");
   });
 });

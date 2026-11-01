@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -97,6 +97,16 @@ export function hostNotificationAddresses(): HostNotificationAddresses | null {
   if (!config.hostMailEnabled) return null;
   const pool = experiencePool();
   return pool ? new HostNotificationAddresses(pool) : null;
+}
+
+/**
+ * OTA の予約 (#194 PR B): the bookings made on reservation sites, read for the product's OWNER and its operators in 予約,
+ * ホーム and この回. null until EXPERIENCE_OTA_GUEST_DETAILS_ENABLED is on and the experience DB is configured.
+ */
+export function hostOtaBookings(): HostOtaBookings | null {
+  if (!config.otaGuestDetailsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new HostOtaBookings(pool) : null;
 }
 
 /** 予約前の質問 (#105/#106): null until its flag is on and the experience DB is configured. */

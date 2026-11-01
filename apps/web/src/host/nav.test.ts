@@ -25,6 +25,8 @@ describe("host navigation", () => {
   it("gives an operator 設定 for their own email address only where the server says so (#194)", () => {
     const operator = { kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null } as const;
     expect(hostNavForChoice({ ...operator, screens: ["/host/calendar", "/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
+    // 予約 for the OTA bookings of their products (#194 PR B), in the menu's order.
+    expect(hostNavForChoice({ ...operator, screens: ["/host/calendar", "/host/bookings", "/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/bookings", "/host/settings"]);
     // Never a provider screen it was not given, and カレンダー always.
     expect(hostNavForChoice({ ...operator, screens: ["/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
   });

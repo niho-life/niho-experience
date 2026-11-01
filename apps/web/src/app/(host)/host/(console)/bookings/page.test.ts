@@ -10,6 +10,11 @@ const state = vi.hoisted(() => ({
   site: { status: "closed" } as Record<string, unknown>,
   loadSiteBookings: null as null | Load,
   loadHostBookings: null as null | Load,
+  providerNotFound: false,
+  ota: { status: "closed" } as Record<string, unknown>,
+  otaShown: false,
+  loadOtaBookings: null as null | Load,
+  calendarChoice: null as null | Record<string, unknown>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", async (importActual) => ({
@@ -24,7 +29,7 @@ vi.mock("@/host/data", () => ({
     session: { nihoUserId: "sample-niho-user", mockScenario: undefined },
     providers: [],
     provider: { id: "sample-provider", displayName: "Synthetic provider", memberRole: state.memberRole },
-    providerNotFound: false,
+    providerNotFound: state.providerNotFound,
     linkProviderId: "sample-provider",
   }),
   loadHostBookings: (...args: unknown[]) => state.loadHostBookings!(...args),
@@ -33,6 +38,11 @@ vi.mock("@/host/site-bookings-server", () => ({
   loadSiteBookings: (...args: unknown[]) => state.loadSiteBookings!(...args),
 }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => false }));
+vi.mock("@/host/ota-bookings-server", () => ({
+  loadOtaBookings: (...args: unknown[]) => state.loadOtaBookings!(...args),
+  otaBookingsShown: () => state.otaShown,
+}));
+vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: async () => ({ choices: [], choice: state.calendarChoice, providerNotFound: false }) }));
 vi.mock("@/lib/host/support-history-server", () => ({ isHostSupportHistoryEnabled: () => false }));
 vi.mock("@/lib/host/fee-summary-server", () => ({ isHostFeeSummaryUiEnabled: () => false }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
@@ -50,12 +60,17 @@ beforeEach(() => {
   state.loadSiteBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.site);
   state.loadHostBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({ list: { status: "unavailable" }, requested: null, experiences: [], today: "2026-10-31", now: null, conversations: [] }));
   state.site = { status: "closed" };
+  state.providerNotFound = false;
+  state.ota = { status: "closed" };
+  state.otaShown = false;
+  state.calendarChoice = null;
+  state.loadOtaBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.ota);
 });
 
 /** The page, with its own local views (SiteBookings) rendered down to the screen component they choose. */
 async function page(query: Record<string, string> = {}): Promise<ReactElement<Record<string, unknown>>> {
   let element: unknown = await HostBookingsPage({ searchParams: Promise.resolve(query) });
-  while (isValidElement(element) && typeof element.type === "function" && element.type.name === "SiteBookings") {
+  while (isValidElement(element) && typeof element.type === "function" && (element.type.name === "SiteBookings" || element.type.name === "OtaOnlyBookings")) {
     element = (element.type as (props: unknown) => unknown)(element.props);
   }
   expect(isValidElement(element)).toBe(true);
@@ -123,5 +138,49 @@ describe("予約 beside NIHO's bookings (provider operations on)", () => {
     const view = await page();
     expect(view.type).toBe(HostLiveBookings);
     expect(((view.props.siteNotice as ReactElement).type as { name: string }).name).toBe("SiteBookingsFailed");
+  });
+});
+
+describe("予約 with bookings made on reservation sites (#194 PR B)", () => {
+  const OTA = { status: "live", bookings: [{ id: "0b7f3c1e-5a2d-4e8f-9c61-2d4b8a7e1f01", ota: { siteLabel: "GetYourGuide" } }], experiences: [], requestedMissing: false, reader: "OWNER", today: "2026-10-31" };
+
+  it("puts them beside this site's bookings, reading the push's ?ota= booking", async () => {
+    state.site = LIVE;
+    state.otaShown = true;
+    state.ota = OTA;
+    const view = await page({ ota: OTA.bookings[0]!.id });
+    expect(view.type).toBe(HostBookings);
+    expect(view.props).toMatchObject({ bookings: LIVE.bookings, ota: { bookings: OTA.bookings } });
+    expect(state.loadOtaBookings).toHaveBeenCalledWith("sample-provider", "sample-niho-user", expect.objectContaining({ memberRole: "OWNER" }), OTA.bookings[0]!.id, undefined);
+  });
+
+  it("is the whole list while neither this site's nor NIHO's bookings are here", async () => {
+    state.otaShown = true;
+    state.ota = OTA;
+    const view = await page();
+    expect(view.type).toBe(HostBookings);
+    expect(view.props).toMatchObject({ bookings: [], ota: { bookings: OTA.bookings }, providerDataId: "sample-provider", today: "2026-10-31" });
+  });
+
+  it("opens a product operator's assigned provider even when NIHO's list falls back to another provider of theirs", async () => {
+    state.otaShown = true;
+    state.providerNotFound = true;
+    state.calendarChoice = { kind: "OPERATOR", id: "provider-b", displayName: "Synthetic seller", memberRole: null };
+    state.ota = { ...OTA, reader: "OPERATOR" };
+    const view = await page({ providerId: "provider-b" });
+    expect(view.type).toBe(HostBookings);
+    expect(view.props).toMatchObject({ providerDataId: "provider-b", bookings: [], ota: { bookings: OTA.bookings } });
+    expect(state.loadOtaBookings).toHaveBeenCalledWith("provider-b", "sample-niho-user", null, null, undefined);
+    // Not the fallback provider's bookings.
+    expect(state.loadSiteBookings).not.toHaveBeenCalled();
+  });
+
+  it("keeps the fallback provider's screen when the missing provider is not an operator's", async () => {
+    state.otaShown = true;
+    state.providerNotFound = true;
+    state.calendarChoice = { kind: "MEMBER", id: "sample-provider", displayName: "Synthetic provider", memberRole: "OWNER" };
+    state.site = LIVE;
+    const view = await page({ providerId: "provider-z" });
+    expect(view.props).toMatchObject({ providerDataId: "sample-provider", bookings: LIVE.bookings });
   });
 });
