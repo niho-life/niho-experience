@@ -25,6 +25,8 @@ export const HOST_BOOKINGS_PATH = "/host/bookings";
 export const HOST_BOOKING_SESSION_PATH = "/host/bookings/session";
 export const HOST_SALES_PATH = "/host/sales";
 export const HOST_SETTINGS_PATH = "/host/settings";
+/** The confirmation link of a new notification address (#194): `#t=<token>`, outside the console frame. */
+export const HOST_NOTIFICATION_EMAIL_PATH = "/host/notification-email";
 /** 本人OWNERの通常Spot / 外部Providerに独立したNIHOサポート設定。 */
 export const HOST_SUPPORT_PATH = "/host/support";
 /** メッセージ (#106): a screen under ホーム, not in the menu. */

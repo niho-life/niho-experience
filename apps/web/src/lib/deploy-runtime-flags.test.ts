@@ -77,6 +77,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED: "googleBookingEventsEnabled",
   EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "otaGuestDetailsEnabled",
   EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "otaBookingNotificationsEnabled",
+  EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
 };
 
 const byEnv = new Map(FLAGS.map((flag) => [flag.env, flag]));

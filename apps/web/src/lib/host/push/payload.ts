@@ -92,7 +92,7 @@ export function hostPushUrl(url: string): string {
 }
 
 /** "10/22（木）18:00" in Japan time, or null. */
-function whenJa(startsAt: string | undefined): string | null {
+export function whenJa(startsAt: string | undefined): string | null {
   const at = startsAt ? Date.parse(startsAt) : Number.NaN;
   if (!Number.isFinite(at)) return null;
   return `${shortDateWithWeekdayJa(todayInJapan(at))}${JST_TIME.format(new Date(at))}`;
@@ -118,16 +118,29 @@ function whenLine(event: HostPushEvent): string | null {
   return before && when ? `${before} → ${when}` : when;
 }
 
+/**
+ * The words of a push, line by line: its title and what its body says (the experience, the time, an OTA guest's name and
+ * the party). The host's email about the same booking says the same (#194, lib/mail/host-templates.ts).
+ */
+export function hostPushLines(event: HostPushEvent): { title: string; experience: string | null; when: string | null; guest: string | null; seats: string | null } {
+  return {
+    title: event.ota ? hostPushOtaTitle(event.ota)
+      : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
+    experience: titleLine(event.experienceTitle),
+    when: whenLine(event),
+    guest: event.ota ? titleLine(event.guestName) : null,
+    seats: Number.isInteger(event.seats) && event.seats! > 0 ? `${event.seats}名` : null,
+  };
+}
+
 export function hostPushPayload(event: HostPushEvent): string {
   const tag = event.tag.trim();
   if (!tag || tag.length > TAG_MAX) throw new Error("A host push tag must be 1-64 characters");
-  const seats = Number.isInteger(event.seats) && event.seats! > 0 ? `${event.seats}名` : null;
-  const guest = event.ota ? titleLine(event.guestName) : null;
+  const lines = hostPushLines(event);
   const message: HostPushMessage = {
     v: 1,
-    title: event.ota ? hostPushOtaTitle(event.ota)
-      : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
-    body: event.note ?? [titleLine(event.experienceTitle), whenLine(event), guest ? `${guest} 様` : null, seats].filter(Boolean).join(" · "),
+    title: lines.title,
+    body: event.note ?? [lines.experience, lines.when, lines.guest ? `${lines.guest} 様` : null, lines.seats].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
     ...(Number.isInteger(event.badgeCount) && event.badgeCount! >= 0 ? { badge: event.badgeCount } : {}),

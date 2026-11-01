@@ -5,7 +5,10 @@ import type { HostCalendarLoad } from "@/host/calendar";
 
 /** 設定 › カレンダー in http mode (#109) as first drawn, on synthetic states. */
 vi.mock("@/host/calendar-actions", () => ({ issueHostCalendarFeed: vi.fn(), revokeHostCalendarFeed: vi.fn() }));
-vi.mock("@/host/actions", () => ({ saveNotificationSettings: vi.fn(), saveProviderMeetingPoint: vi.fn(), saveProviderProfile: vi.fn(), submitProviderReview: vi.fn() }));
+vi.mock("@/host/actions", () => ({
+  saveNotificationSettings: vi.fn(), saveProviderMeetingPoint: vi.fn(), saveProviderProfile: vi.fn(), submitProviderReview: vi.fn(),
+  requestNotificationAddress: vi.fn(), restoreLoginNotificationAddress: vi.fn(), cancelNotificationAddress: vi.fn(),
+}));
 
 import { CALENDAR_LOAD_FAILED_TEXT, GOOGLE_NOT_CONNECTED, GOOGLE_SYNC_FAILING_TEXT } from "@/host/calendar";
 import { HostLiveCalendarPanel } from "./HostCalendarPanel";
@@ -71,7 +74,7 @@ describe("HostSettingsForm's カレンダー", () => {
     calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null }, notifications: null, notificationSource: "preparing",
   } as const;
   const form = (liveCalendar: HostCalendarLoad | null) => renderToStaticMarkup(createElement(HostSettingsForm, {
-    providerId: "sample-provider", role: "OWNER", settings, payout: { status: "error" } as never, connectNotice: null, googleConnection: null, liveCalendar, preview: false, account: null,
+    providerId: "sample-provider", role: "OWNER", settings, payout: { status: "error" } as never, connectNotice: null, googleConnection: null, liveCalendar, preview: false, account: null, notificationAddress: null,
   }));
 
   it("is the live panel for the OWNER, and today's link otherwise, saying when it could not be read", () => {

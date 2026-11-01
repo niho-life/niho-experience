@@ -199,13 +199,13 @@ test("通知: NIHO's seven notifications in its order; the three the owner may s
   await signIn(page);
   await page.goto("/host/settings");
   const panel = notificationPanel(page);
-  // Where the mail goes, read-only: changing it is not here yet.
+  // Where the mail goes (#194): the person's own address, the sign-in's by default; 宛先を変える opens the field.
   const to = panel.getByRole("group", { name: "宛先" });
   await expect(to).toContainText("kitchen@example.com");
-  await expect(to).toContainText("NIHO からの通知はこのメールに届きます");
-  await expect(to).toContainText("宛先の変更は準備中です");
+  await expect(to).toContainText("NIHO アカウントの確認済みのメールです");
   await expect(panel.getByRole("textbox")).toHaveCount(0);
-  await expect(panel.getByRole("button")).toHaveCount(0);
+  await expect(panel.getByRole("button")).toHaveCount(1);
+  await expect(panel.getByRole("button", { name: "宛先を変える" })).toBeVisible();
 
   const switches = panel.getByRole("switch");
   await expect(switches).toHaveCount(7);
@@ -237,6 +237,43 @@ test("通知: NIHO's seven notifications in its order; the three the owner may s
   expect(sent).toEqual([]);
   await page.reload();
   await expect(notificationPanel(page).getByRole("switch", { name: "新しいレビュー" })).toBeChecked();
+});
+
+test("宛先: a new address waits for the link sent to it; 取り消す closes it; the preview sends nothing (#194)", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/settings");
+  const panel = notificationPanel(page);
+  const to = panel.getByRole("group", { name: "宛先" });
+  const sent = recordWrites(page);
+  await panel.getByRole("button", { name: "宛先を変える" }).click();
+  const field = panel.getByRole("textbox", { name: "新しい宛先" });
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute("type", "email");
+  await field.fill("not an address");
+  await panel.getByRole("button", { name: "確認のメールを送る" }).click();
+  await expect(panel).toContainText("メールアドレスの形を確かめてください。");
+  await expect(field).toBeFocused();
+  // やめる goes back to the button.
+  await panel.getByRole("button", { name: "やめる" }).click();
+  await expect(panel.getByRole("button", { name: "宛先を変える" })).toBeFocused();
+
+  await panel.getByRole("button", { name: "宛先を変える" }).click();
+  await field.fill("desk@example.test");
+  await field.press("Enter");
+  await expect(to).toContainText("desk@example.test に確認のメールを送ります（プレビューでは送りません）");
+  // Nothing changes until the link is opened: the sign-in's address is still the one in use.
+  await expect(to).toContainText("kitchen@example.com");
+  await expect(to).toContainText("NIHO アカウントの確認済みのメールです");
+  await panel.getByRole("button", { name: "取り消す" }).click();
+  await expect(to).not.toContainText("desk@example.test");
+  await expect(panel.getByRole("status").filter({ hasText: "確認を取り消しました。" })).toBeVisible();
+  // The sign-in's own address needs no link.
+  await panel.getByRole("button", { name: "宛先を変える" }).click();
+  await field.fill("KITCHEN@example.com");
+  await panel.getByRole("button", { name: "確認のメールを送る" }).click();
+  await expect(panel.getByRole("status").filter({ hasText: "このアドレスに届いています。" })).toBeVisible();
+  expect(sent).toEqual([]);
+  await audit(page, "/host/settings (address)");
 });
 
 test("an editor reads that the notification settings are the owner's", async ({ page }) => {
@@ -318,6 +355,15 @@ test.describe("320px narrow phone", () => {
     await inside(calendar.getByRole("button", { name: "URL をコピー" }), "URL をコピー");
     await inside(calendar.getByRole("button", { name: "URL を作り直す" }), "URL を作り直す");
     for (const name of NOTIFICATIONS) await inside(notificationPanel(page).getByRole("switch", { name }), name);
+    // 宛先 (#194): the field, its buttons and the waiting line fit too.
+    const notification = notificationPanel(page);
+    await notification.getByRole("button", { name: "宛先を変える" }).click();
+    await inside(notification.getByRole("textbox", { name: "新しい宛先" }), "新しい宛先");
+    await inside(notification.getByRole("button", { name: "確認のメールを送る" }), "確認のメールを送る");
+    await notification.getByRole("textbox", { name: "新しい宛先" }).fill("a-long-synthetic-address-for-narrow-phones@example.test");
+    await notification.getByRole("button", { name: "確認のメールを送る" }).click();
+    await inside(notification.getByRole("button", { name: "取り消す" }), "取り消す");
+    expect(await overflowX(page), "settings (address waiting)").toBeLessThanOrEqual(0);
     await calendar.getByRole("button", { name: "URL を作り直す" }).click();
     await inside(page.getByRole("dialog").getByRole("button", { name: "URL を作り直す" }), "dialog: URL を作り直す");
     expect(await overflowX(page), "dialog open").toBeLessThanOrEqual(0);

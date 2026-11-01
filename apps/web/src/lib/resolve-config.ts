@@ -237,6 +237,20 @@ function otaBookingSettings(apiMode: "mock" | "http", env: Env, guestMailEnabled
   return { guestDetails, notifications };
 }
 
+/**
+ * ホストへのメール (#194, owner decision 2026-11-01): copy the NIHO account's verified address when a host signs in to /host,
+ * let the host choose another one in 設定 › 通知 (it takes effect once the emailed link is opened), and email new, cancelled
+ * and moved bookings (this site's and OTA ones) to the people the push goes to. HTTP only, off by default. The emails go out
+ * through the mail job (EXPERIENCE_GUEST_MAIL_ENABLED), and the people sign in through the host console: turned on without
+ * them, the server stops at start-up.
+ */
+function hostMailSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, guestMailEnabled: boolean): boolean {
+  if (apiMode !== "http" || env.EXPERIENCE_HOST_MAIL_ENABLED !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error("EXPERIENCE_HOST_MAIL_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
+  if (!guestMailEnabled) throw new Error("EXPERIENCE_HOST_MAIL_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true (the mail job) in http mode");
+  return true;
+}
+
 /** The terms version a traveler agrees to (consent.agreedVersion, 1-100 characters): printable ASCII without spaces. */
 const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
 
@@ -472,6 +486,8 @@ export function resolveConfig(env: Env) {
   const guestMail = guestMailSettings(apiMode, env);
   // OTA の予約 (#194): the guest details an OTA reader sends, and the pushes about them; see otaBookingSettings.
   const otaBooking = otaBookingSettings(apiMode, env, guestMail.enabled, hostPushEnabled);
+  // ホストへのメール (#194): the sign-in's verified address, the host's own choice and the booking emails; see hostMailSetting.
+  const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
   const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
   // 設定 › カレンダー's bookings feed (#109) for other calendars. The mock keeps its synthetic address on screen; http
@@ -593,6 +609,7 @@ export function resolveConfig(env: Env) {
     experienceJobsServiceAccountEmail: guestMail.jobServiceAccountEmail,
     otaGuestDetailsEnabled: otaBooking.guestDetails,
     otaBookingNotificationsEnabled: otaBooking.notifications,
+    hostMailEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,

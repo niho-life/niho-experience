@@ -17,6 +17,8 @@ import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
 import { mockEnglishDraft } from "./mock/threads";
+import { changeNotificationAddress, confirmNotificationAddressToken } from "./notification-address-server";
+import type { HostNotificationAddressView } from "./notification-address";
 import { changeNotificationSettings } from "./notification-settings-server";
 import { recordOtaAttendanceAsHost } from "./ota-bookings-server";
 import { notificationChangesInput } from "./notifications";
@@ -145,6 +147,32 @@ export async function saveNotificationSettings(input: { providerId: string; chan
   const changes = notificationChangesInput(input?.changes);
   if (!providerId || !changes) return invalid;
   return changeNotificationSettings(providerId, changes);
+}
+
+/**
+ * 設定 › 通知 › 宛先 (#194): the signed-in person's own address for this site's emails. 確認のメールを送る asks for a link
+ * to the new address (nothing changes until it is opened); ログインのメールに戻す and 取り消す act at once. The NIHO user
+ * is the session's; `providerId` is the settings page's provider, which the person must belong to in the experience DB.
+ */
+type AddressChanged = { address: HostNotificationAddressView };
+export async function requestNotificationAddress(input: { providerId: string; email: string }): Promise<HostActionResult<AddressChanged>> {
+  return changeNotificationAddress({ kind: "request", providerId: input?.providerId, email: input?.email });
+}
+
+export async function restoreLoginNotificationAddress(): Promise<HostActionResult<AddressChanged>> {
+  return changeNotificationAddress({ kind: "login" });
+}
+
+export async function cancelNotificationAddress(): Promise<HostActionResult<AddressChanged>> {
+  return changeNotificationAddress({ kind: "cancel" });
+}
+
+/**
+ * 通知の宛先の確認 (#194): the link's token from `/host/notification-email#t=…`. No session: the link proves the inbox. `closed`
+ * when the link no longer works (unknown, used, cancelled, an hour old, access ended; the page does not say which).
+ */
+export async function confirmNotificationAddress(input: { token: string }): Promise<{ ok: true; email: string } | { ok: false; closed: boolean }> {
+  return confirmNotificationAddressToken(input?.token);
 }
 
 /** 審査を申請 (OWNER): NIHO checks the saved seller page and the consent, then the review waits for NIHO. */

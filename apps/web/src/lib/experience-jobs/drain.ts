@@ -1,6 +1,9 @@
 import "server-only";
-import type { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import type { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
+import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
+import type { HostPushKind } from "@/lib/host/push/payload";
+import { hostAddressConfirmationEmail, hostBookingEmail } from "@/lib/mail/host-templates";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
@@ -11,7 +14,9 @@ import { guestMessageToJapanese } from "@/lib/translation/prompts";
  * minute from Cloud Scheduler: host replies to guest questions and host messages about bookings (#285 slice 6b), booking confirmations, the notices of
  * cancellations and refunds, the links "Find your booking" asked for, the refunds Stripe has not accepted (sent again,
  * #285 slice 7b), the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
- * year on (the guests of OTA bookings too, #194) and the removal of booking page links and sessions that ended. Each step is bounded and independent:
+ * year on (the guests of OTA bookings too, #194) and the removal of booking page links and sessions that ended. Hosts get their emails here too
+ * (#194): the link that confirms a new address, and the emails about new, cancelled and moved bookings, then the addresses of those
+ * whose access ended are deleted. Each step is bounded and independent:
  * one that fails is reported and the next still runs. Counts only leave this module: never an address, a name,
  * a token or a message.
  */
@@ -53,6 +58,12 @@ export const EXPERIENCE_JOB_LIMITS = {
   translationTimeoutMs: 30_000,
   /** No new translation starts after this much of the run, so a slow API cannot hold the job. */
   translationBudgetMs: 60_000,
+  /** ホストへのメール (#194): booking emails and address confirmations a run sends, one claimed at a time as the guests'. */
+  hostMails: 20,
+  hostAddressConfirmations: 10,
+  hostMailLeaseSeconds: 120,
+  /** People whose access ended, their addresses deleted per run. */
+  hostAddressesPurgedPerStep: 200,
 } as const;
 
 export interface QuestionReplyCounts {
@@ -87,6 +98,11 @@ export interface TranslationCounts {
 
 /** The links "Find your booking" asked for: as the confirmations. */
 export type BookingLinkCounts = BookingConfirmationCounts;
+/**
+ * The hosts' emails about bookings and their address confirmations (#194): as the confirmations. Skipped: nothing to send
+ * (no address, no longer the booking's person, turned off in 設定 › 通知, a day old, a request no longer open).
+ */
+export type HostMailCounts = BookingConfirmationCounts;
 /** The notices of a cancellation, a refund done or a declined request: as the confirmations. */
 export type BookingNoticeCounts = BookingConfirmationCounts;
 
@@ -135,6 +151,11 @@ export interface ExperienceJobCounts {
   readonly otaGuestErasure: ErasureCounts | FailedStep;
   readonly questionErasure: ErasureCounts | FailedStep;
   readonly bookingAccessPurge: PurgeCounts | StepOff | FailedStep;
+  /** ホストへのメール (#194): off while EXPERIENCE_HOST_MAIL_ENABLED is (the rows wait; the pushes are unaffected). */
+  readonly hostAddressConfirmations: HostMailCounts | StepOff | FailedStep;
+  readonly hostBookingMails: HostMailCounts | StepOff | FailedStep;
+  /** The addresses of hosts with no membership or grant left (#194), deleted whatever the flag. */
+  readonly hostAddressPurge: PurgeCounts | FailedStep;
 }
 
 export interface ExperienceJobDeps {
@@ -158,6 +179,16 @@ export interface ExperienceJobDeps {
   readonly translations: Pick<GuestQuestionTranslations, "claimTranslations" | "recordTranslation" | "retryTranslation">;
   /** The Claude API, or null while translation is off. */
   readonly translator: Translator | null;
+  /**
+   * ホストへのメール (#194), or null while EXPERIENCE_HOST_MAIL_ENABLED is off. `allowed` is 設定 › 通知 (#109) as the push job
+   * reads it: the kinds that cannot be stopped always come.
+   */
+  readonly hostMail: {
+    readonly outbox: Pick<HostMailOutbox, "claimBookingMails" | "completeBookingMail" | "retryBookingMail" | "claimAddressConfirmations" | "issueAddressConfirmationToken" | "completeAddressConfirmation" | "retryAddressConfirmation">;
+    readonly allowed: (providerId: string, kind: HostPushKind) => Promise<boolean>;
+  } | null;
+  /** Deletes the addresses of hosts whose access ended (#194), whatever the flag: what was kept while it was on still goes. */
+  readonly hostAddresses: Pick<HostNotificationAddresses, "purge">;
   readonly mailer: Mailer;
   /** SITE_URL: the origin of every link in the emails. */
   readonly siteUrl: string;
@@ -398,10 +429,97 @@ async function translateGuestMessages(deps: ExperienceJobDeps, translator: Trans
   return counts;
 }
 
+type HostMail = NonNullable<ExperienceJobDeps["hostMail"]>;
+
+/**
+ * The link that makes a new address the one a host's emails go to (#194), one claimed at a time as the confirmations: the
+ * one-time token is made right before the email goes out (only its digest is kept), so a resent email's link replaces the
+ * earlier one. A request no longer open (used, cancelled, an hour old, access ended) sends nothing.
+ */
+async function sendHostAddressConfirmations(deps: ExperienceJobDeps, hostMail: HostMail): Promise<HostMailCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostAddressConfirmations)) {
+    const claim = await hostMail.outbox.claimAddressConfirmations({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.hostMailLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.confirmations;
+    if (!row) break;
+    counts.claimed += 1;
+    const token = row.confirmation ? await hostMail.outbox.issueAddressConfirmationToken(row.confirmation.confirmationId) : null;
+    if (!row.confirmation || !token) {
+      await hostMail.outbox.completeAddressConfirmation(row.id);
+      counts.skipped += 1;
+      continue;
+    }
+    const email = hostAddressConfirmationEmail({ siteUrl: deps.siteUrl, token, expiresAt: row.confirmation.expiresAt });
+    const result = await deps.mailer.sendMail({ to: row.confirmation.email, ...email });
+    if (result.ok || result.failure === "permanent") {
+      await hostMail.outbox.completeAddressConfirmation(row.id);
+      if (result.ok) counts.sent += 1;
+      else counts.failed += 1;
+    } else {
+      if (await hostMail.outbox.retryAddressConfirmation(row.id, row.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
+/**
+ * A host's emails about bookings (#194, owner decision 2026-11-01): this site's new and cancelled bookings to the OWNER, an OTA
+ * booking that is new, cancelled or moved to the product's OWNER and operators, each to the address in use when it goes. The
+ * words are the push's (the same event, with an OTA guest's kept name read now), and so are the rules: a day old, a row of
+ * another shape or a kind turned off in 設定 › 通知 is not sent. One claimed at a time, as the confirmations.
+ */
+async function sendHostBookingMails(deps: ExperienceJobDeps, hostMail: HostMail): Promise<HostMailCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostMails)) {
+    const claim = await hostMail.outbox.claimBookingMails({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.hostMailLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.mails;
+    if (!row) break;
+    counts.claimed += 1;
+    const parsed = hostPushEventFromOutbox({
+      id: row.id,
+      providerId: row.providerId,
+      topic: row.notificationTopic,
+      payload: row.guestName === null ? row.payload : { ...row.payload, guestName: row.guestName },
+      attempts: row.attempts,
+      createdAt: row.createdAt,
+    }, deps.now().getTime());
+    if (!parsed.ok || row.to === null || !(await hostMail.allowed(row.providerId, parsed.event.kind))) {
+      await hostMail.outbox.completeBookingMail(row.id);
+      counts.skipped += 1;
+      continue;
+    }
+    const email = hostBookingEmail(parsed.event, { siteUrl: deps.siteUrl });
+    const result = await deps.mailer.sendMail({ to: row.to, ...email });
+    if (result.ok || result.failure === "permanent") {
+      await hostMail.outbox.completeBookingMail(row.id);
+      if (result.ok) counts.sent += 1;
+      else counts.failed += 1;
+    } else {
+      if (await hostMail.outbox.retryBookingMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
   const bookingNotices = await step(deps, "bookingNotices", () => sendBookingNotices(deps));
+  const hostMail = deps.hostMail;
+  const hostAddressConfirmations: ExperienceJobCounts["hostAddressConfirmations"] = hostMail
+    ? await step(deps, "hostAddressConfirmations", () => sendHostAddressConfirmations(deps, hostMail))
+    : { off: true };
+  const hostBookingMails: ExperienceJobCounts["hostBookingMails"] = hostMail
+    ? await step(deps, "hostBookingMails", () => sendHostBookingMails(deps, hostMail))
+    : { off: true };
   const access = deps.access;
   const bookingLinks: ExperienceJobCounts["bookingLinks"] = access
     ? await step(deps, "bookingLinks", () => sendBookingLinks(deps, access))
@@ -427,7 +545,13 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const bookingAccessPurge: ExperienceJobCounts["bookingAccessPurge"] = access
     ? await step(deps, "bookingAccessPurge", async () => ({ purged: await access.purgeExpiredAccess({ limit: EXPERIENCE_JOB_LIMITS.accessPurgedPerStep }) }))
     : { off: true };
-  return { questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure, bookingAccessPurge };
+  const hostAddressPurge = await step(deps, "hostAddressPurge", async () => ({
+    purged: await deps.hostAddresses.purge({ limit: EXPERIENCE_JOB_LIMITS.hostAddressesPurgedPerStep }),
+  }));
+  return {
+    questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
+    bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge,
+  };
 }
 
 /** True when the run did or failed anything worth a log line. */

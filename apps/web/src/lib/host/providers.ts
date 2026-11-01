@@ -24,7 +24,14 @@ export type HostProviderReviewStatus = ExperienceProviderReviewStatus;
 export type HostProviderChoice = Pick<HostProvider, "id" | "displayName" | "memberRole">;
 export type HostConsoleChoice =
   | (HostProviderChoice & { readonly kind: "MEMBER" })
-  | { readonly kind: "OPERATOR"; readonly id: string; readonly displayName: string; readonly memberRole: null };
+  | {
+      readonly kind: "OPERATOR";
+      readonly id: string;
+      readonly displayName: string;
+      readonly memberRole: null;
+      /** The console screens a product operator has (the menu's paths); カレンダー alone when absent. */
+      readonly screens?: readonly string[];
+    };
 
 const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", EDITOR: "編集者", COHOST: "サブホスト" };
 

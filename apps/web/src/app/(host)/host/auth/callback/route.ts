@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
+import { copyLoginEmail } from "@/lib/host/login-email";
 import { exchangeCode, signInWithCustomToken } from "@/lib/host/niho-auth";
 import { loginStatesMatch } from "@/lib/host/pkce";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
@@ -35,8 +36,10 @@ export async function GET(request: NextRequest) {
   const signedIn = await signInWithCustomToken(deps, exchanged.value.customToken, Date.now());
   if (!signedIn.ok) return failed("unavailable", login.preparationCaseId, login.invitationId ?? null);
 
-  const now = Date.now();
   const { nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl } = exchanged.value;
+  // The NIHO account's verified address for this site's emails (#194); never in the cookie or the browser.
+  await copyLoginEmail({ nihoUserId, idToken: signedIn.value.idToken, invitation: Boolean(login.invitationId) });
+  const now = Date.now();
   // Only a sign-in started inside the installed app makes an app session (#177).
   const session = startSession({ nihoUserId, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...signedIn.value, ...(login.surface === "app" ? { surface: "app" as const } : {}) }, now);
   const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));

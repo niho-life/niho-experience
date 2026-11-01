@@ -46,7 +46,7 @@
 
 ## プッシュ通知（P2）
 
-メールに足す経路で、置き換えない。届く種類は設定 › 通知の 7 種と ON/OFF に従う（経路別の切替は作らない）。
+メールに足す経路で、置き換えない。届く種類は設定 › 通知の 7 種と ON/OFF に従う（経路別の切替は作らない）。このサイトが送るホストへのメール（#194、`EXPERIENCE_HOST_MAIL_ENABLED`）は、このサイトの予約の確定・取消と OTA の予約の新規・取消・日時変更を、push と同じ人へ同じ中身で送る（宛先は設定 › 通知 › 宛先。[guest-booking.md](guest-booking.md) の「ホストへのメール」）。push の行とは別の topic（`host.mail.*`）で、メール job が送る。
 
 - **通知 job（outbox の消費。オーナー決定 2026-10-31）**：承認制の予約と予約者からの連絡の正本は、予約の移行（ADR 0002）までは NIHO にあり、体験 DB には無い。NIHO 側は変えず、体験 DB の `outbox_messages` に積まれた通知を送る job を先に置き、積む側（予約・連絡の transaction）は移行で足す。予約前の質問（旅行者の質問と返信ページの答え）と、このサイトで受けた予約の確定は積む（#285 第5段、[guest-questions.md](guest-questions.md)・[guest-booking.md](guest-booking.md) の「ホストへの通知」）。承認期限と予約者からの連絡は、それらが体験 DB に移るまで積まれない。
   - topic は 4 つ（`packages/experience-store` の `host-notification-outbox.ts`）。`host.notify.guest_question`：予約前の質問・答え 1 件ごとに 1 行（`GUEST_MESSAGE` として送り、題は「予約前の質問が届きました」。payload はスレッド ID・メッセージ ID・体験名だけ）。`host.notify.new_booking`：このサイトの予約の確定ごとに 1 行（`NEW_BOOKING`。payload は予約 ID・体験名・日時・人数だけ）。`host.notify.approval_deadline`：承認期限の 6 時間前と 1 時間前の 2 行（期限まで 1 時間を切っていれば 1 時間前の 1 行をすぐ。過ぎていれば積まない）。承認・辞退・取消・期限切れの transaction で `cancelApprovalDeadlineReminders` が未処理の行を閉じる。`host.notify.guest_message`：予約者からの連絡 1 件ごとに 1 行。payload は予約 ID・体験名・日時・人数だけで、予約者名・本文・金額の欄が無い。ほかの topic（`booking.confirmed` など）には触らない。

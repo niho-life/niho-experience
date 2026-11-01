@@ -386,6 +386,26 @@ describe("admin support console settings", () => {
       .toThrow("EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED=true needs HOST_PUSH_ENABLED=true");
   });
 
+  it("emails hosts only in http mode with its own flag, and only with the host console and the mail job (#194)", () => {
+    const mail = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+    };
+    const host = { HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    expect(resolveConfig({}).hostMailEnabled).toBe(false);
+    // The mock never copies or sends; "1" is not "true".
+    expect(resolveConfig({ EXPERIENCE_HOST_MAIL_ENABLED: "true" }).hostMailEnabled).toBe(false);
+    expect(resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_MAIL_ENABLED: "1" }).hostMailEnabled).toBe(false);
+    expect(resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_MAIL_ENABLED: "true" }).hostMailEnabled).toBe(true);
+    expect(() => resolveConfig({ ...mail, EXPERIENCE_HOST_MAIL_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_MAIL_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+    expect(() => resolveConfig({ EXPERIENCE_API_MODE: "http", ...host, EXPERIENCE_HOST_MAIL_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_HOST_MAIL_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true");
+  });
+
   it("sends guest mail only in http mode with its own flag, and refuses to start without SMTP, the senders and the job identity (#285)", () => {
     const mail = {
       EXPERIENCE_API_MODE: "http",

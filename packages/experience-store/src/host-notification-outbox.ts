@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreError, StoreValidationError } from "./errors.ts";
+import { enqueueHostBookingMails, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { assertStoreIdentifier } from "./validation.ts";
 
@@ -417,13 +418,14 @@ export async function enqueueBookingMessageNotification(
 
 /**
  * A guest booking made on this site was confirmed: one NEW_BOOKING notification (it cannot be turned
- * off), due now. Called in the confirming transaction. 1 when added, 0 for a repeat.
+ * off), due now, and its email to each of the provider's OWNERs with an address here (#194, host-mail-shared.ts).
+ * Called in the confirming transaction. 1 when the push was added, 0 for a repeat.
  */
 export async function enqueueNewBookingNotification(client: PoolClient, input: BookingFacts): Promise<number> {
   const facts = { ...input, experienceTitle: typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "" };
   const { startsAt } = validBooking(facts);
   const payload: NewBookingPayload = { v: 1, bookingId: facts.bookingId, experienceTitle: facts.experienceTitle, startsAt, seats: facts.seats };
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: facts.providerId,
     bookingId: facts.bookingId,
     topic: HOST_NOTIFICATION_TOPICS.newBooking,
@@ -431,17 +433,23 @@ export async function enqueueNewBookingNotification(client: PoolClient, input: B
     payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, {
+    providerId: facts.providerId, topic: HOST_MAIL_TOPICS.newBooking, aggregateType: AGGREGATE_TYPE, aggregateId: facts.bookingId,
+    deduplicationKey: `new-booking:${facts.bookingId}`, payload,
+  });
+  return added;
 }
 
 /**
  * A guest booking made on this site was cancelled by the guest or by NIHO support (#285 slice 7): one CANCELLATION
- * notification (it cannot be turned off), due now. Called in the cancelling transaction. 1 when added, 0 for a repeat.
+ * notification (it cannot be turned off), due now, and its email to each of the provider's OWNERs with an address here
+ * (#194). Called in the cancelling transaction. 1 when the push was added, 0 for a repeat.
  */
 export async function enqueueCancellationNotification(client: PoolClient, input: BookingFacts): Promise<number> {
   const facts = { ...input, experienceTitle: typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "" };
   const { startsAt } = validBooking(facts);
   const payload: CancellationPayload = { v: 1, bookingId: facts.bookingId, experienceTitle: facts.experienceTitle, startsAt, seats: facts.seats };
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: facts.providerId,
     bookingId: facts.bookingId,
     topic: HOST_NOTIFICATION_TOPICS.cancellation,
@@ -449,6 +457,11 @@ export async function enqueueCancellationNotification(client: PoolClient, input:
     payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, {
+    providerId: facts.providerId, topic: HOST_MAIL_TOPICS.cancellation, aggregateType: AGGREGATE_TYPE, aggregateId: facts.bookingId,
+    deduplicationKey: `cancellation:${facts.bookingId}`, payload,
+  });
+  return added;
 }
 
 /**
@@ -495,7 +508,9 @@ export async function enqueueGoogleCalendarAttentionNotification(
 /**
  * A booking on a reservation site was new, cancelled or moved (#194): one OTA_BOOKING notification per ledger revision
  * (NEW_BOOKING or CANCELLATION in 設定 › 通知, which cannot be turned off), due now. The push goes to the product's OWNER
- * and its operators only. Called in the ledger's transaction. 1 when added, 0 for a repeat.
+ * and its operators only, and so does its email (one row each, for those with an address here; owner decision
+ * 2026-11-01). The email row has no guest name: the mail job reads it when it sends. Called in the ledger's transaction.
+ * 1 when the push was added, 0 for a repeat.
  */
 export async function enqueueOtaBookingNotification(
   client: PoolClient,
@@ -526,7 +541,7 @@ export async function enqueueOtaBookingNotification(
   };
   // The same check the push job makes: a row it would drop is refused here instead.
   if (parseOtaBookingPayload(payload) === null) throw new StoreValidationError("The OTA booking notification is invalid.");
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.ref,
     aggregateType: "external_reservation",
@@ -535,6 +550,12 @@ export async function enqueueOtaBookingNotification(
     payload,
     availableAt: null,
   });
+  const { guestName: _guestName, ...mailPayload } = payload;
+  await enqueueHostBookingMails(client, {
+    providerId: input.providerId, topic: HOST_MAIL_TOPICS.otaBooking, aggregateType: "external_reservation", aggregateId: input.ref,
+    deduplicationKey: `ota-booking:${input.ref}:${input.localRevision}`, payload: mailPayload, productId: input.productId,
+  });
+  return added;
 }
 
 function assertRowId(id: string): void {

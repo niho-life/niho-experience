@@ -17,7 +17,8 @@ function List({ children }: { children: ReactNode }) {
 }
 
 /**
- * The traveler privacy notice for bookings made on this site and questions asked here (#285, owner decision 2026-10-31).
+ * The traveler privacy notice for bookings made on this site and questions asked here (#285, owner decision 2026-10-31), and
+ * for travelers who booked through a partner site (OTA) whose details the site sends us (#194, owner decision 2026-11-01).
  * It says what the code does and nothing more (docs/guest-booking.md, docs/guest-questions.md): the wording is for the owner to
  * review before production. `policyUrl` is NIHO's privacy policy (EXPERIENCE_PRIVACY_POLICY_URL); empty leaves the link out.
  */
@@ -26,7 +27,7 @@ export function PrivacyNotice({ policyUrl }: { policyUrl: string }) {
     <div className="container-page max-w-2xl py-10 sm:py-16">
       <p className="eyebrow">How we handle your details</p>
       <h1 className="mt-2 text-4xl sm:text-5xl">Privacy</h1>
-      <p className="mt-4 text-ink-soft">This page is about bookings you make, and questions you send to a host, on this site.</p>
+      <p className="mt-4 text-ink-soft">This page is about bookings you make, and questions you send to a host, on this site, and about bookings made through our partner sites.</p>
       <div className="mt-8 divide-y divide-line">
         <Section id="privacy-keep" title="What we keep">
           <p>
@@ -35,6 +36,13 @@ export function PrivacyNotice({ policyUrl }: { policyUrl: string }) {
             campaign tags, we keep those too.
           </p>
           <p>When you ask a host a question before booking: your name, your email address and your messages.</p>
+        </Section>
+        <Section id="privacy-partners" title="If you booked through a partner site">
+          <p>
+            If you booked through a partner site (Airbnb, GetYourGuide, Viator, Jalan and others), we receive your name, number of guests, email
+            address, phone number, language and notes from that site. We use them to run your experience and to contact you about it, and we keep them
+            for one year after the experience.
+          </p>
         </Section>
         <Section id="privacy-why" title="Why we use it">
           <p>To run your booking, to send you booking emails, and to let the host prepare for your visit and reply to you.</p>

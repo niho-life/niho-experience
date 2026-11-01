@@ -23,9 +23,9 @@ describe("the privacy notice", () => {
     const markup = html();
     expect(markup).toMatch(/<h1[^>]*>Privacy<\/h1>/);
     const headings = [...markup.matchAll(/<h2[^>]*>([^<]+)<\/h2>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["What we keep", "Why we use it", "Who sees or handles it", "How long we keep it", "Cookies", "Questions or requests"]);
+    expect(headings).toEqual(["What we keep", "If you booked through a partner site", "Why we use it", "Who sees or handles it", "How long we keep it", "Cookies", "Questions or requests"]);
     // Every section is a labelled region.
-    expect(markup.match(/<section aria-labelledby="privacy-[a-z]+"/g)).toHaveLength(6);
+    expect(markup.match(/<section aria-labelledby="privacy-[a-z]+"/g)).toHaveLength(7);
   });
 
   it("says what is kept, who handles it, and for how long, as the code does it", () => {
@@ -47,6 +47,15 @@ describe("the privacy notice", () => {
     expect(words).toContain("(HttpOnly)");
     expect(words).toContain("30 days after the experience");
     expect(words).toContain("reply to any booking email");
+  });
+
+  it("says what a partner site sends us about travelers who booked there, why, and for how long, whatever the settings (#194)", () => {
+    const words = text(html());
+    expect(words).toContain("and about bookings made through our partner sites");
+    expect(words).toContain("If you booked through a partner site (Airbnb, GetYourGuide, Viator, Jalan and others), we receive your name, number of guests, email address, phone number, language and notes from that site.");
+    expect(words).toContain("We use them to run your experience and to contact you about it, and we keep them for one year after the experience.");
+    // Shown with or without NIHO's policy link: it does not depend on a setting.
+    expect(text(html(POLICY))).toContain("If you booked through a partner site");
   });
 
   it("sends questions to the site's own booking help", () => {
