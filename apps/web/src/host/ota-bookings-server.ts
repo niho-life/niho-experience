@@ -156,8 +156,12 @@ export async function loadOtaSession(
   try {
     const reader = await otaReaderFor(providerId, nihoUserId, provider);
     if (!reader) return { status: "closed" };
-    // A day either side: the session's own time may differ from the one the site gave.
-    const stored = await bookings.listForHost(reader.actor, { fromUtc: startOf(addDays(query.date, -1)), toUtc: startOf(addDays(query.date, 2)), productId: query.experience, limit: LIST_LIMIT });
+    // The offer's sessions a day either side (the session's own time may differ from the one the site gave), narrowed in
+    // the store before its limit. A session that still fills it is not shown in part: the screen says it cannot be read.
+    const stored = await bookings.listForHost(reader.actor, {
+      fromUtc: startOf(addDays(query.date, -1)), toUtc: startOf(addDays(query.date, 2)), productId: query.experience, offerId: query.offer, limit: LIST_LIMIT,
+    });
+    if (stored.length >= LIST_LIMIT) return { status: "error" };
     const shown = stored.map(otaBooking).filter(inSession).map(sessionBooking);
     const attendance = config.hostAttendanceEnabled;
     if (attendance && shown.length) {

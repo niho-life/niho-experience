@@ -311,6 +311,10 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       // A NIHO-capped operator scope never reads as the OWNER, even with a stale local OWNER row.
       await assert.rejects(() => bookings.listForHost({ ...owner, calendarScope: "OPERATOR" }, window), StoreAccessDeniedError);
       assert.deepEqual((await bookings.listForHost(owner, { ...window, occurrenceId: occurrenceIdFor("tea-am", "2099-01-06") })).map((item) => item.ref), [r2Ref]);
+      // この回 narrows to one offer's sessions before the limit (#194 PR B); a booking with no session is not among them.
+      assert.deepEqual((await bookings.listForHost(owner, { ...window, productId: "tea", offerId: "tea-am" })).map((item) => item.ref).sort(), ownerList.filter((item) => item.offerId === "tea-am").map((item) => item.ref).sort());
+      assert.deepEqual(await bookings.listForHost(owner, { ...window, productId: "tea", offerId: "tea-pm" }), []);
+      await assert.rejects(() => bookings.listForHost(owner, { ...window, offerId: "" }), StoreValidationError);
 
       // 出欠 (#194 PR B, 0039): the OWNER and the product's operator, once the session has started, for a confirmed booking.
       assert.deepEqual(await bookings.recordAttendanceAsHost(owner, r2Ref, "ATTENDED"), { outcome: "NOT_STARTED", status: null });

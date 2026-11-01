@@ -45,6 +45,7 @@ import { DISABLED, useFocusAfterRender } from "./editor-parts";
 import { DANGER_BUTTON } from "./HostBookingDialogs";
 import { HostIcon } from "./HostIcon";
 import { OtaSourceBadge } from "./HostOtaBookingDetail";
+import { OTA_BOOKING_PENDING_TEXT, otaStatusLabel } from "@/host/ota-bookings";
 import { SessionCancelDialog, SessionContactDialog, type SessionContact } from "./HostSessionDialogs";
 import { SiteSessionCancelDialog, type SiteCancelChoice } from "./HostSiteCancelDialogs";
 import { HostSubHeader } from "./HostSubHeader";
@@ -157,6 +158,16 @@ function Attendance({ booking, open, saving = false, noShowNote = true, onMark }
   );
 }
 
+/** An OTA booking its site has not confirmed yet (#194): its pill and why there is no attendance. */
+function OtaPending({ booking, today }: { booking: HostBooking; today: string }) {
+  return (
+    <div className="mt-2.5">
+      <StatusPill status={otaStatusLabel(booking, today)} />
+      <p className="mt-1.5 text-[0.78125rem] leading-normal font-extrabold text-warn">{OTA_BOOKING_PENDING_TEXT} 確定するまで出欠は付けられません。</p>
+    </div>
+  );
+}
+
 /**
  * One guest: who, how many, from where, how to reach them on the day, what to look out for, and the way to their
  * thread (`messageHref` null where there is none).
@@ -253,7 +264,8 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   // ones where theirs is (#194).
   const recordsAttendance = !site || Boolean(site.providerId && (site.attendance || (ota?.attendance && bookings.some((booking) => booking.ota))));
   const dietary = dietarySummary(bookings);
-  const attendance = attendanceCounts(bookings);
+  // An OTA booking its site has not confirmed takes no mark (#194).
+  const attendance = attendanceCounts(bookings.filter((booking) => !booking.ota?.pending));
   const failed = cancellation?.results.filter((result) => !result.ok) ?? [];
 
   const messageHref = (booking: HostBooking) => {
@@ -302,7 +314,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
 
   const mark = (id: string, value: HostAttendance) => {
     const booking = bookings.find((item) => item.id === id);
-    if (!booking || !canRecordAttendance(booking, phase)) return;
+    if (!booking || booking.ota?.pending || !canRecordAttendance(booking, phase)) return;
     if (site) {
       void markSite(booking, value);
       return;
@@ -461,10 +473,15 @@ export function HostSession({ session, now, conversations, providerId, site = nu
                             ))}
                           </ul>
                         </div>
+                      ) : booking.ota?.pending ? (
+                        // Not confirmed by its site yet (#194): no attendance until it is.
+                        <OtaPending booking={booking} today={today} />
                       ) : (booking.ota ? ota?.attendance && site.providerId : site.attendance && site.providerId) ? (
                         // 来なかった keeps the guest's thanks and review request as they are: nothing here holds them back yet.
                         <Attendance booking={booking} open={canRecordAttendance(booking, phase)} saving={saving.has(booking.id)} noShowNote={false} onMark={(value) => mark(booking.id, value)} />
                       ) : null
+                    ) : booking.ota?.pending ? (
+                      <OtaPending booking={booking} today={today} />
                     ) : booking.status === "confirmed" ? (
                       <Attendance booking={booking} open={canRecordAttendance(booking, phase)} onMark={(value) => mark(booking.id, value)} />
                     ) : (

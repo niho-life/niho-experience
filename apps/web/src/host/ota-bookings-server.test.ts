@@ -81,8 +81,12 @@ describe("OTA bookings on the server", () => {
     state.config = { otaGuestDetailsEnabled: true, hostAttendanceEnabled: true };
     expect(await loadOtaSession("provider-a", "owner-a", { memberRole: "OWNER" }, query, undefined, () => state.store as never)).toMatchObject({ attendance: true, bookings: [{ attendance: "no_show" }] });
     expect(await loadOtaSession("provider-a", "owner-a", { memberRole: "OWNER" }, { ...query, start: "13:00" }, undefined, () => state.store as never)).toMatchObject({ bookings: [] });
-    const [, options] = state.store!.listForHost!.mock.calls[0] as [unknown, { productId: string }];
-    expect(options.productId).toBe("community-dinner");
+    const [, options] = state.store!.listForHost!.mock.calls[0] as [unknown, { productId: string; offerId: string }];
+    // Narrowed to the session's offer in the store, before its limit.
+    expect([options.productId, options.offerId]).toEqual(["community-dinner", "offer-dinner"]);
+    // A session that fills the limit is not shown in part.
+    state.store!.listForHost!.mockResolvedValueOnce(Array.from({ length: 200 }, () => gyg));
+    expect(await loadOtaSession("provider-a", "owner-a", { memberRole: "OWNER" }, query, undefined, () => state.store as never)).toEqual({ status: "error" });
   });
 
   it("records 出欠 for the session's reader, with a live sign-in, and says why it did not", async () => {

@@ -82,6 +82,8 @@ export interface HostOtaBookingListOptions {
   readonly productId?: string;
   /** One session only (この回). */
   readonly occurrenceId?: string;
+  /** The sessions of one schedule rule (offer) only: この回 narrows to it before the limit (a session may have moved). */
+  readonly offerId?: string;
   /** 1-200; 100 by default. */
   readonly limit?: number;
 }
@@ -184,6 +186,7 @@ function window(options: HostOtaBookingListOptions): { fromUtc: string; toUtc: s
   if (options.occurrenceId !== undefined && (typeof options.occurrenceId !== "string" || options.occurrenceId.length < 1 || options.occurrenceId.length > 256)) {
     throw new StoreValidationError("occurrenceId is invalid.");
   }
+  if (options.offerId !== undefined) assertStoreIdentifier(options.offerId, "offerId");
   return { fromUtc: options.fromUtc, toUtc: options.toUtc, limit };
 }
 
@@ -209,9 +212,10 @@ export class HostOtaBookings {
         `${SELECT_OTA_BOOKINGS}
            AND e.source_start_at >= $3 AND e.source_start_at < $4
            AND ($5::text IS NULL OR e.occurrence_id=$5)
+           AND ($7::text IS NULL OR (e.occurrence_id IS NOT NULL AND replace(split_part(e.occurrence_id,'@',1),'%3A',':')=$7))
          ORDER BY e.source_start_at, e.host_ref
          LIMIT $6`,
-        [actor.providerId, scope, fromUtc, toUtc, options.occurrenceId ?? null, limit],
+        [actor.providerId, scope, fromUtc, toUtc, options.occurrenceId ?? null, limit, options.offerId ?? null],
       );
       return result.rows.map(hostOtaBookingFromRow);
     });

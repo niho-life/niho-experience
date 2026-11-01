@@ -63,15 +63,17 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
   const context = await hostPageContext(query);
   // The console layout shows sign-in, refresh and error states.
   if (!context) return null;
-  const { provider, linkProviderId } = context;
+  const { provider, linkProviderId, providerNotFound } = context;
   const { nihoUserId, mockScenario } = context.session;
   const otaShown = otaBookingsShown(mockScenario);
   const session = sessionQueryOf(query);
   const besideNiho = providerOperationsEnabled();
   const key = (providerId: string) => `${providerId}/${session?.date}/${session?.start}/${session?.experience}/${session?.offer}`;
-  if (!provider) {
-    // A product operator (#194 PR B): the session's OTA bookings of their products, read only (出欠 where it is kept).
-    const calendar = otaShown ? await resolveCalendarContext(query) : null;
+  // A product operator (#194 PR B): with no provider of NIHO's, or naming one only their grant gives (NIHO's list would
+  // fall back to another provider of theirs). The same choice as the console's frame.
+  const calendar = (!provider || providerNotFound) && otaShown ? await resolveCalendarContext(query) : null;
+  if (calendar?.choice?.kind === "OPERATOR" || !provider) {
+    // The session's OTA bookings of their products, read only (出欠 where it is kept).
     if (calendar?.choice?.kind !== "OPERATOR") return <HostRegisterPrompt title="予約" />;
     if (!session) notFound();
     const ota = await loadOtaSession(calendar.choice.id, nihoUserId, null, session, mockScenario);

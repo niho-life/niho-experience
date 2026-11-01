@@ -147,13 +147,15 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   const context = await hostPageContext(query);
   // The console layout shows sign-in, refresh and error states.
   if (!context) return null;
-  const { provider, linkProviderId } = context;
+  const { provider, linkProviderId, providerNotFound } = context;
   // The first `?booking=`, as the screen reads it, or the push's `?ota=` (#194).
   const requested = [query.booking].flat()[0] || [query.ota].flat()[0] || null;
   const { nihoUserId, mockScenario } = context.session;
-  if (!provider) {
-    // A product operator (#194 PR B): the OTA bookings of their products, read only.
-    const calendar = otaBookingsShown(mockScenario) ? await resolveCalendarContext(query) : null;
+  // A product operator (#194 PR B): with no provider of NIHO's, or naming one only their grant gives (NIHO's list would
+  // fall back to another provider of theirs). The same choice as the console's frame (resolveCalendarContext).
+  const calendar = (!provider || providerNotFound) && otaBookingsShown(mockScenario) ? await resolveCalendarContext(query) : null;
+  if (calendar?.choice?.kind === "OPERATOR" || !provider) {
+    // The OTA bookings of their products, read only.
     if (calendar?.choice?.kind !== "OPERATOR") return <HostRegisterPrompt title="予約" />;
     const load = await loadOtaBookings(calendar.choice.id, nihoUserId, null, requested, mockScenario);
     if (load.status === "error") return <BookingsUnavailable title="予約を読み込めませんでした" body={OTA_BOOKING_LOAD_FAILED_TEXT} />;
