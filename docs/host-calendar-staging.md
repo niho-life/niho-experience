@@ -120,8 +120,9 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 | `STG_SMTP_HOST_REF`・`STG_SMTP_PORT_REF`・`STG_SMTP_USER_REF`・`STG_SMTP_PASSWORD_REF` | `RECEIPT_DELIVERY_SMTP_HOST`・`…_PORT`・`…_USER`・`…_PASSWORD`（NIHO app 既存） | `EXPERIENCE_SMTP_*` | メール |
 | `STG_ANTHROPIC_API_KEY_REF` | `NIHO_TRANSLATE_ANTHROPIC_API_KEY`（NIHO app 既存） | `EXPERIENCE_ANTHROPIC_API_KEY` | 翻訳 |
 | `STG_HOST_PUSH_VAPID_PRIVATE_KEY_REF` | `experience-stg-host-push-vapid-private-key`（新規） | `HOST_PUSH_VAPID_PRIVATE_KEY` | push（`STG_HOST_PUSH_ENABLED`） |
+| `STG_CALENDAR_FEED_KEY_REF` | `experience-stg-calendar-feed-key`（新規。32 byte 以上の乱数の base64） | `EXPERIENCE_CALENDAR_FEED_KEY` | 予約の ICS フィード（`STG_HOST_CALENDAR_FEED_ENABLED`） |
 
-- 新しい Secret（push の VAPID の秘密鍵）は、管理者が作って runtime `experience-host-stg-runtime` にその Secret だけの `secretAccessor` を付ける。売上の入金は、予約で使う Stripe の鍵（Accessor は `setup-host-staging-guest-booking.sh` が付ける）を読むだけで、新しい Secret は要らない。
+- 新しい Secret（push の VAPID の秘密鍵、ICS フィードの鍵）は、管理者が作って runtime `experience-host-stg-runtime` にその Secret だけの `secretAccessor` を付ける。売上の入金は、予約で使う Stripe の鍵（Accessor は `setup-host-staging-guest-booking.sh` が付ける）を読むだけで、新しい Secret は要らない。
 - job を開くフラグ（push：`experience-host-push@niho-app-stg…`、Google の 2 つ：`experience-google-jobs@niho-app-stg…`）は、そのサービスアカウントと Cloud Scheduler を先に作る（メール job の `experience-jobs` と同じく、project の role なし、このサービスの `run.invoker` だけ）。workflow は作らない。
 - 売上の入金（`STG_HOST_SALES_PAYOUTS_ENABLED`）は `STG_HOST_SALES_LEDGER_ENABLED=true` が前提。受入は [host-sales.md](host-sales.md) の「受入」4。
 
