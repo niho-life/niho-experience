@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { draftReviewReplyEnglish } from "@/host/actions";
 import { guestMessageView } from "@/host/messages";
 import type { HostNotice } from "@/host/payout";
-import { publishGuestReviewReply, reportGuestReview } from "@/host/review-actions";
+import { loadMoreReviewList, publishGuestReviewReply, reportGuestReview } from "@/host/review-actions";
 import {
   publishReviewReply,
   ratingLabel,
@@ -16,7 +16,6 @@ import {
   REVIEW_REPORT_NOTE_LIMIT,
   REVIEW_REPORT_REASONS,
   REVIEW_REPORTED_TEXT,
-  REVIEW_WAITING_TEXT,
   reviewAnchor,
   reviewerLabel,
   reviewIdFromHash,
@@ -27,10 +26,11 @@ import {
   reviewsOf,
   reviewSummary,
   reviewSummaryNotes,
+  reviewSummaryOfCounts,
   reviewTagLabels,
   sortReviews,
+  type ReviewCount,
 } from "@/host/reviews";
-import { REVIEW_STATUS } from "@/host/status";
 import type { HostReview, HostReviewReportReason, HostReviewText } from "@/host/types";
 import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
 import { DISABLED, FIELD_LABEL, useFocusAfterRender } from "./editor-parts";
@@ -43,7 +43,7 @@ import { HostSubHeader } from "./HostSubHeader";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { replySignature, reportSignature, reviewAttempt, withRevision, withSavedReview, type ReviewAttempt, type ReviewWrite } from "./live-review-state";
 import { ReplyDraftFields, useReplyDraft } from "./ReplyDraftFields";
-import { HostPageBody, InitialAvatar, PageHead, RatingStars, StatusPill } from "./ui";
+import { HostPageBody, InitialAvatar, PageHead, RatingStars } from "./ui";
 
 /**
  * The reviewer's name is the review's anchor (`#review-{id}`) and takes focus: a fragment that
@@ -242,9 +242,9 @@ interface ReviewRowProps {
 }
 
 /**
- * One review: who and where from, the session and the stars, its state (公開前), the good points,
- * the guest's words (translated, with the original), the note for the host, the reply (or why
- * there is none yet) and 報告する.
+ * One review: who and where from, the session and the stars, the good points, the guest's words
+ * (translated, with the original), the note for the host, the reply and 報告する. Every review is
+ * published when written (owner decision 2026-10-31), so each one takes a reply.
  */
 function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composing, busy, notice, onReply, onCancel, onPublish, onReport }: ReviewRowProps) {
   const stage = reviewReplyStage(review);
@@ -254,16 +254,13 @@ function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composin
       <div className="flex items-start gap-3">
         <InitialAvatar name={review.reviewer.name} className="mt-0.5 size-9 text-[0.875rem]" />
         <div className="min-w-0 flex-1 text-[0.875rem] leading-[1.6]">
-          <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-            <div className="min-w-0 flex-[1_1_180px]">
-              <h2 id={headingId(review.id)} tabIndex={-1} className="scroll-mt-20 font-sans text-[0.9375rem] leading-[1.4] font-extrabold tracking-normal [overflow-wrap:anywhere] focus:outline-none">
-                {reviewerLabel(review)}
-              </h2>
-              <p className="text-[0.78125rem] leading-normal text-muted [overflow-wrap:anywhere]">
-                {reviewSessionLabel(review, experienceTitle)} · <RatingStars rating={review.rating} label={ratingLabel(review.rating)} />
-              </p>
-            </div>
-            {review.status === "pending" ? <StatusPill status={REVIEW_STATUS.pending} /> : null}
+          <div className="min-w-0">
+            <h2 id={headingId(review.id)} tabIndex={-1} className="scroll-mt-20 font-sans text-[0.9375rem] leading-[1.4] font-extrabold tracking-normal [overflow-wrap:anywhere] focus:outline-none">
+              {reviewerLabel(review)}
+            </h2>
+            <p className="text-[0.78125rem] leading-normal text-muted [overflow-wrap:anywhere]">
+              {reviewSessionLabel(review, experienceTitle)} · <RatingStars rating={review.rating} label={ratingLabel(review.rating)} />
+            </p>
           </div>
 
           {tags.length ? (
@@ -291,9 +288,7 @@ function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composin
           {kept ? <ReviewReplyComposer review={review} providerId={providerId} hidden={!composing} busy={busy === "reply"} onPublish={onPublish} onCancel={onCancel} /> : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {stage === "waiting" ? (
-              <p className="min-w-0 flex-[1_1_200px] text-[0.78125rem] leading-normal text-muted">{REVIEW_WAITING_TEXT}</p>
-            ) : composing ? null : (
+            {composing ? null : (
               <button id={replyButtonId(review.id)} type="button" aria-describedby={headingId(review.id)} onClick={onReply} className={consoleButtonClass("secondary", "sm")}>
                 {stage === "replied" ? "返信を直す" : "返信する"}
               </button>
@@ -327,18 +322,20 @@ export interface HostReviewsProps {
   /** The provider shown: 英語にする asks NIHO for its reviews. */
   providerId: string;
   /**
-   * Reviews kept in the experience DB (#108, http mode): each is published when written (none is
-   * 公開前, so every one takes a reply); a reply and a report go to the store, and the review it
-   * answers replaces the one on the screen. `revisions` holds each review's reply revision (0: none
-   * yet), which a correction is checked against. Absent in mock mode.
+   * Reviews kept in the experience DB (#108, http mode): a reply and a report go to the store, and the
+   * review it answers replaces the one on the screen. `revisions` holds each review's reply revision (0:
+   * none yet), which a correction is checked against. The screen reads them a page at a time:
+   * `nextCursor` reads the next one (続きを見る), null when every review is here; `counts` count all of
+   * them by experience, for the average. Absent in mock mode.
    */
-  live?: { revisions: Readonly<Record<string, number>> } | null;
+  live?: { revisions: Readonly<Record<string, number>>; nextCursor: string | null; counts: readonly ReviewCount[] } | null;
 }
 
 const LIVE_FAILED: Record<ReviewWrite, string> = {
   reply: "返信を公開できませんでした。時間をおいて、もう一度お試しください。",
   report: "報告できませんでした。時間をおいて、もう一度お試しください。",
 };
+const MORE_FAILED = "レビューを読み込めませんでした。時間をおいて、もう一度お試しください。";
 
 /**
  * レビュー (#108, the journey mock's H4): every review of the provider's experiences, the newest
@@ -348,7 +345,8 @@ const LIVE_FAILED: Record<ReviewWrite, string> = {
  *
  * Mock mode: a reply and a report change this screen only (the preview note says nothing is kept).
  * Reviews kept in the experience DB (`live`, #108) send them to the store and show the review it
- * reads back; one that fails keeps what the host wrote and says why.
+ * reads back; one that fails keeps what the host wrote and says why. They come a page at a time
+ * (続きを見る), while the average and the select count all of them.
  */
 export function HostReviews({ reviews: initialReviews, experiences, now, linkProviderId, providerId, live = null }: HostReviewsProps) {
   const searchParams = useSearchParams();
@@ -361,6 +359,9 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
   /** Live: each reply's revision, what is with the store (by review), and the command id of each try. */
   const [revisions, setRevisions] = useState<Readonly<Record<string, number>>>(live?.revisions ?? {});
   const [busy, setBusy] = useState<Readonly<Record<string, ReviewWrite>>>({});
+  /** Live: where the next page starts (null once every review is here), and how reading it went. */
+  const [cursor, setCursor] = useState<string | null>(live?.nextCursor ?? null);
+  const [more, setMore] = useState<{ busy: boolean; failed: string | null }>({ busy: false, failed: null });
   const sending = useRef<Set<string>>(new Set());
   const attempts = useRef<Map<string, ReviewAttempt>>(new Map());
   const focusLater = useFocusAfterRender();
@@ -369,7 +370,7 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
   const experienceId = experiences.some((experience) => experience.id === requested) ? requested : null;
   const shown = sortReviews(reviewsOf(reviews, experienceId));
   const allReviews = sortReviews(reviews);
-  const summary = reviewSummary(shown);
+  const summary = live ? reviewSummaryOfCounts(live.counts, experienceId) : reviewSummary(shown);
   const notes = reviewSummaryNotes(summary);
   const titleOf = (id: string) => experiences.find((experience) => experience.id === id)?.title ?? "";
 
@@ -477,6 +478,28 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
     focusLater(replyHeadingId(review.id));
   };
 
+  /** Live: 続きを見る joins the next page to the list (a review already on it keeps what happened to it here). */
+  const loadMore = async () => {
+    if (!cursor || more.busy) return;
+    setMore({ busy: true, failed: null });
+    let result: Awaited<ReturnType<typeof loadMoreReviewList>>;
+    try {
+      result = await loadMoreReviewList({ providerId, cursor });
+    } catch {
+      setMore({ busy: false, failed: MORE_FAILED });
+      return;
+    }
+    if (!result.ok) {
+      setMore({ busy: false, failed: result.message });
+      return;
+    }
+    const page = result;
+    setReviews((current) => [...current, ...page.reviews.filter((review) => !current.some((known) => known.id === review.id))]);
+    setRevisions((current) => ({ ...page.revisions, ...current }));
+    setCursor(page.nextCursor);
+    setMore({ busy: false, failed: null });
+  };
+
   // Mock mode keeps the report on this screen.
   const report = (review: HostReview, reason: HostReviewReportReason, note: string) => {
     if (live) {
@@ -552,8 +575,16 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
               ))}
             </ul>
           ) : null}
-          {!shown.length ? (
+          {!shown.length && !cursor ? (
             <p className="px-4 py-6 text-muted md:px-5">レビューはまだありません</p>
+          ) : null}
+          {live && cursor ? (
+            <div className="border-t border-line p-3 first:border-t-0">
+              {more.failed ? <p role="alert" className="mb-2 text-[0.8125rem] text-ink-soft">{more.failed}</p> : null}
+              <button type="button" disabled={more.busy} onClick={() => void loadMore()} className={consoleButtonClass("secondary", "sm")}>
+                {more.busy ? "読み込み中…" : "続きを見る"}
+              </button>
+            </div>
           ) : null}
         </section>
       </HostPageBody>

@@ -497,7 +497,8 @@ test("owner reorders photos, picks the cover and removes one: one PATCH carries 
   await expect(section.getByRole("button", { name: "写真 1 を前へ" })).toBeDisabled();
   await expect(section.getByRole("button", { name: "写真 3 を後ろへ" })).toBeDisabled();
   await expect(section.getByRole("button", { name: "写真 1 を表紙にする" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  // 保存 is offered only while something changed (as in the mock editor).
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
 
   // 表紙にする: the photo and its description go first; focus stays in that photo's row (the cover has no 前へ or 表紙にする left).
   await section.getByRole("button", { name: "写真 3 を表紙にする" }).click();
@@ -537,7 +538,8 @@ test("owner reorders photos, picks the cover and removes one: one PATCH carries 
   await expect(page.getByText("写真の並び・説明: 別の人が直した説明、食卓")).toBeVisible();
   await page.getByRole("button", { name: "競合項目は最新を残す" }).click();
   expect(await alts()).toEqual(["別の人が直した説明", "食卓"]);
-  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  // 保存 is offered only while something changed (as in the mock editor).
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
   expect(patches).toHaveLength(2);
   await noOverflow(page);
   const axe = await new AxeBuilder({ page }).include("section[aria-labelledby]").withTags(WCAG_TAGS).analyze();

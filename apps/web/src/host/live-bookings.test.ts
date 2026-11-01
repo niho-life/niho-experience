@@ -35,7 +35,10 @@ const detail = {
 describe("host booking BFF projection", () => {
   it("keeps the real list fields the UI needs and removes upstream email and provider internals", () => {
     const projected = projectHostBookingList(list);
-    expect(projected.bookings[0]).toMatchObject({ id: "booking_1", offerName: "Walk", pageTitle: "Kamakura walk", guestName: "Guest" });
+    expect(projected.bookings[0]).toEqual({
+      id: "booking_1", pageId: "page_1", offerId: "offer_1", occurrenceDate: "2027-01-02", startAt: "2027-01-02T01:00:00.000Z", endAt: "2027-01-02T03:00:00.000Z",
+      headCount: 2, offerName: "Walk", totalYen: 12000, guestName: "Guest", pageTitle: "Kamakura walk", status: "PROVISIONAL", salesChannel: "EXPERIENCE_SITE",
+    });
     const text = JSON.stringify(projected);
     expect(text).not.toContain("guest@example.test");
     expect(text).not.toContain("private_spot");

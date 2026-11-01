@@ -117,6 +117,17 @@ jobs:
           test -n "$RUNTIME_SERVICE_ACCOUNT"
           test "$PROJECT_ID" = "niho-app-prd"
           test "$PROJECT_ID" != "$PREVIEW_PROJECT_ID"
+      # Feature flags (docs/production-deploy.md「機能のフラグ」): repository variables PROD_*, resolved and checked
+      # against each other before any credential exists. Only this one script is checked out.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/deploy
+      - name: Resolve feature flags before authentication
+        id: flags
+        env:
+          DEPLOY_VARS: ${{ toJSON(vars) }}
+        run: node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://experience.niho.life
       # No checkout or repository scripts run after OIDC credentials are issued.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -149,7 +160,13 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Deploy candidate with sales and indexing disabled
         id: candidate
+        env:
+          FLAG_ENV: ${{ steps.flags.outputs.env }}
+          FLAG_SECRETS: ${{ steps.flags.outputs.secrets }}
         run: |
+          # The resolve step's strings: names and checked values only, never a comma inside a value.
+          [[ -z "$FLAG_ENV" || "$FLAG_ENV" =~ ^[A-Z][A-Z0-9_]*=[^,]+(,[A-Z][A-Z0-9_]*=[^,]+)*$ ]]
+          [[ -z "$FLAG_SECRETS" || "$FLAG_SECRETS" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9_-]+:[1-9][0-9]*(,[A-Z][A-Z0-9_]*=[A-Za-z0-9_-]+:[1-9][0-9]*)*$ ]]
           image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${{ steps.pushed_image.outputs.digest }}"
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
@@ -162,7 +179,7 @@ jobs:
             done
             [[ "$CLOUDSQL_INSTANCE" =~ ^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$ ]]
             test "${CLOUDSQL_INSTANCE%%:*}" = "$PROJECT_ID"
-            env_vars+=',HOST_CONSOLE_ENABLED=true'
+            env_vars+=",HOST_CONSOLE_ENABLED=true${FLAG_ENV:+,$FLAG_ENV}"
             if [ "$CHANNEL_WATCHDOG" = true ]; then
               env_vars+=",EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true,EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE=https://experience.niho.life,EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL=experience-ota-watchdog@${PROJECT_ID}.iam.gserviceaccount.com"
             else
@@ -170,9 +187,12 @@ jobs:
             fi
             runtime_options+=(--network default --subnet default --vpc-egress private-ranges-only)
             runtime_options+=(--add-cloudsql-instances "$CLOUDSQL_INSTANCE")
-            runtime_options+=(--set-secrets "HOST_SESSION_SECRET=${HOST_SESSION_SECRET_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY_REF},EXPERIENCE_DATABASE_URL=${DATABASE_URL_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_TOKEN_KEY_SECRET_REF}")
+            runtime_options+=(--set-secrets "HOST_SESSION_SECRET=${HOST_SESSION_SECRET_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY_REF},EXPERIENCE_DATABASE_URL=${DATABASE_URL_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SECRET_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_TOKEN_KEY_SECRET_REF}${FLAG_SECRETS:+,$FLAG_SECRETS}")
           else
             env_vars+=',HOST_CONSOLE_ENABLED=false'
+            # Every flag needs the host console and its database (the resolve step refused any otherwise).
+            test -z "$FLAG_ENV"
+            test -z "$FLAG_SECRETS"
             runtime_options+=(--clear-secrets --clear-cloudsql-instances --clear-network)
             # The watchdog needs the Experience database, which only the host calendar wires.
             [[ -z "$CHANNEL_WATCHDOG" || "$CHANNEL_WATCHDOG" = false ]]
@@ -200,6 +220,10 @@ jobs:
         env:
           URL: ${{ steps.candidate.outputs.url }}
           REVISION: ${{ steps.candidate.outputs.revision }}
+          FLAG_NAMES: ${{ steps.flags.outputs.names }}
+          FLAG_EXPECTED_ENV: ${{ steps.flags.outputs.expected_env }}
+          FLAG_EXPECTED_SECRETS: ${{ steps.flags.outputs.expected_secrets }}
+          FLAG_SUMMARY: ${{ steps.flags.outputs.summary }}
         run: |
           curl -fsS --retry 5 --retry-all-errors 'https://niho.life/api/public/experiences' \
             | jq -e '.experiences | type == "array"' >/dev/null
@@ -235,6 +259,12 @@ jobs:
           expected_watchdog=false
           if [ "$HOST_CALENDAR_ENABLED" = true ] && [ "$CHANNEL_WATCHDOG" = true ]; then expected_watchdog=true; fi
           test "$(jq -r '[.spec.containers[0].env[] | select(.name == "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED") | .value][0] // "false"' <<< "$revision_json")" = "$expected_watchdog"
+          # Feature flags: exactly the values and Secret references the resolve step expects, and no other name of its table.
+          jq -e --argjson names "$FLAG_NAMES" --argjson env "$FLAG_EXPECTED_ENV" --argjson secrets "$FLAG_EXPECTED_SECRETS" '
+            [.spec.containers[0].env[] | select(.name as $name | any($names[]; . == $name))] as $set |
+            ($set | map(select(has("value")) | {key: .name, value: .value}) | from_entries) == $env and
+            ($set | map(select(has("valueFrom")) | {key: .name, value: (.valueFrom.secretKeyRef.name + ":" + .valueFrom.secretKeyRef.key)}) | from_entries) == $secrets
+          ' <<< "$revision_json" >/dev/null
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
             jq -e --arg sql "$CLOUDSQL_INSTANCE" '
@@ -268,6 +298,7 @@ jobs:
             echo "Runtime image digest (candidate_image_digest): ${runtime_digest}"
             echo "Pushed image digest: ${pushed_digest}"
             echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=block; host signup=pilot; host calendar=${HOST_CALENDAR_ENABLED}"
+            echo "Feature flags: ${FLAG_SUMMARY}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   promote:
@@ -311,6 +342,12 @@ jobs:
           fetch-depth: 0
       - name: Require the candidate commit to remain on main
         run: git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
+      # The same PROD_* variables as the candidate: changing one after it was made stops the promotion below.
+      - name: Resolve feature flags before authentication
+        id: flags
+        env:
+          DEPLOY_VARS: ${{ toJSON(vars) }}
+        run: node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://experience.niho.life
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.PROD_GCP_WIF_PROVIDER }}
@@ -318,6 +355,11 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
       - name: Verify and recheck the existing candidate
         id: candidate
+        env:
+          FLAG_NAMES: ${{ steps.flags.outputs.names }}
+          FLAG_EXPECTED_ENV: ${{ steps.flags.outputs.expected_env }}
+          FLAG_EXPECTED_SECRETS: ${{ steps.flags.outputs.expected_secrets }}
+          FLAG_SUMMARY: ${{ steps.flags.outputs.summary }}
         run: |
           revision_json="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           expected_image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${CANDIDATE_IMAGE_DIGEST}"
@@ -336,6 +378,12 @@ jobs:
           expected_watchdog=false
           if [ "$HOST_CALENDAR_ENABLED" = true ] && [ "$CHANNEL_WATCHDOG" = true ]; then expected_watchdog=true; fi
           test "$(jq -r '[.spec.containers[0].env[] | select(.name == "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED") | .value][0] // "false"' <<< "$revision_json")" = "$expected_watchdog"
+          # Feature flags: exactly the values and Secret references the resolve step expects, and no other name of its table.
+          jq -e --argjson names "$FLAG_NAMES" --argjson env "$FLAG_EXPECTED_ENV" --argjson secrets "$FLAG_EXPECTED_SECRETS" '
+            [.spec.containers[0].env[] | select(.name as $name | any($names[]; . == $name))] as $set |
+            ($set | map(select(has("value")) | {key: .name, value: .value}) | from_entries) == $env and
+            ($set | map(select(has("valueFrom")) | {key: .name, value: (.valueFrom.secretKeyRef.name + ":" + .valueFrom.secretKeyRef.key)}) | from_entries) == $secrets
+          ' <<< "$revision_json" >/dev/null
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             test "$HOST_CALENDAR_READY" = true
             jq -e '[.spec.containers[0].env[] | select(.name == "HOST_SESSION_SECRET" or .name == "NIHO_FIREBASE_WEB_API_KEY" or .name == "EXPERIENCE_DATABASE_URL" or .name == "EXPERIENCE_GOOGLE_CLIENT_ID" or .name == "EXPERIENCE_GOOGLE_CLIENT_SECRET" or .name == "EXPERIENCE_GOOGLE_TOKEN_KEY") | select(.valueFrom.secretKeyRef != null)] | length == 6' <<< "$revision_json" >/dev/null
@@ -357,6 +405,7 @@ jobs:
             echo "Verified existing revision: ${CANDIDATE_REVISION}"
             echo "Verified image digest: ${CANDIDATE_IMAGE_DIGEST}"
             echo "Candidate URL: ${url}"
+            echo "Feature flags: ${FLAG_SUMMARY}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Check candidate URL before promotion
         env:

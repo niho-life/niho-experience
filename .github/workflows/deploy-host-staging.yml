@@ -106,23 +106,10 @@ jobs:
       GOOGLE_KEY_REF: ${{ vars.STG_HOST_GOOGLE_TOKEN_KEY_REF }}
       # OTA watchdog (docs/ota-runtime.md). Unset or false keeps the endpoint closed.
       WATCHDOG: ${{ vars.STG_CHANNEL_WATCHDOG_ENABLED }}
-      # Traveler booking with Stripe TEST mode (#285, docs/host-calendar-staging.md). Unset or false keeps
-      # BOOKINGS_ENABLED=false and the revision exactly as before. The refs name NIHO app's existing
-      # staging secrets (owner decision 2026-10-31) plus this service's own webhook signing secret.
+      # Traveler booking with Stripe TEST mode (#285, docs/host-calendar-staging.md): BOOKINGS_ENABLED follows it.
+      # It and the other feature flags (STG_*, with their settings and NIHO app's existing staging secrets) are
+      # resolved by scripts/deploy/runtime-flags.mjs below; unset or false keeps each off.
       GUEST_BOOKING: ${{ vars.STG_GUEST_BOOKING_ENABLED }}
-      CONSENT_VERSION: ${{ vars.STG_BOOKING_CONSENT_VERSION }}
-      MAIL_FROM: ${{ vars.STG_MAIL_FROM }}
-      MAIL_REPLY_TO: ${{ vars.STG_MAIL_REPLY_TO }}
-      PRIVACY_URL: ${{ vars.STG_PRIVACY_POLICY_URL }}
-      SMTP_HOST_REF: ${{ vars.STG_SMTP_HOST_REF }}
-      SMTP_PORT_REF: ${{ vars.STG_SMTP_PORT_REF }}
-      SMTP_USER_REF: ${{ vars.STG_SMTP_USER_REF }}
-      SMTP_PASSWORD_REF: ${{ vars.STG_SMTP_PASSWORD_REF }}
-      STRIPE_KEY_REF: ${{ vars.STG_STRIPE_PLATFORM_SECRET_KEY_REF }}
-      STRIPE_WEBHOOK_REF: ${{ vars.STG_STRIPE_WEBHOOK_SECRET_REF }}
-      # Japanese translation and English drafts with NIHO app's existing Anthropic key (needs the gate above).
-      TRANSLATION: ${{ vars.STG_TRANSLATION_ENABLED }}
-      ANTHROPIC_REF: ${{ vars.STG_ANTHROPIC_API_KEY_REF }}
     steps:
       - name: Require protected readiness and numeric staging secret versions
         env:
@@ -142,26 +129,6 @@ jobs:
           [[ "$GOOGLE_KEY_REF" =~ ^experience-stg-google-token-key:[1-9][0-9]*$ ]]
           [[ -z "$WATCHDOG" || "$WATCHDOG" =~ ^(true|false)$ ]]
           [[ -z "$GUEST_BOOKING" || "$GUEST_BOOKING" =~ ^(true|false)$ ]]
-          if [ "$GUEST_BOOKING" = true ]; then
-            # Shapes resolve-config accepts, narrowed to what --set-env-vars carries (never a comma).
-            [[ "$CONSENT_VERSION" =~ ^[A-Za-z0-9._:+-]{1,100}$ ]]
-            address='[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+'
-            mailbox='^('"$address"'|[^<>",[:cntrl:][:space:]][^<>",[:cntrl:]]{0,99} <'"$address"'>)$'
-            [[ "$MAIL_FROM" =~ $mailbox ]]
-            [[ "$MAIL_REPLY_TO" =~ $mailbox ]]
-            [[ -z "$PRIVACY_URL" || "$PRIVACY_URL" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+(/[A-Za-z0-9._~%/-]*)?$ ]]
-            [[ "$SMTP_HOST_REF" =~ ^RECEIPT_DELIVERY_SMTP_HOST:[1-9][0-9]*$ ]]
-            [[ "$SMTP_PORT_REF" =~ ^RECEIPT_DELIVERY_SMTP_PORT:[1-9][0-9]*$ ]]
-            [[ "$SMTP_USER_REF" =~ ^RECEIPT_DELIVERY_SMTP_USER:[1-9][0-9]*$ ]]
-            [[ "$SMTP_PASSWORD_REF" =~ ^RECEIPT_DELIVERY_SMTP_PASSWORD:[1-9][0-9]*$ ]]
-            [[ "$STRIPE_KEY_REF" =~ ^STRIPE_CONNECT_PLATFORM_SECRET_KEY:[1-9][0-9]*$ ]]
-            [[ "$STRIPE_WEBHOOK_REF" =~ ^experience-stg-stripe-webhook-secret:[1-9][0-9]*$ ]]
-          fi
-          [[ -z "$TRANSLATION" || "$TRANSLATION" =~ ^(true|false)$ ]]
-          if [ "$TRANSLATION" = true ]; then
-            test "$GUEST_BOOKING" = true
-            [[ "$ANTHROPIC_REF" =~ ^NIHO_TRANSLATE_ANTHROPIC_API_KEY:[1-9][0-9]*$ ]]
-          fi
           if [ "$ACTION" = promote ]; then
             [[ "$REVISION" =~ ^niho-experience-host-stg-[a-z0-9-]+$ ]]
             [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -172,6 +139,13 @@ jobs:
           fetch-depth: 0
       - name: Require reviewed commit on main
         run: git merge-base --is-ancestor "$SHA" origin/main
+      # Feature flags (docs/host-calendar-staging.md「機能のフラグ」): each needs every setting, Secret reference and
+      # flag it depends on, checked before any credential exists. Changing one after the candidate stops promotion.
+      - name: Resolve feature flags before authentication
+        id: flags
+        env:
+          DEPLOY_VARS: ${{ toJSON(vars) }}
+        run: node scripts/deploy/runtime-flags.mjs --target stg --host-console true --site-url "$SITE_URL"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         if: inputs.action == 'candidate'
         with:
@@ -192,7 +166,18 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
       - name: Create or verify isolated candidate
         id: candidate
+        env:
+          FLAG_ENV: ${{ steps.flags.outputs.env }}
+          FLAG_SECRETS: ${{ steps.flags.outputs.secrets }}
+          FLAG_EXPECTED_ENV: ${{ steps.flags.outputs.expected_env }}
+          FLAG_EXPECTED_SECRETS: ${{ steps.flags.outputs.expected_secrets }}
+          FLAG_SUMMARY: ${{ steps.flags.outputs.summary }}
         run: |
+          # The resolve step's strings: names and checked values only, never a comma inside a value.
+          [[ -z "$FLAG_ENV" || "$FLAG_ENV" =~ ^[A-Z][A-Z0-9_]*=[^,]+(,[A-Z][A-Z0-9_]*=[^,]+)*$ ]]
+          [[ -z "$FLAG_SECRETS" || "$FLAG_SECRETS" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9_-]+:[1-9][0-9]*(,[A-Z][A-Z0-9_]*=[A-Za-z0-9_-]+:[1-9][0-9]*)*$ ]]
+          bookings=false
+          if [ "$GUEST_BOOKING" = true ]; then bookings=true; fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
           test "$(jq -r '.status.url' <<< "$state")" = "$SITE_URL"
           test "$(jq -r '.metadata.labels.app' <<< "$state")" = niho-experience
@@ -210,20 +195,6 @@ jobs:
             if [ "$WATCHDOG" = true ]; then
               watchdog_env=",EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true,EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE=${SITE_URL},EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL=experience-ota-watchdog@niho-app-stg.iam.gserviceaccount.com"
             fi
-            bookings=false
-            guest_env=""
-            guest_secrets=""
-            if [ "$GUEST_BOOKING" = true ]; then
-              bookings=true
-              # The jobs audience is the stable service URL, as for the watchdog (Cloud Scheduler's OIDC token).
-              guest_env=",EXPERIENCE_GUEST_BOOKING_ENABLED=true,EXPERIENCE_GUEST_MAIL_ENABLED=true,EXPERIENCE_GUEST_QUESTIONS_ENABLED=true,EXPERIENCE_BOOKING_CONSENT_VERSION=${CONSENT_VERSION},EXPERIENCE_MAIL_FROM=${MAIL_FROM},EXPERIENCE_MAIL_REPLY_TO=${MAIL_REPLY_TO},EXPERIENCE_JOBS_AUDIENCE=${SITE_URL},EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL=experience-jobs@niho-app-stg.iam.gserviceaccount.com"
-              if [ -n "$PRIVACY_URL" ]; then guest_env+=",EXPERIENCE_PRIVACY_POLICY_URL=${PRIVACY_URL}"; fi
-              guest_secrets=",EXPERIENCE_SMTP_HOST=${SMTP_HOST_REF},EXPERIENCE_SMTP_PORT=${SMTP_PORT_REF},EXPERIENCE_SMTP_USER=${SMTP_USER_REF},EXPERIENCE_SMTP_PASSWORD=${SMTP_PASSWORD_REF},EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY=${STRIPE_KEY_REF},EXPERIENCE_STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_REF}"
-              if [ "$TRANSLATION" = true ]; then
-                guest_env+=",EXPERIENCE_TRANSLATION_ENABLED=true"
-                guest_secrets+=",EXPERIENCE_ANTHROPIC_API_KEY=${ANTHROPIC_REF}"
-              fi
-            fi
             gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" \
               --image "${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${DIGEST}" \
               --service-account "$RUNTIME" --execution-environment gen2 \
@@ -231,8 +202,8 @@ jobs:
               --no-traffic --tag "candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
               --network default --subnet default --vpc-egress private-ranges-only \
               --set-cloudsql-instances "$CLOUDSQL" \
-              --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=${bookings},HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,HOST_PWA_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,DEPLOY_COMMIT_SHA=${SHA}${watchdog_env}${guest_env}" \
-              --set-secrets "HOST_SESSION_SECRET=${SESSION_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_REF},EXPERIENCE_DATABASE_URL=${DATABASE_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_ID_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_KEY_REF}${guest_secrets}" \
+              --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=${bookings},HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,DEPLOY_COMMIT_SHA=${SHA}${watchdog_env}${FLAG_ENV:+,$FLAG_ENV}" \
+              --set-secrets "HOST_SESSION_SECRET=${SESSION_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_REF},EXPERIENCE_DATABASE_URL=${DATABASE_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_ID_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_KEY_REF}${FLAG_SECRETS:+,$FLAG_SECRETS}" \
               --labels "app=niho-experience,env=host-staging,commit=${SHA:0:12}" --quiet
             state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
             REVISION="$(jq -r --arg tag "candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<< "$state")"
@@ -247,10 +218,9 @@ jobs:
             .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
             (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default")) and
             any(.status.conditions[]; .type == "Ready" and .status == "True")' <<< "$revision" >/dev/null
-          expected_env="$(jq -cn --arg origin "$SITE_URL" --arg sha "$SHA" --arg watchdog "$WATCHDOG" --arg guest "$GUEST_BOOKING" --arg consent "$CONSENT_VERSION" --arg from "$MAIL_FROM" --arg reply "$MAIL_REPLY_TO" --arg privacy "$PRIVACY_URL" --arg translation "$TRANSLATION" '{EXPERIENCE_API_MODE:"http",EXPERIENCE_PUBLIC_API_VERSION:"1.0",NEXT_PUBLIC_NIHO_WEB_ORIGIN:"https://app-stg.niho.life",SITE_URL:$origin,SITE_INDEXING:"block",BOOKINGS_ENABLED:(if $guest == "true" then "true" else "false" end),HOST_SIGNUP_MODE:"pilot",HOST_CONSOLE_ENABLED:"true",HOST_PWA_ENABLED:"true",NIHO_HOST_START_URL:"https://app-stg.niho.life/experiences/provider",DEPLOY_COMMIT_SHA:$sha} + (if $watchdog == "true" then {EXPERIENCE_CHANNEL_WATCHDOG_ENABLED:"true",EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE:$origin,EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL:"experience-ota-watchdog@niho-app-stg.iam.gserviceaccount.com"} else {} end)
-            + (if $guest == "true" then {EXPERIENCE_GUEST_BOOKING_ENABLED:"true",EXPERIENCE_GUEST_MAIL_ENABLED:"true",EXPERIENCE_GUEST_QUESTIONS_ENABLED:"true",EXPERIENCE_BOOKING_CONSENT_VERSION:$consent,EXPERIENCE_MAIL_FROM:$from,EXPERIENCE_MAIL_REPLY_TO:$reply,EXPERIENCE_JOBS_AUDIENCE:$origin,EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL:"experience-jobs@niho-app-stg.iam.gserviceaccount.com"} + (if $privacy == "" then {} else {EXPERIENCE_PRIVACY_POLICY_URL:$privacy} end) + (if $translation == "true" then {EXPERIENCE_TRANSLATION_ENABLED:"true"} else {} end) else {} end)')"
-          expected_secrets="$(jq -cn --arg a "$SESSION_REF" --arg b "$FIREBASE_REF" --arg c "$DATABASE_REF" --arg d "$GOOGLE_ID_REF" --arg e "$GOOGLE_SECRET_REF" --arg f "$GOOGLE_KEY_REF" --arg guest "$GUEST_BOOKING" --arg g "$SMTP_HOST_REF" --arg h "$SMTP_PORT_REF" --arg i "$SMTP_USER_REF" --arg j "$SMTP_PASSWORD_REF" --arg k "$STRIPE_KEY_REF" --arg l "$STRIPE_WEBHOOK_REF" --arg translation "$TRANSLATION" --arg m "$ANTHROPIC_REF" '{HOST_SESSION_SECRET:$a,NIHO_FIREBASE_WEB_API_KEY:$b,EXPERIENCE_DATABASE_URL:$c,EXPERIENCE_GOOGLE_CLIENT_ID:$d,EXPERIENCE_GOOGLE_CLIENT_SECRET:$e,EXPERIENCE_GOOGLE_TOKEN_KEY:$f}
-            + (if $guest == "true" then {EXPERIENCE_SMTP_HOST:$g,EXPERIENCE_SMTP_PORT:$h,EXPERIENCE_SMTP_USER:$i,EXPERIENCE_SMTP_PASSWORD:$j,EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY:$k,EXPERIENCE_STRIPE_WEBHOOK_SECRET:$l} + (if $translation == "true" then {EXPERIENCE_ANTHROPIC_API_KEY:$m} else {} end) else {} end)')"
+          # The fixed settings, the watchdog's, and exactly what the resolve step expects of the feature flags.
+          expected_env="$(jq -cn --arg origin "$SITE_URL" --arg sha "$SHA" --arg watchdog "$WATCHDOG" --arg bookings "$bookings" --argjson flags "$FLAG_EXPECTED_ENV" '{EXPERIENCE_API_MODE:"http",EXPERIENCE_PUBLIC_API_VERSION:"1.0",NEXT_PUBLIC_NIHO_WEB_ORIGIN:"https://app-stg.niho.life",SITE_URL:$origin,SITE_INDEXING:"block",BOOKINGS_ENABLED:$bookings,HOST_SIGNUP_MODE:"pilot",HOST_CONSOLE_ENABLED:"true",NIHO_HOST_START_URL:"https://app-stg.niho.life/experiences/provider",DEPLOY_COMMIT_SHA:$sha} + (if $watchdog == "true" then {EXPERIENCE_CHANNEL_WATCHDOG_ENABLED:"true",EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE:$origin,EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL:"experience-ota-watchdog@niho-app-stg.iam.gserviceaccount.com"} else {} end) + $flags')"
+          expected_secrets="$(jq -cn --arg a "$SESSION_REF" --arg b "$FIREBASE_REF" --arg c "$DATABASE_REF" --arg d "$GOOGLE_ID_REF" --arg e "$GOOGLE_SECRET_REF" --arg f "$GOOGLE_KEY_REF" --argjson flags "$FLAG_EXPECTED_SECRETS" '{HOST_SESSION_SECRET:$a,NIHO_FIREBASE_WEB_API_KEY:$b,EXPERIENCE_DATABASE_URL:$c,EXPERIENCE_GOOGLE_CLIENT_ID:$d,EXPERIENCE_GOOGLE_CLIENT_SECRET:$e,EXPERIENCE_GOOGLE_TOKEN_KEY:$f} + $flags')"
           jq -e --argjson expected "$expected_env" --argjson secrets "$expected_secrets" '
             (.spec.containers[0].env | map(select(has("value")) | {key:.name,value:.value}) | from_entries) == $expected and
             (.spec.containers[0].env | map(select(has("valueFrom")) | {key:.name,value:(.valueFrom.secretKeyRef.name + ":" + .valueFrom.secretKeyRef.key)}) | from_entries) == $secrets
@@ -264,7 +234,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           sales="sales disabled"
           if [ "$GUEST_BOOKING" = true ]; then sales="Stripe test bookings open"; fi
-          { echo "Reviewed SHA: $SHA"; echo "Revision: $REVISION"; echo "Digest: $DIGEST"; echo "Candidate created with ${sales} and indexing blocked."; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "Reviewed SHA: $SHA"; echo "Revision: $REVISION"; echo "Digest: $DIGEST"; echo "Candidate created with ${sales} and indexing blocked."; echo "Feature flags: ${FLAG_SUMMARY}"; } >> "$GITHUB_STEP_SUMMARY"
       # ID tokens expire quickly; mint immediately before the authenticated GETs.
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         id: smoke_auth

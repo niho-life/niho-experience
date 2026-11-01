@@ -1,10 +1,12 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { STRIPE_DASHBOARD_URL, type SalesPayoutNotice } from "@/host/payout";
-import { monthKey, type SalesMonth, type SalesPage } from "@/host/sales";
+import { monthKey, type SalesMonth, type SalesPage, type SalesRow } from "@/host/sales";
+import { SITE_PAYOUTS_EMPTY_TEXT, SITE_PAYOUTS_SCOPE_TEXT, SITE_PAYOUTS_TITLE, type SitePayoutsPanel } from "@/host/site-sales-payouts";
 import { HOST_SALES_PATH, withQuery } from "@/lib/host/routes";
 import { HostIcon } from "./HostIcon";
 import { consoleButtonClass, HOST_HEADING, HOST_SURFACE } from "./host-ui";
-import { StatusPill } from "./ui";
+import { SectionTitle, StatusPill } from "./ui";
 
 /*
  * 売上 (#91, mock v2 `screenSales`): the month switch beside the title, the note when the payout
@@ -119,28 +121,115 @@ export function SalesLines({ page }: { page: SalesPage }) {
       {page.rows.length ? (
         <ul>
           {page.rows.map((row) => (
-            <li key={row.key} className="flex min-h-[52px] items-center gap-3 border-t border-line px-3.5 py-3 first:border-t-0 md:px-4">
-              <time dateTime={row.date} className="w-[46px] shrink-0 text-[0.78125rem] text-muted tabular-nums">
-                <span aria-hidden="true">{row.shortDate}</span>
-                <span className="sr-only">{row.dateLabel}</span>
-              </time>
-              <div className="min-w-0 flex-1">
-                <p className="text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere]">{row.title}</p>
-                <p className="text-[0.78125rem] leading-normal text-muted">
-                  {row.detail}
-                  <span className="md:hidden"> · {row.status.label}</span>
-                </p>
-              </div>
-              <p className={`shrink-0 text-right font-extrabold whitespace-nowrap tabular-nums md:min-w-[88px] ${row.negative ? "text-danger" : ""}`}>{row.amount}</p>
-              <span className="shrink-0 max-md:hidden">
-                <StatusPill status={row.status} />
-              </span>
-            </li>
+            <SalesRowItem key={row.key} row={row} />
           ))}
         </ul>
       ) : (
         <p className="px-4 py-6 text-muted md:px-5">この月の売上はまだありません</p>
       )}
     </section>
+  );
+}
+
+/** One line of 明細 (and of この口座への入金): date, what it was, where from, the amount and its state. */
+function SalesRowItem({ row }: { row: SalesRow }) {
+  return (
+    <li className="flex min-h-[52px] items-center gap-3 border-t border-line px-3.5 py-3 first:border-t-0 md:px-4">
+      <time dateTime={row.date} className="w-[46px] shrink-0 text-[0.78125rem] text-muted tabular-nums">
+        <span aria-hidden="true">{row.shortDate}</span>
+        <span className="sr-only">{row.dateLabel}</span>
+      </time>
+      <div className="min-w-0 flex-1">
+        <p className="text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere]">{row.title}</p>
+        <p className="text-[0.78125rem] leading-normal text-muted">
+          {row.detail}
+          <span className="md:hidden"> · {row.status.label}</span>
+        </p>
+      </div>
+      <p className={`shrink-0 text-right font-extrabold whitespace-nowrap tabular-nums md:min-w-[88px] ${row.negative ? "text-danger" : ""}`}>{row.amount}</p>
+      <span className="shrink-0 max-md:hidden">
+        <StatusPill status={row.status} />
+      </span>
+    </li>
+  );
+}
+
+const PAYOUTS_HEADING_ID = "sales-payouts";
+
+/** この口座への入金's frame: its own title and the line that it is the account's money, not this site's. */
+function SalesPayoutsFrame({ busy = false, children }: { busy?: boolean; children: ReactNode }) {
+  return (
+    <section aria-labelledby={PAYOUTS_HEADING_ID} aria-busy={busy || undefined} className={`${HOST_SURFACE} mt-3.5`}>
+      <div className="px-4 pt-4 md:px-5">
+        <SectionTitle id={PAYOUTS_HEADING_ID}>{SITE_PAYOUTS_TITLE}</SectionTitle>
+        <p className="mt-1 text-[0.8125rem] leading-normal text-ink-soft">{SITE_PAYOUTS_SCOPE_TEXT}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * この口座への入金 (#91): Stripe's payouts to the provider's account (mock v2's 入金予定・入金済み and 口座入金 lines),
+ * under its own title below this site's numbers and lines, since the account takes NIHO's sales too.
+ */
+export function SalesPayoutsPanel({ panel }: { panel: SitePayoutsPanel }) {
+  return (
+    <SalesPayoutsFrame>
+      <div className="flex flex-wrap items-center gap-x-[22px] gap-y-3 px-4 py-4 md:px-5">
+        <dl className="flex flex-wrap gap-x-[18px] gap-y-3 md:gap-x-[22px]">
+          {panel.figures.map(({ label, value }) => (
+            <div key={label}>
+              <dt className="text-xs font-bold text-muted">{label}</dt>
+              <dd className="text-lg leading-[1.3] font-extrabold tabular-nums md:text-xl">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      {panel.notes.length ? (
+        <ul className="space-y-1 px-4 pb-3 text-[0.78125rem] leading-normal text-muted md:px-5">
+          {panel.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="border-t border-line">
+        {panel.rows.length ? (
+          <ul aria-label={`${SITE_PAYOUTS_TITLE}の明細`}>
+            {panel.rows.map((row) => (
+              <SalesRowItem key={row.key} row={row} />
+            ))}
+          </ul>
+        ) : (
+          <p className="px-4 py-6 text-muted md:px-5">{SITE_PAYOUTS_EMPTY_TEXT}</p>
+        )}
+      </div>
+    </SalesPayoutsFrame>
+  );
+}
+
+/** この口座への入金 while Stripe is read, or when it could not be: the words, and Stripe's own page when it failed. */
+export function SalesPayoutsMessage({ text, failed = false }: { text: string; failed?: boolean }) {
+  return (
+    <SalesPayoutsFrame busy={!failed}>
+      <div className="px-4 pt-3 pb-4 md:px-5">
+        {failed ? (
+          <>
+            <p role="alert" className="rounded-2xl border border-warn/20 bg-warn-pale px-4 py-3 text-warn">
+              {text}
+            </p>
+            <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-6 items-center gap-0.5 text-[0.78125rem] font-extrabold text-ink-soft hover:text-ink">
+              <HostIcon name="external" className="size-3.5" />
+              Stripe で入金の明細を見る
+              <span className="sr-only">（新しいタブで開きます）</span>
+            </a>
+          </>
+        ) : (
+          <p role="status" className="text-muted">
+            {text}
+          </p>
+        )}
+      </div>
+    </SalesPayoutsFrame>
   );
 }

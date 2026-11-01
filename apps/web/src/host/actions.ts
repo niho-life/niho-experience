@@ -11,6 +11,7 @@ import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
 import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
 import { draftGuestQuestionEnglish, loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
+import { draftGuestReviewEnglish } from "./guest-reviews-server";
 import { normalizeMeetingPoint } from "./meeting-point";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
@@ -338,23 +339,26 @@ export async function sendGuestQuestionReply(input: { providerId: string; thread
 }
 
 /**
- * レビュー › 英語にする (#108): NIHO's English of the host's Japanese reply to a review, for the
- * host to check (and correct) before it is published; nothing is published here. The preview
- * answers with its own synthetic English.
+ * レビュー › 英語にする (#108): an English draft of the host's Japanese reply to a review, for the
+ * host to check (and correct) before it is published; nothing is published here. In http mode, for a
+ * review kept in the experience DB, the Claude API makes it as for a question (EXPERIENCE_TRANSLATION_ENABLED);
+ * without it the host writes the English. The preview answers with its own synthetic English.
  */
 export async function draftReviewReplyEnglish(input: { providerId: string; reviewId: string; japanese: string }): Promise<HostActionResult<EnglishDrafted>> {
   const providerId = nihoIdOrNull(input?.providerId);
   const reviewId = text(input?.reviewId, LIMITS.reviewId);
   const japanese = text(input?.japanese, REVIEW_REPLY_TEXT_LIMIT);
   if (!providerId || !reviewId || !japanese?.trim()) return invalid;
-  // TODO(#87): NIHO's translation for the review's reply (niho-app#19314) once the host contract has it.
+  if (!isHostMock()) return draftGuestReviewEnglish(providerId, reviewId, japanese);
   return draftEnglish(() => mockReviewEnglishDraft(reviewId, japanese));
 }
 
 /**
  * 体験の編集 › 英語の下書きを作る / 英語を作り直す (#110): NIHO's English of the page's Japanese,
  * field by field, for the host to check, correct and confirm; nothing is saved or published here.
- * The preview answers with its own synthetic English.
+ * The preview answers with its own synthetic English. Only the mock editor calls this: the host contract
+ * (0.2.0) has no call to draft, correct or confirm a page's English, so http mode answers that NIHO makes it
+ * and the NIHO-connected editor reads NIHO's own English from the preview (live-english.ts).
  */
 type PageEnglishDrafted = Drafted<HostPageText>;
 export async function draftPageEnglish(input: { providerId: string; experienceId: string; japanese: HostPageText }): Promise<HostActionResult<PageEnglishDrafted>> {
@@ -362,6 +366,5 @@ export async function draftPageEnglish(input: { providerId: string; experienceId
   const experienceId = text(input?.experienceId, LIMITS.experienceId);
   const japanese = pageTextFromInput(input?.japanese);
   if (!providerId || !experienceId || !japanese || !textHasWords(japanese)) return invalid;
-  // TODO(#87): NIHO's English draft of the page (niho-coliving/niho-app#19320) once the host contract has it.
   return draftEnglish(() => mockPageEnglishDraft(experienceId, japanese), { message: "英語の下書きを作りました", unavailable: PAGE_ENGLISH_UNAVAILABLE_TEXT });
 }

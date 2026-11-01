@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
-import { SalesLines, SalesLoading, SalesMonthNav, SalesPayoutNoticeView, SalesScope, SalesSummaryPanel } from "@/components/host/HostSales";
+import { SalesLines, SalesLoading, SalesMonthNav, SalesPayoutNoticeView, SalesPayoutsMessage, SalesPayoutsPanel, SalesScope, SalesSummaryPanel } from "@/components/host/HostSales";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostPayout, loadHostSales } from "@/host/data";
 import { notFound } from "next/navigation";
 import { salesPayoutNotice } from "@/host/payout";
-import { salesPage, type SalesPage } from "@/host/sales";
+import { salesPage, type SalesMonth, type SalesPage } from "@/host/sales";
 import { SITE_SALES_LOAD_FAILED_TEXT, SITE_SALES_SCOPE_TEXT } from "@/host/site-sales";
+import { SITE_PAYOUTS_LOADING_TEXT } from "@/host/site-sales-payouts";
+import { loadSitePayouts } from "@/host/site-sales-payouts-server";
 import { loadSiteSales } from "@/host/site-sales-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
@@ -33,8 +35,9 @@ interface MonthProps {
  *
  * With HOST_SALES_LEDGER_ENABLED (http mode), the OWNER reads the sales of bookings made on this site from the
  * experience DB's ledger instead (#91, ADR 0002): 売上・手数料・返金・受取額 of a month in Japan, said to be this
- * site's only. What Stripe pays out to the bank stays Stripe's: the page leads there and makes none of it up. The
- * month streams in after the OWNER check, so anyone else still gets a 404.
+ * site's only. The month streams in after the OWNER check, so anyone else still gets a 404. With
+ * HOST_SALES_PAYOUTS_ENABLED as well, この口座への入金 follows under its own title: Stripe's balance and payouts of the
+ * account (which takes NIHO's sales too), streamed apart so a slow or failing Stripe leaves this site's month as it is.
  */
 export default async function HostSalesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -79,6 +82,9 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
         {noticeView}
         <SalesSummaryPanel page={site.page} />
         <SalesLines page={site.page} />
+        <Suspense fallback={<SalesPayoutsMessage text={SITE_PAYOUTS_LOADING_TEXT} />}>
+          <HostSalesPayouts provider={provider} reader={reader} month={site.page.month} />
+        </Suspense>
       </SalesFrame>
     );
   }
@@ -114,4 +120,12 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
       <SalesLines page={page} />
     </SalesFrame>
   );
+}
+
+/** この口座への入金 for the month shown: nothing when it is not open to this account, a message when Stripe fails. */
+async function HostSalesPayouts({ provider, reader, month }: Pick<MonthProps, "provider" | "reader"> & { month: SalesMonth }) {
+  const payouts = await loadSitePayouts(provider, reader, month);
+  if (payouts.status === "closed") return null;
+  if (payouts.status === "error") return <SalesPayoutsMessage text={payouts.text} failed />;
+  return <SalesPayoutsPanel panel={payouts.panel} />;
 }

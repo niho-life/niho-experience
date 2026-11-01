@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { HostBookings } from "@/components/host/HostBookings";
 import { HostLiveBookings } from "@/components/host/HostLiveBookings";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
-import { bookingsHref } from "@/host/bookings";
 import { hostPageContext, loadHostBookings } from "@/host/data";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
-import { countSiteBookings, loadSiteBookings, type HostSiteBookingsLoad } from "@/host/site-bookings-server";
+import { loadSiteBookings, type HostSiteBookingsLoad } from "@/host/site-bookings-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { isHostMock } from "@/lib/host/server";
 import { isHostSupportHistoryEnabled } from "@/lib/host/support-history-server";
@@ -39,22 +37,23 @@ function BookingsUnavailable({ title = UNAVAILABLE.title, body = UNAVAILABLE.bod
   );
 }
 
-/** Above NIHO's bookings (provider operations): the way to the ones made on this site (#285 slice 8). */
-function SiteBookingsNotice({ count, href }: { count: number; href: string }) {
+/** Above NIHO's bookings when this site's could not be read beside them: NIHO's list stays the screen. */
+function SiteBookingsFailed() {
   return (
-    <p className="mb-3.5 rounded-xl bg-sand p-3 text-sm">
-      <Link href={href} className="font-extrabold text-ink underline underline-offset-2">
-        このサイトで受けた予約が {count} 件あります
-      </Link>
+    <p role="alert" className="mb-3.5 rounded-xl bg-danger-pale p-3 text-sm font-bold text-danger">
+      このサイトで受けた予約を読み込めませんでした。NIHO の予約だけを表示しています。時間をおいて、ページを読み込み直してください。
     </p>
   );
 }
 
-/** The bookings made on this site (#285 slice 8, experience DB) in the bookings screen, read only. */
-function SiteBookings({ site, provider, linkProviderId, besideNiho }: { site: Exclude<HostSiteBookingsLoad, { status: "closed" }>; provider: HostProvider; linkProviderId: string | null; besideNiho: boolean }) {
+/**
+ * The bookings made on this site (#285 slice 8, experience DB) in the bookings screen; with `niho`, NIHO's beside
+ * them on one list (#84), where a `?booking=` this site does not have may be NIHO's (the screen reads it from NIHO).
+ */
+function SiteBookings({ site, provider, linkProviderId, niho }: { site: Exclude<HostSiteBookingsLoad, { status: "closed" }>; provider: HostProvider; linkProviderId: string | null; niho: { providerId: string; translate: { today: string } | null } | null }) {
   if (site.status === "error") return <BookingsUnavailable title="予約を読み込めませんでした" body={SITE_BOOKING_LOAD_FAILED_TEXT} />;
   // Another provider's booking, a hold, or none at all.
-  if (site.requestedMissing) notFound();
+  if (site.requestedMissing && !niho) notFound();
   return (
     // Keyed by provider: another provider's bookings start from their own list.
     <HostBookings
@@ -70,7 +69,8 @@ function SiteBookings({ site, provider, linkProviderId, besideNiho }: { site: Ex
       feeSummaryEnabled={false}
       translateEnabled={false}
       conversations={[]}
-      live={{ nextCursor: site.nextCursor, besideNiho, messages: site.messages }}
+      live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview }}
+      niho={niho}
     />
   );
 }
@@ -81,8 +81,10 @@ function SiteBookings({ site, provider, linkProviderId, besideNiho }: { site: Ex
  * client screen reads them and moves between them without loading this page again.
  *
  * With EXPERIENCE_GUEST_BOOKING_ENABLED (http mode), the OWNER also sees the bookings travelers made on this
- * site (#285 slice 8): in place of the 準備中 screen while NIHO's bookings are not connected, or beside
- * NIHO's (a notice above them leads to `?source=site`).
+ * site (#285 slice 8): in place of the 準備中 screen while NIHO's bookings are not connected, or with NIHO's on
+ * one list (#84, mock v2's one list; `?source=site`, which この回 and older links carry, is the same list).
+ * Anyone else, or an OWNER the experience DB does not know, keeps NIHO's list (HostLiveBookings). The preview
+ * shows synthetic bookings made on this site with `?mock=site-bookings`.
  */
 export default async function HostBookingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -94,19 +96,15 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   if (provider.memberRole === "EDITOR") notFound();
   // The first `?booking=`, as the screen reads it.
   const requested = [query.booking].flat()[0] || null;
-  const nihoUserId = context.session.nihoUserId;
+  const { nihoUserId, mockScenario } = context.session;
+  const site = await loadSiteBookings(provider, nihoUserId, requested, mockScenario);
   if (providerOperationsEnabled()) {
-    if ([query.source].flat()[0] === "site") {
-      const site = await loadSiteBookings(provider, nihoUserId, requested);
-      if (site.status !== "closed") return <SiteBookings site={site} provider={provider} linkProviderId={linkProviderId} besideNiho />;
-    }
-    const count = await countSiteBookings(provider, nihoUserId);
-    const notice = count > 0 ? <SiteBookingsNotice count={count} href={bookingsHref({ providerId: linkProviderId, source: "site" })} /> : null;
-    return <HostLiveBookings key={provider.id} providerId={provider.id} initialBookingId={requested} translate={translateRoomsEntry()} siteNotice={notice} />;
+    const niho = { providerId: provider.id, translate: translateRoomsEntry() };
+    if (site.status === "live") return <SiteBookings site={site} provider={provider} linkProviderId={linkProviderId} niho={niho} />;
+    return <HostLiveBookings key={provider.id} providerId={provider.id} initialBookingId={requested} translate={niho.translate} siteNotice={site.status === "error" ? <SiteBookingsFailed /> : null} />;
   }
-  // While NIHO's bookings are not connected, this site's are the list (TODO(#87): NIHO's beside them).
-  const site = await loadSiteBookings(provider, nihoUserId, requested);
-  if (site.status !== "closed") return <SiteBookings site={site} provider={provider} linkProviderId={linkProviderId} besideNiho={false} />;
+  // While NIHO's bookings are not connected, this site's are the list.
+  if (site.status !== "closed") return <SiteBookings site={site} provider={provider} linkProviderId={linkProviderId} niho={null} />;
   const { list, requested: opened, experiences, today, now, conversations } = await loadHostBookings(provider, requested);
   if (list.status === "unavailable") return <BookingsUnavailable />;
   // Another provider's booking, or none at all.

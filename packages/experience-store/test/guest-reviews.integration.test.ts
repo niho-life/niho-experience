@@ -422,6 +422,7 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         { ...ownerA, calendarScope: "OPERATOR" as const },
       ]) {
         await assert.rejects(() => reviews.listReviews(actor), StoreAccessDeniedError);
+        await assert.rejects(() => reviews.summarizeReviews(actor), StoreAccessDeniedError);
         await assert.rejects(() => reviews.getReview(actor, second), StoreAccessDeniedError);
         await assert.rejects(() => reviews.saveReply(actor, second, reply), StoreAccessDeniedError);
         await assert.rejects(() => reviews.reportReview(actor, second, report), StoreAccessDeniedError);
@@ -495,6 +496,11 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       assert.deepEqual(page?.reviews.map((item) => item.id), [plain, first]);
       assert.equal(page?.summary.count, 2);
       assert.deepEqual((await reviews.listReviews(ownerA)).reviews.map((item) => item.id), [plain, first]);
+      // Counted whatever page the screen has read; a hidden review counts nowhere, another provider's neither.
+      const counted = await reviews.summarizeReviews(ownerA);
+      assert.deepEqual(counted.map(({ productId, productTitle, count }) => ({ productId, productTitle, count })), [{ productId: "tea", productTitle: "Synthetic tea", count: 2 }]);
+      assert.equal(counted[0]!.ratingTotal, page!.reviews.reduce((sum, item) => sum + item.rating, 0));
+      assert.deepEqual((await reviews.summarizeReviews(ownerB)).map((item) => item.productId), ["river"]);
       await assert.rejects(() => reviews.getReview(ownerA, second), StoreNotFoundError);
       await assert.rejects(() => reviews.saveReply(ownerA, second, correction), StoreNotFoundError);
       await assert.rejects(() => reviews.saveReply(ownerA, second, { ...correction, commandId: randomUUID(), expectedRevision: 2 }), StoreNotFoundError);

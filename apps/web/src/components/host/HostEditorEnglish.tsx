@@ -2,7 +2,7 @@
 
 import { useRef, useState, type KeyboardEvent } from "react";
 import type { EditorTab, PageEnglishState } from "@/host/page-english";
-import { PAGE_ENGLISH_STATUS } from "@/host/status";
+import { PAGE_ENGLISH_STATUS, type StatusLabel } from "@/host/status";
 import { DISABLED } from "./editor-parts";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
@@ -23,16 +23,18 @@ const TABS: { value: EditorTab; label: string }[] = [
   { value: "ja", label: "日本語で書く" },
   { value: "en", label: "英語（公開）" },
 ];
+/** NIHO 接続版: the English is NIHO's own, read only (live-english.ts). */
+export const LIVE_ENGLISH_TAB_LABEL = "英語（自動訳）";
 
 export const editorTabId = (tab: EditorTab) => `editor-tab-${tab}`;
 export const EDITOR_TAB_PANEL_ID = "editor-tab-panel";
 
 /**
  * 日本語で書く / 英語（公開）(mock H5 `.lang-tabs`): underlined tabs. The English tab says its state
- * while the English is not confirmed, so it shows from the Japanese tab too. Arrow keys move
- * between the tabs (and open them), Home and End go to either end.
+ * (`englishPill`) while there is one to say, so it shows from the Japanese tab too. Arrow keys move
+ * between the tabs (and open them), Home and End go to either end. `englishLabel` renames the English tab.
  */
-export function EditorLanguageTabs({ tab, onTab, english }: { tab: EditorTab; onTab: (tab: EditorTab) => void; english: PageEnglishState }) {
+export function EditorLanguageTabs({ tab, onTab, englishPill, englishLabel }: { tab: EditorTab; onTab: (tab: EditorTab) => void; englishPill: StatusLabel | null; englishLabel?: string }) {
   const buttons = useRef<Partial<Record<EditorTab, HTMLButtonElement | null>>>({});
   const move = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const last = TABS.length - 1;
@@ -63,8 +65,8 @@ export function EditorLanguageTabs({ tab, onTab, english }: { tab: EditorTab; on
             onKeyDown={(event) => move(event, index)}
             className={`-mb-px inline-flex h-[42px] shrink-0 items-center gap-1.5 border-b-2 px-1 text-[0.875rem] font-extrabold whitespace-nowrap ${selected ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`}
           >
-            {item.label}
-            {item.value === "en" && english.status !== "confirmed" ? <StatusPill status={PAGE_ENGLISH_STATUS[english.status]} /> : null}
+            {item.value === "en" && englishLabel ? englishLabel : item.label}
+            {item.value === "en" && englishPill ? <StatusPill status={englishPill} /> : null}
           </button>
         );
       })}

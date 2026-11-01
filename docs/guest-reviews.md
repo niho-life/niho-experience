@@ -51,18 +51,18 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 - `saveReply(actor, reviewId, { english, japanese, commandId, expectedRevision })`：表示中のレビューにいつでも 1 つ書ける・直せる（消せない）。`expectedRevision`（返信なし＝0）が今と違えば `StoreConflictError`。同じ `commandId` で同じ内容の再送は同じ結果を返す。書くたびに `reply_revision` が増え、2 回目以降は `reply_edited_at` が付く。
 - `reportReview(actor, reviewId, { reason, note, commandId })`：理由は `PERSONAL` / `UNTRUE` / `INAPPROPRIATE` / `OTHER`。1 レビューに 1 回。同じ内容の再送は同じ結果、別内容は `StoreConflictError`。
 
-英語の下書き（日本語から英語）は翻訳モジュール（#285 5b）ができてから。それまでは提供者が英語を直接書く。
+英語の下書き（日本語から英語）は、予約前の質問と同じ Claude API の翻訳（`EXPERIENCE_TRANSLATION_ENABLED`、[guest-questions.md](guest-questions.md) の「翻訳」）で作る（#84）。`draftGuestReviewEnglish`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER のレビューを読み、レビューの本文を文脈に、ホストの日本語を英語にする（依頼文は `REVIEW_REPLY_TO_ENGLISH_SYSTEM`：体験のページでほかの旅行者も読む返信として訳す。名前・ID・体験名は送らない）。何も保存・公開しない。翻訳が off のときは「英語にする機能は準備中です。英語を直接書いてください。」、API が答えない・断る・15 秒を過ぎたときは「英語にできませんでした。作り直すか、英語を直接書いてください」で、どちらもホストが英語を直接書ける。
 
 ## 画面
 
 - **体験詳細（英語のページ）**：`getLiveReviews(slug)`（`apps/web/src/lib/journey.ts`）が、フラグ ON の http mode で先頭 3 件と集計を DB から読み、`JourneyReviews` として既存の「Reviews」の節に渡す。フラグ OFF・DB なし・その slug が experience DB で `PUBLISHED` でないときは `null`（節も "New" の印も出さない）、読めなかったときは `unavailable`（再試行つきの通知。件数 0 とは別）。見せ方（0 件の "be one of the first"、1〜2 件は件数と本文だけ・星なし、3 件以上は平均・タグ・"Show all N reviews"）と、構造化データを 3 件以上のときだけ出す規則は #113 のまま。"Show all" は、プレビューでなければこのサイトの `GET …/reviews?limit=50`（`getSiteReviewsApi`）を読む。
-- **`/host/reviews`**：`loadGuestReviews`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER の一覧（先頭 100 件。それ以上は未対応で `TODO(#108)`）を既存の `HostReview` の形に写す。全件が公開中なので「公開前」の状態は無く、全件に返信できる。返信・報告は server action（`review-actions.ts`）が入力を検めたうえで store を呼ぶ。ブラウザは試行ごとに command id を持ち、失敗して同じ内容でやり直すと同じ id を使うので、store は 1 回だけ受ける。返信の revision は一覧と一緒に画面へ渡し、保存のたびに更新する（ほかの画面で返信が変わっていれば「読み込み直してください」）。フラグ OFF・mock mode は今までの画面（mock の一覧／http の「準備中」）。
+- **`/host/reviews`**：`loadGuestReviews`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER の一覧を 100 件ずつ既存の `HostReview` の形に写し、残りは一覧の下の「続きを見る」（`loadMoreReviewList`、store の cursor）で足す（#84）。見出しの平均・件数と体験の選択は、読み込んだページではなく全件から出す（store の `summarizeReviews`：表示中のレビューを商品ごとに件数と星の合計で数える。読むだけ）。全件が公開中なので「公開前」の状態は無く、全件に返信できる。返信・報告は server action（`review-actions.ts`）が入力を検めたうえで store を呼ぶ。ブラウザは試行ごとに command id を持ち、失敗して同じ内容でやり直すと同じ id を使うので、store は 1 回だけ受ける。返信の revision は一覧と一緒に画面へ渡し、保存のたびに更新する（ほかの画面で返信が変わっていれば「読み込み直してください」）。フラグ OFF・mock mode は今までの画面（mock の一覧／http の「準備中」）。
 - 予約者の英語の本文・メモには日本語訳がまだ無い（翻訳モジュール 5b まで `null`）ので、画面は原文に「翻訳できませんでした」を添えて出す（メッセージと同じ扱い）。
 
 ## flag と配備
 
 - `EXPERIENCE_GUEST_REVIEWS_ENABLED`（http mode のときだけ、既定 `false`）。`true` で `GET /api/public/experiences/{slug}/reviews` が experience DB から答える。`false` の間は 404。`EXPERIENCE_DATABASE_URL` が無いと 503。
-- mock mode は今までどおり合成のレビューだけを使い、DB に触れない。
+- mock mode は今までどおり合成のレビューだけを使い、DB に触れない。合成のレビューも投稿されたらそのまま公開の決定に合わせ、すべて公開中（「公開前」の状態と「NIHO が確認中です」の文は画面から外した。#84）。型の `HostReviewStatus` の `pending` はホームの判定（`home.ts`）が読むので残している。
 - 先に `0027_guest_reviews.sql` を適用する。runtime role には `guest_reviews` と `guest_review_invitations` の SELECT・INSERT・UPDATE が要る（`scripts/gcp/experience-db-grants.mjs`）。
 - 投稿の画面（スライス 6）ができるまでは、`true` にしても 0 件の応答になる。レビューが 0 件の間は、体験詳細に節の「be one of the first」だけが出る（#104 の「0 件」）。受入までは `false` のまま。
 
@@ -70,7 +70,7 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 
 - お礼メール（種別・送信 job）と書く画面（#285 スライス 5 以降・6）。
 - 投稿されたときのホストへの `NEW_REVIEW` 通知（`provider_notification_preferences` に鍵は既にある）。通知 job が投稿の event を読む形で足す。この PR は outbox に書かない。
-- 出欠による資格の除外（上）、英訳の下書き（5b）。
+- 出欠による資格の除外（上）。
 
 ## 未決（オーナー判断。実装で決め打ちしていない）
 

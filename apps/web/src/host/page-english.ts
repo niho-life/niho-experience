@@ -47,8 +47,12 @@ export interface PageEnglishState {
 
 /** 英語の下書きを作る failed (NIHO or the network): what was written stays. */
 export const PAGE_ENGLISH_FAILED_TEXT = "英語の下書きを作れませんでした。もう一度試すか、英語を直接書いてください";
-/** 英語の下書きを作る before NIHO's API can draft a page's English (http mode). */
-export const PAGE_ENGLISH_UNAVAILABLE_TEXT = "英語の下書きを作る機能は準備中です。英語を直接書いてください。";
+/**
+ * 英語の下書きを作る in http mode: the host contract (0.2.0) has no call to draft, correct or confirm a page's English. NIHO makes
+ * the English of a Japanese page itself and the NIHO-connected editor only reads it (components/host/live-english.ts), so this is
+ * said, never offered. The mock editor's 作る / 直す / 確定 is a rehearsal of #110 until NIHO has such a call.
+ */
+export const PAGE_ENGLISH_UNAVAILABLE_TEXT = "英語は NIHO が日本語から作ります。ここからは作れません。";
 
 /** A page written in English (or never in Japanese): nothing drafted, confirmed or corrected. */
 export const NO_ENGLISH_SOURCE: HostEnglishSource = { draftedFrom: null, confirmedFrom: null, edited: [] };

@@ -10,8 +10,12 @@ type UpstreamDetail = ExperienceProviderBookingDetailResponse["booking"];
 /** Browser DTO for the provider booking list. The upstream email and provider internals never cross the BFF. */
 export interface HostLiveBookingListItem {
   id: string;
+  /** NIHO's page and offer: 予約's one list (#84) puts the booking under its session. */
+  pageId: string;
+  offerId: string;
   occurrenceDate: string;
   startAt: string;
+  endAt: string;
   headCount: number;
   offerName: string;
   totalYen: number;
@@ -62,8 +66,11 @@ export function projectHostBookingList(value: ExperienceProviderBookingListRespo
   return {
     bookings: value.bookings.map((booking) => ({
       id: booking.id,
+      pageId: booking.pageId,
+      offerId: booking.offerId,
       occurrenceDate: booking.occurrenceDate,
       startAt: booking.startAt,
+      endAt: booking.endAt,
       headCount: booking.headCount,
       offerName: booking.offerNameSnapshot,
       totalYen: booking.totalYenSnapshot,

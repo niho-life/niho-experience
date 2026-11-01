@@ -520,3 +520,86 @@ test("通訳の参加状況で権限が失効したら招待 QR を消してポ�
   await page.waitForTimeout(3500); // The next 3-second poll must not happen after access was revoked.
   expect(statusReads).toBe(1);
 });
+
+// This site's bookings (#285, experience DB) as the preview's `?mock=site-bookings` sign-in shows them: the same
+// screen as http mode, from synthetic bookings (src/host/mock/site-bookings.ts). Read only: nothing is sent (#84).
+test.describe("this site's bookings (?mock=site-bookings)", () => {
+  const id = (n: number) => `00000000-0000-4000-8000-00000000b10${n}`;
+  const fees = (booking: Locator) => booking.getByRole("region", { name: "料金・精算状況" });
+  const expectAmounts = async (booking: Locator, amounts: Record<string, string>) => {
+    for (const [label, amount] of Object.entries(amounts)) await expect(value(fees(booking), label), label).toHaveText(amount);
+  };
+  /** What leaves the browser besides page loads (a server action is a POST). */
+  const recordSent = (page: Page) => {
+    const sent: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") sent.push(`${request.method()} ${request.url()}`);
+    });
+    return sent;
+  };
+
+  test("料金・精算状況 shows what the guest paid, NIHO's fee and what the host receives, then what the refunds changed", async ({ page }) => {
+    await signIn(page, "?mock=site-bookings");
+    const sent = recordSent(page);
+    await page.goto("/host/bookings");
+    await expect(page.getByText("このサイトで受けた予約です")).toBeVisible();
+    await expect(row(page, "Hannah Kim")).toContainText("2名 · ¥60,000 · 体験サイト");
+    await expect(row(page, "Léa Dubois")).toContainText("確認待ち");
+    await chip(page, "取消済み").click();
+    for (const guest of ["Kenji Sato", "Maya Cohen", "Oscar Lind"]) await expect(row(page, guest)).toContainText("取消済み");
+
+    // At booking: 10 % with NIHO support off, payment fees included; the fee is not repeated in 申込内容.
+    await page.goto(`/host/bookings?booking=${id(1)}`);
+    const hannah = detail(page, "Hannah Kim");
+    await expect(fees(hannah)).toContainText("受付時 サポートOFF");
+    await expect(fees(hannah)).toContainText("10%（決済費用込み）");
+    await expectAmounts(hannah, { 予約者の支払い: "¥60,000", "NIHO の手数料": "¥6,000", 受取額: "¥54,000" });
+    await expect(fees(hannah)).toContainText("通訳・お手伝いの人件費は含みません");
+    const request = hannah.getByRole("region", { name: "申込内容" });
+    await expect(value(request, "取消条件")).toHaveText("48時間前まで無料");
+    await expect(request).not.toContainText("手数料");
+    // NIHO's own panels know NIHO's bookings only; the preview cancels nothing.
+    await expect(hannah).not.toContainText("料金・精算状況は現在確認できません");
+    await expect(hannah.getByRole("button", { name: /取り消して/ })).toHaveCount(0);
+
+    // Support on: 15 %, the store's floor of the total (an adult and a child).
+    await page.goto(`/host/bookings?booking=${id(3)}`);
+    const noah = detail(page, "Noah Park");
+    await expect(fees(noah)).toContainText("受付時 サポートON");
+    await expect(fees(noah)).toContainText("15%（決済費用込み）");
+    await expectAmounts(noah, { 予約者の支払い: "¥42,000", "NIHO の手数料": "¥6,300", 受取額: "¥35,700" });
+
+    // Refunded in full: the whole fee goes back, nothing is left to anyone.
+    await page.goto(`/host/bookings?booking=${id(2)}`);
+    await expectAmounts(detail(page, "Kenji Sato"), { "予約者への返金（完了）": "¥30,000", "NIHO の手数料の返還": "¥3,000", 返金後の受取額: "¥0" });
+    // Half refunded by support: half the fee back, worked out (Stripe may differ by ¥1).
+    await page.goto(`/host/bookings?booking=${id(4)}`);
+    const maya = detail(page, "Maya Cohen");
+    await expectAmounts(maya, { "予約者への返金（完了）": "¥15,000", "NIHO の手数料の返還（概算）": "¥1,500", 返金後の受取額: "¥13,500" });
+    await expect(fees(maya)).toContainText("Stripe の計算と ¥1 ずれることがあります");
+    await audit(page, "a refunded booking's 料金・精算状況");
+    // On its way: shown apart, and nothing is counted back until Stripe finishes.
+    await page.goto(`/host/bookings?booking=${id(6)}`);
+    const oscar = detail(page, "Oscar Lind");
+    await expectAmounts(oscar, { "予約者への返金（処理中）": "¥30,000" });
+    await expect(fees(oscar)).toContainText("処理中の返金が終わると、手数料の返還と受取額が変わります。");
+    await expect(value(fees(oscar), "返金後の受取額")).toHaveCount(0);
+    expect(sent).toEqual([]);
+  });
+
+  test.describe("320px narrow phone", () => {
+    test.use({ viewport: { width: 320, height: 640 } });
+    test.beforeEach(({}, testInfo) => test.skip(testInfo.project.name !== "host-mobile-360"));
+
+    test("the list and 料金・精算状況 fit", async ({ page }) => {
+      await signIn(page, "?mock=site-bookings");
+      for (const path of ["/host/bookings", "/host/bookings?filter=cancelled", `/host/bookings?booking=${id(4)}`, `/host/bookings?booking=${id(3)}`]) {
+        await page.goto(path);
+        await expect(page.locator("main").getByRole("heading", { level: 2 }).first()).toBeVisible();
+        expect(await overflowX(page), path).toBeLessThanOrEqual(0);
+      }
+      const box = await fees(detail(page, "Noah Park")).boundingBox();
+      expect(box && box.x >= 0 && box.x + box.width <= 320).toBe(true);
+    });
+  });
+});

@@ -124,6 +124,15 @@ export interface HostGuestReviewPage {
   readonly nextCursor: string | null;
 }
 
+/** One product's shown reviews, all of them (not only a page): レビュー's average and its experience select. */
+export interface HostGuestReviewProductSummary {
+  readonly productId: string;
+  readonly productTitle: string;
+  readonly count: number;
+  /** The stars added up (1–5 each). */
+  readonly ratingTotal: number;
+}
+
 const RECEIVED = { status: "received" } as const;
 const TAG_LABELS: ReadonlyMap<string, string> = new Map(GUEST_REVIEW_TAGS.map((tag) => [tag.value, tag.label]));
 const REASONS: ReadonlySet<string> = new Set(GUEST_REVIEW_REPORT_REASONS);
@@ -526,6 +535,27 @@ export class GuestReviewRepository {
         reviews: rows.map(hostReviewFromRow),
         nextCursor: result.rows.length > limit ? encodeCursor(rows.at(-1)!) : null,
       };
+    });
+  }
+
+  /** Every shown review of the provider counted by product, the product reviewed last first. */
+  async summarizeReviews(actor: HostActor): Promise<readonly HostGuestReviewProductSummary[]> {
+    return withTransaction(this.#pool, async (client) => {
+      await requireOwner(client, actor);
+      const result = await client.query<DbRow>(
+        `SELECT r.product_id, p.public_title, count(*)::int AS review_count, sum(r.rating)::int AS rating_total
+           FROM guest_reviews r JOIN experience_products p ON p.provider_id = r.provider_id AND p.id = r.product_id
+          WHERE r.provider_id = $1 AND r.hidden_at IS NULL
+          GROUP BY r.product_id, p.public_title
+          ORDER BY max(r.submitted_at) DESC, r.product_id`,
+        [actor.providerId],
+      );
+      return result.rows.map((row) => ({
+        productId: String(row.product_id),
+        productTitle: String(row.public_title),
+        count: Number(row.review_count),
+        ratingTotal: Number(row.rating_total),
+      }));
     });
   }
 

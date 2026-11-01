@@ -4,13 +4,13 @@ import { replyDraftState, type ReplyDraft, type ReplyDraftState } from "./messag
 import type { HostReview, HostReviewReply, HostReviewReportReason } from "./types";
 
 /*
- * レビュー (#108)'s rules, apart from the screen so they can be tested: the summary (published
- * reviews only; the experience site shows an average from three), the order, which reviews ホーム
- * brings up, when the host may reply, and what publishing, correcting and reporting change. NIHO
- * checks a review before it is published and keeps it as the guest wrote it: the host replies
- * once (and may correct the reply) and may report it, never remove or change it. In mock mode
- * the screen keeps a reply or a report on the page only.
- * TODO(#87): publish the reply and send the report to NIHO (niho-app#19314), and show what it reads back.
+ * レビュー (#108)'s rules, apart from the screen so they can be tested: the summary (the experience
+ * site shows an average from three), the order, which reviews ホーム brings up, when the host may
+ * reply, and what publishing, correcting and reporting change. A review is published as soon as
+ * the guest writes it (owner decision 2026-10-31, docs/guest-reviews.md) and kept as they wrote it:
+ * the host replies once (and may correct the reply) and may report it, never remove or change it.
+ * In mock mode the screen keeps a reply or a report on the page only; in http mode they go to the
+ * experience DB (guest-reviews-server.ts).
  */
 
 /**
@@ -41,8 +41,6 @@ export const SITE_AVERAGE_FROM = 3;
 /** ホーム brings up this many reviews at most, then "ほかに N 件". */
 export const HOME_REVIEW_LIMIT = 3;
 
-/** In place of the reply while NIHO checks the review. */
-export const REVIEW_WAITING_TEXT = "NIHO が確認中です。公開されたら返信できます";
 export const REVIEW_REPORTED_TEXT = "報告しました · NIHO が確認します";
 export const REVIEW_SITE_AVERAGE_TEXT = `体験サイトでは ${SITE_AVERAGE_FROM} 件から平均を出します`;
 
@@ -96,8 +94,6 @@ export function reviewsOf<T extends Pick<HostReview, "experienceId">>(reviews: r
 export interface ReviewSummary {
   /** 公開中. */
   published: number;
-  /** 公開前: NIHO is checking them. */
-  pending: number;
   /** The published reviews' average to one decimal ("4.8"); null without any. */
   average: string | null;
   /** The experience site shows that average (#104): from SITE_AVERAGE_FROM published reviews. */
@@ -109,21 +105,40 @@ function stars(rating: number): number {
   return Math.min(5, Math.max(1, Math.round(rating)));
 }
 
-/** The average of the published reviews only: a review NIHO has not published counts nowhere yet. */
-export function reviewSummary(reviews: readonly Pick<HostReview, "status" | "rating">[]): ReviewSummary {
-  const published = reviews.filter((review) => review.status === "published");
-  const total = published.reduce((sum, review) => sum + stars(review.rating), 0);
-  return {
-    published: published.length,
-    pending: reviews.length - published.length,
-    average: published.length ? (Math.round((total / published.length) * 10) / 10).toFixed(1) : null,
-    onSite: published.length >= SITE_AVERAGE_FROM,
-  };
+function summaryOf(count: number, total: number): ReviewSummary {
+  return { published: count, average: count ? (Math.round((total / count) * 10) / 10).toFixed(1) : null, onSite: count >= SITE_AVERAGE_FROM };
 }
 
-/** The lines under the summary: "公開前 1 件" and, below three published reviews, why the site shows no average yet. None without reviews. */
+/** The average of the published reviews. */
+export function reviewSummary(reviews: readonly Pick<HostReview, "status" | "rating">[]): ReviewSummary {
+  const published = reviews.filter((review) => review.status === "published");
+  return summaryOf(published.length, published.reduce((sum, review) => sum + stars(review.rating), 0));
+}
+
+/**
+ * One experience's shown reviews counted by the experience DB (#108): all of them, not only the
+ * page the screen has read, so the average and the count do not change with 続きを見る.
+ */
+export interface ReviewCount {
+  experienceId: string;
+  title: string;
+  count: number;
+  /** The stars added up (1–5 each). */
+  ratingTotal: number;
+}
+
+/** The summary of one experience's counts (`experienceId`), or of all of them (null). */
+export function reviewSummaryOfCounts(counts: readonly ReviewCount[], experienceId: string | null): ReviewSummary {
+  const counted = experienceId ? counts.filter((item) => item.experienceId === experienceId) : counts;
+  return summaryOf(
+    counted.reduce((sum, item) => sum + item.count, 0),
+    counted.reduce((sum, item) => sum + item.ratingTotal, 0),
+  );
+}
+
+/** The line under the summary: below three reviews, why the site shows no average yet. None without reviews. */
 export function reviewSummaryNotes(summary: ReviewSummary): string[] {
-  return [...(summary.pending ? [`公開前 ${summary.pending} 件`] : []), ...(summary.published + summary.pending > 0 && !summary.onSite ? [REVIEW_SITE_AVERAGE_TEXT] : [])];
+  return summary.published > 0 && !summary.onSite ? [REVIEW_SITE_AVERAGE_TEXT] : [];
 }
 
 /** 体験's "★ 4.8 · 5 件" for one experience: its published reviews; null without any. */
@@ -154,8 +169,10 @@ export function reviewSessionLabel(review: Pick<HostReview, "sessionDate">, titl
 }
 
 /**
- * Where the reply stands: NIHO is checking the review (`waiting`: nothing to answer yet), it is
- * published without a reply (`open`: 返信する), or the host replied (`replied`: 返信を直す).
+ * Where the reply stands: published without a reply (`open`: 返信する), or the host replied
+ * (`replied`: 返信を直す). `waiting` (not published yet) no longer happens: every review is
+ * published when written (owner decision 2026-10-31). TODO(#108): drop it with HostReviewStatus's
+ * `pending` once ホーム (home.ts) stops asking for it.
  */
 export type ReviewReplyStage = "waiting" | "open" | "replied";
 
@@ -214,8 +231,8 @@ export function reportReview(review: HostReview, reason: HostReviewReportReason,
 }
 
 /**
- * What ホーム brings up: the published reviews without a reply (the newest first), then the ones
- * NIHO is still checking (to read before they are published).
+ * What ホーム brings up: the published reviews without a reply, the newest first (then any not
+ * published yet, which no longer happens: see reviewReplyStage).
  */
 export function reviewsToAttend<T extends HostReview>(reviews: readonly T[]): T[] {
   const sorted = sortReviews(reviews);

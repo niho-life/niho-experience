@@ -3,9 +3,10 @@ import type { BetaMessage, MessageCreateParamsNonStreaming } from "@anthropic-ai
 /*
  * 予約前の質問's translations with the Claude API (#285 slice 5, owner decision 2026-10-31,
  * docs/guest-questions.md): a guest's English in Japanese for the host, and an English draft of the
- * host's Japanese reply that the host checks before sending. Every request is built here, so what
- * leaves the site is in one place: the text to translate and, for a draft, the guest's last message
- * for context. Never a name, an address, an id or the experience.
+ * host's Japanese reply that the host checks before sending (to a question, or to a review: #108).
+ * Every request is built here, so what leaves the site is in one place: the text to translate and,
+ * for a draft, the guest's last message (or the review) for context. Never a name, an address, an id
+ * or the experience.
  */
 
 /** The default model of the Claude API skill (claude-api); translation needs no other. */
@@ -42,6 +43,15 @@ export const HOST_TO_ENGLISH_SYSTEM = [
   RULES,
 ].join("\n");
 
+/** レビュー's reply (#108): published under the guest's review on the experience page, for everyone who reads it. */
+export const REVIEW_REPLY_TO_ENGLISH_SYSTEM = [
+  "You translate replies that the host of a cultural experience in Japan writes to a traveler's review.",
+  "The reply is published under the review on the experience's page, where other travelers read it too.",
+  "Translate the host's Japanese reply in <reply> into natural, warm and polite English.",
+  "The traveler's review in <review> is context only: do not translate it, quote it or answer it yourself.",
+  RULES,
+].join("\n");
+
 /** A closing tag inside the text would end its block early; it gets a space instead. */
 function inTag(tag: string, text: string): string {
   return `<${tag}>\n${text.replaceAll(`</${tag}>`, `</ ${tag}>`)}\n</${tag}>`;
@@ -68,6 +78,12 @@ export function guestMessageToJapanese(text: string): MessageCreateParamsNonStre
 export function hostReplyToEnglish(input: { japanese: string; guestMessage: string | null }): MessageCreateParamsNonStreaming {
   const context = input.guestMessage?.trim() ? `${inTag("traveler_message", input.guestMessage)}\n\n` : "";
   return request(HOST_TO_ENGLISH_SYSTEM, `${context}${inTag("reply", input.japanese)}`);
+}
+
+/** The host's Japanese reply to a review, as an English draft, with the review as context. */
+export function reviewReplyToEnglish(input: { japanese: string; review: string }): MessageCreateParamsNonStreaming {
+  const context = input.review.trim() ? `${inTag("review", input.review)}\n\n` : "";
+  return request(REVIEW_REPLY_TO_ENGLISH_SYSTEM, `${context}${inTag("reply", input.japanese)}`);
 }
 
 export type TranslationFailure = "unavailable" | "refused" | "unusable";

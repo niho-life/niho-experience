@@ -4,19 +4,21 @@ import { PREVIEW_ENGLISH_DRAFT } from "./threads";
 /*
  * Invented reviews of the sample kitchen's Community Dinner (#108); nobody here is real. Each is
  * for a past booking of mock/bookings.ts the guest came to (来た: none for one who did not), on
- * that booking's day, written the day after or so. Three published with a reply (one corrected,
- * one to a review NIHO could not translate), two published without one (one with a note for the
- * host), and one NIHO is still checking. Every time is before the preview's moment (MOCK_NOW,
- * 10/21 15:30). The translations are what NIHO would show; the English of a reply is what the
- * experience page shows. よかった点 are NIHO's identifiers (REVIEW_TAGS has the words).
+ * that booking's day, written the day after or so. Each is published when written (owner decision
+ * 2026-10-31: nobody checks a review first). Three with a reply (one corrected, one to a review NIHO
+ * could not translate) and three without one (one with a note for the host, one written in
+ * Japanese). Every time is before the preview's moment (MOCK_NOW, 10/21 15:30). The translations
+ * are what NIHO would show; the English of a reply is what the experience page shows. よかった点
+ * are NIHO's identifiers (REVIEW_TAGS has the words).
  */
 
 const english = (original: string, translation: string): HostReviewText => ({ original, language: "en", translation });
 
-type ReviewFields = Pick<HostReview, "id" | "bookingId" | "sessionDate" | "reviewer" | "rating" | "tags" | "body" | "writtenAt" | "status" | "publishedAt"> &
+type ReviewFields = Pick<HostReview, "id" | "bookingId" | "sessionDate" | "reviewer" | "rating" | "tags" | "body" | "writtenAt"> &
   Partial<Pick<HostReview, "privateNote" | "reply">>;
 
-const review = (fields: ReviewFields): HostReview => ({ experienceId: "community-dinner", privateNote: null, reply: null, report: null, ...fields });
+/** Published the moment it was written. */
+const review = (fields: ReviewFields): HostReview => ({ experienceId: "community-dinner", privateNote: null, reply: null, report: null, status: "published", publishedAt: fields.writtenAt, ...fields });
 
 export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
   // Published, no reply yet, with a note for the host only.
@@ -33,10 +35,8 @@ export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
     ),
     privateNote: english("Thank you for the recipe card! My wife has already made the aubergine twice.", "レシピのカードをありがとうございました！ 妻がもう 2 回もなすを作りました。"),
     writtenAt: "2026-10-18T21:10",
-    status: "published",
-    publishedAt: "2026-10-19T10:00",
   }),
-  // NIHO is still checking it: the host can read it (and report it), not reply yet. Written in Japanese.
+  // Written in Japanese, no reply yet.
   review({
     id: "rv-5013",
     bookingId: "bk-2005",
@@ -50,8 +50,6 @@ export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
       translation: null,
     },
     writtenAt: "2026-10-20T08:30",
-    status: "pending",
-    publishedAt: null,
   }),
   // NIHO could not translate it: the host reads the original. Answered with a short thanks.
   review({
@@ -63,8 +61,6 @@ export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
     tags: ["CALM_ATMOSPHERE", "GREAT_HOST"],
     body: { original: "Úžasný večer! Vařili jsme společně a všichni byli velmi milí. Děkujeme za recept na misopolévku.", language: "cs", translation: null },
     writtenAt: "2026-09-27T19:40",
-    status: "published",
-    publishedAt: "2026-09-28T11:00",
     reply: {
       japanese: "ご参加ありがとうございました。またいつでも鎌倉へお越しください。",
       english: "Thank you for joining us. Come back to Kamakura any time.",
@@ -85,8 +81,6 @@ export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
       "包丁の使い方からだしまで、とてもわかりやすく教えてもらいました。時間どおりに始まって終わったので、電車に乗る私たちには助かりました。",
     ),
     writtenAt: "2026-09-13T22:05",
-    status: "published",
-    publishedAt: "2026-09-14T10:30",
     reply: {
       japanese: "ありがとうございました！ 次は秋の新米の頃にぜひお越しください。",
       english: "Thank you so much! Do come back when the new rice is in this autumn.",
@@ -107,8 +101,6 @@ export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
       "すてきな夜でした。料理はおいしかったのですが、みんなが一度に話すと、長いテーブルの向こうの声が少し聞き取りにくかったです。",
     ),
     writtenAt: "2026-09-06T10:20",
-    status: "published",
-    publishedAt: "2026-09-07T09:00",
   }),
   // Written in German, translated by NIHO, answered.
   review({
@@ -124,8 +116,6 @@ export const MOCK_KITCHEN_REVIEWS: readonly HostReview[] = [
       translation: "温かいホストとのすばらしい夜でした。たくさん学んで、それ以上にたくさん笑いました。",
     },
     writtenAt: "2026-09-02T18:00",
-    status: "published",
-    publishedAt: "2026-09-03T10:00",
     reply: {
       japanese: "温かいお言葉をありがとうございます。またご一緒に料理できる日を楽しみにしています。",
       english: "Thank you for your kind words. We look forward to cooking with you again.",
@@ -141,6 +131,11 @@ export const MOCK_REVIEW_REPLY_EXAMPLES: readonly { reviewId: string; japanese: 
     reviewId: "rv-5020",
     japanese: "ディナーに来てくださってありがとうございました！ なすの味噌田楽をご家庭でも作ってくださって、とてもうれしいです。また鎌倉でお会いしましょう。",
     english: "Thank you for coming to dinner! We are so happy you are making the miso aubergine at home. See you again in Kamakura.",
+  },
+  {
+    reviewId: "rv-5013",
+    japanese: "駅からの道が分かりやすかったと聞いてうれしいです。次の回からは、席の間隔を広げます。ありがとうございました。",
+    english: "We are glad the way from the station was easy to find. From the next dinner, everyone will have more room at the table. Thank you!",
   },
   {
     reviewId: "rv-4906",

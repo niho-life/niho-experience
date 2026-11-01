@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { BookingCancellations, type RefundSubmission } from "../src/booking-cancellations.ts";
-import { StoreAccessDeniedError, StoreValidationError } from "../src/errors.ts";
+import { StoreAccessDeniedError, StoreError, StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import type { HostSaleEntry } from "../src/host-sales.ts";
 import { ExperienceStore } from "../src/repository.ts";
@@ -205,6 +205,51 @@ describe("売上: the ledger of guest bookings for the OWNER", { skip: !database
       await assert.rejects(context.guests.listGuestSalesForHost(ownerA, NOVEMBER), StoreAccessDeniedError);
       await assert.rejects(context.guests.listGuestSalesForHost(ownerB, { from: NOVEMBER.to, to: NOVEMBER.from }), StoreValidationError);
       await assert.rejects(context.guests.listGuestSalesForHost(ownerB, { from: "2026-01-01T00:00:00.000Z", to: "2026-12-31T00:00:00.000Z" }), StoreValidationError);
+    });
+  });
+});
+
+describe("この口座への入金: the Stripe accounts of the OWNER's sales here", { skip: !databaseUrl }, () => {
+  const product = (id: string, account: string) => context.pool.query(
+    `INSERT INTO experience_products
+       (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+     VALUES ('provider-a',$1,$1,'PUBLISHED','Synthetic product','{}','JPY',3000,'terms-v1','seller-provider-a',$2,'Sample Seller A')`,
+    [id, account],
+  );
+  const terms = (id: string) => context.guests.setSaleTerms(ownerA, id, {
+    childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
+  });
+  let context: Context;
+
+  it("reads the accounts of products sold here and of the bookings' seller snapshots, and nothing else", async () => {
+    await withSchema(async (current) => {
+      context = current;
+      assert.deepEqual(await context.guests.listPayoutAccountsForHost(ownerA), [ACCOUNT]);
+      // The booking keeps the account it was paid on after the product moves to another.
+      await paid(context, "moved@example.com", "2026-11-10T01:00:00.000Z");
+      await context.pool.query("UPDATE experience_products SET stripe_connect_account_ref = 'acct_SampleA0002' WHERE id = 'walk'");
+      // Not sold here (no sale terms), or not an account ID: not read.
+      await product("not-here", "acct_SampleA0003");
+      await product("synthetic", "seller-account-ref");
+      await terms("synthetic");
+      assert.deepEqual(await context.guests.listPayoutAccountsForHost(ownerA), [ACCOUNT, "acct_SampleA0002"]);
+      assert.deepEqual(await context.guests.listPayoutAccountsForHost(ownerB), []);
+    });
+  });
+
+  it("is the current OWNER's only, and refuses a provider with more accounts than one read takes", async () => {
+    await withSchema(async (current) => {
+      context = current;
+      await assert.rejects(context.guests.listPayoutAccountsForHost(editorA), StoreAccessDeniedError);
+      await assert.rejects(context.guests.listPayoutAccountsForHost({ providerId: "provider-a", nihoUserId: "owner-b" }), StoreAccessDeniedError);
+      for (const n of [4, 5, 6, 7]) {
+        await product(`more-${n}`, `acct_SampleA000${n}`);
+        await terms(`more-${n}`);
+      }
+      assert.equal((await context.guests.listPayoutAccountsForHost(ownerA)).length, 5);
+      await product("more-8", "acct_SampleA0008");
+      await terms("more-8");
+      await assert.rejects(context.guests.listPayoutAccountsForHost(ownerA), StoreError);
     });
   });
 });

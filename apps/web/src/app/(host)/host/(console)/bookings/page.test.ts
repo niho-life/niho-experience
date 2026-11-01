@@ -3,14 +3,12 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 type Load = Mock<(...args: unknown[]) => Promise<unknown>>;
 
-/** 予約's choice between NIHO's bookings and this site's (#285 slice 8), against stubbed data. */
+/** 予約's choice between NIHO's bookings, this site's (#285 slice 8) and both on one list (#84), against stubbed data. */
 const state = vi.hoisted(() => ({
   providerOperations: false,
   memberRole: "OWNER" as string,
   site: { status: "closed" } as Record<string, unknown>,
-  count: 0,
   loadSiteBookings: null as null | Load,
-  countSiteBookings: null as null | Load,
   loadHostBookings: null as null | Load,
 }));
 vi.mock("server-only", () => ({}));
@@ -23,7 +21,7 @@ vi.mock("next/navigation", async (importActual) => ({
 vi.mock("@/host/actions", () => ({ loadMoreSiteBookingList: vi.fn(), cancelSiteBooking: vi.fn() }));
 vi.mock("@/host/data", () => ({
   hostPageContext: async () => ({
-    session: { nihoUserId: "sample-niho-user" },
+    session: { nihoUserId: "sample-niho-user", mockScenario: undefined },
     providers: [],
     provider: { id: "sample-provider", displayName: "Synthetic provider", memberRole: state.memberRole },
     providerNotFound: false,
@@ -33,13 +31,12 @@ vi.mock("@/host/data", () => ({
 }));
 vi.mock("@/host/site-bookings-server", () => ({
   loadSiteBookings: (...args: unknown[]) => state.loadSiteBookings!(...args),
-  countSiteBookings: (...args: unknown[]) => state.countSiteBookings!(...args),
 }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => false }));
 vi.mock("@/lib/host/support-history-server", () => ({ isHostSupportHistoryEnabled: () => false }));
 vi.mock("@/lib/host/fee-summary-server", () => ({ isHostFeeSummaryUiEnabled: () => false }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
-vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () => false, translateRoomsEntry: () => null }));
+vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () => false, translateRoomsEntry: () => ({ today: "2026-10-31" }) }));
 
 import HostBookingsPage from "./page";
 import { HostBookings } from "@/components/host/HostBookings";
@@ -51,10 +48,8 @@ beforeEach(() => {
   state.providerOperations = false;
   state.memberRole = "OWNER";
   state.loadSiteBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.site);
-  state.countSiteBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.count);
   state.loadHostBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({ list: { status: "unavailable" }, requested: null, experiences: [], today: "2026-10-31", now: null, conversations: [] }));
   state.site = { status: "closed" };
-  state.count = 0;
 });
 
 /** The page, with its own local views (SiteBookings) rendered down to the screen component they choose. */
@@ -72,9 +67,9 @@ describe("予約 without NIHO's bookings (provider operations off)", () => {
     state.site = LIVE;
     const view = await page({ booking: "b-1" });
     expect(view.type).toBe(HostBookings);
-    expect(view.props).toMatchObject({ bookings: LIVE.bookings, providerId: "sample-provider", providerDataId: "sample-provider", conversations: [], live: { nextCursor: "sample-cursor", besideNiho: false } });
+    expect(view.props).toMatchObject({ bookings: LIVE.bookings, providerId: "sample-provider", providerDataId: "sample-provider", conversations: [], live: { nextCursor: "sample-cursor" }, niho: null });
     expect(view.props).toMatchObject({ supportHistoryEnabled: false, feeSummaryEnabled: false, translateEnabled: false });
-    expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", "b-1");
+    expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", "b-1", undefined);
     expect(state.loadHostBookings).not.toHaveBeenCalled();
   });
 
@@ -104,31 +99,29 @@ describe("予約 beside NIHO's bookings (provider operations on)", () => {
     state.providerOperations = true;
   });
 
-  it("keeps NIHO's bookings, with a notice of this site's when there are any", async () => {
-    state.count = 2;
+  it("puts NIHO's bookings and this site's on one list for the OWNER, whatever ?source= says (#84)", async () => {
+    state.site = LIVE;
+    for (const query of [{}, { source: "site" }] as Record<string, string>[]) {
+      const view = await page(query);
+      expect(view.type).toBe(HostBookings);
+      expect(view.props).toMatchObject({ bookings: LIVE.bookings, live: { nextCursor: "sample-cursor" }, niho: { providerId: "sample-provider", translate: { today: "2026-10-31" } } });
+    }
+    // A booking this site does not have may be NIHO's: the screen reads it from NIHO instead of a 404.
+    state.site = { ...LIVE, requestedMissing: true };
+    expect((await page({ booking: "niho-1" })).type).toBe(HostBookings);
+    expect(state.loadHostBookings).not.toHaveBeenCalled();
+  });
+
+  it("keeps NIHO's bookings alone for anyone the experience DB does not show this site's bookings to", async () => {
     const view = await page({ booking: "niho-1" });
     expect(view.type).toBe(HostLiveBookings);
-    expect(view.props).toMatchObject({ providerId: "sample-provider", initialBookingId: "niho-1" });
-    const notice = view.props.siteNotice as ReactElement<{ count: number; href: string }>;
-    expect(notice.props).toEqual({ count: 2, href: "/host/bookings?providerId=sample-provider&source=site" });
-    expect(state.loadSiteBookings).not.toHaveBeenCalled();
-
-    state.count = 0;
-    expect((await page()).props.siteNotice).toBeNull();
+    expect(view.props).toMatchObject({ providerId: "sample-provider", initialBookingId: "niho-1", siteNotice: null });
   });
 
-  it("shows this site's bookings for ?source=site, with every link keeping it", async () => {
-    state.site = LIVE;
-    const view = await page({ source: "site" });
-    expect(view.type).toBe(HostBookings);
-    expect(view.props.live).toEqual({ nextCursor: "sample-cursor", besideNiho: true });
-    expect(state.countSiteBookings).not.toHaveBeenCalled();
-  });
-
-  it("falls back to NIHO's bookings when ?source=site is closed to the account", async () => {
-    const view = await page({ source: "site" });
+  it("keeps NIHO's bookings and says this site's could not be read when the DB fails", async () => {
+    state.site = { status: "error" };
+    const view = await page();
     expect(view.type).toBe(HostLiveBookings);
-    expect(view.props.siteNotice).toBeNull();
-    expect(state.countSiteBookings).toHaveBeenCalled();
+    expect(((view.props.siteNotice as ReactElement).type as { name: string }).name).toBe("SiteBookingsFailed");
   });
 });

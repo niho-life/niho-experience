@@ -16,11 +16,13 @@ import { config } from "@/lib/config";
 import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-refunds";
 import { bookingCancellations, guestBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
-import { loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
+import { idTokenUsable, type HostMockScenario } from "@/lib/host/session";
 import type { BookingExperience } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan, yen } from "./format";
+import { MOCK_TODAY } from "./mock/bookings";
+import { MOCK_SITE_BOOKINGS } from "./mock/site-bookings";
 import type { HostActionResult } from "./payout";
 import { SITE_BOOKING_LOAD_FAILED_TEXT, siteBooking, siteBookingExperiences } from "./site-bookings";
 import type { HostBooking } from "./types";
@@ -75,13 +77,26 @@ export type HostSiteBookingsLoad =
       today: string;
       /** Each booking leads to its messages with the guest (#285 slice 6b). */
       messages: boolean;
+      /** The preview's synthetic bookings (`?mock=site-bookings`): read only, nothing is sent. */
+      preview?: true;
     })
   /** Not kept here for them: the flag is off, no DB, not the OWNER (NIHO or the experience DB). Today's screen. */
   | { status: "closed" }
   | { status: "error" };
 
-/** 予約 for an OWNER (NIHO's role): the provider's bookings made here, with the one `?booking=` names among them. */
-export async function loadSiteBookings(provider: HostProvider, nihoUserId: string, requestedBooking: string | null): Promise<HostSiteBookingsLoad> {
+/** The preview's `?mock=site-bookings` (mock mode): the same screen from synthetic bookings, for the OWNER. */
+function previewSiteBookings(provider: HostProvider, requestedBooking: string | null, mockScenario: HostMockScenario | undefined): HostSiteBookingsLoad {
+  if (mockScenario !== "site-bookings" || provider.memberRole !== "OWNER") return { status: "closed" };
+  const requestedMissing = requestedBooking !== null && !MOCK_SITE_BOOKINGS.some((booking) => booking.publicBookingId === requestedBooking);
+  return { status: "live", ...screenPage(MOCK_SITE_BOOKINGS, null), requestedMissing, today: MOCK_TODAY, messages: false, preview: true };
+}
+
+/**
+ * 予約 for an OWNER (NIHO's role): the provider's bookings made here, with the one `?booking=` names among them.
+ * Mock mode reads the preview's synthetic bookings with `?mock=site-bookings` (`mockScenario`), and none otherwise.
+ */
+export async function loadSiteBookings(provider: HostProvider, nihoUserId: string, requestedBooking: string | null, mockScenario?: HostMockScenario): Promise<HostSiteBookingsLoad> {
+  if (isHostMock()) return previewSiteBookings(provider, requestedBooking, mockScenario);
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
   const actor = ownerActor(provider.id, nihoUserId);
@@ -101,21 +116,6 @@ export async function loadSiteBookings(provider: HostProvider, nihoUserId: strin
     return { status: "live", ...screenPage(stored, page.nextCursor), requestedMissing, today, messages: siteBookingMessagesEnabled() };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
-  }
-}
-
-/**
- * Beside NIHO's bookings (provider operations): how many bookings were made here, for the notice that leads to
- * them. 0 when none, or while they are not shown to this account; a failure to count shows no notice either
- * (NIHO's list is the screen).
- */
-export async function countSiteBookings(provider: HostProvider, nihoUserId: string): Promise<number> {
-  const bookings = guestBookingRepository();
-  if (!bookings || provider.memberRole !== "OWNER") return 0;
-  try {
-    return await bookings.countGuestBookingsForHost(ownerActor(provider.id, nihoUserId));
-  } catch {
-    return 0;
   }
 }
 

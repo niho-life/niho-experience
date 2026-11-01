@@ -377,6 +377,29 @@ test.describe("this site's ledger (?mock=site-sales)", () => {
     }
   });
 
+  test("この口座への入金 is Stripe's, under its own title apart from this site's numbers", async ({ page }) => {
+    await signIn(page, "?mock=site-sales");
+    await page.goto("/host/sales");
+    const payouts = page.getByRole("region", { name: "この口座への入金" });
+    await expect(payouts).toContainText("Stripe の口座に入る入金です。NIHO で販売している体験の分も同じ口座に入るため、このサイトの売上・受取額とは一致しません。");
+    await expect(payouts.locator("dt")).toHaveText(["入金予定", "入金済み"]);
+    await expect(payouts.locator("dd")).toHaveText(["¥80,500", "¥52,300"]);
+    await expect(payouts).toContainText("入金予定は、Stripe の残高と送金中の入金の合計です。");
+    const rows = payouts.getByRole("list", { name: "この口座への入金の明細" }).getByRole("listitem");
+    await expect(rows).toHaveCount(2);
+    for (const text of ["10/23", "口座入金", "Stripe · 着金予定", "¥38,000", "送金中"]) await expect(rows.nth(0)).toContainText(text);
+    for (const text of ["10/09", "口座入金", "¥52,300", "入金済み"]) await expect(rows.nth(1)).toContainText(text);
+    // This site's numbers stay this site's.
+    await expect(summary(page, "2026年10月").locator("dt", { hasText: /入金/ })).toHaveCount(0);
+
+    await monthNav(page).getByRole("link", { name: "前の月" }).click();
+    await expect(page).toHaveURL(/\?month=2026-09$/);
+    const september = page.getByRole("region", { name: "この口座への入金" });
+    await expect(september.locator("dt")).toHaveText(["入金済み"]);
+    await expect(september.locator("dd")).toHaveText(["¥58,400"]);
+    await expect(september.getByRole("list", { name: "この口座への入金の明細" }).getByRole("listitem")).toHaveCount(2);
+  });
+
   test("ホーム's month card is this site's", async ({ page }) => {
     await signIn(page, "?mock=site-sales");
     const month = page.getByRole("region", { name: "10月" });
@@ -404,7 +427,7 @@ test.describe("this site's ledger (?mock=site-sales)", () => {
       await signIn(page, "?mock=site-sales");
       await page.goto("/host/sales");
       expect(await overflowX(page), "sales").toBeLessThanOrEqual(0);
-      for (const locator of [monthNav(page).getByRole("link", { name: "前の月" }), summary(page, "2026年10月").getByRole("link", { name: /Stripe で入金の明細を見る/ }), lines(page, "2026年10月").getByText("−¥30,000")]) {
+      for (const locator of [monthNav(page).getByRole("link", { name: "前の月" }), summary(page, "2026年10月").getByRole("link", { name: /Stripe で入金の明細を見る/ }), lines(page, "2026年10月").getByText("−¥30,000"), page.getByRole("region", { name: "この口座への入金" }).getByText("¥38,000")]) {
         await locator.scrollIntoViewIfNeeded();
         const box = await locator.boundingBox();
         expect(box && box.x >= 0 && box.x + box.width <= 320).toBe(true);

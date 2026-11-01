@@ -8,11 +8,13 @@ import {
   ExperiencePaymentsValidationError,
   isEndedCheckoutEvent,
   isRefundEvent,
+  readConnectedPayouts,
   retrieveConnectedAccount,
   retrieveDirectCheckout,
   submitBookingRefund,
   verifyDirectCheckoutWebhook,
   type ConnectedAccountStripeClient,
+  type ConnectedPayoutsStripeClient,
   type PaymentsStripeClient,
 } from "../src/index.ts";
 
@@ -622,5 +624,115 @@ describe("retrieveConnectedAccount (#285 slice 9)", () => {
     assert.deepEqual(calls, []);
     await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT }), /platform Stripe key/);
     await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT, platformStripeKey: "sk_test_synthetic", stripe: stripeWith({}) }), /either platformStripeKey or stripe/);
+  });
+});
+
+describe("readConnectedPayouts (#91: この口座への入金)", () => {
+  const ACCOUNT = "acct_SampleSeller0001";
+  /** 2026-11-01T00:00+09:00 and 2026-12-01T00:00+09:00 in Unix seconds. */
+  const FROM = Date.parse("2026-10-31T15:00:00.000Z") / 1000;
+  const TO = Date.parse("2026-11-30T15:00:00.000Z") / 1000;
+  const at = (utc: string) => Date.parse(utc) / 1000;
+  const BALANCE = {
+    object: "balance", livemode: false,
+    available: [{ amount: 12_000, currency: "jpy", source_types: { card: 12_000 } }],
+    pending: [{ amount: 8_000, currency: "jpy", source_types: { card: 8_000 } }, { amount: 500, currency: "usd" }],
+    instant_available: [{ amount: 99_999, currency: "jpy" }],
+  };
+  const payout = (id: string, fields: Record<string, unknown>) => ({
+    id, object: "payout", amount: 40_500, currency: "jpy", arrival_date: at("2026-11-05T00:00:00.000Z"), status: "paid", automatic: true,
+    destination: "ba_SampleBank0001", failure_code: null, failure_message: null, statement_descriptor: "SAMPLE", trace_id: null, livemode: false, ...fields,
+  });
+  const PAYOUTS = {
+    object: "list", has_more: false,
+    data: [
+      payout("po_SampleInTransit01", { amount: 20_000, arrival_date: at("2026-12-02T00:00:00.000Z"), status: "in_transit" }),
+      payout("po_SamplePaid000001", {}),
+      payout("po_SampleFailed0001", { amount: 7_000, arrival_date: at("2026-11-19T00:00:00.000Z"), status: "failed", failure_code: "account_closed", failure_message: "The bank account has been closed" }),
+    ],
+  };
+  function stripeWith(answer: { balance?: unknown; payouts?: unknown; error?: unknown } = {}, calls: { what: string; args: unknown[] }[] = []) {
+    return {
+      balance: {
+        retrieve: async (...args: unknown[]) => {
+          calls.push({ what: "balance", args });
+          if (answer.error) throw answer.error;
+          return answer.balance ?? BALANCE;
+        },
+      },
+      payouts: {
+        list: async (...args: unknown[]) => {
+          calls.push({ what: "payouts", args });
+          if (answer.error) throw answer.error;
+          return answer.payouts ?? PAYOUTS;
+        },
+      },
+    } as unknown as ConnectedPayoutsStripeClient;
+  }
+  function stripeError(type: string, code?: string): Error {
+    return Object.assign(new Error("synthetic Stripe error naming acct_SampleSeller0001"), { type, code, raw: { message: "raw" } });
+  }
+
+  it("reads the balance and one page of payouts on the account, GETs only, with a short timeout", async () => {
+    const calls: { what: string; args: unknown[] }[] = [];
+    const read = await readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, arrivalBefore: TO, stripe: stripeWith({}, calls) });
+    const options = { stripeAccount: ACCOUNT, timeout: 5_000, maxNetworkRetries: 1 };
+    assert.deepEqual(calls, [
+      { what: "balance", args: [{}, options] },
+      { what: "payouts", args: [{ arrival_date: { gte: FROM, lt: TO }, limit: 100 }, options] },
+    ]);
+    assert.deepEqual(read, {
+      kind: "read",
+      balance: [{ currency: "JPY", available: 12_000, pending: 8_000 }, { currency: "USD", available: 0, pending: 500 }],
+      payouts: [
+        { key: read.kind === "read" ? read.payouts[0]!.key : "", amount: 20_000, currency: "JPY", arrivalDateUtc: "2026-12-02T00:00:00.000Z", status: "IN_TRANSIT" },
+        { key: read.kind === "read" ? read.payouts[1]!.key : "", amount: 7_000, currency: "JPY", arrivalDateUtc: "2026-11-19T00:00:00.000Z", status: "FAILED" },
+        { key: read.kind === "read" ? read.payouts[2]!.key : "", amount: 40_500, currency: "JPY", arrivalDateUtc: "2026-11-05T00:00:00.000Z", status: "PAID" },
+      ],
+      more: false,
+    });
+    assert.ok(read.kind === "read" && read.payouts.every(({ key }) => /^[0-9a-f]{16}$/.test(key)));
+    // No Stripe ID, bank, descriptor or failure text leaves the package.
+    const text = JSON.stringify(read);
+    for (const raw of ["po_", "acct_", "ba_", "SAMPLE", "account_closed", "closed", "99999"]) assert.equal(text.includes(raw), false, raw);
+  });
+
+  it("reads payouts still on their way without an end, and says when Stripe has more than a page", async () => {
+    const calls: { what: string; args: unknown[] }[] = [];
+    const read = await readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, timeoutMs: 2_000, stripe: stripeWith({ payouts: { ...PAYOUTS, has_more: true } }, calls) });
+    assert.deepEqual(calls[1]!.args, [{ arrival_date: { gte: FROM }, limit: 100 }, { stripeAccount: ACCOUNT, timeout: 2_000, maxNetworkRetries: 1 }]);
+    assert.equal(read.kind === "read" && read.more, true);
+    const negative = await readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, stripe: stripeWith({ payouts: { data: [payout("po_SampleDebit00001", { amount: -3_000, status: "pending" })], has_more: false } }) });
+    assert.deepEqual(negative.kind === "read" && negative.payouts.map(({ amount, status }) => ({ amount, status })), [{ amount: -3_000, status: "PENDING" }]);
+  });
+
+  it("answers unreachable when Stripe will not show the account to this platform, and throws on other failures", async () => {
+    const read = (error: unknown) => readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, stripe: stripeWith({ error }) });
+    assert.deepEqual(await read(stripeError("StripePermissionError")), { kind: "unreachable" });
+    assert.deepEqual(await read(stripeError("StripeInvalidRequestError", "account_invalid")), { kind: "unreachable" });
+    assert.deepEqual(await read(stripeError("StripeInvalidRequestError", "resource_missing")), { kind: "unreachable" });
+    await assert.rejects(read(stripeError("StripeConnectionError")), /synthetic Stripe error/);
+    await assert.rejects(read(stripeError("StripeAPIError")), /synthetic Stripe error/);
+  });
+
+  it("refuses an answer it does not understand instead of showing part of it", async () => {
+    const read = (answer: { balance?: unknown; payouts?: unknown }) => readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, stripe: stripeWith(answer) });
+    await assert.rejects(read({ payouts: { data: [payout("po_SampleOdd000001", { status: "reversed" })] } }), /status this package does not know/);
+    await assert.rejects(read({ payouts: { data: [payout("po_SampleOdd000001", { amount: 1.5 })] } }), /whole number/);
+    await assert.rejects(read({ payouts: { data: [payout("po_SampleOdd000001", { arrival_date: null })] } }), /arrival date/);
+    await assert.rejects(read({ payouts: { data: [payout("tr_SampleOdd000001", {})] } }), /other than a payout/);
+    await assert.rejects(read({ balance: { available: [{ amount: 1, currency: "yen!" }], pending: [] } }), /unknown currency/);
+  });
+
+  it("checks its input before calling Stripe, and needs exactly one of key or client", async () => {
+    const calls: { what: string; args: unknown[] }[] = [];
+    const stripe = stripeWith({}, calls);
+    await assert.rejects(readConnectedPayouts({ accountId: "cus_Sample0001", arrivalFrom: FROM, stripe }), ExperiencePaymentsValidationError);
+    await assert.rejects(readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: -1, stripe }), /arrival window/);
+    await assert.rejects(readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: TO, arrivalBefore: FROM, stripe }), /arrival window/);
+    await assert.rejects(readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, timeoutMs: 60_000, stripe }), /timeoutMs/);
+    assert.deepEqual(calls, []);
+    await assert.rejects(readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM }), /platform Stripe key/);
+    await assert.rejects(readConnectedPayouts({ accountId: ACCOUNT, arrivalFrom: FROM, platformStripeKey: "sk_test_synthetic", stripe }), /either platformStripeKey or stripe/);
   });
 });

@@ -19,6 +19,8 @@ export const HOST_SALES_LIMITS = {
   windowDays: 92,
   /** More entries than this in one window is not a page the screen reads: the read fails instead of cutting it. */
   entries: 5000,
+  /** More Stripe accounts than this for one provider is not a provider 売上 is for: the read fails instead. */
+  payoutAccounts: 5,
 } as const;
 
 export type HostSaleEntryKind = "PAYMENT" | "REFUND" | "REFUND_REVERSAL" | "ADJUSTMENT";
@@ -149,6 +151,41 @@ export async function selectSales(client: PoolClient, providerId: string, window
   );
   const firstRow = first.rows[0];
   return { entries: rows.rows.map(saleEntryFromRow), firstEntryAtUtc: firstRow?.first_at === null || firstRow?.first_at === undefined ? null : isoValue(firstRow, "first_at") };
+}
+
+/* ---------- the accounts the money goes to (この口座への入金) ---------- */
+
+const CONNECTED_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,}$/;
+
+/**
+ * The Stripe connected accounts of the provider's sales here: the accounts of its products sold on this site (those
+ * with sale terms) and of its guest bookings' seller snapshots (where the money went, even after a product stopped
+ * selling here), sorted. A reference that is not an account ID (a synthetic one) is left out.
+ */
+const SELECT_PAYOUT_ACCOUNTS = `
+  SELECT account FROM (
+    SELECT p.stripe_connect_account_ref AS account
+      FROM experience_products p
+      JOIN experience_product_sale_terms t ON t.provider_id = p.provider_id AND t.product_id = p.id
+     WHERE p.provider_id = $1
+    UNION
+    SELECT b.seller_snapshot->>'stripeConnectAccountRef'
+      FROM bookings b
+      JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+     WHERE b.provider_id = $1
+  ) a
+   WHERE account ~ '^acct_[A-Za-z0-9]{8,}$'
+   ORDER BY account
+   LIMIT $2`;
+
+export async function selectPayoutAccounts(client: PoolClient, providerId: string): Promise<string[]> {
+  const rows = await client.query<DbRow>(SELECT_PAYOUT_ACCOUNTS, [providerId, HOST_SALES_LIMITS.payoutAccounts + 1]);
+  if (rows.rows.length > HOST_SALES_LIMITS.payoutAccounts) throw new StoreError("The provider has more Stripe accounts than one read takes.");
+  return rows.rows.map((row) => {
+    const account = text(row.account, "account");
+    if (!CONNECTED_ACCOUNT_ID.test(account)) throw new StoreError("Database returned an invalid account.");
+    return account;
+  });
 }
 
 /* ---------- NIHO's fee ---------- */

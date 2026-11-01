@@ -89,8 +89,11 @@ export function sessionKey(booking: Pick<HostBooking, "date" | "start" | "experi
 
 const byKey = (a: { key: string }, b: { key: string }) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 
+/** What the list needs of a booking: this site's or the preview's (HostBooking), or NIHO's beside them (#84). */
+export type BookingListItem = Pick<HostBooking, "id" | "experienceId" | "offerId" | "date" | "start" | "end" | "guests" | "status">;
+
 /** Every session that has a booking, in date and time order, with the seats its 承認待ち and 確定 bookings keep. */
-export function bookingSessions(bookings: readonly HostBooking[], experiences: readonly BookingExperience[]): BookingSession[] {
+export function bookingSessions(bookings: readonly BookingListItem[], experiences: readonly BookingExperience[]): BookingSession[] {
   const sessions = new Map<string, BookingSession>();
   for (const booking of bookings) {
     const key = sessionKey(booking);
@@ -127,14 +130,14 @@ export function seatsLabel(session: Pick<BookingSession, "guests" | "capacity">)
 }
 
 /** A heading of the list and the bookings under it. The heading opens the session (この回, #107). */
-export interface BookingGroup extends SessionQuery {
+export interface BookingGroup<T extends BookingListItem = HostBooking> extends SessionQuery {
   key: string;
   /** "10月22日（木）18:00" */
   label: string;
   title: string;
   /** "4 / 8名": every 承認待ち and 確定 booking of the session, whatever the filter shows. */
   seats: string;
-  bookings: HostBooking[];
+  bookings: T[];
 }
 
 export interface BookingListQuery {
@@ -147,9 +150,9 @@ export interface BookingListQuery {
  * The list: the bookings the filter and the experience select let through, under one heading
  * per session. これから and 承認待ち start from the nearest day, 過去 and 取消済み from the latest.
  */
-export function bookingGroups(bookings: readonly HostBooking[], experiences: readonly BookingExperience[], query: BookingListQuery, today: string): BookingGroup[] {
+export function bookingGroups<T extends BookingListItem>(bookings: readonly T[], experiences: readonly BookingExperience[], query: BookingListQuery, today: string): BookingGroup<T>[] {
   const sessions = new Map(bookingSessions(bookings, experiences).map((session) => [session.key, session]));
-  const groups = new Map<string, BookingGroup>();
+  const groups = new Map<string, BookingGroup<T>>();
   for (const booking of bookings) {
     if (query.experienceId && booking.experienceId !== query.experienceId) continue;
     if (!matchesBookingFilter(booking, query.filter, today)) continue;
@@ -379,15 +382,73 @@ const CANCELLATION_POLICY_LABELS: Record<NonNullable<HostSiteBookingTerms["cance
   NONE: "無料取消なし",
 };
 
-/** 手数料 of a booking made on this site: "¥1,000（10%・サポートOFF）". */
-export function siteFeeLabel(fee: NonNullable<HostSiteBookingTerms["fee"]>): string {
-  return `${yen(fee.amountYen)}（${fee.percent}%・サポート${fee.supportEnabled ? "ON" : "OFF"}）`;
+/**
+ * 料金・精算状況 of a booking made on this site (#285, docs/fee-summary.md「このサイトで受けた予約」): what the guest
+ * paid, NIHO's fee and what the host receives, as fixed at booking, then what the refunds changed. Stripe gives
+ * NIHO's fee back in proportion to what was refunded (refund_application_fee, owner decision 2026-10-31), so the
+ * fee only ever counts on what the guest kept paying.
+ */
+export interface SiteFeeBreakdown {
+  supportEnabled: boolean;
+  /** NIHO's rate at booking, payment fees included: 10 (support off) or 15 (on). */
+  percent: number;
+  /** What the guest paid. */
+  totalYen: number;
+  /** NIHO's fee at booking. */
+  feeYen: number;
+  /** What the host receives at booking: the total less NIHO's fee. */
+  payoutYen: number;
+  /** Refunded (Stripe finished), and on its way. */
+  refundedYen: number;
+  refundPendingYen: number;
+  /** NIHO's fee given back with the refunded part. */
+  feeReturnedYen: number;
+  /** A partial refund's share of the fee is worked out here and may differ from Stripe's by ¥1. */
+  feeEstimated: boolean;
+  /** After the finished refunds: NIHO's fee, and what the host keeps. */
+  netFeeYen: number;
+  netPayoutYen: number;
+}
+
+/**
+ * round(fee × refunded ÷ paid), half up, without losing digits: the part of NIHO's fee a refund gives back. The
+ * same rule as 売上's ledger (refundedFeeShare in the experience store's host-sales.ts).
+ */
+export function refundedFeeShareYen(feeYen: number, refundedYen: number, paidYen: number): number {
+  if (paidYen <= 0) return 0;
+  const refunded = Math.min(Math.max(refundedYen, 0), paidYen);
+  return Number((2n * BigInt(feeYen) * BigInt(refunded) + BigInt(paidYen)) / (2n * BigInt(paidYen)));
+}
+
+/** The breakdown of a booking made on this site; null for NIHO's bookings and for a booking with no fee recorded. */
+export function siteFeeBreakdown(booking: Pick<HostBooking, "amountYen" | "site">): SiteFeeBreakdown | null {
+  const site = booking.site;
+  if (!site?.fee) return null;
+  const totalYen = booking.amountYen;
+  const feeYen = site.fee.amountYen;
+  const refundedYen = site.cancellation?.refundedYen ?? 0;
+  const refundPendingYen = site.cancellation?.refundPendingYen ?? 0;
+  const feeReturnedYen = refundedFeeShareYen(feeYen, refundedYen, totalYen);
+  const netFeeYen = feeYen - feeReturnedYen;
+  return {
+    supportEnabled: site.fee.supportEnabled,
+    percent: site.fee.percent,
+    totalYen,
+    feeYen,
+    payoutYen: site.payoutYen,
+    refundedYen,
+    refundPendingYen,
+    feeReturnedYen,
+    feeEstimated: refundedYen > 0 && refundedYen < totalYen,
+    netFeeYen,
+    netPayoutYen: totalYen - Math.min(refundedYen, totalYen) - netFeeYen,
+  };
 }
 
 /**
  * 申込内容: what the guest booked and wrote (never their email: NIHO keeps it). Rows with nothing to show are left out.
- * A booking made on this site (#285) adds NIHO's fee, what the host receives and the cancellation policy it was
- * made under; its offer is the experience itself, so 商品 is left out.
+ * A booking made on this site (#285) adds the cancellation policy it was made under (its fee and what the host
+ * receives are 料金・精算状況, siteFeeBreakdown); its offer is the experience itself, so 商品 is left out.
  */
 export function bookingRequestRows(booking: HostBooking, experienceTitle: string): BookingRow[] {
   const site = booking.site;
@@ -397,8 +458,6 @@ export function bookingRequestRows(booking: HostBooking, experienceTitle: string
     { label: "人数", value: peopleLabel(booking) },
     { label: "金額", value: yen(booking.amountYen) },
     { label: "内訳", value: priceBreakdown(booking) },
-    site?.fee && { label: "手数料", value: siteFeeLabel(site.fee) },
-    site && { label: "受取額", value: yen(site.payoutYen) },
     { label: "言語", value: guestLanguageLabel(booking.language) },
     { label: "申込経路", value: booking.channel },
     site?.cancellationPolicy && { label: "取消条件", value: CANCELLATION_POLICY_LABELS[site.cancellationPolicy] },
