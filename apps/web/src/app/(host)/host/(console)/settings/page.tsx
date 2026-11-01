@@ -10,6 +10,7 @@ import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel
 import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsPanel";
 import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
+import { loadHostCalendar } from "@/host/calendar-server";
 import { hostPageContext, loadHostConsoleData, loadHostPayout } from "@/host/data";
 import { config } from "@/lib/config";
 import { HOST_LOGOUT_PATH } from "@/lib/host/routes";
@@ -38,7 +39,12 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   if (!provider) return <HostRegisterPrompt title="設定" />;
   // Stripe's way back belongs to the provider it names, never to the one shown in its place.
   const connect = providerNotFound ? null : connectStep(query.connect);
-  const [{ settings, googleConnection }, payout] = await Promise.all([loadHostConsoleData(provider, { notifications: true, meetingPoint: true }), loadHostPayout(provider, { connect })]);
+  const [{ settings, googleConnection }, payout, liveCalendar] = await Promise.all([
+    loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
+    loadHostPayout(provider, { connect }),
+    // カレンダー in http mode (#109): the OWNER's Google connection and bookings feed.
+    isHostMock() ? null : loadHostCalendar(provider, session.nihoUserId, { feed: true }),
+  ]);
   if (payout.redirectTo) redirect(payout.redirectTo);
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
 
@@ -90,6 +96,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         payout={payout.load}
         connectNotice={payout.notice}
         googleConnection={googleConnection}
+        liveCalendar={liveCalendar}
         preview={isHostMock()}
         account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />

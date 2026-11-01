@@ -66,7 +66,7 @@ export interface HostConsoleData {
   home: HostHomeData;
   experiences: readonly HostExperience[];
   settings: HostSettings;
-  /** The Google account 設定 › カレンダー's つなぐ connects in the preview; null in http mode (not connectable yet). */
+  /** The Google account 設定 › カレンダー's つなぐ connects in the preview; null in http mode (Google's own consent page, calendar-server.ts). */
   googleConnection: HostGoogleConnection | null;
 }
 

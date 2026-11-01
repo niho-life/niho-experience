@@ -8,8 +8,10 @@ import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { consoleButtonClass, HOST_SURFACE, LIST_ROW, LIST_ROW_DETAIL, LIST_ROW_TITLE } from "@/components/host/host-ui";
 import { HostPageBody, MoreLink, PageHead, SectionTitle } from "@/components/host/ui";
 import { homeCalendarPrompt, type HomeCalendarPrompt } from "@/host/calendar";
+import { loadHostCalendar } from "@/host/calendar-server";
 import { hostPageContext, loadHostConsoleData } from "@/host/data";
-import { homeBadgeCount, type HomeUpcoming } from "@/host/home";
+import { homeBadgeCount, homeTodosFailedText, type HomeUpcoming } from "@/host/home";
+import { loadHomeTodos } from "@/host/home-server";
 import { SITE_SALES_HOME_LOAD_FAILED_TEXT } from "@/host/site-sales";
 import { loadSiteHomeMonth } from "@/host/site-sales-server";
 import { SITE_HOME_LOAD_FAILED_TEXT, withSiteHome } from "@/host/site-sessions";
@@ -111,6 +113,10 @@ function CalendarPromptCard({ prompt, href }: { prompt: HomeCalendarPrompt; href
  *
  * With HOST_SALES_LEDGER_ENABLED (http mode), the month card is the OWNER's sales of bookings made on this site this
  * month in Japan (#91), read from the experience DB's ledger as 売上 reads it, and says whose they are.
+ *
+ * In http mode 次にすること also lists, after this site's payments under review, the threads and reviews waiting for the
+ * OWNER and NIHO's drafts and listings under review (home-server.ts; one line says which could not be read), and the
+ * calendar's card follows the experience DB's Google connection for the OWNER where Google's sign-in is configured.
  */
 export default async function HostHomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -123,16 +129,20 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   if (!provider) {
     return <HostRegisterPrompt title="ホーム" />;
   }
-  const [{ home: consoleHome, settings }, site, siteMonth] = await Promise.all([
+  const [{ home: consoleHome, settings }, site, siteMonth, live, liveCalendar] = await Promise.all([
     loadHostConsoleData(provider),
     loadSiteHome(provider, context.session.nihoUserId, providerOperationsEnabled()),
     loadSiteHomeMonth(provider, context.session),
+    loadHomeTodos(provider, context.session),
+    loadHostCalendar(provider, context.session.nihoUserId, { feed: false }),
   ]);
-  const home = site.status === "live" ? withSiteHome(consoleHome, site) : consoleHome;
+  const withSite = site.status === "live" ? withSiteHome(consoleHome, site) : consoleHome;
+  // This site's payments under review first, then what the OWNER reads in http mode (the preview has none of it).
+  const home = live.todos.length ? { ...withSite, todos: [...(site.status === "live" ? site.todos : []), ...live.todos, ...consoleHome.todos] } : withSite;
   const month = siteMonth.status === "live" ? siteMonth.month : siteMonth.status === "error" ? null : home.month;
   const link = (path: string) => withProvider(path, linkProviderId);
-  // Only where it can be connected: the preview (http mode waits for NIHO's Google connection, #87).
-  const calendarPrompt = homeCalendarPrompt(settings.calendar, isHostMock());
+  // Only where it can be connected: the preview's synthetic calendar, or the OWNER's in http mode.
+  const calendarPrompt = isHostMock() ? homeCalendarPrompt(settings.calendar.google) : liveCalendar.status === "live" ? homeCalendarPrompt(liveCalendar.google) : null;
   // これからの開催 starts after the days shown above it.
   const upcoming = home.sessions.later;
   const soon = home.sessions.today.length + home.sessions.tomorrow.length > 0;
@@ -148,6 +158,11 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
       {site.status === "error" ? (
         <p role="alert" className="mb-3.5 rounded-2xl border border-warn/20 bg-warn-pale px-4 py-3 text-warn">
           {SITE_HOME_LOAD_FAILED_TEXT}
+        </p>
+      ) : null}
+      {live.failed.length ? (
+        <p role="alert" className="mb-3.5 rounded-2xl border border-warn/20 bg-warn-pale px-4 py-3 text-warn">
+          {homeTodosFailedText(live.failed)}
         </p>
       ) : null}
 

@@ -46,6 +46,7 @@ export interface HostConsoleSnapshot {
 }
 
 const NO_MEETING_POINT: HostMeetingDefaults = { overview: "", address: "", accessNote: "", mapUrl: "", entranceNote: "" };
+/** http mode keeps no calendar here: 設定 and ホーム read the experience DB's (calendar-server.ts, HostCalendarLoad). */
 const NO_CALENDAR: HostCalendarSettings = { google: GOOGLE_NOT_CONNECTED, icsUrl: null };
 /** NIHO lists every notification as it starts it (notifications.ts fills them in). */
 const NO_NOTIFICATIONS: HostNotificationSettings = { email: { addresses: [] }, items: [] };
@@ -64,9 +65,9 @@ function withScenario(calendar: HostCalendarSettings, scenario: HostMockScenario
 export function hostConsoleSnapshot(providerId: string, mode: HostDataMode, now: number, scenario: HostMockScenario = "default"): HostConsoleSnapshot {
   const mock = mode === "mock" ? MOCK_CONSOLE_PROVIDERS.get(providerId) : undefined;
   if (mock) return { today: MOCK_TODAY, now: MOCK_NOW, salesPeriod: MOCK_SALES_PERIOD, ...mock, calendar: withScenario(mock.calendar, scenario) };
-  // TODO(#87): experiences, bookings, messages, reviews, sales, the calendar (niho-app#19316/#19317)
-  // and the notification settings (#19315) are not in the host contract yet. The payout account and
-  // the meeting defaults are: data.ts reads them from NIHO.
+  // TODO(#87): experiences, bookings, messages, reviews and sales are not in the host contract yet. The payout
+  // account and the meeting defaults are: data.ts reads them from NIHO. The calendar (calendar-server.ts), the
+  // notification settings and this site's bookings, messages and reviews are read from the experience DB instead.
   const today = mode === "mock" ? MOCK_TODAY : todayInJapan(now);
   return {
     today,
@@ -84,11 +85,10 @@ export function hostConsoleSnapshot(providerId: string, mode: HostDataMode, now:
 }
 
 /**
- * The Google account the preview's つなぐ connects (synthetic); null in http mode, where connecting
- * waits for NIHO's Google sign-in (niho-app#19317).
+ * The Google account the preview's つなぐ connects (synthetic); null in http mode, where つなぐ goes to Google's own
+ * consent page (/host/calendar/google/connect) and the connection is kept in the experience DB.
  */
 export function googleConnectionPreview(mode: HostDataMode): HostGoogleConnection | null {
-  // TODO(#87): NIHO's Google connection opens Google's consent page and comes back with the calendars.
   return mode === "mock" ? MOCK_GOOGLE_CONNECTION : null;
 }
 
