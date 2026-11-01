@@ -7,6 +7,7 @@ import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { consoleButtonClass, HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead, StatusPill } from "@/components/host/ui";
 import { hostPageContext, loadHostConsoleData, loadHostReviews } from "@/host/data";
+import { loadExperienceRatings } from "@/host/experience-ratings-server";
 import { experienceMeta } from "@/host/format";
 import { experiencePath } from "@/host/home";
 import { experienceRating, reviewsHref } from "@/host/reviews";
@@ -24,14 +25,17 @@ const THUMB = "h-12 w-16 shrink-0 rounded-[10px] bg-sand md:h-[72px] md:w-24";
  * 体験 (mock v2): every experience page of the provider with its one listing state and, once it
  * has published reviews, their average and count, which open レビュー for that experience (#108).
  * The row opens the editor through its title (its link covers the row); the reviews link sits on
- * top of it, never inside it.
+ * top of it, never inside it. With provider operations on, the list is NIHO's pages (HostLiveExperiences) in the same
+ * rows, with the ★ of the reviews kept in the experience DB for the OWNER (experience-ratings-server.ts).
  */
 export default async function HostExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const context = await hostPageContext(await searchParams);
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
-  if (providerOperationsEnabled()) return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} />;
+  if (providerOperationsEnabled()) {
+    return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider, context.session.nihoUserId)} />;
+  }
   const { experiences } = await loadHostConsoleData(provider);
   const reviews = loadHostReviews(provider).list;
   const ratingOf = (id: string) => (reviews.status === "ready" ? experienceRating(reviews.reviews, id) : null);

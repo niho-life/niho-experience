@@ -2,10 +2,11 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 // 設定 › カレンダー and 通知 (#109) on synthetic data. Runs against the second server
-// (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts). Neither is in NIHO's host API
-// yet: the preview connects a synthetic Google account and keeps every change on screen only, so
-// nothing is sent and a reload starts from the synthetic data again. http mode's 準備中 is checked
-// by the unit tests (calendar.test.ts, notifications.test.ts).
+// (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts). The preview connects a synthetic
+// Google account and keeps every change on screen only, so nothing is sent and a reload starts from
+// the synthetic data again. http mode's panel (the experience DB's Google connection and bookings
+// feed) and 通知's 準備中 are checked by the unit tests (HostCalendarPanel.test.ts, calendar-server.test.ts,
+// notifications.test.ts).
 
 const isDesktop = (projectName: string) => projectName === "host-desktop";
 const calendarPanel = (page: Page) => page.getByRole("region", { name: "カレンダー" });
@@ -181,6 +182,17 @@ test("ほかのカレンダーで見る: the feed's address is copied, and a new
   await calendar.getByRole("button", { name: "URL をコピー" }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await url.inputValue());
   expect(sent).toEqual([]);
+});
+
+test("the bookings feed's address answers nothing in the preview, privately", async ({ request }) => {
+  // http mode serves it from the experience DB (EXPERIENCE_HOST_CALENDAR_FEED_ENABLED); the preview has no feed.
+  const response = await request.get(`/host/calendar/feed/${"A".repeat(43)}/bookings.ics`);
+  expect(response.status()).toBe(404);
+  expect(await response.text()).toBe("");
+  const headers = response.headers();
+  expect(headers["cache-control"]).toContain("no-store");
+  expect(headers["x-robots-tag"]).toBe("noindex, nofollow, noarchive");
+  expect(headers["referrer-policy"]).toBe("no-referrer");
 });
 
 test("通知: NIHO's seven notifications in its order; the three the owner may stop are kept by 保存", async ({ page }) => {

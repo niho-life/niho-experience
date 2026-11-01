@@ -96,6 +96,12 @@ export const FLAGS = Object.freeze([
     secrets: [{ env: "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", variable: "STRIPE_PLATFORM_SECRET_KEY_REF", stg: "STRIPE_CONNECT_PLATFORM_SECRET_KEY" }],
   },
   { env: "HOST_NOTIFICATION_SETTINGS_ENABLED", variable: "HOST_NOTIFICATION_SETTINGS_ENABLED", needs: ["HOST_CONSOLE", "DATABASE"] },
+  {
+    env: "EXPERIENCE_HOST_CALENDAR_FEED_ENABLED",
+    variable: "HOST_CALENDAR_FEED_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE"],
+    secrets: [{ env: "EXPERIENCE_CALENDAR_FEED_KEY", variable: "CALENDAR_FEED_KEY_REF", stg: "experience-stg-calendar-feed-key" }],
+  },
   { env: "HOST_PWA_ENABLED", variable: "HOST_PWA_ENABLED", defaults: { stg: true }, needs: ["HOST_CONSOLE"] },
   {
     env: "HOST_PUSH_ENABLED",

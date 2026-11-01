@@ -70,6 +70,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   HOST_SALES_LEDGER_ENABLED: "hostSalesLedgerEnabled",
   HOST_SALES_PAYOUTS_ENABLED: "hostSalesPayoutsEnabled",
   HOST_NOTIFICATION_SETTINGS_ENABLED: "hostNotificationSettingsEnabled",
+  EXPERIENCE_HOST_CALENDAR_FEED_ENABLED: "hostCalendarFeedEnabled",
   HOST_PWA_ENABLED: "hostPwaEnabled",
   HOST_PUSH_ENABLED: "hostPushEnabled",
   EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED: "googleBusySyncEnabled",
@@ -118,7 +119,7 @@ const BASE = {
 };
 
 /** What Secret Manager would give, where resolve-config checks its shape. */
-const SECRET_VALUE: Record<string, string> = { EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587", HOST_PUSH_VAPID_PRIVATE_KEY: "A".repeat(43) };
+const SECRET_VALUE: Record<string, string> = { EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587", HOST_PUSH_VAPID_PRIVATE_KEY: "A".repeat(43), EXPERIENCE_CALENDAR_FEED_KEY: `${"A".repeat(43)}=` };
 
 /** The revision's environment: the base, the table's values, and a synthetic value for each Secret reference. */
 function revision(target: Target, resolved: Resolved): Record<string, string> {

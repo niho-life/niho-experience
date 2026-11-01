@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostNotificationAddresses, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -80,6 +80,16 @@ export function providerNotificationSettings(): ProviderNotificationSettings | n
 }
 
 /**
+ * 設定 › カレンダー (#109): the Google connection's state, the bookings feed (its own flag, checked where it is used) and
+ * the experiences' paths for 体験の一覧. null in mock mode and without the experience DB.
+ */
+export function hostCalendarSettings(): HostCalendarSettings | null {
+  if (config.apiMode !== "http") return null;
+  const pool = experiencePool();
+  return pool ? new HostCalendarSettings(pool) : null;
+}
+
+/**
  * ホストへのメールの宛先 (#194): the sign-in's verified address and the host's choice in 設定 › 通知. null until its flag
  * (EXPERIENCE_HOST_MAIL_ENABLED) is on and the experience DB is configured.
  */
@@ -101,6 +111,13 @@ export function guestReviewRepository(): GuestReviewRepository | null {
   if (!config.guestReviewsEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestReviewRepository(pool) : null;
+}
+
+/** 体験の一覧's ★ (#108): every shown review counted by experience, behind レビュー's flag and the experience DB. */
+export function guestReviewRatings(): GuestReviewRatings | null {
+  if (!config.guestReviewsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestReviewRatings(pool) : null;
 }
 
 /** 旅行者の予約 (#285, docs/guest-booking.md): null until its flag is on and the experience DB is configured. */

@@ -1,3 +1,4 @@
+import { monthDayJa } from "./format";
 import type { StatusLabel } from "./status";
 import type { HostBusyCalendar, HostCalendarSettings, HostGoogleCalendar, HostGoogleCalendarStatus, HostGoogleConnection } from "./types";
 
@@ -20,6 +21,18 @@ export const CALENDAR_WRITE_LABEL = "確定した予約をカレンダーに書�
 export const CALENDAR_WRITE_DETAIL = "人数と食べものの希望を予定のメモに入れます。予約者の連絡先は入れません";
 export const CALENDAR_ICS_TEXT = "Apple・Outlook などに予約の一覧を表示します";
 
+export const CALENDAR_LOAD_FAILED_TEXT = "カレンダーの設定を読み込めませんでした。時間をおいて、もう一度お試しください。";
+export const GOOGLE_DISCONNECTED_TEXT = "Google カレンダーの接続を切りました。予約はそのままです";
+export const GOOGLE_DISCONNECT_FAILED_TEXT = "接続を切れませんでした。時間をおいて、もう一度お試しください。";
+/** 空きの確認 while the busy reads fail: the experience site closes new bookings until one succeeds (#238). */
+export const GOOGLE_SYNC_FAILING_TEXT = "Google の予定を読めていません。読めるまで、新しい予約を止めています";
+export const CALENDAR_FEED_ISSUED_TEXT = "URL を作りました";
+export const CALENDAR_FEED_RENEWED_TEXT = "URL を作り直しました。登録したカレンダーで、新しい URL を登録し直してください";
+export const CALENDAR_FEED_REVOKED_TEXT = "URL を止めました。登録したカレンダーには予約が届かなくなります";
+export const CALENDAR_FEED_ISSUE_FAILED_TEXT = "URL を作れませんでした。時間をおいて、もう一度お試しください。";
+export const CALENDAR_FEED_REVOKE_FAILED_TEXT = "URL を止められませんでした。時間をおいて、もう一度お試しください。";
+export const CALENDAR_FEED_OWNER_ONLY_TEXT = "カレンダーの URL はオーナーが作れます";
+
 /** A Google sign-in that has not happened: nothing chosen, NIHO's defaults for when it does. */
 export const GOOGLE_NOT_CONNECTED: HostGoogleCalendar = { status: "disconnected", account: null, busyCalendars: [], blockBusy: true, writeBookings: true, writeCalendarId: null };
 
@@ -39,10 +52,8 @@ export function googleCalendarView(google: HostGoogleCalendar): GoogleCalendarVi
   return { status, text: "つなぐと、予定がある時間は予約を受け付けません", connect: "つなぐ", settings: false };
 }
 
-/** What カレンダー lets the host press. */
+/** What the preview's カレンダー lets the host press. */
 export interface CalendarPanelControls {
-  /** The pill beside カレンダー: http mode shows the panel as 準備中. */
-  preparing: boolean;
   /** つなぐ / もう一度つなぐ. */
   connect: boolean;
   /** The switches, the calendars, 接続を切る and URL を作り直す. */
@@ -52,11 +63,11 @@ export interface CalendarPanelControls {
 }
 
 /**
- * Everything works in the preview (on screen only, with its synthetic Google account); http mode has
- * nothing to press until NIHO's Google connection and ICS feed are in the host contract (#87).
+ * Everything works in the preview (on screen only, with its synthetic Google account). http mode has its own panel
+ * (HostLiveCalendarPanel: the experience DB's Google connection and bookings feed, HostCalendarLoad).
  */
 export function calendarPanelControls(calendar: HostCalendarSettings, preview: boolean, connection: HostGoogleConnection | null): CalendarPanelControls {
-  return { preparing: !preview, connect: preview && connection !== null, change: preview, copy: calendar.icsUrl !== null };
+  return { connect: preview && connection !== null, change: preview, copy: calendar.icsUrl !== null };
 }
 
 /** The calendars bookings can be written to (Google's own subscriptions, such as holidays, cannot). */
@@ -123,9 +134,9 @@ export function applyCalendarChange(calendar: HostCalendarSettings, change: Cale
     }
     case "disconnect":
       if (google.status === "disconnected") return unchanged(calendar);
-      return withGoogle(GOOGLE_NOT_CONNECTED, "Google カレンダーの接続を切りました。予約はそのままです");
+      return withGoogle(GOOGLE_NOT_CONNECTED, GOOGLE_DISCONNECTED_TEXT);
     case "new-ics":
-      return { calendar: { ...calendar, icsUrl: change.url }, message: "URL を作り直しました。登録したカレンダーで、新しい URL を登録し直してください" };
+      return { calendar: { ...calendar, icsUrl: change.url }, message: CALENDAR_FEED_RENEWED_TEXT };
     case "block":
       if (!connected) return unchanged(calendar);
       return withGoogle({ ...google, blockBusy: change.on }, change.on ? "予定がある時間は予約を受け付けません" : "予定がある時間も予約を受け付けます");
@@ -149,7 +160,7 @@ export function applyCalendarChange(calendar: HostCalendarSettings, change: Cale
 
 /**
  * The bookings feed at a new address (the preview's URL を作り直す): the same address with `token`
- * in place of the secret part before `bookings.ics`. NIHO makes the real one (niho-app#19316).
+ * in place of the secret part before `bookings.ics`. http mode's is made on the server (calendar-server.ts).
  */
 export function renewIcsUrl(url: string, token: string): string {
   return url.replace(/\/[^/]+\/bookings\.ics$/, `/${token}/bookings.ics`);
@@ -163,12 +174,55 @@ export interface HomeCalendarPrompt {
 }
 
 /**
- * The card on ホーム, or null: only while the calendar is not connected, and only where the host
- * can connect it (the preview; http mode cannot until NIHO's API is in the host contract).
+ * The card on ホーム, or null: only while the calendar is not connected (or lost its access), and only where the
+ * host can connect it. `google` is null where it cannot: http mode for anyone but the OWNER, or without Google's
+ * sign-in configured (HostCalendarLoad).
  */
-export function homeCalendarPrompt(calendar: HostCalendarSettings, preview: boolean): HomeCalendarPrompt | null {
-  if (!preview) return null;
-  if (calendar.google.status === "revoked") return { title: "Google カレンダーの接続が切れました", text: "もう一度つなぐまで、予定の確認と書き込みを止めています", action: "もう一度つなぐ" };
-  if (calendar.google.status === "disconnected") return { title: "Google カレンダーをつなぐ", text: "予定がある時間は予約を受け付けません", action: "つなぐ" };
+export function homeCalendarPrompt(google: HostGoogleCalendar | null): HomeCalendarPrompt | null {
+  if (google?.status === "revoked") return { title: "Google カレンダーの接続が切れました", text: "もう一度つなぐまで、予定の確認と書き込みを止めています", action: "もう一度つなぐ" };
+  if (google?.status === "disconnected") return { title: "Google カレンダーをつなぐ", text: "予定がある時間は予約を受け付けません", action: "つなぐ" };
   return null;
+}
+
+/** 空きの確認 in http mode: when Google's busy times were last read, and whether reading them keeps failing. */
+export interface HostGoogleSync {
+  /** YYYY-MM-DDTHH:MM in Japan; null before the first read. */
+  lastCheckedAt: string | null;
+  /** The reads fail (not because Google refused the connection: that is `revoked`). */
+  failing: boolean;
+}
+
+/**
+ * 設定 › カレンダー and ホーム's card in http mode (#109), from the experience DB for the provider's OWNER (NIHO's role and
+ * the DB's own membership). Closed keeps today's link to the calendar: the preview, anyone else, or no experience DB.
+ */
+export type HostCalendarLoad =
+  | {
+      status: "live";
+      /** null where Google's sign-in is not configured: nothing to connect, so neither the row nor ホーム's card. */
+      google: HostGoogleCalendar | null;
+      /** While connected only. */
+      googleSync: HostGoogleSync | null;
+      /** ほかのカレンダーで見る: its address (null until the OWNER makes one); null while the feed's flag is off. */
+      feed: { url: string | null } | null;
+    }
+  | { status: "closed" }
+  | { status: "error" };
+
+/** The Google row's sentence in http mode: what a connection does, or what it does now. */
+export function liveGoogleText(google: HostGoogleCalendar): string {
+  if (google.status === "connected") return google.blockBusy ? "予定がある時間は予約を受け付けません" : "予定がある時間も予約を受け付けます";
+  return googleCalendarView(google).text;
+}
+
+/**
+ * 空きの確認's lines in http mode (connected and checking busy times only; none otherwise): what the busy times do, and
+ * when they were last read or that reading them fails.
+ */
+export function liveGoogleSyncLines(google: HostGoogleCalendar, sync: HostGoogleSync | null): { text: string; tone: "muted" | "warn" }[] {
+  if (google.status !== "connected" || !google.blockBusy) return [];
+  const detail = { text: "メインのカレンダーの予定と重なる回は、体験サイトで満席と同じ扱いになります（理由は予約者に出しません）", tone: "muted" as const };
+  if (sync?.failing) return [detail, { text: GOOGLE_SYNC_FAILING_TEXT, tone: "warn" }];
+  const checked = sync?.lastCheckedAt ? `最後に確かめた時刻 ${monthDayJa(sync.lastCheckedAt.slice(0, 10))} ${sync.lastCheckedAt.slice(11, 16)}` : "まだ Google の予定を確かめていません";
+  return [detail, { text: checked, tone: "muted" }];
 }
