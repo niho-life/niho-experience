@@ -222,6 +222,21 @@ function hostSalesPayoutsSetting(apiMode: "mock" | "http", env: Env, hostSalesLe
   return true;
 }
 
+/**
+ * 予約者の情報つきの OTA の予約 (#194, owner decision 2026-11-01): keep the guest details an OTA reader sends with a
+ * reservation, and tell the product's OWNER and operators of new, cancelled and moved ones by push. HTTP only, both off
+ * by default. The details are kept only where the mail job erases them after a year (EXPERIENCE_GUEST_MAIL_ENABLED);
+ * the pushes only where the push job sends them and removes the guest's name (HOST_PUSH_ENABLED). Turned on without
+ * those, the server stops at start-up. Neither opens an OTA read: that stays with the channel runtime's own gates.
+ */
+function otaBookingSettings(apiMode: "mock" | "http", env: Env, guestMailEnabled: boolean, hostPushEnabled: boolean): { guestDetails: boolean; notifications: boolean } {
+  const guestDetails = apiMode === "http" && env.EXPERIENCE_OTA_GUEST_DETAILS_ENABLED === "true";
+  const notifications = apiMode === "http" && env.EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED === "true";
+  if (guestDetails && !guestMailEnabled) throw new Error("EXPERIENCE_OTA_GUEST_DETAILS_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true (the job that erases them) in http mode");
+  if (notifications && !hostPushEnabled) throw new Error("EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED=true needs HOST_PUSH_ENABLED=true in http mode");
+  return { guestDetails, notifications };
+}
+
 /** The terms version a traveler agrees to (consent.agreedVersion, 1-100 characters): printable ASCII without spaces. */
 const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
 
@@ -433,6 +448,8 @@ export function resolveConfig(env: Env) {
   // Scheduler through its own service account. Independent of the two flags above: a payment confirmed after
   // guest booking is turned off still gets its email.
   const guestMail = guestMailSettings(apiMode, env);
+  // OTA の予約 (#194): the guest details an OTA reader sends, and the pushes about them; see otaBookingSettings.
+  const otaBooking = otaBookingSettings(apiMode, env, guestMail.enabled, hostPushEnabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
   const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
   // Translations (#285 slice 5): the guest's Japanese runs in the mail job above; the host's English draft in
@@ -549,6 +566,8 @@ export function resolveConfig(env: Env) {
     guestMailReplyTo: guestMail.replyTo,
     experienceJobsAudience: guestMail.jobAudience,
     experienceJobsServiceAccountEmail: guestMail.jobServiceAccountEmail,
+    otaGuestDetailsEnabled: otaBooking.guestDetails,
+    otaBookingNotificationsEnabled: otaBooking.notifications,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,

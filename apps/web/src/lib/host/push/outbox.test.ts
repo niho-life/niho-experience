@@ -188,6 +188,36 @@ describe("hostPushEventFromOutbox", () => {
     expect(hostPushEventFromOutbox(row("host.notify.cancellation", { ...newBookingPayload, amount: 7500 }), NOW)).toEqual({ ok: false, reason: "invalid" });
   });
 
+  it("turns an OTA booking into a push to the product's people naming the site and the guest, never the site's IDs (#194)", () => {
+    const ref = "0b8f5a8e-2c1d-4e7f-9a3b-5c6d7e8f9a0b";
+    const ota = { v: 1, change: "NEW", site: "GetYourGuide", ref, productId: "tea", experienceTitle: "Synthetic Tea Ceremony",
+      startsAt: "2026-11-20T01:00:00.000Z", seats: 2, guestName: "Synthetic Traveler" };
+    const parsed = hostPushEventFromOutbox(row("host.notify.ota_booking", ota), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a", kind: "NEW_BOOKING", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2,
+        ota: { site: "GetYourGuide", change: "NEW" }, guestName: "Synthetic Traveler", productId: "tea",
+        url: `/host/bookings?ota=${ref}&providerId=provider-a`, tag: `ota-${ref}`,
+      },
+    });
+    if (parsed.ok) {
+      expect(JSON.parse(hostPushPayload(parsed.event))).toMatchObject({
+        title: "GetYourGuide で新しい予約", body: "Synthetic Tea Ceremony · 11/20（金）10:00 · Synthetic Traveler 様 · 2名",
+      });
+    }
+    const cancelled = hostPushEventFromOutbox(row("host.notify.ota_booking", { ...ota, change: "CANCELLED", guestName: undefined }), NOW);
+    expect(cancelled.ok && cancelled.event).toMatchObject({ kind: "CANCELLATION", ota: { change: "CANCELLED" } });
+    expect(cancelled.ok && "guestName" in cancelled.event).toBe(false);
+    const moved = hostPushEventFromOutbox(row("host.notify.ota_booking", { ...ota, change: "RESCHEDULED", previousStartsAt: "2026-11-18T01:00:00.000Z" }), NOW);
+    expect(moved.ok && moved.event).toMatchObject({ kind: "NEW_BOOKING", ota: { change: "RESCHEDULED", previousStartsAt: "2026-11-18T01:00:00.000Z" } });
+    for (const bad of [{ ...ota, guestEmail: "traveler@example.test" }, { ...ota, change: "RESCHEDULED" }, { ...ota, ref: "R1" }]) {
+      expect(hostPushEventFromOutbox(row("host.notify.ota_booking", bad), NOW)).toEqual({ ok: false, reason: "invalid" });
+    }
+    expect(hostPushEventFromOutbox(row("host.notify.ota_booking", ota, { createdAt: new Date(NOW - 25 * 60 * MINUTE).toISOString() }), NOW))
+      .toEqual({ ok: false, reason: "stale" });
+  });
+
   it("sends a cancellation whatever the OWNER turned off in 設定 › 通知", async () => {
     expect(await hostNotificationAllowed("provider-a", "CANCELLATION", () => ({ enabledFor: async () => false }))).toBe(true);
   });

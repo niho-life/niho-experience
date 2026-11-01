@@ -11,6 +11,8 @@ import {
   type ConflictPartner,
   type PendingPropagationMeasurement,
 } from "./external-reservation-attention.ts";
+import { externalReservationGuestName, upsertExternalReservationGuest } from "./external-reservation-guests.ts";
+import { enqueueOtaBookingNotification, type OtaBookingChange } from "./host-notification-outbox.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 
 export interface ExternalReservationReadAuthority {
@@ -29,6 +31,17 @@ export interface ExternalReservationReadAuthority {
 export interface ExternalReservationCanonicalTarget {
   readonly occurrence: Occurrence;
 }
+
+/**
+ * What the ledger does besides the inventory (#194, both default OFF): keep the guest details a reader sent, and tell
+ * the product's OWNER and operators of a reservation that is new, cancelled or moved.
+ */
+export interface ExternalReservationApplyOptions {
+  readonly guestDetails: boolean;
+  readonly notifications: boolean;
+}
+
+const NO_OTA_EXTRAS: ExternalReservationApplyOptions = { guestDetails: false, notifications: false };
 
 export interface ExternalReservationApplyResult {
   readonly applied: number;
@@ -50,8 +63,13 @@ function text(row: DbRow, key: string): string {
   return value;
 }
 
+/**
+ * The inventory facts' fingerprint: the guest details are left out, so that a name or a phone number the site adds
+ * later is no new revision, and so that no digest of them is kept in the 7-year audit (they are erased after a year).
+ */
 export function externalReservationObservationFingerprint(observation: ExternalReservationObservation): string {
-  return createHash("sha256").update(JSON.stringify(observation), "utf8").digest("hex");
+  const { guest: _guest, ...facts } = observation;
+  return createHash("sha256").update(JSON.stringify(facts), "utf8").digest("hex");
 }
 
 /**
@@ -65,6 +83,7 @@ export async function applyExternalReservationObservations(
   observations: readonly ExternalReservationObservation[],
   resolveTarget: (observation: ExternalReservationObservation) => Promise<ExternalReservationCanonicalTarget | null>,
   nowIso: () => string,
+  options: ExternalReservationApplyOptions = NO_OTA_EXTRAS,
 ): Promise<ExternalReservationApplyResult> {
   const affectedOccurrences = new Set<string>();
   let applied = 0;
@@ -72,6 +91,7 @@ export async function applyExternalReservationObservations(
   let stale = 0;
   let needsReview = 0;
   const pendingMeasurements: PendingPropagationMeasurement[] = [];
+  const notifier = options.notifications ? otaBookingNotifier(client, authority) : null;
 
   for (const observation of observations) {
     const externalOptionId = observation.externalOptionId ?? "";
@@ -118,6 +138,8 @@ export async function applyExternalReservationObservations(
             WHERE source_site=$1 AND source_external_account_id=$2 AND external_reservation_id=$3`,
           [...key, authority.generation, nowIso()],
         );
+        // The same reservation read again: details the site shows only now (a phone, a note) are still kept.
+        if (options.guestDetails && observation.guest !== undefined) await upsertExternalReservationGuest(client, keyParts(key), observation.guest);
         duplicates += 1;
       } else stale += 1;
       await client.query(
@@ -175,8 +197,9 @@ export async function applyExternalReservationObservations(
     const localRevision = ledger === undefined ? 1 : integer(ledger, "local_revision") + 1;
     const inventory = await evaluateStoredInventory(client, authority.providerId, authority.productId, occurrence, nowIso(), observation.seats);
     const active = observation.status === "PENDING" || observation.status === "CONFIRMED";
-    const wasActiveHere = ledger !== undefined && (ledger.status === "PENDING" || ledger.status === "CONFIRMED")
-      && oldOccurrenceId === occurrence.id;
+    const wasActiveAnywhere = ledger !== undefined && (ledger.status === "PENDING" || ledger.status === "CONFIRMED")
+      && oldOccurrenceId !== undefined;
+    const wasActiveHere = wasActiveAnywhere && oldOccurrenceId === occurrence.id;
     let inventoryConflict = false;
     let partners: ConflictPartner[] = [];
     if (active) {
@@ -239,7 +262,7 @@ export async function applyExternalReservationObservations(
       observation.externalProductId, externalOptionId, observation.sourceStartAtUtc, observation.sourceEndAtUtc,
       observation.seats, observation.status, localRevision, observation.sourceUpdatedAtUtc ?? null,
       observation.sourceRevision ?? null, authority.generation, observationFingerprint, inventoryConflict, inventoryConflict ? "INVENTORY_CONFLICT" : null];
-    await client.query(
+    const written = await client.query<DbRow>(
       `INSERT INTO external_reservations
         (source_site,source_external_account_id,external_reservation_id,provider_id,account_id,listing_id,product_id,occurrence_id,
          external_product_id,external_option_id,source_start_at,source_end_at,seats,status,local_revision,source_updated_at,
@@ -251,8 +274,13 @@ export async function applyExternalReservationObservations(
          source_start_at=EXCLUDED.source_start_at,source_end_at=EXCLUDED.source_end_at,seats=EXCLUDED.seats,status=EXCLUDED.status,
          local_revision=EXCLUDED.local_revision,source_updated_at=EXCLUDED.source_updated_at,source_revision=EXCLUDED.source_revision,
          last_read_generation=EXCLUDED.last_read_generation,current_fingerprint=EXCLUDED.current_fingerprint,
-         needs_review=EXCLUDED.needs_review,review_reason=EXCLUDED.review_reason,updated_at=clock_timestamp()`, ledgerValues,
+         needs_review=EXCLUDED.needs_review,review_reason=EXCLUDED.review_reason,updated_at=clock_timestamp()
+       RETURNING host_ref::text AS host_ref`, ledgerValues,
     );
+    const hostRef = text(written.rows[0] ?? {}, "host_ref");
+    const guestName = !options.guestDetails ? null : observation.guest !== undefined
+      ? await upsertExternalReservationGuest(client, keyParts(key), observation.guest)
+      : await externalReservationGuestName(client, keyParts(key));
     await client.query(
       `INSERT INTO external_reservation_inventory_snapshots
         (source_site,source_external_account_id,external_reservation_id,local_revision,provider_id,product_id,occurrence_id,
@@ -298,6 +326,18 @@ export async function applyExternalReservationObservations(
         ...(observation.sourceUpdatedAtUtc === undefined ? {} : { sourceUpdatedAtUtc: observation.sourceUpdatedAtUtc }),
       });
     }
+    if (notifier) {
+      // New here (first seen, restored, or out of quarantine), cancelled after being active, or moved while active.
+      const change: OtaBookingChange | null = active && !wasActiveAnywhere ? "NEW"
+        : !active && wasActiveAnywhere ? "CANCELLED"
+          : active && oldOccurrenceId !== occurrence.id ? "RESCHEDULED" : null;
+      if (change) {
+        await notifier({
+          change, hostRef, localRevision, occurrence, seats: observation.seats, guestName, nowUtc: writtenAtUtc,
+          ...(change === "RESCHEDULED" && ledger ? { previousStartsAt: isoValue(ledger, "source_start_at") } : {}),
+        });
+      }
+    }
     if (oldOccurrenceId) affectedOccurrences.add(oldOccurrenceId);
     affectedOccurrences.add(occurrence.id);
     applied += 1;
@@ -317,4 +357,49 @@ export async function applyExternalReservationObservations(
   // After the outbox events above, so each measurement's watermark covers the event that reflects it.
   await recordPropagationMeasurements(client, authority.providerId, pendingMeasurements);
   return { applied, duplicates, stale, needsReview, affectedOccurrences };
+}
+
+function keyParts(key: readonly [string, string, string]): { site: string; externalAccountId: string; externalReservationId: string } {
+  return { site: key[0], externalAccountId: key[1], externalReservationId: key[2] };
+}
+
+interface OtaBookingEvent {
+  readonly change: OtaBookingChange;
+  readonly hostRef: string;
+  readonly localRevision: number;
+  readonly occurrence: Occurrence;
+  readonly previousStartsAt?: string;
+  readonly seats: number;
+  readonly guestName: string | null;
+  readonly nowUtc: string;
+}
+
+/**
+ * Writes the push rows of one apply call (#194). The first complete read of a listing is its baseline: the bookings it
+ * finds were made before this site read them, so a listing without a complete read yet tells nobody. A session that
+ * already began is no news either. The product's title is read once.
+ */
+function otaBookingNotifier(client: PoolClient, authority: ExternalReservationReadAuthority): (event: OtaBookingEvent) => Promise<void> {
+  let context: Promise<{ readonly baseline: boolean; readonly title: string | null }> | null = null;
+  const load = async () => {
+    const health = await client.query(
+      "SELECT 1 FROM external_reservation_listing_health WHERE provider_id=$1 AND listing_id=$2", [authority.providerId, authority.listingId],
+    );
+    const product = await client.query<DbRow>(
+      "SELECT public_title FROM experience_products WHERE provider_id=$1 AND id=$2", [authority.providerId, authority.productId],
+    );
+    const title = product.rows[0]?.public_title;
+    return { baseline: health.rows.length === 0, title: typeof title === "string" ? title : null };
+  };
+  return async (event) => {
+    context ??= load();
+    const { baseline, title } = await context;
+    if (baseline || title === null || event.occurrence.startUtc <= event.nowUtc) return;
+    await enqueueOtaBookingNotification(client, {
+      providerId: authority.providerId, change: event.change, site: authority.targetSite, ref: event.hostRef,
+      localRevision: event.localRevision, productId: authority.productId, experienceTitle: title,
+      startsAt: event.occurrence.startUtc, seats: event.seats, guestName: event.guestName,
+      ...(event.previousStartsAt === undefined ? {} : { previousStartsAt: event.previousStartsAt }),
+    });
+  };
 }

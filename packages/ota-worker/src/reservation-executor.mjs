@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ContractError, exactKeys, isPlainObject } from "./validation.mjs";
 import { MAX_JOB_MS } from "./constants.mjs";
+import { validGuestDetails } from "./reservation-guest.mjs";
 
 const MAX_PAGE_BYTES = 16 * 1024;
 const MAX_FACTS = 32;
@@ -56,7 +57,7 @@ async function boundedStop(stopPromise, timeoutMs) {
 
 function fact(value, target, cycle) {
   const required = ["externalReservationId", "externalProductId", "sourceStartAtUtc", "sourceEndAtUtc", "status", "seats"];
-  const optional = ["externalOptionId", "sourceUpdatedAtUtc", "sourceRevision"];
+  const optional = ["externalOptionId", "sourceUpdatedAtUtc", "sourceRevision", "guest"];
   if (!isPlainObject(value) || !exactKeys(value, required, optional)
     || typeof value.externalReservationId !== "string" || value.externalReservationId.length < 1 || value.externalReservationId.length > 256
     || value.externalProductId !== target.externalProductId
@@ -67,10 +68,12 @@ function fact(value, target, cycle) {
     || !["PENDING", "CONFIRMED", "CANCELLED"].includes(value.status)
     || !Number.isSafeInteger(value.seats) || value.seats < 1 || value.seats > 1000
     || (value.sourceUpdatedAtUtc !== undefined && !canonicalInstant(value.sourceUpdatedAtUtc))
-    || (value.sourceRevision !== undefined && (typeof value.sourceRevision !== "string" || value.sourceRevision.length < 1 || value.sourceRevision.length > 256))) {
+    || (value.sourceRevision !== undefined && (typeof value.sourceRevision !== "string" || value.sourceRevision.length < 1 || value.sourceRevision.length > 256))
+    || (value.guest !== undefined && !validGuestDetails(value.guest, value.seats))) {
     throw new ContractError("INVALID_READER_RESPONSE");
   }
-  return Object.freeze({ ...value });
+  // A deep copy: the reader cannot change a journaled fact afterwards.
+  return Object.freeze(value.guest === undefined ? { ...value } : { ...value, guest: Object.freeze(structuredClone(value.guest)) });
 }
 
 function readerPage(value, target, cycle) {

@@ -71,7 +71,10 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `HOST_PUSH_ENABLED` | `HOST_PUSH_ENABLED` | PWA・DB | `HOST_PUSH_VAPID_PUBLIC_KEY`、`HOST_PUSH_VAPID_SUBJECT` | `HOST_PUSH_VAPID_PRIVATE_KEY_REF` → `HOST_PUSH_VAPID_PRIVATE_KEY` | `HOST_PUSH_JOB_AUDIENCE`＝サイトの URL、`HOST_PUSH_JOB_SERVICE_ACCOUNT_EMAIL`＝`experience-host-push@<project>` |
 | `EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED` | `GOOGLE_BUSY_SYNC_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_GOOGLE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-google-jobs@<project>` |
 | `EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED` | `GOOGLE_BOOKING_EVENTS_ENABLED` | ホストの画面・DB | — | — | 上と同じ |
+| `EXPERIENCE_OTA_GUEST_DETAILS_ENABLED` | `OTA_GUEST_DETAILS_ENABLED` | DB、メール（1 年後の消去） | — | — | — |
+| `EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED` | `OTA_BOOKING_NOTIFICATIONS_ENABLED` | push・DB | — | — | — |
 
+- OTA の 2 つ（#194）は、OTA の予約の取込みそのものは開かない（取込みは channel runtime の設定のまま）。`0036` を先に適用する。[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」「ホストへの通知（#194）」。
 - 「ホストの画面・DB」は本番では `enable_host_calendar=true`（と `PROD_HOST_CALENDAR_READY=true`）。サイトの URL は `https://experience.niho.life`、`<project>` は `niho-app-prd`。
 - 設定の形：同意の版は英数字と `._:+-` の 1〜100 字。From・Reply-To はアドレスか `表示名 <アドレス>`（カンマ・`"`・`<>` なし）。URL は小文字の host の https。VAPID の公開鍵は base64url の P-256、subject は `mailto:` か https。`--set-env-vars` の区切りになるカンマは、どの値にも入れられない。
 - 各 Secret は Secret Manager に作り、実行 ID `experience-runtime` にその Secret だけの `secretAccessor` を付けてから参照を入れる。値と接続情報は GitHub の variable・PR に書かない。

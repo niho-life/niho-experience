@@ -8,7 +8,7 @@ export const HOST_PUSH_SEEN_WITHIN_MS = 30 * 24 * 60 * 60 * 1000;
 const CONCURRENCY = 4;
 
 export interface HostPushDeps {
-  subscriptions: Pick<HostPushSubscriptions, "recipients" | "recordSent" | "recordFailure" | "removeById">;
+  subscriptions: Pick<HostPushSubscriptions, "recipients" | "productRecipients" | "recordSent" | "recordFailure" | "removeById">;
   vapid: VapidKeys;
   fetch: typeof fetch;
   now: number;
@@ -48,12 +48,16 @@ export async function deliverHostPush(recipient: HostPushRecipient, message: Hos
 
 /**
  * Sends one event to the devices of the provider's active members seen in the last 30 days, four at
- * a time. Push is a second channel next to email, never a replacement. The notification job that
+ * a time; an event about one product (an OTA booking, #194) to that product's OWNER and operators only.
+ * Push is a second channel next to email, never a replacement. The notification job that
  * consumes `outbox_messages` calls it (outbox.ts, docs/host-pwa.md).
  */
 export async function notifyHostDevices(event: HostPushEvent, deps: HostPushDeps): Promise<HostPushReport> {
   const message: HostPushSend = { payload: hostPushPayload(event), ...hostPushDelivery(event.kind), topic: hostPushTopic(event.tag) };
-  const recipients = await deps.subscriptions.recipients(event.providerId, new Date(deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+  const seenAfter = new Date(deps.now - HOST_PUSH_SEEN_WITHIN_MS);
+  const recipients = event.productId === undefined
+    ? await deps.subscriptions.recipients(event.providerId, seenAfter)
+    : await deps.subscriptions.productRecipients(event.providerId, event.productId, seenAfter);
 
   const report: HostPushReport = { recipients: recipients.length, sent: 0, gone: 0, failed: 0 };
   let next = 0;

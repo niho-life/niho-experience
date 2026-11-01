@@ -40,6 +40,7 @@ const counts = {
   bookingRefunds: { claimed: 1, sent: 1, failed: 0, retried: 0 },
   guestTranslations: { claimed: 1, translated: 1, retried: 0, failed: 0, closed: 0, abandoned: 0 },
   guestErasure: { erased: 0 },
+  otaGuestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
   bookingAccessPurge: { purged: 2 },
 };
@@ -51,6 +52,7 @@ const idle = {
   bookingRefunds: { claimed: 0, sent: 0, failed: 0, retried: 0 },
   guestTranslations: { off: true },
   guestErasure: { erased: 0 },
+  otaGuestErasure: { erased: 0 },
   questionErasure: { erased: 0 },
   bookingAccessPurge: { purged: 0 },
 };
@@ -280,12 +282,13 @@ describe("experienceJobsDrainResponse dependencies", () => {
       bookingRefunds: { error: "unavailable" },
       guestTranslations: { error: "unavailable" },
       guestErasure: { error: "unavailable" },
+      otaGuestErasure: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { error: "unavailable" },
     });
     expect(pool.connect).toHaveBeenCalledTimes(5);
-    // The three steps that query directly, and the claim of refunds to send again.
-    expect(pool.query).toHaveBeenCalledTimes(4);
+    // The four steps that query directly, and the claim of refunds to send again.
+    expect(pool.query).toHaveBeenCalledTimes(5);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();
     expect(mailer.close).toHaveBeenCalledOnce();

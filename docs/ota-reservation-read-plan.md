@@ -22,6 +22,7 @@
 
 - 専用profileのbrowserで会社のSupplier IDを照合してから`/bookings`を通常UIで開く。画面自身の読み取りqueryが通るまで待ち、その認証headerをメモリだけに保持する。保存・ログ・journalへ出さない。
 - 読み取りは固定の名前付きquery `NihoReservationWindowRead`を同じ画面内から送る。selectは予約ID、状態、人数、開始時刻、option/商品ID、optionの所要時間だけで、顧客名・連絡先・価格・ticket・位置は取得しない。mutationと未許可の遷移は遮断する。
+- 予約者の情報（#194、オーナー決定 2026-11-01）：取込みの契約は名前・人数の内訳・連絡先・言語・予約番号・メモを受けられるようになった（[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」）。GetYourGuide では、Booking 型にこれらがあることは見えたが、項目の名前・型・値は非空の予約で確かめていない（観測時の一覧は空）。そのため reader はどれも選ばず、事実に `guest` を付けない。実画面の非空の予約で、項目ごとに次を受け入れてから足す（#237）：名前の項目と表記、参加者の区分と人数、メール・電話を supplier が見られるか、言語、supplier 画面に出る予約番号（`id` とは別か）、予約者のメモ。
 - 条件はsupplierIdと開始時刻の範囲だけで、状態filterを付けない。GYG側の日時解釈が未確認のため、coverageの前後24時間まで広げて読み、coverage外の予約はfactにしない。他商品の予約は件数照合に数えるが、factにはしない。
 - `status=CANCELED`だけを取消とする。`ACTIVE`かつ`guideStatus=CONFIRMED`かつ`isPending=false`を確定とし、それ以外のACTIVEは受付中として占有を保つ。未知の値、offsetの無い開始時刻、未知の所要時間単位、24時間を超える所要時間は推測せず停止する。終了時刻はGYGのoption所要時間から求め、manifestから借りない。NIHOと時刻が一致しない予約はserverが要確認にする。
 - 完全性は、各ページの`totalItems`が変わらないこと、IDが重複しないこと、読んだ件数が総数と一致することの全てで判断する。途中の件数変化・重複・欠落はPARTIALとし、それまでのページは観測として残す。総数が4000件を超える場合は停止する。
@@ -60,10 +61,21 @@ Airbnbは2026-10-31に許可済みStudioのChromeで本人照合・カレンダ�
 1. 正しいaccount、listing、期間、全状態、全pageを読んだこと。
 2. 新規予約、人数変更、取消先着、取消後の古い版、別日への移動、既知予約の欠落。
 3. 途中の認証切れ、challenge、DOM/API形の変化、重複page、ACK喪失、古いmapping、並行HOLD。
-4. 顧客名・メール・cookie・料金・raw responseがDTO、journal、ログ、公開fixtureへ入らないこと。
+4. cookie・料金・raw responseがDTO、journal、ログ、公開fixtureへ入らないこと。予約者の情報（#194）は事実の `guest` の許可した項目だけで送り、ログと公開 fixture へ入れない（fixture は合成のみ）。journal には ACK までの 1 ページだけが残る。
 5. 予約検知から他販路の読戻しまでの時間と、1時間超過・人手介入を実測すること。
 
 Claude Maxの上限、有効な掲載先session、reader未対応は異なる状態として記録する。従量APIへのfallback、challengeの自動突破、本人同意を飛ばす再ログインは行わない。本番flagは対象readerとStudio運用の受入前に開かない。
+
+## 予約者の情報の項目（#194）
+
+reader の結果の型と `/reservation-window-pages` の事実に、任意の `guest` を足した（項目と上限は[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」）。worker（`reservation-guest.mjs`）とサーバーは同じ許可リストで検証し、違反した事実は journal に入れずに止める。各サイトの reader は、実画面で確かめた項目だけを入れる。
+
+| サイト | reader | 予約者の情報 |
+| --- | --- | --- |
+| GetYourGuide | あり（既定 OFF、実サイト未受入） | 入れない。項目の名前・型を非空の予約で確かめていない（#237） |
+| Airbnb | なし（#312 は調査だけ） | 契約だけ合わせた。reader は実画面の調査の後 |
+| Viator | なし（#242） | 同上 |
+| じゃらん | なし（#246） | 同上 |
 
 ## 次batchに残るもの
 

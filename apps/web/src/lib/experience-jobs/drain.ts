@@ -1,5 +1,5 @@
 import "server-only";
-import type { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import type { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
@@ -11,7 +11,7 @@ import { guestMessageToJapanese } from "@/lib/translation/prompts";
  * minute from Cloud Scheduler: host replies to guest questions and host messages about bookings (#285 slice 6b), booking confirmations, the notices of
  * cancellations and refunds, the links "Find your booking" asked for, the refunds Stripe has not accepted (sent again,
  * #285 slice 7b), the Japanese of what guests wrote to hosts, then the erasure of guest data and questions a
- * year on and the removal of booking page links and sessions that ended. Each step is bounded and independent:
+ * year on (the guests of OTA bookings too, #194) and the removal of booking page links and sessions that ended. Each step is bounded and independent:
  * one that fails is reported and the next still runs. Counts only leave this module: never an address, a name,
  * a token or a message.
  */
@@ -131,6 +131,8 @@ export interface ExperienceJobCounts {
   readonly bookingRefunds: RefundResendCounts | StepOff | FailedStep;
   readonly guestTranslations: TranslationCounts | StepOff | FailedStep;
   readonly guestErasure: ErasureCounts | FailedStep;
+  /** The guest details OTA readers sent (#194), a year after the experience as this site's guests. */
+  readonly otaGuestErasure: ErasureCounts | FailedStep;
   readonly questionErasure: ErasureCounts | FailedStep;
   readonly bookingAccessPurge: PurgeCounts | StepOff | FailedStep;
 }
@@ -151,6 +153,8 @@ export interface ExperienceJobDeps {
    */
   readonly refunds: { readonly cancellations: Pick<BookingCancellations, "claimRefundsToSend" | "recordRefundSubmission">; readonly submit: NonNullable<RefundSendDeps["submit"]> } | null;
   readonly guests: Pick<GuestBookingRepository, "eraseGuestData">;
+  /** OTA bookings' guest details (#194). Erased whatever their flag: what was kept while it was on still goes. */
+  readonly otaGuests: Pick<ExternalReservationGuests, "eraseGuestDetails">;
   readonly translations: Pick<GuestQuestionTranslations, "claimTranslations" | "recordTranslation" | "retryTranslation">;
   /** The Claude API, or null while translation is off. */
   readonly translator: Translator | null;
@@ -414,13 +418,16 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const guestErasure = await step(deps, "guestErasure", async () => ({
     erased: await deps.guests.eraseGuestData({ endedBefore: cutoff(), limit: EXPERIENCE_JOB_LIMITS.erasedPerStep }),
   }));
+  const otaGuestErasure = await step(deps, "otaGuestErasure", async () => ({
+    erased: await deps.otaGuests.eraseGuestDetails({ endedBefore: cutoff(), limit: EXPERIENCE_JOB_LIMITS.erasedPerStep }),
+  }));
   const questionErasure = await step(deps, "questionErasure", async () => ({
     erased: await deps.questions.eraseInactiveThreads({ lastMessageBefore: cutoff(), limit: EXPERIENCE_JOB_LIMITS.erasedPerStep }),
   }));
   const bookingAccessPurge: ExperienceJobCounts["bookingAccessPurge"] = access
     ? await step(deps, "bookingAccessPurge", async () => ({ purged: await access.purgeExpiredAccess({ limit: EXPERIENCE_JOB_LIMITS.accessPurgedPerStep }) }))
     : { off: true };
-  return { questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, questionErasure, bookingAccessPurge };
+  return { questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure, bookingAccessPurge };
 }
 
 /** True when the run did or failed anything worth a log line. */

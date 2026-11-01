@@ -146,6 +146,43 @@ test("reader privacy drift and non-canonical or wrong-target facts never reach t
   }
 });
 
+test("guest details a reader read are sent as the contract allows (#194); anything else stops before the journal", async () => {
+  const guest = {
+    name: "Synthetic Traveler", partyBreakdown: [{ band: "ADULT", count: 1 }, { band: "CHILD", count: 1 }],
+    email: "traveler@example.invalid", phone: "+81 90-0000-0000", language: "en", bookingReference: "SYNTH-1", notes: "Synthetic note.",
+  };
+  const submitted = [];
+  const ok = await executeReservationWindow({ job, config: {}, journal: journal(), now: () => fixedNow,
+    cloud: cloudFor(async (_jobId, payload) => { submitted.push(payload); return pageReceipt(payload); }),
+    readerFactory: readerFor(async () => ({ facts: [makeFact(1, { seats: 2, guest }), makeFact(2, { guest: { name: "Synthetic Only" } }), makeFact(3)], terminal: terminal() })),
+  });
+  assert.equal(ok.outcome, "RESERVATION_VERIFIED");
+  assert.deepEqual(submitted[0].observations.map((item) => item.guest), [guest, { name: "Synthetic Only" }, undefined]);
+  for (const bad of [
+    { ...guest, price: 12000 },
+    { ...guest, partyBreakdown: [{ band: "ADULT", count: 1 }] },
+    { ...guest, partyBreakdown: [{ band: "ADULT", count: 1 }, { band: "ADULT", count: 1 }] },
+    { ...guest, email: "no-at-sign" },
+    { ...guest, phone: "ask at the desk" },
+    { ...guest, language: "English" },
+    { ...guest, bookingReference: "with space" },
+    { ...guest, name: "  padded" },
+    { ...guest, notes: "x".repeat(1001) },
+    {},
+    "Synthetic Traveler",
+  ]) {
+    const privateJournal = journal();
+    let sent = 0;
+    const result = await executeReservationWindow({ job, config: {}, journal: privateJournal, now: () => fixedNow,
+      cloud: cloudFor(async () => { sent += 1; }),
+      readerFactory: readerFor(async () => ({ facts: [makeFact(1, { seats: 2, guest: bad })], terminal: terminal() })),
+    });
+    assert.equal(result.outcome, "NEEDS_REVIEW", JSON.stringify(bad));
+    assert.equal(sent, 0);
+    assert.equal(privateJournal.pending.length, 0);
+  }
+});
+
 test("partial reader completion is delivered but never reported as verified freshness", async () => {
   const result = await executeReservationWindow({ job, cloud: cloudFor(), config: {}, journal: journal(), now: () => fixedNow,
     readerFactory: readerFor(async () => ({ facts: [makeFact(1)], terminal: terminal("PARTIAL") })),
