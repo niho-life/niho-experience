@@ -331,9 +331,9 @@ export function bookingStatusLabel(booking: Pick<HostBooking, "status" | "date">
   return booking.status === "confirmed" && booking.date < today ? PAST_CONFIRMED_BOOKING : BOOKING_STATUS[booking.status];
 }
 
-/** A row's second line: "2名 · ¥60,000 · 体験サイト". */
-export function bookingRowDetail(booking: Pick<HostBooking, "guests" | "amountYen" | "channel">): string {
-  return [`${booking.guests}名`, yen(booking.amountYen), booking.channel].join(" · ");
+/** A row's second line: "2名 · ¥60,000 · 体験サイト". A booking made on a reservation site has no amount here (#194): "2名 · GetYourGuide". */
+export function bookingRowDetail(booking: Pick<HostBooking, "guests" | "amountYen" | "channel"> & { ota?: unknown }): string {
+  return (booking.ota ? [`${booking.guests}名`, booking.channel] : [`${booking.guests}名`, yen(booking.amountYen), booking.channel]).join(" · ");
 }
 
 /** What the approval and cancel dialogs show of a booking (ホーム approves from its row too). */

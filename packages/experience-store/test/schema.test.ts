@@ -464,4 +464,12 @@ describe("database invariants", () => {
     const code = sql.replace(/--.*$/gm, "");
     assert.doesNotMatch(code, /amount|price|currency|ALTER TABLE external_reservation_revisions|DROP |^\s*(UPDATE|DELETE) /im);
   });
+
+  it("keeps one attendance mark per OTA booking, additively and without guest data (#194)", async () => {
+    const sql = await readFile(new URL("../migrations/0039_external_reservation_attendance.sql", import.meta.url), "utf8");
+    assert.match(sql, /CREATE TABLE external_reservation_attendance \(\n  host_ref uuid PRIMARY KEY REFERENCES external_reservations\(host_ref\)/);
+    assert.match(sql, /status IN \('ATTENDED', 'NO_SHOW'\)/);
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /guest_|email|phone|ALTER TABLE|DROP |^\s*(UPDATE|DELETE|INSERT) /im);
+  });
 });

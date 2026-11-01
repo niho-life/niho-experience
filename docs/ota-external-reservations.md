@@ -121,8 +121,19 @@ OTA の予約の新規・取消・日時変更を、商品の OWNER と運営者
   - 設定 › 通知の種類は、新規と日時変更が「新しい予約・申込」、取消が「予約の取消」。どちらも止められない種類なので、設定を読まずに送る。
   - 宛先は商品の OWNER と運営者の端末だけ（`HostPushSubscriptions.productRecipients`）。EDITOR・VIEWER・別の商品の運営者には送らない。
   - 題は「GetYourGuide で新しい予約」「Airbnb の予約が取り消されました」「じゃらん の予約の日時が変わりました」。本文は「体験 · 日時（変更は 前 → 後） · 名前 様 · 人数」。
-  - タップで `/host/bookings?ota=<host_ref>&providerId=…`（画面は #194 の PR 2）。
+  - タップで `/host/bookings?ota=<host_ref>&providerId=…`（下の「ホストの画面（#194）」）。
 - **メールはまだ送らない**：experience DB にはホストのメールアドレスが無い（アドレスは NIHO の正本）。宛先の取り方をオーナーが決めるまで、メールの topic は積まない。
+
+## ホストの画面（#194）
+
+`EXPERIENCE_OTA_GUEST_DETAILS_ENABLED` の間、`HostOtaBookings` で読んだ OTA の予約を `/host` の画面に出す（読むだけ）。読める人は上の「ホストが読むもの」と同じで、権限はサーバーが grant から決める。mock の preview は `?mock=ota-bookings` の合成データ（`apps/web/src/host/mock/ota-bookings.ts`）。
+
+- **予約（`/host/bookings`）**：NIHO の予約・このサイトの予約と同じ 1 つの一覧に、予約サイトの名前のバッジ付きで並べる。行は「3名 · GetYourGuide」（金額は無い）。状態は確定・取消済みに加えて、予約サイトが確定していない予約は「確定待ち」、要確認（`needs_review`）は「確認中」。回の見出しは「この回」へ。回に結び付いていない予約（要確認）の見出しはリンクにしない。一覧は今日の 30 日前から 90 日後まで、200 件まで。
+- **詳細**：名前・日時・人数（年齢区分の内訳）・予約番号・メール（`mailto:`）・電話（`tel:`）・言語・予約者が予約サイトに書いたメモ・時系列。「取消・返金・予約者とのやりとりは {予約サイト} で行ってください。この画面からは変えられません。」と出し、操作は出さない。消去済みは「保存期間を過ぎたため、予約者の情報は表示できません。」。
+- **push のリンク**：`/host/bookings?ota=<host_ref>` でその予約を開く（一覧の外なら 1 件だけ読む）。見つからなければ「この予約は見つかりませんでした」。
+- **ホームの次にすること**：取り込んでから 72 時間以内で、回がこれからの、取り消されていない予約を新しい順に 5 件まで（「GetYourGuide で新しい予約」「予約を見る」→ `?ota=`）。
+- **この回**：その回の OTA の予約者を、このサイトの予約者と同じ参加者の一覧に、バッジ・予約番号・電話付きで出す。メッセージ・この回の中止の対象にしない（予約サイトで行う）。出欠は `EXPERIENCE_HOST_ATTENDANCE_ENABLED` のとき、開始後に「来た／来なかった」を記録する（`0039` の `external_reservation_attendance`、予約 1 件に 1 行。OWNER と担当の運営者。確定〔`CONFIRMED`〕だけで、確定待ち・取消済みには付けない）。
+- **商品の運営者**：NIHO の提供者一覧に無い運営者は、担当の商品の OTA の予約だけを、予約の画面（一覧・詳細）と「この回」で読む。ナビに「予約」が加わる。
 
 ## 保持・DB権限・配備順
 
@@ -138,7 +149,7 @@ runtime DB roleはchannelのread/job/receipt/ledger/snapshotとcalendar outbox�
 4. #237のreaderを対象adapter単位で受け入れ、`canReadReservations` を配備allowlist、listingの順に限定有効化する。
 5. rollback時はcapabilityをfalseにして新規readを止める。既に受理したledgerと占有を削除せず、旧writerと同じ枠を二重販売しない。
 
-予約者の情報と通知（#194）は次の順に行う。
+予約者の情報と通知（#194）は次の順に行う（画面の出欠には、先に `0039_external_reservation_attendance.sql` を適用する。表を足すだけで、runtime role に INSERT・UPDATE）。
 
 1. `0036_external_reservation_guests.sql` を先に適用する（表を足すだけ。旧 writer は新しい表を読まず、`external_reservations` への INSERT は `host_ref` の既定値で通る）。runtime role に `external_reservation_guests` の SELECT・INSERT・UPDATE を付ける（`scripts/gcp/experience-db-grants.mjs`）。
 2. 新コードを配備する。`EXPERIENCE_OTA_GUEST_DETAILS_ENABLED` と `EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED` は off のまま。メール job の消去の段はこの時点から動く。

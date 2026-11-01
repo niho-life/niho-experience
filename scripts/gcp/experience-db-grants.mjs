@@ -46,6 +46,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_products: { write: IU },
   // Providers are provisioned privately; the runtime only locks them.
   experience_providers: { write: [], updateColumns: ["created_at"] },
+  // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.
+  external_reservation_attendance: { write: IU },
   external_reservation_conflict_cases: { write: IU },
   external_reservation_conflict_members: { write: IU },
   // OTA の予約者 (#194): the ledger keeps what a reader sent; the mail job's erasure blanks it (no DELETE).

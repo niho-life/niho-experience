@@ -16,14 +16,15 @@ export function mockToken(prefix: string): string {
 
 /** `?mock=` on /host/auth/mock-login → the session's scenario (anything else is the default). */
 export function hostMockScenario(value: unknown): HostMockScenario {
-  return value === "empty" || value === "payments-pending" || value === "calendar-revoked" || value === "cohost" || value === "site-sales" || value === "site-bookings" ? value : "default";
+  return value === "empty" || value === "payments-pending" || value === "calendar-revoked" || value === "cohost" || value === "site-sales" || value === "site-bookings" || value === "ota-bookings" ? value : "default";
 }
 
 /**
  * The console's scenario names → the api-client mock's. `default` is two providers (an OWNER and an
  * EDITOR); `calendar-revoked` is the same two, and only the console's own data differs (console-data.ts).
  * `site-sales` is the same two too: 売上 and ホーム's month read a synthetic ledger of bookings made on this site (#91).
- * So is `site-bookings`: 予約 shows synthetic bookings made on this site (#285, #84).
+ * So is `site-bookings`: 予約 shows synthetic bookings made on this site (#285, #84). And `ota-bookings`: 予約, ホーム and
+ * この回 show synthetic bookings made on reservation sites beside the preview's own (#194).
  */
 export const HOST_MOCK_SCENARIO_MAP: Record<HostMockScenario, MockHostScenario> = {
   default: "two-providers",
@@ -33,6 +34,7 @@ export const HOST_MOCK_SCENARIO_MAP: Record<HostMockScenario, MockHostScenario> 
   cohost: "cohost",
   "site-sales": "two-providers",
   "site-bookings": "two-providers",
+  "ota-bookings": "two-providers",
 };
 
 const loadMock = () => import("@niho-experience/api-client/host/mock");

@@ -18,6 +18,7 @@ import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
 import { mockEnglishDraft } from "./mock/threads";
 import { changeNotificationSettings } from "./notification-settings-server";
+import { recordOtaAttendanceAsHost } from "./ota-bookings-server";
 import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
 import { SITE_CANCEL_NOTE_MAX, SITE_CANCEL_REASONS, SITE_SESSION_CANCEL_REASONS } from "./site-bookings";
@@ -321,6 +322,18 @@ export async function recordSiteAttendance(input: { providerId: string; bookingI
   const attendance = ATTENDANCE_VALUES.has(input?.attendance) ? input.attendance : null;
   if (!providerId || !bookingId || !attendance) return invalid;
   return recordSiteAttendanceAsOwner(providerId, bookingId, attendance);
+}
+
+/**
+ * この回 › 来た / 来なかった for a booking made on a reservation site (#194 PR B): the product's OWNER or its operator,
+ * once its session has started. `ref` is the booking's handle (never the site's IDs).
+ */
+export async function recordOtaAttendance(input: { providerId: string; ref: string; attendance: HostAttendance }): Promise<HostActionResult<{ attendance: HostAttendance | null }>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const ref = typeof input?.ref === "string" && BOOKING_ID.test(input.ref) ? input.ref.toLowerCase() : null;
+  const attendance = ATTENDANCE_VALUES.has(input?.attendance) ? input.attendance : null;
+  if (!providerId || !ref || !attendance) return invalid;
+  return recordOtaAttendanceAsHost(providerId, ref, attendance);
 }
 
 /**
