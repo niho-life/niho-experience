@@ -17,7 +17,7 @@ export function PreviewNote({ catalog }: { catalog: PreviewCatalog }) {
     <p role="note" className="border-t border-line py-3 text-xs leading-snug text-muted">
       {catalog === "pilot" ? (
         <>
-          <strong className="font-extrabold text-ink-soft">Preview</strong> · real hosts; dates, prices and photos are provisional · nothing can be booked
+          <strong className="font-extrabold text-ink-soft">Preview</strong> · schedules and prices are for review; availability is simulated · no real bookings
         </>
       ) : (
         <>
