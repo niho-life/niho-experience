@@ -9,6 +9,8 @@
 
 **オーナーの決定（2026-11-02・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：初回の試験販売候補は [Kamakura Community Dinner with Locals](https://niho.life/living/nihokamakura/pages/community-dinner-with-locals)。主催・提供者はNIHO kamakura拠点。オーナーはこの既存ページに記載された提供内容・開催枠・表示価格・定員・予約/取消条件を商品条件の正本として承認した。オーナー作成の写真は全点Experience掲載に利用してよい。実際の新サイト用データへの転記と安定した画像アップロードは未完了であり、期限付き署名URLは保存しない。写っている第三者の肖像同意は別途確認する。ページに記載のない法的販売主体・受取口座・天候/最少催行等は未確定のまま扱う。
 
+**オーナーの意向（2026-11-02）**：この商品の売上はNIHO kamakura拠点のStripe Connect口座で受け取りたい。法的な口座名義・販売者と、既存NIHO口座のうちどれが同拠点の受取口座かはまだ照合していない。テスト画面に現れた未確認の「新しいビジネス」口座は使わない。
+
 同じ開催日時・定員の枠を重複登録する指示は、重複・在庫競合を検証するstaging専用データとして扱う。現行NIHOページの本番在庫と同時に販売せず、Experience側の本番受付は旧販売枠の停止・切替・切戻し確認後まで開けない。公開ページにはエリア概要だけを載せ、正確な住所・入口・地図などの集合案内は予約者だけに表示する。
 
 ## 一覧
@@ -54,7 +56,7 @@
 | 不向き | 車いす利用者（2階のため）、食物アレルギーのある人 | NIHOapp企画ページ |
 | 価格・オプション | Dinnerとtea timeの2つのオプション、上記starting priceの税込表示がある | NIHOapp企画ページ（2026-11-02確認） |
 | ホスト | 表示名と写真付きで3名を掲載 | NIHOapp企画ページ |
-| 販売・提供主体 | NIHOの取引ごとに、申込画面等に表示されるパナソニックホールディングス株式会社または拠点運営者・個人ホストのいずれか | [NIHO特商法表記](https://niho.life/legal/tokushoho) |
+| 販売・提供主体 | 主催・提供者はNIHO kamakura拠点。売上は同拠点のStripe Connect口座で受け取りたい意向を確認済み。法的販売者・口座名義・実際のConnect口座の紐付けは確認待ち | オーナー確認（2026-11-02）、[NIHO特商法表記](https://niho.life/legal/tokushoho) |
 | 問い合わせ一次受付 | NIHO（運営会社）が一次受付を担い、返金の判断は表示された販売・提供主体に従う | NIHO特商法表記 |
 | 他チャネル | GetYourGuideに掲載あり（[Issue #13](https://github.com/niho-life/niho-experience/issues/13)記載のURL。自動取得はbot判定で不可）。Expedia系のサイトにも同名の商品と、NIHO kamakuraを会場とする類似名の商品が表示される | 2026-10-19のWeb検索 |
 | 検索公開 | NIHOapp企画ページは `noindex, follow`。公式サイトのページはindex可能だが、本文はJavaScript描画で初期HTMLに含まれない | 両ページのHTML |
