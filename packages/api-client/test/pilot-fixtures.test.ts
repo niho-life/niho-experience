@@ -141,7 +141,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
     expect(JSON.stringify(dinner)).not.toContain("niho-exterior.jpg");
   });
 
-  it("Community Dinner reflects the approved offer schedule and terms", async () => {
+  it("Community Dinner reflects the approved source terms and staging-only provisional price", async () => {
     const dinner = experiences.find((experience) => experience.slug === "kamakura-community-dinner");
     expect(dinner?.title).toBe("Kamakura Community Dinner with Locals");
     expect(dinner?.seller.displayName).toBe("パナソニックホールディングス株式会社");
@@ -173,7 +173,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
       {
         id: "offer_community_tea_time",
         price: 15000,
-        child: null,
+        child: { priceYen: 12000, minAge: 0, maxAge: 17, adultRequired: true },
         startTime: "13:00",
         durationMinutes: 120,
         weekdays: [0, 1, 2, 3, 4, 5, 6],

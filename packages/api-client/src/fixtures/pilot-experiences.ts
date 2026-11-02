@@ -3,7 +3,7 @@
  *
  * 合成 fixture（experiences.ts）と違い、実在の提供者の体験を載せる。オーナーが各事業者から掲載の許可を得ており、
  * テストサイトへ組み込むことを決めた（2026-10-19、docs/content/README.md）。
- * - P-01 はオーナー確認済みの掲載元ページを基準にする。法的販売者・販売口座・天候等の未記載条件は確定していない（docs/content/product-ledger.md）。
+ * - P-01 はオーナー確認済みの掲載元ページを基準にする。2026-11-03にオーナーが未確定条件をstg仮値で補うよう指示した。追加した茶会の子ども料金などは本番販売の承認ではなく、天候等の仮運用条件はdocs/content/product-ledger.mdだけに記録する。
  * - 題名は検索語（docs/growth/seo-content-policy.md の体験別の語）を入れた案で、オーナー承認（2026-10-26・#146）。本番の正本は
  *   NIHO 側の原稿なので、そちらは別に直す。ホストの画面の mock（apps/web/src/host/mock）は旧い題名のまま（ホストがまだ直していない状態）。
  * - 多くの写真は撮影前の仮素材（apps/web/public/sample/、出典・内容は同フォルダの CREDITS.md）。P-01 Community Dinner は掲載元にある
@@ -26,7 +26,7 @@ import {
 } from "./experiences.ts";
 
 export const PILOT_CONTENT_STATUS = "provisional" as const;
-export const PILOT_UPDATED_AT = "2026-11-02T00:00:00.000Z";
+export const PILOT_UPDATED_AT = "2026-11-03T00:00:00.000Z";
 
 const KAMAKURA = { key: "kamakura", name: "Kamakura" } as const;
 
@@ -286,9 +286,9 @@ export function buildPilotExperiences(): ExperienceDetail[] {
           pricing: {
             currency: "JPY",
             taxIncluded: true,
-            // The source page lists ¥15,000 from. The booking widget's selected-price breakdown has not been confirmed.
+            // The source page lists ¥15,000 from. Per-adult pricing and the child price are owner-authorized staging-only assumptions.
             adultPriceYen: 15000,
-            child: null,
+            child: { priceYen: 12000, minAge: 0, maxAge: 17, adultRequired: true },
           },
           capacity: 8,
           maxPartySize: 8,
