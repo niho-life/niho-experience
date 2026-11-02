@@ -76,7 +76,16 @@ export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
   if (!accessTokenUsable(session, Date.now())) return { status: "refresh" };
   try {
     const result = await hostApiClient(session).listExperienceProviders();
-    if (result.ok) return { status: "ok", providers: usableProviders(result.data.providers) };
+    if (result.ok) {
+      const providers = usableProviders(result.data.providers);
+      // The host API intentionally represents COHOST as EDITOR in its OWNER/EDITOR DTO.
+      // Restore the separate operational role only in this synthetic scenario so the
+      // preview exercises the cohost UI without changing the NIHO host API contract.
+      const scenarioProviders = isHostMock() && session.mockScenario === "cohost"
+        ? providers.map((provider) => provider.id === "sample-provider-kitchen" ? { ...provider, memberRole: "COHOST" as const } : provider)
+        : providers;
+      return { status: "ok", providers: scenarioProviders };
+    }
     if (result.kind !== "network_error" && result.status === 401) return { status: "rejected" };
     return { status: "error" };
   } catch {
