@@ -187,9 +187,12 @@ test("host pages have no serious accessibility violations and fit the screen", a
     // The PC sidebar has no account menu (sign-out is shown as it is).
     const summary = page.locator("summary:visible", { hasText: menu });
     if (!(await summary.count())) continue;
+    const mobileAccountMenu = await page.locator("summary:visible", { hasText: "のアカウント" }).count();
     await summary.click();
+    if (mobileAccountMenu) await expect(page.locator("#main")).toHaveAttribute("inert", "");
     expect(await seriousViolations(page), `${menu} open`).toEqual([]);
     await summary.click();
+    if (mobileAccountMenu) await expect(page.locator("#main")).not.toHaveAttribute("inert");
   }
   await page.goto("/host/auth/error?reason=state");
   expect(await seriousViolations(page), "login error").toEqual([]);
