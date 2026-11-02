@@ -24,6 +24,7 @@ interface Flag {
   variable: string;
   defaults?: Partial<Record<Target, boolean>>;
   needs?: string[];
+  conflicts?: string[];
   secrets?: Item[];
   settings?: Item[];
   fixed?: Record<string, unknown>;
@@ -63,6 +64,7 @@ const secretRef = (target: Target, item: Item) => (target === "stg" ? `${item.st
 const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
+  EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "experienceProviderOperationsApiEnabled",
   EXPERIENCE_GUEST_QUESTIONS_ENABLED: "guestQuestionsEnabled",
   EXPERIENCE_TRANSLATION_ENABLED: "translationEnabled",
   EXPERIENCE_GUEST_REVIEWS_ENABLED: "guestReviewsEnabled",
@@ -153,13 +155,14 @@ describe("the deploy workflows' feature flags", () => {
       }
     });
 
-    it(`${target}: everything on at once starts the server with every flag on`, () => {
-      const vars = Object.assign({}, ...FLAGS.map((flag) => varsOf(target, flag))) as Vars;
+    it(`${target}: every compatible flag starts the server and turns on in resolve-config`, () => {
+      const compatible = FLAGS.filter((flag) => flag.env !== "EXPERIENCE_GUEST_QUESTIONS_ENABLED");
+      const vars = Object.assign({}, ...compatible.map((flag) => varsOf(target, flag))) as Vars;
       const resolved = resolve(target, vars);
       expect(resolved.problems).toEqual([]);
-      expect(resolved.on).toEqual(FLAGS.map((flag) => flag.env));
+      expect(resolved.on).toEqual(compatible.map((flag) => flag.env));
       const config = resolveConfig(revision(target, resolved));
-      for (const flag of FLAGS) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(true);
+      for (const flag of compatible) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(true);
       // The jobs are called by their own service accounts on the stable URL.
       expect(config.hostPushJobEnabled).toBe(true);
       expect(resolved.env).toMatchObject({
@@ -191,6 +194,14 @@ describe("the deploy workflows' feature flags", () => {
     for (const flag of FLAGS) {
       const { problems } = resolve("prod", closure("prod", flag.env), false);
       expect(problems.some((problem) => problem.includes("enable_host_calendar=true")), flag.env).toBe(true);
+    }
+  });
+
+  it("refuses to combine the NIHO provider API with Experience-owned guest questions", () => {
+    for (const target of ["stg", "prod"] as const) {
+      const both = { ...closure(target, "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED"), ...closure(target, "EXPERIENCE_GUEST_QUESTIONS_ENABLED") };
+      const { problems } = resolve(target, both);
+      expect(problems).toContain(`EXPERIENCE_GUEST_QUESTIONS_ENABLED (${PREFIX[target]}_GUEST_QUESTIONS_ENABLED) conflicts with EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED (${PREFIX[target]}_PROVIDER_OPERATIONS_API_ENABLED)`);
     }
   });
 

@@ -60,7 +60,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 | --- | --- | --- | --- | --- | --- |
 | `EXPERIENCE_GUEST_BOOKING_ENABLED` | `GUEST_BOOKING_ENABLED` | ホストの画面・DB、メール | `BOOKING_CONSENT_VERSION`、`PRIVACY_POLICY_URL`（任意） | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | — |
 | `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*` | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
-| `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `GUEST_QUESTIONS_ENABLED` | ホストの画面・DB | — | — | — |
+| `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `PROVIDER_OPERATIONS_API_ENABLED` | ホストの画面・DB | — | — | — |
+| `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `GUEST_QUESTIONS_ENABLED` | ホストの画面・DB、Provider APIとは併用不可 | — | — | — |
 | `EXPERIENCE_TRANSLATION_ENABLED` | `TRANSLATION_ENABLED` | メールか質問 | — | `ANTHROPIC_API_KEY_REF` → `EXPERIENCE_ANTHROPIC_API_KEY` | — |
 | `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `GUEST_REVIEWS_ENABLED` | DB | — | — | — |
 | `EXPERIENCE_HOST_ATTENDANCE_ENABLED` | `HOST_ATTENDANCE_ENABLED` | 予約 | — | — | — |
@@ -79,6 +80,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 - OTA の 2 つ（#194）は、OTA の予約の取込みそのものは開かない（取込みは channel runtime の設定のまま）。`0036` を先に適用する。[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」「ホストへの通知（#194）」。
 - ホストへのメール（#194、オーナー決定 2026-11-01）：ログインのときに NIHO の確認済みのメールを写し、設定 › 通知で宛先を変えられ、新しい予約・取消・日時変更をメールでも知らせる。メールはメール job が送るので、メール（`EXPERIENCE_GUEST_MAIL_ENABLED`）が要る。新しい Secret・Scheduler・サービスアカウントは無い。**`0038` を新しいコードより先に適用する**（予約の確定・取消と OTA の台帳の transaction が、宛先の表を読んで行を積むため。フラグが off でも読む。off の間は宛先が 1 件も無いので行は積まれない）。[guest-booking.md](guest-booking.md) の「ホストへの通知」。
 - 「ホストの画面・DB」は本番では `enable_host_calendar=true`（と `PROD_HOST_CALENDAR_READY=true`）。サイトの URL は `https://experience.niho.life`、`<project>` は `niho-app-prd`。
+- `PROVIDER_OPERATIONS_API_ENABLED` はNIHOの限定ホストAPI（niho-app #19282/#19283/#19288 と #19278 N2c）を使い、体験の原稿・商品・写真・掲載に加え、予約一覧と承認/辞退/取消、メッセージ、サブホスト管理を有効にする。NIHO本番に `APP_CONNECT_WEB_ORIGINS` と API の `EXPERIENCE_HOST_CONSOLE_URL` を正確なorigin/URLで配備し、N1/N2a/N2b/N2c APIを配備したうえで、フラグが開くすべての画面・操作と権限拒否を受け入れてから `PROD_PROVIDER_OPERATIONS_API_ENABLED=true` にする。NIHOのtokenはExperienceのサーバーだけで扱い、ブラウザへ渡さない。販売開始と検索公開はこのフラグでは開かない。旧 `niho.life/experiences/provider` の転送はNIHO Web側 `EXPERIENCE_HOST_CONSOLE_URL` の別配備で、Experience本番受入後に行う。
+- `GUEST_QUESTIONS_ENABLED` はExperience DB所有の「Ask the host」と質問返信を表示する場合だけ使う。NIHO提供者APIのメッセージ画面と併用できないため、`PROVIDER_OPERATIONS_API_ENABLED` と同時には有効化せず、配備前検査で拒否する。提供者APIを使う受入では、NIHO API上のメッセージ一覧・返信を受け入れる。
 - 設定の形：同意の版は英数字と `._:+-` の 1〜100 字。From・Reply-To はアドレスか `表示名 <アドレス>`（カンマ・`"`・`<>` なし）。URL は小文字の host の https。VAPID の公開鍵は base64url の P-256、subject は `mailto:` か https。`--set-env-vars` の区切りになるカンマは、どの値にも入れられない。
 - 各 Secret は Secret Manager に作り、実行 ID `experience-runtime` にその Secret だけの `secretAccessor` を付けてから参照を入れる。値と接続情報は GitHub の variable・PR に書かない。
 - job（メール・push・Google）を開くフラグは、呼び手の Cloud Scheduler と、上の名前のサービスアカウント（project の role なし、このサービスの `run.invoker` だけ）を先に作る。workflow はそれらを作らない。
