@@ -49,8 +49,10 @@ test("providers empty still reaches a normal Spot from prompt, PC footer and mob
   if (testInfo.project.name === "host-desktop") {
     await expect(page.getByRole("banner").getByRole("link", { name: "NIHOサポート", exact: true })).toBeVisible();
   } else {
-    await page.locator("summary:visible", { hasText: "のアカウント" }).click();
+    const accountMenu = page.locator("summary:visible", { hasText: "のアカウント" });
+    await accountMenu.click();
     await expect(page.getByRole("link", { name: "NIHOサポート", exact: true })).toBeVisible();
+    await accountMenu.click();
   }
   await page.getByRole("link", { name: "NIHOサポート設定" }).click();
   await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toContainText("未設定");
