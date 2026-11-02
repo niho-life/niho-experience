@@ -1,5 +1,5 @@
 # A reviewed main SHA is built without credentials. Only the protected production
-# environment can receive an image and create a candidate Cloud Run revision.
+# environment and owner account can receive an image and create a candidate revision.
 name: Deploy production candidate
 
 on:
@@ -39,7 +39,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require owner initiation and rerun
+        run: bash scripts/check-production-owner.sh
+
   build:
+    needs: authorize
     if: vars.PRODUCTION_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.action == 'candidate'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -302,6 +313,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   promote:
+    needs: authorize
     if: vars.PRODUCTION_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' && inputs.action == 'promote'
     runs-on: ubuntu-latest
     timeout-minutes: 20
