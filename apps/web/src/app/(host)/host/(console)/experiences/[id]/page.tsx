@@ -11,7 +11,7 @@ import { HostPageBody } from "@/components/host/ui";
 import { hostPageContext, loadHostExperienceEditor } from "@/host/data";
 import { config } from "@/lib/config";
 import { HOST_EXPERIENCES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
-import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
+import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 
 export const metadata: Metadata = { title: "体験の編集" };
 
@@ -47,7 +47,7 @@ export default async function HostExperiencePage({ params, searchParams }: { par
   if (!provider) return <HostRegisterPrompt title="体験" />;
   const backHref = withProvider(HOST_EXPERIENCES_PATH, linkProviderId);
   const settingsHref = withProvider(HOST_SETTINGS_PATH, linkProviderId);
-  if (providerOperationsEnabled()) {
+  if (providerPagesEnabled()) {
     return <HostLiveExperienceEditor key={`${provider.id}/${id}`} providerId={provider.id} pageId={id} backHref={backHref} role={provider.memberRole} reviewStatus={provider.reviewStatus} settingsHref={settingsHref} siteUrl={config.siteUrl} />;
   }
   const { editor, host, today } = await loadHostExperienceEditor(provider, id);

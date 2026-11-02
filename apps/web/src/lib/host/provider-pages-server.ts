@@ -1,12 +1,17 @@
 import "server-only";
 import type { ExperienceHostApiFailure } from "@niho-experience/api-client/host";
-import { hostApiClient, readHostSession } from "./server";
+import { config } from "@/lib/config";
+import { clearSessionCookie, hostApiClient, readHostSession } from "./server";
 import { accessTokenUsable } from "./session";
-import { clearSessionCookie } from "./server";
 import { providerOperationsEnabled, providerOperationsJson } from "./provider-operations-server";
 
+/** Provider page authoring has its own rollout gate; the wider operations flag also includes it for compatibility. */
+export function providerPagesEnabled(): boolean {
+  return config.hostConsoleEnabled && (config.experienceProviderPagesApiEnabled || providerOperationsEnabled());
+}
+
 export async function loadProviderPagesClient() {
-  if (!providerOperationsEnabled()) return { ok: false as const, response: providerOperationsJson({ error: "not_found" }, 404) };
+  if (!providerPagesEnabled()) return { ok: false as const, response: providerOperationsJson({ error: "not_found" }, 404) };
   const session = await readHostSession();
   if (!session) return { ok: false as const, response: providerOperationsJson({ error: "unauthenticated" }, 401) };
   if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: providerOperationsJson({ error: "session_refresh_required" }, 401) };

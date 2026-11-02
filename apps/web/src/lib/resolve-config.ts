@@ -447,6 +447,8 @@ export function resolveConfig(env: Env) {
   // the UI for browser-stubbed acceptance; its BFF remains closed in mock mode.
   const experienceAssistedLaunchApiEnabled = apiMode === "http" && env.EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED === "true";
   const experienceAssistedLaunchPreviewEnabled = apiMode === "mock" && env.EXPERIENCE_ASSISTED_LAUNCH_PREVIEW_ENABLED === "true";
+  // Provider page authoring has its own rollout so the page editor can be accepted without opening booking operations.
+  const experienceProviderPagesApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_PAGES_API_ENABLED === "true";
   // Current provider membership and booking operations are independent from Admin and assisted launch.
   // The real transport opens only after the selected v1 API is deployed and accepted.
   const experienceProviderOperationsApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED === "true";
@@ -587,6 +589,7 @@ export function resolveConfig(env: Env) {
     experienceFeeSummaryPreviewEnabled,
     experienceAssistedLaunchApiEnabled,
     experienceAssistedLaunchPreviewEnabled,
+    experienceProviderPagesApiEnabled,
     experienceProviderOperationsApiEnabled,
     experienceProviderOperationsPreviewEnabled,
     experienceTranslateApiEnabled,
