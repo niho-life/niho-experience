@@ -7,8 +7,8 @@
  * - 題名は検索語（docs/growth/seo-content-policy.md の体験別の語）を入れた案で、オーナー承認（2026-10-26・#146）。本番の正本は
  *   NIHO 側の原稿なので、そちらは別に直す。ホストの画面の mock（apps/web/src/host/mock）は旧い題名のまま（ホストがまだ直していない状態）。
  * - 多くの写真は撮影前の仮素材（apps/web/public/sample/、出典・内容は同フォルダの CREDITS.md）。P-01 Community Dinner は掲載元にある
- *   オーナー作成写真8枚のExperience掲載許可を確認済み（2026-11-02）。本番公開には第三者の肖像同意と安定した画像アップロードを別途確認する。
- *   正確な集合案内は予約者だけに出し、公開ギャラリーに建物外観を含めない（docs/content/product-ledger.md）。
+ *   オーナー作成写真8枚のExperience掲載許可を確認済み（2026-11-02）。公開用7枚は掲載元の1024px画像をローカル配信する試験サイト用プレビュー。
+ *   建物外観1枚は予約者向け案内に限り、public/配下には置かない。原画像の安定した非公開アップロードと第三者の肖像同意は本番前に確認する。
  *   - ほかの体験は出典を残した無料素材。円覚寺の集合場所は参道の写真（temple-path.jpg）を使う。
  *   - ホストの顔（hosts[].avatar）は host-*.jpg。Takuya は本人の写真、Yukino・Shiryu は顔の代わりの写真で本人ではない。
  *     写真の無いホスト（Hasami・わか）は null のまま（画面は頭文字）。
@@ -53,20 +53,21 @@ function canonical(slug: string): string {
  * 撮り直した写真が届いたら差し替える（docs/release-acceptance.md）。撮影リストは docs/content/photo-requirements.md。
  */
 export const PILOT_SAMPLE_PHOTO_PATH = "/sample/photos";
+/** P-01 owner-created preview images copied from the public NIHO page; source CDN URLs are time-limited. */
+export const PILOT_COMMUNITY_DINNER_PHOTO_PATH = "/pilot/community-dinner";
 
 /** `samplePhoto` があればその仮写真、無ければ SVG の仮素材（data URI）。 */
-export type PilotImageSpec = PlaceholderImageSpec & { samplePhoto?: string };
+export type PilotImageSpec = PlaceholderImageSpec & { samplePhoto?: string; sourcePhoto?: string };
 
 export const PILOT_IMAGE_SPECS = {
   dinner: [
-    { name: "pilot-dinner-table", label: "Guests and hosts around the long dinner table", hue: 28, samplePhoto: "niho-cd-table-02.jpg" },
-    { name: "pilot-dinner-kitchen", label: "A host cooking with guests in the shared kitchen", hue: 18, samplePhoto: "niho-cd-kitchen-together.jpg" },
-    { name: "pilot-dinner-food", label: "Seasonal dishes prepared for the community dinner", hue: 45, samplePhoto: "niho-cd-food-trays.jpg" },
-    { name: "pilot-dinner-salad", label: "Guests preparing salad together", hue: 90, samplePhoto: "niho-cd-hands-salad.jpg" },
-    { name: "pilot-dinner-dessert", label: "Strawberry daifuku for dessert", hue: 350, samplePhoto: "niho-cd-strawberry-daifuku.jpg" },
-    { name: "pilot-dinner-table-two", label: "Neighbors sharing a meal around the long table", hue: 30, samplePhoto: "niho-cd-table-01.jpg" },
-    { name: "pilot-dinner-welcome", label: "Guests sharing drinks and conversation", hue: 40, samplePhoto: "niho-dinner-1.jpg" },
-    { name: "pilot-dinner-conversation", label: "Guests talking together at NIHO", hue: 330, samplePhoto: "niho-dinner-5.jpg" },
+    { name: "pilot-dinner-table", label: "Guests and hosts around the long dinner table", hue: 28, sourcePhoto: "01-long-table.webp" },
+    { name: "pilot-dinner-kitchen", label: "A host cooking with guests in the shared kitchen", hue: 18, sourcePhoto: "02-cooking-together.webp" },
+    { name: "pilot-dinner-food", label: "Seasonal dishes prepared for the community dinner", hue: 45, sourcePhoto: "03-seasonal-dishes.webp" },
+    { name: "pilot-dinner-welcome", label: "Welcome drinks for the community dinner", hue: 40, sourcePhoto: "04-welcome-drink.webp" },
+    { name: "pilot-dinner-salad", label: "Guests preparing salad together", hue: 90, sourcePhoto: "05-preparing-salad.webp" },
+    { name: "pilot-dinner-conversation", label: "Neighbors talking and playing guitar after dinner", hue: 330, sourcePhoto: "06-dinner-conversation.webp" },
+    { name: "pilot-dinner-dessert", label: "Strawberry daifuku for dessert", hue: 350, sourcePhoto: "07-strawberry-dessert.webp" },
   ],
   coffee: [
     { name: "pilot-coffee-roaster", label: "Scooping roasted beans", hue: 25, samplePhoto: "coffee-scoop.jpg" },
@@ -97,9 +98,11 @@ export const PILOT_IMAGE_SPECS = {
 } satisfies Record<string, PilotImageSpec[]>;
 
 function images(specs: PilotImageSpec[]) {
-  return specs.map((spec) =>
-    spec.samplePhoto ? { url: `${PILOT_SAMPLE_PHOTO_PATH}/${encodeURIComponent(spec.samplePhoto)}` } : placeholderImage(spec),
-  );
+  return specs.map((spec) => {
+    if (spec.sourcePhoto) return { url: `${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/${encodeURIComponent(spec.sourcePhoto)}` };
+    if (spec.samplePhoto) return { url: `${PILOT_SAMPLE_PHOTO_PATH}/${encodeURIComponent(spec.samplePhoto)}` };
+    return placeholderImage(spec);
+  });
 }
 
 /** ホストの顔（仮）。Takuya は本人、ほかは顔の代わりの写真（CREDITS.md）。写真の無いホストは null。 */
@@ -211,7 +214,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
         "Two minutes on foot from Kamakura Station West Exit",
       ],
       timeline: [
-        { time: "18:00", title: "Welcome drink & hellos", text: "Meet your hosts and tonight's neighbors over a local craft beer, tea or juice.", photoIndex: 6 },
+        { time: "18:00", title: "Welcome drink & hellos", text: "Meet your hosts and tonight's neighbors over a local craft beer, tea or juice.", photoIndex: 3 },
         {
           time: "18:15",
           title: "Cook together",
@@ -219,11 +222,11 @@ export function buildPilotExperiences(): ExperienceDetail[] {
           photoIndex: 1,
         },
         { time: "19:15", title: "Sit down and eat", text: "One long table, everything you just made, and stories of everyday life in Kamakura.", photoIndex: 0 },
-        { time: "20:00", title: "Goodnight — or one more cup of tea", text: "Someone usually picks up the guitar. The station is two minutes away whenever you're ready.", photoIndex: 7 },
+        { time: "20:00", title: "Goodnight — or one more cup of tea", text: "Someone usually picks up the guitar. The station is two minutes away whenever you're ready.", photoIndex: 5 },
       ],
       description: [
         "Step into NIHO, a shared living space in Kamakura's Onarimachi neighborhood, for an evening of cooking and conversation with local residents. After a welcome drink and introductions, gather in the shared kitchen to prepare four or five seasonal dishes together.",
-        "Ingredients and the menu change with the season. You might make vegetable tempura, miso soup, grilled fish, a salad with local produce, or a fruit dessert. Your hosts share cooking tips and stories about Japanese home food as you work side by side. Then sit down together to enjoy the meal and talk about life in Kamakura.",
+        "Ingredients and the menu change with the season. You might make vegetable tempura, miso soup, grilled fish, a salad with local produce, or a fruit dessert. Your hosts will share cooking tips and stories about Japanese home food as you work side by side. Then sit down together to enjoy the meal and talk about life in Kamakura.",
         "The people you meet vary from one dinner to the next. Community members may include longtime residents, people involved in local arts and culture, or international neighbors. English and Japanese are used, although English fluency varies by person. Come ready to take part in the cooking and enjoy an easygoing meal together.",
       ].join("\n\n"),
       included: [
@@ -234,7 +237,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
       ],
       notIncluded: ["Transportation to and from NIHO", "Additional alcoholic beverages"],
       notSuitableFor: [
-        "Wheelchair users (the living room is on the second floor)",
+        "Wheelchair users (the venue is on the second floor)",
         "Guests with food allergies",
       ],
       knowBeforeYouGo: [

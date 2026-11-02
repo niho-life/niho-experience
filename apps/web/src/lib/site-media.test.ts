@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPilotExperiences, PILOT_SAMPLE_PHOTO_PATH } from "@niho-experience/api-client/mock";
+import {
+  buildPilotExperiences,
+  PILOT_COMMUNITY_DINNER_PHOTO_PATH,
+  PILOT_SAMPLE_PHOTO_PATH,
+} from "@niho-experience/api-client/mock";
 import { SAMPLE_MEDIA, siteMediaFiles } from "./site-media";
 
 const publicDir = join(__dirname, "../../public");
@@ -32,5 +36,17 @@ describe("provisional media", () => {
       expect(existsSync(join(publicDir, url)), url).toBe(true);
       expect(credits, url).toContain(basename(url));
     }
+  });
+
+  it("uses the owner-approved P-01 gallery locally and keeps meeting details private", () => {
+    const dinner = buildPilotExperiences().find((experience) => experience.slug === "kamakura-community-dinner");
+    expect(dinner).toBeDefined();
+    expect(dinner?.photos).toHaveLength(7);
+    for (const image of dinner?.photos ?? []) {
+      expect(image.url.startsWith(`${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/`)).toBe(true);
+      expect(existsSync(join(publicDir, image.url)), image.url).toBe(true);
+    }
+    expect(dinner?.meetingPointDisclosure).toBe("AFTER_BOOKING");
+    expect(dinner?.meetingPoint).toBeNull();
   });
 });
