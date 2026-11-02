@@ -96,6 +96,8 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const [draft, setDraft] = useState<ExperienceProviderPageDetail | null>(null);
   const [latest, setLatest] = useState<ExperienceProviderPageDetail | null>(null);
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false); const [uncertain, setUncertain] = useState(false);
+  const [uncertainOfferIds, setUncertainOfferIds] = useState<string[]>([]);
+  const [uncertainOfferResolution, setUncertainOfferResolution] = useState<Record<string, string>>({});
   // A 409: 最新の保存内容を読む compares the page and the meeting point with what another editor saved.
   const [stale, setStale] = useState(false);
   const [savedMeeting, setSavedMeeting] = useState<LiveMeeting | null>(null);
@@ -208,11 +210,16 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     try {
       if (pageDirty) {
         const patch = serializeLivePagePatch(draft, saved);
+        const markUncertain = () => {
+          setUncertain(true);
+          setUncertainOfferIds(patch.offers ? draft.offers.filter((offer) => offer.id.startsWith("draft:")).map((offer) => offer.id) : []);
+          setUncertainOfferResolution({});
+        };
         let response: Response;
         try { response = await fetch(endpoint, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ expectedUpdatedAt: saved.updatedAt, patch }) }); }
-        catch { setUncertain(true); setError(SAVE_UNCERTAIN); return; }
+        catch { markUncertain(); setError(SAVE_UNCERTAIN); return; }
         if (!response.ok) {
-          if (response.status >= 500) { setUncertain(true); setError(SAVE_UNCERTAIN); return; }
+          if (response.status >= 500) { markUncertain(); setError(SAVE_UNCERTAIN); return; }
           const code = await responseError(response);
           if (code === "PAGE_OFFER_HAS_BOOKINGS") {
             const offers = restoreSavedLiveOffers(saved.offers, draft.offers);
@@ -224,8 +231,8 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
         }
         let value: ExperienceProviderPageDetail;
         try { value = await response.json() as ExperienceProviderPageDetail; }
-        catch { setUncertain(true); setError("保存は受け付けられた可能性があります。最新の内容を確認してください。"); return; }
-        if (value.id !== pageId) { setUncertain(true); setError("保存結果を確認できません。最新の内容を確認してください。"); return; }
+        catch { markUncertain(); setError("保存は受け付けられた可能性があります。最新の内容を確認してください。"); return; }
+        if (value.id !== pageId) { markUncertain(); setError("保存結果を確認できません。最新の内容を確認してください。"); return; }
         setSaved(value); setDraft(copyPage(value)); version = value.updatedAt; pageSaved = true;
       }
       if (meetingDirty && meeting) {
@@ -264,14 +271,39 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       if (!meetingRead) { setLatest(null); setStale(true); setError("集合場所の最新の保存内容を読めませんでした。もう一度「最新の保存内容を読む」を押してください。"); }
     } catch (reason) { setError(reason instanceof Error ? reason.message : loadMessage(500)); } finally { setBusy(false); }
   }
+  function canResolveUncertainOfferCreates() {
+    if (!uncertainOfferIds.length) return true;
+    if (!latest || !saved) return false;
+    const selected = new Set<string>();
+    return uncertainOfferIds.every((localId) => {
+      const resolution = uncertainOfferResolution[localId];
+      if (resolution === "retry") return true;
+      if (!resolution || saved.offers.some((offer) => offer.id === resolution) || !latest.offers.some((offer) => offer.id === resolution && !saved.offers.some((base) => base.id === offer.id))) return false;
+      if (selected.has(resolution)) return false;
+      selected.add(resolution);
+      return true;
+    });
+  }
   function applyMerge(choice: "local" | "remote") {
     if (!latest || !saved || !draft) return;
     if (meetingState === "ready" && savedMeeting && meeting && !latestMeeting) return;
-    const merged = mergeLivePage(saved, draft, latest, choice);
+    if (!canResolveUncertainOfferCreates()) return;
+    const draftForMerge = copyPage(draft);
+    for (const localId of uncertainOfferIds) {
+      const resolution = uncertainOfferResolution[localId];
+      if (!resolution || resolution === "retry") continue;
+      const remote = latest.offers.find((offer) => offer.id === resolution);
+      const localIndex = draftForMerge.offers.findIndex((offer) => offer.id === localId);
+      if (!remote || localIndex < 0) return;
+      // The owner explicitly matched this uncertain local create to an API-issued product ID.
+      draftForMerge.offers[localIndex] = structuredClone(remote);
+    }
+    draftForMerge.offer = draftForMerge.offers[0] ?? null;
+    const merged = mergeLivePage(saved, draftForMerge, latest, choice);
     const meetingMerged = savedMeeting && meeting && latestMeeting ? mergeLiveMeeting(savedMeeting, meeting, latestMeeting, choice) : null;
     setSaved(latest); setDraft(merged.draft); setLatest(null);
     if (meetingMerged && latestMeeting) { setSavedMeeting(latestMeeting); setMeeting(meetingMerged.draft); setLatestMeeting(null); }
-    setUncertain(false); setStale(false); setError("");
+    setUncertain(false); setUncertainOfferIds([]); setUncertainOfferResolution({}); setStale(false); setError("");
     setNotice(merged.conflicts.length || meetingMerged?.conflict ? (choice === "local" ? "競合した項目は自分の入力を残しました。保存前に確認してください。" : "競合した項目は最新の内容を残しました。") : "両方の変更を統合しました。保存前に確認してください。");
   }
 
@@ -396,6 +428,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const savedAsEnglish = saved.language !== "JA";
   const englishStatus = english.kind === "ready" && !savedAsEnglish ? liveEnglishState(english.english).status : null;
   const listingView = owner && listing ? liveListingView(listing.listing, saved, siteUrl) : null;
+  const uncertainOfferCandidates = latest ? latest.offers.filter((offer) => !saved.offers.some((base) => base.id === offer.id)) : [];
   const title = draft.title.trim() || "体験の編集";
   const setLanguage = (language: ExperienceProviderPageDetail["language"]) => { setDraft((current) => current ? { ...current, language } : current); if (language !== "JA") setTab("ja"); };
   /** 集合場所: the page's own meeting point (NIHO keeps it apart from the page) and, from the page's photos, the 外観写真. */
@@ -417,7 +450,24 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     {dirty ? <p className="mb-3 text-[0.8125rem] text-ink-soft">プレビューには保存した内容が出ます。保存すると反映されます。</p> : null}
     {error ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-4 text-danger">{error}{stale || uncertain ? <button type="button" disabled={busy} onClick={() => void reconcile()} className="ml-2 font-extrabold underline">最新の保存内容を読む</button> : null}</div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-leaf-pale p-4 text-moss">{notice}</p> : null}
-    {latest && mergePreview ? <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4"><h2 className="font-extrabold">最新の保存内容と照合</h2><p className="mt-1 text-sm">自分の入力と、ほかの人が保存した内容を項目ごとに比較しました。</p>{conflicts.length ? <><p className="mt-2 text-sm font-extrabold">同じ項目が変更されています</p><ul className="mt-1 list-disc pl-5 text-sm">{conflicts.map((item) => <li key={item.path} className="mb-3"><strong>{item.label}</strong><dl className="mt-1 grid gap-1"><div><dt className="font-bold">自分の入力</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.local)}</dd></div><div><dt className="font-bold">最新の内容</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.remote)}</dd></div></dl></li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" className={consoleButtonClass("primary", "sm")} onClick={() => applyMerge("local")}>競合項目は自分の入力を残す</button><button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => applyMerge("remote")}>競合項目は最新を残す</button></div></> : <button type="button" className={`${consoleButtonClass("primary", "sm")} mt-3`} onClick={() => applyMerge("local")}>両方の変更を統合する</button>}</section> : null}
+    {latest && mergePreview ? <>
+      {uncertainOfferIds.length ? <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4" aria-labelledby="uncertain-offers-title">
+        <h2 id="uncertain-offers-title" className="font-extrabold">新規商品の保存結果を確認</h2>
+        <p className="mt-1 text-sm">保存応答が失われました。最新の内容にある同じ商品を選ぶと、サーバーが発行したIDへ結び付けます。見当たらないことを確認した場合だけ「再送する」を選んでください。</p>
+        <div className="mt-3 grid gap-3">{uncertainOfferIds.map((id) => {
+          const pending = draft.offers.find((offer) => offer.id === id);
+          const selected = uncertainOfferResolution[id] ?? "";
+          return <label key={id} className="grid gap-1 text-sm font-bold">{`保存結果が不明な商品: ${pending?.name || "商品名未設定"}（¥${(pending?.priceYen ?? 0).toLocaleString("ja-JP")}）`}
+            <select aria-label={`${pending?.name || "新規商品"}の保存結果`} value={selected} onChange={(event) => setUncertainOfferResolution((current) => ({ ...current, [id]: event.target.value }))} className="min-h-10 w-full rounded-lg border border-line bg-canvas px-3 py-2">
+              <option value="">最新の内容を確認して選択</option>
+              {uncertainOfferCandidates.map((candidate) => <option key={candidate.id} value={candidate.id} disabled={Object.entries(uncertainOfferResolution).some(([otherId, value]) => otherId !== id && value === candidate.id)}>{candidate.name || "商品名未設定"}（¥{candidate.priceYen.toLocaleString("ja-JP")}）</option>)}
+              <option value="retry">最新に見当たらないことを確認し、再送する</option>
+            </select>
+          </label>;
+        })}</div>
+      </section> : null}
+      <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4"><h2 className="font-extrabold">最新の保存内容と照合</h2><p className="mt-1 text-sm">自分の入力と、ほかの人が保存した内容を項目ごとに比較しました。</p>{conflicts.length ? <><p className="mt-2 text-sm font-extrabold">同じ項目が変更されています</p><ul className="mt-1 list-disc pl-5 text-sm">{conflicts.map((item) => <li key={item.path} className="mb-3"><strong>{item.label}</strong><dl className="mt-1 grid gap-1"><div><dt className="font-bold">自分の入力</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.local)}</dd></div><div><dt className="font-bold">最新の内容</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.remote)}</dd></div></dl></li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={!canResolveUncertainOfferCreates()} className={consoleButtonClass("primary", "sm", DISABLED)} onClick={() => applyMerge("local")}>競合項目は自分の入力を残す</button><button type="button" disabled={!canResolveUncertainOfferCreates()} className={consoleButtonClass("secondary", "sm", DISABLED)} onClick={() => applyMerge("remote")}>競合項目は最新を残す</button></div></> : <button type="button" disabled={!canResolveUncertainOfferCreates()} className={`${consoleButtonClass("primary", "sm", DISABLED)} mt-3`} onClick={() => applyMerge("local")}>両方の変更を統合する</button>}</section>
+    </> : null}
     {writtenJapanese ? <EditorLanguageTabs tab={activeTab} onTab={setTab} englishPill={englishStatus && englishStatus !== "complete" ? LIVE_ENGLISH_STATUS[englishStatus] : null} englishLabel={LIVE_ENGLISH_TAB_LABEL} /> : null}
     <div id={writtenJapanese ? EDITOR_TAB_PANEL_ID : undefined} role={writtenJapanese ? "tabpanel" : undefined} aria-labelledby={writtenJapanese ? editorTabId(activeTab) : undefined} className="@container">
       {writtenJapanese && activeTab === "en" ? <LiveEnglishState load={english} savedAsEnglish={savedAsEnglish} unsaved={dirty} busy={fieldsLocked} onReload={() => void loadEnglish()} /> : null}
@@ -445,6 +495,6 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     {confirming === "withdraw" ? <HostConfirmDialog title="申請を取り下げますか？" description="体験サイトへの掲載の申請を取り下げます。もう一度載せるには、申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>申請を取り下げる</button>} onConfirm={() => void withdrawListing(false)} onClose={() => setConfirming(null)} /> : null}
     {confirming === "stop" ? <HostConfirmDialog title="掲載を止めますか？" description="体験サイトからすぐに外れます。受け付けた予約は残ります。もう一度載せるには申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>掲載を止める</button>} onConfirm={() => void withdrawListing(true)} onClose={() => setConfirming(null)} /> : null}
     {previewing ? <HostExperiencePreview endpoint={endpoint} unsaved={dirty} onClose={() => setPreviewing(false)} /> : null}
-    {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} onDiscard={() => { setUncertain(false); setListingUncertain(false); }} /> : null}
+    {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} onDiscard={() => { setUncertain(false); setUncertainOfferIds([]); setUncertainOfferResolution({}); setListingUncertain(false); }} /> : null}
   </HostPageBody></div>;
 }

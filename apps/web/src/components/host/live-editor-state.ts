@@ -69,6 +69,11 @@ export function emptyLiveOffer(id: string, sortOrder: number): ExperienceProvide
   };
 }
 
+/** Append in the editor's visible order, even when the API's stored sortOrder values are sparse. */
+export function appendLiveOffer(offers: readonly ExperienceProviderPageOffer[], id: string): ExperienceProviderPageOffer[] {
+  return [...offers.map((offer, sortOrder) => ({ ...offer, sortOrder })), emptyLiveOffer(id, offers.length)];
+}
+
 export function moveLiveOffer(offers: readonly ExperienceProviderPageOffer[], index: number, by: -1 | 1): ExperienceProviderPageOffer[] {
   const target = index + by;
   if (!Number.isInteger(index) || index < 0 || index >= offers.length || target < 0 || target >= offers.length) return [...offers];

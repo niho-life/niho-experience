@@ -74,7 +74,7 @@ const applied = (detail: Detail, patch: Patch): Detail => {
 type SyntheticListing = { id: string; spotId: string; campaignPageId: string; status: "REQUESTED" | "ACTIVE" | "PAUSED" | "WITHDRAWN"; slug: string | null; regionKey: string | null; consentVersion: string; consentedAt: string; approvedAt: string | null; pausedAt: string | null; withdrawnAt: string | null; reviewNote: string | null; reviewNotedAt: string | null; createdAt: string; updatedAt: string };
 type Server = { page: Detail; preview: unknown; patches: Array<{ expectedUpdatedAt: string; patch: Patch }>; previewCalls: number; readStatus: number; patchStatus: number; patchError: string | null; listing: SyntheticListing | null; listingRequests: unknown[] };
 /** A synthetic NIHO for one page: GET / PATCH of the page, its preview, the meeting point and the listing. */
-async function serve(page: Page, server: Server, onPatch?: (body: Server["patches"][number]) => Response | void) {
+async function serve(page: Page, server: Server, onPatch?: (body: Server["patches"][number]) => "abort" | void) {
   await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
     const request = route.request(); const path = new URL(request.url()).pathname;
     if (path.endsWith("/preview")) { server.previewCalls += 1; return json(route, server.preview); }
@@ -91,7 +91,7 @@ async function serve(page: Page, server: Server, onPatch?: (body: Server["patche
     if (path.endsWith(`/${PAGE}`) && request.method() === "PATCH") {
       const body = request.postDataJSON(); server.patches.push(body);
       if (server.patchStatus !== 200) return json(route, { error: server.patchError ?? "invalid" }, server.patchStatus);
-      onPatch?.(body);
+      if (onPatch?.(body) === "abort") return route.abort();
       return json(route, server.page);
     }
     return json(route, { error: "not_found" }, 404);
@@ -167,7 +167,8 @@ test("the body fields come in the mock editor's order, and one 保存 sends only
 });
 
 test("adds a product with a booking question, persists generated IDs, and saves its order", async ({ page }) => {
-  const server = newServer();
+  const initial = pageDetail(); initial.offers[0]!.sortOrder = 10; initial.offer.sortOrder = 10;
+  const server = newServer(initial);
   await serve(page, server, ({ patch }) => { server.page = applied(server.page, patch); });
   await open(page);
 
@@ -184,8 +185,8 @@ test("adds a product with a booking question, persists generated IDs, and saves 
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
 
   expect(server.patches[0]!.patch.offers).toHaveLength(2);
-  expect(server.patches[0]!.patch.offers![0]).toMatchObject({ id: "offer-1", name: "午前の合成商品" });
-  expect(server.patches[0]!.patch.offers![1]).toMatchObject({ name: "子ども向けプラン", priceYen: 4000, bookingQuestions: [{ prompt: "食物アレルギーはありますか？", inputType: "SINGLE_SELECT", options: [{ label: "ある" }, { label: "ない" }] }] });
+  expect(server.patches[0]!.patch.offers![0]).toMatchObject({ id: "offer-1", name: "午前の合成商品", sortOrder: 0 });
+  expect(server.patches[0]!.patch.offers![1]).toMatchObject({ name: "子ども向けプラン", priceYen: 4000, sortOrder: 1, bookingQuestions: [{ prompt: "食物アレルギーはありますか？", inputType: "SINGLE_SELECT", options: [{ label: "ある" }, { label: "ない" }] }] });
   expect(server.patches[0]!.patch.offers![1]).not.toHaveProperty("id");
   expect(server.patches[0]!.patch.offers![1]!.bookingQuestions![0]).not.toHaveProperty("id");
   expect(server.patches[0]!.patch.offers![1]!.bookingQuestions![0]!.options![0]).not.toHaveProperty("id");
@@ -198,6 +199,31 @@ test("adds a product with a booking question, persists generated IDs, and saves 
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
   expect(server.patches[1]!.patch.offers!.map((item) => [item.id, item.sortOrder])).toEqual([["offer-created-2", 0], ["offer-1", 1]]);
+});
+
+test("a lost create response requires matching the saved product before reconciliation", async ({ page }) => {
+  const server = newServer();
+  await serve(page, server, ({ patch }) => { server.page = applied(server.page, patch); return "abort"; });
+  await open(page);
+
+  await page.getByRole("button", { name: "商品を追加" }).click();
+  await page.getByLabel("商品名").nth(1).fill("応答消失の合成商品");
+  await page.getByLabel("大人料金").nth(1).fill("4200");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "再送せず" })).toBeVisible();
+  await page.getByRole("button", { name: "最新の保存内容を読む" }).click();
+  await expect(page.getByRole("heading", { name: "新規商品の保存結果を確認" })).toBeVisible();
+
+  const result = page.getByLabel("応答消失の合成商品の保存結果");
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "両方の変更を統合する" })).toBeDisabled();
+  await result.selectOption("offer-created-2");
+  await page.getByRole("button", { name: "両方の変更を統合する" }).click();
+
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("商品名").nth(1)).toHaveValue("応答消失の合成商品");
+  expect(server.patches).toHaveLength(1);
+  expect(server.page.offers).toHaveLength(2);
 });
 
 test("a product with booking history returns to the draft when NIHO rejects its deletion", async ({ page }) => {

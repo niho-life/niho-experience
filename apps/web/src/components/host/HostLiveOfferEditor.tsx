@@ -1,7 +1,7 @@
 "use client";
 
 import type { ExperienceProviderPageOffer } from "@niho-experience/api-client/host";
-import { editLines, emptyLiveOffer, LIVE_OFFER_LIMIT, LIVE_QUESTION_LIMIT, LIVE_QUESTION_OPTION_LIMIT, moveLiveOffer, removeLiveOffer } from "./live-editor-state";
+import { appendLiveOffer, editLines, LIVE_OFFER_LIMIT, LIVE_QUESTION_LIMIT, LIVE_QUESTION_OPTION_LIMIT, moveLiveOffer, removeLiveOffer } from "./live-editor-state";
 import { consoleButtonClass } from "./host-ui";
 import { DISABLED } from "./editor-parts";
 import { FieldRow, FieldSection, INPUT, TEXTAREA } from "./fields";
@@ -38,7 +38,7 @@ export function HostLiveOfferEditor({ offers, disabled, onChange }: {
   };
   const addOffer = () => {
     if (offers.length >= LIVE_OFFER_LIMIT) return;
-    onChange([...offers, emptyLiveOffer(draftId(), offers.length)]);
+    onChange(appendLiveOffer(offers, draftId()));
   };
 
   return <>
