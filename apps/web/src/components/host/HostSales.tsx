@@ -1,10 +1,11 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { STRIPE_DASHBOARD_URL, type SalesPayoutNotice } from "@/host/payout";
+import type { SalesPayoutNotice } from "@/host/payout";
 import { monthKey, type SalesMonth, type SalesPage, type SalesRow } from "@/host/sales";
 import { SITE_PAYOUTS_EMPTY_TEXT, SITE_PAYOUTS_SCOPE_TEXT, SITE_PAYOUTS_TITLE, type SitePayoutsPanel } from "@/host/site-sales-payouts";
 import { HOST_SALES_PATH, withQuery } from "@/lib/host/routes";
 import { HostIcon } from "./HostIcon";
+import { HostStripeLogin } from "./HostStripeLogin";
 import { consoleButtonClass, HOST_HEADING, HOST_SURFACE } from "./host-ui";
 import { SectionTitle, StatusPill } from "./ui";
 
@@ -60,7 +61,7 @@ export function SalesPayoutNoticeView({ notice, settingsHref }: { notice: SalesP
  * The month's numbers (mock v2 `.stats`), the way to Stripe's own payout details, and the notes on what the numbers
  * leave out or work out (this site's ledger, #91).
  */
-export function SalesSummaryPanel({ page }: { page: SalesPage }) {
+export function SalesSummaryPanel({ page, providerId }: { page: SalesPage; providerId?: string | null }) {
   return (
     <section aria-labelledby="sales-summary" className={HOST_SURFACE}>
       <h2 id="sales-summary" className="sr-only">
@@ -75,11 +76,12 @@ export function SalesSummaryPanel({ page }: { page: SalesPage }) {
             </div>
           ))}
         </dl>
-        <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center gap-0.5 text-[0.78125rem] font-extrabold text-ink-soft hover:text-ink md:ml-auto">
-          <HostIcon name="external" className="size-3.5" />
-          Stripe で入金の明細を見る
-          <span className="sr-only">（新しいタブで開きます）</span>
-        </a>
+        <HostStripeLogin
+          providerId={providerId}
+          label="Stripe で入金の明細を見る"
+          className="inline-flex min-h-6 items-center gap-0.5 text-[0.78125rem] font-extrabold text-ink-soft hover:text-ink"
+          formClassName="md:ml-auto"
+        />
       </div>
       {page.notes.length ? (
         <ul className="space-y-1 border-t border-line px-4 py-3 text-[0.78125rem] leading-normal text-muted md:px-5">
@@ -209,7 +211,7 @@ export function SalesPayoutsPanel({ panel }: { panel: SitePayoutsPanel }) {
 }
 
 /** この口座への入金 while Stripe is read, or when it could not be: the words, and Stripe's own page when it failed. */
-export function SalesPayoutsMessage({ text, failed = false }: { text: string; failed?: boolean }) {
+export function SalesPayoutsMessage({ text, failed = false, providerId }: { text: string; failed?: boolean; providerId?: string | null }) {
   return (
     <SalesPayoutsFrame busy={!failed}>
       <div className="px-4 pt-3 pb-4 md:px-5">
@@ -218,11 +220,12 @@ export function SalesPayoutsMessage({ text, failed = false }: { text: string; fa
             <p role="alert" className="rounded-2xl border border-warn/20 bg-warn-pale px-4 py-3 text-warn">
               {text}
             </p>
-            <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-6 items-center gap-0.5 text-[0.78125rem] font-extrabold text-ink-soft hover:text-ink">
-              <HostIcon name="external" className="size-3.5" />
-              Stripe で入金の明細を見る
-              <span className="sr-only">（新しいタブで開きます）</span>
-            </a>
+            <HostStripeLogin
+              providerId={providerId}
+              label="Stripe で入金の明細を見る"
+              className="inline-flex min-h-6 items-center gap-0.5 text-[0.78125rem] font-extrabold text-ink-soft hover:text-ink"
+              formClassName="mt-2"
+            />
           </>
         ) : (
           <p role="status" className="text-muted">

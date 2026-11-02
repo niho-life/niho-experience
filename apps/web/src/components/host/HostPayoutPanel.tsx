@@ -2,12 +2,13 @@
 
 import { useId, useState, useTransition } from "react";
 import { openPayoutConnect, sharePayoutAccount, syncPayoutAccount } from "@/host/actions";
-import { payoutPanelView, STRIPE_DASHBOARD_URL, type HostNotice, type HostPayoutLoad } from "@/host/payout";
+import { payoutPanelView, type HostNotice, type HostPayoutLoad } from "@/host/payout";
 import { DISABLED } from "./editor-parts";
 import { FieldRow, FieldSection, SELECT } from "./fields";
 import { consoleButtonClass } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { HostNoticeLine } from "./HostNoticeLine";
+import { HostStripeLogin } from "./HostStripeLogin";
 
 /**
  * 設定 › 売上受取口座 (#88/#91, mock v2): the owner's payout account as NIHO has it, and what
@@ -22,6 +23,7 @@ export function HostPayoutPanel({
   payout,
   onPayout,
   initialNotice,
+  preview,
 }: {
   providerId: string;
   /** Names the provider's own account ("サンプルの台所の口座"). */
@@ -30,6 +32,8 @@ export function HostPayoutPanel({
   onPayout: (payout: HostPayoutLoad) => void;
   /** What Stripe's way back (`?connect=`) led to. */
   initialNotice: HostNotice | null;
+  /** Synthetic preview keeps the generic login link; live mode requests a server-side link. */
+  preview: boolean;
 }) {
   const baseId = useId();
   const view = payoutPanelView(payout, displayName);
@@ -93,11 +97,11 @@ export function HostPayoutPanel({
         <div role="group" aria-labelledby={stripeLabel} className="flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-2">
           <span className={view.status ? "" : "text-ink-soft"}>{view.text}</span>
           {view.dashboard ? (
-            <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className={consoleButtonClass("secondary", "sm")}>
-              <HostIcon name="external" className="size-3.5" />
-              Stripe で確認
-              <span className="sr-only">（新しいタブで開きます）</span>
-            </a>
+            <HostStripeLogin
+              providerId={preview ? null : providerId}
+              label="Stripe で確認"
+              className={consoleButtonClass("secondary", "sm")}
+            />
           ) : null}
           {view.actions.includes("connect") ? (
             <button type="button" disabled={busy} onClick={() => openStripe("start")} className={button}>

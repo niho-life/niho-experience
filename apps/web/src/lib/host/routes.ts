@@ -9,6 +9,8 @@ export const HOST_LOGOUT_PATH = "/host/auth/logout";
 export const HOST_AUTH_ERROR_PATH = "/host/auth/error";
 export const HOST_INVITATIONS_PATH = "/host/invitations";
 export const HOST_API_PREFIX = "/host/api/";
+/** Creates a short-lived Express dashboard login link after server-side OWNER checks. */
+export const HOST_STRIPE_LOGIN_PATH = "/host/api/stripe-login";
 /**
  * The console as an installed app (#177). The app's scope is `/host/` (the English
  * introduction at /host stays outside it), and it opens on /host/launch.

@@ -80,7 +80,7 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
       <SalesFrame page={site.page} linkProviderId={linkProviderId}>
         <SalesScope text={SITE_SALES_SCOPE_TEXT} />
         {noticeView}
-        <SalesSummaryPanel page={site.page} />
+        <SalesSummaryPanel page={site.page} providerId={provider.id} />
         <SalesLines page={site.page} />
         <Suspense fallback={<SalesPayoutsMessage text={SITE_PAYOUTS_LOADING_TEXT} />}>
           <HostSalesPayouts provider={provider} reader={reader} month={site.page.month} />
@@ -126,6 +126,6 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
 async function HostSalesPayouts({ provider, reader, month }: Pick<MonthProps, "provider" | "reader"> & { month: SalesMonth }) {
   const payouts = await loadSitePayouts(provider, reader, month);
   if (payouts.status === "closed") return null;
-  if (payouts.status === "error") return <SalesPayoutsMessage text={payouts.text} failed />;
+  if (payouts.status === "error") return <SalesPayoutsMessage text={payouts.text} failed providerId={provider.id} />;
   return <SalesPayoutsPanel panel={payouts.panel} />;
 }
