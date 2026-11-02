@@ -7,7 +7,7 @@ import type { ExperienceProviderMeetingPoint, ExperienceProviderPageDetail, Expe
 import type { HostProviderReviewStatus, HostProviderRole } from "@/lib/host/providers";
 import type { EditorTab } from "@/host/page-english";
 import { DISABLED, EditorPanel } from "./editor-parts";
-import { FieldRow, FieldSection, INPUT, TEXTAREA } from "./fields";
+import { FieldSection } from "./fields";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { EDITOR_TAB_PANEL_ID, EditorLanguageTabs, editorTabId, LIVE_ENGLISH_TAB_LABEL } from "./HostEditorEnglish";
 import { consoleButtonClass } from "./host-ui";
@@ -16,20 +16,20 @@ import { HostIcon } from "./HostIcon";
 import { HostSubHeader } from "./HostSubHeader";
 import { HostPageBody } from "./ui";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
-import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, liveOfferProblem, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, restoreSavedLiveOffers, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 import { LIVE_ENGLISH_STATUS, liveEnglishState, readLiveEnglish } from "./live-english";
 import { hostListingReviewNote, LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, publishBlockerText, readListingResponse } from "./live-listing-state";
 import { LiveContentPanels, LiveExteriorPhoto } from "./LiveContentPanels";
 import { LiveEnglishPanels, LiveEnglishState, type LiveEnglishLoad } from "./LiveEnglishPanels";
 import { LivePagePanel } from "./LivePagePanel";
 import { LivePhotosSection } from "./LivePhotosSection";
+import { HostLiveOfferEditor } from "./HostLiveOfferEditor";
 import { MeetingPointFields, MeetingPointSummary } from "./MeetingPointFields";
 import { SaveBar } from "./SaveBar";
 
 // The detail view comes only when 「プレビュー」 is pressed.
 const HostExperiencePreview = dynamic(() => import("./HostExperiencePreview"), { ssr: false });
 
-const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
 const PHOTO_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 const PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const PHOTO_FILE_FIELD = "file";
@@ -65,6 +65,13 @@ async function listingCall(url: string, init: RequestInit): Promise<{ ok: true; 
   if (response.ok) return { ok: true, value: body };
   const reason = typeof body === "object" && body !== null ? (body as { error?: unknown }).error : null;
   return { ok: false, status: response.status, error: typeof reason === "string" ? reason : null };
+}
+
+async function responseError(response: Response): Promise<string | null> {
+  try {
+    const body = await response.clone().json();
+    return typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string" ? (body as { error: string }).error : null;
+  } catch { return null; }
 }
 
 export interface HostLiveExperienceEditorProps {
@@ -182,13 +189,14 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   // Design: nothing is applied, withdrawn or stopped while the page has changes not yet saved.
   const listingLocked = dirty || Boolean(latest) || uncertain || busy || listingBusy || listingUncertain;
   const editContent = (patch: Partial<ExperienceProviderPageDetail["content"]>) => setDraft((current) => current ? { ...current, content: { ...current.content, ...patch } } : current);
-  const editOffer = (index: number, patch: Partial<ExperienceProviderPageOffer>) => setDraft((current) => current ? { ...current, offers: current.offers.map((offer, at) => at === index ? { ...offer, ...patch } : offer) } : current);
+  const editOffers = (offers: ExperienceProviderPageOffer[]) => setDraft((current) => current ? { ...current, offers, offer: offers[0] ?? null } : current);
 
   /** 保存: a listed experience leaves the site until NIHO checks it again, so the owner is asked first. */
   function requestSave() {
     if (!draft || !saved || busy || listingBusy || latest || !dirty) return;
     // Only the Japanese tab draws the fields: the check does not depend on the tab being open.
-    const problem = liveContentProblem(draft.content) ?? (meetingDirty && meeting ? liveMeetingProblem(meeting) : null);
+    const changed = serializeLivePagePatch(draft, saved);
+    const problem = liveContentProblem(draft.content) ?? (changed.offers ? liveOfferProblem(draft.offers) : null) ?? (meetingDirty && meeting ? liveMeetingProblem(meeting) : null);
     if (problem) { setError(problem); setNotice(""); setTab("ja"); return; }
     if (owner && listing?.listing?.status === "ACTIVE") setConfirming("save");
     else void save();
@@ -205,6 +213,13 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
         catch { setUncertain(true); setError(SAVE_UNCERTAIN); return; }
         if (!response.ok) {
           if (response.status >= 500) { setUncertain(true); setError(SAVE_UNCERTAIN); return; }
+          const code = await responseError(response);
+          if (code === "PAGE_OFFER_HAS_BOOKINGS") {
+            const offers = restoreSavedLiveOffers(saved.offers, draft.offers);
+            setDraft((current) => current ? { ...current, offers, offer: offers[0] ?? null } : current);
+            setError("予約履歴がある商品は削除できません。商品を戻しました。代わりに「この商品を受付する」をオフにしてください。");
+            return;
+          }
           setStale(response.status === 409); setError(message(response.status)); return;
         }
         let value: ExperienceProviderPageDetail;
@@ -412,22 +427,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
           {activeTab === "en" ? (english.kind === "ready" && !savedAsEnglish ? <LiveEnglishPanels english={english.english} /> : null) : <>
             <LivePhotosSection photos={draft.photos} alts={draft.photoAlts} onUpload={(file) => void upload(file)} onAlt={(index, value) => setDraft({ ...draft, photoAlts: draft.photos.map((_, at) => at === index ? value : draft.photoAlts[at] ?? "") })} onMove={(from, to) => setDraft(movePhoto(draft, from, to))} onCover={(index) => setDraft(makeCoverPhoto(draft, index))} onRemove={(index) => setDraft(removePhoto(draft, index))} />
             <LiveContentPanels content={draft.content} photos={draft.photos} lang={lang} onContent={editContent} meeting={meetingPanel} />
-        {draft.offers.map((offer, index) => <FieldSection key={offer.id} title={`商品 ${index + 1}`}>
-        <FieldRow label="商品名" htmlFor={`offer-${index}-name`}><input id={`offer-${index}-name`} required maxLength={80} className={INPUT} value={offer.name} onChange={(event) => editOffer(index, { name: event.target.value })} /></FieldRow>
-        <FieldRow label="短い説明" htmlFor={`offer-${index}-description`}><input id={`offer-${index}-description`} maxLength={160} className={INPUT} value={offer.shortDescription ?? ""} onChange={(event) => editOffer(index, { shortDescription: event.target.value || null })} /></FieldRow>
-        <div className="grid gap-3 p-4 sm:grid-cols-3">
-          {([['priceYen','大人料金',0,1000000],['capacity','定員',1,500],['maxPartySize','1予約の上限',1,500],['minimumParticipants','最低催行人数',1,500],['durationMinutes','所要時間（分）',15,720],['cutoffDays','受付締切（日）',0,60]] as const).map(([key,label,min,max]) => <label key={key} className="font-extrabold">{label}<input type="number" min={min} max={max} className={`${INPUT} mt-1`} value={offer[key]} onChange={(event) => editOffer(index, { [key]: Number(event.target.value) })} /></label>)}
-          <label className="font-extrabold">子ども料金<input type="number" min={0} max={1000000} placeholder="設定なし" className={`${INPUT} mt-1`} value={offer.childPriceYen ?? ""} onChange={(event) => editOffer(index, { childPriceYen: event.target.value === "" ? null : Number(event.target.value) })} /></label>
-          <label className="font-extrabold">子ども最少年齢<input type="number" min={0} max={17} placeholder="設定なし" className={`${INPUT} mt-1`} value={offer.childMinAge ?? ""} onChange={(event) => editOffer(index, { childMinAge: event.target.value === "" ? null : Number(event.target.value) })} /></label>
-          <label className="font-extrabold">子ども最大年齢<input type="number" min={0} max={17} placeholder="設定なし" className={`${INPUT} mt-1`} value={offer.childMaxAge ?? ""} onChange={(event) => editOffer(index, { childMaxAge: event.target.value === "" ? null : Number(event.target.value) })} /></label>
-          <label className="font-extrabold">開始時刻<input type="time" className={`${INPUT} mt-1`} value={offer.startTime} onChange={(event) => editOffer(index, { startTime: event.target.value })} /></label>
-          <label className="font-extrabold">取消条件<select className={`${INPUT} mt-1`} value={offer.cancellationPolicy} onChange={(event) => editOffer(index, { cancellationPolicy: event.target.value as ExperienceProviderPageOffer["cancellationPolicy"] })}><option value="FREE_UNTIL_24H">24時間前まで無料</option><option value="FREE_UNTIL_48H">48時間前まで無料</option><option value="NONE">無料取消なし</option></select></label>
-          <label className="font-extrabold">受付方法<select className={`${INPUT} mt-1`} value={offer.acceptanceMode} onChange={(event) => editOffer(index, { acceptanceMode: event.target.value as ExperienceProviderPageOffer["acceptanceMode"] })}><option value="APPROVAL">承認制</option><option value="INSTANT">即時確定</option></select></label>
-        </div>
-        <div className="flex flex-wrap gap-5 px-4 pb-4"><label className="inline-flex items-center gap-2 font-extrabold"><input type="checkbox" checked={offer.isActive} onChange={(event) => editOffer(index, { isActive: event.target.checked })} />この商品を受付する</label><label className="inline-flex items-center gap-2 font-extrabold"><input type="checkbox" checked={offer.adultRequiredForChild} onChange={(event) => editOffer(index, { adultRequiredForChild: event.target.checked })} />子どもは大人同伴</label></div>
-        <fieldset className="p-4 pt-0"><legend className="font-extrabold">開催曜日</legend><div className="mt-2 flex flex-wrap gap-3">{weekdays.map((label, day) => <label key={label} className="inline-flex items-center gap-2"><input type="checkbox" checked={offer.weekdays.includes(day)} onChange={(event) => editOffer(index, { weekdays: event.target.checked ? [...offer.weekdays, day].sort() : offer.weekdays.filter((value) => value !== day) })} />{label}</label>)}</div></fieldset>
-        <FieldRow label="休みの日" htmlFor={`offer-${index}-closed`}><textarea id={`offer-${index}-closed`} rows={3} placeholder="YYYY-MM-DD（1行1件）" className={TEXTAREA} value={offer.closedDates.join("\n")} onChange={(event) => editOffer(index, { closedDates: editLines(event.target.value) })} /></FieldRow>
-      </FieldSection>)}
+        <HostLiveOfferEditor offers={draft.offers} disabled={fieldsLocked} onChange={editOffers} />
           </>}
         </fieldset>
         <div className="order-first flex min-w-0 flex-col gap-3.5 @3xl:sticky @3xl:top-4 @3xl:order-none">

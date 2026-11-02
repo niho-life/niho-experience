@@ -55,6 +55,89 @@ const OFFER_FIELDS = [
 ] as const satisfies readonly (keyof Omit<ExperienceProviderPageOffer, "id">)[];
 const OFFER_LABELS: Record<typeof OFFER_FIELDS[number], string> = { name: "商品名", shortDescription: "紹介", sortOrder: "表示順", isActive: "受付状態", priceYen: "料金", childPriceYen: "子ども料金", childMinAge: "子どもの最低年齢", childMaxAge: "子どもの最高年齢", adultRequiredForChild: "大人の同伴", capacity: "定員", maxPartySize: "1組の最大人数", minimumParticipants: "最少催行人数", weekdays: "開催曜日", startTime: "開始時刻", durationMinutes: "所要時間", cutoffDays: "受付締切", closedDates: "休みの日", cancellationPolicy: "取消条件", acceptanceMode: "予約の受付方法", spaceScope: "利用範囲", useZone: "利用エリア", bookingQuestions: "予約時の質問" };
 
+export const LIVE_OFFER_LIMIT = 50;
+export const LIVE_QUESTION_LIMIT = 5;
+export const LIVE_QUESTION_OPTION_LIMIT = 8;
+const LOCAL_DRAFT_ID_PREFIX = "draft:";
+
+/** New product fields start with safe, unscheduled values; the host fills the sale terms before saving. */
+export function emptyLiveOffer(id: string, sortOrder: number): ExperienceProviderPageOffer {
+  return {
+    id, name: "", shortDescription: null, sortOrder, isActive: false, priceYen: 0, childPriceYen: null, childMinAge: null, childMaxAge: null,
+    adultRequiredForChild: false, capacity: 1, maxPartySize: 1, minimumParticipants: 1, weekdays: [], startTime: "18:00", durationMinutes: 60,
+    cutoffDays: 1, closedDates: [], cancellationPolicy: "FREE_UNTIL_24H", acceptanceMode: "APPROVAL", spaceScope: "ENTIRE_FACILITY", useZone: [], bookingQuestions: [],
+  };
+}
+
+export function moveLiveOffer(offers: readonly ExperienceProviderPageOffer[], index: number, by: -1 | 1): ExperienceProviderPageOffer[] {
+  const target = index + by;
+  if (!Number.isInteger(index) || index < 0 || index >= offers.length || target < 0 || target >= offers.length) return [...offers];
+  const next = [...offers];
+  [next[index], next[target]] = [next[target]!, next[index]!];
+  return next.map((offer, sortOrder) => ({ ...offer, sortOrder }));
+}
+
+export function removeLiveOffer(offers: readonly ExperienceProviderPageOffer[], index: number): ExperienceProviderPageOffer[] {
+  if (!Number.isInteger(index) || index < 0 || index >= offers.length) return [...offers];
+  return offers.filter((_, at) => at !== index).map((offer, sortOrder) => ({ ...offer, sortOrder }));
+}
+
+/** The API rejects deleting products with booking history; restore only products missing from the unsaved draft. */
+export function restoreSavedLiveOffers(saved: readonly ExperienceProviderPageOffer[], draft: readonly ExperienceProviderPageOffer[]): ExperienceProviderPageOffer[] {
+  const draftIds = new Set(draft.map((offer) => offer.id));
+  const restored = [...draft];
+  saved.forEach((offer, savedIndex) => {
+    if (!draftIds.has(offer.id)) restored.splice(Math.min(savedIndex, restored.length), 0, offer);
+  });
+  return restored.map((offer, sortOrder) => ({ ...offer, sortOrder }));
+}
+
+const draftId = (id: string): boolean => id.startsWith(LOCAL_DRAFT_ID_PREFIX);
+const selectionQuestion = (type: ExperienceProviderPageOffer["bookingQuestions"][number]["inputType"]): boolean => type === "SINGLE_SELECT" || type === "MULTI_SELECT";
+
+/** Refuse incomplete or malformed sale terms before sending the full replacement list to NIHO. */
+export function liveOfferProblem(offers: readonly ExperienceProviderPageOffer[]): string | null {
+  if (offers.length > LIVE_OFFER_LIMIT) return `商品は ${LIVE_OFFER_LIMIT} 件までです。`;
+  for (const [offerIndex, offer] of offers.entries()) {
+    const item = `商品 ${offerIndex + 1}`;
+    if (!offer.name.trim() || offer.name.trim().length > 80) return `${item} の商品名を 1〜80 字で入力してください。`;
+    if (offer.shortDescription && offer.shortDescription.trim().length > 160) return `${item} の短い説明を 160 字以内で入力してください。`;
+    if (!Number.isInteger(offer.priceYen) || offer.priceYen < 0 || offer.priceYen > 1_000_000) return `${item} の大人料金を確認してください。`;
+    if (offer.childPriceYen !== null && (!Number.isInteger(offer.childPriceYen) || offer.childPriceYen < 0 || offer.childPriceYen > 1_000_000)) return `${item} の子ども料金を確認してください。`;
+    for (const [label, value] of [["子どもの最低年齢", offer.childMinAge], ["子どもの最高年齢", offer.childMaxAge]] as const) {
+      if (value !== null && (!Number.isInteger(value) || value < 0 || value > 17)) return `${item} の${label}を確認してください。`;
+    }
+    if (offer.childMinAge !== null && offer.childMaxAge !== null && offer.childMinAge > offer.childMaxAge) return `${item} の子どもの年齢範囲を確認してください。`;
+    for (const [label, value] of [["定員", offer.capacity], ["1予約の上限", offer.maxPartySize], ["最低催行人数", offer.minimumParticipants]] as const) {
+      if (!Number.isInteger(value) || value < 1 || value > 500) return `${item} の${label}を確認してください。`;
+    }
+    if (offer.maxPartySize > offer.capacity || offer.minimumParticipants > offer.capacity) return `${item} の定員・1予約の上限・最低催行人数を確認してください。`;
+    if (!Number.isInteger(offer.durationMinutes) || offer.durationMinutes < 15 || offer.durationMinutes > 720) return `${item} の所要時間を確認してください。`;
+    if (!Number.isInteger(offer.cutoffDays) || offer.cutoffDays < 0 || offer.cutoffDays > 60) return `${item} の受付締切を確認してください。`;
+    if (!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(offer.startTime)) return `${item} の開始時刻を確認してください。`;
+    if (offer.weekdays.length > 7 || new Set(offer.weekdays).size !== offer.weekdays.length || offer.weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) return `${item} の開催曜日を確認してください。`;
+    const dates = normalizedLines(offer.closedDates);
+    if (dates.length > 366 || dates.some((date) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return true;
+      const parsed = new Date(`${date}T00:00:00.000Z`);
+      return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date;
+    })) return `${item} の休みの日は YYYY-MM-DD で入力してください。`;
+    if (offer.bookingQuestions.length > LIVE_QUESTION_LIMIT) return `${item} の予約時の質問は ${LIVE_QUESTION_LIMIT} 件までです。`;
+    for (const [questionIndex, question] of offer.bookingQuestions.entries()) {
+      const questionLabel = `${item} の質問 ${questionIndex + 1}`;
+      const prompt = question.prompt.trim().replace(/[\r\n]+/g, " ");
+      const description = question.description?.trim().replace(/[\r\n]+/g, " ") ?? "";
+      if (!prompt || prompt.length > 120) return `${questionLabel} を 1〜120 字で入力してください。`;
+      if (description.length > 300) return `${questionLabel} の補足を 300 字以内で入力してください。`;
+      if (selectionQuestion(question.inputType)) {
+        const labels = question.options.map((option) => option.label.trim().replace(/[\r\n]+/g, " "));
+        if (labels.length < 2 || labels.length > LIVE_QUESTION_OPTION_LIMIT || labels.some((label) => !label || label.length > 80) || new Set(labels).size !== labels.length) return `${questionLabel} の選択肢を重複なく 2〜${LIVE_QUESTION_OPTION_LIMIT} 件入力してください。`;
+      }
+    }
+  }
+  return null;
+}
+
 export function conflictValueText(value: unknown): string {
   if (value === undefined) return "削除済み";
   if (value === null || value === "") return "未設定";
@@ -124,20 +207,27 @@ export function mergeLivePage(base: ExperienceProviderPageDetail, local: Experie
   );
   const images = new Map([...base.photos, ...local.photos, ...remote.photos].map((photo) => [photo.objectKey, photo]));
   draft.photos = photos.keys.flatMap((key) => { const photo = images.get(key); return photo ? [structuredClone(photo)] : []; }); draft.photoAlts = [...photos.photoAlts];
-  draft.offers = mergeOffers(base.offers, local.offers, remote.offers, choice, conflicts);
+  draft.offers = mergeOffers(base.offers, local.offers, remote.offers, choice, conflicts).sort((left, right) => left.sortOrder - right.sortOrder);
   draft.offer = draft.offers[0] ?? null;
   return { draft, conflicts };
 }
 
 function offerInput(offer: ExperienceProviderPageOffer): ExperienceProviderPageOfferPatch {
   return {
-    id: offer.id, name: offer.name, shortDescription: offer.shortDescription, sortOrder: offer.sortOrder, isActive: offer.isActive,
+    ...(draftId(offer.id) ? {} : { id: offer.id }), name: offer.name.trim(), shortDescription: offer.shortDescription?.trim() || null, sortOrder: offer.sortOrder, isActive: offer.isActive,
     priceYen: offer.priceYen, childPriceYen: offer.childPriceYen, childMinAge: offer.childMinAge, childMaxAge: offer.childMaxAge,
     adultRequiredForChild: offer.adultRequiredForChild, capacity: offer.capacity, maxPartySize: offer.maxPartySize,
     minimumParticipants: offer.minimumParticipants, weekdays: [...new Set(offer.weekdays)].sort(), startTime: offer.startTime,
     durationMinutes: offer.durationMinutes, cutoffDays: offer.cutoffDays, closedDates: normalizedLines(offer.closedDates),
     cancellationPolicy: offer.cancellationPolicy, acceptanceMode: offer.acceptanceMode, spaceScope: offer.spaceScope,
-    useZone: [...offer.useZone], bookingQuestions: structuredClone(offer.bookingQuestions),
+    useZone: [...offer.useZone], bookingQuestions: offer.bookingQuestions.map((question) => ({
+      ...(draftId(question.id) ? {} : { id: question.id }),
+      prompt: question.prompt.trim().replace(/[\r\n]+/g, " "),
+      description: question.description?.trim().replace(/[\r\n]+/g, " ") || null,
+      inputType: question.inputType,
+      required: question.required,
+      options: selectionQuestion(question.inputType) ? question.options.map((option) => ({ ...(draftId(option.id) ? {} : { id: option.id }), label: option.label.trim().replace(/[\r\n]+/g, " ") })) : [],
+    })),
   };
 }
 

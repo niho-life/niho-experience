@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import type { ExperienceProviderPageOfferPatch } from "@niho-experience/api-client/host";
 
 /*
  * 体験の編集 (#89), NIHO 接続版: the mock editor's body fields (見どころ … 注意事項, 当日の流れ, 外観写真) and 日本語 / 英語（自動訳）
@@ -54,11 +55,24 @@ const json = (route: Route, body: unknown, status = 200) => route.fulfill({ stat
 const noOverflow = async (page: Page) => expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 const axeSerious = async (page: Page) => expect((await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze()).violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
 
-type Patch = { content?: Partial<typeof baseContent>; photoObjectKeys?: string[]; photoAlts?: string[]; language?: string };
-/** What NIHO answers after it saves `patch`: the page with the content changes laid over, and a newer version. */
-const applied = (detail: Detail, patch: Patch): Detail => ({ ...detail, content: { ...detail.content, ...patch.content } as Detail["content"], updatedAt: later });
+type Patch = { content?: Partial<typeof baseContent>; photoObjectKeys?: string[]; photoAlts?: string[]; language?: string; offers?: ExperienceProviderPageOfferPatch[] };
+/** What NIHO answers after it saves `patch`: new products, questions and choices receive server IDs. */
+const applied = (detail: Detail, patch: Patch): Detail => {
+  const offers = patch.offers?.map((value, offerIndex) => {
+    const id = value.id ?? `offer-created-${offerIndex + 1}`;
+    const previous = detail.offers.find((item) => item.id === id) ?? offer;
+    const bookingQuestions = value.bookingQuestions?.map((question, questionIndex) => ({
+      ...question,
+      id: question.id ?? `question-${offerIndex}-${questionIndex}`,
+      options: question.options?.map((option, optionIndex) => ({ ...option, id: option.id ?? `option-${offerIndex}-${questionIndex}-${optionIndex}` })) ?? [],
+    })) ?? previous.bookingQuestions;
+    return { ...previous, ...value, id, bookingQuestions };
+  }) as Detail["offers"] | undefined;
+  const nextOffers = offers ?? detail.offers;
+  return { ...detail, content: { ...detail.content, ...patch.content } as Detail["content"], offers: nextOffers, offer: nextOffers[0] ?? offer, updatedAt: later };
+};
 type SyntheticListing = { id: string; spotId: string; campaignPageId: string; status: "REQUESTED" | "ACTIVE" | "PAUSED" | "WITHDRAWN"; slug: string | null; regionKey: string | null; consentVersion: string; consentedAt: string; approvedAt: string | null; pausedAt: string | null; withdrawnAt: string | null; reviewNote: string | null; reviewNotedAt: string | null; createdAt: string; updatedAt: string };
-type Server = { page: Detail; preview: unknown; patches: Array<{ expectedUpdatedAt: string; patch: Patch }>; previewCalls: number; readStatus: number; patchStatus: number; listing: SyntheticListing | null; listingRequests: unknown[] };
+type Server = { page: Detail; preview: unknown; patches: Array<{ expectedUpdatedAt: string; patch: Patch }>; previewCalls: number; readStatus: number; patchStatus: number; patchError: string | null; listing: SyntheticListing | null; listingRequests: unknown[] };
 /** A synthetic NIHO for one page: GET / PATCH of the page, its preview, the meeting point and the listing. */
 async function serve(page: Page, server: Server, onPatch?: (body: Server["patches"][number]) => Response | void) {
   await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
@@ -76,14 +90,14 @@ async function serve(page: Page, server: Server, onPatch?: (body: Server["patche
     if (path.endsWith(`/${PAGE}`) && request.method() === "GET") return server.readStatus === 200 ? json(route, server.page) : json(route, { error: "failed" }, server.readStatus);
     if (path.endsWith(`/${PAGE}`) && request.method() === "PATCH") {
       const body = request.postDataJSON(); server.patches.push(body);
-      if (server.patchStatus !== 200) return json(route, { error: "invalid" }, server.patchStatus);
+      if (server.patchStatus !== 200) return json(route, { error: server.patchError ?? "invalid" }, server.patchStatus);
       onPatch?.(body);
       return json(route, server.page);
     }
     return json(route, { error: "not_found" }, 404);
   });
 }
-const newServer = (detail = pageDetail(), preview: unknown = japanesePreview(detail)): Server => ({ page: detail, preview, patches: [], previewCalls: 0, readStatus: 200, patchStatus: 200, listing: null, listingRequests: [] });
+const newServer = (detail = pageDetail(), preview: unknown = japanesePreview(detail)): Server => ({ page: detail, preview, patches: [], previewCalls: 0, readStatus: 200, patchStatus: 200, patchError: null, listing: null, listingRequests: [] });
 const open = async (page: Page) => { await page.goto("/host/auth/mock-login"); await page.goto(EDITOR); await expect(page.getByLabel("題名", { exact: true })).toBeVisible(); };
 
 test("a paused listing shows NIHO's reason and resubmits after consent", async ({ page }) => {
@@ -150,6 +164,51 @@ test("the body fields come in the mock editor's order, and one 保存 sends only
   await expect(page.getByRole("region", { name: "迎える人" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "参加の条件" })).toHaveCount(0);
   await noOverflow(page); await axeSerious(page);
+});
+
+test("adds a product with a booking question, persists generated IDs, and saves its order", async ({ page }) => {
+  const server = newServer();
+  await serve(page, server, ({ patch }) => { server.page = applied(server.page, patch); });
+  await open(page);
+
+  await page.getByRole("button", { name: "商品を追加" }).click();
+  await expect(page.getByLabel("商品 2", { exact: true }).getByLabel("この商品を受付する")).not.toBeChecked();
+  await page.getByLabel("商品名").nth(1).fill("子ども向けプラン");
+  await page.getByLabel("大人料金").nth(1).fill("4000");
+  await page.getByLabel("商品 2", { exact: true }).getByRole("button", { name: "質問を追加" }).click();
+  await page.getByLabel("質問文").fill("食物アレルギーはありますか？");
+  await page.getByLabel("回答方法").selectOption("SINGLE_SELECT");
+  await page.getByRole("textbox", { name: "選択肢 1" }).fill("ある");
+  await page.getByRole("textbox", { name: "選択肢 2" }).fill("ない");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+
+  expect(server.patches[0]!.patch.offers).toHaveLength(2);
+  expect(server.patches[0]!.patch.offers![0]).toMatchObject({ id: "offer-1", name: "午前の合成商品" });
+  expect(server.patches[0]!.patch.offers![1]).toMatchObject({ name: "子ども向けプラン", priceYen: 4000, bookingQuestions: [{ prompt: "食物アレルギーはありますか？", inputType: "SINGLE_SELECT", options: [{ label: "ある" }, { label: "ない" }] }] });
+  expect(server.patches[0]!.patch.offers![1]).not.toHaveProperty("id");
+  expect(server.patches[0]!.patch.offers![1]!.bookingQuestions![0]).not.toHaveProperty("id");
+  expect(server.patches[0]!.patch.offers![1]!.bookingQuestions![0]!.options![0]).not.toHaveProperty("id");
+
+  await page.reload();
+  await expect(page.getByLabel("商品名").nth(1)).toHaveValue("子ども向けプラン");
+  await expect(page.getByLabel("質問文")).toHaveValue("食物アレルギーはありますか？");
+  await expect(page.getByRole("textbox", { name: "選択肢 1" })).toHaveValue("ある");
+  await page.getByRole("button", { name: "商品 2 を上へ" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  expect(server.patches[1]!.patch.offers!.map((item) => [item.id, item.sortOrder])).toEqual([["offer-created-2", 0], ["offer-1", 1]]);
+});
+
+test("a product with booking history returns to the draft when NIHO rejects its deletion", async ({ page }) => {
+  const server = newServer(); server.patchStatus = 409; server.patchError = "PAGE_OFFER_HAS_BOOKINGS";
+  await serve(page, server);
+  await open(page);
+  await page.getByRole("button", { name: "商品 1 を外す" }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator('[role="alert"]').filter({ hasText: "予約履歴がある商品は削除できません" })).toContainText("商品を戻しました。");
+  await expect(page.getByLabel("商品名", { exact: true })).toHaveValue("午前の合成商品");
+  await expect(page.getByRole("button", { name: "最新の保存内容を読む" })).toHaveCount(0);
 });
 
 test("a time that is not 24-hour HH:mm stops the save before anything is sent, and a failed save keeps every input", async ({ page }) => {
