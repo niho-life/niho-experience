@@ -7,9 +7,9 @@
 
 **オーナーの決定（2026-10-26・[#146](https://github.com/niho-life/niho-experience/issues/146)）**：P-01〜P-05 の題名を、検索語（[seo-content-policy.md](../growth/seo-content-policy.md) の体験別の語）を入れた案に替える。テストサイトの pilot fixture は替えた。本番の正本（NIHO 側の原稿）は別に直す。
 
-**オーナーの決定（2026-11-02・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：初回の試験販売候補は [Kamakura Community Dinner with Locals](https://niho.life/living/nihokamakura/pages/community-dinner-with-locals)。主催・提供者はNIHO kamakura拠点。オーナーはこの既存ページに記載された提供内容・開催枠・表示価格・定員・予約/取消条件を商品条件の正本として承認した。オーナー作成の写真は全点Experience掲載に利用してよい。実際の新サイト用データへの転記と安定した画像アップロードは未完了であり、期限付き署名URLは保存しない。写っている第三者の肖像同意は別途確認する。ページに記載のない法的販売主体・受取口座・天候/最少催行等は未確定のまま扱う。
+**オーナーの決定（2026-11-02・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：初回の試験販売候補は [Kamakura Community Dinner with Locals](https://niho.life/living/nihokamakura/pages/community-dinner-with-locals)。主催・提供者はNIHO kamakura拠点。オーナーはこの既存ページに記載された提供内容・開催枠・表示価格・定員・予約/取消条件を商品条件の正本として承認した。オーナー作成の写真は全点Experience掲載に利用してよい。掲載用の安定した画像アップロードは未完了であり、期限付き署名URLは保存しない。写っている第三者の肖像同意は別途確認する。販売者は指定された特商法ページの表示どおりパナソニックホールディングス株式会社とし、売上はNIHO kamakura拠点のStripe Connect口座で受け取りたいと確認した。実際に使うConnect口座の照合・有効化、天候/最少催行等のページにない条件は未確認のまま扱う。
 
-**オーナーの意向（2026-11-02）**：この商品の売上はNIHO kamakura拠点のStripe Connect口座で受け取りたい。法的な口座名義・販売者と、既存NIHO口座のうちどれが同拠点の受取口座かはまだ照合していない。テスト画面に現れた未確認の「新しいビジネス」口座は使わない。
+**オーナーの決定（2026-11-02）**：法的販売者は指定された [NIHO kamakura 特商法表示](https://kamakura.niho.life/tradelaw) に従いパナソニックホールディングス株式会社とし、主催・提供者表示はNIHO kamakura拠点、売上受取先は同拠点に対応するStripe Connect口座とする。stgで表示されるConnect test口座は制限中で、法的口座名義・契約同意・銀行口座・実際の受取先対応を確認できていないため、本番口座として扱わない。提供者登録はオーナーの同意を得たが、Connect確認と掲載審査は別の未完了作業。
 
 同じ開催日時・定員の枠を重複登録する指示は、重複・在庫競合を検証するstaging専用データとして扱う。現行NIHOページの本番在庫と同時に販売せず、Experience側の本番受付は旧販売枠の停止・切替・切戻し確認後まで開けない。公開ページにはエリア概要だけを載せ、正確な住所・入口・地図などの集合案内は予約者だけに表示する。
 
@@ -56,14 +56,14 @@
 | 不向き | 車いす利用者（2階のため）、食物アレルギーのある人 | NIHOapp企画ページ |
 | 価格・オプション | Dinnerとtea timeの2つのオプション、上記starting priceの税込表示がある | NIHOapp企画ページ（2026-11-02確認） |
 | ホスト | 表示名と写真付きで3名を掲載 | NIHOapp企画ページ |
-| 販売・提供主体 | 主催・提供者はNIHO kamakura拠点。売上は同拠点のStripe Connect口座で受け取りたい意向を確認済み。法的販売者・口座名義・実際のConnect口座の紐付けは確認待ち | オーナー確認（2026-11-02）、[NIHO特商法表記](https://niho.life/legal/tokushoho) |
+| 販売・提供主体 | 法的販売者はパナソニックホールディングス株式会社。主催・提供者表示はNIHO kamakura拠点、売上受取先は同拠点に対応するStripe Connect口座。stg口座と法的口座名義・契約・銀行口座・受取先対応は確認待ち | オーナー確認（2026-11-02）、[指定された特商法表示](https://kamakura.niho.life/tradelaw) |
 | 問い合わせ一次受付 | NIHO（運営会社）が一次受付を担い、返金の判断は表示された販売・提供主体に従う | NIHO特商法表記 |
 | 他チャネル | GetYourGuideに掲載あり（[Issue #13](https://github.com/niho-life/niho-experience/issues/13)記載のURL。自動取得はbot判定で不可）。Expedia系のサイトにも同名の商品と、NIHO kamakuraを会場とする類似名の商品が表示される | 2026-10-19のWeb検索 |
 | 検索公開 | NIHOapp企画ページは `noindex, follow`。公式サイトのページはindex可能だが、本文はJavaScript描画で初期HTMLに含まれない | 両ページのHTML |
 
 ### 確認待ち（オーナー）
 
-1. この商品の販売・提供主体と、使うStripe口座
+1. 法的販売者・主催者表示・受取先の方針はオーナー確認済み。実際に使うConnect口座がNIHO kamakura拠点の正しい受取先であること、法的口座名義・Stripe契約・本人確認・銀行口座のstg/本番状態を確認する
 2. tea timeの選択後の料金内訳・子ども料金、OTA価格との関係（価格を揃える義務の有無を含む）。ページの「¥15,000 from」を1名料金とみなす前に確認する
 3. 実際に開催できる曜日と頻度、最少催行人数、受付締切。現在は毎日枠が表示されている
 4. 開始時刻をチャネル間で統一するか
@@ -152,17 +152,17 @@ pilot fixture（`packages/api-client/src/fixtures/pilot-experiences.ts`）に入
 | 取消 | 24時間前まで無料 | 24時間前まで無料 | 24時間前まで無料 | 48時間前まで無料（※） | 48時間前まで無料（※） | 48時間前まで無料 |
 | 受付 | 承認制 | 承認制 | 即時確定 | 承認制 | 承認制 | 即時確定 |
 | 集合 | 予約後に詳細表示 | 予約後に詳細表示 | NIHO kamakura | 円覚寺 | NIHO kamakura | NIHO kamakura |
-| 販売者の表示 | 未確定 | 未確定 | Panasonic Holdings Corporation | Synk LLC | YUKINO Restorer | Shiryu |
+| 販売者の表示 | Panasonic Holdings Corporation | Panasonic Holdings Corporation | Panasonic Holdings Corporation | Synk LLC | YUKINO Restorer | Shiryu |
 
 推奨値の根拠：
 
-- **P-01**：2026-11-02のオーナー確認に基づき既存ページの2枠（毎日、Dinner 18:00・¥30,000 starting、Tea time 13:00・¥15,000 starting）、最大8名、2時間、24時間前まで無料取消、リクエスト予約をテスト表示する。Dinner予約画面では子ども0〜17歳・大人同伴・¥12,000を確認した。Tea timeの金額単位・子ども料金、実際に開催可能な日、法的販売者・受取口座は未確定。テスト用の残席は実績ではない。ウェルカムドリンクにはノンアルコールの選択肢がある。
+- **P-01**：2026-11-02のオーナー確認に基づき既存ページの2枠（毎日、Dinner 18:00・¥30,000 starting、Tea time 13:00・¥15,000 starting）、最大8名、2時間、24時間前まで無料取消、リクエスト予約をテスト表示する。Dinner予約画面では子ども0〜17歳・大人同伴・¥12,000を確認した。Tea timeの金額単位・子ども料金、実際に開催可能な日、Connect口座の紐付けは未確認。販売者はパナソニックホールディングス株式会社、主催・提供者はNIHO kamakura拠点として記録する。テスト用の残席は実績ではない。ウェルカムドリンクにはノンアルコールの選択肢がある。
 - **P-02**：生豆100gと焙煎機の利用、コーヒー1杯を含めた価格。焙煎機は1回ずつ使うため定員を3名にした。
 - **P-03**：既存チャネルの表示（from $411 /person）に近い円の値を仮置きした。JPYの実価格は提供者に確認する。
 - **P-04・P-05**：同じ分野の鎌倉の英語体験（[search-research.md](../growth/search-research.md)）より低めにして、少人数のグループで参加しやすくした。
 - **（※）** 提供者の既存条件（P-03は14日前）やP-04の材料準備を踏まえた7日前案は、現行の取消条件（24時間・48時間・返金なし）では表せない。niho-app #19138 の受入前に、これらを必要とする商品を実販売しない。
 
-写真は未入手のため、テストサイトでは仮素材の画像を使う。実際の写真は[photo-requirements.md](photo-requirements.md)に沿って入手する。
+P-01の掲載元にあるオーナー作成写真8枚はExperience掲載許可済みで、pilot fixtureに使用する。stgの安定した画像アップロードは未完了で、第三者の肖像同意は本番公開前に確認する。他のテスト体験では仮素材を使う。実際の販売・掲載に使う素材は[photo-requirements.md](photo-requirements.md)に沿って確認する。
 
 ## 予備候補
 
