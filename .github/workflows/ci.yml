@@ -81,6 +81,8 @@ jobs:
         run: python3 scripts/test_stg_document_readback.py
       - name: Test synthetic staging booking gates without network access
         run: python3 scripts/test_stg_booking_preflight.py
+      - name: Test production owner and rerun authorization without credentials
+        run: python3 scripts/test_production_owner.py
 
   web:
     needs: changes
