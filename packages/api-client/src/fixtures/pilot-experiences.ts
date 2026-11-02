@@ -253,7 +253,10 @@ export function buildPilotExperiences(): ExperienceDetail[] {
         host("わか"),
       ],
       provider: { ...NIHO_PROVIDER, tagline: "A relaxing place to enjoy everyday life.", logo: nihoLogo },
-      seller: { displayName: "NIHO kamakura (legal seller pending)", legalNoticeUrl: `${FIXTURE_NIHO_WEB_ORIGIN}/legal/tokushoho` },
+      seller: {
+        displayName: "パナソニックホールディングス株式会社",
+        legalNoticeUrl: "https://kamakura.niho.life/tradelaw",
+      },
       offers: [
         {
           id: "offer_community_dinner",

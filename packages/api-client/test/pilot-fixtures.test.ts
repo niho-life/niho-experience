@@ -144,6 +144,8 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
   it("Community Dinner reflects the approved offer schedule and terms", async () => {
     const dinner = experiences.find((experience) => experience.slug === "kamakura-community-dinner");
     expect(dinner?.title).toBe("Kamakura Community Dinner with Locals");
+    expect(dinner?.seller.displayName).toBe("パナソニックホールディングス株式会社");
+    expect(dinner?.seller.legalNoticeUrl).toBe("https://kamakura.niho.life/tradelaw");
     expect(dinner?.offers.map((offer) => ({
       id: offer.id,
       price: offer.pricing.adultPriceYen,
