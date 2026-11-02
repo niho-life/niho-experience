@@ -1,6 +1,7 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
     "types": ["node"]
   },
   "include": ["./**/*.ts", "../playwright.config.ts", "../playwright.documents.config.ts", "../playwright.host-calendar.config.ts"]
