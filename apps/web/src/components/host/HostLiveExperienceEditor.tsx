@@ -118,6 +118,8 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const [saving, setSaving] = useState(false); const [flash, setFlash] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const stay = useRef<HTMLButtonElement>(null);
+  const ownedPhotoUrls = useRef(new Set<string>());
+  const mounted = useRef(false);
   const loadVersion = useRef(0); const meetingVersion = useRef(0); const listingVersion = useRef(0); const englishVersion = useRef(0);
   const endpoint = `/host/api/provider-pages/${encodeURIComponent(providerId)}/${encodeURIComponent(pageId)}`;
   const load = useCallback(async (replace = true) => {
@@ -168,6 +170,21 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     queueMicrotask(() => { if (!active) return; void load().catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : loadMessage(500)); }); void loadMeeting(); void loadListing(); });
     return () => { active = false; loadVersion.current += 1; meetingVersion.current += 1; listingVersion.current += 1; englishVersion.current += 1; };
   }, [load, loadMeeting, loadListing]);
+  // Uploaded photos use temporary previews until NIHO returns its signed display URLs.
+  // Revoke only URLs created here; API URLs can be shared by other views.
+  useEffect(() => {
+    mounted.current = true;
+    const urls = ownedPhotoUrls.current;
+    return () => { mounted.current = false; for (const url of urls) URL.revokeObjectURL(url); urls.clear(); };
+  }, []);
+  useEffect(() => {
+    const visible = new Set(draft?.photos.map((photo) => photo.url) ?? []);
+    for (const url of ownedPhotoUrls.current) {
+      if (visible.has(url)) continue;
+      URL.revokeObjectURL(url);
+      ownedPhotoUrls.current.delete(url);
+    }
+  }, [draft]);
   // 保存しました stays for a moment beside 保存.
   useEffect(() => {
     if (!flash) return;
@@ -383,9 +400,12 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       const policy = await policyResponse.json() as ExperienceProviderPhotoUploadForm; const form = new FormData();
       for (const [key, value] of Object.entries(policy.fields)) form.append(key, value); form.append(PHOTO_FILE_FIELD, file);
       const uploaded = await fetch(policy.url, { method: "POST", body: form, referrerPolicy: "no-referrer" }); if (!uploaded.ok) throw new Error("写真をアップロードできませんでした。入力は保持しています。");
-      setDraft((current) => current ? appendPhoto(current, { objectKey: policy.objectKey, url: URL.createObjectURL(file) }, file.name.replace(/\.[^.]+$/, "")) : current);
+      if (!mounted.current) return;
+      const previewUrl = URL.createObjectURL(file);
+      ownedPhotoUrls.current.add(previewUrl);
+      setDraft((current) => current ? appendPhoto(current, { objectKey: policy.objectKey, url: previewUrl }, file.name.replace(/\.[^.]+$/, "")) : current);
       setNotice("写真をアップロードしました。並びと説明を確認して「保存」を押してください。");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "写真をアップロードできませんでした。"); } finally { setBusy(false); }
+    } catch { setError("写真をアップロードできませんでした。入力は保持しています。"); } finally { setBusy(false); }
   }
 
   /** 読み込み直す: the first read of the page failed (the editor has nothing to show yet). */

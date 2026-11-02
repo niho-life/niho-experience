@@ -119,6 +119,113 @@ test("a paused listing shows NIHO's reason and resubmits after consent", async (
   expect(server.listing).toMatchObject({ status: "PAUSED", reviewNote: null, reviewNotedAt: null });
 });
 
+test("a new page goes through photo upload, product, preview, review and resubmission", async ({ page }) => {
+  await page.addInitScript(() => {
+    const created: string[] = []; const revoked: string[] = [];
+    const create = URL.createObjectURL.bind(URL); const revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (blob) => { const url = create(blob); created.push(url); return url; };
+    URL.revokeObjectURL = (url) => { revoked.push(url); revoke(url); };
+    Object.assign(window, { __photoPreviewUrls: { created, revoked } });
+  });
+  let created = false;
+  let uploadFails = false;
+  let uploadCount = 0;
+  let current = pageDetail({ language: "EN", title: "合成の新しい体験", photos: [], photoAlts: [], coverObjectKey: null });
+  let listing: SyntheticListing | null = null;
+  const calls: string[] = [];
+  const uploadUrl = "https://storage.googleapis.com/synthetic-upload";
+  await page.route(uploadUrl, (route) => {
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "*" } });
+    calls.push("upload");
+    return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } });
+  });
+  await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
+    const request = route.request(); const path = new URL(request.url()).pathname; const method = request.method();
+    if (path.endsWith("/upload-policy") && method === "POST") {
+      calls.push("upload-policy");
+      if (uploadFails) return json(route, { error: "unavailable" }, 503);
+      const objectKey = `synthetic-photo-${++uploadCount}`;
+      return json(route, { url: uploadUrl, fields: { key: objectKey }, objectKey, expiresAt: later, maxSizeBytes: 10_485_760 }, 201);
+    }
+    if (path.endsWith("/preview") && method === "GET") {
+      calls.push("preview");
+      const previewOffer = { ...current.offers[0], currency: "JPY", bookingQuestionsFingerprint: "0".repeat(64), occurrences: [] };
+      return json(route, { page: { ...japanesePreview(current).page, photos: [{ url: svgImage("uploaded") }], coverUrl: svgImage("uploaded") },
+        spot: { slug: "synthetic-provider", name: "（合成）提供者", logoUrl: null, tagline: null, taglineEn: null, landingGround: "LIGHT", landingAccent: "LEAF", landingFont: "MARU", meetingPoint: null },
+        hosts: [], offers: [previewOffer], offer: { ...previewOffer, occurrences: undefined }, occurrences: [] });
+    }
+    if (path.endsWith("/meeting-point")) return json(route, inheritedMeeting);
+    if (path.endsWith("/listing")) {
+      if (method === "PUT") { calls.push("request"); expect(request.postDataJSON()).toEqual({ consentVersion: consent.version }); listing = { id: "synthetic-listing", spotId: "synthetic-provider", campaignPageId: PAGE, status: "REQUESTED", slug: null, regionKey: null, consentVersion: consent.version, consentedAt: now, approvedAt: null, pausedAt: null, withdrawnAt: null, reviewNote: null, reviewNotedAt: null, createdAt: now, updatedAt: later }; }
+      return json(route, { listing, consent });
+    }
+    if (path.endsWith("/publish") && method === "POST") { calls.push("publish"); current = { ...current, status: "PUBLISHED", updatedAt: later }; return json(route, current); }
+    if (path.endsWith(`/${PROVIDER}`)) {
+      if (method === "POST") { created = true; calls.push("create"); return json(route, current, 201); }
+      return json(route, { checkoutEnabled: true, pages: created ? [{ id: PAGE, kind: "EXPERIENCE", slug: current.slug, language: current.language, title: current.title, coverUrl: null, status: current.status, listOnEntrance: false, bookingCounts: { confirmed: 0, thisWeek: 0 }, updatedAt: current.updatedAt }] : [] });
+    }
+    if (path.endsWith(`/${PAGE}`) && method === "GET") return json(route, current);
+    if (path.endsWith(`/${PAGE}`) && method === "PATCH") {
+      calls.push("save"); const { patch, expectedUpdatedAt } = request.postDataJSON() as { patch: Patch; expectedUpdatedAt: string };
+      expect(expectedUpdatedAt).toBe(current.updatedAt);
+      current = { ...applied(current, patch), photos: patch.photoObjectKeys?.map((objectKey) => ({ objectKey, url: svgImage("uploaded") })) ?? current.photos,
+        photoAlts: patch.photoAlts ?? current.photoAlts, coverObjectKey: patch.photoObjectKeys?.[0] ?? current.coverObjectKey };
+      return json(route, current);
+    }
+    return json(route, { error: "not_found" }, 404);
+  });
+
+  await page.goto("/host/auth/mock-login");
+  await page.goto(`/host/experiences?providerId=${PROVIDER}`);
+  await page.getByRole("button", { name: "新しい体験" }).click();
+  await page.getByRole("textbox", { name: "題名" }).fill("合成の新しい体験");
+  await page.getByRole("combobox", { name: "言語" }).selectOption("EN");
+  await page.getByRole("button", { name: "下書きを作成" }).click();
+  await expect(page.getByLabel("題名", { exact: true })).toHaveValue("合成の新しい体験");
+
+  await page.getByLabel("写真を追加").setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: Buffer.from("synthetic-image") });
+  await expect(page.getByRole("status").filter({ hasText: "写真をアップロードしました" })).toBeVisible();
+  await page.getByLabel("写真 1 の説明").fill("合成の表紙");
+  await page.getByRole("button", { name: "商品を追加" }).click();
+  await page.getByLabel("商品名").nth(1).fill("午後の合成商品");
+  await page.getByLabel("大人料金").nth(1).fill("4000");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => { const urls = (window as unknown as { __photoPreviewUrls: { created: string[]; revoked: string[] } }).__photoPreviewUrls; return urls.created.length === 1 && urls.revoked.includes(urls.created[0]!); })).toBe(true);
+  expect(current.photoAlts).toEqual(["合成の表紙"]);
+  expect(current.offers).toHaveLength(2);
+
+  uploadFails = true;
+  await page.getByLabel("写真を追加").setInputFiles({ name: "failed.png", mimeType: "image/png", buffer: Buffer.from("failed-image") });
+  await expect(page.getByRole("alert").filter({ hasText: "写真をアップロードできませんでした。入力は保持しています。" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __photoPreviewUrls: { created: string[] } }).__photoPreviewUrls.created.length)).toBe(1);
+  uploadFails = false;
+  await page.getByLabel("写真を追加").setInputFiles({ name: "removed.png", mimeType: "image/png", buffer: Buffer.from("removed-image") });
+  await expect(page.getByRole("button", { name: "写真 2 を外す" })).toBeVisible();
+  await page.getByRole("button", { name: "写真 2 を外す" }).click();
+  await expect.poll(() => page.evaluate(() => { const urls = (window as unknown as { __photoPreviewUrls: { created: string[]; revoked: string[] } }).__photoPreviewUrls; return urls.created.length === 2 && urls.revoked.includes(urls.created[1]!); })).toBe(true);
+  await noOverflow(page);
+  await axeSerious(page);
+
+  await page.getByRole("button", { name: "プレビュー" }).first().click();
+  await expect(page.getByRole("dialog", { name: /プレビュー/ }).getByRole("heading", { level: 1, name: "合成の新しい体験" })).toBeVisible();
+  await page.getByRole("dialog", { name: /プレビュー/ }).getByRole("button", { name: "閉じる" }).click();
+  await page.getByRole("button", { name: "同意して掲載を申請" }).click();
+  await expect(page.getByRole("region", { name: "掲載", exact: true })).toContainText("審査待ち");
+  expect(calls).toContain("preview");
+  expect(calls.filter((call) => call !== "preview")).toEqual(["create", "upload-policy", "upload", "save", "upload-policy", "upload-policy", "upload", "publish", "request"]);
+
+  listing = { ...listing!, status: "PAUSED", reviewNote: "合成の差戻し理由", reviewNotedAt: later, pausedAt: later };
+  await page.reload();
+  await expect(page.getByText("合成の差戻し理由")).toBeVisible();
+  await page.getByRole("textbox", { name: "ひとこと紹介" }).fill("差戻し後に直した合成紹介");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  await page.getByRole("button", { name: "同意して再申請" }).click();
+  await expect(page.getByRole("region", { name: "掲載", exact: true })).toContainText("審査待ち");
+  expect(calls.slice(-2)).toEqual(["save", "request"]);
+});
+
 test("the body fields come in the mock editor's order, and one 保存 sends only what changed with blank rows left out", async ({ page }) => {
   const server = newServer();
   await serve(page, server, ({ patch }) => { server.page = applied(server.page, patch); });
