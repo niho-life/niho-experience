@@ -72,7 +72,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Build image
-        run: docker build -t "$IMAGE" .
+        # Check in this job too: rerunning one job does not rerun authorize.
+        # The checkout above is the reviewed workflow SHA.
+        run: |
+          bash scripts/check-production-owner.sh
+          docker build -t "$IMAGE" .
       - name: Smoke test image
         run: sh scripts/container-smoke.sh "$IMAGE"
       - name: Save image artifact
@@ -129,11 +133,13 @@ jobs:
           test "$PROJECT_ID" = "niho-app-prd"
           test "$PROJECT_ID" != "$PREVIEW_PROJECT_ID"
       # Feature flags (docs/production-deploy.md「機能のフラグ」): repository variables PROD_*, resolved and checked
-      # against each other before any credential exists. Only this one script is checked out.
+      # against each other before any credential exists. Only deployment scripts are checked out.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/deploy
+          sparse-checkout: scripts
+      - name: Require owner initiation and rerun in this job
+        run: bash scripts/check-production-owner.sh
       - name: Resolve feature flags before authentication
         id: flags
         env:
@@ -352,6 +358,8 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Require owner initiation and rerun in this job
+        run: bash scripts/check-production-owner.sh
       - name: Require the candidate commit to remain on main
         run: git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
       # The same PROD_* variables as the candidate: changing one after it was made stops the promotion below.

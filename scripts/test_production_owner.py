@@ -30,12 +30,21 @@ class ProductionOwnerTests(unittest.TestCase):
         for actor in (None, "", "another-user", "niho3[bot]"):
             self.assertFalse(self.allowed("252574334", actor))
 
-    def test_all_production_paths_wait_for_authorization(self):
+    def test_each_production_job_checks_identity_before_credentials(self):
         text = (ROOT / ".github/workflows/deploy-production.yml").read_text()
-        self.assertIn("run: bash scripts/check-production-owner.sh", text)
         self.assertIn("  build:\n    needs: authorize\n", text)
         self.assertIn("    needs: build\n", text)
         self.assertIn("  promote:\n    needs: authorize\n", text)
+        # Successful dependencies are not rerun for a failed-job or single-job rerun.
+        # Every credential-bearing job must recheck the current triggering actor itself.
+        for name, end in (("deploy", "promote"), ("promote", None)):
+            job = text.split(f"\n  {name}:\n", 1)[1]
+            if end:
+                job = job.split(f"\n  {end}:\n", 1)[0]
+            guard = job.index("run: bash scripts/check-production-owner.sh")
+            self.assertLess(job.index("uses: actions/checkout@"), guard)
+            self.assertLess(guard, job.index("uses: google-github-actions/auth@"))
+        self.assertIn("sparse-checkout: scripts\n", text)
         setup = (ROOT / "scripts/gcp/setup-production.sh").read_text()
         self.assertIn("'actor_id' in assertion", setup)
         self.assertIn("assertion.actor_id in ['252574334', '345803507', '119937906']", setup)
