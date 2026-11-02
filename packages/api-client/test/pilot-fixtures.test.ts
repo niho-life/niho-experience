@@ -80,7 +80,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
     }
   });
 
-  it("写真は仮素材だけ（SVG の仮素材か、出典を残したサイト内の仮写真。外部・実在の写真の URL を入れていない）", () => {
+  it("写真はサイト内の素材だけ（外部 URL を入れていない）", () => {
     const samplePhoto = new RegExp(`^${PILOT_SAMPLE_PHOTO_PATH}/[a-z0-9-]+\\.jpg$`);
     const declared = new Set(
       [
@@ -124,16 +124,80 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
     }
   });
 
-  it("コミュニティディナーは NIHO の自前の写真だけを使う", () => {
+  it("コミュニティディナーは掲載元の写真8枚をすべて使い、集合場所の外観を公開しない", () => {
     const dinner = experiences.find((experience) => experience.slug === "kamakura-community-dinner");
     expect(dinner?.photos.map((photo) => photo.url.replace(`${PILOT_SAMPLE_PHOTO_PATH}/`, ""))).toEqual([
       "niho-cd-table-02.jpg",
       "niho-cd-kitchen-together.jpg",
       "niho-cd-food-trays.jpg",
-      "niho-dinner-5.jpg",
+      "niho-cd-hands-salad.jpg",
+      "niho-cd-strawberry-daifuku.jpg",
+      "niho-cd-table-01.jpg",
       "niho-dinner-1.jpg",
-      "niho-exterior.jpg",
+      "niho-dinner-5.jpg",
     ]);
+    expect(dinner?.meetingPointDisclosure).toBe("AFTER_BOOKING");
+    expect(dinner?.meetingPoint).toBeNull();
+    expect(JSON.stringify(dinner)).not.toContain("niho-exterior.jpg");
+  });
+
+  it("Community Dinner reflects the approved offer schedule and terms", async () => {
+    const dinner = experiences.find((experience) => experience.slug === "kamakura-community-dinner");
+    expect(dinner?.title).toBe("Kamakura Community Dinner with Locals");
+    expect(dinner?.offers.map((offer) => ({
+      id: offer.id,
+      price: offer.pricing.adultPriceYen,
+      child: offer.pricing.child,
+      startTime: offer.startTime,
+      durationMinutes: offer.durationMinutes,
+      weekdays: offer.weekdays,
+      capacity: offer.capacity,
+      maxPartySize: offer.maxPartySize,
+      acceptanceMode: offer.acceptanceMode,
+      cancellationPolicy: offer.cancellationPolicy,
+    }))).toEqual([
+      {
+        id: "offer_community_dinner",
+        price: 30000,
+        child: { priceYen: 12000, minAge: 0, maxAge: 17, adultRequired: true },
+        startTime: "18:00",
+        durationMinutes: 120,
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+        capacity: 8,
+        maxPartySize: 8,
+        acceptanceMode: "APPROVAL",
+        cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
+      },
+      {
+        id: "offer_community_tea_time",
+        price: 15000,
+        child: null,
+        startTime: "13:00",
+        durationMinutes: 120,
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+        capacity: 8,
+        maxPartySize: 8,
+        acceptanceMode: "APPROVAL",
+        cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
+      },
+    ]);
+    expect(dinner?.offers.every((offer) => offer.bookingQuestions.map((question) => question.prompt).join() === "Notes (allergies, questions)")).toBe(true);
+  });
+
+  it("Community Dinnerの公開集合概要に正確な住所・入口・地図を含めない", async () => {
+    const client = createExperienceApiClient({
+      nihoWebOrigin: "https://niho.life",
+      fetch: createMockExperienceFetch({ catalog: "pilot", now: () => new Date("2026-10-19T00:00:00.000Z") }),
+    });
+    const result = await client.getExperienceV11("kamakura-community-dinner");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.experience).toMatchObject({
+      meetingOverview: "In Kamakura's Onarimachi neighborhood, near Kamakura Station.",
+      meetingPointDisclosure: "AFTER_BOOKING",
+      meetingPoint: null,
+    });
+    expect(JSON.stringify(result.data.experience)).not.toMatch(/11-12|side entrance|maps\.google/i);
   });
 
   it("原稿の約束：伝統的な金継ぎと書かず、特定の人に会えると約束しない", () => {

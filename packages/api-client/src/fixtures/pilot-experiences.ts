@@ -3,12 +3,12 @@
  *
  * 合成 fixture（experiences.ts）と違い、実在の提供者の体験を載せる。オーナーが各事業者から掲載の許可を得ており、
  * テストサイトへ組み込むことを決めた（2026-10-19、docs/content/README.md）。
- * - 価格・曜日・時刻・人数・取消・受付方式は担当3の推奨値で、販売条件として確定していない（docs/content/product-ledger.md）。
+ * - P-01 はオーナー確認済みの掲載元ページを基準にする。法的販売者・販売口座・天候等の未記載条件は確定していない（docs/content/product-ledger.md）。
  * - 題名は検索語（docs/growth/seo-content-policy.md の体験別の語）を入れた案で、オーナー承認（2026-10-26・#146）。本番の正本は
  *   NIHO 側の原稿なので、そちらは別に直す。ホストの画面の mock（apps/web/src/host/mock）は旧い題名のまま（ホストがまだ直していない状態）。
- * - 写真は撮影前の仮素材（apps/web/public/sample/、出典・内容は同フォルダの CREDITS.md）。オーナー判断（2026-10-20、
- *   スマホの試作モックに見た目を合わせる）で、次のとおり使う。撮り直した写真が届いたら差し替える（docs/release-acceptance.md）。
- *   - コミュニティディナーと集合場所の外観は NIHO kamakura の自前の写真（niho-*.jpg）。NIHO の集合場所の外観は実物の建物。
+ * - 多くの写真は撮影前の仮素材（apps/web/public/sample/、出典・内容は同フォルダの CREDITS.md）。P-01 Community Dinner は掲載元にある
+ *   オーナー作成写真8枚のExperience掲載許可を確認済み（2026-11-02）。本番公開には第三者の肖像同意と安定した画像アップロードを別途確認する。
+ *   正確な集合案内は予約者だけに出し、公開ギャラリーに建物外観を含めない（docs/content/product-ledger.md）。
  *   - ほかの体験は出典を残した無料素材。円覚寺の集合場所は参道の写真（temple-path.jpg）を使う。
  *   - ホストの顔（hosts[].avatar）は host-*.jpg。Takuya は本人の写真、Yukino・Shiryu は顔の代わりの写真で本人ではない。
  *     写真の無いホスト（Hasami・わか）は null のまま（画面は頭文字）。
@@ -26,7 +26,7 @@ import {
 } from "./experiences.ts";
 
 export const PILOT_CONTENT_STATUS = "provisional" as const;
-export const PILOT_UPDATED_AT = "2026-10-19T03:00:00.000Z";
+export const PILOT_UPDATED_AT = "2026-11-02T00:00:00.000Z";
 
 const KAMAKURA = { key: "kamakura", name: "Kamakura" } as const;
 
@@ -59,12 +59,14 @@ export type PilotImageSpec = PlaceholderImageSpec & { samplePhoto?: string };
 
 export const PILOT_IMAGE_SPECS = {
   dinner: [
-    { name: "pilot-dinner-table", label: "Neighbors around the long table at NIHO", hue: 28, samplePhoto: "niho-cd-table-02.jpg" },
-    { name: "pilot-dinner-kitchen", label: "Cooking together in the shared kitchen", hue: 18, samplePhoto: "niho-cd-kitchen-together.jpg" },
-    { name: "pilot-dinner-dishes", label: "Trays of dishes made together", hue: 45, samplePhoto: "niho-cd-food-trays.jpg" },
-    { name: "pilot-dinner-living-room", label: "Talking in the NIHO living room", hue: 330, samplePhoto: "niho-dinner-5.jpg" },
-    { name: "pilot-niho-living-room", label: "Welcome drinks in the living room", hue: 40, samplePhoto: "niho-dinner-1.jpg" },
-    { name: "pilot-niho-exterior", label: "The blue NIHO building from the street", hue: 205, samplePhoto: "niho-exterior.jpg" },
+    { name: "pilot-dinner-table", label: "Guests and hosts around the long dinner table", hue: 28, samplePhoto: "niho-cd-table-02.jpg" },
+    { name: "pilot-dinner-kitchen", label: "A host cooking with guests in the shared kitchen", hue: 18, samplePhoto: "niho-cd-kitchen-together.jpg" },
+    { name: "pilot-dinner-food", label: "Seasonal dishes prepared for the community dinner", hue: 45, samplePhoto: "niho-cd-food-trays.jpg" },
+    { name: "pilot-dinner-salad", label: "Guests preparing salad together", hue: 90, samplePhoto: "niho-cd-hands-salad.jpg" },
+    { name: "pilot-dinner-dessert", label: "Strawberry daifuku for dessert", hue: 350, samplePhoto: "niho-cd-strawberry-daifuku.jpg" },
+    { name: "pilot-dinner-table-two", label: "Neighbors sharing a meal around the long table", hue: 30, samplePhoto: "niho-cd-table-01.jpg" },
+    { name: "pilot-dinner-welcome", label: "Guests sharing drinks and conversation", hue: 40, samplePhoto: "niho-dinner-1.jpg" },
+    { name: "pilot-dinner-conversation", label: "Guests talking together at NIHO", hue: 330, samplePhoto: "niho-dinner-5.jpg" },
   ],
   coffee: [
     { name: "pilot-coffee-roaster", label: "Scooping roasted beans", hue: 25, samplePhoto: "coffee-scoop.jpg" },
@@ -154,10 +156,10 @@ export const PILOT_SOURCE_QUESTION: BookingQuestion = {
   ],
 };
 
-export const PILOT_DIET_QUESTION: BookingQuestion = {
-  id: "q_diet",
-  prompt: "Any dietary preferences we should know about?",
-  description: "We can't cater for food allergies. Let us know if you are vegetarian or avoid certain foods.",
+export const PILOT_NOTES_QUESTION: BookingQuestion = {
+  id: "q_notes",
+  prompt: "Notes (allergies, questions)",
+  description: "This experience is not suitable for guests with food allergies.",
   inputType: "SHORT_TEXT",
   required: false,
   options: [],
@@ -178,7 +180,7 @@ export const PILOT_CHAIR_QUESTION: BookingQuestion = {
 
 /** NIHO と同じ算出（質問の正規化 JSON の SHA-256）。test で確かめる。 */
 export const PILOT_QUESTION_FINGERPRINTS = {
-  dinner: "1abdbef3195f2635aed6c0eff146a22f94e0848bb9bc719f2a4f94cc75580544",
+  dinner: "291120b79a3c17b093b7572e8d20222150eee9adf580646719a7369f3d5ab268",
   source: "32e7faed83ad5aaa6b0cf4c6799aa4417de7d2be17e08f13c517bc47b19e8428",
   chair: "38a417f651c9f72f4358d9b394902aa547790f2421db35ba42070aa18935ee27",
 } as const;
@@ -194,91 +196,106 @@ export function buildPilotExperiences(): ExperienceDetail[] {
   return [
     {
       slug: "kamakura-community-dinner",
-      title: "Kamakura Home Cooking Dinner with Locals",
+      title: "Kamakura Community Dinner with Locals",
       contentLanguage: "EN",
       region: { ...KAMAKURA },
       canonicalUrl: canonical("kamakura-community-dinner"),
       lead:
-        "Spend an evening the way locals do. Cook a seasonal, home-style Japanese dinner together in a shared living room two minutes from Kamakura Station, then sit down at one long table to eat and talk with people who live here.",
+        "Spend an evening the way locals do. Cook a seasonal, home-style Japanese dinner together in a shared kitchen two minutes from Kamakura Station, then sit down at one long table to eat, talk and laugh with the people who live here.",
       languageNote: "English & Japanese",
       highlights: [
         "Cook four or five seasonal Japanese home-style dishes side by side with Kamakura residents",
-        "Start with a welcome drink and easy introductions",
+        "Start with a local craft beer, tea or juice and easy introductions",
         "Eat together at one long table and hear about everyday life in Kamakura",
         "A small group of up to 8 guests",
         "Two minutes on foot from Kamakura Station West Exit",
       ],
       timeline: [
-        { time: "18:00", title: "Welcome drink and hellos", text: "Meet your hosts and tonight's neighbors over tea or juice.", photoIndex: 4 },
+        { time: "18:00", title: "Welcome drink & hellos", text: "Meet your hosts and tonight's neighbors over a local craft beer, tea or juice.", photoIndex: 6 },
         {
           time: "18:15",
           title: "Cook together",
-          text: "Four or five seasonal dishes in the shared kitchen. No cooking experience needed; your hosts show you each step.",
+          text: "Four or five seasonal dishes in the shared kitchen. No experience needed — your hosts show you the way.",
           photoIndex: 1,
         },
-        { time: "19:15", title: "Sit down and eat", text: "One long table, everything you just made, and conversation about life in Kamakura.", photoIndex: 0 },
-        { time: "20:00", title: "Wrap up", text: "Stay for one more cup of tea, or head back. The station is a two-minute walk away.", photoIndex: null },
+        { time: "19:15", title: "Sit down and eat", text: "One long table, everything you just made, and stories of everyday life in Kamakura.", photoIndex: 0 },
+        { time: "20:00", title: "Goodnight — or one more cup of tea", text: "Someone usually picks up the guitar. The station is two minutes away whenever you're ready.", photoIndex: 7 },
       ],
       description: [
-        "NIHO is a members' shared living room in Kamakura's Onarimachi neighborhood, where residents come to cook, work, read and spend time together. For this dinner, you join them.",
-        "After a welcome drink and introductions, everyone moves into the shared kitchen to prepare four or five seasonal dishes. The menu follows the season. You might make vegetable tempura, miso soup, grilled fish, a salad with local vegetables or a fruit dessert. Your hosts share simple techniques and the stories behind Japanese home cooking as you work.",
-        "Then you sit down together to eat. The people at the table change from evening to evening. You may meet longtime residents, people working in arts and culture, or international neighbors who have made Kamakura home. We can't promise who will be there, and that is part of what makes each dinner different.",
-        "Conversation happens in English and Japanese. Some members speak English fluently, others a little, and everyone is happy to try. This dinner suits travelers who want a relaxed evening with residents rather than a formal cooking class.",
+        "Step into NIHO, a shared living space in Kamakura's Onarimachi neighborhood, for an evening of cooking and conversation with local residents. After a welcome drink and introductions, gather in the shared kitchen to prepare four or five seasonal dishes together.",
+        "Ingredients and the menu change with the season. You might make vegetable tempura, miso soup, grilled fish, a salad with local produce, or a fruit dessert. Your hosts share cooking tips and stories about Japanese home food as you work side by side. Then sit down together to enjoy the meal and talk about life in Kamakura.",
+        "The people you meet vary from one dinner to the next. Community members may include longtime residents, people involved in local arts and culture, or international neighbors. English and Japanese are used, although English fluency varies by person. Come ready to take part in the cooking and enjoy an easygoing meal together.",
       ].join("\n\n"),
       included: [
-        "Welcome drink (tea or juice)",
+        "Welcome drink (a non-alcoholic option is available)",
         "Hands-on cooking with local residents",
-        "Dinner made from the dishes you cook together",
-        "Ingredients and kitchen tools",
+        "Dinner with seasonal dishes",
+        "Conversation and cultural exchange",
       ],
-      notIncluded: ["Alcoholic drinks", "Transport to and from NIHO"],
+      notIncluded: ["Transportation to and from NIHO", "Additional alcoholic beverages"],
       notSuitableFor: [
         "Wheelchair users (the living room is on the second floor)",
-        "Guests with food allergies (we cook in a shared kitchen and can't prevent cross-contact)",
-        "Children under 6",
+        "Guests with food allergies",
       ],
       knowBeforeYouGo: [
-        "The menu changes with the season.",
-        "The community members who join vary by date, so we can't guarantee who you will meet.",
+        "The menu changes with seasonal ingredient availability.",
+        "Community members vary by date; specific people cannot be guaranteed.",
         "English fluency varies among community members.",
-        "You'll wear slippers inside, as in a Japanese home.",
-        "Children aged 6 to 17 are welcome with an adult.",
-        "We run in any weather. If a storm or emergency warning is in effect for Kamakura three hours before the start, we cancel and offer a full refund or another date.",
-        "Please arrive on time. We start cooking no later than 15 minutes after the start time.",
         "Smoking is not permitted.",
       ],
       cover: dinnerPhotos[0] ?? null,
       photos: dinnerPhotos,
-      meetingPointDisclosure: "PUBLIC",
-      meetingPoint: nihoMeetingPoint(5),
+      meetingPointDisclosure: "AFTER_BOOKING",
+      meetingPoint: null,
       hosts: [
         host("Takuya"),
         host("Hasami"),
         host("わか"),
       ],
-      provider: { ...NIHO_PROVIDER, logo: nihoLogo },
-      seller: { displayName: "Panasonic Holdings Corporation", legalNoticeUrl: `${FIXTURE_NIHO_WEB_ORIGIN}/legal/tokushoho` },
+      provider: { ...NIHO_PROVIDER, tagline: "A relaxing place to enjoy everyday life.", logo: nihoLogo },
+      seller: { displayName: "NIHO kamakura (legal seller pending)", legalNoticeUrl: `${FIXTURE_NIHO_WEB_ORIGIN}/legal/tokushoho` },
       offers: [
         {
           id: "offer_community_dinner",
-          name: "Community dinner",
-          shortDescription: "About two hours, from the welcome drink to dinner.",
+          name: "Dinner",
+          shortDescription: "Dinner time · 18:00 · 2 hours",
           pricing: {
             currency: "JPY",
             taxIncluded: true,
-            // NIHOappの企画ページの金額（オーナー確認 2026-10-19）。子どもの年齢範囲は推奨値のまま。
             adultPriceYen: 30000,
-            child: { priceYen: 12000, minAge: 6, maxAge: 17, adultRequired: true },
+            child: { priceYen: 12000, minAge: 0, maxAge: 17, adultRequired: true },
           },
           capacity: 8,
           maxPartySize: 8,
           minimumParticipants: 1,
           durationMinutes: 120,
           startTime: "18:00",
-          weekdays: [2, 4, 6],
+          weekdays: [0, 1, 2, 3, 4, 5, 6],
           cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
           acceptanceMode: "APPROVAL",
-          bookingQuestions: [PILOT_DIET_QUESTION, PILOT_SOURCE_QUESTION],
+          bookingQuestions: [PILOT_NOTES_QUESTION],
+          bookingQuestionsFingerprint: PILOT_QUESTION_FINGERPRINTS.dinner,
+        },
+        {
+          id: "offer_community_tea_time",
+          name: "Tea time",
+          shortDescription: "Tea time · 13:00 · 2 hours",
+          pricing: {
+            currency: "JPY",
+            taxIncluded: true,
+            // The source page lists ¥15,000 from. The booking widget's selected-price breakdown has not been confirmed.
+            adultPriceYen: 15000,
+            child: null,
+          },
+          capacity: 8,
+          maxPartySize: 8,
+          minimumParticipants: 1,
+          durationMinutes: 120,
+          startTime: "13:00",
+          weekdays: [0, 1, 2, 3, 4, 5, 6],
+          cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
+          acceptanceMode: "APPROVAL",
+          bookingQuestions: [PILOT_NOTES_QUESTION],
           bookingQuestionsFingerprint: PILOT_QUESTION_FINGERPRINTS.dinner,
         },
       ],
