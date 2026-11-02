@@ -64,6 +64,7 @@ const secretRef = (target: Target, item: Item) => (target === "stg" ? `${item.st
 const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
+  EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "experienceProviderPagesApiEnabled",
   EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "experienceProviderOperationsApiEnabled",
   EXPERIENCE_GUEST_QUESTIONS_ENABLED: "guestQuestionsEnabled",
   EXPERIENCE_TRANSLATION_ENABLED: "translationEnabled",

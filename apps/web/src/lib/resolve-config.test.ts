@@ -310,6 +310,18 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "true", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
   });
 
+  it("opens NIHO provider page authoring independently from bookings and team operations", () => {
+    expect(resolveConfig({}).experienceProviderPagesApiEnabled).toBe(false);
+    const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "1" }).experienceProviderPagesApiEnabled).toBe(false);
+    expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "true" }).experienceProviderPagesApiEnabled).toBe(true);
+    expect(resolveConfig({ ...host, HOST_CONSOLE_ENABLED: "false", EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "true" }).experienceProviderPagesApiEnabled).toBe(false);
+    expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "true" })).toMatchObject({
+      experienceProviderOperationsApiEnabled: false,
+      experienceProviderPagesApiEnabled: true,
+    });
+  });
+
   it("sells on this site only in http mode with its own flag, and refuses to start without what a sale needs (#285)", () => {
     const sale = {
       EXPERIENCE_API_MODE: "http",

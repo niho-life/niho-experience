@@ -35,7 +35,7 @@ export function HostLiveExperienceRow({ page, rating, linkProviderId }: { page: 
       <div className="min-w-0 flex-1">
         <Link
           href={withProvider(`/host/experiences/${encodeURIComponent(page.id)}`, linkProviderId)}
-          className="block text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere] after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-3 focus-visible:after:-outline-offset-3 focus-visible:after:outline-moss"
+          className="flex min-h-11 items-center text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere] after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-3 focus-visible:after:-outline-offset-3 focus-visible:after:outline-moss"
         >
           {page.title || "題名なし"}
         </Link>

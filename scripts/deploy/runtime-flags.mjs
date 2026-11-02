@@ -80,6 +80,11 @@ export const FLAGS = Object.freeze([
     fixed: { EXPERIENCE_JOBS_AUDIENCE: siteUrl, EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: serviceAccount("experience-jobs") },
   },
   {
+    env: "EXPERIENCE_PROVIDER_PAGES_API_ENABLED",
+    variable: "PROVIDER_PAGES_API_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE"],
+  },
+  {
     env: "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED",
     variable: "PROVIDER_OPERATIONS_API_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE"],

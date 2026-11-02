@@ -143,7 +143,8 @@ test("体験: the list, one experience, and back", async ({ page }, testInfo) =>
   await page.waitForURL(/\/host\/experiences$/);
   await expect(page.getByRole("heading", { level: 1, name: "体験" })).toBeVisible();
   await expect(menu(page).getByRole("link", { name: "体験" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("button", { name: "新しい体験" })).toBeVisible();
+  // This legacy mock page has no provider-page operations; do not advertise a no-op create action.
+  await expect(page.getByRole("button", { name: "新しい体験" })).toHaveCount(0);
 
   // Each row opens its editor (its title's link covers the row); the dinner's reviews have a link of their own (host-reviews.spec.ts).
   const rows = page.getByRole("region", { name: "体験の一覧" }).getByRole("listitem");
@@ -348,7 +349,8 @@ test.describe("320px narrow phone", () => {
     await inside(page.getByRole("link", { name: /サンプル工房/ }), "account menu: provider");
     expect(await overflowX(page), "account menu open").toBeLessThanOrEqual(0);
     await page.goto("/host/experiences");
-    await inside(page.getByRole("button", { name: "新しい体験" }), "experiences: 新しい体験");
+    // Page authoring is disabled in this legacy mock scenario, so there is no create action to activate.
+    await expect(page.getByRole("button", { name: "新しい体験" })).toHaveCount(0);
     await page.goto("/host/experiences/community-dinner");
     await inside(page.getByRole("link", { name: "体験へ戻る" }), "sub page: ‹ 体験");
     await page.goto("/host/settings");

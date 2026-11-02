@@ -110,7 +110,8 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 
 - **ホストの画面と DB は常にある**ので、前提の「ホストの画面・DB」はいつも満たす。サイトの URL は `STG_HOST_SERVICE_URL`、`<project>` は `niho-app-stg`。
 - **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
-- **ホストの提供者API操作**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` でNIHOの限定ホストAPIへ接続する。NIHO stg に `APP_CONNECT_WEB_ORIGINS` と API の `EXPERIENCE_HOST_CONSOLE_URL` を正確なorigin/URLで設定し、N1/N2a/N2bと予約・顧客・売上を扱うN2c API（niho-app #19278）を配備してから、体験編集・掲載だけでなく予約一覧と承認/辞退/取消、メッセージ、サブホスト管理、各操作の権限拒否まで受け入れて開く。提供者登録自体はホスト画面の別操作。このフラグは旅行者の予約・販売を開かない。NIHO API上のメッセージを使うため、Experience独自の質問を使う `STG_GUEST_QUESTIONS_ENABLED` は `false` または未設定にする。
+- **体験ページの作成・編集**は `STG_PROVIDER_PAGES_API_ENABLED=true` でNIHOの限定ホストAPIへ接続する。NIHO stgのprovider pages APIとホストログインを配備し、ページ作成・編集・写真・掲載申請と別提供者/非OWNERの拒否を受け入れてから開く。このフラグ単独では予約運営・メッセージ・サブホスト管理、旅行者の予約・販売を開かない。
+- **ホストの提供者運営API操作**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` で予約一覧と承認/辞退/取消、メッセージ、サブホスト管理に接続する（体験ページ操作も含む）。NIHO stg に `APP_CONNECT_WEB_ORIGINS` と API の `EXPERIENCE_HOST_CONSOLE_URL` を正確なorigin/URLで設定し、N1/N2a/N2bと予約・顧客・売上を扱うN2c API（niho-app #19278）を配備してから、フラグが開くすべての画面・操作と権限拒否まで受け入れて開く。提供者登録自体はホスト画面の別操作。このフラグは旅行者の予約・販売を開かない。NIHO API上のメッセージを使うため、Experience独自の質問を使う `STG_GUEST_QUESTIONS_ENABLED` は `false` または未設定にする。
 - **Experience独自の質問**（「Ask the host」）は `STG_GUEST_QUESTIONS_ENABLED=true` で別に受け入れる。この受入では `STG_PROVIDER_OPERATIONS_API_ENABLED` を `false` または未設定にし、Experience DBの質問と `/questions/reply` を確認する。2つのメッセージ経路は同時に有効化できないため、両方を受け入れるときは別々の候補revisionで行う。
 - **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
 - **Secret の名前を固定**して検査する（`secret-name:数字version`）：

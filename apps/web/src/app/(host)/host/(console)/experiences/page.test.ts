@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { ExperienceProviderPageListItem } from "@niho-experience/api-client/host";
 
-/** 体験 with provider operations on (http mode): NIHO's pages in the preview's rows, with the experience DB's ★ (#108). */
+/** NIHO's host API powers page authoring independently of booking and team operations. */
 const state = vi.hoisted(() => ({
-  providerOperations: true,
+  providerPages: true,
   ratings: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
 }));
 vi.mock("server-only", () => ({}));
@@ -21,7 +21,7 @@ vi.mock("@/host/data", () => ({
   loadHostReviews: () => ({ list: { status: "unavailable" } }),
 }));
 vi.mock("@/host/experience-ratings-server", () => ({ loadExperienceRatings: (...args: unknown[]) => state.ratings!(...args) }));
-vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
+vi.mock("@/lib/host/provider-pages-server", () => ({ providerPagesEnabled: () => state.providerPages }));
 
 import HostExperiencesPage from "./page";
 import { HostLiveExperienceRow, HostLiveExperiences } from "@/components/host/HostLiveExperiences";
@@ -41,11 +41,11 @@ function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
 }
 
 beforeEach(() => {
-  state.providerOperations = true;
+  state.providerPages = true;
   state.ratings = vi.fn(async () => RATINGS);
 });
 
-describe("体験 with provider operations on", () => {
+describe("体験 with provider pages enabled", () => {
   it("passes the OWNER's ★ to NIHO's list, read on the server", async () => {
     const element = await HostExperiencesPage({ searchParams: Promise.resolve({}) });
     const live = elements(element).find((item) => item.type === HostLiveExperiences);
@@ -53,10 +53,11 @@ describe("体験 with provider operations on", () => {
     expect(state.ratings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }));
   });
 
-  it("keeps the preview's list and reads no ★ from the experience DB with provider operations off", async () => {
-    state.providerOperations = false;
+  it("keeps the legacy list without offering a no-op create button when page authoring is off", async () => {
+    state.providerPages = false;
     const element = await HostExperiencesPage({ searchParams: Promise.resolve({}) });
     expect(elements(element).some((item) => item.type === HostLiveExperiences)).toBe(false);
+    expect(elements(element).some((item) => item.type === "button")).toBe(false);
     expect(state.ratings).not.toHaveBeenCalled();
   });
 });
@@ -65,6 +66,7 @@ describe("a row of NIHO's pages", () => {
   it("looks like the preview's: the title over the row, the language, the ★ link to the experience's reviews, a pill", () => {
     const html = row(page(), RATINGS["sample-walk"]);
     expect(html).toContain('href="/host/experiences/page-walk?providerId=sample-provider"');
+    expect(html).toContain("flex min-h-11 items-center");
     expect(html).toContain("after:absolute after:inset-0");
     expect(html).toContain(">Synthetic walk</a>");
     expect(html).toContain('<p class="text-[0.78125rem] leading-normal text-muted">英語</p>');

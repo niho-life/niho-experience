@@ -5,7 +5,7 @@ import type { HostReview, HostThread } from "./types";
 type Load = Mock<(...args: unknown[]) => Promise<unknown>>;
 const state = vi.hoisted(() => ({
   mock: false,
-  providerOperations: false,
+  providerPages: false,
   questions: null as null | Load,
   reviews: null as null | Load,
   listPages: null as null | Load,
@@ -21,7 +21,7 @@ vi.mock("@/lib/host/server", () => ({
   },
 }));
 vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
-vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
+vi.mock("@/lib/host/provider-pages-server", () => ({ providerPagesEnabled: () => state.providerPages }));
 vi.mock("./guest-questions-server", () => ({ loadGuestQuestions: (...args: unknown[]) => state.questions!(...args) }));
 vi.mock("./guest-reviews-server", () => ({ loadGuestReviews: (...args: unknown[]) => state.reviews!(...args) }));
 
@@ -45,7 +45,7 @@ const listing = (status: string, consentedAt = "2026-10-29T16:00:00.000Z") => ({
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date("2026-11-01T03:00:00.000Z"), toFake: ["Date"] });
   state.mock = false;
-  state.providerOperations = false;
+  state.providerPages = false;
   state.client.mockClear();
   state.questions = vi.fn(async () => ({ status: "live", threads: [THREAD] }));
   state.reviews = vi.fn(async () => ({ status: "live", reviews: [REVIEW], experiences: [{ id: "walk", title: "Synthetic walk" }] }));
@@ -63,12 +63,12 @@ describe("loadHomeTodos", () => {
       ["thread-thread-1", "返信待ち", "「子どもでも大丈夫ですか？」", "Lucas さん · 3 時間前 · 英語から翻訳"],
       ["guest-review-review-1", "未返信", "「Lovely morning」", "Mia さん · Synthetic walk"],
     ]);
-    // Provider operations off: NIHO's pages are not read.
+    // Provider pages off: NIHO's pages are not read.
     expect(state.client).not.toHaveBeenCalled();
   });
 
-  it("adds NIHO's drafts and the listings it is checking after them, with provider operations on", async () => {
-    state.providerOperations = true;
+  it("adds NIHO's drafts and the listings it is checking after them, with provider pages on", async () => {
+    state.providerPages = true;
     const load = await loadHomeTodos(PROVIDER, SESSION);
     expect(state.listing!.mock.calls.map(([, pageId]) => pageId)).toEqual(["live-a", "live-b"]);
     expect(load.failed).toEqual([]);
@@ -78,14 +78,14 @@ describe("loadHomeTodos", () => {
   });
 
   it("reads the listings of 20 published pages at most", async () => {
-    state.providerOperations = true;
+    state.providerPages = true;
     state.listPages!.mockResolvedValueOnce({ ok: true, data: { checkoutEnabled: true, pages: Array.from({ length: 25 }, (_, index) => page(`p${index}`, "PUBLISHED")) } });
     await loadHomeTodos(PROVIDER, SESSION);
     expect(state.listing).toHaveBeenCalledTimes(20);
   });
 
   it("says which sources could not be read, and still shows the others", async () => {
-    state.providerOperations = true;
+    state.providerPages = true;
     state.questions!.mockResolvedValueOnce({ status: "error" });
     state.listing!.mockImplementation(async (_providerId: unknown, pageId: unknown) => (pageId === "live-a" ? listing("REQUESTED") : { ok: false, kind: "network_error" }));
     const partly = await loadHomeTodos(PROVIDER, SESSION);
@@ -103,7 +103,7 @@ describe("loadHomeTodos", () => {
   });
 
   it("adds nothing for closed sources, NIHO refusing the account, or an ID token about to expire", async () => {
-    state.providerOperations = true;
+    state.providerPages = true;
     state.questions!.mockResolvedValueOnce({ status: "closed" });
     state.reviews!.mockResolvedValueOnce({ status: "owner-only" });
     state.listPages!.mockResolvedValueOnce({ ok: false, kind: "error", status: 403, code: "FORBIDDEN", reason: null, message: "" });

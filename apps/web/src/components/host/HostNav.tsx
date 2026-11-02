@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
 import { nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
 import { hostSupportPath, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
@@ -202,6 +202,19 @@ function AccountMenu({ account, providers, nihoAppUrl, editorUrl }: HostChromePr
   const { provider: current } = selectProvider(providers, providerId);
   const name = account.displayName || "NIHO アカウント";
   const switchable = providers.length > 1 ? current : null;
+  useEffect(() => {
+    const details = menu.current;
+    const syncMainInert = () => {
+      const main = document.getElementById("main");
+      if (main) main.inert = Boolean(details?.open);
+    };
+    details?.addEventListener("toggle", syncMainInert);
+    return () => {
+      details?.removeEventListener("toggle", syncMainInert);
+      const main = document.getElementById("main");
+      if (main) main.inert = false;
+    };
+  }, []);
   return (
     <details ref={menu} className="relative">
       <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-full [&::-webkit-details-marker]:hidden">
