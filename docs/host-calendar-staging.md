@@ -110,6 +110,7 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 
 - **ホストの画面と DB は常にある**ので、前提の「ホストの画面・DB」はいつも満たす。サイトの URL は `STG_HOST_SERVICE_URL`、`<project>` は `niho-app-stg`。
 - **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
+- **体験編集・掲載**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` でNIHOの限定ホストAPIへ接続する。NIHO stg に `APP_CONNECT_WEB_ORIGINS` と API の `EXPERIENCE_HOST_CONSOLE_URL` を正確なorigin/URLで設定し、N1/N2a/N2b APIを配備して認証・提供者APIの許可範囲を確認してから開く。提供者登録自体はホスト画面の別操作。このフラグはゲスト予約・販売を開かない。Experience独自の質問を使う `STG_GUEST_QUESTIONS_ENABLED` とは同時に有効化できない。
 - **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
 - **Secret の名前を固定**して検査する（`secret-name:数字version`）：
 

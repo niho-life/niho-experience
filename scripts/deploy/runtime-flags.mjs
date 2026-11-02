@@ -44,7 +44,8 @@ const siteUrl = ({ siteUrl: url }) => url;
 /**
  * The table. `env`: the Cloud Run variable set to "true". `variable`: the GitHub variable after the prefix.
  * `defaults`: on when its variable is unset (only staging's PWA, which it always had). `needs`: CAPABILITIES or other
- * flags' `env`, "A|B" for either. `secrets`: Secret Manager references (`name:version`), with staging's fixed Secret
+ * flags' `env`, "A|B" for either. `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
+ * references (`name:version`), with staging's fixed Secret
  * name. `settings`: plain values with their shape. `fixed`: values the workflow derives (job audiences and callers).
  */
 export const FLAGS = Object.freeze([
@@ -78,7 +79,17 @@ export const FLAGS = Object.freeze([
     ],
     fixed: { EXPERIENCE_JOBS_AUDIENCE: siteUrl, EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: serviceAccount("experience-jobs") },
   },
-  { env: "EXPERIENCE_GUEST_QUESTIONS_ENABLED", variable: "GUEST_QUESTIONS_ENABLED", needs: ["HOST_CONSOLE", "DATABASE"] },
+  {
+    env: "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED",
+    variable: "PROVIDER_OPERATIONS_API_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE"],
+  },
+  {
+    env: "EXPERIENCE_GUEST_QUESTIONS_ENABLED",
+    variable: "GUEST_QUESTIONS_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE"],
+    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED"],
+  },
   {
     env: "EXPERIENCE_TRANSLATION_ENABLED",
     variable: "TRANSLATION_ENABLED",
@@ -173,6 +184,14 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
     else if (raw !== "false") problems.push(`${name(flag.variable)} must be true, false or unset`);
   }
   const has = (need) => need.split("|").some((one) => (CAPABILITIES.includes(one) ? hostConsole === true : on.has(one)));
+  for (const flag of FLAGS) {
+    if (!on.has(flag.env)) continue;
+    for (const conflict of flag.conflicts ?? []) {
+      if (!on.has(conflict)) continue;
+      const other = FLAGS.find((candidate) => candidate.env === conflict);
+      problems.push(`${flag.env} (${name(flag.variable)}) conflicts with ${other?.env ?? conflict}${other ? ` (${name(other.variable)})` : ""}`);
+    }
+  }
   const env = {};
   const secrets = {};
   const context = { project: settings.project, siteUrl: url };
