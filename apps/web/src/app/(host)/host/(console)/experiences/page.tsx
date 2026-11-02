@@ -4,7 +4,7 @@ import Link from "next/link";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostLiveExperiences } from "@/components/host/HostLiveExperiences";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
-import { consoleButtonClass, HOST_SURFACE } from "@/components/host/host-ui";
+import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead, StatusPill } from "@/components/host/ui";
 import { hostPageContext, loadHostConsoleData, loadHostReviews } from "@/host/data";
 import { loadExperienceRatings } from "@/host/experience-ratings-server";
@@ -13,7 +13,7 @@ import { experiencePath } from "@/host/home";
 import { experienceRating, reviewsHref } from "@/host/reviews";
 import { LISTING_STATUS } from "@/host/status";
 import { withProvider } from "@/lib/host/routes";
-import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
+import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 
 export const metadata: Metadata = { title: "体験" };
 
@@ -33,7 +33,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
-  if (providerOperationsEnabled()) {
+  if (providerPagesEnabled()) {
     return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} />;
   }
   const { experiences } = await loadHostConsoleData(provider);
@@ -42,13 +42,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
 
   return (
     <HostPageBody>
-      <PageHead title="体験">
-        {/* Creating an experience arrives with the editor (#89); for now the button does nothing. */}
-        <button type="button" className={consoleButtonClass("primary")}>
-          <HostIcon name="plus" className="size-4" />
-          新しい体験
-        </button>
-      </PageHead>
+      <PageHead title="体験" />
       <section aria-label="体験の一覧" className={HOST_SURFACE}>
         {experiences.length ? (
           <ul>
