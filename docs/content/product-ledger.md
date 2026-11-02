@@ -7,7 +7,7 @@
 
 **オーナーの決定（2026-10-26・[#146](https://github.com/niho-life/niho-experience/issues/146)）**：P-01〜P-05 の題名を、検索語（[seo-content-policy.md](../growth/seo-content-policy.md) の体験別の語）を入れた案に替える。テストサイトの pilot fixture は替えた。本番の正本（NIHO 側の原稿）は別に直す。
 
-**オーナーの決定（2026-11-02・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：初回の試験販売候補は [Kamakura Community Dinner with Locals](https://niho.life/living/nihokamakura/pages/community-dinner-with-locals)。主催・提供者はNIHO kamakura拠点。オーナーはこの既存ページに記載された提供内容・開催枠・表示価格・定員・予約/取消条件を商品条件の正本として承認した。オーナー作成の写真は全点Experience掲載に利用してよい。売上の受取先はNIHO kamakura拠点を希望する。stgの提供者・Stripe口座の紐付けは未確認。実際の新サイト用データへの転記と安定した画像アップロードは未完了であり、期限付き署名URLは保存しない。写っている第三者の肖像同意は別途確認する。ページに記載のない法的販売主体・販売者表示、天候/最少催行等は未確定のまま扱う。
+**オーナーの決定（2026-11-02・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：初回の試験販売候補は [Kamakura Community Dinner with Locals](https://niho.life/living/nihokamakura/pages/community-dinner-with-locals)。主催・提供者はNIHO kamakura拠点。オーナーはこの既存ページに記載された提供内容・開催枠・表示価格・定員・予約/取消条件を商品条件の正本として承認した。オーナー作成の写真は全点Experience掲載に利用してよい。売上の受取先はNIHO kamakura拠点を希望する。掲載名は「シェアリビングスペースNIHOkamakura」、特商法表示URLは [NIHO kamakuraの特商法](https://kamakura.niho.life/tradelaw) を指定した。同URLには販売業者としてパナソニックホールディングス株式会社と記載されているため、この体験の法的販売主体とNIHO kamakuraの受取先の関係は確認待ちとする。stgの提供者・Stripe口座の紐付けも未確認。実際の新サイト用データへの転記と安定した画像アップロードは未完了であり、期限付き署名URLは保存しない。写っている第三者の肖像同意は別途確認する。ページに記載のない天候/最少催行等は未確定のまま扱う。
 
 同じ開催日時・定員の枠を重複登録する指示は、重複・在庫競合を検証するstaging専用データとして扱う。現行NIHOページの本番在庫と同時に販売せず、Experience側の本番受付は旧販売枠の停止・切替・切戻し確認後まで開けない。公開ページにはエリア概要だけを載せ、正確な住所・入口・地図などの集合案内は予約者だけに表示する。
 
@@ -61,7 +61,7 @@
 
 ### 確認待ち（オーナー）
 
-1. 法令上の販売主体・画面に表示する販売者名・特商法表示URL。売上受取先はNIHO kamakura拠点を希望するが、stgのStripe Connect紐付けは未確認
+1. 掲載名「シェアリビングスペースNIHOkamakura」と特商法表示URLはオーナー指定済み。URLは販売業者をパナソニックホールディングス株式会社と記載しているため、この体験の法的販売主体・NIHO kamakuraへの受取との整合、stgのStripe Connect紐付けを確認する
 2. tea timeの選択後の価格表示、子ども料金、OTA価格との関係（価格を揃える義務の有無を含む）。既存ページの記載は正本として承認済みだが、未表示の条件は補完しない
 3. 実際に開催できる曜日と頻度、最少催行人数、受付締切。現在は毎日枠が表示されている
 4. 開始時刻をチャネル間で統一するか
