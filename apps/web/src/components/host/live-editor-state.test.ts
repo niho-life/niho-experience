@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
 import { decodeExperienceProviderPagePatchRequest } from "@niho-experience/api-client/host-schema";
-import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, makeCoverPhoto, mergeLiveMeeting, mergeLivePage, movePhoto, normalizedTimeline, paddedTime, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_PHOTO_LIMIT, appendLiveOffer, appendPhoto, conflictValueText, editLines, emptyLiveOffer, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, liveOfferProblem, makeCoverPhoto, mergeLiveMeeting, mergeLivePage, moveLiveOffer, movePhoto, normalizedTimeline, paddedTime, readLiveMeeting, removeLiveOffer, removePhoto, restoreSavedLiveOffers, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 
 const offer = (id: string, name: string, priceYen: number) => ({ id, name, shortDescription: null, sortOrder: 0, isActive: true, priceYen, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [2], startTime: "10:00", durationMinutes: 60, cutoffDays: 1, closedDates: [], cancellationPolicy: "FREE_UNTIL_24H" as const, acceptanceMode: "APPROVAL" as const, spaceScope: "ENTIRE_FACILITY" as const, useZone: [], bookingQuestions: [] });
 const page = (): ExperienceProviderPageDetail => ({ id: "page_1", kind: "EXPERIENCE", slug: "sample-page", language: "JA", title: "元の題名", status: "DRAFT", listOnEntrance: false, publishedAt: null, unpublishedAt: null, content: { lead: "元", facts: { language: "日本語" }, highlights: [], timeline: [], description: "元", included: [], notIncluded: [], notSuitableFor: [], meetingPoint: { entranceNote: "内部", exteriorPhotoObjectKey: null }, knowBeforeYouGo: [], participationConditions: { accessibility: null, age: null, food: null, hostLanguages: null, physical: null, weather: null }, hostUserIds: ["hidden"] }, photos: [], coverObjectKey: null, offer: offer("offer_1", "商品", 1000), offers: [offer("offer_1", "商品", 1000)], publishBlockers: [], publicPath: "/living/sample/pages/sample-page", createdAt: "2026-10-27T00:00:00.000Z", updatedAt: "2026-10-27T01:00:00.000Z", photoAlts: [] });
@@ -39,6 +39,56 @@ describe("live editor state", () => {
     draft.offers[0]!.capacity = 8;
     const patch = serializeLivePagePatch(draft, base);
     expect(patch.offers?.map((item) => item.id)).toEqual(["offer_1", "offer_2"]);
+  });
+
+  it("adds and removes products in display order, renumbering sort order", () => {
+    const first = offer("offer_1", "夜の食事", 3000);
+    const second = offer("offer_2", "昼の食事", 2500);
+    const moved = moveLiveOffer([first, second], 1, -1);
+    expect(moved.map(({ name, sortOrder }) => [name, sortOrder])).toEqual([["昼の食事", 0], ["夜の食事", 1]]);
+    expect(removeLiveOffer(moved, 0).map(({ name, sortOrder }) => [name, sortOrder])).toEqual([["夜の食事", 0]]);
+  });
+
+  it("appends after sparse saved sort orders without moving the new product ahead", () => {
+    const existing = { ...offer("offer_1", "既存商品", 3000), sortOrder: 10 };
+    expect(appendLiveOffer([existing], "draft:new").map(({ id, sortOrder }) => [id, sortOrder])).toEqual([["offer_1", 0], ["draft:new", 1]]);
+  });
+
+  it("restores a product with booking history without losing other draft products", () => {
+    const first = offer("offer_1", "夜の食事", 3000);
+    const second = offer("offer_2", "昼の食事", 2500);
+    const changedSecond = { ...second, name: "昼の食事・変更", sortOrder: 0 };
+    const added = { ...emptyLiveOffer("draft:offer-1", 1), name: "子ども向け" };
+    expect(restoreSavedLiveOffers([first, second], [changedSecond, added]).map(({ id, name, sortOrder }) => [id, name, sortOrder])).toEqual([
+      ["offer_1", "夜の食事", 0], ["offer_2", "昼の食事・変更", 1], ["draft:offer-1", "子ども向け", 2],
+    ]);
+  });
+
+  it("sends new product, question and choice ids as omitted IDs, while keeping existing IDs", () => {
+    const base = page();
+    base.offers[0]!.bookingQuestions = [{ id: "diet", prompt: "食物アレルギーはありますか？", description: null, inputType: "SINGLE_SELECT", required: true, options: [{ id: "yes", label: "ある" }, { id: "no", label: "ない" }] }];
+    const draft = structuredClone(base);
+    const extra = emptyLiveOffer("draft:offer-1", 1);
+    expect(extra.isActive).toBe(false);
+    extra.name = "子ども料金"
+    draft.offers.push(extra);
+    draft.offers[0]!.bookingQuestions.push({ id: "draft:question-1", prompt: "食べられないものはありますか？", description: null, inputType: "SHORT_TEXT", required: false, options: [] });
+    const patch = serializeLivePagePatch(draft, base);
+    expect(patch.offers?.[0]?.id).toBe("offer_1");
+    expect(patch.offers?.[0]?.bookingQuestions?.[0]).toMatchObject({ id: "diet", options: [{ id: "yes" }, { id: "no" }] });
+    expect(patch.offers?.[0]?.bookingQuestions?.[1]).not.toHaveProperty("id");
+    expect(patch.offers?.[1]).not.toHaveProperty("id");
+    expect(decodeExperienceProviderPagePatchRequest(patch)).not.toBeNull();
+  });
+
+  it("blocks incomplete new products and invalid booking-question choices before save", () => {
+    const extra = emptyLiveOffer("draft:offer-1", 1);
+    expect(liveOfferProblem([extra])).toMatch(/商品名/);
+    extra.name = "追加商品";
+    extra.bookingQuestions = [{ id: "draft:question-1", prompt: "参加人数を教えてください", description: null, inputType: "SINGLE_SELECT", required: false, options: [{ id: "draft:option-1", label: "1名" }] }];
+    expect(liveOfferProblem([extra])).toMatch(/選択肢/);
+    extra.bookingQuestions[0]!.options.push({ id: "draft:option-2", label: "2名" });
+    expect(liveOfferProblem([extra])).toBeNull();
   });
 
   it("merges disjoint edits and preserves another editor's new offer", () => {

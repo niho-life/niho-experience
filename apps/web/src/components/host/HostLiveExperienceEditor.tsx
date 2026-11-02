@@ -7,7 +7,7 @@ import type { ExperienceProviderMeetingPoint, ExperienceProviderPageDetail, Expe
 import type { HostProviderReviewStatus, HostProviderRole } from "@/lib/host/providers";
 import type { EditorTab } from "@/host/page-english";
 import { DISABLED, EditorPanel } from "./editor-parts";
-import { FieldRow, FieldSection, INPUT, TEXTAREA } from "./fields";
+import { FieldSection } from "./fields";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { EDITOR_TAB_PANEL_ID, EditorLanguageTabs, editorTabId, LIVE_ENGLISH_TAB_LABEL } from "./HostEditorEnglish";
 import { consoleButtonClass } from "./host-ui";
@@ -16,20 +16,20 @@ import { HostIcon } from "./HostIcon";
 import { HostSubHeader } from "./HostSubHeader";
 import { HostPageBody } from "./ui";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
-import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
+import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, liveOfferProblem, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, restoreSavedLiveOffers, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 import { LIVE_ENGLISH_STATUS, liveEnglishState, readLiveEnglish } from "./live-english";
 import { hostListingReviewNote, LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, publishBlockerText, readListingResponse } from "./live-listing-state";
 import { LiveContentPanels, LiveExteriorPhoto } from "./LiveContentPanels";
 import { LiveEnglishPanels, LiveEnglishState, type LiveEnglishLoad } from "./LiveEnglishPanels";
 import { LivePagePanel } from "./LivePagePanel";
 import { LivePhotosSection } from "./LivePhotosSection";
+import { HostLiveOfferEditor } from "./HostLiveOfferEditor";
 import { MeetingPointFields, MeetingPointSummary } from "./MeetingPointFields";
 import { SaveBar } from "./SaveBar";
 
 // The detail view comes only when 「プレビュー」 is pressed.
 const HostExperiencePreview = dynamic(() => import("./HostExperiencePreview"), { ssr: false });
 
-const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
 const PHOTO_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 const PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 const PHOTO_FILE_FIELD = "file";
@@ -67,6 +67,13 @@ async function listingCall(url: string, init: RequestInit): Promise<{ ok: true; 
   return { ok: false, status: response.status, error: typeof reason === "string" ? reason : null };
 }
 
+async function responseError(response: Response): Promise<string | null> {
+  try {
+    const body = await response.clone().json();
+    return typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string" ? (body as { error: string }).error : null;
+  } catch { return null; }
+}
+
 export interface HostLiveExperienceEditorProps {
   providerId: string;
   pageId: string;
@@ -89,6 +96,8 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const [draft, setDraft] = useState<ExperienceProviderPageDetail | null>(null);
   const [latest, setLatest] = useState<ExperienceProviderPageDetail | null>(null);
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false); const [uncertain, setUncertain] = useState(false);
+  const [uncertainOfferIds, setUncertainOfferIds] = useState<string[]>([]);
+  const [uncertainOfferResolution, setUncertainOfferResolution] = useState<Record<string, string>>({});
   // A 409: 最新の保存内容を読む compares the page and the meeting point with what another editor saved.
   const [stale, setStale] = useState(false);
   const [savedMeeting, setSavedMeeting] = useState<LiveMeeting | null>(null);
@@ -182,13 +191,14 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   // Design: nothing is applied, withdrawn or stopped while the page has changes not yet saved.
   const listingLocked = dirty || Boolean(latest) || uncertain || busy || listingBusy || listingUncertain;
   const editContent = (patch: Partial<ExperienceProviderPageDetail["content"]>) => setDraft((current) => current ? { ...current, content: { ...current.content, ...patch } } : current);
-  const editOffer = (index: number, patch: Partial<ExperienceProviderPageOffer>) => setDraft((current) => current ? { ...current, offers: current.offers.map((offer, at) => at === index ? { ...offer, ...patch } : offer) } : current);
+  const editOffers = (offers: ExperienceProviderPageOffer[]) => setDraft((current) => current ? { ...current, offers, offer: offers[0] ?? null } : current);
 
   /** 保存: a listed experience leaves the site until NIHO checks it again, so the owner is asked first. */
   function requestSave() {
     if (!draft || !saved || busy || listingBusy || latest || !dirty) return;
     // Only the Japanese tab draws the fields: the check does not depend on the tab being open.
-    const problem = liveContentProblem(draft.content) ?? (meetingDirty && meeting ? liveMeetingProblem(meeting) : null);
+    const changed = serializeLivePagePatch(draft, saved);
+    const problem = liveContentProblem(draft.content) ?? (changed.offers ? liveOfferProblem(draft.offers) : null) ?? (meetingDirty && meeting ? liveMeetingProblem(meeting) : null);
     if (problem) { setError(problem); setNotice(""); setTab("ja"); return; }
     if (owner && listing?.listing?.status === "ACTIVE") setConfirming("save");
     else void save();
@@ -200,17 +210,29 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     try {
       if (pageDirty) {
         const patch = serializeLivePagePatch(draft, saved);
+        const markUncertain = () => {
+          setUncertain(true);
+          setUncertainOfferIds(patch.offers ? draft.offers.filter((offer) => offer.id.startsWith("draft:")).map((offer) => offer.id) : []);
+          setUncertainOfferResolution({});
+        };
         let response: Response;
         try { response = await fetch(endpoint, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ expectedUpdatedAt: saved.updatedAt, patch }) }); }
-        catch { setUncertain(true); setError(SAVE_UNCERTAIN); return; }
+        catch { markUncertain(); setError(SAVE_UNCERTAIN); return; }
         if (!response.ok) {
-          if (response.status >= 500) { setUncertain(true); setError(SAVE_UNCERTAIN); return; }
+          if (response.status >= 500) { markUncertain(); setError(SAVE_UNCERTAIN); return; }
+          const code = await responseError(response);
+          if (code === "PAGE_OFFER_HAS_BOOKINGS") {
+            const offers = restoreSavedLiveOffers(saved.offers, draft.offers);
+            setDraft((current) => current ? { ...current, offers, offer: offers[0] ?? null } : current);
+            setError("予約履歴がある商品は削除できません。商品を戻しました。代わりに「この商品を受付する」をオフにしてください。");
+            return;
+          }
           setStale(response.status === 409); setError(message(response.status)); return;
         }
         let value: ExperienceProviderPageDetail;
         try { value = await response.json() as ExperienceProviderPageDetail; }
-        catch { setUncertain(true); setError("保存は受け付けられた可能性があります。最新の内容を確認してください。"); return; }
-        if (value.id !== pageId) { setUncertain(true); setError("保存結果を確認できません。最新の内容を確認してください。"); return; }
+        catch { markUncertain(); setError("保存は受け付けられた可能性があります。最新の内容を確認してください。"); return; }
+        if (value.id !== pageId) { markUncertain(); setError("保存結果を確認できません。最新の内容を確認してください。"); return; }
         setSaved(value); setDraft(copyPage(value)); version = value.updatedAt; pageSaved = true;
       }
       if (meetingDirty && meeting) {
@@ -249,14 +271,39 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       if (!meetingRead) { setLatest(null); setStale(true); setError("集合場所の最新の保存内容を読めませんでした。もう一度「最新の保存内容を読む」を押してください。"); }
     } catch (reason) { setError(reason instanceof Error ? reason.message : loadMessage(500)); } finally { setBusy(false); }
   }
+  function canResolveUncertainOfferCreates() {
+    if (!uncertainOfferIds.length) return true;
+    if (!latest || !saved) return false;
+    const selected = new Set<string>();
+    return uncertainOfferIds.every((localId) => {
+      const resolution = uncertainOfferResolution[localId];
+      if (resolution === "retry") return true;
+      if (!resolution || saved.offers.some((offer) => offer.id === resolution) || !latest.offers.some((offer) => offer.id === resolution && !saved.offers.some((base) => base.id === offer.id))) return false;
+      if (selected.has(resolution)) return false;
+      selected.add(resolution);
+      return true;
+    });
+  }
   function applyMerge(choice: "local" | "remote") {
     if (!latest || !saved || !draft) return;
     if (meetingState === "ready" && savedMeeting && meeting && !latestMeeting) return;
-    const merged = mergeLivePage(saved, draft, latest, choice);
+    if (!canResolveUncertainOfferCreates()) return;
+    const draftForMerge = copyPage(draft);
+    for (const localId of uncertainOfferIds) {
+      const resolution = uncertainOfferResolution[localId];
+      if (!resolution || resolution === "retry") continue;
+      const remote = latest.offers.find((offer) => offer.id === resolution);
+      const localIndex = draftForMerge.offers.findIndex((offer) => offer.id === localId);
+      if (!remote || localIndex < 0) return;
+      // The owner explicitly matched this uncertain local create to an API-issued product ID.
+      draftForMerge.offers[localIndex] = structuredClone(remote);
+    }
+    draftForMerge.offer = draftForMerge.offers[0] ?? null;
+    const merged = mergeLivePage(saved, draftForMerge, latest, choice);
     const meetingMerged = savedMeeting && meeting && latestMeeting ? mergeLiveMeeting(savedMeeting, meeting, latestMeeting, choice) : null;
     setSaved(latest); setDraft(merged.draft); setLatest(null);
     if (meetingMerged && latestMeeting) { setSavedMeeting(latestMeeting); setMeeting(meetingMerged.draft); setLatestMeeting(null); }
-    setUncertain(false); setStale(false); setError("");
+    setUncertain(false); setUncertainOfferIds([]); setUncertainOfferResolution({}); setStale(false); setError("");
     setNotice(merged.conflicts.length || meetingMerged?.conflict ? (choice === "local" ? "競合した項目は自分の入力を残しました。保存前に確認してください。" : "競合した項目は最新の内容を残しました。") : "両方の変更を統合しました。保存前に確認してください。");
   }
 
@@ -381,6 +428,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   const savedAsEnglish = saved.language !== "JA";
   const englishStatus = english.kind === "ready" && !savedAsEnglish ? liveEnglishState(english.english).status : null;
   const listingView = owner && listing ? liveListingView(listing.listing, saved, siteUrl) : null;
+  const uncertainOfferCandidates = latest ? latest.offers.filter((offer) => !saved.offers.some((base) => base.id === offer.id)) : [];
   const title = draft.title.trim() || "体験の編集";
   const setLanguage = (language: ExperienceProviderPageDetail["language"]) => { setDraft((current) => current ? { ...current, language } : current); if (language !== "JA") setTab("ja"); };
   /** 集合場所: the page's own meeting point (NIHO keeps it apart from the page) and, from the page's photos, the 外観写真. */
@@ -402,7 +450,24 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     {dirty ? <p className="mb-3 text-[0.8125rem] text-ink-soft">プレビューには保存した内容が出ます。保存すると反映されます。</p> : null}
     {error ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-4 text-danger">{error}{stale || uncertain ? <button type="button" disabled={busy} onClick={() => void reconcile()} className="ml-2 font-extrabold underline">最新の保存内容を読む</button> : null}</div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-leaf-pale p-4 text-moss">{notice}</p> : null}
-    {latest && mergePreview ? <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4"><h2 className="font-extrabold">最新の保存内容と照合</h2><p className="mt-1 text-sm">自分の入力と、ほかの人が保存した内容を項目ごとに比較しました。</p>{conflicts.length ? <><p className="mt-2 text-sm font-extrabold">同じ項目が変更されています</p><ul className="mt-1 list-disc pl-5 text-sm">{conflicts.map((item) => <li key={item.path} className="mb-3"><strong>{item.label}</strong><dl className="mt-1 grid gap-1"><div><dt className="font-bold">自分の入力</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.local)}</dd></div><div><dt className="font-bold">最新の内容</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.remote)}</dd></div></dl></li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" className={consoleButtonClass("primary", "sm")} onClick={() => applyMerge("local")}>競合項目は自分の入力を残す</button><button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => applyMerge("remote")}>競合項目は最新を残す</button></div></> : <button type="button" className={`${consoleButtonClass("primary", "sm")} mt-3`} onClick={() => applyMerge("local")}>両方の変更を統合する</button>}</section> : null}
+    {latest && mergePreview ? <>
+      {uncertainOfferIds.length ? <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4" aria-labelledby="uncertain-offers-title">
+        <h2 id="uncertain-offers-title" className="font-extrabold">新規商品の保存結果を確認</h2>
+        <p className="mt-1 text-sm">保存応答が失われました。最新の内容にある同じ商品を選ぶと、サーバーが発行したIDへ結び付けます。見当たらないことを確認した場合だけ「再送する」を選んでください。</p>
+        <div className="mt-3 grid gap-3">{uncertainOfferIds.map((id) => {
+          const pending = draft.offers.find((offer) => offer.id === id);
+          const selected = uncertainOfferResolution[id] ?? "";
+          return <label key={id} className="grid gap-1 text-sm font-bold">{`保存結果が不明な商品: ${pending?.name || "商品名未設定"}（¥${(pending?.priceYen ?? 0).toLocaleString("ja-JP")}）`}
+            <select aria-label={`${pending?.name || "新規商品"}の保存結果`} value={selected} onChange={(event) => setUncertainOfferResolution((current) => ({ ...current, [id]: event.target.value }))} className="min-h-10 w-full rounded-lg border border-line bg-canvas px-3 py-2">
+              <option value="">最新の内容を確認して選択</option>
+              {uncertainOfferCandidates.map((candidate) => <option key={candidate.id} value={candidate.id} disabled={Object.entries(uncertainOfferResolution).some(([otherId, value]) => otherId !== id && value === candidate.id)}>{candidate.name || "商品名未設定"}（¥{candidate.priceYen.toLocaleString("ja-JP")}）</option>)}
+              <option value="retry">最新に見当たらないことを確認し、再送する</option>
+            </select>
+          </label>;
+        })}</div>
+      </section> : null}
+      <section className="mb-3 rounded-xl border border-warn bg-warn-pale p-4"><h2 className="font-extrabold">最新の保存内容と照合</h2><p className="mt-1 text-sm">自分の入力と、ほかの人が保存した内容を項目ごとに比較しました。</p>{conflicts.length ? <><p className="mt-2 text-sm font-extrabold">同じ項目が変更されています</p><ul className="mt-1 list-disc pl-5 text-sm">{conflicts.map((item) => <li key={item.path} className="mb-3"><strong>{item.label}</strong><dl className="mt-1 grid gap-1"><div><dt className="font-bold">自分の入力</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.local)}</dd></div><div><dt className="font-bold">最新の内容</dt><dd className="whitespace-pre-wrap [overflow-wrap:anywhere]">{conflictValueText(item.remote)}</dd></div></dl></li>)}</ul><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={!canResolveUncertainOfferCreates()} className={consoleButtonClass("primary", "sm", DISABLED)} onClick={() => applyMerge("local")}>競合項目は自分の入力を残す</button><button type="button" disabled={!canResolveUncertainOfferCreates()} className={consoleButtonClass("secondary", "sm", DISABLED)} onClick={() => applyMerge("remote")}>競合項目は最新を残す</button></div></> : <button type="button" disabled={!canResolveUncertainOfferCreates()} className={`${consoleButtonClass("primary", "sm", DISABLED)} mt-3`} onClick={() => applyMerge("local")}>両方の変更を統合する</button>}</section>
+    </> : null}
     {writtenJapanese ? <EditorLanguageTabs tab={activeTab} onTab={setTab} englishPill={englishStatus && englishStatus !== "complete" ? LIVE_ENGLISH_STATUS[englishStatus] : null} englishLabel={LIVE_ENGLISH_TAB_LABEL} /> : null}
     <div id={writtenJapanese ? EDITOR_TAB_PANEL_ID : undefined} role={writtenJapanese ? "tabpanel" : undefined} aria-labelledby={writtenJapanese ? editorTabId(activeTab) : undefined} className="@container">
       {writtenJapanese && activeTab === "en" ? <LiveEnglishState load={english} savedAsEnglish={savedAsEnglish} unsaved={dirty} busy={fieldsLocked} onReload={() => void loadEnglish()} /> : null}
@@ -412,22 +477,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
           {activeTab === "en" ? (english.kind === "ready" && !savedAsEnglish ? <LiveEnglishPanels english={english.english} /> : null) : <>
             <LivePhotosSection photos={draft.photos} alts={draft.photoAlts} onUpload={(file) => void upload(file)} onAlt={(index, value) => setDraft({ ...draft, photoAlts: draft.photos.map((_, at) => at === index ? value : draft.photoAlts[at] ?? "") })} onMove={(from, to) => setDraft(movePhoto(draft, from, to))} onCover={(index) => setDraft(makeCoverPhoto(draft, index))} onRemove={(index) => setDraft(removePhoto(draft, index))} />
             <LiveContentPanels content={draft.content} photos={draft.photos} lang={lang} onContent={editContent} meeting={meetingPanel} />
-        {draft.offers.map((offer, index) => <FieldSection key={offer.id} title={`商品 ${index + 1}`}>
-        <FieldRow label="商品名" htmlFor={`offer-${index}-name`}><input id={`offer-${index}-name`} required maxLength={80} className={INPUT} value={offer.name} onChange={(event) => editOffer(index, { name: event.target.value })} /></FieldRow>
-        <FieldRow label="短い説明" htmlFor={`offer-${index}-description`}><input id={`offer-${index}-description`} maxLength={160} className={INPUT} value={offer.shortDescription ?? ""} onChange={(event) => editOffer(index, { shortDescription: event.target.value || null })} /></FieldRow>
-        <div className="grid gap-3 p-4 sm:grid-cols-3">
-          {([['priceYen','大人料金',0,1000000],['capacity','定員',1,500],['maxPartySize','1予約の上限',1,500],['minimumParticipants','最低催行人数',1,500],['durationMinutes','所要時間（分）',15,720],['cutoffDays','受付締切（日）',0,60]] as const).map(([key,label,min,max]) => <label key={key} className="font-extrabold">{label}<input type="number" min={min} max={max} className={`${INPUT} mt-1`} value={offer[key]} onChange={(event) => editOffer(index, { [key]: Number(event.target.value) })} /></label>)}
-          <label className="font-extrabold">子ども料金<input type="number" min={0} max={1000000} placeholder="設定なし" className={`${INPUT} mt-1`} value={offer.childPriceYen ?? ""} onChange={(event) => editOffer(index, { childPriceYen: event.target.value === "" ? null : Number(event.target.value) })} /></label>
-          <label className="font-extrabold">子ども最少年齢<input type="number" min={0} max={17} placeholder="設定なし" className={`${INPUT} mt-1`} value={offer.childMinAge ?? ""} onChange={(event) => editOffer(index, { childMinAge: event.target.value === "" ? null : Number(event.target.value) })} /></label>
-          <label className="font-extrabold">子ども最大年齢<input type="number" min={0} max={17} placeholder="設定なし" className={`${INPUT} mt-1`} value={offer.childMaxAge ?? ""} onChange={(event) => editOffer(index, { childMaxAge: event.target.value === "" ? null : Number(event.target.value) })} /></label>
-          <label className="font-extrabold">開始時刻<input type="time" className={`${INPUT} mt-1`} value={offer.startTime} onChange={(event) => editOffer(index, { startTime: event.target.value })} /></label>
-          <label className="font-extrabold">取消条件<select className={`${INPUT} mt-1`} value={offer.cancellationPolicy} onChange={(event) => editOffer(index, { cancellationPolicy: event.target.value as ExperienceProviderPageOffer["cancellationPolicy"] })}><option value="FREE_UNTIL_24H">24時間前まで無料</option><option value="FREE_UNTIL_48H">48時間前まで無料</option><option value="NONE">無料取消なし</option></select></label>
-          <label className="font-extrabold">受付方法<select className={`${INPUT} mt-1`} value={offer.acceptanceMode} onChange={(event) => editOffer(index, { acceptanceMode: event.target.value as ExperienceProviderPageOffer["acceptanceMode"] })}><option value="APPROVAL">承認制</option><option value="INSTANT">即時確定</option></select></label>
-        </div>
-        <div className="flex flex-wrap gap-5 px-4 pb-4"><label className="inline-flex items-center gap-2 font-extrabold"><input type="checkbox" checked={offer.isActive} onChange={(event) => editOffer(index, { isActive: event.target.checked })} />この商品を受付する</label><label className="inline-flex items-center gap-2 font-extrabold"><input type="checkbox" checked={offer.adultRequiredForChild} onChange={(event) => editOffer(index, { adultRequiredForChild: event.target.checked })} />子どもは大人同伴</label></div>
-        <fieldset className="p-4 pt-0"><legend className="font-extrabold">開催曜日</legend><div className="mt-2 flex flex-wrap gap-3">{weekdays.map((label, day) => <label key={label} className="inline-flex items-center gap-2"><input type="checkbox" checked={offer.weekdays.includes(day)} onChange={(event) => editOffer(index, { weekdays: event.target.checked ? [...offer.weekdays, day].sort() : offer.weekdays.filter((value) => value !== day) })} />{label}</label>)}</div></fieldset>
-        <FieldRow label="休みの日" htmlFor={`offer-${index}-closed`}><textarea id={`offer-${index}-closed`} rows={3} placeholder="YYYY-MM-DD（1行1件）" className={TEXTAREA} value={offer.closedDates.join("\n")} onChange={(event) => editOffer(index, { closedDates: editLines(event.target.value) })} /></FieldRow>
-      </FieldSection>)}
+        <HostLiveOfferEditor offers={draft.offers} disabled={fieldsLocked} onChange={editOffers} />
           </>}
         </fieldset>
         <div className="order-first flex min-w-0 flex-col gap-3.5 @3xl:sticky @3xl:top-4 @3xl:order-none">
@@ -445,6 +495,6 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     {confirming === "withdraw" ? <HostConfirmDialog title="申請を取り下げますか？" description="体験サイトへの掲載の申請を取り下げます。もう一度載せるには、申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>申請を取り下げる</button>} onConfirm={() => void withdrawListing(false)} onClose={() => setConfirming(null)} /> : null}
     {confirming === "stop" ? <HostConfirmDialog title="掲載を止めますか？" description="体験サイトからすぐに外れます。受け付けた予約は残ります。もう一度載せるには申請と NIHO の確認が必要です。" focusRef={stay} stayRef={stay} confirm={<button type="submit" className={consoleButtonClass("primary")}>掲載を止める</button>} onConfirm={() => void withdrawListing(true)} onClose={() => setConfirming(null)} /> : null}
     {previewing ? <HostExperiencePreview endpoint={endpoint} unsaved={dirty} onClose={() => setPreviewing(false)} /> : null}
-    {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} onDiscard={() => { setUncertain(false); setListingUncertain(false); }} /> : null}
+    {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} onDiscard={() => { setUncertain(false); setUncertainOfferIds([]); setUncertainOfferResolution({}); setListingUncertain(false); }} /> : null}
   </HostPageBody></div>;
 }
