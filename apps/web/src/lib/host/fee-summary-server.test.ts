@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ config: { apiMode: "mock", hostConsoleEnabled:
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@niho-experience/api-client/fee-summary-server", () => ({ createExperienceFeeSummaryApiClient: mocks.create }));
-vi.mock("./session", () => ({ idTokenUsable: mocks.usable }));
+vi.mock("./session", () => ({ accessTokenUsable: mocks.usable }));
 vi.mock("./server", () => ({ readHostSession: mocks.read, clearSessionCookie: mocks.clear, hostNotFound: () => Response.json({ error: "not_found" }, { status: 404 }), noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }) }));
 
 import { hostFeeSummaryFailureJson, isHostFeeSummaryEnabled, isHostFeeSummaryPreview, loadHostFeeSummaryClient } from "./fee-summary-server";
@@ -20,16 +20,16 @@ describe("Host fee summary server boundary", () => {
 
   it("uses the sealed usable host token for both host kinds to be authorized upstream", async () => {
     Object.assign(mocks.config, { apiMode: "http", experienceFeeSummaryApiEnabled: true });
-    mocks.read.mockResolvedValue({ idToken: "server-host-token" });
+    mocks.read.mockResolvedValue({ accessToken: "server-host-token" });
     const loaded = await loadHostFeeSummaryClient();
     expect(loaded).toEqual({ ok: true, client: { marker: "fee-client" } });
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ audience: "host", idToken: "server-host-token", nihoWebOrigin: "https://niho.example" }));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ audience: "host", accessToken: "server-host-token", nihoWebOrigin: "https://niho.example" }));
   });
 
   it("closes missing and expiring sessions before upstream", async () => {
     Object.assign(mocks.config, { apiMode: "http", experienceFeeSummaryApiEnabled: true });
     mocks.read.mockResolvedValue(null); let loaded = await loadHostFeeSummaryClient(); if (!loaded.ok) expect(loaded.response.status).toBe(401);
-    mocks.read.mockResolvedValue({ idToken: "token" }); mocks.usable.mockReturnValue(false); loaded = await loadHostFeeSummaryClient(); if (!loaded.ok) expect(await loaded.response.json()).toEqual({ error: "session_refresh_required" });
+    mocks.read.mockResolvedValue({ accessToken: "token" }); mocks.usable.mockReturnValue(false); loaded = await loadHostFeeSummaryClient(); if (!loaded.ok) expect(await loaded.response.json()).toEqual({ error: "session_refresh_required" });
     expect(mocks.create).not.toHaveBeenCalled();
   });
 

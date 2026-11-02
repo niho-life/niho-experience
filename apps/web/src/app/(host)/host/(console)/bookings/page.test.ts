@@ -84,7 +84,7 @@ describe("予約 without NIHO's bookings (provider operations off)", () => {
     expect(view.type).toBe(HostBookings);
     expect(view.props).toMatchObject({ bookings: LIVE.bookings, providerId: "sample-provider", providerDataId: "sample-provider", conversations: [], live: { nextCursor: "sample-cursor" }, niho: null });
     expect(view.props).toMatchObject({ supportHistoryEnabled: false, feeSummaryEnabled: false, translateEnabled: false });
-    expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", "b-1", undefined);
+    expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "b-1", undefined);
     expect(state.loadHostBookings).not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe("予約 with bookings made on reservation sites (#194 PR B)", () => {
     const view = await page({ ota: OTA.bookings[0]!.id });
     expect(view.type).toBe(HostBookings);
     expect(view.props).toMatchObject({ bookings: LIVE.bookings, ota: { bookings: OTA.bookings } });
-    expect(state.loadOtaBookings).toHaveBeenCalledWith("sample-provider", "sample-niho-user", expect.objectContaining({ memberRole: "OWNER" }), OTA.bookings[0]!.id, undefined);
+    expect(state.loadOtaBookings).toHaveBeenCalledWith("sample-provider", expect.objectContaining({ memberRole: "OWNER" }), OTA.bookings[0]!.id, undefined);
   });
 
   it("is the whole list while neither this site's nor NIHO's bookings are here", async () => {
@@ -170,7 +170,7 @@ describe("予約 with bookings made on reservation sites (#194 PR B)", () => {
     const view = await page({ providerId: "provider-b" });
     expect(view.type).toBe(HostBookings);
     expect(view.props).toMatchObject({ providerDataId: "provider-b", bookings: [], ota: { bookings: OTA.bookings } });
-    expect(state.loadOtaBookings).toHaveBeenCalledWith("provider-b", "sample-niho-user", null, null, undefined);
+    expect(state.loadOtaBookings).toHaveBeenCalledWith("provider-b", null, null, undefined);
     // Not the fallback provider's bookings.
     expect(state.loadSiteBookings).not.toHaveBeenCalled();
   });

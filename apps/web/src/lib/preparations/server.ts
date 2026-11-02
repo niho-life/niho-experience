@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   createExperiencePreparationAdminApiClient,
-  createExperiencePreparationHostApiClient,
   createExperiencePreparationReviewApiClient,
   type ExperiencePreparationAdminApiClient,
   type ExperiencePreparationFailure,
@@ -12,8 +11,7 @@ import {
 import { config } from "@/lib/config";
 import { clearAdminHttpSessionCookie, loadAdminHttpSession } from "@/lib/admin/server";
 import { cookieSealer } from "@/lib/host/cookie-seal";
-import { clearSessionCookie, readHostSession, siteOrigin } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { clearSessionCookie, siteOrigin } from "@/lib/host/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import {
   decodePreparationReviewGrant,
@@ -83,11 +81,9 @@ export async function loadPreparationAdminClient(): Promise<{ ok: true; client: 
 }
 
 export async function loadPreparationHostClient(): Promise<{ ok: true; client: ExperiencePreparationHostApiClient } | { ok: false; response: NextResponse }> {
-  if (!isPreparationHttpEnabled()) return { ok: false, response: preparationJson({ error: "not_found" }, 404) };
-  const session = await readHostSession();
-  if (!session) return { ok: false, response: preparationJson({ error: "signed_out" }, 401) };
-  if (!idTokenUsable(session, Date.now())) return { ok: false, response: preparationJson({ error: "refresh_required" }, 401) };
-  return { ok: true, client: createExperiencePreparationHostApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: session.idToken, fetch }) };
+  // The current NIHO app-connect token allowlist does not include /api/experience-preparations.
+  // Never send it under the legacy Firebase ID-token contract; NIHO must add a scoped endpoint first.
+  return { ok: false, response: preparationJson({ error: "not_found" }, 404) };
 }
 
 export function preparationReviewClient() {

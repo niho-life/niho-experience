@@ -34,7 +34,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
   if (providerOperationsEnabled()) {
-    return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider, context.session.nihoUserId)} />;
+    return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} />;
   }
   const { experiences } = await loadHostConsoleData(provider);
   const reviews = loadHostReviews(provider).list;

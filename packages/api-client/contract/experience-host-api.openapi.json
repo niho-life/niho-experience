@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Host API",
-    "version": "0.2.0",
-    "description": "niho-experience のホストの画面（/host）が、ホスト本人の ID token（Bearer）で使う NIHO の API（選別して配布する版）。正本は niho-app の contracts/openapi.yaml。ここに無い項目・操作は使わない。",
+    "version": "0.4.0",
+    "description": "niho-experience のホストの画面（/host）が、NIHO API 専用 app-connect access token（Bearer）で使う NIHO の API（選別して配布する版）。正本は niho-app の contracts/openapi.yaml。ここに無い項目・操作は使わない。",
     "x-niho-contract-status": "draft",
     "x-niho-contract-source": "niho-app contracts/openapi.yaml"
   },
@@ -30,6 +30,7 @@
           "Auth"
         ],
         "summary": "自分のユーザー情報・所属情報を取得",
+        "description": "`niho_app_client=niho-experience` の接続 token では、表示名と顔写真だけを返す。\n所属・連絡先・オンボーディング回答などは含まず、クエリ付き要求は 403 で拒否する。\n",
         "operationId": "getAuthMe",
         "responses": {
           "200": {
@@ -51,7 +52,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -84,7 +85,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -131,7 +132,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -172,7 +173,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -219,7 +220,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -263,7 +264,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -304,7 +305,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -345,7 +346,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -405,7 +406,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -449,7 +450,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -493,7 +494,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -537,7 +538,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -578,7 +579,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -625,7 +626,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -666,7 +667,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -716,7 +717,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -760,7 +761,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -818,7 +819,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -855,7 +856,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -910,7 +911,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -957,7 +958,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -1001,7 +1002,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -1045,7 +1046,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -1095,7 +1096,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -1139,7 +1140,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -1192,7 +1193,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       },
@@ -1226,7 +1227,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -1242,7 +1243,7 @@
           "ExperienceProvider"
         ],
         "summary": "体験ページの写真を上げる署名つき POST を受け取る",
-        "description": "OWNER / EDITOR（platform ADMIN）が、体験ページの写真を GCS へ直接上げる署名つき POST（multipart/form-data）を受け取る。\n`purpose` は `ARTICLE_IMAGE`、形式は JPEG・PNG・WebP、1 枚 10MB まで（ほかは 400）。上げ先の `objectKey` はサーバーが決め、\n提供者に属する写真になる（体験ページの `photoObjectKeys` に使う）。署名は 15 分。`upload.fields` を全部 form に入れ、最後に\n`file` を足して `upload.url` へ送る。写真の保存が止まっている（`uploads_disabled`）・署名に失敗した（`signing_circuit_open` /\n`signing_transient_failure`）ときは 503。\n",
+        "description": "OWNER / EDITOR（platform ADMIN）が、体験ページの写真を GCS へ直接上げる署名つき POST（multipart/form-data）を受け取る。\n`purpose` は `ARTICLE_IMAGE`、形式は JPEG・PNG・WebP、1 枚 10MB まで（ほかは 400）。上げ先の `objectKey` はサーバーが決め、\n提供者に属する写真になる（体験ページの `photoObjectKeys` に使う）。署名は 15 分。`upload.fields` を全部 form に入れ、最後に\n`file` を足して `upload.url` へ送る。写真の保存が止まっている（`uploads_disabled`）・署名に失敗した（`signing_circuit_open` /\n`signing_transient_failure`）ときは 503。失敗の `details` は `reason` と問い合わせ用 ID だけで、器の ID や署名診断は返さない。\n回数の上限は拠点・ユーザーの上げ口と提供者の `signed-url` と共有し、IP ごとに 30 回 / 60 秒。\n",
         "operationId": "createExperienceProviderUploadPolicy",
         "requestBody": {
           "required": true,
@@ -1283,7 +1284,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -1299,7 +1300,7 @@
           "ExperienceProvider"
         ],
         "summary": "体験ページの写真を見る短命の署名つき URL を受け取る",
-        "description": "OWNER / EDITOR（platform ADMIN）が、この提供者の上げ口で上げた写真（`objectKey`）を見る署名つき URL を受け取る。保存前の写真の\n表示に使う（保存済みの写真は詳細の `photos[].url`）。別の提供者の写真・無い写真は 404（理由なし）、実体が無ければ 404\n`object_missing`、上げる期限が切れて署名を出し直せない写真は 403 `upload_expired`。写真の保存が止まっている（`uploads_disabled`）・\n実体の確認に失敗した（`object_lookup_failed`）・署名に失敗したときは 503。\n",
+        "description": "OWNER / EDITOR（platform ADMIN）が、この提供者の上げ口で上げた写真（`objectKey`）を見る署名つき URL を受け取る。保存前の写真の\n表示に使う（保存済みの写真は詳細の `photos[].url`）。別の提供者の写真・無い写真は 404（理由なし）、実体が無ければ 404\n`object_missing`、上げる期限が切れて署名を出し直せない写真は 403 `upload_expired`。写真の保存が止まっている（`uploads_disabled`）・\n実体の確認に失敗した（`object_lookup_failed`）・署名に失敗したときは 503。失敗の `details` は `reason` と問い合わせ用 ID だけで、\n器の ID・objectKey・署名診断は返さず、`requestId` / `supportId` でサーバーログを照会する。回数の上限は提供者の `policies` と共有し、\nIP ごとに 30 回 / 60 秒。\n",
         "operationId": "createExperienceProviderUploadSignedUrl",
         "requestBody": {
           "required": true,
@@ -1340,7 +1341,7 @@
         },
         "security": [
           {
-            "FirebaseIdToken": []
+            "AppConnectWebAccessToken": []
           }
         ]
       }
@@ -1348,11 +1349,10 @@
   },
   "components": {
     "securitySchemes": {
-      "FirebaseIdToken": {
+      "AppConnectWebAccessToken": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+        "description": "NIHO Experience の Web app-connect で exchange した NIHO API 専用の短命 token（`niho-web-v1.`）。\nFirebase ID token ではない。API は接続の refresh secret hash で署名を照合し、接続状態と期限を毎回確認する。\n"
       }
     },
     "schemas": {
@@ -1551,21 +1551,17 @@
       "ExperienceHostAuthMe": {
         "x-niho-experience-host-dto": true,
         "type": "object",
-        "description": "体験サイトのホストの画面が `GET /api/auth/me` から読む部分（表示名と顔写真）。応答の正は `AuthMeResponse` で、ほかの項目も入る\n（この schema は閉じない）。ホストの契約の書き出しでは、`getAuthMe` の 200 の schema をこれに置き換える。\n項目を足すときは `AuthMeResponse` に同じ名前・同じ型の項目があることを確かめる（contracts の test が見る）。\n",
+        "description": "体験サイトのホストの画面が `GET /api/auth/me` から受け取る表示名と顔写真。\n応答の正は `AuthMeExperienceProfileResponse`。ホストの契約の書き出しでは、`getAuthMe` の 200 の\nschema をこれに置き換える。項目を足すときは実際の応答と一致することを contracts の test が見る。\n",
         "properties": {
           "user": {
             "type": "object",
             "properties": {
-              "id": {
-                "type": "string"
-              },
               "displayName": {
                 "type": "string",
                 "nullable": true
               }
             },
             "required": [
-              "id",
               "displayName"
             ]
           },
@@ -1807,108 +1803,6 @@
               "requestId"
             ],
             "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "description": "写真の署名つき URL（403 `upload_expired`・404 `object_missing`・503 `object_lookup_failed`。`spotId` は提供者の器の ID）",
-            "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/ExperienceHostErrorReason"
-              },
-              "spotId": {
-                "type": "string"
-              },
-              "objectKey": {
-                "type": "string"
-              },
-              "supportId": {
-                "type": "string"
-              },
-              "requestId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "spotId",
-              "objectKey",
-              "supportId",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "description": "写真の上げ口の署名の失敗（503 `signing_circuit_open` / `signing_transient_failure`）",
-            "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/ExperienceHostErrorReason"
-              },
-              "purpose": {
-                "type": "string",
-                "enum": [
-                  "ARTICLE_IMAGE"
-                ]
-              },
-              "signingErrorName": {
-                "type": "string"
-              },
-              "signingErrorCode": {
-                "$ref": "#/components/schemas/ExperienceHostSigningErrorCode"
-              },
-              "supportId": {
-                "type": "string"
-              },
-              "requestId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "purpose",
-              "signingErrorName",
-              "signingErrorCode",
-              "supportId",
-              "requestId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "description": "写真の署名つき URL の署名の失敗（503 `signing_circuit_open` / `signing_transient_failure`）",
-            "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/ExperienceHostErrorReason"
-              },
-              "spotId": {
-                "type": "string"
-              },
-              "objectKey": {
-                "type": "string"
-              },
-              "signingErrorName": {
-                "type": "string"
-              },
-              "signingErrorCode": {
-                "$ref": "#/components/schemas/ExperienceHostSigningErrorCode"
-              },
-              "supportId": {
-                "type": "string"
-              },
-              "requestId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "spotId",
-              "objectKey",
-              "signingErrorName",
-              "signingErrorCode",
-              "supportId",
-              "requestId"
-            ],
-            "additionalProperties": false
           }
         ]
       },
@@ -1980,19 +1874,6 @@
           "error"
         ],
         "additionalProperties": false
-      },
-      "ExperienceHostSigningErrorCode": {
-        "x-niho-experience-host-dto": true,
-        "description": "署名の失敗の元のコード（文字列か数。無ければ null）。調査用で、画面の分岐には使わない",
-        "oneOf": [
-          {
-            "type": "string",
-            "nullable": true
-          },
-          {
-            "type": "number"
-          }
-        ]
       },
       "ExperienceProvider": {
         "x-niho-experience-host-dto": true,
@@ -2241,10 +2122,9 @@
         "type": "string",
         "enum": [
           "OWNER",
-          "EDITOR",
-          "COHOST"
+          "EDITOR"
         ],
-        "description": "提供者の中での本人の役割。role enumの正本は選別済み experience-provider-operations v1.0.0。元のhost draft exportはcore baselineに無いため、既存ページDTOを維持したままこのenumだけを同期する。EDITORは紹介と原稿だけ、COHOSTは日常運営、OWNERは販売者・法的同意・受取口座・メンバー管理も行う。\n"
+        "description": "提供者の中での本人の役割。EDITOR は紹介と原稿だけを直せる（予約・顧客・売上・受取口座・掲載の申請・審査の申請は OWNER だけ）。\n"
       },
       "ExperienceProviderPageContentInput": {
         "x-niho-experience-host-dto": true,
@@ -2360,6 +2240,16 @@
               "type": "string",
               "nullable": true
             }
+          },
+          "participationConditions": {
+            "type": "object",
+            "nullable": true,
+            "description": "参加の条件（#19318）。送ると全体を置き換える（null は全部未設定）。保存すると掲載中の体験は再審査になる。",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPageParticipationConditions"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -2486,7 +2376,7 @@
       "ExperienceProviderPageListing": {
         "x-niho-experience-host-dto": true,
         "type": "object",
-        "description": "体験ページの体験サイトへの掲載（記録そのまま。予約・個人情報を含まない）。`slug` と `regionKey` は初回の承認で決まる。\n拠点の掲載の応答と違い、体験サイトの URL は返さない。\n",
+        "description": "体験ページの体験サイトへの掲載（予約・個人情報を含まない）。`slug` と `regionKey` は初回の承認で決まる。審査理由はホスト表示用の公開可能な理由で、GET・PUT にだけ含む。\n拠点の掲載の応答と違い、体験サイトの URL は返さない。審査理由の欄は GET・PUT・DELETE に含め、取り下げ応答では null にする。\n",
         "properties": {
           "id": {
             "type": "string"
@@ -2534,6 +2424,18 @@
             "format": "date-time",
             "nullable": true
           },
+          "reviewNote": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 1000,
+            "description": "ホストに表示できる審査差戻し・停止理由。本人取消と自動停止では null。"
+          },
+          "reviewNotedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "審査理由の記録時刻。本人取消と自動停止では null。"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -2555,6 +2457,8 @@
           "approvedAt",
           "pausedAt",
           "withdrawnAt",
+          "reviewNote",
+          "reviewNotedAt",
           "createdAt",
           "updatedAt"
         ],
@@ -3030,8 +2934,8 @@
           },
           "bookingQuestions": {
             "type": "array",
-            "maxItems": 5,
-            "description": "申込時の質問（質問の無い商品は []）",
+            "maxItems": 6,
+            "description": "申込時の質問（質問の無い商品は []）。参加の条件に対応できる食事があるときは先頭に定型の質問「食べものの希望」（#19318）",
             "items": {
               "$ref": "#/components/schemas/SpotCampaignPageBookingQuestion"
             }
@@ -3903,6 +3807,60 @@
           "APPROVAL"
         ]
       },
+      "SpotCampaignPageAccessibilityCondition": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "段差と車いす。",
+        "properties": {
+          "wheelchair": {
+            "type": "string",
+            "enum": [
+              "ACCESSIBLE",
+              "PARTIAL",
+              "NOT_ACCESSIBLE"
+            ],
+            "description": "車いすで参加できる・一部（段差・介助）・参加できない"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "段差の様子（例「本堂まで石段」）"
+          }
+        },
+        "required": [
+          "wheelchair",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "SpotCampaignPageAgeCondition": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "年齢。下限・大人と一緒・補足のどれも無ければ保存時に null になる。",
+        "properties": {
+          "minimumAge": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 99,
+            "description": "参加できる年齢の下限（null は下限なし）"
+          },
+          "childrenWithAdult": {
+            "type": "boolean",
+            "description": "子どもは大人と一緒に参加する"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 120
+          }
+        },
+        "required": [
+          "minimumAge",
+          "childrenWithAdult",
+          "note"
+        ],
+        "additionalProperties": false
+      },
       "SpotCampaignPageBookingQuestion": {
         "x-niho-experience-host-dto": true,
         "x-niho-public-dto": true,
@@ -4150,6 +4108,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "participationConditions": {
+            "$ref": "#/components/schemas/SpotCampaignPageParticipationConditions"
           }
         },
         "required": [
@@ -4163,7 +4124,84 @@
           "notSuitableFor",
           "meetingPoint",
           "knowBeforeYouGo",
-          "hostUserIds"
+          "hostUserIds",
+          "participationConditions"
+        ],
+        "additionalProperties": false
+      },
+      "SpotCampaignPageFoodCondition": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "食べもの。provided が false（出ない）のときの対応できる食事は空になる。",
+        "properties": {
+          "provided": {
+            "type": "boolean",
+            "description": "食べもの・飲みものが出るか"
+          },
+          "dietaryOptions": {
+            "type": "array",
+            "maxItems": 6,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "VEGETARIAN",
+                "VEGAN",
+                "HALAL",
+                "GLUTEN_FREE",
+                "NO_PORK",
+                "NO_ALCOHOL"
+              ]
+            },
+            "description": "対応できる食事（値の並びにそろえる）"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "何が出るか（例「終わったらお茶とお菓子」）"
+          }
+        },
+        "required": [
+          "provided",
+          "dietaryOptions",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "SpotCampaignPageHostLanguagesCondition": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "ホストの言語。日本語・英語・補足のどれも無ければ保存時に null になる。",
+        "properties": {
+          "japanese": {
+            "type": "string",
+            "enum": [
+              "FLUENT",
+              "CONVERSATIONAL",
+              "BASIC"
+            ],
+            "nullable": true,
+            "description": "不自由なく話せる・日常会話・かんたんな言葉（話さないときは null）"
+          },
+          "english": {
+            "type": "string",
+            "enum": [
+              "FLUENT",
+              "CONVERSATIONAL",
+              "BASIC"
+            ],
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "補助の資料など（例「英語の案内の紙あり」）"
+          }
+        },
+        "required": [
+          "japanese",
+          "english",
+          "note"
         ],
         "additionalProperties": false
       },
@@ -4473,6 +4511,108 @@
         },
         "additionalProperties": false
       },
+      "SpotCampaignPageParticipationConditions": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "参加の条件（#19318・§4.4a）。項目ごとに null は未設定（公開の画面に出さない）。補足（note）はページの言語で書く 1 行（120 字まで・\n空は空文字）。体験サイトの公開 API（v1.4 の詳細）に出し、年齢・体の負担・段差と車いすは予約入力で同意を求める。食べものが出て\n対応できる食事があるときは、各商品の申込時の質問の先頭に定型の質問「食べものの希望」（id `niho_food`）が入る。\n本文の PATCH で送ると全体を置き換える（null は全部未設定）。保存すると提供者の体験の掲載は再審査になる。\n",
+        "properties": {
+          "age": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPageAgeCondition"
+              }
+            ]
+          },
+          "physical": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPagePhysicalCondition"
+              }
+            ]
+          },
+          "hostLanguages": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPageHostLanguagesCondition"
+              }
+            ]
+          },
+          "food": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPageFoodCondition"
+              }
+            ]
+          },
+          "accessibility": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPageAccessibilityCondition"
+              }
+            ]
+          },
+          "weather": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpotCampaignPageWeatherCondition"
+              }
+            ]
+          }
+        },
+        "required": [
+          "age",
+          "physical",
+          "hostLanguages",
+          "food",
+          "accessibility",
+          "weather"
+        ],
+        "additionalProperties": false
+      },
+      "SpotCampaignPagePhysicalCondition": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "体の負担。項目と補足のどちらも無ければ保存時に null になる。項目は値の並びにそろえて重複を落とす。",
+        "properties": {
+          "activities": {
+            "type": "array",
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "FLOOR_SITTING",
+                "LONG_STANDING",
+                "WALKING",
+                "UNEVEN_GROUND"
+              ]
+            },
+            "description": "床に座る・長く立つ・歩く・坂や足場の悪い所を歩く"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "どのくらいか・補助（例「25 分 × 2 回・座布団と低い椅子あり」）"
+          }
+        },
+        "required": [
+          "activities",
+          "note"
+        ],
+        "additionalProperties": false
+      },
       "SpotCampaignPagePublishBlocker": {
         "x-niho-experience-host-dto": true,
         "type": "string",
@@ -4533,6 +4673,32 @@
           "title",
           "text",
           "photoObjectKey"
+        ],
+        "additionalProperties": false
+      },
+      "SpotCampaignPageWeatherCondition": {
+        "x-niho-experience-host-dto": true,
+        "type": "object",
+        "description": "雨の日。",
+        "properties": {
+          "policy": {
+            "type": "string",
+            "enum": [
+              "RAIN_OR_SHINE",
+              "ADJUSTED_FOR_RAIN",
+              "MAY_CANCEL"
+            ],
+            "description": "雨でも開催・雨の日は内容を変えて開催・荒天は中止（全額返金）"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "例「屋内で開催」"
+          }
+        },
+        "required": [
+          "policy",
+          "note"
         ],
         "additionalProperties": false
       },

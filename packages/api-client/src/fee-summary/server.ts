@@ -5,13 +5,15 @@ import { decodeExperienceFeeSummaryResponse, isExperienceFeeSummaryBookingId } f
 import type { ExperienceFeeSummaryResponse } from "./types.ts";
 
 export type ExperienceFeeSummaryAudience = "admin" | "host";
-export interface ExperienceFeeSummaryApiClientOptions {
+interface BaseOptions {
   nihoWebOrigin: string;
-  idToken: string;
-  audience: ExperienceFeeSummaryAudience;
   fetch?: FetchLike;
   timeoutMs?: number;
 }
+export type ExperienceFeeSummaryApiClientOptions = BaseOptions & (
+  | { audience: "admin"; idToken: string }
+  | { audience: "host"; accessToken: string }
+);
 export type ExperienceFeeSummaryFailure =
   | { ok: false; kind: "invalid_request" }
   | { ok: false; kind: "rejected"; status: 401 | 403 }
@@ -25,7 +27,8 @@ const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 
 export function createExperienceFeeSummaryApiClient(input: ExperienceFeeSummaryApiClientOptions): ExperienceFeeSummaryApiClient {
   const origin = normalizeOrigin(input.nihoWebOrigin);
-  if (!TOKEN.test(input.idToken)) throw new Error("Fee summary idToken contains characters that cannot be sent in Authorization");
+  const token = input.audience === "admin" ? input.idToken : input.accessToken;
+  if (!TOKEN.test(token)) throw new Error("Fee summary token contains characters that cannot be sent in Authorization");
   const request = input.fetch ?? fetch;
   const timeoutMs = input.timeoutMs ?? 10_000;
   const base = input.audience === "admin"
@@ -39,7 +42,7 @@ export function createExperienceFeeSummaryApiClient(input: ExperienceFeeSummaryA
       try {
         response = await request(new URL(`${base}${encodeURIComponent(bookingId)}/fee-summary`, origin).href, {
           method: "GET",
-          headers: { accept: "application/json", authorization: `Bearer ${input.idToken}` },
+          headers: { accept: "application/json", authorization: `Bearer ${token}` },
           cache: "no-store",
           redirect: "manual",
           signal: AbortSignal.timeout(timeoutMs),

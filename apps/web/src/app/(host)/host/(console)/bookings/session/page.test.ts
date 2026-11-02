@@ -59,7 +59,7 @@ describe("この回 without NIHO's bookings (provider operations off)", () => {
     expect(view.type).toBe(HostSession);
     // No OTA bookings here (#194 PR B: their flag is off).
     expect(view.props).toEqual({ session: VIEW, now: "2026-11-01T09:00", conversations: [], providerId: "sample-provider", site: { besideNiho: false, providerId: "sample-provider" }, ota: null });
-    expect(state.loadSiteSession).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", QUERY);
+    expect(state.loadSiteSession).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), QUERY);
     expect(state.loadHostSession).not.toHaveBeenCalled();
   });
 

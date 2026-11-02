@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
-import { hostMockScenario, MOCK_ID_TOKEN_PREFIX, mockHostDisplayName, mockToken } from "@/lib/host/mock-niho";
+import { hostMockScenario, MOCK_ACCESS_TOKEN_PREFIX, mockHostDisplayName, mockToken } from "@/lib/host/mock-niho";
 import { nihoIdOrNull } from "@/lib/host/providers";
 import { HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, invitationIdOrNull, preparationCaseIdOrNull, withProvider } from "@/lib/host/routes";
-import { hostNotFound, isHostMock, MOCK_ID_TOKEN_TTL_MS, noStoreJson, seeOther, setSessionCookie } from "@/lib/host/server";
+import { hostNotFound, isHostMock, MOCK_ACCESS_TOKEN_TTL_MS, noStoreJson, seeOther, setSessionCookie } from "@/lib/host/server";
 import { startSession } from "@/lib/host/session";
 
 const MOCK_CONNECTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -16,7 +16,7 @@ const MOCK_CONNECTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
  * (#109), `?mock=site-sales` the usual two with 売上 read from a synthetic ledger
  * of bookings made on this site (#91), `?mock=site-bookings` the usual two with
  * 予約 showing synthetic bookings made on this site (#285); `?expired=1` starts with an
- * expired ID token to exercise the refresh-then-reload path, and `?surface=app`
+ * expired NIHO Web access token to exercise the refresh-then-reload path, and `?surface=app`
  * signs in as the installed app does (#177). 404 in http mode.
  */
 export async function GET(request: NextRequest) {
@@ -28,10 +28,9 @@ export async function GET(request: NextRequest) {
   const now = Date.now();
   const session = startSession(
     {
-      nihoUserId: "synthetic-host-user",
       refreshToken: mockToken("mock-refresh-token."),
-      idToken: mockToken(MOCK_ID_TOKEN_PREFIX),
-      idTokenExpiresAt: params.get("expired") === "1" ? now - 1000 : now + MOCK_ID_TOKEN_TTL_MS,
+      accessToken: mockToken(MOCK_ACCESS_TOKEN_PREFIX),
+      accessTokenExpiresAt: params.get("expired") === "1" ? now - 1000 : now + MOCK_ACCESS_TOKEN_TTL_MS,
       connectionId: mockToken("mock-connection-"),
       connectionExpiresAt: now + MOCK_CONNECTION_TTL_MS,
       displayName: await mockHostDisplayName(),

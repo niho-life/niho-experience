@@ -6,15 +6,15 @@ import { NextResponse } from "next/server";
 import { createExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/host";
 import { config } from "@/lib/config";
 import { cookieSealer } from "./cookie-seal";
-import { createMockHostFetch, MOCK_ID_TOKEN_PREFIX, mockToken } from "./mock-niho";
-import { refreshConnection, signInWithCustomToken, type NihoAuthDeps } from "./niho-auth";
+import { createMockHostFetch, MOCK_ACCESS_TOKEN_PREFIX, mockToken } from "./mock-niho";
+import { refreshConnection, type NihoAuthDeps } from "./niho-auth";
 import { usableProviders, type HostProvider } from "./providers";
 import {
   decodeSession,
   encodeLoginState,
   encodeSession,
   hostCookieOptions,
-  idTokenUsable,
+  accessTokenUsable,
   LOGIN_COOKIE,
   LOGIN_COOKIE_PATH,
   LOGIN_MAX_AGE_SECONDS,
@@ -44,7 +44,7 @@ export const readHostSession = cache(async (): Promise<HostSession | null> => {
 });
 
 export function nihoAuthDeps(): NihoAuthDeps {
-  return { fetch, nihoOrigin: config.nihoWebOrigin, firebaseWebApiKey: config.nihoFirebaseWebApiKey };
+  return { fetch, nihoOrigin: config.nihoWebOrigin };
 }
 
 /** NIHO's API for this session: the real origin in http mode, the synthetic one in mock mode. */
@@ -55,7 +55,7 @@ export function nihoApiFetch(session: HostSession): typeof fetch {
 export type ProvidersLoad =
   | { status: "ok"; providers: HostProvider[] }
   | { status: "signed-out" }
-  /** The ID token is (nearly) expired: the browser refreshes, then reloads. */
+  /** The NIHO Web access token is (nearly) expired: the browser refreshes, then reloads. */
   | { status: "refresh" }
   /** NIHO refused a token we thought valid (connection ended elsewhere). */
   | { status: "rejected" }
@@ -63,17 +63,17 @@ export type ProvidersLoad =
 
 /**
  * NIHO's host API for this session, typed by the host contract (#87). Server
- * only: it sends the session's ID token. Browser code calls /host/api/* instead.
+ * only: it sends the session's NIHO-scoped Web access token. Browser code calls /host/api/* instead.
  */
 export function hostApiClient(session: HostSession): ExperienceHostApiClient {
-  return createExperienceHostApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: session.idToken, fetch: nihoApiFetch(session) });
+  return createExperienceHostApiClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch: nihoApiFetch(session) });
 }
 
 /** The signed-in host's providers, fetched once per request for the frame and the page. */
 export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
   const session = await readHostSession();
   if (!session) return { status: "signed-out" };
-  if (!idTokenUsable(session, Date.now())) return { status: "refresh" };
+  if (!accessTokenUsable(session, Date.now())) return { status: "refresh" };
   try {
     const result = await hostApiClient(session).listExperienceProviders();
     if (result.ok) return { status: "ok", providers: usableProviders(result.data.providers) };
@@ -93,24 +93,22 @@ export type Renewal =
   | { outcome: "unavailable"; session: HostSession };
 
 /**
- * Exchanges the connection's refresh token for a new one and a new ID token.
+ * Exchanges the connection's refresh token for a new one and a new NIHO Web access token.
  * Only /host/auth/refresh (serialised by the browser across tabs) and logout call this.
  */
 export async function renewSession(session: HostSession): Promise<Renewal> {
   if (isHostMock()) {
     const now = Date.now();
-    return { outcome: "refreshed", session: startSession({ ...session, refreshToken: mockToken("mock-refresh-token."), idToken: mockToken(MOCK_ID_TOKEN_PREFIX), idTokenExpiresAt: now + MOCK_ID_TOKEN_TTL_MS }, now) };
+    return { outcome: "refreshed", session: startSession({ ...session, refreshToken: mockToken("mock-refresh-token."), accessToken: mockToken(MOCK_ACCESS_TOKEN_PREFIX), accessTokenExpiresAt: now + MOCK_ACCESS_TOKEN_TTL_MS }, now) };
   }
   const deps = nihoAuthDeps();
   const refreshed = await refreshConnection(deps, session.refreshToken);
   if (!refreshed.ok) return refreshed.reason === "rejected" ? { outcome: "rejected" } : { outcome: "unavailable", session };
   const rotated: HostSession = { ...session, refreshToken: refreshed.value.refreshToken, connectionExpiresAt: refreshed.value.connectionExpiresAt };
-  const signedIn = await signInWithCustomToken(deps, refreshed.value.customToken, Date.now());
-  if (!signedIn.ok) return { outcome: "unavailable", session: rotated };
-  return { outcome: "refreshed", session: startSession({ ...rotated, ...signedIn.value }, Date.now()) };
+  return { outcome: "refreshed", session: startSession({ ...rotated, accessToken: refreshed.value.accessToken, accessTokenExpiresAt: refreshed.value.accessTokenExpiresAt }, Date.now()) };
 }
 
-export const MOCK_ID_TOKEN_TTL_MS = 60 * 60 * 1000;
+export const MOCK_ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 
 const NO_STORE = "private, no-store";
 

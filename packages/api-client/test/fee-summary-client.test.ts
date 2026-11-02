@@ -34,7 +34,10 @@ describe("fee summary server-only client", () => {
     ["host", "https://niho.example/api/experience-providers/management/bookings/booking.1/fee-summary"],
   ] as const)("uses the fixed %s GET with Bearer, no-store and manual redirects", async (audience, expectedUrl) => {
     const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => Response.json(response));
-    const client = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", idToken: "server-token", audience, fetch: fetcher });
+    const auth = audience === "admin"
+      ? { audience: "admin" as const, idToken: "server-token" }
+      : { audience: "host" as const, accessToken: "server-token" };
+    const client = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", ...auth, fetch: fetcher });
     expect((await client.read("booking.1")).ok).toBe(true);
     expect(fetcher).toHaveBeenCalledWith(expectedUrl, expect.objectContaining({ method: "GET", cache: "no-store", redirect: "manual" }));
     expect((fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer server-token");
@@ -43,9 +46,9 @@ describe("fee summary server-only client", () => {
   it("rejects wrong booking IDs and maps auth/not-found/network without a success fallback", async () => {
     const wrong = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", idToken: "token", audience: "admin", fetch: vi.fn(async () => Response.json({ feeSummary: { ...response.feeSummary, bookingRequestId: "other" } })) });
     expect(await wrong.read("booking.1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
-    const rejected = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", idToken: "token", audience: "host", fetch: vi.fn(async () => Response.json({}, { status: 403 })) });
+    const rejected = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "token", audience: "host", fetch: vi.fn(async () => Response.json({}, { status: 403 })) });
     expect(await rejected.read("booking.1")).toEqual({ ok: false, kind: "rejected", status: 403 });
-    const network = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", idToken: "token", audience: "host", fetch: vi.fn(async () => { throw new Error("offline"); }) });
+    const network = createExperienceFeeSummaryApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "token", audience: "host", fetch: vi.fn(async () => { throw new Error("offline"); }) });
     expect(await network.read("booking.1")).toEqual({ ok: false, kind: "network_error" });
     expect(await wrong.read("bad/id")).toEqual({ ok: false, kind: "invalid_request" });
   });

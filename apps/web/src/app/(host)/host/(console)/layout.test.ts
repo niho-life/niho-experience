@@ -8,8 +8,11 @@ vi.mock("@/lib/config", () => ({ config: { hostPwaEnabled: false, nihoWebOrigin:
 vi.mock("@/lib/experience/store-server", () => ({ productOperatorRepository: () => ({ listAssignments: mocks.assignments }) }));
 vi.mock("@/lib/host/server", () => ({
   requireHostConsole: vi.fn(), isHostMock: () => false,
-  readHostSession: async () => ({ nihoUserId: "synthetic-cohost", displayName: "Synthetic teacher", iconUrl: null, idTokenExpiresAt: Date.now() + 3600_000 }),
-  loadHostProviders: async () => ({ status: "ok", providers: [{ id: "provider-a", displayName: "Synthetic provider", memberRole: "COHOST" }] }),
+  readHostSession: async () => ({ accessToken: "synthetic-access-token", displayName: "Synthetic teacher", iconUrl: null, accessTokenExpiresAt: Date.now() + 3600_000 }),
+  loadHostProviders: async () => ({ status: "ok", providers: [
+    { id: "owned-provider", ownerUserId: "synthetic-cohost", displayName: "Owned provider", memberRole: "OWNER" },
+    { id: "provider-a", ownerUserId: "seller-a", displayName: "Synthetic provider", memberRole: "COHOST" },
+  ] }),
 }));
 
 import HostConsoleLayout from "./layout";
@@ -27,14 +30,15 @@ async function shellChoices(): Promise<readonly HostConsoleChoice[]> {
   return (shell as ReactElement<{ providers: readonly HostConsoleChoice[] }>).props.providers;
 }
 
-it("passes the actual HostShell an operator choice for a COHOST with an assigned product", async () => {
+it("passes the actual HostShell an operator choice for a COHOST with an owned identity and assigned product", async () => {
   const choices = await shellChoices();
-  expect(choices).toMatchObject([{ id: "provider-a", kind: "OPERATOR", memberRole: null }]);
-  expect(hostNavForChoice(choices[0]).map((item) => item.href)).toEqual(["/host/calendar"]);
+  const target = choices.find((choice) => choice.id === "provider-a");
+  expect(target).toMatchObject({ id: "provider-a", kind: "OPERATOR", memberRole: null });
+  expect(hostNavForChoice(target!).map((item) => item.href)).toEqual(["/host/calendar"]);
 });
 
 it("keeps a genuine COHOST's established member read navigation when no product grant exists", async () => {
   mocks.assignments.mockResolvedValue([]);
   const choices = await shellChoices();
-  expect(choices).toMatchObject([{ id: "provider-a", kind: "MEMBER", memberRole: "COHOST" }]);
+  expect(choices.find((choice) => choice.id === "provider-a")).toMatchObject({ id: "provider-a", kind: "MEMBER", memberRole: "COHOST" });
 });

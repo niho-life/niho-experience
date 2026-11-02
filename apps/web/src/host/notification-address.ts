@@ -1,6 +1,6 @@
 /*
- * 設定 › 通知 › 宛先 (#194, owner decision 2026-11-01): where this site emails the signed-in person. By default the NIHO
- * account's verified address, copied at sign-in; the person may choose another one, used once the link sent to it is opened.
+ * 設定 › 通知 › 宛先 (#194, owner decision 2026-11-01): where this site emails the signed-in person. Existing verified
+ * login addresses are retained; with the current app-connect token, an OWNER can enter and verify a new address by email.
  * Plain data and words (no server code), shared by the settings page, its panel and the server actions.
  */
 
@@ -19,9 +19,9 @@ export interface HostNotificationAddressView {
 }
 
 export const NOTIFICATION_ADDRESS_TEXT = {
-  login: "NIHO アカウントの確認済みのメールです（ログインのときに写します）。",
+  login: "以前に確認したNIHOアカウントのメールです。",
   chosen: "あなたが設定したメールです。",
-  none: "まだ宛先がありません。もう一度ログインすると、NIHO アカウントの確認済みのメールが入ります。",
+  none: "まだ宛先がありません。メールアドレスを入力して確認すると、予約などの通知を受け取れます。",
   pending: (address: string) => `${address} に確認のメールを送りました。メールのリンクを開くと、宛先がこのアドレスに変わります（1 時間有効）。`,
   previewPending: (address: string) => `${address} に確認のメールを送ります（プレビューでは送りません）。`,
   sent: "確認のメールを送りました。",

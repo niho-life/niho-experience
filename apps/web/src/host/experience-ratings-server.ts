@@ -21,16 +21,18 @@ export interface ExperienceRatingLink {
 /** By the experience's slug. */
 export type ExperienceRatings = Record<string, ExperienceRatingLink>;
 
-function ownerActor(providerId: string, nihoUserId: string): HostActor {
-  return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
+function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
+  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
 }
 
-export async function loadExperienceRatings(provider: Pick<HostProvider, "id" | "memberRole">, nihoUserId: string): Promise<ExperienceRatings> {
+export async function loadExperienceRatings(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): Promise<ExperienceRatings> {
   if (isHostMock() || provider.memberRole !== "OWNER") return {};
   const store = guestReviewRatings();
   if (!store) return {};
   try {
-    const rows = await store.byProduct(ownerActor(provider.id, nihoUserId));
+    if (provider.memberRole !== "OWNER") return {};
+    const rows = await store.byProduct(ownerActor(provider));
     return Object.fromEntries(rows.map((row) => [row.slug, { productId: row.productId, average: row.average, count: row.count }]));
   } catch (error) {
     // The experience DB does not count this account as the OWNER: no ★, as レビュー shows them nothing either.

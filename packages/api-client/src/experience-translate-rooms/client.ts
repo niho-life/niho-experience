@@ -12,14 +12,14 @@ import type { ExperienceTranslateRoomCreatedResponse, ExperienceTranslateRoomEnd
  */
 
 type Decoder<T> = (value: unknown) => T | null;
-type BaseOptions = { nihoWebOrigin: string; idToken: string; fetch?: FetchLike; timeoutMs?: number };
+type BaseOptions = { nihoWebOrigin: string; accessToken: string; fetch?: FetchLike; timeoutMs?: number };
 const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const schema = <T>(name: string): Decoder<T> => (value) => isExperienceTranslateRoomsSchema<T>(name, value) ? value : null;
 
 export function createExperienceTranslateRoomsClient(options: BaseOptions) {
   const origin = normalizeOrigin(options.nihoWebOrigin);
-  if (!TOKEN.test(options.idToken)) throw new Error("Experience translate rooms token is invalid");
+  if (!TOKEN.test(options.accessToken)) throw new Error("Experience translate rooms token is invalid");
   const send = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   async function request<T>(method: "GET" | "POST", path: string, status: number, decode: Decoder<T>, body?: unknown): Promise<ExperienceTranslateRoomsResult<T>> {
@@ -27,7 +27,7 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     try {
       response = await send(new URL(path, origin).href, {
         method,
-        headers: { accept: "application/json", authorization: `Bearer ${options.idToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { accept: "application/json", authorization: `Bearer ${options.accessToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         cache: "no-store",
         credentials: "omit",

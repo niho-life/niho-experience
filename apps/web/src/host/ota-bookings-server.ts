@@ -2,9 +2,9 @@ import "server-only";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError, type HostActor, type HostOtaBooking, type HostOtaBookings } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { hostOtaBookings, productOperatorRepository } from "@/lib/experience/store-server";
-import type { HostProvider } from "@/lib/host/providers";
+import { hostUserIdFromOwnedProviders, type HostProvider } from "@/lib/host/providers";
 import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable, type HostMockScenario } from "@/lib/host/session";
+import { accessTokenUsable, type HostMockScenario } from "@/lib/host/session";
 import { addDays, todayInJapan } from "./format";
 import { actionTime, type BookingExperience, type SessionQuery } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
@@ -41,10 +41,14 @@ export interface OtaReader {
  * The reader for `providerId`: NIHO's OWNER, else a product operator with a grant there (the store narrows them to their
  * products). null for anyone else (an EDITOR or a COHOST without a grant reads none).
  */
-export async function otaReaderFor(providerId: string, nihoUserId: string, provider: Pick<HostProvider, "memberRole"> | null): Promise<OtaReader | null> {
-  if (provider?.memberRole === "OWNER") return { kind: "OWNER", actor: { providerId, nihoUserId, calendarRoleCeiling: "OWNER" } };
+export async function otaReaderFor(providerId: string, provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null): Promise<OtaReader | null> {
+  if (provider?.id === providerId && provider.memberRole === "OWNER") {
+    return { kind: "OWNER", actor: { providerId, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" } };
+  }
+  const providers = await loadHostProviders();
+  const nihoUserId = providers.status === "ok" ? hostUserIdFromOwnedProviders(providers.providers) : null;
   const repository = productOperatorRepository();
-  if (!repository) return null;
+  if (!nihoUserId || !repository) return null;
   const assignments = await repository.listAssignments(nihoUserId);
   if (!assignments.some((entry) => entry.providerId === providerId)) return null;
   return { kind: "OPERATOR", actor: { providerId, nihoUserId, calendarScope: "OPERATOR" } };
@@ -87,8 +91,7 @@ export function otaBookingsShown(mockScenario?: HostMockScenario): boolean {
  */
 export async function loadOtaBookings(
   providerId: string,
-  nihoUserId: string,
-  provider: Pick<HostProvider, "memberRole"> | null,
+  provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null,
   requested: string | null,
   mockScenario?: HostMockScenario,
   store: () => Pick<HostOtaBookings, "listForHost" | "getForHost"> | null = hostOtaBookings,
@@ -97,7 +100,7 @@ export async function loadOtaBookings(
   const bookings = store();
   if (!bookings) return { status: "closed" };
   try {
-    const reader = await otaReaderFor(providerId, nihoUserId, provider);
+    const reader = await otaReaderFor(providerId, provider);
     if (!reader) return { status: "closed" };
     const today = todayInJapan(Date.now());
     const from = addDays(today, -LIST_DAYS_BACK);
@@ -140,8 +143,7 @@ function sessionBooking(booking: HostBooking): HostBooking {
  */
 export async function loadOtaSession(
   providerId: string,
-  nihoUserId: string,
-  provider: Pick<HostProvider, "memberRole"> | null,
+  provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null,
   query: SessionQuery,
   mockScenario?: HostMockScenario,
   store: () => Pick<HostOtaBookings, "listForHost" | "attendanceForHost"> | null = hostOtaBookings,
@@ -154,7 +156,7 @@ export async function loadOtaSession(
   const bookings = store();
   if (!bookings || !query.offer) return { status: "closed" };
   try {
-    const reader = await otaReaderFor(providerId, nihoUserId, provider);
+    const reader = await otaReaderFor(providerId, provider);
     if (!reader) return { status: "closed" };
     // The offer's sessions a day either side (the session's own time may differ from the one the site gave), narrowed in
     // the store before its limit. A session that still fills it is not shown in part: the screen says it cannot be read.
@@ -183,8 +185,7 @@ export async function loadOtaSession(
 /** ホーム's 次にすること: the OTA bookings read in the last three days whose session is ahead. None while closed or unreadable. */
 export async function loadOtaHomeTodos(
   providerId: string,
-  nihoUserId: string,
-  provider: Pick<HostProvider, "memberRole"> | null,
+  provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null,
   mockScenario?: HostMockScenario,
   store: () => Pick<HostOtaBookings, "listForHost"> | null = hostOtaBookings,
 ): Promise<{ todos: HomeTodo[]; failed: boolean }> {
@@ -194,7 +195,7 @@ export async function loadOtaHomeTodos(
   const bookings = store();
   if (!bookings) return { todos: [], failed: false };
   try {
-    const reader = await otaReaderFor(providerId, nihoUserId, provider);
+    const reader = await otaReaderFor(providerId, provider);
     if (!reader) return { todos: [], failed: false };
     const now = Date.now();
     const today = todayInJapan(now);
@@ -213,13 +214,13 @@ const STORED: Record<HostAttendance, "ATTENDED" | "NO_SHOW"> = { attended: "ATTE
  */
 export async function recordOtaAttendanceAsHost(providerId: string, ref: string, value: HostAttendance): Promise<HostActionResult<{ attendance: HostAttendance | null }>> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const bookings = hostOtaBookings();
   if (!bookings || !config.hostAttendanceEnabled) return { ok: false, message: SITE_ATTENDANCE_FAILED_TEXT };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? SITE_ATTENDANCE_FAILED_TEXT : HOST_SESSION_ENDED_TEXT };
   try {
-    const reader = await otaReaderFor(providerId, session.nihoUserId, providers.providers.find((entry) => entry.id === providerId) ?? null);
+    const reader = await otaReaderFor(providerId, providers.providers.find((entry) => entry.id === providerId) ?? null);
     if (!reader) return { ok: false, message: SITE_ATTENDANCE_FAILED_TEXT };
     const result = await bookings.recordAttendanceAsHost(reader.actor, ref, STORED[value]);
     if (result.outcome === "NOT_STARTED") return { ok: false, message: SITE_ATTENDANCE_NOT_STARTED_TEXT };

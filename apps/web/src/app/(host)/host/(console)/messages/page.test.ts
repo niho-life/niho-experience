@@ -87,7 +87,7 @@ describe("メッセージ without NIHO's booking messages (provider operations o
     const view = await page({ booking: BOOKING });
     expect(view.type).toBe(HostMessages);
     expect(view.props).toMatchObject({ newThread: NEW_THREAD, providerId: "sample-provider", linkProviderId: "sample-provider", live: { loaded: [NEW_THREAD.id], nextCursor: null, besideNiho: false } });
-    expect(state.loadGuestQuestions).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", null, BOOKING);
+    expect(state.loadGuestQuestions).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), null, BOOKING);
     expect(state.loadHostMessages).not.toHaveBeenCalled();
   });
 
@@ -150,7 +150,7 @@ describe("ホーム's 返信する in http mode (#106)", () => {
       const view = await page(query);
       expect(view.type).toBe(HostMessages);
       expect(view.props.live).toMatchObject({ besideNiho: providerOperations });
-      expect(state.loadGuestQuestions).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", "th-3012", null);
+      expect(state.loadGuestQuestions).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "th-3012", null);
       expect(state.countSiteBookingThreads).not.toHaveBeenCalled();
     });
   }

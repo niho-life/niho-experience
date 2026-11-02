@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     return noStoreJson({ error: HOST_APP_SIGN_IN_REQUIRED }, 401);
   }
   // Another tab may have refreshed while this one waited for the lock.
-  if (!shouldRefresh(session, now)) return noStoreJson({ refreshed: false, idTokenExpiresAt: session.idTokenExpiresAt });
+  if (!shouldRefresh(session, now)) return noStoreJson({ refreshed: false, accessTokenExpiresAt: session.accessTokenExpiresAt });
 
   const renewal = await renewSession(session);
   // Push follows the connection (#177 P2): an ended one loses its devices, a refreshed one keeps them current. Never blocks.
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     return response;
   }
   const response = renewal.outcome === "refreshed"
-    ? noStoreJson({ refreshed: true, idTokenExpiresAt: renewal.session.idTokenExpiresAt })
+    ? noStoreJson({ refreshed: true, accessTokenExpiresAt: renewal.session.accessTokenExpiresAt })
     : noStoreJson({ error: "niho_unavailable" }, 503);
   // Saved even when unavailable: NIHO may already have rotated the refresh token.
   setSessionCookie(response, renewal.session, Date.now());

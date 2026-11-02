@@ -5,7 +5,7 @@ import { forgetHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { HOST_INTRO_PATH, HOST_LAUNCH_PATH } from "@/lib/host/routes";
 import { clearLoginCookie, clearSessionCookie, hostNotFound, isHostMock, nihoAuthDeps, noStoreJson, renewSession, seeOther, sessionSealer, siteOrigin } from "@/lib/host/server";
-import { decodeSession, idTokenUsable, SESSION_COOKIE } from "@/lib/host/session";
+import { accessTokenUsable, decodeSession, SESSION_COOKIE } from "@/lib/host/session";
 
 /** Ends the NIHO connection (best effort) and always clears this site's cookies. */
 export async function POST(request: NextRequest) {
@@ -14,13 +14,13 @@ export async function POST(request: NextRequest) {
 
   const session = decodeSession(sessionSealer(), request.cookies.get(SESSION_COOKIE)?.value, Date.now());
   if (session && !isHostMock()) {
-    let idToken: string | null = idTokenUsable(session, Date.now()) ? session.idToken : null;
-    if (!idToken) {
+    let accessToken: string | null = accessTokenUsable(session, Date.now()) ? session.accessToken : null;
+    if (!accessToken) {
       // The connection is being ended, so a refresh here cannot cost a live session.
       const renewal = await renewSession(session);
-      if (renewal.outcome === "refreshed") idToken = renewal.session.idToken;
+      if (renewal.outcome === "refreshed") accessToken = renewal.session.accessToken;
     }
-    if (idToken) await deleteConnection(nihoAuthDeps(), session.connectionId, idToken);
+    if (accessToken) await deleteConnection(nihoAuthDeps(), session.connectionId, accessToken);
   }
   // The connection's devices stop receiving push (#177 P2). Best effort, like the call above.
   if (session) await forgetHostPushConnection(session.connectionId);

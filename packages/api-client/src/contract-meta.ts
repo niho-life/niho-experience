@@ -13,7 +13,8 @@ export const EXPERIENCE_API_CONTRACT = {
  * 書き出したが、まだ NIHO の main に入っていない・配備されていない段階を表す。ホストの画面は mock で作り、実 API と接続済みとは扱わない。
  */
 export const EXPERIENCE_HOST_API_CONTRACT = {
-  version: "0.2.0",
+  version: "0.4.0",
+  sourceCommit: "cc2a1503c4a01d9cc4c19ca295be72de623e4d60",
   status: "draft",
 } as const;
 

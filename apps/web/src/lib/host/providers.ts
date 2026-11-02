@@ -15,8 +15,8 @@ export function nihoIdOrNull(value: unknown): string | null {
 }
 
 /** A provider in the signed-in host's list (server side only: it carries NIHO's internal ids). */
-export type HostProvider = ExperienceProviderWithMemberRole;
-export type HostProviderRole = ExperienceProviderMemberRole;
+export type HostProviderRole = ExperienceProviderMemberRole | "COHOST";
+export type HostProvider = Omit<ExperienceProviderWithMemberRole, "memberRole"> & { memberRole: HostProviderRole | null };
 export type HostProviderKind = ExperienceProviderKind;
 export type HostProviderReviewStatus = ExperienceProviderReviewStatus;
 
@@ -37,6 +37,12 @@ const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", E
 
 export function providerRoleLabel(role: HostProviderRole | null): string | null {
   return role ? ROLE_LABELS[role] : null;
+}
+
+/** Fallback identity for flows without a target provider: accept only one owner ID from the authenticated provider list. */
+export function hostUserIdFromOwnedProviders(providers: readonly Pick<HostProvider, "ownerUserId" | "memberRole">[]): string | null {
+  const ids = [...new Set(providers.filter((provider) => provider.memberRole === "OWNER").map((provider) => provider.ownerUserId))];
+  return ids.length === 1 ? ids[0]! : null;
 }
 
 /**

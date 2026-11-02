@@ -1,9 +1,6 @@
 import { cleanDisplayName, cleanIconUrl } from "./session";
 
-/**
- * NIHO app-connect (NIHO spec §16) as used by this site's server. Tokens and
- * codes only travel between this server, NIHO and Firebase; nothing here logs them.
- */
+/** NIHO app-connect Web flow. API tokens and refresh tokens stay on this server. */
 export const NIHO_CLIENT_ID = "niho-experience";
 const FIREBASE_SIGN_IN_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken";
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -11,7 +8,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 export interface NihoAuthDeps {
   fetch: typeof fetch;
   nihoOrigin: string;
-  firebaseWebApiKey: string;
+  firebaseWebApiKey?: string;
   timeoutMs?: number;
 }
 
@@ -20,8 +17,8 @@ export type NihoAuthFailure = "rejected" | "unavailable";
 export type NihoAuthResult<T> = { ok: true; value: T } | { ok: false; reason: NihoAuthFailure };
 
 export interface ExchangeResult {
-  nihoUserId: string;
-  customToken: string;
+  accessToken: string;
+  accessTokenExpiresAt: number;
   refreshToken: string;
   connectionId: string;
   connectionExpiresAt: number;
@@ -30,11 +27,13 @@ export interface ExchangeResult {
 }
 
 export interface RefreshResult {
-  customToken: string;
+  accessToken: string;
+  accessTokenExpiresAt: number;
   refreshToken: string;
   connectionExpiresAt: number;
 }
 
+/** Firebase ID token used by the separate Experience Admin console, not by the host console. */
 export interface IdTokenResult {
   idToken: string;
   idTokenExpiresAt: number;
@@ -84,17 +83,18 @@ export async function exchangeCode(deps: NihoAuthDeps, input: { code: string; co
   if (!result.ok) return result;
   const body = result.value as Record<string, unknown> | null;
   const user = (body?.user ?? {}) as Record<string, unknown>;
+  const accessTokenExpiresAt = parseTime(body?.expiresAt);
   const connectionExpiresAt = parseTime(body?.connectionExpiresAt);
-  if (!isText(body?.customToken) || !isText(body?.refreshToken, 1024) || !isText(body?.connectionId, 256) || !isText(user.id, 128) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
+  if (!isText(body?.accessToken) || !accessTokenExpiresAt || !isText(body?.refreshToken, 1024) || !isText(body?.connectionId, 256) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
   return {
     ok: true,
     value: {
-      nihoUserId: user.id,
-      customToken: body.customToken,
+      accessToken: body.accessToken,
+      accessTokenExpiresAt,
       refreshToken: body.refreshToken,
       connectionId: body.connectionId,
       connectionExpiresAt,
-      displayName: cleanDisplayName(user.displayName) || cleanDisplayName(user.handle),
+      displayName: cleanDisplayName(user.displayName),
       iconUrl: cleanIconUrl(user.iconImage),
     },
   };
@@ -105,13 +105,15 @@ export async function refreshConnection(deps: NihoAuthDeps, refreshToken: string
   const result = await postJson(deps, new URL("/api/auth/app-connect/refresh", deps.nihoOrigin).href, { clientId: NIHO_CLIENT_ID, refreshToken });
   if (!result.ok) return result;
   const body = result.value as Record<string, unknown> | null;
+  const accessTokenExpiresAt = parseTime(body?.expiresAt);
   const connectionExpiresAt = parseTime(body?.connectionExpiresAt);
-  if (!isText(body?.customToken) || !isText(body?.refreshToken, 1024) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
-  return { ok: true, value: { customToken: body.customToken, refreshToken: body.refreshToken, connectionExpiresAt } };
+  if (!isText(body?.accessToken) || !accessTokenExpiresAt || !isText(body?.refreshToken, 1024) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
+  return { ok: true, value: { accessToken: body.accessToken, accessTokenExpiresAt, refreshToken: body.refreshToken, connectionExpiresAt } };
 }
 
-/** Firebase custom token → ID token (1 hour). Firebase's own refresh token is discarded. */
+/** Admin-only legacy exchange; the NIHO Experience host uses the scoped Web access token above. */
 export async function signInWithCustomToken(deps: NihoAuthDeps, customToken: string, now: number): Promise<NihoAuthResult<IdTokenResult>> {
+  if (!deps.firebaseWebApiKey) return { ok: false, reason: "unavailable" };
   const url = `${FIREBASE_SIGN_IN_URL}?key=${encodeURIComponent(deps.firebaseWebApiKey)}`;
   const result = await postJson(deps, url, { token: customToken, returnSecureToken: true });
   if (!result.ok) return result;
@@ -122,13 +124,13 @@ export async function signInWithCustomToken(deps: NihoAuthDeps, customToken: str
 }
 
 /** Ends the connection on NIHO (logout). Best effort: the caller clears the cookie either way. */
-export async function deleteConnection(deps: NihoAuthDeps, connectionId: string, idToken: string): Promise<boolean> {
+export async function deleteConnection(deps: NihoAuthDeps, connectionId: string, accessToken: string): Promise<boolean> {
   const url = new URL(`/api/auth/app-connections/${encodeURIComponent(connectionId)}`, deps.nihoOrigin);
   url.searchParams.set("reason", "logout");
   try {
     const response = await deps.fetch(url.href, {
       method: "DELETE",
-      headers: { authorization: `Bearer ${idToken}` },
+      headers: { authorization: `Bearer ${accessToken}` },
       cache: "no-store",
       redirect: "manual",
       signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),

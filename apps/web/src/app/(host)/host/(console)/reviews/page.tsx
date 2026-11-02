@@ -46,7 +46,7 @@ export default async function HostReviewsPage({ searchParams }: { searchParams: 
   if (!provider) return <HostRegisterPrompt title="レビュー" />;
   const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
   // 予約者のレビュー kept in the experience DB (#108): the OWNER's reviews, each shown (and open to a reply) from when it was written, a page at a time. While closed, the screen below.
-  const live = await loadGuestReviews(provider, context.session.nihoUserId);
+  const live = await loadGuestReviews(provider);
   if (live.status === "live") {
     return (
       <HostReviews

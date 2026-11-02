@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nihoIdOrNull, providerRoleLabel, selectProvider, toProviderChoice, usableProviders, type HostProvider } from "./providers";
+import { hostUserIdFromOwnedProviders, nihoIdOrNull, providerRoleLabel, selectProvider, toProviderChoice, usableProviders, type HostProvider } from "./providers";
 
 const provider = (fields: Partial<HostProvider>): HostProvider => ({
   id: "p_1",
@@ -24,6 +24,13 @@ const provider = (fields: Partial<HostProvider>): HostProvider => ({
 });
 
 describe("provider list", () => {
+  it("derives identity only from one unique owner id in NIHO's current provider list", () => {
+    expect(hostUserIdFromOwnedProviders([provider({ ownerUserId: "u_1", memberRole: "OWNER" })])).toBe("u_1");
+    expect(hostUserIdFromOwnedProviders([provider({ ownerUserId: "u_1", memberRole: "OWNER" }), provider({ id: "p_2", ownerUserId: "u_1", memberRole: "OWNER" })])).toBe("u_1");
+    expect(hostUserIdFromOwnedProviders([provider({ ownerUserId: "u_1", memberRole: "EDITOR" })])).toBeNull();
+    expect(hostUserIdFromOwnedProviders([provider({ ownerUserId: "u_1", memberRole: "OWNER" }), provider({ id: "p_2", ownerUserId: "u_2", memberRole: "OWNER" })])).toBeNull();
+  });
+
   it("leaves out providers whose id cannot travel in ?providerId= or whose name is blank", () => {
     const kept = provider({ id: "p_3", displayName: "合成工房", memberRole: null });
     expect(usableProviders([provider({ id: "../x" }), provider({ id: "p_2", displayName: "  " }), kept])).toEqual([kept]);

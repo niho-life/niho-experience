@@ -33,9 +33,9 @@ function setup(responses: Record<string, Array<() => Response>>) {
 
 describe("refreshHostSession", () => {
   it("runs under the shared lock and sends one request for concurrent callers in a tab", async () => {
-    const { deps, calls, names } = setup({ "/host/auth/refresh": [() => json(200, { refreshed: true, idTokenExpiresAt: 123 })] });
+    const { deps, calls, names } = setup({ "/host/auth/refresh": [() => json(200, { refreshed: true, accessTokenExpiresAt: 123 })] });
     const [a, b] = await Promise.all([refreshHostSession(deps), refreshHostSession(deps)]);
-    expect(a).toEqual({ status: "ok", idTokenExpiresAt: 123 });
+    expect(a).toEqual({ status: "ok", accessTokenExpiresAt: 123 });
     expect(b).toBe(a);
     expect(calls).toEqual(["/host/auth/refresh"]);
     expect(names).toEqual([HOST_REFRESH_LOCK]);
@@ -51,7 +51,7 @@ describe("refreshHostSession", () => {
     const sent: Headers[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) => {
       sent.push(new Headers(init.headers));
-      return json(200, { refreshed: false, idTokenExpiresAt: 5 });
+      return json(200, { refreshed: false, accessTokenExpiresAt: 5 });
     });
     const deps: HostClientDeps = { fetch: fetchMock as unknown as typeof fetch, locks: undefined, onSignedOut: vi.fn() };
     await refreshHostSession({ ...deps, standalone: true });
@@ -65,9 +65,9 @@ describe("refreshHostSession", () => {
   });
 
   it("still serialises in browsers without Web Locks", async () => {
-    const { deps, calls } = setup({ "/host/auth/refresh": [() => json(200, { refreshed: false, idTokenExpiresAt: 9 })] });
+    const { deps, calls } = setup({ "/host/auth/refresh": [() => json(200, { refreshed: false, accessTokenExpiresAt: 9 })] });
     const result = await Promise.all([refreshHostSession({ ...deps, locks: undefined }), refreshHostSession({ ...deps, locks: undefined })]);
-    expect(result[0]).toEqual({ status: "ok", idTokenExpiresAt: 9 });
+    expect(result[0]).toEqual({ status: "ok", accessTokenExpiresAt: 9 });
     expect(calls).toHaveLength(1);
   });
 });
@@ -76,7 +76,7 @@ describe("hostFetch", () => {
   it("refreshes through the lock and retries once when the relay asks", async () => {
     const { deps, calls } = setup({
       "/host/api/experience-providers": [() => json(401, { error: "session_refresh_required" }), () => json(200, { providers: [] })],
-      "/host/auth/refresh": [() => json(200, { refreshed: true, idTokenExpiresAt: 1 })],
+      "/host/auth/refresh": [() => json(200, { refreshed: true, accessTokenExpiresAt: 1 })],
     });
     const response = await hostFetch("experience-providers", {}, deps);
     expect(response.status).toBe(200);

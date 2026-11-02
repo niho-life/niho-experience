@@ -5,7 +5,7 @@ import type { ExperienceHostApiClient, ExperienceHostApiFailure, ExperienceProvi
 import { nihoIdOrNull, type HostProviderReviewStatus } from "@/lib/host/providers";
 import { HOST_HOME_PATH, HOST_MOCK_LOGIN_PATH, withProvider } from "@/lib/host/routes";
 import { hostApiClient, isHostMock, readHostSession } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { openStripe, stepNotice, syncStripe } from "./connect";
 import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
@@ -47,7 +47,7 @@ type Run<T extends object> = (client: ExperienceHostApiClient) => Promise<HostAc
 
 async function withHostApi<T extends object>(run: Run<T>): Promise<HostActionResult<T>> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   try {
     return await run(hostApiClient(session));
   } catch {
@@ -159,12 +159,12 @@ export async function requestNotificationAddress(input: { providerId: string; em
   return changeNotificationAddress({ kind: "request", providerId: input?.providerId, email: input?.email });
 }
 
-export async function restoreLoginNotificationAddress(): Promise<HostActionResult<AddressChanged>> {
-  return changeNotificationAddress({ kind: "login" });
+export async function restoreLoginNotificationAddress(providerId: string): Promise<HostActionResult<AddressChanged>> {
+  return changeNotificationAddress({ kind: "login", providerId });
 }
 
-export async function cancelNotificationAddress(): Promise<HostActionResult<AddressChanged>> {
-  return changeNotificationAddress({ kind: "cancel" });
+export async function cancelNotificationAddress(providerId: string): Promise<HostActionResult<AddressChanged>> {
+  return changeNotificationAddress({ kind: "cancel", providerId });
 }
 
 /**
@@ -253,7 +253,7 @@ export async function syncPayoutAccount(input: { providerId: string }): Promise<
 type Drafted<T> = { english: T };
 async function draftEnglish<T>(mockEnglish: () => T, { message = "英語にしました", unavailable = REPLY_DRAFT_UNAVAILABLE_TEXT } = {}): Promise<HostActionResult<Drafted<T>>> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   if (!isHostMock()) return { ok: false, message: unavailable };
   return { ok: true, message, english: mockEnglish() };
 }

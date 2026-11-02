@@ -3,7 +3,7 @@ import { StoreAccessDeniedError, StoreValidationError, type HostActor, type Host
 import { providerNotificationSettings } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { NOTIFICATION_OWNER_ONLY_TEXT, NOTIFICATION_SAVE_FAILED_TEXT } from "./notifications";
 import type { HostActionResult } from "./payout";
@@ -22,16 +22,17 @@ export type HostNotificationSettingsLoad =
   | { status: "preparing" }
   | { status: "error" };
 
-function ownerActor(providerId: string, nihoUserId: string): HostActor {
-  return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
+function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
+  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /** The settings page's 通知 for an OWNER (NIHO's role); anyone else never reads them. */
-export async function loadNotificationSettings(provider: HostProvider, nihoUserId: string): Promise<HostNotificationSettingsLoad> {
+export async function loadNotificationSettings(provider: HostProvider): Promise<HostNotificationSettingsLoad> {
   const settings = providerNotificationSettings();
   if (!settings || provider.memberRole !== "OWNER") return { status: "preparing" };
   try {
-    return { status: "live", items: await settings.get(ownerActor(provider.id, nihoUserId)) };
+    return { status: "live", items: await settings.get(ownerActor(provider)) };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "preparing" } : { status: "error" };
   }
@@ -40,7 +41,7 @@ export async function loadNotificationSettings(provider: HostProvider, nihoUserI
 /** 保存: the changes the browser sent (already checked for shape), for a provider NIHO says this account owns. */
 export async function changeNotificationSettings(providerId: string, changes: HostNotificationChanges): Promise<HostActionResult<{ items: HostNotificationItem[] }>> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const settings = providerNotificationSettings();
   if (!settings) return { ok: false, message: NOTIFICATION_SAVE_FAILED_TEXT };
   const providers = await loadHostProviders();
@@ -48,7 +49,7 @@ export async function changeNotificationSettings(providerId: string, changes: Ho
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: NOTIFICATION_OWNER_ONLY_TEXT };
   try {
-    return { ok: true, message: "保存しました", items: await settings.update(ownerActor(providerId, session.nihoUserId), changes) };
+    return { ok: true, message: "保存しました", items: await settings.update(ownerActor(provider), changes) };
   } catch (error) {
     if (error instanceof StoreAccessDeniedError) return { ok: false, message: NOTIFICATION_OWNER_ONLY_TEXT };
     if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };

@@ -74,7 +74,7 @@ export function isMockConnectUrl(url: string): boolean {
 }
 
 type MockProvider = MockPageOwner & {
-  memberRole: ExperienceProviderMemberRole;
+  memberRole: ExperienceProviderMemberRole | "COHOST";
   /** Stripe の口座がある（start で作る）。 */
   connected: boolean;
   /** 申込がある（口座を切り替えられない）。 */
@@ -248,7 +248,9 @@ export function createMockExperienceHostFetch(options: MockExperienceHostFetchOp
   const conflict = (reason: ExperienceHostErrorReason) => errors.fail(409, "CONFLICT", { reason });
   const unprocessable = (reason: ExperienceHostErrorReason) => errors.fail(422, "UNPROCESSABLE_ENTITY", { reason });
 
-  const withRole = (entry: MockProvider): ExperienceProviderWithMemberRole => ({ ...entry.provider, memberRole: entry.memberRole });
+  // COHOST is an operational role in the separate provider-operations API, not a member role in this host API DTO.
+  // On the page API it has editor access; owner-only publication/payment actions remain blocked below.
+  const withRole = (entry: MockProvider): ExperienceProviderWithMemberRole => ({ ...entry.provider, memberRole: entry.memberRole === "COHOST" ? "EDITOR" : entry.memberRole });
   const find = (providerId: string) => state.providers.find((entry) => entry.provider.id === providerId);
   const consents = { consent: MOCK_PROVIDER_CONSENT, paymentReuseConsent: MOCK_PAYMENT_REUSE_CONSENT };
 

@@ -64,7 +64,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.editorAllowed.mockReturnValue(true);
   mocks.editorContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "writer-secret" }, repository: mocks.repository } });
-  mocks.hostContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "owner-secret" }, repository: mocks.repository, session: { idToken: "sealed-token" } } });
+  mocks.hostContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "owner-secret" }, repository: mocks.repository, session: { accessToken: "sealed-token" } } });
   mocks.repository.listOwnPendingLinkInvitations.mockResolvedValue([invitation]);
   mocks.repository.listProviderLinkInvitations.mockResolvedValue([invitation]);
   mocks.repository.inviteProductLinkWriter.mockResolvedValue(invitation);
@@ -120,7 +120,7 @@ describe("guide link invitation BFF", () => {
 
     const response = await hostInvite(jsonRequest(path, { email: " Writer@Example.com " }), context);
     expect(response.status).toBe(200);
-    expect(mocks.resolveWriter).toHaveBeenCalledWith({ idToken: "sealed-token" }, { email: "writer@example.com" });
+    expect(mocks.resolveWriter).toHaveBeenCalledWith({ accessToken: "sealed-token" }, { email: "writer@example.com" });
     expect(mocks.repository.inviteProductLinkWriter).toHaveBeenCalledWith({ nihoUserId: "owner-secret" }, "provider-test", "writer-secret");
     expect(JSON.stringify(await response.json())).not.toMatch(/writer-secret|owner-secret|provider-test/);
     expect(response.headers.get("cache-control")).toBe("private, no-store");

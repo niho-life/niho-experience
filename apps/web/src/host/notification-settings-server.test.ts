@@ -5,20 +5,20 @@ import type { HostProvider } from "@/lib/host/providers";
 /** 設定 › 通知 against a stubbed experience store and NIHO provider list (#109). */
 const state = vi.hoisted(() => ({
   store: null as null | { get: (actor: HostActor) => Promise<unknown>; update: (actor: HostActor, changes: HostNotificationChanges) => Promise<unknown> },
-  session: null as null | { nihoUserId: string; idTokenExpiresAt: number },
+  session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ providerNotificationSettings: () => state.store }));
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
-vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { changeNotificationSettings, loadNotificationSettings } from "./notification-settings-server";
 import { NOTIFICATION_OWNER_ONLY_TEXT, NOTIFICATION_SAVE_FAILED_TEXT } from "./notifications";
 
 const ITEMS = [{ key: "NEW_REVIEW", enabled: false, locked: false }];
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const calls: { method: string; actor: HostActor; changes?: HostNotificationChanges }[] = [];
 
 function storeAnswering(answer: () => Promise<unknown>) {
@@ -31,27 +31,27 @@ function storeAnswering(answer: () => Promise<unknown>) {
 beforeEach(() => {
   calls.length = 0;
   storeAnswering(async () => ITEMS);
-  state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+  state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
   state.providers = { status: "ok", providers: [OWNER, { id: "sample-other", memberRole: "EDITOR" }] };
 });
 
 describe("loadNotificationSettings", () => {
   it("reads the owner's settings as the OWNER NIHO says this account is", async () => {
-    expect(await loadNotificationSettings(OWNER, "sample-niho-user")).toEqual({ status: "live", items: ITEMS });
+    expect(await loadNotificationSettings(OWNER)).toEqual({ status: "live", items: ITEMS });
     expect(calls).toEqual([{ method: "get", actor: { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" } }]);
   });
 
   it("is 準備中 while closed, for anyone but the owner, and while the experience DB has no OWNER for them", async () => {
-    expect(await loadNotificationSettings({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user")).toEqual({ status: "preparing" });
+    expect(await loadNotificationSettings({ ...OWNER, memberRole: "EDITOR" })).toEqual({ status: "preparing" });
     storeAnswering(async () => Promise.reject(new StoreAccessDeniedError()));
-    expect(await loadNotificationSettings(OWNER, "sample-niho-user")).toEqual({ status: "preparing" });
+    expect(await loadNotificationSettings(OWNER)).toEqual({ status: "preparing" });
     state.store = null;
-    expect(await loadNotificationSettings(OWNER, "sample-niho-user")).toEqual({ status: "preparing" });
+    expect(await loadNotificationSettings(OWNER)).toEqual({ status: "preparing" });
   });
 
   it("says the settings could not be read when the DB fails", async () => {
     storeAnswering(async () => Promise.reject(new Error("synthetic outage")));
-    expect(await loadNotificationSettings(OWNER, "sample-niho-user")).toEqual({ status: "error" });
+    expect(await loadNotificationSettings(OWNER)).toEqual({ status: "error" });
   });
 });
 
@@ -64,7 +64,7 @@ describe("changeNotificationSettings", () => {
   it("asks for a sign-in when the session has ended", async () => {
     state.session = null;
     expect(await changeNotificationSettings("sample-provider", { NEW_REVIEW: false })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
-    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() - 1 };
+    state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() - 1 };
     expect(await changeNotificationSettings("sample-provider", { NEW_REVIEW: false })).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     expect(calls).toEqual([]);
   });

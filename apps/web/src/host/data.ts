@@ -2,7 +2,7 @@ import "server-only";
 import type { ExperienceHostApiClient, ExperienceProviderConsent } from "@niho-experience/api-client/host";
 import { nihoIdOrNull, selectProvider, type HostProvider } from "@/lib/host/providers";
 import { hostApiClient, isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable, type HostSession } from "@/lib/host/session";
+import { accessTokenUsable, type HostSession } from "@/lib/host/session";
 import type { BookingExperience, SessionQuery } from "./bookings";
 import { openStripe, stepNotice, syncStripe } from "./connect";
 import {
@@ -70,10 +70,10 @@ export interface HostConsoleData {
   googleConnection: HostGoogleConnection | null;
 }
 
-/** The session when its ID token can still be sent (the console layout refreshes it otherwise). */
+/** The session when its NIHO Web access token can still be sent (the console layout refreshes it otherwise). */
 async function usableSession(): Promise<HostSession | null> {
   const session = await readHostSession();
-  return session && idTokenUsable(session, Date.now()) ? session : null;
+  return session && accessTokenUsable(session, Date.now()) ? session : null;
 }
 
 /**
@@ -132,7 +132,7 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
   const [detail, meetingPoint, notificationLoad] = await Promise.all([
     loadProviderDetail(provider.id),
     options.meetingPoint ? loadMeetingDefaults(provider, mode, snapshot.meetingPoint) : null,
-    mode === "http" && owner && session && options.notifications ? loadNotificationSettings(provider, session.nihoUserId) : null,
+    mode === "http" && owner && session && options.notifications ? loadNotificationSettings(provider) : null,
   ]);
   const known = detail?.provider ?? provider;
   return {

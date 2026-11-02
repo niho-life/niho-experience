@@ -6,7 +6,7 @@ import { config } from "@/lib/config";
 import { experiencePool } from "@/lib/experience/store-server";
 import { readBoundedJson } from "../bounded-json";
 import { mutationFromSameOrigin } from "../relay";
-import { hostNotFound, isHostMock, noStoreJson, readHostSession, siteOrigin } from "../server";
+import { hostNotFound, isHostMock, loadHostProviders, noStoreJson, readHostSession, siteOrigin } from "../server";
 import type { HostSession } from "../session";
 import type { HostPushDeps } from "./notify";
 
@@ -17,7 +17,7 @@ import type { HostPushDeps } from "./notify";
  */
 const MAX_BODY_BYTES = 4096;
 
-export type PushBffRequest = { response: NextResponse } | { session: HostSession; body: Record<string, unknown> };
+export type PushBffRequest = { response: NextResponse } | { session: HostSession; nihoUserId: string; body: Record<string, unknown> };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -33,7 +33,12 @@ export async function openPushBff(request: NextRequest): Promise<PushBffRequest>
     return { response: noStoreJson({ error: body.reason === "too_large" ? "payload_too_large" : body.reason === "media_type" ? "unsupported_media_type" : "invalid_body" }, status) };
   }
   if (!isRecord(body.value)) return { response: noStoreJson({ error: "invalid_body" }, 400) };
-  return { session, body: body.value };
+  if (isHostMock()) return { session, nihoUserId: "synthetic-host-user", body: body.value };
+  const providers = await loadHostProviders();
+  if (providers.status !== "ok") return { response: noStoreJson({ error: providers.status === "error" ? "identity_unavailable" : "unauthenticated" }, providers.status === "error" ? 503 : 401) };
+  const ownerIds = [...new Set(providers.providers.filter((provider) => provider.memberRole === "OWNER").map((provider) => provider.ownerUserId))];
+  if (ownerIds.length !== 1) return { response: noStoreJson({ error: ownerIds.length ? "identity_unavailable" : "forbidden" }, ownerIds.length ? 503 : 403) };
+  return { session, nihoUserId: ownerIds[0]!, body: body.value };
 }
 
 /** `{ endpoint }` of a browser push service, or the 400 to answer. */

@@ -107,6 +107,7 @@ function emptyContent(): ExperienceProviderPageContent {
     meetingPoint: { entranceNote: "", exteriorPhotoObjectKey: null },
     knowBeforeYouGo: [],
     hostUserIds: [],
+    participationConditions: { age: null, physical: null, hostLanguages: null, food: null, accessibility: null, weather: null },
   };
 }
 
@@ -176,6 +177,7 @@ export function seedKitchenPages(base: Date, owner: { vesselSpotId: string; vess
       meetingPoint: { entranceNote: "(sample) Ring the bell at the wooden gate.", exteriorPhotoObjectKey: null },
       knowBeforeYouGo: ["Wear comfortable clothes (sample)."],
       hostUserIds: [hostUserId],
+      participationConditions: { age: null, physical: null, hostLanguages: null, food: null, accessibility: null, weather: null },
     },
     photoObjectKeys: [...photos],
     photoAlts: ["The big wooden table (sample)", "A basket of vegetables (sample)", ""],
@@ -213,6 +215,8 @@ export function seedKitchenPages(base: Date, owner: { vesselSpotId: string; vess
       approvedAt: iso(base, -28 * DAY_MS),
       pausedAt: null,
       withdrawnAt: null,
+      reviewNote: null,
+      reviewNotedAt: null,
       createdAt: iso(base, -29 * DAY_MS),
       updatedAt: iso(base, -28 * DAY_MS),
     },
@@ -992,12 +996,14 @@ export function createMockPageRoutes(context: MockPagesContext) {
         approvedAt: null,
         pausedAt: null,
         withdrawnAt: null,
+        reviewNote: null,
+        reviewNotedAt: null,
         createdAt: at,
         updatedAt: at,
       };
     } else {
       const status = page.listing.status === "WITHDRAWN" ? "REQUESTED" : page.listing.status;
-      page.listing = { ...page.listing, status, consentVersion: body.consentVersion, consentedAt: at, updatedAt: at };
+      page.listing = { ...page.listing, status, consentVersion: body.consentVersion, consentedAt: at, reviewNote: null, reviewNotedAt: null, updatedAt: at };
     }
     return json(200, listingResponse(page));
   }
@@ -1007,7 +1013,7 @@ export function createMockPageRoutes(context: MockPagesContext) {
     if (!page?.listing) return errors.fail(404, "NOT_FOUND", { reason: "EXPERIENCE_LISTING_NOT_FOUND" });
     if (page.listing.status !== "WITHDRAWN") {
       const at = now().toISOString();
-      page.listing = { ...page.listing, status: "WITHDRAWN", withdrawnAt: at, updatedAt: at };
+      page.listing = { ...page.listing, status: "WITHDRAWN", withdrawnAt: at, reviewNote: null, reviewNotedAt: null, updatedAt: at };
     }
     return json(200, listingResponse(page));
   }

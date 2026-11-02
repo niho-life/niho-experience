@@ -64,7 +64,7 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
   // The console layout shows sign-in, refresh and error states.
   if (!context) return null;
   const { provider, linkProviderId, providerNotFound } = context;
-  const { nihoUserId, mockScenario } = context.session;
+  const { mockScenario } = context.session;
   const otaShown = otaBookingsShown(mockScenario);
   const session = sessionQueryOf(query);
   const besideNiho = providerOperationsEnabled();
@@ -76,7 +76,7 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
     // The session's OTA bookings of their products, read only (出欠 where it is kept).
     if (calendar?.choice?.kind !== "OPERATOR") return <HostRegisterPrompt title="予約" />;
     if (!session) notFound();
-    const ota = await loadOtaSession(calendar.choice.id, nihoUserId, null, session, mockScenario);
+    const ota = await loadOtaSession(calendar.choice.id, null, session, mockScenario);
     const backHref = bookingsHref({ providerId: linkProviderId });
     if (ota.status === "error") return <SessionUnavailable backHref={backHref} title="参加者を読み込めませんでした" body={OTA_BOOKING_LOAD_FAILED_TEXT} />;
     const view = ota.status === "live" ? withOtaGuests(null, ota.bookings, session) : null;
@@ -84,12 +84,12 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
     return <HostSession key={key(calendar.choice.id)} session={view} now={ota.now} conversations={[]} providerId={linkProviderId} site={{ besideNiho: false, providerId: calendar.choice.id, messages: false, attendance: false }} ota={{ attendance: ota.attendance }} />;
   }
   if (!session) notFound();
-  const otaLoad: HostOtaSessionLoad = otaShown ? await loadOtaSession(provider.id, nihoUserId, provider, session, mockScenario) : { status: "closed" };
+  const otaLoad: HostOtaSessionLoad = otaShown ? await loadOtaSession(provider.id, provider, session, mockScenario) : { status: "closed" };
   const otaGuests = otaLoad.status === "live" ? otaLoad.bookings : [];
   const ota = otaLoad.status === "live" ? { attendance: otaLoad.attendance } : null;
   const otaNow = otaLoad.status === "live" ? otaLoad.now : "";
   if (!besideNiho || [query.source].flat()[0] === "site") {
-    const site = await loadSiteSession(provider, nihoUserId, session);
+    const site = await loadSiteSession(provider, session);
     const backHref = bookingsHref({ providerId: linkProviderId, source: besideNiho ? "site" : null });
     if (site.status === "error") return <SessionUnavailable backHref={backHref} title="参加者を読み込めませんでした" body={SITE_SESSION_LOAD_FAILED_TEXT} />;
     if (site.status === "live") {

@@ -7,7 +7,7 @@ vi.mock("./server", () => ({ nihoApiFetch: () => fetch }));
 
 import { resolveGuideWriter } from "./guide-writer-resolver";
 
-const session = { idToken: "secret-token" } as HostSession;
+const session = { accessToken: "secret-token" } as HostSession;
 const json = (body: unknown, status = 200, headers?: HeadersInit) => Response.json(body, { status, headers });
 
 describe("NIHO guide writer resolver", () => {

@@ -82,13 +82,13 @@ function together(reads: readonly ConnectedPayoutsRead[]): SitePayoutsRead | "un
 }
 
 /** Where this account's payouts are read from; null leaves the section out. */
-async function readerFor(provider: Pick<HostProvider, "id" | "memberRole">, session: Pick<HostSession, "nihoUserId" | "mockScenario">): Promise<PayoutsReader | null> {
+async function readerFor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">): Promise<PayoutsReader | null> {
   if (provider.memberRole !== "OWNER") return null;
   if (isHostMock()) return session.mockScenario === "site-sales" ? { today: MOCK_TODAY, read: async (window) => previewRead(window) } : null;
   const platformStripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY;
   const sales = hostSalesRepository();
   if (!config.hostSalesPayoutsEnabled || !platformStripeKey || !sales) return null;
-  const accounts = await sales.listPayoutAccountsForHost(ownerActor(provider.id, session.nihoUserId));
+  const accounts = await sales.listPayoutAccountsForHost(ownerActor(provider));
   if (!accounts.length) return null;
   return {
     today: todayInJapan(Date.now()),
@@ -123,7 +123,7 @@ function errorName(error: unknown): string {
  * a month back is ample, and the read stays one page (100) of about two months of payouts. The store's OWNER check
  * failing leaves the section out, as 売上 does.
  */
-export async function loadSitePayouts(provider: Pick<HostProvider, "id" | "memberRole">, session: Pick<HostSession, "nihoUserId" | "mockScenario">, month: SalesMonth): Promise<HostSitePayoutsLoad> {
+export async function loadSitePayouts(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">, month: SalesMonth): Promise<HostSitePayoutsLoad> {
   try {
     const reader = await readerFor(provider, session);
     if (!reader) return { status: "closed" };

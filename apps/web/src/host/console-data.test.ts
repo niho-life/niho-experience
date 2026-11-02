@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMockHostFetch, MOCK_ID_TOKEN_PREFIX } from "@/lib/host/mock-niho";
+import { createMockHostFetch, MOCK_ACCESS_TOKEN_PREFIX } from "@/lib/host/mock-niho";
 import { GOOGLE_NOT_CONNECTED } from "./calendar";
 import {
   bookingClock,
@@ -64,7 +64,7 @@ describe("console data per provider", () => {
   });
 
   it("covers every provider the synthetic NIHO returns", async () => {
-    const response = await createMockHostFetch("default")("https://niho.example.test/api/experience-providers", { headers: { authorization: `Bearer ${MOCK_ID_TOKEN_PREFIX}test` } });
+    const response = await createMockHostFetch("default")("https://niho.example.test/api/experience-providers", { headers: { authorization: `Bearer ${MOCK_ACCESS_TOKEN_PREFIX}test` } });
     const { providers } = (await response.json()) as { providers: { id: string }[] };
     expect(providers.map((provider) => provider.id).sort()).toEqual([...MOCK_CONSOLE_PROVIDERS.keys()].sort());
   });

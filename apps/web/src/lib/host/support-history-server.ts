@@ -1,7 +1,7 @@
 import "server-only";
 import { createExperienceHostSupportHistoryApiClient, type ExperienceHostSupportHistoryFailure } from "@niho-experience/api-client/host-support-history";
 import { config } from "@/lib/config";
-import { idTokenUsable } from "./session";
+import { accessTokenUsable } from "./session";
 import { hostNotFound, noStoreJson, readHostSession } from "./server";
 
 export const isHostSupportHistoryEnabled = () => config.apiMode === "http" && config.hostConsoleEnabled && config.hostSupportHistoryApiEnabled;
@@ -18,6 +18,6 @@ export async function loadHostSupportHistoryClient() {
   if (!isHostSupportHistoryEnabled()) return { ok: false as const, response: hostNotFound() };
   const session = await readHostSession();
   if (!session) return { ok: false as const, response: noStoreJson({ error: "unauthenticated" }, 401) };
-  if (!idTokenUsable(session, Date.now())) return { ok: false as const, response: noStoreJson({ error: "session_refresh_required" }, 401) };
-  return { ok: true as const, client: createExperienceHostSupportHistoryApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: session.idToken, fetch }) };
+  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: noStoreJson({ error: "session_refresh_required" }, 401) };
+  return { ok: true as const, client: createExperienceHostSupportHistoryApiClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch }) };
 }

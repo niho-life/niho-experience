@@ -12,7 +12,7 @@ import {
 import { EXPERIENCE_PROVIDER_BOOKING_STATUSES, type ExperienceProviderBookingDetailResponse, type ExperienceProviderBookingListQuery, type ExperienceProviderBookingListResponse, type ExperienceProviderBookingStatusResponse, type ExperienceProviderCancelBookingInput, type ExperienceProviderCancelBookingResponse, type ExperienceProviderMemberListResponse, type ExperienceProviderMemberResponse, type ExperienceProviderMessageInput, type ExperienceProviderMessageResponse, type ExperienceProviderOperationsResult, type ExperienceProviderPutMemberInput, type ExperienceProviderResolveMemberInput, type ExperienceProviderResolveMemberResponse } from "./types.ts";
 
 type Decoder<T> = (value: unknown) => T | null;
-type BaseOptions = { nihoWebOrigin: string; idToken: string; fetch?: FetchLike; timeoutMs?: number };
+type BaseOptions = { nihoWebOrigin: string; accessToken: string; fetch?: FetchLike; timeoutMs?: number };
 const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -38,7 +38,7 @@ function queryString(query: ExperienceProviderBookingListQuery): string | null {
 
 export function createExperienceProviderOperationsClient(options: BaseOptions) {
   const origin = normalizeOrigin(options.nihoWebOrigin);
-  if (!TOKEN.test(options.idToken)) throw new Error("Experience provider operations token is invalid");
+  if (!TOKEN.test(options.accessToken)) throw new Error("Experience provider operations token is invalid");
   const send = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, status: number, decode: Decoder<T>, body?: unknown): Promise<ExperienceProviderOperationsResult<T>> {
@@ -46,7 +46,7 @@ export function createExperienceProviderOperationsClient(options: BaseOptions) {
     try {
       response = await send(new URL(path, origin).href, {
         method,
-        headers: { accept: "application/json", authorization: `Bearer ${options.idToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { accept: "application/json", authorization: `Bearer ${options.accessToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         cache: "no-store",
         credentials: "omit",

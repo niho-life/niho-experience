@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   config: { hostConsoleEnabled: true },
   editorEnabled: vi.fn(() => true),
   readSession: vi.fn(),
-  authMe: vi.fn(),
+  listProviders: vi.fn(),
   clearSession: vi.fn(),
   repositoryFactory: vi.fn(),
 }));
@@ -15,7 +15,7 @@ vi.mock("@/lib/editor/server", () => ({ isEditorConsole: mocks.editorEnabled }))
 vi.mock("@/lib/experience/store-server", () => ({ guideRepository: mocks.repositoryFactory }));
 vi.mock("@/lib/host/server", () => ({
   readHostSession: mocks.readSession,
-  hostApiClient: () => ({ getAuthMe: mocks.authMe }),
+  hostApiClient: () => ({ listExperienceProviders: mocks.listProviders }),
   clearSessionCookie: mocks.clearSession,
   noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }),
 }));
@@ -26,37 +26,35 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.config.hostConsoleEnabled = true;
   mocks.editorEnabled.mockReturnValue(true);
-  mocks.readSession.mockResolvedValue({ nihoUserId: "owner-a", idToken: "secret", idTokenExpiresAt: Date.now() + 3_600_000 });
-  mocks.authMe.mockResolvedValue({ ok: true, data: { user: { id: "owner-a" } } });
+  mocks.readSession.mockResolvedValue({ accessToken: "secret", accessTokenExpiresAt: Date.now() + 3_600_000 });
+  mocks.listProviders.mockResolvedValue({ ok: true, data: { providers: [{ id: "provider-a", ownerUserId: "owner-a", memberRole: "OWNER" }] } });
   mocks.repositoryFactory.mockReturnValue({});
 });
 
 describe("host guide link identity boundary", () => {
-  it("checks NIHO identity before exposing the Experience Store", async () => {
+  it("uses the current owned provider as the NIHO identity anchor before exposing the Experience Store", async () => {
     const loaded = await loadHostGuideLinkContext();
     expect(loaded.ok).toBe(true);
     if (loaded.ok) expect(loaded.value.actor).toEqual({ nihoUserId: "owner-a" });
-    expect(mocks.authMe).toHaveBeenCalledTimes(1);
+    expect(mocks.listProviders).toHaveBeenCalledTimes(1);
     expect(mocks.repositoryFactory).toHaveBeenCalledTimes(1);
   });
 
-  it("clears a stale or mismatched host session", async () => {
-    mocks.authMe.mockResolvedValueOnce({ ok: true, data: { user: { id: "other-account" } } });
-    const mismatch = await loadHostGuideLinkContext();
+  it("refuses a provider the current account does not own and clears a revoked NIHO token", async () => {
+    const mismatch = await loadHostGuideLinkContext("other-provider");
     expect(mismatch.ok).toBe(false);
-    if (!mismatch.ok) expect(mismatch.response.status).toBe(401);
-    expect(mocks.clearSession).toHaveBeenCalledTimes(1);
+    if (!mismatch.ok) expect(mismatch.response.status).toBe(403);
     expect(mocks.repositoryFactory).not.toHaveBeenCalled();
 
-    mocks.authMe.mockResolvedValueOnce({ ok: false, kind: "error", status: 401 });
+    mocks.listProviders.mockResolvedValueOnce({ ok: false, kind: "error", status: 401 });
     const revoked = await loadHostGuideLinkContext();
     expect(revoked.ok).toBe(false);
     if (!revoked.ok) expect(revoked.response.status).toBe(401);
-    expect(mocks.clearSession).toHaveBeenCalledTimes(2);
+    expect(mocks.clearSession).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed on NIHO outage and while the feature is disabled", async () => {
-    mocks.authMe.mockResolvedValueOnce({ ok: false, kind: "network_error" });
+    mocks.listProviders.mockResolvedValueOnce({ ok: false, kind: "network_error" });
     const outage = await loadHostGuideLinkContext();
     expect(outage.ok).toBe(false);
     if (!outage.ok) expect(outage.response.status).toBe(503);

@@ -18,14 +18,14 @@ vi.mock("@/lib/config", () => ({
 }));
 vi.mock("@/lib/experience/store-server", () => ({ hostSalesRepository: () => state.store }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => state.mock }));
-vi.mock("./site-bookings-server", () => ({ ownerActor: (providerId: string, nihoUserId: string) => ({ providerId, nihoUserId, calendarRoleCeiling: "OWNER" }) }));
+vi.mock("./site-bookings-server", () => ({ ownerActor: (provider: { id: string; ownerUserId: string }) => ({ providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" }) }));
 vi.mock("@niho-experience/experience-payments", () => ({ readConnectedPayouts: (...args: unknown[]) => state.stripe(...args) }));
 
 import { loadSitePayouts, SITE_PAYOUTS_DEADLINE_MS } from "./site-sales-payouts-server";
 import { SITE_PAYOUTS_FAILED_TEXT, SITE_PAYOUTS_SLOW_TEXT, SITE_PAYOUTS_UNREACHABLE_TEXT } from "./site-sales-payouts";
 
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as const;
-const SESSION = { nihoUserId: "sample-niho-user" };
+const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as const;
+const SESSION = { mockScenario: undefined };
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 const ACCOUNT = "acct_SampleSeller0001";
 const OTHER = "acct_SampleSeller0002";
@@ -103,7 +103,7 @@ describe("この口座への入金 from Stripe", () => {
   });
 
   it("is not there for anyone but the OWNER, with the flag off, without the key, the store, an account, or when the store refuses", async () => {
-    expect(await loadSitePayouts({ id: "sample-provider", memberRole: "EDITOR" }, SESSION, NOVEMBER)).toEqual({ status: "closed" });
+    expect(await loadSitePayouts({ id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "EDITOR" }, SESSION, NOVEMBER)).toEqual({ status: "closed" });
     state.enabled = false;
     expect(await loadSitePayouts(OWNER, SESSION, NOVEMBER)).toEqual({ status: "closed" });
     state.enabled = true;

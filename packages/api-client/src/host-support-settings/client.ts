@@ -13,7 +13,7 @@ import type {
   ExperienceHostSupportSettingsStateResponse,
 } from "./types.ts";
 
-export interface ExperienceHostSupportSettingsApiClientOptions { nihoWebOrigin: string; idToken: string; fetch?: FetchLike; timeoutMs?: number }
+export interface ExperienceHostSupportSettingsApiClientOptions { nihoWebOrigin: string; accessToken: string; fetch?: FetchLike; timeoutMs?: number }
 export type ExperienceHostSupportSettingsFailure =
   | { ok: false; kind: "invalid_request" }
   | { ok: false; kind: "rejected"; status: 401 | 403 }
@@ -61,10 +61,10 @@ async function boundedJson(response: Response): Promise<unknown> {
 
 export function createExperienceHostSupportSettingsApiClient(input: ExperienceHostSupportSettingsApiClientOptions): ExperienceHostSupportSettingsApiClient {
   const origin = normalizeOrigin(input.nihoWebOrigin);
-  if (!TOKEN.test(input.idToken)) throw new Error("Host idToken contains characters that cannot be sent in Authorization");
+  if (!TOKEN.test(input.accessToken)) throw new Error("Host accessToken contains characters that cannot be sent in Authorization");
   const request = input.fetch ?? fetch;
   const timeoutMs = input.timeoutMs ?? 10_000;
-  const headers = { accept: "application/json", authorization: `Bearer ${input.idToken}` };
+  const headers = { accept: "application/json", authorization: `Bearer ${input.accessToken}` };
 
   async function json<T>(path: string, init: RequestInit, decode: (value: unknown) => T | null, accepted: readonly number[]): Promise<ExperienceHostSupportSettingsResult<T>> {
     let response: Response;

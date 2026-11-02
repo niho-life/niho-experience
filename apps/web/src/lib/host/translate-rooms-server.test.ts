@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
-vi.mock("./session", () => ({ idTokenUsable: mocks.usable }));
+vi.mock("./session", () => ({ accessTokenUsable: mocks.usable }));
 vi.mock("./server", () => ({
   readHostSession: mocks.readHost,
   nihoApiFetch: () => mocks.upstreamFetch,
@@ -47,10 +47,10 @@ describe("translate rooms server boundary", () => {
 
   it("uses only the sealed current host session and NIHO's fetch for that session", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
-    mocks.readHost.mockResolvedValue({ idToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
     const loaded = await loadTranslateRoomsClient();
     expect(loaded).toEqual({ ok: true, client: { marker: "translate-client" } });
-    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", idToken: "sealed-host-token", fetch: mocks.upstreamFetch });
+    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", accessToken: "sealed-host-token", fetch: mocks.upstreamFetch });
   });
 
   it("answers 404 while closed, 401 without a session and 401 refresh when the token is nearly out", async () => {
@@ -59,7 +59,7 @@ describe("translate rooms server boundary", () => {
     mocks.config.experienceTranslateApiEnabled = true;
     mocks.readHost.mockResolvedValue(null);
     expect((await loadTranslateRoomsClient() as { response: Response }).response.status).toBe(401);
-    mocks.readHost.mockResolvedValue({ idToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
     mocks.usable.mockReturnValue(false);
     const refresh = (await loadTranslateRoomsClient() as { response: Response }).response;
     expect(refresh.status).toBe(401);

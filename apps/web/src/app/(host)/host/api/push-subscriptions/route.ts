@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   const store = hostPushStore();
   if (!store) return pushNotConfigured();
   try {
-    await store.save({ nihoUserId: opened.session.nihoUserId, connectionId: opened.session.connectionId, ...parsed.subscription, deviceLabel: pushDeviceLabel(request.headers.get("user-agent")) });
+    await store.save({ nihoUserId: opened.nihoUserId, connectionId: opened.session.connectionId, ...parsed.subscription, deviceLabel: pushDeviceLabel(request.headers.get("user-agent")) });
   } catch {
     return pushUnavailable();
   }
@@ -29,7 +29,7 @@ export async function DELETE(request: NextRequest) {
   const store = hostPushStore();
   if (!store) return pushNotConfigured();
   try {
-    await store.remove(opened.session.nihoUserId, parsed.endpoint);
+    await store.remove(opened.nihoUserId, parsed.endpoint);
   } catch {
     return pushUnavailable();
   }

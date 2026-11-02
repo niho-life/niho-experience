@@ -248,10 +248,9 @@ describe("Admin HTTP refresh and cookie separation", () => {
 
   it("does not accept the host or synthetic Admin preview cookie", async () => {
     const host = startSession({
-      nihoUserId: "synthetic-host-user",
       refreshToken: "host-refresh",
-      idToken: "host-id",
-      idTokenExpiresAt: Date.now() + HOUR,
+      accessToken: "host-access-token",
+      accessTokenExpiresAt: Date.now() + HOUR,
       connectionId: "host-connection",
       connectionExpiresAt: Date.now() + 24 * HOUR,
       displayName: "Host",

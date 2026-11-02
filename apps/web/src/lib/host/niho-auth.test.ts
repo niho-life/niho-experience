@@ -25,12 +25,12 @@ describe("NIHO confirmation URL", () => {
 });
 
 describe("code exchange", () => {
-  const ok = { customToken: "custom", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: "2027-01-19T03:00:00.000Z", user: { id: "u1", displayName: "合成 ホスト", handle: "synthetic", iconImage: "https://images.example.test/a.jpg" } };
+  const ok = { accessToken: "web-access-1", expiresAt: "2026-10-21T04:00:00.000Z", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: "2027-01-19T03:00:00.000Z", user: { displayName: "合成 ホスト", iconImage: "https://images.example.test/a.jpg" } };
 
   it("posts the client id, code and verifier and reads the connection", async () => {
     const { deps: d, calls } = deps(() => json(200, ok));
     const result = await exchangeCode(d, { code: "code-1", codeVerifier: "verifier-1" });
-    expect(result).toEqual({ ok: true, value: { nihoUserId: "u1", customToken: "custom", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: Date.parse(ok.connectionExpiresAt), displayName: "合成 ホスト", iconUrl: "https://images.example.test/a.jpg" } });
+    expect(result).toEqual({ ok: true, value: { accessToken: "web-access-1", accessTokenExpiresAt: Date.parse(ok.expiresAt), refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: Date.parse(ok.connectionExpiresAt), displayName: "合成 ホスト", iconUrl: "https://images.example.test/a.jpg" } });
     expect(calls[0]!.url).toBe(`${NIHO}/api/auth/app-connect/exchange`);
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ clientId: "niho-experience", code: "code-1", codeVerifier: "verifier-1" });
     expect(calls[0]!.init.redirect).toBe("manual");
@@ -41,15 +41,15 @@ describe("code exchange", () => {
     expect(await exchangeCode(deps(() => json(429, {})).deps, { code: "c", codeVerifier: "v" })).toEqual({ ok: false, reason: "unavailable" });
     expect(await exchangeCode(deps(() => json(503, {})).deps, { code: "c", codeVerifier: "v" })).toEqual({ ok: false, reason: "unavailable" });
     expect(await exchangeCode(deps(() => Promise.reject(new TypeError("network"))).deps, { code: "c", codeVerifier: "v" })).toEqual({ ok: false, reason: "unavailable" });
-    expect(await exchangeCode(deps(() => json(200, { customToken: "x" })).deps, { code: "c", codeVerifier: "v" })).toEqual({ ok: false, reason: "unavailable" });
+    expect(await exchangeCode(deps(() => json(200, { customToken: "x", user: { id: "u1" } })).deps, { code: "c", codeVerifier: "v" })).toEqual({ ok: false, reason: "unavailable" });
   });
 });
 
 describe("connection refresh", () => {
   it("returns the rotated refresh token", async () => {
-    const { deps: d, calls } = deps(() => json(200, { customToken: "custom-2", expiresAt: "2026-10-21T04:00:00.000Z", refreshToken: "refresh-2", connectionExpiresAt: "2027-01-19T03:00:00.000Z" }));
+    const { deps: d, calls } = deps(() => json(200, { accessToken: "web-access-2", expiresAt: "2026-10-21T04:00:00.000Z", refreshToken: "refresh-2", connectionExpiresAt: "2027-01-19T03:00:00.000Z" }));
     const result = await refreshConnection(d, "refresh-1");
-    expect(result).toMatchObject({ ok: true, value: { customToken: "custom-2", refreshToken: "refresh-2" } });
+    expect(result).toMatchObject({ ok: true, value: { accessToken: "web-access-2", refreshToken: "refresh-2" } });
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ clientId: "niho-experience", refreshToken: "refresh-1" });
   });
 
@@ -68,7 +68,7 @@ describe("Firebase custom token sign-in", () => {
 });
 
 describe("logout", () => {
-  it("deletes the connection with the ID token and reason=logout", async () => {
+  it("deletes the connection with the Web access token and reason=logout", async () => {
     const { deps: d, calls } = deps(() => new Response(null, { status: 204 }));
     expect(await deleteConnection(d, "conn_1", "id-1")).toBe(true);
     expect(calls[0]!.url).toBe(`${NIHO}/api/auth/app-connections/conn_1?reason=logout`);

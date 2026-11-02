@@ -163,13 +163,13 @@ describe("ホスト契約の監査の自己検査", () => {
     const widened = clone();
     widened.paths["/api/users/{userId}"] = { get: { operationId: "getUser", security: [{ FirebaseIdToken: [] }], responses: {} } };
     widened.paths["/api/experience-providers"].get.security = [];
-    widened.paths["/api/experience-providers/{providerId}"].patch.security = [{ FirebaseIdToken: [] }, {}];
-    widened.paths["/api/auth/me"].delete = { operationId: "deleteMe", security: [{ FirebaseIdToken: [] }], responses: {} };
+    widened.paths["/api/experience-providers/{providerId}"].patch.security = [{ AppConnectWebAccessToken: [] }, {}];
+    widened.paths["/api/auth/me"].delete = { operationId: "deleteMe", security: [{ AppConnectWebAccessToken: [] }], responses: {} };
     expect(auditHostContractDocument(widened)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("/api/users/{userId}: ホスト API の範囲"),
-        "GET /api/experience-providers: security は [{ FirebaseIdToken: [] }] だけにします",
-        "PATCH /api/experience-providers/{providerId}: security は [{ FirebaseIdToken: [] }] だけにします",
+        "GET /api/experience-providers: security は [{ AppConnectWebAccessToken: [] }] だけにします",
+        "PATCH /api/experience-providers/{providerId}: security は [{ AppConnectWebAccessToken: [] }] だけにします",
         expect.stringContaining("DELETE /api/auth/me: この path で使える method は GET だけです"),
       ]),
     );
@@ -246,7 +246,7 @@ describe("ホスト契約の監査の自己検査", () => {
     expect(auditHostContractDocument(loose)).toEqual(
       expect.arrayContaining([
         "ExperienceHostErrorDetails[3]: additionalProperties: false が必要です",
-        "ExperienceHostErrorDetails.oneOf[11]: 何でも通る組です（閉じた object か $ref か型を書く）",
+        "ExperienceHostErrorDetails.oneOf[8]: 何でも通る組です（閉じた object か $ref か型を書く）",
         "ExperienceProviderPageMeetingPointUpdateRequest[1].meetingPoint: additionalProperties: false が必要です",
         expect.stringContaining("ExperienceProviderPagePreviewOccurrence[0]: 応答の項目は常に返す"),
       ]),

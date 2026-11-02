@@ -41,11 +41,11 @@ describe("experience provider operations selected contract", () => {
     );
   });
 
-  it("keeps the draft host role enum anchored to the independent canonical operations role", async () => {
+  it("keeps page API roles narrower than the separate operational cohost role", async () => {
     const operations = (await readContract("experience-provider-operations-api.openapi.json")).document;
     const host = (await readContract("experience-host-api.openapi.json")).document;
     expect(operations.components.schemas.ProviderRole?.enum).toEqual(["OWNER", "EDITOR", "COHOST"]);
-    expect(host.components.schemas.ExperienceProviderMemberRole?.enum).toEqual(operations.components.schemas.ProviderRole?.enum);
+    expect(host.components.schemas.ExperienceProviderMemberRole?.enum).toEqual(["OWNER", "EDITOR"]);
     expect(EXPERIENCE_PROVIDER_OPERATION_ROLES).toEqual(operations.components.schemas.ProviderRole?.enum);
     expect(EXPERIENCE_HOST_API_CONTRACT.status).toBe("draft");
   });

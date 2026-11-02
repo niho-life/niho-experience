@@ -32,7 +32,7 @@ flowchart LR
 
 旅行者は英語のページで体験を探し、日時・人数・料金・販売者・キャンセル条件を確認する。会員登録を求めず、必要最小限の連絡先をゲストAPIへ送信し、StripeのCheckoutに移る。価格、在庫、販売者、決済口座は共通APIが決定する。v1の予約確認は既存NIHO側を使い、決済の成立はwebhookを正とする。
 
-提供者（ホスト）は、このサイトの `/host` で登録・体験ページ・予約対応・売上を扱う（オーナー決定 2026-10-21・[#84](https://github.com/niho-life/niho-experience/issues/84)）。ログインはNIHOに任せ、NIHOの確認画面で「接続する」を押すと一度きりのコードでこのサイトへ戻る。このサイトのサーバーがコードをトークンに替え、HttpOnly cookie に暗号化して持つ。ブラウザのJavaScriptにはトークンを渡さず、画面からの操作は `/host/api/*` からサーバーがNIHOの提供者APIを呼ぶ。このトークンで呼べるのは提供者APIと本人の表示に要るものだけで、権限（OWNER / EDITOR / COHOST）の判断はNIHOのAPIが毎回行う。OWNERは販売者・法的同意・Stripe売上受取・メンバー管理を担い、COHOSTはその提供者の全体験・予約に対する原稿、写真、日程、定員、予約承認・辞退、返信を担う。EDITORの既存範囲は広げない。既存ログイン、権限のある販売者、接続済みStripe口座を再利用する。NIHOが原稿作成や公開を手伝い、提供者には開催・受入に必要な操作を中心に見せる。口座未接続者の必要な本人確認は残る。
+提供者（ホスト）は、このサイトの `/host` で登録・体験ページ・予約対応・売上を扱う（オーナー決定 2026-10-21・[#84](https://github.com/niho-life/niho-experience/issues/84)）。ログインはNIHOに任せ、NIHOの確認画面で「接続する」を押すと一度きりのコードでこのサイトへ戻る。このサイトのサーバーがコードをNIHO専用Web access tokenへ交換し、refresh tokenとともにHttpOnly cookieへ暗号化して持つ。ブラウザのJavaScriptにはトークンを渡さず、画面からの操作は `/host/api/*` からサーバーがNIHOの提供者APIを呼ぶ。現在の交換応答はNIHO user IDとメールを返さないため、Experience内のprovider-scoped記録は選択中providerの `ownerUserId` に結び、操作権限はNIHO APIのscoped token検証とExperience側role ceilingの両方で制限する。個人アカウント本人の識別が必要な機能へowner IDを転用しない。NIHOの通常provider DTOはOWNER / EDITORを返し、COHOST運営API v1.1.0は agreed-not-deployed のため、COHOSTの予約UI・権限はNIHO側契約の配備と受入まで閉じる。OWNERは販売者・法的同意・Stripe売上受取・メンバー管理を担い、配備後のCOHOSTはそのproviderの全体験・予約に対する原稿、写真、日程、定員、予約承認・辞退、返信を担う。EDITORの既存範囲は広げない。既存ログイン、権限のある販売者、接続済みStripe口座を再利用する。NIHOが原稿作成や公開を手伝い、提供者には開催・受入に必要な操作を中心に見せる。口座未接続者の必要な本人確認は残る。
 
 NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ昇格させず、Experience内の[商品限定運営者](product-operators.md) grantでカレンダーだけを扱う。NIHOのfresh identityとhost API接続確認は省略せず、予約・売上・Google管理などprovider-wide情報は公開しない。
 
@@ -57,7 +57,7 @@ NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ�
 ## API契約
 
 - 実行時はHTTPS APIで接続する。公開サイトからDBやprivateリポへ接続しない。
-- 旅行者向けの公開APIは認証を使わない。ホストの画面のAPIは、サーバーからBearer（ホストの接続のIDトークン）で呼ぶ。二つは契約・型・監査を分ける（[#87](https://github.com/niho-life/niho-experience/issues/87)）。
+- 旅行者向けの公開APIは認証を使わない。ホストの画面のAPIは、サーバーからBearer（NIHO Web app-connect専用の短命access token）で呼ぶ。二つは契約・型・監査を分ける（[#87](https://github.com/niho-life/niho-experience/issues/87)）。
 - Admin予約支援APIはホストAPIとも分け、NIHOが検証したAdmin tokenをexperienceのサーバーだけが持つ。通常のホストcookie・役割・クエリでAdminへ昇格させない。HTTPモードの選別済みAdmin認証、予約・通知read、予約別担当・内部メモcaseは別契約・別flagで受け入れ、いずれも配備・受入までは準備中として閉じる。caseを有効にしても承認・辞退・取消／返金・送信・権限付与へ広げない。
 - Admin操作とホスト本人の支援履歴も独立した選別契約・既定OFF flag・固定BFFに分ける。操作は最新snapshotとUUID v4のimmutable command、同ID照合、APIのretryAllowedに従い、画面で料金や返金を再計算しない。ホスト履歴は本人scope内の最小metadataだけとし、内部メモ・Admin連絡先・hash・Stripe IDを渡さない。どちらもAPI先行配備・受入までは`agreed-not-deployed`として閉じ、HTTP失敗をmockへ差し替えない。
 - Guideのwriter grantとcategoryはExperienceが正本とし、NIHO platform ADMIN serverだけが既定OFFの`/internal/guide-admin/v1`をサービスアカウントID tokenで操作する。NIHOは毎回のADMIN判定、verified email・本人性・招待受諾・配送・outboxを正本として持ち、Experienceへは安定NIHO user ID、管理actor ID、単調増加version、相関用invitation UUIDだけを渡す。既存`/admin`・`/editor`・`/host` sessionではこのAPIを認可しない。詳細は[Guide CMS](guide-cms.md#niho-adminからのgrantcategory管理224)を参照する。

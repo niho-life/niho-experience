@@ -6,8 +6,9 @@ import { clearOperatorInvitationCookie, decodeOperatorInvitationCookie, OPERATOR
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { invitationIdOrNull, withProvider } from "@/lib/host/routes";
 import { hostNotFound, loadHostProviders, noStoreJson, readHostSession, siteOrigin } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { config } from "@/lib/config";
+import { hostUserIdFromOwnedProviders } from "@/lib/host/providers";
 
 export const runtime = "nodejs";
 
@@ -25,13 +26,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const prepared = decodeOperatorInvitationCookie(request.cookies.get(OPERATOR_INVITATION_COOKIE)?.value);
   if (!prepared || prepared.invitationId !== invitationId) return noStoreJson({ error: "invalid_invitation_session" }, 403);
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return noStoreJson({ error: "unauthenticated" }, 401);
+  if (!session || !accessTokenUsable(session, Date.now())) return noStoreJson({ error: "unauthenticated" }, 401);
   const identity = await loadHostProviders();
   if (identity.status !== "ok") return noStoreJson({ error: identity.status === "error" ? "identity_unavailable" : "unauthenticated" }, identity.status === "error" ? 503 : 401);
+  const nihoUserId = hostUserIdFromOwnedProviders(identity.providers);
+  if (!nihoUserId) return noStoreJson({ error: "identity_unavailable" }, 503);
   const repository = productOperatorRepository();
   if (!repository) return noStoreJson({ error: "unavailable" }, 503);
   try {
-    const grant = await repository.accept(invitationId, prepared.token, session.nihoUserId);
+    const grant = await repository.accept(invitationId, prepared.token, nihoUserId);
     const response = noStoreJson({ href: withProvider("/host/calendar", grant.providerId) });
     clearOperatorInvitationCookie(response);
     return response;

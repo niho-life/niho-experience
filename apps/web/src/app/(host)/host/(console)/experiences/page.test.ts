@@ -50,7 +50,7 @@ describe("体験 with provider operations on", () => {
     const element = await HostExperiencesPage({ searchParams: Promise.resolve({}) });
     const live = elements(element).find((item) => item.type === HostLiveExperiences);
     expect(live?.props).toEqual({ providerId: "sample-provider", linkProviderId: "sample-provider", ratings: RATINGS });
-    expect(state.ratings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user");
+    expect(state.ratings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }));
   });
 
   it("keeps the preview's list and reads no ★ from the experience DB with provider operations off", async () => {

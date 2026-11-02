@@ -17,7 +17,7 @@ import {
 import { siteThreadRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
 import { hostReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
@@ -58,8 +58,9 @@ export function japanMinute(utc: string): string {
   return actionTime(todayInJapan(at), at);
 }
 
-function ownerActor(providerId: string, nihoUserId: string): HostActor {
-  return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
+function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
+  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /** One stored message as メッセージ shows it: the guest's words (translation still null) or the host's reply and its email. */
@@ -155,11 +156,11 @@ export type HostGuestQuestionsLoad =
  * `?thread=` names, opened; or this site's booking `?booking=` names (#285 slice 6b), its thread opened or, before
  * anyone wrote, its empty one.
  */
-export async function loadGuestQuestions(provider: HostProvider, nihoUserId: string, requestedThread: string | null, requestedBooking: string | null = null): Promise<HostGuestQuestionsLoad> {
+export async function loadGuestQuestions(provider: HostProvider, requestedThread: string | null, requestedBooking: string | null = null): Promise<HostGuestQuestionsLoad> {
   const site = siteThreadRepository();
   if (!site || provider.memberRole !== "OWNER") return { status: "closed" };
   const { repository: questions, kind } = site;
-  const actor = ownerActor(provider.id, nihoUserId);
+  const actor = ownerActor(provider);
   try {
     const page = await questions.listThreads(actor, { limit: LIST_LIMIT, kind });
     const { threads } = listPage(page);
@@ -203,11 +204,11 @@ export async function loadGuestQuestions(provider: HostProvider, nihoUserId: str
  * Beside NIHO's booking messages (provider operations): how many bookings made on this site have a thread, for the
  * notice that leads to them (`?source=site`). 0 when they are closed here, for anyone but the OWNER, or unreadable.
  */
-export async function countSiteBookingThreads(provider: HostProvider, nihoUserId: string): Promise<number> {
+export async function countSiteBookingThreads(provider: HostProvider): Promise<number> {
   const site = siteThreadRepository();
   if (!site || site.kind === "QUESTION" || provider.memberRole !== "OWNER") return 0;
   try {
-    return await site.repository.countThreads(ownerActor(provider.id, nihoUserId), { kind: "BOOKING" });
+    return await site.repository.countThreads(ownerActor(provider), { kind: "BOOKING" });
   } catch {
     return 0;
   }
@@ -218,14 +219,14 @@ type OwnerCheck = { ok: true; questions: GuestQuestionRepository; kind: GuestThr
 /** A usable session, the store, and NIHO saying this account owns the provider. */
 async function asOwner(providerId: string, failed: string): Promise<OwnerCheck> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const site = siteThreadRepository();
   if (!site) return { ok: false, message: failed };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? failed : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT };
-  return { ok: true, questions: site.repository, kind: site.kind, actor: ownerActor(providerId, session.nihoUserId) };
+  return { ok: true, questions: site.repository, kind: site.kind, actor: ownerActor(provider) };
 }
 
 function failure(error: unknown, failed: string): { ok: false; message: string } {
@@ -299,7 +300,7 @@ export async function draftGuestQuestionEnglish(
   translator: () => Translator | null = () => anthropicTranslator({ timeoutMs: REPLY_DRAFT_TIMEOUT_MS }),
 ): Promise<HostActionResult<{ english: string }>> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const translate = translator();
   if (!translate) return { ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT };
   const owner = await asOwner(providerId, REPLY_DRAFT_UNAVAILABLE_TEXT);

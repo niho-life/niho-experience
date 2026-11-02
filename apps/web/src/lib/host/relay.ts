@@ -54,13 +54,13 @@ export function mutationFromSameOrigin(method: string, headers: Headers, siteOri
   return headers.get("origin") === siteOrigin && headers.get("sec-fetch-site") === "same-origin";
 }
 
-export function relayRequestHeaders(incoming: Headers, idToken: string): Headers {
+export function relayRequestHeaders(incoming: Headers, accessToken: string): Headers {
   const headers = new Headers();
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = incoming.get(name);
     if (value !== null) headers.set(name, value);
   }
-  headers.set("authorization", `Bearer ${idToken}`);
+  headers.set("authorization", `Bearer ${accessToken}`);
   return headers;
 }
 
