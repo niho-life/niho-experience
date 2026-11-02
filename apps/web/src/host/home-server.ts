@@ -1,7 +1,7 @@
 import "server-only";
 import type { ExperienceHostApiClient, ExperienceHostApiFailure } from "@niho-experience/api-client/host";
 import type { HostProvider } from "@/lib/host/providers";
-import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
+import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 import { hostApiClient, isHostMock } from "@/lib/host/server";
 import { accessTokenUsable, type HostSession } from "@/lib/host/session";
 import { actionTime } from "./bookings";
@@ -13,7 +13,7 @@ import { liveHomeTodos, type HomePage, type HomePageListing, type HomeTodo, type
 /*
  * ホーム's 次にすること in http mode (the preview has its own, console-data.ts): the threads waiting for the OWNER's
  * answer (予約前の質問 and this site's bookings' messages, as メッセージ reads them), the reviews to answer (as レビュー
- * reads them), and with provider operations on, NIHO's drafts to finish and the listings it is checking. Each source
+ * reads them), and with provider pages on, NIHO's drafts to finish and the listings it is checking. Each source
  * is read as its own screen does, behind its own flags; one that cannot be read is said once on ホーム and the others
  * still show. This site's payments under review come from site-sessions-server.ts, as before. Nothing here marks a
  * thread read.
@@ -46,9 +46,9 @@ async function listingOf(client: ExperienceHostApiClient, providerId: string, pa
   }
 }
 
-/** NIHO's pages and the listings of the published ones (provider operations on, with a usable NIHO Web access token). */
+/** NIHO's pages and the listings of the published ones (provider pages on, with a usable NIHO Web access token). */
 async function readPages(provider: HostProvider, session: HostSession): Promise<PagesRead> {
-  if (!providerOperationsEnabled() || !accessTokenUsable(session, Date.now())) return NO_PAGES;
+  if (!providerPagesEnabled() || !accessTokenUsable(session, Date.now())) return NO_PAGES;
   try {
     const client = hostApiClient(session);
     const result = await client.listExperienceProviderPages(provider.id);
