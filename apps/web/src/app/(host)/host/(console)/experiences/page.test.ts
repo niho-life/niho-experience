@@ -66,6 +66,7 @@ describe("a row of NIHO's pages", () => {
   it("looks like the preview's: the title over the row, the language, the ★ link to the experience's reviews, a pill", () => {
     const html = row(page(), RATINGS["sample-walk"]);
     expect(html).toContain('href="/host/experiences/page-walk?providerId=sample-provider"');
+    expect(html).toContain("flex min-h-11 items-center");
     expect(html).toContain("after:absolute after:inset-0");
     expect(html).toContain(">Synthetic walk</a>");
     expect(html).toContain('<p class="text-[0.78125rem] leading-normal text-muted">英語</p>');
