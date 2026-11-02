@@ -75,7 +75,7 @@
 | Notice | `ui.tsx` | info / warn / danger / success / neutral。アイコン + 読み上げ用ラベル + 見出し + 次の行動 |
 | Pill | `ui.tsx` | 状態（満席・停止）だけ。プレビュー掲載のピルは出さない。人気・残りわずか等の演出には使わない |
 | 写真 | `Photo.tsx` | 比率固定でレイアウトのずれを防ぐ。`sizes` 指定。仮の写真にもタグを付けない（プレビューであることはフッターの1行で伝える） |
-| プレビュー表記 | `SiteChrome.tsx` `PreviewNote` | プレビュー（mock）だけ、フッター最下部に小さな1行（`role="note"`）。pilot は「real hosts; dates, prices and photos are provisional · nothing can be booked」、合成は「hosts, dates and prices are invented · nothing can be booked」、どちらも契約版を添える。公開文書の共通枠（chrome）を使うときも同じ |
+| プレビュー表記 | `SiteChrome.tsx` `PreviewNote` | プレビュー（mock）だけ、フッター最下部に小さな1行（`role="note"`）。pilot は「schedules and prices are for review; availability is simulated · no real bookings」、合成は「hosts, dates and prices are invented · nothing can be booked」、どちらも契約版を添える。公開文書の共通枠（chrome）を使うときも同じ |
 | 顔 | `Face.tsx` | ホストの顔写真。無ければ頭文字の丸（leaf-pale 地＋moss 文字）。名前は必ず隣に書くので `aria-hidden` |
 | 体験カード | `ExperienceCard.tsx` `CardDates.tsx` | 表紙（4:5。一覧のスマホは 4:3）→ 左上に定員チップ（"Up to 8 guests" / 全商品が 2 人以上なら "Private · 2–4 guests"）→ 右下にはみ出すホストの顔（写真、無ければ頭文字）→ "with ホスト名"（いなければ提供者名。`lib/themes.ts` の上書きがあればその語）→ 題名 →（一覧だけ）2行のリード → 所要時間・言語の略記（レビューがあれば同じ行の末尾に "★ 4.9 · 12"。3 件未満は "2 reviews"。無ければ何も出さない）→ "Next" と次の開催日3つのピル（"Thu 22"）→ "¥X / adult"。開催日はブラウザで読んだ availability から作る（一覧は一覧の読み取り結果を共有、トップはカードが読む）。読めるまで・読めないときは開催曜日と時刻（JST）の要約を同じ1行の高さで出し、レイアウトを跳ねさせない。日付を選んだ一覧では "Sat 24 Oct · 6:00 PM" を強調。カード全体が1つのリンク。人気・残りわずか・レビュー・残席は出さない |
 | 動画 | `AmbientVideo.tsx` | muted・loop・playsInline・poster・`preload="metadata"`、`aria-hidden`。画面に入っている間だけ再生し、`prefers-reduced-motion: reduce` では再生しない（poster のまま）。LCP はヒーローの画像で、動画に依存しない |

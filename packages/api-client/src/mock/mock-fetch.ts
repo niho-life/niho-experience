@@ -84,9 +84,10 @@ const MOCK_THEMES: Readonly<Record<string, readonly ExperienceSiteTheme[]>> = {
   "kamakura-ceramic-mending": ["CRAFT", "CULTURE"],
   "kamakura-calligraphy": ["CRAFT", "CULTURE"],
 };
-// Synthetic public copy only; private address and directions stay out of the v1.1 DTO.
+// Area-only public copy for synthetic and approved preview experiences; private address and directions stay out of the v1.1 DTO.
 const MOCK_MEETING_OVERVIEWS: Readonly<Record<string, string>> = {
   "indigo-dyeing-with-an-artisan": "A small indigo studio in Kamakura.",
+  "kamakura-community-dinner": "In Kamakura's Onarimachi neighborhood, near Kamakura Station.",
 };
 // Synthetic host introductions (v1.1 `hosts[].bio`) for the invented hosts only. Pilot hosts keep `bio: null`
 // until their own approved wording exists (AGENTS.md); the cycling host keeps null to show the page without one.

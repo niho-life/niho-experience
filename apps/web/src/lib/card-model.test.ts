@@ -14,11 +14,13 @@ describe("card display model", () => {
     // The editor's words replace the host names on the card (lib/themes.ts); the detail page still names every host.
     expect(card.withLabel).toBe("with Takuya & neighbors");
     expect(card.groupLabel).toBe("Up to 8 guests");
-    expect(card.scheduleLabel).toBe("Tue · Thu · Sat · 6:00 PM");
-    expect(card.priceLabel).toBe("¥30,000");
-    expect(card.priceIsFrom).toBe(false);
+    expect(card.scheduleLabel).toBe("Every day · 1:00 PM / 6:00 PM");
+    expect(card.priceLabel).toBe("¥15,000");
+    expect(card.priceIsFrom).toBe(true);
     expect(card.language).toEqual({ short: "EN · JA", full: "English & Japanese" });
-    expect(card.offers).toEqual([{ id: dinner.offers[0]!.id, minimumParticipants: dinner.offers[0]!.minimumParticipants, maxPartySize: 8 }]);
+    expect(card.offers).toEqual(
+      dinner.offers.map((offer) => ({ id: offer.id, minimumParticipants: offer.minimumParticipants, maxPartySize: offer.maxPartySize })),
+    );
   });
 
   it("keeps pilot-only faces out of live cards, and uses the preview face only without hosts", () => {
