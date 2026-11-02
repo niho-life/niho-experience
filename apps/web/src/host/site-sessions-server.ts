@@ -44,13 +44,13 @@ export type HostSiteHomeLoad =
  * Japan, and 次にすること for the payments under review. `besideNiho`: NIHO's bookings are 予約's own (provider
  * operations), so the rows say they are this site's and lead to この回 with `?source=site`.
  */
-export async function loadSiteHome(provider: HostProvider, nihoUserId: string, besideNiho: boolean): Promise<HostSiteHomeLoad> {
+export async function loadSiteHome(provider: HostProvider, besideNiho: boolean): Promise<HostSiteHomeLoad> {
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
   const now = Date.now();
   const today = todayInJapan(now);
   try {
-    const sessions = await bookings.listGuestSessionsForHost(ownerActor(provider.id, nihoUserId), { from: startOfJapanDay(today), limit: HOME_SESSION_LIMIT });
+    const sessions = await bookings.listGuestSessionsForHost(ownerActor(provider), { from: startOfJapanDay(today), limit: HOME_SESSION_LIMIT });
     return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now), besideNiho), todos: siteHomeTodos(sessions, besideNiho) };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
@@ -77,13 +77,13 @@ export type HostSiteSessionLoad =
  * with their 出欠 and the session's capacity where attendance is kept (#107). A failure to read either is the
  * screen's: a mark shown as 未記録 that is not would be put right by mistake.
  */
-export async function loadSiteSession(provider: HostProvider, nihoUserId: string, query: SessionQuery): Promise<HostSiteSessionLoad> {
+export async function loadSiteSession(provider: HostProvider, query: SessionQuery): Promise<HostSiteSessionLoad> {
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
   const attendance = bookingAttendance();
   const clock = Date.now();
   const now = actionTime(todayInJapan(clock), clock);
-  const actor = ownerActor(provider.id, nihoUserId);
+  const actor = ownerActor(provider);
   const key = { productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start };
   try {
     const stored = await bookings.listGuestBookingsForSession(actor, key);

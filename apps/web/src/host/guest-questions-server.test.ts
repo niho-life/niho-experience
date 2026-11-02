@@ -19,13 +19,13 @@ import type { HostProvider } from "@/lib/host/providers";
 const state = vi.hoisted(() => ({
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
   kind: null as GuestThreadKind | null,
-  session: null as null | { nihoUserId: string; idTokenExpiresAt: number },
+  session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ siteThreadRepository: () => (state.store ? { repository: state.store, kind: state.kind } : null) }));
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
-vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { APIConnectionTimeoutError, InternalServerError } from "@anthropic-ai/sdk";
 import { createTranslator, type Translator } from "@/lib/translation/anthropic";
@@ -49,7 +49,7 @@ import { BOOKING_THREAD_CLOSED_TEXT, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAI
 
 const THREAD_ID = "00000000-0000-4000-8000-000000000106";
 const COMMAND_ID = "00000000-0000-4000-8000-0000000c0106";
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 
 const QUESTION: GuestQuestionMessage = { id: "m-1", author: "GUEST", source: "SITE_FORM", body: "Is there a vegetarian option?", bodyJa: null, createdAtUtc: "2026-10-31T01:02:03.000Z", deliveryStatus: null };
@@ -70,7 +70,7 @@ beforeEach(() => {
     reply: vi.fn(async () => REPLY),
   };
   state.kind = null;
-  state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+  state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
   state.providers = { status: "ok", providers: [OWNER, { id: "sample-other", memberRole: "EDITOR" }] };
 });
 
@@ -100,13 +100,13 @@ describe("hostThread", () => {
 
 describe("loadGuestQuestions", () => {
   it("lists the OWNER's questions with their last message, and opens the one asked for in full (read)", async () => {
-    const list = await loadGuestQuestions(OWNER, "sample-niho-user", null);
+    const list = await loadGuestQuestions(OWNER, null);
     expect(list).toMatchObject({ status: "live", loaded: [], requestedMissing: false, experiences: [{ id: "tea", title: "Synthetic tea" }] });
     expect(list.status === "live" && list.threads[0]?.messages.map((message) => message.id)).toEqual(["m-3"]);
     expect(state.store?.listThreads).toHaveBeenCalledWith(ACTOR, { limit: 50, kind: null });
     expect(state.store?.markThreadRead).not.toHaveBeenCalled();
 
-    const opened = await loadGuestQuestions(OWNER, "sample-niho-user", THREAD_ID);
+    const opened = await loadGuestQuestions(OWNER, THREAD_ID);
     expect(opened).toMatchObject({ status: "live", loaded: [THREAD_ID], requestedMissing: false });
     expect(opened.status === "live" && opened.threads[0]?.messages).toHaveLength(3);
     expect(state.store?.markThreadRead).toHaveBeenCalledWith(ACTOR, THREAD_ID);
@@ -115,26 +115,26 @@ describe("loadGuestQuestions", () => {
 
   it("marks a thread that is not the provider's as missing", async () => {
     state.store!.markThreadRead!.mockRejectedValueOnce(new StoreNotFoundError("guest question"));
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", THREAD_ID)).toMatchObject({ status: "live", requestedMissing: true, loaded: [] });
+    expect(await loadGuestQuestions(OWNER, THREAD_ID)).toMatchObject({ status: "live", requestedMissing: true, loaded: [] });
   });
 
   it("keeps today's screen while closed, for anyone but the owner, and while the experience DB has no OWNER for them", async () => {
-    expect(await loadGuestQuestions({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user", null)).toEqual({ status: "closed" });
+    expect(await loadGuestQuestions({ ...OWNER, memberRole: "EDITOR" }, null)).toEqual({ status: "closed" });
     state.store!.listThreads!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
+    expect(await loadGuestQuestions(OWNER, null)).toEqual({ status: "closed" });
     state.store = null;
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
+    expect(await loadGuestQuestions(OWNER, null)).toEqual({ status: "closed" });
   });
 
   it("says the questions could not be read when the DB fails", async () => {
     state.store!.listThreads!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toEqual({ status: "error" });
+    expect(await loadGuestQuestions(OWNER, null)).toEqual({ status: "error" });
   });
 
   it("hands the screen the cursor of the older threads, so none drops off the list", async () => {
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toMatchObject({ status: "live", nextCursor: null });
+    expect(await loadGuestQuestions(OWNER, null)).toMatchObject({ status: "live", nextCursor: null });
     state.store!.listThreads!.mockResolvedValueOnce({ threads: [SUMMARY], nextCursor: "sample-cursor" });
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null)).toMatchObject({ status: "live", nextCursor: "sample-cursor" });
+    expect(await loadGuestQuestions(OWNER, null)).toMatchObject({ status: "live", nextCursor: "sample-cursor" });
   });
 });
 
@@ -172,7 +172,7 @@ describe("openGuestQuestion and replyToGuestQuestion", () => {
   it("do nothing unless the session is usable and NIHO says this account is the OWNER", async () => {
     state.session = null;
     expect(await openGuestQuestion("sample-provider", THREAD_ID)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
-    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
     for (const providerId of ["sample-other", "sample-unknown"]) {
       expect(await replyToGuestQuestion(providerId, THREAD_ID, { japanese: "", english: "Yes.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT });
     }
@@ -238,7 +238,7 @@ describe("draftGuestQuestionEnglish (英語にする, #285 slice 5)", () => {
     const { create, translator } = api(async () => reply("Yes."));
     state.session = null;
     expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
-    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
     expect(await draftGuestQuestionEnglish("sample-other", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT });
     state.store!.getThread!.mockRejectedValueOnce(new StoreNotFoundError("guest question"));
     expect(await draftGuestQuestionEnglish("sample-provider", THREAD_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_QUESTION_MISSING_TEXT });
@@ -280,11 +280,11 @@ describe("this site's bookings' threads (#285 slice 6b)", () => {
 
   it("opens a booking's thread from ?booking=, or its empty one before anyone wrote", async () => {
     state.store!.findBookingThread!.mockResolvedValueOnce({ ...START, threadId: BOOKING_THREAD_ID });
-    const opened = await loadGuestQuestions(OWNER, "sample-niho-user", null, BOOKING_ID);
+    const opened = await loadGuestQuestions(OWNER, null, BOOKING_ID);
     expect(opened).toMatchObject({ status: "live", loaded: [BOOKING_THREAD_ID], requestedMissing: false, newThread: null });
     expect(state.store?.markThreadRead).toHaveBeenCalledWith(ACTOR, BOOKING_THREAD_ID);
 
-    const empty = await loadGuestQuestions(OWNER, "sample-niho-user", null, BOOKING_ID);
+    const empty = await loadGuestQuestions(OWNER, null, BOOKING_ID);
     expect(empty).toMatchObject({
       status: "live", loaded: [NEW_ID], requestedMissing: false,
       newThread: { id: NEW_ID, guest: "Sample Booker", experienceId: "walk", booking: { id: BOOKING_ID, guests: 3, site: true }, messages: [] },
@@ -292,15 +292,15 @@ describe("this site's bookings' threads (#285 slice 6b)", () => {
     expect(empty.status === "live" && empty.experiences).toContainEqual({ id: "walk", title: "Synthetic walk" });
 
     state.store!.findBookingThread!.mockRejectedValueOnce(new StoreNotFoundError("guest booking"));
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null, BOOKING_ID)).toMatchObject({ status: "live", requestedMissing: true, newThread: null });
+    expect(await loadGuestQuestions(OWNER, null, BOOKING_ID)).toMatchObject({ status: "live", requestedMissing: true, newThread: null });
   });
 
   it("keeps to the kind that is open: questions only, or bookings only", async () => {
     state.kind = "QUESTION";
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", null, BOOKING_ID)).toMatchObject({ status: "live", requestedMissing: false, newThread: null });
+    expect(await loadGuestQuestions(OWNER, null, BOOKING_ID)).toMatchObject({ status: "live", requestedMissing: false, newThread: null });
     expect(state.store?.findBookingThread).not.toHaveBeenCalled();
     expect(state.store?.listThreads).toHaveBeenLastCalledWith(ACTOR, { limit: 50, kind: "QUESTION" });
-    expect(await loadGuestQuestions(OWNER, "sample-niho-user", BOOKING_THREAD_ID)).toMatchObject({ status: "live", requestedMissing: true });
+    expect(await loadGuestQuestions(OWNER, BOOKING_THREAD_ID)).toMatchObject({ status: "live", requestedMissing: true });
     expect(await replyToGuestQuestion("sample-provider", NEW_ID, { japanese: "", english: "Hi.", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_QUESTION_MISSING_TEXT });
 
     state.kind = "BOOKING";
@@ -332,12 +332,12 @@ describe("this site's bookings' threads (#285 slice 6b)", () => {
   });
 
   it("counts the bookings' threads for the notice beside NIHO's messages, 0 when closed or unreadable", async () => {
-    expect(await countSiteBookingThreads(OWNER, "sample-niho-user")).toBe(2);
+    expect(await countSiteBookingThreads(OWNER)).toBe(2);
     expect(state.store?.countThreads).toHaveBeenCalledWith(ACTOR, { kind: "BOOKING" });
-    expect(await countSiteBookingThreads({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user")).toBe(0);
+    expect(await countSiteBookingThreads({ ...OWNER, memberRole: "EDITOR" })).toBe(0);
     state.store!.countThreads!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await countSiteBookingThreads(OWNER, "sample-niho-user")).toBe(0);
+    expect(await countSiteBookingThreads(OWNER)).toBe(0);
     state.kind = "QUESTION";
-    expect(await countSiteBookingThreads(OWNER, "sample-niho-user")).toBe(0);
+    expect(await countSiteBookingThreads(OWNER)).toBe(0);
   });
 });

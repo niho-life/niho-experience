@@ -1,10 +1,10 @@
 import "server-only";
 import type { HostActor, ProductOperatorAssignment } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { nihoIdOrNull, selectProvider, toProviderChoice, type HostConsoleChoice, type HostProvider, type HostProviderRole } from "@/lib/host/providers";
+import { hostUserIdFromOwnedProviders, nihoIdOrNull, selectProvider, toProviderChoice, type HostConsoleChoice, type HostProvider, type HostProviderRole } from "@/lib/host/providers";
 import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
 import { loadHostProviders, noStoreJson, readHostSession } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { productOperatorRepository } from "./store-server";
 
 export type CalendarActorResult =
@@ -17,17 +17,27 @@ export async function calendarActor(providerId: unknown): Promise<CalendarActorR
   if (!id) return { response: noStoreJson({ error: "invalid_provider" }, 400) };
   const session = await readHostSession();
   if (!session) return { response: noStoreJson({ error: "unauthenticated" }, 401) };
-  if (!idTokenUsable(session, Date.now())) return { response: noStoreJson({ error: "session_refresh_required" }, 401) };
+  if (!accessTokenUsable(session, Date.now())) return { response: noStoreJson({ error: "session_refresh_required" }, 401) };
   const providers = await loadHostProviders();
   if (providers.status === "rejected" || providers.status === "refresh" || providers.status === "signed-out") return { response: noStoreJson({ error: "unauthenticated" }, 401) };
   if (providers.status !== "ok") return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
   const provider = providers.providers.find((entry) => entry.id === id);
-  const memberActor: HostActor = { providerId: id, nihoUserId: session.nihoUserId, calendarRoleCeiling: provider?.memberRole === "OWNER" ? "OWNER" : provider?.memberRole === "EDITOR" ? "EDITOR" : "VIEWER" };
-  if (provider && (provider.memberRole === "OWNER" || provider.memberRole === "EDITOR")) return { actor: memberActor, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
+  if (provider && (provider.memberRole === "OWNER" || provider.memberRole === "EDITOR" || provider.memberRole === "COHOST")) {
+    // App-connect does not return the signed-in user ID. Scope the Experience actor
+    // to this provider's stable owner ID, while NIHO's current membership still
+    // caps the role and product operators continue to use their own known identity.
+    const providerOwnerId = nihoIdOrNull(provider.ownerUserId);
+    if (!providerOwnerId) return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
+    return {
+      actor: { providerId: id, nihoUserId: providerOwnerId, calendarRoleCeiling: provider.memberRole === "OWNER" ? "OWNER" : "EDITOR" },
+      access: { kind: "MEMBER", nihoRole: provider.memberRole },
+    };
+  }
+  const identity = hostUserIdFromOwnedProviders(providers.providers);
+  if (!identity) return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
   const repository = productOperatorRepository();
-  const assignments = repository ? (await repository.listAssignments(session.nihoUserId)).filter((entry) => entry.providerId === id) : [];
-  if (assignments.length > 0) return { actor: { providerId: id, nihoUserId: session.nihoUserId, calendarScope: "OPERATOR" }, access: { kind: "OPERATOR", assignments } };
-  if (provider) return { actor: memberActor, access: { kind: "MEMBER", nihoRole: provider.memberRole } };
+  const assignments = repository ? (await repository.listAssignments(identity)).filter((entry) => entry.providerId === id) : [];
+  if (assignments.length) return { actor: { providerId: id, nihoUserId: identity, calendarScope: "OPERATOR" }, access: { kind: "OPERATOR", assignments } };
   return { response: noStoreJson({ error: repository ? "forbidden" : "calendar_not_configured" }, repository ? 403 : 503) };
 }
 
@@ -39,11 +49,12 @@ export interface CalendarPageContext {
 
 export async function resolveCalendarContext(query: Record<string, string | string[] | undefined>): Promise<CalendarPageContext | null> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return null;
+  if (!session || !accessTokenUsable(session, Date.now())) return null;
   const load = await loadHostProviders();
   if (load.status !== "ok") return null;
+  const identity = hostUserIdFromOwnedProviders(load.providers);
   const repository = productOperatorRepository();
-  const assignments = repository ? await repository.listAssignments(session.nihoUserId) : [];
+  const assignments = identity && repository ? await repository.listAssignments(identity) : [];
   const choices = calendarConsoleChoices(load.providers, assignments);
   const raw = typeof query.providerId === "string" ? query.providerId : null;
   const requested = nihoIdOrNull(raw);

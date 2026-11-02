@@ -9,8 +9,8 @@ const state = vi.hoisted(() => ({
   config: { hostCalendarFeedEnabled: true },
   google: true,
   store: null as null | { googleConnection: Fn; getFeed: Fn; issueFeed: Fn; revokeFeed: Fn },
-  session: { nihoUserId: "sample-owner", idTokenExpiresAt: Number.MAX_SAFE_INTEGER } as null | { nihoUserId: string; idTokenExpiresAt: number },
-  providers: { status: "ok", providers: [{ id: "sample-provider", memberRole: "OWNER" }] } as { status: string; providers?: { id: string; memberRole: string }[] },
+  session: { accessTokenExpiresAt: Number.MAX_SAFE_INTEGER } as null | { accessTokenExpiresAt: number },
+  providers: { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" }] } as { status: string; providers?: { id: string; ownerUserId: string; memberRole: string }[] },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config }));
@@ -22,7 +22,7 @@ vi.mock("@/lib/host/server", () => ({
   readHostSession: async () => state.session,
   loadHostProviders: async () => state.providers,
 }));
-vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { CALENDAR_FEED_ISSUED_TEXT, CALENDAR_FEED_OWNER_ONLY_TEXT, CALENDAR_FEED_RENEWED_TEXT, CALENDAR_FEED_REVOKED_TEXT, GOOGLE_NOT_CONNECTED } from "./calendar";
 import { calendarFeedToken, calendarFeedTokenHash, calendarFeedTokenMatches, calendarFeedUrl, issueCalendarFeedAsOwner, loadHostCalendar, revokeCalendarFeedAsOwner } from "./calendar-server";
@@ -30,7 +30,7 @@ import { HOST_SESSION_ENDED_TEXT } from "./errors";
 
 const KEY = Buffer.alloc(32, 7);
 const SALT = Buffer.alloc(32, 1);
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as const;
+const OWNER = { id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" } as const;
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-owner", calendarRoleCeiling: "OWNER" };
 const CONNECTED: HostGoogleConnectionState = { revoked: false, blockingEnabled: true, syncStatus: "FRESH", lastSucceededAtUtc: "2026-11-01T01:05:30.000Z" };
 /** The address for the provider and salt under `key`, and what the store keeps of it. */
@@ -43,8 +43,8 @@ beforeEach(() => {
   state.mock = false;
   state.config.hostCalendarFeedEnabled = true;
   state.google = true;
-  state.session = { nihoUserId: "sample-owner", idTokenExpiresAt: Number.MAX_SAFE_INTEGER };
-  state.providers = { status: "ok", providers: [{ id: "sample-provider", memberRole: "OWNER" }] };
+  state.session = { accessTokenExpiresAt: Number.MAX_SAFE_INTEGER };
+  state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" }] };
   state.store = {
     googleConnection: vi.fn(async () => CONNECTED),
     getFeed: vi.fn(async () => issuedUnder(KEY)),
@@ -103,7 +103,7 @@ describe("the feed's address", () => {
 
 describe("loadHostCalendar", () => {
   it("reads the Google connection and, for 設定, the feed's address as the OWNER", async () => {
-    const load = await loadHostCalendar(OWNER, "sample-owner", { feed: true });
+    const load = await loadHostCalendar(OWNER, { feed: true });
     expect(state.store!.googleConnection).toHaveBeenCalledWith(ACTOR);
     expect(state.store!.getFeed).toHaveBeenCalledWith(ACTOR);
     expect(load).toEqual({
@@ -117,7 +117,7 @@ describe("loadHostCalendar", () => {
   it("shows no address once the key changed since it was issued (it stopped), and the new one once the OWNER makes it", async () => {
     const rotated = Buffer.alloc(32, 8);
     vi.stubEnv("EXPERIENCE_CALENDAR_FEED_KEY", rotated.toString("base64"));
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ status: "live", feed: { url: null } });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toMatchObject({ status: "live", feed: { url: null } });
 
     state.store!.issueFeed.mockResolvedValueOnce({ issuedAtUtc: "2026-11-01T00:00:00.000Z", replaced: true });
     const renewed = await issueCalendarFeedAsOwner("sample-provider");
@@ -126,49 +126,49 @@ describe("loadHostCalendar", () => {
     expect(input.tokenHash).toEqual(createHash("sha256").update(token).digest());
     expect(renewed).toEqual({ ok: true, message: CALENDAR_FEED_RENEWED_TEXT, url: calendarFeedUrl(token) });
     state.store!.getFeed.mockResolvedValueOnce(issuedUnder(rotated, input.salt));
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ feed: { url: calendarFeedUrl(token) } });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toMatchObject({ feed: { url: calendarFeedUrl(token) } });
     // A stored digest of another length (never written by issueFeed) is no address either.
     state.store!.getFeed.mockResolvedValueOnce({ ...issuedUnder(rotated, input.salt), tokenHash: Buffer.alloc(16) });
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ feed: { url: null } });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toMatchObject({ feed: { url: null } });
   });
 
   it("says not connected, refused by Google, or connected with failing reads", async () => {
     state.store!.googleConnection.mockResolvedValueOnce(null);
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: false })).toEqual({ status: "live", google: GOOGLE_NOT_CONNECTED, googleSync: null, feed: null });
+    expect(await loadHostCalendar(OWNER, { feed: false })).toEqual({ status: "live", google: GOOGLE_NOT_CONNECTED, googleSync: null, feed: null });
     state.store!.googleConnection.mockResolvedValueOnce({ ...CONNECTED, revoked: true, syncStatus: "FAILED" });
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: false })).toMatchObject({ google: { status: "revoked" }, googleSync: null });
+    expect(await loadHostCalendar(OWNER, { feed: false })).toMatchObject({ google: { status: "revoked" }, googleSync: null });
     state.store!.googleConnection.mockResolvedValueOnce({ ...CONNECTED, syncStatus: "FAILED", blockingEnabled: false, lastSucceededAtUtc: null });
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: false })).toMatchObject({ google: { status: "connected", blockBusy: false }, googleSync: { lastCheckedAt: null, failing: true } });
+    expect(await loadHostCalendar(OWNER, { feed: false })).toMatchObject({ google: { status: "connected", blockBusy: false }, googleSync: { lastCheckedAt: null, failing: true } });
   });
 
   it("has no Google row without Google's sign-in, no feed without its flag or outside 設定, and no address before one is made", async () => {
     state.google = false;
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ status: "live", google: null, googleSync: null });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toMatchObject({ status: "live", google: null, googleSync: null });
     expect(state.store!.googleConnection).toHaveBeenCalled();
     state.store!.getFeed.mockClear();
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: false })).toMatchObject({ feed: null });
+    expect(await loadHostCalendar(OWNER, { feed: false })).toMatchObject({ feed: null });
     state.config.hostCalendarFeedEnabled = false;
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ feed: null });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toMatchObject({ feed: null });
     expect(state.store!.getFeed).not.toHaveBeenCalled();
     state.config.hostCalendarFeedEnabled = true;
     state.store!.getFeed.mockResolvedValueOnce(null);
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toMatchObject({ feed: { url: null } });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toMatchObject({ feed: { url: null } });
   });
 
   it("is closed in the preview, for anyone else, without the store, and when the store does not count them as the OWNER", async () => {
-    expect(await loadHostCalendar({ id: "sample-provider", memberRole: "EDITOR" }, "sample-owner", { feed: true })).toEqual({ status: "closed" });
+    expect(await loadHostCalendar({ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "EDITOR" }, { feed: true })).toEqual({ status: "closed" });
     state.store!.googleConnection.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toEqual({ status: "closed" });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toEqual({ status: "closed" });
     state.mock = true;
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toEqual({ status: "closed" });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toEqual({ status: "closed" });
     state.mock = false;
     state.store = null;
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toEqual({ status: "closed" });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toEqual({ status: "closed" });
   });
 
   it("says it could not read, logging no more than the error's name", async () => {
     state.store!.getFeed.mockRejectedValueOnce(new StoreError("Database returned an invalid feed_salt."));
-    expect(await loadHostCalendar(OWNER, "sample-owner", { feed: true })).toEqual({ status: "error" });
+    expect(await loadHostCalendar(OWNER, { feed: true })).toEqual({ status: "error" });
     expect(console.error).toHaveBeenCalledWith("Experience host calendar read failed", { error: "StoreError" });
   });
 });
@@ -196,10 +196,10 @@ describe("URL を作る / URL を止める", () => {
   });
 
   it("is the OWNER's only, needs a usable session and the flag, and says when it failed", async () => {
-    state.providers = { status: "ok", providers: [{ id: "sample-provider", memberRole: "EDITOR" }] };
+    state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "EDITOR" }] };
     expect(await issueCalendarFeedAsOwner("sample-provider")).toEqual({ ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT });
     expect(await issueCalendarFeedAsOwner("other-provider")).toEqual({ ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT });
-    state.providers = { status: "ok", providers: [{ id: "sample-provider", memberRole: "OWNER" }] };
+    state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" }] };
     state.store!.revokeFeed.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await revokeCalendarFeedAsOwner("sample-provider")).toEqual({ ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT });
     state.store!.issueFeed.mockRejectedValueOnce(new Error("down"));
@@ -210,7 +210,7 @@ describe("URL を作る / URL を止める", () => {
 
     state.session = null;
     expect(await issueCalendarFeedAsOwner("sample-provider")).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
-    state.session = { nihoUserId: "sample-owner", idTokenExpiresAt: Number.MAX_SAFE_INTEGER };
+    state.session = { accessTokenExpiresAt: Number.MAX_SAFE_INTEGER };
     state.config.hostCalendarFeedEnabled = false;
     expect(await issueCalendarFeedAsOwner("sample-provider")).toMatchObject({ ok: false });
     state.config.hostCalendarFeedEnabled = true;

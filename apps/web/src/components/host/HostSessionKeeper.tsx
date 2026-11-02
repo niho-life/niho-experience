@@ -20,12 +20,12 @@ function signInInApp() {
 
 /**
  * One per host page (in the console layout). Refreshes the session five minutes
- * before the ID token expires, through the cross-tab lock. Pages and the proxy
+ * before the NIHO Web access token expires, through the cross-tab lock. Pages and the proxy
  * never refresh on their own, so a rotated refresh token is never spent twice.
  */
-export function HostSessionKeeper({ idTokenExpiresAt }: { idTokenExpiresAt: number }) {
+export function HostSessionKeeper({ accessTokenExpiresAt }: { accessTokenExpiresAt: number }) {
   useEffect(() => {
-    let expiresAt = idTokenExpiresAt;
+    let expiresAt = accessTokenExpiresAt;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
 
@@ -39,7 +39,7 @@ export function HostSessionKeeper({ idTokenExpiresAt }: { idTokenExpiresAt: numb
       if (outcome.status === "signed-out") return signOut();
       if (outcome.status === "app-sign-in") return signInInApp();
       if (outcome.status === "ok") {
-        expiresAt = outcome.idTokenExpiresAt;
+        expiresAt = outcome.accessTokenExpiresAt;
         // Never loop faster than the retry interval, even if NIHO hands out short-lived tokens.
         schedule(Math.max(expiresAt - REFRESH_WINDOW_MS - Date.now(), RETRY_MS));
       } else {
@@ -58,13 +58,13 @@ export function HostSessionKeeper({ idTokenExpiresAt }: { idTokenExpiresAt: numb
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [idTokenExpiresAt]);
+  }, [accessTokenExpiresAt]);
 
   return null;
 }
 
 /**
- * Shown instead of the page when the server found an expired ID token: refresh
+ * Shown instead of the page when the server found an expired access token: refresh
  * through the same lock, then reload so the page renders with the new token.
  */
 export function HostRefreshGate() {

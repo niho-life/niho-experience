@@ -9,10 +9,10 @@ import { guideApiError } from "@/lib/editor/guide-api-server";
 type Context = { params: Promise<{ providerId: string }> };
 
 export async function GET(request: Request, context: Context) {
-  const loaded = await loadHostGuideLinkContext();
+  const { providerId } = await context.params;
+  const loaded = await loadHostGuideLinkContext(providerId);
   if (!loaded.ok) return loaded.response;
   if (new URL(request.url).search) return noStoreJson({ error: "invalid_input" }, 400);
-  const { providerId } = await context.params;
   try {
     const invitations = await loaded.value.repository.listProviderLinkInvitations(loaded.value.actor, providerId);
     return noStoreJson({ invitations: invitations.map(hostInvitation) });
@@ -22,7 +22,8 @@ export async function GET(request: Request, context: Context) {
 }
 
 export async function POST(request: Request, context: Context) {
-  const loaded = await loadHostGuideLinkContext();
+  const { providerId } = await context.params;
+  const loaded = await loadHostGuideLinkContext(providerId);
   if (!loaded.ok) return loaded.response;
   if (!mutationFromSameOrigin("POST", request.headers, siteOrigin())) {
     return noStoreJson({ error: "cross_site_request" }, 403);
@@ -38,7 +39,6 @@ export async function POST(request: Request, context: Context) {
   }
   const identifier = writerIdentifier(raw);
   if (!identifier) return noStoreJson({ error: "invalid_input" }, 400);
-  const { providerId } = await context.params;
   try {
     // Check current OWNER before looking up an account on NIHO; Store repeats the check when writing.
     await loaded.value.repository.listProviderLinkInvitations(loaded.value.actor, providerId);

@@ -14,7 +14,7 @@ import {
 import { guestReviewRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
 import { reviewReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
@@ -50,8 +50,9 @@ const LIST_LIMIT = 100;
 const REASON_FROM_STORE: Record<GuestReviewReportReason, HostReviewReportReason> = { PERSONAL: "personal", UNTRUE: "untrue", INAPPROPRIATE: "inappropriate", OTHER: "other" };
 const REASON_TO_STORE: Record<HostReviewReportReason, GuestReviewReportReason> = { personal: "PERSONAL", untrue: "UNTRUE", inappropriate: "INAPPROPRIATE", other: "OTHER" };
 
-function ownerActor(providerId: string, nihoUserId: string): HostActor {
-  return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
+function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
+  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /**
@@ -122,12 +123,12 @@ export type HostGuestReviewsLoad =
   | { status: "error" };
 
 /** レビュー for an OWNER (NIHO's role): the provider's shown reviews. */
-export async function loadGuestReviews(provider: Pick<HostProvider, "id" | "memberRole">, nihoUserId: string): Promise<HostGuestReviewsLoad> {
+export async function loadGuestReviews(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): Promise<HostGuestReviewsLoad> {
   const store = guestReviewRepository();
   if (!store) return { status: "closed" };
   if (provider.memberRole !== "OWNER") return { status: "owner-only" };
   try {
-    const actor = ownerActor(provider.id, nihoUserId);
+    const actor = ownerActor(provider);
     const [page, summary] = await Promise.all([store.listReviews(actor, { limit: LIST_LIMIT }), store.summarizeReviews(actor)]);
     const counts = summary.map(countOf);
     const now = Date.now();
@@ -148,14 +149,14 @@ type OwnerCheck = { ok: true; store: GuestReviewRepository; actor: HostActor } |
 /** A usable session, the store, and NIHO saying this account owns the provider. */
 async function asOwner(providerId: string, failed: string): Promise<OwnerCheck> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const store = guestReviewRepository();
   if (!store) return { ok: false, message: failed };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? failed : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
-  return { ok: true, store, actor: ownerActor(providerId, session.nihoUserId) };
+  return { ok: true, store, actor: ownerActor(provider) };
 }
 
 /** 続きを見る: the reviews after the screen's last one, from the cursor the previous page gave. */
@@ -185,7 +186,7 @@ export async function draftGuestReviewEnglish(
   translator: () => Translator | null = () => anthropicTranslator({ timeoutMs: REPLY_DRAFT_TIMEOUT_MS }),
 ): Promise<HostActionResult<{ english: string }>> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const translate = translator();
   if (!translate) return { ok: false, message: REPLY_DRAFT_UNAVAILABLE_TEXT };
   const owner = await asOwner(providerId, REPLY_DRAFT_UNAVAILABLE_TEXT);

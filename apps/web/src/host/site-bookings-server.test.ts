@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
   cancellations: null as null | Record<string, ReturnType<typeof vi.fn>>,
   submit: null as null | ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>,
-  session: null as null | { nihoUserId: string; idTokenExpiresAt: number },
+  session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
   mock: false,
 }));
@@ -15,13 +15,13 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, bookingCancellations: () => state.cancellations }));
 vi.mock("@niho-experience/experience-payments", () => ({ submitBookingRefund: (...args: unknown[]) => state.submit!(...args) }));
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers, isHostMock: () => state.mock }));
-vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
 import { cancelSiteBookingAsOwner, loadMoreSiteBookings, loadSiteBookings, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT } from "./site-bookings-server";
 
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 const BOOKING_ID = "00000000-0000-4000-8000-000000000285";
 const OTHER_ID = "00000000-0000-4000-8000-000000000286";
@@ -52,14 +52,14 @@ beforeEach(() => {
   };
   state.submit = vi.fn(async () => ({ kind: "accepted", stripeRefundRef: "re_test_Sample1", status: "succeeded", failureCode: null }));
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic_platform_key_only");
-  state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+  state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
   state.providers = { status: "ok", providers: [OWNER, { id: "sample-other", memberRole: "EDITOR" }] };
 });
 
 describe("loadSiteBookings", () => {
   it("lists the OWNER's bookings from the start of today in Japan, with the experiences they name and no address or phone", async () => {
     vi.useFakeTimers({ now: Date.parse("2026-10-31T16:00:00.000Z"), toFake: ["Date"] });
-    const load = await loadSiteBookings(OWNER, "sample-niho-user", null);
+    const load = await loadSiteBookings(OWNER, null);
     expect(load).toMatchObject({ status: "live", requestedMissing: false, nextCursor: null, today: "2026-11-01", experiences: [{ id: "tea", title: "Synthetic tea ceremony" }] });
     expect(load.status === "live" && load.bookings.map((booking) => [booking.id, booking.guest, booking.phone, booking.site?.payoutYen])).toEqual([[BOOKING_ID, "Sample Guest", null, 3600]]);
     expect(state.store?.listGuestBookingsForHost).toHaveBeenCalledWith(ACTOR, { from: "2026-10-31T15:00:00.000Z", limit: 100 });
@@ -68,47 +68,47 @@ describe("loadSiteBookings", () => {
   });
 
   it("adds the booking `?booking=` names when the first page does not hold it, and marks one that is not the provider's", async () => {
-    const opened = await loadSiteBookings(OWNER, "sample-niho-user", OTHER_ID);
+    const opened = await loadSiteBookings(OWNER, OTHER_ID);
     expect(opened.status === "live" && opened.bookings.map((booking) => booking.id)).toEqual([BOOKING_ID, OTHER_ID]);
     expect(state.store?.getGuestBookingForHost).toHaveBeenCalledWith(ACTOR, OTHER_ID);
     // Already on the list: not read again.
-    await loadSiteBookings(OWNER, "sample-niho-user", BOOKING_ID);
+    await loadSiteBookings(OWNER, BOOKING_ID);
     expect(state.store?.getGuestBookingForHost).toHaveBeenCalledTimes(1);
     for (const error of [new StoreNotFoundError("guest booking"), new StoreValidationError("publicBookingId must be a UUID.")]) {
       state.store!.getGuestBookingForHost!.mockRejectedValueOnce(error);
-      expect(await loadSiteBookings(OWNER, "sample-niho-user", "not-a-booking")).toMatchObject({ status: "live", requestedMissing: true, bookings: [expect.objectContaining({ id: BOOKING_ID })] });
+      expect(await loadSiteBookings(OWNER, "not-a-booking")).toMatchObject({ status: "live", requestedMissing: true, bookings: [expect.objectContaining({ id: BOOKING_ID })] });
     }
   });
 
   it("keeps today's screen while closed, for anyone but the owner, and while the experience DB has no OWNER for them", async () => {
     for (const memberRole of ["EDITOR", "COHOST"] as const) {
-      expect(await loadSiteBookings({ ...OWNER, memberRole }, "sample-niho-user", null)).toEqual({ status: "closed" });
+      expect(await loadSiteBookings({ ...OWNER, memberRole }, null)).toEqual({ status: "closed" });
     }
     state.store!.listGuestBookingsForHost!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
+    expect(await loadSiteBookings(OWNER, null)).toEqual({ status: "closed" });
     state.store = null;
-    expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toEqual({ status: "closed" });
+    expect(await loadSiteBookings(OWNER, null)).toEqual({ status: "closed" });
   });
 
   it("shows the preview's synthetic bookings to the OWNER with `?mock=site-bookings` only, and never asks the store in mock mode", async () => {
     state.mock = true;
-    const preview = await loadSiteBookings(OWNER, "sample-niho-user", null, "site-bookings");
+    const preview = await loadSiteBookings(OWNER, null, "site-bookings");
     expect(preview).toMatchObject({ status: "live", preview: true, messages: false, nextCursor: null, today: "2026-10-21", requestedMissing: false });
     expect(preview.status === "live" && preview.bookings.map((booking) => booking.status)).toEqual(["confirmed", "cancelled", "confirmed", "cancelled", "payment_review", "cancelled", "confirmed"]);
     expect(preview.status === "live" && preview.bookings.every((booking) => booking.site?.fee && booking.phone === null)).toBe(true);
-    expect(await loadSiteBookings(OWNER, "sample-niho-user", "00000000-0000-4000-8000-0000000000ff", "site-bookings")).toMatchObject({ status: "live", requestedMissing: true });
-    for (const scenario of [undefined, "default", "site-sales"] as const) expect(await loadSiteBookings(OWNER, "sample-niho-user", null, scenario)).toEqual({ status: "closed" });
-    expect(await loadSiteBookings({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user", null, "site-bookings")).toEqual({ status: "closed" });
+    expect(await loadSiteBookings(OWNER, "00000000-0000-4000-8000-0000000000ff", "site-bookings")).toMatchObject({ status: "live", requestedMissing: true });
+    for (const scenario of [undefined, "default", "site-sales"] as const) expect(await loadSiteBookings(OWNER, null, scenario)).toEqual({ status: "closed" });
+    expect(await loadSiteBookings({ ...OWNER, memberRole: "EDITOR" }, null, "site-bookings")).toEqual({ status: "closed" });
     expect(state.store?.listGuestBookingsForHost).not.toHaveBeenCalled();
   });
 
   it("says the bookings could not be read when the DB fails, and hands on the cursor of the rest", async () => {
     state.store!.listGuestBookingsForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toEqual({ status: "error" });
+    expect(await loadSiteBookings(OWNER, null)).toEqual({ status: "error" });
     state.store!.getGuestBookingForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await loadSiteBookings(OWNER, "sample-niho-user", OTHER_ID)).toEqual({ status: "error" });
+    expect(await loadSiteBookings(OWNER, OTHER_ID)).toEqual({ status: "error" });
     state.store!.listGuestBookingsForHost!.mockResolvedValueOnce({ bookings: [STORED], nextCursor: "sample-cursor" });
-    expect(await loadSiteBookings(OWNER, "sample-niho-user", null)).toMatchObject({ status: "live", nextCursor: "sample-cursor" });
+    expect(await loadSiteBookings(OWNER, null)).toMatchObject({ status: "live", nextCursor: "sample-cursor" });
   });
 });
 
@@ -130,7 +130,7 @@ describe("loadMoreSiteBookings", () => {
   };
   state.submit = vi.fn(async () => ({ kind: "accepted", stripeRefundRef: "re_test_Sample1", status: "succeeded", failureCode: null }));
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic_platform_key_only");
-  state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+  state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
     expect(await loadMoreSiteBookings("sample-other", "c")).toEqual({ ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT });
     state.providers = { status: "error" };
     expect(await loadMoreSiteBookings("sample-provider", "c")).toEqual({ ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT });

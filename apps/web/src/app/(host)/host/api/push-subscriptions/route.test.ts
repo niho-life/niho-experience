@@ -16,11 +16,16 @@ const state = vi.hoisted(() => ({
     hostPushVapidPrivateKey: "",
   },
   cookie: undefined as string | undefined,
+  currentUserId: "user-1",
   pool: null as { query: (sql: string, params: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }> } | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
 vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool }));
+vi.mock("@/lib/host/server", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/host/server")>();
+  return { ...original, loadHostProviders: async () => ({ status: "ok", providers: [{ id: "provider-a", ownerUserId: state.currentUserId, memberRole: "OWNER" }] }) };
+});
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Secure-niho_host_session" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
 
 import { cookieSealer } from "@/lib/host/cookie-seal";
@@ -42,7 +47,8 @@ let rows: unknown[] = [];
 
 function signIn(nihoUserId = `user-${++userCounter}`) {
   const now = Date.now();
-  const session = startSession({ nihoUserId, refreshToken: "refresh-1", idToken: "id-1", idTokenExpiresAt: now + 3_600_000, connectionId: "conn_1", connectionExpiresAt: now + 86_400_000, displayName: "合成 ホスト", iconUrl: null }, now);
+  state.currentUserId = nihoUserId;
+  const session = startSession({ refreshToken: "refresh-1", accessToken: "access-1", accessTokenExpiresAt: now + 3_600_000, connectionId: "conn_1", connectionExpiresAt: now + 86_400_000, displayName: "合成 ホスト", iconUrl: null }, now);
   state.cookie = encodeSession(cookieSealer(state.config.hostSessionSecret, "session"), session);
   return nihoUserId;
 }

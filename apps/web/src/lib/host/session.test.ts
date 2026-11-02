@@ -7,7 +7,7 @@ import {
   encodeLoginState,
   encodeSession,
   HostSessionTooLargeError,
-  idTokenUsable,
+  accessTokenUsable,
   LOGIN_MAX_AGE_SECONDS,
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -26,10 +26,9 @@ const DAY = 24 * 60 * MIN;
 function session(overrides: Partial<HostSession> = {}): HostSession {
   return startSession(
     {
-      nihoUserId: "synthetic-host-user",
       refreshToken: "synthetic-refresh-token",
-      idToken: "synthetic.id.token",
-      idTokenExpiresAt: NOW + 60 * MIN,
+      accessToken: "synthetic.web-access-token",
+      accessTokenExpiresAt: NOW + 60 * MIN,
       connectionId: "synthetic-connection",
       connectionExpiresAt: NOW + 90 * DAY,
       displayName: "合成 ホスト",
@@ -50,15 +49,14 @@ describe("host session cookie", () => {
     const app = session({ surface: "app" });
     expect(decodeSession(sealer, encodeSession(sealer, app), NOW)).toEqual(app);
     // A refresh rebuilds the session from the old one; the mark goes with it.
-    expect(startSession({ ...app, idToken: "synthetic.id.token.2" }, NOW + DAY).surface).toBe("app");
+    expect(startSession({ ...app, accessToken: "synthetic.web-access-token.2" }, NOW + DAY).surface).toBe("app");
     expect(decodeSession(sealer, encodeSession(sealer, session()), NOW)).not.toHaveProperty("surface");
   });
 
-  it("reads cookies from before the app mark, and any other mark, as browser sessions", () => {
+  it("rejects old cookies that stored Firebase or synthetic user identity", () => {
     const value = session();
-    const wire = { v: 1, u: value.nihoUserId, r: value.refreshToken, t: value.idToken, te: value.idTokenExpiresAt, c: value.connectionId, ce: value.connectionExpiresAt, x: value.expiresAt, n: value.displayName };
-    expect(decodeSession(sealer, sealer.seal(wire), NOW)).toEqual({ ...value, iconUrl: null });
-    for (const a of [true, "app", 2, 0]) expect(decodeSession(sealer, sealer.seal({ ...wire, a }), NOW)).not.toHaveProperty("surface");
+    const oldWire = { v: 2, u: "old-user-id", r: value.refreshToken, t: "old-firebase-id-token", te: value.accessTokenExpiresAt, c: value.connectionId, ce: value.connectionExpiresAt, x: value.expiresAt, n: value.displayName };
+    expect(decodeSession(sealer, sealer.seal(oldWire), NOW)).toBeNull();
   });
 
   it("keeps the session for 30 days from the last sign-in or refresh, never past the connection", () => {
@@ -86,10 +84,9 @@ describe("host session cookie", () => {
     expect(decodeSession(sealer, login, NOW)).toBeNull();
   });
 
-  it("fits in one 4 KB cookie with realistic NIHO and Firebase values", () => {
+  it("fits in one 4 KB cookie with realistic NIHO access and refresh tokens", () => {
     const value = session({
-      // Firebase ID tokens are about 1 KB; this one leaves room for custom claims.
-      idToken: `${"h".repeat(36)}.${"p".repeat(1100)}.${"s".repeat(342)}`,
+      accessToken: `${"h".repeat(36)}.${"p".repeat(1100)}.${"s".repeat(342)}`,
       refreshToken: "r".repeat(128),
       connectionId: "c".repeat(64),
       // The longest name kept (80 characters), all multi-byte.
@@ -102,11 +99,11 @@ describe("host session cookie", () => {
   });
 
   it("drops the face before the tokens, and refuses a session that cannot fit", () => {
-    const big = session({ idToken: "t".repeat(2500), iconUrl: `https://images.example.test/${"x".repeat(990)}` });
+    const big = session({ accessToken: "t".repeat(2500), iconUrl: `https://images.example.test/${"x".repeat(990)}` });
     const sealed = encodeSession(sealer, big);
     expect(Buffer.byteLength(SESSION_COOKIE) + Buffer.byteLength(sealed)).toBeLessThanOrEqual(COOKIE_BYTES_LIMIT);
-    expect(decodeSession(sealer, sealed, NOW)).toMatchObject({ idToken: big.idToken, iconUrl: null });
-    expect(() => encodeSession(sealer, session({ idToken: "t".repeat(4000) }))).toThrow(HostSessionTooLargeError);
+    expect(decodeSession(sealer, sealed, NOW)).toMatchObject({ accessToken: big.accessToken, iconUrl: null });
+    expect(() => encodeSession(sealer, session({ accessToken: "t".repeat(4000) }))).toThrow(HostSessionTooLargeError);
   });
 
   it("keeps only https faces and trims display names", () => {
@@ -116,19 +113,19 @@ describe("host session cookie", () => {
 });
 
 describe("refresh timing", () => {
-  it("refreshes only within five minutes of the ID token's expiry", () => {
-    const value = session({ idTokenExpiresAt: NOW + 60 * MIN });
+  it("refreshes only within five minutes of the access token's expiry", () => {
+    const value = session({ accessTokenExpiresAt: NOW + 60 * MIN });
     expect(shouldRefresh(value, NOW)).toBe(false);
     expect(shouldRefresh(value, NOW + 55 * MIN - 1)).toBe(false);
     expect(shouldRefresh(value, NOW + 55 * MIN + 1)).toBe(true);
     expect(shouldRefresh(value, NOW + 61 * MIN)).toBe(true);
   });
 
-  it("stops using the ID token a minute before it expires", () => {
-    const value = session({ idTokenExpiresAt: NOW + 60 * MIN });
-    expect(idTokenUsable(value, NOW + 58 * MIN)).toBe(true);
-    expect(idTokenUsable(value, NOW + 59 * MIN)).toBe(false);
-    expect(idTokenUsable(value, NOW + 61 * MIN)).toBe(false);
+  it("stops using the access token a minute before it expires", () => {
+    const value = session({ accessTokenExpiresAt: NOW + 60 * MIN });
+    expect(accessTokenUsable(value, NOW + 58 * MIN)).toBe(true);
+    expect(accessTokenUsable(value, NOW + 59 * MIN)).toBe(false);
+    expect(accessTokenUsable(value, NOW + 61 * MIN)).toBe(false);
   });
 });
 

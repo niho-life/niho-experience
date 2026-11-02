@@ -22,12 +22,12 @@ describe("Host support history strict SDK", () => {
 
   it("uses the fixed host subtree, Bearer/no-store and rejects wrong IDs", async () => {
     const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => Response.json(list));
-    const client = createExperienceHostSupportHistoryApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: fetcher });
+    const client = createExperienceHostSupportHistoryApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: fetcher });
     expect((await client.list("booking.1")).ok).toBe(true);
     expect(fetcher.mock.calls[0]?.[0]).toBe("https://niho.example/api/experience-providers/management/bookings/booking.1/support-history");
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "GET", cache: "no-store", redirect: "manual" });
     expect((fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer host-token");
-    const wrong = createExperienceHostSupportHistoryApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: vi.fn(async () => Response.json({ ...list, bookingRequestId: "other" })) });
+    const wrong = createExperienceHostSupportHistoryApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: vi.fn(async () => Response.json({ ...list, bookingRequestId: "other" })) });
     expect(await wrong.list("booking.1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
   });
 });

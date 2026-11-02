@@ -1,7 +1,7 @@
 import "server-only";
 import type { ExperienceHostApiFailure } from "@niho-experience/api-client/host";
 import { hostApiClient, readHostSession } from "./server";
-import { idTokenUsable } from "./session";
+import { accessTokenUsable } from "./session";
 import { clearSessionCookie } from "./server";
 import { providerOperationsEnabled, providerOperationsJson } from "./provider-operations-server";
 
@@ -9,7 +9,7 @@ export async function loadProviderPagesClient() {
   if (!providerOperationsEnabled()) return { ok: false as const, response: providerOperationsJson({ error: "not_found" }, 404) };
   const session = await readHostSession();
   if (!session) return { ok: false as const, response: providerOperationsJson({ error: "unauthenticated" }, 401) };
-  if (!idTokenUsable(session, Date.now())) return { ok: false as const, response: providerOperationsJson({ error: "session_refresh_required" }, 401) };
+  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: providerOperationsJson({ error: "session_refresh_required" }, 401) };
   try { return { ok: true as const, client: hostApiClient(session) }; }
   catch { return { ok: false as const, response: providerOperationsJson({ error: "unavailable" }, 502) }; }
 }

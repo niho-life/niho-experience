@@ -28,6 +28,7 @@ const baseContent = {
   timeline: [{ time: "10:00", title: "集合", text: "合成の案内", photoObjectKey: null }] as Step[],
   description: "実データではない合成の体験です。", included: ["食材"], notIncluded: [], notSuitableFor: ["生ものが苦手な方"],
   meetingPoint: { entranceNote: "合成の入口", exteriorPhotoObjectKey: null as string | null }, knowBeforeYouGo: ["歩きやすい服装"], hostUserIds: [],
+  participationConditions: { age: null, physical: null, hostLanguages: null, food: null, accessibility: null, weather: null },
 };
 const pageDetail = (patch: Record<string, unknown> = {}) => ({
   id: PAGE, kind: "EXPERIENCE", slug: "synthetic-workshop", language: "JA", title: "合成の手仕事体験", status: "DRAFT", listOnEntrance: false, publishedAt: null, unpublishedAt: null,
@@ -56,14 +57,22 @@ const axeSerious = async (page: Page) => expect((await new AxeBuilder({ page }).
 type Patch = { content?: Partial<typeof baseContent>; photoObjectKeys?: string[]; photoAlts?: string[]; language?: string };
 /** What NIHO answers after it saves `patch`: the page with the content changes laid over, and a newer version. */
 const applied = (detail: Detail, patch: Patch): Detail => ({ ...detail, content: { ...detail.content, ...patch.content } as Detail["content"], updatedAt: later });
-type Server = { page: Detail; preview: unknown; patches: Array<{ expectedUpdatedAt: string; patch: Patch }>; previewCalls: number; readStatus: number; patchStatus: number };
+type SyntheticListing = { id: string; spotId: string; campaignPageId: string; status: "REQUESTED" | "ACTIVE" | "PAUSED" | "WITHDRAWN"; slug: string | null; regionKey: string | null; consentVersion: string; consentedAt: string; approvedAt: string | null; pausedAt: string | null; withdrawnAt: string | null; reviewNote: string | null; reviewNotedAt: string | null; createdAt: string; updatedAt: string };
+type Server = { page: Detail; preview: unknown; patches: Array<{ expectedUpdatedAt: string; patch: Patch }>; previewCalls: number; readStatus: number; patchStatus: number; listing: SyntheticListing | null; listingRequests: unknown[] };
 /** A synthetic NIHO for one page: GET / PATCH of the page, its preview, the meeting point and the listing. */
 async function serve(page: Page, server: Server, onPatch?: (body: Server["patches"][number]) => Response | void) {
   await page.route(`**/host/api/provider-pages/${PROVIDER}**`, async (route) => {
     const request = route.request(); const path = new URL(request.url()).pathname;
     if (path.endsWith("/preview")) { server.previewCalls += 1; return json(route, server.preview); }
     if (path.endsWith("/meeting-point")) return json(route, inheritedMeeting);
-    if (path.endsWith("/listing")) return json(route, { listing: null, consent });
+    if (path.endsWith("/listing")) {
+      if (request.method() === "PUT") {
+        server.listingRequests.push(request.postDataJSON());
+        if (server.listing) server.listing = { ...server.listing, status: server.listing.status === "WITHDRAWN" ? "REQUESTED" : server.listing.status, reviewNote: null, reviewNotedAt: null, updatedAt: later };
+      }
+      if (request.method() === "DELETE" && server.listing) server.listing = { ...server.listing, status: "WITHDRAWN", reviewNote: null, reviewNotedAt: null, updatedAt: later };
+      return json(route, { listing: server.listing, consent });
+    }
     if (path.endsWith(`/${PAGE}`) && request.method() === "GET") return server.readStatus === 200 ? json(route, server.page) : json(route, { error: "failed" }, server.readStatus);
     if (path.endsWith(`/${PAGE}`) && request.method() === "PATCH") {
       const body = request.postDataJSON(); server.patches.push(body);
@@ -74,8 +83,27 @@ async function serve(page: Page, server: Server, onPatch?: (body: Server["patche
     return json(route, { error: "not_found" }, 404);
   });
 }
-const newServer = (detail = pageDetail(), preview: unknown = japanesePreview(detail)): Server => ({ page: detail, preview, patches: [], previewCalls: 0, readStatus: 200, patchStatus: 200 });
+const newServer = (detail = pageDetail(), preview: unknown = japanesePreview(detail)): Server => ({ page: detail, preview, patches: [], previewCalls: 0, readStatus: 200, patchStatus: 200, listing: null, listingRequests: [] });
 const open = async (page: Page) => { await page.goto("/host/auth/mock-login"); await page.goto(EDITOR); await expect(page.getByLabel("題名", { exact: true })).toBeVisible(); };
+
+test("a paused listing shows NIHO's reason and resubmits after consent", async ({ page }) => {
+  const server = newServer(pageDetail({ status: "PUBLISHED" }));
+  server.listing = {
+    id: "listing-1", spotId: "spot-1", campaignPageId: PAGE, status: "PAUSED", slug: "synthetic-workshop", regionKey: "kamakura",
+    consentVersion: consent.version, consentedAt: now, approvedAt: now, pausedAt: later, withdrawnAt: null,
+    reviewNote: "集合案内の公開範囲を見直してください。", reviewNotedAt: later, createdAt: now, updatedAt: later,
+  };
+  await serve(page, server);
+  await open(page);
+
+  await expect(page.getByText("NIHOからの確認事項")).toBeVisible();
+  await expect(page.getByText("集合案内の公開範囲を見直してください。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "同意して再申請" })).toBeVisible();
+  await page.getByRole("button", { name: "同意して再申請" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "再審査を申請しました" })).toBeVisible();
+  expect(server.listingRequests).toEqual([{ consentVersion: consent.version }]);
+  expect(server.listing).toMatchObject({ status: "PAUSED", reviewNote: null, reviewNotedAt: null });
+});
 
 test("the body fields come in the mock editor's order, and one 保存 sends only what changed with blank rows left out", async ({ page }) => {
   const server = newServer();

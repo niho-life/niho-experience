@@ -3,7 +3,7 @@ import type { ExperienceHostApiClient, ExperienceHostApiFailure } from "@niho-ex
 import type { HostProvider } from "@/lib/host/providers";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 import { hostApiClient, isHostMock } from "@/lib/host/server";
-import { idTokenUsable, type HostSession } from "@/lib/host/session";
+import { accessTokenUsable, type HostSession } from "@/lib/host/session";
 import { actionTime } from "./bookings";
 import { todayInJapan } from "./format";
 import { loadGuestQuestions } from "./guest-questions-server";
@@ -46,9 +46,9 @@ async function listingOf(client: ExperienceHostApiClient, providerId: string, pa
   }
 }
 
-/** NIHO's pages and the listings of the published ones (provider operations on, with a usable ID token). */
+/** NIHO's pages and the listings of the published ones (provider operations on, with a usable NIHO Web access token). */
 async function readPages(provider: HostProvider, session: HostSession): Promise<PagesRead> {
-  if (!providerOperationsEnabled() || !idTokenUsable(session, Date.now())) return NO_PAGES;
+  if (!providerOperationsEnabled() || !accessTokenUsable(session, Date.now())) return NO_PAGES;
   try {
     const client = hostApiClient(session);
     const result = await client.listExperienceProviderPages(provider.id);
@@ -68,8 +68,8 @@ async function readPages(provider: HostProvider, session: HostSession): Promise<
 export async function loadHomeTodos(provider: HostProvider, session: HostSession): Promise<HostHomeTodosLoad> {
   if (isHostMock()) return { todos: [], failed: [] };
   const [questions, reviews, pages] = await Promise.all([
-    loadGuestQuestions(provider, session.nihoUserId, null),
-    loadGuestReviews(provider, session.nihoUserId),
+    loadGuestQuestions(provider, null),
+    loadGuestReviews(provider),
     readPages(provider, session),
   ]);
   const now = Date.now();

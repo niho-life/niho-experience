@@ -74,8 +74,8 @@ import {
 export type ExperienceHostApiClientOptions = {
   /** NIHO の Web origin（例: https://niho.life）。公開クライアントと同じ規則で確かめる。 */
   nihoWebOrigin: string;
-  /** ホスト本人の ID token。ログ・URL・ブラウザへ出さない。 */
-  idToken: string;
+  /** NIHO がscopeと期限を検証する app-connect Web access token。ログ・URL・ブラウザへ出さない。 */
+  accessToken: string;
   /** 既定は globalThis.fetch。mock は `@niho-experience/api-client/host/mock` の createMockExperienceHostFetch。 */
   fetch?: FetchLike;
   /** 1 回の要求（応答の本文を読み終えるまで）の待ち時間の上限（既定 10 秒）。 */
@@ -122,7 +122,7 @@ const PROVIDER_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
 /** `x-niho-page-updated-at` に載せてよい値（応答の `updatedAt` の ISO 8601。改行などで header を壊さない）。 */
 const UPDATED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
 /** Authorization に入れられる文字だけ（改行・空白でヘッダーを壊さない）。 */
-const ID_TOKEN_PATTERN = /^[\x21-\x7e]{1,8192}$/;
+const ACCESS_TOKEN_PATTERN = /^[\x21-\x7e]{1,8192}$/;
 
 /** Stripe の口座の登録の画面（アカウントリンク）として遷移してよい URL か。 */
 export function isStripeConnectUrl(candidate: string): boolean {
@@ -218,14 +218,14 @@ function readReadinessReason(value: unknown): ExperienceProviderPaymentReadiness
 
 /** `/api/auth/me` は閉じていない応答なので、契約に書いた項目（表示名と顔写真）だけを取り出す。 */
 function readAuthMe(body: unknown): ExperienceHostAuthMe | null {
-  if (!isObject(body) || !isObject(body.user) || !isString(body.user.id) || !isNullableString(body.user.displayName)) return null;
+  if (!isObject(body) || !isObject(body.user) || !isNullableString(body.user.displayName)) return null;
   const icon = body.userIconImage;
   let userIconImage: ExperienceHostAuthMe["userIconImage"] = null;
   if (icon !== null) {
     if (!isObject(icon) || !isHttpsUrl(icon.signedUrl) || !isString(icon.expiresAt)) return null;
     userIconImage = { signedUrl: icon.signedUrl, expiresAt: icon.expiresAt };
   }
-  return { user: { id: body.user.id, displayName: body.user.displayName }, userIconImage };
+  return { user: { displayName: body.user.displayName }, userIconImage };
 }
 
 function readList(body: unknown): ExperienceProviderListResponse | null {
@@ -335,8 +335,8 @@ export function toExperienceProviderPhotoUploadForm(policy: ExperienceProviderUp
 
 export function createExperienceHostApiClient(options: ExperienceHostApiClientOptions) {
   const origin = normalizeOrigin(options.nihoWebOrigin);
-  if (!ID_TOKEN_PATTERN.test(options.idToken)) throw new Error("idToken must be a non-empty token without spaces");
-  const authorization = `Bearer ${options.idToken}`;
+  if (!ACCESS_TOKEN_PATTERN.test(options.accessToken)) throw new Error("accessToken must be a non-empty token without spaces");
+  const authorization = `Bearer ${options.accessToken}`;
   const fetchImpl: FetchLike = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

@@ -77,20 +77,22 @@ describe("product operator invitation HTTP boundary", () => {
     expect(new CookieSealer(["synthetic-invitation-secret-0123456789abcdef"], "session").open(raw)).toBeNull();
   });
 
-  it("requires a current NIHO identity, accepts with an empty provider list, and returns only a fixed calendar path", async () => {
+  it("requires an owner identity from NIHO, then accepts and returns only a fixed calendar path", async () => {
     const prepared = await prepare(request(`/host/invitations/${ID}/prepare`, { token: TOKEN }), context);
     const cookie = `__Secure-niho_operator_invitation=${prepared.cookies.get("__Secure-niho_operator_invitation")?.value}`;
     expect((await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context)).status).toBe(401);
-    mocks.session = { nihoUserId: "operator-a", idTokenExpiresAt: Date.now() + 3600_000 };
+    mocks.session = { accessToken: "access-token", accessTokenExpiresAt: Date.now() + 3600_000 };
+    expect((await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context)).status).toBe(503);
+    mocks.providers = { status: "ok", providers: [{ id: "owner-provider", ownerUserId: "owner-a", memberRole: "OWNER" }] };
     const response = await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ href: "/host/calendar?providerId=provider-a" });
-    expect(mocks.accept).toHaveBeenCalledWith(ID, TOKEN, "operator-a");
+    expect(mocks.accept).toHaveBeenCalledWith(ID, TOKEN, "owner-a");
     expect(response.headers.get("set-cookie")).toMatch(/Max-Age=0/);
   });
 
   it("rejects an expired or wrong-purpose invitation session", async () => {
-    mocks.session = { nihoUserId: "operator-a", idTokenExpiresAt: Date.now() + 3600_000 };
+    mocks.session = { accessToken: "access-token", accessTokenExpiresAt: Date.now() + 3600_000 };
     const sessionValue = new CookieSealer(["synthetic-invitation-secret-0123456789abcdef"], "session").seal({ invitationId: ID, token: TOKEN, expiresAt: Date.now() + 60_000 });
     expect((await accept(request(`/host/invitations/${ID}/accept`, {}, `__Secure-niho_operator_invitation=${sessionValue}`), context)).status).toBe(403);
     const expired = new CookieSealer(["synthetic-invitation-secret-0123456789abcdef"], "product-operator-invitation")

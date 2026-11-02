@@ -150,22 +150,22 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   const { provider, linkProviderId, providerNotFound } = context;
   // The first `?booking=`, as the screen reads it, or the push's `?ota=` (#194).
   const requested = [query.booking].flat()[0] || [query.ota].flat()[0] || null;
-  const { nihoUserId, mockScenario } = context.session;
+  const { mockScenario } = context.session;
   // A product operator (#194 PR B): with no provider of NIHO's, or naming one only their grant gives (NIHO's list would
   // fall back to another provider of theirs). The same choice as the console's frame (resolveCalendarContext).
   const calendar = (!provider || providerNotFound) && otaBookingsShown(mockScenario) ? await resolveCalendarContext(query) : null;
   if (calendar?.choice?.kind === "OPERATOR" || !provider) {
     // The OTA bookings of their products, read only.
     if (calendar?.choice?.kind !== "OPERATOR") return <HostRegisterPrompt title="予約" />;
-    const load = await loadOtaBookings(calendar.choice.id, nihoUserId, null, requested, mockScenario);
+    const load = await loadOtaBookings(calendar.choice.id, null, requested, mockScenario);
     if (load.status === "error") return <BookingsUnavailable title="予約を読み込めませんでした" body={OTA_BOOKING_LOAD_FAILED_TEXT} />;
     if (load.status !== "live") return <HostRegisterPrompt title="予約" />;
     return <OtaOnlyBookings ota={otaRows(load)!} providerDataId={calendar.choice.id} linkProviderId={linkProviderId} today={load.today} />;
   }
   if (provider.memberRole === "EDITOR") notFound();
   const [site, otaLoad] = await Promise.all([
-    loadSiteBookings(provider, nihoUserId, requested, mockScenario),
-    loadOtaBookings(provider.id, nihoUserId, provider, requested, mockScenario),
+    loadSiteBookings(provider, requested, mockScenario),
+    loadOtaBookings(provider.id, provider, requested, mockScenario),
   ]);
   const ota = otaRows(otaLoad);
   const otaFailed = otaLoad.status === "error" ? <OtaBookingsFailed /> : null;

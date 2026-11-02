@@ -10,9 +10,9 @@ import { consoleButtonClass } from "./host-ui";
 import { HostNoticeLine } from "./HostNoticeLine";
 
 /**
- * 設定 › 通知 › 宛先 (#194, owner decision 2026-11-01): the address this site emails the signed-in person, and where it came
+ * 設定 › 通知 › 宛先 (#194, owner decision 2026-11-01): the address this site emails the provider OWNER, and where it came
  * from. 宛先を変える asks for a new address and 確認のメールを送る sends a link to it: nothing changes until the link is opened
- * (an hour, once). While one waits, 取り消す closes its link; a chosen address can go back to the sign-in's. Like カレンダー,
+ * (an hour, once). While one waits, 取り消す closes its link; a chosen address can go back to a previously verified sign-in address. Like カレンダー,
  * it works on its own (not through the page's 保存) and says how it went inside the panel. The preview keeps every change on
  * this screen and sends nothing.
  */
@@ -80,7 +80,7 @@ export function HostNotificationAddress({ providerId, initial, labelId }: { prov
       return;
     }
     startBusy(async () => {
-      done(await cancelNotificationAddress());
+      done(await cancelNotificationAddress(providerId));
     });
   };
 
@@ -90,7 +90,7 @@ export function HostNotificationAddress({ providerId, initial, labelId }: { prov
       return;
     }
     startBusy(async () => {
-      done(await restoreLoginNotificationAddress());
+      done(await restoreLoginNotificationAddress(providerId));
     });
   };
 

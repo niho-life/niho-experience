@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
-vi.mock("./session", () => ({ idTokenUsable: mocks.usable }));
+vi.mock("./session", () => ({ accessTokenUsable: mocks.usable }));
 vi.mock("./server", () => ({
   readHostSession: mocks.readHost,
   nihoApiFetch: () => mocks.upstreamFetch,
@@ -57,11 +57,11 @@ describe("provider operations server boundary", () => {
 
   it("uses only the sealed current host session, never an Admin token", async () => {
     mocks.config.experienceProviderOperationsApiEnabled = true;
-    mocks.readHost.mockResolvedValue({ idToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
     const loaded = await loadProviderOperationsClient();
     expect(loaded).toEqual({ ok: true, client: { marker: "operations-client" } });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
-      idToken: "sealed-host-token",
+      accessToken: "sealed-host-token",
       nihoWebOrigin: "https://niho.example",
       fetch: mocks.upstreamFetch,
     }));
@@ -72,7 +72,7 @@ describe("provider operations server boundary", () => {
     mocks.readHost.mockResolvedValue(null);
     let result = await loadProviderOperationsClient();
     if (!result.ok) expect(result.response.status).toBe(401);
-    mocks.readHost.mockResolvedValue({ idToken: "expired" });
+    mocks.readHost.mockResolvedValue({ accessToken: "expired" });
     mocks.usable.mockReturnValue(false);
     result = await loadProviderOperationsClient();
     if (!result.ok) expect(await result.response.json()).toEqual({ error: "session_refresh_required" });

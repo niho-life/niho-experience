@@ -289,7 +289,7 @@ test("owner saves a page-only meeting point, applies for the listing, withdraws 
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
   expect(calls.slice(before)).toEqual(["PATCH " + PAGE]);
   await expect(listingPanel).toContainText("停止中");
-  await expect(listingPanel).toContainText("内容を変えたため掲載を止めています。");
+  await expect(listingPanel).toContainText("保存済みの内容を再審査に出せます。");
   await noOverflow(page);
 });
 

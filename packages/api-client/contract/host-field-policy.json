@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "description": "ホスト API の契約（experience-host-api.openapi.json）に入れてよい項目の規則。ホスト本人の ID token（Bearer）で読む API なので、公開契約と違い提供者・拠点・利用者の ID と役割は入るが、秘密・連絡先・決済口座・本人確認の項目は入れない。object は閉じた形（additionalProperties: false）で、閉じない schema は openSchemas に理由と一緒に書いたものだけ。禁止の語に当たる名前は、allowedPropertyNames に理由と一緒に schema ごとに書いた名前だけを、その語についてだけ許す（語そのものの禁止は残す）。",
+  "description": "ホスト API の契約（experience-host-api.openapi.json）に入れてよい項目の規則。NIHO がscopeを検証する専用Web app-connect token（Bearer）で読むAPIなので、公開契約と違い提供者・拠点のIDと役割は入るが、認証token、秘密・連絡先・決済口座・本人確認の項目は入れない。object は閉じた形（additionalProperties: false）で、閉じない schema は openSchemas に理由と一緒に書いたものだけ。禁止の語に当たる名前は、allowedPropertyNames に理由と一緒に schema ごとに書いた名前だけを、その語についてだけ許す（語そのものの禁止は残す）。",
   "pathPrefixes": ["/api/experience-providers"],
   "exactPaths": {
     "/api/auth/me": ["get"]
   },
-  "securityScheme": "FirebaseIdToken",
+  "securityScheme": "AppConnectWebAccessToken",
   "openSchemas": {
     "ExperienceHostAuthMe": "GET /api/auth/me の応答（AuthMeResponse）のうち、ホストの画面が読む部分だけを書いた schema。実際の応答にはほかの項目も入るので閉じない。クライアントはこの schema の項目だけを取り出して使う。",
     "ExperienceProviderUploadPolicyFields": "写真を GCS へ直接上げる署名つき POST の form の項目。名前と値は GCS の署名の規則が決めるので閉じられない（値は文字列だけ）。サーバーは中身を解釈せず、ブラウザが全部をそのまま form に入れる。"
@@ -16,7 +16,6 @@
       "reason": "体験ページの写真の識別子。提供者の上げ口（POST …/uploads/policies）が決めた保存先の名前で、ホスト本人が自分の写真を体験ページに並べる・保存前の写真を見るのに使う。公開の応答には出ない（公開契約では引き続き禁止）。",
       "schemas": {
         "AdminCampaignPagePhoto": ["objectKey"],
-        "ExperienceHostErrorDetails": ["objectKey"],
         "ExperienceProviderPageContentInput": ["photoObjectKey", "exteriorPhotoObjectKey"],
         "ExperienceProviderPageDetail": ["coverObjectKey"],
         "ExperienceProviderPagePatchRequest": ["photoObjectKeys"],

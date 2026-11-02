@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMockHostFetch, hostMockScenario, MOCK_ID_TOKEN_PREFIX } from "./mock-niho";
+import { createMockHostFetch, hostMockScenario, MOCK_ACCESS_TOKEN_PREFIX } from "./mock-niho";
 import { mutationFromSameOrigin, relayRequestHeaders, relayResponseHeaders, relayUpstreamPath } from "./relay";
 import { HOST_MOCK_SCENARIOS, type HostMockScenario } from "./session";
 
@@ -91,7 +91,7 @@ describe("relay headers", () => {
 });
 
 describe("synthetic provider API", () => {
-  const auth = { headers: { authorization: `Bearer ${MOCK_ID_TOKEN_PREFIX}abc` } };
+  const auth = { headers: { authorization: `Bearer ${MOCK_ACCESS_TOKEN_PREFIX}abc` } };
 
   it("requires the Bearer token the relay adds", async () => {
     expect((await createMockHostFetch("default")("https://niho.example.test/api/experience-providers")).status).toBe(401);
@@ -111,7 +111,7 @@ describe("synthetic provider API", () => {
     expect(await ids("default")).toEqual(["sample-provider-kitchen:OWNER", "sample-provider-studio:EDITOR"]);
     expect(await ids("payments-pending")).toEqual(["sample-provider-garden:OWNER"]);
     expect(await ids("calendar-revoked")).toEqual(["sample-provider-kitchen:OWNER", "sample-provider-studio:EDITOR"]);
-    expect(await ids("cohost")).toEqual(["sample-provider-kitchen:COHOST", "sample-provider-studio:EDITOR"]);
+    expect(await ids("cohost")).toEqual(["sample-provider-kitchen:EDITOR", "sample-provider-studio:EDITOR"]);
     expect(HOST_MOCK_SCENARIOS.map(hostMockScenario)).toEqual(HOST_MOCK_SCENARIOS);
     expect(hostMockScenario("two-providers")).toBe("default");
   });

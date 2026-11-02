@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/host/data", () => ({
   hostPageContext: async () => ({
-    session: { nihoUserId: "sample-niho-user" },
+    session: { mockScenario: undefined },
     providers: [],
     provider: { id: "sample-provider", displayName: "Synthetic provider", memberRole: "OWNER" },
     providerNotFound: false,
@@ -93,7 +93,7 @@ describe("ホーム with this site's bookings", () => {
   it("fills the sessions and 次にすること with them without NIHO's bookings (provider operations off)", async () => {
     state.site = { status: "live", todos: [TODO], sessions: { today: [row("today")], tomorrow: [row("tomorrow")], later: [row("later")] } };
     const view = await page();
-    expect(state.loadSiteHome).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", false);
+    expect(state.loadSiteHome).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), false);
     expect(view.todos).toEqual([TODO]);
     expect(view.days).toEqual({ "home-today": ["today"], "home-tomorrow": ["tomorrow"] });
     expect(view.later).toContain("later");
@@ -105,7 +105,7 @@ describe("ホーム with this site's bookings", () => {
     state.providerOperations = true;
     state.site = { status: "live", todos: [], sessions: { today: [], tomorrow: [], later: [row("later", "このサイトの予約")] } };
     const view = await page();
-    expect(state.loadSiteHome).toHaveBeenCalledWith(expect.anything(), "sample-niho-user", true);
+    expect(state.loadSiteHome).toHaveBeenCalledWith(expect.anything(), true);
     expect(view.later).toContain("later");
     expect(view.sources).toEqual(["このサイトの予約"]);
   });
@@ -127,7 +127,7 @@ describe("ホーム's month card (#91)", () => {
   it("is this site's sales this month when the ledger is open to the OWNER, and says whose they are", async () => {
     state.month = { status: "live", month: { label: "11月", figures: [{ label: "売上", value: "¥7,500" }, { label: "受取額", value: "¥6,750" }], note: SITE_SALES_HOME_SCOPE_TEXT } };
     const view = await page();
-    expect(state.loadSiteHomeMonth).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { nihoUserId: "sample-niho-user" });
+    expect(state.loadSiteHomeMonth).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { mockScenario: undefined });
     expect(view.month).toEqual(["売上", "¥7,500", "受取額", "¥6,750"]);
     expect(view.monthText).toContain(SITE_SALES_HOME_SCOPE_TEXT);
   });
@@ -152,7 +152,7 @@ describe("ホーム's 次にすること and calendar card in http mode", () => 
     state.site = { status: "live", todos: [TODO], sessions: { today: [], tomorrow: [], later: [] } };
     state.live = { todos: [THREAD, DRAFT], failed: [] };
     const view = await page();
-    expect(state.loadHomeTodos).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { nihoUserId: "sample-niho-user" });
+    expect(state.loadHomeTodos).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { mockScenario: undefined });
     expect(view.todos).toEqual([TODO, THREAD, DRAFT]);
     expect(view.all.find((item) => typeof item.type === "function" && item.type.name === "HostAppBadge")?.props.count).toBe(1);
     expect(view.alert).toBeUndefined();
@@ -170,7 +170,7 @@ describe("ホーム's 次にすること and calendar card in http mode", () => 
 
   it("shows the calendar's card from the OWNER's Google connection, and none while it is closed or connected", async () => {
     expect((await page()).calendarPrompt).toBeUndefined();
-    expect(state.loadHostCalendar).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "sample-niho-user", { feed: false });
+    expect(state.loadHostCalendar).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { feed: false });
 
     state.calendar = { status: "live", google: GOOGLE_NOT_CONNECTED, googleSync: null, feed: null };
     expect((await page()).calendarPrompt).toEqual({ title: "Google カレンダーをつなぐ", text: "予定がある時間は予約を受け付けません", action: "つなぐ" });

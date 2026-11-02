@@ -78,7 +78,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `HOST_PUSH_VAPID_PUBLIC_KEY` / `HOST_PUSH_VAPID_SUBJECT` | なし（mock は開発用の公開鍵） | VAPID の公開鍵（base64url）と連絡先（`mailto:` か `https:`）。http mode で `HOST_PUSH_ENABLED=true` なら必須 |
 | `HOST_PUSH_VAPID_PRIVATE_KEY` | なし | VAPID の秘密鍵。Secret Manager からだけ渡す。公開鍵と対でないと起動しない |
 | `HOST_SESSION_SECRET` | なし（mock は開発用の固定値） | ホストのセッション cookie の暗号化の鍵。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
-| `NIHO_FIREBASE_WEB_API_KEY` | なし | NIHO の custom token を ID token に替えるための公開 Web API key。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
+| `NIHO_FIREBASE_WEB_API_KEY` | なし | NIHO の custom token を Firebase ID token に替える公開 Web API key。http mode の `/admin` または `/editor` の有効化で必要。NIHO専用Web access tokenを使う `/host` では不要 |
 | `HOST_SUPPORT_SETTINGS_API_ENABLED` | `false` | NIHO側の本人OWNER支援設定 v1.0.1 を配備・受入後にだけ開くHTTP BFF。mockではtrueにしても開かない |
 | `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `false` | OWNER/COHOSTの日常運営と提供者チームの選別API。認証PR #19282/#19353、API PR #19405、consumer PR #170の配備・受入後にだけ開く。Admin consoleとは独立 |
 | `EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED` | `false` | mock mode専用の合成UI確認。HTTP失敗時のfallbackには使わない |

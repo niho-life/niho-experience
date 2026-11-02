@@ -1,10 +1,9 @@
 import type { CookieSealer } from "./cookie-seal";
-import { ID_TOKEN_MIN_REMAINING_MS, REFRESH_WINDOW_MS } from "./timing";
+import { ACCESS_TOKEN_MIN_REMAINING_MS, REFRESH_WINDOW_MS } from "./timing";
 
 /**
- * The host console session (#86): NIHO's app-connect refresh token and the
- * current Firebase ID token, sealed in an HttpOnly cookie. The browser never
- * sees either token; client code only learns when the ID token expires.
+ * The host console session: NIHO's scoped app-connect access token and rotating
+ * refresh token, sealed in an HttpOnly cookie. The browser only sees expiry time.
  */
 export const SESSION_COOKIE = "__Secure-niho_host_session";
 export const LOGIN_COOKIE = "__Secure-niho_host_login";
@@ -35,12 +34,10 @@ export const HOST_MOCK_SCENARIOS: readonly HostMockScenario[] = ["default", "emp
 export type HostSessionSurface = "app";
 
 export interface HostSession {
-  /** Stable NIHO account ID from the app-connect exchange; never sent to browser code. */
-  nihoUserId: string;
   refreshToken: string;
-  idToken: string;
+  accessToken: string;
   /** Epoch ms. */
-  idTokenExpiresAt: number;
+  accessTokenExpiresAt: number;
   connectionId: string;
   /** Epoch ms. NIHO ends the connection here regardless of refreshes. */
   connectionExpiresAt: number;
@@ -67,11 +64,10 @@ export interface HostLoginState {
 }
 
 interface SessionWire {
-  v: 1;
-  u: string;
+  v: 3;
   r: string;
-  t: string;
-  te: number;
+  at: string;
+  ate: number;
   c: string;
   ce: number;
   x: number;
@@ -126,14 +122,14 @@ export function sessionMaxAgeSeconds(session: HostSession, now: number): number 
   return Math.max(0, Math.floor((session.expiresAt - now) / 1000));
 }
 
-/** True while NIHO can still be called with the stored ID token. */
-export function idTokenUsable(session: HostSession, now: number): boolean {
-  return session.idTokenExpiresAt - now > ID_TOKEN_MIN_REMAINING_MS;
+/** True while NIHO can still be called with the stored scoped Web access token. */
+export function accessTokenUsable(session: HostSession, now: number): boolean {
+  return session.accessTokenExpiresAt - now > ACCESS_TOKEN_MIN_REMAINING_MS;
 }
 
-/** True when /host/auth/refresh should exchange the refresh token for a new ID token. */
+/** True when /host/auth/refresh should rotate the NIHO access and refresh tokens. */
 export function shouldRefresh(session: HostSession, now: number): boolean {
-  return session.idTokenExpiresAt - now < REFRESH_WINDOW_MS;
+  return session.accessTokenExpiresAt - now < REFRESH_WINDOW_MS;
 }
 
 export function cookieFits(name: string, value: string): boolean {
@@ -142,11 +138,10 @@ export function cookieFits(name: string, value: string): boolean {
 
 export function encodeSession(sealer: CookieSealer, session: HostSession): string {
   const wire: SessionWire = {
-    v: 1,
-    u: session.nihoUserId,
+    v: 3,
     r: session.refreshToken,
-    t: session.idToken,
-    te: session.idTokenExpiresAt,
+    at: session.accessToken,
+    ate: session.accessTokenExpiresAt,
     c: session.connectionId,
     ce: session.connectionExpiresAt,
     x: session.expiresAt,
@@ -168,15 +163,14 @@ export function encodeSession(sealer: CookieSealer, session: HostSession): strin
 /** A session that opens, has a connection and has not expired; otherwise null. */
 export function decodeSession(sealer: CookieSealer, raw: string | undefined | null, now: number): HostSession | null {
   const wire = sealer.open(raw) as Partial<SessionWire> | null;
-  if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
-  if (!isString(wire.u, 128) || !isString(wire.r) || !isString(wire.t) || !isString(wire.c, 256) || !isTime(wire.te) || !isTime(wire.ce) || !isTime(wire.x)) return null;
+  if (!wire || typeof wire !== "object" || wire.v !== 3) return null;
+  if (!isString(wire.r) || !isString(wire.at) || !isString(wire.c, 256) || !isTime(wire.ate) || !isTime(wire.ce) || !isTime(wire.x)) return null;
   if (now >= wire.x || now >= wire.ce) return null;
   const scenario = HOST_MOCK_SCENARIOS.find((candidate) => candidate === wire.m);
   return {
-    nihoUserId: wire.u,
     refreshToken: wire.r,
-    idToken: wire.t,
-    idTokenExpiresAt: wire.te,
+    accessToken: wire.at,
+    accessTokenExpiresAt: wire.ate,
     connectionId: wire.c,
     connectionExpiresAt: wire.ce,
     expiresAt: wire.x,

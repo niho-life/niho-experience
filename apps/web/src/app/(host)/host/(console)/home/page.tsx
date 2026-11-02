@@ -136,12 +136,12 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   }
   const [{ home: consoleHome, settings }, site, siteMonth, live, liveCalendar, ota] = await Promise.all([
     loadHostConsoleData(provider),
-    loadSiteHome(provider, context.session.nihoUserId, providerOperationsEnabled()),
+    loadSiteHome(provider, providerOperationsEnabled()),
     loadSiteHomeMonth(provider, context.session),
     loadHomeTodos(provider, context.session),
-    loadHostCalendar(provider, context.session.nihoUserId, { feed: false }),
+    loadHostCalendar(provider, { feed: false }),
     // New bookings made on reservation sites (#194 PR B).
-    loadOtaHomeTodos(provider.id, context.session.nihoUserId, provider, context.session.mockScenario),
+    loadOtaHomeTodos(provider.id, provider, context.session.mockScenario),
   ]);
   const withSite = site.status === "live" ? withSiteHome(consoleHome, site) : consoleHome;
   // This site's payments under review first, then the new OTA bookings, then what the OWNER reads in http mode (the

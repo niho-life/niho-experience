@@ -20,15 +20,15 @@ vi.mock("@/lib/host/server", () => ({
     return { listExperienceProviderPages: state.listPages, getExperienceProviderPageListing: state.listing };
   },
 }));
-vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
 vi.mock("./guest-questions-server", () => ({ loadGuestQuestions: (...args: unknown[]) => state.questions!(...args) }));
 vi.mock("./guest-reviews-server", () => ({ loadGuestReviews: (...args: unknown[]) => state.reviews!(...args) }));
 
 import { loadHomeTodos } from "./home-server";
 
-const PROVIDER = { id: "sample-provider", displayName: "Synthetic provider", memberRole: "OWNER" } as never;
-const SESSION = { nihoUserId: "sample-owner", idTokenExpiresAt: Number.MAX_SAFE_INTEGER } as never;
+const PROVIDER = { id: "sample-provider", ownerUserId: "sample-owner", displayName: "Synthetic provider", memberRole: "OWNER" } as never;
+const SESSION = { accessToken: "synthetic-access-token", accessTokenExpiresAt: Number.MAX_SAFE_INTEGER } as never;
 
 const THREAD: HostThread = {
   id: "thread-1", experienceId: "walk", guest: "Lucas", topic: null, booking: null,
@@ -56,8 +56,8 @@ beforeEach(() => {
 describe("loadHomeTodos", () => {
   it("lists the threads, then the reviews, reading them as メッセージ and レビュー do (nothing marked read)", async () => {
     const load = await loadHomeTodos(PROVIDER, SESSION);
-    expect(state.questions).toHaveBeenCalledWith(PROVIDER, "sample-owner", null);
-    expect(state.reviews).toHaveBeenCalledWith(PROVIDER, "sample-owner");
+    expect(state.questions).toHaveBeenCalledWith(PROVIDER, null);
+    expect(state.reviews).toHaveBeenCalledWith(PROVIDER);
     expect(load.failed).toEqual([]);
     expect(load.todos.map((todo) => [todo.key, todo.status?.label, todo.title, todo.detail])).toEqual([
       ["thread-thread-1", "返信待ち", "「子どもでも大丈夫ですか？」", "Lucas さん · 3 時間前 · 英語から翻訳"],
@@ -113,7 +113,7 @@ describe("loadHomeTodos", () => {
     expect((await loadHomeTodos(PROVIDER, SESSION)).failed).toEqual([]);
 
     state.client.mockClear();
-    await loadHomeTodos(PROVIDER, { nihoUserId: "sample-owner", idTokenExpiresAt: 0 } as never);
+    await loadHomeTodos(PROVIDER, { nihoUserId: "sample-owner", accessTokenExpiresAt: 0 } as never);
     expect(state.client).not.toHaveBeenCalled();
   });
 

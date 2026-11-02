@@ -91,20 +91,19 @@ export default async function HostMessagesPage({ searchParams }: { searchParams:
   const thread = [query.thread].flat()[0] || null;
   const booking = [query.booking].flat()[0] || null;
   const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
-  const nihoUserId = context.session.nihoUserId;
   if (providerOperationsEnabled()) {
     if ([query.source].flat()[0] === "site") {
-      const site = await loadGuestQuestions(provider, nihoUserId, thread, booking);
+      const site = await loadGuestQuestions(provider, thread, booking);
       if (site.status === "error") return <MessagesUnavailable homeHref={homeHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
       if (site.status === "live") return <SiteThreads questions={site} provider={provider} linkProviderId={linkProviderId} besideNiho />;
     }
-    const count = await countSiteBookingThreads(provider, nihoUserId);
+    const count = await countSiteBookingThreads(provider);
     const notice = count > 0 ? <SiteThreadsNotice count={count} href={messagesHref({ providerId: linkProviderId, source: "site" })} /> : null;
     return <><HostSubHeader backHref={homeHref} backLabel="ホーム" title="" /><HostLiveBookings key={`${provider.id}/messages`} providerId={provider.id} initialBookingId={booking} mode="messages" siteNotice={notice} /></>;
   }
   // 予約前の質問 and this site's bookings' messages kept in the experience DB (#106, #285 slice 6b): the OWNER's threads.
   // Anyone else, or while closed, keeps the screen below.
-  const questions = await loadGuestQuestions(provider, nihoUserId, thread, booking);
+  const questions = await loadGuestQuestions(provider, thread, booking);
   if (questions.status === "error") return <MessagesUnavailable homeHref={homeHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
   if (questions.status === "live") return <SiteThreads questions={questions} provider={provider} linkProviderId={linkProviderId} besideNiho={false} />;
   const { list, requested, experiences, today, now } = await loadHostMessages(provider, { thread, booking });

@@ -22,7 +22,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/host/data", () => ({
   hostPageContext: async () => ({
-    session: { nihoUserId: "sample-niho-user", idToken: "never-passed-on", refreshToken: "never-passed-on" },
+    session: { accessToken: "never-passed-on", refreshToken: "never-passed-on" },
     providers: [],
     provider: { id: "sample-provider", displayName: "Synthetic provider", memberRole: state.role },
     providerNotFound: false,
@@ -80,7 +80,7 @@ describe("売上 with this site's ledger", () => {
     state.payout = { status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [], reuseConsent: null } };
     const view = await page("2026-11");
     // Who reads, never the session's tokens.
-    expect(state.loadSiteSales).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { nihoUserId: "sample-niho-user", mockScenario: undefined }, "2026-11");
+    expect(state.loadSiteSales).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { mockScenario: undefined }, "2026-11");
     expect(view.find(SalesScope)?.props.text).toBe(SITE_SALES_SCOPE_TEXT);
     expect(view.find(SalesSummaryPanel)?.props.page).toBe(PAGE);
     expect(view.find(SalesLines)?.props.page).toBe(PAGE);
@@ -91,7 +91,7 @@ describe("売上 with this site's ledger", () => {
     state.site = { status: "live", page: PAGE };
     state.payouts = { status: "live", panel: { figures: [{ label: "入金予定", value: "¥42,500" }], notes: [], rows: [] } };
     const view = await page("2026-11");
-    expect(state.loadSitePayouts).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { nihoUserId: "sample-niho-user", mockScenario: undefined }, PAGE.month);
+    expect(state.loadSitePayouts).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { mockScenario: undefined }, PAGE.month);
     const boundary = view.all.find((item) => item.type === Suspense && item !== view.root) as ReactElement<{ fallback: ReactNode }> | undefined;
     const fallback = await elements(boundary?.props.fallback);
     expect(fallback.find((item) => item.type === SalesPayoutsMessage)?.props).toEqual({ text: SITE_PAYOUTS_LOADING_TEXT });

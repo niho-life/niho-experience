@@ -126,10 +126,10 @@
 
 ホスト（提供者）の画面はこのサイトの `/host` で作ります（オーナー決定 2026-10-21・[#84](https://github.com/niho-life/niho-experience/issues/84)）。個人事業主・小規模店舗が登録し、原稿、Stripe、掲載申請、予約・売上を扱います。
 
-- ログイン：NIHO の確認画面（`/connect/niho-experience`）で「接続する」を押すと、一度きりのコードで `/host/auth/callback` へ戻ります。このサイトのサーバーがコードを交換し、接続の refresh token と ID token を HttpOnly cookie に暗号化して持ちます。ブラウザの JavaScript・storage・URL にトークンを出しません。NIHO のログイン cookie は共有しません（[#86](https://github.com/niho-life/niho-experience/issues/86)）。
-- API：画面は `/host/api/*` を呼び、サーバーが NIHO の `/api/experience-providers/**` と `GET /api/auth/me` を Bearer で呼びます。この接続のトークンで呼べるのはこれと自分の接続の解除だけで、ほかは NIHO が 403 を返します。権限（OWNER / EDITOR）の判断は NIHO の応答に従います。
+- ログイン：NIHO の確認画面（`/connect/niho-experience`）で「接続する」を押すと、一度きりのコードで `/host/auth/callback` へ戻ります。このサイトのサーバーがコードを交換し、NIHO専用Web access tokenとrefresh tokenをHttpOnly cookieに暗号化して持ちます。ブラウザの JavaScript・storage・URL にトークンを出しません。NIHO のログイン cookie は共有しません（[#86](https://github.com/niho-life/niho-experience/issues/86)）。
+- API：画面は `/host/api/*` を呼び、サーバーが NIHO の `/api/experience-providers/**` と `GET /api/auth/me` をNIHO専用Web access tokenで呼びます。`/api/auth/me` は表示名・顔写真だけを返し、NIHO user IDとメールは返しません。provider DTOのroleは現在 OWNER / EDITOR で、COHOST運営契約 v1.1.0 は `agreed-not-deployed` です。tokenで呼べる範囲と操作権限はNIHOが毎回検証します。Experienceはprovider-scoped保存のactorに選択中providerの `ownerUserId` を使い、個人アカウント本人のIDが必要な機能には流用しません。
 - 契約：公開 API とは別に、NIHO が書き出したホスト API の契約を写し、別の監査・型・モックを持ちます（[#87](https://github.com/niho-life/niho-experience/issues/87)）。
-- 更新：ID token は 1 時間。接続の refresh token は更新のたびに取り替わり、古い token を 10 分を過ぎて出すと NIHO が接続を失効させるので、同じブラウザで並行して更新しません。
+- 更新：NIHO専用Web access tokenの期限が近づいたら、接続のrefresh tokenを一度だけ直列に更新します。refresh tokenは更新のたびに取り替わり、古いtokenを再使用するとNIHOが接続を失効させるため、同じブラウザの複数タブで並行更新しません。ホストの接続tokenはFirebase ID tokenと別物です。
 - `HOST_CONSOLE_ENABLED` が off の間は、今の紹介ページと問い合わせの案内のままです。
 
 ### 9.1 ホスト API の契約（[#87](https://github.com/niho-life/niho-experience/issues/87)）
@@ -145,6 +145,7 @@
   - `GET /api/auth/me`（表示名と顔写真だけ）
   - 予約：provider scope の一覧と詳細、承認・辞退、予約者1人へのメール送信。詳細はホストの送信本文と、予約者が認証済みWeb画面から送った返信本文を含む。予約前質問、メール返信の取込、自動翻訳は契約に無い。
   - 顧客・売上（#91）は、NIHO 側が足した段で写す。
+- NIHO app の選別済みホスト契約 v0.4.0（source commit `cc2a1503c4a01d9cc4c19ca295be72de623e4d60`）を生成物のまま同期した。`ExperienceProviderPageListing.reviewNote` / `reviewNotedAt` はホスト向けの差戻し・停止理由だけを表し、公開ページや運営メモには使わない。契約は `draft` で、NIHO 側の #19236 が main へ入り配備されるまでは理由が届かない。v0.3.0 との移行中は不足フィールドを null として読み、画面は理由なしとして扱う。
 - 予約BFF：NIHOの一覧・詳細は `guestEmail` 等を含むため、ブラウザへそのまま中継しない。`/host/api/provider-operations/{providerId}/bookings/**` が固定DTOへサーバー側投影し、予約者メール、送信元の `replyToEmails`、provider内部IDを除外する。401/403を権限終了として扱い、別providerの予約は404のままにする。レスポンスは `private, no-store`。
 - 対面通訳（#181）：予約の `translate-rooms`（作成・取得・終了）は独立した `experience-translate-rooms-api.openapi.json` v0.1.0（`draft`。niho-app Epic #19446 の契約節の shape）で選別し、`/host/api/translate/providers/{providerId}/bookings/{bookingId}/rooms/**` が招待 URL・状態・参加状況だけを `private, no-store` で返す。`participantId`・`inviteCode`・入室券は中継しない。境界は [architecture.md](architecture.md#対面通訳-181) を正とする。
 - 予約の送信：本文を画面内でそのまま確認してから1件ずつ送る。結果不明時は自動再送せず、最新詳細の送信履歴を読み直す。承認・辞退は確認の直前に最新詳細を読み、金額と結果を示す。取消・返金は専用の最新snapshot・確認UIを備えるまでこのBFFでは公開しない。

@@ -18,7 +18,7 @@ import { HostPageBody } from "./ui";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
 import { LIVE_PHOTO_LIMIT, appendPhoto, conflictValueText, editLines, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, mergeLiveMeeting, makeCoverPhoto, mergeLivePage, movePhoto, readLiveMeeting, removePhoto, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 import { LIVE_ENGLISH_STATUS, liveEnglishState, readLiveEnglish } from "./live-english";
-import { LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, publishBlockerText, readListingResponse } from "./live-listing-state";
+import { hostListingReviewNote, LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, publishBlockerText, readListingResponse } from "./live-listing-state";
 import { LiveContentPanels, LiveExteriorPhoto } from "./LiveContentPanels";
 import { LiveEnglishPanels, LiveEnglishState, type LiveEnglishLoad } from "./LiveEnglishPanels";
 import { LivePagePanel } from "./LivePagePanel";
@@ -296,6 +296,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   /** 同意して掲載を申請 (OWNER): publish the saved page first when it is not, then the consent version NIHO showed. */
   async function requestListing() {
     if (!saved || !listing || listingLocked) return; setListingBusy(true); setListingMessage(null); setError(""); setNotice("");
+    const resubmittingPausedListing = listing.listing?.status === "PAUSED";
     try {
       if (saved.status !== "PUBLISHED") {
         const published = await listingCall(`${endpoint}/publish`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ expectedUpdatedAt: saved.updatedAt }) });
@@ -308,7 +309,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
       if (!requested.ok) { await refuseListing("request", requested.status, requested.error); return; }
       const value = readListingResponse(requested.value);
       if (!value) { setListingUncertain(true); setListingMessage({ tone: "error", text: LISTING_TEXT.requestUncertain }); return; }
-      setListing(value); setListingState("ready"); setListingMessage({ tone: "notice", text: LISTING_TEXT.requested });
+      setListing(value); setListingState("ready"); setListingMessage({ tone: "notice", text: resubmittingPausedListing ? LISTING_TEXT.pausedResubmitted : LISTING_TEXT.requested });
     } finally { setListingBusy(false); }
   }
 
@@ -347,19 +348,23 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
   /** 掲載 (OWNER): the state as a pill and what can be done in it, first on the page (the rail comes first on phones). */
   const listingPanel = () => {
     const view = listing ? liveListingView(listing.listing, saved, siteUrl) : null;
+    const reviewNote = listing ? hostListingReviewNote(listing.listing) : null;
+    const resubmitting = listing?.listing?.status === "WITHDRAWN" || listing?.listing?.status === "PAUSED";
+    const reviewNotePanel = reviewNote ? <div className="rounded-xl bg-sand p-3 [overflow-wrap:anywhere]"><p className="font-bold">NIHOからの確認事項</p><p className="mt-1 whitespace-pre-wrap text-sm">{reviewNote}</p></div> : null;
     const withdraw = <button type="button" disabled={listingLocked} onClick={() => setConfirming("withdraw")} className={consoleButtonClass("secondary", "md", DISABLED)}>申請を取り下げる</button>;
     return <FieldSection title="掲載" status={listingState === "ready" && listing ? liveListingStatus(listing.listing) : null}>
       {listingState === "loading" ? <p className="text-ink-soft">読み込み中…</p> : listingState === "error" || !listing || !view ? <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1"><p>{LISTING_TEXT.unreadable}</p><button type="button" disabled={listingBusy} onClick={() => { setListingState("loading"); void loadListing(); }} className={consoleButtonClass("secondary", "sm", DISABLED)}>読み込み直す</button></div> : <div className="flex flex-col gap-2.5">
         <ListingSteps status={view.kind === "request" ? "draft" : view.kind === "requested" ? "review" : view.kind === "active" ? "live" : "paused"} />
+        {reviewNotePanel}
         {view.kind === "request" ? view.block === "language" ? <p>体験サイトに載せられるのは英語の体験ページだけです。</p> : <>
           {view.block === null ? <p className="whitespace-pre-wrap rounded-xl bg-sand p-3 text-sm [overflow-wrap:anywhere]">{listing.consent.text}</p> : null}
           {view.block === null && saved.status !== "PUBLISHED" ? <p className="text-xs text-muted">申請すると、保存済みの内容で体験ページを公開します。</p> : null}
-          <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={listingLocked || view.block !== null} aria-describedby={view.block ? "live-listing-why" : undefined} onClick={() => void requestListing()} className={consoleButtonClass("primary", "md", DISABLED)}>{listingBusy ? "申請しています…" : "同意して掲載を申請"}</button>{view.withdrawable ? withdraw : null}</div>
+          <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={listingLocked || view.block !== null} aria-describedby={view.block ? "live-listing-why" : undefined} onClick={() => void requestListing()} className={consoleButtonClass("primary", "md", DISABLED)}>{listingBusy ? "申請しています…" : resubmitting ? "同意して再申請" : "同意して掲載を申請"}</button>{view.withdrawable ? withdraw : null}</div>
           {view.block === "blockers" ? <p id="live-listing-why" className="text-xs text-muted">下の「公開前に確認が必要です」の項目を直すと申請できます。</p> : null}
         </> : null}
         {view.kind === "requested" ? <><p>NIHO が確認しています。</p><div>{withdraw}</div></> : null}
         {view.kind === "active" ? <div className="flex flex-wrap items-center gap-2">{view.href ? <a href={view.href} target="_blank" rel="noopener noreferrer" className={consoleButtonClass("secondary")}>体験サイトで見る</a> : null}<button type="button" disabled={listingLocked} onClick={() => setConfirming("stop")} className={consoleButtonClass("secondary", "md", DISABLED)}>掲載を止める</button></div> : null}
-        {view.kind === "paused" ? <><p>内容を変えたため掲載を止めています。NIHO が確認すると掲載に戻ります。</p><div>{withdraw}</div></> : null}
+        {view.kind === "paused" ? <><p>{reviewNote ? "確認事項を直して保存したあと、同意して再申請してください。審査が終わるまで掲載は停止中です。" : "保存済みの内容を再審査に出せます。審査が終わるまで掲載は停止中です。"}</p><p className="whitespace-pre-wrap rounded-xl bg-sand p-3 text-sm [overflow-wrap:anywhere]">{listing.consent.text}</p><div className="flex flex-wrap items-center gap-2"><button type="button" disabled={listingLocked} onClick={() => void requestListing()} className={consoleButtonClass("primary", "md", DISABLED)}>{listingBusy ? "再申請しています…" : "同意して再申請"}</button>{withdraw}</div></> : null}
       </div>}
       {reviewLine ? <p className="mt-3 border-t border-line pt-3 text-sm">{reviewLine.text}{reviewLine.link ? <> <a href={`${settingsHref}#settings-provider`} className="font-bold text-moss underline underline-offset-4">{reviewLine.link}</a></> : null}</p> : null}
       {dirty || latest ? <p className="mt-2 text-xs text-muted">保存前の変更があるあいだは、申請・取り下げ・停止はできません。</p> : null}

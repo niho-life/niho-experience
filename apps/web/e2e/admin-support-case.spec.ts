@@ -460,7 +460,7 @@ test("a case 401 clears list, detail, search and draft into a terminal reauth st
   await expect(page.getByRole("region", { name: "予約一覧" })).toContainText("Synthetic Guest A");
   backend.nextCaseStatus = 401;
   await page.getByRole("button", { name: /Synthetic Guest A/ }).click();
-  const alert = page.getByRole("alert").filter({ hasText: "有効期限が切れました" });
+  const alert = page.getByRole("main").getByRole("alert").filter({ hasText: "有効期限が切れました" });
   await expect(alert).toBeVisible();
   await expect(page.getByText("Synthetic Guest A")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "内部メモ" })).toHaveCount(0);

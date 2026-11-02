@@ -5,7 +5,7 @@ import { todayInJapan } from "@/host/format";
 import { config } from "@/lib/config";
 import { mutationFromSameOrigin } from "./relay";
 import { clearSessionCookie, nihoApiFetch, readHostSession, siteOrigin } from "./server";
-import { idTokenUsable } from "./session";
+import { accessTokenUsable } from "./session";
 
 /*
  * Server boundary of 対面通訳 (#181), after provider-operations-server.ts: the host's sealed
@@ -54,9 +54,9 @@ export async function loadTranslateRoomsClient() {
   if (!translateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
   const session = await readHostSession();
   if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
-  if (!idTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
   try {
-    return { ok: true as const, client: createExperienceTranslateRoomsClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: session.idToken, fetch: nihoApiFetch(session) }) };
+    return { ok: true as const, client: createExperienceTranslateRoomsClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch: nihoApiFetch(session) }) };
   } catch { return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) }; }
 }
 

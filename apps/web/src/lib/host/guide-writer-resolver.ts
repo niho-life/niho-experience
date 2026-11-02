@@ -36,7 +36,7 @@ export async function resolveGuideWriter(
     response = await fetchImpl(new URL("/api/experience-guide-writers/resolve", config.nihoWebOrigin), {
       method: "POST",
       headers: {
-        authorization: `Bearer ${session.idToken}`,
+        authorization: `Bearer ${session.accessToken}`,
         "x-niho-experience-service-id-token": serviceToken,
         accept: "application/json",
         "content-type": "application/json",

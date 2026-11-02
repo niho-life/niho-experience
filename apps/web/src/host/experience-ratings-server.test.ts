@@ -14,7 +14,7 @@ vi.mock("@/lib/experience/store-server", () => ({ guestReviewRatings: () => (sta
 
 import { loadExperienceRatings } from "./experience-ratings-server";
 
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as const;
+const OWNER = { id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" } as const;
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-owner", calendarRoleCeiling: "OWNER" };
 
 beforeEach(() => {
@@ -30,7 +30,7 @@ beforeEach(() => {
 
 describe("loadExperienceRatings", () => {
   it("gives each reviewed experience the store's average and count of all its reviews by its slug, with the product レビュー filters by", async () => {
-    expect(await loadExperienceRatings(OWNER, "sample-owner")).toEqual({
+    expect(await loadExperienceRatings(OWNER)).toEqual({
       "sample-walk": { productId: "walk", average: "4.6", count: 130 },
       "sample-tea": { productId: "tea", average: "5.0", count: 1 },
     });
@@ -39,22 +39,22 @@ describe("loadExperienceRatings", () => {
 
   it("is empty without reviews, for anyone else, closed, when the store does not count the OWNER, or when the read fails", async () => {
     state.byProduct!.mockResolvedValueOnce([]);
-    expect(await loadExperienceRatings(OWNER, "sample-owner")).toEqual({});
-    expect(await loadExperienceRatings({ id: "sample-provider", memberRole: "EDITOR" }, "sample-owner")).toEqual({});
+    expect(await loadExperienceRatings(OWNER)).toEqual({});
+    expect(await loadExperienceRatings({ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "EDITOR" })).toEqual({});
     expect(state.byProduct).toHaveBeenCalledTimes(1);
 
     state.byProduct!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadExperienceRatings(OWNER, "sample-owner")).toEqual({});
+    expect(await loadExperienceRatings(OWNER)).toEqual({});
     expect(console.error).not.toHaveBeenCalled();
     state.byProduct!.mockRejectedValueOnce(new StoreError("Database returned an invalid review rating."));
-    expect(await loadExperienceRatings(OWNER, "sample-owner")).toEqual({});
+    expect(await loadExperienceRatings(OWNER)).toEqual({});
     expect(console.error).toHaveBeenCalledWith("Experience ratings read failed", { error: "StoreError" });
 
     state.store = false;
-    expect(await loadExperienceRatings(OWNER, "sample-owner")).toEqual({});
+    expect(await loadExperienceRatings(OWNER)).toEqual({});
     state.store = true;
     state.mock = true;
-    expect(await loadExperienceRatings(OWNER, "sample-owner")).toEqual({});
+    expect(await loadExperienceRatings(OWNER)).toEqual({});
     expect(state.byProduct).toHaveBeenCalledTimes(3);
   });
 });

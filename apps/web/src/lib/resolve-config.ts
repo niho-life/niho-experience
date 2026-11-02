@@ -506,7 +506,7 @@ export function resolveConfig(env: Env) {
   const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
   const guideEditorSite = guideEditorSiteOrigin(env.GUIDE_EDITOR_SITE_ORIGIN);
   const guideAdmin = guideAdminSettings(apiMode, env);
-  if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret, nihoFirebaseWebApiKey);
+  if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
     ? assertAdminConsoleSettings(
       adminSessionSecret,
@@ -677,12 +677,11 @@ function hostPushSettings(apiMode: "mock" | "http", enabled: boolean, env: Env):
 }
 
 /** Refuses to start a real host console with a missing or guessable cookie key. */
-function assertHostConsoleSecrets(secret: string, firebaseWebApiKey: string) {
+function assertHostConsoleSecrets(secret: string) {
   const keys = secret.split(",").map((key) => key.trim()).filter(Boolean);
   if (keys.length === 0 || keys.some((key) => key.length < MIN_HOST_SESSION_SECRET_LENGTH || key === DEV_ONLY_HOST_SESSION_SECRET)) {
     throw new Error(`HOST_CONSOLE_ENABLED=true needs HOST_SESSION_SECRET (each key at least ${MIN_HOST_SESSION_SECRET_LENGTH} characters) in http mode`);
   }
-  if (!firebaseWebApiKey) throw new Error("HOST_CONSOLE_ENABLED=true needs NIHO_FIREBASE_WEB_API_KEY in http mode");
 }
 
 /** Real Admin auth is closed unless its independent cookie key and exact callback origin are configured. */

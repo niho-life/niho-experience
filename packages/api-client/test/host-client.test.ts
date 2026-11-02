@@ -58,7 +58,7 @@ describe("isStripeConnectUrl", () => {
 describe("createExperienceHostApiClient", () => {
   it("Bearer を付け、cookie を送らず、リダイレクトに従わず、キャッシュしない", async () => {
     const fetchMock = respond(200, LIST);
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetchMock });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetchMock });
     expect(await api.listExperienceProviders()).toEqual({ ok: true, data: LIST });
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("https://niho.life/api/experience-providers");
@@ -69,7 +69,7 @@ describe("createExperienceHostApiClient", () => {
 
   it("本文のある操作は JSON で送り、path の ID を符号化する", async () => {
     const fetchMock = respond(200, { provider: PROVIDER });
-    const api = createExperienceHostApiClient({ nihoWebOrigin: `${ORIGIN}/`, idToken: TOKEN, fetch: fetchMock });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: `${ORIGIN}/`, accessToken: TOKEN, fetch: fetchMock });
     await api.updateExperienceProvider("cm0provider01", { displayName: "新しい名前" });
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("https://niho.life/api/experience-providers/cm0provider01");
@@ -83,7 +83,7 @@ describe("createExperienceHostApiClient", () => {
 
   it("確かめられない provider ID では NIHO を呼ばない", async () => {
     const fetchMock = respond(200, {});
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetchMock });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetchMock });
     for (const id of ["..", ".", "", "a/b", "x".repeat(201)]) {
       expect(await api.getExperienceProvider(id)).toEqual({ ok: false, kind: "error", status: 404, code: "NOT_FOUND", reason: null, message: "" });
     }
@@ -91,21 +91,21 @@ describe("createExperienceHostApiClient", () => {
   });
 
   it("origin と token の規則", () => {
-    expect(() => createExperienceHostApiClient({ nihoWebOrigin: "http://niho.life", idToken: TOKEN })).toThrow(/https/);
-    expect(() => createExperienceHostApiClient({ nihoWebOrigin: "https://niho.life/api", idToken: TOKEN })).toThrow(/origin/);
-    expect(() => createExperienceHostApiClient({ nihoWebOrigin: "http://localhost:3000", idToken: TOKEN })).not.toThrow();
-    for (const idToken of ["", "a b", "a\r\nx-evil: 1"]) {
-      expect(() => createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken })).toThrow(/idToken/);
+    expect(() => createExperienceHostApiClient({ nihoWebOrigin: "http://niho.life", accessToken: TOKEN })).toThrow(/https/);
+    expect(() => createExperienceHostApiClient({ nihoWebOrigin: "https://niho.life/api", accessToken: TOKEN })).toThrow(/origin/);
+    expect(() => createExperienceHostApiClient({ nihoWebOrigin: "http://localhost:3000", accessToken: TOKEN })).not.toThrow();
+    for (const accessToken of ["", "a b", "a\r\nx-evil: 1"]) {
+      expect(() => createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken })).toThrow(/accessToken/);
     }
   });
 
   it("NIHO のエラーは status・code・reason で返す", async () => {
     const body = { error: { code: "CONFLICT", message: "処理できませんでした", details: { reason: "PROVIDER_PAYMENT_LOCKED" } } };
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(409, body) });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(409, body) });
     expect(await api.reuseExperienceProviderPayment("cm0provider01", { sourceSpotId: "cm0spot02", consentVersion: "v1" })).toEqual({
       ok: false, kind: "error", status: 409, code: "CONFLICT", reason: "PROVIDER_PAYMENT_LOCKED", message: "処理できませんでした",
     });
-    const unauthorized = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(401, { error: { code: "UNAUTHORIZED", message: "認証が必要です", details: {} } }) });
+    const unauthorized = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(401, { error: { code: "UNAUTHORIZED", message: "認証が必要です", details: {} } }) });
     expect(await unauthorized.getAuthMe()).toMatchObject({ ok: false, kind: "error", status: 401, code: "UNAUTHORIZED", reason: null });
   });
 
@@ -118,39 +118,39 @@ describe("createExperienceHostApiClient", () => {
       [404, { error: "not_found" }],
     ];
     for (const [status, body] of cases) {
-      const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(status, body) });
+      const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(status, body) });
       expect(await api.listExperienceProviders()).toEqual({ ok: false, kind: "unexpected_response", status });
     }
   });
 
   it("契約に無い項目は取り出さない（me は表示名と顔写真だけ）", async () => {
     const me = { user: { id: "cm0user01", displayName: "合成 ホスト", handle: "x", email: "someone@example.com" }, userIconImage: null, memberships: [{ spotId: "s" }] };
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, me) });
-    expect(await api.getAuthMe()).toEqual({ ok: true, data: { user: { id: "cm0user01", displayName: "合成 ホスト" }, userIconImage: null } });
-    const extra = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, { ...LIST, providers: [{ ...LIST.providers[0], internalNote: "x" }] }) });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(200, me) });
+    expect(await api.getAuthMe()).toEqual({ ok: true, data: { user: { displayName: "合成 ホスト" }, userIconImage: null } });
+    const extra = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(200, { ...LIST, providers: [{ ...LIST.providers[0], internalNote: "x" }] }) });
     const result = await extra.listExperienceProviders();
     expect(result.ok && result.data.providers[0]).not.toHaveProperty("internalNote");
   });
 
   it("接続の URL は https だけを受け取る", async () => {
     const connect = { url: "javascript:alert(1)", expiresAt: null, ready: false, reason: "NOT_CONNECTED" };
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, connect) });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(200, connect) });
     expect(await api.startExperienceProviderPaymentConnect("cm0provider01")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
   });
 
   it("通信の失敗と時間切れは network_error", async () => {
-    const failing = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: vi.fn<FetchLike>(async () => { throw new TypeError("fetch failed"); }) });
+    const failing = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: vi.fn<FetchLike>(async () => { throw new TypeError("fetch failed"); }) });
     expect(await failing.listExperienceProviders()).toEqual({ ok: false, kind: "network_error" });
 
     const hanging: FetchLike = (_input, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
     });
-    const slow = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: hanging, timeoutMs: 20 });
+    const slow = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: hanging, timeoutMs: 20 });
     expect(await slow.getAuthMe()).toEqual({ ok: false, kind: "network_error" });
   });
 
   it("mock とつないで使える", async () => {
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: createMockExperienceHostFetch({ scenario: "two-providers" }) });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: createMockExperienceHostFetch({ scenario: "two-providers" }) });
     const result = await api.listExperienceProviders();
     expect(result.ok && result.data.providers.map((provider) => provider.id)).toEqual(["sample-provider-kitchen", "sample-provider-studio"]);
   });
@@ -178,6 +178,7 @@ const PAGE = {
     meetingPoint: { entranceNote: "", exteriorPhotoObjectKey: null },
     knowBeforeYouGo: [],
     hostUserIds: ["cm0user01"],
+    participationConditions: { age: null, physical: null, hostLanguages: null, food: null, accessibility: null, weather: null },
   },
   photos: [{ objectKey: "sample-photos/x/1.jpg", url: "https://storage.example.com/w1024/1.jpg" }, { objectKey: "sample-photos/x/2.jpg", url: null }],
   coverObjectKey: "sample-photos/x/1.jpg",
@@ -193,7 +194,7 @@ const PAGE = {
 describe("createExperienceHostApiClient：体験ページ・集合場所・掲載・写真", () => {
   it("保存と公開は読んだ版を x-niho-page-updated-at に載せ、null なら載せない", async () => {
     const fetchMock = respond(200, PAGE);
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetchMock });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetchMock });
     expect(await api.updateExperienceProviderPage("cm0provider01", "cm0page01", { title: "新しい題名" }, PAGE.updatedAt)).toEqual({ ok: true, data: PAGE });
     let [url, init] = lastCall(fetchMock);
     expect(url).toBe("https://niho.life/api/experience-providers/cm0provider01/pages/cm0page01");
@@ -213,7 +214,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
 
   it("版の形でない expectedUpdatedAt では呼ばず、409 PAGE_UPDATED（読み直す）と同じに返す", async () => {
     const fetchMock = respond(200, PAGE);
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetchMock });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetchMock });
     for (const version of ["", "yesterday", `${PAGE.updatedAt}\r\nx-evil: 1`]) {
       expect(await api.updateExperienceProviderPage("cm0provider01", "cm0page01", {}, version)).toEqual({ ok: false, kind: "error", status: 409, code: "CONFLICT", reason: "PAGE_UPDATED", message: "" });
       expect(await api.publishExperienceProviderPage("cm0provider01", "cm0page01", version)).toMatchObject({ status: 409, reason: "PAGE_UPDATED" });
@@ -241,7 +242,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
     ];
     for (const [name, invoke, method, path] of cases) {
       const fetchMock = respond(204, null);
-      await invoke(createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetchMock }));
+      await invoke(createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetchMock }));
       const [url, init] = lastCall(fetchMock);
       expect(`${name} ${init.method} ${url}`).toBe(`${name} ${method} https://niho.life${path}`);
     }
@@ -249,7 +250,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
 
   it("確かめられない page ID では呼ばず、その操作が無いページに返す 404 と同じに返す", async () => {
     const fetchMock = respond(200, {});
-    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetchMock });
+    const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetchMock });
     const notFound = (reason: string) => ({ ok: false, kind: "error", status: 404, code: "NOT_FOUND", reason, message: "" });
     for (const pageId of ["..", "", "a/b", "x".repeat(201)]) {
       expect(await api.getExperienceProviderPage("cm0provider01", pageId)).toEqual(notFound("PAGE_NOT_FOUND"));
@@ -266,7 +267,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
   it("失敗の理由ごとの項目（field・slug・blockers・supportId）を足す", async () => {
     const error = (status: number, code: string, supportId: string | null, details: Record<string, unknown>) => ({ error: { code, message: "合成の失敗", supportId, details } });
     const call = async (status: number, body: unknown) =>
-      createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(status, body) }).updateExperienceProviderPage("p1", "g1", {}, null);
+      createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(status, body) }).updateExperienceProviderPage("p1", "g1", {}, null);
 
     expect(await call(400, error(400, "VALIDATION_ERROR", null, { reason: "PAGE_TITLE_INVALID", field: "title" }))).toEqual({
       ok: false, kind: "error", status: 400, code: "VALIDATION_ERROR", reason: "PAGE_TITLE_INVALID", message: "合成の失敗", field: "title",
@@ -284,7 +285,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
   });
 
   it("体験ページの詳細は契約の項目だけを取り出し、写真の URL は https だけを受け取る", async () => {
-    const extra = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, { ...PAGE, internalNote: "x", content: { ...PAGE.content, draftNote: "x" } }) });
+    const extra = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(200, { ...PAGE, internalNote: "x", content: { ...PAGE.content, draftNote: "x" } }) });
     expect(await extra.getExperienceProviderPage("p1", "g1")).toEqual({ ok: true, data: PAGE });
 
     const cases: unknown[] = [
@@ -295,14 +296,14 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
       { ...PAGE, photoAlts: undefined },
     ];
     for (const body of cases) {
-      const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, body) });
+      const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(200, body) });
       expect(await api.getExperienceProviderPage("p1", "g1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
     }
   });
 
   it("集合場所の上書きの応答は mode ごとの形だけを受け取る", async () => {
     const read = async (body: unknown) =>
-      createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(200, body) })
+      createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(200, body) })
         .updateExperienceProviderPageMeetingPoint("p1", "g1", { mode: "INHERIT", expectedUpdatedAt: PAGE.updatedAt });
     const meetingPoint = { overview: "駅の近く", address: "合成の住所", accessNote: "", mapUrl: "https://example.com/map", entranceNote: "" };
     expect(await read({ mode: "INHERIT", updatedAt: PAGE.updatedAt, meetingPoint })).toEqual({ ok: true, data: { mode: "INHERIT", updatedAt: PAGE.updatedAt } });
@@ -319,7 +320,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
       expiresAt: "2026-10-21T01:15:00.000Z",
       maxSizeBytes: 10485760,
     };
-    const ok = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(201, policy) });
+    const ok = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(201, policy) });
     const result = await ok.createExperienceProviderUploadPolicy("p1", { purpose: "ARTICLE_IMAGE", contentType: "image/jpeg", contentLength: 1000 });
     expect(result).toEqual({ ok: true, data: policy });
     expect(result.ok && toExperienceProviderPhotoUploadForm(result.data)).toEqual({
@@ -327,7 +328,7 @@ describe("createExperienceHostApiClient：体験ページ・集合場所・掲�
     });
 
     for (const upload of [{ ...policy.upload, url: "http://uploads.example.com/bucket" }, { ...policy.upload, fields: { key: 1 } }, { url: policy.upload.url }]) {
-      const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(201, { ...policy, upload }) });
+      const api = createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(201, { ...policy, upload }) });
       expect(await api.createExperienceProviderUploadPolicy("p1", { purpose: "ARTICLE_IMAGE", contentType: "image/jpeg" })).toEqual({ ok: false, kind: "unexpected_response", status: 201 });
     }
   });

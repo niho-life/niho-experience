@@ -58,8 +58,8 @@ function recordingFetch(scenario: MockHostScenario, options: Omit<MockExperience
   };
 }
 
-function client(scenario: MockHostScenario, idToken = "sample-id-token", options: Omit<MockExperienceHostFetchOptions, "scenario" | "now"> = {}) {
-  return createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, idToken, fetch: recordingFetch(scenario, options) });
+function client(scenario: MockHostScenario, accessToken = "sample-id-token", options: Omit<MockExperienceHostFetchOptions, "scenario" | "now"> = {}) {
+  return createExperienceHostApiClient({ nihoWebOrigin: ORIGIN, accessToken, fetch: recordingFetch(scenario, options) });
 }
 
 function data<T>(result: ExperienceHostApiResult<T>): T {
@@ -340,7 +340,7 @@ describe("ホスト API の mock：scenario", () => {
   });
 
   it("me は合成の本人だけを返す", async () => {
-    expect(data(await client("empty").getAuthMe())).toEqual({ user: { id: MOCK_HOST_USER.id, displayName: MOCK_HOST_USER.displayName }, userIconImage: null });
+    expect(data(await client("empty").getAuthMe())).toEqual({ user: { displayName: MOCK_HOST_USER.displayName }, userIconImage: null });
   });
 });
 

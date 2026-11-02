@@ -17,7 +17,7 @@ import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-ref
 import { bookingCancellations, guestBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
-import { idTokenUsable, type HostMockScenario } from "@/lib/host/session";
+import { accessTokenUsable, type HostMockScenario } from "@/lib/host/session";
 import type { BookingExperience } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan, yen } from "./format";
@@ -39,9 +39,10 @@ export const SITE_BOOKING_OWNER_ONLY_TEXT = "このサイトで受けた予約�
 /** The list reads this many bookings: the upcoming ones from today, the nearest first, then the latest past ones. */
 const LIST_LIMIT = 100;
 
-/** NIHO said this account is the provider's OWNER; the store checks its own membership as well. */
-export function ownerActor(providerId: string, nihoUserId: string): HostActor {
-  return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
+/** Use the selected provider's ownerUserId as its Experience actor; never infer identity from a connection ID. */
+export function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
+  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /** The start of the day in Japan: the list's これから counts today's bookings, as the screen does (ホーム's 今日 too). */
@@ -95,11 +96,11 @@ function previewSiteBookings(provider: HostProvider, requestedBooking: string | 
  * 予約 for an OWNER (NIHO's role): the provider's bookings made here, with the one `?booking=` names among them.
  * Mock mode reads the preview's synthetic bookings with `?mock=site-bookings` (`mockScenario`), and none otherwise.
  */
-export async function loadSiteBookings(provider: HostProvider, nihoUserId: string, requestedBooking: string | null, mockScenario?: HostMockScenario): Promise<HostSiteBookingsLoad> {
+export async function loadSiteBookings(provider: HostProvider, requestedBooking: string | null, mockScenario?: HostMockScenario): Promise<HostSiteBookingsLoad> {
   if (isHostMock()) return previewSiteBookings(provider, requestedBooking, mockScenario);
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
-  const actor = ownerActor(provider.id, nihoUserId);
+  const actor = ownerActor(provider);
   const today = todayInJapan(Date.now());
   try {
     const page = await bookings.listGuestBookingsForHost(actor, { from: startOfJapanDay(today), limit: LIST_LIMIT });
@@ -124,14 +125,14 @@ type OwnerCheck = { ok: true; bookings: GuestBookingRepository; actor: HostActor
 /** A usable session, the store, and NIHO saying this account owns the provider. */
 export async function asOwner(providerId: string): Promise<OwnerCheck> {
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const bookings = guestBookingRepository();
   if (!bookings) return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? SITE_BOOKING_LOAD_FAILED_TEXT : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT };
-  return { ok: true, bookings, actor: ownerActor(providerId, session.nihoUserId) };
+  return { ok: true, bookings, actor: ownerActor(provider) };
 }
 
 /** 続きを見る: the bookings after the list's last one, from the cursor the previous page gave (it keeps that page's today). */

@@ -62,7 +62,7 @@ function AccountPanel({ session }: { session: Pick<HostSession, "displayName" | 
  * (the OTA bookings of their products come to them) and the account. Only while this site emails hosts.
  */
 async function OperatorSettings({ providerId, session }: { providerId: string; session: HostSession }) {
-  const load = await loadNotificationAddress(session.nihoUserId);
+  const load = await loadNotificationAddress(providerId);
   return (
     <HostPageBody>
       <PageHead title="設定" />
@@ -107,9 +107,9 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
     loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
     loadHostPayout(provider, { connect }),
     // カレンダー in http mode (#109): the OWNER's Google connection and bookings feed.
-    isHostMock() ? null : loadHostCalendar(provider, session.nihoUserId, { feed: true }),
+    isHostMock() ? null : loadHostCalendar(provider, { feed: true }),
     // 宛先 (#194): the person's own address (the session's NIHO user); the preview's stays on screen.
-    isHostMock() ? null : loadNotificationAddress(session.nihoUserId),
+    isHostMock() ? null : loadNotificationAddress(provider.id),
   ]);
   if (payout.redirectTo) redirect(payout.redirectTo);
   const notificationAddress = isHostMock()

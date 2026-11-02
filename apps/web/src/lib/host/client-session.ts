@@ -9,7 +9,7 @@ import { HOST_API_PREFIX, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_REFRESH_PATH }
 export const HOST_REFRESH_LOCK = "niho-host-refresh";
 
 export type RefreshOutcome =
-  | { status: "ok"; idTokenExpiresAt: number }
+  | { status: "ok"; accessTokenExpiresAt: number }
   | { status: "signed-out" }
   /** Inside the installed app with a session signed in elsewhere (cookies the OS copied in): sign in again here (#177). */
   | { status: "app-sign-in" }
@@ -53,9 +53,9 @@ async function postRefresh(fetchImpl: typeof fetch, standalone: boolean): Promis
     const response = await fetchImpl(HOST_REFRESH_PATH, { method: "POST", credentials: "same-origin", cache: "no-store", headers });
     if (response.status === 401) return (await errorCode(response)) === HOST_APP_SIGN_IN_REQUIRED ? { status: "app-sign-in" } : { status: "signed-out" };
     if (!response.ok) return { status: "failed" };
-    const body = (await response.json()) as { idTokenExpiresAt?: unknown };
-    const idTokenExpiresAt = Number(body.idTokenExpiresAt);
-    return Number.isFinite(idTokenExpiresAt) ? { status: "ok", idTokenExpiresAt } : { status: "failed" };
+    const body = (await response.json()) as { accessTokenExpiresAt?: unknown };
+    const accessTokenExpiresAt = Number(body.accessTokenExpiresAt);
+    return Number.isFinite(accessTokenExpiresAt) ? { status: "ok", accessTokenExpiresAt } : { status: "failed" };
   } catch {
     return { status: "failed" };
   }
@@ -84,7 +84,7 @@ async function needsRefresh(response: Response): Promise<boolean> {
 }
 
 /**
- * fetch for `/host/api/<path>`. When the relay says the ID token needs refreshing,
+ * fetch for `/host/api/<path>`. When the relay says the NIHO Web access token needs refreshing,
  * refreshes through the same single-flight path and retries once. Bodies must be
  * re-sendable (string, Blob, FormData, URLSearchParams), not streams.
  */

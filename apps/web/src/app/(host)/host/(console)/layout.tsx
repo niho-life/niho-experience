@@ -38,7 +38,7 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
 /**
  * The signed-in frame: the sidebar (PC) or the header and bottom tabs (phones)
  * around every console page (HostShell, #84). Rendering never refreshes the
- * session: an expired ID token hands over to the browser (HostRefreshGate),
+ * session: an expired NIHO Web access token hands over to the browser (HostRefreshGate),
  * which refreshes through the cross-tab lock and reloads.
  */
 export default async function HostConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -62,17 +62,18 @@ export default async function HostConsoleLayout({ children }: { children: React.
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
   let assignments: readonly ProductOperatorAssignment[] = [];
   if (load.status === "ok" && !isHostMock()) {
+    const identityIds = [...new Set(load.providers.filter((provider) => provider.memberRole === "OWNER").map((provider) => provider.ownerUserId))];
     const repository = productOperatorRepository();
-    if (repository) {
-      try { assignments = await repository.listAssignments(session.nihoUserId); }
-      catch { /* Current NIHO members retain their existing read access; grants fail closed. */ }
+    if (identityIds.length === 1 && repository) {
+      try { assignments = await repository.listAssignments(identityIds[0]!); }
+      catch { /* Operator grants fail closed. */ }
     }
   }
   const choices = calendarConsoleChoices(load.status === "ok" ? load.providers : [], assignments);
   return (
     <>
       {appGuard}
-      <HostSessionKeeper idTokenExpiresAt={session.idTokenExpiresAt} />
+      <HostSessionKeeper accessTokenExpiresAt={session.accessTokenExpiresAt} />
       <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
       <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl={config.guideEditorSiteOrigin} preview={isHostMock()}>

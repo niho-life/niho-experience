@@ -12,13 +12,13 @@ export async function POST(request: NextRequest) {
   if ("response" in parsed) return parsed.response;
   // The preview sends nothing, so it has nothing to limit (its hosts all share one synthetic user).
   if (isPushPreview()) return noStoreJson({ sent: false, preview: true });
-  const wait = takePushTestSlot(opened.session.nihoUserId);
+  const wait = takePushTestSlot(opened.nihoUserId);
   if (wait > 0) return noStoreJson({ error: "rate_limited", retryAfterSeconds: wait }, 429);
   const store = hostPushStore();
   if (!store) return pushNotConfigured();
   let recipient;
   try {
-    recipient = await store.find(opened.session.nihoUserId, parsed.endpoint);
+    recipient = await store.find(opened.nihoUserId, parsed.endpoint);
   } catch {
     return pushUnavailable();
   }

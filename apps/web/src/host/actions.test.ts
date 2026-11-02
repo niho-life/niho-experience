@@ -23,8 +23,8 @@ vi.mock("@/lib/host/server", async (importActual) => {
       const now = Date.now();
       return {
         refreshToken: "r",
-        idToken: "mock-id-token.actions-test",
-        idTokenExpiresAt: state.expired ? now - 1000 : now + 3_600_000,
+        accessToken: "mock-access-token.actions-test",
+        accessTokenExpiresAt: state.expired ? now - 1000 : now + 3_600_000,
         connectionId: "c",
         connectionExpiresAt: now + 86_400_000,
         expiresAt: now + 86_400_000,

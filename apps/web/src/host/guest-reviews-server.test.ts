@@ -7,13 +7,13 @@ import { REVIEW_REPLY_TO_ENGLISH_SYSTEM, TRANSLATION_MODEL } from "@/lib/transla
 /** レビュー's reviews against a stubbed experience store and NIHO provider list (#108). */
 const state = vi.hoisted(() => ({
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
-  session: null as null | { nihoUserId: string; idTokenExpiresAt: number },
+  session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ guestReviewRepository: () => state.store, guestQuestionRepository: () => null, siteThreadRepository: () => null }));
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
-vi.mock("@/lib/host/session", () => ({ idTokenUsable: (session: { idTokenExpiresAt: number }, now: number) => session.idTokenExpiresAt > now }));
+vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import {
@@ -39,7 +39,7 @@ import { REVIEW_REPLY_TEXT_LIMIT, REVIEW_REPORT_NOTE_LIMIT, REVIEW_REPORTED_TEXT
 const REVIEW_ID = "00000000-0000-4000-8000-000000000108";
 const OTHER_REVIEW_ID = "00000000-0000-4000-8000-000000000109";
 const COMMAND_ID = "00000000-0000-4000-8000-0000000c0108";
-const OWNER = { id: "sample-provider", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 
 /** Written just now: no reply, no report, no note. */
@@ -73,7 +73,7 @@ beforeEach(() => {
     saveReply: vi.fn(async () => REPLIED),
     reportReview: vi.fn(async () => ({ ...STORED, report: { reason: "UNTRUE", note: null, reportedAtUtc: "2026-10-31T02:00:00.000Z" } })),
   };
-  state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+  state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
   state.providers = { status: "ok", providers: [OWNER, { id: "sample-other", memberRole: "EDITOR" }] };
 });
 
@@ -134,7 +134,7 @@ describe("loadGuestReviews", () => {
       { productId: "walk", productTitle: "Synthetic walk", count: 2, ratingTotal: 9 },
       { productId: "river", productTitle: "Synthetic river", count: 1, ratingTotal: 4 },
     ]);
-    const load = await loadGuestReviews(OWNER, "sample-niho-user");
+    const load = await loadGuestReviews(OWNER);
     expect(state.store?.listReviews).toHaveBeenCalledWith(ACTOR, { limit: 100 });
     expect(state.store?.summarizeReviews).toHaveBeenCalledWith(ACTOR);
     expect(load).toMatchObject({
@@ -158,19 +158,19 @@ describe("loadGuestReviews", () => {
   });
 
   it("keeps today's screen while closed, and says the reviews are the OWNER's to anyone else", async () => {
-    expect(await loadGuestReviews({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user")).toEqual({ status: "owner-only" });
+    expect(await loadGuestReviews({ ...OWNER, memberRole: "EDITOR" })).toEqual({ status: "owner-only" });
     state.store!.listReviews!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "owner-only" });
+    expect(await loadGuestReviews(OWNER)).toEqual({ status: "owner-only" });
     state.store!.summarizeReviews!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "owner-only" });
+    expect(await loadGuestReviews(OWNER)).toEqual({ status: "owner-only" });
     state.store = null;
-    expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "closed" });
-    expect(await loadGuestReviews({ ...OWNER, memberRole: "EDITOR" }, "sample-niho-user")).toEqual({ status: "closed" });
+    expect(await loadGuestReviews(OWNER)).toEqual({ status: "closed" });
+    expect(await loadGuestReviews({ ...OWNER, memberRole: "EDITOR" })).toEqual({ status: "closed" });
   });
 
   it("says the reviews could not be read when the DB fails", async () => {
     state.store!.listReviews!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await loadGuestReviews(OWNER, "sample-niho-user")).toEqual({ status: "error" });
+    expect(await loadGuestReviews(OWNER)).toEqual({ status: "error" });
   });
 });
 
@@ -193,7 +193,7 @@ describe("loadMoreGuestReviews (続きを見る)", () => {
     state.session = null;
     expect(await loadMoreGuestReviews("sample-provider", "c2Vjb25k")).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     // The action refuses what the screen never sends, before the store is asked.
-    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
     state.store!.listReviews!.mockClear();
     for (const input of [{ providerId: "not a provider", cursor: "c2Vjb25k" }, { providerId: "sample-provider", cursor: "" }, { providerId: "sample-provider", cursor: "c".repeat(201) }, null]) {
       expect(await loadMoreReviewList(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
@@ -236,7 +236,7 @@ describe("draftGuestReviewEnglish (英語にする, #108)", () => {
     const { create, translator } = api(async () => reply("Thanks!"));
     state.session = null;
     expect(await draftGuestReviewEnglish("sample-provider", REVIEW_ID, JAPANESE, translator)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
-    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
     expect(await draftGuestReviewEnglish("sample-other", REVIEW_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT });
     state.store!.getReview!.mockRejectedValueOnce(new StoreNotFoundError("guest review"));
     expect(await draftGuestReviewEnglish("sample-provider", OTHER_REVIEW_ID, JAPANESE, translator)).toEqual({ ok: false, message: GUEST_REVIEW_MISSING_TEXT });
@@ -270,7 +270,7 @@ describe("saveGuestReviewReply and reportGuestReview", () => {
     const reply = { japanese: "", english: "Thanks!", commandId: COMMAND_ID, expectedRevision: 0 };
     state.session = null;
     expect(await saveGuestReviewReply("sample-provider", REVIEW_ID, reply)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
-    state.session = { nihoUserId: "sample-niho-user", idTokenExpiresAt: Date.now() + 60_000 };
+    state.session = { nihoUserId: "sample-niho-user", accessTokenExpiresAt: Date.now() + 60_000 };
     for (const providerId of ["sample-other", "sample-unknown"]) {
       expect(await saveGuestReviewReply(providerId, REVIEW_ID, reply)).toEqual({ ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT });
       expect(await reportGuestReview(providerId, REVIEW_ID, { reason: "other", note: "", commandId: COMMAND_ID })).toEqual({ ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT });

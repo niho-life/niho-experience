@@ -8,7 +8,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 自分のユーザー情報・所属情報を取得 */
+        /**
+         * 自分のユーザー情報・所属情報を取得
+         * @description `niho_app_client=niho-experience` の接続 token では、表示名と顔写真だけを返す。
+         *     所属・連絡先・オンボーディング回答などは含まず、クエリ付き要求は 403 で拒否する。
+         */
         get: operations["getAuthMe"];
         put?: never;
         post?: never;
@@ -534,7 +538,8 @@ export type paths = {
          *     `purpose` は `ARTICLE_IMAGE`、形式は JPEG・PNG・WebP、1 枚 10MB まで（ほかは 400）。上げ先の `objectKey` はサーバーが決め、
          *     提供者に属する写真になる（体験ページの `photoObjectKeys` に使う）。署名は 15 分。`upload.fields` を全部 form に入れ、最後に
          *     `file` を足して `upload.url` へ送る。写真の保存が止まっている（`uploads_disabled`）・署名に失敗した（`signing_circuit_open` /
-         *     `signing_transient_failure`）ときは 503。
+         *     `signing_transient_failure`）ときは 503。失敗の `details` は `reason` と問い合わせ用 ID だけで、器の ID や署名診断は返さない。
+         *     回数の上限は拠点・ユーザーの上げ口と提供者の `signed-url` と共有し、IP ごとに 30 回 / 60 秒。
          */
         post: operations["createExperienceProviderUploadPolicy"];
         delete?: never;
@@ -560,7 +565,9 @@ export type paths = {
          * @description OWNER / EDITOR（platform ADMIN）が、この提供者の上げ口で上げた写真（`objectKey`）を見る署名つき URL を受け取る。保存前の写真の
          *     表示に使う（保存済みの写真は詳細の `photos[].url`）。別の提供者の写真・無い写真は 404（理由なし）、実体が無ければ 404
          *     `object_missing`、上げる期限が切れて署名を出し直せない写真は 403 `upload_expired`。写真の保存が止まっている（`uploads_disabled`）・
-         *     実体の確認に失敗した（`object_lookup_failed`）・署名に失敗したときは 503。
+         *     実体の確認に失敗した（`object_lookup_failed`）・署名に失敗したときは 503。失敗の `details` は `reason` と問い合わせ用 ID だけで、
+         *     器の ID・objectKey・署名診断は返さず、`requestId` / `supportId` でサーバーログを照会する。回数の上限は提供者の `policies` と共有し、
+         *     IP ごとに 30 回 / 60 秒。
          */
         post: operations["createExperienceProviderUploadSignedUrl"];
         delete?: never;
@@ -625,14 +632,13 @@ export type components = {
             consentVersion: string;
         };
         /**
-         * @description 体験サイトのホストの画面が `GET /api/auth/me` から読む部分（表示名と顔写真）。応答の正は `AuthMeResponse` で、ほかの項目も入る
-         *     （この schema は閉じない）。ホストの契約の書き出しでは、`getAuthMe` の 200 の schema をこれに置き換える。
-         *     項目を足すときは `AuthMeResponse` に同じ名前・同じ型の項目があることを確かめる（contracts の test が見る）。
+         * @description 体験サイトのホストの画面が `GET /api/auth/me` から受け取る表示名と顔写真。
+         *     応答の正は `AuthMeExperienceProfileResponse`。ホストの契約の書き出しでは、`getAuthMe` の 200 の
+         *     schema をこれに置き換える。項目を足すときは実際の応答と一致することを contracts の test が見る。
          */
         ExperienceHostAuthMe: {
             user: {
                 displayName: string | null;
-                id: string;
             };
             /** @description プロフィールの顔写真（短命の署名つき URL）。未設定は null */
             userIconImage: {
@@ -690,28 +696,6 @@ export type components = {
             reason: components["schemas"]["ExperienceHostErrorReason"];
             requestId: string;
             supportId: string;
-        } | {
-            objectKey: string;
-            reason: components["schemas"]["ExperienceHostErrorReason"];
-            requestId: string;
-            spotId: string;
-            supportId: string;
-        } | {
-            /** @enum {string} */
-            purpose: "ARTICLE_IMAGE";
-            reason: components["schemas"]["ExperienceHostErrorReason"];
-            requestId: string;
-            signingErrorCode: components["schemas"]["ExperienceHostSigningErrorCode"];
-            signingErrorName: string;
-            supportId: string;
-        } | {
-            objectKey: string;
-            reason: components["schemas"]["ExperienceHostErrorReason"];
-            requestId: string;
-            signingErrorCode: components["schemas"]["ExperienceHostSigningErrorCode"];
-            signingErrorName: string;
-            spotId: string;
-            supportId: string;
         };
         /**
          * @description `error.details.reason` の値。どの operation がどの理由を返すかは operation の説明に書く。
@@ -731,8 +715,6 @@ export type components = {
         ExperienceHostErrorResponse: {
             error: components["schemas"]["ExperienceHostError"];
         };
-        /** @description 署名の失敗の元のコード（文字列か数。無ければ null）。調査用で、画面の分岐には使わない */
-        ExperienceHostSigningErrorCode: (string | null) | number;
         /** @description 体験の提供者（本人が読む形） */
         ExperienceProvider: {
             /** Format: date-time */
@@ -812,10 +794,10 @@ export type components = {
             meetingPoint: components["schemas"]["ExperienceProviderMeetingPoint"];
         };
         /**
-         * @description 提供者の中での本人の役割。role enumの正本は選別済み experience-provider-operations v1.0.0。元のhost draft exportはcore baselineに無いため、既存ページDTOを維持したままこのenumだけを同期する。EDITORは紹介と原稿だけ、COHOSTは日常運営、OWNERは販売者・法的同意・受取口座・メンバー管理も行う。
+         * @description 提供者の中での本人の役割。EDITOR は紹介と原稿だけを直せる（予約・顧客・売上・受取口座・掲載の申請・審査の申請は OWNER だけ）。
          * @enum {string}
          */
-        ExperienceProviderMemberRole: "OWNER" | "EDITOR" | "COHOST";
+        ExperienceProviderMemberRole: "OWNER" | "EDITOR";
         /**
          * @description 本文の部分更新（送ったトップレベルのキーだけを今の本文へ重ねる。`facts`・`meetingPoint` は送ると中身ごと置き換える）。null は空と同じ。
          *     上限は本文（`SpotCampaignPageExperienceContent`）と同じで、文字列は前後の空白を除き、配列の空の要素（当日の流れは時刻・題・一言の
@@ -838,6 +820,8 @@ export type components = {
             } | null;
             notIncluded?: (string | null)[] | null;
             notSuitableFor?: (string | null)[] | null;
+            /** @description 参加の条件（#19318）。送ると全体を置き換える（null は全部未設定）。保存すると掲載中の体験は再審査になる。 */
+            participationConditions?: components["schemas"]["SpotCampaignPageParticipationConditions"] | null;
             timeline?: ({
                 photoObjectKey?: string | null;
                 text?: string | null;
@@ -884,8 +868,8 @@ export type components = {
             updatedAt: string;
         };
         /**
-         * @description 体験ページの体験サイトへの掲載（記録そのまま。予約・個人情報を含まない）。`slug` と `regionKey` は初回の承認で決まる。
-         *     拠点の掲載の応答と違い、体験サイトの URL は返さない。
+         * @description 体験ページの体験サイトへの掲載（予約・個人情報を含まない）。`slug` と `regionKey` は初回の承認で決まる。審査理由はホスト表示用の公開可能な理由で、GET・PUT にだけ含む。
+         *     拠点の掲載の応答と違い、体験サイトの URL は返さない。審査理由の欄は GET・PUT・DELETE に含め、取り下げ応答では null にする。
          */
         ExperienceProviderPageListing: {
             /** Format: date-time */
@@ -902,6 +886,13 @@ export type components = {
             /** Format: date-time */
             pausedAt: string | null;
             regionKey: string | null;
+            /** @description ホストに表示できる審査差戻し・停止理由。本人取消と自動停止では null。 */
+            reviewNote: string | null;
+            /**
+             * Format: date-time
+             * @description 審査理由の記録時刻。本人取消と自動停止では null。
+             */
+            reviewNotedAt: string | null;
             /** @description 体験サイトでの slug（初回の承認で決まる） */
             slug: string | null;
             /** @description 提供者の器の ID（`vesselSpotId`） */
@@ -1029,7 +1020,7 @@ export type components = {
         ExperienceProviderPagePreviewOfferSummary: {
             acceptanceMode: components["schemas"]["SpotCampaignPageAcceptanceMode"];
             adultRequiredForChild: boolean;
-            /** @description 申込時の質問（質問の無い商品は []） */
+            /** @description 申込時の質問（質問の無い商品は []）。参加の条件に対応できる食事があるときは先頭に定型の質問「食べものの希望」（#19318） */
             bookingQuestions: components["schemas"]["SpotCampaignPageBookingQuestion"][];
             /** @description 申込時の質問のセットの SHA-256（申込で照合する） */
             bookingQuestionsFingerprint: string;
@@ -1292,6 +1283,24 @@ export type components = {
          * @enum {string}
          */
         SpotCampaignPageAcceptanceMode: "INSTANT" | "APPROVAL";
+        /** @description 段差と車いす。 */
+        SpotCampaignPageAccessibilityCondition: {
+            /** @description 段差の様子（例「本堂まで石段」） */
+            note: string;
+            /**
+             * @description 車いすで参加できる・一部（段差・介助）・参加できない
+             * @enum {string}
+             */
+            wheelchair: "ACCESSIBLE" | "PARTIAL" | "NOT_ACCESSIBLE";
+        };
+        /** @description 年齢。下限・大人と一緒・補足のどれも無ければ保存時に null になる。 */
+        SpotCampaignPageAgeCondition: {
+            /** @description 子どもは大人と一緒に参加する */
+            childrenWithAdult: boolean;
+            /** @description 参加できる年齢の下限（null は下限なし） */
+            minimumAge: number | null;
+            note: string;
+        };
         /**
          * @description 商品の申込時の質問（Epic #17729 S1 #17730）。ホストが書いた文のまま返す（翻訳しない）。
          *     1 商品 5 問まで。旅行者は申込（checkout の `answers`）で 1 組に 1 つ答える。
@@ -1362,8 +1371,30 @@ export type components = {
             };
             notIncluded: string[];
             notSuitableFor: string[];
+            participationConditions: components["schemas"]["SpotCampaignPageParticipationConditions"];
             /** @description 当日の流れ（#17619）。空なら公開ページは見どころの箇条を出す。 */
             timeline: components["schemas"]["SpotCampaignPageTimelineItem"][];
+        };
+        /** @description 食べもの。provided が false（出ない）のときの対応できる食事は空になる。 */
+        SpotCampaignPageFoodCondition: {
+            /** @description 対応できる食事（値の並びにそろえる） */
+            dietaryOptions: ("VEGETARIAN" | "VEGAN" | "HALAL" | "GLUTEN_FREE" | "NO_PORK" | "NO_ALCOHOL")[];
+            /** @description 何が出るか（例「終わったらお茶とお菓子」） */
+            note: string;
+            /** @description 食べもの・飲みものが出るか */
+            provided: boolean;
+        };
+        /** @description ホストの言語。日本語・英語・補足のどれも無ければ保存時に null になる。 */
+        SpotCampaignPageHostLanguagesCondition: {
+            /** @enum {string|null} */
+            english: "FLUENT" | "CONVERSATIONAL" | "BASIC" | null;
+            /**
+             * @description 不自由なく話せる・日常会話・かんたんな言葉（話さないときは null）
+             * @enum {string|null}
+             */
+            japanese: "FLUENT" | "CONVERSATIONAL" | "BASIC" | null;
+            /** @description 補助の資料など（例「英語の案内の紙あり」） */
+            note: string;
         };
         /**
          * @description 企画ページの型。v1 は体験の申込（EXPERIENCE）だけ。
@@ -1442,6 +1473,27 @@ export type components = {
             weekdays?: number[];
         };
         /**
+         * @description 参加の条件（#19318・§4.4a）。項目ごとに null は未設定（公開の画面に出さない）。補足（note）はページの言語で書く 1 行（120 字まで・
+         *     空は空文字）。体験サイトの公開 API（v1.4 の詳細）に出し、年齢・体の負担・段差と車いすは予約入力で同意を求める。食べものが出て
+         *     対応できる食事があるときは、各商品の申込時の質問の先頭に定型の質問「食べものの希望」（id `niho_food`）が入る。
+         *     本文の PATCH で送ると全体を置き換える（null は全部未設定）。保存すると提供者の体験の掲載は再審査になる。
+         */
+        SpotCampaignPageParticipationConditions: {
+            accessibility: components["schemas"]["SpotCampaignPageAccessibilityCondition"] | null;
+            age: components["schemas"]["SpotCampaignPageAgeCondition"] | null;
+            food: components["schemas"]["SpotCampaignPageFoodCondition"] | null;
+            hostLanguages: components["schemas"]["SpotCampaignPageHostLanguagesCondition"] | null;
+            physical: components["schemas"]["SpotCampaignPagePhysicalCondition"] | null;
+            weather: components["schemas"]["SpotCampaignPageWeatherCondition"] | null;
+        };
+        /** @description 体の負担。項目と補足のどちらも無ければ保存時に null になる。項目は値の並びにそろえて重複を落とす。 */
+        SpotCampaignPagePhysicalCondition: {
+            /** @description 床に座る・長く立つ・歩く・坂や足場の悪い所を歩く */
+            activities: ("FLOOR_SITTING" | "LONG_STANDING" | "WALKING" | "UNEVEN_GROUND")[];
+            /** @description どのくらいか・補助（例「25 分 × 2 回・座布団と低い椅子あり」） */
+            note: string;
+        };
+        /**
          * @description 公開を止める理由。PRICE_BELOW_MINIMUM = 料金が Stripe の JPY の最低額（50 円）未満、
          *     STRIPE_NOT_READY = 拠点の都度決済（Stripe Connect）の受け取り準備ができていない、OPS_EMAIL_REQUIRED = 拠点の運用通知メールが空。
          * @enum {string}
@@ -1461,6 +1513,16 @@ export type components = {
             /** @description 時刻（JST の "HH:mm"。空は時刻なし） */
             time: string;
             title: string;
+        };
+        /** @description 雨の日。 */
+        SpotCampaignPageWeatherCondition: {
+            /** @description 例「屋内で開催」 */
+            note: string;
+            /**
+             * @description 雨でも開催・雨の日は内容を変えて開催・荒天は中止（全額返金）
+             * @enum {string}
+             */
+            policy: "RAIN_OR_SHINE" | "ADJUSTED_FOR_RAIN" | "MAY_CANCEL";
         };
         UploadSignedUrlRequest: {
             objectKey: string;

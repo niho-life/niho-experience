@@ -3,7 +3,7 @@ import { createMockTranslateRooms, MOCK_INVITE_ORIGIN, MOCK_INVITE_TTL_MS, MOCK_
 
 const ORIGIN = "https://niho.test";
 const ROOMS = `${ORIGIN}/api/experience-providers/sample-provider-kitchen/bookings/bk-2038/translate-rooms`;
-const headers = { authorization: "Bearer mock-id-token.x" };
+const headers = { authorization: "Bearer mock-access-token.x" };
 
 function harness(start = 1_000_000) {
   let now = start;

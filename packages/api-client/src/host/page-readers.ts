@@ -10,6 +10,7 @@ import {
   type ExperienceProviderPageAcceptanceMode,
   type ExperienceProviderPageBookingQuestionInputType,
   type ExperienceProviderPageCancellationPolicy,
+  type ExperienceProviderPageContent,
   type ExperienceProviderPageDeleteResponse,
   type ExperienceProviderPageDetail,
   type ExperienceProviderPageKind,
@@ -64,6 +65,11 @@ function oneOf<T extends string | boolean | null>(values: readonly T[]): Reader<
 
 function nullable<T>(read: Reader<T>): Reader<T | null> {
   return (value) => (value === null ? null : read(value));
+}
+
+/** 新しいnullable項目を追加した契約の段階配備中、旧応答の未送信をnullとして読む。 */
+function nullableWhenMissing<T>(read: Reader<T>): Reader<T | null> {
+  return (value) => (value === undefined || value === null ? null : read(value));
 }
 
 function arrayOf<T>(read: Reader<T>): Reader<T[]> {
@@ -125,6 +131,33 @@ const OCCURRENCE_UNAVAILABLE_REASONS = ["cutoff", "full", "unavailable"] as cons
 const LANDING_GROUNDS: readonly ExperienceProviderPagePreviewSpot["landingGround"][] = ["LIGHT", "DARK_WARM"];
 const LANDING_ACCENTS: readonly ExperienceProviderPagePreviewSpot["landingAccent"][] = ["LEAF", "CORAL", "TERRACOTTA", "SAND", "SUMI"];
 const LANDING_FONTS: readonly ExperienceProviderPagePreviewSpot["landingFont"][] = ["MARU", "KAKU", "MINCHO", "KYOKASHO", "MODERN", "CLASSIC"];
+const PARTICIPATION_ACTIVITIES = ["FLOOR_SITTING", "LONG_STANDING", "WALKING", "UNEVEN_GROUND"] as const;
+const PARTICIPATION_DIETARY_OPTIONS = ["VEGETARIAN", "VEGAN", "HALAL", "GLUTEN_FREE", "NO_PORK", "NO_ALCOHOL"] as const;
+const PARTICIPATION_LANGUAGE_LEVELS = ["FLUENT", "CONVERSATIONAL", "BASIC"] as const;
+const PARTICIPATION_WHEELCHAIR_ACCESS = ["ACCESSIBLE", "PARTIAL", "NOT_ACCESSIBLE"] as const;
+const PARTICIPATION_WEATHER_POLICIES = ["RAIN_OR_SHINE", "ADJUSTED_FOR_RAIN", "MAY_CANCEL"] as const;
+
+type ParticipationConditions = ExperienceProviderPageContent["participationConditions"];
+const EMPTY_PARTICIPATION_CONDITIONS: ParticipationConditions = {
+  age: null,
+  physical: null,
+  hostLanguages: null,
+  food: null,
+  accessibility: null,
+  weather: null,
+};
+const participationConditions: Reader<ParticipationConditions> = (value) => {
+  // v0.3 API responses predate this field; treat omission (and legacy null) as no conditions.
+  if (value === undefined || value === null) return { ...EMPTY_PARTICIPATION_CONDITIONS };
+  return object({
+    age: nullable(object({ minimumAge: nullable(integer), childrenWithAdult: boolean, note: string })),
+    physical: nullable(object({ activities: arrayOf(oneOf(PARTICIPATION_ACTIVITIES)), note: string })),
+    hostLanguages: nullable(object({ japanese: nullable(oneOf(PARTICIPATION_LANGUAGE_LEVELS)), english: nullable(oneOf(PARTICIPATION_LANGUAGE_LEVELS)), note: string })),
+    food: nullable(object({ provided: boolean, dietaryOptions: arrayOf(oneOf(PARTICIPATION_DIETARY_OPTIONS)), note: string })),
+    accessibility: nullable(object({ wheelchair: oneOf(PARTICIPATION_WHEELCHAIR_ACCESS), note: string })),
+    weather: nullable(object({ policy: oneOf(PARTICIPATION_WEATHER_POLICIES), note: string })),
+  })(value);
+};
 
 // 集合場所
 
@@ -214,6 +247,7 @@ const pageContent = object({
   meetingPoint: object({ entranceNote: string, exteriorPhotoObjectKey: nullable(string) }),
   knowBeforeYouGo: arrayOf(string),
   hostUserIds: arrayOf(string),
+  participationConditions,
 });
 
 const pageDetail: Reader<ExperienceProviderPageDetail> = object({
@@ -346,6 +380,9 @@ const pageListingResponse: Reader<ExperienceProviderPageListingResponse> = objec
       approvedAt: nullable(string),
       pausedAt: nullable(string),
       withdrawnAt: nullable(string),
+      // Host contract v0.3 did not send these fields. Keep reading that deployed response until v0.4 is deployed.
+      reviewNote: nullableWhenMissing(string),
+      reviewNotedAt: nullableWhenMissing(string),
       createdAt: string,
       updatedAt: string,
     }),

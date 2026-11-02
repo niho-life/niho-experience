@@ -2,7 +2,7 @@
  * ホスト API の契約（contract/experience-host-api.openapi.json）の検証（Node・test 専用）。公開契約の監査
  * （`auditContractDocument`）とは別の規則で、公開契約の規則は変えない。
  *
- * - path は `/api/experience-providers` 以下と `GET /api/auth/me` だけ。各 operation の security は Bearer（`FirebaseIdToken`）だけ。
+ * - path は `/api/experience-providers` 以下と `GET /api/auth/me` だけ。各 operation の security は Bearer（`AppConnectWebAccessToken`）だけ。
  * - 操作から辿れる schema（閉包）は `x-niho-experience-host-dto: true` の印が必須。どの操作からも辿れない schema は置かない。
  * - object は `additionalProperties: false`。閉じない schema は `host-field-policy.json` の `openSchemas` に理由と一緒に書いたものだけ。
  *   `oneOf` / `anyOf` / `allOf` の各組も同じ規則で見る（組ごとに閉じた object か `$ref` か型のある値。何でも通る組は置かない）。

@@ -20,7 +20,7 @@ function respond(status: number, body: unknown): ReturnType<typeof vi.fn<FetchLi
 describe("experience translate rooms transport", () => {
   it("creates a room with an empty JSON object on the pinned path and never forwards cookies, redirects or referrers", async () => {
     const fetcher = respond(201, created);
-    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetcher });
+    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetcher });
     expect(await api.createRoom("provider_1", "booking_1")).toEqual({ ok: true, data: created });
     expect(fetcher).toHaveBeenCalledWith(ROOMS, expect.objectContaining({
       method: "POST", credentials: "omit", redirect: "manual", cache: "no-store", referrerPolicy: "no-referrer", body: "{}",
@@ -30,16 +30,16 @@ describe("experience translate rooms transport", () => {
 
   it("reads and ends the room on its own paths", async () => {
     const read = respond(200, status);
-    expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: read }).getRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: status });
+    expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: read }).getRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: status });
     expect(read).toHaveBeenCalledWith(`${ROOMS}/room_1`, expect.objectContaining({ method: "GET" }));
     const end = respond(200, { state: "ended" });
-    expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: end }).endRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: { state: "ended" } });
+    expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: end }).endRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: { state: "ended" } });
     expect(end).toHaveBeenCalledWith(`${ROOMS}/room_1/end`, expect.objectContaining({ method: "POST", body: "{}" }));
   });
 
   it("rejects invalid ids before fetch", async () => {
     const fetcher = respond(201, created);
-    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetcher });
+    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetcher });
     expect(await api.createRoom("../private", "booking_1")).toEqual({ ok: false, kind: "invalid_request" });
     expect(await api.getRoom("provider_1", "booking_1", "a/b")).toEqual({ ok: false, kind: "invalid_request" });
     expect(await api.endRoom("provider_1", "", "room_1")).toEqual({ ok: false, kind: "invalid_request" });
@@ -49,7 +49,7 @@ describe("experience translate rooms transport", () => {
   });
 
   it("accepts only the pinned shapes: a relay ticket, an unknown state or a third participant is an unexpected response", async () => {
-    const api = (body: unknown, status = 200) => createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(status, body) });
+    const api = (body: unknown, status = 200) => createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(status, body) });
     expect(await api({ ...created, ticket: "eyJ.hidden" }, 201).createRoom("provider_1", "booking_1")).toEqual({ ok: false, kind: "unexpected_response", status: 201 });
     expect(await api(created, 200).createRoom("provider_1", "booking_1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
     expect(await api({ ...status, state: "live" }).getRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
@@ -65,18 +65,18 @@ describe("experience translate rooms transport", () => {
     [404, { ok: false, kind: "not_found" }],
     [409, { ok: false, kind: "conflict" }],
   ] as const)("maps %i without exposing upstream error bodies", async (status, expected) => {
-    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: respond(status, { message: "private", relayUrl: "wss://hidden" }) });
+    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(status, { message: "private", relayUrl: "wss://hidden" }) });
     expect(await api.createRoom("provider_1", "booking_1")).toEqual(expected);
   });
 
   it("treats a timeout as a network error and never retries", async () => {
     const fetcher = vi.fn<FetchLike>(async () => { throw new DOMException("timed out", "TimeoutError"); });
-    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: TOKEN, fetch: fetcher, timeoutMs: 1 });
+    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: fetcher, timeoutMs: 1 });
     expect(await api.endRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: false, kind: "network_error" });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a token that cannot be a bearer credential", () => {
-    expect(() => createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, idToken: "bad token\n" })).toThrow();
+    expect(() => createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: "bad token\n" })).toThrow();
   });
 });

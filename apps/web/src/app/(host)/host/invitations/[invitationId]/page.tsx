@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { ProductOperatorInvitation } from "@/components/host/ProductOperatorInvitation";
+import { hostUserIdFromOwnedProviders } from "@/lib/host/providers";
 import { productOperatorRepository } from "@/lib/experience/store-server";
 import { decodeOperatorInvitationCookie, OPERATOR_INVITATION_COOKIE } from "@/lib/host/operator-invitation-cookie";
 import { hostInvitationLoginPath, invitationIdOrNull } from "@/lib/host/routes";
@@ -20,10 +21,12 @@ export default async function InvitationPage({ params }: { params: Promise<{ inv
   if (!session) return <ProductOperatorInvitation invitationId={invitationId} prepared loginHref={hostInvitationLoginPath(invitationId)} detail={null} />;
   const identity = await loadHostProviders();
   if (identity.status !== "ok") return <ProductOperatorInvitation invitationId={invitationId} prepared loginHref={identity.status === "refresh" || identity.status === "rejected" || identity.status === "signed-out" ? hostInvitationLoginPath(invitationId) : null} detail={null} />;
+  const nihoUserId = hostUserIdFromOwnedProviders(identity.providers);
+  if (!nihoUserId) return <ProductOperatorInvitation invitationId={invitationId} prepared loginHref={null} detail={null} accountName={session.displayName} />;
   const repository = productOperatorRepository();
   let detail = null;
   try {
-    const record = repository ? await repository.inspectForIdentity(invitationId, prepared.token, session.nihoUserId) : null;
+    const record = repository ? await repository.inspectForIdentity(invitationId, prepared.token, nihoUserId) : null;
     if (record) detail = { productTitle: record.productTitle, sellerDisplayName: record.sellerDisplayName, assignmentLabel: record.assignmentLabel };
   } catch { /* The client renders the safe unavailable state without private product data. */ }
   return <ProductOperatorInvitation invitationId={invitationId} prepared loginHref={null} detail={detail} accountName={session.displayName} />;

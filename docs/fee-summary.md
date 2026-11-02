@@ -5,7 +5,7 @@
 ## 契約と接続
 
 - 正本は `packages/api-client/contract/experience-fee-summary-api.openapi.json` v1.0.0。source commitは`291bc1fca9a9e21ebaeae4a9637379afc472aa61`、SHA-256は`c7b39ac5ae5331268915f4b9b2ded477a09f35eb333a291a9826e6b8f3a9d95e`、状態は`agreed-not-deployed`。
-- Admin/Hostとも固定GET、queryなし、`private, no-store`。Adminは専用の現在ADMIN session、Hostは既存のsealed sessionとID token期限を要求する。本人scopeと両host kindの所有権はNIHO APIが判断する。
+- Admin/Hostとも固定GET、queryなし、`private, no-store`。Adminは専用の現在ADMIN session、Hostは既存のsealed sessionとNIHO Web access token期限を要求する。本人scopeと両host kindの所有権はNIHO APIが判断する。
 - `EXPERIENCE_FEE_SUMMARY_API_ENABLED` はHTTP modeだけで有効。各console/authが無効ならBFFは閉じたままである。`EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED` はmock UIとPlaywright browser stub専用で、BFFや合成成功fallbackを開かない。
 - 401/403では保持していた金額を消し、再認証を案内する。別予約・別actor・手動再取得の遅い応答はgenerationとAbortControllerで破棄する。自動pollingはしない。
 

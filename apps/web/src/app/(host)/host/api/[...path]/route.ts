@@ -2,13 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { mutationFromSameOrigin, relayRequestHeaders, relayResponseHeaders, relayUpstreamPath } from "@/lib/host/relay";
 import { hostNotFound, nihoApiFetch, noStoreJson, sessionSealer, siteOrigin } from "@/lib/host/server";
-import { decodeSession, idTokenUsable, SESSION_COOKIE } from "@/lib/host/session";
+import { decodeSession, accessTokenUsable, SESSION_COOKIE } from "@/lib/host/session";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 20_000;
 
 /**
- * `/host/api/<rest>` → `${NIHO}/api/<rest>` with the session's ID token (#86).
+ * `/host/api/<rest>` → `${NIHO}/api/<rest>` with the session's NIHO Web access token (#86).
  * Photos never pass through here: the browser posts them to a signed GCS URL.
  */
 async function relay(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
@@ -22,7 +22,7 @@ async function relay(request: NextRequest, context: { params: Promise<{ path: st
   const session = decodeSession(sessionSealer(), request.cookies.get(SESSION_COOKIE)?.value, Date.now());
   if (!session) return noStoreJson({ error: "unauthenticated" }, 401);
   // NIHO is not called with an expiring token; the browser refreshes (one tab at a time) and retries once.
-  if (!idTokenUsable(session, Date.now())) return noStoreJson({ error: "session_refresh_required" }, 401);
+  if (!accessTokenUsable(session, Date.now())) return noStoreJson({ error: "session_refresh_required" }, 401);
 
   let body: ArrayBuffer | undefined;
   if (method !== "GET") {
@@ -38,7 +38,7 @@ async function relay(request: NextRequest, context: { params: Promise<{ path: st
   try {
     upstream = await nihoApiFetch(session)(url.href, {
       method,
-      headers: relayRequestHeaders(request.headers, session.idToken),
+      headers: relayRequestHeaders(request.headers, session.accessToken),
       body,
       cache: "no-store",
       redirect: "manual",

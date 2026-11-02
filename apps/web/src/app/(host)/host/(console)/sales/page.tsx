@@ -23,7 +23,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 interface MonthProps {
   provider: HostProvider;
   /** Who reads: never the session's tokens. */
-  reader: Pick<HostSession, "nihoUserId" | "mockScenario">;
+  reader: Pick<HostSession, "mockScenario">;
   month: SearchParams["month"];
   linkProviderId: string | null;
 }
@@ -47,7 +47,7 @@ export default async function HostSalesPage({ searchParams }: { searchParams: Pr
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="売上" />;
   if (provider.memberRole !== "OWNER") notFound();
-  const reader = { nihoUserId: context.session.nihoUserId, mockScenario: context.session.mockScenario };
+  const reader = { mockScenario: context.session.mockScenario };
   return (
     <Suspense key={String(query.month ?? "")} fallback={
         <SalesFrame>

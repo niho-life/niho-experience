@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const store = hostPushStore();
   if (!store) return pushNotConfigured();
   try {
-    return noStoreJson({ subscribed: await store.claim(opened.session.nihoUserId, parsed.endpoint, opened.session.connectionId) });
+    return noStoreJson({ subscribed: await store.claim(opened.nihoUserId, parsed.endpoint, opened.session.connectionId) });
   } catch {
     return pushUnavailable();
   }

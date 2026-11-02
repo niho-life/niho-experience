@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceProviderPageListing } from "@niho-experience/api-client/host";
-import { LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, PUBLISH_BLOCKER_TEXT, publishBlockerText, readListingResponse } from "./live-listing-state";
+import { hostListingReviewNote, LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, PUBLISH_BLOCKER_TEXT, publishBlockerText, readListingResponse } from "./live-listing-state";
 
 const SITE = "https://experience.example.test";
 const listing = (status: ExperienceProviderPageListing["status"], slug: string | null = null): ExperienceProviderPageListing => ({
   id: "listing_1", spotId: "spot_1", campaignPageId: "page_1", status, slug, regionKey: null, consentVersion: "sample-listing-consent-1",
-  consentedAt: "2026-10-27T01:00:00.000Z", approvedAt: null, pausedAt: null, withdrawnAt: null, createdAt: "2026-10-27T01:00:00.000Z", updatedAt: "2026-10-27T01:00:00.000Z",
+  consentedAt: "2026-10-27T01:00:00.000Z", approvedAt: null, pausedAt: null, withdrawnAt: null, reviewNote: null, reviewNotedAt: null, createdAt: "2026-10-27T01:00:00.000Z", updatedAt: "2026-10-27T01:00:00.000Z",
 });
 const page = (patch: Partial<{ status: "DRAFT" | "PUBLISHED" | "UNPUBLISHED"; language: "EN" | "JA"; publishBlockers: string[] }> = {}) => ({ status: "PUBLISHED" as const, language: "EN" as const, publishBlockers: [], ...patch }) as Parameters<typeof liveListingView>[1];
 
@@ -28,6 +28,14 @@ describe("live listing state", () => {
     expect(liveListingView(listing("PAUSED"), page({ status: "UNPUBLISHED" }), SITE)).toEqual({ kind: "request", block: null, withdrawable: true });
     expect(liveListingView(listing("ACTIVE", "synthetic tea"), page({ status: "UNPUBLISHED" }), SITE)).toEqual({ kind: "active", href: `${SITE}/experiences/synthetic%20tea` });
     expect(liveListingView(listing("ACTIVE"), page(), SITE)).toEqual({ kind: "active", href: null });
+  });
+
+  it("shows only reviewer reasons for a returned or paused listing", () => {
+    expect(hostListingReviewNote({ ...listing("PAUSED"), reviewNote: "集合案内の公開範囲を見直してください。" })).toBe("集合案内の公開範囲を見直してください。");
+    expect(hostListingReviewNote({ ...listing("WITHDRAWN"), reviewNote: "写真の説明を追加してください。" })).toBe("写真の説明を追加してください。");
+    expect(hostListingReviewNote({ ...listing("REQUESTED"), reviewNote: "internal" })).toBeNull();
+    expect(hostListingReviewNote({ ...listing("ACTIVE"), reviewNote: "internal" })).toBeNull();
+    expect(hostListingReviewNote({ ...listing("PAUSED"), reviewNote: "  " })).toBeNull();
   });
 
   it("names the provider review only until it is approved", () => {

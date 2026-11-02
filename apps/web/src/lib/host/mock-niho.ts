@@ -8,7 +8,7 @@ import type { HostMockScenario } from "./session";
  * contract-checked mock from `@niho-experience/api-client/host/mock` (#87),
  * loaded only when a mock session calls it. Invented data only.
  */
-export const MOCK_ID_TOKEN_PREFIX = "mock-id-token.";
+export const MOCK_ACCESS_TOKEN_PREFIX = "mock-access-token.";
 
 export function mockToken(prefix: string): string {
   return `${prefix}${randomBytes(16).toString("base64url")}`;
@@ -61,7 +61,7 @@ export function createMockHostFetch(scenario: HostMockScenario): typeof fetch {
   const upstream = async () => (mock ??= loadMock().then(({ createMockExperienceHostFetch }) => createMockExperienceHostFetch({ scenario: HOST_MOCK_SCENARIO_MAP[scenario] })));
   return async (input, init) => {
     const request = new Request(input, init);
-    if (!request.headers.get("authorization")?.startsWith(`Bearer ${MOCK_ID_TOKEN_PREFIX}`)) return unauthorized();
+    if (!request.headers.get("authorization")?.startsWith(`Bearer ${MOCK_ACCESS_TOKEN_PREFIX}`)) return unauthorized();
     const translated = await translateRooms.route(request, {
       now: Date.now,
       providerExists: async (providerId) => (await (await upstream())(new URL(`/api/experience-providers/${encodeURIComponent(providerId)}`, request.url).href, { method: "GET", headers: request.headers })).status === 200,

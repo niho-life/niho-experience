@@ -8,13 +8,13 @@ const state = vi.hoisted(() => ({
   providers: [] as HostProvider[],
   scenario: "default" as HostMockScenario,
   notificationLoad: { status: "preparing" } as import("./notification-settings-server").HostNotificationSettingsLoad,
-  notificationCalls: [] as { providerId: string; nihoUserId: string }[],
+  notificationCalls: [] as { providerId: string; ownerUserId: string }[],
 }));
 vi.mock("server-only", () => ({}));
 // The experience DB's 通知 (#109) is its own module; here only what it answers.
 vi.mock("./notification-settings-server", () => ({
-  loadNotificationSettings: async (provider: HostProvider, nihoUserId: string) => {
-    state.notificationCalls.push({ providerId: provider.id, nihoUserId });
+  loadNotificationSettings: async (provider: HostProvider) => {
+    state.notificationCalls.push({ providerId: provider.id, ownerUserId: provider.ownerUserId });
     return state.notificationLoad;
   },
 }));
@@ -23,7 +23,7 @@ vi.mock("@/lib/config", () => ({ config: state.config, isPreview: true }));
 vi.mock("@/lib/host/server", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/host/server")>();
   const now = Date.now();
-  const session = { nihoUserId: "sample-niho-user", refreshToken: "r", idToken: "mock-id-token.data-test", idTokenExpiresAt: now + 3_600_000, connectionId: "c", connectionExpiresAt: now + 86_400_000, expiresAt: now + 86_400_000, displayName: "サンプル ホスト", iconUrl: null };
+  const session = { refreshToken: "r", accessToken: "mock-access-token.data-test", accessTokenExpiresAt: now + 3_600_000, connectionId: "c", connectionExpiresAt: now + 86_400_000, expiresAt: now + 86_400_000, displayName: "サンプル ホスト", iconUrl: null };
   return {
     ...actual,
     readHostSession: async () => ({ ...session, mockScenario: state.scenario }),
@@ -134,8 +134,8 @@ describe("loadHostConsoleData", () => {
     const calls = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(detail)));
     const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
     expect(calls.toSorted((left, right) => left.url.localeCompare(right.url))).toEqual([
-      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen", authorization: "Bearer mock-id-token.data-test" },
-      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen/meeting-point", authorization: "Bearer mock-id-token.data-test" },
+      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen", authorization: "Bearer mock-access-token.data-test" },
+      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen/meeting-point", authorization: "Bearer mock-access-token.data-test" },
     ]);
     expect(data.settings).toEqual({
       displayName: "合成の台所",
@@ -169,7 +169,7 @@ describe("loadHostConsoleData", () => {
     expect(state.notificationCalls).toEqual([]);
     const live = await loadHostConsoleData(KITCHEN, { notifications: true });
     expect(live.settings).toMatchObject({ notifications: { email: { addresses: [] }, items }, notificationSource: "live" });
-    expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, nihoUserId: "sample-niho-user" }]);
+    expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, ownerUserId: "sample-user" }]);
     state.notificationLoad = { status: "error" };
     expect((await loadHostConsoleData(KITCHEN, { notifications: true })).settings.notificationSource).toBe("error");
     // An editor never reads them.

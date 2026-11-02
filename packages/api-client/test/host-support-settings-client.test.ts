@@ -43,7 +43,7 @@ describe("Host support settings strict SDK", () => {
 
   it("uses only fixed paths, Bearer, no-store and manual redirect for both host kinds", async () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => url.endsWith("niho-support-hosts") ? json(list) : json(url.includes("SPOT") ? state : { ...state, host: provider }));
-    const client = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: fetcher });
+    const client = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: fetcher });
     expect((await client.list()).ok).toBe(true);
     expect((await client.get("SPOT", spot.id)).ok).toBe(true);
     expect((await client.get("EXPERIENCE_PROVIDER", provider.id)).ok).toBe(true);
@@ -56,26 +56,26 @@ describe("Host support settings strict SDK", () => {
   it("accepts strict 200/201 saves, sends one normalized command and rejects target mismatch", async () => {
     const saved = { ...state, setting: { ...setting, enabled: false, revision: 4 } };
     const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => json(saved, 201));
-    const client = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: fetcher });
+    const client = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: fetcher });
     expect((await client.put("SPOT", spot.id, command)).ok).toBe(true);
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify(command) });
     expect((fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>)["content-type"]).toBe("application/json");
-    const wrong = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: vi.fn(async () => json({ ...saved, host: provider })) });
+    const wrong = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: vi.fn(async () => json({ ...saved, host: provider })) });
     expect(await wrong.put("SPOT", spot.id, command)).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
   });
 
   it("accepts a maximum Unicode host page and rejects a body beyond the bounded cap", async () => {
     const maximum = { hosts: Array.from({ length: 100 }, (_, index) => ({ kind: "SPOT" as const, id: `${"😀".repeat(199)}${String.fromCodePoint(0x10000 + index)}`, displayName: "😀".repeat(200) })), limit: 100 as const, truncated: true };
     expect(decodeExperienceHostSupportSettingsHostListResponse({ ...list, hosts: [{ ...spot, displayName: "😀".repeat(201) }] })).toBeNull();
-    const accepted = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: vi.fn(async () => json(maximum)) });
+    const accepted = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: vi.fn(async () => json(maximum)) });
     const result = await accepted.list();
     expect(result.ok && result.data.hosts).toHaveLength(100);
-    const oversized = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: vi.fn(async () => json({ ...list, padding: "x".repeat(270_000) })) });
+    const oversized = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: vi.fn(async () => json({ ...list, padding: "x".repeat(270_000) })) });
     expect(await oversized.list()).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
   });
 
   it("rejects wrong media type, redirects and classifies known failures", async () => {
-    const clientFor = (response: Response) => createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", fetch: vi.fn(async () => response) });
+    const clientFor = (response: Response) => createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", fetch: vi.fn(async () => response) });
     expect(await clientFor(new Response(JSON.stringify(list), { headers: { "content-type": "text/plain" } })).list()).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
     expect(await clientFor(json({}, 302)).list()).toEqual({ ok: false, kind: "unexpected_response", status: 302 });
     expect(await clientFor(json({}, 401)).list()).toEqual({ ok: false, kind: "rejected", status: 401 });
@@ -88,7 +88,7 @@ describe("Host support settings strict SDK", () => {
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => await new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("timed out", "AbortError")));
     }));
-    const client = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", idToken: "host-token", timeoutMs: 1, fetch: fetcher });
+    const client = createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: "https://niho.example", accessToken: "host-token", timeoutMs: 1, fetch: fetcher });
     expect(await client.list()).toEqual({ ok: false, kind: "network_error" });
   });
 });

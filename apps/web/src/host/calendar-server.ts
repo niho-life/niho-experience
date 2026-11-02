@@ -7,7 +7,7 @@ import { hostCalendarSettings } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_CALENDAR_PATH } from "@/lib/host/routes";
 import { isHostMock, loadHostProviders, readHostSession, siteOrigin } from "@/lib/host/server";
-import { idTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import { actionTime } from "./bookings";
 import {
   CALENDAR_FEED_ISSUE_FAILED_TEXT,
@@ -38,8 +38,9 @@ const CLOSED: HostCalendarLoad = { status: "closed" };
 /** Ties an address to this feed and its version: another use of the key never yields the same value. */
 const FEED_TOKEN_CONTEXT = "niho-experience/calendar-feed/v1";
 
-function ownerActor(providerId: string, nihoUserId: string): HostActor {
-  return { providerId, nihoUserId, calendarRoleCeiling: "OWNER" };
+function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
+  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
 }
 
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
@@ -100,11 +101,11 @@ function japanMinute(utc: string): string {
  * `feed` (設定 only) the bookings feed's address while its flag is on. Closed in the preview, for anyone else, without
  * the experience DB, or when the store does not count them as the OWNER.
  */
-export async function loadHostCalendar(provider: Pick<HostProvider, "id" | "memberRole">, nihoUserId: string, options: { feed: boolean }): Promise<HostCalendarLoad> {
+export async function loadHostCalendar(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, options: { feed: boolean }): Promise<HostCalendarLoad> {
   if (isHostMock() || provider.memberRole !== "OWNER") return CLOSED;
   const settings = hostCalendarSettings();
   if (!settings) return CLOSED;
-  const actor = ownerActor(provider.id, nihoUserId);
+  const actor = ownerActor(provider);
   const withFeed = options.feed && config.hostCalendarFeedEnabled;
   try {
     // The connection's read is also the store's OWNER check, so it runs with Google's sign-in off too.
@@ -131,14 +132,14 @@ type FeedOwner = { ok: true; settings: HostCalendarSettings; actor: HostActor } 
 async function asFeedOwner(providerId: string, failed: string): Promise<FeedOwner> {
   if (isHostMock() || !config.hostCalendarFeedEnabled) return { ok: false, message: failed };
   const session = await readHostSession();
-  if (!session || !idTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const settings = hostCalendarSettings();
   if (!settings) return { ok: false, message: failed };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? failed : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT };
-  return { ok: true, settings, actor: ownerActor(providerId, session.nihoUserId) };
+  return { ok: true, settings, actor: ownerActor(provider) };
 }
 
 /** URL を作る / URL を作り直す: a new salt, so a new address; the old one stops working at once. */

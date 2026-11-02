@@ -16,6 +16,7 @@ export const LISTING_TEXT = {
   notEligible: "体験サイトに載せられるのは、公開中の英語の体験ページだけです。",
   changed: "掲載の状態が変わりました。最新の状態を確認してください。",
   requestUncertain: "申請の結果を確認できません。再送せず、最新の状態を確認してください。",
+  pausedResubmitted: "再審査を申請しました。掲載は審査が終わるまで停止しています。",
   withdrawUncertain: "取り下げの結果を確認できません。再送せず、最新の状態を確認してください。",
   unreadable: "掲載の状態を読めませんでした。",
 } as const;
@@ -54,6 +55,13 @@ export function publishBlockerText(blocker: string): string {
 /** The pill: 未申請 (none or withdrawn) / 審査待ち / 掲載中 / 停止中. */
 export function liveListingStatus(listing: ExperienceProviderPageListing | null): StatusLabel {
   return SITE_LISTING_STATUS[listing?.status ?? "NONE"];
+}
+
+/** Host-only reason saved by NIHO's reviewer. Automatic pauses and owner withdrawals have no reason. */
+export function hostListingReviewNote(listing: ExperienceProviderPageListing | null): string | null {
+  if (!listing || (listing.status !== "PAUSED" && listing.status !== "WITHDRAWN")) return null;
+  const note = listing.reviewNote?.trim();
+  return note ? note : null;
 }
 
 /** What the panel offers for the listing and the saved page. */
