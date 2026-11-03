@@ -119,7 +119,7 @@ jobs:
           test "$READY" = true
           test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
           [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
-          [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ ]]
+          [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ || "$SITE_URL" =~ ^https://niho-experience-host-stg-[0-9]+\.asia-northeast1\.run\.app$ ]]
           test "$CLOUDSQL" = niho-app-stg:asia-northeast1:niho-app-db-stg
           [[ "$SESSION_REF" =~ ^experience-stg-host-session:[1-9][0-9]*$ ]]
           [[ "$FIREBASE_REF" =~ ^experience-stg-niho-firebase-web-api-key:[1-9][0-9]*$ ]]
