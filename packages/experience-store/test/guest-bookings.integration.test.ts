@@ -390,7 +390,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       const expiredOfferId = "sample-walk-expired";
       const activeOfferId = "sample-walk-current";
       await addRule("walk", rule(expiredOfferId, { startsOn: day(-3) }));
-      await addRule("walk", rule(activeOfferId, { startsOn: day(1) }));
+      await addRule("walk", rule(activeOfferId, { startsOn: day(1), localStartTime: "12:00" }));
       await guests.setSaleTerms(ownerA, "walk", {
         ...PLAIN_TERMS,
         offerPrices: [
