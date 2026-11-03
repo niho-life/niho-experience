@@ -182,7 +182,7 @@ pilot fixture（`packages/api-client/src/fixtures/pilot-experiences.ts`）に入
 - **P-04・P-05**：同じ分野の鎌倉の英語体験（[search-research.md](../growth/search-research.md)）より低めにして、少人数のグループで参加しやすくした。
 - **（※）** 提供者の既存条件（P-03は14日前）やP-04の材料準備を踏まえた7日前案は、現行の取消条件（24時間・48時間・返金なし）では表せない。niho-app #19138 の受入前に、これらを必要とする商品を実販売しない。
 
-P-01の掲載元にあるオーナー作成写真8枚はExperience掲載許可済みで、pilot fixtureに使用する。stgの安定した画像アップロードは未完了で、第三者の肖像同意は本番公開前に確認する。他のテスト体験では仮素材を使う。実際の販売・掲載に使う素材は[photo-requirements.md](photo-requirements.md)に沿って確認する。
+P-01の掲載元にあるオーナー作成写真8枚はExperience掲載許可済み。試験サイトの公開ギャラリーには7枚の1024pxプレビューを `apps/web/public/pilot/community-dinner/` から配信する。建物外観の1枚は正確な集合案内用として非公開ストレージへのアップロードが必要なため、公開ディレクトリへ置かず、stg登録は未完了のまま扱う。第三者の肖像同意と原画像の安定したアップロードは本番公開前に確認する。他のテスト体験では仮素材を使う。実際の販売・掲載に使う素材は[photo-requirements.md](photo-requirements.md)に沿って確認する。
 
 ## 予備候補
 
