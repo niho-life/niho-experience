@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import type { BookingRecord, RefundSubmission } from "@niho-experience/experience-store";
 import {
   createDirectCheckout,
+  createConnectedAccountLoginLink,
   ExperiencePaymentsHoldTooShortError,
   ExperiencePaymentsValidationError,
   isEndedCheckoutEvent,
@@ -624,6 +625,42 @@ describe("retrieveConnectedAccount (#285 slice 9)", () => {
     assert.deepEqual(calls, []);
     await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT }), /platform Stripe key/);
     await assert.rejects(retrieveConnectedAccount({ accountId: ACCOUNT, platformStripeKey: "sk_test_synthetic", stripe: stripeWith({}) }), /either platformStripeKey or stripe/);
+  });
+});
+
+describe("createConnectedAccountLoginLink (#91)", () => {
+  it("creates and returns only an HTTPS Stripe Express login URL", async () => {
+    const calls: string[] = [];
+    const stripe = {
+      accounts: {
+        createLoginLink: async (accountId: string) => {
+          calls.push(accountId);
+          return { object: "login_link", url: "https://stripe.com/express/synthetic-one-time-link" };
+        },
+      },
+    } as unknown as ConnectedAccountStripeClient;
+
+    const url = await createConnectedAccountLoginLink({ accountId: "acct_Synthetic123", stripe });
+
+    assert.deepEqual(calls, ["acct_Synthetic123"]);
+    assert.equal(url, "https://stripe.com/express/synthetic-one-time-link");
+  });
+
+  it("rejects an invalid account or a URL outside Stripe Express", async () => {
+    let calls = 0;
+    const stripe = {
+      accounts: {
+        createLoginLink: async () => {
+          calls += 1;
+          return { object: "login_link", url: "https://evil.example/express/secret" };
+        },
+      },
+    } as unknown as ConnectedAccountStripeClient;
+
+    await assert.rejects(createConnectedAccountLoginLink({ accountId: "cus_Sample0001", stripe }), ExperiencePaymentsValidationError);
+    assert.equal(calls, 0);
+    await assert.rejects(createConnectedAccountLoginLink({ accountId: "acct_Synthetic123", stripe }), ExperiencePaymentsValidationError);
+    assert.equal(calls, 1);
   });
 });
 

@@ -104,7 +104,7 @@ describe("売上 with this site's ledger", () => {
     state.site = { status: "live", page: PAGE };
     state.payouts = { status: "error", text: SITE_PAYOUTS_FAILED_TEXT };
     const failed = await page();
-    expect(failed.find(SalesPayoutsMessage)?.props).toEqual({ text: SITE_PAYOUTS_FAILED_TEXT, failed: true });
+    expect(failed.find(SalesPayoutsMessage)?.props).toEqual({ text: SITE_PAYOUTS_FAILED_TEXT, failed: true, providerId: "sample-provider" });
     expect(failed.find(SalesSummaryPanel)?.props.page).toBe(PAGE);
     state.payouts = { status: "closed" };
     const closed = await page();

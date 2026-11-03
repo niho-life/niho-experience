@@ -76,14 +76,15 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
   const noticeView = notice ? <SalesPayoutNoticeView notice={notice} settingsHref={`${withProvider(HOST_SETTINGS_PATH, linkProviderId)}#settings-payout`} /> : null;
 
   if (site.status === "live") {
+    const stripeLoginProviderId = reader.mockScenario ? null : provider.id;
     return (
       <SalesFrame page={site.page} linkProviderId={linkProviderId}>
         <SalesScope text={SITE_SALES_SCOPE_TEXT} />
         {noticeView}
-        <SalesSummaryPanel page={site.page} />
+        <SalesSummaryPanel page={site.page} providerId={stripeLoginProviderId} />
         <SalesLines page={site.page} />
         <Suspense fallback={<SalesPayoutsMessage text={SITE_PAYOUTS_LOADING_TEXT} />}>
-          <HostSalesPayouts provider={provider} reader={reader} month={site.page.month} />
+          <HostSalesPayouts provider={provider} reader={reader} month={site.page.month} stripeLoginProviderId={stripeLoginProviderId} />
         </Suspense>
       </SalesFrame>
     );
@@ -123,9 +124,9 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
 }
 
 /** この口座への入金 for the month shown: nothing when it is not open to this account, a message when Stripe fails. */
-async function HostSalesPayouts({ provider, reader, month }: Pick<MonthProps, "provider" | "reader"> & { month: SalesMonth }) {
+async function HostSalesPayouts({ provider, reader, month, stripeLoginProviderId }: Pick<MonthProps, "provider" | "reader"> & { month: SalesMonth; stripeLoginProviderId: string | null }) {
   const payouts = await loadSitePayouts(provider, reader, month);
   if (payouts.status === "closed") return null;
-  if (payouts.status === "error") return <SalesPayoutsMessage text={payouts.text} failed />;
+  if (payouts.status === "error") return <SalesPayoutsMessage text={payouts.text} failed providerId={stripeLoginProviderId} />;
   return <SalesPayoutsPanel panel={payouts.panel} />;
 }

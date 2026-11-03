@@ -749,6 +749,43 @@ export async function retrieveConnectedAccount(input: RetrieveConnectedAccountIn
   return problems.length === 0 ? { kind: "ready", account: summary } : { kind: "not_ready", account: summary, problems };
 }
 
+export interface CreateConnectedAccountLoginLinkInput {
+  readonly accountId: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: ConnectedAccountStripeClient;
+}
+
+/**
+ * Creates a short-lived Express Dashboard login link for a connected account. The URL is a bearer
+ * credential: callers must redirect to it immediately and must never log, persist, or send it by
+ * email. Stripe documents `stripe.com/express/...` as the link destination.
+ */
+export async function createConnectedAccountLoginLink(input: CreateConnectedAccountLoginLinkInput): Promise<string> {
+  if (typeof input.accountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.accountId)) {
+    throw new ExperiencePaymentsValidationError("accountId must be a Stripe connected account ID.");
+  }
+  const stripe = accountsClient(input.platformStripeKey, input.stripe);
+  const loginLink = await stripe.accounts.createLoginLink(input.accountId);
+  let target: URL;
+  try {
+    target = new URL(loginLink.url);
+  } catch {
+    throw new ExperiencePaymentsValidationError("Stripe returned an invalid login link.");
+  }
+  if (
+    target.protocol !== "https:"
+    || !["stripe.com", "connect.stripe.com"].includes(target.hostname)
+    || target.port !== ""
+    || target.username !== ""
+    || target.password !== ""
+    || !target.pathname.startsWith("/express/")
+    || target.hash !== ""
+  ) {
+    throw new ExperiencePaymentsValidationError("Stripe returned an unsafe login link.");
+  }
+  return target.href;
+}
+
 /* ---------- the seller's payouts (#91: 売上's この口座への入金, read only) ---------- */
 
 /** The part of Stripe the payout read uses: two GETs on the connected account, nothing that writes. */
