@@ -385,6 +385,38 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("keeps remaining priced offers sellable after another offer expires", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      const expiredOfferId = "sample-walk-expired";
+      const activeOfferId = "sample-walk-current";
+      await addRule("walk", rule(expiredOfferId, { startsOn: day(-3) }));
+      await addRule("walk", rule(activeOfferId, { startsOn: day(1) }));
+      await guests.setSaleTerms(ownerA, "walk", {
+        ...PLAIN_TERMS,
+        offerPrices: [
+          { offerId: expiredOfferId, adultPriceYen: 2500 },
+          { offerId: activeOfferId, adultPriceYen: 3500 },
+        ],
+      }, 1);
+
+      // Simulate time passing while retaining the immutable price for the expired rule.
+      await pool.query("UPDATE schedule_rules SET ends_on=$1::date WHERE id=$2", [day(-1), expiredOfferId]);
+
+      const terms = await guests.publicBookingTerms("sample-walk");
+      assert.deepEqual(terms?.offers.map((offer) => [offer.id, offer.pricing.adultPriceYen]), [[activeOfferId, 3500]]);
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), ["sample-walk"]);
+      assert.notEqual(await guests.listPublicAvailability("sample-walk"), null);
+
+      const held = await guests.startGuestBooking(walkRequest({
+        offerId: activeOfferId,
+        occurrenceDate: day(2),
+        expectedTotalYen: 3500,
+      }));
+      assert.equal(held.totalAmount, 3500);
+      assert.equal(held.booking.pricingSnapshot.unitAmount, 3500);
+    });
+  });
+
   it("sells a provider's products only with its sale settings, and fixes NIHO's fee on each booking", async () => {
     await withSchema(async ({ pool, store, guests, addRule }) => {
       await addRule("walk", rule("sample-walk-am"));

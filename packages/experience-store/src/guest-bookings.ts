@@ -935,9 +935,11 @@ export async function offerPricesMatchActiveRules(
     [providerId, productId, today],
   );
   const ruleIds = result.rows.map((row) => String(row.id));
-  if (ruleIds.some((id) => !OFFER_ID.test(id)) || terms.offerPrices.length !== ruleIds.length) return false;
-  const priceIds = [...terms.offerPrices].map((price) => price.offerId).sort();
-  return ruleIds.every((id, index) => id === priceIds[index]);
+  if (ruleIds.length === 0 || ruleIds.some((id) => !OFFER_ID.test(id))) return false;
+  const pricedIds = new Set(terms.offerPrices.map((price) => price.offerId));
+  // A rule can expire after its price was saved or published. Keep its immutable
+  // price snapshot, but require a price only for each rule that is active today.
+  return ruleIds.every((id) => pricedIds.has(id));
 }
 
 function adultPriceFor(terms: ProductSaleTerms, product: ProductRecord, offerId: string): number | null {
@@ -1613,9 +1615,8 @@ export class GuestBookingRepository {
       if (terms === null) return false;
       const activeOfferIds = Array.isArray(row.active_offer_ids) ? row.active_offer_ids.map(String) : [];
       if (terms.offerPrices !== null) {
-        const pricedIds = terms.offerPrices.map((price) => price.offerId).sort();
-        if (activeOfferIds.length === 0 || activeOfferIds.length !== pricedIds.length
-            || activeOfferIds.some((offerId, index) => offerId !== pricedIds[index])) return false;
+        const pricedIds = new Set(terms.offerPrices.map((price) => price.offerId));
+        if (activeOfferIds.length === 0 || activeOfferIds.some((offerId) => !pricedIds.has(offerId))) return false;
       }
       const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [unitAmount];
       return adultPrices.every((price) => chargeableFee(price, terms!.childPricing, Number(row.platform_fee_basis_points)));
