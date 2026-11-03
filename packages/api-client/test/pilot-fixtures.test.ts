@@ -87,8 +87,8 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
         ...Object.values(PILOT_IMAGE_SPECS)
           .flat()
           .flatMap((spec) => [
-            ...(spec.samplePhoto ? [`${PILOT_SAMPLE_PHOTO_PATH}/${spec.samplePhoto}`] : []),
-            ...(spec.sourcePhoto ? [`${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/${spec.sourcePhoto}`] : []),
+            ...("samplePhoto" in spec && spec.samplePhoto ? [`${PILOT_SAMPLE_PHOTO_PATH}/${spec.samplePhoto}`] : []),
+            ...("sourcePhoto" in spec && spec.sourcePhoto ? [`${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/${spec.sourcePhoto}`] : []),
           ]),
         ...Object.values(PILOT_HOST_PHOTOS).map((file) => `${PILOT_SAMPLE_PHOTO_PATH}/${file}`),
       ],
