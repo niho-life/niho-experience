@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { buildMockOccurrences, MOCK_AVAILABILITY_WINDOW_DAYS } from "../src/fixtures/availability.ts";
 import { toExperienceSummary } from "../src/fixtures/catalog.ts";
 import { buildFixtureExperiences, FIXTURE_EXPERIENCE_SITE_ORIGIN } from "../src/fixtures/experiences.ts";
-import { buildPilotExperiences, PILOT_CONTENT_STATUS, PILOT_HOST_PHOTOS, PILOT_IMAGE_SPECS, PILOT_SAMPLE_PHOTO_PATH } from "../src/fixtures/pilot-experiences.ts";
+import { buildPilotExperiences, PILOT_COMMUNITY_DINNER_PHOTO_PATH, PILOT_CONTENT_STATUS, PILOT_HOST_PHOTOS, PILOT_IMAGE_SPECS, PILOT_SAMPLE_PHOTO_PATH } from "../src/fixtures/pilot-experiences.ts";
 import { createExperienceApiClient } from "../src/client.ts";
 import { createMockExperienceFetch, isMockCheckoutUrl, type MockCatalog } from "../src/mock/mock-fetch.ts";
 import { createContractValidator, findSensitiveValues } from "../src/testing/index.ts";
@@ -81,14 +81,17 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
   });
 
   it("写真はサイト内の素材だけ（外部 URL を入れていない）", () => {
-    const samplePhoto = new RegExp(`^${PILOT_SAMPLE_PHOTO_PATH}/[a-z0-9-]+\\.jpg$`);
+    const localPhoto = new RegExp(`^(?:${PILOT_SAMPLE_PHOTO_PATH}/[a-z0-9-]+\\.jpg|${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/[a-z0-9-]+\\.webp)$`);
     const declared = new Set(
       [
         ...Object.values(PILOT_IMAGE_SPECS)
           .flat()
-          .flatMap((spec) => ("samplePhoto" in spec && spec.samplePhoto ? [spec.samplePhoto] : [])),
-        ...Object.values(PILOT_HOST_PHOTOS),
-      ].map((file) => `${PILOT_SAMPLE_PHOTO_PATH}/${file}`),
+          .flatMap((spec) => [
+            ...(spec.samplePhoto ? [`${PILOT_SAMPLE_PHOTO_PATH}/${spec.samplePhoto}`] : []),
+            ...(spec.sourcePhoto ? [`${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/${spec.sourcePhoto}`] : []),
+          ]),
+        ...Object.values(PILOT_HOST_PHOTOS).map((file) => `${PILOT_SAMPLE_PHOTO_PATH}/${file}`),
+      ],
     );
     for (const experience of experiences) {
       const urls = [experience.cover, ...experience.photos, ...experience.hosts.map((host) => host.avatar), experience.provider.logo]
@@ -96,7 +99,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
         .map((image) => image.url);
       for (const url of urls) {
         if (url.startsWith("data:image/svg+xml")) continue;
-        expect(url).toMatch(samplePhoto);
+        expect(url).toMatch(localPhoto);
         expect(declared.has(url)).toBe(true);
       }
     }
@@ -124,17 +127,16 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
     }
   });
 
-  it("コミュニティディナーは掲載元の写真8枚をすべて使い、集合場所の外観を公開しない", () => {
+  it("コミュニティディナーは公開許可済みの写真7枚を使い、集合場所の外観を公開しない", () => {
     const dinner = experiences.find((experience) => experience.slug === "kamakura-community-dinner");
-    expect(dinner?.photos.map((photo) => photo.url.replace(`${PILOT_SAMPLE_PHOTO_PATH}/`, ""))).toEqual([
-      "niho-cd-table-02.jpg",
-      "niho-cd-kitchen-together.jpg",
-      "niho-cd-food-trays.jpg",
-      "niho-cd-hands-salad.jpg",
-      "niho-cd-strawberry-daifuku.jpg",
-      "niho-cd-table-01.jpg",
-      "niho-dinner-1.jpg",
-      "niho-dinner-5.jpg",
+    expect(dinner?.photos.map((photo) => photo.url.replace(`${PILOT_COMMUNITY_DINNER_PHOTO_PATH}/`, ""))).toEqual([
+      "01-long-table.webp",
+      "02-cooking-together.webp",
+      "03-seasonal-dishes.webp",
+      "04-welcome-drink.webp",
+      "05-preparing-salad.webp",
+      "06-dinner-conversation.webp",
+      "07-strawberry-dessert.webp",
     ]);
     expect(dinner?.meetingPointDisclosure).toBe("AFTER_BOOKING");
     expect(dinner?.meetingPoint).toBeNull();
