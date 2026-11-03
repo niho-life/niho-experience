@@ -13,9 +13,9 @@ vi.mock("@/lib/host/translate-rooms-server", () => ({
 import { POST } from "./route";
 
 const created = {
-  roomId: "room_1", state: "created", expiresAt: "2026-11-08T01:15:00.000Z",
-  host: { participantId: "participant_host", inviteCode: "host-code-secret", inviteUrl: "https://app-stg.niho.test/i/host-code-secret" },
-  guest: { participantId: "participant_guest", inviteCode: "guest-code-secret", inviteUrl: "https://app-stg.niho.test/i/guest-code-secret" },
+  roomId: "room_1", state: "waiting", expiresAt: "2026-11-08T01:15:00.000Z",
+  host: { participantId: "participant_host", inviteCode: "host-code-secret", inviteUrl: "https://app-stg.niho.test/t#host-code-secret" },
+  guest: { participantId: "participant_guest", inviteCode: "guest-code-secret", inviteUrl: "https://app-stg.niho.test/t#guest-code-secret" },
 };
 const context = (providerId = "provider_1", bookingId = "booking_1") => ({ params: Promise.resolve({ providerId, bookingId }) });
 const request = (body: string | null = null, url = "https://experience.example/host/api/translate/providers/provider_1/bookings/booking_1/rooms") =>
@@ -33,7 +33,7 @@ describe("translate room create BFF", () => {
   it("makes the room and hands the browser the invite URLs, never a participant id or a bare code", async () => {
     const response = await POST(request(), context());
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({ room: { id: "room_1", state: "created", expiresAt: "2026-11-08T01:15:00.000Z", hostInviteUrl: created.host.inviteUrl, guestInviteUrl: created.guest.inviteUrl } });
+    expect(await response.json()).toEqual({ room: { id: "room_1", state: "waiting", expiresAt: "2026-11-08T01:15:00.000Z", hostInviteUrl: created.host.inviteUrl, guestInviteUrl: created.guest.inviteUrl } });
     expect(mocks.create).toHaveBeenCalledWith("provider_1", "booking_1");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");

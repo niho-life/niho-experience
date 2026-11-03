@@ -31,9 +31,12 @@ export function isExperienceTranslateRoomsSchema<T>(name: string, value: unknown
 export const isExperienceTranslateRoomPathId = (value: unknown): value is string =>
   typeof value === "string" && value.length >= 1 && value.length <= 200 && value !== "." && value !== ".." && !/[/\\%\u0000-\u001f\u007f]/.test(value);
 
+export const isExperienceTranslateBookingId = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
 export const decodeExperienceTranslateRoomCreatedResponse = (value: unknown): ExperienceTranslateRoomCreatedResponse | null =>
-  isExperienceTranslateRoomsSchema<ExperienceTranslateRoomCreatedResponse>("TranslateRoomCreatedResponse", value) ? value : null;
+  isExperienceTranslateRoomsSchema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated", value) ? value : null;
 export const decodeExperienceTranslateRoomStatusResponse = (value: unknown): ExperienceTranslateRoomStatusResponse | null =>
-  isExperienceTranslateRoomsSchema<ExperienceTranslateRoomStatusResponse>("TranslateRoomStatusResponse", value) ? value : null;
+  isExperienceTranslateRoomsSchema<ExperienceTranslateRoomStatusResponse>("ExperienceProviderTranslateRoomStatus", value) ? value : null;
 export const decodeExperienceTranslateRoomEndResponse = (value: unknown): ExperienceTranslateRoomEndResponse | null =>
-  isExperienceTranslateRoomsSchema<ExperienceTranslateRoomEndResponse>("TranslateRoomEndResponse", value) ? value : null;
+  isExperienceTranslateRoomsSchema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult", value) ? value : null;

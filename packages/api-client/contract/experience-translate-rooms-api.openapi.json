@@ -1,55 +1,87 @@
 {
-  "openapi": "3.1.0",
+  "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Translate Rooms API",
-    "version": "0.1.0",
-    "description": "体験の予約から対面通訳（niho-translate）の部屋を作り、参加状況を読み、終えるだけの選別契約。shape は niho-coliving/niho-app#19446 の契約節で固定し、N1b（niho-coliving/niho-app#19447）が contracts/openapi.yaml に載せるまでの下書き。入室券・relay・予算・使用料金・ゲストの個人情報は含めない。招待 code は URL の中だけに置き、画面の本文・ログ・計測に出さない。",
-    "x-niho-contract-status": "draft",
-    "x-niho-contract-source": "niho-coliving/niho-app#19446",
+    "version": "1.0.0",
+    "description": "旧NIHO予約とExperience予約UUIDの双方から使う日英2人通訳の最小契約。旅行者PII・NIHO private sourceは含めない。",
+    "x-niho-contract-status": "agreed-not-deployed",
+    "x-niho-contract-source": "niho-app contracts/openapi.yaml (source commit not fixed yet)",
     "x-niho-contract-sha256-file": "experience-translate-rooms-api.openapi.json.sha256"
   },
+  "servers": [
+    {
+      "url": "https://niho.life",
+      "description": "NIHO API origin"
+    }
+  ],
   "security": [
     {
-      "bearerAuth": []
+      "FirebaseIdToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Translate"
     }
   ],
   "paths": {
     "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/ProviderId"
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
         },
         {
-          "$ref": "#/components/parameters/RequestId"
+          "$ref": "#/components/parameters/TranslateBookingRequestId"
         }
       ],
       "post": {
-        "operationId": "createExperienceProviderTranslateRoom",
-        "x-provider-roles": [
-          "OWNER",
-          "COHOST"
+        "operationId": "postExperienceProviderTranslateRoom",
+        "tags": [
+          "Translate"
         ],
-        "description": "予約の languageSnapshot から言語を決め（EN → guest en・host ja）、host / guest の participant と 15 分有効の招待 code を作る。本文は空のオブジェクト。",
+        "summary": "体験の予約から通訳ルームを作り、host / guestの招待codeとURLを返す",
+        "description": "体験サイトのホスト画面（experience.niho.life/host）から、確定済みの予約に対して1部屋を作る。名義は体験の提供者。\n言語は予約の`languageSnapshot`（EN → guest en / host ja、JA → guest ja / host en）。招待codeはこの応答にだけ平文で載り、\nDBにはhashだけ残る。同じ予約に有効な部屋があるときは409（`TRANSLATE_ROOM_EXISTS`・detailsに`roomId`）で、終了してから作り直す。\n通訳が未設定の環境では503。\n",
         "requestBody": {
           "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateTranslateRoomInput"
+                "$ref": "#/components/schemas/EmptyObject"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "the room and both invite URLs",
+            "description": "作成済み",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TranslateRoomCreatedResponse"
+                  "$ref": "#/components/schemas/ExperienceProviderTranslateRoomCreated"
                 }
               }
             }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
           }
         }
       }
@@ -57,32 +89,43 @@
     "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms/{roomId}": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/ProviderId"
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
         },
         {
-          "$ref": "#/components/parameters/RequestId"
+          "$ref": "#/components/parameters/TranslateBookingRequestId"
         },
         {
-          "$ref": "#/components/parameters/RoomId"
+          "$ref": "#/components/parameters/TranslateRoomId"
         }
       ],
       "get": {
         "operationId": "getExperienceProviderTranslateRoom",
-        "x-provider-roles": [
-          "OWNER",
-          "COHOST"
+        "tags": [
+          "Translate"
         ],
-        "description": "ホスト画面の 3 秒 polling。参加者ごとの joined / ready と使用分。",
+        "summary": "通訳ルームの状態・参加状況・使用分（ホスト画面の3秒polling）",
         "responses": {
           "200": {
-            "description": "room state, participants and usage",
+            "description": "成功",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TranslateRoomStatusResponse"
+                  "$ref": "#/components/schemas/ExperienceProviderTranslateRoomStatus"
                 }
               }
             }
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
           }
         }
       }
@@ -90,137 +133,238 @@
     "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms/{roomId}/end": {
       "parameters": [
         {
-          "$ref": "#/components/parameters/ProviderId"
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
         },
         {
-          "$ref": "#/components/parameters/RequestId"
+          "$ref": "#/components/parameters/TranslateBookingRequestId"
         },
         {
-          "$ref": "#/components/parameters/RoomId"
+          "$ref": "#/components/parameters/TranslateRoomId"
         }
       ],
       "post": {
-        "operationId": "endExperienceProviderTranslateRoom",
-        "x-provider-roles": [
-          "OWNER",
-          "COHOST"
+        "operationId": "postExperienceProviderTranslateRoomEnd",
+        "tags": [
+          "Translate"
         ],
-        "description": "ホストが部屋を終える。招待 code は使えなくなる。",
+        "summary": "通訳ルームを終了する（招待codeと接続資格を失効）",
         "requestBody": {
           "required": false,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EndTranslateRoomInput"
+                "$ref": "#/components/schemas/EmptyObject"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "the final state",
+            "description": "終了済み",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TranslateRoomEndResponse"
+                  "$ref": "#/components/schemas/TranslateRoomStateResult"
                 }
               }
             }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/site-bookings/{bookingId}/translate-rooms": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateExperienceBookingId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceBookingTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "Experience DBの予約文脈から日英通訳ルームを作る",
+        "description": "NIHOはprovider・通訳・予算の正本として、providerに属するopaqueな外部予約文脈を受け取る。\n外部予約の実在・確定・取消・日付はExperience BFFが検証し、このAPIは検証済みと主張しない。\nv1の言語はhost ja / guest en固定。role・language・budgetはrequest bodyで受け取らない。\n同じproviderとbookingIdに未終了かつ未期限切れの部屋がある場合は409。\n",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "作成済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceProviderTranslateRoomCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/site-bookings/{bookingId}/translate-rooms/{roomId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateExperienceBookingId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "get": {
+        "operationId": "getExperienceBookingTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "Experience DBの予約に紐づく通訳ルーム状態を返す",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceProviderTranslateRoomStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/site-bookings/{bookingId}/translate-rooms/{roomId}/end": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateExperienceBookingId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceBookingTranslateRoomEnd",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "Experience DBの予約に紐づく通訳ルームを終了する",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "終了済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
           }
         }
       }
     }
   },
   "components": {
-    "securitySchemes": {
-      "bearerAuth": {
-        "type": "http",
-        "scheme": "bearer"
-      }
-    },
-    "parameters": {
-      "ProviderId": {
-        "name": "providerId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "maxLength": 200
-        }
-      },
-      "RequestId": {
-        "name": "requestId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "maxLength": 200
-        }
-      },
-      "RoomId": {
-        "name": "roomId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "maxLength": 200
-        }
-      }
-    },
     "schemas": {
-      "TranslateRoomState": {
-        "type": "string",
-        "enum": [
-          "created",
-          "active",
-          "paused",
-          "ended"
-        ]
-      },
-      "TranslateParticipantRole": {
-        "type": "string",
-        "enum": [
-          "host",
-          "guest"
-        ]
-      },
-      "CreateTranslateRoomInput": {
+      "EmptyObject": {
+        "x-niho-experience-translate-rooms-dto": true,
         "type": "object",
-        "additionalProperties": false,
-        "properties": {}
+        "additionalProperties": false
       },
-      "EndTranslateRoomInput": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {}
-      },
-      "TranslateInvite": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "participantId",
-          "inviteCode",
-          "inviteUrl"
-        ],
-        "properties": {
-          "participantId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "inviteCode": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "inviteUrl": {
-            "type": "string",
-            "format": "uri",
-            "maxLength": 2048
-          }
-        }
-      },
-      "TranslateRoomCreatedResponse": {
+      "ExperienceProviderTranslateRoomCreated": {
+        "x-niho-experience-translate-rooms-dto": true,
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -234,24 +378,32 @@
           "roomId": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 200
+            "maxLength": 128
           },
           "state": {
-            "$ref": "#/components/schemas/TranslateRoomState"
+            "type": "string",
+            "enum": [
+              "waiting",
+              "active",
+              "paused",
+              "ended"
+            ]
           },
           "host": {
-            "$ref": "#/components/schemas/TranslateInvite"
+            "$ref": "#/components/schemas/TranslateInviteParticipant"
           },
           "guest": {
-            "$ref": "#/components/schemas/TranslateInvite"
+            "$ref": "#/components/schemas/TranslateInviteParticipant"
           },
           "expiresAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "部屋の寿命（作成から90分）"
           }
         }
       },
-      "TranslateRoomParticipant": {
+      "ExperienceProviderTranslateRoomParticipant": {
+        "x-niho-experience-translate-rooms-dto": true,
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -261,17 +413,24 @@
         ],
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/TranslateParticipantRole"
+            "type": "string",
+            "enum": [
+              "host",
+              "guest"
+            ]
           },
           "joined": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "relayに接続中（直近15秒以内のpresence）"
           },
           "ready": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "SDKのready（同意・イヤフォン・権限が揃った）を直近15秒以内に申告した"
           }
         }
       },
-      "TranslateRoomStatusResponse": {
+      "ExperienceProviderTranslateRoomStatus": {
+        "x-niho-experience-translate-rooms-dto": true,
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -281,32 +440,135 @@
         ],
         "properties": {
           "state": {
-            "$ref": "#/components/schemas/TranslateRoomState"
+            "type": "string",
+            "enum": [
+              "waiting",
+              "active",
+              "paused",
+              "ended"
+            ]
           },
           "participants": {
             "type": "array",
             "maxItems": 2,
             "items": {
-              "$ref": "#/components/schemas/TranslateRoomParticipant"
+              "$ref": "#/components/schemas/ExperienceProviderTranslateRoomParticipant"
             }
           },
           "usageMinutes": {
             "type": "number",
-            "minimum": 0
+            "minimum": 0,
+            "description": "入力音声の合計分（0.1分単位・切り上げ）。予算の前払い予約とは別"
           }
         }
       },
-      "TranslateRoomEndResponse": {
+      "TranslateInviteParticipant": {
+        "x-niho-experience-translate-rooms-dto": true,
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "participantId",
+          "inviteCode",
+          "inviteUrl"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "inviteCode": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128,
+            "description": "作成応答にだけ平文で載る。DBはhashだけ"
+          },
+          "inviteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "`{TRANSLATE_INVITE_BASE_URL}/t#<code>`（本番 https://niho.life、stg https://app-stg.niho.life。codeはfragmentに置き、`/i/` は会員招待の短縮リンクなので使わない）"
+          }
+        }
+      },
+      "TranslateRoomStateResult": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
           "state"
         ],
         "properties": {
+          "roomId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
           "state": {
-            "$ref": "#/components/schemas/TranslateRoomState"
+            "type": "string",
+            "enum": [
+              "waiting",
+              "active",
+              "paused",
+              "ended"
+            ]
           }
         }
+      }
+    },
+    "parameters": {
+      "TranslateBookingRequestId": {
+        "name": "requestId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": "体験の予約（SpotCampaignPageBookingRequest）のID。"
+      },
+      "TranslateExperienceBookingId": {
+        "name": "bookingId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。"
+      },
+      "TranslateExperienceProviderId": {
+        "name": "providerId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": "体験の提供者（ExperienceProvider）のID。"
+      },
+      "TranslateRoomId": {
+        "name": "roomId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": "対面通訳ルームの仮ID。NIHO user IDではない。"
+      }
+    },
+    "responses": {},
+    "headers": {},
+    "securitySchemes": {
+      "FirebaseIdToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
       }
     }
   }

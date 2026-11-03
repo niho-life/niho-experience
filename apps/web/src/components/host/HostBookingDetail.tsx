@@ -209,7 +209,7 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
   const site = Boolean(booking.site);
   const siteFee = siteFeeBreakdown(booking);
   // 通訳を始める: a confirmed booking of an English-speaking guest whose day has not passed (#181).
-  const translate = translateEnabled && !site && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
+  const translate = translateEnabled && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
 
   let next: ReactNode = null;
   if (site) {
@@ -310,7 +310,7 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       {next || translate ? (
         <div className="mt-3.5 border-t border-line pt-3.5">
           {next}
-          {translate ? <HostTranslatePanel key={booking.id} providerId={providerId} bookingId={booking.id} className={next ? "mt-3" : ""} /> : null}
+          {translate ? <HostTranslatePanel key={booking.id} source={site ? "site" : "niho"} providerId={providerId} bookingId={booking.id} className={next ? "mt-3" : ""} /> : null}
         </div>
       ) : null}
       {conversation ? <ConversationSection conversation={conversation} /> : null}

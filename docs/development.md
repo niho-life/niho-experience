@@ -86,7 +86,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `EXPERIENCE_RESOURCE_GOOGLE_ENABLED` / `EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED` | `false` | 資源別Google busy入力とwatchを段階的に開く。mock/previewはbrowser stubだけで、実OAuth・DB・workerを開かない |
 | `EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL` | 未設定 | watch有効時の本番公開HTTPS URL（`/api/google/calendar/watch`）。preview・localhostは指定しない |
 | `EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED` / `EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED` | `false` | Cloud Scheduler が呼ぶ Google の busy 照合と予約カレンダー書き込みの job（#238、[experience-runtime.md](experience-runtime.md#google-の-job)）。mock/preview では開かない |
-| `EXPERIENCE_TRANSLATE_API_ENABLED` | `false` | 予約詳細の「通訳を始める」（#181）の BFF `/host/api/translate/*`。http mode で `HOST_CONSOLE_ENABLED=true` のとき、NIHO 側 N1b（niho-app #19447）の配備・受入後にだけ開く。mock は flag なしで合成の部屋を返す |
+| `EXPERIENCE_TRANSLATE_API_ENABLED` | `false` | 予約詳細の「通訳を始める」（#181）のBFF。http modeでは`HOST_CONSOLE_ENABLED=true`、DB、`EXPERIENCE_GUEST_BOOKING_ENABLED=true`が前提。NIHO新APIとstgのOWNER・store所属・予約状態・旧/site source分離・create/poll/endの受入後にだけ開く。mockはflagなしで旧/site両pathを合成する |
 | `HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightが選別契約形のbrowser responseをstubし、BFF・実保存は開かない |
 | `EXPERIENCE_FEE_SUMMARY_API_ENABLED` | `false` | Admin/Host共通の予約別実料金・精算GET。HTTP modeかつ各console/sessionが有効で、NIHO側API配備・受入後だけ開く |
 | `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightのbrowser stubだけを使い、実BFFや合成成功fallbackは開かない |

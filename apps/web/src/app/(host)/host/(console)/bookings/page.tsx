@@ -118,7 +118,7 @@ function SiteBookings({ site, provider, linkProviderId, niho, ota }: { site: Exc
       supportPreview={false}
       supportHistoryEnabled={false}
       feeSummaryEnabled={false}
-      translateEnabled={false}
+      translateEnabled={translateRoomsEnabled()}
       conversations={[]}
       live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview }}
       niho={niho}

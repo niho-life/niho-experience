@@ -90,6 +90,12 @@ export const FLAGS = Object.freeze([
     needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {
+    env: "EXPERIENCE_TRANSLATE_API_ENABLED",
+    variable: "TRANSLATE_API_ENABLED",
+    // 新予約の所属・状態の正本をExperience DBで再検証してからNIHOへopaqueなUUIDだけを渡す。
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_BOOKING_ENABLED"],
+  },
+  {
     env: "EXPERIENCE_GUEST_QUESTIONS_ENABLED",
     variable: "GUEST_QUESTIONS_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE"],

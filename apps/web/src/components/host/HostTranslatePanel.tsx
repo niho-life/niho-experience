@@ -6,6 +6,7 @@ import {
   participantStatus,
   timeInJapan,
   TRANSLATE_ROOM_STATUS,
+  translateRoomsBffPath,
   type HostTranslateRoomEndResponse,
   type HostTranslateRoomResponse,
   type HostTranslateRoomStatusResponse,
@@ -38,6 +39,7 @@ function startError(status: number): string {
   if (status === 403) return "この予約で通訳を始める権限がありません。提供者を切り替えるか、権限を確認してください。";
   if (status === 404) return "この予約では通訳を始められません。";
   if (status === 409) return "いまは通訳の部屋を作れません。しばらくしてからもう一度お試しください。";
+  if (status === 429) return "通訳の利用上限に達しています。時間をおいてもう一度お試しいただくか、NIHOサポートにご相談ください。";
   return "通訳を始められませんでした。通信を確認して、もう一度お試しください。";
 }
 
@@ -63,6 +65,7 @@ function EndDialog({ onConfirm, onClose }: { onConfirm: () => void; onClose: () 
 }
 
 export interface HostTranslatePanelProps {
+  source: "niho" | "site";
   providerId: string;
   bookingId: string;
   /** While another action on the booking is running. */
@@ -72,8 +75,8 @@ export interface HostTranslatePanelProps {
   onAuthorizationEnded?: (status: 401 | 403) => void;
 }
 
-export function HostTranslatePanel({ providerId, bookingId, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
-  const base = `translate/providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(bookingId)}/rooms`;
+export function HostTranslatePanel({ source, providerId, bookingId, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
+  const base = translateRoomsBffPath(source, providerId, bookingId);
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [busy, setBusy] = useState(false);

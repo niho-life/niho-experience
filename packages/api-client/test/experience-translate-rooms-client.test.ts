@@ -9,8 +9,12 @@ import type { FetchLike } from "../src/client.ts";
 const ORIGIN = "https://niho.example";
 const TOKEN = "header.payload.signature";
 const ROOMS = "https://niho.example/api/experience-providers/provider_1/bookings/booking_1/translate-rooms";
-const invite = (role: "host" | "guest") => ({ participantId: `participant_${role}`, inviteCode: `synthetic-${role}-code`, inviteUrl: `https://app-stg.niho.test/i/synthetic-${role}-code` });
-const created = { roomId: "room_1", state: "created", host: invite("host"), guest: invite("guest"), expiresAt: "2026-11-08T01:15:00.000Z" };
+const SITE_ROOMS = "https://niho.example/api/experience-providers/provider_1/site-bookings/00000000-0000-4000-8000-00000000b101/translate-rooms";
+const invite = (role: "host" | "guest") => {
+  const inviteCode = (role === "host" ? "h" : "g").repeat(43);
+  return { participantId: `participant_${role}`, inviteCode, inviteUrl: `https://app-stg.niho.test/t#${inviteCode}` };
+};
+const created = { roomId: "room_1", state: "waiting", host: invite("host"), guest: invite("guest"), expiresAt: "2026-11-08T01:15:00.000Z" };
 const status = { state: "active", participants: [{ role: "host", joined: true, ready: true }, { role: "guest", joined: false, ready: false }], usageMinutes: 2 };
 
 function respond(status: number, body: unknown): ReturnType<typeof vi.fn<FetchLike>> {
@@ -32,9 +36,22 @@ describe("experience translate rooms transport", () => {
     const read = respond(200, status);
     expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: read }).getRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: status });
     expect(read).toHaveBeenCalledWith(`${ROOMS}/room_1`, expect.objectContaining({ method: "GET" }));
-    const end = respond(200, { state: "ended" });
-    expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: end }).endRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: { state: "ended" } });
+    const end = respond(200, { roomId: "room_1", state: "ended" });
+    expect(await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: end }).endRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: true, data: { roomId: "room_1", state: "ended" } });
     expect(end).toHaveBeenCalledWith(`${ROOMS}/room_1/end`, expect.objectContaining({ method: "POST", body: "{}" }));
+  });
+
+  it("Experience予約は固定site-bookings pathだけを使い、空bodyと厳密DTOを守る", async () => {
+    const create = respond(201, created);
+    const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: create });
+    expect(await api.createSiteRoom("provider_1", "00000000-0000-4000-8000-00000000b101")).toEqual({ ok: true, data: created });
+    expect(create).toHaveBeenCalledWith(SITE_ROOMS, expect.objectContaining({ method: "POST", body: "{}" }));
+    const read = respond(200, status);
+    await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: read }).getSiteRoom("provider_1", "00000000-0000-4000-8000-00000000b101", "room_1");
+    expect(read).toHaveBeenCalledWith(`${SITE_ROOMS}/room_1`, expect.objectContaining({ method: "GET" }));
+    const end = respond(200, { roomId: "room_1", state: "ended" });
+    await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: end }).endSiteRoom("provider_1", "00000000-0000-4000-8000-00000000b101", "room_1");
+    expect(end).toHaveBeenCalledWith(`${SITE_ROOMS}/room_1/end`, expect.objectContaining({ method: "POST", body: "{}" }));
   });
 
   it("rejects invalid ids before fetch", async () => {
@@ -43,6 +60,7 @@ describe("experience translate rooms transport", () => {
     expect(await api.createRoom("../private", "booking_1")).toEqual({ ok: false, kind: "invalid_request" });
     expect(await api.getRoom("provider_1", "booking_1", "a/b")).toEqual({ ok: false, kind: "invalid_request" });
     expect(await api.endRoom("provider_1", "", "room_1")).toEqual({ ok: false, kind: "invalid_request" });
+    expect(await api.createSiteRoom("provider_1", "booking_1")).toEqual({ ok: false, kind: "invalid_request" });
     expect(fetcher).not.toHaveBeenCalled();
     expect(isExperienceTranslateRoomPathId("room_1")).toBe(true);
     expect(isExperienceTranslateRoomPathId("room%2F1")).toBe(false);
@@ -55,8 +73,9 @@ describe("experience translate rooms transport", () => {
     expect(await api({ ...status, state: "live" }).getRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
     expect(await api({ ...status, participants: [...status.participants, { role: "guest", joined: true, ready: true }] }).getRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
     expect(await api({ state: "ended", usageMinutes: 3 }).endRoom("provider_1", "booking_1", "room_1")).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
-    expect(decodeExperienceTranslateRoomStatusResponse({ state: "created", participants: [], usageMinutes: 0 })).toEqual({ state: "created", participants: [], usageMinutes: 0 });
-    expect(decodeExperienceTranslateRoomStatusResponse({ state: "created", participants: [], usageMinutes: -1 })).toBeNull();
+    expect(decodeExperienceTranslateRoomStatusResponse({ state: "waiting", participants: [], usageMinutes: 0 })).toEqual({ state: "waiting", participants: [], usageMinutes: 0 });
+    expect(decodeExperienceTranslateRoomStatusResponse({ state: "created", participants: [], usageMinutes: 0 })).toBeNull();
+    expect(decodeExperienceTranslateRoomStatusResponse({ state: "waiting", participants: [], usageMinutes: -1 })).toBeNull();
   });
 
   it.each([
@@ -64,6 +83,7 @@ describe("experience translate rooms transport", () => {
     [403, { ok: false, kind: "rejected", status: 403 }],
     [404, { ok: false, kind: "not_found" }],
     [409, { ok: false, kind: "conflict" }],
+    [429, { ok: false, kind: "limited" }],
   ] as const)("maps %i without exposing upstream error bodies", async (status, expected) => {
     const api = createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, accessToken: TOKEN, fetch: respond(status, { message: "private", relayUrl: "wss://hidden" }) });
     expect(await api.createRoom("provider_1", "booking_1")).toEqual(expected);
