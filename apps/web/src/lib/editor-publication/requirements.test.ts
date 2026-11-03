@@ -5,11 +5,19 @@ import { editorArticleToGuide, editorPreviewToGuide } from "./convert";
 import { EDITOR_FIXTURE, FIXTURE_ASSET_ORIGIN, fixtureArticle } from "./fixtures/fake-editor-api";
 import { guidePublicationRequirements } from "./requirements";
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example" } }));
+const routeMocks = vi.hoisted(() => ({
+  categories: [{ slug: "evenings", labelEn: "Evenings", labelJa: "夕方", displayOrder: 1, revision: 1 }],
+}));
+vi.mock("@/lib/experience/store-server", () => ({ articleAuthorityRepository: () => ({
+  listActiveCategories: async () => routeMocks.categories,
+}) }));
 
 const { GET } = await import("@/app/api/public/guides/publication-requirements/route");
 
 const SITE = "https://experience.example";
+const CATEGORIES = [{ slug: "evenings", labelEn: "Evenings", labelJa: "夕方", displayOrder: 1, revision: 1 }] as const;
 
 /**
  * The editor's closed rules for a destination declaration, copied from niho-life/niho-editor
@@ -117,11 +125,11 @@ function declarationIssues(input: unknown): string[] {
 }
 
 /** The declaration as JSON, then changed: the drift checks below start from a copy. */
-const declared = () => JSON.parse(JSON.stringify(guidePublicationRequirements(SITE))) as Fields & { requires: Fields[] };
+const declared = () => JSON.parse(JSON.stringify(guidePublicationRequirements(SITE, CATEGORIES))) as Fields & { requires: Fields[] };
 
 describe("the destination declaration (#253, editor declaration schema 1)", () => {
   it("declares NIHO Experience's conditions in the editor's vocabulary, with limits taken from the guide rules", () => {
-    expect(guidePublicationRequirements(SITE)).toEqual({
+    expect(guidePublicationRequirements(SITE, CATEGORIES)).toEqual({
       schemaVersion: 1,
       id: "exp",
       label: "NIHO Experience",
@@ -132,9 +140,9 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
       accepts: { blocks: ["paragraph", "heading", "list", "figure", "note"], marks: ["bold", "italic", "link"] },
       requires: [
         { id: "lang-en", kind: "lang", equals: "en", message: "英語で書いてください", fix: "lang" },
-        { id: "cover", kind: "cover", consent: true, message: "掲載許諾のあるカバー写真を選んでください", fix: "cover" },
-        { id: "lead", kind: "lead", max: GUIDE_LIMITS.descriptionMaxLength, message: `リードを ${GUIDE_LIMITS.descriptionMaxLength} 字以内で書いてください`, fix: "lead" },
-        { id: "category", kind: "category", message: "カテゴリを選んでください", fix: "category" },
+        { id: "cover", kind: "cover", consent: true, message: "カバー写真を設定する場合は掲載許諾を確認してください", fix: "cover" },
+        { id: "lead", kind: "lead", max: GUIDE_LIMITS.descriptionMaxLength, message: `リードを設定する場合は ${GUIDE_LIMITS.descriptionMaxLength} 字以内にしてください`, fix: "lead" },
+        { id: "category", kind: "category", oneOf: ["evenings"], message: "カテゴリを選んでください", fix: "category" },
         { id: "headings", kind: "headings", min: 1, message: "本文に見出しを 1 つ以上入れてください", fix: "body" },
         { id: "no-confirm", kind: "noConfirm", message: "未確認の印（CONFIRM）を解消してください", fix: "body" },
         { id: "related-live", kind: "relatedLive", message: "掲載中の関連する体験を選んでください", fix: "related" },
@@ -144,7 +152,7 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
   });
 
   it("passes the editor's closed rules, which still catch every kind of drift", () => {
-    expect(declarationIssues(guidePublicationRequirements(SITE))).toEqual([]);
+    expect(declarationIssues(guidePublicationRequirements(SITE, CATEGORIES))).toEqual([]);
     const drifted: [(declaration: ReturnType<typeof declared>) => void, string][] = [
       [(d) => { d.version = 1; }, "$.version"],
       [(d) => { d.schemaVersion = 2; }, "$.schemaVersion"],
@@ -168,7 +176,7 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
     }
   });
 
-  it("agrees with what this site accepts on receipt: English, and a lead within the declared limit", () => {
+  it("accepts an omitted cover and lead while retaining the lead limit and English requirement", () => {
     const requires = guidePublicationRequirements(SITE).requires;
     const leadMax = requires.find((condition) => condition.kind === "lead")!.max;
     const lang = requires.find((condition) => condition.kind === "lang")!.equals;
@@ -178,8 +186,7 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
     const accepted = (lead: string | null, itemLang: string = lang) => parseEditorPublishedList({ contractVersion: "1", items: [item(lead, itemLang)], nextCursor: null }).items.length === 1;
     expect(accepted("l".repeat(leadMax))).toBe(true);
     expect(accepted("l".repeat(leadMax + 1))).toBe(false);
-    // The lead and category conditions are what the site needs to list a guide: without them it is left out.
-    expect(accepted(null)).toBe(false);
+    expect(accepted(null)).toBe(true);
     expect(accepted("A lead.", "ja")).toBe(false);
   });
 
@@ -203,13 +210,25 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
     expect(editorial(guidePublishProblems(preview.guide))).toHaveLength(2);
   });
 
-  it("is served publicly as cacheable JSON for any origin, outside search", async () => {
-    const response = GET();
+  it("reads active categories for every publication check and is never accepted from a stale cache", async () => {
+    const response = await GET();
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect(await response.json()).toEqual(guidePublicationRequirements(SITE));
+    expect(await response.json()).toEqual(guidePublicationRequirements(SITE, CATEGORIES));
+  });
+
+  it("fails closed when Admin has no active category instead of publishing with a stale option", async () => {
+    routeMocks.categories = [];
+    try {
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ error: "categories_not_configured" });
+    } finally {
+      routeMocks.categories = [...CATEGORIES];
+    }
   });
 });

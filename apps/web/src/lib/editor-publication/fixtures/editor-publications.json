@@ -383,6 +383,7 @@
     },
     {
       "$case": "no-lead",
+      "$comment": "A normal live article proving that both lead and cover are optional.",
       "id": "0e000000-0000-4000-8000-00000000001b",
       "slug": "sample-without-lead",
       "dest": "exp",
@@ -400,7 +401,7 @@
       "extras": { "app": false, "news": false, "xp": false },
       "related": [],
       "blocks": [],
-      "markdown": "## Hidden\n\nNever shown\\.\n",
+      "markdown": "## Plan your route\n\nThis published example intentionally has no lead or cover photo\\.\n",
       "assets": []
     }
   ],

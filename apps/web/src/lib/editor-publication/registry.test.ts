@@ -27,6 +27,8 @@ vi.mock("../config", () => ({
 }));
 vi.mock("../guide-drafts", () => ({ GUIDE_DRAFTS_FOLDER: "GUIDE_DRAFTS_DIR", readGuideDrafts: state.readDrafts }));
 vi.mock("../experience/store-server", () => ({ guideRepository: () => state.repository }));
+// Current authority filtering has its own contract tests. This registry cluster supplies an explicit successful current check.
+vi.mock("../article-authority/publication-read", () => ({ filterCurrentRelatedGuide: async (guide: unknown) => guide }));
 
 const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 const logged = () => errors.mock.calls.map((call) => call.join(" ")).join("\n");
@@ -39,7 +41,7 @@ async function load() {
   return { api, ...(await import("../guide-registry")) };
 }
 
-const LIVE = ["sample-evening-walk", "sample-rainy-afternoon", "sample-market-morning"];
+const LIVE = ["sample-evening-walk", "sample-rainy-afternoon", "sample-market-morning", "sample-without-lead"];
 
 beforeEach(() => {
   state.config = { ...editorConfig };
@@ -75,7 +77,7 @@ describe("the editor guide source (#252)", () => {
     await guideCatalog();
     const lines = logged();
     const leftOut = [
-      "other-dest", "bad-range", "bad-slug", "reserved-slug", "japanese", "no-category", "no-lead", "gone-1", "moved-1",
+      "other-dest", "bad-range", "bad-slug", "reserved-slug", "japanese", "no-category", "gone-1", "moved-1",
       "http-cover", "script-link", "duplicate-slug", "foreign-figure", "internal-asset",
     ];
     for (const name of leftOut) expect(lines).toContain(`"id":"${fixtureId(name)}"`);
@@ -124,7 +126,7 @@ describe("the editor guide source (#252)", () => {
     api.state.articles = api.state.articles.filter((article) => article.id !== fixtureId("live-2"));
     vi.setSystemTime(new Date("2026-10-31T00:00:31Z"));
     const catalog = await guideCatalog();
-    expect(catalog.guides.map((guide) => guide.slug)).toEqual(["sample-evening-walk", "sample-market-morning"]);
+    expect(catalog.guides.map((guide) => guide.slug)).toEqual(["sample-evening-walk", "sample-market-morning", "sample-without-lead"]);
     expect(catalog.guides[0]).toMatchObject({ title: "An updated evening walk (sample guide)", body: "## Updated\n\nNew text.", updatedAt: "2026-10-31" });
     expect(await findGuide("sample-rainy-afternoon")).toBeNull();
     // An unpublished URL goes back to /guides (a temporary redirect: republishing keeps the URL).

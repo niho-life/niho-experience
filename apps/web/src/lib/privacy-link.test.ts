@@ -43,7 +43,7 @@ describe("the Privacy footer link", () => {
     state.config = { ...state.config, guideEditorSiteOrigin: "https://editor.example" };
     try {
       const more = links(renderToStaticMarkup(await RootLayout({ children: createElement("p", null, "page") })));
-      expect(more.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/guides", "https://editor.example", "/privacy"]);
+      expect(more.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/guides", "/write", "/privacy"]);
     } finally {
       state.hasGuides = false;
       state.config = { ...state.config, guideEditorSiteOrigin: "" };
