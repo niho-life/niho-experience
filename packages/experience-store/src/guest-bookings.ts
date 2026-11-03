@@ -1238,14 +1238,15 @@ export class GuestBookingRepository {
     })), nowUtc);
     const occurrences = visible.map(({ ruleId, occurrence }): PublicOccurrence => {
       const availability = evaluated.get(occurrence.id)?.availability;
-      const reason = overlapping.has(occurrence.id) || availability === undefined ? "UNAVAILABLE" : publicReason(availability.reason);
+      const isOverlapping = overlapping.has(occurrence.id);
+      const reason = isOverlapping || availability === undefined ? "UNAVAILABLE" : publicReason(availability.reason);
       return {
         offerId: ruleId,
         date: occurrence.localDate,
         startAt: occurrence.startUtc,
         endAt: occurrence.endUtc,
         bookable: reason === null,
-        seatsLeft: availability?.availableSeats ?? 0,
+        seatsLeft: isOverlapping ? 0 : availability?.availableSeats ?? 0,
         reason,
       };
     });

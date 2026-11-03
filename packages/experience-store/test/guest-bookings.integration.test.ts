@@ -286,7 +286,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await addRule("tea", rule("sample-am"));
       await addRule("tea", rule("sample-pm", { localStartTime: "14:30", durationMinutes: 120, capacity: 4, recurrence: { kind: "SELECTED_WEEKDAYS", weekdays: ["FRIDAY", "MONDAY"] } }));
       await addRule("tea", rule("sample-old", { startsOn: day(-20), endsOn: day(-1) }));
-      await addRule("tea", rule("sample.dotted"));
+      await addRule("tea", rule("sample.dotted", { localStartTime: "12:00" }));
       for (const id of ["draft", "archived", "noterms", "usd", "cheap", "dup"]) await addRule(id, rule(`sample-${id}-am`));
       await addRule("dup-b", rule("sample-dup-b-am"));
 
