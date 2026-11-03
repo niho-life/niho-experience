@@ -12,16 +12,18 @@ import {
   databaseNow,
   expandRules,
   questionsFingerprint,
+  readSaleTerms,
   saleSettingsFromRow,
-  termsFromRow,
   tokyoDate,
   validSaleTerms,
+  writeOfferPrices,
   type NormalizedProductSaleTermsInput,
   type ProductSaleTerms,
   type ProductSaleTermsInput,
   type ProviderSaleSettings,
 } from "./guest-bookings.ts";
 import { PRODUCT_COLUMNS } from "./repository.ts";
+import { lockProviderInventory } from "./inventory.ts";
 import { productFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { MembershipRole, ProductRecord, ProductStatus } from "./types.ts";
@@ -151,7 +153,9 @@ function sameProduct(product: ProductRecord, input: RegisterProductInput): boole
 function sameTerms(current: ProductSaleTerms, next: NormalizedProductSaleTermsInput, fingerprint: string): boolean {
   const child = (value: ProductSaleTermsInput["childPricing"]) =>
     value === null ? null : [value.priceYen, value.minAge, value.maxAge, value.adultRequired];
-  return JSON.stringify(child(current.childPricing)) === JSON.stringify(child(next.childPricing))
+  const pricesEqual = next.offerPrices === undefined || next.offerPrices === null
+    || JSON.stringify(current.offerPrices) === JSON.stringify([...next.offerPrices].sort((a, b) => a.offerId.localeCompare(b.offerId)));
+  return pricesEqual && JSON.stringify(child(current.childPricing)) === JSON.stringify(child(next.childPricing))
     && current.minimumParticipants === next.minimumParticipants
     && current.minimumChargeableParticipants === next.minimumChargeableParticipants
     && current.privateBooking === next.privateBooking
@@ -203,7 +207,10 @@ export class SiteSaleRegistration {
           AND has_table_privilege(current_user, 'provider_sale_settings', 'UPDATE')
           AND has_table_privilege(current_user, 'experience_product_sale_terms', 'INSERT')
           AND has_table_privilege(current_user, 'experience_product_sale_terms', 'UPDATE')
-          AND has_table_privilege(current_user, 'experience_product_sale_terms', 'DELETE') AS allowed`,
+          AND has_table_privilege(current_user, 'experience_product_sale_terms', 'DELETE')
+          AND has_table_privilege(current_user, 'experience_offer_prices', 'INSERT')
+          AND has_table_privilege(current_user, 'experience_offer_prices', 'UPDATE')
+          AND has_table_privilege(current_user, 'experience_offer_prices', 'DELETE') AS allowed`,
     );
     return result.rows[0]?.allowed === true;
   }
@@ -220,7 +227,7 @@ export class SiteSaleRegistration {
       pool.query<DbRow>("SELECT role, active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2", [query.providerId, query.nihoUserId]),
       pool.query<DbRow>(`SELECT ${PRODUCT_COLUMNS} FROM experience_products WHERE provider_id=$1 AND id=$2`, [query.providerId, query.productId]),
       pool.query<DbRow>(`SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1`, [query.providerId]),
-      pool.query<DbRow>(`SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2`, [query.providerId, query.productId]),
+      readSaleTerms(pool, query.providerId, query.productId),
       pool.query<DbRow>(
         `SELECT bool_or(status='PUBLISHED') AS published, bool_or(provider_id=$2) AS in_provider
            FROM experience_products WHERE slug=$1 AND NOT (provider_id=$2 AND id=$3)`,
@@ -238,7 +245,7 @@ export class SiteSaleRegistration {
       membership: member === undefined ? null : { role: String(member.role) as MembershipRole, active: member.active === true },
       product: product.rows[0] === undefined ? null : productFromRow(product.rows[0]),
       saleSettings: settings.rows[0] === undefined ? null : saleSettingsFromRow(settings.rows[0]),
-      saleTerms: terms.rows[0] === undefined ? null : termsFromRow(terms.rows[0]),
+      saleTerms: terms,
       slugPublishedElsewhere: slugRow?.published === true,
       slugUsedInProvider: slugRow?.in_provider === true,
       otherProductsWithSaleTerms: others.rows.map((row) => String(row.product_id)),
@@ -385,12 +392,10 @@ export class SiteSaleRegistration {
     assertExpectedVersion(expectedVersion);
     const fingerprint = questionsFingerprint(terms.bookingQuestions);
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
       const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [providerId, productId]);
       if (product.rows[0] === undefined) throw new StoreNotFoundError("product");
-      const current = await client.query<DbRow>(
-        `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2 FOR UPDATE`,
-        [providerId, productId],
-      );
+      const current = await readSaleTerms(client, providerId, productId, true);
       const child = terms.childPricing;
       const values = [
         providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
@@ -398,7 +403,7 @@ export class SiteSaleRegistration {
         terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
         terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion,
       ];
-      const existing = current.rows[0] === undefined ? null : termsFromRow(current.rows[0]);
+      const existing = current;
       if (existing === null) {
         if (expectedVersion !== undefined) throw new StoreConflictError("The sale terms do not exist at that version.");
         const inserted = await client.query<DbRow>(
@@ -411,7 +416,11 @@ export class SiteSaleRegistration {
            RETURNING ${TERMS_COLUMNS}`,
           values,
         );
-        return { terms: termsFromRow(inserted.rows[0]!), outcome: "CREATED" as const };
+        const version = Number(inserted.rows[0]!.version);
+        await writeOfferPrices(client, providerId, productId, terms.offerPrices, version);
+        const written = await readSaleTerms(client, providerId, productId);
+        if (!written) throw new StoreConflictError("Sale terms disappeared while saving.");
+        return { terms: written, outcome: "CREATED" as const };
       }
       if (sameTerms(existing, terms, fingerprint)) return { terms: existing, outcome: "UNCHANGED" as const };
       if (expectedVersion !== existing.version) throw new StoreConflictError("Sale terms version mismatch: read the sale terms again.");
@@ -428,7 +437,11 @@ export class SiteSaleRegistration {
         [...values, expectedVersion],
       );
       if (updated.rows[0] === undefined) throw new StoreConflictError("Sale terms version mismatch: read the sale terms again.");
-      return { terms: termsFromRow(updated.rows[0]), outcome: "UPDATED" as const };
+      const version = Number(updated.rows[0].version);
+      await writeOfferPrices(client, providerId, productId, terms.offerPrices, version);
+      const written = await readSaleTerms(client, providerId, productId);
+      if (!written) throw new StoreConflictError("Sale terms disappeared while saving.");
+      return { terms: written, outcome: "UPDATED" as const };
     });
   }
 
@@ -460,11 +473,11 @@ export class SiteSaleRegistration {
       pool.query<DbRow>("SELECT count(*)::int AS owners FROM provider_memberships WHERE provider_id=$1 AND role='OWNER' AND active", [providerId]),
       pool.query<DbRow>(`SELECT ${PRODUCT_COLUMNS} FROM experience_products WHERE provider_id=$1 AND id=$2`, [providerId, productId]),
       pool.query<DbRow>(`SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1`, [providerId]),
-      pool.query<DbRow>(`SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2`, [providerId, productId]),
+      readSaleTerms(pool, providerId, productId),
     ]);
     const product = productRows.rows[0] === undefined ? null : productFromRow(productRows.rows[0]);
     const settings = settingsRows.rows[0] === undefined ? null : saleSettingsFromRow(settingsRows.rows[0]);
-    const terms = termsRows.rows[0] === undefined ? null : termsFromRow(termsRows.rows[0]);
+    const terms = termsRows;
     const ownerCount = Number(owners.rows[0]?.owners ?? 0);
     const checks: SaleReadinessCheck[] = [];
     const add = (key: SaleReadinessKey, ok: boolean, okDetail: string, failDetail: string) =>

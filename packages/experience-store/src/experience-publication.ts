@@ -2,8 +2,12 @@ import type { Pool, PoolClient } from "pg";
 import {
   questionsFingerprint,
   cancellationPolicyCode,
-  termsFromRow,
+  databaseNow,
+  offerPricesMatchActiveRules,
+  readSaleTerms,
+  tokyoDate,
   validSaleTerms,
+  writeOfferPrices,
   type ProductSaleCancellationPolicy,
   type ProductSaleTerms,
   type ProductSaleTermsInput,
@@ -245,9 +249,9 @@ function validateChecks(checks: ExperiencePublicationContentChecks): void {
   }
 }
 
-function hostSaleTermsFromRow(row: DbRow): ExperienceHostSaleTerms {
-  const terms = termsFromRow(row);
+function hostSaleTerms(terms: ProductSaleTerms): ExperienceHostSaleTerms {
   return {
+    offerPrices: terms.offerPrices,
     childPricing: terms.childPricing,
     minimumParticipants: terms.minimumParticipants,
     minimumChargeableParticipants: terms.minimumChargeableParticipants,
@@ -373,6 +377,11 @@ async function blockers(
   );
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
+  const terms = await readSaleTerms(client, product.providerId, product.id, true);
+  if (terms !== null && terms.offerPrices !== null) {
+    const today = tokyoDate(await databaseNow(client));
+    if (!await offerPricesMatchActiveRules(client, terms, product.providerId, product.id, today)) result.push("PRICE_REQUIRED");
+  }
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
 
@@ -404,19 +413,9 @@ async function insertOrFindPublication(
   consentVersion: string,
   publishedBy: string,
 ): Promise<number> {
-  const termsResult = await client.query<DbRow>(
-    `SELECT child_price_amount,child_min_age,child_max_age,child_adult_required,
-            minimum_participants,minimum_chargeable_participants,private_booking,max_party_size,
-            cancellation_policy,cancellation_window_minutes_before_start,cancellation_refund_basis_points,
-            minimum_attendance,booking_questions,
-            booking_questions_fingerprint,conditions_version,version
-       FROM experience_product_sale_terms
-      WHERE provider_id=$1 AND product_id=$2 FOR SHARE`,
-    [product.providerId, product.id],
-  );
-  const terms = termsResult.rows[0];
+  const terms = await readSaleTerms(client, product.providerId, product.id, true);
   if (!terms) throw new StoreConflictError("Sale terms changed while preparing the immutable publication.");
-  const saleTermsVersion = safeInteger(terms.version, "sale_terms_version");
+  const saleTermsVersion = terms.version;
   const previous = await client.query<DbRow>(
     `SELECT id FROM experience_product_publications
       WHERE provider_id=$1 AND product_id=$2 AND draft_version=$3
@@ -425,24 +424,19 @@ async function insertOrFindPublication(
   );
   if (previous.rows[0]) return safeInteger(previous.rows[0].id, "publication id");
   const saleTermsSnapshot = {
-    childPricing: terms.child_price_amount === null ? null : {
-      priceYen: safeInteger(terms.child_price_amount, "child_price_amount"),
-      minAge: safeInteger(terms.child_min_age, "child_min_age"),
-      maxAge: safeInteger(terms.child_max_age, "child_max_age"),
-      adultRequired: terms.child_adult_required === true,
-    },
-    minimumParticipants: safeInteger(terms.minimum_participants, "minimum_participants"),
-    minimumChargeableParticipants: safeInteger(terms.minimum_chargeable_participants, "minimum_chargeable_participants"),
-    privateBooking: terms.private_booking === true,
-    maxPartySize: safeInteger(terms.max_party_size, "max_party_size"),
-    cancellationPolicy: String(terms.cancellation_policy),
-    cancellationWindowMinutesBeforeStart: terms.cancellation_window_minutes_before_start === null
-      ? null : safeInteger(terms.cancellation_window_minutes_before_start, "cancellation_window_minutes_before_start"),
-    cancellationRefundBasisPoints: safeInteger(terms.cancellation_refund_basis_points, "cancellation_refund_basis_points"),
-    minimumAttendance: terms.minimum_attendance === null ? null : safeInteger(terms.minimum_attendance, "minimum_attendance"),
-    bookingQuestions: terms.booking_questions,
-    bookingQuestionsFingerprint: String(terms.booking_questions_fingerprint),
-    conditionsVersion: terms.conditions_version === null ? null : String(terms.conditions_version),
+    offerPrices: terms.offerPrices,
+    childPricing: terms.childPricing,
+    minimumParticipants: terms.minimumParticipants,
+    minimumChargeableParticipants: terms.minimumChargeableParticipants,
+    privateBooking: terms.privateBooking,
+    maxPartySize: terms.maxPartySize,
+    cancellationPolicy: terms.cancellationPolicy,
+    cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
+    cancellationRefundBasisPoints: terms.cancellationRefundBasisPoints,
+    minimumAttendance: terms.minimumAttendance,
+    bookingQuestions: terms.bookingQuestions,
+    bookingQuestionsFingerprint: terms.bookingQuestionsFingerprint,
+    conditionsVersion: terms.conditionsVersion,
   };
   const inserted = await client.query<DbRow>(
     `INSERT INTO experience_product_publications
@@ -485,14 +479,11 @@ export class ExperiencePublicationRepository {
       );
       if (!product.rows[0]) throw new StoreNotFoundError("product");
       const state = await lockedState(client, actor.providerId, productId);
-      const result = await client.query<DbRow>(
-        `SELECT ${SALE_TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2`,
-        [actor.providerId, productId],
-      );
+      const result = await readSaleTerms(client, actor.providerId, productId);
       return {
         draftVersion: safeInteger(product.rows[0].version, "product version"),
         stateVersion: state?.version ?? null,
-        saleTerms: result.rows[0] ? hostSaleTermsFromRow(result.rows[0]) : null,
+        saleTerms: result ? hostSaleTerms(result) : null,
       };
     });
   }
@@ -564,6 +555,9 @@ export class ExperiencePublicationRepository {
           ? "Sale terms already exist for this product."
           : "Sale terms version mismatch or sale terms not found in this provider.");
       }
+      await writeOfferPrices(client, actor.providerId, productId, terms.offerPrices, Number(termsRow.version));
+      const writtenTerms = await readSaleTerms(client, actor.providerId, productId);
+      if (!writtenTerms) throw new StoreConflictError("Sale terms disappeared while saving.");
 
       let consentVersion: string | null = null;
       if (state?.currentPublicationId !== null && state?.currentPublicationId !== undefined) {
@@ -577,7 +571,7 @@ export class ExperiencePublicationRepository {
         return {
           draftVersion: product.version,
           stateVersion: state?.version ?? null,
-          saleTerms: hostSaleTermsFromRow(termsRow),
+          saleTerms: hostSaleTerms(writtenTerms),
           publicationUpdated: false,
           blockers: consentVersion === null && active && !blocked.includes("CONSENT_OUTDATED")
             ? [...blocked, "CONSENT_OUTDATED"] : blocked,
@@ -597,7 +591,7 @@ export class ExperiencePublicationRepository {
       return {
         draftVersion: product.version,
         stateVersion: stateFromRow(updatedState.rows[0]).version,
-        saleTerms: hostSaleTermsFromRow(termsRow),
+        saleTerms: hostSaleTerms(writtenTerms),
         publicationUpdated: true,
         blockers: [],
       };

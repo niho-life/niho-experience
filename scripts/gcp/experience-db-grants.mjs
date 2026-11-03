@@ -42,6 +42,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   channel_watchdog_state: { write: IU },
   channel_worker_accounts: { write: IU },
   channel_workers: { write: IU },
+  experience_offer_prices: { write: IUD },
   experience_product_sale_terms: { write: IU },
   // Cutover and imported legacy seat facts are operator-written; runtime checkout only reads them.
   experience_product_cutovers: { write: [] },

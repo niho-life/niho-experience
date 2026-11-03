@@ -365,6 +365,19 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /outbox_messages/);
   });
 
+  it("binds offer prices to provider, product, rule and the sale-terms CAS version", async () => {
+    const sql = await readFile(new URL("../migrations/0044_experience_offer_prices.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /PRIMARY KEY \(provider_id, product_id, rule_id\)/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, product_id, rule_id\)\s+REFERENCES schedule_rules\(provider_id, product_id, id\) ON DELETE RESTRICT/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, product_id, sale_terms_version\)\s+REFERENCES experience_product_sale_terms\(provider_id, product_id, version\)/);
+    assert.match(sql, /DEFERRABLE INITIALLY DEFERRED/);
+    assert.match(sql, /adult_price_amount BETWEEN 50 AND 9999999999/);
+    assert.match(sql, /offer_prices_configured boolean NOT NULL DEFAULT false/);
+    assert.doesNotMatch(sql, /UPDATE experience_products|UPDATE schedule_rules|UPDATE experience_product_sale_terms/);
+  });
+
   it("keeps one review per booking, review links only as hashes, and no guest contact or IP address (#104 #108)", async () => {
     const sql = await readFile(new URL("../migrations/0027_guest_reviews.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);

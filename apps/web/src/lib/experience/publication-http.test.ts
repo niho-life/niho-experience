@@ -41,6 +41,10 @@ const draft = {
   cancellationTermsRef: "terms-v1",
 };
 const saleTerms = {
+  offerPrices: [
+    { offerId: "offer_community_dinner", adultPriceYen: 30_000 },
+    { offerId: "offer_community_tea_time", adultPriceYen: 15_000 },
+  ],
   childPricing: null,
   minimumParticipants: 1,
   minimumChargeableParticipants: 1,
@@ -171,6 +175,10 @@ describe("Experience publication host API contract", () => {
     ["unknown sale terms field", () => saveSaleTerms(request("PATCH", {
       expectedDraftVersion: 1, expectedStateVersion: null, expectedSaleTermsVersion: null,
       saleTerms: { ...saleTerms, stripeConnectAccountRef: "acct_synthetic" },
+    }), context)],
+    ["duplicate offer price IDs", () => saveSaleTerms(request("PATCH", {
+      expectedDraftVersion: 1, expectedStateVersion: null, expectedSaleTermsVersion: 1,
+      saleTerms: { ...saleTerms, offerPrices: [saleTerms.offerPrices[0], saleTerms.offerPrices[0]] },
     }), context)],
     ["incomplete cancellation pair", () => saveSaleTerms(request("PATCH", {
       expectedDraftVersion: 1, expectedStateVersion: null, expectedSaleTermsVersion: null,

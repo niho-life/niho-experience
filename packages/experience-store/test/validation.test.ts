@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expandOccurrences, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "../src/errors.ts";
+import { termsFromRow } from "../src/guest-bookings.ts";
 import { buildSnapshots, chargeablePlatformFee, effectiveGoogleSyncStatus, normalizeCurrency, platformFeeAmount, validateBusySync } from "../src/validation.ts";
 
 const rule: ScheduleRule = {
@@ -18,6 +19,37 @@ const rule: ScheduleRule = {
 };
 
 describe("store boundary validation", () => {
+  it("does not reinterpret a configured but missing offer-price set as the legacy fallback", () => {
+    assert.throws(
+      () => termsFromRow({ offer_prices_configured: true, offer_prices: null }),
+      StoreValidationError,
+    );
+    assert.deepEqual(termsFromRow({
+      provider_id: "provider-a",
+      product_id: "tea",
+      child_price_amount: null,
+      minimum_participants: 1,
+      minimum_chargeable_participants: 1,
+      private_booking: false,
+      max_party_size: 6,
+      cancellation_policy: "NONE",
+      cancellation_window_minutes_before_start: null,
+      cancellation_refund_basis_points: 0,
+      minimum_attendance: null,
+      booking_questions: [],
+      booking_questions_fingerprint: "c0".repeat(32),
+      conditions_version: null,
+      offer_prices_configured: true,
+      offer_prices: [],
+      version: 1,
+      updated_at: "2026-11-04T00:00:00.000Z",
+    }).offerPrices, []);
+    assert.throws(
+      () => termsFromRow({ offer_prices_configured: false, offer_prices: [{ offerId: "tea", adultPriceYen: 15_000 }] }),
+      StoreValidationError,
+    );
+  });
+
   it("treats an expired successful Google sync as stale and preserves failures", () => {
     assert.equal(effectiveGoogleSyncStatus("FRESH", "2026-10-27T01:00:00.000Z", "2026-10-27T01:00:00.000Z"), "STALE");
     assert.equal(effectiveGoogleSyncStatus("FRESH", "2026-10-27T01:00:00.001Z", "2026-10-27T01:00:00.000Z"), "FRESH");
