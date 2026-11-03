@@ -124,6 +124,7 @@ function patternAt(value: unknown, path: string, pattern: RegExp, rule: string, 
 /** Strict shapes for the sale terms (unknown fields refused); the values are then setSaleTerms' validation. */
 function saleTermsAt(value: unknown, problems: string[]): ProductSaleTermsInput | null {
   const terms = objectAt(value, "saleTerms", [
+    "offerPrices",
     "childPricing", "minimumParticipants", "minimumChargeableParticipants", "privateBooking", "maxPartySize",
     "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints", "minimumAttendance",
     "bookingQuestions", "conditionsVersion",
@@ -132,6 +133,12 @@ function saleTermsAt(value: unknown, problems: string[]): ProductSaleTermsInput 
   const before = problems.length;
   if (terms.childPricing !== null && terms.childPricing !== undefined) {
     objectAt(terms.childPricing, "saleTerms.childPricing", ["priceYen", "minAge", "maxAge", "adultRequired"], problems);
+  }
+  if (terms.offerPrices !== undefined && terms.offerPrices !== null) {
+    if (!Array.isArray(terms.offerPrices)) problems.push("saleTerms.offerPrices must be an array");
+    else terms.offerPrices.forEach((price: unknown, index) => {
+      objectAt(price, `saleTerms.offerPrices.${index}`, ["offerId", "adultPriceYen"], problems);
+    });
   }
   if (Array.isArray(terms.bookingQuestions)) {
     terms.bookingQuestions.forEach((question: unknown, index) => {
@@ -302,6 +309,10 @@ export function productChanges(current: ProductRecord, input: SiteSaleInput): st
 /** What open-sale would change in the sale terms, by field name. Empty when they are the same. */
 export function saleTermsChanges(current: ProductSaleTerms, next: ProductSaleTermsInput): string[] {
   const changes: string[] = [];
+  if (next.offerPrices !== undefined && next.offerPrices !== null
+      && JSON.stringify(current.offerPrices) !== JSON.stringify([...next.offerPrices].sort((a, b) => a.offerId.localeCompare(b.offerId)))) {
+    changes.push("offerPrices");
+  }
   if (JSON.stringify(current.childPricing) !== JSON.stringify(next.childPricing === null ? null : {
     priceYen: next.childPricing.priceYen, minAge: next.childPricing.minAge, maxAge: next.childPricing.maxAge, adultRequired: next.childPricing.adultRequired,
   })) changes.push("childPricing");

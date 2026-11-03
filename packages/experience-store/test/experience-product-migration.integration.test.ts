@@ -22,6 +22,7 @@ const rule: ScheduleRule = {
   busyBufferAfterMinutes: 0, recurrence: { kind: "SELECTED_WEEKDAYS", weekdays: ["MONDAY"] },
 };
 const terms = {
+  offerPrices: [{ offerId: rule.id, adultPriceYen: 30_000 }],
   childPricing: null, minimumParticipants: 1, maxPartySize: 8, cancellationPolicy: "FREE_UNTIL_24H" as const,
   bookingQuestions: [], conditionsVersion: null,
 };
@@ -45,6 +46,10 @@ describe("Experience legacy product migration", { skip: databaseUrl === undefine
       assert.deepEqual(imported, { providerId, productId: product.id, productVersion: 1, scheduleCount: 1 });
       assert.equal(await new GuestBookingRepository(pool).publicBookingTerms(product.slug), null, "the imported PUBLISHED product cannot use the legacy checkout branch");
       assert.equal(Number((await pool.query("SELECT count(*) AS n FROM schedule_rules WHERE provider_id=$1 AND product_id=$2", [providerId, product.id])).rows[0]?.n), 1);
+      assert.deepEqual((await pool.query(
+        "SELECT rule_id,adult_price_amount::int,sale_terms_version::int FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2",
+        [providerId, product.id],
+      )).rows, [{ rule_id: rule.id, adult_price_amount: 30_000, sale_terms_version: 1 }]);
       assert.equal(Number((await pool.query("SELECT count(*) AS n FROM experience_product_cutovers WHERE provider_id=$1 AND product_id=$2", [providerId, product.id])).rows[0]?.n), 1);
       await assert.rejects(importer.importBundle({ providerId, legacySaleStoppedConfirmed: true, product, saleTerms: terms, scheduleRules: [rule] }), StoreConflictError);
     } finally {

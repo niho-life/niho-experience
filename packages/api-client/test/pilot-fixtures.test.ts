@@ -237,30 +237,31 @@ describe("mock の catalog（pilot をテストサイトに出す）", () => {
     for (const offer of experiences.flatMap((experience) => experience.offers)) expect(syntheticIds.has(offer.id)).toBe(false);
   });
 
-  it("all の mock で pilot の体験の詳細・残席・checkout が動く", async () => {
+  it("all の mock で Dinner と Tea Time の別価格を読み、各 checkout に使う", async () => {
     const client = createExperienceApiClient({ nihoWebOrigin: origin, fetch: createMockExperienceFetch({ catalog: "all", now }) });
     const detail = await client.getExperience("kamakura-community-dinner");
     if (!detail.ok) throw new Error("detail failed");
-    const offer = detail.data.experience.offers[0];
-    if (!offer) throw new Error("offer missing");
-    const availability = await client.getAvailability("kamakura-community-dinner", { offerId: offer.id });
-    if (!availability.ok) throw new Error("availability failed");
-    const occurrence = availability.data.occurrences.find((candidate) => candidate.bookable && candidate.seatsLeft >= 2);
-    if (!occurrence) throw new Error("no bookable occurrence");
-    const result = await client.startCheckout("kamakura-community-dinner", {
-      offerId: offer.id,
-      occurrenceDate: occurrence.date,
-      adultCount: 2,
-      childCount: 0,
-      expectedTotalYen: offer.pricing.adultPriceYen * 2,
-      guestName: "Sample Guest",
-      guestEmail: "guest@example.com",
-      bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
-      consent: { agreedVersion: detail.data.experience.booking.consentVersion },
-      clientRequestKey: "00000000-0000-4000-8000-000000000001",
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(isMockCheckoutUrl(result.checkoutUrl)).toBe(true);
+    expect(detail.data.experience.offers.map((offer) => offer.pricing.adultPriceYen)).toEqual([30_000, 15_000]);
+    for (const [index, offer] of detail.data.experience.offers.entries()) {
+      const availability = await client.getAvailability("kamakura-community-dinner", { offerId: offer.id });
+      if (!availability.ok) throw new Error("availability failed");
+      const occurrence = availability.data.occurrences.find((candidate) => candidate.bookable && candidate.seatsLeft >= 2);
+      if (!occurrence || !offer.pricing.child) throw new Error("no bookable child-priced occurrence");
+      const result = await client.startCheckout("kamakura-community-dinner", {
+        offerId: offer.id,
+        occurrenceDate: occurrence.date,
+        adultCount: 1,
+        childCount: 1,
+        expectedTotalYen: offer.pricing.adultPriceYen + offer.pricing.child.priceYen,
+        guestName: "Sample Guest",
+        guestEmail: "guest@example.com",
+        bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
+        consent: { agreedVersion: detail.data.experience.booking.consentVersion },
+        clientRequestKey: `00000000-0000-4000-8000-00000000000${index + 1}`,
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(isMockCheckoutUrl(result.checkoutUrl)).toBe(true);
+    }
   });
 });
 

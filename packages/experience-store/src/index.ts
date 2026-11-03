@@ -207,6 +207,7 @@ export type {
   GuestBookingStart,
   GuestBookingUtm,
   GuestHoldRelease,
+  OfferPriceInput,
   ProductSaleCancellationPolicy,
   ProductSaleTerms,
   ProductSaleTermsInput,

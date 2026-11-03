@@ -1,7 +1,7 @@
 import { parseScheduleRule, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
-import { questionsFingerprint, validSaleTerms, type ProductSaleTermsInput } from "./guest-bookings.ts";
+import { questionsFingerprint, validSaleTerms, writeOfferPrices, type ProductSaleTermsInput } from "./guest-bookings.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import type { ProductInput } from "./types.ts";
 import { validateProduct } from "./repository.ts";
@@ -95,6 +95,7 @@ export class ExperienceProductMigrationImport {
             rule.busyBufferAfterMinutes, JSON.stringify(rule.recurrence)],
         );
       }
+      await writeOfferPrices(client, raw.providerId, product.id, terms.offerPrices, 1);
       await client.query(
         `INSERT INTO experience_product_cutovers (provider_id,product_id,legacy_sales_stopped_at)
          VALUES ($1,$2,clock_timestamp())`,

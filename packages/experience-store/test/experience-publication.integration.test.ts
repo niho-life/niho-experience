@@ -268,6 +268,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         [OWNER.providerId, original.id],
       );
       assert.equal(publicationTerms.rows[0]?.sale_terms_snapshot.cancellationPolicy, "FREE_UNTIL_24H");
+      assert.equal(publicationTerms.rows[0]?.sale_terms_snapshot.offerPrices, null);
       assert.deepEqual((await publications.listPublic()).map(({ slug }) => slug), [original.slug]);
 
       const saleTermsRead = await publications.getSaleTerms(EDITOR, original.id);
@@ -280,6 +281,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         expectedStateVersion: state.version,
         expectedSaleTermsVersion: 1,
         saleTerms: {
+          offerPrices: [{ offerId: rule.id, adultPriceYen: 15_000 }],
           childPricing: null,
           minimumParticipants: 2,
           minimumChargeableParticipants: 3,
@@ -308,6 +310,9 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.privateBooking, true);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationWindowMinutesBeforeStart, 90);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationRefundBasisPoints, 3_750);
+      assert.deepEqual(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.offerPrices, [
+        { offerId: rule.id, adultPriceYen: 15_000 },
+      ]);
       await assert.rejects(publications.saveSaleTerms(EDITOR, original.id, {
         expectedDraftVersion: original.version,
         expectedStateVersion: state.version,

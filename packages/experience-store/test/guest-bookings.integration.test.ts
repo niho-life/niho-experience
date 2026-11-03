@@ -519,6 +519,98 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("prices two offers independently, snapshots the selected price, and fails closed on an incomplete set", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("tea", rule("offer_community_tea_time", { localStartTime: "13:00", durationMinutes: 120 }));
+      await addRule("tea", rule("offer_community_dinner", { localStartTime: "18:00", durationMinutes: 120 }));
+      const pricedTerms: ProductSaleTermsInput = {
+        ...TEA_TERMS,
+        childPricing: { priceYen: 12_000, minAge: 0, maxAge: 17, adultRequired: true },
+      };
+      await assert.rejects(() => guests.setSaleTerms(ownerA, "tea", {
+        ...pricedTerms,
+        offerPrices: [
+          { offerId: "offer_community_dinner", adultPriceYen: 30_000 },
+          { offerId: "offer_unknown", adultPriceYen: 15_000 },
+        ],
+      }, 1), StoreConflictError);
+      await assert.rejects(() => guests.setSaleTerms(ownerA, "tea", {
+        ...pricedTerms,
+        offerPrices: [{ offerId: "offer_community_dinner", adultPriceYen: 30_000 }],
+      }, 1), StoreConflictError);
+      await assert.rejects(() => guests.setSaleTerms(ownerA, "tea", {
+        ...pricedTerms,
+        offerPrices: [
+          { offerId: "offer_community_dinner", adultPriceYen: 30_000 },
+          { offerId: "offer_community_dinner", adultPriceYen: 15_000 },
+        ],
+      }, 1), StoreValidationError);
+
+      const saved = await guests.setSaleTerms(ownerA, "tea", {
+        ...pricedTerms,
+        offerPrices: [
+          { offerId: "offer_community_dinner", adultPriceYen: 30_000 },
+          { offerId: "offer_community_tea_time", adultPriceYen: 15_000 },
+        ],
+      }, 1);
+      assert.equal(saved.version, 2);
+      assert.deepEqual(saved.offerPrices, [
+        { offerId: "offer_community_dinner", adultPriceYen: 30_000 },
+        { offerId: "offer_community_tea_time", adultPriceYen: 15_000 },
+      ]);
+      const publicTerms = await guests.publicBookingTerms("sample-tea");
+      assert.deepEqual(publicTerms?.offers.map((offer) => [offer.id, offer.pricing.adultPriceYen, offer.pricing.child?.priceYen]), [
+        ["offer_community_tea_time", 15_000, 12_000],
+        ["offer_community_dinner", 30_000, 12_000],
+      ]);
+
+      const dinner = await guests.startGuestBooking(request({
+        offerId: "offer_community_dinner", adultCount: 1, childCount: 1, expectedTotalYen: 42_000,
+      }));
+      const tea = await guests.startGuestBooking(request({
+        offerId: "offer_community_tea_time", adultCount: 1, childCount: 1, expectedTotalYen: 27_000,
+        guestEmail: "tea@example.com",
+      }));
+      assert.deepEqual(
+        [dinner.booking.pricingSnapshot.unitAmount, dinner.booking.pricingSnapshot.totalAmount,
+          tea.booking.pricingSnapshot.unitAmount, tea.booking.pricingSnapshot.totalAmount],
+        [30_000, 42_000, 15_000, 27_000],
+      );
+
+      await guests.setSaleTerms(ownerA, "tea", {
+        ...pricedTerms,
+        offerPrices: [
+          { offerId: "offer_community_dinner", adultPriceYen: 31_000 },
+          { offerId: "offer_community_tea_time", adultPriceYen: 16_000 },
+        ],
+      }, 2);
+      const storedSnapshots = await pool.query(
+        `SELECT occurrence_snapshot->>'ruleId' AS offer_id,pricing_snapshot->>'unitAmount' AS adult_price
+           FROM bookings ORDER BY offer_id`,
+      );
+      assert.deepEqual(storedSnapshots.rows, [
+        { offer_id: "offer_community_dinner", adult_price: "30000" },
+        { offer_id: "offer_community_tea_time", adult_price: "15000" },
+      ]);
+
+      await addRule("tea", rule("offer.invalid", { localStartTime: "21:00" }));
+      assert.equal(await guests.publicBookingTerms("sample-tea"), null, "an unrepresentable active rule closes explicit pricing");
+      await pool.query("DELETE FROM schedule_rules WHERE provider_id='provider-a' AND product_id='tea' AND id='offer.invalid'");
+      assert.ok(await guests.publicBookingTerms("sample-tea"));
+
+      await pool.query(
+        "DELETE FROM experience_offer_prices WHERE provider_id='provider-a' AND product_id='tea' AND rule_id='offer_community_tea_time'",
+      );
+      assert.equal(await guests.publicBookingTerms("sample-tea"), null);
+      assert.equal(await guests.listPublicAvailability("sample-tea"), null);
+      await assert.rejects(() => guests.startGuestBooking(request({
+        offerId: "offer_community_dinner", expectedTotalYen: 31_000,
+      })), StoreNotFoundError);
+      await pool.query("DELETE FROM experience_offer_prices WHERE provider_id='provider-a' AND product_id='tea'");
+      assert.equal(await guests.publicBookingTerms("sample-tea"), null, "a fully missing configured set cannot become the legacy fallback");
+    });
+  });
+
   it("publishes explicit booking conditions, applies the minimum charge and reserves a private occurrence for one group", async () => {
     await withSchema(async ({ guests, addRule, store }) => {
       await addRule("tea", rule("sample-am"));

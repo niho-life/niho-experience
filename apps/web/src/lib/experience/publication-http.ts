@@ -13,6 +13,7 @@ const version = (value: unknown): value is number => typeof value === "number" &
 const versionOrNull = (value: unknown): value is number | null => value === null || version(value);
 const BODY_LIMIT = 256 * 1024;
 const TERMS_KEYS = [
+  "offerPrices",
   "childPricing", "minimumParticipants", "minimumChargeableParticipants", "privateBooking", "maxPartySize",
   "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints",
   "minimumAttendance", "bookingQuestions", "conditionsVersion",
@@ -40,6 +41,12 @@ function validSaleTermsShape(value: unknown): value is ProductSaleTermsInput {
   ])) return false;
   if (value.childPricing !== null && (!record(value.childPricing)
     || !exactKeys(value.childPricing, ["priceYen", "minAge", "maxAge", "adultRequired"]))) return false;
+  if (value.offerPrices !== undefined && value.offerPrices !== null) {
+    if (!Array.isArray(value.offerPrices)) return false;
+    for (const price of value.offerPrices) {
+      if (!record(price) || !exactKeys(price, ["offerId", "adultPriceYen"])) return false;
+    }
+  }
   if (!Array.isArray(value.bookingQuestions)) return false;
   for (const question of value.bookingQuestions) {
     if (!record(question) || !exactKeys(question, ["id", "prompt", "description", "inputType", "required", "options"])

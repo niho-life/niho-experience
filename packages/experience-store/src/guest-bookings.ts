@@ -134,7 +134,18 @@ export interface ChildPricing {
   readonly adultRequired: boolean;
 }
 
+/** The adult price of one public offer (`schedule_rules.id`). */
+export interface OfferPriceInput {
+  readonly offerId: string;
+  readonly adultPriceYen: number;
+}
+
 export interface ProductSaleTermsInput {
+  /**
+   * Complete replacement for every active offer. Omit for the legacy product.unit_amount fallback.
+   * Once persisted, omitting it on a later compatible write preserves the current set.
+   */
+  readonly offerPrices?: readonly OfferPriceInput[] | null;
   /** null: the product takes no children. */
   readonly childPricing: ChildPricing | null;
   readonly minimumParticipants: number;
@@ -158,7 +169,8 @@ export interface ProductSaleTermsInput {
 export type ProductSaleCancellationPolicy = GuestCancellationPolicy | "CUSTOM";
 
 export interface NormalizedProductSaleTermsInput extends Omit<ProductSaleTermsInput,
-  "minimumChargeableParticipants" | "privateBooking" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance" | "cancellationPolicy"> {
+  "offerPrices" | "minimumChargeableParticipants" | "privateBooking" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance" | "cancellationPolicy"> {
+  readonly offerPrices?: readonly OfferPriceInput[];
   readonly cancellationPolicy: GuestCancellationPolicy;
   readonly minimumChargeableParticipants: number;
   readonly privateBooking: boolean;
@@ -167,12 +179,14 @@ export interface NormalizedProductSaleTermsInput extends Omit<ProductSaleTermsIn
   readonly minimumAttendance: number | null;
 }
 
-export interface ProductSaleTerms extends NormalizedProductSaleTermsInput {
+export interface ProductSaleTerms extends Omit<NormalizedProductSaleTermsInput, "offerPrices"> {
   readonly providerId: string;
   readonly productId: string;
   readonly bookingQuestionsFingerprint: string;
   readonly version: number;
   readonly updatedAtUtc: string;
+  /** null means this product still intentionally uses product.unit_amount. */
+  readonly offerPrices: readonly OfferPriceInput[] | null;
 }
 
 /** NIHO's PublicExperienceOffer: one active schedule rule of the product. */
@@ -356,7 +370,7 @@ export const TERMS_COLUMNS = `
   minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
   cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
   minimum_attendance, booking_questions,
-  booking_questions_fingerprint, conditions_version, version, updated_at`;
+  booking_questions_fingerprint, conditions_version, offer_prices_configured, version, updated_at`;
 
 /* ---------- sale terms ---------- */
 
@@ -434,6 +448,27 @@ export function questionsFingerprint(questions: readonly BookingQuestion[]): str
 
 export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductSaleTermsInput {
   if (input === null || typeof input !== "object") throw new StoreValidationError("terms must be an object.");
+  let offerPrices: readonly OfferPriceInput[] | undefined;
+  if (input.offerPrices !== undefined && input.offerPrices !== null) {
+    if (!Array.isArray(input.offerPrices) || input.offerPrices.length < 1 || input.offerPrices.length > 100) {
+      throw new StoreValidationError("offerPrices must contain 1-100 active offers when provided.");
+    }
+    const ids = new Set<string>();
+    offerPrices = input.offerPrices.map((raw, index) => {
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new StoreValidationError(`offerPrices.${index} must be an object.`);
+      }
+      if (typeof raw.offerId !== "string" || !OFFER_ID.test(raw.offerId) || ids.has(raw.offerId)) {
+        throw new StoreValidationError(`offerPrices.${index}.offerId must be a unique public offer id.`);
+      }
+      ids.add(raw.offerId);
+      assertMoney(raw.adultPriceYen, `offerPrices.${index}.adultPriceYen`);
+      if (raw.adultPriceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+        throw new StoreValidationError(`offerPrices.${index}.adultPriceYen must be at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
+      }
+      return { offerId: raw.offerId, adultPriceYen: raw.adultPriceYen };
+    });
+  }
   let childPricing: ChildPricing | null = null;
   if (input.childPricing !== null) {
     const child = input.childPricing;
@@ -490,6 +525,7 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
     throw new StoreValidationError("conditionsVersion must be null or a lowercase SHA-256 hex digest.");
   }
   return {
+    ...(offerPrices === undefined ? {} : { offerPrices }),
     childPricing,
     minimumParticipants,
     minimumChargeableParticipants,
@@ -505,6 +541,12 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
 }
 
 export function termsFromRow(row: DbRow): ProductSaleTerms {
+  const rawOfferPrices = row.offer_prices;
+  const configured = row.offer_prices_configured === true;
+  if (configured !== (rawOfferPrices !== undefined && rawOfferPrices !== null)) {
+    throw new StoreValidationError("Database returned an inconsistent offer price configuration.");
+  }
+  const offerPrices = configured ? validOfferPriceRows(rawOfferPrices) : null;
   return {
     providerId: String(row.provider_id),
     productId: String(row.product_id),
@@ -528,7 +570,106 @@ export function termsFromRow(row: DbRow): ProductSaleTerms {
     conditionsVersion: row.conditions_version === null ? null : String(row.conditions_version),
     version: Number(row.version),
     updatedAtUtc: isoValue(row, "updated_at"),
+    offerPrices,
   };
+}
+
+function validOfferPriceRows(value: unknown): OfferPriceInput[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
+    throw new StoreValidationError("Database returned an invalid offer price set.");
+  }
+  const ids = new Set<string>();
+  return value.map((raw, index) => {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new StoreValidationError("Database returned an invalid offer price.");
+    const row = raw as Record<string, unknown>;
+    const offerId = String(row.offerId);
+    const adultPriceYen = typeof row.adultPriceYen === "number" ? row.adultPriceYen : Number(row.adultPriceYen);
+    if (!OFFER_ID.test(offerId) || ids.has(offerId) || !Number.isSafeInteger(adultPriceYen)
+        || adultPriceYen < GUEST_BOOKING_LIMITS.minimumChargeYen || adultPriceYen > 9_999_999_999) {
+      throw new StoreValidationError(`Database returned an invalid offer price at ${index}.`);
+    }
+    ids.add(offerId);
+    return { offerId, adultPriceYen };
+  });
+}
+
+/** Reads the terms and their optional explicit offer-price set under the same transaction. */
+export async function readSaleTerms(
+  client: Queryable,
+  providerId: string,
+  productId: string,
+  lock = false,
+): Promise<ProductSaleTerms | null> {
+  const terms = await client.query<DbRow>(
+    `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms
+      WHERE provider_id=$1 AND product_id=$2${lock ? " FOR SHARE" : ""}`,
+    [providerId, productId],
+  );
+  if (!terms.rows[0]) return null;
+  const prices = await client.query<DbRow>(
+    `SELECT rule_id AS "offerId",adult_price_amount AS "adultPriceYen"
+       FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2
+       ORDER BY rule_id COLLATE "C"${lock ? " FOR SHARE" : ""}`,
+    [providerId, productId],
+  );
+  return termsFromRow({ ...terms.rows[0], offer_prices: prices.rows.length === 0 ? null : prices.rows });
+}
+
+async function activeOfferIdsForWrite(client: PoolClient, providerId: string, productId: string): Promise<string[]> {
+  const rows = await client.query<DbRow>(
+    `SELECT r.id FROM schedule_rules r
+      WHERE r.provider_id=$1 AND r.product_id=$2 AND (
+        r.ends_on IS NULL OR r.ends_on >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date
+        OR EXISTS (SELECT 1 FROM schedule_occurrence_overrides o
+                    WHERE o.provider_id=r.provider_id AND o.rule_id=r.id AND o.kind='RESCHEDULE'
+                      AND o.local_date >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date)
+      ) ORDER BY r.id COLLATE "C" FOR SHARE OF r`,
+    [providerId, productId],
+  );
+  const ids = rows.rows.map((row) => String(row.id));
+  if (ids.some((id) => !OFFER_ID.test(id))) throw new StoreConflictError("An active schedule rule cannot be represented as a public offer.");
+  return ids;
+}
+
+/** Replaces or carries the complete explicit price set under the parent sale-terms CAS. */
+export async function writeOfferPrices(
+  client: PoolClient,
+  providerId: string,
+  productId: string,
+  prices: readonly OfferPriceInput[] | undefined,
+  saleTermsVersion: number,
+): Promise<void> {
+  const activeIds = await activeOfferIdsForWrite(client, providerId, productId);
+  const existing = await client.query<DbRow>(
+    `SELECT rule_id FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2
+      ORDER BY rule_id COLLATE "C" FOR UPDATE`,
+    [providerId, productId],
+  );
+  const effective = prices ?? (existing.rows.length === 0 ? undefined : await client.query<DbRow>(
+    `SELECT rule_id AS "offerId",adult_price_amount AS "adultPriceYen"
+       FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2 ORDER BY rule_id COLLATE "C"`,
+    [providerId, productId],
+  ).then((result) => validOfferPriceRows(result.rows)));
+  if (effective === undefined) return;
+  const givenIds = [...effective].map((price) => price.offerId).sort();
+  if (activeIds.length === 0 || activeIds.length !== givenIds.length || activeIds.some((id, index) => id !== givenIds[index])) {
+    throw new StoreConflictError("offerPrices must name every active offer exactly once; read the schedules again.");
+  }
+  await client.query("DELETE FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2", [providerId, productId]);
+  for (const price of effective) {
+    await client.query(
+      `INSERT INTO experience_offer_prices
+         (provider_id,product_id,rule_id,adult_price_amount,sale_terms_version)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [providerId, productId, price.offerId, price.adultPriceYen, saleTermsVersion],
+    );
+  }
+  const configured = await client.query(
+    `UPDATE experience_product_sale_terms SET offer_prices_configured=true
+      WHERE provider_id=$1 AND product_id=$2 AND version=$3`,
+    [providerId, productId, saleTermsVersion],
+  );
+  if (configured.rowCount !== 1) throw new StoreConflictError("Sale terms changed while saving offer prices.");
 }
 
 function termsFromPublicationSnapshot(value: unknown, providerId: string, productId: string): ProductSaleTerms | null {
@@ -546,6 +687,7 @@ function termsFromPublicationSnapshot(value: unknown, providerId: string, produc
       bookingQuestionsFingerprint: fingerprint,
       version: 1,
       updatedAtUtc: "1970-01-01T00:00:00.000Z",
+      offerPrices: snapshot.offerPrices === undefined || snapshot.offerPrices === null ? null : validOfferPriceRows(snapshot.offerPrices),
     };
   } catch {
     return null;
@@ -649,10 +791,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   if (!sellableProduct(product)) return null;
   const terms = isPublication
     ? termsFromPublicationSnapshot(row.sale_terms_snapshot, product.providerId, product.id)
-    : await client.query<DbRow>(
-      `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2${lock ? " FOR SHARE" : ""}`,
-      [product.providerId, product.id],
-    ).then((result) => result.rows[0] ? termsFromRow(result.rows[0]) : null);
+    : await readSaleTerms(client, product.providerId, product.id, lock);
   if (terms === null) return null;
   const settings = await client.query<DbRow>(
     `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1${lock ? " FOR SHARE" : ""}`,
@@ -660,7 +799,9 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   );
   if (settings.rows[0] === undefined) return null;
   const sellable = { product, terms, settings: saleSettingsFromRow(settings.rows[0]) };
-  return chargeableFee(product.unitAmount, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints) ? sellable : null;
+  const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [product.unitAmount];
+  return adultPrices.every((price) => chargeableFee(price, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints))
+    ? sellable : null;
 }
 
 /** A JPY price Stripe can charge, and an ID that fits the guest idempotency key (loadSellable, sellableSlugs). */
@@ -747,11 +888,13 @@ export function cancellationPolicyCode(terms: ProductSaleTerms): ProductSaleCanc
 function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBookingOffer {
   const { product, terms } = sellable;
   const rule = stored.rule;
+  const adultPriceYen = adultPriceFor(terms, product, rule.id);
+  if (adultPriceYen === null) throw new StoreConflictError("An active offer has no price in the current sale terms.");
   return {
     id: rule.id,
     name: offerName(product.publicTitle),
     shortDescription: null,
-    pricing: { currency: "JPY", taxIncluded: true, adultPriceYen: product.unitAmount, child: terms.childPricing },
+    pricing: { currency: "JPY", taxIncluded: true, adultPriceYen, child: terms.childPricing },
     capacity: rule.capacity,
     maxPartySize: terms.maxPartySize,
     minimumParticipants: terms.minimumParticipants,
@@ -773,6 +916,33 @@ function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBooking
     bookingQuestions: terms.bookingQuestions,
     bookingQuestionsFingerprint: terms.bookingQuestionsFingerprint,
   };
+}
+
+export async function offerPricesMatchActiveRules(
+  client: Queryable,
+  terms: ProductSaleTerms,
+  providerId: string,
+  productId: string,
+  today: string,
+): Promise<boolean> {
+  if (terms.offerPrices === null) return true;
+  const result = await client.query<DbRow>(
+    `SELECT r.id FROM schedule_rules r WHERE r.provider_id=$1 AND r.product_id=$2 AND (
+       r.ends_on IS NULL OR r.ends_on >= $3::date
+       OR EXISTS (SELECT 1 FROM schedule_occurrence_overrides o
+         WHERE o.provider_id=r.provider_id AND o.rule_id=r.id AND o.kind='RESCHEDULE' AND o.local_date >= $3::date)
+     ) ORDER BY r.id COLLATE "C"`,
+    [providerId, productId, today],
+  );
+  const ruleIds = result.rows.map((row) => String(row.id));
+  if (ruleIds.some((id) => !OFFER_ID.test(id)) || terms.offerPrices.length !== ruleIds.length) return false;
+  const priceIds = [...terms.offerPrices].map((price) => price.offerId).sort();
+  return ruleIds.every((id, index) => id === priceIds[index]);
+}
+
+function adultPriceFor(terms: ProductSaleTerms, product: ProductRecord, offerId: string): number | null {
+  if (terms.offerPrices === null) return product.unitAmount;
+  return terms.offerPrices.find((price) => price.offerId === offerId)?.adultPriceYen ?? null;
 }
 
 /** The same expansion as the host calendar: every stored override (moves, legacy CLOSE) and sales state. */
@@ -1105,6 +1275,7 @@ export class GuestBookingRepository {
     }
     const fingerprint = questionsFingerprint(terms.bookingQuestions);
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
       if (product.rows[0] === undefined) throw new StoreNotFoundError("product");
@@ -1145,7 +1316,10 @@ export class GuestBookingRepository {
           ? "Sale terms already exist for this product."
           : "Sale terms version mismatch or sale terms not found in this provider.");
       }
-      return termsFromRow(row);
+      await writeOfferPrices(client, actor.providerId, productId, terms.offerPrices, Number(row.version));
+      const written = await readSaleTerms(client, actor.providerId, productId);
+      if (written === null) throw new StoreConflictError("Sale terms disappeared while saving.");
+      return written;
     });
   }
 
@@ -1316,6 +1490,7 @@ export class GuestBookingRepository {
     if (sellable === null) return null;
     const today = tokyoDate(await databaseNow(this.#pool));
     const rules = await activeRules(this.#pool, sellable.product.providerId, sellable.product.id, today);
+    if (!await offerPricesMatchActiveRules(this.#pool, sellable.terms, sellable.product.providerId, sellable.product.id, today)) return null;
     return {
       providerId: sellable.product.providerId,
       productId: sellable.product.id,
@@ -1347,8 +1522,18 @@ export class GuestBookingRepository {
               t.minimum_participants,t.minimum_chargeable_participants,t.private_booking,t.max_party_size,
               t.cancellation_policy,t.cancellation_window_minutes_before_start,t.cancellation_refund_basis_points,
               t.minimum_attendance,t.booking_questions,
-              t.booking_questions_fingerprint,t.conditions_version,
-              s.platform_fee_basis_points
+              t.booking_questions_fingerprint,t.conditions_version,t.offer_prices_configured,
+              s.platform_fee_basis_points,
+              (SELECT jsonb_agg(jsonb_build_object('offerId',op.rule_id,'adultPriceYen',op.adult_price_amount)
+                        ORDER BY op.rule_id COLLATE "C")
+                 FROM experience_offer_prices op WHERE op.provider_id=p.provider_id AND op.product_id=p.id) AS offer_prices,
+              (SELECT array_agg(r.id ORDER BY r.id COLLATE "C") FROM schedule_rules r
+                 WHERE r.provider_id=p.provider_id AND r.product_id=p.id AND (
+                   r.ends_on IS NULL OR r.ends_on >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date
+                   OR EXISTS (SELECT 1 FROM schedule_occurrence_overrides o
+                     WHERE o.provider_id=r.provider_id AND o.rule_id=r.id AND o.kind='RESCHEDULE'
+                       AND o.local_date >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date)
+                 )) AS active_offer_ids
          FROM experience_products p
          LEFT JOIN experience_product_publication_states state ON state.provider_id=p.provider_id AND state.product_id=p.id
          LEFT JOIN experience_product_publications pub ON pub.id=state.current_publication_id
@@ -1415,14 +1600,25 @@ export class GuestBookingRepository {
             conditionsVersion: row.conditions_version === null ? null : String(row.conditions_version),
           });
           const fingerprint = questionsFingerprint(normalized.bookingQuestions);
+          const configured = row.offer_prices_configured === true;
+          if (configured !== (row.offer_prices !== null)) throw new StoreValidationError("inconsistent offer prices");
           terms = fingerprint === String(row.booking_questions_fingerprint)
-            ? { ...normalized, providerId: String(row.provider_id), productId: id, bookingQuestionsFingerprint: fingerprint, version: 1, updatedAtUtc: "1970-01-01T00:00:00.000Z" }
+            ? { ...normalized, providerId: String(row.provider_id), productId: id, bookingQuestionsFingerprint: fingerprint, version: 1,
+                updatedAtUtc: "1970-01-01T00:00:00.000Z", offerPrices: configured ? validOfferPriceRows(row.offer_prices) : null }
             : null;
         } catch {
           terms = null;
         }
       }
-      return terms !== null && chargeableFee(unitAmount, terms.childPricing, Number(row.platform_fee_basis_points));
+      if (terms === null) return false;
+      const activeOfferIds = Array.isArray(row.active_offer_ids) ? row.active_offer_ids.map(String) : [];
+      if (terms.offerPrices !== null) {
+        const pricedIds = terms.offerPrices.map((price) => price.offerId).sort();
+        if (activeOfferIds.length === 0 || activeOfferIds.length !== pricedIds.length
+            || activeOfferIds.some((offerId, index) => offerId !== pricedIds[index])) return false;
+      }
+      const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [unitAmount];
+      return adultPrices.every((price) => chargeableFee(price, terms!.childPricing, Number(row.platform_fee_basis_points)));
     });
   }
 
@@ -1463,6 +1659,7 @@ export class GuestBookingRepository {
     if (fromDate > toDate) return empty;
 
     const rules = await activeRules(this.#pool, providerId, productId, today);
+    if (!await offerPricesMatchActiveRules(this.#pool, sellable.terms, providerId, productId, today)) return null;
     const [previousDate, expanded] = await Promise.all([
       expandRules(this.#pool, providerId, rules, addLocalDays(fromDate, -1), addLocalDays(fromDate, -1)),
       expandRules(this.#pool, providerId, rules, fromDate, toDate),
@@ -1548,8 +1745,11 @@ export class GuestBookingRepository {
       const nowUtc = await databaseNow(client);
       const today = tokyoDate(nowUtc);
       const rules = await activeRules(client, providerId, productId, today);
+      if (!await offerPricesMatchActiveRules(client, terms, providerId, productId, today)) throw new StoreNotFoundError("experience for sale");
       const rule = rules.find((stored) => stored.rule.id === request.offerId);
       if (rule === undefined) throw invalid("offerId");
+      const adultPriceYen = adultPriceFor(terms, product, rule.rule.id);
+      if (adultPriceYen === null) throw new StoreNotFoundError("experience for sale");
       if (request.termsConsentVersion !== request.currentConsentVersion) {
         throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "consent.agreedVersion" });
       }
@@ -1563,7 +1763,7 @@ export class GuestBookingRepository {
       if (request.childCount > 0 && terms.childPricing === null) throw invalid("childCount");
       if (request.adultCount < 1 && terms.childPricing?.adultRequired !== false) throw invalid("adultCount");
       const totalYen = guestTotalYen(
-        product.unitAmount, terms.childPricing, request.adultCount, request.childCount, terms.minimumChargeableParticipants,
+        adultPriceYen, terms.childPricing, request.adultCount, request.childCount, terms.minimumChargeableParticipants,
       );
       if (request.expectedTotalYen !== totalYen) throw new GuestCheckoutError("PRICE_CHANGED", { currentTotalYen: totalYen });
       // Unreachable with the ¥50 minimum and today's rates; a fee Stripe would refuse is not for sale.
@@ -1619,7 +1819,7 @@ export class GuestBookingRepository {
 
       let placed: Awaited<ReturnType<typeof placeBookingHold>>;
       try {
-        placed = await placeBookingHold(client, product, occurrenceForBooking, {
+        placed = await placeBookingHold(client, { ...product, unitAmount: adultPriceYen }, occurrenceForBooking, {
           seats: headCount,
           idempotencyKey,
           holdSeconds: request.holdSeconds,
