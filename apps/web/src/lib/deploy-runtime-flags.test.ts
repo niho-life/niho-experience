@@ -68,6 +68,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
   EXPERIENCE_GUIDE_PUBLIC_SOURCE: "guidePublicSource",
+  EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "guideAppCardsEnabled",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
   EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "experienceProviderPagesApiEnabled",
@@ -159,6 +160,14 @@ describe("the deploy workflows' feature flags", () => {
     expect(enabled.env.EXPERIENCE_GUIDE_PUBLIC_SOURCE).toBe("editor");
     expect(enabled.env.GUIDE_EDITOR_API_HANDLE).toBe("exp");
     expect(enabled.secrets.GUIDE_EDITOR_API_TOKEN).toMatch(/:[1-9][0-9]*$/);
+  });
+
+  it("requires the Editor publication source before exposing app cards", () => {
+    const vars = closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED");
+    vars.PROD_EDITOR_PUBLICATIONS_ENABLED = "false";
+    expect(resolve("prod", vars).problems.join(" ")).toContain("EXPERIENCE_GUIDE_PUBLIC_SOURCE");
+    const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED"));
+    expect(resolveConfig(revision("prod", enabled)).guideAppCardsEnabled).toBe(true);
   });
 
   it("covers every flag of the table with a config setting", () => {

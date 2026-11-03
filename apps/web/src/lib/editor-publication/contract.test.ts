@@ -64,19 +64,21 @@ describe("the published list (contract v1)", () => {
       lead: "A synthetic guide for checking the editor source: an evening route, two stops and where to sit down.",
       cover: { id: "asset-cover-1", url: "https://assets.editor.example/photos/cover-1.jpg", alt: "A quiet lane at dusk (sample photo)", credit: "Photo: Sample Studio" },
       category: { slug: "evenings", label: "Evenings" },
-      author: { name: "Sample Writer" },
+      author: { name: "Sample Writer", url: "https://writer.example/" },
+      canonicalUrl: "https://experience.example/guides/sample-evening-walk",
+      extras: { app: false },
       related: ["evening-pottery-session", "home-cooked-dinner-with-locals"],
       publishedAt: "2026-10-20T01:00:00.000Z",
       updatedAt: "2026-10-30T03:00:00.000Z",
     });
-    // Neither canonicalUrl, extras nor the author's handle and URL is carried: canonical URLs come from SITE_URL.
-    expect(JSON.stringify(items)).not.toMatch(/canonicalUrl|extras|sample-writer|writer\.example/);
+    // Original canonical is retained for app-card provenance; the author's handle is not carried.
+    expect(JSON.stringify(items)).not.toMatch(/sample-writer/);
     // An empty alt stays empty; a null credit is no caption; a two-word category gets a readable label.
     expect(items[1]).toMatchObject({ cover: { alt: "" }, category: { slug: "day-trips", label: "Day trips" } });
     expect(items[1]!.cover).not.toHaveProperty("credit");
     expect(items[1]!.category).not.toHaveProperty("order");
     expect(items[4]).not.toHaveProperty("cover");
-    expect(items.at(-1)?.lead).toBe("");
+    expect(items.at(-1)?.lead).toBeNull();
   });
 
   it("uses publish-time category display metadata when present and keeps the legacy slug fallback", () => {
@@ -86,6 +88,14 @@ describe("the published list (contract v1)", () => {
     });
     const invalid = listItem({ categoryDisplay: { labelEn: "Claimed", labelJa: "自己申告", displayOrder: 4, revision: 0 } });
     expect(parseEditorPublishedList(page([invalid])).items).toEqual([]);
+  });
+
+  it("retains source canonical when present and keeps it optional for legacy ordinary guides", () => {
+    expect(parseOne({ canonicalUrl: "https://experience.example/guides/a-sample-guide" }).items[0]?.canonicalUrl).toBe(
+      "https://experience.example/guides/a-sample-guide",
+    );
+    expect(parseOne({ canonicalUrl: undefined }).items[0]).not.toHaveProperty("canonicalUrl");
+    expect(parseOne({ canonicalUrl: 7 }).skipped).toEqual([expect.objectContaining({ reason: "canonicalUrl is invalid" })]);
   });
 
   it("throws when the response is not a v1 page at all", () => {
@@ -166,10 +176,10 @@ describe("the published list (contract v1)", () => {
       title: "t".repeat(GUIDE_LIMITS.titleMaxLength),
       cover: { alt: "", credit: "Photo: Sample" },
       category: { slug: "day-trips", label: "Day trips" },
-      author: { name: "Sample Writer" },
+      author: { name: "Sample Writer", url: null },
       related: ["b-one", "c-two"],
     });
-    expect(items[0]!.author).toEqual({ name: "Sample Writer" });
+    expect(items[0]!.author).toEqual({ name: "Sample Writer", url: null });
     expect(items[0]!.cover).toEqual({ id: "c", url: "https://assets.editor.example/a.jpg", alt: "", credit: "Photo: Sample" });
   });
 
@@ -215,7 +225,7 @@ describe("a preview draft", () => {
         title: "An unfinished draft (sample)",
         markdown: "Opening paragraph without a heading\\. [CONFIRM: opening hours]\n",
         slug: "sample-unfinished-draft",
-        author: { name: "Sample Writer" },
+        author: { name: "Sample Writer", url: null },
         assets: [],
         related: [],
         publishedAt: "2026-10-30T23:50:00.000Z",

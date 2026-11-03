@@ -39,7 +39,7 @@ export function guidePublicationRequirements(siteUrl: string, categories: readon
     host: new URL(siteUrl).host,
     path: "guides",
     ranges: ["live", "unlisted"],
-    extras: [],
+    extras: ["app"],
     // The editor's quote, divider, strike and code have no place on a guide page.
     accepts: { blocks: ["paragraph", "heading", "list", "figure", "note"], marks: ["bold", "italic", "link"] },
     requires: [

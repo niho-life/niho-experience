@@ -80,10 +80,10 @@ export function editorArticleToGuide(article: EditorArticle, policy: EditorPhoto
       slug: article.slug,
       ...(article.range === "unlisted" ? { unlisted: true as const } : {}),
       title: article.title,
-      description: article.lead,
+      description: article.lead ?? "",
       category: { slug: article.category.slug, label: article.category.label, ...(article.category.labelJa === undefined ? {} : { labelJa: article.category.labelJa }), displayOrder: article.category.order ?? EDITOR_CATEGORY_DEFAULT_ORDER, ...(article.category.revision === undefined ? {} : { revision: article.category.revision }) },
       editorPublication: { id: article.id, version: article.version },
-      author: article.author,
+      author: { name: article.author.name },
       publishedAt: dateOf(article.publishedAt),
       updatedAt: dateOf(article.updatedAt),
       ...(article.cover ? { hero: hero(article.cover, policy) } : {}),
@@ -118,7 +118,7 @@ export function editorPreviewToGuide(preview: EditorPreview, policy: EditorPhoto
       ...(preview.category
         ? { category: { slug: preview.category.slug, label: preview.category.label, displayOrder: preview.category.order ?? EDITOR_CATEGORY_DEFAULT_ORDER } }
         : {}),
-      author: preview.author ?? EDITOR_PREVIEW_AUTHOR,
+      author: preview.author ? { name: preview.author.name } : EDITOR_PREVIEW_AUTHOR,
       publishedAt,
       updatedAt: today < publishedAt ? publishedAt : today,
       ...(preview.cover ? { hero: hero(preview.cover, policy) } : {}),
