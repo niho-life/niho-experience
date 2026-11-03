@@ -11,6 +11,17 @@ export {
 } from "./errors.ts";
 export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
+export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "./experience-publication.ts";
+export type {
+  ExperiencePublicationBlocker,
+  ExperiencePublicationContentChecks,
+  ExperiencePublicationDraftInput,
+  ExperiencePublicationState,
+  ProviderPublicationReadiness,
+  ProviderPublicationReadinessInput,
+  PublicationOperationsActor,
+  PublicExperiencePublication,
+} from "./experience-publication.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export { ResourceGoogleRepository } from "./resource-google.ts";

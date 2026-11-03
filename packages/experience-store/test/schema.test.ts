@@ -482,4 +482,29 @@ describe("database invariants", () => {
     const code = sql.replace(/--.*$/gm, "");
     assert.doesNotMatch(code, /guest_|email|phone|ALTER TABLE|DROP |^\s*(UPDATE|DELETE|INSERT) /im);
   });
+
+  it("separates editable products, immutable public copies, OWNER intent and operations suspension (#330 #369)", async () => {
+    const sql = await readFile(new URL("../migrations/0040_experience_publication.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /CREATE TABLE provider_publication_readiness/);
+    assert.match(sql, /valid_until timestamptz NOT NULL/);
+    assert.match(sql, /valid_until <= observed_at \+ interval '10 minutes'/);
+    assert.match(sql, /FOREIGN KEY \(provider_id, owner_niho_user_id\)[\s\S]*provider_memberships/);
+    const publications = sql.match(/CREATE TABLE experience_product_publications \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(publications, /draft_version bigint NOT NULL/);
+    assert.match(publications, /seller_niho_account_ref text NOT NULL/);
+    assert.match(publications, /stripe_connect_account_ref text NOT NULL/);
+    assert.match(publications, /consent_version text NOT NULL/);
+    assert.match(sql, /experience_product_publications_no_update[\s\S]*BEFORE UPDATE OR DELETE/);
+    const states = sql.match(/CREATE TABLE experience_product_publication_states \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(states, /self_stopped_at timestamptz/);
+    assert.match(states, /operations_suspended_at timestamptz/);
+    assert.match(states, /owner_resume_required boolean NOT NULL DEFAULT false/);
+    assert.match(states, /FOREIGN KEY \(current_publication_id, provider_id, product_id\)/);
+    // Existing bookings and their immutable snapshots are not rewritten by this additive migration.
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /ALTER TABLE|DROP TABLE|UPDATE bookings|DELETE FROM bookings/);
+    assert.doesNotMatch(code, /email|phone|address|bearer|secret|raw_response/i);
+  });
 });
