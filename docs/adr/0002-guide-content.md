@@ -55,7 +55,7 @@ database modeの有効化条件・staging受入・切戻しは [Guide CMS](../gu
 - **experience は発信先**：公開版を editor の公開 API から読み、`/guides`・`/guides/{slug}`・トップの Kamakura Journal・体験詳細の関連記事・sitemap・Article JSON-LD・canonical・hreflang を自分のドメインで SSR する。検索エンジンが評価するのは公開 URL なので、SEO の狙いは変えない。
 - **受け取るときに再確認する**：英語であること、Markdown の部分集合、https の許可 origin の写真、関連体験が今も掲載中で記事連携が有効であること。editor の表示や API の `related` を認可の根拠にしない。編集上の条件（リード・カバー・カテゴリなど）は experience が宣言し（`/api/public/guides/publication-requirements`）、editor の公開前の検査が使う。
 - **プレビューの見え方の正本は experience**：editor が発行する短命のトークンで下書きを読み、`/guides/preview` で通常の記事と同じ部品で `noindex`・`no-store` に描画する。
-- **編集画面は experience に置かない**：`/editor/*`（画面・API・下書き・写真の保管・公開前の検査）は #254 で撤去する。書き手の入口は公開サイトのフッター「For writers」と、ホストの画面の「記事を書く」で、どちらも editor.niho.life へのリンクだけを置く（`GUIDE_EDITOR_SITE_ORIGIN` を設定した環境だけ表示）。
+- **編集画面は experience に置かない**：`/editor/*`の書込・認証・下書きAPIは410で閉じ、保存済みデータは削除しない。画面のGET入口は`/write`へ移し、固定Editor originの`/p/new?destination=exp&lang=en`だけへ遷移する。OAuthのcode/stateは転送しない。書き手の入口は公開サイトのフッター「For writers」と、ホストの画面の「記事を書く」に統一する（`GUIDE_EDITOR_SITE_ORIGIN`を設定した環境だけ表示）。
 - **記事連携の正本は NIHO の役割の層**：招待・承諾・取消は NIHO 側へ移す（#255）。experience は公開版の関連体験を、現在の権限と掲載状態で表示のたびに再判定する。
 - **公開元は常に一つ**：`EXPERIENCE_GUIDE_PUBLIC_SOURCE` の `static`／`database`／`editor` から一つだけを選び、union しない。同じ slug の二重表示と二重の正本を作らない。
 
@@ -67,10 +67,9 @@ database modeの有効化条件・staging受入・切戻しは [Guide CMS](../gu
 ### 結果
 
 - 記事の公開・更新・停止は editor で完結し、experience の再ビルドも PR も要らない（公開版は次の読み取りで反映）。
-- 移行が終わると、「原稿をモジュールにする → PR」の手順（上の「決定」）と experience DB の Guide CMS の編集・公開の経路は使わなくなる。それまでに静的経路・database 経路で出した記事は editor へ移してから公開元を切り替え、同じ slug を二重に出さない。静的経路は mock preview の合成サンプルのために残る。database 経路と `/editor` を消す時期は #254 で決める。
+- 「原稿をモジュールにする → PR」の手順とexperience DBのGuide CMSの編集・公開経路は新規書込に使わない。静的・database経路で出した記事はeditorへ移してから公開元を切り替え、同じslugを二重に出さない。静的経路はmock previewの合成サンプル、旧DB/tableは監査と切戻し判断のため保持する。
 - experience 側の記事の型（`Guide`）、安全な Markdown→React の描画、SEO の部品はそのまま使う。
 
 ### 未決
 
-- `/editor` を撤去するまでの間、experience の `/editor` を公開に使うか（`EDITOR_CONSOLE_ENABLED` は OFF のまま）。
 - 日本語の記事を experience の `/ja/guides` に出すか（#59）。

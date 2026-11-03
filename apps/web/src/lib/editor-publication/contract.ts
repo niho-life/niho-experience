@@ -58,13 +58,14 @@ export function editorCategoryLabel(slug: string): string {
 /** A photo. v1 carries no pixel size and no sharing rights (see convert.ts). `alt` may be empty. */
 export type EditorAsset = Readonly<{ id: string; url: string; alt: string; credit?: string }>;
 
-export type EditorCategory = Readonly<{ slug: string; label: string; order?: number }>;
+export type EditorCategory = Readonly<{ slug: string; label: string; labelJa?: string; order?: number; revision?: number }>;
 /** The publish-time author. The contract's `handle` and `url` are checked but not kept: the page shows the name only. */
 export type EditorAuthor = Readonly<{ name: string }>;
 
 /** One entry of the published list: what a listing needs. `range` decides where it shows. */
 export type EditorArticleSummary = Readonly<{
   id: string;
+  version: number;
   slug: string;
   range: "live" | "unlisted";
   title: string;
@@ -135,6 +136,11 @@ function optionalText(value: unknown, label: string, max: number): string | unde
   return absent(value) || value === "" ? undefined : text(value, label, max);
 }
 
+/** Published optional text is represented as null on the wire; an empty string is still malformed. */
+function nullableText(value: unknown, label: string, max: number): string {
+  return absent(value) ? "" : text(value, label, max);
+}
+
 function isoTime(value: unknown, label: string): string {
   const match = typeof value === "string" ? ISO_TIME.exec(value) : null;
   if (!match || !isGuideDate(match[1]!) || !Number.isFinite(Date.parse(value as string))) throw new Invalid(`${label} is not an ISO 8601 date-time`);
@@ -154,11 +160,17 @@ function asset(value: unknown, label: string): EditorAsset {
   return { id: value.id, url: value.url, alt: value.alt, ...(credit === undefined ? {} : { credit }) };
 }
 
-function category(value: unknown): EditorCategory {
+function category(value: unknown, display?: unknown): EditorCategory {
   if (absent(value)) throw new Invalid("category is missing");
   if (typeof value !== "string" || value.length > GUIDE_LIMITS.slugMaxLength || !SLUG.test(value)) throw new Invalid("category is not a slug");
   // No order: the category sorts after every ordered one (EDITOR_CATEGORY_DEFAULT_ORDER).
-  return { slug: value, label: editorCategoryLabel(value) };
+  if (display === undefined) return { slug: value, label: editorCategoryLabel(value) };
+  if (!isRecord(display) || Object.keys(display).sort().join(",") !== "displayOrder,labelEn,labelJa,revision"
+    || typeof display.labelEn !== "string" || !display.labelEn.trim() || display.labelEn.length > 120
+    || typeof display.labelJa !== "string" || !display.labelJa.trim() || display.labelJa.length > 120
+    || !Number.isSafeInteger(display.displayOrder) || (display.displayOrder as number) < 0 || (display.displayOrder as number) > 1_000_000
+    || !Number.isSafeInteger(display.revision) || (display.revision as number) < 1) throw new Invalid("categoryDisplay is invalid");
+  return { slug: value, label: display.labelEn, labelJa: display.labelJa, order: display.displayOrder as number, revision: display.revision as number };
 }
 
 function author(value: unknown): EditorAuthor {
@@ -199,12 +211,13 @@ function summary(item: Fields): EditorArticleSummary {
   if (item.lang !== "en") throw new Invalid("lang is not en");
   return {
     id: item.id,
+    version: Number.isSafeInteger(item.version) && (item.version as number) > 0 ? item.version as number : (() => { throw new Invalid("version is invalid"); })(),
     slug: item.slug,
     range: item.range,
     title: text(item.title, "title", GUIDE_LIMITS.titleMaxLength),
-    lead: text(item.lead, "lead", GUIDE_LIMITS.descriptionMaxLength),
+    lead: nullableText(item.lead, "lead", GUIDE_LIMITS.descriptionMaxLength),
     ...(absent(item.cover) ? {} : { cover: asset(item.cover, "cover") }),
-    category: category(item.category),
+    category: category(item.category, item.categoryDisplay),
     author: author(item.author),
     related: relatedSlugs(item.related, "related"),
     publishedAt: isoTime(item.publishedAt, "publishedAt"),

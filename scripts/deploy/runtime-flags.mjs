@@ -28,12 +28,16 @@ export const CAPABILITIES = Object.freeze(["HOST_CONSOLE", "DATABASE"]);
 
 const ADDRESS = "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+";
 const HTTPS_URL = "https://[a-z0-9-]+(\\.[a-z0-9-]+)+(/[A-Za-z0-9._~%/-]*)?";
+const SERVICE_ACCOUNT = "[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\\.iam\\.gserviceaccount\\.com";
 
 /** Plain settings' shapes: what resolve-config accepts, narrowed to what --set-env-vars carries (never a comma). */
 export const SHAPES = Object.freeze({
   consentVersion: { pattern: /^[A-Za-z0-9._:+-]{1,100}$/, words: "letters, digits and ._:+- (1-100)" },
   mailbox: { pattern: new RegExp(`^(${ADDRESS}|[^<>",\\u0000-\\u001F\\u007F\\s][^<>",\\u0000-\\u001F\\u007F]{0,99} <${ADDRESS}>)$`), words: "an address, or Name <address> without commas or quotes" },
   httpsUrl: { pattern: new RegExp(`^${HTTPS_URL}$`), words: "an https URL with a lower-case host, no query or comma" },
+  httpsOrigin: { pattern: /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/, words: "an exact https origin without path, credentials or query" },
+  // Semicolons preserve the two callers as one gcloud value; the runtime accepts the same closed list.
+  serviceAccountList: { pattern: new RegExp(`^${SERVICE_ACCOUNT}(;${SERVICE_ACCOUNT})*$`), words: "service account emails separated by semicolons, without spaces" },
   vapidPublicKey: { pattern: /^B[A-Za-z0-9_-]{86}$/, words: "an uncompressed P-256 public key in base64url" },
   vapidSubject: { pattern: new RegExp(`^(mailto:${ADDRESS}|${HTTPS_URL})$`), words: "mailto: an address, or an https URL" },
 });
@@ -49,6 +53,42 @@ const siteUrl = ({ siteUrl: url }) => url;
  * name. `settings`: plain values with their shape. `fixed`: values the workflow derives (job audiences and callers).
  */
 export const FLAGS = Object.freeze([
+  {
+    env: "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED",
+    variable: "ARTICLE_AUTHORITY_API_ENABLED",
+    needs: ["DATABASE"],
+    settings: [
+      { env: "EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS", variable: "ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS", shape: "serviceAccountList" },
+      { env: "NIHO_ARTICLE_AUTHORITY_ORIGIN", variable: "NIHO_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
+      { env: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", variable: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
+      { env: "EDITOR_ARTICLE_AUTHORITY_ORIGIN", variable: "EDITOR_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
+      { env: "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", variable: "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
+    ],
+    fixed: { EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE: siteUrl },
+  },
+  {
+    env: "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
+    variable: "HOST_ARTICLE_LINKS_ENABLED",
+    needs: ["HOST_CONSOLE"],
+    settings: [
+      { env: "NIHO_ARTICLE_AUTHORITY_ORIGIN", variable: "NIHO_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
+      { env: "NIHO_ARTICLE_LINKS_AUDIENCE", variable: "NIHO_ARTICLE_LINKS_AUDIENCE", shape: "httpsUrl" },
+      { env: "GUIDE_EDITOR_SITE_ORIGIN", variable: "GUIDE_EDITOR_SITE_ORIGIN", shape: "httpsOrigin" },
+    ],
+  },
+  {
+    env: "EXPERIENCE_GUIDE_PUBLIC_SOURCE",
+    variable: "EDITOR_PUBLICATIONS_ENABLED",
+    value: "editor",
+    needs: ["DATABASE", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED"],
+    settings: [
+      { env: "GUIDE_EDITOR_API_BASE_URL", variable: "GUIDE_EDITOR_API_BASE_URL", shape: "httpsUrl" },
+      { env: "GUIDE_EDITOR_ASSET_ORIGINS", variable: "GUIDE_EDITOR_ASSET_ORIGIN", shape: "httpsOrigin" },
+      { env: "GUIDE_EDITOR_SITE_ORIGIN", variable: "GUIDE_EDITOR_SITE_ORIGIN", shape: "httpsOrigin" },
+    ],
+    secrets: [{ env: "GUIDE_EDITOR_API_TOKEN", variable: "GUIDE_EDITOR_API_TOKEN_REF", stg: "experience-stg-editor-api-token" }],
+    fixed: { GUIDE_EDITOR_API_HANDLE: () => "exp" },
+  },
   {
     env: "EXPERIENCE_GUEST_BOOKING_ENABLED",
     variable: "GUEST_BOOKING_ENABLED",
@@ -209,7 +249,7 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
         problems.push(`${by} needs ${words}`);
       }
     }
-    env[flag.env] = "true";
+    env[flag.env] = flag.value ?? "true";
     for (const secret of flag.secrets ?? []) {
       const ref = value(secret.variable);
       const pattern = target === "stg" ? new RegExp(`^${escape(secret.stg)}:[1-9][0-9]*$`) : PROD_SECRET_REF;

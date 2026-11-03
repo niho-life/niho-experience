@@ -22,6 +22,7 @@ interface Item {
 interface Flag {
   env: string;
   variable: string;
+  value?: string;
   defaults?: Partial<Record<Target, boolean>>;
   needs?: string[];
   conflicts?: string[];
@@ -55,6 +56,8 @@ const SETTING: Record<string, string> = {
   consentVersion: "sample-terms-2026-11",
   mailbox: "NIHO Sample <noreply@example.com>",
   httpsUrl: "https://example.com/privacy",
+  httpsOrigin: "https://editor.example.com",
+  serviceAccountList: "caller@sample-project.iam.gserviceaccount.com",
   vapidPublicKey: `B${"A".repeat(86)}`,
   vapidSubject: "mailto:ops@example.com",
 };
@@ -62,6 +65,9 @@ const secretRef = (target: Target, item: Item) => (target === "stg" ? `${item.st
 
 /** Each flag's config setting: a new flag without one here fails "covers every flag". */
 const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
+  EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
+  EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
+  EXPERIENCE_GUIDE_PUBLIC_SOURCE: "guidePublicSource",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
   EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "experienceProviderPagesApiEnabled",
@@ -132,6 +138,29 @@ function revision(target: Target, resolved: Resolved): Record<string, string> {
 const resolve = (target: Target, vars: Vars, hostConsole = true) => resolveDeployFlags({ target, vars, hostConsole, siteUrl: SITE[target] });
 
 describe("the deploy workflows' feature flags", () => {
+  it("keeps the two article service callers in one deployment value", () => {
+    const vars = closure("prod", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED");
+    vars.PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS = "niho@sample-project.iam.gserviceaccount.com;editor@sample-project.iam.gserviceaccount.com";
+    const resolved = resolve("prod", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(outputsOf(resolved).env!.split(",")).toHaveLength(Object.keys(resolved.env).length);
+    expect(resolveConfig(revision("prod", resolved)).articleAuthorityServiceAccountEmails).toEqual([
+      "niho@sample-project.iam.gserviceaccount.com", "editor@sample-project.iam.gserviceaccount.com",
+    ]);
+    vars.PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS += ";EDITOR_AUTH_MODE=stub";
+    expect(resolve("prod", vars).problems.join(" ")).toContain("PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS");
+  });
+
+  it("requires current authority before switching the publication source", () => {
+    const vars = closure("prod", "EXPERIENCE_GUIDE_PUBLIC_SOURCE");
+    vars.PROD_ARTICLE_AUTHORITY_API_ENABLED = "false";
+    expect(resolve("prod", vars).problems.join(" ")).toContain("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED");
+    const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_PUBLIC_SOURCE"));
+    expect(enabled.env.EXPERIENCE_GUIDE_PUBLIC_SOURCE).toBe("editor");
+    expect(enabled.env.GUIDE_EDITOR_API_HANDLE).toBe("exp");
+    expect(enabled.secrets.GUIDE_EDITOR_API_TOKEN).toMatch(/:[1-9][0-9]*$/);
+  });
+
   it("covers every flag of the table with a config setting", () => {
     expect(FLAGS.map((flag) => flag.env).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
     expect(new Set(FLAGS.map((flag) => flag.variable)).size).toBe(FLAGS.length);
@@ -152,7 +181,7 @@ describe("the deploy workflows' feature flags", () => {
         expect(resolved.problems, flag.env).toEqual([]);
         expect(resolved.on, flag.env).toContain(flag.env);
         const config = resolveConfig(revision(target, resolved));
-        expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(true);
+        expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
       }
     });
 
@@ -163,7 +192,7 @@ describe("the deploy workflows' feature flags", () => {
       expect(resolved.problems).toEqual([]);
       expect(resolved.on).toEqual(compatible.map((flag) => flag.env));
       const config = resolveConfig(revision(target, resolved));
-      for (const flag of compatible) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(true);
+      for (const flag of compatible) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
       // The jobs are called by their own service accounts on the stable URL.
       expect(config.hostPushJobEnabled).toBe(true);
       expect(resolved.env).toMatchObject({

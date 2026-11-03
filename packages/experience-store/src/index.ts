@@ -202,6 +202,8 @@ export type {
 } from "./guest-bookings.ts";
 export { GuideRepository, parseGuideContent } from "./guides.ts";
 export { GuideAdminRepository } from "./guide-admin.ts";
+export { ArticleAuthorityRepository } from "./article-authority.ts";
+export type { ArticleAuthorityCandidate, ArticleAuthorityCategory } from "./article-authority.ts";
 export { CHANNEL_SITES, ChannelRuntime, channelReadbackAccepted } from "./channels.ts";
 export { GoogleChannelDeliveryRepository } from "./google-channel-delivery.ts";
 export { MANUAL_CONFLICT_RESOLUTIONS } from "./external-reservation-attention.ts";

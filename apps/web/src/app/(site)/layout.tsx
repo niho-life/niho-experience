@@ -43,7 +43,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const footerLinks = [
     ...(hasGuidesPage(guides) ? [{ href: "/guides", label: "Guides" }] : []),
     // Articles are written on editor.niho.life (#254); hidden until its origin is set.
-    ...(config.guideEditorSiteOrigin ? [{ href: config.guideEditorSiteOrigin, label: "For writers" }] : []),
+    ...(config.guideEditorSiteOrigin ? [{ href: "/write", label: "For writers" }] : []),
     // The traveler privacy notice (#285): always linked, last and quiet like the rest.
     privacyFooterLink("en"),
   ];

@@ -22,7 +22,8 @@ export interface GoogleServiceTokenVerifier {
 
 export interface GoogleServiceIdentitySettings {
   readonly audience: string;
-  readonly serviceAccountEmail: string;
+  readonly serviceAccountEmail?: string;
+  readonly serviceAccountEmails?: readonly string[];
 }
 
 /** `missing` and `invalid` are both unauthenticated; only `outage` means the verifier itself is unavailable. */
@@ -88,7 +89,10 @@ export async function verifyGoogleServiceIdentity(
     !GOOGLE_ISSUERS.has(claims.iss)
     || claims.aud !== settings.audience
     || claims.emailVerified !== true
-    || claims.email !== settings.serviceAccountEmail
+    || ![
+      ...(settings.serviceAccountEmails ?? []),
+      ...(settings.serviceAccountEmail ? [settings.serviceAccountEmail] : []),
+    ].includes(claims.email ?? "")
     || !Number.isSafeInteger(claims.exp)
     || claims.exp <= Math.floor(Date.now() / 1000)
   ) {

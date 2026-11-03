@@ -1,5 +1,8 @@
 # ガイド記事の書き方と公開手順
 
+2026-11-03: 新規記事はEditorクラウドで作成・公開する。Experienceの`/write`は固定Editorへ執筆文脈を渡す。旧`/editor`と、以下の旧CMS編集手順は新規執筆に使わない。公開元の切替前は静的/databaseの既存公開版を保持し、移行済みと推測しない。[現在の契約](../editor-article-authority.md)を参照する。
+
+
 対象：[#145](https://github.com/niho-life/niho-experience/issues/145)。置き場所を決めた理由は [ADR 0002](../adr/0002-guide-content.md)、検索まわり（構造化データ・sitemap・hreflang）は [seo.md](../seo.md) の「ガイド記事」。
 
 > 2026-10-30 のオーナー判断で、記事は editor.niho.life で書いて公開し、experience はその公開版を読む発信先になる（[ADR 0002](../adr/0002-guide-content.md) の「2026-10-30」、Epic [#251](https://github.com/niho-life/niho-experience/issues/251)）。この文書の手順（リポ内のモジュールとして公開する）は、公開元を editor へ切り替えるまでの静的経路の説明。ここで出した記事は、切り替える前に editor へ移す（同じ slug を二重に出さない）。

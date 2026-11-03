@@ -9,11 +9,12 @@ const LIVE = [
   { slug: "sample-evening-walk", title: "A slow evening walk (sample guide)" },
   { slug: "sample-rainy-afternoon", title: "What to do on a rainy afternoon (sample guide)" },
   { slug: "sample-market-morning", title: "A market morning by bicycle (sample guide)" },
+  { slug: "sample-without-lead", title: "No lead (sample)" },
 ];
 // Each is in the editor's list, and none may show on /guides or in the sitemap.
 const LEFT_OUT = [
   "sample-direct-link-only", "sample-just-unpublished", "sample-moved-to-another-face", "sample-for-another-site", "sample-http-cover",
-  "sample-script-link", "sample-in-japanese", "sample-without-category", "sample-without-lead",
+  "sample-script-link", "sample-in-japanese", "sample-without-category",
 ];
 const PREVIEW_TOKEN = "pv_synthetic-preview-not-a-secret-draft-000001";
 const COVER_URL = "https://assets.editor.example/photos/cover-1.jpg";
@@ -30,7 +31,7 @@ test("/guides lists the live publications only, and the footer sends writers to 
 
   const footer = page.getByRole("contentinfo");
   await expect(footer.getByRole("link", { name: "Guides" })).toHaveAttribute("href", "/guides");
-  await expect(footer.getByRole("link", { name: "For writers" })).toHaveAttribute("href", "https://editor.example");
+  await expect(footer.getByRole("link", { name: "For writers" })).toHaveAttribute("href", "/write");
 });
 
 test("a guide's first HTML carries its body, canonical and Article JSON-LD, and is indexable, without sharing its cover", async ({ request, baseURL }) => {
@@ -59,6 +60,10 @@ test("a guide's first HTML carries its body, canonical and Article JSON-LD, and 
   expect(article).not.toHaveProperty("image");
   expect(article?.author).not.toHaveProperty("jobTitle");
   expect(html).not.toContain("synthetic-fixture-token");
+
+  const withoutLeadOrCover = await request.get("/guides/sample-without-lead", { headers: { "user-agent": GOOGLEBOT } });
+  expect(withoutLeadOrCover.status()).toBe(200);
+  expect((await withoutLeadOrCover.text()).replaceAll("<!-- -->", "")).toContain("This published example intentionally has no lead or cover photo");
 });
 
 test("an unlisted guide opens by its direct URL with noindex, and the sitemap has the live ones only", async ({ request, baseURL }) => {
@@ -111,12 +116,12 @@ test("the preview renders a draft privately, and is not found without a live tok
   expect(await (await request.get("/sitemap.xml")).text()).not.toContain("/guides/preview");
 });
 
-test("the publication conditions are declared for the editor to read", async ({ request, baseURL }) => {
+test("publication requirements and categories fail closed without the Store fixture", async ({ request }) => {
   desktopOnly();
-  const response = await request.get("/api/public/guides/publication-requirements");
-  expect(response.status()).toBe(200);
-  expect(response.headers()["x-robots-tag"]).toBe("noindex");
-  const body = (await response.json()) as { schemaVersion: number; id: string; host: string; path: string; requires: { id: string; kind: string }[] };
-  expect(body).toMatchObject({ schemaVersion: 1, id: "exp", host: new URL(baseURL!).host, path: "guides" });
-  expect(body.requires.map((condition) => condition.kind)).toEqual(["lang", "cover", "lead", "category", "headings", "noConfirm", "relatedLive"]);
+  for (const path of ["/api/public/guides/publication-requirements", "/api/public/guides/categories"]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(503);
+    expect(response.headers()["cache-control"], path).toBe("no-store");
+    expect(response.headers()["x-robots-tag"], path).toBe("noindex");
+  }
 });

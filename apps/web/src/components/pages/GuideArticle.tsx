@@ -16,6 +16,8 @@ import { guideCatalogForSite } from "@/lib/guide-registry";
 import { formatGuideDate, guideCtaInsertAfter, guideOutline, guidePillarDetails, guideReadMinutes, listedExperienceSlugs, relatedGuidesOf } from "@/lib/guides";
 import { SITE_NAME } from "@/lib/public-metadata";
 import { breadcrumbJsonLd, guideArticleJsonLd } from "@/lib/structured-data";
+import { filterCurrentRelatedGuide } from "@/lib/article-authority/publication-read";
+import { withoutUnverifiedPreviewRelated } from "./guide-article-policy";
 
 /**
  * How a guide is shown:
@@ -31,6 +33,9 @@ export type GuideArticleVariant = "published" | "draft" | "editorial-preview" | 
  * `/guides/{slug}` and `/guides/preview` both render through here, so a preview looks exactly like the published page.
  */
 export async function GuideArticle({ guide, variant, query }: { guide: Guide; variant: GuideArticleVariant; query: SearchParams }) {
+  guide = variant === "published"
+    ? await filterCurrentRelatedGuide(guide)
+    : withoutUnverifiedPreviewRelated(guide, variant === "editor-preview");
   const editorialPreview = variant === "editorial-preview";
   const structuredData = variant === "published" || variant === "draft";
   const blocks = parseGuideMarkdown(guide.body);

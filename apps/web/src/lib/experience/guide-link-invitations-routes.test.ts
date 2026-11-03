@@ -1,154 +1,38 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StoreAccessDeniedError, StoreConflictError } from "@niho-experience/experience-store";
+import { describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  editorContext: vi.fn(),
-  hostContext: vi.fn(),
-  resolveWriter: vi.fn(),
-  editorAllowed: vi.fn(() => true),
-  repository: {
-    listOwnPendingLinkInvitations: vi.fn(),
-    acceptLinkInvitation: vi.fn(),
-    declineLinkInvitation: vi.fn(),
-    listProviderLinkInvitations: vi.fn(),
-    inviteProductLinkWriter: vi.fn(),
-    revokeLinkInvitation: vi.fn(),
-  },
-}));
+const mocks = vi.hoisted(() => ({ editorMutationAllowed: vi.fn() }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/editor/guide-api-server", async () => {
-  const { NextResponse } = await import("next/server");
-  const { StoreAccessDeniedError, StoreConflictError, StoreValidationError, StoreNotFoundError } = await import("@niho-experience/experience-store");
-  const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } });
-  return {
-    guideApiJson: json,
-    guideApiError: (error: unknown) => error instanceof StoreConflictError ? json({ error: "conflict" }, 409)
-      : error instanceof StoreAccessDeniedError || error instanceof StoreNotFoundError ? json({ error: "not_found" }, 404)
-        : error instanceof StoreValidationError ? json({ error: "invalid_input" }, 400) : json({ error: "unavailable" }, 503),
-    guideApiMutationAllowed: mocks.editorAllowed,
-    loadGuideApiContext: mocks.editorContext,
-    readGuideApiJson: async (request: Request) => {
-      if (new URL(request.url).search || request.headers.get("content-type") !== "application/json") return { ok: false };
-      try { return { ok: true, value: await request.json() }; } catch { return { ok: false }; }
-    },
-  };
-});
-vi.mock("@/lib/host/guide-link-api-server", () => ({ loadHostGuideLinkContext: mocks.hostContext }));
-vi.mock("@/lib/host/guide-writer-resolver", () => ({ resolveGuideWriter: mocks.resolveWriter }));
-vi.mock("@/lib/host/server", () => ({
-  noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } }),
-  siteOrigin: () => "https://experience.example.test",
-}));
+vi.mock("@/lib/editor/server", () => ({ editorMutationAllowed: mocks.editorMutationAllowed }));
 
-import { GET as writerList } from "@/app/(editor)/editor/api/guide-link-invitations/route";
-import { POST as writerRespond } from "@/app/(editor)/editor/api/guide-link-invitations/[invitationId]/[action]/route";
-import { GET as hostList, POST as hostInvite } from "@/app/(host)/host/api/guide-link-invitations/providers/[providerId]/route";
-import { POST as hostRevoke } from "@/app/(host)/host/api/guide-link-invitations/[invitationId]/revoke/route";
+import { POST as createLegacyGuide } from "@/app/(editor)/editor/api/guides/route";
+import { GET as listLegacyWriterLinks } from "@/app/(editor)/editor/api/guide-link-invitations/route";
+import { POST as respondLegacyWriterLink } from "@/app/(editor)/editor/api/guide-link-invitations/[invitationId]/[action]/route";
+import { POST as revokeLegacyHostLink } from "@/app/(host)/host/api/guide-link-invitations/[invitationId]/revoke/route";
 
-const SITE = "https://experience.example.test";
-const id = "00000000-0000-4000-8000-000000000190";
-const invitation = {
-  id,
-  providerId: "provider-test",
-  writerNihoUserId: "writer-secret",
-  invitedByNihoUserId: "owner-secret",
-  state: "PENDING",
-  generation: 2,
-  invitedAtUtc: "2026-10-29T00:00:00.000Z",
-};
-const headers = { origin: SITE, "sec-fetch-site": "same-origin", "content-type": "application/json" };
-const jsonRequest = (path: string, body: unknown, requestHeaders = headers) => new Request(`${SITE}${path}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) });
+const SITE = "https://experience.example.invalid";
+const ID = "00000000-0000-4000-8000-000000000042";
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.editorAllowed.mockReturnValue(true);
-  mocks.editorContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "writer-secret" }, repository: mocks.repository } });
-  mocks.hostContext.mockResolvedValue({ ok: true, value: { actor: { nihoUserId: "owner-secret" }, repository: mocks.repository, session: { accessToken: "sealed-token" } } });
-  mocks.repository.listOwnPendingLinkInvitations.mockResolvedValue([invitation]);
-  mocks.repository.listProviderLinkInvitations.mockResolvedValue([invitation]);
-  mocks.repository.inviteProductLinkWriter.mockResolvedValue(invitation);
-  mocks.resolveWriter.mockResolvedValue({ status: "ok", writerNihoUserId: "writer-secret" });
-  mocks.repository.acceptLinkInvitation.mockResolvedValue({ ...invitation, state: "ACCEPTED", acceptedAtUtc: "2026-10-29T01:00:00.000Z" });
-  mocks.repository.declineLinkInvitation.mockResolvedValue({ ...invitation, state: "DECLINED", declinedAtUtc: "2026-10-29T01:00:00.000Z" });
-  mocks.repository.revokeLinkInvitation.mockResolvedValue({ ...invitation, state: "REVOKED", revokedAtUtc: "2026-10-29T01:00:00.000Z" });
-});
-
-describe("guide link invitation BFF", () => {
-  it("shows only the fields needed for writer and host actions", async () => {
-    const writer = await writerList(new Request(`${SITE}/editor/api/guide-link-invitations`));
-    const host = await hostList(new Request(`${SITE}/host/api/guide-link-invitations/providers/provider-test`), { params: Promise.resolve({ providerId: "provider-test" }) });
-    expect(writer.status).toBe(200);
-    expect(host.status).toBe(200);
-    expect(JSON.stringify(await writer.json())).not.toMatch(/writer-secret|owner-secret/);
-    expect(JSON.stringify(await host.json())).not.toMatch(/writer-secret|owner-secret|provider-test/);
-    expect(writer.headers.get("cache-control")).toBe("private, no-store");
-    expect(host.headers.get("cache-control")).toBe("private, no-store");
+describe("retired Experience writer and Store link mutations", () => {
+  it("returns 410 before reading a legacy write body or consulting mutation auth", async () => {
+    const request = new Request(`${SITE}/editor/api/guides`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "private body" }),
+    });
+    const response = await createLegacyGuide(request);
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual({ error: "gone" });
+    expect(mocks.editorMutationAllowed).not.toHaveBeenCalled();
   });
 
-  it("requires a current generation and same-origin mutation", async () => {
-    const action = { params: Promise.resolve({ invitationId: id, action: "accept" }) };
-    const route = `/editor/api/guide-link-invitations/${id}/accept`;
-    expect((await writerRespond(jsonRequest(route, { generation: 0 }), action)).status).toBe(400);
-    mocks.editorAllowed.mockReturnValue(false);
-    expect((await writerRespond(jsonRequest(route, { generation: 2 }), action)).status).toBe(403);
-    mocks.editorAllowed.mockReturnValue(true);
-    const accepted = await writerRespond(jsonRequest(route, { generation: 2 }), action);
-    expect(accepted.status).toBe(200);
-    expect(mocks.repository.acceptLinkInvitation).toHaveBeenCalledWith({ nihoUserId: "writer-secret" }, id, 2);
-    expect(JSON.stringify(await accepted.json())).not.toMatch(/writer-secret|owner-secret/);
-  });
-
-  it("keeps permission failures private and rejects stale revocation", async () => {
-    const route = `/host/api/guide-link-invitations/${id}/revoke`;
-    const context = { params: Promise.resolve({ invitationId: id }) };
-    expect((await hostRevoke(jsonRequest(route, { generation: 2 }, { ...headers, origin: "https://evil.example.test" }), context)).status).toBe(403);
-    expect((await hostRevoke(jsonRequest(route, { generation: 1.5 }), context)).status).toBe(400);
-    mocks.repository.revokeLinkInvitation.mockRejectedValueOnce(new StoreConflictError("stale"));
-    expect((await hostRevoke(jsonRequest(route, { generation: 1 }), context)).status).toBe(409);
-    mocks.repository.revokeLinkInvitation.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect((await hostRevoke(jsonRequest(route, { generation: 2 }), context)).status).toBe(404);
-    expect(mocks.repository.revokeLinkInvitation).toHaveBeenCalledWith({ nihoUserId: "owner-secret" }, id, 2);
-  });
-
-  it("checks provider ownership before NIHO lookup and returns only the invitation DTO", async () => {
-    const path = "/host/api/guide-link-invitations/providers/provider-test";
-    const context = { params: Promise.resolve({ providerId: "provider-test" }) };
-    mocks.repository.listProviderLinkInvitations.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect((await hostInvite(jsonRequest(path, { email: "Writer@Example.com" }), context)).status).toBe(404);
-    expect(mocks.resolveWriter).not.toHaveBeenCalled();
-
-    const response = await hostInvite(jsonRequest(path, { email: " Writer@Example.com " }), context);
-    expect(response.status).toBe(200);
-    expect(mocks.resolveWriter).toHaveBeenCalledWith({ accessToken: "sealed-token" }, { email: "writer@example.com" });
-    expect(mocks.repository.inviteProductLinkWriter).toHaveBeenCalledWith({ nihoUserId: "owner-secret" }, "provider-test", "writer-secret");
-    expect(JSON.stringify(await response.json())).not.toMatch(/writer-secret|owner-secret|provider-test/);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-  });
-
-  it("rejects cross-origin and malformed invitations before resolving an account", async () => {
-    const path = "/host/api/guide-link-invitations/providers/provider-test";
-    const context = { params: Promise.resolve({ providerId: "provider-test" }) };
-    expect((await hostInvite(jsonRequest(path, { email: "writer@example.com" }, { ...headers, origin: "https://evil.test" }), context)).status).toBe(403);
-    expect((await hostInvite(jsonRequest(path, { email: "writer@example.com", nihoUserId: "writer-secret" }), context)).status).toBe(400);
-    expect((await hostInvite(jsonRequest(path, { email: "writer@example.com" }, { ...headers, "content-type": "text/plain" }), context)).status).toBe(400);
-    expect(mocks.resolveWriter).not.toHaveBeenCalled();
-  });
-
-  it("keeps resolver and Store failures private", async () => {
-    const path = "/host/api/guide-link-invitations/providers/provider-test";
-    const context = { params: Promise.resolve({ providerId: "provider-test" }) };
-    mocks.resolveWriter.mockResolvedValueOnce({ status: "not_found" });
-    expect((await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context)).status).toBe(404);
-    mocks.resolveWriter.mockResolvedValueOnce({ status: "unavailable" });
-    const unavailable = await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context);
-    expect(unavailable.status).toBe(503);
-    expect(unavailable.headers.get("set-cookie")).toBeNull();
-    mocks.resolveWriter.mockResolvedValueOnce({ status: "rate_limited", retryAfterSeconds: 60 });
-    const limited = await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context);
-    expect(limited.status).toBe(429);
-    expect(limited.headers.get("retry-after")).toBe("60");
-    mocks.repository.inviteProductLinkWriter.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect((await hostInvite(jsonRequest(path, { nihoUserId: "writer-secret" }), context)).status).toBe(404);
+  it("returns the same 410 for old writer invitation reads/responses and the old host revoke path", async () => {
+    const list = await listLegacyWriterLinks(new Request(`${SITE}/editor/api/guide-link-invitations`));
+    const respond = await respondLegacyWriterLink(new Request(`${SITE}/editor/api/guide-link-invitations/${ID}/accept`, { method: "POST" }), {
+      params: Promise.resolve({ invitationId: ID, action: "accept" }),
+    });
+    const revoke = revokeLegacyHostLink();
+    for (const response of [list, respond, revoke]) {
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({ error: "gone" });
+    }
   });
 });

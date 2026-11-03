@@ -127,7 +127,10 @@ export async function missingGuideRedirect(slug: string): Promise<"/guides" | nu
 
 export async function guidesAboutExperience(experienceSlug: string): Promise<{ guides: Guide[]; draftSlugs: readonly string[] }> {
   const catalog = await guideCatalogForSite();
-  return { guides: guidesForExperience(catalog.guides, experienceSlug), draftSlugs: catalog.draftSlugs };
+  if (config.guidePublicSource !== "editor") return { guides: guidesForExperience(catalog.guides, experienceSlug), draftSlugs: catalog.draftSlugs };
+  const { filterCurrentRelatedGuide } = await import("./article-authority/publication-read");
+  const checked = await Promise.all(catalog.guides.map((guide) => filterCurrentRelatedGuide(guide)));
+  return { guides: guidesForExperience(checked, experienceSlug), draftSlugs: catalog.draftSlugs };
 }
 
 /** The guides a sitemap may list: current PUBLIC database or live editor publications, or code publications; never drafts/UNLISTED. */
