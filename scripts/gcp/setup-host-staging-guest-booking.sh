@@ -11,8 +11,8 @@ set -euo pipefail
   exit 1
 }
 SERVICE_URL="${STG_HOST_SERVICE_URL:-}"
-[[ "$SERVICE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ ]] || {
-  echo 'Set STG_HOST_SERVICE_URL to the stable staging service URL (https://niho-experience-host-stg-….a.run.app, no trailing slash).' >&2
+[[ "$SERVICE_URL" =~ ^https://niho-experience-host-stg-[0-9]+\.asia-northeast1\.run\.app$ ]] || {
+  echo 'Set STG_HOST_SERVICE_URL to the Cloud Run status.url for niho-experience-host-stg (https://niho-experience-host-stg-<project-number>.asia-northeast1.run.app, no trailing slash).' >&2
   exit 1
 }
 PROJECT=niho-app-stg
