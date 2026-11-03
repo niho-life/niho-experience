@@ -13,10 +13,10 @@ import {
   offerScheduleLabel,
   pageTextFromInput,
   pauseListing,
+  publicationRequirements,
+  publishListing,
   sameContent,
-  submitListing,
   weekdayLabels,
-  withdrawListing,
   writtenTitle,
 } from "./editor";
 import { MOCK_KITCHEN_EXPERIENCES, MOCK_STUDIO_EXPERIENCES } from "./mock/experiences";
@@ -64,26 +64,27 @@ describe("掲載までに必要", () => {
 describe("掲載の状態", () => {
   const TODAY = "2026-10-21";
 
-  it("掲載を申請: a draft or a paused listing goes to review, dated today", () => {
-    expect(submitListing({ status: "draft" }, TODAY)).toEqual({ status: "review", requestedOn: TODAY });
-    expect(submitListing({ status: "paused", liveSince: "2026-10-12" }, TODAY)).toEqual({ status: "review", liveSince: "2026-10-12", requestedOn: TODAY });
+  it("初回公開はすぐ live にし、再開は初回公開日を保つ", () => {
+    expect(publishListing({ status: "draft" }, TODAY)).toEqual({ status: "live", liveSince: TODAY });
+    expect(publishListing({ status: "paused", liveSince: "2026-10-12" }, TODAY)).toEqual({ status: "live", liveSince: "2026-10-12" });
   });
 
   it("掲載を止める: only a live listing stops", () => {
     expect(pauseListing({ status: "live", liveSince: "2026-10-12" })).toEqual({ status: "paused", liveSince: "2026-10-12" });
-    for (const status of ["draft", "review", "paused"] as const) expect(pauseListing({ status })).toEqual({ status });
-  });
-
-  it("申請を取り下げる: a listing under review goes back to draft", () => {
-    expect(withdrawListing({ status: "review", requestedOn: "2026-10-19" })).toEqual({ status: "draft" });
-    expect(withdrawListing({ status: "live", liveSince: "2026-10-12" })).toEqual({ status: "live", liveSince: "2026-10-12" });
+    for (const status of ["draft", "paused"] as const) expect(pauseListing({ status })).toEqual({ status });
   });
 
   it("leaves listings it does not apply to as they are", () => {
     const live = { status: "live" as const, liveSince: "2026-10-12" };
-    expect(submitListing(live, TODAY)).toBe(live);
-    const review = { status: "review" as const, requestedOn: "2026-10-19" };
-    expect(submitListing(review, TODAY)).toBe(review);
+    expect(publishListing(live, TODAY)).toBe(live);
+  });
+
+  it("口座・販売者表示・規約同意・運営状態が不明または不足なら公開を開けない", () => {
+    expect(publicationRequirements({ role: "OWNER", payoutReason: null, sellerDisclosureReady: false, consentCurrent: null, providerStatus: "unknown" })).toEqual([
+      "売上受取口座", "販売者表示", "提供者規約への同意", "提供者状態の確認",
+    ]);
+    expect(publicationRequirements({ role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "suspended" })).toEqual(["運営停止の解除"]);
+    expect(publicationRequirements({ role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "available" })).toEqual([]);
   });
 });
 
@@ -148,7 +149,7 @@ describe("the list row's summary", () => {
       schedule: { weekdays: ["火", "木", "土"], start: "18:00", durationMinutes: 120, capacity: 8, priceFromYen: 30000 },
       missing: [],
     });
-    expect(listingSummary(byId("kintsugi"))).toEqual({ cover: null, schedule: { weekdays: ["土", "日"], start: "10:00", durationMinutes: 120, capacity: 4, priceFromYen: 8800 }, missing: [] });
+    expect(listingSummary(byId("kintsugi"))).toEqual({ cover: null, schedule: { weekdays: ["土", "日"], start: "10:00", durationMinutes: 120, capacity: 4, priceFromYen: 8800 }, missing: ["表紙写真"] });
   });
 
   it("says what a draft still needs, and has no schedule until its first offer is complete", () => {

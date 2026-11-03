@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-// 売上 (#91) on synthetic data, and the payout account, the provider's review and the
+// 売上 (#91) on synthetic data, and the payout account and provider
 // registration through NIHO's host API (#88/#91). Runs against the second server
 // (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts): the server actions call the
 // host contract's mock. That mock keeps a change only within the request that made it
@@ -114,15 +114,15 @@ test("an editor cannot open sales or the payout account", async ({ page }) => {
   await menu(page).getByRole("link", { name: "設定" }).click();
   await page.waitForURL("**/host/settings?providerId=sample-provider-studio");
   const provider = providerPanel(page);
-  await expect(provider).toContainText("未申請");
+  await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toBeDisabled();
   await expect(provider).toContainText("特商法表示 URL はオーナーが変えられます。");
   await expect(provider.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
-  await expect(provider).toContainText("審査の申請はオーナーが行います。");
+  await expect(provider).toContainText("提供者規約");
   await expect(payoutPanel(page)).toHaveCount(0);
 });
 
-test("a new provider: registered through NIHO, led from 売上 to its payout account, shares a spot's account and asks for the review", async ({ page }) => {
+test("a new provider: registered through NIHO, led from 売上 to its payout account and shares a spot's account", async ({ page }) => {
   await signIn(page, "?mock=empty");
   await page.getByRole("link", { name: "提供者として登録" }).click();
   await page.waitForURL(/\/host\/register$/);
@@ -149,12 +149,13 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await page.waitForURL(/\/host\/settings$/);
   const provider = providerPanel(page);
   const payout = payoutPanel(page);
-  await expect(provider).toContainText("未申請");
+  await expect(provider.getByRole("group", { name: "販売者表示" })).toBeVisible();
+  await expect(provider).toContainText("提供者規約");
+  await expect(provider).toContainText("同意済み");
+  await expect(provider.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
+  await expect(provider).not.toContainText("審査");
   await expect(payout).toContainText("未接続");
   await expect(payout).toContainText("売上を受け取る口座を接続してください。");
-  const submit = provider.getByRole("button", { name: "審査を申請" });
-  await expect(submit).toBeDisabled();
-  await expect(provider).toContainText("売上受取口座の準備ができると申請できます。");
 
   await menu(page).getByRole("link", { name: "売上" }).click();
   await page.waitForURL(/\/host\/sales$/);
@@ -174,50 +175,38 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await expect(payout).toContainText("準備済み");
   await expect(payout).toContainText("サンプルの拠点の口座を共有中");
   await expect(payout.getByRole("link", { name: /Stripe で確認/ })).toBeVisible();
-
-  await expect(submit).toBeEnabled();
-  await submit.click();
-  await expect(provider.getByRole("status")).toHaveText("審査を申請しました。");
-  await expect(provider).toContainText("審査待ち");
-  await expect(provider).toContainText("NIHO が確認しています。");
+  await expect(provider.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
+  await expect(provider).not.toContainText("審査");
 });
 
-test("提供者情報: 保存 sends the change to NIHO, asking first for a reviewed provider", async ({ page }) => {
+test("提供者情報: preview saves an ordinary change without review", async ({ page }) => {
   await signIn(page);
   await page.goto("/host/settings");
   const provider = providerPanel(page);
   const bio = provider.getByRole("textbox", { name: "紹介" });
   const save = page.getByRole("button", { name: "保存", exact: true });
-  await expect(provider).toContainText("審査済み");
+  await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("radio", { name: "個人" })).toBeChecked();
   await expect(provider.getByRole("radio", { name: "個人" })).toBeDisabled();
   // 販売者表示: the provider's own site; NIHO's page for providers without one is not ready yet.
   await expect(provider.getByRole("radio", { name: "自分のサイトに表示する" })).toBeChecked();
   await expect(provider.getByRole("radio", { name: /NIHO のページに表示する（自前サイトがない事業者）/ })).toBeDisabled();
   await expect(provider.getByRole("group", { name: "販売者表示" })).toContainText("準備中");
+  await expect(provider).toContainText("提供者規約");
+  await expect(provider).toContainText("同意済み");
 
   await bio.fill("  合成の新しい紹介  ");
   await save.click();
-  const dialog = page.getByRole("dialog", { name: "提供者情報を保存しますか？" });
-  await expect(dialog).toContainText("掲載中の体験は止まります");
-  await expect(dialog.getByRole("button", { name: "やめる" })).toBeFocused();
-  await dialog.getByRole("button", { name: "やめる" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(provider).toContainText("審査済み");
-  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toHaveCount(0);
-
-  await save.click();
-  await dialog.getByRole("button", { name: "保存して再審査を受ける" }).click();
+  await expect(page.getByRole("dialog", { name: /提供者情報/ })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
-  // What NIHO kept: the words without the spaces around them, and the provider back in review.
+  // What the preview kept for this request: the words without the spaces around them.
   await expect(bio).toHaveValue("合成の新しい紹介");
-  await expect(provider).toContainText("審査待ち");
-  await expect(provider).toContainText("NIHO が確認しています。");
+  await expect(provider).not.toContainText("審査");
 
   // The preview does not keep it (the contract mock keeps a change for one request only): a
   // reload shows the synthetic provider again. In http mode NIHO keeps it.
   await page.reload();
-  await expect(providerPanel(page)).toContainText("審査済み");
+  await expect(providerPanel(page)).not.toContainText("審査");
   await expect(providerPanel(page).getByRole("textbox", { name: "紹介" })).toHaveValue("家庭料理を一緒に作る体験の、合成データの提供者です（sample）。");
 });
 
@@ -255,8 +244,9 @@ test("sales, payout and registration screens have no WCAG 2.2 AA violations", as
   await page.goto("/host/settings");
   await providerPanel(page).getByRole("textbox", { name: "紹介" }).fill("合成の紹介");
   await page.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await audit(page, "/host/settings (confirm)");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  await audit(page, "/host/settings (saved)");
 
   await signIn(page, "?mock=payments-pending");
   await page.goto("/host/sales");
@@ -308,7 +298,7 @@ test.describe("320px narrow phone", () => {
     await inside(payout.getByRole("button", { name: "Stripe で口座を接続" }), "settings: Stripe で口座を接続");
     await inside(payout.getByRole("combobox", { name: "既存の口座を使う" }), "settings: 既存の口座");
     await inside(payout.getByRole("button", { name: "共有する" }), "settings: 共有する");
-    await inside(providerPanel(page).getByRole("button", { name: "審査を申請" }), "settings: 審査を申請");
+    await expect(providerPanel(page).getByRole("button", { name: "審査を申請" })).toHaveCount(0);
     // Inputs stay 16px on phones (iOS does not zoom in).
     expect(await payout.getByRole("combobox", { name: "既存の口座を使う" }).evaluate((select) => getComputedStyle(select).fontSize)).toBe("16px");
     expect(await providerPanel(page).getByRole("textbox", { name: "特商法表示 URL" }).evaluate((input) => getComputedStyle(input).fontSize)).toBe("16px");

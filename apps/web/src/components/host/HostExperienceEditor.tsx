@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draftPageEnglish } from "@/host/actions";
-import { EDITOR_LIMITS, experienceContent, listingRequirements, pauseListing, sameContent, submitListing, withdrawListing, writtenTitle } from "@/host/editor";
+import { EDITOR_LIMITS, experienceContent, listingRequirements, pauseListing, publicationRequirements, publishListing, sameContent, writtenTitle } from "@/host/editor";
 import {
   applyEnglishDraft,
   changeInTab,
@@ -19,7 +19,7 @@ import {
   type EditorTab,
 } from "@/host/page-english";
 import { PAGE_ENGLISH_STATUS } from "@/host/status";
-import type { HostExperience, HostExperienceContent, HostListing, HostWritingLanguage } from "@/host/types";
+import type { HostExperience, HostExperienceContent, HostListing, HostPublicationReadiness, HostWritingLanguage } from "@/host/types";
 import { DISABLED } from "./editor-parts";
 import { HostEditorContent } from "./HostEditorContent";
 import { ChangedMark, EDITOR_TAB_PANEL_ID, EditorLanguageTabs, editorTabId, EnglishStatePanel } from "./HostEditorEnglish";
@@ -34,7 +34,7 @@ import { HostPageBody } from "./ui";
 const SAVE_DELAY_MS = 500;
 const SAVED_NOTICE_MS = 2500;
 
-/** プレビュー: the public page in a new tab once it is on the site (掲載中・審査待ち). A draft has nothing to show yet. */
+/** プレビュー: the public page in a new tab once it is live. A draft or stopped page has nothing to show yet. */
 function PreviewButton({ href, size }: { href: string | null; size: "sm" | "md" }) {
   if (!href) {
     return (
@@ -56,8 +56,9 @@ export interface HostExperienceEditorProps {
   providerId: string;
   /** 迎える人: the provider's name and introduction (設定 › 提供者情報). */
   host: { name: string; bio: string };
-  /** The day 掲載を申請 is dated (YYYY-MM-DD, JST). */
+  /** The day a first publication is dated (YYYY-MM-DD, JST). */
   today: string;
+  publication: HostPublicationReadiness;
   /** The traveler site's origin (SITE_URL), for the page's public address. */
   siteUrl: string;
   backHref: string;
@@ -72,14 +73,14 @@ export interface HostExperienceEditorProps {
  * 日本語で書く (the default) and 英語（公開）, with the English's state and NIHO's draft on top.
  * The header's title is the title in the language the page is written in.
  *
- * Mock mode only for now: 保存 keeps the page in this screen, photos stay in the browser
- * as object URLs, and 申請・停止・取り下げ change the state shown here. Going back to
+ * Mock mode only for now: 保存 keeps the page in this screen, photos stay in the browser,
+ * and the owner publishes, pauses and resumes the state shown here. Going back to
  * the list starts again from the synthetic data (the preview note says nothing is kept).
  */
-export function HostExperienceEditor({ experience, providerId, host, today, siteUrl, backHref, settingsHref }: HostExperienceEditorProps) {
+export function HostExperienceEditor({ experience, providerId, host, today, publication, siteUrl, backHref, settingsHref }: HostExperienceEditorProps) {
   const [content, setContent] = useState<HostExperienceContent>(() => experienceContent(experience));
   const [saved, setSaved] = useState<HostExperienceContent>(content);
-  const [listing, setListing] = useState<HostListing>(() => ({ status: experience.status, liveSince: experience.liveSince, requestedOn: experience.requestedOn }));
+  const [listing, setListing] = useState<HostListing>(() => ({ status: experience.status, liveSince: experience.liveSince }));
   const [consent, setConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ at: number } | null>(null);
@@ -88,7 +89,8 @@ export function HostExperienceEditor({ experience, providerId, host, today, site
   const [draftError, setDraftError] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const dirty = useMemo(() => !sameContent(content, saved), [content, saved]);
-  const requirements = useMemo(() => listingRequirements(content), [content]);
+  const publicationMissing = useMemo(() => publicationRequirements(publication), [publication]);
+  const requirements = useMemo(() => [...listingRequirements(content), ...publicationMissing], [content, publicationMissing]);
   const english = useMemo(() => pageEnglishState(content), [content]);
   const tab: EditorTab = english ? chosenTab : "en";
   const view = useMemo(() => contentInTab(content, tab), [content, tab]);
@@ -160,7 +162,7 @@ export function HostExperienceEditor({ experience, providerId, host, today, site
   // English is locked while NIHO drafts it (the Japanese tab stays open to edit).
   const locked = drafting && tab === "en";
   const publicPath = `/experiences/${encodeURIComponent(experience.slug)}`;
-  const previewHref = listing.status === "live" || listing.status === "review" ? publicPath : null;
+  const previewHref = listing.status === "live" ? publicPath : null;
 
   return (
     <div ref={root}>
@@ -209,16 +211,17 @@ export function HostExperienceEditor({ experience, providerId, host, today, site
                 className="order-first @3xl:sticky @3xl:top-4 @3xl:order-none"
                 listing={listing}
                 requirements={requirements}
+                settingsHref={publicationMissing.length ? settingsHref : undefined}
                 dirty={dirty}
+                owner={publication.role === "OWNER"}
                 consent={consent}
                 onConsent={setConsent}
                 actions={{
-                  onSubmit: () => {
-                    setListing((current) => submitListing(current, today));
+                  onPublish: () => {
+                    setListing((current) => publishListing(current, today));
                     setConsent(false);
                   },
                   onPause: () => setListing(pauseListing),
-                  onWithdraw: () => setListing(withdrawListing),
                 }}
                 publicPath={publicPath}
                 publicUrl={listing.status === "live" ? `${siteUrl}${publicPath}` : null}

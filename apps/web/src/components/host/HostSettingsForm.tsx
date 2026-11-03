@@ -53,8 +53,9 @@ export interface HostSettingsFormProps {
 
 /**
  * 設定 (mock v2): one panel per group and one 保存. 提供者情報 is NIHO's (#88/#91): 保存 sends
- * the fields that changed to the provider API and shows what NIHO kept; a reviewed provider is
- * asked first, as saving sends it back to review. 既定の集合案内 (#89, OWNER and EDITOR) is NIHO's
+ * the fields that changed to the provider API and shows what NIHO kept. The HTTP legacy screen asks
+ * before a save that sends a reviewed provider back to review; the preview's self-publication flow does not.
+ * 既定の集合案内 (#89, OWNER and EDITOR) is NIHO's
  * too and saved after 提供者情報 by the same 保存; changing it stops every listed experience of the
  * provider, so the host is asked first (one dialog with the review's sentence when both apply). The
  * preview keeps it on screen only. 審査を申請, the payout account and カレンダー (#109) work on their
@@ -95,15 +96,20 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const meetingChanged = meetingEditable && meeting !== null && savedMeeting !== null && !sameMeetingPoint(meeting, savedMeeting);
   // The preview keeps the meeting point on screen: nothing of NIHO's stops there.
   const meetingConfirm = meetingChanged && !preview;
-  const reviewConfirm = unsaved && saveNeedsReviewConfirm(reviewStatus);
-  const review = reviewRow({
+  const reviewConfirm = !preview && unsaved && saveNeedsReviewConfirm(reviewStatus);
+  const review = preview ? null : reviewRow({
     reviewStatus,
     role,
     savedSellerUrl: saved.sellerDisclosureUrl,
     unsaved,
     payoutReady: payout.status === "owner" && payout.payout.reason === "READY",
-    consentCurrent: settings.consentCurrent,
+    consentCurrent: settings.consentCurrent === true,
   });
+  const consentStatus = settings.consentCurrent === true
+    ? { label: "同意済み", tone: "ok" as const }
+    : settings.consentCurrent === false
+      ? { label: "更新が必要", tone: "wait" as const }
+      : { label: "確認できず", tone: "stop" as const };
 
   // Stripe sent the host back (?connect=): the page has read the account again. Take the query
   // away so a reload does not repeat it, and bring the account into view.
@@ -169,7 +175,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
         }
         setSaved(result.profile);
         setProfile(result.profile);
-        setReviewStatus(result.reviewStatus);
+        if (!preview) setReviewStatus(result.reviewStatus);
         message = result.message;
         savedParts.push("提供者情報");
       }
@@ -222,7 +228,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
     <>
       <div className="flex flex-col gap-3.5">
         <form id={formId} className="flex flex-col gap-3.5" onSubmit={submit}>
-          <FieldSection id="settings-provider" title="提供者情報" status={reviewStatus ? PROVIDER_REVIEW_STATUS[reviewStatus] : null}>
+          <FieldSection id="settings-provider" title="提供者情報" status={!preview && reviewStatus ? PROVIDER_REVIEW_STATUS[reviewStatus] : null}>
             <FieldRow label="掲載名" htmlFor="settings-display-name">
               <input
                 id="settings-display-name"
@@ -282,6 +288,14 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
                 </label>
               </div>
             </FieldRow>
+            {preview ? <FieldRow label="提供者規約" labelId="settings-consent-label">
+              <div role="group" aria-labelledby="settings-consent-label" className="flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1">
+                <StatusPill status={consentStatus} />
+                <span className="text-[0.78125rem] text-muted">
+                  {settings.consentCurrent === true ? "現在の規約に同意しています。" : settings.consentCurrent === false ? "公開する前に現在の規約への同意が必要です。" : "状態を確認できないため、公開できません。"}
+                </span>
+              </div>
+            </FieldRow> : null}
             {review ? (
               <FieldRow label="審査" labelId="settings-review-label">
                 <div role="group" aria-labelledby="settings-review-label" className="flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1">

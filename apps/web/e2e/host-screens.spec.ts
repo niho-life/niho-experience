@@ -24,16 +24,18 @@ test("ホーム shows what to do next, the sessions coming up and the month", as
 
   const todo = page.getByRole("region", { name: "次にすること" });
   const todos = todo.getByRole("listitem");
-  // Each request, the threads waiting for an answer, the reviews, then a draft and a listing under review
+  // Each request, the threads waiting for an answer, the reviews, then the two publication drafts
   // (host-messages.spec.ts follows the first ones, host-reviews.spec.ts the reviews).
   await expect(todos).toHaveCount(10);
   await expect(todos.nth(0)).toContainText("承認待ち");
   await expect(todos.nth(5)).toContainText("未返信");
   await expect(todos.nth(8)).toContainText("下書き");
-  await expect(todos.nth(9)).toContainText("審査待ち");
-  await expect(todo.getByRole("link", { name: "編集する" })).toHaveAttribute("href", "/host/experiences/coffee");
-  // Listings under review wait for NIHO: no button.
-  await expect(todos.nth(9).getByRole("link")).toHaveCount(0);
+  await expect(todos.nth(8)).toContainText("Mend a Broken Bowl with a Kamakura Restorer");
+  await expect(todos.nth(8).getByRole("link", { name: "編集する" })).toHaveAttribute("href", "/host/experiences/kintsugi");
+  await expect(todos.nth(9)).toContainText("下書き");
+  await expect(todos.nth(9)).toContainText("Roast Your Own Coffee in a Kamakura Living Room");
+  await expect(todos.nth(9).getByRole("link", { name: "編集する" })).toHaveAttribute("href", "/host/experiences/coffee");
+  await expect(todo).not.toContainText("審査待ち");
   await expect(todo.getByRole("link", { name: "メッセージを見る" })).toHaveAttribute("href", "/host/messages");
 
   // Today's tea time, over with its attendance still to record; tomorrow's dinner; then the sessions after tomorrow.
@@ -87,7 +89,7 @@ test("console links carry ?providerId=, and each provider has its own data", asy
   const provider = page.getByRole("region", { name: "提供者情報" });
   await expect(provider.getByRole("textbox", { name: "掲載名" })).toHaveValue("サンプル工房");
   await expect(provider.getByRole("radio", { name: "店舗・事業者" })).toBeChecked();
-  await expect(provider).toContainText("未申請");
+  await expect(provider).not.toContainText("審査");
   // The payout account is the owner's to read; the studio's host is an editor.
   await expect(page.getByRole("region", { name: "売上受取口座" })).toHaveCount(0);
 });
@@ -153,9 +155,16 @@ test("体験: the list, one experience, and back", async ({ page }, testInfo) =>
   await expect(rows.nth(0)).toContainText("火・木・土 18:00 · 2時間 · 定員8 · ¥30,000〜");
   await expect(rows.nth(0)).toContainText("掲載中");
   await expect(rows.nth(1)).toContainText("Mend a Broken Bowl with a Kamakura Restorer");
-  await expect(rows.nth(1)).toContainText("審査待ち");
+  await expect(rows.nth(1)).toContainText("表紙写真が未入力");
+  await expect(rows.nth(1)).toContainText("下書き");
   await expect(rows.nth(2)).toContainText("表紙写真・料金が未入力");
   await expect(rows.nth(2)).toContainText("下書き");
+  for (const [index, title, href] of [
+    [0, "Kamakura Community Dinner with Locals", "/host/experiences/community-dinner"],
+    [1, "Mend a Broken Bowl with a Kamakura Restorer", "/host/experiences/kintsugi"],
+    [2, "Roast Your Own Coffee in a Kamakura Living Room", "/host/experiences/coffee"],
+  ] as const) await expect(rows.nth(index).getByRole("link", { name: title })).toHaveAttribute("href", href);
+  await expect(page.getByRole("region", { name: "体験の一覧" })).not.toContainText("審査待ち");
   // The cover photo is 96×72 on PC and 64×48 on phones; without one, a plain thumbnail.
   const thumb = (await rows.nth(0).locator("img").boundingBox())!;
   expect([thumb.width, thumb.height]).toEqual(isDesktop(testInfo.project.name) ? [96, 72] : [64, 48]);
@@ -190,7 +199,7 @@ test("設定 has nine panels, and 保存 checks the fields and keeps what NIHO h
   await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "運営チーム", "NIHOサポート", "この端末", "アカウント"]);
 
   const provider = page.getByRole("region", { name: "提供者情報" });
-  await expect(provider).toContainText("審査済み");
+  await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("textbox", { name: "掲載名" })).toHaveValue("サンプルの台所");
   await expect(provider.getByRole("radio", { name: "個人" })).toBeChecked();
   // The provider's own values come from the host contract's mock (@niho-experience/api-client/host/mock).
@@ -344,7 +353,9 @@ test.describe("320px narrow phone", () => {
     await inside(page.getByRole("link", { name: "詳しく見る" }).first(), "home: 詳しく見る");
     await inside(page.getByRole("link", { name: "返信する" }).first(), "home: 返信する");
     for (const day of ["今日の開催", "明日の開催"]) await inside(page.getByRole("region", { name: day }).getByRole("link", { name: "参加者を見る" }), `home: ${day} 参加者を見る`);
-    await inside(page.getByRole("link", { name: "編集する" }), "home: 編集する");
+    const draftEditors = page.getByRole("region", { name: "次にすること" }).getByRole("link", { name: "編集する" });
+    await expect(draftEditors).toHaveCount(2);
+    for (const link of await draftEditors.all()) await inside(link, "home: 編集する");
     await page.locator("summary", { hasText: "のアカウント" }).click();
     await inside(page.getByRole("link", { name: /サンプル工房/ }), "account menu: provider");
     expect(await overflowX(page), "account menu open").toBeLessThanOrEqual(0);

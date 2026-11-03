@@ -2,6 +2,8 @@
 
 この文書は [ADR 0002](adr/0002-experience-domain-ownership.md) の実装状況を示す。旧 NIHO API の予約・決済を止めるまで、新旧の正本を混同しない。
 
+2026-11-03 の公開方針（#369）: 提供者と体験の事前承認を廃止し、必要条件を満たした OWNER が同意して自己公開する。通常保存での掲載停止・再審査はなくす。現行 HTTP の体験編集・掲載はまだ旧 NIHO API のため、モックの変更だけでは本番の承認はなくならない。[公開方針と HTTP 切替の受入](host-publication.md) を #330 の移行に含める。
+
 ## この変更で利用できる範囲
 
 - `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHOのscoped tokenで現在のprovider membershipを検証し、Experienceのprovider actorは選択中providerの `ownerUserId` とrole ceilingで保管データへの権限を絞る。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
@@ -63,7 +65,7 @@ Guide CMSの公開切替は販売正本の切替と分離する。まずstaging�
 
 ## 切替前の残作業
 
-1. NIHO の安定した user ID、provider ID、Connect 口座の readiness を渡す限定契約を確定し、権限付きで provider・membership・商品を移す。体験コンテンツの編集 UI と公開 SSR を新正本へ接続する。
+1. NIHO の安定した user ID、provider ID、Connect 口座の readiness を渡す限定契約を確定し、権限付きで provider・membership・商品を移す。体験コンテンツの編集 UI と公開 SSR を新正本へ接続する。#369 の自己公開、公開版の維持、本人停止と運営停止の分離、公開条件のサーバー検証を含め、旧 NIHO の掲載審査・保存時停止への依存を除く。
 2. 旅行者の availability・入力・checkout を experience API へ切り替える。ゲスト連絡先、同意、質問、条件、返金・取消、メール・通知の扱いを旧契約と比較して受け入れる。レビュー（#104/#108）は保存と公開の読み取り API までを experience DB に置いた（`0027`、[guest-reviews.md](guest-reviews.md)）。残りは、投稿のお礼メールと書く画面、出欠による資格の除外、英訳の下書き（NIHO の事前確認は無し・直接公開）。新旧で同じ開催回を同時に販売しない。
 3. Google busy の定期再照合と確定予約の書き込みは、独立した 2 つの job として実装した（#238、下の「Google の job」）。残りは staging での受入：Cloud Scheduler の 2 job と専用サービスアカウント、実 OAuth の接続・失効・再接続、watch の webhook の到達、専用 calendar への書き込みを確かめてから flag を開く。
 4. Stripe Connect webhook を同じプラットフォームの NIHO アプリ決済から振り分け、署名・販売者口座・金額・イベント再送・期限切れを staging で検証する。旧予約の返金責任を整理する。

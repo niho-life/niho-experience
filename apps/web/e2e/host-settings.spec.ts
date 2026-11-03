@@ -34,6 +34,23 @@ function recordWrites(page: Page): string[] {
   return sent;
 }
 
+test("preview の提供者設定は審査を出さず、公開条件の案内を残して通常保存する", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/settings");
+  const provider = page.getByRole("region", { name: "提供者情報" });
+  await expect(provider).toContainText("販売者表示");
+  await expect(provider).toContainText("提供者規約");
+  await expect(provider).toContainText("同意済み");
+  await expect(provider).not.toContainText("審査");
+  await expect(page.getByRole("region", { name: "売上受取口座" })).toContainText("準備済み");
+
+  await provider.getByRole("textbox", { name: "紹介" }).fill("合成データの紹介を更新");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: /提供者情報/ })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
+  await expect(provider).not.toContainText("審査");
+});
+
 test("the studio connects Google Calendar from ホーム's card, sets it up and disconnects it", async ({ page }) => {
   await signIn(page, "?providerId=sample-provider-studio");
   const card = page.getByRole("region", { name: "Google カレンダーをつなぐ" });
