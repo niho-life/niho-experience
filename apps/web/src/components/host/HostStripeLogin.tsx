@@ -31,7 +31,7 @@ export function HostStripeLogin({
   }
 
   return (
-    <form action={HOST_STRIPE_LOGIN_PATH} method="post" target="_blank" rel="noopener noreferrer" className={formClassName}>
+    <form action={HOST_STRIPE_LOGIN_PATH} method="post" target="_blank" rel="noopener" className={formClassName}>
       <input type="hidden" name="providerId" value={providerId} />
       <button type="submit" className={className}>
         {children}
