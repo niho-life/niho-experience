@@ -312,10 +312,13 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         capacity: 6,
         maxPartySize: 6,
         minimumParticipants: 1,
+        minimumChargeableParticipants: 1,
+        privateBooking: false,
         durationMinutes: 90,
         startTime: "10:00",
         weekdays: [0, 1, 2, 3, 4, 5, 6],
         cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
+        cancellationTerms: { cancellationWindowMinutesBeforeStart: 1440, refundBasisPoints: 10000 },
         acceptanceMode: "INSTANT",
         bookingQuestions: QUESTIONS,
         bookingQuestionsFingerprint: nihoFingerprint(QUESTIONS),
@@ -500,12 +503,72 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         { childPricing: { priceYen: 0, minAge: 4, maxAge: 12, adultRequired: false } },
         { childPricing: { priceYen: 1000, minAge: 12, maxAge: 6, adultRequired: true } },
         { minimumParticipants: 3, maxPartySize: 2 },
+        { minimumChargeableParticipants: 7 },
+        { cancellationWindowMinutesBeforeStart: 90 },
+        { cancellationRefundBasisPoints: 5000 },
+        { cancellationRefundBasisPoints: 10001 },
+        { minimumAttendance: -1 },
+        { minimumAttendance: 2_147_483_648 },
+        { privateBooking: "yes" as never },
         { maxPartySize: 501 },
         { cancellationPolicy: "FLEXIBLE" as never },
         { conditionsVersion: "not-a-digest" },
       ] satisfies Partial<ProductSaleTermsInput>[]) {
         await assert.rejects(() => guests.setSaleTerms(ownerA, "tea", { ...TEA_TERMS, ...bad }, 2), StoreValidationError, JSON.stringify(bad).slice(0, 80));
       }
+    });
+  });
+
+  it("publishes explicit booking conditions, applies the minimum charge and reserves a private occurrence for one group", async () => {
+    await withSchema(async ({ guests, addRule, store }) => {
+      await addRule("tea", rule("sample-am"));
+      await guests.setSaleTerms(ownerA, "tea", {
+        ...TEA_TERMS,
+        minimumChargeableParticipants: 3,
+        privateBooking: true,
+        cancellationWindowMinutesBeforeStart: 90,
+        cancellationRefundBasisPoints: 3750,
+        minimumAttendance: 4,
+      }, 1);
+
+      const terms = await guests.publicBookingTerms("sample-tea");
+      assert.ok(terms);
+      assert.deepEqual(terms.offers[0]?.cancellationTerms, { cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3750 });
+      assert.deepEqual({
+        minimumChargeableParticipants: terms.offers[0]?.minimumChargeableParticipants,
+        privateBooking: terms.offers[0]?.privateBooking,
+      }, { minimumChargeableParticipants: 3, privateBooking: true });
+      assert.equal(Object.hasOwn(terms.offers[0]!, "minimumAttendance"), false);
+
+      const first = await guests.startGuestBooking(request({ adultCount: 1, childCount: 1, expectedTotalYen: 12_000 }));
+      assert.equal(first.totalAmount, 12_000);
+      assert.deepEqual(first.booking.pricingSnapshot.bookingTerms, {
+        minimumParticipants: 1,
+        minimumChargeableParticipants: 3,
+        privateBooking: true,
+        minimumAttendance: 4,
+        maxPartySize: 6,
+        cancellationPolicy: "FREE_UNTIL_24H",
+        cancellationWindowMinutesBeforeStart: 90,
+        cancellationRefundBasisPoints: 3750,
+        bookingQuestions: QUESTIONS,
+        bookingQuestionsFingerprint: nihoFingerprint(QUESTIONS),
+        conditionsVersion: CONDITIONS,
+      });
+      await payFor(store, first, 12_000, "custom-sale-conditions");
+      const hostBooking = await guests.getGuestBookingForHost(ownerA, first.publicBookingId);
+      assert.deepEqual(hostBooking.saleConditions, {
+        minimumChargeableParticipants: 3,
+        privateBooking: true,
+        minimumAttendance: 4,
+        cancellationWindowMinutesBeforeStart: 90,
+        cancellationRefundBasisPoints: 3750,
+      });
+
+      await assert.rejects(
+        () => guests.startGuestBooking(request({ guestEmail: "second@example.com", expectedTotalYen: 12_000 })),
+        (error: unknown) => error instanceof GuestCheckoutError && error.code === "FULL",
+      );
     });
   });
 
@@ -828,7 +891,12 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.ok(holdMilliseconds - (1_800_000 + 60_000) >= 180_000);
       assert.deepEqual(family.booking.pricingSnapshot, {
         currency: "JPY", unitAmount: 4000, seats: 3, totalAmount: 10_000, cancellationTermsRef: "terms-v1",
-        breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2000 }, cancellationPolicy: "FREE_UNTIL_24H",
+        breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2000, minimumChargeableParticipants: 1 }, cancellationPolicy: "FREE_UNTIL_24H",
+        bookingTerms: {
+          minimumParticipants: 1, minimumChargeableParticipants: 1, privateBooking: false, maxPartySize: 6,
+          cancellationPolicy: "FREE_UNTIL_24H", cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000, bookingQuestions: QUESTIONS,
+          bookingQuestionsFingerprint: nihoFingerprint(QUESTIONS), conditionsVersion: CONDITIONS, minimumAttendance: null,
+        },
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 },
       });
       assert.equal(family.booking.occurrenceSnapshot.seats, 3);
@@ -848,7 +916,12 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       const children = await guests.startGuestBooking(kidsRequest({ adultCount: 0, childCount: 2, expectedTotalYen: 3000 }));
       assert.deepEqual(children.booking.pricingSnapshot, {
         currency: "JPY", unitAmount: 2500, seats: 2, totalAmount: 3000, cancellationTermsRef: "terms-v1",
-        breakdown: { adultCount: 0, childCount: 2, childUnitAmount: 1500 }, cancellationPolicy: "FREE_UNTIL_48H",
+        breakdown: { adultCount: 0, childCount: 2, childUnitAmount: 1500, minimumChargeableParticipants: 1 }, cancellationPolicy: "FREE_UNTIL_48H",
+        bookingTerms: {
+          minimumParticipants: 1, minimumChargeableParticipants: 1, privateBooking: false, maxPartySize: 4,
+          cancellationPolicy: "FREE_UNTIL_48H", cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000, bookingQuestions: [],
+          bookingQuestionsFingerprint: nihoFingerprint([]), conditionsVersion: null, minimumAttendance: null,
+        },
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 300 },
       });
 
@@ -1195,6 +1268,10 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
         },
         currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000,
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 }, providerAmount: 9000,
+        saleConditions: {
+          minimumChargeableParticipants: 1, privateBooking: false, minimumAttendance: null,
+          cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000,
+        },
         cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: tea.booking.createdAtUtc, cancelledAtUtc: null,
         // 取消と返金 (slice 7): nothing cancelled, refunded or asked.
         cancelledBy: null, cancellationReason: null, cancellationNote: null,
@@ -1325,6 +1402,7 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       assert.deepEqual(sessions[0], {
         productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo",
         startUtc: snapshot.startUtc, endUtc: snapshot.endUtc, participants: 4, bookings: 2, paymentReviews: 0,
+        confirmedParticipants: 4, minimumAttendance: null,
       });
       assert.deepEqual(sessions.map((session) => [session.productId, session.localDate, session.localStartTime, session.participants, session.bookings, session.paymentReviews]), [
         ["tea", day(2), "10:00", 4, 2, 0],
@@ -1350,6 +1428,19 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       for (const options of [{ limit: 0 }, { limit: 101 }, { from: "yesterday" }, { to: "tomorrow" }, { from, to: from }, { from, to: tokyoLocalToUtc(day(1), "00:00") }]) {
         await assert.rejects(() => guests.listGuestSessionsForHost(ownerA, options), StoreValidationError, JSON.stringify(options));
       }
+    });
+  });
+
+  it("reports the minimum attendance target against confirmed participants only", async () => {
+    await withSchema(async ({ guests, addRule, store }) => {
+      await addRule("tea", rule("sample-am"));
+      await guests.setSaleTerms(ownerA, "tea", { ...TEA_TERMS, minimumAttendance: 3 }, 1);
+      const first = await guests.startGuestBooking(request());
+      await payFor(store, first, 4000, "minimum-attendance");
+      const sessions = await guests.listGuestSessionsForHost(ownerA);
+      assert.deepEqual(sessions[0]?.minimumAttendance, { required: 3, confirmed: 1, remaining: 2 });
+      assert.equal(sessions[0]?.confirmedParticipants, 1);
+      assert.doesNotMatch(JSON.stringify(sessions), /@|example\.com|Sample Guest/);
     });
   });
 

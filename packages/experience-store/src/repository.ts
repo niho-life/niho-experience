@@ -218,7 +218,7 @@ export async function requireMembership(
   };
 }
 
-function validateProduct(input: ProductInput): ProductInput & { readonly currency: string } {
+export function validateProduct(input: ProductInput): ProductInput & { readonly currency: string } {
   assertStoreIdentifier(input.id, "product.id");
   assertNonEmptyText(input.slug, "product.slug", 160);
   assertNonEmptyText(input.publicTitle, "product.publicTitle", 300);

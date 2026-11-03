@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -18,6 +18,12 @@ export function experiencePool(): Pool | null {
 export function experienceStore(): ExperienceStore | null {
   const pool = experiencePool();
   return pool ? new ExperienceStore(pool) : null;
+}
+
+/** Immutable public product snapshots and their host publication state. */
+export function experiencePublicationRepository(): ExperiencePublicationRepository | null {
+  const pool = experiencePool();
+  return pool ? new ExperiencePublicationRepository(pool) : null;
 }
 
 export function productOperatorRepository(): ProductOperatorRepository | null {

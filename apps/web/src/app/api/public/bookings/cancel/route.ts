@@ -39,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
   if (
     !bookingId
     || typeof commandId !== "string" || !UUID.test(commandId)
-    || (choice !== "FULL_REFUND" && choice !== "REQUEST")
+    || (choice !== "FULL_REFUND" && choice !== "POLICY_CANCEL" && choice !== "REQUEST")
     || (shownDeadlineUtc !== null && (typeof shownDeadlineUtc !== "string" || !INSTANT.test(shownDeadlineUtc)))
   ) return bookingEmpty(400);
   const sessionId = accessSecret(requestCookie(request, bookingSessionCookieName(bookingId)));

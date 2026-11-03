@@ -282,6 +282,29 @@ function guestBookingSettings(apiMode: "mock" | "http", env: Env, hostConsoleEna
   return { enabled: true, consentVersion };
 }
 
+function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean) {
+  const requested = env.EXPERIENCE_PUBLICATIONS_ENABLED === "true";
+  const consentVersion = env.EXPERIENCE_PUBLICATION_CONSENT_VERSION?.trim() ?? "";
+  const databaseConfigured = Boolean(env.EXPERIENCE_DATABASE_URL?.trim());
+  if (requested && apiMode === "http" && !hostConsoleEnabled) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+  }
+  if (requested && apiMode === "http" && !databaseConfigured) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_DATABASE_URL");
+  }
+  if (requested && apiMode === "http" && !consentVersion) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_PUBLICATION_CONSENT_VERSION");
+  }
+  if (requested && apiMode === "http" && !env.EXPERIENCE_PUBLIC_MEDIA_BUCKET?.trim()) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_PUBLIC_MEDIA_BUCKET");
+  }
+  if (consentVersion.length > 160) throw new Error("EXPERIENCE_PUBLICATION_CONSENT_VERSION must be at most 160 characters");
+  return {
+    enabled: apiMode === "http" && hostConsoleEnabled && requested && databaseConfigured && consentVersion.length > 0,
+    consentVersion,
+  };
+}
+
 /** An email address: one line, no display name. */
 const MAIL_ADDRESS = /^[^\s<>@",;]+@[^\s<>@",;]+\.[^\s<>@",;]+$/;
 /** An SMTP host name or IPv4 address. */
@@ -478,6 +501,7 @@ export function resolveConfig(env: Env) {
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
+  const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled);
   // 出欠 (#107) of the bookings made on this site, kept in the experience DB (migration 0033), with the capacity of
   // their session on この回. Only where those bookings are (the flag above); the mock records attendance on screen
   // only. http opens per environment after 0033 is applied and accepted.
@@ -601,6 +625,8 @@ export function resolveConfig(env: Env) {
     guestBookingEnabled: guestBooking.enabled,
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
+    experiencePublicationsEnabled: experiencePublication.enabled,
+    experiencePublicationConsentVersion: experiencePublication.consentVersion,
     hostAttendanceEnabled,
     // The mail job (empty while off). SMTP credentials are not here: they are read where they are used.
     guestMailEnabled: guestMail.enabled,

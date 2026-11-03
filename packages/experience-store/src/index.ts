@@ -14,6 +14,10 @@ export { ExperienceStore } from "./repository.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "./experience-publication.ts";
 export { projectPublicExperiencePublicationManuscript } from "./experience-publication-projection.ts";
 export type {
+  ExperienceHostSaleTerms,
+  ExperienceHostSaleTermsSaveInput,
+  ExperienceHostSaleTermsSaveResult,
+  ExperienceHostSaleTermsState,
   ExperiencePublicationBlocker,
   ExperiencePublicationContentChecks,
   ExperiencePublicationDraftInput,
@@ -22,7 +26,9 @@ export type {
   ProviderPublicationReadinessInput,
   PublicationOperationsActor,
   PublicExperiencePublication,
+  PublicExperienceMediaAsset,
 } from "./experience-publication.ts";
+export type { BookingTermsSnapshot } from "./types.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export { ResourceGoogleRepository } from "./resource-google.ts";
@@ -178,7 +184,7 @@ export type {
   SupportQueueReview,
   SupportRefundChoice,
 } from "./booking-cancellations.ts";
-export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS } from "./guest-bookings.ts";
+export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS, validSaleTerms } from "./guest-bookings.ts";
 export { HOST_GUEST_BOOKING_LIMITS, HOST_GUEST_BOOKING_STATUSES } from "./host-guest-bookings.ts";
 export type {
   HostGuestBooking,

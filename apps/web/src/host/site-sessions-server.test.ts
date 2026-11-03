@@ -26,13 +26,14 @@ const QUERY = { date: "2026-11-01", start: "10:00", experience: "tea", offer: "s
 
 const SESSION: HostGuestSession = {
   productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", localDate: "2026-11-01", localStartTime: "10:00", timeZone: "Asia/Tokyo",
-  startUtc: "2026-11-01T01:00:00.000Z", endUtc: "2026-11-01T02:30:00.000Z", participants: 3, bookings: 2, paymentReviews: 1,
+  startUtc: "2026-11-01T01:00:00.000Z", endUtc: "2026-11-01T02:30:00.000Z", participants: 3, confirmedParticipants: 2, minimumAttendance: null, bookings: 2, paymentReviews: 1,
 };
 const STORED: HostGuestBooking = {
   publicBookingId: "00000000-0000-4000-8000-000000000285", productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", status: "CONFIRMED",
   localDate: "2026-11-01", localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: "2026-11-01T01:00:00.000Z", endUtc: "2026-11-01T02:30:00.000Z",
   adultCount: 2, childCount: 0, language: "JA", guest: { name: "Sample Guest", phone: "+81 90 0000 0000", note: null, answers: [] },
   currency: "JPY", adultUnitAmount: 4000, childUnitAmount: null, totalAmount: 8000, platformFee: { supportEnabled: false, basisPoints: 1000, amount: 800 },
+  saleConditions: { minimumChargeableParticipants: 1, privateBooking: false, minimumAttendance: null, cancellationWindowMinutesBeforeStart: null, cancellationRefundBasisPoints: 0 },
   providerAmount: 7200, cancellationPolicy: "NONE", bookedAtUtc: "2026-10-31T03:04:00.000Z", paidAtUtc: "2026-10-31T03:06:00.000Z", cancelledAtUtc: null, cancelledBy: null, cancellationReason: null, cancellationNote: null, refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false,
 };
 

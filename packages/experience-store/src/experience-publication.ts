@@ -1,4 +1,11 @@
 import type { Pool, PoolClient } from "pg";
+import {
+  questionsFingerprint,
+  termsFromRow,
+  validSaleTerms,
+  type ProductSaleTerms,
+  type ProductSaleTermsInput,
+} from "./guest-bookings.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import {
   projectPublicExperiencePublication,
@@ -7,6 +14,7 @@ import {
 } from "./experience-publication-projection.ts";
 import { productFromRow, type DbRow } from "./rows.ts";
 import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
+import { lockProviderInventory } from "./inventory.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor, JsonValue, ProductRecord } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, normalizeCurrency } from "./validation.ts";
@@ -63,6 +71,29 @@ export interface ExperiencePublicationDraftInput {
   readonly cancellationTermsRef: string;
 }
 
+/** Host DTO for editable sale terms. Internal provider/product IDs and the question fingerprint stay server-side. */
+export type ExperienceHostSaleTerms = Omit<ProductSaleTerms, "providerId" | "productId" | "bookingQuestionsFingerprint">;
+
+export interface ExperienceHostSaleTermsState {
+  readonly draftVersion: number;
+  readonly stateVersion: number | null;
+  readonly saleTerms: ExperienceHostSaleTerms | null;
+}
+
+export interface ExperienceHostSaleTermsSaveInput {
+  readonly expectedDraftVersion: number;
+  readonly expectedStateVersion: number | null;
+  readonly expectedSaleTermsVersion: number | null;
+  readonly saleTerms: ProductSaleTermsInput;
+  readonly checks: ExperiencePublicationContentChecks;
+}
+
+export interface ExperienceHostSaleTermsSaveResult extends Omit<ExperienceHostSaleTermsState, "saleTerms"> {
+  readonly saleTerms: ExperienceHostSaleTerms;
+  readonly publicationUpdated: boolean;
+  readonly blockers: readonly ExperiencePublicationBlocker[];
+}
+
 export interface ProviderPublicationReadinessInput {
   readonly accountUsable: boolean;
   readonly connectReady: boolean;
@@ -100,12 +131,30 @@ export interface PublicationOperationsActor {
   readonly nihoUserId: string;
 }
 
+export interface PublicExperienceMediaAsset {
+  readonly objectKey: string;
+  readonly byteSize: number;
+}
+
 const PUBLICATION_COLUMNS = `
-  p.id AS publication_id, p.slug, p.public_title, p.content, p.currency,
+  p.id AS publication_id,p.provider_id,p.product_id,p.slug,p.public_title,p.content,p.currency,
   p.unit_amount, p.seller_display_name, p.published_at, s.first_published_at`;
 
+const SALE_TERMS_COLUMNS = `provider_id,product_id,child_price_amount,child_min_age,child_max_age,child_adult_required,
+  minimum_participants,minimum_chargeable_participants,private_booking,max_party_size,cancellation_policy,
+  cancellation_window_minutes_before_start,cancellation_refund_basis_points,minimum_attendance,booking_questions,
+  booking_questions_fingerprint,conditions_version,version,updated_at`;
+
 const PUBLIC_READER_COLUMNS = `
-  slug, public_title, content, currency, unit_amount, seller_display_name, published_at`;
+  slug,public_title,content,currency,unit_amount,seller_display_name,published_at,
+  COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'asset_id',media.asset_id::text,'alt_text',media.alt_text,'public_credit',media.public_credit
+    ) ORDER BY media.position)
+      FROM experience_product_publication_media media
+      JOIN experience_product_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
+     WHERE media.publication_id=visible_publications.publication_id
+  ),'[]'::jsonb) AS photos`;
 
 const VISIBLE_PUBLICATIONS = `
   WITH visible_publications AS (
@@ -126,6 +175,11 @@ const VISIBLE_PUBLICATIONS = `
        AND r.seller_niho_account_ref=p.seller_niho_account_ref
        AND r.stripe_connect_account_ref=p.stripe_connect_account_ref
        AND r.seller_display_name=p.seller_display_name
+       AND NOT EXISTS (
+         SELECT 1 FROM experience_product_publication_media media
+         JOIN experience_product_media_assets asset ON asset.id=media.asset_id
+          WHERE media.publication_id=p.id AND asset.state<>'READY'
+       )
        AND EXISTS (
          SELECT 1 FROM provider_memberships m
           WHERE m.provider_id=r.provider_id AND m.niho_user_id=r.owner_niho_user_id
@@ -184,6 +238,25 @@ function validateChecks(checks: ExperiencePublicationContentChecks): void {
   if (typeof checks.manuscriptReady !== "boolean" || typeof checks.photosReady !== "boolean") {
     throw new StoreValidationError("Publication content checks must be booleans established by the server validator.");
   }
+}
+
+function hostSaleTermsFromRow(row: DbRow): ExperienceHostSaleTerms {
+  const terms = termsFromRow(row);
+  return {
+    childPricing: terms.childPricing,
+    minimumParticipants: terms.minimumParticipants,
+    minimumChargeableParticipants: terms.minimumChargeableParticipants,
+    privateBooking: terms.privateBooking,
+    maxPartySize: terms.maxPartySize,
+    cancellationPolicy: terms.cancellationPolicy,
+    cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
+    cancellationRefundBasisPoints: terms.cancellationRefundBasisPoints,
+    minimumAttendance: terms.minimumAttendance,
+    bookingQuestions: terms.bookingQuestions,
+    conditionsVersion: terms.conditionsVersion,
+    version: terms.version,
+    updatedAtUtc: terms.updatedAtUtc,
+  };
 }
 
 function validateDraft(input: ExperiencePublicationDraftInput): ExperiencePublicationDraftInput & { readonly currency: string } {
@@ -265,8 +338,21 @@ async function blockers(
 ): Promise<ExperiencePublicationBlocker[]> {
   const result: ExperiencePublicationBlocker[] = [];
   if (!checks.manuscriptReady) result.push("MANUSCRIPT_REQUIRED");
-  if (!checks.photosReady) result.push("PHOTOS_REQUIRED");
-  if (projectPublicExperiencePublicationManuscript(product.content) === null) result.push("PUBLIC_CONTENT_INVALID");
+  const manuscript = projectPublicExperiencePublicationManuscript(product.content);
+  if (manuscript === null) result.push("PUBLIC_CONTENT_INVALID");
+  const photoIndices = manuscript === null ? [] : [
+    ...manuscript.content.timeline.flatMap((item) => item.photoIndex === null ? [] : [item.photoIndex]),
+    ...(manuscript.meetingPoint?.exteriorPhotoIndex === null || manuscript.meetingPoint?.exteriorPhotoIndex === undefined
+      ? [] : [manuscript.meetingPoint.exteriorPhotoIndex]),
+  ];
+  const media = await client.query<{ positions: number[] | null }>(
+    `SELECT COALESCE(array_agg(source_position ORDER BY source_position),'{}'::integer[]) AS positions
+       FROM experience_product_media_assets
+      WHERE provider_id=$1 AND product_id=$2 AND state='READY' AND rights_confirmed_at IS NOT NULL`,
+    [product.providerId, product.id],
+  );
+  const positions = new Set((media.rows[0]?.positions ?? []).map(Number));
+  if (!checks.photosReady || positions.size === 0 || photoIndices.some((index) => !positions.has(index))) result.push("PHOTOS_REQUIRED");
   if (product.currency !== "JPY" || product.unitAmount <= 0) result.push("PRICE_REQUIRED");
   const facts = await client.query<{ sale_terms: boolean; schedule: boolean; slug_in_use: boolean }>(
     `SELECT
@@ -313,30 +399,205 @@ async function insertOrFindPublication(
   consentVersion: string,
   publishedBy: string,
 ): Promise<number> {
+  const termsResult = await client.query<DbRow>(
+    `SELECT child_price_amount,child_min_age,child_max_age,child_adult_required,
+            minimum_participants,minimum_chargeable_participants,private_booking,max_party_size,
+            cancellation_policy,cancellation_window_minutes_before_start,cancellation_refund_basis_points,
+            minimum_attendance,booking_questions,
+            booking_questions_fingerprint,conditions_version,version
+       FROM experience_product_sale_terms
+      WHERE provider_id=$1 AND product_id=$2 FOR SHARE`,
+    [product.providerId, product.id],
+  );
+  const terms = termsResult.rows[0];
+  if (!terms) throw new StoreConflictError("Sale terms changed while preparing the immutable publication.");
+  const saleTermsVersion = safeInteger(terms.version, "sale_terms_version");
   const previous = await client.query<DbRow>(
     `SELECT id FROM experience_product_publications
-      WHERE provider_id=$1 AND product_id=$2 AND draft_version=$3 AND consent_version=$4`,
-    [product.providerId, product.id, product.version, consentVersion],
+      WHERE provider_id=$1 AND product_id=$2 AND draft_version=$3
+        AND sale_terms_version=$4 AND consent_version=$5`,
+    [product.providerId, product.id, product.version, saleTermsVersion, consentVersion],
   );
   if (previous.rows[0]) return safeInteger(previous.rows[0].id, "publication id");
+  const saleTermsSnapshot = {
+    childPricing: terms.child_price_amount === null ? null : {
+      priceYen: safeInteger(terms.child_price_amount, "child_price_amount"),
+      minAge: safeInteger(terms.child_min_age, "child_min_age"),
+      maxAge: safeInteger(terms.child_max_age, "child_max_age"),
+      adultRequired: terms.child_adult_required === true,
+    },
+    minimumParticipants: safeInteger(terms.minimum_participants, "minimum_participants"),
+    minimumChargeableParticipants: safeInteger(terms.minimum_chargeable_participants, "minimum_chargeable_participants"),
+    privateBooking: terms.private_booking === true,
+    maxPartySize: safeInteger(terms.max_party_size, "max_party_size"),
+    cancellationPolicy: String(terms.cancellation_policy),
+    cancellationWindowMinutesBeforeStart: terms.cancellation_window_minutes_before_start === null
+      ? null : safeInteger(terms.cancellation_window_minutes_before_start, "cancellation_window_minutes_before_start"),
+    cancellationRefundBasisPoints: safeInteger(terms.cancellation_refund_basis_points, "cancellation_refund_basis_points"),
+    minimumAttendance: terms.minimum_attendance === null ? null : safeInteger(terms.minimum_attendance, "minimum_attendance"),
+    bookingQuestions: terms.booking_questions,
+    bookingQuestionsFingerprint: String(terms.booking_questions_fingerprint),
+    conditionsVersion: terms.conditions_version === null ? null : String(terms.conditions_version),
+  };
   const inserted = await client.query<DbRow>(
     `INSERT INTO experience_product_publications
-       (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,
+       (provider_id,product_id,draft_version,sale_terms_version,slug,public_title,content,currency,unit_amount,
         cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
-        consent_version,published_by_niho_user_id)
-     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14)
+        consent_version,published_by_niho_user_id,sale_terms_snapshot)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
      RETURNING id`,
-    [product.providerId, product.id, product.version, product.slug, product.publicTitle, JSON.stringify(product.content),
-      product.currency, product.unitAmount, product.cancellationTermsRef, product.sellerNihoAccountRef,
-      product.stripeConnectAccountRef, product.sellerDisplayName, consentVersion, publishedBy],
+    [product.providerId, product.id, product.version, saleTermsVersion, product.slug, product.publicTitle,
+      JSON.stringify(product.content), product.currency, product.unitAmount, product.cancellationTermsRef,
+      product.sellerNihoAccountRef, product.stripeConnectAccountRef, product.sellerDisplayName, consentVersion,
+      publishedBy, JSON.stringify(saleTermsSnapshot)],
   );
-  return safeInteger(inserted.rows[0]?.id, "publication id");
+  const publicationId = safeInteger(inserted.rows[0]?.id, "publication id");
+  const media = await client.query(
+    `INSERT INTO experience_product_publication_media
+       (publication_id,asset_id,provider_id,product_id,position,alt_text,public_credit)
+     SELECT $3,id,provider_id,product_id,source_position,alt_text,public_credit
+       FROM experience_product_media_assets
+      WHERE provider_id=$1 AND product_id=$2 AND state='READY' AND rights_confirmed_at IS NOT NULL
+      ORDER BY source_position`,
+    [product.providerId, product.id, publicationId],
+  );
+  if (media.rowCount === 0) throw new StoreConflictError("The publication has no rights-confirmed public media.");
+  return publicationId;
 }
 
 export class ExperiencePublicationRepository {
   readonly #pool: Pool;
 
   constructor(pool: Pool) { this.#pool = pool; }
+
+  async getSaleTerms(actor: HostActor, productId: string): Promise<ExperienceHostSaleTermsState> {
+    assertStoreIdentifier(productId, "productId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      const product = await client.query<DbRow>(
+        "SELECT version FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE",
+        [actor.providerId, productId],
+      );
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      const state = await lockedState(client, actor.providerId, productId);
+      const result = await client.query<DbRow>(
+        `SELECT ${SALE_TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2`,
+        [actor.providerId, productId],
+      );
+      return {
+        draftVersion: safeInteger(product.rows[0].version, "product version"),
+        stateVersion: state?.version ?? null,
+        saleTerms: result.rows[0] ? hostSaleTermsFromRow(result.rows[0]) : null,
+      };
+    });
+  }
+
+  async saveSaleTerms(
+    actor: HostActor,
+    productId: string,
+    input: ExperienceHostSaleTermsSaveInput,
+  ): Promise<ExperienceHostSaleTermsSaveResult> {
+    assertStoreIdentifier(productId, "productId");
+    const terms = validSaleTerms(input.saleTerms);
+    validateChecks(input.checks);
+    validateExpectedVersion(input.expectedDraftVersion, "expectedDraftVersion");
+    validateExpectedVersion(input.expectedStateVersion, "expectedStateVersion");
+    validateExpectedVersion(input.expectedSaleTermsVersion, "expectedSaleTermsVersion");
+    if (input.expectedDraftVersion === null) throw new StoreValidationError("expectedDraftVersion must be a positive integer.");
+    const fingerprint = questionsFingerprint(terms.bookingQuestions);
+
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${productId}`]);
+      const productResult = await client.query<DbRow>(
+        `SELECT ${PRODUCT_COLUMNS} FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE`,
+        [actor.providerId, productId],
+      );
+      const product = productResult.rows[0] ? productFromRow(productResult.rows[0]) : null;
+      if (!product) throw new StoreNotFoundError("product");
+      if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      const state = await lockedState(client, actor.providerId, productId);
+      if ((state?.version ?? null) !== input.expectedStateVersion) {
+        throw new StoreConflictError("Publication state version mismatch: read the state again.");
+      }
+
+      const child = terms.childPricing;
+      const values = [
+        actor.providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
+        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.privateBooking, terms.maxPartySize,
+        terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
+        terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion,
+      ];
+      const saved = input.expectedSaleTermsVersion === null
+        ? await client.query<DbRow>(
+          `INSERT INTO experience_product_sale_terms (
+             provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
+             minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+             cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
+             minimum_attendance, booking_questions, booking_questions_fingerprint, conditions_version
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+           ON CONFLICT DO NOTHING
+           RETURNING ${SALE_TERMS_COLUMNS}`,
+          values,
+        )
+        : await client.query<DbRow>(
+          `UPDATE experience_product_sale_terms
+              SET child_price_amount=$3, child_min_age=$4, child_max_age=$5, child_adult_required=$6,
+                  minimum_participants=$7, minimum_chargeable_participants=$8, private_booking=$9, max_party_size=$10,
+                  cancellation_policy=$11, cancellation_window_minutes_before_start=$12, cancellation_refund_basis_points=$13,
+                  minimum_attendance=$14, booking_questions=$15::jsonb,
+                  booking_questions_fingerprint=$16, conditions_version=$17,
+                  version=version+1, updated_at=clock_timestamp()
+            WHERE provider_id=$1 AND product_id=$2 AND version=$18
+            RETURNING ${SALE_TERMS_COLUMNS}`,
+          [...values, input.expectedSaleTermsVersion],
+        );
+      const termsRow = saved.rows[0];
+      if (!termsRow) {
+        throw new StoreConflictError(input.expectedSaleTermsVersion === null
+          ? "Sale terms already exist for this product."
+          : "Sale terms version mismatch or sale terms not found in this provider.");
+      }
+
+      let consentVersion: string | null = null;
+      if (state?.currentPublicationId !== null && state?.currentPublicationId !== undefined) {
+        const current = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.currentPublicationId]);
+        consentVersion = current.rows[0] ? String(current.rows[0].consent_version) : null;
+      }
+      const blocked = await blockers(client, product, input.checks, consentVersion, state);
+      const active = state !== null && state.currentPublicationId !== null && state.selfStoppedAtUtc === null
+        && state.operationsSuspendedAtUtc === null && !state.ownerResumeRequired;
+      if (!active || blocked.length > 0 || consentVersion === null) {
+        return {
+          draftVersion: product.version,
+          stateVersion: state?.version ?? null,
+          saleTerms: hostSaleTermsFromRow(termsRow),
+          publicationUpdated: false,
+          blockers: consentVersion === null && active && !blocked.includes("CONSENT_OUTDATED")
+            ? [...blocked, "CONSENT_OUTDATED"] : blocked,
+        };
+      }
+
+      const publicationId = await insertOrFindPublication(client, product, consentVersion, actor.nihoUserId);
+      const updatedState = await client.query<DbRow>(
+        `UPDATE experience_product_publication_states
+            SET current_publication_id=$3,version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND product_id=$2 AND version=$4
+          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+            operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+        [actor.providerId, productId, publicationId, state.version],
+      );
+      if (!updatedState.rows[0]) throw new StoreConflictError("Publication state version mismatch.");
+      return {
+        draftVersion: product.version,
+        stateVersion: stateFromRow(updatedState.rows[0]).version,
+        saleTerms: hostSaleTermsFromRow(termsRow),
+        publicationUpdated: true,
+        blockers: [],
+      };
+    });
+  }
 
   async recordReadiness(
     actor: HostActor,
@@ -346,6 +607,7 @@ export class ExperiencePublicationRepository {
     validateReadiness(input);
     validateExpectedVersion(expectedVersion, "expectedVersion");
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       const membership = await requireMembership(client, actor, ["OWNER"]);
       const values = [actor.providerId, membership.nihoUserId, input.accountUsable, input.connectReady,
         input.sellerDisplayReady, input.sellerNihoAccountRef, input.stripeConnectAccountRef,
@@ -379,14 +641,17 @@ export class ExperiencePublicationRepository {
   async saveDraft(
     actor: HostActor,
     rawInput: ExperiencePublicationDraftInput,
-    expectedVersion: number,
+    expectedDraftVersion: number,
+    expectedStateVersion: number | null,
     checks: ExperiencePublicationContentChecks,
   ): Promise<{ readonly draft: ProductRecord; readonly publicationUpdated: boolean; readonly blockers: readonly ExperiencePublicationBlocker[] }> {
     const input = validateDraft(rawInput);
     validateChecks(checks);
-    validateExpectedVersion(expectedVersion, "expectedVersion");
-    if (expectedVersion === null) throw new StoreValidationError("expectedVersion must be a positive integer.");
+    validateExpectedVersion(expectedDraftVersion, "expectedDraftVersion");
+    validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
+    if (expectedDraftVersion === null) throw new StoreValidationError("expectedDraftVersion must be a positive integer.");
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${input.id}`]);
       const current = await client.query<{ slug: string }>(
@@ -402,11 +667,14 @@ export class ExperiencePublicationRepository {
           WHERE provider_id=$1 AND id=$2 AND version=$9
           RETURNING ${PRODUCT_COLUMNS}`,
         [actor.providerId, input.id, input.slug, input.publicTitle, JSON.stringify(input.content), input.currency,
-          input.unitAmount, input.cancellationTermsRef, expectedVersion],
+          input.unitAmount, input.cancellationTermsRef, expectedDraftVersion],
       );
       if (!updated.rows[0]) throw new StoreConflictError("Product version mismatch or product not found in this provider.");
       const draft = productFromRow(updated.rows[0]);
       const state = await lockedState(client, actor.providerId, input.id);
+      if ((state?.version ?? null) !== expectedStateVersion) {
+        throw new StoreConflictError("Publication state version mismatch: read the state again.");
+      }
       let consent: string | null = null;
       if (state?.currentPublicationId !== null && state?.currentPublicationId !== undefined) {
         const current = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.currentPublicationId]);
@@ -444,6 +712,7 @@ export class ExperiencePublicationRepository {
     assertNonEmptyText(input.consentVersion, "consentVersion", 160);
     validateChecks(input.checks);
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${productId}`]);
       const productResult = await client.query<DbRow>(
@@ -484,6 +753,7 @@ export class ExperiencePublicationRepository {
     assertStoreIdentifier(productId, "productId");
     validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
       const result = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
@@ -510,18 +780,21 @@ export class ExperiencePublicationRepository {
     assertStoreIdentifier(productId, "productId");
     if (!/^[A-Z0-9_]{1,80}$/.test(reasonCode)) throw new StoreValidationError("reasonCode must be an uppercase machine code.");
     validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
-    const result = await this.#pool.query<DbRow>(
-      `UPDATE experience_product_publication_states
-          SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
-              operations_suspended_by_niho_user_id=$5,owner_resume_required=true,
-              version=version+1,updated_at=clock_timestamp()
-        WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND current_publication_id IS NOT NULL
-        RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
-          operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
-      [providerId, productId, expectedStateVersion, reasonCode, actor.nihoUserId],
-    );
-    if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
-    return stateFromRow(result.rows[0]);
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      const result = await client.query<DbRow>(
+        `UPDATE experience_product_publication_states
+            SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
+                operations_suspended_by_niho_user_id=$5,owner_resume_required=true,
+                version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND current_publication_id IS NOT NULL
+          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+            operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+        [providerId, productId, expectedStateVersion, reasonCode, actor.nihoUserId],
+      );
+      if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
+      return stateFromRow(result.rows[0]);
+    });
   }
 
   async clearOperationsSuspension(
@@ -534,17 +807,20 @@ export class ExperiencePublicationRepository {
     assertStoreIdentifier(providerId, "providerId");
     assertStoreIdentifier(productId, "productId");
     validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
-    const result = await this.#pool.query<DbRow>(
-      `UPDATE experience_product_publication_states
-          SET operations_suspended_at=NULL,operations_suspension_code=NULL,
-              operations_suspended_by_niho_user_id=NULL,version=version+1,updated_at=clock_timestamp()
-        WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND operations_suspended_at IS NOT NULL
-        RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
-          operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
-      [providerId, productId, expectedStateVersion],
-    );
-    if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or operations suspension not found.");
-    return stateFromRow(result.rows[0]);
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      const result = await client.query<DbRow>(
+        `UPDATE experience_product_publication_states
+            SET operations_suspended_at=NULL,operations_suspension_code=NULL,
+                operations_suspended_by_niho_user_id=NULL,version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND operations_suspended_at IS NOT NULL
+          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+            operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+        [providerId, productId, expectedStateVersion],
+      );
+      if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or operations suspension not found.");
+      return stateFromRow(result.rows[0]);
+    });
   }
 
   async getState(actor: HostActor, productId: string): Promise<ExperiencePublicationState | null> {
@@ -569,17 +845,34 @@ export class ExperiencePublicationRepository {
   async listPublic(): Promise<readonly PublicExperiencePublication[]> {
     const result = await this.#pool.query<DbRow>(
       `${VISIBLE_PUBLICATIONS}
-       SELECT ${PUBLIC_READER_COLUMNS} FROM visible_publications v
+       SELECT ${PUBLIC_READER_COLUMNS} FROM visible_publications
         WHERE NOT EXISTS (
           SELECT 1 FROM visible_publications duplicate
-           WHERE duplicate.slug=v.slug AND duplicate.publication_id<>v.publication_id
+           WHERE duplicate.slug=visible_publications.slug AND duplicate.publication_id<>visible_publications.publication_id
         )
-        ORDER BY v.first_published_at DESC,v.publication_id DESC`,
+        ORDER BY visible_publications.first_published_at DESC,visible_publications.publication_id DESC`,
     );
     return result.rows.flatMap((row) => {
       const publication = projectPublicExperiencePublication(row);
       return publication === null ? [] : [publication];
     });
+  }
+
+  /** Internal object-store locator for the anonymous relay; never serialize this value to a client. */
+  async getPublicMediaAsset(assetId: string): Promise<PublicExperienceMediaAsset | null> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) return null;
+    const result = await this.#pool.query<DbRow>(
+      `${VISIBLE_PUBLICATIONS}
+       SELECT asset.object_key,asset.byte_size
+         FROM visible_publications publication
+         JOIN experience_product_publication_media media ON media.publication_id=publication.publication_id
+         JOIN experience_product_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
+        WHERE asset.id=$1::uuid LIMIT 1`,
+      [assetId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return { objectKey: String(row.object_key), byteSize: safeInteger(row.byte_size, "media byte_size") };
   }
 }
 

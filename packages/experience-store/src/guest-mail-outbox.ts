@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
+import { cancellationTermsOf } from "./cancellation-terms.ts";
 import type { DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { GuestCancellationPolicy } from "./types.ts";
@@ -49,6 +50,9 @@ export interface BookingConfirmationEmail {
   readonly currency: string;
   /** Fixed at booking; null only for a snapshot without one. */
   readonly cancellationPolicy: GuestCancellationPolicy | null;
+  /** Exact refund window/rate accepted at checkout; null window means no automatic guest refund. */
+  readonly cancellationWindowMinutesBeforeStart: number | null;
+  readonly cancellationRefundBasisPoints: number;
   /** The seller's name fixed at booking. */
   readonly hostDisplayName: string;
 }
@@ -192,6 +196,7 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
   const pricing = record(row.pricing_snapshot);
   const seller = record(row.seller_snapshot);
   const policy = pricing.cancellationPolicy;
+  const cancellation = cancellationTermsOf(pricing);
   return {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
@@ -207,6 +212,8 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
     totalAmount: count(pricing.totalAmount, "pricing_snapshot.totalAmount"),
     currency: text(pricing.currency, "pricing_snapshot.currency"),
     cancellationPolicy: typeof policy === "string" && POLICIES.has(policy) ? policy as GuestCancellationPolicy : null,
+    cancellationWindowMinutesBeforeStart: cancellation.cancellationWindowMinutesBeforeStart,
+    cancellationRefundBasisPoints: cancellation.refundBasisPoints,
     hostDisplayName: text(seller.displayName, "seller_snapshot.displayName"),
   };
 }

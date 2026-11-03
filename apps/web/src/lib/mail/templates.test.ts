@@ -31,6 +31,8 @@ const confirmation: BookingConfirmationEmail = {
   totalAmount: 10_000,
   currency: "JPY",
   cancellationPolicy: "FREE_UNTIL_24H",
+  cancellationWindowMinutesBeforeStart: 1_440,
+  cancellationRefundBasisPoints: 10_000,
   hostDisplayName: "Sample Host",
 };
 const NOW = new Date("2026-11-01T00:00:00.000Z");
@@ -115,12 +117,22 @@ describe("bookingConfirmationEmail", () => {
 
   it("states each policy in plain words, and a deadline already passed as non-refundable", () => {
     const text = (overrides: Partial<BookingConfirmationEmail>, now = NOW) => bookingConfirmationEmail({ ...confirmation, ...overrides }, { siteUrl: SITE, now }).text;
-    expect(text({ cancellationPolicy: "FREE_UNTIL_48H" })).toContain("Free cancellation until Thu 12 Nov, 10:00 Japan time (48 hours before the start).");
-    expect(text({ cancellationPolicy: "NONE" })).toContain("This booking is non-refundable.");
-    expect(text({}, new Date("2026-11-13T12:00:00.000Z"))).toContain("Free cancellation ends 24 hours before the start, so this booking is now non-refundable.");
+    expect(text({ cancellationPolicy: "FREE_UNTIL_48H", cancellationWindowMinutesBeforeStart: 2_880, cancellationRefundBasisPoints: 10_000 })).toContain("Free cancellation until Thu 12 Nov, 10:00 Japan time (2 days before the start).");
+    expect(text({ cancellationPolicy: "NONE", cancellationWindowMinutesBeforeStart: null, cancellationRefundBasisPoints: 0 })).toContain("This booking is non-refundable.");
+    expect(text({}, new Date("2026-11-13T12:00:00.000Z"))).toContain("Free cancellation ended 1 day before the start. Reply to this email and NIHO support can help with a cancellation request.");
     expect(text({ cancellationPolicy: null })).not.toMatch(/refund|cancellation/i);
     expect(text({ adultCount: 1, childCount: 0 })).toContain("Guests: 1 adult\n");
     expect(text({ adultCount: 0, childCount: 2 })).toContain("Guests: 2 children\n");
+  });
+
+  it("states a custom partial refund rule from the immutable booking terms", () => {
+    const output = bookingConfirmationEmail({
+      ...confirmation,
+      cancellationWindowMinutesBeforeStart: 90,
+      cancellationRefundBasisPoints: 3_750,
+    }, { siteUrl: SITE, now: NOW }).text;
+    expect(output).toContain("You can cancel for a 37.5% refund until Sat 14 Nov, 08:30 Japan time (90 minutes before the start).");
+    expect(output).toContain("After that, contact NIHO support to request cancellation.");
   });
 
   it("puts the guest's name in the greeting only, never the address, the meeting point or anything remote", () => {

@@ -8,7 +8,7 @@ import {
   type Occurrence,
 } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "./errors.ts";
-import type { GuestCancellationPolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
+import type { BookingTermsSnapshot, GuestCancellationPolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -73,8 +73,9 @@ export function effectiveGoogleSyncStatus(
 
 /** A guest booking's party and its sale terms; without it every seat costs the product's unit amount. */
 export interface GuestPricingInput {
-  readonly breakdown: PricingBreakdown;
+  readonly breakdown: Omit<PricingBreakdown, "minimumChargeableParticipants">;
   readonly cancellationPolicy: GuestCancellationPolicy;
+  readonly bookingTerms: BookingTermsSnapshot;
   /** The provider's sale settings at booking; the amount follows from the total. */
   readonly platformFee: Omit<PlatformFeeSnapshot, "amount">;
 }
@@ -122,13 +123,17 @@ export function buildSnapshots(
   assertSeats(seats);
   assertMoney(product.unitAmount, "unitAmount");
   let totalAmount = product.unitAmount * seats;
+  let minimumChargeableParticipants = 1;
   if (guest !== undefined) {
     const { adultCount, childCount, childUnitAmount } = guest.breakdown;
     if (adultCount + childCount !== seats || (childCount > 0 && childUnitAmount === null)) {
       throw new StoreValidationError("The guest party does not match the booked seats.");
     }
     if (childUnitAmount !== null) assertMoney(childUnitAmount, "childUnitAmount");
-    totalAmount = product.unitAmount * adultCount + (childUnitAmount ?? 0) * childCount;
+    minimumChargeableParticipants = guest.bookingTerms.minimumChargeableParticipants ?? 1;
+    const ordinaryAmount = product.unitAmount * adultCount + (childUnitAmount ?? 0) * childCount;
+    const minimumAmount = product.unitAmount * minimumChargeableParticipants;
+    totalAmount = Math.max(ordinaryAmount, minimumAmount);
   }
   if (!Number.isSafeInteger(totalAmount)) throw new StoreValidationError("booking total exceeds the safe integer range.");
   return {
@@ -140,8 +145,9 @@ export function buildSnapshots(
       totalAmount,
       cancellationTermsRef: product.cancellationTermsRef,
       ...(guest === undefined ? {} : {
-        breakdown: { ...guest.breakdown },
+        breakdown: { ...guest.breakdown, minimumChargeableParticipants },
         cancellationPolicy: guest.cancellationPolicy,
+        bookingTerms: guest.bookingTerms,
         platformFee: guestPlatformFee(guest.platformFee, totalAmount),
       }),
     },

@@ -54,6 +54,41 @@ export function cancellationWords(
   return `Free cancellation until ${zonedMoment(deadline, booking.timeZone)} ${zoneName(booking.timeZone)} (${hours} hours before the start). After that, the booking is non-refundable.`;
 }
 
+/** Exact configurable refund rule in a confirmation email; custom values come from the booking snapshot. */
+export function cancellationTermsWords(
+  booking: {
+    readonly cancellationPolicy: GuestCancellationPolicy | null;
+    readonly cancellationWindowMinutesBeforeStart: number | null;
+    readonly cancellationRefundBasisPoints: number;
+    readonly startUtc: string;
+    readonly timeZone: string;
+  },
+  now: Date,
+): string | null {
+  if (booking.cancellationPolicy === null) return null;
+  const window = booking.cancellationWindowMinutesBeforeStart;
+  const refundBasisPoints = booking.cancellationRefundBasisPoints;
+  if (window === null) return "This booking is non-refundable.";
+  const deadline = Date.parse(booking.startUtc) - window * 60_000;
+  if (!Number.isFinite(deadline)) return "This booking's cancellation refund terms are unavailable. Reply to this email and NIHO support will help.";
+  const period = window % 1_440 === 0 ? `${window / 1_440} day${window / 1_440 === 1 ? "" : "s"}`
+    : window % 60 === 0 ? `${window / 60} hour${window / 60 === 1 ? "" : "s"}`
+      : `${window} minute${window === 1 ? "" : "s"}`;
+  const percent = refundBasisPoints % 100 === 0
+    ? `${refundBasisPoints / 100}%`
+    : `${(refundBasisPoints / 100).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}%`;
+  if (deadline <= now.getTime()) {
+    const label = refundBasisPoints === 10_000 ? "Free cancellation" : `${percent} cancellation refund`;
+    return `${label} ended ${period} before the start. Reply to this email and NIHO support can help with a cancellation request.`;
+  }
+  const moment = `${zonedMoment(deadline, booking.timeZone)} ${zoneName(booking.timeZone)}`;
+  if (refundBasisPoints === 10_000) {
+    return `Free cancellation until ${moment} (${period} before the start). After that, the booking is non-refundable.`;
+  }
+  if (refundBasisPoints === 0) return `You may cancel without a refund until ${moment} (${period} before the start). After that, contact NIHO support to request cancellation.`;
+  return `You can cancel for a ${percent} refund until ${moment} (${period} before the start). After that, contact NIHO support to request cancellation.`;
+}
+
 /** How long a card refund takes to show, as Stripe tells cardholders. */
 export const REFUND_TIMING = "Banks usually take 5–10 business days to show a refund on your statement.";
 

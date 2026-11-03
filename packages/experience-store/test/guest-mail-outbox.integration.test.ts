@@ -126,6 +126,7 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
         publicBookingId: family.publicBookingId, guestEmail: "Parent@Example.com", guestName: "Sample Parent",
         experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo",
         startUtc: snapshot.startUtc, adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H",
+        cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000,
         hostDisplayName: "Sample Seller A",
       });
 

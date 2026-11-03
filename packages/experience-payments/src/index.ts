@@ -208,14 +208,20 @@ function expectedSnapshotTotal(booking: Readonly<BookingRecord>): number {
   const breakdown = pricing.breakdown;
   if (breakdown === undefined) return pricing.unitAmount * pricing.seats;
   const { adultCount, childCount, childUnitAmount } = breakdown;
+  const minimumChargeableParticipants = booking.pricingSnapshot.bookingTerms?.minimumChargeableParticipants
+    ?? breakdown.minimumChargeableParticipants ?? 1;
   if (
     !Number.isInteger(adultCount) || !Number.isInteger(childCount) || adultCount < 0 || childCount < 0 ||
     adultCount + childCount !== pricing.seats || (childCount > 0 && childUnitAmount === null) ||
-    (childUnitAmount !== null && (!Number.isSafeInteger(childUnitAmount) || childUnitAmount < 0))
+    (childUnitAmount !== null && (!Number.isSafeInteger(childUnitAmount) || childUnitAmount < 0)) ||
+    !Number.isInteger(minimumChargeableParticipants) || minimumChargeableParticipants < 1
   ) {
     return Number.NaN;
   }
-  return pricing.unitAmount * adultCount + (childUnitAmount ?? 0) * childCount;
+  return Math.max(
+    pricing.unitAmount * adultCount + (childUnitAmount ?? 0) * childCount,
+    pricing.unitAmount * minimumChargeableParticipants,
+  );
 }
 
 function checkoutExpiry(

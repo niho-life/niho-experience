@@ -157,6 +157,14 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         stripeConnectAccountRef: "acct_synthetic_publication",
         sellerDisplayName: "Synthetic Legal Seller",
       });
+      await pool.query(
+        `INSERT INTO experience_product_media_assets
+           (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,
+            public_credit,rights_confirmed_at)
+         VALUES ('00000000-0000-4000-8000-000000000330',$1,$2,0,'experience-products/00000000-0000-4000-8000-000000000330.jpg',
+           $3,640,480,4096,'Synthetic public photo',NULL,clock_timestamp())`,
+        [OWNER.providerId, original.id, "3".repeat(64)],
+      );
 
       const suspensionCheckViolation = (error: unknown): boolean =>
         typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23514";
@@ -240,7 +248,62 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(state.version, 1);
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic tea");
+      assert.equal((await publications.getPublicBySlug(original.slug))?.photos[0]?.src,
+        "/api/public/experience-media/00000000-0000-4000-8000-000000000330");
+      assert.deepEqual(await publications.getPublicMediaAsset("00000000-0000-4000-8000-000000000330"), {
+        objectKey: "experience-products/00000000-0000-4000-8000-000000000330.jpg", byteSize: 4096,
+      });
+      const publicationTerms = await pool.query<{ sale_terms_snapshot: Record<string, unknown> }>(
+        "SELECT sale_terms_snapshot FROM experience_product_publications WHERE provider_id=$1 AND product_id=$2 ORDER BY id LIMIT 1",
+        [OWNER.providerId, original.id],
+      );
+      assert.equal(publicationTerms.rows[0]?.sale_terms_snapshot.cancellationPolicy, "FREE_UNTIL_24H");
       assert.deepEqual((await publications.listPublic()).map(({ slug }) => slug), [original.slug]);
+
+      const saleTermsRead = await publications.getSaleTerms(EDITOR, original.id);
+      assert.equal(saleTermsRead.draftVersion, original.version);
+      assert.equal(saleTermsRead.stateVersion, state.version);
+      assert.equal(saleTermsRead.saleTerms?.version, 1);
+      assert.equal("providerId" in (saleTermsRead.saleTerms ?? {}), false);
+      const saleTermsUpdate = await publications.saveSaleTerms(EDITOR, original.id, {
+        expectedDraftVersion: original.version,
+        expectedStateVersion: state.version,
+        expectedSaleTermsVersion: 1,
+        saleTerms: {
+          childPricing: null,
+          minimumParticipants: 2,
+          minimumChargeableParticipants: 3,
+          privateBooking: true,
+          maxPartySize: 6,
+          cancellationPolicy: "NONE",
+          cancellationWindowMinutesBeforeStart: 90,
+          cancellationRefundBasisPoints: 3_750,
+          minimumAttendance: 4,
+          bookingQuestions: [],
+          conditionsVersion: null,
+        },
+        checks: CHECKS,
+      });
+      assert.equal(saleTermsUpdate.publicationUpdated, true);
+      assert.equal(saleTermsUpdate.saleTerms?.version, 2);
+      assert.equal(saleTermsUpdate.stateVersion, state.version + 1);
+      state = (await publications.getState(OWNER, original.id))!;
+      const activeTermsSnapshot = await pool.query<{ sale_terms_version: string; sale_terms_snapshot: Record<string, unknown> }>(
+        `SELECT sale_terms_version,sale_terms_snapshot FROM experience_product_publications WHERE id=$1`,
+        [state.currentPublicationId],
+      );
+      assert.equal(Number(activeTermsSnapshot.rows[0]?.sale_terms_version), 2);
+      assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.minimumChargeableParticipants, 3);
+      assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.privateBooking, true);
+      assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationWindowMinutesBeforeStart, 90);
+      assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationRefundBasisPoints, 3_750);
+      await assert.rejects(publications.saveSaleTerms(EDITOR, original.id, {
+        expectedDraftVersion: original.version,
+        expectedStateVersion: state.version,
+        expectedSaleTermsVersion: 1,
+        saleTerms: saleTermsUpdate.saleTerms!,
+        checks: CHECKS,
+      }), StoreConflictError);
 
       const changed = await publications.saveDraft(EDITOR, {
         id: original.id,
@@ -250,12 +313,19 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         currency: "JPY",
         unitAmount: 4_500,
         cancellationTermsRef: "cancellation-synthetic-v2",
-      }, original.version, CHECKS);
+      }, original.version, state.version, CHECKS);
       assert.equal(changed.publicationUpdated, true);
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic tea, revised");
       await assert.rejects(
-        publications.saveDraft(EDITOR, { ...changed.draft, id: original.id }, original.version, CHECKS),
+        publications.saveDraft(EDITOR, { ...changed.draft, id: original.id }, original.version, state.version, CHECKS),
         StoreConflictError,
+      );
+
+      const currentState = (await publications.getState(OWNER, original.id))!;
+      await assert.rejects(
+        publications.saveDraft(EDITOR, { ...changed.draft, id: original.id }, changed.draft.version, state.version, CHECKS),
+        StoreConflictError,
+        "a stale publication version cannot overwrite an edit even when the draft version is current",
       );
 
       // An incomplete ordinary save remains editable but does not erase or replace the public copy.
@@ -267,7 +337,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         currency: "JPY",
         unitAmount: 4_500,
         cancellationTermsRef: "cancellation-synthetic-v2",
-      }, changed.draft.version, { manuscriptReady: true, photosReady: false });
+      }, changed.draft.version, currentState.version, { manuscriptReady: true, photosReady: false });
       assert.equal(incomplete.publicationUpdated, false);
       assert.ok(incomplete.blockers.includes("PHOTOS_REQUIRED"));
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic tea, revised");
@@ -275,6 +345,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       state = (await publications.getState(OWNER, original.id))!;
       state = await publications.stop(OWNER, original.id, state.version);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.equal(await publications.getPublicMediaAsset("00000000-0000-4000-8000-000000000330"), null);
       await assert.rejects(publications.stop(OWNER, original.id, state.version - 1), StoreConflictError);
       state = await publications.publish(OWNER, original.id, {
         expectedDraftVersion: incomplete.draft.version,

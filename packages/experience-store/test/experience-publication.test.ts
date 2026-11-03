@@ -54,6 +54,7 @@ const row = (disclosure: "PUBLIC" | "AFTER_BOOKING") => ({
   currency: "JPY",
   unit_amount: "4000",
   seller_display_name: "Synthetic Legal Seller",
+  photos: [{ asset_id: "00000000-0000-4000-8000-000000000401", alt_text: "Synthetic photo", public_credit: null }],
   published_at: "2026-11-03T00:00:00.000Z",
 });
 
@@ -62,7 +63,7 @@ describe("experience publication public projection", () => {
     const projected = projectPublicExperiencePublication(row("PUBLIC"));
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
-      "currency", "unitAmount", "sellerDisplayName", "publishedAtUtc",
+      "currency", "unitAmount", "sellerDisplayName", "photos", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
     assert.deepEqual(Object.keys(projected?.content ?? {}), [

@@ -209,6 +209,34 @@ export interface PricingBreakdown {
   readonly childCount: number;
   /** The child price per seat; null when the product sells no child seats (childCount is then 0). */
   readonly childUnitAmount: number | null;
+  /** Exact minimum-charge rule applied to this booking (absent only in legacy snapshots). */
+  readonly minimumChargeableParticipants?: number;
+}
+
+/** The exact offer rules and consented conditions accepted when checkout starts. */
+export interface BookingTermsSnapshot {
+  readonly minimumParticipants: number;
+  /** Minimum adult-price-equivalent participants charged, even when the party is smaller. */
+  readonly minimumChargeableParticipants?: number;
+  /** A single active booking group reserves this occurrence against later groups. */
+  readonly privateBooking?: boolean;
+  /** Operations threshold fixed at checkout; intentionally excluded from all guest-facing DTOs. */
+  readonly minimumAttendance?: number | null;
+  readonly maxPartySize: number;
+  readonly cancellationPolicy: GuestCancellationPolicy;
+  /** Exact offer-level free-cancellation window and guest refund rate accepted at checkout. */
+  readonly cancellationWindowMinutesBeforeStart?: number | null;
+  readonly cancellationRefundBasisPoints?: number;
+  readonly bookingQuestions: readonly {
+    readonly id: string;
+    readonly prompt: string;
+    readonly description: string | null;
+    readonly inputType: "SHORT_TEXT" | "LONG_TEXT" | "SINGLE_SELECT" | "MULTI_SELECT";
+    readonly required: boolean;
+    readonly options: readonly { readonly id: string; readonly label: string }[];
+  }[];
+  readonly bookingQuestionsFingerprint: string;
+  readonly conditionsVersion: string | null;
 }
 
 export interface PricingSnapshot {
@@ -223,6 +251,8 @@ export interface PricingSnapshot {
   readonly breakdown?: PricingBreakdown;
   /** Guest bookings (#285) only: the cancellation policy fixed at booking. */
   readonly cancellationPolicy?: GuestCancellationPolicy;
+  /** Guest bookings only: immutable terms shown and accepted at the time the hold was created. */
+  readonly bookingTerms?: BookingTermsSnapshot;
   /** Guest bookings (#285) only: NIHO's fee fixed at booking, the Checkout Session's application fee. */
   readonly platformFee?: PlatformFeeSnapshot;
 }

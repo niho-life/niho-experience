@@ -38,6 +38,11 @@ export interface PublicExperiencePublication {
     readonly name: string;
     readonly exteriorPhotoIndex: number | null;
   } | null;
+  readonly photos: readonly {
+    readonly src: string;
+    readonly alt: string;
+    readonly publicCredit: string | null;
+  }[];
   readonly publishedAtUtc: string;
 }
 
@@ -68,6 +73,20 @@ const safeInteger = (value: unknown): number | null => {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 };
+
+function projectPhotos(value: unknown): PublicExperiencePublication["photos"] | null {
+  if (!Array.isArray(value)) return null;
+  const photos: { src: string; alt: string; publicCredit: string | null }[] = [];
+  for (const rawPhoto of value) {
+    const photo = record(rawPhoto);
+    if (!photo || typeof photo.asset_id !== "string" || !/^[0-9a-f-]{36}$/i.test(photo.asset_id)) return null;
+    const alt = text(photo.alt_text);
+    const publicCredit = nullableText(photo.public_credit);
+    if (alt === null || publicCredit === undefined) return null;
+    photos.push({ src: `/api/public/experience-media/${encodeURIComponent(photo.asset_id)}`, alt, publicCredit });
+  }
+  return photos;
+}
 
 function projectTimeline(value: unknown): readonly PublicExperiencePublicationTimelineItem[] | null {
   if (!Array.isArray(value)) return null;
@@ -158,8 +177,9 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const currency = typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null;
   const unitAmount = safeInteger(row.unit_amount);
   const sellerDisplayName = text(row.seller_display_name, false);
+  const photos = projectPhotos(row.photos);
   const publishedAtUtc = instant(row.published_at);
   if (slug === null || publicTitle === null || manuscript === null || currency === null || unitAmount === null
-      || sellerDisplayName === null || publishedAtUtc === null) return null;
-  return { slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, publishedAtUtc };
+      || sellerDisplayName === null || photos === null || publishedAtUtc === null) return null;
+  return { slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, photos, publishedAtUtc };
 }
