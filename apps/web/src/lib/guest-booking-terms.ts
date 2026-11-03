@@ -1,5 +1,5 @@
 import type { BookingQuestion, ExperienceOffer } from "@niho-experience/api-client";
-import type { PublicBookingTerms } from "@niho-experience/experience-store";
+import type { PublicBookingOffer, PublicBookingTerms } from "@niho-experience/experience-store";
 import type { ExperienceDetailForSite } from "./experience-types";
 
 /**
@@ -15,6 +15,21 @@ export type SiteSaleTerms = {
   booking: { consentVersion: string; checkoutAvailable: true; currency: "JPY"; timeZone: "Asia/Tokyo" };
   sellerDisplayName: string;
 };
+
+function legacyCancellationPolicy(offer: PublicBookingOffer): ExperienceOffer["cancellationPolicy"] {
+  const { code, freeCancellationHoursBefore } = offer.cancellationPolicy;
+  const { cancellationWindowMinutesBeforeStart, refundBasisPoints } = offer.cancellationTerms;
+  if (code === "NONE" && cancellationWindowMinutesBeforeStart === null && refundBasisPoints === 0 && freeCancellationHoursBefore === null) {
+    return { code, freeCancellationHoursBefore };
+  }
+  if (code === "FREE_UNTIL_24H" && cancellationWindowMinutesBeforeStart === 1_440 && refundBasisPoints === 10_000 && freeCancellationHoursBefore === 24) {
+    return { code, freeCancellationHoursBefore };
+  }
+  if (code === "FREE_UNTIL_48H" && cancellationWindowMinutesBeforeStart === 2_880 && refundBasisPoints === 10_000 && freeCancellationHoursBefore === 48) {
+    return { code, freeCancellationHoursBefore };
+  }
+  throw new Error("This cancellation policy cannot be represented by the legacy booking contract.");
+}
 
 /**
  * The store's terms in NIHO's public shapes, field by field: the provider and product IDs (server-only) never
@@ -43,7 +58,7 @@ export function siteSaleTerms(terms: PublicBookingTerms, consentVersion: string)
       durationMinutes: offer.durationMinutes,
       startTime: offer.startTime,
       weekdays: [...offer.weekdays],
-      cancellationPolicy: { code: offer.cancellationPolicy.code, freeCancellationHoursBefore: offer.cancellationPolicy.freeCancellationHoursBefore },
+      cancellationPolicy: legacyCancellationPolicy(offer),
       acceptanceMode: offer.acceptanceMode,
       bookingQuestions: offer.bookingQuestions.map((question) => ({
         id: question.id,

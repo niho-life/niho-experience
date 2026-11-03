@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
 import { adminMutationAllowed, clearAdminHttpSessionCookie, loadAdminHttpSession } from "@/lib/admin/server";
 import { config } from "@/lib/config";
@@ -9,9 +10,9 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const VERSION = /^[1-9][0-9]{0,15}$/;
 const BODY_LIMIT = 2_048;
 const HEADERS = { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" };
-function json(body: unknown, status = 200): Response { return Response.json(body, { status, headers: HEADERS }); }
+function json(body: unknown, status = 200): NextResponse { return NextResponse.json(body, { status, headers: HEADERS }); }
 
-export async function POST(request: Request, context: Context): Promise<Response> {
+export async function POST(request: Request, context: Context): Promise<NextResponse> {
   if (!config.experiencePublicationsEnabled || config.apiMode !== "http" || !config.adminSupportConsoleEnabled) return json({ error: { code: "NOT_FOUND" } }, 404);
   if (!adminMutationAllowed(request)) return json({ error: { code: "FORBIDDEN" } }, 403);
   const { providerId, productId } = await context.params;

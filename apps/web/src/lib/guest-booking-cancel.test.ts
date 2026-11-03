@@ -133,7 +133,7 @@ describe("the booking page's cancellation section", () => {
   const VIEW: GuestBookingView = {
     publicBookingId: BOOKING, status: "CONFIRMED", experienceTitle: "Synthetic walk", experienceSlug: "sample-walk",
     localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: "2026-11-14T01:00:00.000Z", endUtc: "2026-11-14T02:30:00.000Z",
-    adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H", freeCancellationUntilUtc: DEADLINE,
+    adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H", cancellationRefundBasisPoints: 10000, freeCancellationUntilUtc: DEADLINE,
     hostDisplayName: "Sample Host", guestName: "Sample Guest", bookedAtUtc: "2026-10-31T01:00:00.000Z", cancelledAtUtc: null,
     cancelledBy: null, cancellationReason: null, freeCancellationOpen: true, experienceEnded: false, refunds: [], cancellationRequest: null,
   };
