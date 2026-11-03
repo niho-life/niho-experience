@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  addLocalDays,
   expandOccurrences,
+  findOverlappingOpenOccurrenceIds,
   occurrenceIdFor,
   parseOccurrenceOverrides,
   parseScheduleRule,
@@ -267,6 +269,70 @@ function occurrenceForSource(
   }).find((candidate) => candidate.id === occurrenceId);
   if (occurrence === undefined) throw new StoreNotFoundError("schedule occurrence");
   return occurrence;
+}
+
+async function productScheduleOccurrences(
+  client: PoolClient,
+  providerId: string,
+  productId: string,
+  fromDate: string,
+  toDate: string,
+  replacements: {
+    readonly rule?: ScheduleRule;
+    readonly salesState?: { readonly ruleId: string; readonly state: OccurrenceSalesState };
+  } = {},
+): Promise<Occurrence[]> {
+  const ruleResult = await client.query<DbRow>(
+    `SELECT ${RULE_COLUMNS} FROM schedule_rules WHERE provider_id=$1 AND product_id=$2 ORDER BY id COLLATE "C"`,
+    [providerId, productId],
+  );
+  const rulesById = new Map(ruleResult.rows.map((row) => {
+    const stored = scheduleRuleFromRow(row);
+    return [stored.rule.id, stored.rule] as const;
+  }));
+  if (replacements.rule !== undefined) rulesById.set(replacements.rule.id, replacements.rule);
+  const ruleIds = [...rulesById.keys()];
+  if (ruleIds.length === 0) return [];
+
+  const overrideResult = await client.query<DbRow>(
+    `SELECT rule_id,${OVERRIDE_COLUMNS} FROM schedule_occurrence_overrides WHERE provider_id=$1 AND rule_id=ANY($2::text[])`,
+    [providerId, ruleIds],
+  );
+  const salesStateResult = await client.query<DbRow>(
+    `SELECT rule_id,${SALES_STATE_COLUMNS} FROM schedule_occurrence_sales_states WHERE provider_id=$1 AND rule_id=ANY($2::text[])`,
+    [providerId, ruleIds],
+  );
+  const overridesByRule = new Map<string, OccurrenceOverride[]>();
+  for (const row of overrideResult.rows) {
+    const ruleId = String(row.rule_id);
+    overridesByRule.set(ruleId, [...(overridesByRule.get(ruleId) ?? []), overrideFromRow(row).override]);
+  }
+  const salesStatesByRule = new Map<string, OccurrenceSalesState[]>();
+  for (const row of salesStateResult.rows) {
+    const ruleId = String(row.rule_id);
+    salesStatesByRule.set(ruleId, [...(salesStatesByRule.get(ruleId) ?? []), salesStateFromRow(row).state]);
+  }
+  const replacement = replacements.salesState;
+  if (replacement !== undefined) {
+    const states = (salesStatesByRule.get(replacement.ruleId) ?? [])
+      .filter((state) => state.occurrenceId !== replacement.state.occurrenceId);
+    salesStatesByRule.set(replacement.ruleId, [...states, replacement.state]);
+  }
+
+  return [...rulesById].flatMap(([ruleId, rule]) => expandOccurrences({
+    rule,
+    overrides: overridesByRule.get(ruleId) ?? [],
+    salesStates: salesStatesByRule.get(ruleId) ?? [],
+    fromDate,
+    toDate,
+  }));
+}
+
+function assertNoOverlappingOpenOccurrences(occurrences: readonly Occurrence[], targetRuleId: string): void {
+  const conflicted = findOverlappingOpenOccurrenceIds(occurrences);
+  if (occurrences.some((item) => item.ruleId === targetRuleId && conflicted.has(item.id))) {
+    throw new StoreConflictError("This schedule overlaps another open occurrence for the same product.");
+  }
 }
 
 export class ExperienceStore {
@@ -654,6 +720,17 @@ export class ExperienceStore {
       }
       if (existingRow !== undefined) await this.#assertScheduleHasNoFutureReservations(client, actor.providerId, rule.id);
 
+      const todayResult = await client.query<DbRow>(
+        "SELECT (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date::text AS today",
+      );
+      const today = String(todayResult.rows[0]?.today ?? "");
+      if (!today) throw new Error("The current Tokyo date could not be read.");
+      const occurrences = [
+        ...await productScheduleOccurrences(client, actor.providerId, productId, today, addLocalDays(today, 89), { rule }),
+        ...await productScheduleOccurrences(client, actor.providerId, productId, addLocalDays(today, -1), addLocalDays(today, -1), { rule }),
+      ];
+      assertNoOverlappingOpenOccurrences(occurrences, rule.id);
+
       const values = [
         actor.providerId,
         rule.id,
@@ -832,7 +909,7 @@ export class ExperienceStore {
         [actor.providerId, ruleId, rawState.occurrenceId],
       );
       const storedOverride = timing.rows[0] === undefined ? undefined : overrideFromRow(timing.rows[0]).override;
-      occurrenceForSource(storedRule.rule, storedOverride, rawState, rawState.occurrenceId);
+      const occurrence = occurrenceForSource(storedRule.rule, storedOverride, rawState, rawState.occurrenceId);
       const current = await client.query<DbRow>(
         `SELECT ${SALES_STATE_COLUMNS} FROM schedule_occurrence_sales_states
           WHERE provider_id=$1 AND rule_id=$2 AND occurrence_id=$3 FOR UPDATE`,
@@ -841,6 +918,17 @@ export class ExperienceStore {
       const currentRow = current.rows[0];
       if (currentRow === undefined && expectedVersion !== null) throw new StoreConflictError("Occurrence sales state was not found.");
       if (currentRow !== undefined && Number(currentRow.version) !== expectedVersion) throw new StoreConflictError("Occurrence sales state version mismatch.");
+      if (rawState.desiredState === "OPEN") {
+        const conflicting = await productScheduleOccurrences(
+          client,
+          actor.providerId,
+          productId,
+          addLocalDays(occurrence.localDate, -1),
+          occurrence.localDate,
+          { salesState: { ruleId, state: rawState } },
+        );
+        assertNoOverlappingOpenOccurrences(conflicting, ruleId);
+      }
       const savedResult = currentRow === undefined
         ? await client.query<DbRow>(
             `INSERT INTO schedule_occurrence_sales_states (provider_id, rule_id, occurrence_id, desired_state)

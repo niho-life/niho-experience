@@ -217,6 +217,70 @@ async function lapse(pool: Pool, starts: readonly GuestBookingStart[]): Promise<
 }
 
 describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }, () => {
+  it("keeps duplicate slots from opening together and fails closed if legacy state bypasses the guard", async () => {
+    await withSchema(async ({ pool, store, guests }) => {
+      const firstRule = rule("sample-duplicate-first", {
+        startsOn: day(2), endsOn: day(2), localStartTime: "18:00", durationMinutes: 120,
+      });
+      const secondRule = rule("sample-duplicate-second", {
+        startsOn: day(2), endsOn: day(2), localStartTime: "18:00", durationMinutes: 120,
+      });
+      await store.saveScheduleRule(ownerA, "tea", firstRule, null, randomUUID());
+
+      await assert.rejects(
+        () => store.saveScheduleRule(ownerA, "tea", secondRule, null, randomUUID()),
+        StoreConflictError,
+      );
+
+      const firstOccurrenceId = occurrenceIdFor(firstRule.id, day(2));
+      await store.setOccurrenceSalesState(ownerA, "tea", firstRule.id, {
+        occurrenceId: firstOccurrenceId, desiredState: "CLOSED",
+      }, null, randomUUID());
+      const savedSecond = await store.saveScheduleRule(ownerA, "tea", secondRule, null, randomUUID());
+      assert.equal(savedSecond.aggregateId, secondRule.id);
+      const secondOccurrenceId = occurrenceIdFor(secondRule.id, day(2));
+      await store.setOccurrenceSalesState(ownerA, "tea", secondRule.id, {
+        occurrenceId: secondOccurrenceId, desiredState: "CLOSED",
+      }, null, randomUUID());
+
+      const attempts = await Promise.allSettled([
+        store.setOccurrenceSalesState(ownerA, "tea", firstRule.id, {
+          occurrenceId: firstOccurrenceId, desiredState: "OPEN",
+        }, 1, randomUUID()),
+        store.setOccurrenceSalesState(ownerA, "tea", secondRule.id, {
+          occurrenceId: secondOccurrenceId, desiredState: "OPEN",
+        }, 1, randomUUID()),
+      ]);
+      assert.equal(attempts.filter((item) => item.status === "fulfilled").length, 1);
+      assert.equal(attempts.filter((item) => item.status === "rejected" && item.reason instanceof StoreConflictError).length, 1);
+
+      const partiallyOpen = await guests.listPublicAvailability("sample-tea", { fromDate: day(2), windowDays: 1 });
+      assert.ok(partiallyOpen);
+      assert.equal(partiallyOpen.occurrences.filter((item) => item.date === day(2) && item.bookable).length, 1);
+
+      // Simulate pre-existing inconsistent data that bypassed typed store writes.
+      await pool.query(
+        `UPDATE schedule_occurrence_sales_states SET desired_state='OPEN',version=version+1
+          WHERE provider_id='provider-a' AND rule_id=$1 AND occurrence_id=$2`,
+        [firstRule.id, firstOccurrenceId],
+      );
+      await pool.query(
+        `UPDATE schedule_occurrence_sales_states SET desired_state='OPEN',version=version+1
+          WHERE provider_id='provider-a' AND rule_id=$1 AND occurrence_id=$2`,
+        [secondRule.id, secondOccurrenceId],
+      );
+
+      const failClosed = await guests.listPublicAvailability("sample-tea", { fromDate: day(2), windowDays: 1, offerId: firstRule.id });
+      assert.deepEqual(failClosed?.occurrences.map((item) => ({ bookable: item.bookable, seatsLeft: item.seatsLeft, reason: item.reason })), [
+        { bookable: false, seatsLeft: 0, reason: "UNAVAILABLE" },
+      ]);
+      await refused(guests.startGuestBooking(request({ offerId: firstRule.id, occurrenceDate: day(2) })),
+        "OCCURRENCE_INVALID", { occurrenceReason: "UNAVAILABLE" });
+      await refused(guests.startGuestBooking(request({ offerId: secondRule.id, occurrenceDate: day(2) })),
+        "OCCURRENCE_INVALID", { occurrenceReason: "UNAVAILABLE" });
+    });
+  });
+
   it("sells only what exactly one published JPY product with sale terms offers, and maps rules to offers", async () => {
     await withSchema(async ({ pool, guests, addRule }) => {
       await addRule("tea", rule("sample-am"));

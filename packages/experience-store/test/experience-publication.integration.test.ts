@@ -45,6 +45,89 @@ const readiness = (overrides: Partial<Parameters<ExperiencePublicationRepository
 };
 
 describe("Experience publication persistence (#330 #369)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
+  it("serializes slug claims across providers for publish and save-and-publish", async () => {
+    const { Pool } = await import("pg");
+    const schema = `experience_publication_slug_${randomUUID().replaceAll("-", "")}`;
+    const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
+    try {
+      await pool.query(`CREATE SCHEMA "${schema}"`);
+      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
+      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+
+      const firstOwner = { providerId: "provider-slug-first", nihoUserId: "owner-slug-first" } as const;
+      const secondOwner = { providerId: "provider-slug-second", nihoUserId: "owner-slug-second" } as const;
+      await pool.query("INSERT INTO experience_providers (id) VALUES ($1),($2)", [firstOwner.providerId, secondOwner.providerId]);
+      await pool.query(
+        "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($3,$4,'OWNER')",
+        [firstOwner.providerId, firstOwner.nihoUserId, secondOwner.providerId, secondOwner.nihoUserId],
+      );
+
+      const store = new ExperienceStore(pool);
+      const publications = new ExperiencePublicationRepository(pool);
+      for (const owner of [firstOwner, secondOwner]) await publications.recordReadiness(owner, readiness(), null);
+      const prepareProduct = async (owner: { readonly providerId: string; readonly nihoUserId: string }, id: string, slug: string) => {
+        const product = await store.createProduct(owner, {
+          id, slug, status: "PUBLISHED", publicTitle: `Synthetic ${id}`, content: manuscript(`Synthetic ${id} copy.`),
+          currency: "JPY", unitAmount: 4_000, cancellationTermsRef: `terms-${id}`,
+          sellerNihoAccountRef: "seller-account-synthetic", stripeConnectAccountRef: "acct_synthetic_publication",
+          sellerDisplayName: "Synthetic Legal Seller",
+        });
+        const rule: ScheduleRule = {
+          id: `${id}-daily`, timeZone: "Asia/Tokyo", startsOn: "2099-01-01", localStartTime: "10:00", durationMinutes: 90,
+          capacity: 6, bookingCutoffMinutes: 60, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
+        };
+        await store.saveScheduleRule(owner, id, rule, null, randomUUID());
+        await pool.query(
+          `INSERT INTO experience_product_sale_terms
+             (provider_id,product_id,minimum_participants,max_party_size,cancellation_policy,
+              booking_questions,booking_questions_fingerprint,conditions_version)
+           VALUES ($1,$2,1,6,'FREE_UNTIL_24H','[]'::jsonb,$3,NULL)`,
+          [owner.providerId, id, "0".repeat(64)],
+        );
+        return product;
+      };
+      const publishRace = await Promise.all([
+        prepareProduct(firstOwner, "publish-first", "shared-publish-slug"),
+        prepareProduct(secondOwner, "publish-second", "shared-publish-slug"),
+      ]);
+      const publishResults = await Promise.allSettled(publishRace.map((product, index) => publications.publish(
+        index === 0 ? firstOwner : secondOwner,
+        product.id,
+        { expectedDraftVersion: product.version, expectedStateVersion: null, consentVersion: readiness().requiredConsentVersion, checks: CHECKS },
+      )));
+      assert.equal(publishResults.filter((result) => result.status === "fulfilled").length, 1);
+      const publishBlocked = publishResults.find((result) => result.status === "rejected");
+      assert.ok(publishBlocked?.status === "rejected" && publishBlocked.reason instanceof ExperiencePublicationBlockedError);
+      assert.ok(publishBlocked.reason.blockers.includes("SLUG_IN_USE"));
+      assert.equal((await publications.listPublic()).filter(({ slug }) => slug === "shared-publish-slug").length, 1);
+
+      const firstDraft = await prepareProduct(firstOwner, "draft-first", "draft-first-slug");
+      const secondDraft = await prepareProduct(secondOwner, "draft-second", "draft-second-slug");
+      for (const [owner, product] of [[firstOwner, firstDraft], [secondOwner, secondDraft]] as const) {
+        await publications.publish(owner, product.id, {
+          expectedDraftVersion: product.version, expectedStateVersion: null,
+          consentVersion: readiness().requiredConsentVersion, checks: CHECKS,
+        });
+      }
+      const draftResults = await Promise.all([
+        publications.saveDraft(firstOwner, {
+          id: firstDraft.id, slug: "shared-draft-slug", publicTitle: "Synthetic draft first",
+          content: manuscript("Synthetic first update."), currency: "JPY", unitAmount: 4_100, cancellationTermsRef: `terms-${firstDraft.id}`,
+        }, firstDraft.version, CHECKS),
+        publications.saveDraft(secondOwner, {
+          id: secondDraft.id, slug: "shared-draft-slug", publicTitle: "Synthetic draft second",
+          content: manuscript("Synthetic second update."), currency: "JPY", unitAmount: 4_100, cancellationTermsRef: `terms-${secondDraft.id}`,
+        }, secondDraft.version, CHECKS),
+      ]);
+      assert.equal(draftResults.filter((result) => result.publicationUpdated).length, 1);
+      assert.equal(draftResults.filter((result) => result.blockers.includes("SLUG_IN_USE")).length, 1);
+      assert.equal((await publications.listPublic()).filter(({ slug }) => slug === "shared-draft-slug").length, 1);
+    } finally {
+      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await pool.end();
+    }
+  });
+
   it("publishes only through a current OWNER, preserves an older public copy on incomplete saves, and fails closed", async () => {
     const { Pool } = await import("pg");
     const schema = `experience_publication_${randomUUID().replaceAll("-", "")}`;

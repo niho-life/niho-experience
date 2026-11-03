@@ -33,6 +33,7 @@ export {
   MAX_EXPANSION_DAYS,
   createBookingOccurrenceSnapshot,
   expandOccurrences,
+  findOverlappingOpenOccurrenceIds,
   occurrenceIdFor,
 } from "#schedule";
 export { evaluateAvailability, intervalsOverlap } from "#availability";

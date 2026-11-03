@@ -250,6 +250,12 @@ async function readinessRow(client: PoolClient, providerId: string, lock = false
   return result.rows[0] ?? null;
 }
 
+async function lockPublicationSlugs(client: PoolClient, slugs: readonly string[]): Promise<void> {
+  for (const slug of [...new Set(slugs)].sort()) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`experience-publication-slug:${slug}`]);
+  }
+}
+
 async function blockers(
   client: PoolClient,
   product: ProductRecord,
@@ -383,6 +389,12 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${input.id}`]);
+      const current = await client.query<{ slug: string }>(
+        "SELECT slug FROM experience_products WHERE provider_id=$1 AND id=$2 AND version=$3 FOR UPDATE",
+        [actor.providerId, input.id, expectedVersion],
+      );
+      if (!current.rows[0]) throw new StoreConflictError("Product version mismatch or product not found in this provider.");
+      await lockPublicationSlugs(client, [current.rows[0].slug, input.slug]);
       const updated = await client.query<DbRow>(
         `UPDATE experience_products
             SET slug=$3,public_title=$4,content=$5::jsonb,currency=$6,unit_amount=$7,
@@ -441,6 +453,7 @@ export class ExperiencePublicationRepository {
       if (!productResult.rows[0]) throw new StoreNotFoundError("product");
       const product = productFromRow(productResult.rows[0]);
       if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      await lockPublicationSlugs(client, [product.slug]);
       const state = await lockedState(client, actor.providerId, productId);
       if ((state?.version ?? null) !== input.expectedStateVersion) throw new StoreConflictError("Publication state version mismatch: read the state again.");
       const blocked = await blockers(client, product, input.checks, input.consentVersion, state);

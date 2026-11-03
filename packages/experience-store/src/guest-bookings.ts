@@ -3,6 +3,7 @@ import {
   addLocalDays,
   assertLocalDate,
   expandOccurrences,
+  findOverlappingOpenOccurrenceIds,
   weekdayOf,
   type AvailabilityReason,
   type Occurrence,
@@ -1214,22 +1215,30 @@ export class GuestBookingRepository {
     const empty: PublicAvailability = { generatedAt: nowUtc, timeZone: "Asia/Tokyo", windowDays, occurrences: [] };
     if (fromDate > toDate) return empty;
 
-    const rules = (await activeRules(this.#pool, providerId, productId, today))
-      .filter((stored) => options.offerId === undefined || stored.rule.id === options.offerId);
-    const expanded = await expandRules(this.#pool, providerId, rules, fromDate, toDate);
-    if (expanded.length > MAX_LISTED_OCCURRENCES) throw new StoreConflictError("Too many occurrences in the public availability window.");
+    const rules = await activeRules(this.#pool, providerId, productId, today);
+    const [previousDate, expanded] = await Promise.all([
+      expandRules(this.#pool, providerId, rules, addLocalDays(fromDate, -1), addLocalDays(fromDate, -1)),
+      expandRules(this.#pool, providerId, rules, fromDate, toDate),
+    ]);
+    const allExpanded = [...previousDate, ...expanded];
+    const selected = expanded.filter(({ ruleId }) => options.offerId === undefined || ruleId === options.offerId);
+    if (selected.length > MAX_LISTED_OCCURRENCES || allExpanded.length > MAX_LISTED_OCCURRENCES * 2) {
+      throw new StoreConflictError("Too many occurrences in the public availability window.");
+    }
+    const overlapping = findOverlappingOpenOccurrenceIds(allExpanded.map(({ occurrence }) => occurrence));
+    const visible = selected.filter(({ occurrence }) => occurrence.localDate >= fromDate);
     const perDate = new Map<string, number>();
-    for (const { ruleId, occurrence } of expanded) {
+    for (const { ruleId, occurrence } of visible) {
       const key = `${ruleId}|${occurrence.localDate}`;
       perDate.set(key, (perDate.get(key) ?? 0) + 1);
     }
-    const unique = expanded.filter(({ ruleId, occurrence }) => perDate.get(`${ruleId}|${occurrence.localDate}`) === 1);
+    const unique = visible.filter(({ ruleId, occurrence }) => perDate.get(`${ruleId}|${occurrence.localDate}`) === 1);
     const evaluated = await evaluateStoredInventories(this.#pool, providerId, unique.map(({ occurrence }) => ({
       productId, occurrence, requestedSeats: sellable.terms.minimumParticipants,
     })), nowUtc);
-    const occurrences = expanded.map(({ ruleId, occurrence }): PublicOccurrence => {
+    const occurrences = visible.map(({ ruleId, occurrence }): PublicOccurrence => {
       const availability = evaluated.get(occurrence.id)?.availability;
-      const reason = availability === undefined ? "UNAVAILABLE" : publicReason(availability.reason);
+      const reason = overlapping.has(occurrence.id) || availability === undefined ? "UNAVAILABLE" : publicReason(availability.reason);
       return {
         offerId: ruleId,
         date: occurrence.localDate,
@@ -1290,7 +1299,8 @@ export class GuestBookingRepository {
 
       const nowUtc = await databaseNow(client);
       const today = tokyoDate(nowUtc);
-      const rule = (await activeRules(client, providerId, productId, today)).find((stored) => stored.rule.id === request.offerId);
+      const rules = await activeRules(client, providerId, productId, today);
+      const rule = rules.find((stored) => stored.rule.id === request.offerId);
       if (rule === undefined) throw invalid("offerId");
       if (request.termsConsentVersion !== request.currentConsentVersion) {
         throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "consent.agreedVersion" });
@@ -1347,11 +1357,19 @@ export class GuestBookingRepository {
       const candidates = await expandRules(client, providerId, [rule], request.occurrenceDate, request.occurrenceDate);
       if (candidates.length === 0) throw notScheduled("NOT_SCHEDULED");
       if (candidates.length > 1) throw notScheduled("UNAVAILABLE");
-      const occurrence = await materializeAndLockOccurrence(client, providerId, productId, candidates[0]!.occurrence.id);
+      const occurrence = candidates[0]!.occurrence;
+      const previousDate = await expandRules(
+        client, providerId, rules, addLocalDays(request.occurrenceDate, -1), addLocalDays(request.occurrenceDate, -1),
+      );
+      const sameDate = await expandRules(client, providerId, rules, request.occurrenceDate, request.occurrenceDate);
+      if (findOverlappingOpenOccurrenceIds([...previousDate, ...sameDate].map((item) => item.occurrence)).has(occurrence.id)) {
+        throw notScheduled("UNAVAILABLE");
+      }
+      const occurrenceForBooking = await materializeAndLockOccurrence(client, providerId, productId, occurrence.id);
 
       let placed: Awaited<ReturnType<typeof placeBookingHold>>;
       try {
-        placed = await placeBookingHold(client, product, occurrence, {
+        placed = await placeBookingHold(client, product, occurrenceForBooking, {
           seats: headCount,
           idempotencyKey,
           holdSeconds: request.holdSeconds,

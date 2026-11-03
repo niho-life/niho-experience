@@ -5,6 +5,7 @@ import {
   createBookingOccurrenceSnapshot,
   evaluateAvailability,
   expandOccurrences,
+  findOverlappingOpenOccurrenceIds,
   occurrenceIdFor,
   parseBusyIntervals,
   parseOccurrenceOverrides,
@@ -48,6 +49,16 @@ function availability(overrides: Partial<AvailabilityInput> = {}): AvailabilityI
 }
 
 describe("schedule expansion", () => {
+  it("fails closed for every overlapping open occurrence but allows adjacent and closed occurrences", () => {
+    const conflicted = findOverlappingOpenOccurrenceIds([
+      occurrence({ id: "first@2026-11-01", startUtc: "2026-11-01T10:00:00.000Z", endUtc: "2026-11-01T11:00:00.000Z" }),
+      occurrence({ id: "adjacent@2026-11-01", startUtc: "2026-11-01T11:00:00.000Z", endUtc: "2026-11-01T12:00:00.000Z" }),
+      occurrence({ id: "closed@2026-11-01", startUtc: "2026-11-01T10:30:00.000Z", endUtc: "2026-11-01T11:30:00.000Z", status: "CLOSED" }),
+      occurrence({ id: "overlap@2026-11-01", startUtc: "2026-11-01T10:15:00.000Z", endUtc: "2026-11-01T10:45:00.000Z" }),
+    ]);
+    assert.deepEqual([...conflicted].sort(), ["first@2026-11-01", "overlap@2026-11-01"]);
+  });
+
   it("expands daily and weekly rules using inclusive Tokyo dates", () => {
     const daily = expandOccurrences({ rule: baseRule, fromDate: "2026-11-01", toDate: "2026-11-04" });
     assert.deepEqual(
