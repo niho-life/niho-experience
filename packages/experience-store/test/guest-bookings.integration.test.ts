@@ -407,6 +407,13 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), ["sample-walk"]);
       assert.notEqual(await guests.listPublicAvailability("sample-walk"), null);
 
+      const updatedTerms = await guests.setSaleTerms(ownerA, "walk", { ...PLAIN_TERMS }, 2);
+      assert.equal(updatedTerms.version, 3);
+      assert.deepEqual(updatedTerms.offerPrices, [
+        { offerId: activeOfferId, adultPriceYen: 3500 },
+        { offerId: expiredOfferId, adultPriceYen: 2500 },
+      ]);
+
       const held = await guests.startGuestBooking(walkRequest({
         offerId: activeOfferId,
         occurrenceDate: day(2),

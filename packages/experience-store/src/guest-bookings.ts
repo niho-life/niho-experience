@@ -646,18 +646,20 @@ export async function writeOfferPrices(
 ): Promise<void> {
   const activeIds = await activeOfferIdsForWrite(client, providerId, productId);
   const existing = await client.query<DbRow>(
-    `SELECT rule_id FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2
+    `SELECT rule_id AS "offerId",adult_price_amount AS "adultPriceYen"
+       FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2
       ORDER BY rule_id COLLATE "C" FOR UPDATE`,
     [providerId, productId],
   );
-  const effective = prices ?? (existing.rows.length === 0 ? undefined : await client.query<DbRow>(
-    `SELECT rule_id AS "offerId",adult_price_amount AS "adultPriceYen"
-       FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2 ORDER BY rule_id COLLATE "C"`,
-    [providerId, productId],
-  ).then((result) => validOfferPriceRows(result.rows)));
+  const existingPrices = existing.rows.length === 0 ? [] : validOfferPriceRows(existing.rows);
+  const effective = prices ?? (existingPrices.length === 0 ? undefined : existingPrices);
   if (effective === undefined) return;
-  const givenIds = [...effective].map((price) => price.offerId).sort();
-  if (activeIds.length === 0 || activeIds.length !== givenIds.length || activeIds.some((id, index) => id !== givenIds[index])) {
+  const givenIds = effective.map((price) => price.offerId);
+  const givenIdSet = new Set(givenIds);
+  const existingIdSet = new Set(existingPrices.map((price) => price.offerId));
+  if (givenIdSet.size !== givenIds.length
+      || activeIds.some((id) => !givenIdSet.has(id))
+      || givenIds.some((id) => !activeIds.includes(id) && !existingIdSet.has(id))) {
     throw new StoreConflictError("offerPrices must name every active offer exactly once; read the schedules again.");
   }
   await client.query("DELETE FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2", [providerId, productId]);
