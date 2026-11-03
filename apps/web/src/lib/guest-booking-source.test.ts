@@ -53,6 +53,20 @@ describe("where one experience is sold", () => {
     expect(await guestBookingSale("sample-walk")).toEqual({ kind: "niho" });
   });
 
+  it("closes a publication whose terms the legacy booking contract cannot represent", async () => {
+    state.repository!.publicBookingTerms = vi.fn(async () => ({
+      ...SAMPLE_TERMS,
+      offers: SAMPLE_TERMS.offers.map((offer, index) => index === 0
+        ? { ...offer, cancellationPolicy: { code: "CUSTOM", freeCancellationHoursBefore: null }, cancellationTerms: { cancellationWindowMinutesBeforeStart: 240, refundBasisPoints: 3_750 } }
+        : offer),
+    }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const sale = await guestBookingSale("sample-tea");
+    expect(sale).toEqual({ kind: "unknown" });
+    expect(bookingSourceOf(sale)).toEqual({ kind: "closed" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("public booking contract update");
+  });
+
   it("is unknown when the DB fails or is missing: closed, never NIHO, and nothing of the error is logged", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     state.repository!.publicBookingTerms = failing();

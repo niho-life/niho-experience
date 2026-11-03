@@ -76,11 +76,15 @@ export async function evaluateStoredInventories(
   const occurrenceIds = requests.map((request) => request.occurrence.id);
   const settings = await client.query<DbRow>(
     `SELECT p.id AS product_id,
-            CASE WHEN COALESCE(s.booking_mode,'SEAT')='PRIVATE_GROUP' OR COALESCE(t.private_booking,false)
+            CASE WHEN COALESCE(s.booking_mode,'SEAT')='PRIVATE_GROUP'
+                       OR COALESCE((publication.sale_terms_snapshot->'privateBooking' = 'true'::jsonb),t.private_booking,false)
               THEN 'PRIVATE_GROUP' ELSE 'SEAT' END AS booking_mode
        FROM experience_products p
        LEFT JOIN product_inventory_settings s ON s.provider_id=p.provider_id AND s.product_id=p.id
        LEFT JOIN experience_product_sale_terms t ON t.provider_id=p.provider_id AND t.product_id=p.id
+       LEFT JOIN experience_product_publication_states publication_state
+         ON publication_state.provider_id=p.provider_id AND publication_state.product_id=p.id
+       LEFT JOIN experience_product_publications publication ON publication.id=publication_state.current_publication_id
       WHERE p.provider_id=$1 AND p.id=ANY($2::text[])`,
     [providerId, productIds],
   );

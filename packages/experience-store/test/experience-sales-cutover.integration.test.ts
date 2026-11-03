@@ -65,7 +65,7 @@ describe("Experience product sales cutover", { skip: databaseUrl === undefined ?
            (provider_id,product_id,minimum_participants,minimum_chargeable_participants,private_booking,minimum_attendance,
             max_party_size,cancellation_policy,cancellation_window_minutes_before_start,cancellation_refund_basis_points,
             booking_questions,booking_questions_fingerprint,conditions_version)
-         VALUES ($1,$2,1,3,false,4,4,'FREE_UNTIL_24H',90,3750,'[]'::jsonb,$3,$4)`,
+         VALUES ($1,$2,1,3,true,4,4,'FREE_UNTIL_24H',90,3750,'[]'::jsonb,$3,$4)`,
         [OWNER.providerId, product.id, QUESTIONS_FINGERPRINT, CONDITIONS],
       );
       await pool.query(
@@ -133,7 +133,7 @@ describe("Experience product sales cutover", { skip: databaseUrl === undefined ?
       // A later mutable term edit cannot change the terms already published for new checkout.
       await pool.query(
         `UPDATE experience_product_sale_terms
-            SET max_party_size=3,cancellation_policy='NONE',conditions_version=$3
+            SET max_party_size=3,private_booking=false,cancellation_policy='NONE',conditions_version=$3
           WHERE provider_id=$1 AND product_id=$2`,
         [OWNER.providerId, product.id, "b5".repeat(32)],
       );
@@ -142,23 +142,23 @@ describe("Experience product sales cutover", { skip: databaseUrl === undefined ?
       assert.equal(publicTerms?.offers[0]?.cancellationPolicy.code, "CUSTOM");
       assert.deepEqual(publicTerms?.offers[0]?.cancellationTerms, { cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3750 });
       assert.equal(publicTerms?.offers[0]?.minimumChargeableParticipants, 3);
-      assert.equal(publicTerms?.offers[0]?.privateBooking, false);
+      assert.equal(publicTerms?.offers[0]?.privateBooking, true);
       assert.equal(Object.hasOwn(publicTerms?.offers[0] ?? {}, "minimumAttendance"), false);
       assert.deepEqual(await bookings.sellableSlugs([SLUG]), [SLUG]);
 
       const started = await bookings.startGuestBooking({
-        slug: SLUG, offerId: rule.id, occurrenceDate: date, adultCount: 2, childCount: 0, expectedTotalYen: 3000,
+        slug: SLUG, offerId: rule.id, occurrenceDate: addLocalDays(date, 1), adultCount: 2, childCount: 0, expectedTotalYen: 3000,
         bookingQuestionsFingerprint: QUESTIONS_FINGERPRINT, termsConsentVersion: "site-terms-v1", currentConsentVersion: "site-terms-v1",
         conditionsConsentVersion: CONDITIONS, guestName: "Synthetic Guest", guestEmail: "guest@example.test",
         guestLanguage: "EN", clientRequestKey: "cutover-after-import",
       });
       assert.deepEqual(started.booking.pricingSnapshot.bookingTerms, {
-        minimumParticipants: 1, minimumChargeableParticipants: 3, privateBooking: false, maxPartySize: 4,
+        minimumParticipants: 1, minimumChargeableParticipants: 3, privateBooking: true, maxPartySize: 4,
         cancellationPolicy: "FREE_UNTIL_24H", cancellationWindowMinutesBeforeStart: 90, cancellationRefundBasisPoints: 3750, bookingQuestions: [],
         bookingQuestionsFingerprint: QUESTIONS_FINGERPRINT, conditionsVersion: CONDITIONS, minimumAttendance: 4,
       });
       await assert.rejects(bookings.startGuestBooking({
-        slug: SLUG, offerId: rule.id, occurrenceDate: date, adultCount: 1, childCount: 0, expectedTotalYen: 3000,
+        slug: SLUG, offerId: rule.id, occurrenceDate: addLocalDays(date, 1), adultCount: 1, childCount: 0, expectedTotalYen: 3000,
         bookingQuestionsFingerprint: QUESTIONS_FINGERPRINT, termsConsentVersion: "site-terms-v1", currentConsentVersion: "site-terms-v1",
         conditionsConsentVersion: CONDITIONS, guestName: "Another Synthetic Guest", guestEmail: "other@example.test",
         guestLanguage: "EN", clientRequestKey: "cutover-capacity-reject",

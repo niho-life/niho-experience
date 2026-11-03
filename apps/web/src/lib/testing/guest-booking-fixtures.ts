@@ -38,7 +38,7 @@ export const SAMPLE_TERMS: PublicBookingTerms = {
       capacity: 4,
       maxPartySize: 4,
       minimumParticipants: 2,
-      minimumChargeableParticipants: 2,
+      minimumChargeableParticipants: 1,
       privateBooking: false,
       cancellationTerms: { cancellationWindowMinutesBeforeStart: null, refundBasisPoints: 0 },
       durationMinutes: 120,

@@ -41,7 +41,11 @@ export async function guestBookingSale(slug: string): Promise<GuestBookingSale> 
   if (!bookings) return UNKNOWN;
   try {
     const terms = await bookings.publicBookingTerms(slug);
-    return terms === null ? NIHO : { kind: "site", terms };
+    if (terms === null) return NIHO;
+    // Keep this legacy page closed until its client contract can display and
+    // price every term that the Experience publication accepts.
+    siteSaleTerms(terms, config.guestBookingConsentVersion);
+    return { kind: "site", terms };
   } catch (error) {
     logFailure("terms", error);
     return UNKNOWN;
