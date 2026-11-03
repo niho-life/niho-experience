@@ -145,7 +145,7 @@ export class ArticleAuthorityRepository {
               FROM experience_products duplicate
              WHERE duplicate.status='PUBLISHED'
                AND duplicate.slug=p.slug
-               AND duplicate.id<>p.id
+               AND (duplicate.provider_id<>p.provider_id OR duplicate.id<>p.id)
           )
         ORDER BY p.slug, p.provider_id, p.id
         LIMIT $3`,

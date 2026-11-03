@@ -21,5 +21,6 @@ test("candidate query excludes globally ambiguous published slugs before applyin
   assert.deepEqual(result, [{ providerId: "provider-a", slug: "safe-trip", title: "Safe trip", providerName: "Synthetic Provider" }]);
   assert.deepEqual(params, ["", "earlier-trip", 96]);
   assert.match(sql, /NOT EXISTS\s*\([\s\S]*duplicate\.status='PUBLISHED'[\s\S]*duplicate\.slug=p\.slug/);
+  assert.match(sql, /duplicate\.provider_id<>p\.provider_id\s+OR\s+duplicate\.id<>p\.id/);
   assert.ok(sql.indexOf("NOT EXISTS") < sql.indexOf("LIMIT $3"), "global ambiguity filter must run before the bounded scan");
 });

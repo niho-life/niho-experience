@@ -26,6 +26,25 @@ export type GuideCatalog = Readonly<{
 
 const NO_DRAFTS: GuideDrafts = { guides: [], problems: [] };
 const GUIDE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const RELATED_AUTHORITY_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, U>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>,
+): Promise<U[]> {
+  const results = new Array<U>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index]!);
+    }
+  }));
+  return results;
+}
 
 async function readDrafts(): Promise<GuideDrafts> {
   const dir = isPreview ? config.guideDraftsDir : null;
@@ -128,8 +147,9 @@ export async function missingGuideRedirect(slug: string): Promise<"/guides" | nu
 export async function guidesAboutExperience(experienceSlug: string): Promise<{ guides: Guide[]; draftSlugs: readonly string[] }> {
   const catalog = await guideCatalogForSite();
   if (config.guidePublicSource !== "editor") return { guides: guidesForExperience(catalog.guides, experienceSlug), draftSlugs: catalog.draftSlugs };
+  const related = catalog.guides.filter((guide) => guide.relatedExperienceSlugs.includes(experienceSlug));
   const { filterCurrentRelatedGuide } = await import("./article-authority/publication-read");
-  const checked = await Promise.all(catalog.guides.map((guide) => filterCurrentRelatedGuide(guide)));
+  const checked = await mapWithConcurrency(related, RELATED_AUTHORITY_CONCURRENCY, filterCurrentRelatedGuide);
   return { guides: guidesForExperience(checked, experienceSlug), draftSlugs: catalog.draftSlugs };
 }
 
