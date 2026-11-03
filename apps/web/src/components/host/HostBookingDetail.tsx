@@ -307,12 +307,12 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
           <FeeSummaryPanel key={`host-fee-${booking.id}`} audience="host" bookingId={booking.id} actorKey={providerId} enabled={feeSummaryEnabled} />
         </>
       )}
-      {next || translate ? (
+      {next ? (
         <div className="mt-3.5 border-t border-line pt-3.5">
           {next}
-          {translate ? <HostTranslatePanel key={booking.id} source={site ? "site" : "niho"} providerId={providerId} bookingId={booking.id} className={next ? "mt-3" : ""} /> : null}
         </div>
       ) : null}
+      {translateEnabled ? <HostTranslatePanel key={booking.id} source={site ? "site" : "niho"} providerId={providerId} bookingId={booking.id} canStart={translate} className={next ? "mt-3" : "mt-3.5 border-t border-line pt-3.5"} /> : null}
       {conversation ? <ConversationSection conversation={conversation} /> : null}
       <DetailSection title="時系列">
         <ol>

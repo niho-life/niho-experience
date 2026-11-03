@@ -500,6 +500,27 @@ test("通訳を始める shows the guest's QR, the host's own way in, who has jo
   expect(await overflowX(page)).toBe(0);
 });
 
+test("予約取消後も既存の通訳を終了でき、新しい通訳は始められない", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/bookings?booking=bk-2038");
+  const booking = detail(page, "Emma Larsson");
+  await booking.getByRole("button", { name: "通訳を始める" }).click();
+  const room = booking.getByRole("region", { name: "対面通訳" });
+  await expect(room).toBeVisible();
+
+  await booking.getByRole("button", { name: "取り消して返金する" }).click();
+  const cancellation = page.getByRole("dialog");
+  await cancellation.getByRole("radio", { name: "運営者の都合" }).check();
+  await cancellation.getByRole("button", { name: "¥60,000 を返金して取り消す" }).click();
+  await expect(value(booking, "予約")).toHaveText("取消済み");
+  await expect(room).toBeVisible();
+  await room.getByRole("button", { name: "通訳を終了" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "通訳を終了する" }).click();
+  await expect(booking.getByRole("status").filter({ hasText: "通訳を終了しました" })).toBeVisible();
+  await expect(room).toHaveCount(0);
+  await expect(booking.getByRole("button", { name: "通訳を始める" })).toHaveCount(0);
+});
+
 test("通訳の参加状況で権限が失効したら招待 QR を消してポーリングを止める (#181)", async ({ page }) => {
   await signIn(page);
   await page.goto("/host/bookings?booking=bk-2038");

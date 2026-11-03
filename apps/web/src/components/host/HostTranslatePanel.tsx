@@ -68,6 +68,8 @@ export interface HostTranslatePanelProps {
   source: "niho" | "site";
   providerId: string;
   bookingId: string;
+  /** Booking eligibility gates new rooms; an existing room must remain controllable after cancellation. */
+  canStart?: boolean;
   /** While another action on the booking is running. */
   disabled?: boolean;
   className?: string;
@@ -75,7 +77,7 @@ export interface HostTranslatePanelProps {
   onAuthorizationEnded?: (status: 401 | 403) => void;
 }
 
-export function HostTranslatePanel({ source, providerId, bookingId, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
+export function HostTranslatePanel({ source, providerId, bookingId, canStart = true, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
   const base = translateRoomsBffPath(source, providerId, bookingId);
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<RoomStatus | null>(null);
@@ -166,6 +168,7 @@ export function HostTranslatePanel({ source, providerId, bookingId, disabled = f
   }, [base, room, ended, revokeAccess]);
 
   const start = async () => {
+    if (!canStart || disabled || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await hostFetch(base, { method: "POST" });
@@ -197,11 +200,13 @@ export function HostTranslatePanel({ source, providerId, bookingId, disabled = f
     }
   };
 
+  if (!canStart && !live && !notice && !error) return null;
+
   return (
     <div className={className}>
       {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="mb-2.5 rounded-xl bg-danger-pale px-3 py-2 text-[0.8125rem] leading-normal font-bold text-danger focus:outline-none">{error}</p> : null}
       {notice ? <p role="status" className="mb-2.5 rounded-xl bg-leaf-pale px-3 py-2 text-[0.8125rem] leading-normal font-bold text-moss">{notice}</p> : null}
-      {!live && !authorizationEnded ? (
+      {!live && !authorizationEnded && canStart ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <button type="button" disabled={disabled || busy} onClick={() => void start()} className={consoleButtonClass("primary")}>
             {busy ? "準備しています…" : "通訳を始める"}
