@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
+import { cancellationTermsOf, freeCancellationDeadlineUtc } from "./cancellation-terms.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -73,7 +74,9 @@ export interface GuestBookingView {
   readonly currency: string;
   /** Fixed at booking; null only for a snapshot without one. */
   readonly cancellationPolicy: GuestCancellationPolicy | null;
-  /** When free cancellation ends (24 or 48 hours before the start); null when there is none. */
+  /** The guest refund rate within the booking's free-cancellation window. */
+  readonly cancellationRefundBasisPoints: number;
+  /** When the guest's self-cancellation window ends; null when there is none. */
   readonly freeCancellationUntilUtc: string | null;
   /** The seller's name fixed at booking. */
   readonly hostDisplayName: string;
@@ -84,7 +87,7 @@ export interface GuestBookingView {
   readonly cancelledBy: GuestCancelledBy | null;
   /** Why, as a fixed reason (CANCELLATION_REASONS); null while it is not cancelled. */
   readonly cancellationReason: string | null;
-  /** Free cancellation is still open by the database's clock: the page offers "Cancel and get a full refund". */
+  /** The guest's self-cancellation window is still open by the database clock. */
   readonly freeCancellationOpen: boolean;
   /** The experience has ended: nothing is offered any more. */
   readonly experienceEnded: boolean;
@@ -117,7 +120,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ANY_CONTROL = /[\u0000-\u001F\u007F]/;
 const POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
-const FREE_HOURS: Readonly<Record<string, number>> = { FREE_UNTIL_24H: 24, FREE_UNTIL_48H: 48 };
 const END = "(b.occurrence_snapshot->>'endUtc')::timestamptz";
 
 /** A grant token or a session id: 32 random bytes, base64url. */
@@ -150,7 +152,8 @@ function viewFromRow(row: DbRow): GuestBookingView {
   const seller = record(row.seller_snapshot);
   const policy = typeof pricing.cancellationPolicy === "string" && POLICIES.has(pricing.cancellationPolicy) ? pricing.cancellationPolicy as GuestCancellationPolicy : null;
   const startUtc = text(occurrence.startUtc, "occurrence_snapshot.startUtc");
-  const hours = policy ? FREE_HOURS[policy] : undefined;
+  const cancellation = cancellationTermsOf(pricing);
+  const freeCancellationUntilUtc = freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart);
   const status = text(row.status, "status");
   if (!(GUEST_BOOKING_VIEW_STATUSES as readonly string[]).includes(status)) throw new StoreError("Database returned an invalid status.");
   return {
@@ -168,14 +171,15 @@ function viewFromRow(row: DbRow): GuestBookingView {
     totalAmount: count(pricing.totalAmount, "pricing_snapshot.totalAmount"),
     currency: text(pricing.currency, "pricing_snapshot.currency"),
     cancellationPolicy: policy,
-    freeCancellationUntilUtc: hours === undefined ? null : new Date(Date.parse(startUtc) - hours * 3_600_000).toISOString(),
+    cancellationRefundBasisPoints: cancellation.refundBasisPoints,
+    freeCancellationUntilUtc,
     hostDisplayName: text(seller.displayName, "seller_snapshot.displayName"),
     guestName: text(row.guest_name, "guest_name"),
     bookedAtUtc: isoValue(row, "created_at"),
     cancelledAtUtc: row.cancelled_at === null || row.cancelled_at === undefined ? null : isoValue(row, "cancelled_at"),
     cancelledBy: CANCELLED_BY.has(String(row.cancelled_by)) ? row.cancelled_by as GuestCancelledBy : null,
     cancellationReason: typeof row.cancellation_reason === "string" ? row.cancellation_reason : null,
-    freeCancellationOpen: status === "CONFIRMED" && hours !== undefined && Date.parse(startUtc) - hours * 3_600_000 > Date.parse(isoValue(row, "db_now")),
+    freeCancellationOpen: status === "CONFIRMED" && freeCancellationUntilUtc !== null && Date.parse(freeCancellationUntilUtc) > Date.parse(isoValue(row, "db_now")),
     experienceEnded: row.ended === true,
     refunds: (Array.isArray(row.refunds) ? row.refunds : []).map(refundView),
     cancellationRequest: requestView(row.request),

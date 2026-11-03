@@ -119,7 +119,7 @@ jobs:
           test "$READY" = true
           test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
           [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
-          [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ ]]
+          [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ || "$SITE_URL" =~ ^https://niho-experience-host-stg-[0-9]+\.asia-northeast1\.run\.app$ ]]
           test "$CLOUDSQL" = niho-app-stg:asia-northeast1:niho-app-db-stg
           [[ "$SESSION_REF" =~ ^experience-stg-host-session:[1-9][0-9]*$ ]]
           [[ "$FIREBASE_REF" =~ ^experience-stg-niho-firebase-web-api-key:[1-9][0-9]*$ ]]
@@ -179,7 +179,7 @@ jobs:
           bookings=false
           if [ "$GUEST_BOOKING" = true ]; then bookings=true; fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
-          test "$(jq -r '.status.url' <<< "$state")" = "$SITE_URL"
+          jq -e --arg url "$SITE_URL" '((.metadata.annotations["run.googleapis.com/urls"] // "[]") | fromjson | index($url)) != null' <<< "$state" >/dev/null
           test "$(jq -r '.metadata.labels.app' <<< "$state")" = niho-experience
           test "$(jq -r '.metadata.labels.env' <<< "$state")" = host-staging
           traffic="$(jq -c '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName)' <<< "$state")"

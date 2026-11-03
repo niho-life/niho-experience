@@ -147,7 +147,7 @@ describe("PostgreSQL guest booking access (#285 slice 6)", { skip: databaseUrl =
       assert.deepEqual(view, {
         publicBookingId: booking.publicBookingId, status: "CONFIRMED", experienceTitle: "Synthetic walk", experienceSlug: "sample-walk",
         localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: snapshot.startUtc, endUtc: snapshot.endUtc,
-        adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H",
+        adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H", cancellationRefundBasisPoints: 10_000,
         freeCancellationUntilUtc: new Date(Date.parse(snapshot.startUtc) - 48 * 3_600_000).toISOString(),
         hostDisplayName: "Sample Seller A", guestName: "Sample Guest", bookedAtUtc: booking.booking.createdAtUtc, cancelledAtUtc: null,
         // 取消と返金 (slice 7): nothing cancelled, refunded or asked; the experience is ahead.

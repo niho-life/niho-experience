@@ -36,6 +36,13 @@ function booking({ name, support = false, ...fields }: Fields): HostGuestBooking
     platformFee: { supportEnabled: support, basisPoints, amount: fee },
     providerAmount: totalAmount - fee,
     cancellationPolicy: "FREE_UNTIL_48H",
+    saleConditions: {
+      minimumChargeableParticipants: null,
+      privateBooking: null,
+      minimumAttendance: null,
+      cancellationWindowMinutesBeforeStart: null,
+      cancellationRefundBasisPoints: null,
+    },
     paidAtUtc: fields.bookedAtUtc,
     cancelledAtUtc: null,
     cancelledBy: null,

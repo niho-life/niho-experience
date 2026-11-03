@@ -16,6 +16,7 @@ import {
   termsFromRow,
   tokyoDate,
   validSaleTerms,
+  type NormalizedProductSaleTermsInput,
   type ProductSaleTerms,
   type ProductSaleTermsInput,
   type ProviderSaleSettings,
@@ -147,13 +148,18 @@ function sameProduct(product: ProductRecord, input: RegisterProductInput): boole
 }
 
 /** The same terms: the questions compare by their fingerprint (their canonical JSON). */
-function sameTerms(current: ProductSaleTerms, next: ProductSaleTermsInput, fingerprint: string): boolean {
+function sameTerms(current: ProductSaleTerms, next: NormalizedProductSaleTermsInput, fingerprint: string): boolean {
   const child = (value: ProductSaleTermsInput["childPricing"]) =>
     value === null ? null : [value.priceYen, value.minAge, value.maxAge, value.adultRequired];
   return JSON.stringify(child(current.childPricing)) === JSON.stringify(child(next.childPricing))
     && current.minimumParticipants === next.minimumParticipants
+    && current.minimumChargeableParticipants === next.minimumChargeableParticipants
+    && current.privateBooking === next.privateBooking
     && current.maxPartySize === next.maxPartySize
     && current.cancellationPolicy === next.cancellationPolicy
+    && current.cancellationWindowMinutesBeforeStart === next.cancellationWindowMinutesBeforeStart
+    && current.cancellationRefundBasisPoints === next.cancellationRefundBasisPoints
+    && current.minimumAttendance === next.minimumAttendance
     && current.bookingQuestionsFingerprint === fingerprint
     && current.conditionsVersion === next.conditionsVersion;
 }
@@ -388,8 +394,9 @@ export class SiteSaleRegistration {
       const child = terms.childPricing;
       const values = [
         providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
-        terms.minimumParticipants, terms.maxPartySize, terms.cancellationPolicy, JSON.stringify(terms.bookingQuestions),
-        fingerprint, terms.conditionsVersion,
+        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.privateBooking, terms.maxPartySize,
+        terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
+        terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion,
       ];
       const existing = current.rows[0] === undefined ? null : termsFromRow(current.rows[0]);
       if (existing === null) {
@@ -397,9 +404,10 @@ export class SiteSaleRegistration {
         const inserted = await client.query<DbRow>(
           `INSERT INTO experience_product_sale_terms (
              provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
-             minimum_participants, max_party_size, cancellation_policy, booking_questions,
-             booking_questions_fingerprint, conditions_version
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
+             minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+             cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
+             minimum_attendance, booking_questions, booking_questions_fingerprint, conditions_version
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
            RETURNING ${TERMS_COLUMNS}`,
           values,
         );
@@ -410,10 +418,12 @@ export class SiteSaleRegistration {
       const updated = await client.query<DbRow>(
         `UPDATE experience_product_sale_terms
             SET child_price_amount=$3, child_min_age=$4, child_max_age=$5, child_adult_required=$6,
-                minimum_participants=$7, max_party_size=$8, cancellation_policy=$9, booking_questions=$10::jsonb,
-                booking_questions_fingerprint=$11, conditions_version=$12,
+                minimum_participants=$7, minimum_chargeable_participants=$8, private_booking=$9, max_party_size=$10,
+                cancellation_policy=$11, cancellation_window_minutes_before_start=$12, cancellation_refund_basis_points=$13,
+                minimum_attendance=$14, booking_questions=$15::jsonb,
+                booking_questions_fingerprint=$16, conditions_version=$17,
                 version=version+1, updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND product_id=$2 AND version=$13
+          WHERE provider_id=$1 AND product_id=$2 AND version=$18
           RETURNING ${TERMS_COLUMNS}`,
         [...values, expectedVersion],
       );

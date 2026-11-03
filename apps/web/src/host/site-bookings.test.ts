@@ -32,6 +32,7 @@ const STORED: HostGuestBooking = {
   childUnitAmount: 2000,
   totalAmount: 10000,
   platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 },
+  saleConditions: { minimumChargeableParticipants: 1, privateBooking: false, minimumAttendance: null, cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000 },
   providerAmount: 9000,
   cancellationPolicy: "FREE_UNTIL_24H",
   bookedAtUtc: "2026-10-31T03:04:00.000Z",

@@ -326,6 +326,29 @@ function guestBookingSettings(apiMode: "mock" | "http", env: Env, hostConsoleEna
   return { enabled: true, consentVersion };
 }
 
+function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean) {
+  const requested = env.EXPERIENCE_PUBLICATIONS_ENABLED === "true";
+  const consentVersion = env.EXPERIENCE_PUBLICATION_CONSENT_VERSION?.trim() ?? "";
+  const databaseConfigured = Boolean(env.EXPERIENCE_DATABASE_URL?.trim());
+  if (requested && apiMode === "http" && !hostConsoleEnabled) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+  }
+  if (requested && apiMode === "http" && !databaseConfigured) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_DATABASE_URL");
+  }
+  if (requested && apiMode === "http" && !consentVersion) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_PUBLICATION_CONSENT_VERSION");
+  }
+  if (requested && apiMode === "http" && !env.EXPERIENCE_PUBLIC_MEDIA_BUCKET?.trim()) {
+    throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_PUBLIC_MEDIA_BUCKET");
+  }
+  if (consentVersion.length > 160) throw new Error("EXPERIENCE_PUBLICATION_CONSENT_VERSION must be at most 160 characters");
+  return {
+    enabled: apiMode === "http" && hostConsoleEnabled && requested && databaseConfigured && consentVersion.length > 0,
+    consentVersion,
+  };
+}
+
 /** An email address: one line, no display name. */
 const MAIL_ADDRESS = /^[^\s<>@",;]+@[^\s<>@",;]+\.[^\s<>@",;]+$/;
 /** An SMTP host name or IPv4 address. */
@@ -519,6 +542,7 @@ export function resolveConfig(env: Env) {
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
+  const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled);
   // 対面通訳 (#181): site bookingの所属・状態をExperience DBで再検証するため、新予約の正本も必須。
   // http opens only after the selected NIHO API is deployed and accepted, per environment.
   const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && guestBooking.enabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
@@ -655,6 +679,8 @@ export function resolveConfig(env: Env) {
     guestBookingEnabled: guestBooking.enabled,
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
+    experiencePublicationsEnabled: experiencePublication.enabled,
+    experiencePublicationConsentVersion: experiencePublication.consentVersion,
     hostAttendanceEnabled,
     // The mail job (empty while off). SMTP credentials are not here: they are read where they are used.
     guestMailEnabled: guestMail.enabled,

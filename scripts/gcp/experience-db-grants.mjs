@@ -43,6 +43,15 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   channel_worker_accounts: { write: IU },
   channel_workers: { write: IU },
   experience_product_sale_terms: { write: IU },
+  // Cutover and imported legacy seat facts are operator-written; runtime checkout only reads them.
+  experience_product_cutovers: { write: [] },
+  experience_legacy_reservation_inventory: { write: [] },
+  experience_legacy_reservation_inventory_current: { write: [] },
+  experience_product_media_assets: { write: [] },
+  experience_product_publication_media: { write: I },
+  // Immutable public copies are inserted; state and short-lived NIHO/Connect readiness move independently.
+  experience_product_publications: { write: I },
+  experience_product_publication_states: { write: IU },
   experience_products: { write: IU },
   // Providers are provisioned privately; the runtime only locks them.
   experience_providers: { write: [], updateColumns: ["created_at"] },
@@ -114,6 +123,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // role and active stay immutable to the runtime; the timestamp only enables FOR SHARE.
   provider_memberships: { write: [], updateColumns: ["updated_at"] },
   provider_notification_preferences: { write: IU },
+  provider_publication_readiness: { write: IU },
   provider_sale_settings: { write: IU },
   resource_google_busy_intervals: { write: ID },
   resource_google_calendars: { write: IU },
@@ -135,4 +145,7 @@ export const MIGRATION_LEDGER_TABLE = "experience_schema_migrations";
 // store's index.ts reaches one of them.
 export const OPERATOR_ONLY_SOURCES = Object.freeze([
   "packages/experience-store/src/site-sale-registration.ts",
+  "packages/experience-store/src/experience-product-migration.ts",
+  "packages/experience-store/src/experience-sales-cutover.ts",
+  "packages/experience-store/src/experience-product-media-import.ts",
 ]);

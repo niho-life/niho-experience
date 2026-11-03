@@ -4,7 +4,11 @@
 
 ## 公開の方針
 
-体験の販売主体はホストとし、NIHO は公開・予約・決済連携を提供する。必要な情報と口座の準備が整った OWNER は、掲載条件に同意して自分で公開する。通常の原稿修正で掲載を止めたり、事務局の承認を待ったりしない。
+掲載操作の主体は OWNER とし、NIHO は公開・予約・決済連携を提供する。必要な情報が整った OWNER は、掲載条件に同意して自分で公開する。通常の原稿修正で掲載を止めたり、事務局の承認を待ったりしない。掲載操作の主体、体験ページに表示する主催者、法的販売者、売上の受取口座は別の属性として扱い、同一であると推測しない。
+
+コミュニティディナーのオーナー確認済み条件（`docs/content/product-ledger.md`）：主催・提供者表示はNIHO kamakura拠点、法的販売者は指定された特商法表示に従うパナソニックホールディングス株式会社、売上の受取先はNIHO kamakura拠点に対応するStripe Connect口座。実際に使う口座の対応・有効化を別途確かめる。#369 の「ホスト自身を販売主体とする」という記述はこの商品条件と矛盾するため、自己公開の状態遷移を維持したまま、販売者と受取先の記述・判定は商品台帳の決定に従う。
+
+現行の予約モデルでは、1商品に複数のschedule rule（公開offer）を設定できるが、料金と予約条件は商品単位で共有される。P-01はDinnerとTea timeで異なる価格を持つため、このまま両optionを同じ商品のofferとして切り替えない。offer単位の料金・条件または同等の明示的な移行契約を作り、写真を期限のない公開mediaへ移すまで、P-01を新API・checkoutへ切り替えない。
 
 Stripe の本人確認・口座の利用可否は公開と販売の条件として残す。NIHO 独自の掲載審査とは分ける。Direct charges だけを根拠にプラットフォームの責任や不正対応がなくなるとは扱わず、口座構成と責任分担は既存の限定契約を維持する。
 
@@ -36,10 +40,19 @@ Stripe の本人確認・口座の利用可否は公開と販売の条件とし�
 | --- | --- | --- |
 | `/host` の画面モック | このリポの合成データと画面内状態 | 新しい公開・停止・再開を確認する。実保存・販売・メール送信の証跡にはしない |
 | 現在の HTTP 版の編集・掲載 | NIHO Host API 0.4.0（選別契約・draft）。提供者と掲載に審査があり、保存で掲載が止まる | 実際の状態を表示し、保存時停止の説明を維持する。申請の API を「即時公開」と表示しない |
-| 移行後の編集・公開・SSR | experience API v1 と体験専用 DB。公開の契約・永続化は #369 の残作業 | 公開版と編集内容、本人停止と運営停止を明示し、必要条件だけで自己公開する |
+| 移行後の編集・公開・SSR | Experience-owned publication BFF の契約・route・入力検証が実装済み。未配備・既定OFF。Aの本人ID/Connect対応付け不足で全操作をfail-closed | A契約の追加と検証、編集UI、公開media・公開カタログ/SSR/SEO、stg実受入が残る。API契約や合成テストを稼働済みと扱わない |
 | NIHO 共通アカウント・Connect | NIHO の本人・権限・口座の限定契約 | 現在の状態をサーバー間で確認する。体験審査を新設しない |
 
 旧契約の生成型や mock を、新しいサーバー仕様に配備済みであるように書き換えない。NIHO 側に新たな体験掲載機能を増やさず、[#330](https://github.com/niho-life/niho-experience/issues/330) の移行に、experience 所有の原稿編集、公開状態の永続化、公開カタログ・詳細・SSR/SEO の読取り切替を含める。商品ごとの販売切替と本文の公開停止を混同せず、同じ開催回を新旧双方で販売しない。
+
+## 現在のHTTP BFF実装（2026-11-03）
+
+PR #372 の作業ブランチには `/host/api/publication/providers/{providerId}/products/{productId}` と `/sale-terms`、`/preview`、`/publish`、`/stop` のrouteと、[Experience publication API contract](experience-publication-api.md) に定めたDTO・CAS・エラー契約がある。`EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true`、`HOST_CONSOLE_ENABLED=true`、HTTP mode、Experience側feature flagの全てが必要で、既定はOFF。
+
+- draftとsale termsの保存は各draft/state/sale-terms versionを必須にし、公開同意の版・値もサーバー設定と照合する。未知フィールド・不正な条件値・別originのmutationはExperience storeに到達する前に拒否する。
+- 認証境界はNIHO session/provider roleを再確認するが、`ownerUserId` をログイン本人として使わない。現行A契約に本人の安定IDと同じ提供者に結び付いたseller/Connect口座がないため、読み書きとも `503 AUTH_CONTRACT_UNAVAILABLE` を返し、Experience storeの読取・変更を行わない。
+- D向けの操作、allowlist DTO、CAS版、エラー、通常保存時の公開版保持、sale-terms更新時のsnapshot契約は文書化済み。運営停止はホストrouteから変更できず、本人停止/再開と別管理する。
+- routeの応答は `private, no-store` と `noindex`。Aが契約を追加し、Experience clientが検証できるまで実データの編集・公開は開かない。画面editorとの接続と固定SHAのstg実受入も未完了。
 
 ## HTTP 切替の受入
 

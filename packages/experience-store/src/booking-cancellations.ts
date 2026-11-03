@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { sessionBookingRef } from "./booking-access.ts";
+import { cancellationTermsOf, freeCancellationDeadlineUtc } from "./cancellation-terms.ts";
 import { StoreConflictError, StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { publicBookingIdOf, requireBookingsOwner, sessionKeyOf, type HostGuestSessionKey } from "./host-guest-bookings.ts";
 import { enqueueCancellationNotification } from "./host-notification-outbox.ts";
@@ -126,8 +127,8 @@ export interface CancellationResult {
 
 export interface GuestCancellationInput {
   readonly commandId: string;
-  /** What the page offered: a full refund before the deadline, a request to support after it. */
-  readonly choice: "FULL_REFUND" | "REQUEST";
+  /** FULL_REFUND is the legacy 100% choice; POLICY_CANCEL accepts the snapshotted configured refund rate. */
+  readonly choice: "FULL_REFUND" | "POLICY_CANCEL" | "REQUEST";
   /** The free cancellation deadline the page showed (GuestBookingView.freeCancellationUntilUtc); null when none. */
   readonly shownDeadlineUtc: string | null;
 }
@@ -199,6 +200,7 @@ export interface SupportQueueBooking {
   readonly totalAmount: number;
   readonly currency: string;
   readonly cancellationPolicy: GuestCancellationPolicy | null;
+  readonly cancellationRefundBasisPoints: number;
   readonly freeCancellationUntilUtc: string | null;
 }
 
@@ -236,7 +238,6 @@ const NOTE_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const STRIPE_REF = /^[A-Za-z0-9_]{1,256}$/;
 const FAILURE_CODE = /^[a-z0-9_]{1,80}$/;
 const POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
-const FREE_HOURS: Readonly<Record<string, number>> = { FREE_UNTIL_24H: 24, FREE_UNTIL_48H: 48 };
 const STRIPE_STATUSES: ReadonlySet<string> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 const LOCK_COMMAND = 47;
 
@@ -320,6 +321,7 @@ interface LockedBooking {
   readonly endUtc: string;
   readonly policy: GuestCancellationPolicy | null;
   readonly deadlineUtc: string | null;
+  readonly refundBasisPoints: number;
   readonly connectedAccountId: string;
   readonly stripePaymentRef: string | null;
   readonly party: number;
@@ -333,7 +335,7 @@ function lockedFromRow(row: DbRow): LockedBooking {
   const seller = record(row.seller_snapshot);
   const startUtc = text(occurrence.startUtc, "occurrence_snapshot.startUtc");
   const policy = typeof pricing.cancellationPolicy === "string" && POLICIES.has(pricing.cancellationPolicy) ? pricing.cancellationPolicy as GuestCancellationPolicy : null;
-  const hours = policy ? FREE_HOURS[policy] : undefined;
+  const cancellation = cancellationTermsOf(pricing);
   return {
     rowId: text(row.id, "id"),
     providerId: text(row.provider_id, "provider_id"),
@@ -344,7 +346,8 @@ function lockedFromRow(row: DbRow): LockedBooking {
     startUtc,
     endUtc: text(occurrence.endUtc, "occurrence_snapshot.endUtc"),
     policy,
-    deadlineUtc: hours === undefined ? null : new Date(Date.parse(startUtc) - hours * 3_600_000).toISOString(),
+    deadlineUtc: freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart),
+    refundBasisPoints: cancellation.refundBasisPoints,
     connectedAccountId: text(seller.stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
     stripePaymentRef: typeof row.stripe_payment_ref === "string" ? row.stripe_payment_ref : null,
     party: amount(row.party, "party"),
@@ -442,7 +445,7 @@ interface CancelSpec {
   readonly by: CancellationActor;
   readonly reason: CancellationReason;
   readonly note: string | null;
-  readonly refund: SupportRefundChoice;
+  readonly refund: SupportRefundChoice | null;
   readonly commandId: string;
   /** The host's push (CANCELLATION): when the guest or support cancels a confirmed booking. */
   readonly notifyHost: boolean;
@@ -519,7 +522,9 @@ async function enqueueGuestNotice(client: PoolClient, booking: LockedBooking, to
 }
 
 /** Cancels a locked CONFIRMED or PAYMENT_REVIEW booking: its seats go back, its refund is requested, the guest is told. */
-async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec): Promise<RefundSubmission> {
+async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec & { readonly refund: SupportRefundChoice }): Promise<RefundSubmission>;
+async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec & { readonly refund: null }): Promise<null>;
+async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec): Promise<RefundSubmission | null> {
   const wasConfirmed = booking.status === "CONFIRMED";
   await client.query(
     `UPDATE bookings
@@ -533,7 +538,7 @@ async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: Ca
       WHERE provider_id = $1 AND booking_id = $2 AND status = 'OPEN'`,
     [booking.providerId, booking.rowId, spec.requestStatus, spec.resolvedBy],
   );
-  const refund = await insertRefund(client, booking, { commandId: spec.commandId, choice: spec.refund, requestedBy: spec.by });
+  const refund = spec.refund === null ? null : await insertRefund(client, booking, { commandId: spec.commandId, choice: spec.refund, requestedBy: spec.by });
   // Seats return: stored inventory counts CONFIRMED only; the calendar and channels recalculate the occurrence.
   await enqueueCalendarRecalculation(client, {
     providerId: booking.providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_cancelled",
@@ -545,6 +550,19 @@ async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: Ca
     });
   }
   return refund;
+}
+
+async function configuredGuestRefund(
+  client: PoolClient,
+  booking: LockedBooking,
+): Promise<SupportRefundChoice | null> {
+  if (booking.refundBasisPoints === 0) return null;
+  const money = await moneyOf(client, booking);
+  const target = Math.floor((money.paid * booking.refundBasisPoints) / 10_000);
+  const amountToReturn = Math.min(money.paid - money.committed, Math.max(0, target - money.committed));
+  if (amountToReturn <= 0) return null;
+  if (amountToReturn === money.paid && money.committed === 0) return { kind: "FULL" };
+  return { kind: "PARTIAL", amount: amountToReturn };
 }
 
 /* ---------- Stripe's answers ---------- */
@@ -670,7 +688,7 @@ function queueBookingFromRow(row: DbRow): SupportQueueBooking {
   const pricing = record(row.pricing_snapshot);
   const startUtc = text(occurrence.startUtc, "occurrence_snapshot.startUtc");
   const policy = typeof pricing.cancellationPolicy === "string" && POLICIES.has(pricing.cancellationPolicy) ? pricing.cancellationPolicy as GuestCancellationPolicy : null;
-  const hours = policy ? FREE_HOURS[policy] : undefined;
+  const cancellation = cancellationTermsOf(pricing);
   return {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     providerId: text(row.provider_id, "provider_id"),
@@ -684,7 +702,8 @@ function queueBookingFromRow(row: DbRow): SupportQueueBooking {
     totalAmount: amount(pricing.totalAmount, "pricing_snapshot.totalAmount"),
     currency: text(pricing.currency, "pricing_snapshot.currency"),
     cancellationPolicy: policy,
-    freeCancellationUntilUtc: hours === undefined ? null : new Date(Date.parse(startUtc) - hours * 3_600_000).toISOString(),
+    cancellationRefundBasisPoints: cancellation.refundBasisPoints,
+    freeCancellationUntilUtc: freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart),
   };
 }
 
@@ -709,7 +728,9 @@ export class BookingCancellations {
    */
   async cancelAsGuest(sessionId: string, publicBookingId: string, input: GuestCancellationInput): Promise<CancellationResult | null> {
     const commandId = commandIdOf(input?.commandId);
-    if (input.choice !== "FULL_REFUND" && input.choice !== "REQUEST") throw new StoreValidationError("choice must be FULL_REFUND or REQUEST.");
+    if (input.choice !== "FULL_REFUND" && input.choice !== "POLICY_CANCEL" && input.choice !== "REQUEST") {
+      throw new StoreValidationError("choice must be FULL_REFUND, POLICY_CANCEL, or REQUEST.");
+    }
     if (input.shownDeadlineUtc !== null) assertCanonicalInstant(input.shownDeadlineUtc, "shownDeadlineUtc");
     const located = await withTransaction(this.#pool, (client) => sessionBookingRef(client, sessionId, publicBookingId));
     if (!located) return null;
@@ -734,10 +755,19 @@ export class BookingCancellations {
       if (booking.status !== "CONFIRMED") return done("NOT_CANCELLABLE");
       const free = booking.deadlineUtc !== null && booking.deadlineUtc > booking.nowUtc;
       if (input.shownDeadlineUtc !== booking.deadlineUtc) return done("CHANGED");
-      if (input.choice === "FULL_REFUND") {
-        if (!free) return done("CHANGED");
+      if (input.choice === "FULL_REFUND" || input.choice === "POLICY_CANCEL") {
+        if (!free || (input.choice === "FULL_REFUND" && booking.refundBasisPoints !== 10_000)) return done("CHANGED");
+        const refundChoice = await configuredGuestRefund(client, booking);
+        if (refundChoice === null) {
+          await cancelLocked(client, booking, {
+            by: "GUEST", reason: "GUEST_REQUEST", note: null, refund: null, commandId, notifyHost: true,
+            requestStatus: "CLOSED", resolvedBy: null,
+          });
+          return done("CANCELLED");
+        }
         const refund = await cancelLocked(client, booking, {
-          by: "GUEST", reason: "GUEST_REQUEST", note: null, refund: { kind: "FULL" }, commandId, notifyHost: true, requestStatus: "CLOSED", resolvedBy: null,
+          by: "GUEST", reason: "GUEST_REQUEST", note: null, refund: refundChoice, commandId, notifyHost: true,
+          requestStatus: "CLOSED", resolvedBy: null,
         });
         return done("CANCELLED", [refund]);
       }

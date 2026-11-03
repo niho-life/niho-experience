@@ -1,5 +1,5 @@
 import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage } from "@niho-experience/experience-store";
-import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
+import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
  * The emails guests get from this site (#285 slice 5): plain English, a text part and a minimal HTML part
@@ -133,7 +133,7 @@ export function bookingConfirmationEmail(
   const experience = oneLine(email.experienceTitle);
   const host = oneLine(email.hostDisplayName);
   const time = `${email.localStartTime} ${zoneName(email.timeZone)}`;
-  const policy = cancellationWords(email, options.now);
+  const policy = cancellationTermsWords(email, options.now);
   const grant = options.bookingPageGrant;
   return mail(`Your booking is confirmed: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, [
     { kind: "p", text: `Hi ${oneLine(email.guestName)},` },

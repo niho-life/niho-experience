@@ -94,14 +94,14 @@ export function parseSiteSaleArguments(argv: readonly string[]): SiteSaleArgumen
 
 type Json = Record<string, unknown>;
 
-function objectAt(value: unknown, path: string, keys: readonly string[], problems: string[]): Json | null {
+function objectAt(value: unknown, path: string, keys: readonly string[], problems: string[], requiredKeys: readonly string[] = keys): Json | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     problems.push(`${path} must be an object`);
     return null;
   }
   const record = value as Json;
   for (const key of Object.keys(record)) if (!keys.includes(key)) problems.push(`${path}.${key} is not a known field`);
-  for (const key of keys) if (!(key in record)) problems.push(`${path}.${key} is missing`);
+  for (const key of requiredKeys) if (!(key in record)) problems.push(`${path}.${key} is missing`);
   return record;
 }
 
@@ -123,7 +123,11 @@ function patternAt(value: unknown, path: string, pattern: RegExp, rule: string, 
 
 /** Strict shapes for the sale terms (unknown fields refused); the values are then setSaleTerms' validation. */
 function saleTermsAt(value: unknown, problems: string[]): ProductSaleTermsInput | null {
-  const terms = objectAt(value, "saleTerms", ["childPricing", "minimumParticipants", "maxPartySize", "cancellationPolicy", "bookingQuestions", "conditionsVersion"], problems);
+  const terms = objectAt(value, "saleTerms", [
+    "childPricing", "minimumParticipants", "minimumChargeableParticipants", "privateBooking", "maxPartySize",
+    "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints", "minimumAttendance",
+    "bookingQuestions", "conditionsVersion",
+  ], problems, ["childPricing", "minimumParticipants", "maxPartySize", "cancellationPolicy", "bookingQuestions", "conditionsVersion"]);
   if (terms === null) return null;
   const before = problems.length;
   if (terms.childPricing !== null && terms.childPricing !== undefined) {

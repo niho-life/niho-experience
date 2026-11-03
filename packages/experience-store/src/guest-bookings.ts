@@ -3,6 +3,7 @@ import {
   addLocalDays,
   assertLocalDate,
   expandOccurrences,
+  findOverlappingOpenOccurrenceIds,
   weekdayOf,
   type AvailabilityReason,
   type Occurrence,
@@ -50,7 +51,6 @@ import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import {
   BOOKING_COLUMNS,
   OVERRIDE_COLUMNS,
-  PRODUCT_COLUMNS,
   RULE_COLUMNS,
   SALES_STATE_COLUMNS,
   expireLapsedHolds,
@@ -138,14 +138,36 @@ export interface ProductSaleTermsInput {
   /** null: the product takes no children. */
   readonly childPricing: ChildPricing | null;
   readonly minimumParticipants: number;
+  /** A party below this count still pays at least this many adult prices. Defaults to the neutral value 1. */
+  readonly minimumChargeableParticipants?: number;
+  /** Reserve one group for the occurrence; existing inventory settings may also require private booking. */
+  readonly privateBooking?: boolean;
   readonly maxPartySize: number;
-  readonly cancellationPolicy: GuestCancellationPolicy;
+  readonly cancellationPolicy: ProductSaleCancellationPolicy;
+  /** Set both values with cancellationPolicy=CUSTOM to define a non-legacy cancellation rule. */
+  readonly cancellationWindowMinutesBeforeStart?: number | null;
+  readonly cancellationRefundBasisPoints?: number;
+  /** Operations-only attendance threshold. It is never included in guest-facing DTOs. */
+  readonly minimumAttendance?: number | null;
   readonly bookingQuestions: readonly BookingQuestion[];
   /** 参加の条件 (#110): the version a guest must consent to, or null. */
   readonly conditionsVersion: string | null;
 }
 
-export interface ProductSaleTerms extends ProductSaleTermsInput {
+/** `CUSTOM` is a host write/read code; persistence keeps a legacy-compatible `NONE` marker plus the explicit pair. */
+export type ProductSaleCancellationPolicy = GuestCancellationPolicy | "CUSTOM";
+
+export interface NormalizedProductSaleTermsInput extends Omit<ProductSaleTermsInput,
+  "minimumChargeableParticipants" | "privateBooking" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance" | "cancellationPolicy"> {
+  readonly cancellationPolicy: GuestCancellationPolicy;
+  readonly minimumChargeableParticipants: number;
+  readonly privateBooking: boolean;
+  readonly cancellationWindowMinutesBeforeStart: number | null;
+  readonly cancellationRefundBasisPoints: number;
+  readonly minimumAttendance: number | null;
+}
+
+export interface ProductSaleTerms extends NormalizedProductSaleTermsInput {
   readonly providerId: string;
   readonly productId: string;
   readonly bookingQuestionsFingerprint: string;
@@ -167,12 +189,18 @@ export interface PublicBookingOffer {
   readonly capacity: number;
   readonly maxPartySize: number;
   readonly minimumParticipants: number;
+  readonly minimumChargeableParticipants: number;
+  readonly privateBooking: boolean;
   readonly durationMinutes: number;
   /** Asia/Tokyo HH:mm. */
   readonly startTime: string;
   /** 0 = Sunday … 6 = Saturday. */
   readonly weekdays: readonly number[];
-  readonly cancellationPolicy: { readonly code: GuestCancellationPolicy; readonly freeCancellationHoursBefore: 24 | 48 | null };
+  readonly cancellationPolicy: { readonly code: GuestCancellationPolicy | "CUSTOM"; readonly freeCancellationHoursBefore: 24 | 48 | null };
+  readonly cancellationTerms: {
+    readonly cancellationWindowMinutesBeforeStart: number | null;
+    readonly refundBasisPoints: number;
+  };
   readonly acceptanceMode: "INSTANT";
   readonly bookingQuestions: readonly BookingQuestion[];
   readonly bookingQuestionsFingerprint: string;
@@ -297,7 +325,7 @@ type Queryable = Pool | PoolClient;
 type InputType = BookingQuestionInputType;
 
 const INPUT_TYPES: ReadonlySet<string> = new Set(["SHORT_TEXT", "LONG_TEXT", "SINGLE_SELECT", "MULTI_SELECT"]);
-const CANCELLATION_POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
+const CANCELLATION_POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE", "CUSTOM"]);
 const UTM_KEYS = ["utmSource", "utmMedium", "utmCampaign", "utmContent"] as const;
 const PUBLIC_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const OFFER_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -325,7 +353,9 @@ const MAX_SELLABLE_SLUGS_ASKED = 200;
 export const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
 export const TERMS_COLUMNS = `
   provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
-  minimum_participants, max_party_size, cancellation_policy, booking_questions,
+  minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+  cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
+  minimum_attendance, booking_questions,
   booking_questions_fingerprint, conditions_version, version, updated_at`;
 
 /* ---------- sale terms ---------- */
@@ -402,7 +432,7 @@ export function questionsFingerprint(questions: readonly BookingQuestion[]): str
   return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
 }
 
-export function validSaleTerms(input: ProductSaleTermsInput): ProductSaleTermsInput {
+export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductSaleTermsInput {
   if (input === null || typeof input !== "object") throw new StoreValidationError("terms must be an object.");
   let childPricing: ChildPricing | null = null;
   if (input.childPricing !== null) {
@@ -420,8 +450,41 @@ export function validSaleTerms(input: ProductSaleTermsInput): ProductSaleTermsIn
   }
   const minimumParticipants = integerIn(input.minimumParticipants, "minimumParticipants", 1, GUEST_BOOKING_LIMITS.maxPartySize);
   const maxPartySize = integerIn(input.maxPartySize, "maxPartySize", minimumParticipants, GUEST_BOOKING_LIMITS.maxPartySize);
+  const minimumChargeableParticipants = integerIn(
+    input.minimumChargeableParticipants === undefined ? 1 : input.minimumChargeableParticipants,
+    "minimumChargeableParticipants", 1, maxPartySize,
+  );
+  const privateBooking = input.privateBooking === undefined ? false : input.privateBooking;
+  if (typeof privateBooking !== "boolean") throw new StoreValidationError("privateBooking must be a boolean.");
+  const minimumAttendance = input.minimumAttendance === undefined || input.minimumAttendance === null
+    ? null
+    : integerIn(input.minimumAttendance, "minimumAttendance", 1, 2_147_483_647);
   if (typeof input.cancellationPolicy !== "string" || !CANCELLATION_POLICIES.has(input.cancellationPolicy)) {
     throw new StoreValidationError("cancellationPolicy is invalid.");
+  }
+  const hasCancellationMinutes = Object.hasOwn(input, "cancellationWindowMinutesBeforeStart");
+  const hasCancellationRate = Object.hasOwn(input, "cancellationRefundBasisPoints");
+  if (hasCancellationMinutes !== hasCancellationRate) {
+    throw new StoreValidationError("cancellationWindowMinutesBeforeStart and cancellationRefundBasisPoints must be set together.");
+  }
+  if (input.cancellationPolicy === "CUSTOM" && (!hasCancellationMinutes || !hasCancellationRate)) {
+    throw new StoreValidationError("CUSTOM cancellationPolicy requires an explicit cancellation window and refund rate.");
+  }
+  const legacyCancellation = input.cancellationPolicy === "FREE_UNTIL_24H"
+    ? { minutes: 1_440, basisPoints: 10_000 }
+    : input.cancellationPolicy === "FREE_UNTIL_48H"
+      ? { minutes: 2_880, basisPoints: 10_000 }
+      : { minutes: null, basisPoints: 0 };
+  const cancellationWindowMinutesBeforeStart = hasCancellationMinutes
+    ? input.cancellationWindowMinutesBeforeStart === null
+      ? null
+      : integerIn(input.cancellationWindowMinutesBeforeStart, "cancellationWindowMinutesBeforeStart", 0, 2_147_483_647)
+    : legacyCancellation.minutes;
+  const cancellationRefundBasisPoints = hasCancellationRate
+    ? integerIn(input.cancellationRefundBasisPoints, "cancellationRefundBasisPoints", 0, 10_000)
+    : legacyCancellation.basisPoints;
+  if (cancellationWindowMinutesBeforeStart === null && cancellationRefundBasisPoints !== 0) {
+    throw new StoreValidationError("A cancellation refund rate requires a free-cancellation period.");
   }
   if (input.conditionsVersion !== null && (typeof input.conditionsVersion !== "string" || !SHA256_HEX.test(input.conditionsVersion))) {
     throw new StoreValidationError("conditionsVersion must be null or a lowercase SHA-256 hex digest.");
@@ -429,8 +492,13 @@ export function validSaleTerms(input: ProductSaleTermsInput): ProductSaleTermsIn
   return {
     childPricing,
     minimumParticipants,
+    minimumChargeableParticipants,
+    privateBooking,
     maxPartySize,
-    cancellationPolicy: input.cancellationPolicy,
+    cancellationPolicy: input.cancellationPolicy === "CUSTOM" ? "NONE" : input.cancellationPolicy,
+    cancellationWindowMinutesBeforeStart,
+    cancellationRefundBasisPoints,
+    minimumAttendance,
     bookingQuestions: validQuestions(input.bookingQuestions),
     conditionsVersion: input.conditionsVersion,
   };
@@ -447,14 +515,41 @@ export function termsFromRow(row: DbRow): ProductSaleTerms {
       adultRequired: row.child_adult_required === true,
     },
     minimumParticipants: Number(row.minimum_participants),
+    minimumChargeableParticipants: Number(row.minimum_chargeable_participants),
+    privateBooking: row.private_booking === true,
     maxPartySize: Number(row.max_party_size),
     cancellationPolicy: String(row.cancellation_policy) as GuestCancellationPolicy,
+    cancellationWindowMinutesBeforeStart: row.cancellation_window_minutes_before_start === null
+      ? null : Number(row.cancellation_window_minutes_before_start),
+    cancellationRefundBasisPoints: Number(row.cancellation_refund_basis_points),
+    minimumAttendance: row.minimum_attendance === null ? null : Number(row.minimum_attendance),
     bookingQuestions: validQuestions(row.booking_questions),
     bookingQuestionsFingerprint: String(row.booking_questions_fingerprint),
     conditionsVersion: row.conditions_version === null ? null : String(row.conditions_version),
     version: Number(row.version),
     updatedAtUtc: isoValue(row, "updated_at"),
   };
+}
+
+function termsFromPublicationSnapshot(value: unknown, providerId: string, productId: string): ProductSaleTerms | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const snapshot = value as Record<string, unknown>;
+  if (typeof snapshot.bookingQuestionsFingerprint !== "string") return null;
+  try {
+    const normalized = validSaleTerms(snapshot as unknown as ProductSaleTermsInput);
+    const fingerprint = questionsFingerprint(normalized.bookingQuestions);
+    if (fingerprint !== snapshot.bookingQuestionsFingerprint) return null;
+    return {
+      ...normalized,
+      providerId,
+      productId,
+      bookingQuestionsFingerprint: fingerprint,
+      version: 1,
+      updatedAtUtc: "1970-01-01T00:00:00.000Z",
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
@@ -477,6 +572,17 @@ interface Sellable {
   readonly settings: ProviderSaleSettings;
 }
 
+// loadSellable joins publication/readiness tables that share several product column names.
+// Keep the aliases consumed by productFromRow while qualifying the joined columns.
+const SELLABLE_PRODUCT_COLUMNS = `
+  p.provider_id AS provider_id, p.id AS id, p.slug AS slug, p.status AS status,
+  p.public_title AS public_title, p.content AS content, p.currency AS currency,
+  p.unit_amount AS unit_amount, p.cancellation_terms_ref AS cancellation_terms_ref,
+  p.seller_niho_account_ref AS seller_niho_account_ref,
+  p.stripe_connect_account_ref AS stripe_connect_account_ref,
+  p.seller_display_name AS seller_display_name, p.version AS version,
+  p.created_at AS created_at, p.updated_at AS updated_at`;
+
 /**
  * The product travelers may book under this slug: exactly one PUBLISHED product across providers has it
  * (as guide links and guest questions), it has sale terms, its provider has sale settings (no fee is
@@ -486,24 +592,74 @@ interface Sellable {
 async function loadSellable(client: Queryable, slug: string, lock: boolean): Promise<Sellable | null> {
   if (typeof slug !== "string" || slug.length < 1 || slug.length > 160) return null;
   const products = await client.query<DbRow>(
-    `SELECT ${PRODUCT_COLUMNS} FROM experience_products WHERE slug=$1 AND status='PUBLISHED'
-      ORDER BY provider_id, id LIMIT 2${lock ? " FOR SHARE" : ""}`,
+    `SELECT ${SELLABLE_PRODUCT_COLUMNS}, pub.id AS active_publication_id,
+            pub.slug AS publication_slug,pub.public_title AS publication_title,pub.content AS publication_content,
+            pub.currency AS publication_currency,pub.unit_amount AS publication_unit_amount,
+            pub.cancellation_terms_ref AS publication_cancellation_terms_ref,
+            pub.seller_niho_account_ref AS publication_seller_niho_account_ref,
+            pub.stripe_connect_account_ref AS publication_stripe_connect_account_ref,
+            pub.seller_display_name AS publication_seller_display_name,
+            pub.sale_terms_snapshot
+       FROM experience_products p
+       LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
+       LEFT JOIN experience_product_publications pub ON pub.id=s.current_publication_id
+       LEFT JOIN provider_publication_readiness r ON r.provider_id=s.provider_id
+       LEFT JOIN experience_product_cutovers cut ON cut.provider_id=p.provider_id AND cut.product_id=p.id
+      WHERE p.status='PUBLISHED' AND (
+        -- Legacy checkout remains available only for products that have not
+        -- entered the Experience cutover. Recording the cutover row closes
+        -- this path before the new publication exists.
+        (s.product_id IS NULL AND cut.product_id IS NULL AND p.slug=$1)
+        OR
+        (pub.slug=$1 AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL
+          AND s.owner_resume_required=false
+          AND r.account_usable=true AND r.connect_ready=true AND r.seller_display_ready=true
+          AND r.observed_at <= clock_timestamp() AND r.valid_until > clock_timestamp()
+          AND r.valid_until <= r.observed_at + interval '10 minutes'
+          AND r.required_consent_version=pub.consent_version
+          AND r.seller_niho_account_ref=pub.seller_niho_account_ref
+          AND r.stripe_connect_account_ref=pub.stripe_connect_account_ref
+          AND r.seller_display_name=pub.seller_display_name
+          AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=s.provider_id
+            AND m.niho_user_id=r.owner_niho_user_id AND m.role='OWNER' AND m.active=true)
+          AND cut.legacy_holds_drained_at IS NOT NULL
+          AND cut.inventory_import_batch_id IS NOT NULL
+          AND cut.experience_sales_started_at IS NOT NULL
+          AND cut.experience_sales_stopped_at IS NULL)
+      )
+      ORDER BY p.provider_id,p.id LIMIT 2${lock ? " FOR SHARE OF p" : ""}`,
     [slug],
   );
   if (products.rows.length !== 1) return null;
-  const product = productFromRow(products.rows[0]!);
+  const row = products.rows[0]!;
+  const currentProduct = productFromRow(row);
+  const isPublication = row.active_publication_id !== null && row.active_publication_id !== undefined;
+  const product: ProductRecord = isPublication ? {
+    ...currentProduct,
+    slug: String(row.publication_slug),
+    publicTitle: String(row.publication_title),
+    content: row.publication_content as ProductRecord["content"],
+    currency: String(row.publication_currency),
+    unitAmount: Number(row.publication_unit_amount),
+    cancellationTermsRef: String(row.publication_cancellation_terms_ref),
+    sellerNihoAccountRef: String(row.publication_seller_niho_account_ref),
+    stripeConnectAccountRef: String(row.publication_stripe_connect_account_ref),
+    sellerDisplayName: String(row.publication_seller_display_name),
+  } : currentProduct;
   if (!sellableProduct(product)) return null;
-  const terms = await client.query<DbRow>(
-    `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2${lock ? " FOR SHARE" : ""}`,
-    [product.providerId, product.id],
-  );
-  if (terms.rows[0] === undefined) return null;
+  const terms = isPublication
+    ? termsFromPublicationSnapshot(row.sale_terms_snapshot, product.providerId, product.id)
+    : await client.query<DbRow>(
+      `SELECT ${TERMS_COLUMNS} FROM experience_product_sale_terms WHERE provider_id=$1 AND product_id=$2${lock ? " FOR SHARE" : ""}`,
+      [product.providerId, product.id],
+    ).then((result) => result.rows[0] ? termsFromRow(result.rows[0]) : null);
+  if (terms === null) return null;
   const settings = await client.query<DbRow>(
     `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1${lock ? " FOR SHARE" : ""}`,
     [product.providerId],
   );
   if (settings.rows[0] === undefined) return null;
-  const sellable = { product, terms: termsFromRow(terms.rows[0]), settings: saleSettingsFromRow(settings.rows[0]) };
+  const sellable = { product, terms, settings: saleSettingsFromRow(settings.rows[0]) };
   return chargeableFee(product.unitAmount, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints) ? sellable : null;
 }
 
@@ -520,6 +676,21 @@ export function sellableProduct(product: Pick<ProductRecord, "id" | "currency" |
 export function chargeableFee(unitAmount: number, child: ChildPricing | null, basisPoints: number): boolean {
   const smallest = child !== null && !child.adultRequired ? Math.min(unitAmount, child.priceYen) : unitAmount;
   return chargeablePlatformFee(smallest, basisPoints);
+}
+
+/** Children pay their configured amount; if the resulting total is below the configured floor, missing units use the adult price. */
+export function guestTotalYen(
+  adultPriceYen: number,
+  childPricing: ChildPricing | null,
+  adultCount: number,
+  childCount: number,
+  minimumChargeableParticipants: number,
+): number {
+  const ordinaryTotal = adultPriceYen * adultCount + (childPricing?.priceYen ?? 0) * childCount;
+  const minimumTotal = adultPriceYen * minimumChargeableParticipants;
+  const total = Math.max(ordinaryTotal, minimumTotal);
+  if (!Number.isSafeInteger(total)) throw new StoreValidationError("booking total exceeds the safe integer range.");
+  return total;
 }
 
 export async function databaseNow(client: Queryable): Promise<string> {
@@ -566,6 +737,13 @@ function offerName(title: string): string {
   return characters.length <= 80 ? title : `${characters.slice(0, 79).join("")}…`;
 }
 
+export function cancellationPolicyCode(terms: ProductSaleTerms): ProductSaleCancellationPolicy {
+  if (terms.cancellationWindowMinutesBeforeStart === null && terms.cancellationRefundBasisPoints === 0) return "NONE";
+  if (terms.cancellationWindowMinutesBeforeStart === 1_440 && terms.cancellationRefundBasisPoints === 10_000) return "FREE_UNTIL_24H";
+  if (terms.cancellationWindowMinutesBeforeStart === 2_880 && terms.cancellationRefundBasisPoints === 10_000) return "FREE_UNTIL_48H";
+  return "CUSTOM";
+}
+
 function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBookingOffer {
   const { product, terms } = sellable;
   const rule = stored.rule;
@@ -577,12 +755,19 @@ function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBooking
     capacity: rule.capacity,
     maxPartySize: terms.maxPartySize,
     minimumParticipants: terms.minimumParticipants,
+    minimumChargeableParticipants: terms.minimumChargeableParticipants,
+    privateBooking: terms.privateBooking,
     durationMinutes: rule.durationMinutes,
     startTime: rule.localStartTime,
     weekdays: weekdaysOf(rule),
     cancellationPolicy: {
-      code: terms.cancellationPolicy,
-      freeCancellationHoursBefore: terms.cancellationPolicy === "FREE_UNTIL_24H" ? 24 : terms.cancellationPolicy === "FREE_UNTIL_48H" ? 48 : null,
+      code: cancellationPolicyCode(terms),
+      freeCancellationHoursBefore: cancellationPolicyCode(terms) === "FREE_UNTIL_24H" ? 24
+        : cancellationPolicyCode(terms) === "FREE_UNTIL_48H" ? 48 : null,
+    },
+    cancellationTerms: {
+      cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
+      refundBasisPoints: terms.cancellationRefundBasisPoints,
     },
     acceptanceMode: "INSTANT",
     bookingQuestions: terms.bookingQuestions,
@@ -926,16 +1111,18 @@ export class GuestBookingRepository {
       const child = terms.childPricing;
       const values = [
         actor.providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
-        terms.minimumParticipants, terms.maxPartySize, terms.cancellationPolicy, JSON.stringify(terms.bookingQuestions),
-        fingerprint, terms.conditionsVersion,
+        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.privateBooking, terms.maxPartySize,
+        terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
+        terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion,
       ];
       const result = expectedVersion === undefined
         ? await client.query<DbRow>(
             `INSERT INTO experience_product_sale_terms (
                provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
-               minimum_participants, max_party_size, cancellation_policy, booking_questions,
-               booking_questions_fingerprint, conditions_version
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
+               minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+               cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
+               minimum_attendance, booking_questions, booking_questions_fingerprint, conditions_version
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
              ON CONFLICT DO NOTHING
              RETURNING ${TERMS_COLUMNS}`,
             values,
@@ -943,10 +1130,12 @@ export class GuestBookingRepository {
         : await client.query<DbRow>(
             `UPDATE experience_product_sale_terms
                 SET child_price_amount=$3, child_min_age=$4, child_max_age=$5, child_adult_required=$6,
-                    minimum_participants=$7, max_party_size=$8, cancellation_policy=$9, booking_questions=$10::jsonb,
-                    booking_questions_fingerprint=$11, conditions_version=$12,
+                    minimum_participants=$7, minimum_chargeable_participants=$8, private_booking=$9, max_party_size=$10,
+                    cancellation_policy=$11, cancellation_window_minutes_before_start=$12, cancellation_refund_basis_points=$13,
+                    minimum_attendance=$14, booking_questions=$15::jsonb,
+                    booking_questions_fingerprint=$16, conditions_version=$17,
                     version=version+1, updated_at=clock_timestamp()
-              WHERE provider_id=$1 AND product_id=$2 AND version=$13
+              WHERE provider_id=$1 AND product_id=$2 AND version=$18
               RETURNING ${TERMS_COLUMNS}`,
             [...values, expectedVersion],
           );
@@ -1150,31 +1339,90 @@ export class GuestBookingRepository {
     const asked = [...new Set(slugs.filter((slug) => typeof slug === "string" && slug.length >= 1 && slug.length <= 160))];
     if (asked.length === 0) return [];
     const result = await this.#pool.query<DbRow>(
-      `SELECT p.slug, p.id, p.currency, p.unit_amount,
-              t.product_id IS NOT NULL AS has_terms, t.child_price_amount, t.child_min_age, t.child_max_age, t.child_adult_required,
+      `SELECT CASE WHEN pub.id IS NULL THEN p.slug ELSE pub.slug END AS slug,
+              p.id,p.provider_id,p.currency,p.unit_amount,
+              pub.id AS active_publication_id,pub.currency AS publication_currency,pub.unit_amount AS publication_unit_amount,
+              pub.sale_terms_snapshot,t.product_id IS NOT NULL AS has_terms,
+              t.child_price_amount,t.child_min_age,t.child_max_age,t.child_adult_required,
+              t.minimum_participants,t.minimum_chargeable_participants,t.private_booking,t.max_party_size,
+              t.cancellation_policy,t.cancellation_window_minutes_before_start,t.cancellation_refund_basis_points,
+              t.minimum_attendance,t.booking_questions,
+              t.booking_questions_fingerprint,t.conditions_version,
               s.platform_fee_basis_points
          FROM experience_products p
+         LEFT JOIN experience_product_publication_states state ON state.provider_id=p.provider_id AND state.product_id=p.id
+         LEFT JOIN experience_product_publications pub ON pub.id=state.current_publication_id
+         LEFT JOIN provider_publication_readiness ready ON ready.provider_id=state.provider_id
+         LEFT JOIN experience_product_cutovers cut ON cut.provider_id=p.provider_id AND cut.product_id=p.id
          LEFT JOIN experience_product_sale_terms t ON t.provider_id=p.provider_id AND t.product_id=p.id
          LEFT JOIN provider_sale_settings s ON s.provider_id=p.provider_id
-        WHERE p.slug=ANY($1::text[]) AND p.status='PUBLISHED'`,
+        WHERE p.status='PUBLISHED' AND (
+          (state.product_id IS NULL AND cut.product_id IS NULL AND p.slug=ANY($1::text[]))
+          OR
+          (pub.slug=ANY($1::text[]) AND state.self_stopped_at IS NULL
+            AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
+            AND ready.account_usable=true AND ready.connect_ready=true AND ready.seller_display_ready=true
+            AND ready.observed_at <= clock_timestamp() AND ready.valid_until > clock_timestamp()
+            AND ready.valid_until <= ready.observed_at + interval '10 minutes'
+            AND ready.required_consent_version=pub.consent_version
+            AND ready.seller_niho_account_ref=pub.seller_niho_account_ref
+            AND ready.stripe_connect_account_ref=pub.stripe_connect_account_ref
+            AND ready.seller_display_name=pub.seller_display_name
+            AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=state.provider_id
+              AND m.niho_user_id=ready.owner_niho_user_id AND m.role='OWNER' AND m.active=true)
+            AND cut.legacy_holds_drained_at IS NOT NULL AND cut.inventory_import_batch_id IS NOT NULL
+            AND cut.experience_sales_started_at IS NOT NULL AND cut.experience_sales_stopped_at IS NULL)
+        )`,
       [asked],
     );
     const rowsBySlug = new Map<string, DbRow[]>();
     for (const row of result.rows) rowsBySlug.set(String(row.slug), [...(rowsBySlug.get(String(row.slug)) ?? []), row]);
     return asked.filter((slug) => {
       const rows = rowsBySlug.get(slug);
-      // A second published product with the slug stops the sale, as in loadSellable.
+      // A second active sale source with the slug stops the sale, as in loadSellable.
       if (rows?.length !== 1) return false;
       const row = rows[0]!;
-      if (row.has_terms !== true || row.platform_fee_basis_points === null) return false;
-      if (!sellableProduct({ id: String(row.id), currency: String(row.currency), unitAmount: Number(row.unit_amount) })) return false;
-      const child: ChildPricing | null = row.child_price_amount === null ? null : {
-        priceYen: Number(row.child_price_amount),
-        minAge: Number(row.child_min_age),
-        maxAge: Number(row.child_max_age),
-        adultRequired: row.child_adult_required === true,
-      };
-      return chargeableFee(Number(row.unit_amount), child, Number(row.platform_fee_basis_points));
+      if (row.platform_fee_basis_points === null) return false;
+      const isPublication = row.active_publication_id !== null && row.active_publication_id !== undefined;
+      const id = String(row.id);
+      const currency = String(isPublication ? row.publication_currency : row.currency);
+      const unitAmount = Number(isPublication ? row.publication_unit_amount : row.unit_amount);
+      if (!sellableProduct({ id, currency, unitAmount })) return false;
+      let terms: ProductSaleTerms | null;
+      if (isPublication) {
+        terms = termsFromPublicationSnapshot(row.sale_terms_snapshot, String(row.provider_id), id);
+      } else {
+        if (row.has_terms !== true) return false;
+        const childPricing: ChildPricing | null = row.child_price_amount === null ? null : {
+          priceYen: Number(row.child_price_amount),
+          minAge: Number(row.child_min_age),
+          maxAge: Number(row.child_max_age),
+          adultRequired: row.child_adult_required === true,
+        };
+        try {
+          const normalized = validSaleTerms({
+            childPricing,
+            minimumParticipants: Number(row.minimum_participants),
+            minimumChargeableParticipants: Number(row.minimum_chargeable_participants),
+            privateBooking: row.private_booking === true,
+            maxPartySize: Number(row.max_party_size),
+            cancellationPolicy: String(row.cancellation_policy) as GuestCancellationPolicy,
+            cancellationWindowMinutesBeforeStart: row.cancellation_window_minutes_before_start === null
+              ? null : Number(row.cancellation_window_minutes_before_start),
+            cancellationRefundBasisPoints: Number(row.cancellation_refund_basis_points),
+            minimumAttendance: row.minimum_attendance === null ? null : Number(row.minimum_attendance),
+            bookingQuestions: row.booking_questions as BookingQuestion[],
+            conditionsVersion: row.conditions_version === null ? null : String(row.conditions_version),
+          });
+          const fingerprint = questionsFingerprint(normalized.bookingQuestions);
+          terms = fingerprint === String(row.booking_questions_fingerprint)
+            ? { ...normalized, providerId: String(row.provider_id), productId: id, bookingQuestionsFingerprint: fingerprint, version: 1, updatedAtUtc: "1970-01-01T00:00:00.000Z" }
+            : null;
+        } catch {
+          terms = null;
+        }
+      }
+      return terms !== null && chargeableFee(unitAmount, terms.childPricing, Number(row.platform_fee_basis_points));
     });
   }
 
@@ -1214,29 +1462,38 @@ export class GuestBookingRepository {
     const empty: PublicAvailability = { generatedAt: nowUtc, timeZone: "Asia/Tokyo", windowDays, occurrences: [] };
     if (fromDate > toDate) return empty;
 
-    const rules = (await activeRules(this.#pool, providerId, productId, today))
-      .filter((stored) => options.offerId === undefined || stored.rule.id === options.offerId);
-    const expanded = await expandRules(this.#pool, providerId, rules, fromDate, toDate);
-    if (expanded.length > MAX_LISTED_OCCURRENCES) throw new StoreConflictError("Too many occurrences in the public availability window.");
+    const rules = await activeRules(this.#pool, providerId, productId, today);
+    const [previousDate, expanded] = await Promise.all([
+      expandRules(this.#pool, providerId, rules, addLocalDays(fromDate, -1), addLocalDays(fromDate, -1)),
+      expandRules(this.#pool, providerId, rules, fromDate, toDate),
+    ]);
+    const allExpanded = [...previousDate, ...expanded];
+    const selected = expanded.filter(({ ruleId }) => options.offerId === undefined || ruleId === options.offerId);
+    if (selected.length > MAX_LISTED_OCCURRENCES || allExpanded.length > MAX_LISTED_OCCURRENCES * 2) {
+      throw new StoreConflictError("Too many occurrences in the public availability window.");
+    }
+    const overlapping = findOverlappingOpenOccurrenceIds(allExpanded.map(({ occurrence }) => occurrence));
+    const visible = selected.filter(({ occurrence }) => occurrence.localDate >= fromDate);
     const perDate = new Map<string, number>();
-    for (const { ruleId, occurrence } of expanded) {
+    for (const { ruleId, occurrence } of visible) {
       const key = `${ruleId}|${occurrence.localDate}`;
       perDate.set(key, (perDate.get(key) ?? 0) + 1);
     }
-    const unique = expanded.filter(({ ruleId, occurrence }) => perDate.get(`${ruleId}|${occurrence.localDate}`) === 1);
+    const unique = visible.filter(({ ruleId, occurrence }) => perDate.get(`${ruleId}|${occurrence.localDate}`) === 1);
     const evaluated = await evaluateStoredInventories(this.#pool, providerId, unique.map(({ occurrence }) => ({
       productId, occurrence, requestedSeats: sellable.terms.minimumParticipants,
     })), nowUtc);
-    const occurrences = expanded.map(({ ruleId, occurrence }): PublicOccurrence => {
+    const occurrences = visible.map(({ ruleId, occurrence }): PublicOccurrence => {
       const availability = evaluated.get(occurrence.id)?.availability;
-      const reason = availability === undefined ? "UNAVAILABLE" : publicReason(availability.reason);
+      const isOverlapping = overlapping.has(occurrence.id);
+      const reason = isOverlapping || availability === undefined ? "UNAVAILABLE" : publicReason(availability.reason);
       return {
         offerId: ruleId,
         date: occurrence.localDate,
         startAt: occurrence.startUtc,
         endAt: occurrence.endUtc,
         bookable: reason === null,
-        seatsLeft: availability?.availableSeats ?? 0,
+        seatsLeft: isOverlapping ? 0 : availability?.availableSeats ?? 0,
         reason,
       };
     });
@@ -1290,7 +1547,8 @@ export class GuestBookingRepository {
 
       const nowUtc = await databaseNow(client);
       const today = tokyoDate(nowUtc);
-      const rule = (await activeRules(client, providerId, productId, today)).find((stored) => stored.rule.id === request.offerId);
+      const rules = await activeRules(client, providerId, productId, today);
+      const rule = rules.find((stored) => stored.rule.id === request.offerId);
       if (rule === undefined) throw invalid("offerId");
       if (request.termsConsentVersion !== request.currentConsentVersion) {
         throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "consent.agreedVersion" });
@@ -1304,7 +1562,9 @@ export class GuestBookingRepository {
       if (headCount < terms.minimumParticipants || headCount > terms.maxPartySize) throw invalid("adultCount");
       if (request.childCount > 0 && terms.childPricing === null) throw invalid("childCount");
       if (request.adultCount < 1 && terms.childPricing?.adultRequired !== false) throw invalid("adultCount");
-      const totalYen = product.unitAmount * request.adultCount + (terms.childPricing?.priceYen ?? 0) * request.childCount;
+      const totalYen = guestTotalYen(
+        product.unitAmount, terms.childPricing, request.adultCount, request.childCount, terms.minimumChargeableParticipants,
+      );
       if (request.expectedTotalYen !== totalYen) throw new GuestCheckoutError("PRICE_CHANGED", { currentTotalYen: totalYen });
       // Unreachable with the ¥50 minimum and today's rates; a fee Stripe would refuse is not for sale.
       if (!chargeablePlatformFee(totalYen, settings.platformFeeBasisPoints)) throw new StoreNotFoundError("experience for sale");
@@ -1347,17 +1607,38 @@ export class GuestBookingRepository {
       const candidates = await expandRules(client, providerId, [rule], request.occurrenceDate, request.occurrenceDate);
       if (candidates.length === 0) throw notScheduled("NOT_SCHEDULED");
       if (candidates.length > 1) throw notScheduled("UNAVAILABLE");
-      const occurrence = await materializeAndLockOccurrence(client, providerId, productId, candidates[0]!.occurrence.id);
+      const occurrence = candidates[0]!.occurrence;
+      const previousDate = await expandRules(
+        client, providerId, rules, addLocalDays(request.occurrenceDate, -1), addLocalDays(request.occurrenceDate, -1),
+      );
+      const sameDate = await expandRules(client, providerId, rules, request.occurrenceDate, request.occurrenceDate);
+      if (findOverlappingOpenOccurrenceIds([...previousDate, ...sameDate].map((item) => item.occurrence)).has(occurrence.id)) {
+        throw notScheduled("UNAVAILABLE");
+      }
+      const occurrenceForBooking = await materializeAndLockOccurrence(client, providerId, productId, occurrence.id);
 
       let placed: Awaited<ReturnType<typeof placeBookingHold>>;
       try {
-        placed = await placeBookingHold(client, product, occurrence, {
+        placed = await placeBookingHold(client, product, occurrenceForBooking, {
           seats: headCount,
           idempotencyKey,
           holdSeconds: request.holdSeconds,
           guest: {
             breakdown: { adultCount: request.adultCount, childCount: request.childCount, childUnitAmount: terms.childPricing?.priceYen ?? null },
             cancellationPolicy: terms.cancellationPolicy,
+            bookingTerms: {
+              minimumParticipants: terms.minimumParticipants,
+              minimumChargeableParticipants: terms.minimumChargeableParticipants,
+              privateBooking: terms.privateBooking,
+              minimumAttendance: terms.minimumAttendance,
+              maxPartySize: terms.maxPartySize,
+              cancellationPolicy: terms.cancellationPolicy,
+              cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
+              cancellationRefundBasisPoints: terms.cancellationRefundBasisPoints,
+              bookingQuestions: terms.bookingQuestions,
+              bookingQuestionsFingerprint: terms.bookingQuestionsFingerprint,
+              conditionsVersion: terms.conditionsVersion,
+            },
             platformFee: { supportEnabled: settings.supportEnabled, basisPoints: settings.platformFeeBasisPoints },
           },
         });

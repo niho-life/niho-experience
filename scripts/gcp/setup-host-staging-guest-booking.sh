@@ -4,6 +4,8 @@
 # access for the runtime on exactly the NIHO app secrets it reuses (owner decision 2026-10-31), the jobs
 # identity and a PAUSED Cloud Scheduler job. It never creates a secret version, prints a secret value or
 # changes a NIHO app resource beyond adding the runtime's secretAccessor binding on the listed secrets.
+# For an existing paused job, it only reconciles URI/audience when both use another published URL alias
+# for this exact service and all other job settings match. It never resumes the job.
 set -euo pipefail
 
 [[ "${CONFIRM_HOST_STAGING_GUEST_BOOKING_SETUP:-}" == niho-app-stg ]] || {
@@ -11,8 +13,8 @@ set -euo pipefail
   exit 1
 }
 SERVICE_URL="${STG_HOST_SERVICE_URL:-}"
-[[ "$SERVICE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ ]] || {
-  echo 'Set STG_HOST_SERVICE_URL to the stable staging service URL (https://niho-experience-host-stg-….a.run.app, no trailing slash).' >&2
+[[ "$SERVICE_URL" =~ ^https://niho-experience-host-stg-[A-Za-z0-9.-]+\.run\.app$ ]] || {
+  echo 'Set STG_HOST_SERVICE_URL to a stable run.app URL for niho-experience-host-stg (no path or trailing slash).' >&2
   exit 1
 }
 PROJECT=niho-app-stg
@@ -29,7 +31,6 @@ NIHO_SECRETS=(
   RECEIPT_DELIVERY_SMTP_USER
   RECEIPT_DELIVERY_SMTP_PASSWORD
   STRIPE_CONNECT_PLATFORM_SECRET_KEY
-  NIHO_TRANSLATE_ANTHROPIC_API_KEY
 )
 SCHEDULER_JOB=experience-jobs-drain-stg
 DRAIN_URI="${SERVICE_URL}/internal/experience-jobs/v1/drain"
@@ -45,10 +46,17 @@ retry_binding() {
   done
 }
 [[ "$(gcloud projects describe "$PROJECT" --format='value(projectId)')" == "$PROJECT" ]]
-# The URL must be this service's stable URL (not a candidate tag URL or another service): the job's
-# audience is compared with EXPERIENCE_JOBS_AUDIENCE, which the deploy workflow sets to the same URL.
+# The URL must be one of this service's stable URLs (not a candidate tag URL or another service):
+# the job's audience is compared with EXPERIENCE_JOBS_AUDIENCE, which the deploy workflow sets to the same URL.
 state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
-jq -e --arg url "$SERVICE_URL" --arg runtime "$RUNTIME" '.status.url == $url and .spec.template.spec.serviceAccountName == $runtime and .metadata.labels.app == "niho-experience" and .metadata.labels.env == "host-staging"' <<< "$state" >/dev/null || {
+jq -e --arg url "$SERVICE_URL" --arg runtime "$RUNTIME" '
+  . as $service
+  | ((.metadata.annotations["run.googleapis.com/urls"] // "[]") | fromjson) as $urls
+  | ($urls | index($url)) != null
+    and $service.spec.template.spec.serviceAccountName == $runtime
+    and $service.metadata.labels.app == "niho-experience"
+    and $service.metadata.labels.env == "host-staging"
+' <<< "$state" >/dev/null || {
   echo "STG_HOST_SERVICE_URL is not ${SERVICE}'s URL, or the service is not the experience staging service." >&2
   exit 1
 }
@@ -92,9 +100,40 @@ else
   created=false
 fi
 job="$(gcloud scheduler jobs describe "$SCHEDULER_JOB" --project "$PROJECT" --location "$REGION" --format=json)"
-# An existing job is checked, never changed or resumed here.
-jq -e --arg uri "$DRAIN_URI" --arg sa "$JOBS" --arg audience "$SERVICE_URL" '.schedule == "* * * * *" and .httpTarget.uri == $uri and .httpTarget.httpMethod == "POST" and .httpTarget.oidcToken.serviceAccountEmail == $sa and .httpTarget.oidcToken.audience == $audience' <<< "$job" >/dev/null || {
-  echo "Existing Cloud Scheduler job ${SCHEDULER_JOB} differs from this setup; review it instead of changing it here." >&2
+if [[ "$created" == false ]]; then
+  current_uri="$(jq -r '.httpTarget.uri // empty' <<< "$job")"
+  current_origin="${current_uri%/internal/experience-jobs/v1/drain}"
+  current_audience="$(jq -r '.httpTarget.oidcToken.audience // empty' <<< "$job")"
+  if [[ "$current_origin" != "$SERVICE_URL" || "$current_audience" != "$SERVICE_URL" ]]; then
+    jq -e \
+      --arg origin "$current_origin" \
+      --arg suffix '/internal/experience-jobs/v1/drain' \
+      --arg runtime "$JOBS" \
+      --arg description 'Experience jobs drain (staging, #285). Resume only after deploying with STG_GUEST_BOOKING_ENABLED=true.' \
+      --arg urls "$(jq -c '.metadata.annotations["run.googleapis.com/urls"] | fromjson' <<< "$state")" \
+      '(.state == "PAUSED")
+       and .schedule == "* * * * *"
+       and .timeZone == "Etc/UTC"
+       and .httpTarget.httpMethod == "POST"
+       and .httpTarget.uri == ($origin + $suffix)
+       and .httpTarget.oidcToken.audience == $origin
+       and .httpTarget.oidcToken.serviceAccountEmail == $runtime
+       and .attemptDeadline == "180s"
+       and .description == $description
+       and ((.retryConfig.retryCount // 0) == 0)
+       and (($urls | fromjson | index($origin)) != null)' <<< "$job" >/dev/null || {
+      echo "Existing Cloud Scheduler job ${SCHEDULER_JOB} is not a paused job using another published URL alias with otherwise expected settings; review it without changing it." >&2
+      exit 1
+    }
+    gcloud scheduler jobs update http "$SCHEDULER_JOB" --project "$PROJECT" --location "$REGION" \
+      --uri "$DRAIN_URI" --oidc-service-account-email "$JOBS" \
+      --oidc-token-audience "$SERVICE_URL" --quiet
+    job="$(gcloud scheduler jobs describe "$SCHEDULER_JOB" --project "$PROJECT" --location "$REGION" --format=json)"
+  fi
+fi
+jq -e --arg uri "$DRAIN_URI" --arg sa "$JOBS" --arg audience "$SERVICE_URL" \
+  '.state == "PAUSED" and .schedule == "* * * * *" and .timeZone == "Etc/UTC" and .httpTarget.uri == $uri and .httpTarget.httpMethod == "POST" and .httpTarget.oidcToken.serviceAccountEmail == $sa and .httpTarget.oidcToken.audience == $audience and .attemptDeadline == "180s" and ((.retryConfig.retryCount // 0) == 0)' <<< "$job" >/dev/null || {
+  echo "Cloud Scheduler job ${SCHEDULER_JOB} does not match the paused staging configuration after setup." >&2
   exit 1
 }
 job_state="$(jq -r '.state' <<< "$job")"

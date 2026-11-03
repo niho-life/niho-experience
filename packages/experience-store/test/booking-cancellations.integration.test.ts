@@ -49,7 +49,11 @@ interface Context {
   readonly outbox: GuestMailOutbox;
 }
 
-async function withSchema(run: (context: Context) => Promise<void>, policy: "FREE_UNTIL_48H" | "NONE" = "FREE_UNTIL_48H"): Promise<void> {
+async function withSchema(
+  run: (context: Context) => Promise<void>,
+  policy: "FREE_UNTIL_48H" | "NONE" = "FREE_UNTIL_48H",
+  customCancellation?: { readonly windowMinutes: number | null; readonly refundBasisPoints: number },
+): Promise<void> {
   const { Pool } = await import("pg");
   const schema = `cancellations_${randomUUID().replaceAll("-", "")}`;
   const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
@@ -69,7 +73,12 @@ async function withSchema(run: (context: Context) => Promise<void>, policy: "FRE
     await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: { priceYen: 1500, minAge: 4, maxAge: 12, adultRequired: true }, minimumParticipants: 1, maxPartySize: 6,
-      cancellationPolicy: policy, bookingQuestions: [], conditionsVersion: null,
+      cancellationPolicy: policy,
+      ...(customCancellation ? {
+        cancellationWindowMinutesBeforeStart: customCancellation.windowMinutes,
+        cancellationRefundBasisPoints: customCancellation.refundBasisPoints,
+      } : {}),
+      bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
     await run({ pool, store, guests, access: new GuestBookingAccess(pool), cancellations: new BookingCancellations(pool), outbox: new GuestMailOutbox(pool) });
@@ -189,6 +198,43 @@ async function setSendState(pool: Pool, refundId: string, attempts: number, clai
 const AUTO = { limit: 10, olderThanSeconds: 120, leaseSeconds: 120 } as const;
 
 describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: databaseUrl === undefined }, () => {
+  it("uses the snapshotted refund percentage for custom cancellation and rounds down to whole yen", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context);
+      const start = await startsIn(pool, made.publicBookingId, 6 * HOUR_MS);
+      const deadline = new Date(Date.parse(start) - 3 * HOUR_MS).toISOString();
+      const session = await sessionFor(context, made.publicBookingId);
+      const view = await context.access.readBookingSession(session, made.publicBookingId);
+      assert.equal(view?.cancellationRefundBasisPoints, 3750);
+      assert.equal(view?.freeCancellationUntilUtc, deadline);
+      assert.equal(view?.freeCancellationOpen, true);
+
+      const result = await cancellations.cancelAsGuest(session, made.publicBookingId, {
+        commandId: randomUUID(), choice: "POLICY_CANCEL", shownDeadlineUtc: deadline,
+      });
+      assert.equal(result?.outcome, "CANCELLED");
+      assert.deepEqual(result?.refunds.map(({ kind, amount }) => ({ kind, amount })), [{ kind: "PARTIAL", amount: 2812 }]);
+      assert.deepEqual((await refunds(pool, made.publicBookingId)).map(({ kind, amount }) => [kind, amount]), [["PARTIAL", 2812]]);
+    }, "NONE", { windowMinutes: 180, refundBasisPoints: 3750 });
+  });
+
+  it("allows cancellation within a configured zero-refund window without creating a refund", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context);
+      const start = await startsIn(pool, made.publicBookingId, 6 * HOUR_MS);
+      const deadline = new Date(Date.parse(start) - 3 * HOUR_MS).toISOString();
+      const session = await sessionFor(context, made.publicBookingId);
+      const result = await cancellations.cancelAsGuest(session, made.publicBookingId, {
+        commandId: randomUUID(), choice: "POLICY_CANCEL", shownDeadlineUtc: deadline,
+      });
+      assert.equal(result?.outcome, "CANCELLED");
+      assert.deepEqual(result?.refunds, []);
+      assert.deepEqual(await refunds(pool, made.publicBookingId), []);
+    }, "NONE", { windowMinutes: 180, refundBasisPoints: 0 });
+  });
+
   it("cancels for the guest before free cancellation ends: a full refund with NIHO's fee, seats back, the guest and host told", async () => {
     await withSchema(async (context) => {
       const { pool, cancellations } = context;

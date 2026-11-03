@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildFixtureExperiences } from "@niho-experience/api-client/mock";
+import type { PublicBookingOffer } from "@niho-experience/experience-store";
 import { parseSiteSaleTerms, siteSaleTerms, withSiteSaleTerms } from "./guest-booking-terms";
 import { SAMPLE_TERMS } from "./testing/guest-booking-fixtures";
 
@@ -8,11 +9,42 @@ describe("the sale of an experience sold here (#285)", () => {
     const sale = siteSaleTerms(SAMPLE_TERMS, "sample-terms-2026-10");
     expect(sale.booking).toEqual({ consentVersion: "sample-terms-2026-10", checkoutAvailable: true, currency: "JPY", timeZone: "Asia/Tokyo" });
     expect(sale.sellerDisplayName).toBe("Sample Seller");
-    expect(sale.offers).toEqual(SAMPLE_TERMS.offers);
+    expect(sale.offers).toEqual(SAMPLE_TERMS.offers.map((offer) => ({
+      id: offer.id,
+      name: offer.name,
+      shortDescription: offer.shortDescription,
+      pricing: offer.pricing,
+      capacity: offer.capacity,
+      maxPartySize: offer.maxPartySize,
+      minimumParticipants: offer.minimumParticipants,
+      durationMinutes: offer.durationMinutes,
+      startTime: offer.startTime,
+      weekdays: offer.weekdays,
+      cancellationPolicy: offer.cancellationPolicy,
+      acceptanceMode: offer.acceptanceMode,
+      bookingQuestions: offer.bookingQuestions,
+      bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
+    })));
     expect(JSON.stringify(sale)).not.toMatch(/provider-sample|"productId"|"providerId"|conditionsVersion/);
     // Copies, not the store's readonly arrays.
     expect(sale.offers[0]!.weekdays).not.toBe(SAMPLE_TERMS.offers[0]!.weekdays);
     expect(sale.offers[0]!.bookingQuestions[0]!.options).not.toBe(SAMPLE_TERMS.offers[0]!.bookingQuestions[0]!.options);
+  });
+
+  it("refuses refund and pricing conditions the legacy booking contract cannot represent", () => {
+    const [offer, ...offers] = SAMPLE_TERMS.offers;
+    const unrepresentable = (change: Partial<PublicBookingOffer>) => ({
+      ...SAMPLE_TERMS,
+      offers: [{ ...offer!, ...change }, ...offers],
+    });
+    expect(() => siteSaleTerms(unrepresentable({
+      cancellationPolicy: { code: "CUSTOM", freeCancellationHoursBefore: null },
+      cancellationTerms: { cancellationWindowMinutesBeforeStart: 240, refundBasisPoints: 3_750 },
+    }), "sample-terms-2026-10")).toThrow("This cancellation policy cannot be represented by the legacy booking contract.");
+    expect(() => siteSaleTerms(unrepresentable({ minimumChargeableParticipants: 2 }), "sample-terms-2026-10"))
+      .toThrow("This sale condition cannot be represented by the legacy booking contract.");
+    expect(() => siteSaleTerms(unrepresentable({ privateBooking: true }), "sample-terms-2026-10"))
+      .toThrow("This sale condition cannot be represented by the legacy booking contract.");
   });
 
   it("lays the sale over NIHO's detail and keeps NIHO's content, legal documents and seller notice", () => {

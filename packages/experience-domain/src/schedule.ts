@@ -115,6 +115,76 @@ export function expandOccurrences(input: ExpandOccurrencesInput): readonly Occur
   return occurrences.sort((left, right) => left.startUtc.localeCompare(right.startUtc) || left.id.localeCompare(right.id));
 }
 
+/**
+ * Returns every OPEN occurrence that overlaps another OPEN occurrence. The sweep
+ * is fail-closed for duplicate slots while treating adjacent half-open intervals
+ * as non-overlapping. Each occurrence is added to the conflict set at most once.
+ */
+export function findOverlappingOpenOccurrenceIds(occurrences: readonly Occurrence[]): ReadonlySet<OccurrenceId> {
+  const sorted = occurrences.filter((item) => item.status === "OPEN")
+    .slice()
+    .sort((left, right) => left.startUtc.localeCompare(right.startUtc)
+      || left.endUtc.localeCompare(right.endUtc)
+      || left.id.localeCompare(right.id));
+  const active = new Set<OccurrenceId>();
+  const notYetConflicted = new Set<OccurrenceId>();
+  const conflicts = new Set<OccurrenceId>();
+  const expiryHeap: Occurrence[] = [];
+
+  const pushExpiry = (item: Occurrence) => {
+    expiryHeap.push(item);
+    let index = expiryHeap.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      const parentItem = expiryHeap[parent]!;
+      if (parentItem.endUtc < item.endUtc || (parentItem.endUtc === item.endUtc && parentItem.id <= item.id)) break;
+      expiryHeap[index] = parentItem;
+      index = parent;
+    }
+    expiryHeap[index] = item;
+  };
+
+  const popExpiry = (): Occurrence | undefined => {
+    const first = expiryHeap[0];
+    const last = expiryHeap.pop();
+    if (first === undefined || last === undefined || expiryHeap.length === 0) return first;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      if (left >= expiryHeap.length) break;
+      const child = right < expiryHeap.length
+        && (expiryHeap[right]!.endUtc < expiryHeap[left]!.endUtc
+          || (expiryHeap[right]!.endUtc === expiryHeap[left]!.endUtc && expiryHeap[right]!.id < expiryHeap[left]!.id))
+        ? right : left;
+      const childItem = expiryHeap[child]!;
+      if (last.endUtc < childItem.endUtc || (last.endUtc === childItem.endUtc && last.id <= childItem.id)) break;
+      expiryHeap[index] = childItem;
+      index = child;
+    }
+    expiryHeap[index] = last;
+    return first;
+  };
+
+  for (const item of sorted) {
+    while (expiryHeap[0] !== undefined && expiryHeap[0]!.endUtc <= item.startUtc) {
+      const expired = popExpiry()!;
+      active.delete(expired.id);
+      notYetConflicted.delete(expired.id);
+    }
+    if (active.size > 0) {
+      conflicts.add(item.id);
+      for (const activeId of notYetConflicted) conflicts.add(activeId);
+      notYetConflicted.clear();
+    } else {
+      notYetConflicted.add(item.id);
+    }
+    active.add(item.id);
+    pushExpiry(item);
+  }
+  return conflicts;
+}
+
 export function createBookingOccurrenceSnapshot(
   occurrence: Occurrence,
   seats: number,

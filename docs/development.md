@@ -80,6 +80,8 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `HOST_SESSION_SECRET` | なし（mock は開発用の固定値） | ホストのセッション cookie の暗号化の鍵。http mode で `HOST_CONSOLE_ENABLED=true` なら必須 |
 | `NIHO_FIREBASE_WEB_API_KEY` | なし | NIHO の custom token を Firebase ID token に替える公開 Web API key。http mode の `/admin` または `/editor` の有効化で必要。NIHO専用Web access tokenを使う `/host` では不要 |
 | `HOST_SUPPORT_SETTINGS_API_ENABLED` | `false` | NIHO側の本人OWNER支援設定 v1.0.1 を配備・受入後にだけ開くHTTP BFF。mockではtrueにしても開かない |
+| `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `false` | #369のExperience所有掲載BFF。`HOST_CONSOLE_ENABLED=true`かつHTTP modeでも既定は停止。NIHOのOWNER/readiness、公開media、掲載同意の契約をstgで受入するまで有効化しない |
+| `EXPERIENCE_PUBLICATION_CONSENT_VERSION` | 未設定 | 掲載同意の承認済み版。BFFからホストへ返す版識別子で、承認された同意文と対にしてのみ設定する。未設定なら同意不足として公開不可 |
 | `EXPERIENCE_PROVIDER_PAGES_API_ENABLED` | `false` | NIHOの体験ページ作成・編集・写真・掲載だけを開く。予約運営・メッセージ・サブホスト管理は開かない |
 | `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `false` | OWNER/COHOSTの予約・メッセージ・提供者チーム操作。体験ページAPIも含む。認証PR #19282/#19353、API PR #19405、consumer PR #170の配備・受入後にだけ開く。Admin consoleとは独立 |
 | `EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED` | `false` | mock mode専用の合成UI確認。HTTP失敗時のfallbackには使わない |

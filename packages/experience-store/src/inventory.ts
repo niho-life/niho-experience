@@ -75,9 +75,16 @@ export async function evaluateStoredInventories(
   const productIds = [...new Set(requests.map((request) => request.productId))];
   const occurrenceIds = requests.map((request) => request.occurrence.id);
   const settings = await client.query<DbRow>(
-    `SELECT p.id AS product_id,COALESCE(s.booking_mode,'SEAT') AS booking_mode
+    `SELECT p.id AS product_id,
+            CASE WHEN COALESCE(s.booking_mode,'SEAT')='PRIVATE_GROUP'
+                       OR COALESCE((publication.sale_terms_snapshot->'privateBooking' = 'true'::jsonb),t.private_booking,false)
+              THEN 'PRIVATE_GROUP' ELSE 'SEAT' END AS booking_mode
        FROM experience_products p
        LEFT JOIN product_inventory_settings s ON s.provider_id=p.provider_id AND s.product_id=p.id
+       LEFT JOIN experience_product_sale_terms t ON t.provider_id=p.provider_id AND t.product_id=p.id
+       LEFT JOIN experience_product_publication_states publication_state
+         ON publication_state.provider_id=p.provider_id AND publication_state.product_id=p.id
+       LEFT JOIN experience_product_publications publication ON publication.id=publication_state.current_publication_id
       WHERE p.provider_id=$1 AND p.id=ANY($2::text[])`,
     [providerId, productIds],
   );
@@ -122,6 +129,13 @@ export async function evaluateStoredInventories(
        SELECT occurrence_id,seats,'CONFIRMED'::text AS status,NULL::timestamptz AS hold_expires_at
          FROM external_reservations
         WHERE provider_id=$1 AND occurrence_id=ANY($2::text[]) AND status IN ('PENDING','CONFIRMED')
+       UNION ALL
+       SELECT legacy.occurrence_id,legacy.seats,'CONFIRMED'::text AS status,NULL::timestamptz AS hold_expires_at
+         FROM experience_legacy_reservation_inventory_current legacy_current
+         JOIN experience_legacy_reservation_inventory legacy
+           ON legacy.provider_id=legacy_current.provider_id AND legacy.source_ref_hash=legacy_current.source_ref_hash
+          AND legacy.source_revision=legacy_current.source_revision
+        WHERE legacy.provider_id=$1 AND legacy.occurrence_id=ANY($2::text[]) AND legacy.status='CONFIRMED'
      )
      SELECT occurrence_id,
             COALESCE(sum(seats) FILTER (WHERE status='CONFIRMED'),0)::text AS confirmed,

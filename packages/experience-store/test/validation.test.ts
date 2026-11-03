@@ -80,7 +80,13 @@ describe("store boundary validation", () => {
       sellerNihoAccountRef: "niho-seller-a", stripeConnectAccountRef: "acct_synthetic", sellerDisplayName: "Synthetic Seller",
     };
     const guest = (supportEnabled: boolean, basisPoints: 1000 | 1500) => ({
-      breakdown: { adultCount: 1, childCount: 1, childUnitAmount: 0 }, cancellationPolicy: "NONE" as const, platformFee: { supportEnabled, basisPoints },
+      breakdown: { adultCount: 1, childCount: 1, childUnitAmount: 0 },
+      cancellationPolicy: "NONE" as const,
+      bookingTerms: {
+        minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "NONE" as const,
+        bookingQuestions: [], bookingQuestionsFingerprint: "0".repeat(64), conditionsVersion: null,
+      },
+      platformFee: { supportEnabled, basisPoints },
     });
     assert.deepEqual(buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", product, guest(true, 1500)).pricingSnapshot.platformFee, {
       supportEnabled: true, basisPoints: 1500, amount: 499,

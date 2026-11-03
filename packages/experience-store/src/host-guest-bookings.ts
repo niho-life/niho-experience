@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
+import { cancellationTermsOf } from "./cancellation-terms.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import type { GuestCancellationPolicy, HostActor, PlatformFeeSnapshot } from "./types.ts";
@@ -72,6 +73,14 @@ export interface HostGuestBooking {
   readonly totalAmount: number;
   /** NIHO's fee fixed at booking; null only for a snapshot without one. */
   readonly platformFee: PlatformFeeSnapshot | null;
+  /** The exact sale conditions in the accepted booking snapshot; null members mean a legacy snapshot lacked them. */
+  readonly saleConditions: {
+    readonly minimumChargeableParticipants: number | null;
+    readonly privateBooking: boolean | null;
+    readonly minimumAttendance: number | null;
+    readonly cancellationWindowMinutesBeforeStart: number | null;
+    readonly cancellationRefundBasisPoints: number | null;
+  };
   /** The total less NIHO's fee: what the provider receives, before any refund. */
   readonly providerAmount: number;
   /** Fixed at booking; null only for a snapshot without one. */
@@ -133,6 +142,10 @@ export interface HostGuestSession {
   readonly bookings: number;
   /** How many of them are payments under review (確認待ち): they keep no seat. */
   readonly paymentReviews: number;
+  /** Participants in confirmed bookings only; pending payment reviews do not count toward run minimum. */
+  readonly confirmedParticipants: number;
+  /** Current host-only run threshold and progress. Null when no threshold is configured. */
+  readonly minimumAttendance: { readonly required: number; readonly confirmed: number; readonly remaining: number } | null;
 }
 
 export interface HostGuestSessionListOptions {
@@ -313,11 +326,14 @@ export async function selectSessions(client: PoolClient, providerId: string, fro
     `SELECT b.product_id, p.public_title, ${RULE} AS rule_id, ${LOCAL_DATE} AS local_date, ${LOCAL_START} AS local_start_time,
             min(b.occurrence_snapshot->>'timeZone') AS time_zone, min(${START}) AS start_utc,
             max((b.occurrence_snapshot->>'endUtc')::timestamptz) AS end_utc,
-            sum(g.adult_count + g.child_count)::int AS participants, count(*)::int AS bookings,
+            sum(g.adult_count + g.child_count)::int AS participants,
+            sum(g.adult_count + g.child_count) FILTER (WHERE b.status = 'CONFIRMED')::int AS confirmed_participants,
+            min(t.minimum_attendance) AS minimum_attendance, count(*)::int AS bookings,
             (count(*) FILTER (WHERE b.status = 'PAYMENT_REVIEW'))::int AS payment_reviews
        FROM bookings b
        JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
        JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+       LEFT JOIN experience_product_sale_terms t ON t.provider_id = b.provider_id AND t.product_id = b.product_id
       WHERE b.provider_id = $1 AND b.status = ANY($2::text[])
         AND ${START} >= $3::timestamptz AND ($4::timestamptz IS NULL OR ${START} < $4::timestamptz)
       GROUP BY b.product_id, p.public_title, ${RULE}, ${LOCAL_DATE}, ${LOCAL_START}
@@ -417,6 +433,14 @@ export function hostGuestSessionFromRow(row: DbRow): HostGuestSession {
     startUtc: isoValue(row, "start_utc"),
     endUtc: isoValue(row, "end_utc"),
     participants: amount(row.participants, "participants"),
+    confirmedParticipants: amount(row.confirmed_participants ?? 0, "confirmed_participants"),
+    minimumAttendance: row.minimum_attendance === null || row.minimum_attendance === undefined
+      ? null
+      : (() => {
+          const required = amount(row.minimum_attendance, "minimum_attendance");
+          const confirmed = amount(row.confirmed_participants ?? 0, "confirmed_participants");
+          return { required, confirmed, remaining: Math.max(0, required - confirmed) };
+        })(),
     bookings: amount(row.bookings, "bookings"),
     paymentReviews: amount(row.payment_reviews, "payment_reviews"),
   };
@@ -426,8 +450,10 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
   const occurrence = record(row.occurrence_snapshot);
   const pricing = record(row.pricing_snapshot);
   const breakdown = record(pricing.breakdown);
+  const bookingTerms = record(pricing.bookingTerms);
   const totalAmount = amount(pricing.totalAmount, "pricing_snapshot.totalAmount");
   const platformFee = platformFeeOf(pricing.platformFee);
+  const cancellationTerms = cancellationTermsOf(pricing);
   const policy = pricing.cancellationPolicy;
   const erased = row.erased === true;
   return {
@@ -455,6 +481,19 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
     childUnitAmount: breakdown.childUnitAmount === null || breakdown.childUnitAmount === undefined ? null : amount(breakdown.childUnitAmount, "pricing_snapshot.breakdown.childUnitAmount"),
     totalAmount,
     platformFee,
+    saleConditions: {
+      minimumChargeableParticipants: Number.isSafeInteger(bookingTerms.minimumChargeableParticipants)
+        ? Number(bookingTerms.minimumChargeableParticipants)
+        : Number.isSafeInteger(breakdown.minimumChargeableParticipants)
+          ? Number(breakdown.minimumChargeableParticipants)
+          : null,
+      privateBooking: typeof bookingTerms.privateBooking === "boolean" ? bookingTerms.privateBooking : null,
+      minimumAttendance: bookingTerms.minimumAttendance === null || bookingTerms.minimumAttendance === undefined
+        ? null
+        : amount(bookingTerms.minimumAttendance, "pricing_snapshot.bookingTerms.minimumAttendance"),
+      cancellationWindowMinutesBeforeStart: cancellationTerms.cancellationWindowMinutesBeforeStart,
+      cancellationRefundBasisPoints: cancellationTerms.refundBasisPoints,
+    },
     providerAmount: totalAmount - (platformFee?.amount ?? 0),
     cancellationPolicy: typeof policy === "string" && POLICIES.has(policy) ? policy as GuestCancellationPolicy : null,
     bookedAtUtc: isoValue(row, "created_at"),
