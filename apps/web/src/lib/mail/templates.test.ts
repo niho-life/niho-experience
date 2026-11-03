@@ -106,7 +106,7 @@ describe("bookingConfirmationEmail", () => {
       "Host: Sample Host",
       `Booking reference: ${confirmation.publicBookingId}`,
     ].join("\n"));
-    expect(mail.text).toContain("Free cancellation until Fri 13 Nov, 10:00 Japan time (24 hours before the start). After that, the booking is non-refundable.");
+    expect(mail.text).toContain("Free cancellation until Fri 13 Nov, 10:00 Japan time (1 day before the start). After that, the booking is non-refundable.");
     expect(mail.text).toContain("Sample Host will share the meeting details with you before the day.");
     expect(mail.text).toContain("Reply to this email and NIHO support will help.");
     expect(linesWith(mail, "https://")).toEqual([`${SITE}/experiences/sample-tea`]);
