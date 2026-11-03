@@ -546,7 +546,10 @@ export function termsFromRow(row: DbRow): ProductSaleTerms {
   if (configured !== (rawOfferPrices !== undefined && rawOfferPrices !== null)) {
     throw new StoreValidationError("Database returned an inconsistent offer price configuration.");
   }
-  const offerPrices = configured ? validOfferPriceRows(rawOfferPrices) : null;
+  // Keep a configured-but-empty price set distinguishable from the legacy
+  // fallback. If rows were deleted or corrupted, readers will fail closed
+  // when matching prices to active schedule rules.
+  const offerPrices = configured ? validOfferPriceRows(rawOfferPrices, true) : null;
   return {
     providerId: String(row.provider_id),
     productId: String(row.product_id),
@@ -574,8 +577,8 @@ export function termsFromRow(row: DbRow): ProductSaleTerms {
   };
 }
 
-function validOfferPriceRows(value: unknown): OfferPriceInput[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
+function validOfferPriceRows(value: unknown, allowEmpty = false): OfferPriceInput[] {
+  if (!Array.isArray(value) || value.length < (allowEmpty ? 0 : 1) || value.length > 100) {
     throw new StoreValidationError("Database returned an invalid offer price set.");
   }
   const ids = new Set<string>();
@@ -612,7 +615,9 @@ export async function readSaleTerms(
        ORDER BY rule_id COLLATE "C"${lock ? " FOR SHARE" : ""}`,
     [providerId, productId],
   );
-  return termsFromRow({ ...terms.rows[0], offer_prices: prices.rows.length === 0 ? null : prices.rows });
+  const configured = terms.rows[0]!.offer_prices_configured === true;
+  const offerPrices = prices.rows.length > 0 ? prices.rows : configured ? [] : null;
+  return termsFromRow({ ...terms.rows[0], offer_prices: offerPrices });
 }
 
 async function activeOfferIdsForWrite(client: PoolClient, providerId: string, productId: string): Promise<string[]> {
