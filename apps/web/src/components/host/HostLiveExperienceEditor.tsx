@@ -421,7 +421,7 @@ export function HostLiveExperienceEditor({ providerId, pageId, backHref, role, r
     const withdraw = <button type="button" disabled={listingLocked} onClick={() => setConfirming("withdraw")} className={consoleButtonClass("secondary", "md", DISABLED)}>申請を取り下げる</button>;
     return <FieldSection title="掲載" status={listingState === "ready" && listing ? liveListingStatus(listing.listing) : null}>
       {listingState === "loading" ? <p className="text-ink-soft">読み込み中…</p> : listingState === "error" || !listing || !view ? <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1"><p>{LISTING_TEXT.unreadable}</p><button type="button" disabled={listingBusy} onClick={() => { setListingState("loading"); void loadListing(); }} className={consoleButtonClass("secondary", "sm", DISABLED)}>読み込み直す</button></div> : <div className="flex flex-col gap-2.5">
-        <ListingSteps status={view.kind === "request" ? "draft" : view.kind === "requested" ? "review" : view.kind === "active" ? "live" : "paused"} />
+        <ListingSteps flow="legacy-review" status={view.kind === "request" ? "draft" : view.kind === "requested" ? "review" : view.kind === "active" ? "live" : "paused"} />
         {reviewNotePanel}
         {view.kind === "request" ? view.block === "language" ? <p>体験サイトに載せられるのは英語の体験ページだけです。</p> : <>
           {view.block === null ? <p className="whitespace-pre-wrap rounded-xl bg-sand p-3 text-sm [overflow-wrap:anywhere]">{listing.consent.text}</p> : null}

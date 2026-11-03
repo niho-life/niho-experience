@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { EDITOR_LIMITS, emptyOffer, moveItem, offerChildPriceLabel, offerPriceLabel, offerScheduleLabel } from "@/host/editor";
-import { fullDateJa, monthDayJa } from "@/host/format";
+import { fullDateJa } from "@/host/format";
 import { LISTING_STATUS } from "@/host/status";
 import type { HostListing, HostOffer, HostWritingLanguage, ListingStatus } from "@/host/types";
 import { DISABLED, EditorPanel } from "./editor-parts";
@@ -12,7 +12,8 @@ import { HostIcon } from "./HostIcon";
 import { HostOfferDialog } from "./HostOfferDialog";
 import { StatusPill } from "./ui";
 
-const STEPS = ["下書き", "審査", "掲載中"] as const;
+const SELF_SERVICE_STEPS = ["下書き", "公開中"] as const;
+const LEGACY_REVIEW_STEPS = ["下書き", "審査", "掲載中"] as const;
 type StepState = "done" | "current" | "todo";
 
 const STEP_STATES: Record<ListingStatus, readonly StepState[]> = {
@@ -27,12 +28,17 @@ const STEP_TEXT: Record<StepState, string> = { done: "text-ink-soft", current: "
 const STEP_DOT: Record<StepState, string> = { done: "bg-moss", current: "bg-leaf shadow-[0_0_0_3px_rgb(178_214_124/0.4)]", todo: "bg-line-strong" };
 const STEP_SPOKEN: Record<StepState, string> = { done: "（済み）", current: "（現在）", todo: "" };
 
-/** 下書き → 審査 → 掲載中: done steps have a deep green dot, the current one a leaf dot with a ring. */
-export function ListingSteps({ status }: { status: ListingStatus }) {
-  const states = STEP_STATES[status];
+/** Mock is self-service; the HTTP legacy editor opts into its explicit review step. */
+export function ListingSteps({ status, flow = "self-service" }: { status: ListingStatus; flow?: "self-service" | "legacy-review" }) {
+  const steps = flow === "legacy-review" ? LEGACY_REVIEW_STEPS : SELF_SERVICE_STEPS;
+  const states = flow === "legacy-review"
+    ? STEP_STATES[status]
+    : status === "live" ? ["done", "current"] as const
+      : status === "paused" ? ["done", "todo"] as const
+        : ["current", "todo"] as const;
   return (
     <ol aria-label="掲載までの流れ" className="mb-3 flex flex-wrap items-center gap-y-1">
-      {STEPS.map((label, index) => {
+      {steps.map((label, index) => {
         const state = states[index] ?? "todo";
         return (
           <li key={label} className={`flex items-center gap-1.5 text-xs font-extrabold whitespace-nowrap ${STEP_TEXT[state]}`}>
@@ -59,16 +65,14 @@ function SaveFirst({ id, children }: { id: string; children: ReactNode }) {
 }
 
 export interface ListingActions {
-  onSubmit: () => void;
+  onPublish: () => void;
   onPause: () => void;
-  onWithdraw: () => void;
 }
 
 /**
- * 掲載 (owner decision 2026-10-21, #84): one state per listing and one button to apply.
- * 申請, 停止 and 取り下げ wait until the page is saved, so NIHO reviews what was kept.
+ * Mock self-publication: only the owner publishes, pauses and resumes a saved page.
  */
-function ListingPanel({ listing, requirements, dirty, consent, onConsent, publicPath, englishBehind, actions }: { listing: HostListing; requirements: readonly string[]; dirty: boolean; consent: boolean; onConsent: (agreed: boolean) => void; publicPath: string; englishBehind: boolean; actions: ListingActions }) {
+function ListingPanel({ listing, requirements, settingsHref, dirty, owner, consent, onConsent, publicPath, englishBehind, actions }: { listing: HostListing; requirements: readonly string[]; settingsHref?: string; dirty: boolean; owner: boolean; consent: boolean; onConsent: (agreed: boolean) => void; publicPath: string; englishBehind: boolean; actions: ListingActions }) {
   const baseId = useId();
   const hintId = `${baseId}-hint`;
   const headingId = "editor-listing";
@@ -81,8 +85,9 @@ function ListingPanel({ listing, requirements, dirty, consent, onConsent, public
     document.getElementById(headingId)?.focus();
   };
 
+  const status = listing.status;
   let body: ReactNode;
-  if (listing.status === "live") {
+  if (status === "live") {
     body = (
       <>
         <p className={LINE}>体験サイトで公開中{listing.liveSince ? ` · ${fullDateJa(listing.liveSince)}から` : ""}</p>
@@ -93,29 +98,18 @@ function ListingPanel({ listing, requirements, dirty, consent, onConsent, public
             <HostIcon name="external" className="size-3.5" />
             体験サイトで見る<span className="sr-only">（新しいタブで開く）</span>
           </a>
-          <button type="button" disabled={dirty} aria-describedby={describedBy} onClick={() => after(actions.onPause, "掲載を止めました")} className={consoleButtonClass("ghost", "sm", DISABLED)}>
-            掲載を止める
-          </button>
+          {owner ? <button type="button" disabled={dirty} aria-describedby={describedBy} onClick={() => after(actions.onPause, "公開を停止しました")} className={consoleButtonClass("ghost", "sm", DISABLED)}>公開を停止する</button> : null}
         </div>
-        {dirty ? <SaveFirst id={hintId}>保存後に操作できます</SaveFirst> : null}
-      </>
-    );
-  } else if (listing.status === "review") {
-    body = (
-      <>
-        <p className={LINE}>{[listing.requestedOn ? `${monthDayJa(listing.requestedOn)}に申請` : null, "NIHO が確認中"].filter(Boolean).join(" · ")}</p>
-        <button type="button" disabled={dirty} aria-describedby={describedBy} onClick={() => after(actions.onWithdraw, "申請を取り下げました")} className={consoleButtonClass("ghost", "sm", DISABLED)}>
-          申請を取り下げる
-        </button>
-        {dirty ? <SaveFirst id={hintId}>保存後に操作できます</SaveFirst> : null}
+        {!owner ? <p className="mt-2 text-xs text-muted">公開の停止はオーナーが行います。</p> : dirty ? <SaveFirst id={hintId}>保存後に操作できます</SaveFirst> : null}
       </>
     );
   } else {
     const ready = requirements.length === 0;
+    const resuming = status === "paused";
     body = (
       <>
-        {listing.status === "paused" ? <p className={LINE}>掲載を止めています · 再開には NIHO の確認が必要です</p> : null}
-        {ready ? (
+        {resuming ? <p className={LINE}>公開を停止しています。</p> : null}
+        {ready && owner ? (
           <label className="mb-3 flex items-center gap-2 text-[0.8125rem] font-bold">
             <input type="checkbox" checked={consent} onChange={(event) => onConsent(event.currentTarget.checked)} className="size-5 shrink-0 accent-moss" />
             掲載の条件に同意する
@@ -132,18 +126,19 @@ function ListingPanel({ listing, requirements, dirty, consent, onConsent, public
                 </li>
               ))}
             </ul>
+            {settingsHref ? <a href={settingsHref} className="mt-2 inline-flex min-h-6 items-center text-xs font-extrabold text-moss underline underline-offset-4">設定で確認する</a> : null}
           </div>
         )}
-        <button
+        {owner ? <button
           type="button"
           disabled={!ready || !consent || dirty}
           aria-describedby={describedBy}
-          onClick={() => after(actions.onSubmit, "掲載を申請しました。NIHO が確認します")}
+          onClick={() => after(actions.onPublish, resuming ? "公開を再開しました" : "公開しました")}
           className={consoleButtonClass("primary", "sm", DISABLED)}
         >
-          掲載を申請
-        </button>
-        {dirty ? <SaveFirst id={hintId}>保存後に申請できます</SaveFirst> : null}
+          {resuming ? "同意して公開を再開" : "同意して公開"}
+        </button> : <p className="text-xs text-muted">公開・停止・再開はオーナーが行います。</p>}
+        {owner && dirty ? <SaveFirst id={hintId}>保存後に公開できます</SaveFirst> : null}
       </>
     );
   }
@@ -154,9 +149,9 @@ function ListingPanel({ listing, requirements, dirty, consent, onConsent, public
         <h2 id={headingId} tabIndex={-1} className="font-sans text-[0.78125rem] leading-normal font-bold tracking-normal text-ink-soft focus:outline-none">
           掲載
         </h2>
-        <StatusPill status={LISTING_STATUS[listing.status]} />
+        <StatusPill status={LISTING_STATUS[status]} />
       </div>
-      <ListingSteps status={listing.status} />
+      <ListingSteps status={status} />
       {body}
       <p role="status" className="sr-only">
         {said}
@@ -352,7 +347,10 @@ export interface HostEditorRailProps {
   className?: string;
   listing: HostListing;
   requirements: readonly string[];
+  /** Shown only when provider/account publication requirements need attention. */
+  settingsHref?: string;
   dirty: boolean;
+  owner: boolean;
   consent: boolean;
   onConsent: (agreed: boolean) => void;
   actions: ListingActions;
@@ -375,10 +373,10 @@ export interface HostEditorRailProps {
 }
 
 /** The right rail (mock v2 `.rail`): 掲載, 申込の設定 and ページ. */
-export function HostEditorRail({ className = "", listing, requirements, dirty, consent, onConsent, actions, publicPath, publicUrl, offers, onOffers, lang, offersMarker, englishBehind, language, onLanguage, today }: HostEditorRailProps) {
+export function HostEditorRail({ className = "", listing, requirements, settingsHref, dirty, owner, consent, onConsent, actions, publicPath, publicUrl, offers, onOffers, lang, offersMarker, englishBehind, language, onLanguage, today }: HostEditorRailProps) {
   return (
     <div className={`flex min-w-0 flex-col gap-3.5 ${className}`.trim()}>
-      <ListingPanel listing={listing} requirements={requirements} dirty={dirty} consent={consent} onConsent={onConsent} publicPath={publicPath} englishBehind={englishBehind} actions={actions} />
+      <ListingPanel listing={listing} requirements={requirements} settingsHref={settingsHref} dirty={dirty} owner={owner} consent={consent} onConsent={onConsent} publicPath={publicPath} englishBehind={englishBehind} actions={actions} />
       <OffersPanel offers={offers} onOffers={onOffers} today={today} lang={lang} marker={offersMarker} />
       <PagePanel language={language} onLanguage={onLanguage} publicUrl={publicUrl} />
     </div>

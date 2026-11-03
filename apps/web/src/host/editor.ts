@@ -2,7 +2,7 @@ import { EXPERIENCE_CONDITION_KINDS, type ExperienceConditionKind } from "@niho-
 import { CONDITION_NOTE_LIMIT } from "./conditions";
 import { yen } from "./format";
 import { needsEnglishConfirmed } from "./page-english";
-import type { HostExperience, HostExperienceContent, HostListing, HostOffer, HostOfferText, HostPageText, HostTimelineText, Weekday } from "./types";
+import type { HostExperience, HostExperienceContent, HostListing, HostOffer, HostOfferText, HostPageText, HostPublicationReadiness, HostTimelineText, Weekday } from "./types";
 
 /*
  * The experience editor's rules (#89), apart from the screen so they can be tested:
@@ -73,10 +73,10 @@ export function listingRequirements(content: ListingContent): ListingRequirement
   return LISTING_REQUIREMENTS.filter((item) => missing.has(item));
 }
 
-/** 掲載を申請: a draft, or a paused listing, goes to NIHO's review, requested today. */
-export function submitListing(listing: HostListing, today: string): HostListing {
+/** Self-service publication: a draft goes live today; a resume retains the first publication day. */
+export function publishListing(listing: HostListing, today: string): HostListing {
   if (listing.status !== "draft" && listing.status !== "paused") return listing;
-  return { ...listing, status: "review", requestedOn: today };
+  return { ...listing, status: "live", liveSince: listing.liveSince ?? today };
 }
 
 /** 掲載を止める: a live listing leaves the traveler site. */
@@ -84,9 +84,17 @@ export function pauseListing(listing: HostListing): HostListing {
   return listing.status === "live" ? { ...listing, status: "paused" } : listing;
 }
 
-/** 申請を取り下げる: a listing under review goes back to being a draft. */
-export function withdrawListing(listing: HostListing): HostListing {
-  return listing.status === "review" ? { status: "draft" } : listing;
+export type PublicationRequirement = "売上受取口座" | "販売者表示" | "提供者規約への同意" | "提供者状態の確認" | "運営停止の解除";
+
+/** Provider/account blockers for self-publication. Unknown facts stay closed instead of being guessed ready. */
+export function publicationRequirements(readiness: HostPublicationReadiness): PublicationRequirement[] {
+  const missing: PublicationRequirement[] = [];
+  if (readiness.payoutReason !== "READY") missing.push("売上受取口座");
+  if (!readiness.sellerDisclosureReady) missing.push("販売者表示");
+  if (readiness.consentCurrent !== true) missing.push("提供者規約への同意");
+  if (readiness.providerStatus === "unknown") missing.push("提供者状態の確認");
+  if (readiness.providerStatus === "suspended") missing.push("運営停止の解除");
+  return missing;
 }
 
 const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;

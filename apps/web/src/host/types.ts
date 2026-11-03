@@ -1,6 +1,6 @@
 import type { ExperienceConditionKind } from "@niho-experience/api-client";
 import type { ExperienceProviderMeetingPoint, ExperienceProviderPaymentReadinessReason } from "@niho-experience/api-client/host";
-import type { HostProviderKind, HostProviderReviewStatus } from "@/lib/host/providers";
+import type { HostProviderKind, HostProviderReviewStatus, HostProviderRole } from "@/lib/host/providers";
 import type { NotificationSource } from "./notifications";
 import type { HostReviewTag } from "./reviews";
 
@@ -13,7 +13,7 @@ import type { HostReviewTag } from "./reviews";
  * calendar and notification settings follow NIHO's own specs for them (#109).
  */
 
-/** One listing state per experience page: draft → review → live (or paused). */
+/** Listing labels shared with the legacy HTTP review flow. */
 export type ListingStatus = "draft" | "review" | "live" | "paused";
 
 /**
@@ -244,13 +244,23 @@ export interface HostExperienceContent {
   offers: readonly HostOffer[];
 }
 
-/** The listing's one state. 掲載を申請, 掲載を止める and 申請を取り下げる change it; 保存 does not. */
+/** The mock listing's state. The owner publishes, pauses and resumes it; ordinary saves do not change it. */
 export interface HostListing {
-  status: ListingStatus;
-  /** When the listing went live (YYYY-MM-DD, JST). */
+  status: Exclude<ListingStatus, "review">;
+  /** The first day the listing went live (YYYY-MM-DD, JST), retained across pauses. */
   liveSince?: string;
-  /** When the listing was submitted for review (YYYY-MM-DD, JST). */
-  requestedOn?: string;
+}
+
+/** Existing provider/account facts that gate the mock's self-service publication controls. */
+export interface HostPublicationReadiness {
+  role: HostProviderRole | null;
+  /** Null means that the payout state could not be read, and publication stays closed. */
+  payoutReason: PaymentReadinessReason | null;
+  sellerDisclosureReady: boolean;
+  /** Null means that the current provider consent could not be verified. */
+  consentCurrent: boolean | null;
+  /** Legacy provider review does not gate self-publication; only an operational suspension does. */
+  providerStatus: "available" | "suspended" | "unknown";
 }
 
 export interface HostExperience extends HostExperienceContent, HostListing {
@@ -715,8 +725,8 @@ export interface HostSettings {
   bio: string;
   sellerDisclosureUrl: string;
   reviewStatus: HostProviderReviewStatus | null;
-  /** The provider agreed to the version of NIHO's provider terms in force (審査を申請 needs it). */
-  consentCurrent: boolean;
+  /** The provider agreed to the current NIHO provider terms; null when the state could not be read. */
+  consentCurrent: boolean | null;
   /** 既定の集合案内; null when it could not be read, or for a member NIHO does not show it to (only OWNER and EDITOR). */
   meetingPoint: HostMeetingDefaults | null;
   calendar: HostCalendarSettings;

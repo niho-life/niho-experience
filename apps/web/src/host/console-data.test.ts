@@ -29,7 +29,7 @@ describe("console data per provider", () => {
     const snapshot = hostConsoleSnapshot("sample-provider-kitchen", "mock", NOW);
     expect(snapshot.experiences.map((experience) => [experience.id, experience.status])).toEqual([
       ["community-dinner", "live"],
-      ["kintsugi", "review"],
+      ["kintsugi", "draft"],
       ["coffee", "draft"],
     ]);
     expect(snapshot.salesPeriod).toEqual(MOCK_SALES_PERIOD);
@@ -39,7 +39,7 @@ describe("console data per provider", () => {
     expect(snapshot.calendar.icsUrl).toMatch(/^https:\/\/calendar\.example\.com\/sample-kitchen\/[0-9a-z]{20,}\/bookings\.ics$/);
     expect(snapshot.now).toBe("2026-10-21T15:30");
     const home = hostHome(snapshot);
-    expect(home.todos.map((todo) => todo.status?.label)).toEqual(["承認待ち", "承認待ち", "返信待ち", "返信待ち", "返信待ち", "未返信", "未返信", "未返信", "下書き", "審査待ち"]);
+    expect(home.todos.map((todo) => todo.status?.label)).toEqual(["承認待ち", "承認待ち", "返信待ち", "返信待ち", "返信待ち", "未返信", "未返信", "未返信", "下書き", "下書き"]);
     expect([home.sessions.today, home.sessions.tomorrow, home.sessions.later].map((sessions) => sessions.length)).toEqual([1, 1, 3]);
     // The preview keeps its own "today": the synthetic dates stay upcoming whenever it is opened.
     expect(home.month).toEqual({ label: "10月", figures: [{ label: "売上", value: "¥390,000" }, { label: "返金", value: "−¥60,000" }, { label: "入金予定", value: "¥139,500" }, { label: "確定した予約", value: "8件" }], note: null });

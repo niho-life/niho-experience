@@ -87,4 +87,26 @@ describe("HostSettingsForm's カレンダー", () => {
     expect(failed).toContain(CALENDAR_LOAD_FAILED_TEXT);
     expect(failed).toContain('href="/host/calendar?providerId=sample-provider"');
   });
+
+  it("removes provider review UI only in preview while retaining seller, consent and payout readiness", () => {
+    const html = renderToStaticMarkup(createElement(HostSettingsForm, {
+      providerId: "sample-provider",
+      role: "OWNER",
+      settings: { ...settings, sellerDisclosureUrl: "https://example.test/legal", reviewStatus: "APPROVED", consentCurrent: true },
+      payout: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: null } },
+      connectNotice: null,
+      googleConnection: null,
+      liveCalendar: null,
+      preview: true,
+      account: null,
+      notificationAddress: null,
+    }));
+    const shown = text(html);
+    expect(shown).toContain("販売者表示");
+    expect(shown).toContain("提供者規約 同意済み");
+    expect(shown).toContain("売上受取口座 準備済み");
+    expect(shown).not.toContain("審査済み");
+    expect(shown).not.toContain("審査を申請");
+    expect(shown).not.toContain("再審査");
+  });
 });

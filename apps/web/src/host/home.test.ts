@@ -35,15 +35,15 @@ describe("host formatting", () => {
 describe("host home", () => {
   const todos = (bookings = MOCK_KITCHEN_BOOKINGS, threads = MOCK_KITCHEN_THREADS) => homeTodos(MOCK_KITCHEN_EXPERIENCES, bookings, threads, MOCK_TODAY, MOCK_NOW);
 
-  it("puts each request first, the nearest deadline first, then the threads waiting longest, then drafts and listings under review", () => {
+  it("puts each request first, the nearest deadline first, then the threads waiting longest and publication drafts", () => {
     expect(todos().map((todo) => [todo.key, todo.status?.label ?? null, todo.aside?.text ?? null, todo.action?.label ?? null])).toEqual([
       ["booking-bk-2041", "承認待ち", "あと 6 時間", "詳しく見る"],
       ["booking-bk-2044", "承認待ち", "あと 44 時間", "詳しく見る"],
       ["thread-th-3010", "返信待ち", "予約前の質問", "返信する"],
       ["thread-th-3004", "返信待ち", "予約者からの連絡", "返信する"],
       ["thread-th-3012", "返信待ち", "予約前の質問", "返信する"],
+      ["draft-kintsugi", "下書き", null, "編集する"],
       ["draft-coffee", "下書き", null, "編集する"],
-      ["review-kintsugi", "審査待ち", null, null],
     ]);
   });
 
@@ -101,8 +101,8 @@ describe("host home", () => {
       "guest-review-rv-5013",
       "guest-review-rv-5020",
       "guest-review-rv-4906",
+      "draft-kintsugi",
       "draft-coffee",
-      "review-kintsugi",
     ]);
     expect(rows[6]).toEqual({
       key: "guest-review-rv-5020",

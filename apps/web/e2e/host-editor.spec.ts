@@ -4,8 +4,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 // The experience editor (#89) on synthetic data. Runs against the second server
 // (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts). Nothing is sent:
-// 保存 keeps the page in the screen, photos stay in the browser, and 申請・停止・取り下げ
-// change the state shown there.
+// 保存 keeps the page in the screen, photos stay in the browser, and the owner publishes,
+// pauses and resumes the state shown there.
 
 const SAMPLE_PHOTO = fileURLToPath(new URL("../public/sample/photos/niho-cd-table-01.jpg", import.meta.url));
 
@@ -17,8 +17,8 @@ const savedNotice = (page: Page) => page.getByRole("status").filter({ hasText: "
 const steps = (listing: Locator) => listing.getByRole("list", { name: "掲載までの流れ" }).getByRole("listitem");
 const overflowX = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-async function signIn(page: Page) {
-  await page.goto("/host/auth/mock-login");
+async function signIn(page: Page, query = "") {
+  await page.goto(`/host/auth/mock-login${query}`);
   await page.waitForURL(/\/host\/home(\?|$)/);
 }
 
@@ -50,12 +50,12 @@ test("the list opens the page: its title, eight photos and the live listing, and
   await expect(photos.nth(7).getByRole("button", { name: "写真 8 を外す" })).toHaveCount(1);
 
   const listing = panel(page, "掲載");
-  await expect(steps(listing)).toHaveText(["下書き（済み）", "審査（済み）", "掲載中（現在）"]);
+  await expect(steps(listing)).toHaveText(["下書き（済み）", "公開中（現在）"]);
   await expect(listing).toContainText("体験サイトで公開中 · 2026年10月12日から");
   const site = listing.getByRole("link", { name: /^体験サイトで見る/ });
   await expect(site).toHaveAttribute("href", "/experiences/kamakura-community-dinner");
   await expect(site).toHaveAttribute("target", "_blank");
-  await expect(listing.getByRole("button", { name: "掲載を止める" })).toBeEnabled();
+  await expect(listing.getByRole("button", { name: "公開を停止する" })).toBeEnabled();
 
   const offers = panel(page, "申込の設定").getByRole("listitem");
   await expect(offers).toHaveCount(2);
@@ -97,7 +97,7 @@ test("the list opens the page: its title, eight photos and the live listing, and
   await expect(page.getByRole("heading", { level: 1, name: "体験" })).toBeVisible();
 });
 
-test("見どころ gets a row and 保存 says 保存しました; until then 掲載を止める waits", async ({ page }, testInfo) => {
+test("通常保存は公開を保ち、停止から同意して初回公開日のまま再開する", async ({ page }, testInfo) => {
   await signIn(page);
   await openEditor(page, "/host/experiences/community-dinner");
   const highlights = panel(page, "見どころ");
@@ -118,7 +118,7 @@ test("見どころ gets a row and 保存 says 保存しました; until then 掲
   await expect(photos).toHaveCount(7);
 
   const listing = panel(page, "掲載");
-  const stop = listing.getByRole("button", { name: "掲載を止める" });
+  const stop = listing.getByRole("button", { name: "公開を停止する" });
   await expect(stop).toBeDisabled();
   await expect(listing).toContainText("保存後に操作できます");
 
@@ -144,6 +144,7 @@ test("見どころ gets a row and 保存 says 保存しました; until then 掲
   await expect(savedNotice(page)).toBeVisible();
   await expect(save).toHaveCount(0);
   await expect(stop).toBeEnabled();
+  await expect(listing).toContainText("体験サイトで公開中 · 2026年10月12日から");
   await expect(highlights.getByRole("textbox")).toHaveCount(5);
   await expect(added).toHaveValue("Take the recipes home on a postcard.");
   await expect(photos).toHaveCount(7);
@@ -152,33 +153,37 @@ test("見どころ gets a row and 保存 says 保存しました; until then 掲
   // The notice goes after a moment.
   await expect(savedNotice(page)).toHaveCount(0, { timeout: 5_000 });
 
-  // 掲載を止める: the listing stops, and the way back is a new application.
+  // 公開を停止する: resuming does not ask NIHO for a review.
   await stop.click();
-  await expect(steps(listing)).toHaveText(["下書き（済み）", "審査（済み）", "掲載中"]);
+  await expect(steps(listing)).toHaveText(["下書き（済み）", "公開中"]);
   await expect(listing).toContainText("停止中");
-  await expect(listing).toContainText("掲載を止めています");
-  const apply = listing.getByRole("button", { name: "掲載を申請" });
+  await expect(listing).toContainText("公開を停止しています");
+  const apply = listing.getByRole("button", { name: "同意して公開を再開" });
   await expect(apply).toBeDisabled();
-  await expect(page.getByRole("status").filter({ hasText: "掲載を止めました" })).toHaveCount(1);
-  // The Japanese changed since the English was confirmed (#110): the new application waits for the English.
+  await expect(page.getByRole("status").filter({ hasText: "公開を停止しました" })).toHaveCount(1);
+  // The Japanese changed since the English was confirmed (#110): resuming waits for the English.
   await expect(listing.getByRole("list", { name: "掲載までに必要" }).getByRole("listitem")).toHaveText(["英語の確定"]);
   await page.getByRole("tab", { name: /^英語（公開）/ }).click();
   await page.getByRole("region", { name: "英語の状態" }).getByRole("button", { name: "英語を確定" }).click();
-  await expect(listing).toContainText("保存後に申請できます");
+  await expect(listing).toContainText("保存後に公開できます");
   await saveButton(page).click();
   await expect(savedNotice(page)).toBeVisible();
   await listing.getByRole("checkbox", { name: "掲載の条件に同意する" }).check();
   await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(steps(listing)).toHaveText(["下書き（済み）", "公開中（現在）"]);
+  await expect(listing).toContainText("体験サイトで公開中 · 2026年10月12日から");
+  await expect(page.getByRole("status").filter({ hasText: "公開を再開しました" })).toHaveCount(1);
 });
 
-test("a draft: what it needs, a photo and an offer, 保存, the consent and 掲載を申請", async ({ page }) => {
+test("a draft: missing content and unsaved changes block it, then consent publishes it immediately", async ({ page }) => {
   await signIn(page);
   await openEditor(page, "/host/experiences/coffee");
   const listing = panel(page, "掲載");
   const needs = listing.getByRole("list", { name: "掲載までに必要" }).getByRole("listitem");
-  await expect(steps(listing)).toHaveText(["下書き（現在）", "審査", "掲載中"]);
+  await expect(steps(listing)).toHaveText(["下書き（現在）", "公開中"]);
   await expect(needs).toHaveText(["表紙写真", "料金"]);
-  const apply = listing.getByRole("button", { name: "掲載を申請" });
+  const apply = listing.getByRole("button", { name: "同意して公開", exact: true });
   await expect(apply).toBeDisabled();
   await expect(page.getByRole("button", { name: "保存後にプレビュー" })).toBeDisabled();
 
@@ -211,41 +216,45 @@ test("a draft: what it needs, a photo and an offer, 保存, the consent and 掲�
   await expect(row).toHaveCount(1);
   for (const text of ["Roasting workshop", "14:00 · 90分 · 定員6", "¥9,800〜"]) await expect(row).toContainText(text);
 
-  // Nothing is missing now; the page is saved before it is submitted.
+  // Nothing is missing now; the page is saved before it is published.
   await expect(listing.getByRole("list", { name: "掲載までに必要" })).toHaveCount(0);
   await listing.getByRole("checkbox", { name: "掲載の条件に同意する" }).check();
   await expect(apply).toBeDisabled();
-  await expect(listing).toContainText("保存後に申請できます");
+  await expect(listing).toContainText("保存後に公開できます");
   await saveButton(page).click();
   await expect(page.getByRole("dialog", { name: "保存していない変更があります" })).toHaveCount(0);
   await expect(savedNotice(page)).toBeVisible();
   await expect(apply).toBeEnabled();
   await apply.click();
 
-  await expect(steps(listing)).toHaveText(["下書き（済み）", "審査（現在）", "掲載中"]);
-  await expect(listing).toContainText("審査待ち");
-  await expect(listing).toContainText("10月21日に申請 · NIHO が確認中");
-  await expect(listing.getByRole("button", { name: "申請を取り下げる" })).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "掲載を申請しました" })).toHaveCount(1);
-  // Under review, プレビュー opens the public page.
+  await expect(steps(listing)).toHaveText(["下書き（済み）", "公開中（現在）"]);
+  await expect(listing).toContainText("体験サイトで公開中 · 2026年10月21日から");
+  await expect(listing).not.toContainText("審査");
+  await expect(page.getByRole("status").filter({ hasText: "公開しました" })).toHaveCount(1);
+  // Once live, プレビュー opens the public page.
   await expect(page.getByRole("link", { name: /^プレビュー/ })).toHaveAttribute("href", "/experiences/kamakura-coffee-roasting");
 });
 
-test("under review: 申請を取り下げる makes the listing a draft again", async ({ page }) => {
+test("a legacy review fixture returns to publication preparation without pretending it was approved", async ({ page }) => {
   await signIn(page);
   await openEditor(page, "/host/experiences/kintsugi");
   const listing = panel(page, "掲載");
-  await expect(steps(listing)).toHaveText(["下書き（済み）", "審査（現在）", "掲載中"]);
-  await expect(listing).toContainText("10月19日に申請 · NIHO が確認中");
-  await expect(page.getByRole("link", { name: /^プレビュー/ })).toHaveAttribute("href", "/experiences/kamakura-ceramic-mending");
-
-  await listing.getByRole("button", { name: "申請を取り下げる" }).click();
-  await expect(steps(listing)).toHaveText(["下書き（現在）", "審査", "掲載中"]);
-  await expect(page.getByRole("status").filter({ hasText: "申請を取り下げました" })).toHaveCount(1);
-  // The preview has no photo of this one: a draft asks for it before it can be submitted again.
+  await expect(steps(listing)).toHaveText(["下書き（現在）", "公開中"]);
+  await expect(listing).not.toContainText("審査");
+  await expect(listing).not.toContainText("NIHO が確認中");
+  // The preview has no photo: publication preparation asks for it.
   await expect(listing.getByRole("list", { name: "掲載までに必要" }).getByRole("listitem")).toHaveText(["表紙写真"]);
-  await expect(listing.getByRole("button", { name: "掲載を申請" })).toBeDisabled();
+  await expect(listing.getByRole("button", { name: "同意して公開", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "保存後にプレビュー" })).toBeDisabled();
+});
+
+test("公開・停止・再開は OWNER だけに出す", async ({ page }) => {
+  await signIn(page, "?mock=cohost");
+  await openEditor(page, "/host/experiences/community-dinner");
+  const listing = panel(page, "掲載");
+  await expect(listing).toContainText("公開の停止はオーナーが行います");
+  await expect(listing.getByRole("button", { name: "公開を停止する" })).toHaveCount(0);
+  await expect(listing.getByRole("button", { name: /同意して公開/ })).toHaveCount(0);
 });
 
 test("an offer name made only of whitespace is rejected", async ({ page }) => {

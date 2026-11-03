@@ -31,8 +31,8 @@ import {
 } from "./console-data";
 import { bookingConversations, type BookingConversation } from "./messages";
 import { loadNotificationSettings } from "./notification-settings-server";
-import type { HostNotice, HostPayoutLoad } from "./payout";
-import type { HostExperience, HostGoogleConnection, HostMeetingDefaults, HostSettings } from "./types";
+import { isSellerPageUrl, type HostNotice, type HostPayoutLoad } from "./payout";
+import type { HostExperience, HostGoogleConnection, HostMeetingDefaults, HostPublicationReadiness, HostSettings } from "./types";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -145,8 +145,8 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
       bio: known.bio,
       sellerDisclosureUrl: known.sellerDisclosureUrl ?? "",
       reviewStatus: known.reviewStatus,
-      // Unknown without the detail: NIHO still checks it when the review is requested.
-      consentCurrent: detail ? detail.provider.consentVersion === detail.consent.version : true,
+      // Unknown without the detail: publication stays closed instead of guessing that consent is current.
+      consentCurrent: detail ? detail.provider.consentVersion === detail.consent.version : null,
       meetingPoint,
       calendar: snapshot.calendar,
       notifications: !owner ? null : notificationLoad?.status === "live" ? { email: { addresses: [] }, items: notificationLoad.items } : snapshot.notifications,
@@ -160,17 +160,28 @@ export interface HostExperienceEditorData {
   editor: HostEditorExperience;
   /** 迎える人: the provider's name and introduction, as 設定 › 提供者情報 has them. */
   host: { name: string; bio: string };
-  /** The day a submission is dated (申請日). */
+  /** The first publication day used by the mock (YYYY-MM-DD, JST). */
   today: string;
+  /** Existing account/provider facts used only by the mock's self-publication controls. */
+  publication: HostPublicationReadiness;
 }
 
 /** The experience editor's page (#89): the experience with this id and the provider who hosts it. */
 export async function loadHostExperienceEditor(provider: HostProvider, id: string): Promise<HostExperienceEditorData> {
-  const data = await loadHostConsoleData(provider);
+  const mock = isHostMock();
+  const [data, payout] = await Promise.all([loadHostConsoleData(provider), mock ? loadHostPayout(provider, { candidates: false }) : Promise.resolve(null)]);
+  const reviewStatus = data.settings.reviewStatus;
   return {
-    editor: editorExperience(data, isHostMock() ? "mock" : "http", id),
+    editor: editorExperience(data, mock ? "mock" : "http", id),
     host: { name: data.settings.displayName, bio: data.settings.bio },
     today: data.today,
+    publication: {
+      role: provider.memberRole,
+      payoutReason: payout?.load.status === "owner" ? payout.load.payout.reason : null,
+      sellerDisclosureReady: isSellerPageUrl(data.settings.sellerDisclosureUrl),
+      consentCurrent: data.settings.consentCurrent,
+      providerStatus: reviewStatus === null ? "unknown" : reviewStatus === "SUSPENDED" ? "suspended" : "available",
+    },
   };
 }
 

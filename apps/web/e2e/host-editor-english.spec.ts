@@ -133,7 +133,8 @@ test("the calligraphy draft: 英語の確定 is needed; the draft locks the Engl
   await signIn(page);
   await openEditor(page, CALLIGRAPHY);
   const needs = panel(page, "掲載").getByRole("list", { name: "掲載までに必要" }).getByRole("listitem");
-  await expect(needs).toHaveText(["表紙写真", "料金", "英語の確定"]);
+  await expect(needs).toHaveText(["表紙写真", "料金", "英語の確定", "売上受取口座", "販売者表示"]);
+  await expect(panel(page, "掲載").getByRole("link", { name: "設定で確認する" })).toHaveAttribute("href", "/host/settings?providerId=sample-provider-studio");
   await expect(englishTab(page)).toHaveAccessibleName(/^英語（公開）\s*未作成$/);
 
   await englishTab(page).click();
@@ -151,7 +152,7 @@ test("the calligraphy draft: 英語の確定 is needed; the draft locks the Engl
   await expect(state).toContainText("未作成");
   await expect(titleField(page)).toHaveValue("鎌倉の書家と、自分の漢字を書く");
   await expect(field(page, "英語の題名")).toHaveValue("Write Your Own Kanji with a Kamakura Calligrapher");
-  await expect(needs).toHaveText(["表紙写真", "料金", "英語の確定"]);
+  await expect(needs).toHaveText(["表紙写真", "料金", "英語の確定", "売上受取口座", "販売者表示"]);
   await page.unroute(route);
 
   // Again, a little slowly: the English is locked meanwhile, the Japanese tab stays open to write.
@@ -175,7 +176,7 @@ test("the calligraphy draft: 英語の確定 is needed; the draft locks the Engl
 
   await state.getByRole("button", { name: "英語を確定" }).click();
   await expect(state.getByText("確定済み", { exact: true })).toBeVisible();
-  await expect(needs).toHaveText(["表紙写真", "料金"]);
+  await expect(needs).toHaveText(["表紙写真", "料金", "売上受取口座", "販売者表示"]);
   await expect(saveButton(page)).toBeVisible();
 });
 

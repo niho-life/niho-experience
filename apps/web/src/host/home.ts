@@ -161,7 +161,7 @@ function draftTodo(id: string, title: string, detail: string): HomeTodo {
   };
 }
 
-/** A listing NIHO is checking for the experience site, and the day it was asked for (YYYY-MM-DD in Japan) when known. */
+/** Legacy HTTP only: a listing NIHO is checking and the day it was asked for when known. */
 function listingReviewTodo(id: string, title: string, requestedOn: string | null): HomeTodo {
   return {
     key: `review-${id}`,
@@ -176,7 +176,7 @@ function listingReviewTodo(id: string, title: string, requestedOn: string | null
 
 /**
  * 次にすること, the nearest deadline first: the requests (each has one), the threads waiting
- * for an answer, the reviews to answer or read, then drafts to finish and listings under review.
+ * for an answer, the reviews to answer or read, then mock drafts to finish or publish.
  */
 export function homeTodos(
   experiences: readonly HostExperience[],
@@ -188,11 +188,8 @@ export function homeTodos(
 ): HomeTodo[] {
   const drafts = experiences
     .filter((experience) => experience.status === "draft")
-    .map((experience) => draftTodo(experience.id, experience.title, experience.missing.length ? missingLine(experience.missing, listJa) : "掲載を申請できます"));
-  const listingReviews = experiences
-    .filter((experience) => experience.status === "review")
-    .map((experience) => listingReviewTodo(experience.id, experience.title, experience.requestedOn || null));
-  return [...requestTodos(experiences, bookings, today, now), ...threadTodos(threads, now), ...reviewTodos(experiences, reviews), ...drafts, ...listingReviews];
+    .map((experience) => draftTodo(experience.id, experience.title, experience.missing.length ? missingLine(experience.missing, listJa) : "保存後に公開できます"));
+  return [...requestTodos(experiences, bookings, today, now), ...threadTodos(threads, now), ...reviewTodos(experiences, reviews), ...drafts];
 }
 
 /** One of NIHO's experience pages as 次にすること reads it (provider operations on, #89). */

@@ -32,7 +32,7 @@ vi.mock("@/lib/host/server", async (importActual) => {
 });
 
 import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
-import { hostPageContext, loadHostBookings, loadHostConsoleData, loadHostMessages, loadHostPayout, loadHostReviews, loadHostSales, loadHostSession, loadRegistrationConsent } from "./data";
+import { hostPageContext, loadHostBookings, loadHostConsoleData, loadHostExperienceEditor, loadHostMessages, loadHostPayout, loadHostReviews, loadHostSales, loadHostSession, loadRegistrationConsent } from "./data";
 import { GOOGLE_NOT_CONNECTED } from "./calendar";
 import { HOST_ERROR_REASON_TEXT } from "./errors";
 import { MOCK_GOOGLE_CONNECTION } from "./mock/provider";
@@ -183,7 +183,9 @@ describe("loadHostConsoleData", () => {
     state.config.apiMode = "http";
     const fromList = { displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", sellerDisclosureUrl: "", reviewStatus: "APPROVED" };
     stubNiho(() => new Response("unavailable", { status: 503 }));
-    expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject(fromList);
+    const unavailable = (await loadHostConsoleData(KITCHEN)).settings;
+    expect(unavailable).toMatchObject(fromList);
+    expect(unavailable.consentCurrent).toBeNull();
     // A body outside the contract is not read.
     stubNiho(() => Response.json({ provider: { id: KITCHEN.id, displayName: "形の違う提供者" }, platformAdmin: false }));
     expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject(fromList);
@@ -207,6 +209,24 @@ describe("loadHostConsoleData", () => {
     const cohost = provider({ id: KITCHEN.id, displayName: "サンプルの台所", memberRole: "COHOST" });
     const calls = stubNiho(() => Response.json(detailBody(cohost)));
     expect((await loadHostConsoleData(cohost, { meetingPoint: true })).settings.meetingPoint).toBeNull();
+    expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen"]);
+  });
+});
+
+describe("loadHostExperienceEditor", () => {
+  it("passes verified mock publication facts, and keeps non-owner or unreadable facts closed", async () => {
+    expect((await loadHostExperienceEditor(KITCHEN, "coffee")).publication).toEqual({
+      role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "available",
+    });
+    expect((await loadHostExperienceEditor(STUDIO, "calligraphy")).publication).toEqual({
+      role: "EDITOR", payoutReason: null, sellerDisclosureReady: false, consentCurrent: true, providerStatus: "available",
+    });
+  });
+
+  it("does not add a payout dependency to the legacy HTTP editor", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => Response.json(detailBody(KITCHEN)));
+    expect((await loadHostExperienceEditor(KITCHEN, "coffee")).editor).toEqual({ status: "unavailable" });
     expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen"]);
   });
 });

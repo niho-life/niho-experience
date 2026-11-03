@@ -159,8 +159,8 @@ export const MOCK_KITCHEN_EXPERIENCES: readonly HostExperience[] = [
     id: "kintsugi",
     slug: "kamakura-ceramic-mending",
     title: "Mend a Broken Bowl with a Kamakura Restorer",
-    status: "review",
-    requestedOn: "2026-10-19",
+    // This legacy review fixture is publication preparation in the self-service mock, not auto-approved.
+    status: "draft",
     ...WRITTEN_IN_ENGLISH,
     lead: "Learn the basics of kintsugi with a restorer who has mended Kamakura’s bowls for twenty years. Bring a chipped piece from home or pick one from the studio shelf.",
     dayLanguage: "Japanese, with basic English",
