@@ -136,7 +136,7 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
       host: "experience.example",
       path: "guides",
       ranges: ["live", "unlisted"],
-      extras: [],
+      extras: ["app"],
       accepts: { blocks: ["paragraph", "heading", "list", "figure", "note"], marks: ["bold", "italic", "link"] },
       requires: [
         { id: "lang-en", kind: "lang", equals: "en", message: "英語で書いてください", fix: "lang" },

@@ -662,6 +662,12 @@ describe("editor public guide source (#252, contract v1)", () => {
     });
   });
 
+  it("keeps NIHO app cards off by default and enables them only in the HTTP runtime", () => {
+    expect(resolveConfig(editor).guideAppCardsEnabled).toBe(false);
+    expect(resolveConfig({ ...editor, EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "true" }).guideAppCardsEnabled).toBe(true);
+    expect(resolveConfig({ ...editor, EXPERIENCE_API_MODE: "mock", EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "true" }).guideAppCardsEnabled).toBe(false);
+  });
+
   it("refuses to start without any of them, without falling back to static guides", () => {
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "" })).toThrow(/GUIDE_EDITOR_API_BASE_URL/);
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: " " })).toThrow(/GUIDE_EDITOR_API_HANDLE/);

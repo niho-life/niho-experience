@@ -612,6 +612,8 @@ export function resolveConfig(env: Env) {
     guideEditorApiHandle: guideEditor.handle,
     guideEditorApiToken: guideEditor.token,
     guideEditorAssetOrigins: guideEditor.assetOrigins,
+    // Public summaries consumed by NIHO. Opt-in and off unless explicitly enabled in the HTTP runtime.
+    guideAppCardsEnabled: apiMode === "http" && env.EXPERIENCE_GUIDE_APP_CARDS_ENABLED === "true",
     // The editor's own site, linked from the footer and /host; empty hides the links.
     guideEditorSiteOrigin: guideEditorSite,
     // NIHO platform ADMIN server -> Experience guide administration. This is a

@@ -60,7 +60,7 @@ export type EditorAsset = Readonly<{ id: string; url: string; alt: string; credi
 
 export type EditorCategory = Readonly<{ slug: string; label: string; labelJa?: string; order?: number; revision?: number }>;
 /** The publish-time author. The contract's `handle` and `url` are checked but not kept: the page shows the name only. */
-export type EditorAuthor = Readonly<{ name: string }>;
+export type EditorAuthor = Readonly<{ name: string; url: string | null }>;
 
 /** One entry of the published list: what a listing needs. `range` decides where it shows. */
 export type EditorArticleSummary = Readonly<{
@@ -69,10 +69,13 @@ export type EditorArticleSummary = Readonly<{
   slug: string;
   range: "live" | "unlisted";
   title: string;
-  lead: string;
+  lead: string | null;
   cover?: EditorAsset;
   category: EditorCategory;
   author: EditorAuthor;
+  /** Original canonical declared by Editor. Optional for old ordinary-guide publications; app cards require it. */
+  canonicalUrl?: string;
+  extras: Readonly<{ app: boolean }>;
   /** Related experience slugs (slug-shaped entries only), from the list: the body never overrides them. */
   related: readonly string[];
   /** ISO 8601 date-times: first publication, and the current published version. */
@@ -136,9 +139,15 @@ function optionalText(value: unknown, label: string, max: number): string | unde
   return absent(value) || value === "" ? undefined : text(value, label, max);
 }
 
+function optionalCanonicalUrl(value: unknown): string | undefined {
+  if (absent(value)) return undefined;
+  if (typeof value !== "string" || !value.trim() || value.length > URL_MAX) throw new Invalid("canonicalUrl is invalid");
+  return value;
+}
+
 /** Published optional text is represented as null on the wire; an empty string is still malformed. */
-function nullableText(value: unknown, label: string, max: number): string {
-  return absent(value) ? "" : text(value, label, max);
+function nullableText(value: unknown, label: string, max: number): string | null {
+  return absent(value) ? null : text(value, label, max);
 }
 
 function isoTime(value: unknown, label: string): string {
@@ -178,7 +187,22 @@ function author(value: unknown): EditorAuthor {
   const name = text(value.name, "author.name", GUIDE_LIMITS.authorMaxLength);
   if (value.handle !== null && typeof value.handle !== "string") throw new Invalid("author.handle is not text or null");
   if (value.url !== null && typeof value.url !== "string") throw new Invalid("author.url is not text or null");
-  return { name };
+  if (typeof value.url === "string") {
+    let url: URL;
+    try {
+      url = new URL(value.url);
+    } catch {
+      throw new Invalid("author.url is not an https URL");
+    }
+    if (url.protocol !== "https:" || url.username || url.password || value.url.length > URL_MAX) throw new Invalid("author.url is not an https URL");
+  }
+  return { name, url: value.url };
+}
+
+function extras(value: unknown): Readonly<{ app: boolean }> {
+  if (!isRecord(value) || Object.keys(value).sort().join(",") !== "app,news,xp") throw new Invalid("extras is invalid");
+  if (typeof value.app !== "boolean" || typeof value.news !== "boolean" || typeof value.xp !== "boolean") throw new Invalid("extras is invalid");
+  return { app: value.app };
 }
 
 function relatedSlugs(value: unknown, label: string): string[] {
@@ -209,6 +233,7 @@ function summary(item: Fields): EditorArticleSummary {
   if (!isEditorGuideSlug(item.slug)) throw new Invalid("slug is invalid or reserved");
   if (item.range !== "live" && item.range !== "unlisted") throw new Invalid("range is missing or unknown");
   if (item.lang !== "en") throw new Invalid("lang is not en");
+  const canonicalUrl = optionalCanonicalUrl(item.canonicalUrl);
   return {
     id: item.id,
     version: Number.isSafeInteger(item.version) && (item.version as number) > 0 ? item.version as number : (() => { throw new Invalid("version is invalid"); })(),
@@ -219,6 +244,8 @@ function summary(item: Fields): EditorArticleSummary {
     ...(absent(item.cover) ? {} : { cover: asset(item.cover, "cover") }),
     category: category(item.category, item.categoryDisplay),
     author: author(item.author),
+    ...(canonicalUrl === undefined ? {} : { canonicalUrl }),
+    extras: extras(item.extras),
     related: relatedSlugs(item.related, "related"),
     publishedAt: isoTime(item.publishedAt, "publishedAt"),
     updatedAt: isoTime(item.updatedAt, "updatedAt"),
@@ -229,7 +256,7 @@ function summary(item: Fields): EditorArticleSummary {
  * One page of `GET {base}/{handle}/published.json?limit=100&include=unlisted[&cursor=…]` → `{ contractVersion: "1",
  * items, nextCursor }`, newest update first. A response that is not that shape (another contract version, more items
  * than a page holds, a malformed cursor) throws {@link EditorContractError}; an unusable item is skipped with its reason.
- * `canonicalUrl` and `extras` are not read: this site builds its URLs from SITE_URL.
+ * `canonicalUrl` is retained for app-card provenance checks, while ordinary guides continue to build their URLs from SITE_URL.
  */
 export function parseEditorPublishedList(json: unknown): EditorPublishedPage {
   if (!isRecord(json)) throw new EditorContractError("the published list is not an object");

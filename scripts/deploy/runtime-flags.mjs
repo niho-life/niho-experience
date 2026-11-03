@@ -90,6 +90,11 @@ export const FLAGS = Object.freeze([
     fixed: { GUIDE_EDITOR_API_HANDLE: () => "exp" },
   },
   {
+    env: "EXPERIENCE_GUIDE_APP_CARDS_ENABLED",
+    variable: "GUIDE_APP_CARDS_ENABLED",
+    needs: ["EXPERIENCE_GUIDE_PUBLIC_SOURCE"],
+  },
+  {
     env: "EXPERIENCE_GUEST_BOOKING_ENABLED",
     variable: "GUEST_BOOKING_ENABLED",
     // Booking needs its confirmation email and booking page (the mail job), not only what resolve-config checks.
