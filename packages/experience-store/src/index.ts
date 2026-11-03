@@ -12,6 +12,7 @@ export {
 export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "./experience-publication.ts";
+export { projectPublicExperiencePublicationManuscript } from "./experience-publication-projection.ts";
 export type {
   ExperiencePublicationBlocker,
   ExperiencePublicationContentChecks,

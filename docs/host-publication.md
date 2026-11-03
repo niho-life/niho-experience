@@ -40,10 +40,22 @@ Stripe の本人確認・口座の利用可否は公開と販売の条件とし�
 | --- | --- | --- |
 | `/host` の画面モック | このリポの合成データと画面内状態 | 新しい公開・停止・再開を確認する。実保存・販売・メール送信の証跡にはしない |
 | 現在の HTTP 版の編集・掲載 | NIHO Host API 0.4.0（選別契約・draft）。提供者と掲載に審査があり、保存で掲載が止まる | 実際の状態を表示し、保存時停止の説明を維持する。申請の API を「即時公開」と表示しない |
-| 移行後の編集・公開・SSR | experience API v1 と体験専用 DB。公開の契約・永続化は #369 の残作業 | 公開版と編集内容、本人停止と運営停止を明示し、必要条件だけで自己公開する |
+| 移行後の編集・公開・SSR | Experience-owned publication BFF の一部（draft/state読取・CAS保存・preview・本人停止）が実装済み。未配備・既定OFF。公開/再公開はreadiness契約不足でfail-closed | 編集UI、NIHO限定readiness、公開media・同意validator、公開カタログ/SSR/SEO、stg実受入が残る。API部分実装を稼働済みと扱わない |
 | NIHO 共通アカウント・Connect | NIHO の本人・権限・口座の限定契約 | 現在の状態をサーバー間で確認する。体験審査を新設しない |
 
 旧契約の生成型や mock を、新しいサーバー仕様に配備済みであるように書き換えない。NIHO 側に新たな体験掲載機能を増やさず、[#330](https://github.com/niho-life/niho-experience/issues/330) の移行に、experience 所有の原稿編集、公開状態の永続化、公開カタログ・詳細・SSR/SEO の読取り切替を含める。商品ごとの販売切替と本文の公開停止を混同せず、同じ開催回を新旧双方で販売しない。
+
+## 現在のHTTP BFF実装（2026-11-03）
+
+PR #372 の作業ブランチには、次の `/host/api/publication/providers/{providerId}/products/{productId}` route がある。`EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true`、`HOST_CONSOLE_ENABLED=true`、HTTP mode の全てが必要で、flagの既定値は `false`。
+
+- `GET`：draft、publication state、公開を妨げる条件を読む。
+- `PATCH`：`expectedVersion` を使うdraftのCAS保存。掲載済み版を置き換えるvalidatorが未接続のため、保存結果は下書きに留める。
+- `GET .../preview`：公開manuscriptのallowlist projectionだけを返す。住所・アクセス・入口案内・server参照を含めない。
+- `POST .../stop`：期待state versionを使ってホスト自身の公開だけを止める。運営停止を解除しない。
+- `POST .../publish`：初回公開・再公開の入口はあるが、NIHO account/Connect readiness、公開mediaの許諾・検証、承認済み同意契約が未接続のため、現状は常に具体的blockerを返して拒否する。
+
+routeはfreshなNIHO provider DTOの完全一致OWNERだけから `ownerUserId` を得て、Experience DBのactive OWNER membershipも照合する。入力の版競合を409で返し、mutationはsame-originを要求する。応答は `private, no-store` と `noindex`。公開経路は各依存の実API・validator・固定SHAのstg受入が揃うまで開けない。画面editorへの接続、商品作成、必要条件blockerの修正導線、公開カタログ/SSR切替はまだ実装されていない。
 
 ## HTTP 切替の受入
 
