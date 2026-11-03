@@ -74,6 +74,30 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         stripeConnectAccountRef: "acct_synthetic_publication",
         sellerDisplayName: "Synthetic Legal Seller",
       });
+
+      const suspensionCheckViolation = (error: unknown): boolean =>
+        typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23514";
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO experience_product_publication_states
+             (provider_id,product_id,operations_suspended_at,operations_suspended_by_niho_user_id)
+           VALUES ($1,$2,clock_timestamp(),$3)`,
+          [OWNER.providerId, original.id, OPS.nihoUserId],
+        ),
+        suspensionCheckViolation,
+        "an operations suspension must include its reason code",
+      );
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO experience_product_publication_states
+             (provider_id,product_id,operations_suspended_at,operations_suspension_code)
+           VALUES ($1,$2,clock_timestamp(),'POLICY_REVIEW')`,
+          [OWNER.providerId, original.id],
+        ),
+        suspensionCheckViolation,
+        "an operations suspension must include its actor",
+      );
+
       const rule: ScheduleRule = {
         id: "tea-daily",
         timeZone: "Asia/Tokyo",

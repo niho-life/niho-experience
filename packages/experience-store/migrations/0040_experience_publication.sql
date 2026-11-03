@@ -80,6 +80,8 @@ CREATE TABLE experience_product_publication_states (
     (operations_suspended_at IS NULL AND operations_suspension_code IS NULL AND operations_suspended_by_niho_user_id IS NULL)
     OR
     (operations_suspended_at IS NOT NULL
+      AND operations_suspension_code IS NOT NULL
+      AND operations_suspended_by_niho_user_id IS NOT NULL
       AND operations_suspension_code ~ '^[A-Z0-9_]{1,80}$'
       AND length(operations_suspended_by_niho_user_id) BETWEEN 1 AND 256)
   )
