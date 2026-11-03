@@ -143,8 +143,8 @@ export interface ProductSaleTermsInput {
   /** Reserve one group for the occurrence; existing inventory settings may also require private booking. */
   readonly privateBooking?: boolean;
   readonly maxPartySize: number;
-  readonly cancellationPolicy: GuestCancellationPolicy;
-  /** Set these together to define the cancellation window and refund percentage. */
+  readonly cancellationPolicy: ProductSaleCancellationPolicy;
+  /** Set both values with cancellationPolicy=CUSTOM to define a non-legacy cancellation rule. */
   readonly cancellationWindowMinutesBeforeStart?: number | null;
   readonly cancellationRefundBasisPoints?: number;
   /** Operations-only attendance threshold. It is never included in guest-facing DTOs. */
@@ -154,8 +154,12 @@ export interface ProductSaleTermsInput {
   readonly conditionsVersion: string | null;
 }
 
+/** `CUSTOM` is a host write/read code; persistence keeps a legacy-compatible `NONE` marker plus the explicit pair. */
+export type ProductSaleCancellationPolicy = GuestCancellationPolicy | "CUSTOM";
+
 export interface NormalizedProductSaleTermsInput extends Omit<ProductSaleTermsInput,
-  "minimumChargeableParticipants" | "privateBooking" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance"> {
+  "minimumChargeableParticipants" | "privateBooking" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance" | "cancellationPolicy"> {
+  readonly cancellationPolicy: GuestCancellationPolicy;
   readonly minimumChargeableParticipants: number;
   readonly privateBooking: boolean;
   readonly cancellationWindowMinutesBeforeStart: number | null;
@@ -321,7 +325,7 @@ type Queryable = Pool | PoolClient;
 type InputType = BookingQuestionInputType;
 
 const INPUT_TYPES: ReadonlySet<string> = new Set(["SHORT_TEXT", "LONG_TEXT", "SINGLE_SELECT", "MULTI_SELECT"]);
-const CANCELLATION_POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
+const CANCELLATION_POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE", "CUSTOM"]);
 const UTM_KEYS = ["utmSource", "utmMedium", "utmCampaign", "utmContent"] as const;
 const PUBLIC_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const OFFER_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -463,6 +467,9 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
   if (hasCancellationMinutes !== hasCancellationRate) {
     throw new StoreValidationError("cancellationWindowMinutesBeforeStart and cancellationRefundBasisPoints must be set together.");
   }
+  if (input.cancellationPolicy === "CUSTOM" && (!hasCancellationMinutes || !hasCancellationRate)) {
+    throw new StoreValidationError("CUSTOM cancellationPolicy requires an explicit cancellation window and refund rate.");
+  }
   const legacyCancellation = input.cancellationPolicy === "FREE_UNTIL_24H"
     ? { minutes: 1_440, basisPoints: 10_000 }
     : input.cancellationPolicy === "FREE_UNTIL_48H"
@@ -488,7 +495,7 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
     minimumChargeableParticipants,
     privateBooking,
     maxPartySize,
-    cancellationPolicy: input.cancellationPolicy,
+    cancellationPolicy: input.cancellationPolicy === "CUSTOM" ? "NONE" : input.cancellationPolicy,
     cancellationWindowMinutesBeforeStart,
     cancellationRefundBasisPoints,
     minimumAttendance,
@@ -730,7 +737,7 @@ function offerName(title: string): string {
   return characters.length <= 80 ? title : `${characters.slice(0, 79).join("")}…`;
 }
 
-function cancellationPolicyCode(terms: ProductSaleTerms): GuestCancellationPolicy | "CUSTOM" {
+export function cancellationPolicyCode(terms: ProductSaleTerms): ProductSaleCancellationPolicy {
   if (terms.cancellationWindowMinutesBeforeStart === null && terms.cancellationRefundBasisPoints === 0) return "NONE";
   if (terms.cancellationWindowMinutesBeforeStart === 1_440 && terms.cancellationRefundBasisPoints === 10_000) return "FREE_UNTIL_24H";
   if (terms.cancellationWindowMinutesBeforeStart === 2_880 && terms.cancellationRefundBasisPoints === 10_000) return "FREE_UNTIL_48H";

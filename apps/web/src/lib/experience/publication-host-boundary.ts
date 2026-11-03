@@ -13,7 +13,8 @@ const error = (code: string, status: number) => noStoreJson({ error: { code } },
  * until A exposes a stable auth user ID plus a seller/Connect mapping.
  */
 export async function publicationHostBoundary(providerId: unknown, operation: Operation): Promise<Response> {
-  if (!config.experiencePublicationsEnabled || config.apiMode !== "http" || !config.hostConsoleEnabled) return error("NOT_FOUND", 404);
+  if (!config.experiencePublicationsEnabled || config.apiMode !== "http" || !config.hostConsoleEnabled
+    || process.env.EXPERIENCE_HOST_PUBLICATION_API_ENABLED !== "true") return error("NOT_FOUND", 404);
   const id = nihoIdOrNull(providerId);
   if (!id) return error("INVALID_INPUT", 400);
   const session = await readHostSession();

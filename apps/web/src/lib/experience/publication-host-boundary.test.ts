@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   config: { experiencePublicationsEnabled: true, apiMode: "http", hostConsoleEnabled: true, siteUrl: "https://experience.example" },
@@ -23,8 +23,10 @@ vi.mock("@/lib/host/server", () => ({
 import { publicationHostBoundary } from "./publication-host-boundary";
 
 describe("Experience publication host auth boundary", () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("EXPERIENCE_HOST_PUBLICATION_API_ENABLED", "true");
     Object.assign(mocks.config, { experiencePublicationsEnabled: true, apiMode: "http", hostConsoleEnabled: true });
     mocks.read.mockResolvedValue({ accessToken: "synthetic-token" });
     mocks.usable.mockReturnValue(true);

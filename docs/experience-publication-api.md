@@ -2,6 +2,8 @@
 
 Status: implementation contract for #330 / #369. The host UI consumes these routes; UI components are out of scope here.
 
+The sale-terms contract also covers the Experience-side requirements tracked by [niho-coliving/niho-app#19138](https://github.com/niho-coliving/niho-app/issues/19138): cancellation window/refund rate, private booking, minimum chargeable participants, and operations-only minimum attendance. UI components remain D's scope.
+
 Rollout remains closed until A extends its host identity/Connect response with a stable current user ID and the seller-account mapping for the same provider. The present `GET /api/auth/me` omits the ID, and `ownerUserId` is registration metadata rather than an authentication claim. Experience must not substitute that field. Current payment readiness returns only `ready`/`reason`, so a product's local account reference cannot be proven to match it. Missing either datum returns `AUTH_CONTRACT_UNAVAILABLE` and cannot mutate publication state.
 
 ## Identity and authorization boundary
@@ -91,7 +93,7 @@ Both versions are required. The server validates the complete draft and photo ri
     "minimumChargeableParticipants": 3,
     "privateBooking": false,
     "maxPartySize": 6,
-    "cancellationPolicy": "NONE",
+    "cancellationPolicy": "CUSTOM",
     "cancellationWindowMinutesBeforeStart": 1440,
     "cancellationRefundBasisPoints": 5000,
     "minimumAttendance": 4,
@@ -118,7 +120,7 @@ Both versions are required. The server validates the complete draft and photo ri
     "minimumChargeableParticipants": 3,
     "privateBooking": false,
     "maxPartySize": 6,
-    "cancellationPolicy": "NONE",
+    "cancellationPolicy": "CUSTOM",
     "cancellationWindowMinutesBeforeStart": 1440,
     "cancellationRefundBasisPoints": 5000,
     "minimumAttendance": 4,
@@ -217,7 +219,7 @@ Responses do not include exception text, credentials, private identifiers, or pe
 
 `minimumChargeableParticipants` is a floor on the adult-price portion: checkout charges `max(adult price × adult count + child price × child count, adult price × minimumChargeableParticipants)`. It defaults to the neutral value `1`; it is separate from `minimumParticipants`, which controls whether a party may book. `privateBooking=true` makes one group reserve the occurrence and rejects a second active group in shared inventory.
 
-The cancellation window and refund rate are configured as a pair. `refundBasisPoints` is 0–10000; the automatic refund amount is `floor(paid amount × basis points / 10000)` and prior successful/pending refunds are deducted before a new refund is created. A 10000-basis-point window retains the legacy free-cancellation wording. `cancellationPolicy` remains the compatibility code; custom rules use `CUSTOM`. Legacy 24-hour, 48-hour, and no-refund values migrate exactly to 1440/2880/null minutes and 10000/10000/0 basis points. No other window or rate is inferred.
+The cancellation window and refund rate are configured as a pair. For a custom rule, D sends `cancellationPolicy: "CUSTOM"` and both explicit values; omitting either is invalid. `refundBasisPoints` is 0–10000; the automatic refund amount is `floor(paid amount × basis points / 10000)` and prior successful/pending refunds are deducted before a new refund is created. A 10000-basis-point window retains the legacy free-cancellation wording. The host read DTO and public offer derive `CUSTOM` or an exact legacy code from the stored pair. Internally, custom rows keep the legacy-compatible `NONE` marker plus the explicit pair. Legacy 24-hour, 48-hour, and no-refund values migrate exactly to 1440/2880/null minutes and 10000/10000/0 basis points. No other window or rate is inferred.
 
 `minimumAttendance` is stored and snapshotted at checkout but never appears in guest DTOs. The host session DTO adds `confirmedParticipants` and `minimumAttendance: { required, confirmed, remaining } | null`; pending payment reviews do not count toward the run minimum. This is a report only: it does not cancel a session or change bookings automatically.
 

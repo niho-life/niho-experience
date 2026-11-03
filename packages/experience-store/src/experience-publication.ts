@@ -1,8 +1,10 @@
 import type { Pool, PoolClient } from "pg";
 import {
   questionsFingerprint,
+  cancellationPolicyCode,
   termsFromRow,
   validSaleTerms,
+  type ProductSaleCancellationPolicy,
   type ProductSaleTerms,
   type ProductSaleTermsInput,
 } from "./guest-bookings.ts";
@@ -72,7 +74,10 @@ export interface ExperiencePublicationDraftInput {
 }
 
 /** Host DTO for editable sale terms. Internal provider/product IDs and the question fingerprint stay server-side. */
-export type ExperienceHostSaleTerms = Omit<ProductSaleTerms, "providerId" | "productId" | "bookingQuestionsFingerprint">;
+export type ExperienceHostSaleTerms = Omit<ProductSaleTerms,
+  "providerId" | "productId" | "bookingQuestionsFingerprint" | "cancellationPolicy"> & {
+    readonly cancellationPolicy: ProductSaleCancellationPolicy;
+  };
 
 export interface ExperienceHostSaleTermsState {
   readonly draftVersion: number;
@@ -248,7 +253,7 @@ function hostSaleTermsFromRow(row: DbRow): ExperienceHostSaleTerms {
     minimumChargeableParticipants: terms.minimumChargeableParticipants,
     privateBooking: terms.privateBooking,
     maxPartySize: terms.maxPartySize,
-    cancellationPolicy: terms.cancellationPolicy,
+    cancellationPolicy: cancellationPolicyCode(terms),
     cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
     cancellationRefundBasisPoints: terms.cancellationRefundBasisPoints,
     minimumAttendance: terms.minimumAttendance,
@@ -656,7 +661,7 @@ export class ExperiencePublicationRepository {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${input.id}`]);
       const current = await client.query<{ slug: string }>(
         "SELECT slug FROM experience_products WHERE provider_id=$1 AND id=$2 AND version=$3 FOR UPDATE",
-        [actor.providerId, input.id, expectedVersion],
+        [actor.providerId, input.id, expectedDraftVersion],
       );
       if (!current.rows[0]) throw new StoreConflictError("Product version mismatch or product not found in this provider.");
       await lockPublicationSlugs(client, [current.rows[0].slug, input.slug]);

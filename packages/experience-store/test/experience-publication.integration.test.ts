@@ -72,6 +72,14 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
           sellerNihoAccountRef: "seller-account-synthetic", stripeConnectAccountRef: "acct_synthetic_publication",
           sellerDisplayName: "Synthetic Legal Seller",
         });
+        const assetId = randomUUID();
+        await pool.query(
+          `INSERT INTO experience_product_media_assets
+             (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,
+              public_credit,rights_confirmed_at)
+           VALUES ($1,$2,$3,0,$4,$5,640,480,4096,'Synthetic public photo',NULL,clock_timestamp())`,
+          [assetId, owner.providerId, id, `experience-products/${assetId}.jpg`, randomUUID().replaceAll("-", "").repeat(2)],
+        );
         const rule: ScheduleRule = {
           id: `${id}-daily`, timeZone: "Asia/Tokyo", startsOn: "2099-01-01", localStartTime: "10:00", durationMinutes: 90,
           capacity: 6, bookingCutoffMinutes: 60, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
@@ -109,15 +117,17 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
           consentVersion: readiness().requiredConsentVersion, checks: CHECKS,
         });
       }
+      const firstState = await publications.getState(firstOwner, firstDraft.id);
+      const secondState = await publications.getState(secondOwner, secondDraft.id);
       const draftResults = await Promise.all([
         publications.saveDraft(firstOwner, {
           id: firstDraft.id, slug: "shared-draft-slug", publicTitle: "Synthetic draft first",
           content: manuscript("Synthetic first update."), currency: "JPY", unitAmount: 4_100, cancellationTermsRef: `terms-${firstDraft.id}`,
-        }, firstDraft.version, CHECKS),
+        }, firstDraft.version, firstState?.version ?? null, CHECKS),
         publications.saveDraft(secondOwner, {
           id: secondDraft.id, slug: "shared-draft-slug", publicTitle: "Synthetic draft second",
           content: manuscript("Synthetic second update."), currency: "JPY", unitAmount: 4_100, cancellationTermsRef: `terms-${secondDraft.id}`,
-        }, secondDraft.version, CHECKS),
+        }, secondDraft.version, secondState?.version ?? null, CHECKS),
       ]);
       assert.equal(draftResults.filter((result) => result.publicationUpdated).length, 1);
       assert.equal(draftResults.filter((result) => result.blockers.includes("SLUG_IN_USE")).length, 1);
@@ -275,7 +285,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
           minimumChargeableParticipants: 3,
           privateBooking: true,
           maxPartySize: 6,
-          cancellationPolicy: "NONE",
+          cancellationPolicy: "CUSTOM",
           cancellationWindowMinutesBeforeStart: 90,
           cancellationRefundBasisPoints: 3_750,
           minimumAttendance: 4,
@@ -286,6 +296,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(saleTermsUpdate.publicationUpdated, true);
       assert.equal(saleTermsUpdate.saleTerms?.version, 2);
+      assert.equal(saleTermsUpdate.saleTerms?.cancellationPolicy, "CUSTOM");
       assert.equal(saleTermsUpdate.stateVersion, state.version + 1);
       state = (await publications.getState(OWNER, original.id))!;
       const activeTermsSnapshot = await pool.query<{ sale_terms_version: string; sale_terms_snapshot: Record<string, unknown> }>(
