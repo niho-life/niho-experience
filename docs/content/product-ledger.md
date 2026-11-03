@@ -9,7 +9,7 @@
 
 **オーナーの決定（2026-11-02・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：初回の試験販売候補は [Kamakura Community Dinner with Locals](https://niho.life/living/nihokamakura/pages/community-dinner-with-locals)。主催・提供者はNIHO kamakura拠点。オーナーはこの既存ページに記載された提供内容・開催枠・表示価格・定員・予約/取消条件を商品条件の正本として承認した。オーナー作成の写真は全点Experience掲載に利用してよい。掲載用の安定した画像アップロードは未完了であり、期限付き署名URLは保存しない。写っている第三者の肖像同意は別途確認する。販売者は指定された特商法ページの表示どおりパナソニックホールディングス株式会社とし、売上はNIHO kamakura拠点のStripe Connect口座で受け取りたいと確認した。実際に使うConnect口座の照合・有効化、天候/最少催行等のページにない条件は未確認のまま扱う。
 
-**オーナーの決定（2026-11-02）**：法的販売者は指定された [NIHO kamakura 特商法表示](https://kamakura.niho.life/tradelaw) に従いパナソニックホールディングス株式会社とし、主催・提供者表示はNIHO kamakura拠点、売上受取先は同拠点に対応するStripe Connect口座とする。stgで表示されるConnect test口座は制限中で、法的口座名義・契約同意・銀行口座・実際の受取先対応を確認できていないため、本番口座として扱わない。提供者登録はオーナーの同意を得たが、既存拠点口座の共有に伴う返金・紛争・手数料の負担と購入者情報へのアクセス範囲に関する別同意、Connect確認、掲載審査は未完了。
+**オーナーの決定（2026-11-02）**：法的販売者は指定された [NIHO kamakura 特商法表示](https://kamakura.niho.life/tradelaw) に従いパナソニックホールディングス株式会社とし、主催・提供者表示はNIHO kamakura拠点、売上受取先は同拠点に対応するStripe Connect口座とする。2026-11-03に Experience staging 用の Express test account を再取得したところ、カード決済・送金が有効、currently/past-due requirement は空、Stripe test bank account が登録済みだった。これは合成データによるstg決済・入金表示の試験に使える状態で、本番口座の法的名義・銀行口座・実際の受取先対応を証明しない。別の Standard sandbox account に `proof_of_liveness` が未完了で残っているが、これは Experience onboarding 用の Express test account ではなく、stg公開のConnect readiness判定には使わない。test accountに入力された情報は本番の法的名義・契約・本人確認を証明しない。Stripeの[Connectテスト手順](https://docs.stripe.com/connect/testing)と[Connect本人確認テスト](https://docs.stripe.com/connect/testing-verification?accounts-namespace=v1)は本人確認書類用のテスト値を記載するが、この `proof_of_liveness` を完了するテスト値は記載していない。提供者登録はオーナーの同意を得たが、既存拠点口座の共有に伴う返金・紛争・手数料の負担と購入者情報へのアクセス範囲に関する別同意、実口座対応の確認は未完了。
 
 同じ開催日時・定員の枠を重複登録する指示は、重複・在庫競合を検証するstaging専用データとして扱う。現行NIHOページの本番在庫と同時に販売せず、Experience側の本番受付は旧販売枠の停止・切替・切戻し確認後まで開けない。公開ページにはエリア概要だけを載せ、正確な住所・入口・地図などの集合案内は予約者だけに表示する。
 
@@ -56,14 +56,14 @@
 | 不向き | 車いす利用者（2階のため）、食物アレルギーのある人 | NIHOapp企画ページ |
 | 価格・オプション | Dinnerとtea timeの2つのオプション、上記starting priceの税込表示がある | NIHOapp企画ページ（2026-11-02確認） |
 | ホスト | 表示名と写真付きで3名を掲載 | NIHOapp企画ページ |
-| 販売・提供主体 | 法的販売者はパナソニックホールディングス株式会社。主催・提供者表示はNIHO kamakura拠点、売上受取先は同拠点に対応するStripe Connect口座。stg口座と法的口座名義・契約・銀行口座・受取先対応は確認待ち | オーナー確認（2026-11-02）、[指定された特商法表示](https://kamakura.niho.life/tradelaw) |
+| 販売・提供主体 | 法的販売者はパナソニックホールディングス株式会社。主催・提供者表示はNIHO kamakura拠点、売上受取先は同拠点に対応するStripe Connect口座。Express test account はstg試験用に決済・送金可能だが、実口座との対応は確認待ち | オーナー確認（2026-11-02）、[指定された特商法表示](https://kamakura.niho.life/tradelaw)、Stripe test API（2026-11-03） |
 | 問い合わせ一次受付 | NIHO（運営会社）が一次受付を担い、返金の判断は表示された販売・提供主体に従う | NIHO特商法表記 |
 | 他チャネル | GetYourGuideに掲載あり（[Issue #13](https://github.com/niho-life/niho-experience/issues/13)記載のURL。自動取得はbot判定で不可）。Expedia系のサイトにも同名の商品と、NIHO kamakuraを会場とする類似名の商品が表示される | 2026-10-19のWeb検索 |
 | 検索公開 | NIHOapp企画ページは `noindex, follow`。公式サイトのページはindex可能だが、本文はJavaScript描画で初期HTMLに含まれない | 両ページのHTML |
 
 ### 確認待ち（オーナー）
 
-1. 法的販売者・主催者表示・受取先の方針はオーナー確認済み。実際に使うConnect口座がNIHO kamakura拠点の正しい受取先であること、法的口座名義・Stripe契約・本人確認・銀行口座のstg/本番状態を確認する。既存拠点口座を共有する別同意（返金・紛争・手数料の負担と購入者情報へのアクセス範囲）は未完了
+1. 法的販売者・主催者表示・受取先の方針はオーナー確認済み。Express test account はstg用として決済・送金可能だが、production Connect口座がNIHO kamakura拠点の正しい受取先であること、法的口座名義・Stripe契約・本人確認・銀行口座の本番状態を確認する。既存拠点口座を共有する別同意（返金・紛争・手数料の負担と購入者情報へのアクセス範囲）は未完了
 2. tea timeの選択後の料金内訳・子ども料金、OTA価格との関係（価格を揃える義務の有無を含む）。stgでは下記の仮値を使うが、実際の単位・料金は本番登録前に確認する
 3. 実際に開催できる曜日と頻度、最少催行人数、受付締切。stgでは下記の仮値を使うが、提供者が開催できる日と担当者を本番登録前に確定する
 4. 開始時刻をチャネル間で統一するか
