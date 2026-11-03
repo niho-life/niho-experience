@@ -229,7 +229,9 @@ describe("admin support console settings", () => {
     expect(resolveConfig({}).experienceTranslateApiEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(false);
-    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(true);
+    const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", EXPERIENCE_TRANSLATE_API_ENABLED: "true" };
+    expect(resolveConfig(host).experienceTranslateApiEnabled).toBe(false);
+    expect(resolveConfig({ ...host, SITE_URL: "https://experience.example", EXPERIENCE_GUEST_BOOKING_ENABLED: "true", EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_sample", EXPERIENCE_STRIPE_WEBHOOK_SECRET: "whsec_sample", EXPERIENCE_BOOKING_CONSENT_VERSION: "sample-terms-2026-10" }).experienceTranslateApiEnabled).toBe(true);
   });
 
   it("keeps 設定 › 通知 in the experience DB only in http mode with its own flag and the host console (#109)", () => {

@@ -453,9 +453,6 @@ export function resolveConfig(env: Env) {
   // The real transport opens only after the selected v1 API is deployed and accepted.
   const experienceProviderOperationsApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED === "true";
   const experienceProviderOperationsPreviewEnabled = apiMode === "mock" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED === "true";
-  // 対面通訳 (#181): the translate-rooms BFF under /host/api/translate. The mock always serves synthetic rooms;
-  // http opens only after niho-app N1b (#19447) is deployed and accepted, per environment.
-  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   // 設定 › 通知 (#109) kept in the experience DB. The mock keeps the switches on screen; http opens per
   // environment after migration 0020 and the provider's experience OWNER membership are accepted.
   const hostNotificationSettingsEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_NOTIFICATION_SETTINGS_ENABLED === "true";
@@ -478,6 +475,9 @@ export function resolveConfig(env: Env) {
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
+  // 対面通訳 (#181): site bookingの所属・状態をExperience DBで再検証するため、新予約の正本も必須。
+  // http opens only after the selected NIHO API is deployed and accepted, per environment.
+  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && guestBooking.enabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   // 出欠 (#107) of the bookings made on this site, kept in the experience DB (migration 0033), with the capacity of
   // their session on この回. Only where those bookings are (the flag above); the mock records attendance on screen
   // only. http opens per environment after 0033 is applied and accepted.

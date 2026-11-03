@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   otaShown: false,
   loadOtaBookings: null as null | Load,
   calendarChoice: null as null | Record<string, unknown>,
+  translateEnabled: false,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", async (importActual) => ({
@@ -46,7 +47,7 @@ vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: asyn
 vi.mock("@/lib/host/support-history-server", () => ({ isHostSupportHistoryEnabled: () => false }));
 vi.mock("@/lib/host/fee-summary-server", () => ({ isHostFeeSummaryUiEnabled: () => false }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
-vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () => false, translateRoomsEntry: () => ({ today: "2026-10-31" }) }));
+vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () => state.translateEnabled, translateRoomsEntry: () => state.translateEnabled ? { today: "2026-10-31" } : null }));
 
 import HostBookingsPage from "./page";
 import { HostBookings } from "@/components/host/HostBookings";
@@ -64,6 +65,7 @@ beforeEach(() => {
   state.ota = { status: "closed" };
   state.otaShown = false;
   state.calendarChoice = null;
+  state.translateEnabled = false;
   state.loadOtaBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.ota);
 });
 
@@ -86,6 +88,13 @@ describe("予約 without NIHO's bookings (provider operations off)", () => {
     expect(view.props).toMatchObject({ supportHistoryEnabled: false, feeSummaryEnabled: false, translateEnabled: false });
     expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "b-1", undefined);
     expect(state.loadHostBookings).not.toHaveBeenCalled();
+  });
+
+  it("translate flagが開いたときExperience DB予約にも通訳actionを渡す", async () => {
+    state.site = LIVE;
+    state.translateEnabled = true;
+    const view = await page({ booking: "b-1" });
+    expect(view.props).toMatchObject({ translateEnabled: true, providerDataId: "sample-provider" });
   });
 
   it("keeps today's screen while this site's bookings are closed to the account", async () => {
@@ -112,6 +121,7 @@ describe("予約 without NIHO's bookings (provider operations off)", () => {
 describe("予約 beside NIHO's bookings (provider operations on)", () => {
   beforeEach(() => {
     state.providerOperations = true;
+    state.translateEnabled = true;
   });
 
   it("puts NIHO's bookings and this site's on one list for the OWNER, whatever ?source= says (#84)", async () => {

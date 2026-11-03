@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceTranslateRoomCreatedResponse, ExperienceTranslateRoomStatusResponse } from "@niho-experience/api-client/experience-translate-rooms";
-import { guestNeedsInterpretation, participantStatus, projectTranslateRoom, projectTranslateRoomStatus, timeInJapan, translationOffered } from "./translate";
+import { guestNeedsInterpretation, participantStatus, projectTranslateRoom, projectTranslateRoomStatus, timeInJapan, translateRoomsBffPath, translationOffered } from "./translate";
 
 const created = {
-  roomId: "room_1", state: "created", expiresAt: "2026-11-08T01:15:00.000Z",
-  host: { participantId: "participant_host", inviteCode: "host-code-secret", inviteUrl: "https://app-stg.niho.test/i/host-code-secret" },
-  guest: { participantId: "participant_guest", inviteCode: "guest-code-secret", inviteUrl: "https://app-stg.niho.test/i/guest-code-secret" },
+  roomId: "room_1", state: "waiting", expiresAt: "2026-11-08T01:15:00.000Z",
+  host: { participantId: "participant_host", inviteCode: "host-code-secret", inviteUrl: "https://app-stg.niho.test/t#host-code-secret" },
+  guest: { participantId: "participant_guest", inviteCode: "guest-code-secret", inviteUrl: "https://app-stg.niho.test/t#guest-code-secret" },
 } satisfies ExperienceTranslateRoomCreatedResponse;
 
 describe("translate room DTOs", () => {
   it("gives the browser the invite URLs and nothing that names a participant or a code on its own", () => {
     const projected = projectTranslateRoom(created);
-    expect(projected).toEqual({ room: { id: "room_1", state: "created", expiresAt: "2026-11-08T01:15:00.000Z", hostInviteUrl: created.host.inviteUrl, guestInviteUrl: created.guest.inviteUrl } });
+    expect(projected).toEqual({ room: { id: "room_1", state: "waiting", expiresAt: "2026-11-08T01:15:00.000Z", hostInviteUrl: created.host.inviteUrl, guestInviteUrl: created.guest.inviteUrl } });
     const text = JSON.stringify(projected);
     expect(text).not.toContain("participant_");
     expect(text).not.toContain("inviteCode");
+  });
+
+  it("予約sourceごとに旧BFFとsite専用BFFを混ぜない", () => {
+    expect(translateRoomsBffPath("niho", "provider 1", "booking/1")).toBe("translate/providers/provider%201/bookings/booking%2F1/rooms");
+    expect(translateRoomsBffPath("site", "provider 1", "booking/1")).toBe("translate/site/providers/provider%201/bookings/booking%2F1/rooms");
   });
 
   it("turns the participants list into host and guest, missing roles not joined", () => {
