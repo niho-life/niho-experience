@@ -3,6 +3,7 @@ import { createMockTranslateRooms, MOCK_INVITE_ORIGIN, MOCK_INVITE_TTL_MS, MOCK_
 
 const ORIGIN = "https://niho.test";
 const ROOMS = `${ORIGIN}/api/experience-providers/sample-provider-kitchen/bookings/bk-2038/translate-rooms`;
+const SITE_ROOMS = `${ORIGIN}/api/experience-providers/sample-provider-kitchen/site-bookings/00000000-0000-4000-8000-00000000b101/translate-rooms`;
 const headers = { authorization: "Bearer mock-access-token.x" };
 
 function harness(start = 1_000_000) {
@@ -29,9 +30,9 @@ describe("mock translate rooms", () => {
     const response = await route(ROOMS, "POST");
     expect(response?.status).toBe(201);
     const room = await response!.json() as { roomId: string; state: string; host: { inviteCode: string; inviteUrl: string }; guest: { inviteCode: string; inviteUrl: string }; expiresAt: string };
-    expect(room.state).toBe("created");
-    expect(room.host.inviteUrl).toBe(`${MOCK_INVITE_ORIGIN}/i/${room.host.inviteCode}`);
-    expect(room.guest.inviteUrl).toBe(`${MOCK_INVITE_ORIGIN}/i/${room.guest.inviteCode}`);
+    expect(room.state).toBe("waiting");
+    expect(room.host.inviteUrl).toBe(`${MOCK_INVITE_ORIGIN}/t#${room.host.inviteCode}`);
+    expect(room.guest.inviteUrl).toBe(`${MOCK_INVITE_ORIGIN}/t#${room.guest.inviteCode}`);
     expect(room.host.inviteCode).not.toBe(room.guest.inviteCode);
     expect(new Date(room.expiresAt).getTime()).toBe(1_000_000 + MOCK_INVITE_TTL_MS);
   });
@@ -40,7 +41,7 @@ describe("mock translate rooms", () => {
     const { route, advance } = harness();
     const { roomId } = await (await route(ROOMS, "POST"))!.json() as { roomId: string };
     const read = async () => (await route(`${ROOMS}/${roomId}`))!.json() as Promise<{ state: string; participants: { role: string; joined: boolean; ready: boolean }[]; usageMinutes: number }>;
-    expect(await read()).toEqual({ state: "created", participants: [{ role: "host", joined: false, ready: false }, { role: "guest", joined: false, ready: false }], usageMinutes: 0 });
+    expect(await read()).toEqual({ state: "waiting", participants: [{ role: "host", joined: false, ready: false }, { role: "guest", joined: false, ready: false }], usageMinutes: 0 });
     advance(MOCK_TIMELINE.hostJoined);
     expect((await read()).participants[0]).toEqual({ role: "host", joined: true, ready: false });
     advance(MOCK_TIMELINE.hostReady - MOCK_TIMELINE.hostJoined);
@@ -51,11 +52,20 @@ describe("mock translate rooms", () => {
     expect((await read()).usageMinutes).toBe(5);
     const ended = await route(`${ROOMS}/${roomId}/end`, "POST");
     expect(ended?.status).toBe(200);
-    expect(await ended!.json()).toEqual({ state: "ended" });
+    expect(await ended!.json()).toEqual({ roomId, state: "ended" });
     advance(10 * 60_000);
     expect(await read()).toMatchObject({ state: "ended", usageMinutes: 5 });
     // Ending twice changes nothing.
     expect((await route(`${ROOMS}/${roomId}/end`, "POST"))?.status).toBe(200);
+  });
+
+  it("同じIDでもNIHO予約とsite予約のroomを混ぜない", async () => {
+    const { route } = harness();
+    const legacy = await (await route(ROOMS, "POST"))!.json() as { roomId: string };
+    const site = await (await route(SITE_ROOMS, "POST"))!.json() as { roomId: string };
+    expect((await route(`${SITE_ROOMS}/${legacy.roomId}`))?.status).toBe(404);
+    expect((await route(`${ROOMS}/${site.roomId}`))?.status).toBe(404);
+    expect((await route(`${SITE_ROOMS}/${site.roomId}`))?.status).toBe(200);
   });
 
   it("keeps rooms to their own provider and booking and refuses the wrong method", async () => {

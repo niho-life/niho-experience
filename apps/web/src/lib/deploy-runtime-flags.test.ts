@@ -73,6 +73,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
   EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "experienceProviderPagesApiEnabled",
   EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "experienceProviderOperationsApiEnabled",
+  EXPERIENCE_TRANSLATE_API_ENABLED: "experienceTranslateApiEnabled",
   EXPERIENCE_GUEST_QUESTIONS_ENABLED: "guestQuestionsEnabled",
   EXPERIENCE_TRANSLATION_ENABLED: "translationEnabled",
   EXPERIENCE_GUEST_REVIEWS_ENABLED: "guestReviewsEnabled",
@@ -169,7 +170,6 @@ describe("the deploy workflows' feature flags", () => {
     const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED"));
     expect(resolveConfig(revision("prod", enabled)).guideAppCardsEnabled).toBe(true);
   });
-
   it("covers every flag of the table with a config setting", () => {
     expect(FLAGS.map((flag) => flag.env).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
     expect(new Set(FLAGS.map((flag) => flag.variable)).size).toBe(FLAGS.length);

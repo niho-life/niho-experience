@@ -39,6 +39,11 @@ export interface HostTranslateRoomEndResponse {
 
 export const NOT_JOINED: HostTranslateParticipantStatus = { joined: false, ready: false };
 
+export function translateRoomsBffPath(source: "niho" | "site", providerId: string, bookingId: string): string {
+  const namespace = source === "site" ? "translate/site" : "translate";
+  return `${namespace}/providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(bookingId)}/rooms`;
+}
+
 export function projectTranslateRoom(value: ExperienceTranslateRoomCreatedResponse): HostTranslateRoomResponse {
   return { room: { id: value.roomId, state: value.state, expiresAt: value.expiresAt, hostInviteUrl: value.host.inviteUrl, guestInviteUrl: value.guest.inviteUrl } };
 }
@@ -67,7 +72,7 @@ export function translationOffered(booking: { confirmed: boolean; language: stri
 }
 
 export const TRANSLATE_ROOM_STATUS: Record<ExperienceTranslateRoomState, StatusLabel> = {
-  created: { label: "開始待ち", tone: "wait" },
+  waiting: { label: "開始待ち", tone: "wait" },
   active: { label: "通訳中", tone: "ok" },
   paused: { label: "一時停止", tone: "wait" },
   ended: { label: "終了", tone: "draft" },
