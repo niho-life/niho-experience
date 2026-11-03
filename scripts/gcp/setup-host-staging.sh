@@ -75,6 +75,12 @@ if ! gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REG
 fi
 state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
 jq -e --arg runtime "$RUNTIME" '.spec.template.spec.serviceAccountName == $runtime and .metadata.labels.app == "niho-experience" and .metadata.labels.env == "host-staging"' <<< "$state" >/dev/null
+DETERMINISTIC_URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
+STG_HOST_SERVICE_URL="$(jq -er --arg preferred "$DETERMINISTIC_URL" '
+  . as $service
+  | ((.metadata.annotations["run.googleapis.com/urls"] // "[]") | fromjson) as $urls
+  | if ($urls | index($preferred)) != null then $preferred else $service.status.url end
+' <<< "$state")"
 for role in roles/run.admin roles/run.invoker; do
   retry_binding gcloud run services add-iam-policy-binding "$SERVICE" --project "$PROJECT" --region "$REGION" \
     --member "serviceAccount:$DEPLOYER" --role "$role" --condition=None --quiet
@@ -101,7 +107,7 @@ retry_binding gcloud iam service-accounts add-iam-policy-binding "$DEPLOYER" --p
 cat <<EOF
 STG_HOST_WIF_PROVIDER=projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL}/providers/${PROVIDER}
 STG_HOST_DEPLOY_SERVICE_ACCOUNT=${DEPLOYER}
-STG_HOST_SERVICE_URL=$(jq -r '.status.url' <<< "$state")
+STG_HOST_SERVICE_URL=${STG_HOST_SERVICE_URL}
 STG_HOST_CLOUDSQL_INSTANCE=${PROJECT}:${REGION}:niho-app-db-stg
 Read docs/host-calendar-staging.md and complete manual readiness before enabling deployment.
 EOF

@@ -85,7 +85,7 @@ gcloud secrets add-iam-policy-binding SECRET_NAME \
 
 ## 固定URLでの接続準備
 
-Cloud Run `status.url` を取得して `STG_HOST_SERVICE_URL` へそのまま登録する。末尾スラッシュ・wildcard・候補tag URL・本番URLを使わない。workflowでも実際のservice URLと一致することを確認する。
+Cloud Runのservice URLは `status.url` のhash形式に加え、service名・project number・regionから決まるURLも割り当てられる。`setup-host-staging.sh` はCloud Runが公開するURL一覧に含まれる決定URLを優先して `STG_HOST_SERVICE_URL` として出力し、無い場合は `status.url` を使う。以降のcallback、OAuth、NIHO origin、Scheduler audience、deployment workflowには同じ値を使う。workflowはserviceが公開するURL一覧との完全一致を確認し、候補tag URL・別service・別環境は受け付けない。
 
 - Google OAuthはstg専用Web clientを作り、redirect URIを **`STG_HOST_SERVICE_URL` + `/host/calendar/google/callback`** の1つに限定する。Calendar APIの有効化、同意画面、検証用Googleアカウント、必要なscope（`calendar.calendarlist.readonly`、`calendar.events.freebusy`、`calendar.app.created`）を確認する。本番OAuth client・私用の実予定は使用しない。
 - NIHO連携担当はstg Webの `APP_CONNECT_WEB_ORIGINS` に **同じ `STG_HOST_SERVICE_URL` のexact origin** を追加し、接続API/許可された戻り先を確認する。Cloud Runのtag URLを列挙しない。本番 `niho.life` の設定・cookieを変更しない。
@@ -190,7 +190,7 @@ Secret の参照（`secret-name:VERSION`、数字 version だけ。workflow は�
      bash scripts/gcp/setup-host-staging-guest-booking.sh
    ```
 
-   URL が現在の Cloud Run `status.url`（`https://niho-experience-host-stg-<project-number>.asia-northeast1.run.app`）の形でない、または実際の service URL と違えば止まる。Cloud Scheduler API を有効にし、`experience-stg-stripe-webhook-secret` を version なしで作り、runtime に上の 6 個の Secret だけ resource 単位の `secretAccessor` を付け、`experience-jobs` を project の role なしで作って対象 service の `run.invoker` だけを付け、Scheduler job を作ってすぐ一時停止する（作成時に一時停止で作る flag が無い。その間に 1 回呼ばれても、gate が off なら 404 で何も変えない）。既存の job は検査だけで、変更・再開しない（設定が違えば止まる）。NIHO app の Secret が無ければ止まり、作らない。Secret の値と version を読まず、表示しない。既存の `setup-host-staging.sh` は変えない。
+   URLがCloud Runのservice公開URL一覧に含まれない、または実際のserviceと違えば止まる。Cloud Scheduler APIを有効にし、`experience-stg-stripe-webhook-secret` をversionなしで作り、runtimeに上の6個のSecretだけresource単位の`secretAccessor`を付け、`experience-jobs`をprojectのroleなしで作って対象serviceの`run.invoker`だけを付け、Scheduler jobを作ってすぐ一時停止する（作成時に一時停止で作るflagが無い。その間に1回呼ばれても、gateがoffなら404で何も変えない）。既存jobは検査だけで、変更・再開しない（設定が違えば止まる）。NIHO appのSecretが無ければ止まり、作らない。Secretの値とversionを読まず、表示しない。
 3. **Secret の version**：Stripe のテストモードで、NIHO のプラットフォームアカウントに webhook endpoint `{STG_HOST_SERVICE_URL}/api/experience/stripe/webhook` を作る。connected account のイベントを受ける（Connect の）endpoint とし、`checkout.session.completed`・`checkout.session.async_payment_succeeded`・`checkout.session.expired`・`checkout.session.async_payment_failed`・`refund.created`・`refund.updated`・`refund.failed` を購読する（[guest-booking.md](guest-booking.md) の「体験の登録と切替」の前提）。署名鍵はこの endpoint からしか出ないので、endpoint を先に作り、その署名鍵を安全な管理端末から `experience-stg-stripe-webhook-secret` に version として足す（標準出力・shell 履歴に出さない）。NIHO app の既存 endpoint とその鍵は変えず、流用しない。NIHO app の 5 個の Secret は値を変えず、NIHO app の stg が使っている数字 version を `gcloud secrets versions list` で確かめる。
 4. **Variables**：`host-staging` Environment に上の Variable と 6 個の `*_REF` を設定し、`STG_GUEST_MAIL_ENABLED=true` にしてから、最後に `STG_GUEST_BOOKING_ENABLED=true` にする。Experience独自の質問を受け入れる候補では `STG_GUEST_QUESTIONS_ENABLED=true`、NIHO提供者APIと予約を同じ候補で受け入れるときは `STG_GUEST_QUESTIONS_ENABLED=false`（または未設定）かつ `STG_PROVIDER_OPERATIONS_API_ENABLED=true` にする。相反する2つのフラグを同じ候補で有効にしない。
 5. **配備**：上の「手動配備と受入」と同じく `candidate` → `promote`。summary は「Stripe test bookings open」と `bookings=true (Stripe test mode)` になる。

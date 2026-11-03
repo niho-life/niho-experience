@@ -179,7 +179,7 @@ jobs:
           bookings=false
           if [ "$GUEST_BOOKING" = true ]; then bookings=true; fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
-          test "$(jq -r '.status.url' <<< "$state")" = "$SITE_URL"
+          jq -e --arg url "$SITE_URL" '((.metadata.annotations["run.googleapis.com/urls"] // "[]") | fromjson | index($url)) != null' <<< "$state" >/dev/null
           test "$(jq -r '.metadata.labels.app' <<< "$state")" = niho-experience
           test "$(jq -r '.metadata.labels.env' <<< "$state")" = host-staging
           traffic="$(jq -c '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName)' <<< "$state")"

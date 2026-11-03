@@ -11,8 +11,8 @@ set -euo pipefail
   exit 1
 }
 SERVICE_URL="${STG_HOST_SERVICE_URL:-}"
-[[ "$SERVICE_URL" =~ ^https://niho-experience-host-stg-[0-9]+\.asia-northeast1\.run\.app$ ]] || {
-  echo 'Set STG_HOST_SERVICE_URL to the Cloud Run status.url for niho-experience-host-stg (https://niho-experience-host-stg-<project-number>.asia-northeast1.run.app, no trailing slash).' >&2
+[[ "$SERVICE_URL" =~ ^https://niho-experience-host-stg-[A-Za-z0-9.-]+\.run\.app$ ]] || {
+  echo 'Set STG_HOST_SERVICE_URL to a stable run.app URL for niho-experience-host-stg (no path or trailing slash).' >&2
   exit 1
 }
 PROJECT=niho-app-stg
@@ -45,10 +45,17 @@ retry_binding() {
   done
 }
 [[ "$(gcloud projects describe "$PROJECT" --format='value(projectId)')" == "$PROJECT" ]]
-# The URL must be this service's stable URL (not a candidate tag URL or another service): the job's
-# audience is compared with EXPERIENCE_JOBS_AUDIENCE, which the deploy workflow sets to the same URL.
+# The URL must be one of this service's stable URLs (not a candidate tag URL or another service):
+# the job's audience is compared with EXPERIENCE_JOBS_AUDIENCE, which the deploy workflow sets to the same URL.
 state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
-jq -e --arg url "$SERVICE_URL" --arg runtime "$RUNTIME" '.status.url == $url and .spec.template.spec.serviceAccountName == $runtime and .metadata.labels.app == "niho-experience" and .metadata.labels.env == "host-staging"' <<< "$state" >/dev/null || {
+jq -e --arg url "$SERVICE_URL" --arg runtime "$RUNTIME" '
+  . as $service
+  | ((.metadata.annotations["run.googleapis.com/urls"] // "[]") | fromjson) as $urls
+  | ($urls | index($url)) != null
+    and $service.spec.template.spec.serviceAccountName == $runtime
+    and $service.metadata.labels.app == "niho-experience"
+    and $service.metadata.labels.env == "host-staging"
+' <<< "$state" >/dev/null || {
   echo "STG_HOST_SERVICE_URL is not ${SERVICE}'s URL, or the service is not the experience staging service." >&2
   exit 1
 }
