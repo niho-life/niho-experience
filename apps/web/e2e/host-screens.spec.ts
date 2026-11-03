@@ -114,8 +114,8 @@ test("the menu is a sidebar on PC and six bottom tabs on phones", async ({ page 
     await expect(banner.getByRole("link", { name: "NIHO Experience" })).toHaveAttribute("href", "/host/home");
     await expect(banner.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
     await expect(banner.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
-    // Articles are written on editor.niho.life (#254).
-    await expect(banner.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "https://editor.example");
+    // Writing starts at /write and hands off to the fixed editor destination (#254).
+    await expect(banner.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
     await expect(banner).toContainText("サンプル ホスト");
     await expect(banner.getByRole("button", { name: "ログアウト" })).toBeVisible();
     // The page sits beside the sidebar, at most 1040px wide.
@@ -133,9 +133,9 @@ test("the menu is a sidebar on PC and six bottom tabs on phones", async ({ page 
     await page.waitForURL(/\/host\/sales$/);
     await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "売上" })).toHaveAttribute("aria-current", "page");
-    // The account menu carries the same ways out, editor.niho.life among them (#254).
+    // The account menu carries the same /write handoff (#254).
     await page.locator("summary", { hasText: "のアカウント" }).click();
-    await expect(page.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "https://editor.example");
+    await expect(page.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
   }
 });
 

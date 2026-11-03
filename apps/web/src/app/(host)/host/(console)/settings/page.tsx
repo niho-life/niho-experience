@@ -9,6 +9,7 @@ import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
 import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsPanel";
+import { HostArticleLinksPanel } from "@/components/host/HostArticleLinksPanel";
 import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
 import { loadHostCalendar } from "@/host/calendar-server";
@@ -147,7 +148,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         liveCalendar={liveCalendar}
         preview={isHostMock()}
         notificationAddress={notificationAddress}
-        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /><div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
+        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} />{provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <div className="mt-3.5"><HostArticleLinksPanel providerId={provider.id} /></div> : null}<div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>
   );

@@ -155,6 +155,50 @@ function guideAdminSettings(apiMode: "mock" | "http", env: Env): {
   return { enabled: true, audience, serviceAccountEmail };
 }
 
+function serviceAccountAllowlist(value: string | undefined, setting: string): readonly string[] {
+  const entries = [...new Set((value ?? "").split(/[,;]/).map((item) => item.trim()).filter(Boolean))];
+  if (!entries.length || entries.some((entry) => !SERVICE_ACCOUNT_EMAIL.test(entry))) {
+    throw new Error(`${setting} must list service account emails`);
+  }
+  return entries;
+}
+
+function articleAuthoritySettings(apiMode: "mock" | "http", env: Env) {
+  const enabled = apiMode === "http" && env.EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED === "true";
+  const hostLinksEnabled = apiMode === "http" && env.EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED === "true";
+  if (!enabled && !hostLinksEnabled) {
+    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin: "", nihoAudience: "", nihoLinksAudience: "", editorOrigin: "", editorAudience: "", hostLinksEnabled: false };
+  }
+  const nihoOrigin = deploymentOrigin(env.NIHO_ARTICLE_AUTHORITY_ORIGIN?.trim() ?? "", "NIHO_ARTICLE_AUTHORITY_ORIGIN");
+  const nihoAudience = enabled ? env.NIHO_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "" : "";
+  const nihoLinksAudience = hostLinksEnabled ? env.NIHO_ARTICLE_LINKS_AUDIENCE?.trim() ?? "" : "";
+  if (enabled && !nihoAudience) throw new Error("article authority needs NIHO_ARTICLE_AUTHORITY_AUDIENCE in http mode");
+  if (hostLinksEnabled && !nihoLinksAudience) throw new Error("host article links need NIHO_ARTICLE_LINKS_AUDIENCE in http mode");
+  if (hostLinksEnabled && env.HOST_CONSOLE_ENABLED !== "true") {
+    throw new Error("EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
+  }
+  if (!enabled) {
+    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin, nihoAudience, nihoLinksAudience, editorOrigin: "", editorAudience: "", hostLinksEnabled };
+  }
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EXPERIENCE_DATABASE_URL");
+  const audience = env.EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "";
+  if (!audience) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE");
+  const editorOrigin = deploymentOrigin(env.EDITOR_ARTICLE_AUTHORITY_ORIGIN?.trim() ?? "", "EDITOR_ARTICLE_AUTHORITY_ORIGIN");
+  const editorAudience = env.EDITOR_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "";
+  if (!editorAudience) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EDITOR_ARTICLE_AUTHORITY_AUDIENCE");
+  return {
+    enabled,
+    audience,
+    serviceAccountEmails: serviceAccountAllowlist(env.EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS, "EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS"),
+    nihoOrigin,
+    nihoAudience,
+    nihoLinksAudience,
+    editorOrigin,
+    editorAudience,
+    hostLinksEnabled,
+  };
+}
+
 /**
  * The host push job's trigger (#177 P2, POST /internal/host-push/v1/drain): Cloud Scheduler calls it
  * with a Google ID token of its own service account. On only in http mode with push on and both set;
@@ -476,9 +520,6 @@ export function resolveConfig(env: Env) {
   // The real transport opens only after the selected v1 API is deployed and accepted.
   const experienceProviderOperationsApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED === "true";
   const experienceProviderOperationsPreviewEnabled = apiMode === "mock" && hostConsoleEnabled && env.EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED === "true";
-  // 対面通訳 (#181): the translate-rooms BFF under /host/api/translate. The mock always serves synthetic rooms;
-  // http opens only after niho-app N1b (#19447) is deployed and accepted, per environment.
-  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   // 設定 › 通知 (#109) kept in the experience DB. The mock keeps the switches on screen; http opens per
   // environment after migration 0020 and the provider's experience OWNER membership are accepted.
   const hostNotificationSettingsEnabled = apiMode === "http" && hostConsoleEnabled && env.HOST_NOTIFICATION_SETTINGS_ENABLED === "true";
@@ -502,6 +543,9 @@ export function resolveConfig(env: Env) {
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled);
+  // 対面通訳 (#181): site bookingの所属・状態をExperience DBで再検証するため、新予約の正本も必須。
+  // http opens only after the selected NIHO API is deployed and accepted, per environment.
+  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && guestBooking.enabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   // 出欠 (#107) of the bookings made on this site, kept in the experience DB (migration 0033), with the capacity of
   // their session on この回. Only where those bookings are (the flag above); the mock records attendance on screen
   // only. http opens per environment after 0033 is applied and accepted.
@@ -532,6 +576,7 @@ export function resolveConfig(env: Env) {
   const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
   const guideEditorSite = guideEditorSiteOrigin(env.GUIDE_EDITOR_SITE_ORIGIN);
   const guideAdmin = guideAdminSettings(apiMode, env);
+  const articleAuthority = articleAuthoritySettings(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret);
   const adminOrigin = apiMode === "http" && adminSupportConsoleEnabled
     ? assertAdminConsoleSettings(
@@ -574,6 +619,15 @@ export function resolveConfig(env: Env) {
     guideAdminApiEnabled: guideAdmin.enabled,
     guideAdminAudience: guideAdmin.audience,
     guideAdminServiceAccountEmail: guideAdmin.serviceAccountEmail,
+    articleAuthorityApiEnabled: articleAuthority.enabled,
+    articleAuthorityAudience: articleAuthority.audience,
+    articleAuthorityServiceAccountEmails: articleAuthority.serviceAccountEmails,
+    nihoArticleAuthorityOrigin: articleAuthority.nihoOrigin,
+    nihoArticleAuthorityAudience: articleAuthority.nihoAudience,
+    nihoArticleLinksAudience: articleAuthority.nihoLinksAudience,
+    editorArticleAuthorityOrigin: articleAuthority.editorOrigin,
+    editorArticleAuthorityAudience: articleAuthority.editorAudience,
+    hostArticleLinksEnabled: articleAuthority.hostLinksEnabled,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.
     indexingAllowed: env.SITE_INDEXING === "allow" && apiMode === "http",

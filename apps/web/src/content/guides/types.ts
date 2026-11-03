@@ -12,7 +12,7 @@ export type GuideFaqItem = Readonly<{ question: string; answer: string }>;
 export type GuidePillar = "evenings" | "zazen" | "hands-on" | "planning" | "hosts";
 
 /** Admin-managed CMS category. It is intentionally separate from the five code-owned editorial pillars. */
-export type GuideCategory = Readonly<{ slug: string; label: string; displayOrder: number }>;
+export type GuideCategory = Readonly<{ slug: string; label: string; labelJa?: string; displayOrder: number; revision?: number }>;
 
 export type GuidePublicFigure = Readonly<{ assetId: string; src: string; credit: string }>;
 
@@ -78,4 +78,6 @@ export type Guide = Readonly<{
   /** Currently READY snapshot figures that the safe Markdown renderer may resolve. */
   publicFigures?: readonly GuidePublicFigure[];
   translations?: Readonly<{ ja?: GuideTranslation }>;
+  /** Server-only provenance used to re-check related experiences on every read. */
+  editorPublication?: Readonly<{ id: string; version: number }>;
 }>;

@@ -28,6 +28,7 @@ describe("an editor publication as a guide", () => {
         title: "A slow evening walk (sample guide)",
         description: "A synthetic guide for checking the editor source: an evening route, two stops and where to sit down.",
         category: { slug: "evenings", label: "Evenings", displayOrder: 1000 },
+        editorPublication: { id: "0e000000-0000-4000-8000-000000000001", version: 3 },
         author: { name: "Sample Writer" },
         publishedAt: "2026-10-20",
         updatedAt: "2026-10-30",
@@ -67,6 +68,18 @@ describe("an editor publication as a guide", () => {
     expect(market).toMatchObject({ ok: true, guide: { slug: "sample-market-morning" } });
     expect(market.ok && market.guide.hero).toBeUndefined();
     expect(editorArticleToGuide(article("unlisted-1"), policy)).toMatchObject({ ok: true, guide: { unlisted: true } });
+  });
+
+  it("keeps the publish-time custom category label after that category is no longer active", () => {
+    const display = { labelEn: "Seasonal shoreline walks", labelJa: "季節の海辺散策", displayOrder: 3, revision: 9 };
+    const raw = { ...fixtureArticle("live-1"), categoryDisplay: display };
+    const summary = parseEditorPublishedList({ contractVersion: "1", items: [raw], nextCursor: null }).items[0]!;
+    const body = parseEditorArticleBody({ contractVersion: "1", ...raw }, summary.id);
+    if (!body.ok) throw new Error(body.reason);
+    expect(editorArticleToGuide({ ...summary, ...body.body }, policy)).toMatchObject({
+      ok: true,
+      guide: { category: { slug: "evenings", label: display.labelEn, labelJa: display.labelJa, displayOrder: 3, revision: 9 } },
+    });
   });
 
   it("leaves out unsafe content: http or foreign photos, internal asset references, script links, empty bodies", () => {

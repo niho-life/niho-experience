@@ -45,7 +45,7 @@ describe("the published list (contract v1)", () => {
     const { items, skipped, nextCursor } = parseEditorPublishedList(fixturePage());
     expect(nextCursor).toBeNull();
     expect(items.map((item) => item.id)).toEqual(
-      ["live-1", "live-2", "gone-1", "moved-1", "live-3", "unlisted-1", "http-cover", "script-link", "duplicate-slug", "foreign-figure", "internal-asset"].map(fixtureId),
+      ["live-1", "live-2", "gone-1", "moved-1", "live-3", "unlisted-1", "http-cover", "script-link", "duplicate-slug", "foreign-figure", "internal-asset", "no-lead"].map(fixtureId),
     );
     expect(skipped).toEqual([
       { id: fixtureId("other-dest"), slug: "sample-for-another-site", reason: "dest is not exp" },
@@ -54,10 +54,10 @@ describe("the published list (contract v1)", () => {
       { id: fixtureId("reserved-slug"), reason: "slug is invalid or reserved" },
       { id: fixtureId("japanese"), slug: "sample-in-japanese", reason: "lang is not en" },
       { id: fixtureId("no-category"), slug: "sample-without-category", reason: "category is missing" },
-      { id: fixtureId("no-lead"), slug: "sample-without-lead", reason: "lead is missing" },
     ]);
     expect(items[0]).toEqual({
       id: fixtureId("live-1"),
+      version: 3,
       slug: "sample-evening-walk",
       range: "live",
       title: "A slow evening walk (sample guide)",
@@ -76,6 +76,16 @@ describe("the published list (contract v1)", () => {
     expect(items[1]!.cover).not.toHaveProperty("credit");
     expect(items[1]!.category).not.toHaveProperty("order");
     expect(items[4]).not.toHaveProperty("cover");
+    expect(items.at(-1)?.lead).toBe("");
+  });
+
+  it("uses publish-time category display metadata when present and keeps the legacy slug fallback", () => {
+    const snapshot = listItem({ category: "evenings", categoryDisplay: { labelEn: "Evening walks", labelJa: "夕方の散策", displayOrder: 4, revision: 7 } });
+    expect(parseEditorPublishedList(page([snapshot])).items[0]?.category).toEqual({
+      slug: "evenings", label: "Evening walks", labelJa: "夕方の散策", order: 4, revision: 7,
+    });
+    const invalid = listItem({ categoryDisplay: { labelEn: "Claimed", labelJa: "自己申告", displayOrder: 4, revision: 0 } });
+    expect(parseEditorPublishedList(page([invalid])).items).toEqual([]);
   });
 
   it("throws when the response is not a v1 page at all", () => {
@@ -108,7 +118,6 @@ describe("the published list (contract v1)", () => {
       [{ id: "ed-1" }, "id is invalid"],
       [{ id: ID.toUpperCase() }, "id is invalid"],
       [{ title: "x".repeat(GUIDE_LIMITS.titleMaxLength + 1) }, `title is longer than ${GUIDE_LIMITS.titleMaxLength} characters`],
-      [{ lead: null }, "lead is missing"],
       [{ lead: "" }, "lead is missing"],
       [{ lead: "l".repeat(GUIDE_LIMITS.descriptionMaxLength + 1) }, `lead is longer than ${GUIDE_LIMITS.descriptionMaxLength} characters`],
       [{ category: null }, "category is missing"],

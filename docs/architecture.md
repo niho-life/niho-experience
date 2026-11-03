@@ -48,12 +48,12 @@ NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ�
 | --- | --- |
 | NIHO API（Authority） | 部屋、host / guest の participant と招待 code、relay の入室券（EdDSA JWT・60 秒）と JWKS、presence・control・lease、名義（体験提供者）ごとの予算と使用量 |
 | relay（NIHO が運用） | iPhone と OpenAPI の音声の中継。OpenAI の鍵は relay だけが持つ |
-| iPhone（NIHO アプリ・App Clip） | 招待 URL `https://niho.life/i/<code>`（stg は `app-stg.niho.life`）を開き、同意・イヤフォンの確認・開始・終了 |
-| niho-experience | ホスト画面の予約詳細の「通訳を始める」と、その BFF `/host/api/translate/providers/{providerId}/bookings/{bookingId}/rooms[/{roomId}[/end]]` |
+| iPhone（NIHO アプリ・App Clip） | 招待 URL `https://niho.life/t#<code>`（stg は `app-stg.niho.life`）を開き、同意・イヤフォンの確認・開始・終了 |
+| niho-experience | 予約sourceを明示したホスト画面とBFF。旧NIHO予約は `/host/api/translate/providers/...`、Experience DB予約は `/host/api/translate/site/providers/{providerId}/bookings/{bookingId}/rooms[/{roomId}[/end]]` |
 
-- 流れ：英語圏のゲストの確定予約（`languageSnapshot` が EN、または未記録）で、当日以降に「通訳を始める」を出す。押すと BFF がホストのセッションで NIHO の `POST /api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms` を呼び、同じ画面に ① ゲスト用の QR（`guest.inviteUrl`） ② 「自分の iPhone で開く」（`host.inviteUrl`。iPhone なら即、PC なら自分用の QR） ③ 参加状況（3 秒ごとの `GET …/translate-rooms/{roomId}`。非表示中は止める） ④ 「通訳を終了」（`<dialog>` で確認してから `POST …/end`）を出す。
-- 境界：NIHO の ID トークンはサーバーの HttpOnly cookie に留まり、ブラウザは `/host/api/translate/*` だけを呼ぶ。BFF は `participantId`・`inviteCode` を落とし、招待 URL・状態・参加状況だけを `private, no-store` で返す。招待 code は URL の中にだけ存在し、ログ・計測・画面の本文に出さない。入室券・relay の URL・予算はこのサイトを通らない。権限（OWNER / COHOST）は NIHO が毎回判断し、401/403 は権限終了として扱う。
-- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` v0.1.0（`draft`）。Epic の契約節の shape を先に pin したもので、N1b（[niho-coliving/niho-app#19447](https://github.com/niho-coliving/niho-app/issues/19447)）が NIHO 側の `contracts/openapi.yaml` に載せたら export を写し直す。http mode の BFF は `EXPERIENCE_TRANSLATE_API_ENABLED=true` まで開かず、mock は合成の部屋（`apps/web/src/lib/host/mock-translate-rooms.ts`）を返す。
+- 流れ：英語圏のゲストの確定予約（EN、または未記録）で、当日以降に「通訳を始める」を出す。Experience DB予約はBFFが現在のNIHO OWNERとExperience storeのOWNER+予約所属を毎回照合し、create時だけ確定・未取消・当日以降を確認して、NIHOの`site-bookings/{publicBookingId}/translate-rooms`へopaqueなUUIDだけを送る。status/endは取消・日付変更後も所属を再確認して自分のroomを終了できる。旧NIHO予約pathは維持する。
+- 境界：NIHO の access tokenはサーバーのsealed HttpOnly cookieに留まり、ブラウザは `/host/api/translate/*` だけを呼ぶ。旅行者の氏名・メール・状態・言語・role・budgetはNIHOへ送らない。BFF は `participantId`・`inviteCode` を落とし、招待 URL・状態・参加状況だけを `private, no-store` / `noindex` / `no-referrer` で返す。HTTP失敗をmockへ差し替えない。
+- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` v1.0.0（`agreed-not-deployed`）。NIHOのselected exportとsha256を同期し、source commitを`5ed6ebac62b5f14dd0d114d7893bc0099d9df776`へ固定。APIは未配備。公開状態は`waiting | active | paused | ended`、endは`{roomId,state}`。stgのOWNER・所属・状態・source分離・create/poll/end受入までは`EXPERIENCE_TRANSLATE_API_ENABLED`をOFFに保つ。mockは旧/site両pathを合成だけで一周する。
 - 保存しないもの：音声・字幕・ゲストの個人情報。体験サイトは部屋や使用量の記録も持たず、必要なら NIHO から読む。
 
 ## API契約
@@ -62,7 +62,7 @@ NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ�
 - 旅行者向けの公開APIは認証を使わない。ホストの画面のAPIは、サーバーからBearer（NIHO Web app-connect専用の短命access token）で呼ぶ。二つは契約・型・監査を分ける（[#87](https://github.com/niho-life/niho-experience/issues/87)）。
 - Admin予約支援APIはホストAPIとも分け、NIHOが検証したAdmin tokenをexperienceのサーバーだけが持つ。通常のホストcookie・役割・クエリでAdminへ昇格させない。HTTPモードの選別済みAdmin認証、予約・通知read、予約別担当・内部メモcaseは別契約・別flagで受け入れ、いずれも配備・受入までは準備中として閉じる。caseを有効にしても承認・辞退・取消／返金・送信・権限付与へ広げない。
 - Admin操作とホスト本人の支援履歴も独立した選別契約・既定OFF flag・固定BFFに分ける。操作は最新snapshotとUUID v4のimmutable command、同ID照合、APIのretryAllowedに従い、画面で料金や返金を再計算しない。ホスト履歴は本人scope内の最小metadataだけとし、内部メモ・Admin連絡先・hash・Stripe IDを渡さない。どちらもAPI先行配備・受入までは`agreed-not-deployed`として閉じ、HTTP失敗をmockへ差し替えない。
-- Guideのwriter grantとcategoryはExperienceが正本とし、NIHO platform ADMIN serverだけが既定OFFの`/internal/guide-admin/v1`をサービスアカウントID tokenで操作する。NIHOは毎回のADMIN判定、verified email・本人性・招待受諾・配送・outboxを正本として持ち、Experienceへは安定NIHO user ID、管理actor ID、単調増加version、相関用invitation UUIDだけを渡す。既存`/admin`・`/editor`・`/host` sessionではこのAPIを認可しない。詳細は[Guide CMS](guide-cms.md#niho-adminからのgrantcategory管理224)を参照する。
+- 記事本文・画像・下書き・版・公開操作はEditorクラウド、writer権限と記事連携の招待・同意・取消はNIHO、カテゴリと現在の提供者OWNER・公開体験はExperienceが正本。writer grantのoutbox複製は使わない。カテゴリ管理の限定Admin APIは維持し、記事連携はNIHOの用途別APIと現在権限のサービス専用APIを使う。旧`/editor`の認証・書込は閉じる。詳細は[記事連携契約](editor-article-authority.md)を参照する。
 - Host本人のNIHOサポート設定もAdminや予約履歴から分離した選別契約・固定BFFとする。通常Spotと外部Providerをkind/idで区別し、NIHO APIが毎回の現在OWNERを判定する。画面は設定・同意だけを保存し、料金producer・予約snapshot・精算への接続済みとは扱わない（[Host本人のNIHOサポート設定](host-support-settings.md)）。
 - NIHO側の契約から、このサイトに必要なDTO・操作・参照型だけを選別して配布する。公開対象の検証と合成例を伴わせ、全内部スキーマを輸出しない。
 - 初期の画面開発では仮契約と合成fixtureを用いる。連携担当が契約を確定して版を固定する。APIとmockは同じ契約検証を通す。

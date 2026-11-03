@@ -47,6 +47,53 @@ describe("guide admin service settings", () => {
   });
 });
 
+describe("article authority settings", () => {
+  const authority = {
+    EXPERIENCE_API_MODE: "http",
+    EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "true",
+    EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+    EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE: "https://experience.example.invalid/internal/article-authority",
+    EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS: "editor@example-project.iam.gserviceaccount.com",
+    NIHO_ARTICLE_AUTHORITY_ORIGIN: "https://niho.example.invalid",
+    NIHO_ARTICLE_AUTHORITY_AUDIENCE: "https://niho.example.invalid/internal/editor-authority",
+    EDITOR_ARTICLE_AUTHORITY_ORIGIN: "https://editor.example.invalid",
+    EDITOR_ARTICLE_AUTHORITY_AUDIENCE: "https://editor.example.invalid/internal/publication-authority",
+  };
+
+  it("is HTTP-only, exact-flag default OFF, and exposes no partial runtime", () => {
+    expect(resolveConfig({})).toMatchObject({ articleAuthorityApiEnabled: false, hostArticleLinksEnabled: false });
+    expect(resolveConfig({ ...authority, EXPERIENCE_API_MODE: "mock" }).articleAuthorityApiEnabled).toBe(false);
+    expect(resolveConfig({ ...authority, EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "1" }).articleAuthorityApiEnabled).toBe(false);
+    expect(resolveConfig(authority)).toMatchObject({
+      articleAuthorityApiEnabled: true,
+      articleAuthorityAudience: authority.EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE,
+      articleAuthorityServiceAccountEmails: [authority.EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS],
+    });
+  });
+
+  it("fails startup when an enabled authority lacks DB, origin, audience, or a valid allowlist", () => {
+    for (const key of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE", "NIHO_ARTICLE_AUTHORITY_ORIGIN", "NIHO_ARTICLE_AUTHORITY_AUDIENCE", "EDITOR_ARTICLE_AUTHORITY_ORIGIN", "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", "EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS"] as const) {
+      expect(() => resolveConfig({ ...authority, [key]: "" }), key).toThrow();
+    }
+    expect(() => resolveConfig({ ...authority, EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS: "person@example.com" })).toThrow(/SERVICE_ACCOUNT_EMAILS/);
+  });
+
+  it("keeps host links independent from the retired editor console and requires only the live host boundary plus NIHO service identity", () => {
+    const host = {
+      EXPERIENCE_API_MODE: "http",
+      HOST_CONSOLE_ENABLED: "true",
+      HOST_SESSION_SECRET: "s".repeat(32),
+      EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "true",
+      NIHO_ARTICLE_AUTHORITY_ORIGIN: authority.NIHO_ARTICLE_AUTHORITY_ORIGIN,
+      NIHO_ARTICLE_LINKS_AUDIENCE: "https://niho.example.invalid/experience-guide-links",
+      EDITOR_CONSOLE_ENABLED: "false",
+    };
+    expect(resolveConfig(host)).toMatchObject({ hostArticleLinksEnabled: true, articleAuthorityApiEnabled: false, nihoArticleAuthorityAudience: "", nihoArticleLinksAudience: host.NIHO_ARTICLE_LINKS_AUDIENCE });
+    expect(() => resolveConfig({ ...host, HOST_CONSOLE_ENABLED: "false" })).toThrow(/HOST_CONSOLE_ENABLED/);
+    expect(() => resolveConfig({ ...host, NIHO_ARTICLE_LINKS_AUDIENCE: "" })).toThrow(/NIHO_ARTICLE_LINKS_AUDIENCE/);
+  });
+});
+
 describe("code-owned presentation and Japanese release gate", () => {
   it("ignores the retired visual source flag and gates only the approved Japanese release", () => {
     expect(resolveConfig({})).toMatchObject({ japaneseSiteEnabled: false });
@@ -229,7 +276,9 @@ describe("admin support console settings", () => {
     expect(resolveConfig({}).experienceTranslateApiEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_CONSOLE_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(false);
-    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", EXPERIENCE_TRANSLATE_API_ENABLED: "true" }).experienceTranslateApiEnabled).toBe(true);
+    const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key", EXPERIENCE_TRANSLATE_API_ENABLED: "true" };
+    expect(resolveConfig(host).experienceTranslateApiEnabled).toBe(false);
+    expect(resolveConfig({ ...host, SITE_URL: "https://experience.example", EXPERIENCE_GUEST_BOOKING_ENABLED: "true", EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_sample", EXPERIENCE_STRIPE_WEBHOOK_SECRET: "whsec_sample", EXPERIENCE_BOOKING_CONSENT_VERSION: "sample-terms-2026-10" }).experienceTranslateApiEnabled).toBe(true);
   });
 
   it("keeps 設定 › 通知 in the experience DB only in http mode with its own flag and the host console (#109)", () => {

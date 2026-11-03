@@ -1,5 +1,18 @@
 # Guide CMS の非公開写真と関連体験
 
+## 現在の経路（2026-11-03、#254 / #255）
+
+記事はEditorクラウドで作成・公開する。Experienceの旧`/editor`認証・書込・下書きAPIは410で閉じ、入口は`/write`から固定Editorへ移動する。旧Storeの保存済み下書き・grant・招待・公開版は削除しないが、旧writer grantや招待台帳を現在権限の根拠にしない。
+
+NIHOがライター招待と現在の役割・記事連携同意を所有し、Experienceは現在のStore OWNER・公開体験と合わせて関連表示を毎読取で判定する。取消・writer解除・OWNER変更・体験停止・authority障害では関連表示だけを隠し、記事本文は保持する。ホスト設定の招待・取消はNIHO BFFへ送り、Experienceに同意を保存しない。商品・予約・顧客・売上への権限は生まれない。
+
+現在activeなカテゴリは公開APIと公開条件宣言に載せ、Editorで選ぶ。公開直前にも現在性を確認し、表示名・順序・revisionを公開snapshotへ固定する。停止済みカテゴリの過去記事は残す。最新のowner決定により、Experience向けもカバー写真とリードは任意で、入力された値の長さ・画像形式・掲載許諾は検証する。
+
+契約・設定・段階配備は[記事連携契約](editor-article-authority.md)を正とする。以下の旧Experience内CMS・grant/outbox・`/editor`の記述は保存済みデータと過去実装の履歴で、新規執筆・認可経路として使わない。
+
+
+> 2026-11-03: Experience内の旧 `/editor` は読み書き・認証APIを410で閉じ、画面入口だけ`/write`へ移した。以下のdatabase CMS節は既存データと切戻し判断の記録であり、現在のwriter権限や記事連携の根拠ではない。現在の責任分界は [Editor記事authority](editor-article-authority.md) を正とする。
+
 [#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張した。[#189](https://github.com/niho-life/niho-experience/issues/189) は公開SSRと公開画像配信を実装するが、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` まで既存の静的表示を維持し、公開 media route は404のままにする。
 
 ## データと権利の境界
@@ -37,9 +50,9 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## 関連体験への招待 API（#190）
 
-`/editor/api/guide-link-invitations` はログイン中のwriter本人に未応答の招待だけを返す。`/{id}/accept`・`/{id}/decline` は同一originのPOSTで`{generation}`を受け、Storeが現在のwriter grant・招待したOWNER・世代・状態を同一transactionで再検査する。`/host/api/guide-link-invitations/providers/{providerId}` は現行OWNERの招待一覧と新規招待、`/{id}/revoke` は`{generation}`を受けて現在のOWNER・世代・状態を再検査する。host BFFは各要求でNIHO `GET /api/auth/me`のuser IDをsealed sessionと照合し、401・ID不一致ではcookieを消す。DTOにはwriter・招待者のNIHO user ID、名前、メールを出さず、すべて`private, no-store`で返す。
+記事連携のcanonical stateはNIHOが持つ。writer本人はEditorの`/account` BFFからNIHOのrolesと招待を読み、明示的に承諾・辞退する。ホストは既存host sessionを使うExperience BFFからNIHOの`/api/experience-guide-links/providers/{providerId}`を呼び、招待一覧・メール招待・取消を行う。BFFは本人の不透明なhost access tokenとExperience runtimeのGoogle ID tokenを両方送り、NIHOがStoreの現在OWNERをサービスAPIで再確認する。Experienceはprovider行の`ownerUserId`からactorを推測せず、招待stateを保存しない。旧`guide_writer_grants`と`guide_link_invitations`は履歴として残すが、現在権限へfallbackしない。
 
-ホストの新規招待POSTは同一originのJSON `{email}` または `{nihoUserId}` を受ける。先にStoreで現行OWNERを検査し、その後NIHO #19462の `POST /api/experience-guide-writers/resolve` へserver-held host AppConnection tokenとExperience runtime service accountのGoogle ID tokenを送る。NIHOは両方を検証してverified email・有効アカウントを解決するだけで、Experience Storeが現行writer grantとOWNERをtransactionで再検査して招待を保存する。NIHOの対象不適格404は`X-NIHO-Guide-Writer-Resolver: v1`で未配備・flag OFFの404と区別する。resolverの401・403ではhost cookieを消さず503にし、host tokenの失効は先行する`/api/auth/me`で判断する。NIHO APIが未配備、service identityが取得不能、またはhost app-connect #19277が未配備なら招待は開かない。editor/host flagがOFFなら404。ブラウザが指定したuser IDをStoreへ直接通さない。既存hostのCOHOST権限は流用せず、招待を受諾しても商品編集・予約・顧客・売上への権限は生まれない。
+公開候補と公開時検査は、NIHOの現在writer/ACCEPTED link、Storeの現在OWNER membership、現在`PUBLISHED`の商品を毎回交差する。公開読取でもEditorの公開版authorityを起点に同じ検査を繰り返し、失効・取消・OWNER変更・商品停止・依存障害の次要求から関連slugだけを外す。本文の公開状態は維持する。内部IDはサービス間に閉じ、公開DTOにはprovider表示名、記事表示名、slug以外のID・メールを出さない。
 
 ## database flagを開く前のゲート
 
@@ -249,14 +262,14 @@ npm -w @niho-experience/web run dev
 | 本文 | `markdown` を描画 | 同じ（AST が正本で `markdown` はその投影。`blocks` は読まない） |
 | 認可の失敗 | 401/403 を失敗 | 同じ。加えて資格のない handle は 404 なので一覧の 404/410 も失敗 |
 | 著者・写真 | `author { name, role, bio }`、写真に寸法・`licensed` | `author { name, handle, url }`（名前だけ表示）。写真に寸法・`licensed` が無い（名目寸法・`licensed: false`） |
-| カテゴリ | `{ slug, label, order? }` | `string \| null`（slug から表示名を導く） |
+| カテゴリ | `{ slug, label, order? }` | `string \| null`を維持し、任意の`categoryDisplay {labelEn,labelJa,displayOrder,revision}`を公開時snapshotとして読む。metadataがない旧版はslug fallback |
 | 認証 | 固定の Bearer | 面の資格（現行 editor では不透明な Bearer。期限あり）。名前・配線は `GUIDE_EDITOR_API_TOKEN` のまま |
 | 公開条件の語彙 | `min-headings`・`no-confirm-marker`・`related-experiences-listed` ほか独自の形 | editor の `DestinationDeclaration`（`headings`・`noConfirm`・`relatedLive` ほか。閉じた語彙） |
 | プレビュー token | `^[A-Za-z0-9_-]{16,256}$` | `^pv_[A-Za-z0-9_-]{43}$` |
 
 **残る差・オーナー判断が要る点**（勝手に緩めていない）:
 
-1. **カテゴリ**：このサイトは category が必須だが、editor には入力欄が無い（`docs/architecture/editor-publish-core.md` は「シートに出していないもの：カテゴリ・関連する体験の欄」）。このままだと editor 起点の新規記事は `category` が null で、宣言の条件（`category`）も満たせず**公開できない**。選択肢：(a) editor に入力欄を足し、宣言の `category` に `oneOf`（experience のカテゴリ一覧）を付ける（別リポ。推奨：書き手に選ばせ、表示名と並び順の正本を experience に置ける）、(b) experience で必須を緩め、カテゴリ無しは「未分類」の棚に出す（棚の表示が増える）、(c) 当面はカテゴリ無しを出さず、editor の欄ができるまで公開元を `editor` にしない。
+1. **カテゴリ**：解消済み。EditorはExperienceのactiveカテゴリを公開ごとに読み、選択slugを`category`、英日表示名・順序・revisionを任意の`categoryDisplay` snapshotとして固定する。activeが空、取得失敗、または選択slugが停止済みなら次の公開は503/不許可で、既存公開版とそのsnapshot表示名は維持する。
 2. **共有の権利と OG 画像**：editor v1 は写真の共有権利を宣言しないので OG・`Article.image` は出ない。editor が Asset に明示の宣言（例：共有可否）を足せば、`licensed` に写像する。
 3. **写真の寸法**：契約に無い。editor が `width`・`height` を Asset に足せば名目値をやめられる（互換を壊さない追加）。
 4. **著者の役割・紹介文・プロフィール URL**：契約に `role`・`bio` が無く、`handle`・`url` は使っていない。著者ページを作る判断は別。
@@ -264,9 +277,9 @@ npm -w @niho-experience/web run dev
 6. **`movedTo`**：NIHO の別の面へ移した記事の 410 に付くが、旧 URL から新 URL への転送は実装していない（`/guides` へ 307）。
 7. **`checkedOn`（確認日）**：v1 に無いので editor 記事では表示しない。
 8. **画像の複製と `sha256`**：editor の仕様は「本人のサイトは取り込むときに複製する」だが、面の experience は許可 origin から直接読む。availability は editor の写真置き場に依存する。
-9. **面の資格**：editor は署名つきサービス間 token の契約ができるまでの暫定の方式。置き換わるときは `client.ts` の認証だけを直す。
+9. **面の資格**：公開本文の既存面資格と、現在権限を読む内部authorityのGoogle ID tokenは用途を分ける。通常公開API key、host token、Photo資格を内部authorityへ流用しない。
 10. **見出しの数え方**：editor の `headings` 条件は `##` と `###` を数えるが、このサイトの目次は `##` が前提。`###` だけの記事は目次が空になりうる（表示は崩れない）。
-11. **未配備**：`api.editor.niho.life` の DNS・ALB、本番の flag・Secret の配線、editor の NIHO ログイン。
+11. **未配備**：本番のflag、固定audience、許可runtime service account、origin、Secret/IAM/DNSの配線とstaging受入。
 
 ### 契約が変わったときに直す箇所
 

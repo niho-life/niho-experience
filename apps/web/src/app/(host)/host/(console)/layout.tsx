@@ -76,7 +76,7 @@ export default async function HostConsoleLayout({ children }: { children: React.
       <HostSessionKeeper accessTokenExpiresAt={session.accessTokenExpiresAt} />
       <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
-      <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl={config.guideEditorSiteOrigin} preview={isHostMock()}>
+      <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl={config.guideEditorSiteOrigin ? "/write" : ""} preview={isHostMock()}>
         {load.status === "ok" ? (
           children
         ) : (

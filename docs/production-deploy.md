@@ -62,6 +62,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*` | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
 | `EXPERIENCE_PROVIDER_PAGES_API_ENABLED` | `PROVIDER_PAGES_API_ENABLED` | ホストの画面・DB | — | — | — |
 | `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `PROVIDER_OPERATIONS_API_ENABLED` | ホストの画面・DB | — | — | — |
+| `EXPERIENCE_TRANSLATE_API_ENABLED` | `TRANSLATE_API_ENABLED` | ホストの画面・DB・予約 | — | — | — |
 | `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `GUEST_QUESTIONS_ENABLED` | ホストの画面・DB、Provider APIとは併用不可 | — | — | — |
 | `EXPERIENCE_TRANSLATION_ENABLED` | `TRANSLATION_ENABLED` | メールか質問 | — | `ANTHROPIC_API_KEY_REF` → `EXPERIENCE_ANTHROPIC_API_KEY` | — |
 | `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `GUEST_REVIEWS_ENABLED` | DB | — | — | — |
@@ -133,3 +134,20 @@ NIHOapp側の変更は連携Aの担当へ集約する。stg Web の `EXPERIENCE_
 | 計測 | NIHOのプライバシーポリシーに Umami Cloud の送信内容・目的・保存期間を追記し、同意方針の確認後だけ `UMAMI_WEBSITE_ID` を設定。previewには設定しない |
 
 緊急停止はまず NIHO の掲載/受付を止め、サイト側も `BOOKINGS_ENABLED=false` の安全revisionへ戻す。サイトのtrafficを直前revisionへ戻しても、成立済み予約・返金は NIHO の予約一覧と台帳で追う。Cloud Run trafficの変更後に revision、100% の配分、トップ/詳細/予約停止、NIHO側の予約一覧・返金導線をreadbackする。停止・切戻し・再開の日時とSHAを #15 に残す。
+
+
+## Editorの記事連携を開く設定（2026-11-03）
+
+新しい設定も`runtime-flags.mjs`の同じ検査・固定版参照・revision readbackを使う。GitHub variableはstagingで`STG_`、productionで`PROD_`を付け、未設定はOFF。実値・token・未公開原稿をIssue/PRへ書かない。
+
+| variable（prefixを省略） | 開くもの | 必要な設定 |
+| --- | --- | --- |
+| `ARTICLE_AUTHORITY_API_ENABLED` | 現在OWNER・体験候補・関連権限API | DB、`ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS`、`NIHO_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE`、`EDITOR_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE` |
+| `HOST_ARTICLE_LINKS_ENABLED` | ホスト設定のNIHO正本への招待・取消 | ホスト画面、`NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_LINKS_AUDIENCE`、`GUIDE_EDITOR_SITE_ORIGIN` |
+| `EDITOR_PUBLICATIONS_ENABLED` | 公開元を`editor`へ切替 | DB、authority API、`GUIDE_EDITOR_API_BASE_URL`、`GUIDE_EDITOR_API_TOKEN_REF`の固定数値版、`GUIDE_EDITOR_ASSET_ORIGIN`、`GUIDE_EDITOR_SITE_ORIGIN` |
+
+許可サービスアカウントはセミコロン区切りで複数を指定する。gcloudのカンマ区切りと衝突せず、単一のenv値として渡し、runtimeでも同じリストを解釈する。サービス専用APIのaudienceは配備先の固定site URL。ホスト用`NIHO_ARTICLE_LINKS_AUDIENCE`はNIHOの既存writer resolver用audienceと一致させ、サービス専用の`NIHO_ARTICLE_AUTHORITY_AUDIENCE`と混同しない。
+
+NIHO追加API → Editor / Experience追加API → 相互認証と合成の負例確認 → ホスト入口 → 公開元切替の順で開く。writer解除・取消・OWNER変更・体験停止の次読取、既存カテゴリ停止後の記事維持、公開停止後の写真404、依存障害での関連表示非表示を確認する。owner指示により画面受入・実機操作は省略できる。Secret値の用意は各repoのowner専用手順に従い、AIが値を取得・表示しない。
+
+公開元flagをOFFに戻すと新revisionは従来のstaticになる。既存database公開元へ戻す場合は既存runbookの固定revision切戻しを使う。公開記事・旧下書き・招待履歴を消さない。新しい定期job・Schedulerは追加しない。

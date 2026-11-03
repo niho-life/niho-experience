@@ -98,15 +98,15 @@ export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
 } as const;
 
 /**
- * 対面通訳の部屋（#181）。shape は niho-app Epic #19446 の契約節で固定した下書き（draft）で、NIHO の export を写したものではない。
- * N1b（niho-app #19447）が contracts/openapi.yaml に載せたら写し直し、sourceCommit・sha256・status を更新する。
+ * 対面通訳の部屋（#181）。niho-appのselected exportを固定source commitから同期済み。APIは未配備。
  * http mode の BFF は EXPERIENCE_TRANSLATE_API_ENABLED=true まで開かない。
  */
 export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
-  version: "0.1.0",
+  version: "1.0.0",
   sourceIssue: "niho-coliving/niho-app#19446",
-  sha256: "3aec3f313ca3f9d57a1e3169b297c5aecf8ae440cf46216d046f2afdb167ba5d",
-  status: "draft",
+  sourceCommit: "5ed6ebac62b5f14dd0d114d7893bc0099d9df776",
+  sha256: "08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8e",
+  status: "agreed-not-deployed",
   deploymentStatus: "not-deployed",
 } as const;
 

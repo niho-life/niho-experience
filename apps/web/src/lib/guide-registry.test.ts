@@ -2,9 +2,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { SAMPLE_GUIDES, type Guide } from "@/content/guides";
 
 const state = vi.hoisted(() => ({
-  config: { guideDraftsDir: "/drafts" as string | null, guidePublicSource: "static" as "static" | "database" },
+  config: { guideDraftsDir: "/drafts" as string | null, guidePublicSource: "static" as "static" | "database" | "editor" },
   isPreview: true,
   read: vi.fn(),
+  editorPublications: vi.fn(),
+  filterCurrentRelatedGuide: vi.fn(),
   repository: { listPublicArticles: vi.fn(), getPublicArticleBySlug: vi.fn() },
 }));
 
@@ -19,6 +21,8 @@ vi.mock("./config", () => ({
 }));
 vi.mock("./guide-drafts", () => ({ GUIDE_DRAFTS_FOLDER: "GUIDE_DRAFTS_DIR", readGuideDrafts: state.read }));
 vi.mock("./experience/store-server", () => ({ guideRepository: () => state.repository }));
+vi.mock("./editor-publication/source", () => ({ findEditorGuide: vi.fn(), readEditorPublications: state.editorPublications }));
+vi.mock("./article-authority/publication-read", () => ({ filterCurrentRelatedGuide: state.filterCurrentRelatedGuide }));
 
 const { findGuide, guideCatalog, guidesAboutExperience, hasGuidesPage, indexableGuides } = await import("./guide-registry");
 
@@ -31,6 +35,8 @@ describe("the guide catalog", () => {
     state.config = { guideDraftsDir: "/drafts", guidePublicSource: "static" };
     state.isPreview = true;
     state.read.mockReset();
+    state.editorPublications.mockReset();
+    state.filterCurrentRelatedGuide.mockReset();
     state.repository.listPublicArticles.mockReset();
     state.repository.getPublicArticleBySlug.mockReset();
   });
@@ -131,5 +137,38 @@ describe("the guide catalog", () => {
     state.repository.listPublicArticles.mockRejectedValue(new Error("database unavailable"));
     await expect(guideCatalog()).rejects.toThrow("database unavailable");
     expect(state.read).not.toHaveBeenCalled();
+  });
+
+  it("rechecks only guides related to this experience with bounded concurrency", async () => {
+    state.config = { guideDraftsDir: null, guidePublicSource: "editor" };
+    state.isPreview = false;
+    const unrelated = Array.from({ length: 8 }, (_, index) => ({
+      ...first,
+      slug: `unrelated-${index}`,
+      relatedExperienceSlugs: ["another-experience"],
+    }));
+    const related = Array.from({ length: 9 }, (_, index) => ({
+      ...first,
+      slug: `related-${index}`,
+      relatedExperienceSlugs: ["target-experience"],
+    }));
+    state.editorPublications.mockResolvedValue({ live: [...unrelated, ...related] });
+    let active = 0;
+    let maximumActive = 0;
+    state.filterCurrentRelatedGuide.mockImplementation(async (guide: Guide) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return guide;
+    });
+
+    const result = await guidesAboutExperience("target-experience");
+
+    expect(state.filterCurrentRelatedGuide).toHaveBeenCalledTimes(related.length);
+    expect(state.filterCurrentRelatedGuide.mock.calls.map(([guide]) => guide.slug).sort())
+      .toEqual(related.map((guide) => guide.slug).sort());
+    expect(maximumActive).toBe(4);
+    expect(result.guides).toHaveLength(3);
   });
 });
