@@ -793,7 +793,10 @@ export function sellableProduct(product: Pick<ProductRecord, "id" | "currency" |
 }
 
 /** Free products are all-zero: a paid adult product cannot mix in a zero-priced offer (or vice versa). */
-export function salePriceSetMatchesProduct(unitAmount: number, terms: Pick<ProductSaleTerms, "offerPrices" | "childPricing">): boolean {
+export function salePriceSetMatchesProduct(unitAmount: number, terms: {
+  readonly offerPrices?: readonly OfferPriceInput[] | null;
+  readonly childPricing: ChildPricing | null;
+}): boolean {
   const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [unitAmount];
   if (unitAmount === 0) return adultPrices.every((price) => price === 0) && (terms.childPricing === null || terms.childPricing.priceYen === 0);
   return unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
