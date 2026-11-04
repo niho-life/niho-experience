@@ -42,7 +42,7 @@ New products are created in Experience. There is no NIHO product import or old-s
 
 ### Read and save a product
 
-`GET /host/api/products/{productId}` returns an allowlisted host DTO with `version`, editable draft, sale terms, public media previews, status, and seller display name. It does not return internal seller/provider IDs, Stripe references, meeting access details, or database fields. Schedule rules are managed through the existing host calendar API and remain attached to this product ID.
+`GET /host/api/products/{productId}` returns an allowlisted host DTO with `version`, editable draft, sale terms, current active schedule offers, publication blocker codes, public media previews, status, and seller display name. The active offers contain only their public offer ID and host-editing labels (start time, duration, capacity, recurrence); they let the OWNER save the complete offer-price set without exposing a provider ID. Blockers are recalculated from the saved server state and never accept browser readiness claims. The DTO does not return internal seller/provider IDs, Stripe references, meeting access details, or database fields. Schedule rules are managed through the existing host calendar API and remain attached to this product ID.
 
 The existing calendar read is `GET /host/calendar/data?providerId=…&fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD`; it returns product IDs, schedule rules, and their occurrences. A new rule is created with `POST /host/calendar/data` using `{ "providerId": "…", "action": "createRule", "experienceId": "{productId}", "rule": { ... }, "commandId": "{uuid}" }`. The server verifies the current NIHO membership before writing, uses `commandId` as the new rule ID, and returns its numeric `version`. Per-occurrence pause/resume and reschedule writes also use `commandId` plus that occurrence's `expectedVersion`. Existing schedules are not copied from NIHO.
 
@@ -71,6 +71,8 @@ The editable terms include:
 ```
 
 This example only documents field shape; its values are not approved product terms. The host must provide explicit cancellation window/refund values. `minimumChargeableParticipants` controls the adult-price floor and is separate from `minimumParticipants`, which controls whether a party may book. `minimumAttendance` is optional operations data and never appears in guest DTOs. It does not automatically cancel or refund a booking. There is no private-group/whole-booking field. `minimumChargeYen` remains Stripe's payment minimum and is not a seller's minimum price.
+
+The host UI edits cancellation windows as days/hours/minutes and refunds as a percentage, then converts them losslessly to minutes and basis points at the API boundary. Product, offer, and child prices accept explicit free `0`; any paid price must be at least ¥50, so ¥1–49 is rejected before and at the Store boundary. Existing booking snapshots are not rewritten.
 
 The public API returns the accepted minimum charge and cancellation rule for guests. The host reservation/session API returns the accepted minimum charge, minimum attendance, and cancellation rule from the booking snapshot. No reader reconstructs them from current product settings.
 

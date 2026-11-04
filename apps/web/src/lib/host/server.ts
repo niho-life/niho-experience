@@ -149,7 +149,15 @@ export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
     }
     const repository = experiencePublicationRepository();
     if (!repository) return { status: "error" };
-    const members = await repository.listHostProviders(identityResult.data.nihoUserId);
+    const nihoUserId = identityResult.data.nihoUserId;
+    let members = await repository.listHostProviders(nihoUserId);
+    if (members.length === 0 && config.experienceHostPublicationApiEnabled) {
+      // The console must bind a pre-provisioned seller before its first product page can
+      // render. Waiting for a product API call strands that seller on the register prompt.
+      const binding = await repository.ensureMappedOwnerMembership(nihoUserId);
+      if (binding.kind === "ambiguous" || binding.kind === "membership-conflict") return { status: "error" };
+      if (binding.kind === "linked" || binding.kind === "already-owner") members = await repository.listHostProviders(nihoUserId);
+    }
     const providers = usableProviders(members.map((member) => ({
       id: member.providerId,
       legacyProviderId: member.legacyProviderId,

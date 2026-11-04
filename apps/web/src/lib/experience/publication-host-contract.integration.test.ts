@@ -19,6 +19,7 @@ const LEGACY_PROVIDER_ID = "legacy-provider-contract-synthetic-330";
 const CONNECT_ACCOUNT_ID = "acct_ContractSeller330";
 const CONSENT_VERSION = "listing-contract-v1";
 const SLUG = "synthetic-niho-contract-experience";
+const OFFER_ID = "contract-synthetic-daily";
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -121,7 +122,7 @@ const content = {
 };
 
 const saleTerms = {
-  offerPrices: null,
+  offerPrices: [{ offerId: OFFER_ID, adultPriceYen: 4_000 }],
   childPricing: null,
   minimumParticipants: 1,
   minimumChargeableParticipants: 2,
@@ -259,7 +260,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       });
       const occurrenceDay = addLocalDays(new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10), 1);
       const rule: ScheduleRule = {
-        id: "contract-synthetic-daily", timeZone: "Asia/Tokyo", startsOn: occurrenceDay, endsOn: occurrenceDay,
+        id: OFFER_ID, timeZone: "Asia/Tokyo", startsOn: occurrenceDay, endsOn: occurrenceDay,
         localStartTime: "10:00", durationMinutes: 90, capacity: 4, bookingCutoffMinutes: 0,
         busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
       };
@@ -270,7 +271,10 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         { params: Promise.resolve({ productId }) }, "read",
       );
       expect(readResponse.status).toBe(200);
-      const readBody = await readResponse.json() as { product: { version: string } };
+      const readBody = await readResponse.json() as { product: { version: string; offers: { id: string }[]; publicationBlockers: string[] } };
+      expect(readBody.product.offers).toEqual([expect.objectContaining({ id: OFFER_ID })]);
+      expect(readBody.product.publicationBlockers).toContain("CANCELLATION_TERMS_REQUIRED");
+      expect(readBody.product.publicationBlockers).not.toContain("SCHEDULE_REQUIRED");
       const termsResponse = await publicationRequest(
         new Request(`https://experience.example.test/host/api/products/${productId}/sale-terms`, {
           method: "PUT",
@@ -282,7 +286,8 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         { params: Promise.resolve({ productId }) }, "saveSaleTerms",
       );
       expect(termsResponse.status).toBe(200);
-      const termsBody = await termsResponse.json() as { product: { version: string } };
+      const termsBody = await termsResponse.json() as { product: { version: string; publicationBlockers: string[] } };
+      expect(termsBody.product.publicationBlockers).toEqual([]);
       const publishResponse = await publicationRequest(
         new Request(`https://experience.example.test/host/api/products/${productId}/publish`, {
           method: "POST",

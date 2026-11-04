@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { HostCalendarData } from "@/experience/calendar-contract";
 import { withProvider } from "@/lib/host/routes";
@@ -188,6 +189,7 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
   };
 
   const visibleOccurrences = useMemo(() => dataFresh ? data?.occurrences.filter((item) => !experienceId || item.experienceId === experienceId) ?? [] : [], [data, dataFresh, experienceId]);
+  const selectedProductId = experienceId || (data?.experiences.length === 1 ? data.experiences[0]!.id : "");
   const productIndexes = useMemo(() => new Map((data?.experiences ?? []).map((item, index) => [item.id, index])), [data]);
   const selectedOccurrences = visibleOccurrences.filter((item) => item.localDate === selectedDate);
   const selectWeek = (next: string) => { invalidateData(); setActiveWeek(weekStart(next)); setSelectedDate(next); };
@@ -212,8 +214,11 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
       <div role="group" aria-label="カレンダーの表示" className="hidden rounded-xl bg-sand p-1 lg:flex"><button type="button" aria-pressed={view === "week"} onClick={() => setView("week")} className={`min-h-9 min-w-12 rounded-lg px-3 text-sm font-bold ${view === "week" ? "bg-canvas shadow-sm" : "text-muted"}`}>週</button><button type="button" aria-pressed={view === "day"} onClick={() => setView("day")} className={`min-h-9 min-w-12 rounded-lg px-3 text-sm font-bold ${view === "day" ? "bg-canvas shadow-sm" : "text-muted"}`}>日</button></div>
     </div>
 
-    {dataFresh && data ? <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0" role="group" aria-label="体験で絞り込む">
-      {data.experiences.length > 1 ? <><button type="button" aria-pressed={experienceId === ""} onClick={() => setExperienceId("")} className={`min-h-10 shrink-0 rounded-full border px-3 text-xs font-extrabold ${experienceId === "" ? "border-ink bg-sand" : "border-line-strong bg-canvas"}`}>すべて</button>{data.experiences.map((item, index) => <button key={item.id} type="button" aria-pressed={experienceId === item.id} onClick={() => setExperienceId(item.id)} className={`flex min-h-10 max-w-64 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-extrabold ${experienceId === item.id ? "border-ink bg-sand" : "border-line-strong bg-canvas"}`}><span aria-hidden="true" className={`size-2 rounded-full border ${productTone(index)}`} /><span className="truncate">{item.title}</span></button>)}</> : data.experiences[0] ? <span className="flex min-h-10 items-center gap-2 rounded-full border border-line-strong px-3 text-xs font-extrabold"><span aria-hidden="true" className={`size-2 rounded-full border ${productTone(0)}`} />{data.experiences[0].title}</span> : null}
+    {dataFresh && data ? <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="-mx-4 flex min-w-0 gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0" role="group" aria-label="体験で絞り込む">
+        {data.experiences.length > 1 ? <><button type="button" aria-pressed={experienceId === ""} onClick={() => setExperienceId("")} className={`min-h-10 shrink-0 rounded-full border px-3 text-xs font-extrabold ${experienceId === "" ? "border-ink bg-sand" : "border-line-strong bg-canvas"}`}>すべて</button>{data.experiences.map((item, index) => <button key={item.id} type="button" aria-pressed={experienceId === item.id} onClick={() => setExperienceId(item.id)} className={`flex min-h-10 max-w-64 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-extrabold ${experienceId === item.id ? "border-ink bg-sand" : "border-line-strong bg-canvas"}`}><span aria-hidden="true" className={`size-2 rounded-full border ${productTone(index)}`} /><span className="truncate">{item.title}</span></button>)}</> : data.experiences[0] ? <span className="flex min-h-10 items-center gap-2 rounded-full border border-line-strong px-3 text-xs font-extrabold"><span aria-hidden="true" className={`size-2 rounded-full border ${productTone(0)}`} />{data.experiences[0].title}</span> : null}
+      </div>
+      {selectedProductId ? <Link href={`/host/experiences/${encodeURIComponent(selectedProductId)}`} className="inline-flex min-h-10 shrink-0 items-center text-sm font-extrabold underline underline-offset-4">商品編集へ戻る</Link> : null}
     </div> : null}
 
     {loading && !dataFresh ? <p role="status" className="py-10 text-center text-ink-soft">読み込んでいます…</p> : null}

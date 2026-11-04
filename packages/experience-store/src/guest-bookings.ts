@@ -483,13 +483,12 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
     const child = input.childPricing;
     if (child === undefined || typeof child !== "object") throw new StoreValidationError("childPricing must be an object or null.");
     assertMoney(child.priceYen, "childPricing.priceYen");
+    if (child.priceYen !== 0 && child.priceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+      throw new StoreValidationError(`childPricing.priceYen must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
+    }
     const minAge = integerIn(child.minAge, "childPricing.minAge", 0, 17);
     const maxAge = integerIn(child.maxAge, "childPricing.maxAge", minAge, 17);
     if (typeof child.adultRequired !== "boolean") throw new StoreValidationError("childPricing.adultRequired must be a boolean.");
-    // A party of children only pays the child price alone, which must still be a chargeable amount.
-    if (!child.adultRequired && child.priceYen !== 0 && child.priceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
-      throw new StoreValidationError(`childPricing.priceYen must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen} when children may book without an adult.`);
-    }
     childPricing = { priceYen: child.priceYen, minAge, maxAge, adultRequired: child.adultRequired };
   }
   const minimumParticipants = integerIn(input.minimumParticipants, "minimumParticipants", 1, GUEST_BOOKING_LIMITS.maxPartySize);
