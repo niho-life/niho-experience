@@ -95,7 +95,7 @@ export interface RefundSubmission {
   readonly kind: "FULL" | "PARTIAL";
   readonly amount: number;
   readonly currency: string;
-  /** NIHO's fee goes back with a full refund only (docs: 返金と手数料). */
+  /** NIHO's fee goes back with every refund, in proportion to the refunded amount (docs: 返金と手数料). */
   readonly refundApplicationFee: boolean;
 }
 
@@ -144,19 +144,42 @@ export interface SupportActor {
   readonly nihoUserId: string;
 }
 
-/** Full: the whole payment, NIHO's fee given back. Partial: the amount support enters, NIHO's fee kept. */
+/** Full: the whole payment. Partial: the amount support enters. NIHO's fee is returned in proportion to either refund. */
 export type SupportRefundChoice = { readonly kind: "FULL" } | { readonly kind: "PARTIAL"; readonly amount: number };
 
 export interface SupportCancellationInput {
   readonly commandId: string;
+  readonly expectedSnapshot?: string;
   readonly reason: CancellationReason;
   readonly note?: string | null;
   readonly refund: SupportRefundChoice;
 }
 
 export type CancellationRequestDecision =
-  | { readonly commandId: string; readonly decision: "APPROVE"; readonly refund: SupportRefundChoice; readonly note?: string | null }
-  | { readonly commandId: string; readonly decision: "DECLINE"; readonly message: string };
+  | { readonly commandId: string; readonly expectedSnapshot?: string; readonly decision: "APPROVE"; readonly refund: SupportRefundChoice; readonly note?: string | null }
+  | { readonly commandId: string; readonly expectedSnapshot?: string; readonly decision: "DECLINE"; readonly message: string };
+
+export const SUPPORT_OPERATION_ACTIONS = ["CANCEL", "APPROVE_REQUEST", "DECLINE_REQUEST", "RESOLVE_PAYMENT_REVIEW", "RETRY_REFUND", "CLOSE_REFUND"] as const;
+export type SupportOperationAction = (typeof SUPPORT_OPERATION_ACTIONS)[number];
+
+export type SupportOperationPreviewInput =
+  | { readonly action: "CANCEL" | "APPROVE_REQUEST"; readonly publicBookingId: string; readonly refund: SupportRefundChoice }
+  | { readonly action: "DECLINE_REQUEST" | "RESOLVE_PAYMENT_REVIEW"; readonly publicBookingId: string }
+  | { readonly action: "RETRY_REFUND" | "CLOSE_REFUND"; readonly refundId: string };
+
+export interface SupportOperationPreview {
+  readonly action: SupportOperationAction;
+  readonly expectedSnapshot: string;
+  readonly publicBookingId: string;
+  readonly providerId: string;
+  readonly experienceTitle: string;
+  readonly startUtc: string;
+  readonly bookingStatus: string;
+  readonly bookingStatusAfter: string;
+  readonly refundAmount: number;
+  readonly currency: string;
+  readonly cancellationRequestStatus: string | null;
+}
 
 /** What Stripe answered to creating (or finding) a refund. */
 export type StripeRefundAnswer =
@@ -239,6 +262,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOTE_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const STRIPE_REF = /^[A-Za-z0-9_]{1,256}$/;
 const FAILURE_CODE = /^[a-z0-9_]{1,80}$/;
+const HASH64 = /^[0-9a-f]{64}$/;
 const POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
 const STRIPE_STATUSES: ReadonlySet<string> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 const LOCK_COMMAND = 47;
@@ -278,6 +302,12 @@ function refundChoiceOf(value: unknown): SupportRefundChoice {
   if (choice?.kind === "FULL") return { kind: "FULL" };
   if (choice?.kind === "PARTIAL" && Number.isSafeInteger(choice.amount) && choice.amount > 0) return { kind: "PARTIAL", amount: choice.amount };
   throw new StoreValidationError("refund must be FULL, or PARTIAL with a positive amount.");
+}
+
+function expectedSnapshotOf(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || !HASH64.test(value)) throw new StoreValidationError("expectedSnapshot must be a lowercase sha256 hash.");
+  return value;
 }
 
 function supportActorOf(actor: SupportActor): string {
@@ -325,12 +355,19 @@ interface LockedBooking {
   readonly deadlineUtc: string | null;
   readonly refundBasisPoints: number;
   readonly totalAmount: number;
+  readonly currency: string;
   readonly connectedAccountId: string;
   readonly stripePaymentRef: string | null;
   readonly party: number;
   readonly title: string;
   readonly nowUtc: string;
   readonly supportEligible: boolean;
+  readonly supportConsent: {
+    readonly enabled: boolean;
+    readonly basisPoints: number | null;
+    readonly consentVersion: string | null;
+    readonly agreementRevision: number | null;
+  };
 }
 
 function lockedFromRow(row: DbRow): LockedBooking {
@@ -340,6 +377,13 @@ function lockedFromRow(row: DbRow): LockedBooking {
   const startUtc = text(occurrence.startUtc, "occurrence_snapshot.startUtc");
   const policy = typeof pricing.cancellationPolicy === "string" && POLICIES.has(pricing.cancellationPolicy) ? pricing.cancellationPolicy as GuestCancellationPolicy : null;
   const cancellation = cancellationTermsOf(pricing);
+  const fee = record(pricing.platformFee);
+  const supportConsent = {
+    enabled: fee.supportEnabled === true,
+    basisPoints: Number.isSafeInteger(fee.basisPoints) ? Number(fee.basisPoints) : null,
+    consentVersion: typeof fee.supportConsentVersion === "string" ? fee.supportConsentVersion : null,
+    agreementRevision: Number.isSafeInteger(fee.supportAgreementRevision) ? Number(fee.supportAgreementRevision) : null,
+  };
   return {
     rowId: text(row.id, "id"),
     providerId: text(row.provider_id, "provider_id"),
@@ -353,20 +397,19 @@ function lockedFromRow(row: DbRow): LockedBooking {
     deadlineUtc: freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart),
     refundBasisPoints: cancellation.refundBasisPoints,
     totalAmount: amount(pricing.totalAmount, "pricing_snapshot.totalAmount"),
+    currency: text(pricing.currency, "pricing_snapshot.currency"),
     connectedAccountId: text(seller.stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
     stripePaymentRef: typeof row.stripe_payment_ref === "string" ? row.stripe_payment_ref : null,
     party: amount(row.party, "party"),
     title: text(row.public_title, "public_title"),
     nowUtc: isoValue(row, "db_now"),
-    supportEligible: (() => {
-      const fee = record(pricing.platformFee);
-      return fee.supportEnabled === true
-        && fee.basisPoints === 1500
-        && typeof fee.supportConsentVersion === "string"
-        && fee.supportConsentVersion.length > 0
-        && Number.isSafeInteger(fee.supportAgreementRevision)
-        && Number(fee.supportAgreementRevision) > 0;
-    })(),
+    supportEligible: supportConsent.enabled
+      && supportConsent.basisPoints === 1500
+      && supportConsent.consentVersion !== null
+      && supportConsent.consentVersion.length > 0
+      && supportConsent.agreementRevision !== null
+      && supportConsent.agreementRevision > 0,
+    supportConsent,
   };
 }
 
@@ -489,27 +532,147 @@ async function moneyOf(client: PoolClient, booking: LockedBooking): Promise<{ pa
   return { paid: amount(row.amount, "payment_ledger_entries.amount"), currency: text(row.currency, "currency"), committed: amount(refunds.rows[0]?.committed, "committed") };
 }
 
+function refundAmountFor(choice: SupportRefundChoice, money: { readonly paid: number; readonly committed: number }): { readonly kind: "FULL" | "PARTIAL"; readonly amount: number } {
+  const left = money.paid - money.committed;
+  if (choice.kind === "FULL") {
+    if (money.committed > 0) throw new StoreConflictError("Part of this payment was refunded already; refund the rest as a partial refund.");
+    if (money.paid <= 0) throw new StoreConflictError("Nothing is left to refund.");
+    return { kind: "FULL", amount: money.paid };
+  }
+  if (choice.amount > left) throw new StoreValidationError("The refund is more than what is left of the payment.");
+  if (choice.amount === money.paid) throw new StoreValidationError("A refund of the whole payment is a full refund.");
+  if (choice.amount <= 0 || left <= 0) throw new StoreConflictError("Nothing is left to refund.");
+  return { kind: "PARTIAL", amount: choice.amount };
+}
+
+interface SupportSnapshotState {
+  readonly hash: string;
+  readonly paid: number;
+  readonly committed: number;
+  readonly currency: string;
+  readonly openRequest: boolean;
+  readonly cancellationRequestStatus: string | null;
+  readonly targetRefund: {
+    readonly id: string;
+    readonly kind: "FULL" | "PARTIAL";
+    readonly amount: number;
+    readonly status: RefundStatus;
+    readonly closed: boolean;
+  } | null;
+}
+
+async function supportSnapshot(
+  client: PoolClient,
+  booking: LockedBooking,
+  input: { readonly action: SupportOperationAction; readonly refund?: SupportRefundChoice; readonly refundId?: string },
+): Promise<SupportSnapshotState> {
+  const captured = await client.query<DbRow>(
+    `SELECT entry_id, amount, currency, stripe_payment_ref, stripe_event_id, occurred_at
+       FROM payment_ledger_entries
+      WHERE provider_id = $1 AND booking_id = $2 AND kind = 'PAYMENT_CAPTURED' AND stripe_payment_ref = $3`,
+    [booking.providerId, booking.rowId, booking.stripePaymentRef],
+  );
+  const refundRows = await client.query<DbRow>(
+    `SELECT id::text AS id, kind, amount, currency, refund_application_fee, requested_by, stripe_payment_ref, status,
+            stripe_refund_ref, failure_code, submitted_at, settled_at, closed_at, superseded_by::text AS superseded_by,
+            send_attempts, send_claimed_at
+       FROM booking_refunds
+      WHERE provider_id = $1 AND booking_id = $2
+      ORDER BY created_at, id
+      FOR UPDATE`,
+    [booking.providerId, booking.rowId],
+  );
+  const requestRows = await client.query<DbRow>(
+    `SELECT id::text AS id, status, resolved_at, resolved_by
+       FROM booking_cancellation_requests
+      WHERE provider_id = $1 AND booking_id = $2
+      ORDER BY created_at, id
+      FOR UPDATE`,
+    [booking.providerId, booking.rowId],
+  );
+  const capture = captured.rows[0];
+  const refunds = refundRows.rows.map((row) => ({
+    id: text(row.id, "booking_refunds.id"),
+    kind: row.kind === "FULL" ? "FULL" as const : "PARTIAL" as const,
+    amount: amount(row.amount, "booking_refunds.amount"),
+    currency: text(row.currency, "booking_refunds.currency"),
+    refundApplicationFee: row.refund_application_fee === true,
+    requestedBy: text(row.requested_by, "booking_refunds.requested_by"),
+    stripePaymentRef: text(row.stripe_payment_ref, "booking_refunds.stripe_payment_ref"),
+    status: text(row.status, "booking_refunds.status") as RefundStatus,
+    stripeRefundRef: typeof row.stripe_refund_ref === "string" ? row.stripe_refund_ref : null,
+    failureCode: typeof row.failure_code === "string" ? row.failure_code : null,
+    submittedAt: row.submitted_at == null ? null : isoValue(row, "submitted_at"),
+    settledAt: row.settled_at == null ? null : isoValue(row, "settled_at"),
+    closedAt: row.closed_at == null ? null : isoValue(row, "closed_at"),
+    supersededBy: typeof row.superseded_by === "string" ? row.superseded_by : null,
+    sendAttempts: amount(row.send_attempts, "booking_refunds.send_attempts"),
+    sendClaimedAt: row.send_claimed_at == null ? null : isoValue(row, "send_claimed_at"),
+  }));
+  const requests = requestRows.rows.map((row) => ({
+    id: text(row.id, "booking_cancellation_requests.id"),
+    status: text(row.status, "booking_cancellation_requests.status"),
+    resolvedAt: row.resolved_at == null ? null : isoValue(row, "resolved_at"),
+    resolvedBy: typeof row.resolved_by === "string" ? row.resolved_by : null,
+  }));
+  const paid = capture ? amount(capture.amount, "payment_ledger_entries.amount") : 0;
+  const currency = capture ? text(capture.currency, "payment_ledger_entries.currency") : booking.currency;
+  const committed = refunds.filter((refund) => refund.status !== "FAILED").reduce((sum, refund) => sum + refund.amount, 0);
+  const target = input.refundId ? refunds.find((refund) => refund.id === input.refundId) ?? null : null;
+  const material = {
+    version: 1,
+    operation: { action: input.action, refund: input.refund ?? null, refundId: input.refundId ?? null },
+    booking: {
+      providerId: booking.providerId,
+      publicBookingId: booking.publicBookingId,
+      status: booking.status,
+      occurrenceId: booking.occurrenceId,
+      ruleId: booking.ruleId,
+      startUtc: booking.startUtc,
+      endUtc: booking.endUtc,
+      totalAmount: booking.totalAmount,
+      currency: booking.currency,
+      refundBasisPoints: booking.refundBasisPoints,
+      supportConsent: booking.supportConsent,
+      stripePaymentRef: booking.stripePaymentRef,
+      connectedAccountId: booking.connectedAccountId,
+    },
+    capture: capture ? {
+      entryId: text(capture.entry_id, "payment_ledger_entries.entry_id"),
+      amount: paid,
+      currency,
+      stripePaymentRef: text(capture.stripe_payment_ref, "payment_ledger_entries.stripe_payment_ref"),
+      stripeEventId: typeof capture.stripe_event_id === "string" ? capture.stripe_event_id : null,
+      occurredAt: isoValue(capture, "occurred_at"),
+    } : null,
+    refunds,
+    cancellationRequests: requests,
+  };
+  return {
+    hash: fingerprint([material]),
+    paid,
+    committed,
+    currency,
+    openRequest: requests.some((request) => request.status === "OPEN"),
+    cancellationRequestStatus: requests.find((request) => request.status === "OPEN")?.status ?? requests.at(-1)?.status ?? null,
+    targetRefund: target ? { id: target.id, kind: target.kind, amount: target.amount, status: target.status, closed: target.closedAt !== null } : null,
+  };
+}
+
+function assertExpectedSnapshot(expected: string | null, actual: string): void {
+  if (expected !== null && expected !== actual) throw new StoreConflictError("The booking or refund changed after support previewed it.");
+}
+
+const fingerprintWithSnapshot = (parts: readonly unknown[], expected: string | null): string => fingerprint(expected === null ? parts : [...parts, expected]);
+
 async function insertRefund(
   client: PoolClient,
   booking: LockedBooking,
   input: { readonly commandId: string; readonly choice: SupportRefundChoice; readonly requestedBy: CancellationActor },
 ): Promise<RefundSubmission> {
   const money = await moneyOf(client, booking);
-  const left = money.paid - money.committed;
-  let kind: "FULL" | "PARTIAL";
-  let refundAmount: number;
-  if (input.choice.kind === "FULL") {
-    // A full refund is the whole payment, once: after any refund the rest goes back as a partial one.
-    if (money.committed > 0) throw new StoreConflictError("Part of this payment was refunded already; refund the rest as a partial refund.");
-    kind = "FULL";
-    refundAmount = money.paid;
-  } else {
-    if (input.choice.amount > left) throw new StoreValidationError("The refund is more than what is left of the payment.");
-    if (input.choice.amount === money.paid) throw new StoreValidationError("A refund of the whole payment is a full refund.");
-    kind = "PARTIAL";
-    refundAmount = input.choice.amount;
-  }
-  if (refundAmount <= 0) throw new StoreConflictError("Nothing is left to refund.");
+  const calculated = refundAmountFor(input.choice, money);
+  const { kind, amount: refundAmount } = calculated;
   const id = randomUUID();
   await client.query(
     `INSERT INTO booking_refunds
@@ -945,9 +1108,86 @@ export class BookingCancellations {
 
   /* ---------- NIHO support (Admin) ---------- */
 
+  /** Read-only confirmation of the exact booking/refund state a support command will compare inside its transaction. */
+  async previewSupportOperation(actor: SupportActor, input: SupportOperationPreviewInput): Promise<SupportOperationPreview> {
+    supportActorOf(actor);
+    if (!input || !(SUPPORT_OPERATION_ACTIONS as readonly string[]).includes(input.action)) {
+      throw new StoreValidationError("action is not a support operation.");
+    }
+    const bookingAction = input.action === "CANCEL" || input.action === "APPROVE_REQUEST" || input.action === "DECLINE_REQUEST" || input.action === "RESOLVE_PAYMENT_REVIEW";
+    const publicBookingId = bookingAction ? publicBookingIdOf((input as { publicBookingId?: string }).publicBookingId ?? "") : null;
+    const rawRefundId = bookingAction ? null : (input as { refundId?: string }).refundId;
+    if (rawRefundId !== null && (typeof rawRefundId !== "string" || !UUID.test(rawRefundId))) throw new StoreValidationError("refundId must be a UUID.");
+    const refundId = rawRefundId?.toLowerCase() ?? null;
+    const refund = input.action === "CANCEL" || input.action === "APPROVE_REQUEST" ? refundChoiceOf(input.refund) : undefined;
+    const located = publicBookingId !== null
+      ? await this.#pool.query<DbRow>(
+        `SELECT provider_id, id::text AS booking_id FROM bookings WHERE public_booking_id = $1::uuid`,
+        [publicBookingId],
+      )
+      : await this.#pool.query<DbRow>(
+        `SELECT r.provider_id, r.booking_id::text AS booking_id FROM booking_refunds r WHERE r.id = $1::uuid`,
+        [refundId],
+      );
+    if (!located.rows[0]) throw new StoreNotFoundError(publicBookingId === null ? "refund" : "guest booking");
+    const providerId = text(located.rows[0].provider_id, "provider_id");
+    const bookingRowId = text(located.rows[0].booking_id, "booking_id");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      if (refundId !== null && !await lockRefund(client, refundId)) throw new StoreNotFoundError("refund");
+      const booking = await lockBooking(client, "b.provider_id = $1 AND b.id = $2", [providerId, bookingRowId]);
+      if (!booking) throw new StoreNotFoundError("guest booking");
+      requireBookingSupportConsent(booking);
+      const snapshot = await supportSnapshot(client, booking, { action: input.action, ...(refund ? { refund } : {}), ...(refundId ? { refundId } : {}) });
+      let refundAmount = 0;
+      let bookingStatusAfter = booking.status;
+      if (input.action === "CANCEL") {
+        if (booking.status !== "CONFIRMED") throw new StoreConflictError("The booking is not cancellable by support.");
+        refundAmount = booking.totalAmount === 0 ? 0 : refundAmountFor(refund!, snapshot).amount;
+        bookingStatusAfter = "CANCELLED";
+      } else if (input.action === "APPROVE_REQUEST") {
+        if (booking.status !== "CONFIRMED" || !snapshot.openRequest) throw new StoreConflictError("The cancellation request is no longer open.");
+        refundAmount = booking.totalAmount === 0 ? 0 : refundAmountFor(refund!, snapshot).amount;
+        bookingStatusAfter = "CANCELLED";
+      } else if (input.action === "DECLINE_REQUEST") {
+        if (booking.status !== "CONFIRMED" || !snapshot.openRequest) throw new StoreConflictError("The cancellation request is no longer open.");
+      } else if (input.action === "RESOLVE_PAYMENT_REVIEW") {
+        if (booking.status !== "PAYMENT_REVIEW") throw new StoreConflictError("The payment is no longer under review.");
+        refundAmount = refundAmountFor({ kind: "FULL" }, snapshot).amount;
+        bookingStatusAfter = "CANCELLED";
+      } else if (input.action === "RETRY_REFUND") {
+        const target = snapshot.targetRefund;
+        if (!target || (target.status !== "REQUESTED" && (target.status !== "FAILED" || target.closed))) {
+          throw new StoreConflictError("The refund cannot be retried in its current state.");
+        }
+        if (target.status === "FAILED") {
+          refundAmount = refundAmountFor(target.kind === "FULL" ? { kind: "FULL" } : { kind: "PARTIAL", amount: target.amount }, snapshot).amount;
+        } else {
+          refundAmount = target.amount;
+        }
+      } else {
+        const target = snapshot.targetRefund;
+        if (!target || target.status !== "FAILED" || target.closed) throw new StoreConflictError("The failed refund is no longer open.");
+      }
+      return {
+        action: input.action,
+        expectedSnapshot: snapshot.hash,
+        publicBookingId: booking.publicBookingId,
+        providerId: booking.providerId,
+        experienceTitle: booking.title,
+        startUtc: booking.startUtc,
+        bookingStatus: booking.status,
+        bookingStatusAfter,
+        refundAmount,
+        currency: snapshot.currency,
+        cancellationRequestStatus: snapshot.cancellationRequestStatus,
+      };
+    });
+  }
+
   /**
    * Support cancels a confirmed booking with a full refund (NIHO's fee given back) or a partial one of the amount it
-   * enters (NIHO's fee kept). The host gets a CANCELLATION push; the guest the email.
+   * enters (NIHO's fee is returned in proportion to either refund). The host gets a CANCELLATION push; the guest the email.
    */
   async cancelAsSupport(actor: SupportActor, publicBookingId: string, input: SupportCancellationInput): Promise<CancellationResult> {
     const actorRef = supportActorOf(actor);
@@ -956,18 +1196,20 @@ export class BookingCancellations {
     const reason = reasonOf(input.reason, SUPPORT_CANCELLATION_REASONS);
     const note = optionalText(input.note, "note", BOOKING_CANCELLATION_LIMITS.noteMax);
     const refund = refundChoiceOf(input.refund);
+    const expectedSnapshot = expectedSnapshotOf(input.expectedSnapshot);
     const providerId = await providerOf(this.#pool, id);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
       const key: CommandKey = {
         commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_CANCEL",
-        fingerprint: fingerprint(["SUPPORT_CANCEL", id, reason, note, refund]),
+        fingerprint: fingerprintWithSnapshot(["SUPPORT_CANCEL", id, reason, note, refund], expectedSnapshot),
       };
       const previous = await previousResult(client, key);
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [providerId, id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
       requireBookingSupportConsent(booking);
+      if (expectedSnapshot !== null) assertExpectedSnapshot(expectedSnapshot, (await supportSnapshot(client, booking, { action: "CANCEL", refund })).hash);
       if (booking.status !== "CONFIRMED") {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
         return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
@@ -989,6 +1231,7 @@ export class BookingCancellations {
     const actorRef = supportActorOf(actor);
     const id = publicBookingIdOf(publicBookingId);
     const commandId = commandIdOf(input?.commandId);
+    const expectedSnapshot = expectedSnapshotOf(input?.expectedSnapshot);
     let parts: unknown[];
     let approve: { refund: SupportRefundChoice; note: string | null } | null = null;
     let message: string | null = null;
@@ -1004,12 +1247,13 @@ export class BookingCancellations {
     const providerId = await providerOf(this.#pool, id);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: String(parts[0]), fingerprint: fingerprint(parts) };
+      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: String(parts[0]), fingerprint: fingerprintWithSnapshot(parts, expectedSnapshot) };
       const previous = await previousResult(client, key);
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [providerId, id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
       requireBookingSupportConsent(booking);
+      if (expectedSnapshot !== null) assertExpectedSnapshot(expectedSnapshot, (await supportSnapshot(client, booking, { action: approve ? "APPROVE_REQUEST" : "DECLINE_REQUEST", ...(approve ? { refund: approve.refund } : {}) })).hash);
       const open = await client.query<DbRow>(
         "SELECT id::text AS id FROM booking_cancellation_requests WHERE provider_id = $1 AND booking_id = $2 AND status = 'OPEN' FOR UPDATE",
         [providerId, booking.rowId],
@@ -1042,19 +1286,21 @@ export class BookingCancellations {
    * is cancelled (no seat was kept) and what Stripe captured goes back in full. The host was never told of it as a
    * booking, so no push; the guest gets the email.
    */
-  async resolvePaymentReview(actor: SupportActor, publicBookingId: string, input: { readonly commandId: string }): Promise<CancellationResult> {
+  async resolvePaymentReview(actor: SupportActor, publicBookingId: string, input: { readonly commandId: string; readonly expectedSnapshot?: string }): Promise<CancellationResult> {
     const actorRef = supportActorOf(actor);
     const id = publicBookingIdOf(publicBookingId);
     const commandId = commandIdOf(input?.commandId);
+    const expectedSnapshot = expectedSnapshotOf(input?.expectedSnapshot);
     const providerId = await providerOf(this.#pool, id);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_RESOLVE_REVIEW", fingerprint: fingerprint(["SUPPORT_RESOLVE_REVIEW", id]) };
+      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_RESOLVE_REVIEW", fingerprint: fingerprintWithSnapshot(["SUPPORT_RESOLVE_REVIEW", id], expectedSnapshot) };
       const previous = await previousResult(client, key);
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [providerId, id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
       requireBookingSupportConsent(booking);
+      if (expectedSnapshot !== null) assertExpectedSnapshot(expectedSnapshot, (await supportSnapshot(client, booking, { action: "RESOLVE_PAYMENT_REVIEW" })).hash);
       if (booking.status !== "PAYMENT_REVIEW") {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
         return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
@@ -1072,16 +1318,17 @@ export class BookingCancellations {
    * the failed one is closed and points to it); one Stripe never answered is sent again as it is (the same key, and
    * the caller looks for it at Stripe first). NOT_CANCELLABLE for a refund in any other state.
    */
-  async retryRefund(actor: SupportActor, refundId: string, input: { readonly commandId: string }): Promise<CancellationResult> {
+  async retryRefund(actor: SupportActor, refundId: string, input: { readonly commandId: string; readonly expectedSnapshot?: string }): Promise<CancellationResult> {
     const actorRef = supportActorOf(actor);
     if (typeof refundId !== "string" || !UUID.test(refundId)) throw new StoreValidationError("refundId must be a UUID.");
     const commandId = commandIdOf(input?.commandId);
+    const expectedSnapshot = expectedSnapshotOf(input?.expectedSnapshot);
     const located = await this.#pool.query<DbRow>("SELECT provider_id FROM booking_refunds WHERE id = $1::uuid", [refundId]);
     if (!located.rows[0]) throw new StoreNotFoundError("refund");
     const providerId = text(located.rows[0].provider_id, "provider_id");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_RETRY_REFUND", fingerprint: fingerprint(["SUPPORT_RETRY_REFUND", refundId.toLowerCase()]) };
+      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_RETRY_REFUND", fingerprint: fingerprintWithSnapshot(["SUPPORT_RETRY_REFUND", refundId.toLowerCase()], expectedSnapshot) };
       const previous = await previousResult(client, key);
       if (previous) {
         const again = await unsubmittedRefunds(client, commandId);
@@ -1098,6 +1345,7 @@ export class BookingCancellations {
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.id = $2", [providerId, row.booking_id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
       requireBookingSupportConsent(booking);
+      if (expectedSnapshot !== null) assertExpectedSnapshot(expectedSnapshot, (await supportSnapshot(client, booking, { action: "RETRY_REFUND", refundId: refundId.toLowerCase() })).hash);
       if (row.status === "REQUESTED") {
         await recordResult(client, key, { outcome: "REFUND_RETRIED", bookingIds });
         return { outcome: "REFUND_RETRIED", repeated: false, bookingIds, refunds: await this.#leaseRequested(client, refundId) };
@@ -1122,16 +1370,18 @@ export class BookingCancellations {
   }
 
   /** Support settled a failed refund by hand (another way, or the guest agreed to none): it leaves the list. */
-  async closeFailedRefund(actor: SupportActor, refundId: string, input: { readonly commandId: string; readonly note: string }): Promise<CancellationResult> {
+  async closeFailedRefund(actor: SupportActor, refundId: string, input: { readonly commandId: string; readonly expectedSnapshot?: string; readonly note: string }): Promise<CancellationResult> {
     const actorRef = supportActorOf(actor);
     if (typeof refundId !== "string" || !UUID.test(refundId)) throw new StoreValidationError("refundId must be a UUID.");
     const commandId = commandIdOf(input?.commandId);
+    const expectedSnapshot = expectedSnapshotOf(input?.expectedSnapshot);
     const note = requiredText(input.note, "note", BOOKING_CANCELLATION_LIMITS.noteMax);
     const located = await this.#pool.query<DbRow>("SELECT provider_id FROM booking_refunds WHERE id = $1::uuid", [refundId]);
     if (!located.rows[0]) throw new StoreNotFoundError("refund");
     const providerId = text(located.rows[0].provider_id, "provider_id");
     return withTransaction(this.#pool, async (client) => {
-      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_CLOSE_REFUND", fingerprint: fingerprint(["SUPPORT_CLOSE_REFUND", refundId.toLowerCase(), note]) };
+      await lockProviderInventory(client, providerId);
+      const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_CLOSE_REFUND", fingerprint: fingerprintWithSnapshot(["SUPPORT_CLOSE_REFUND", refundId.toLowerCase(), note], expectedSnapshot) };
       const previous = await previousResult(client, key);
       if (previous) return { ...previous, repeated: true, refunds: [] };
       const target = await client.query<DbRow>(
@@ -1142,6 +1392,7 @@ export class BookingCancellations {
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.id = $2", [providerId, target.rows[0].booking_id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
       requireBookingSupportConsent(booking);
+      if (expectedSnapshot !== null) assertExpectedSnapshot(expectedSnapshot, (await supportSnapshot(client, booking, { action: "CLOSE_REFUND", refundId: refundId.toLowerCase() })).hash);
       const closed = await client.query<DbRow>(
         `UPDATE booking_refunds r SET closed_at = clock_timestamp(), close_note = $2, updated_at = clock_timestamp()
            FROM bookings b

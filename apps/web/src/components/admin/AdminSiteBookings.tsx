@@ -1,16 +1,32 @@
 "use client";
 
-import { useCallback, useState, type ReactNode, type SyntheticEvent } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { decodeExperienceAdminSupportAdminListResponse, type ExperienceAdminSupportAdminListResponse } from "@niho-experience/api-client/admin-support-case";
 import type { ExperienceSettlementSummary, ExperienceSupportCase, ExperienceSupportNotification, SupportQueue, SupportQueueBooking } from "@niho-experience/experience-store";
 import { SettlementSummaryList } from "@/components/settlement/SettlementSummaryList";
-import { siteBookingOutcome } from "./site-booking-outcome";
+import { siteBookingCommandRejected, siteBookingOutcome, siteBookingPreview, type SiteBookingPreview } from "./site-booking-outcome";
+import {
+  beginContactOperation,
+  beginFinancialExecution,
+  beginFinancialPreview,
+  claimFinancialOperation,
+  contactCommand,
+  finishFinancialPreview,
+  markContactUnknown,
+  markFinancialUnknown,
+  releaseContactOperation,
+  releaseFinancialOperation,
+  resetFinancialForm,
+  type ContactGuestCommand,
+  type LockTransition,
+  type SiteBookingOperationLock,
+} from "./site-booking-operation-lock";
 
 /*
  * サイト予約の取消・返金 (#285 slice 7, docs/guest-booking.md「取消と返金（第7段）」): what NIHO support has to look at
  * among the bookings made on this site, and its actions. Each action is confirmed on the row first and sent with a UUID
  * kept until an answer comes back, so a retry after a lost answer is the same action. After every answer the list is
- * read again. Partial refunds keep NIHO's fee (support enters the amount); full refunds give it back.
+ * read again. Full and partial refunds return NIHO's fee in proportion to the refunded amount.
  */
 
 const API = "/admin/api/site-bookings";
@@ -33,7 +49,7 @@ const ERROR_TEXT: Record<string, string> = {
 };
 
 const REFUND_STATE = {
-  REQUESTED: () => "Stripe の受付待ち（10 分以上。自動の再送は 8 回まで）",
+  REQUESTED: () => "Stripe の受付待ち（10 分以上）",
   PENDING: () => "Stripe の処理中（7 日以上）",
   FAILED: (code: string | null) => `返金に失敗（${code ?? "理由不明"}）`,
 } as const;
@@ -67,7 +83,15 @@ const SUPPORT_OUTCOME_LABEL: Record<string, string> = {
   CANCELLED: "取消済み", DECLINED: "辞退済み", REFUND_RETRIED: "再試行受付", REFUND_CLOSED: "対応終了", NOT_CANCELLABLE: "操作対象外",
 };
 
-function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueueBooking; onSessionExpired: () => void }) {
+function SupportCasePanel({ booking, operationLock, onBeginContact, onContactUnknown, onReleaseContact, onSessionExpired }: {
+  booking: SupportQueueBooking;
+  operationLock: SiteBookingOperationLock | null;
+  onBeginContact: (ownerId: string, existing: ContactGuestCommand | null, input: { readonly publicBookingId: string; readonly message: string }) => ContactGuestCommand | null;
+  onContactUnknown: (ownerId: string, commandId: string) => boolean;
+  onReleaseContact: (ownerId: string, commandId: string) => boolean;
+  onSessionExpired: () => void;
+}) {
+  const ownerId = useId();
   const [caseData, setCaseData] = useState<ExperienceSupportCase | null>(null);
   const [currentAdmin, setCurrentAdmin] = useState<string | null>(null);
   const [roster, setRoster] = useState<ExperienceAdminSupportAdminListResponse | null>(null);
@@ -78,8 +102,13 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
   const [busy, setBusy] = useState(false);
   const [command, setCommand] = useState<Record<string, unknown> | null>(null);
   const [contactText, setContactText] = useState("");
-  const [contactCommand, setContactCommand] = useState<Record<string, unknown> | null>(null);
+  const [contactCommandState, setContactCommandState] = useState<ContactGuestCommand | null>(null);
+  const contactCommandRef = useRef<ContactGuestCommand | null>(null);
   const [message, setMessage] = useState("");
+  const ownsContact = operationLock?.kind === "CONTACT" && operationLock.ownerId === ownerId
+    && operationLock.commandId === contactCommandState?.commandId;
+  const canSendContact = operationLock === null || (ownsContact && operationLock.phase === "UNKNOWN");
+  const operationBlocked = operationLock !== null;
   const load = useCallback(async () => {
     const response = await fetch(`${API}/case?publicBookingId=${encodeURIComponent(booking.publicBookingId)}`, { cache: "no-store", credentials: "same-origin" });
     if (response.status === 401 || response.status === 403) { onSessionExpired(); throw new Error("session"); }
@@ -102,14 +131,14 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
     setRosterState("ready");
   }, [onSessionExpired]);
   const openPanel = () => {
-    if (loaded || busy) return;
+    if (loaded || busy || operationBlocked) return;
     setBusy(true);
     setMessage("");
     void Promise.all([load(), loadRoster()]).catch(() => setMessage("案件または担当候補を読み込めません。通信状態と権限を確認して再度開いてください。"))
       .finally(() => setBusy(false));
   };
   const save = async () => {
-    if (!caseData || busy) return;
+    if (!caseData || busy || operationBlocked) return;
     const next = command ?? { commandId: crypto.randomUUID(), publicBookingId: booking.publicBookingId, expectedRevision: caseData.revision, assignedAdminUserId: assignee.trim() || null, internalMemo: memo.trim() || null };
     setCommand(next);
     setBusy(true);
@@ -139,9 +168,17 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
     } finally { setBusy(false); }
   };
   const sendContact = async () => {
-    if (!contactText.trim() || busy) return;
-    const request = contactCommand ?? { action: "CONTACT_GUEST", commandId: crypto.randomUUID(), publicBookingId: booking.publicBookingId, message: contactText.trim() };
-    setContactCommand(request);
+    const existing = contactCommandRef.current;
+    const contactMessage = existing?.message ?? contactText.trim();
+    if (!contactMessage || busy) return;
+    const request = onBeginContact(ownerId, existing, { publicBookingId: booking.publicBookingId, message: contactMessage });
+    if (!request) {
+      setMessage("進行中の操作結果を先に確認してください。同じ連絡の結果確認だけ再試行できます。");
+      return;
+    }
+    // Fixed synchronously before fetch/await: a second click cannot mint another UUID or payload.
+    contactCommandRef.current = request;
+    setContactCommandState(request);
     setBusy(true);
     setMessage("");
     try {
@@ -149,15 +186,31 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
       const result = await response.json().catch(() => ({})) as { outcome?: string; error?: string };
       if (response.status === 401 || response.status === 403) { onSessionExpired(); return; }
       if (response.ok && result.outcome === "CONTACT_SENT" && siteBookingOutcome(result)) {
-        setContactCommand(null); setContactText(""); await load();
+        if (onReleaseContact(ownerId, request.commandId)) {
+          contactCommandRef.current = null;
+          setContactCommandState(null);
+          setContactText("");
+        }
         setMessage("予約者への連絡をメール配信キューに登録しました。");
+        await load().catch(() => setMessage("予約者への連絡は登録しましたが、操作履歴を再読込できませんでした。"));
       } else if (response.ok) {
+        onContactUnknown(ownerId, request.commandId);
         setMessage("送信結果を確認できません。入力を保持しています。同じ命令IDで照合してください。");
       } else {
-        if (response.status < 500) setContactCommand(null);
+        if (siteBookingCommandRejected(response.status, result)) {
+          if (onReleaseContact(ownerId, request.commandId)) {
+            contactCommandRef.current = null;
+            setContactCommandState(null);
+          }
+        } else {
+          onContactUnknown(ownerId, request.commandId);
+        }
         setMessage(ERROR_TEXT[result.error ?? ""] ?? "送信結果を確認できません。通信後は同じ命令IDで再試行します。");
       }
-    } catch { setMessage("通信できません。再試行すると同じ命令IDで照合します。"); }
+    } catch {
+      onContactUnknown(ownerId, request.commandId);
+      setMessage("通信できません。再試行すると同じ命令IDで照合します。");
+    }
     finally { setBusy(false); }
   };
   if (!booking.supportEligible) return <p className="mt-3 rounded-lg bg-sand p-2 text-xs text-muted">受付時のサポートON同意を確認できない予約です。サポート操作は行えません。</p>;
@@ -169,7 +222,7 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
     <summary className="cursor-pointer font-bold">Admin案件 · 担当・内部メモ・操作履歴</summary>
     {!loaded ? <p className="mt-2 text-sm text-muted">{message || (busy ? "案件を読み込んでいます…" : "開くと案件情報を読み込みます。")}</p> : caseData ? <div className="mt-3 grid gap-2">
       <label className="grid gap-1 text-sm">担当Admin
-        <select className={FIELD} value={assignee} disabled={rosterState !== "ready" || busy || command !== null} onChange={(event) => { setAssignee(event.currentTarget.value); setCommand(null); }}>
+        <select className={FIELD} value={assignee} disabled={rosterState !== "ready" || busy || command !== null || operationBlocked} onChange={(event) => { setAssignee(event.currentTarget.value); setCommand(null); }}>
           <option value="">未割当</option>
           {retainedOutsideRoster ? <option value={retainedAssignee}>現在の担当を維持（候補外）</option> : null}
           {admins.map((admin) => <option key={admin.id} value={admin.id}>{admin.displayName?.trim() || `管理者 ${admin.id}`}</option>)}
@@ -178,13 +231,14 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
       {rosterState === "loading" ? <p className="text-xs text-muted">担当候補を確認しています。</p> : rosterState === "error" ? <div><p className="text-xs text-warn">担当候補を確認できません。内部メモは保存できます。</p><button type="button" disabled={busy} className="mt-1 text-sm font-bold underline" onClick={() => { setBusy(true); void loadRoster().catch(() => setMessage("担当候補を読み込めません。通信状態を確認してください。")).finally(() => setBusy(false)); }}>候補を再読込</button></div> : roster?.truncated ? <p className="text-xs text-muted">担当候補は先頭100名です。候補外の現在担当は維持できます。</p> : null}
       {assignee && currentAdmin ? <p className="text-xs text-muted">{assignee === currentAdmin ? "自分が担当です" : "現在の管理者を担当に設定しています"}</p> : null}
       <label className="grid gap-1 text-sm">内部メモ（ホスト・予約者には共有されません）
-        <textarea className={`${FIELD} py-2`} rows={3} maxLength={5000} value={memo} disabled={busy || command !== null} onChange={(event) => { setMemo(event.currentTarget.value); setCommand(null); }} />
+        <textarea className={`${FIELD} py-2`} rows={3} maxLength={5000} value={memo} disabled={busy || command !== null || operationBlocked} onChange={(event) => { setMemo(event.currentTarget.value); setCommand(null); }} />
       </label>
-      <button type="button" disabled={!changed || busy} className={`${BUTTON} justify-self-start`} onClick={() => void save()}>{busy ? "保存中…" : command ? "同じ操作を再試行" : "案件情報を保存"}</button>
+      <button type="button" disabled={!changed || busy || operationBlocked} className={`${BUTTON} justify-self-start`} onClick={() => void save()}>{busy ? "保存中…" : command ? "同じ操作を再試行" : "案件情報を保存"}</button>
       <label className="grid gap-1 text-sm">予約者へNIHOサポートから連絡（英語・メール配信）
-        <textarea className={`${FIELD} py-2`} rows={3} maxLength={4000} value={contactText} onChange={(event) => { setContactText(event.currentTarget.value); setContactCommand(null); }} />
+        <textarea className={`${FIELD} py-2`} rows={3} maxLength={4000} value={contactText} disabled={busy || operationLock !== null} onChange={(event) => setContactText(event.currentTarget.value)} />
       </label>
-      <button type="button" disabled={!contactText.trim() || busy} className={`${BUTTON} justify-self-start`} onClick={() => void sendContact()}>{busy ? "送っています…" : contactCommand ? "同じ連絡を再試行" : "NIHOサポートとして連絡"}</button>
+      <button type="button" disabled={!(contactCommandState?.message ?? contactText.trim()) || busy || !canSendContact} className={`${BUTTON} justify-self-start`} onClick={() => void sendContact()}>{busy ? "送っています…" : contactCommandState ? "同じ連絡を再試行" : "NIHOサポートとして連絡"}</button>
+      {operationLock !== null && !ownsContact ? <p role="status" className="text-sm text-warn">別の操作結果を先に確認してください。</p> : null}
       {caseData.events.length ? <div><p className="text-xs font-bold text-muted">操作履歴（本文は記録しません）</p><ul className="mt-1 grid gap-1 text-xs text-muted">{caseData.events.map((event, index) => {
         const eventLabel = event.type === "ASSIGNEE_CHANGED" ? "担当変更" : event.type === "GUEST_CONTACT_SENT" ? "予約者へ連絡" : event.type === "SUPPORT_ACTION"
           ? `${SUPPORT_ACTION_LABEL[event.action ?? ""] ?? "支援操作"}${event.outcome ? ` · ${SUPPORT_OUTCOME_LABEL[event.outcome] ?? "結果を記録"}` : ""}`
@@ -220,19 +274,52 @@ function AdminSupportNotifications({ initial, onSessionExpired }: { initial: Exp
 
 type Form = { action: string; key: string; body: Record<string, unknown> } | null;
 
+function previewBody(form: NonNullable<Form>): Record<string, unknown> {
+  const target = typeof form.body.publicBookingId === "string" ? { publicBookingId: form.body.publicBookingId } : { refundId: form.body.refundId };
+  return form.action === "CANCEL" || form.action === "APPROVE_REQUEST"
+    ? { action: form.action, ...target, refund: form.body.refund }
+    : { action: form.action, ...target };
+}
+
 export function AdminSiteBookings({ initial, notifications = [], settlements = [] }: { initial: SupportQueue; notifications?: ExperienceSupportNotification[]; settlements?: ExperienceSettlementSummary[] }) {
+  const financialOwnerId = useId();
   const [queue, setQueue] = useState(initial);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [form, setForm] = useState<Form>(null);
+  const [preview, setPreview] = useState<SiteBookingPreview | null>(null);
+  const [prepared, setPrepared] = useState<Record<string, unknown> | null>(null);
   const [pending, setPending] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [cancelId, setCancelId] = useState("");
+  const operationLockRef = useRef<SiteBookingOperationLock | null>(null);
+  const [operationLock, setOperationLock] = useState<SiteBookingOperationLock | null>(null);
+
+  const applyLockTransition = useCallback((transition: LockTransition): boolean => {
+    if (!transition.accepted) return false;
+    operationLockRef.current = transition.lock;
+    setOperationLock(transition.lock);
+    return true;
+  }, []);
+  const beginContact = useCallback((ownerId: string, existing: ContactGuestCommand | null, input: { readonly publicBookingId: string; readonly message: string }): ContactGuestCommand | null => {
+    // Do not mint a UUID while another panel or a financial form owns the synchronous gate.
+    if (existing === null && operationLockRef.current !== null) return null;
+    const candidate = contactCommand(existing, input, () => crypto.randomUUID());
+    return applyLockTransition(beginContactOperation(operationLockRef.current, ownerId, candidate.commandId)) ? candidate : null;
+  }, [applyLockTransition]);
+  const contactUnknown = useCallback((ownerId: string, commandId: string): boolean =>
+    applyLockTransition(markContactUnknown(operationLockRef.current, ownerId, commandId)), [applyLockTransition]);
+  const releaseContact = useCallback((ownerId: string, commandId: string): boolean =>
+    applyLockTransition(releaseContactOperation(operationLockRef.current, ownerId, commandId)), [applyLockTransition]);
 
   const expireSession = useCallback(() => {
+    operationLockRef.current = null;
+    setOperationLock(null);
     setSessionExpired(true);
     setQueue({ cancellationRequests: [], paymentReviews: [], refunds: [] });
     setForm(null);
+    setPreview(null);
+    setPrepared(null);
     setPending(null);
     setCancelId("");
   }, []);
@@ -247,9 +334,40 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
     }
   };
 
+  const loadPreview = async () => {
+    if (!form || pending || !applyLockTransition(beginFinancialPreview(operationLockRef.current, financialOwnerId))) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API}/preview`, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(previewBody(form)) });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (response.status === 401 || response.status === 403) { expireSession(); return; }
+      if (!response.ok) {
+        setPreview(null); setPrepared(null);
+        setMessage({ tone: "error", text: ERROR_TEXT[result.error ?? ""] ?? "最新の状態を確認できませんでした。入力を確かめて再度お試しください。" });
+        return;
+      }
+      const checked = siteBookingPreview(result);
+      const expectedTarget = String(form.body.publicBookingId ?? "");
+      if (!checked || checked.action !== form.action || (expectedTarget && checked.publicBookingId !== expectedTarget)) {
+        setPreview(null); setPrepared(null);
+        setMessage({ tone: "error", text: "確認結果を検証できません。操作は実行していません。" });
+        return;
+      }
+      setPreview(checked);
+      setPrepared({ ...form.body, action: form.action, commandId: crypto.randomUUID(), expectedSnapshot: checked.expectedSnapshot });
+    } catch {
+      setPreview(null); setPrepared(null);
+      setMessage({ tone: "error", text: "最新の状態を確認できませんでした。通信状態を確かめてください。" });
+    } finally {
+      applyLockTransition(finishFinancialPreview(operationLockRef.current, financialOwnerId));
+      setBusy(false);
+    }
+  };
+
   const send = async () => {
-    if (!form || busy) return;
-    const request = pending ?? { ...form.body, action: form.action, commandId: crypto.randomUUID() };
+    if (!form || !prepared || !applyLockTransition(beginFinancialExecution(operationLockRef.current, financialOwnerId))) return;
+    const request = pending ?? prepared;
     setPending(request);
     setBusy(true);
     setMessage(null);
@@ -258,21 +376,31 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
       const result = await response.json().catch(() => ({})) as { outcome?: string; error?: string; refunds?: { status: string }[] };
       if (response.status === 401 || response.status === 403) { expireSession(); return; }
       if (!response.ok) {
-        // A refusal is final for this command; a server failure may be retried with the same one.
-        if (response.status < 500) setPending(null);
-        setMessage({ tone: "error", text: ERROR_TEXT[result.error ?? ""] ?? "送れませんでした。もう一度お試しください（同じ操作として送り直します）" });
+        // Only a typed business rejection permits a new confirmation; route/proxy failures retain this command.
+        if (siteBookingCommandRejected(response.status, result)) {
+          applyLockTransition(resetFinancialForm(operationLockRef.current, financialOwnerId));
+          setPending(null); setPreview(null); setPrepared(null);
+        } else {
+          applyLockTransition(markFinancialUnknown(operationLockRef.current, financialOwnerId));
+        }
+        setMessage({ tone: "error", text: response.status === 409 ? "状態または返金額が確認後に変わりました。最新の状態と金額をもう一度確認してください。" : ERROR_TEXT[result.error ?? ""] ?? "送れませんでした。もう一度お試しください（同じ操作として送り直します）" });
         return;
       }
       const outcome = siteBookingOutcome(result);
       if (!outcome || result.outcome === "CONTACT_SENT") {
+        applyLockTransition(markFinancialUnknown(operationLockRef.current, financialOwnerId));
         setMessage({ tone: "error", text: "操作結果を確認できません。入力を保持しています。同じ操作として照合してください。" });
         return;
       }
+      applyLockTransition(releaseFinancialOperation(operationLockRef.current, financialOwnerId));
       setPending(null);
+      setPreview(null);
+      setPrepared(null);
       setForm(null);
       setMessage(outcome);
       await refresh();
     } catch {
+      applyLockTransition(markFinancialUnknown(operationLockRef.current, financialOwnerId));
       setMessage({ tone: "error", text: "通信できませんでした。もう一度お試しください（同じ操作として送り直します）" });
     } finally {
       setBusy(false);
@@ -280,17 +408,29 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
   };
 
   const open = (action: string, key: string, body: Record<string, unknown>) => {
-    if (busy || pending) {
+    if (busy || pending || !applyLockTransition(claimFinancialOperation(operationLockRef.current, financialOwnerId))) {
       setMessage({ tone: "error", text: "送信済みの操作結果を先に確認してください。確認が終わるまで別の操作は始められません。" });
       return;
     }
+    setPreview(null);
+    setPrepared(null);
     setPending(null);
     setMessage(null);
     setForm({ action, key, body });
   };
   const set = (patch: Record<string, unknown>) => {
-    if (busy || pending) return;
+    if (busy || pending || operationLockRef.current?.kind !== "FINANCIAL" || operationLockRef.current.ownerId !== financialOwnerId || operationLockRef.current.phase !== "FORM") return;
+    setPreview(null);
+    setPrepared(null);
     setForm((current) => (current ? { ...current, body: { ...current.body, ...patch } } : current));
+  };
+
+  const ownsFinancialLock = operationLock?.kind === "FINANCIAL" && operationLock.ownerId === financialOwnerId;
+  const canContinueFinancial = ownsFinancialLock && (operationLock.phase === "FORM" || operationLock.phase === "EXECUTION_UNKNOWN");
+  const cancelFinancialForm = () => {
+    if (operationLockRef.current?.phase !== "FORM") return;
+    if (!applyLockTransition(releaseFinancialOperation(operationLockRef.current, financialOwnerId))) return;
+    setForm(null); setPreview(null); setPrepared(null); setPending(null);
   };
 
   /** The confirmation of the open action, under its row. */
@@ -298,27 +438,33 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
     form?.key === key ? (
       <div className="mt-3 rounded-xl border border-line bg-sand/50 p-3">
         <p className="font-extrabold">{title}</p>
-        <fieldset disabled={busy || pending !== null} className="mt-2 grid gap-2"><legend className="sr-only">{title}</legend>{fields}</fieldset>
+        <fieldset disabled={busy || pending !== null || operationLock?.phase !== "FORM"} className="mt-2 grid gap-2"><legend className="sr-only">{title}</legend>{fields}</fieldset>
+        {preview ? <div className="mt-3 rounded-lg border border-line bg-canvas p-3 text-sm">
+          <p className="font-extrabold">最新の状態と金額</p>
+          <p>{preview.experienceTitle} · {japanTime(preview.startUtc)}</p>
+          <p>予約番号 {preview.publicBookingId} · 提供者 {preview.providerId}</p>
+          <p>状態 {preview.bookingStatus} → {preview.bookingStatusAfter} · 今回の返金 {yen(preview.refundAmount)}</p>
+        </div> : null}
         {pending ? <p role="status" className="mt-2 text-sm text-ink-soft">送信済みの操作結果を確認しています。確認が終わるまで内容の変更や中止はできません。</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className={DANGER} disabled={busy} onClick={() => void send()}>{busy ? "確認しています…" : pending ? "同じ操作の結果を確認" : label}</button>
-          <button type="button" className={BUTTON} disabled={busy || pending !== null} onClick={() => { setForm(null); setPending(null); }}>やめる</button>
+          <button type="button" className={preview ? DANGER : BUTTON} disabled={busy || !canContinueFinancial} onClick={() => void (pending || preview ? send() : loadPreview())}>{busy ? "確認しています…" : pending ? "同じ操作の結果を確認" : preview ? label : "最新の状態と金額を確認"}</button>
+          <button type="button" className={BUTTON} disabled={busy || pending !== null || operationLock?.phase !== "FORM"} onClick={cancelFinancialForm}>やめる</button>
         </div>
       </div>
     ) : null;
 
   if (sessionExpired) return <main className="mx-auto max-w-4xl px-4 py-8"><h1 className="font-display text-2xl font-medium">Adminの再ログインが必要です</h1><p role="status" className="mt-2 text-ink-soft">権限またはログインの有効期限が切れました。再ログインすると予約・案件・入力を読み直せます。</p></main>;
 
-  const refundFields = (paid: number) => (
+  const refundFields = () => (
     <>
       <fieldset className="flex flex-wrap gap-3">
         <legend className="sr-only">返金</legend>
-        <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind !== "PARTIAL"} onChange={() => set({ refund: { kind: "FULL" } })} />全額 {yen(paid)}（NIHO 手数料も返す）</label>
+        <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind !== "PARTIAL"} onChange={() => set({ refund: { kind: "FULL" } })} />全額（最新の支払額は次に確認）</label>
         <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind === "PARTIAL"} onChange={() => set({ refund: { kind: "PARTIAL", amount: 0 } })} />一部（NIHO 手数料も額に比例して返す）</label>
       </fieldset>
       {(form?.body.refund as { kind?: string } | undefined)?.kind === "PARTIAL" ? (
-        <label className="grid gap-1">返金額（円、{yen(paid)} 未満）
-          <input type="number" min={1} max={paid - 1} inputMode="numeric" className={FIELD} value={String((form?.body.refund as { amount?: number }).amount || "")} onChange={(event) => set({ refund: { kind: "PARTIAL", amount: Number(event.currentTarget.value) } })} />
+        <label className="grid gap-1">返金額（円、最新の返金可能残額以下）
+          <input type="number" min={1} inputMode="numeric" className={FIELD} value={String((form?.body.refund as { amount?: number }).amount || "")} onChange={(event) => set({ refund: { kind: "PARTIAL", amount: Number(event.currentTarget.value) } })} />
         </label>
       ) : null}
     </>
@@ -344,12 +490,12 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
           {queue.cancellationRequests.map((item) => (
             <li key={item.requestId} className="rounded-2xl border border-line bg-canvas p-4">
               <BookingFacts booking={item} extra={<p className="text-xs text-muted">依頼 {japanTime(item.requestedAtUtc)}</p>} />
-              <SupportCasePanel booking={item} onSessionExpired={expireSession} />
+              <SupportCasePanel booking={item} operationLock={operationLock} onBeginContact={beginContact} onContactUnknown={contactUnknown} onReleaseContact={releaseContact} onSessionExpired={expireSession} />
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" disabled={!item.supportEligible} className={BUTTON} onClick={() => open("APPROVE_REQUEST", `approve-${item.requestId}`, { publicBookingId: item.publicBookingId, refund: { kind: "FULL" } })}>取り消して返金する</button>
-                <button type="button" disabled={!item.supportEligible} className={BUTTON} onClick={() => open("DECLINE_REQUEST", `decline-${item.requestId}`, { publicBookingId: item.publicBookingId, message: "" })}>お断りする</button>
+                <button type="button" disabled={!item.supportEligible || operationLock !== null} className={BUTTON} onClick={() => open("APPROVE_REQUEST", `approve-${item.requestId}`, { publicBookingId: item.publicBookingId, refund: { kind: "FULL" } })}>取り消して返金する</button>
+                <button type="button" disabled={!item.supportEligible || operationLock !== null} className={BUTTON} onClick={() => open("DECLINE_REQUEST", `decline-${item.requestId}`, { publicBookingId: item.publicBookingId, message: "" })}>お断りする</button>
               </div>
-              {confirmPanel(`approve-${item.requestId}`, "依頼のとおり取り消します", <>{refundFields(item.totalAmount)}{noteField("メモ（任意・予約者には届きません）", "note")}</>, "取り消して返金する")}
+              {confirmPanel(`approve-${item.requestId}`, "依頼のとおり取り消します", <>{refundFields()}{noteField("メモ（任意・予約者には届きません）", "note")}</>, "取り消して返金する")}
               {confirmPanel(`decline-${item.requestId}`, "依頼をお断りします（予約は確定のまま）", noteField("予約者へのメッセージ（英語・メールで届きます）", "message", true), "お断りを送る")}
             </li>
           ))}
@@ -363,9 +509,9 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
           {queue.paymentReviews.map((item) => (
             <li key={item.publicBookingId} className="rounded-2xl border border-line bg-canvas p-4">
               <BookingFacts booking={item} extra={<p className="text-xs text-muted">受領 {yen(item.paidAmount)}{item.paidAtUtc ? ` · ${japanTime(item.paidAtUtc)}` : ""}</p>} />
-              <SupportCasePanel booking={item} onSessionExpired={expireSession} />
-              <div className="mt-2"><button type="button" disabled={!item.supportEligible} className={BUTTON} onClick={() => open("RESOLVE_PAYMENT_REVIEW", `review-${item.publicBookingId}`, { publicBookingId: item.publicBookingId })}>全額を返金して取り消す</button></div>
-              {confirmPanel(`review-${item.publicBookingId}`, `${yen(item.paidAmount)} を全額返金して取り消します`, null, "返金して取り消す")}
+              <SupportCasePanel booking={item} operationLock={operationLock} onBeginContact={beginContact} onContactUnknown={contactUnknown} onReleaseContact={releaseContact} onSessionExpired={expireSession} />
+              <div className="mt-2"><button type="button" disabled={!item.supportEligible || operationLock !== null} className={BUTTON} onClick={() => open("RESOLVE_PAYMENT_REVIEW", `review-${item.publicBookingId}`, { publicBookingId: item.publicBookingId })}>全額を返金して取り消す</button></div>
+              {confirmPanel(`review-${item.publicBookingId}`, "最新の受領額を全額返金して取り消します", null, "返金して取り消す")}
             </li>
           ))}
         </ul>
@@ -381,16 +527,16 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
                 booking={item}
                 extra={<p className="text-xs font-bold text-danger">{REFUND_STATE[item.refundStatus](item.failureCode)} · {item.kind === "FULL" ? "全額" : "一部"} {yen(item.amount)} · {japanTime(item.createdAtUtc)}</p>}
               />
-              <SupportCasePanel booking={item} onSessionExpired={expireSession} />
+              <SupportCasePanel booking={item} operationLock={operationLock} onBeginContact={beginContact} onContactUnknown={contactUnknown} onReleaseContact={releaseContact} onSessionExpired={expireSession} />
               {item.refundStatus === "PENDING" ? (
                 <p className="mt-2 text-ink-soft">Stripe の Dashboard で、販売者の口座のこの返金の状態を確かめてください。</p>
               ) : (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" disabled={!item.supportEligible} className={BUTTON} onClick={() => open("RETRY_REFUND", `retry-${item.refundId}`, { refundId: item.refundId })}>{item.refundStatus === "FAILED" ? "もう一度返金する" : "もう一度送る"}</button>
-                  {item.refundStatus === "FAILED" ? <button type="button" disabled={!item.supportEligible} className={BUTTON} onClick={() => open("CLOSE_REFUND", `close-${item.refundId}`, { refundId: item.refundId, note: "" })}>手作業で済ませた</button> : null}
+                  <button type="button" disabled={!item.supportEligible || operationLock !== null} className={BUTTON} onClick={() => open("RETRY_REFUND", `retry-${item.refundId}`, { refundId: item.refundId })}>{item.refundStatus === "FAILED" ? "もう一度返金する" : "もう一度送る"}</button>
+                  {item.refundStatus === "FAILED" ? <button type="button" disabled={!item.supportEligible || operationLock !== null} className={BUTTON} onClick={() => open("CLOSE_REFUND", `close-${item.refundId}`, { refundId: item.refundId, note: "" })}>手作業で済ませた</button> : null}
                 </div>
               )}
-              {confirmPanel(`retry-${item.refundId}`, `${yen(item.amount)} の返金を Stripe へ送ります`, null, "送る")}
+              {confirmPanel(`retry-${item.refundId}`, "対象の返金を Stripe へ送ります", null, "送る")}
               {confirmPanel(`close-${item.refundId}`, "この返金を一覧から外します（Stripe では返金しません）", noteField("どう済ませたか（必須）", "note", true), "閉じる")}
             </li>
           ))}
@@ -402,9 +548,9 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
         <p className="text-ink-soft">確定している予約を、全額または一部の返金で取り消します。ホストに通知が届きます。</p>
         <div className="mt-2 flex flex-wrap gap-2">
           <label className="grid min-w-72 flex-1 gap-1">予約番号
-            <input className={FIELD} value={cancelId} onChange={(event) => setCancelId(event.currentTarget.value.trim())} />
+            <input className={FIELD} value={cancelId} disabled={operationLock !== null} onChange={(event) => setCancelId(event.currentTarget.value.trim())} />
           </label>
-          <button type="button" className={`${BUTTON} self-end`} disabled={!cancelId} onClick={() => open("CANCEL", "cancel-by-id", { publicBookingId: cancelId, refund: { kind: "FULL" }, reason: "", note: "" })}>取り消す</button>
+          <button type="button" className={`${BUTTON} self-end`} disabled={!cancelId || operationLock !== null} onClick={() => open("CANCEL", "cancel-by-id", { publicBookingId: cancelId, refund: { kind: "FULL" }, reason: "", note: "" })}>取り消す</button>
         </div>
         {confirmPanel(
           "cancel-by-id",

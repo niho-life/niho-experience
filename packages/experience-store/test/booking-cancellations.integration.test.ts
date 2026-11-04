@@ -507,7 +507,7 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
     });
   });
 
-  it("lets support refund in part (NIHO's fee kept) or in full, answer requests, and resolve late payments", async () => {
+  it("lets support refund in part (NIHO's fee returned proportionally) or in full, answer requests, and resolve late payments", async () => {
     await withSchema(async (context) => {
       const { pool, cancellations, guests } = context;
       const part = await paid(context);
@@ -562,6 +562,75 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.equal((await cancellations.supportQueue()).paymentReviews.length, 0);
       const notReview = await cancellations.resolvePaymentReview(support, late.publicBookingId, { commandId: randomUUID() });
       assert.equal(notReview.outcome, "NOT_CANCELLABLE");
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("previews support ledger amounts, executes the expected snapshot, and replays the same UUID after its own state change", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const fullBooking = await paid(context, { guestEmail: "preview-full@example.com" });
+      const fullPreview = await cancellations.previewSupportOperation(support, { action: "CANCEL", publicBookingId: fullBooking.publicBookingId, refund: { kind: "FULL" } });
+      assert.deepEqual(
+        [fullPreview.publicBookingId, fullPreview.bookingStatus, fullPreview.bookingStatusAfter, fullPreview.refundAmount, fullPreview.currency, fullPreview.expectedSnapshot.length],
+        [fullBooking.publicBookingId, "CONFIRMED", "CANCELLED", 7500, "JPY", 64],
+      );
+      const commandId = randomUUID();
+      const input = { commandId, expectedSnapshot: fullPreview.expectedSnapshot, reason: "OTHER" as const, refund: { kind: "FULL" as const } };
+      const first = await cancellations.cancelAsSupport(support, fullBooking.publicBookingId, input);
+      assert.deepEqual([first.outcome, first.repeated, first.refunds[0]?.amount], ["CANCELLED", false, 7500]);
+      const repeated = await cancellations.cancelAsSupport(support, fullBooking.publicBookingId, input);
+      assert.deepEqual([repeated.outcome, repeated.repeated, repeated.refunds[0]?.refundId], ["CANCELLED", true, first.refunds[0]?.refundId]);
+      assert.equal(Number((await pool.query("SELECT count(*) AS count FROM booking_cancellation_commands WHERE command_id=$1::uuid", [commandId])).rows[0].count), 1);
+      assert.equal((await refunds(pool, fullBooking.publicBookingId)).length, 1);
+
+      const partialBooking = await paid(context, { guestEmail: "preview-partial@example.com" });
+      const partialPreview = await cancellations.previewSupportOperation(support, { action: "CANCEL", publicBookingId: partialBooking.publicBookingId, refund: { kind: "PARTIAL", amount: 3000 } });
+      assert.equal(partialPreview.refundAmount, 3000);
+      const partial = await cancellations.cancelAsSupport(support, partialBooking.publicBookingId, {
+        commandId: randomUUID(), expectedSnapshot: partialPreview.expectedSnapshot, reason: "HOST_UNAVAILABLE", refund: { kind: "PARTIAL", amount: 3000 },
+      });
+      assert.deepEqual([partial.refunds[0]?.kind, partial.refunds[0]?.amount], ["PARTIAL", 3000]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("rejects stale support snapshots before recording a command or refund when another Admin or refund update wins", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context, { guestEmail: "stale-admin@example.com" });
+      const stale = await cancellations.previewSupportOperation(support, { action: "CANCEL", publicBookingId: made.publicBookingId, refund: { kind: "FULL" } });
+      const winning = await cancellations.previewSupportOperation({ nihoUserId: "support-admin-2" }, { action: "CANCEL", publicBookingId: made.publicBookingId, refund: { kind: "PARTIAL", amount: 1000 } });
+      await cancellations.cancelAsSupport({ nihoUserId: "support-admin-2" }, made.publicBookingId, {
+        commandId: randomUUID(), expectedSnapshot: winning.expectedSnapshot, reason: "OTHER", refund: { kind: "PARTIAL", amount: 1000 },
+      });
+      const before = await pool.query("SELECT (SELECT count(*) FROM booking_cancellation_commands)::int AS commands, (SELECT count(*) FROM booking_refunds)::int AS refunds");
+      await assert.rejects(() => cancellations.cancelAsSupport(support, made.publicBookingId, {
+        commandId: randomUUID(), expectedSnapshot: stale.expectedSnapshot, reason: "OTHER", refund: { kind: "FULL" },
+      }), StoreConflictError);
+      const after = await pool.query("SELECT (SELECT count(*) FROM booking_cancellation_commands)::int AS commands, (SELECT count(*) FROM booking_refunds)::int AS refunds");
+      assert.deepEqual(after.rows[0], before.rows[0]);
+
+      const refundBooking = await paid(context, { guestEmail: "stale-refund@example.com" });
+      const refund = (await cancellations.cancelAsHost(ownerA, refundBooking.publicBookingId, { commandId: randomUUID(), reason: "WEATHER" })).refunds[0]!;
+      const retry = await cancellations.previewSupportOperation(support, { action: "RETRY_REFUND", refundId: refund.refundId });
+      await cancellations.recordRefundSubmission(refund.refundId, { kind: "accepted", stripeRefundRef: "re_test_stale_preview", status: "pending" });
+      const beforeRetry = await pool.query("SELECT (SELECT count(*) FROM booking_cancellation_commands)::int AS commands, (SELECT count(*) FROM booking_refunds)::int AS refunds");
+      await assert.rejects(() => cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID(), expectedSnapshot: retry.expectedSnapshot }), StoreConflictError);
+      const afterRetry = await pool.query("SELECT (SELECT count(*) FROM booking_cancellation_commands)::int AS commands, (SELECT count(*) FROM booking_refunds)::int AS refunds");
+      assert.deepEqual(afterRetry.rows[0], beforeRetry.rows[0]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("refuses support preview for support-OFF and legacy consent snapshots", async () => {
+    await withSchema(async (context) => {
+      const made = await paid(context, { guestEmail: "support-off-preview@example.com" });
+      await assert.rejects(() => context.cancellations.previewSupportOperation(support, { action: "CANCEL", publicBookingId: made.publicBookingId, refund: { kind: "FULL" } }), StoreAccessDeniedError);
+    });
+    await withSchema(async (context) => {
+      const made = await paid(context, { guestEmail: "legacy-preview@example.com" });
+      await context.pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+      await context.pool.query("UPDATE bookings SET pricing_snapshot=pricing_snapshot #- '{platformFee,supportConsentVersion}' #- '{platformFee,supportAgreementRevision}' WHERE public_booking_id=$1", [made.publicBookingId]);
+      await context.pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+      await assert.rejects(() => context.cancellations.previewSupportOperation(support, { action: "CANCEL", publicBookingId: made.publicBookingId, refund: { kind: "FULL" } }), StoreAccessDeniedError);
     }, "FREE_UNTIL_48H", undefined, true);
   });
 
