@@ -13,10 +13,10 @@ import {
 } from "@niho-experience/experience-store";
 import { guestReviewRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
-import { loadHostProviders, readHostSession } from "@/lib/host/server";
+import { loadHostProviders, loadHostProvidersFresh, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
 import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
-import { reviewReplyToEnglish } from "@/lib/translation/prompts";
+import { guestMessageToJapanese, reviewReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
@@ -43,6 +43,8 @@ export const GUEST_REVIEW_REPLY_FAILED_TEXT = "返信を公開できませんで
 export const GUEST_REVIEW_REPLY_CHANGED_TEXT = "返信がほかの画面で変わっています。レビューを読み込み直してください";
 export const GUEST_REVIEW_REPORT_FAILED_TEXT = "報告できませんでした。時間をおいて、もう一度お試しください。";
 export const GUEST_REVIEW_ALREADY_REPORTED_TEXT = "すでに報告されています";
+export const GUEST_REVIEW_TRANSLATION_UNAVAILABLE_TEXT = "日本語で読む機能は準備中です。原文を読みながら返信できます";
+export const GUEST_REVIEW_TRANSLATION_FAILED_TEXT = "日本語にできませんでした。原文を読みながら返信するか、もう一度お試しください";
 
 /** The list reads this many reviews at a time, the latest first (続きを見る reads the next ones). */
 const LIST_LIMIT = 100;
@@ -56,8 +58,8 @@ function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRo
 }
 
 /**
- * One stored review as レビュー shows it: the guest's words (translation still null until NIHO makes
- * one), dated in Japan. Published when written, so never 公開前.
+ * One stored review as レビュー shows it: the guest's words and an optional explicitly requested
+ * Japanese translation, dated in Japan. Published when written, so never 公開前.
  */
 export function hostReviewFrom(review: HostGuestReview): HostReview {
   const language = review.language === "JA" ? "ja" : "en";
@@ -147,12 +149,12 @@ export async function loadGuestReviews(provider: Pick<HostProvider, "id" | "niho
 type OwnerCheck = { ok: true; store: GuestReviewRepository; actor: HostActor } | { ok: false; message: string };
 
 /** A usable session, the store, and NIHO saying this account owns the provider. */
-async function asOwner(providerId: string, failed: string): Promise<OwnerCheck> {
+async function asOwner(providerId: string, failed: string, fresh = false): Promise<OwnerCheck> {
   const session = await readHostSession();
   if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const store = guestReviewRepository();
   if (!store) return { ok: false, message: failed };
-  const providers = await loadHostProviders();
+  const providers = await (fresh ? loadHostProvidersFresh() : loadHostProviders());
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? failed : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
@@ -205,6 +207,52 @@ export async function draftGuestReviewEnglish(
   return result.ok ? { ok: true, message: "英語にしました", english: result.text } : { ok: false, message: REPLY_DRAFT_FAILED_TEXT };
 }
 
+/** The review as the store answers it now, and its reply's revision for the next correction. */
+type Saved = { review: HostReview; revision: number };
+
+/**
+ * 日本語で読む: read the OWNER's review from the store, send only its public body to the existing
+ * faithful translator, then re-check both NIHO and Experience OWNER authority before the set-once
+ * body_ja write. Japanese originals and cached translations never call the translator.
+ */
+export async function readGuestReviewInJapanese(
+  providerId: string,
+  reviewId: string,
+  translator: () => Translator | null = () => anthropicTranslator({ timeoutMs: REPLY_DRAFT_TIMEOUT_MS }),
+): Promise<HostActionResult<Saved>> {
+  const owner = await asOwner(providerId, GUEST_REVIEW_TRANSLATION_FAILED_TEXT);
+  if (!owner.ok) return owner;
+  let review: HostGuestReview;
+  try {
+    review = await owner.store.getReview(owner.actor, reviewId);
+  } catch (error) {
+    if (error instanceof StoreAccessDeniedError) return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
+    if (error instanceof StoreNotFoundError) return { ok: false, message: GUEST_REVIEW_MISSING_TEXT };
+    if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+    return { ok: false, message: GUEST_REVIEW_TRANSLATION_FAILED_TEXT };
+  }
+  if (review.language === "JA" || review.bodyJa !== null) {
+    return { ok: true, message: review.bodyJa ? "保存済みの日本語を表示しました" : "日本語の原文を表示しています", review: hostReviewFrom(review), revision: revisionOf(review) };
+  }
+  const translate = translator();
+  if (!translate) return { ok: false, message: GUEST_REVIEW_TRANSLATION_UNAVAILABLE_TEXT };
+  const result = await translate(guestMessageToJapanese(review.body));
+  if (!result.ok) return { ok: false, message: GUEST_REVIEW_TRANSLATION_FAILED_TEXT };
+
+  // Translation can take 15 seconds. Do not let authority captured before it authorize the write.
+  const currentOwner = await asOwner(providerId, GUEST_REVIEW_TRANSLATION_FAILED_TEXT, true);
+  if (!currentOwner.ok) return currentOwner;
+  try {
+    const saved = await currentOwner.store.setBodyJapaneseOnce(currentOwner.actor, reviewId, result.text);
+    return { ok: true, message: "日本語にしました", review: hostReviewFrom(saved), revision: revisionOf(saved) };
+  } catch (error) {
+    if (error instanceof StoreAccessDeniedError) return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
+    if (error instanceof StoreNotFoundError) return { ok: false, message: GUEST_REVIEW_MISSING_TEXT };
+    if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
+    return { ok: false, message: GUEST_REVIEW_TRANSLATION_FAILED_TEXT };
+  }
+}
+
 function failure(error: unknown, kind: "reply" | "report"): { ok: false; message: string } {
   if (error instanceof StoreAccessDeniedError) return { ok: false, message: GUEST_REVIEW_OWNER_ONLY_TEXT };
   // Another provider's, or one operations hid.
@@ -214,9 +262,6 @@ function failure(error: unknown, kind: "reply" | "report"): { ok: false; message
   if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };
   return { ok: false, message: kind === "reply" ? GUEST_REVIEW_REPLY_FAILED_TEXT : GUEST_REVIEW_REPORT_FAILED_TEXT };
 }
-
-/** The review as the store answers it now, and its reply's revision for the next correction. */
-type Saved = { review: HostReview; revision: number };
 
 /**
  * 返信を公開する / 返信を直す, on any shown review: the English the experience page shows, with the

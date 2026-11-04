@@ -1,5 +1,6 @@
 import "server-only";
 import { NO_JOURNEY_EXTRAS, usableConditions, usableFaq, type ExperienceReviewSummary, type JourneyDetailExtras, type JourneyReviews } from "@niho-experience/api-client";
+import { GUEST_REVIEW_LIMITS } from "@niho-experience/experience-store";
 import { config } from "./config";
 import { guestQuestionRepository, guestReviewRepository } from "./experience/store-server";
 
@@ -42,9 +43,10 @@ async function questionsOpen(slug: string): Promise<boolean> {
 }
 
 /**
- * http mode: 予約者のレビュー (#104) of an experience the experience DB has PUBLISHED, once
- * EXPERIENCE_GUEST_REVIEWS_ENABLED is on (docs/guest-reviews.md): the newest and the summary of all.
- * Null while it is off, without the DB, or for an experience not published there: no section, no "New".
+ * http mode: 予約者のレビュー (#104) inside the same visible native-publication or unclaimed legacy
+ * scope as the public experience, once EXPERIENCE_GUEST_REVIEWS_ENABLED is on (docs/guest-reviews.md):
+ * the newest and the summary of all. Null while it is off, without the DB, or outside that public
+ * scope: no section, no "New".
  * A DB that cannot be read is `unavailable`, which the page tells apart from no reviews.
  */
 export async function getLiveReviews(slug: string): Promise<JourneyReviews | null> {
@@ -59,14 +61,47 @@ export async function getLiveReviews(slug: string): Promise<JourneyReviews | nul
   }
 }
 
+/** The catalog may exceed a single store request's count or total-character bound. */
+function reviewSummaryBatches(slugs: readonly string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let characters = 0;
+  for (const slug of new Set(slugs)) {
+    if (batch.length > 0 && (batch.length >= GUEST_REVIEW_LIMITS.publicSummarySlugsMax
+      || characters + slug.length > GUEST_REVIEW_LIMITS.publicSummarySlugCharactersMax)) {
+      batches.push(batch);
+      batch = [];
+      characters = 0;
+    }
+    batch.push(slug);
+    characters += slug.length;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
 /** The review summaries of the listed experiences, for the cards. Only experiences that have reviews are in the map. */
 export async function getReviewSummaries(slugs: readonly string[]): Promise<Map<string, ExperienceReviewSummary>> {
   const summaries = new Map<string, ExperienceReviewSummary>();
-  if (config.journeyApi !== "mock") return summaries;
-  const { reviewsResponseFor } = await import("@niho-experience/api-client/mock");
-  for (const slug of slugs) {
-    const { summary } = reviewsResponseFor(slug, 1);
-    if (summary.count > 0) summaries.set(slug, summary);
+  if (config.journeyApi === "mock") {
+    const { reviewsResponseFor } = await import("@niho-experience/api-client/mock");
+    for (const slug of slugs) {
+      const { summary } = reviewsResponseFor(slug, 1);
+      if (summary.count > 0) summaries.set(slug, summary);
+    }
+    return summaries;
+  }
+  const reviews = guestReviewRepository();
+  if (!reviews || slugs.length === 0) return summaries;
+  try {
+    for (const batch of reviewSummaryBatches(slugs)) {
+      for (const [slug, summary] of await reviews.listPublishedReviewSummaries(batch)) {
+        if (summary.count > 0) summaries.set(slug, summary);
+      }
+    }
+  } catch (error) {
+    // A failed aggregate is neither zero reviews nor a reason to fabricate a rating line.
+    console.error("Experience card guest review summaries failed", { error: error instanceof Error ? error.name : typeof error });
   }
   return summaries;
 }

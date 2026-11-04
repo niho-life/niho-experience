@@ -21,7 +21,14 @@ function Stars({ rating }: { rating: number }) {
 }
 
 /** One written review. `showStars` is off while there are fewer than three reviews: then only the count and the words are shown. */
-function ReviewItem({ item, showStars }: { item: ExperienceReview; showStars: boolean }) {
+type ReviewLocale = "en" | "ja";
+const COPY = {
+  en: { booked: "Booked on NIHO", reply: "Reply from", showAll: (count: number) => `Show all ${count} reviews`, all: "All reviews", close: "Close", error: "Reviews can't be loaded right now", retry: "Try again", loading: "Loading reviews…", first: "be one of the first", empty: "Reviews appear here after guests who booked share how it went.", fromGuests: (count: number) => `${countLabel(count)} from guests who booked`, liked: "What guests liked" },
+  ja: { booked: "NIHOで予約", reply: "返信", showAll: (count: number) => `${count}件すべて見る`, all: "すべてのレビュー", close: "閉じる", error: "現在レビューを読み込めません", retry: "もう一度試す", loading: "レビューを読み込んでいます…", first: "最初のレビューをお待ちしています", empty: "予約したゲストのレビューがここに表示されます。", fromGuests: (count: number) => `予約したゲストの${countLabel(count, "ja")}`, liked: "よかった点" },
+} as const;
+
+function ReviewItem({ item, showStars, locale }: { item: ExperienceReview; showStars: boolean; locale: ReviewLocale }) {
+  const copy = COPY[locale];
   const where = [item.originLabel, monthYear(item.publishedAt)].filter(Boolean).join(" · ");
   return (
     <article className="py-5">
@@ -38,7 +45,7 @@ function ReviewItem({ item, showStars }: { item: ExperienceReview; showStars: bo
           {item.fromBooking ? (
             <span className="inline-flex items-center gap-1 text-[0.75rem] font-extrabold text-moss">
               <HandIcon name="check" className="size-4" />
-              Booked on NIHO
+              {copy.booked}
             </span>
           ) : null}
         </p>
@@ -46,8 +53,8 @@ function ReviewItem({ item, showStars }: { item: ExperienceReview; showStars: bo
       <p className="mt-2 whitespace-pre-line">{item.body}</p>
       {item.reply ? (
         <div className="mt-3 rounded-xl bg-sand px-3.5 py-3 text-[0.875rem] text-ink-soft">
-          <b className="block text-[0.8125rem] font-extrabold text-ink">Reply from {item.reply.hostName}</b>
-          {item.reply.body}
+          <b className="block text-[0.8125rem] font-extrabold text-ink">{locale === "ja" ? `${item.reply.hostName}からの${copy.reply}` : `${copy.reply} ${item.reply.hostName}`}</b>
+          <p lang="en">{item.reply.body}</p>
         </div>
       ) : null}
     </article>
@@ -60,7 +67,8 @@ type All = { status: "idle" | "loading" | "error" } | { status: "ready"; items: 
  * "Show all N reviews": a dialog like the photos, read when it is opened (the page itself carries only the newest):
  * from this site's route, which reads the experience DB (#104), or from the preview's mock.
  */
-function AllReviews({ slug, count, showStars, preview, nihoWebOrigin }: { slug: string; count: number; showStars: boolean; preview: boolean; nihoWebOrigin: string }) {
+function AllReviews({ slug, count, showStars, preview, nihoWebOrigin, locale }: { slug: string; count: number; showStars: boolean; preview: boolean; nihoWebOrigin: string; locale: ReviewLocale }) {
+  const copy = COPY[locale];
   const dialog = useRef<HTMLDialogElement>(null);
   const headingId = useId();
   const [all, setAll] = useState<All>({ status: "idle" });
@@ -83,7 +91,7 @@ function AllReviews({ slug, count, showStars, preview, nihoWebOrigin }: { slug: 
 
   return (
     <>
-      <button type="button" onClick={open} className={buttonClass("secondary", "mt-4 w-full sm:w-auto")}>Show all {count} reviews</button>
+      <button type="button" onClick={open} className={buttonClass("secondary", "mt-4 w-full sm:w-auto")}>{copy.showAll(count)}</button>
       <dialog
         ref={dialog}
         aria-labelledby={headingId}
@@ -91,20 +99,20 @@ function AllReviews({ slug, count, showStars, preview, nihoWebOrigin }: { slug: 
         className="m-auto max-h-[90dvh] w-[min(40rem,calc(100vw_-_2rem))] overflow-y-auto rounded-3xl bg-white p-0 text-ink backdrop:bg-black/60"
       >
         <div className="sticky top-0 z-[2] flex items-center justify-between gap-4 border-b border-line bg-white px-6 py-4">
-          <h2 id={headingId} className="text-2xl">All reviews</h2>
-          <button type="button" onClick={close} className="rounded-full px-4 py-2 text-sm font-extrabold shadow-[inset_0_0_0_1.5px_var(--color-ink)] hover:bg-sand">Close</button>
+          <h2 id={headingId} className="text-2xl">{copy.all}</h2>
+          <button type="button" onClick={close} className="rounded-full px-4 py-2 text-sm font-extrabold shadow-[inset_0_0_0_1.5px_var(--color-ink)] hover:bg-sand">{copy.close}</button>
         </div>
         <div className="px-6 pb-6">
           {all.status === "ready" ? (
             <ul className="divide-y divide-line">
-              {all.items.map((item) => <li key={item.id}><ReviewItem item={item} showStars={showStars} /></li>)}
+              {all.items.map((item) => <li key={item.id}><ReviewItem item={item} showStars={showStars} locale={locale} /></li>)}
             </ul>
           ) : all.status === "error" ? (
             <div className="pt-5">
-              <Notice role="alert" tone="warn" title="Reviews can't be loaded right now" action={<button type="button" onClick={() => void load()} className="font-bold text-moss underline underline-offset-4">Try again</button>} />
+              <Notice role="alert" tone="warn" title={copy.error} action={<button type="button" onClick={() => void load()} className="font-bold text-moss underline underline-offset-4">{copy.retry}</button>} />
             </div>
           ) : (
-            <p role="status" className="pt-5 text-muted">Loading reviews…</p>
+            <p role="status" className="pt-5 text-muted">{copy.loading}</p>
           )}
         </div>
       </dialog>
@@ -113,22 +121,22 @@ function AllReviews({ slug, count, showStars, preview, nihoWebOrigin }: { slug: 
 }
 
 /**
- * The content of the "Reviews" section (the heading comes with the presentation's section). Epic #103 / niho-experience#104,
- * niho-coliving/niho-app#19314: reviews come from guests who booked, NIHO checks them before they appear, and the host
- * may reply once. Mock only until NIHO's review API exists (`config.journeyApi`).
+ * The content of the "Reviews" section (the heading comes with the presentation's section). Reviews from guests who
+ * booked are public when submitted; an OWNER may publish one English reply. HTTP mode reads the Experience store.
  */
-export function ReviewsSection({ slug, reviews, preview, nihoWebOrigin }: { slug: string; reviews: JourneyReviews; preview: boolean; nihoWebOrigin: string }) {
+export function ReviewsSection({ slug, reviews, preview, nihoWebOrigin, locale = "en" }: { slug: string; reviews: JourneyReviews; preview: boolean; nihoWebOrigin: string; locale?: ReviewLocale }) {
   const router = useRouter();
+  const copy = COPY[locale];
   const display = reviewDisplay(reviews);
   if (reviews.status === "unavailable") {
-    return <Notice role="alert" tone="warn" title="Reviews can't be loaded right now" action={<button type="button" onClick={() => router.refresh()} className="font-bold text-moss underline underline-offset-4">Try again</button>} />;
+    return <Notice role="alert" tone="warn" title={copy.error} action={<button type="button" onClick={() => router.refresh()} className="font-bold text-moss underline underline-offset-4">{copy.retry}</button>} />;
   }
   const { summary, items } = reviews;
   if (display.kind === "none") {
     return (
       <div className="rounded-[18px] border border-dashed border-line-strong p-5 text-center">
-        <span className="hand block text-[1.5rem]">be one of the first</span>
-        <p className="mt-1 text-[0.9375rem] text-ink-soft">Reviews appear here after guests who booked share how it went.</p>
+        <span className="hand block text-[1.5rem]">{copy.first}</span>
+        <p className="mt-1 text-[0.9375rem] text-ink-soft">{copy.empty}</p>
       </div>
     );
   }
@@ -141,22 +149,22 @@ export function ReviewsSection({ slug, reviews, preview, nihoWebOrigin }: { slug
             <span className="font-display text-[3rem] leading-none font-light">{averageLabel(display.average)}</span>
             <div>
               <Stars rating={display.average} />
-              <p className="text-[0.8125rem] text-muted">{countLabel(display.count)} from guests who booked</p>
+              <p className="text-[0.8125rem] text-muted">{copy.fromGuests(display.count)}</p>
             </div>
           </div>
           {summary.tags.length ? (
-            <ul className="mt-3.5 flex flex-wrap gap-2" aria-label="What guests liked">
+            <ul className="mt-3.5 flex flex-wrap gap-2" aria-label={copy.liked}>
               {summary.tags.map((tag) => <li key={tag.label} className="rounded-full bg-sand px-3 py-1 text-[0.8125rem] font-bold text-ink-soft">{tag.label} · {tag.count}</li>)}
             </ul>
           ) : null}
         </div>
       ) : (
-        <p className="font-extrabold">{countLabel(summary.count)} from guests who booked</p>
+        <p className="font-extrabold">{copy.fromGuests(summary.count)}</p>
       )}
       <ul className="mt-2 divide-y divide-line">
-        {items.map((item) => <li key={item.id}><ReviewItem item={item} showStars={rated} /></li>)}
+        {items.map((item) => <li key={item.id}><ReviewItem item={item} showStars={rated} locale={locale} /></li>)}
       </ul>
-      {summary.count > items.length ? <AllReviews slug={slug} count={summary.count} showStars={rated} preview={preview} nihoWebOrigin={nihoWebOrigin} /> : null}
+      {summary.count > items.length ? <AllReviews slug={slug} count={summary.count} showStars={rated} preview={preview} nihoWebOrigin={nihoWebOrigin} locale={locale} /> : null}
     </>
   );
 }

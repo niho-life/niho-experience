@@ -164,6 +164,7 @@ export type {
   HostGuestReviewPage,
   HostGuestReviewProductSummary,
   PublicGuestReview,
+  PublicGuestReviewSummary,
   PublicGuestReviews,
   SubmitGuestReviewInput,
 } from "./guest-reviews.ts";

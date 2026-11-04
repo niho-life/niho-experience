@@ -25,17 +25,21 @@ export function reviewDisplay(reviews: JourneyReviews | null): ReviewDisplay {
   return reviews.status === "unavailable" ? { kind: "unavailable" } : summaryDisplay(reviews.summary);
 }
 
-export const countLabel = (count: number) => `${count} ${count === 1 ? "review" : "reviews"}`;
+export const countLabel = (count: number, locale: "en" | "ja" = "en") => locale === "ja" ? `${count}件のレビュー` : `${count} ${count === 1 ? "review" : "reviews"}`;
 /** One decimal, as shown: 4.92 → "4.9". */
 export const averageLabel = (average: number) => (Math.round(average * 10) / 10).toFixed(1);
 
 /** The line under the title: "★ 4.9 · 12 reviews" (link to the reviews), "2 reviews" (link), or the "New" badge. Nothing when there is no review feature or the read failed. */
-export function reviewHeadline(display: ReviewDisplay): DetailReviewHeadlineV1 | null {
+export function reviewHeadline(display: ReviewDisplay, locale: "en" | "ja" = "en"): DetailReviewHeadlineV1 | null {
   switch (display.kind) {
     case "rated":
-      return { label: `★ ${averageLabel(display.average)} · ${countLabel(display.count)}`, accessibleLabel: `Rated ${averageLabel(display.average)} out of 5 from ${countLabel(display.count)}. Go to the reviews`, href: "#reviews" };
+      return locale === "ja"
+        ? { label: `★ ${averageLabel(display.average)} · ${countLabel(display.count, locale)}`, accessibleLabel: `5点満点中${averageLabel(display.average)}点、${countLabel(display.count, locale)}。レビューへ移動`, href: "#reviews" }
+        : { label: `★ ${averageLabel(display.average)} · ${countLabel(display.count)}`, accessibleLabel: `Rated ${averageLabel(display.average)} out of 5 from ${countLabel(display.count)}. Go to the reviews`, href: "#reviews" };
     case "few":
-      return { label: countLabel(display.count), accessibleLabel: `${countLabel(display.count)}. Go to the reviews`, href: "#reviews" };
+      return locale === "ja"
+        ? { label: countLabel(display.count, locale), accessibleLabel: `${countLabel(display.count, locale)}。レビューへ移動`, href: "#reviews" }
+        : { label: countLabel(display.count), accessibleLabel: `${countLabel(display.count)}. Go to the reviews`, href: "#reviews" };
     case "none":
       return { label: "New", isNew: true };
     default:
@@ -44,18 +48,20 @@ export function reviewHeadline(display: ReviewDisplay): DetailReviewHeadlineV1 |
 }
 
 /** The card's line: only experiences that have reviews. "★ 4.9 · 12", or "2 reviews" under three. */
-export function cardReviewLine(summary: ExperienceReviewSummary | null | undefined): { text: string; label: string } | null {
+export function cardReviewLine(summary: ExperienceReviewSummary | null | undefined, locale: "en" | "ja" = "en"): { text: string; label: string } | null {
   if (!summary) return null;
   const display = summaryDisplay(summary);
-  if (display.kind === "rated") return { text: `★ ${averageLabel(display.average)} · ${display.count}`, label: `Rated ${averageLabel(display.average)} out of 5 from ${countLabel(display.count)}` };
-  if (display.kind === "few") return { text: countLabel(display.count), label: countLabel(display.count) };
+  if (display.kind === "rated") return locale === "ja"
+    ? { text: `★ ${averageLabel(display.average)} · ${display.count}`, label: `5点満点中${averageLabel(display.average)}点、${countLabel(display.count, locale)}` }
+    : { text: `★ ${averageLabel(display.average)} · ${display.count}`, label: `Rated ${averageLabel(display.average)} out of 5 from ${countLabel(display.count)}` };
+  if (display.kind === "few") return { text: countLabel(display.count, locale), label: countLabel(display.count, locale) };
   return null;
 }
 
 /** Adds the review line to the cards that have one. */
-export function withReviewLines(cards: CardModel[], summaries: ReadonlyMap<string, ExperienceReviewSummary>): CardModel[] {
+export function withReviewLines(cards: CardModel[], summaries: ReadonlyMap<string, ExperienceReviewSummary>, locale: "en" | "ja" = "en"): CardModel[] {
   return cards.map((card) => {
-    const line = cardReviewLine(summaries.get(card.slug));
+    const line = cardReviewLine(summaries.get(card.slug), locale);
     return line ? { ...card, reviewLine: line } : card;
   });
 }
