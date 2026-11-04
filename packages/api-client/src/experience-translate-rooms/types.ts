@@ -9,6 +9,12 @@ export type ExperienceTranslateRoomCreatedResponse = Schemas["ExperienceProvider
 export type ExperienceTranslateRoomParticipant = Schemas["ExperienceProviderTranslateRoomParticipant"];
 export type ExperienceTranslateRoomStatusResponse = Schemas["ExperienceProviderTranslateRoomStatus"];
 export type ExperienceTranslateRoomEndResponse = Schemas["TranslateRoomStateResult"];
+export type StandaloneTranslateLanguage = Schemas["TranslateLanguage"];
+export type StandaloneTranslateInvite = Schemas["StandaloneTranslateInvite"];
+export type StandaloneTranslateInviteResult = Schemas["StandaloneTranslateInviteResult"];
+export type StandaloneTranslateRoom = Schemas["StandaloneTranslateRoom"];
+export type StandaloneTranslateRoomCreated = Schemas["StandaloneTranslateRoomCreated"];
+export type StandaloneTranslateRoomCurrent = Schemas["StandaloneTranslateRoomCurrent"];
 
 export type ExperienceTranslateRoomsFailure =
   | { ok: false; kind: "invalid_request" }
@@ -23,3 +29,4 @@ export type ExperienceTranslateRoomsResult<T> = { ok: true; data: T } | Experien
 
 export const EXPERIENCE_TRANSLATE_ROOM_STATES = ["waiting", "active", "paused", "ended"] as const satisfies readonly ExperienceTranslateRoomState[];
 export const EXPERIENCE_TRANSLATE_PARTICIPANT_ROLES = ["host", "guest"] as const satisfies readonly ExperienceTranslateParticipantRole[];
+export const STANDALONE_TRANSLATE_LANGUAGES = ["ja", "en"] as const satisfies readonly StandaloneTranslateLanguage[];

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT } from "../src/contract-meta.ts";
 import { EXPERIENCE_TRANSLATE_PARTICIPANT_ROLES, EXPERIENCE_TRANSLATE_ROOM_STATES } from "../src/experience-translate-rooms/types.ts";
+import { isExperienceTranslateRoomsSchema } from "../src/experience-translate-rooms/schema.ts";
 import { generateContractTypes } from "../scripts/gen-types.ts";
 
 type ContractDocument = {
@@ -14,6 +15,13 @@ type ContractDocument = {
 };
 
 describe("experience translate rooms selected contract", () => {
+  it("予約なしcurrentの空状態を受け入れ、資格情報の混入を拒否する", () => {
+    expect(isExperienceTranslateRoomsSchema("StandaloneTranslateRoomCurrent", { room: null })).toBe(true);
+    expect(isExperienceTranslateRoomsSchema("StandaloneTranslateRoomCurrent", { room: null, ticket: "synthetic" })).toBe(false);
+    expect(isExperienceTranslateRoomsSchema("StandaloneTranslateRoomCreateRequest", { hostLanguage: "ja", ownerId: "synthetic" })).toBe(false);
+    expect(isExperienceTranslateRoomsSchema("StandaloneTranslateRoomCreateRequest", { hostLanguage: "fr" })).toBe(false);
+  });
+
   it("pins NIHO's selected export, its version and the generated types", async () => {
     const name = "experience-translate-rooms-api.openapi.json";
     const body = await readFile(new URL(`../contract/${name}`, import.meta.url));
@@ -31,7 +39,7 @@ describe("experience translate rooms selected contract", () => {
     expect(manifest.sourceCommit).toMatch(/^[0-9a-f]{40}$/);
     expect(manifest).toMatchObject({ version: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.version, sourceIssue: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.sourceIssue, sourceCommit: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.sourceCommit, sha256: hash, status: "agreed-not-deployed", deploymentStatus: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.deploymentStatus });
     expect(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.status).toBe("agreed-not-deployed");
-    expect(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.deploymentStatus).toBe("stg-candidate-source-hash-verified");
+    expect(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.deploymentStatus).toBe("not-deployed");
     expect(await readFile(new URL("../src/generated/experience-translate-rooms-openapi.ts", import.meta.url), "utf8")).toBe(
       await generateContractTypes("experience-translate-rooms"),
     );
@@ -43,6 +51,12 @@ describe("experience translate rooms selected contract", () => {
     const site = "/api/experience-providers/{providerId}/site-bookings/{bookingId}/translate-rooms";
     expect(Object.keys(document.paths).sort()).toEqual([
       legacy, `${legacy}/{roomId}`, `${legacy}/{roomId}/end`, site, `${site}/{roomId}`, `${site}/{roomId}/end`,
+      "/api/experience-providers/{providerId}/translate-rooms",
+      "/api/experience-providers/{providerId}/translate-rooms/current",
+      "/api/experience-providers/{providerId}/translate-rooms/{roomId}",
+      "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/host",
+      "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/guest",
+      "/api/experience-providers/{providerId}/translate-rooms/{roomId}/end",
     ].sort());
     for (const root of [legacy, site]) {
       expect(Object.keys(document.paths[root] ?? {})).toEqual(["parameters", "post"]);

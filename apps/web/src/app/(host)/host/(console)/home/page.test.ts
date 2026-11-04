@@ -35,6 +35,7 @@ vi.mock("@/host/home-server", () => ({ loadHomeTodos: (...args: unknown[]) => st
 vi.mock("@/host/calendar-server", () => ({ loadHostCalendar: (...args: unknown[]) => state.loadHostCalendar!(...args) }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => false }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
+vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () => true }));
 
 import HostHomePage from "./page";
 import { HostHomeTodos } from "@/components/host/HostHomeTodos";

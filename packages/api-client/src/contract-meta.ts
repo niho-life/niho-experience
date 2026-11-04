@@ -109,12 +109,12 @@ export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
  * runtime read-backと実予約create/poll/endの受入まではHTTP flagを開かない。
  */
 export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
-  version: "1.0.0",
-  sourceIssue: "niho-coliving/niho-app#19446",
-  sourceCommit: "5ed6ebac62b5f14dd0d114d7893bc0099d9df776",
-  sha256: "08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8e",
+  version: "1.1.0",
+  sourceIssue: "niho-coliving/niho-app#19797",
+  sourceCommit: "8a9c79b82341094fa44620b06f78097e76ef3114",
+  sha256: "e080dbfef26e8188002b434fa43c939867e80eb5fd5d347f81eb9bf3e34c80bc",
   status: "agreed-not-deployed",
-  deploymentStatus: "stg-candidate-source-hash-verified",
+  deploymentStatus: "not-deployed",
 } as const;
 
 /** 予約に関わる時刻の基準。表示も日本時間（Asia/Tokyo）で行う。 */
