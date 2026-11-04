@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
 import { HostSubHeader } from "./HostSubHeader";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, PageHead } from "./ui";
@@ -41,7 +42,7 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
   const [notice, setNotice] = useState("");
   const product = products.find((item) => item.id === productId) ?? null;
 
-  async function loadProducts() {
+  const loadProducts = useCallback(async () => {
     setLoading(true); setError("");
     try {
       const response = await fetch("/host/api/products", { cache: "no-store" });
@@ -52,9 +53,9 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
       setProductId((current) => value.products!.some((item) => item.id === current) ? current : value.products![0]?.id ?? "");
     } catch (reason) { setError(reason instanceof Error ? reason.message : guideMessage(500)); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  async function loadGuide(id: string) {
+  const loadGuide = useCallback(async (id: string) => {
     if (!id) { setSaved(null); setDraft(BLANK); return; }
     setLoading(true); setError(""); setNotice("");
     try {
@@ -66,12 +67,18 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
       setDraft(value.bookingGuide.guide ?? { ...BLANK, photoAssetId: products.find((item) => item.id === id)?.media[0]?.id ?? null });
     } catch (reason) { setSaved(null); setError(reason instanceof Error ? reason.message : guideMessage(500)); }
     finally { setLoading(false); }
-  }
+  }, [products]);
 
-  useEffect(() => { void loadProducts(); }, []);
-  useEffect(() => { if (!loading) void loadGuide(productId); // product selection changes only after the list read
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId]);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => { if (active) void loadProducts(); });
+    return () => { active = false; };
+  }, [loadProducts]);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => { if (active) void loadGuide(productId); });
+    return () => { active = false; };
+  }, [loadGuide, productId]);
 
   function change<K extends keyof Guide>(key: K, value: Guide[K]) { setDraft((current) => ({ ...current, [key]: value })); }
 
@@ -111,7 +118,7 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
           <label className="text-sm font-bold">地図URL<input className={field} type="url" maxLength={2048} value={draft.mapUrl ?? ""} onChange={(event) => change("mapUrl", event.target.value || null)} /></label>
           <label className="text-sm font-bold">集合場所の写真<select className={field} value={draft.photoAssetId ?? ""} onChange={(event) => change("photoAssetId", event.target.value || null)}><option value="">写真を選んでください</option>{product.media.map((photo) => <option key={photo.id} value={photo.id}>{photo.altText || "写真"}</option>)}</select></label>
           {!product.media.length ? <p className="text-sm text-ink-soft">選べる権利確認済みの写真がありません。体験編集から写真を登録してから設定してください。</p> : null}
-          {draft.photoAssetId ? <img src={`/host/api/products/${encodeURIComponent(product.id)}/media/${encodeURIComponent(draft.photoAssetId)}`} alt="選択中の集合場所の写真" className="max-h-72 w-fit max-w-full rounded-xl object-cover" referrerPolicy="no-referrer" /> : null}
+          {draft.photoAssetId ? <Image src={`/host/api/products/${encodeURIComponent(product.id)}/media/${encodeURIComponent(draft.photoAssetId)}`} alt="選択中の集合場所の写真" width={1200} height={800} unoptimized className="max-h-72 w-fit max-w-full rounded-xl object-cover" referrerPolicy="no-referrer" /> : null}
           <label className="text-sm font-bold">持ち物（1行に1つ）<textarea className={field} rows={4} maxLength={4000} value={draft.itemsToBring.join("\n")} onChange={(event) => change("itemsToBring", event.target.value.split("\n"))} /></label>
           <label className="text-sm font-bold">雨天時の案内<textarea className={field} rows={3} maxLength={2000} value={draft.weatherPlan} onChange={(event) => change("weatherPlan", event.target.value)} /></label>
           {!owner ? <p className="text-sm text-ink-soft">閲覧のみです。保存はオーナーが行えます。</p> : null}
