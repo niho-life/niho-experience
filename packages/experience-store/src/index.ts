@@ -13,6 +13,8 @@ export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOc
 export { ExperienceStore } from "./repository.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "./experience-publication.ts";
 export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
+export { ProviderMediaCleanupRepository } from "./public-media-cleanup.ts";
+export type { ClaimedProviderMediaCleanup } from "./public-media-cleanup.ts";
 export type {
   ExternalSellerDisclosureInput,
   HostSellerDisclosure,
