@@ -12,12 +12,12 @@ import {
 } from "./notifications";
 import type { HostNotificationItem, HostNotificationSettings } from "./types";
 
-/** NIHO's answer as niho-app spec §17.4 has it: the seven keys in order, the ones the host cannot stop on and locked. */
+/** The host-facing notification set: the keys in order, with only guest messages, summaries and reviews stoppable. */
 const AS_NIHO_ANSWERS: HostNotificationItem[] = NOTIFICATIONS.map(({ key, stoppable }) => ({ key, enabled: true, locked: !stoppable }));
 const SETTINGS: HostNotificationSettings = { email: { addresses: ["owner@example.com"] }, items: AS_NIHO_ANSWERS };
 
 describe("notification definitions", () => {
-  it("lists NIHO's seven notifications in its order, with their words, and only three can be stopped", () => {
+  it("lists host notifications in order, with their words, and only three can be stopped", () => {
     expect(NOTIFICATIONS.map(({ key, label, when, stoppable }) => [key, label, when, stoppable])).toEqual([
       ["NEW_BOOKING", "新しい予約・申込", "承認待ちの申込と予約の確定 · すぐに", false],
       ["APPROVAL_DEADLINE", "承認の期限が近い", "期限の 6 時間前と 1 時間前", false],
@@ -25,6 +25,7 @@ describe("notification definitions", () => {
       ["GUEST_MESSAGE", "予約前の質問・予約者からの連絡", "日本語訳つきで届きます", true],
       ["DAY_BEFORE_SUMMARY", "前日の参加者のまとめ", "毎日 18:00 · 翌日に確定の予約があるときだけ", true],
       ["NEW_REVIEW", "新しいレビュー", "投稿されたとき · すぐに", true],
+      ["EMAIL_DELIVERY_FAILED", "予約者へのメールの不達", "相手のメールサーバーが不達を返したとき", false],
       ["LISTING_REVIEW", "掲載と審査の結果", "掲載の承認・差し戻し・停止", false],
     ]);
     expect(NOTIFICATIONS.filter((definition) => definition.stoppable).map((definition) => definition.key)).toEqual([...STOPPABLE_NOTIFICATION_KEYS]);
@@ -41,6 +42,7 @@ describe("notificationRows", () => {
       ["GUEST_MESSAGE", true, false],
       ["DAY_BEFORE_SUMMARY", true, false],
       ["NEW_REVIEW", false, false],
+      ["EMAIL_DELIVERY_FAILED", true, true],
       ["LISTING_REVIEW", true, true],
     ]);
   });
@@ -59,6 +61,7 @@ describe("notificationRows", () => {
       ["GUEST_MESSAGE", false, false],
       ["DAY_BEFORE_SUMMARY", true, false],
       ["NEW_REVIEW", false, false],
+      ["EMAIL_DELIVERY_FAILED", true, true],
       ["LISTING_REVIEW", true, true],
     ]);
     expect(notificationRows([])).toEqual(notificationRows(AS_NIHO_ANSWERS));
@@ -99,7 +102,7 @@ describe("changing notifications", () => {
 });
 
 describe("notificationPanelView", () => {
-  it("shows the owner the addresses (read-only) and the seven switches; the preview lets them be tried", () => {
+  it("shows the owner the addresses (read-only) and the notification choices; the preview lets them be tried", () => {
     const view = notificationPanelView(SETTINGS, "OWNER", "preview");
     expect(view).toMatchObject({ kind: "owner", preparing: false, addresses: ["owner@example.com"], addressText: "NIHO からの通知はこのメールに届きます" });
     expect(view.kind === "owner" && view.rows).toEqual(notificationRows(AS_NIHO_ANSWERS));

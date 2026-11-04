@@ -61,7 +61,8 @@ const facts = (n: number): BookingConfirmationEmail => ({
   cancellationWindowMinutesBeforeStart: null, cancellationRefundBasisPoints: 0,
   hostDisplayName: "Sample Host",
 });
-const confirmationFor = (n: number, email: BookingConfirmationEmail | null = facts(n), attempts = 1): ClaimedBookingConfirmation => ({ id: String(n), attempts, email });
+const deliveryRefFor = (n: number) => `ex1_${n.toString(16).padStart(32, "0")}`;
+const confirmationFor = (n: number, email: BookingConfirmationEmail | null = facts(n), attempts = 1): ClaimedBookingConfirmation => ({ id: String(n), deliveryRef: deliveryRefFor(n), attempts, email });
 const translationFor = (n: number, attempts = 1): ClaimedGuestTranslation => ({
   id: String(100 + n), attempts, messageId: `00000000-0000-4000-8000-00000000010${n}`, text: `Sample question ${n}: is there a vegetarian option?`,
 });
@@ -149,8 +150,8 @@ beforeEach(() => {
 describe("runExperienceJobs", () => {
   it("sends a review invitation only for a currently eligible attendance claim", async () => {
     const rows = [
-      { id: "91", attempts: 1, email: null },
-      { id: "92", attempts: 1, email: { providerId: "provider-a", bookingId: "42", guestEmail: "guest@example.com", guestName: "Sample Guest", experienceTitle: "Synthetic walk" } },
+      { id: "91", deliveryRef: deliveryRefFor(91), attempts: 1, email: null },
+      { id: "92", deliveryRef: deliveryRefFor(92), attempts: 1, email: { providerId: "provider-a", bookingId: "42", guestEmail: "guest@example.com", guestName: "Sample Guest", experienceTitle: "Synthetic walk" } },
     ];
     const outbox = {
       claimReviewInvitations: vi.fn(async () => ({ invitations: rows.splice(0, 1), abandoned: 0 })),
@@ -315,7 +316,7 @@ describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => 
     publicBookingId: facts(n).publicBookingId, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`,
     experienceTitle: "Synthetic walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   });
-  const linkFor = (n: number, email: BookingLinkEmail | null = linkFacts(n), attempts = 1): ClaimedBookingLink => ({ id: String(200 + n), attempts, email });
+  const linkFor = (n: number, email: BookingLinkEmail | null = linkFacts(n), attempts = 1): ClaimedBookingLink => ({ id: String(200 + n), deliveryRef: deliveryRefFor(200 + n), attempts, email });
   function linksOneAtATime(items: ClaimedBookingLink[], abandoned = 0) {
     let first = true;
     return async (): Promise<BookingLinkClaim> => {
@@ -429,7 +430,7 @@ describe("runExperienceJobs › private meeting guide email (#376)", () => {
     mapUrl: "https://maps.example.test/synthetic", photoAssetId: "00000000-0000-4000-8000-000000000401",
     itemsToBring: ["Water bottle"], weatherPlan: "Move indoors in heavy rain.",
   };
-  const row: ClaimedBookingMeetingGuide = { id: "701", attempts: 1, email };
+  const row: ClaimedBookingMeetingGuide = { id: "701", deliveryRef: deliveryRefFor(701), attempts: 1, email };
 
   it("sends the captured guide with a private photo and a fresh booking-page grant", async () => {
     const access = { issueBookingAccessGrant: vi.fn(async () => ({ token: TOKEN, expiresAtUtc: "2026-12-01T00:00:00.000Z" })), purgeExpiredAccess: vi.fn(async () => 0) };
@@ -551,7 +552,7 @@ describe("the notices of cancellations and refunds (#285 slice 7)", () => {
     experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
     hostDisplayName: "Sample Host",
   });
-  const noticeFor = (n: number, email: BookingNoticeEmail | null, attempts = 1) => ({ id: String(300 + n), attempts, email });
+  const noticeFor = (n: number, email: BookingNoticeEmail | null, attempts = 1) => ({ id: String(300 + n), deliveryRef: deliveryRefFor(300 + n), attempts, email });
   function noticesOneAtATime(items: ReturnType<typeof noticeFor>[], abandoned = 0) {
     let first = true;
     return async (): Promise<BookingNoticeClaim> => {

@@ -6,7 +6,7 @@ import { withTransaction } from "./transaction.ts";
 import type { HostActor } from "./types.ts";
 import { assertStoreIdentifier } from "./validation.ts";
 
-/** Every notification a provider gets (#109), in the order 設定 › 通知 lists them. */
+/** Every notification a provider gets, in the order 設定 › 通知 lists them. */
 export const HOST_NOTIFICATION_KEYS = [
   "NEW_BOOKING",
   "APPROVAL_DEADLINE",
@@ -14,6 +14,7 @@ export const HOST_NOTIFICATION_KEYS = [
   "GUEST_MESSAGE",
   "DAY_BEFORE_SUMMARY",
   "NEW_REVIEW",
+  "EMAIL_DELIVERY_FAILED",
   "LISTING_REVIEW",
 ] as const;
 export type HostNotificationKey = (typeof HOST_NOTIFICATION_KEYS)[number];
@@ -74,7 +75,7 @@ export class ProviderNotificationSettings {
     this.#pool = pool;
   }
 
-  /** All seven, in order. Only the OWNER may read them. */
+  /** All notification keys, in order. Only the OWNER may read them. */
   async get(actor: HostActor): Promise<HostNotificationItem[]> {
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
@@ -82,7 +83,7 @@ export class ProviderNotificationSettings {
     });
   }
 
-  /** Turns stoppable notifications on or off and answers all seven as they are now. */
+  /** Turns stoppable notifications on or off and answers all keys as they are now. */
   async update(actor: HostActor, changes: HostNotificationChanges): Promise<HostNotificationItem[]> {
     const entries = validChanges(changes);
     return withTransaction(this.#pool, async (client) => {

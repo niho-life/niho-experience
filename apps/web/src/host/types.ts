@@ -703,7 +703,7 @@ export interface HostCalendarSettings {
  */
 
 /** The notifications NIHO sends a provider, in the order NIHO lists them (notifications.ts has the words). */
-export type HostNotificationKey = "NEW_BOOKING" | "APPROVAL_DEADLINE" | "CANCELLATION" | "GUEST_MESSAGE" | "DAY_BEFORE_SUMMARY" | "NEW_REVIEW" | "LISTING_REVIEW";
+export type HostNotificationKey = "NEW_BOOKING" | "APPROVAL_DEADLINE" | "CANCELLATION" | "GUEST_MESSAGE" | "DAY_BEFORE_SUMMARY" | "NEW_REVIEW" | "EMAIL_DELIVERY_FAILED" | "LISTING_REVIEW";
 
 /** One notification as NIHO answers it. `key` stays a string: a key the console does not know yet is left out. */
 export interface HostNotificationItem {

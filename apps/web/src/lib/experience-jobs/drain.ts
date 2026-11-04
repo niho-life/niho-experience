@@ -306,7 +306,7 @@ async function sendBookingConfirmations(deps: ExperienceJobDeps): Promise<Bookin
     // A grant per email: the raw token goes into this email's link only (#285 slice 6).
     const grant = deps.access ? await deps.access.issueBookingAccessGrant(confirmation.email.publicBookingId) : null;
     const email = bookingConfirmationEmail(confirmation.email, { siteUrl: deps.siteUrl, now: deps.now(), bookingPageGrant: grant?.token ?? null });
-    const result = await deps.mailer.sendMail({ to: confirmation.email.guestEmail, ...email });
+    const result = await deps.mailer.sendMail({ to: confirmation.email.guestEmail, ...email, deliveryRef: confirmation.deliveryRef });
     if (result.ok || result.failure === "permanent") {
       await deps.confirmations.completeBookingConfirmation(confirmation.id);
       if (result.ok) sent += 1;
@@ -340,7 +340,7 @@ async function sendBookingNotices(deps: ExperienceJobDeps): Promise<BookingNotic
     }
     const grant = deps.access ? await deps.access.issueBookingAccessGrant(notice.email.publicBookingId) : null;
     const email = bookingNoticeEmail(notice.email, { siteUrl: deps.siteUrl, bookingPageGrant: grant?.token ?? null });
-    const result = await deps.mailer.sendMail({ to: notice.email.guestEmail, ...email });
+    const result = await deps.mailer.sendMail({ to: notice.email.guestEmail, ...email, deliveryRef: notice.deliveryRef });
     if (result.ok || result.failure === "permanent") {
       await deps.notices.completeBookingNotice(notice.id);
       if (result.ok) counts.sent += 1;
@@ -374,7 +374,7 @@ async function sendBookingLinks(deps: ExperienceJobDeps, access: NonNullable<Exp
       continue;
     }
     const email = bookingLinkEmail(link.email, { siteUrl: deps.siteUrl, bookingPageGrant: grant.token });
-    const result = await deps.mailer.sendMail({ to: link.email.guestEmail, ...email });
+    const result = await deps.mailer.sendMail({ to: link.email.guestEmail, ...email, deliveryRef: link.deliveryRef });
     if (result.ok || result.failure === "permanent") {
       await deps.bookingLinks.completeBookingLink(link.id);
       if (result.ok) counts.sent += 1;
@@ -415,7 +415,7 @@ async function sendReviewInvitations(deps: ExperienceJobDeps, source: NonNullabl
       continue;
     }
     const mail = reviewInvitationEmail(row.email, { siteUrl: deps.siteUrl, token });
-    const result = await deps.mailer.sendMail({ to: row.email.guestEmail, ...mail });
+    const result = await deps.mailer.sendMail({ to: row.email.guestEmail, ...mail, deliveryRef: row.deliveryRef });
     if (result.ok || result.failure === "permanent") {
       await source.outbox.completeReviewInvitation(row.id);
       if (result.ok) counts.sent += 1;
@@ -460,7 +460,7 @@ async function sendMeetingGuides(deps: ExperienceJobDeps, source: NonNullable<Ex
       continue;
     }
     const email = bookingMeetingGuideEmail(row.email, { siteUrl: deps.siteUrl, bookingPageGrant: grant.token, photo });
-    const result = await deps.mailer.sendMail({ to: row.email.guestEmail, ...email });
+    const result = await deps.mailer.sendMail({ to: row.email.guestEmail, ...email, deliveryRef: row.deliveryRef });
     if (result.ok || result.failure === "permanent") {
       await source.outbox.completeMeetingGuideDayBefore(row.id);
       if (result.ok) counts.sent += 1;
