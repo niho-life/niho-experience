@@ -1,21 +1,95 @@
 import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
+import { HostIcon } from "@/components/host/HostIcon";
+import { HostLiveExperiences } from "@/components/host/HostLiveExperiences";
 import { HostPublicationWorkspace } from "@/components/host/HostPublicationWorkspace";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
-import { hostPageContext } from "@/host/data";
-import { config } from "@/lib/config";
+import { HOST_SURFACE } from "@/components/host/host-ui";
+import { HostPageBody, PageHead, StatusPill } from "@/components/host/ui";
+import { hostPageContext, loadHostConsoleData, loadHostReviews } from "@/host/data";
+import { loadExperienceRatings } from "@/host/experience-ratings-server";
+import { experienceMeta } from "@/host/format";
+import { experiencePath } from "@/host/home";
+import { experienceRating, reviewsHref } from "@/host/reviews";
+import { LISTING_STATUS } from "@/host/status";
 import { withProvider } from "@/lib/host/routes";
+import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
+import { config } from "@/lib/config";
 
 export const metadata: Metadata = { title: "体験" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** OWNER products are managed by Experience's publication API. */
+const THUMB = "h-12 w-16 shrink-0 rounded-[10px] bg-sand md:h-[72px] md:w-24";
+
+/**
+ * 体験 (mock v2): every experience page of the provider with its one listing state and, once it
+ * has published reviews, their average and count, which open レビュー for that experience (#108).
+ * The row opens the editor through its title (its link covers the row); the reviews link sits on
+ * top of it, never inside it. With provider operations on, the list is NIHO's pages (HostLiveExperiences) in the same
+ * rows, with the ★ of the reviews kept in the experience DB for the OWNER (experience-ratings-server.ts).
+ */
 export default async function HostExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const context = await hostPageContext(await searchParams);
   if (!context) return null;
-  if (!context.provider) return <HostRegisterPrompt title="体験" />;
-  const bookingGuideHref = config.experienceHostPublicationApiEnabled
-    ? withProvider("/host/booking-guides", context.linkProviderId)
-    : undefined;
-  return <HostPublicationWorkspace bookingGuideHref={bookingGuideHref} />;
+  const { provider, linkProviderId } = context;
+  if (!provider) return <HostRegisterPrompt title="体験" />;
+  if (config.experienceHostPublicationApiEnabled) {
+    return <HostPublicationWorkspace bookingGuideHref={withProvider("/host/booking-guides", linkProviderId)} />;
+  }
+  if (providerPagesEnabled()) {
+    return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} bookingGuideHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", linkProviderId) : undefined} />;
+  }
+  const { experiences } = await loadHostConsoleData(provider);
+  const reviews = loadHostReviews(provider).list;
+  const ratingOf = (id: string) => (reviews.status === "ready" ? experienceRating(reviews.reviews, id) : null);
+
+  return (
+    <HostPageBody>
+      <PageHead title="体験">{config.experienceHostPublicationApiEnabled ? <Link href={withProvider("/host/booking-guides", linkProviderId)} className="rounded-lg border border-line px-3 py-2 text-sm font-bold">予約後の集合案内</Link> : null}</PageHead>
+      <section aria-label="体験の一覧" className={HOST_SURFACE}>
+        {experiences.length ? (
+          <ul>
+            {experiences.map((experience) => {
+              const rating = ratingOf(experience.id);
+              return (
+                <li key={experience.id} className="relative flex min-h-[52px] items-center gap-3 border-t border-line px-3.5 py-3 first:border-t-0 hover:bg-sand/60 md:px-4">
+                  {experience.cover ? (
+                    <Image src={experience.cover} alt="" width={96} height={72} sizes="96px" unoptimized className={`${THUMB} object-cover`} />
+                  ) : (
+                    <span aria-hidden="true" className={`block ${THUMB}`} />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={withProvider(experiencePath(experience.id), linkProviderId)}
+                      className="flex min-h-11 items-center text-[0.875rem] leading-[1.4] font-extrabold [overflow-wrap:anywhere] after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-3 focus-visible:after:-outline-offset-3 focus-visible:after:outline-moss"
+                    >
+                      {experience.title}
+                    </Link>
+                    <p className="text-[0.78125rem] leading-normal text-muted">{experienceMeta(experience)}</p>
+                    {rating ? (
+                      <Link
+                        href={withProvider(reviewsHref({ experience: experience.id }), linkProviderId)}
+                        className="relative z-[1] inline-block min-h-6 text-[0.78125rem] leading-6 font-extrabold whitespace-nowrap text-ink-soft tabular-nums underline-offset-2 hover:text-ink hover:underline"
+                      >
+                        <span className="sr-only">レビュー </span>
+                        <span aria-hidden="true">★ </span>
+                        {rating.average}
+                        <span className="sr-only"> 点</span> · {rating.count} 件
+                      </Link>
+                    ) : null}
+                  </div>
+                  <StatusPill status={LISTING_STATUS[experience.status]} />
+                  <HostIcon name="chevronRight" className="size-4 text-line-strong max-md:hidden" />
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="px-4 py-6 text-muted md:px-5">まだ体験がありません。</p>
+        )}
+      </section>
+    </HostPageBody>
+  );
 }

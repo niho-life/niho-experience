@@ -15,7 +15,7 @@ describe("Experience owner-product routes", () => {
     mocks.hostPageContext.mockResolvedValue({ provider: { id: "provider-123" }, linkProviderId: "provider-123" });
     const list = await HostExperiencesPage({ searchParams: Promise.resolve({ providerId: "provider-123" }) });
     const create = NewHostExperiencePage();
-    const edit = await HostExperiencePage({ params: Promise.resolve({ id: "product-123" }) });
+    const edit = await HostExperiencePage({ params: Promise.resolve({ id: "product-123" }), searchParams: Promise.resolve({ providerId: "provider-123" }) });
     expect(isValidElement(list) && list.props).toEqual({ bookingGuideHref: "/host/booking-guides?providerId=provider-123" });
     expect(isValidElement(create) && create.props).toEqual({ create: true });
     expect(isValidElement(edit) && edit.props).toEqual({ productId: "product-123" });
