@@ -34,10 +34,11 @@ function decodeChannels(value: unknown): readonly ChannelStatus[] | null {
 }
 
 /** Polls only while this tab is visible. Each response belongs to one provider and one sequence. */
-export function useHostChannelStatuses(providerId: string, refreshVersion: string): HostChannelState {
+export function useHostChannelStatuses(providerId: string, refreshVersion: string, enabled = true): HostChannelState {
   const [state, setState] = useState<HostChannelState>({ kind: "loading" });
   const sequence = useRef(0);
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     let disabled = false;
     let initial = true;
@@ -84,8 +85,8 @@ export function useHostChannelStatuses(providerId: string, refreshVersion: strin
     document.addEventListener("visibilitychange", visibility);
     if (document.visibilityState === "visible") void poll();
     return () => { active = false; sequence.current += 1; document.removeEventListener("visibilitychange", visibility); clear(); };
-  }, [providerId, refreshVersion]);
-  return state;
+  }, [enabled, providerId, refreshVersion]);
+  return enabled ? state : { kind: "disabled" };
 }
 
 function statusView(label: ChannelLabel): { label: string; tone: "ok" | "wait" | "draft" } {

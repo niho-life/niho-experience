@@ -11,6 +11,8 @@ const ID = ["INSERT", "DELETE"];
 const IUD = ["INSERT", "UPDATE", "DELETE"];
 
 export const RUNTIME_TABLE_GRANTS = Object.freeze({
+  // Verified Admin writes are immutable and contain actor/resource/action metadata only.
+  admin_product_draft_audit_events: { write: I },
   // DELETE: the mail job removes grants and sessions that can no longer open or read a booking.
   booking_access_grants: { write: IUD },
   // 出欠 (#107): one row per booking, its mark replaced when the host corrects it.

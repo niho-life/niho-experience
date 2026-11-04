@@ -11,6 +11,7 @@ import { config } from "@/lib/config";
 export default async function AdminConsoleLayout({ children }: { children: React.ReactNode }) {
   requireAdminConsole();
   const channelManager = channelManagerEnabled() || channelWorkspacePreviewEnabled();
+  const products = isAdminHttp() && config.experienceHostPublicationApiEnabled;
   if (isAdminPreview()) {
     const session = await readAdminSession();
     if (!session) redirect(ADMIN_ENTRY_PATH);
@@ -40,5 +41,5 @@ export default async function AdminConsoleLayout({ children }: { children: React
   const actorName = load.verified.actor.displayName?.trim() || "NIHO 管理者";
   // サイト予約の取消・返金 (#285 slice 7): this site's bookings, with the Admin sign-in above.
   const siteBookings = config.guestBookingEnabled;
-  return <><AdminSessionKeeper idTokenExpiresAt={load.session.idTokenExpiresAt} connectionExpiresAt={load.session.connectionExpiresAt} /><AdminShell actorName={actorName} unreadCount={unreadCount} channelManager={channelManager} siteBookings={siteBookings}>{children}</AdminShell></>;
+  return <><AdminSessionKeeper idTokenExpiresAt={load.session.idTokenExpiresAt} connectionExpiresAt={load.session.connectionExpiresAt} /><AdminShell actorName={actorName} unreadCount={unreadCount} channelManager={channelManager} siteBookings={siteBookings} products={products}>{children}</AdminShell></>;
 }

@@ -62,6 +62,7 @@ import type {
   ProductInventorySetting,
   ProductInventorySettingInput,
   ProductRecord,
+  PublicationAdminDraftActor,
   ProviderMembership,
   ProviderScope,
   RecordGoogleBusySyncInput,
@@ -694,20 +695,96 @@ export class ExperienceStore {
       throw new StoreValidationError("expectedVersion must be null or a positive integer.");
     }
     const requestFingerprint = JSON.stringify({ productId, rule, expectedVersion });
+    return this.#saveScheduleRule(actor.providerId, productId, rule, expectedVersion, commandId, requestFingerprint,
+      (client) => requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]));
+  }
+
+  /** Admin-only draft calendar write; it cannot address a published or formerly-published product. */
+  async saveDraftScheduleRuleAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    rawRule: ScheduleRule,
+    expectedVersion: number | null,
+    commandId: string,
+  ): Promise<CalendarCommandReceipt> {
+    validateInventoryAdmin(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(productId, "productId");
+    const rule = parseScheduleRule(rawRule);
+    validateCommandId(commandId);
+    if (expectedVersion !== null && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) {
+      throw new StoreValidationError("expectedVersion must be null or a positive integer.");
+    }
+    const requestFingerprint = JSON.stringify({ productId, rule, expectedVersion });
+    return this.#saveScheduleRule(providerId, productId, rule, expectedVersion, commandId, requestFingerprint, async (client) => {
+      const product = await client.query(
+        `SELECT 1 FROM experience_products product
+          JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+         WHERE product.provider_id=$1 AND product.id=$2 AND product.status='DRAFT'
+           AND NOT EXISTS (
+             SELECT 1 FROM experience_product_publications publication
+              WHERE publication.provider_id=product.provider_id AND publication.product_id=product.id
+           ) FOR SHARE OF product,seller`,
+        [providerId, productId],
+      );
+      if (!product.rows[0]) throw new StoreAccessDeniedError();
+    }, async (client) => {
+      await client.query(
+        `INSERT INTO admin_product_draft_audit_events
+           (actor_niho_user_id,provider_id,product_id,action,metadata)
+         VALUES ($1,$2,$3,'SCHEDULE_SAVED',$4::jsonb)`,
+        [actor.nihoUserId, providerId, productId, JSON.stringify({ ruleId: rule.id })],
+      );
+    });
+  }
+
+  async listDraftScheduleAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+  ): Promise<readonly ScheduleView[]> {
+    validateInventoryAdmin(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(productId, "productId");
+    const product = await this.#pool.query(
+      `SELECT 1 FROM experience_products product
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+       WHERE product.provider_id=$1 AND product.id=$2 AND product.status='DRAFT'
+         AND NOT EXISTS (
+           SELECT 1 FROM experience_product_publications publication
+            WHERE publication.provider_id=product.provider_id AND publication.product_id=product.id
+         )`,
+      [providerId, productId],
+    );
+    if (!product.rows[0]) throw new StoreAccessDeniedError();
+    return this.#listSchedule(providerId, productId);
+  }
+
+  async #saveScheduleRule(
+    providerId: string,
+    productId: string,
+    rule: ScheduleRule,
+    expectedVersion: number | null,
+    commandId: string,
+    requestFingerprint: string,
+    authorize: (client: PoolClient) => Promise<unknown>,
+    afterWrite?: (client: PoolClient) => Promise<void>,
+  ): Promise<CalendarCommandReceipt> {
     return withTransaction(this.#pool, async (client) => {
-      await lockProviderInventory(client, actor.providerId);
-      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]);
-      const previous = await previousCalendarCommand(client, actor.providerId, commandId, "schedule_rule.save", requestFingerprint);
+      await lockProviderInventory(client, providerId);
+      await authorize(client);
+      const previous = await previousCalendarCommand(client, providerId, commandId, "schedule_rule.save", requestFingerprint);
       if (previous) return previous;
       const product = await client.query<DbRow>(
         "SELECT id FROM experience_products WHERE provider_id = $1 AND id = $2 FOR SHARE",
-        [actor.providerId, productId],
+        [providerId, productId],
       );
       if (product.rows[0] === undefined) throw new StoreNotFoundError("product");
 
       const existing = await client.query<DbRow>(
         "SELECT product_id, version FROM schedule_rules WHERE provider_id = $1 AND id = $2 FOR UPDATE",
-        [actor.providerId, rule.id],
+        [providerId, rule.id],
       );
       const existingRow = existing.rows[0];
       if (existingRow === undefined && expectedVersion !== null) {
@@ -719,7 +796,7 @@ export class ExperienceStore {
       if (existingRow !== undefined && existingRow.product_id !== productId) {
         throw new StoreConflictError("A schedule rule cannot be moved between products.");
       }
-      if (existingRow !== undefined) await this.#assertScheduleHasNoFutureReservations(client, actor.providerId, rule.id);
+      if (existingRow !== undefined) await this.#assertScheduleHasNoFutureReservations(client, providerId, rule.id);
 
       const todayResult = await client.query<DbRow>(
         "SELECT (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date::text AS today",
@@ -727,13 +804,13 @@ export class ExperienceStore {
       const today = String(todayResult.rows[0]?.today ?? "");
       if (!today) throw new Error("The current Tokyo date could not be read.");
       const occurrences = [
-        ...await productScheduleOccurrences(client, actor.providerId, productId, today, addLocalDays(today, 89), { rule }),
-        ...await productScheduleOccurrences(client, actor.providerId, productId, addLocalDays(today, -1), addLocalDays(today, -1), { rule }),
+        ...await productScheduleOccurrences(client, providerId, productId, today, addLocalDays(today, 89), { rule }),
+        ...await productScheduleOccurrences(client, providerId, productId, addLocalDays(today, -1), addLocalDays(today, -1), { rule }),
       ];
       assertNoOverlappingOpenOccurrences(occurrences, rule.id);
 
       const values = [
-        actor.providerId,
+        providerId,
         rule.id,
         productId,
         rule.timeZone,
@@ -768,11 +845,13 @@ export class ExperienceStore {
             values,
           );
       const saved = scheduleRuleFromRow(oneRow(result.rows, "schedule rule"));
-      return completeCalendarCommand(client, actor.providerId, commandId, "schedule_rule.save", requestFingerprint, "schedule_rule", {
+      const receipt = await completeCalendarCommand(client, providerId, commandId, "schedule_rule.save", requestFingerprint, "schedule_rule", {
         aggregateId: saved.rule.id,
         version: saved.version,
         repeated: false,
       });
+      await afterWrite?.(client);
+      return receipt;
     });
   }
 
@@ -780,12 +859,16 @@ export class ExperienceStore {
     validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
     await requireProductCalendarAccess(this.#pool, actor, productId, ["OWNER", "EDITOR", "VIEWER"]);
+    return this.#listSchedule(actor.providerId, productId);
+  }
+
+  async #listSchedule(providerId: string, productId: string): Promise<readonly ScheduleView[]> {
     const rules = await this.#pool.query<DbRow>(
       `SELECT ${RULE_COLUMNS}
          FROM schedule_rules r
         WHERE r.provider_id=$1 AND r.product_id=$2
         ORDER BY r.id`,
-      [actor.providerId, productId],
+      [providerId, productId],
     );
     const views: ScheduleView[] = [];
     for (const row of rules.rows) {
@@ -795,14 +878,14 @@ export class ExperienceStore {
            FROM schedule_occurrence_overrides o
           WHERE o.provider_id=$1 AND o.rule_id=$2
           ORDER BY o.occurrence_id`,
-        [actor.providerId, storedRule.rule.id],
+        [providerId, storedRule.rule.id],
       );
       const salesStates = await this.#pool.query<DbRow>(
         `SELECT ${SALES_STATE_COLUMNS}
            FROM schedule_occurrence_sales_states s
           WHERE s.provider_id=$1 AND s.rule_id=$2
           ORDER BY s.occurrence_id`,
-        [actor.providerId, storedRule.rule.id],
+        [providerId, storedRule.rule.id],
       );
       views.push({ rule: storedRule, overrides: overrides.rows.map(overrideFromRow), salesStates: salesStates.rows.map(salesStateFromRow) });
     }
