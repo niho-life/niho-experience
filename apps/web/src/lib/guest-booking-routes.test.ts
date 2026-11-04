@@ -3,8 +3,9 @@ import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type Bookin
 
 /** The public availability and checkout of 旅行者の予約 (#285) against a stubbed store and a stubbed Stripe SDK. */
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  publications: { claimsSlug: vi.fn() },
   stripeKeys: [] as string[],
   stripeAccountRetrieve: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
   stripeCreate: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
-vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository }));
+vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository, experiencePublicationRepository: () => state.publications }));
 // The real experience-payments runs against this stand-in for the Stripe SDK.
 vi.mock("stripe", () => ({
   default: class {
@@ -104,7 +105,8 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
-  state.config = { guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { apiMode: "http", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.publications.claimsSlug.mockResolvedValue(false);
   state.repository = {
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
     startGuestBooking: vi.fn(async () => started()),
@@ -151,6 +153,15 @@ describe("GET /api/public/experiences/[slug]/availability", () => {
     const off = await availability(get(), slugParams());
     expect(off.status).toBe(404);
     expect(await off.text()).toBe("");
+  });
+
+  it("does not expose a new seller's reserved slug through legacy availability when publication is disabled", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: false };
+    state.publications.claimsSlug.mockResolvedValue(true);
+    const response = await availability(get(), slugParams());
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+    expect(state.repository?.listPublicAvailability).not.toHaveBeenCalled();
   });
 });
 
@@ -207,6 +218,16 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.repository?.startGuestBooking).toHaveBeenCalledTimes(1);
     expect(state.stripeCreate).not.toHaveBeenCalled();
     expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("does not admit a new seller's reserved slug through legacy checkout when publication is disabled", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: false };
+    state.publications.claimsSlug.mockResolvedValue(true);
+    const response = await checkout(post(CHECKOUT), slugParams());
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
+    expect(state.stripeCreate).not.toHaveBeenCalled();
   });
 
   it("drops the UTM fields under Do Not Track, and leaves out what the guest did not send", async () => {

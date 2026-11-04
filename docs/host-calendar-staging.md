@@ -110,8 +110,9 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 
 - **ホストの画面と DB は常にある**ので、前提の「ホストの画面・DB」はいつも満たす。サイトの URL は `STG_HOST_SERVICE_URL`、`<project>` は `niho-app-stg`。
 - **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
-- **体験ページの作成・編集**は `STG_PROVIDER_PAGES_API_ENABLED=true` でNIHOの限定ホストAPIへ接続する。NIHO stgのprovider pages APIとホストログインを配備し、ページ作成・編集・写真・掲載申請と別提供者/非OWNERの拒否を受け入れてから開く。このフラグ単独では予約運営・メッセージ・サブホスト管理、旅行者の予約・販売を開かない。
-- **ホストの提供者運営API操作**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` で予約一覧と承認/辞退/取消、メッセージ、サブホスト管理に接続する（体験ページ操作も含む）。NIHO stg に `APP_CONNECT_WEB_ORIGINS` と API の `EXPERIENCE_HOST_CONSOLE_URL` を正確なorigin/URLで設定し、N1/N2a/N2bと予約・顧客・売上を扱うN2c API（niho-app #19278）を配備してから、フラグが開くすべての画面・操作と権限拒否まで受け入れて開く。提供者登録自体はホスト画面の別操作。このフラグは旅行者の予約・販売を開かない。NIHO API上のメッセージを使うため、Experience独自の質問を使う `STG_GUEST_QUESTIONS_ENABLED` は `false` または未設定にする。
+- **Experience商品・原稿・写真・公開**はNIHO provider-pages APIを使わない。新しいNIHO Host v1（#19712）を同じsource hashでstg配備し、`APP_CONNECT_WEB_ORIGINS` とruntime service identity allowlist/audienceを設定、identity失効・Connect不一致・readiness・payment reuse consentを受け入れてから `STG_PUBLICATIONS_ENABLED=true` と `STG_HOST_PUBLICATION_API_ENABLED=true` を段階的に開く。`EXPERIENCE_PUBLICATION_CONSENT_VERSION`、`EXPERIENCE_PUBLIC_MEDIA_BUCKET`、migration `0047`、runtime grants、GCS IAMも必要。NIHO契約が未配備の間は両flagをOFFにする。
+- **旧NIHO予約の運営業務**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` で予約一覧・詳細・承認/辞退/取消／返金・メッセージなどに接続する。NIHOは旧予約の照会・返金責任を保持する。`APP_CONNECT_WEB_ORIGINS`、許可service identity、旧予約APIを配備し、その画面・権限拒否を受け入れてから開く。このflagはExperience商品・公開を開かない。NIHO API上のメッセージを使う場合は、Experience独自質問の `STG_GUEST_QUESTIONS_ENABLED` を `false` または未設定にする。
+- **legacy NIHO provider pages** は `STG_PROVIDER_PAGES_API_ENABLED` を開かない。Experience商品をNIHO旧商品APIで登録・編集しない。
 - **Experience独自の質問**（「Ask the host」）は `STG_GUEST_QUESTIONS_ENABLED=true` で別に受け入れる。この受入では `STG_PROVIDER_OPERATIONS_API_ENABLED` を `false` または未設定にし、Experience DBの質問と `/questions/reply` を確認する。2つのメッセージ経路は同時に有効化できないため、両方を受け入れるときは別々の候補revisionで行う。
 - **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
 - **Secret の名前を固定**して検査する（`secret-name:数字version`）：
@@ -128,6 +129,7 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 - 新しい Secret（push の VAPID の秘密鍵、ICS フィードの鍵）は、管理者が作って runtime `experience-host-stg-runtime` にその Secret だけの `secretAccessor` を付ける。売上の入金は、予約で使う Stripe の鍵（Accessor は `setup-host-staging-guest-booking.sh` が付ける）を読むだけで、新しい Secret は要らない。
 - job を開くフラグ（push：`experience-host-push@niho-app-stg…`、Google の 2 つ：`experience-google-jobs@niho-app-stg…`）は、そのサービスアカウントと Cloud Scheduler を先に作る（メール job の `experience-jobs` と同じく、project の role なし、このサービスの `run.invoker` だけ）。workflow は作らない。
 - 売上の入金（`STG_HOST_SALES_PAYOUTS_ENABLED`）は `STG_HOST_SALES_LEDGER_ENABLED=true` が前提。受入は [host-sales.md](host-sales.md) の「受入」4。
+- 新しいExperience公開APIはNIHO Host v1のstg配備、exact origin/service identity許可、Experience migration `0047`・runtime grants・public media bucketのread/write/delete IAM、承認済み掲載同意versionを揃えてから開く。[consumer contract](host-niho-v1-consumer.md)の新規sellerから予約受付までを合成データで一周し、API flagはそれぞれOFF→ONの候補で検証する。
 
 ## 旅行者の予約（Stripe テストモード、#285）
 
@@ -195,7 +197,7 @@ Secret の参照（`secret-name:VERSION`、数字 version だけ。workflow は�
 4. **Variables**：`host-staging` Environment に上の Variable と 6 個の `*_REF` を設定し、`STG_GUEST_MAIL_ENABLED=true` にしてから、最後に `STG_GUEST_BOOKING_ENABLED=true` にする。Experience独自の質問を受け入れる候補では `STG_GUEST_QUESTIONS_ENABLED=true`、NIHO提供者APIと予約を同じ候補で受け入れるときは `STG_GUEST_QUESTIONS_ENABLED=false`（または未設定）かつ `STG_PROVIDER_OPERATIONS_API_ENABLED=true` にする。相反する2つのフラグを同じ候補で有効にしない。
 5. **配備**：上の「手動配備と受入」と同じく `candidate` → `promote`。summary は「Stripe test bookings open」と `bookings=true (Stripe test mode)` になる。
 6. **Scheduler の再開**：昇格のあと `gcloud scheduler jobs resume experience-jobs-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる（401 は audience かサービスアカウントの不一致、404 は配信中の revision で gate が off、503 は Google の鍵・DB・SMTP）。
-7. **体験の公開**：NIHO の合成 OWNER セッションを使い、`/host/api/products` から商品を作成し、販売条件・開催枠・画像を設定してからOWNER公開APIを呼ぶ。公開応答と公開詳細DTOを確認し、Checkoutで受け取るConnect口座がこの合成テスト用口座であることを照合する。運営登録CLIは公開操作に使わない。
+7. **Experience sellerの初期化と公開**：合成NIHO本人ID、lookup key、test Connect account、承認済みfeeを使ってseller provisioning CLIを先に実行する（CLIはseller mapping/feeだけを登録し、OWNERや商品を作らない）。NIHO v1の合成 OWNER sessionで初回API要求を行い、`/host/api/products` から商品を作成し、販売条件・開催枠・写真を設定して明示publishする。公開応答・catalog/detail・Checkout口座一致を確認する。CLIを公開操作には使わない。
 
 止めるとき：OWNER停止APIで公開を止め、仮押さえの期限（35 分）と返金の完了を待つ。Scheduler を一時停止してから `STG_GUEST_BOOKING_ENABLED` を `false` に戻して配備・昇格する（出欠の `STG_HOST_ATTENDANCE_ENABLED` も予約が前提なので、先に `false` にする）。gate を戻すと Stripe の秘密も revision から外れ、それ以降の webhook は処理されない。
 

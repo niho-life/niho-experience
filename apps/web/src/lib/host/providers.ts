@@ -1,8 +1,8 @@
 /**
- * Providers as NIHO's host API returns them. The shapes come from the host
- * contract (#87, `@niho-experience/api-client/host`); this file only holds the
- * console's rules for choosing and labelling them. Type-only import: client
- * components may use these helpers without pulling in the server-only client.
+ * Experience host seller profiles joined to NIHO's current identity. NIHO Host
+ * v1 does not return a provider directory. This file holds only the console's
+ * rules for choosing and labelling local Experience memberships. Type-only
+ * import: client components do not pull in the server-only NIHO client.
  */
 
 /** NIHO ids are opaque url-safe tokens; same rule as offer ids in the api-client mock. */
@@ -12,7 +12,7 @@ export function nihoIdOrNull(value: unknown): string | null {
   return typeof value === "string" && NIHO_ID_PATTERN.test(value) ? value : null;
 }
 
-/** A provider in the signed-in host's list (server side only: it carries NIHO's internal ids). */
+/** A seller workspace for the signed-in host (server side only: includes NIHO lookup ids). */
 export type HostProviderRole = "OWNER" | "EDITOR" | "VIEWER" | "COHOST";
 export type HostProviderKind = "INDIVIDUAL" | "BUSINESS" | "SPOT";
 export type HostProviderReviewStatus = "DRAFT" | "REQUESTED" | "APPROVED" | "SUSPENDED";

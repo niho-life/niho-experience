@@ -10,7 +10,7 @@ CREATE TABLE experience_host_seller_profiles (
   legacy_provider_id text NOT NULL UNIQUE CHECK (length(legacy_provider_id) BETWEEN 1 AND 200 AND legacy_provider_id ~ '^[A-Za-z0-9_-]+$'),
   provider_display_name text NOT NULL CHECK (length(provider_display_name) BETWEEN 1 AND 300),
   seller_niho_account_ref text NOT NULL UNIQUE CHECK (length(seller_niho_account_ref) BETWEEN 1 AND 256),
-  stripe_connect_account_ref text NOT NULL CHECK (stripe_connect_account_ref ~ '^acct_[A-Za-z0-9]{8,250}$'),
+  stripe_connect_account_ref text NOT NULL UNIQUE CHECK (stripe_connect_account_ref ~ '^acct_[A-Za-z0-9]{8,250}$'),
   seller_display_name text NOT NULL CHECK (length(seller_display_name) BETWEEN 1 AND 300),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()

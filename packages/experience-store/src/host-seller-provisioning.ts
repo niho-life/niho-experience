@@ -140,7 +140,7 @@ export async function runHostSellerProvisioning(
     out(`NIHO legacy Connect lookup key ${masked(input.provider.legacyProviderId)}: ${profileOutcome(state, input)}`);
     out(`NIHO seller account reference ${masked(input.seller.nihoAccountRef)}: explicitly mapped to the current identity at first login`);
     out(`Stripe connected account ${masked(input.seller.stripeConnectAccountRef)}: ${state.sellerProfile?.stripeConnectAccountRef === input.seller.stripeConnectAccountRef ? "mapped" : "map and verify"}`);
-    out(`NIHO fee setting: support ${input.supportEnabled ? "on (15%)" : "off (10%)"} (${state.saleSettings === null ? "create" : state.saleSettings.supportEnabled === input.supportEnabled ? "unchanged" : "conflict: existing fee differs"})`);
+    out(`Experience fee setting (from approved NIHO terms): support ${input.supportEnabled ? "on (15%)" : "off (10%)"} (${state.saleSettings === null ? "create" : state.saleSettings.supportEnabled === input.supportEnabled ? "unchanged" : "conflict: existing fee differs"})`);
     out("Product, publication, and OWNER membership: not created by this operation");
     if (command === "plan") return HOST_SELLER_PROVISIONING_EXIT.ok;
     if (!yes) {

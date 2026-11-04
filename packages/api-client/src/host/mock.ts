@@ -19,6 +19,7 @@ export function createMockExperienceHostFetch(options: {
   const reuseConsentAccepted = options.reuseConsentAccepted ?? true;
   const accessToken = options.accessToken ?? "synthetic-niho-access-token";
   const serviceIdToken = options.serviceIdToken ?? MOCK_EXPERIENCE_HOST_SERVICE_TOKEN;
+  const readinessReason = stripeAccountId === null ? "NOT_CONNECTED" : connectReady ? "READY" : "VERIFICATION_REQUIRED";
   return async (input, init = {}) => {
     const url = new URL(input);
     const headers = new Headers(init.headers);
@@ -35,7 +36,7 @@ export function createMockExperienceHostFetch(options: {
       return Response.json({
         legacyProviderId,
         stripeAccountId,
-        readiness: { ready: connectReady, reason: connectReady ? "READY" : "VERIFICATION_REQUIRED" },
+        readiness: { ready: stripeAccountId !== null && connectReady, reason: readinessReason },
         paymentReuseConsent: {
           accepted: reuseConsentAccepted,
           version: reuseConsentAccepted ? "synthetic-1" : null,

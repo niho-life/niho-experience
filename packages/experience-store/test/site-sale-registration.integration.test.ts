@@ -136,6 +136,11 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
       const unchanged = await registration.currentHostSellerState(input.providerId);
       assert.equal(unchanged.saleSettings?.platformFeeBasisPoints, 1000, "an unapproved fee change is not applied");
       assert.equal((await pool.query("SELECT count(*)::int AS count FROM experience_products WHERE provider_id=$1", [input.providerId])).rows[0]?.count, 0);
+      await assert.rejects(registration.provisionHostSeller({
+        ...input, providerId: "experience-other-seller-synthetic", legacyProviderId: "niho-other-connect-synthetic",
+        sellerNihoAccountRef: "niho-user-other-synthetic", sellerDisplayName: "Other Synthetic Seller",
+      }), StoreConflictError, "one connected account cannot be assigned to multiple seller identities");
+      assert.equal((await registration.currentHostSellerState("experience-other-seller-synthetic")).providerExists, false);
     });
   });
 
@@ -289,7 +294,7 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
     await withSchema(async ({ registration }) => {
       const query = { providerId: "sample-provider-a", productId: "sample-tea", nihoUserId: "sample-user-a", slug: "sample-tea-ceremony" };
       assert.deepEqual(await registration.currentState(query), {
-        providerExists: false, membership: null, product: null, saleSettings: null, saleTerms: null,
+        providerExists: false, sellerProfile: null, membership: null, product: null, saleSettings: null, saleTerms: null,
         slugPublishedElsewhere: false, slugUsedInProvider: false, otherProductsWithSaleTerms: [],
       });
       await registered(registration);

@@ -7,6 +7,8 @@ const state = vi.hoisted(() => ({
   config: { apiMode: "mock" as "mock" | "http", nihoWebOrigin: "https://niho.example.test" },
   providers: [] as HostProvider[],
   scenario: "default" as HostMockScenario,
+  selectedHostClient: null as unknown,
+  publicationRepository: null as unknown,
   notificationLoad: { status: "preparing" } as import("./notification-settings-server").HostNotificationSettingsLoad,
   notificationCalls: [] as { providerId: string; nihoUserId: string }[],
 }));
@@ -28,17 +30,23 @@ vi.mock("@/lib/host/server", async (importActual) => {
     ...actual,
     readHostSession: async () => ({ ...session, mockScenario: state.scenario }),
     loadHostProviders: async () => ({ status: "ok", providers: state.providers }),
+    selectedHostApiClient: async (...args: Parameters<typeof actual.selectedHostApiClient>) => {
+      if (state.selectedHostClient) return state.selectedHostClient as Awaited<ReturnType<typeof actual.selectedHostApiClient>>;
+      return actual.selectedHostApiClient(...args);
+    },
   };
 });
+vi.mock("@/lib/experience/store-server", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/experience/store-server")>();
+  return { ...actual, experiencePublicationRepository: () => state.publicationRepository };
+});
 
-import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
 import { hostPageContext, loadHostBookings, loadHostConsoleData, loadHostExperienceEditor, loadHostMessages, loadHostPayout, loadHostReviews, loadHostSales, loadHostSession, loadRegistrationConsent } from "./data";
 import { GOOGLE_NOT_CONNECTED } from "./calendar";
-import { HOST_ERROR_REASON_TEXT } from "./errors";
 import { MOCK_GOOGLE_CONNECTION } from "./mock/provider";
 import { MOCK_SALES_PERIOD } from "./mock/sales";
 
-/** A provider as the host contract shapes it (synthetic values). */
+/** A local Experience seller membership joined to synthetic NIHO identity. */
 const provider = (fields: Pick<HostProvider, "id" | "displayName" | "memberRole"> & Partial<HostProvider>): HostProvider => ({
   nihoUserId: "sample-user",
   legacyProviderId: "sample-legacy-provider",
@@ -47,24 +55,13 @@ const provider = (fields: Pick<HostProvider, "id" | "displayName" | "memberRole"
   sellerDisclosureUrl: null,
   reviewStatus: "DRAFT",
   consentVersion: "sample-provider-consent-1",
-  consentedAt: "2026-10-01T00:00:00.000Z",
-  submittedAt: null,
-  approvedAt: null,
-  paymentReuseConsentVersion: null,
-  paymentReuseConsentedAt: null,
   paymentReuseSourceSpotId: null,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  updatedAt: "2026-10-01T00:00:00.000Z",
   ...fields,
 });
 
 const KITCHEN = provider({ id: "sample-provider-kitchen", displayName: "サンプルの台所", memberRole: "OWNER", reviewStatus: "APPROVED" });
 const STUDIO = provider({ id: "sample-provider-studio", displayName: "サンプル工房", memberRole: "EDITOR", kind: "BUSINESS" });
 const GARDEN = provider({ id: "sample-provider-garden", displayName: "サンプルの庭", memberRole: "OWNER" });
-const REUSE_CONSENT = { version: "sample-payment-reuse-consent-1", text: "（サンプル）拠点の販売者口座を、体験の売上の受取に使うことに同意します。この文言は合成データです。" };
-
-const consent = { version: "sample-provider-consent-1", text: "合成の同意文" };
-const detailBody = (detail: HostProvider) => ({ provider: detail, platformAdmin: false, consent, paymentReuseConsent: consent });
 
 /** http mode: NIHO is the global fetch, recorded here. */
 function stubNiho(respond: (url: string) => Response) {
@@ -76,28 +73,27 @@ function stubNiho(respond: (url: string) => Response) {
   return calls;
 }
 
-/** 既定の集合案内 as NIHO answers it (synthetic). */
-const MEETING = { overview: "（合成）駅の近く", address: "（合成）サンプル町 1 丁目", accessNote: "（合成）東口から歩きます。", mapUrl: "https://maps.example.test/sample", entranceNote: "（合成）木の門" };
-
 beforeEach(() => {
   state.config.apiMode = "mock";
   state.providers = [KITCHEN, STUDIO];
   state.scenario = "default";
+  state.selectedHostClient = null;
+  state.publicationRepository = null;
   state.notificationLoad = { status: "preparing" };
   state.notificationCalls = [];
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("loadHostConsoleData", () => {
-  it("mock: the contract mock's provider detail and the kitchen's preview data", async () => {
+  it("mock: the kitchen's synthetic seller data and preview data", async () => {
     const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
     expect(data.settings).toEqual({
       displayName: "サンプルの台所",
       kind: "INDIVIDUAL",
-      bio: "家庭料理を一緒に作る体験の、合成データの提供者です（sample）。",
-      sellerDisclosureUrl: "https://example.com/sample-kitchen/legal",
+      bio: "",
+      sellerDisclosureUrl: "",
       reviewStatus: "APPROVED",
-      consentCurrent: true,
+      consentCurrent: null,
       meetingPoint: expect.objectContaining({ overview: "Near Kamakura Station, 5-minute walk", mapUrl: "https://maps.example.com/sample-kitchen" }),
       calendar: { google: expect.objectContaining({ status: "connected", account: "kitchen@example.com" }), icsUrl: expect.stringMatching(/^https:\/\/calendar\.example\.com\//) },
       notifications: { email: { addresses: ["kitchen@example.com"] }, items: expect.any(Array) },
@@ -123,45 +119,29 @@ describe("loadHostConsoleData", () => {
 
   it("mock: the studio is a business still in draft", async () => {
     const data = await loadHostConsoleData(STUDIO);
-    expect(data.settings).toMatchObject({ displayName: "サンプル工房", kind: "BUSINESS", reviewStatus: "DRAFT", consentCurrent: true });
+    expect(data.settings).toMatchObject({ displayName: "サンプル工房", kind: "BUSINESS", reviewStatus: "DRAFT", consentCurrent: null });
     expect(data.experiences.map((experience) => experience.status)).toEqual(["draft"]);
     expect(data.home.sessions).toEqual({ today: [], tomorrow: [], later: [] });
   });
 
-  it("http: reads the provider detail and the meeting defaults from NIHO with the session's token and shows nothing else yet", async () => {
+  it("http: uses the local Experience seller profile and does not call removed NIHO provider APIs", async () => {
     state.config.apiMode = "http";
-    const detail = provider({ id: KITCHEN.id, displayName: "合成の台所", memberRole: "OWNER", kind: "BUSINESS", bio: "合成の紹介", sellerDisclosureUrl: "https://seller.example.com/", reviewStatus: "REQUESTED" });
-    const calls = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(detail)));
+    const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
     const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
-    expect(calls.toSorted((left, right) => left.url.localeCompare(right.url))).toEqual([
-      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen", authorization: "Bearer mock-access-token.data-test" },
-      { url: "https://niho.example.test/api/experience-providers/sample-provider-kitchen/meeting-point", authorization: "Bearer mock-access-token.data-test" },
-    ]);
-    expect(data.settings).toEqual({
-      displayName: "合成の台所",
-      kind: "BUSINESS",
-      bio: "合成の紹介",
-      sellerDisclosureUrl: "https://seller.example.com/",
-      reviewStatus: "REQUESTED",
-      consentCurrent: true,
-      meetingPoint: MEETING,
-      calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null },
-      notifications: { email: { addresses: [] }, items: [] },
-      notificationSource: "preparing",
+    expect(calls).toEqual([]);
+    expect(data.settings).toMatchObject({
+      displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", sellerDisclosureUrl: "",
+      reviewStatus: "APPROVED", consentCurrent: null, meetingPoint: null,
     });
-    // Nothing to connect until NIHO's Google connection is in the host contract.
+    expect(data.settings.calendar).toEqual({ google: GOOGLE_NOT_CONNECTED, icsUrl: null });
     expect(data.googleConnection).toBeNull();
     expect(data.experiences).toEqual([]);
     expect(data.home).toEqual({ todos: [], sessions: { today: [], tomorrow: [], later: [] }, month: null });
-    // A provider who agreed to older terms cannot ask for the review until NIHO sorts it out.
-    stubNiho(() => Response.json({ ...detailBody(detail), consent: { version: "sample-provider-consent-2", text: "新しい合成の同意文" } }));
-    expect((await loadHostConsoleData(KITCHEN)).settings.consentCurrent).toBe(false);
   });
 
   it("http: 通知 comes from the experience DB for the owner once it is open there (#109)", async () => {
     state.config.apiMode = "http";
-    const detail = provider({ id: KITCHEN.id, displayName: "合成の台所", memberRole: "OWNER" });
-    stubNiho(() => Response.json(detailBody(detail)));
+    const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
     const items = [{ key: "NEW_BOOKING", enabled: true, locked: true }, { key: "NEW_REVIEW", enabled: false, locked: false }];
     state.notificationLoad = { status: "live", items };
     // Only 設定 asks for them; the other pages never read the DB for them.
@@ -170,64 +150,51 @@ describe("loadHostConsoleData", () => {
     const live = await loadHostConsoleData(KITCHEN, { notifications: true });
     expect(live.settings).toMatchObject({ notifications: { email: { addresses: [] }, items }, notificationSource: "live" });
     expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, nihoUserId: "sample-user" }]);
+    expect(calls).toEqual([]);
     state.notificationLoad = { status: "error" };
     expect((await loadHostConsoleData(KITCHEN, { notifications: true })).settings.notificationSource).toBe("error");
     // An editor never reads them.
     state.notificationCalls = [];
-    stubNiho(() => Response.json(detailBody(provider({ id: STUDIO.id, displayName: "サンプル工房", memberRole: "EDITOR" }))));
     expect((await loadHostConsoleData(STUDIO, { notifications: true })).settings).toMatchObject({ notifications: null, notificationSource: "preparing" });
     expect(state.notificationCalls).toEqual([]);
   });
 
-  it("http: falls back to the list's provider when the detail cannot be read", async () => {
+  it("http: never tries a NIHO provider detail fallback", async () => {
     state.config.apiMode = "http";
-    const fromList = { displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", sellerDisclosureUrl: "", reviewStatus: "APPROVED" };
-    stubNiho(() => new Response("unavailable", { status: 503 }));
-    const unavailable = (await loadHostConsoleData(KITCHEN)).settings;
-    expect(unavailable).toMatchObject(fromList);
-    expect(unavailable.consentCurrent).toBeNull();
-    // A body outside the contract is not read.
-    stubNiho(() => Response.json({ provider: { id: KITCHEN.id, displayName: "形の違う提供者" }, platformAdmin: false }));
-    expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject(fromList);
-    // A detail for another provider is not taken for this one.
-    stubNiho(() => Response.json(detailBody(provider({ id: "someone-else", displayName: "別の提供者", memberRole: "OWNER", kind: "BUSINESS" }))));
-    expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject(fromList);
+    const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
+    expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject({
+      displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", sellerDisclosureUrl: "", reviewStatus: "APPROVED",
+      consentCurrent: null, meetingPoint: null,
+    });
+    expect(calls).toEqual([]);
   });
 
-  it("http: the meeting defaults are the owner's and the editor's, null when NIHO cannot answer them", async () => {
+  it("http: meeting defaults are unavailable without the Experience product API", async () => {
     state.config.apiMode = "http";
-    const editor = provider({ id: STUDIO.id, displayName: "サンプル工房", memberRole: "EDITOR" });
-    stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(editor)));
-    expect((await loadHostConsoleData(STUDIO, { meetingPoint: true })).settings.meetingPoint).toEqual(MEETING);
-    stubNiho((url) => url.endsWith("/meeting-point") ? new Response("unavailable", { status: 503 }) : Response.json(detailBody(editor)));
+    const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
     expect((await loadHostConsoleData(STUDIO, { meetingPoint: true })).settings.meetingPoint).toBeNull();
-    // Only 設定 asks for them: ホーム and 体験 never call NIHO's meeting point.
-    const unasked = stubNiho((url) => url.endsWith("/meeting-point") ? Response.json({ meetingPoint: MEETING }) : Response.json(detailBody(editor)));
     expect((await loadHostConsoleData(STUDIO)).settings.meetingPoint).toBeNull();
-    expect(unasked.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-studio"]);
-    // A cohost is not asked for: NIHO answers the meeting defaults to the owner and the editor only.
     const cohost = provider({ id: KITCHEN.id, displayName: "サンプルの台所", memberRole: "COHOST" });
-    const calls = stubNiho(() => Response.json(detailBody(cohost)));
     expect((await loadHostConsoleData(cohost, { meetingPoint: true })).settings.meetingPoint).toBeNull();
-    expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen"]);
+    expect(calls).toEqual([]);
   });
 });
 
 describe("loadHostExperienceEditor", () => {
   it("passes verified mock publication facts, and keeps non-owner or unreadable facts closed", async () => {
     expect((await loadHostExperienceEditor(KITCHEN, "coffee")).publication).toEqual({
-      role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "available",
+      role: "OWNER", payoutReason: "READY", sellerDisclosureReady: false, consentCurrent: null, providerStatus: "available",
     });
     expect((await loadHostExperienceEditor(STUDIO, "calligraphy")).publication).toEqual({
-      role: "EDITOR", payoutReason: null, sellerDisclosureReady: false, consentCurrent: true, providerStatus: "available",
+      role: "EDITOR", payoutReason: null, sellerDisclosureReady: false, consentCurrent: null, providerStatus: "available",
     });
   });
 
-  it("does not add a payout dependency to the legacy HTTP editor", async () => {
+  it("does not add a legacy NIHO provider detail dependency to the HTTP editor", async () => {
     state.config.apiMode = "http";
-    const calls = stubNiho(() => Response.json(detailBody(KITCHEN)));
+    const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
     expect((await loadHostExperienceEditor(KITCHEN, "coffee")).editor).toEqual({ status: "unavailable" });
-    expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen"]);
+    expect(calls).toEqual([]);
   });
 });
 
@@ -358,45 +325,61 @@ describe("loadHostSales", () => {
 describe("loadHostPayout", () => {
   it("mock: the owner reads the kitchen's ready account; an editor reads nothing", async () => {
     expect(await loadHostPayout(KITCHEN)).toEqual({
-      load: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: REUSE_CONSENT } },
+      load: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: null } },
       notice: null,
       redirectTo: null,
     });
     expect(await loadHostPayout(STUDIO)).toEqual({ load: { status: "not-owner" }, notice: null, redirectTo: null });
   });
 
-  it("mock: a provider without an account sees its spots' ready accounts to share", async () => {
+  it("mock: a provider without a Connect account has no candidate or reuse operation", async () => {
     state.scenario = "payments-pending";
-    expect((await loadHostPayout(GARDEN)).load).toEqual({ status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [{ id: "sample-spot-house", name: "サンプルの拠点" }], reuseConsent: REUSE_CONSENT } });
-    // 売上 only needs the state.
+    expect((await loadHostPayout(GARDEN)).load).toEqual({ status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [], reuseConsent: null } });
     expect((await loadHostPayout(GARDEN, { candidates: false })).load).toMatchObject({ status: "owner", payout: { reason: "NOT_CONNECTED", candidates: [] } });
   });
 
-  it("mock: back from Stripe (?connect=return) reads the account again first, and says when there is none", async () => {
-    expect(await loadHostPayout(KITCHEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "READY" } }, notice: { tone: "success", message: STRIPE_SYNCED_TEXT }, redirectTo: null });
+  it("mock: Connect return and refresh do not mutate NIHO Connect state", async () => {
+    expect(await loadHostPayout(KITCHEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "READY" } }, notice: null, redirectTo: null });
     state.scenario = "payments-pending";
-    expect(await loadHostPayout(GARDEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "NOT_CONNECTED" } }, notice: { tone: "error", message: HOST_ERROR_REASON_TEXT.PROVIDER_PAYMENT_NOT_CONNECTED } });
-    // An expired link (?connect=refresh): the preview has no Stripe page to go back to.
-    expect(await loadHostPayout(GARDEN, { connect: "refresh" })).toMatchObject({ load: { payout: { reason: "READY" } }, notice: { tone: "success", message: PREVIEW_STRIPE_TEXT }, redirectTo: null });
+    expect(await loadHostPayout(GARDEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "NOT_CONNECTED" } }, notice: null, redirectTo: null });
+    expect(await loadHostPayout(GARDEN, { connect: "refresh" })).toMatchObject({ load: { payout: { reason: "NOT_CONNECTED" } }, notice: null, redirectTo: null });
   });
 
-  it("http: an expired link (?connect=refresh) goes back to Stripe's page, and only to Stripe's", async () => {
+  it("http: Connect is read-only and never calls the removed setup-link endpoint", async () => {
     state.config.apiMode = "http";
-    const link = (url: string) => () => Response.json({ url, expiresAt: "2026-10-21T00:05:00.000Z", ready: false, reason: "VERIFICATION_REQUIRED" });
-    const calls = stubNiho(link("https://connect.stripe.com/setup/e/acct_sample/abc"));
-    expect(await loadHostPayout(KITCHEN, { connect: "refresh" })).toEqual({ load: { status: "error" }, notice: null, redirectTo: "https://connect.stripe.com/setup/e/acct_sample/abc" });
-    expect(calls.map((call) => call.url)).toEqual(["https://niho.example.test/api/experience-providers/sample-provider-kitchen/payments/connect/resume"]);
-    stubNiho(link("https://stripe.example.test/setup"));
-    expect(await loadHostPayout(KITCHEN, { connect: "refresh" })).toMatchObject({ notice: { tone: "error", message: STRIPE_LINK_UNUSABLE_TEXT }, redirectTo: null });
+    const getLegacyConnectAccount = vi.fn().mockResolvedValue({ ok: true, data: {
+      legacyProviderId: KITCHEN.legacyProviderId,
+      stripeAccountId: "acct_synthetic12345678",
+      readiness: { ready: true, reason: "READY" },
+      paymentReuseConsent: { accepted: true, version: "synthetic-payment-v1", consentedAt: "2026-11-04T00:00:00.000Z" },
+    } });
+    state.selectedHostClient = { getLegacyConnectAccount };
+    state.publicationRepository = {
+      currentOwnerSellerProfile: vi.fn().mockResolvedValue({ kind: "ready", profile: {
+        providerId: KITCHEN.id,
+        legacyProviderId: KITCHEN.legacyProviderId,
+        providerDisplayName: KITCHEN.displayName,
+        sellerNihoAccountRef: KITCHEN.nihoUserId,
+        stripeConnectAccountRef: "acct_synthetic12345678",
+        sellerDisplayName: "Synthetic legal seller",
+      } }),
+    };
+    const calls = stubNiho(() => { throw new Error("Connect mutation API must not be called"); });
+    expect(await loadHostPayout(KITCHEN, { connect: "refresh" })).toMatchObject({
+      load: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: null } },
+      notice: null, redirectTo: null,
+    });
+    expect(getLegacyConnectAccount).toHaveBeenCalledWith(KITCHEN.legacyProviderId);
+    expect(calls).toEqual([]);
   });
 });
 
 describe("loadRegistrationConsent", () => {
-  it("reads the provider terms in force from NIHO's provider list", async () => {
-    state.scenario = "empty";
-    expect(await loadRegistrationConsent()).toEqual({ version: "sample-provider-consent-1", text: "（サンプル）提供者として登録し、NIHO の提供者規約に同意します。この文言は合成データです。" });
-    state.config.apiMode = "http";
-    stubNiho(() => new Response("unavailable", { status: 503 }));
+  it("does not read provider terms from the removed NIHO provider list", async () => {
     expect(await loadRegistrationConsent()).toBeNull();
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
+    expect(await loadRegistrationConsent()).toBeNull();
+    expect(calls).toEqual([]);
   });
 });

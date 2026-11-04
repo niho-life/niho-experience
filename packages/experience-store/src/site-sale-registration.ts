@@ -341,7 +341,7 @@ export class SiteSaleRegistration {
           settingsOutcome = "CREATED";
         } else {
           if (settings.support_enabled !== input.supportEnabled) {
-            throw new StoreConflictError("An existing NIHO fee setting differs; use the reviewed fee-change process.");
+            throw new StoreConflictError("An existing Experience fee setting differs; use the reviewed fee-change process.");
           }
           settingsOutcome = "UNCHANGED";
         }

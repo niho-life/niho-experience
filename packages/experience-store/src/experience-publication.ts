@@ -1189,6 +1189,38 @@ export class ExperiencePublicationRepository {
     return result.rows.length === 1 ? projectPublicExperiencePublication(result.rows[0]!) : null;
   }
 
+  /**
+   * Internal route-selection guard: a mapped host seller's current or historical slug stays reserved after
+   * stop, suspension, rename, or draft so a same-slug legacy NIHO page cannot become visible again.
+   */
+  async listClaimedSlugs(): Promise<readonly string[]> {
+    const result = await this.#pool.query<{ slug: string }>(
+      `SELECT product.slug FROM experience_products product
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+       UNION
+       SELECT publication.slug FROM experience_product_publications publication
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
+       ORDER BY slug COLLATE "C"`,
+    );
+    return result.rows.map((row) => String(row.slug));
+  }
+
+  async claimsSlug(slug: string): Promise<boolean> {
+    assertNonEmptyText(slug, "slug", 160);
+    const result = await this.#pool.query(
+      `SELECT 1 FROM experience_products product
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+        WHERE product.slug=$1
+       UNION ALL
+       SELECT 1 FROM experience_product_publications publication
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
+        WHERE publication.slug=$1
+       LIMIT 1`,
+      [slug],
+    );
+    return result.rows.length > 0;
+  }
+
   async listPublic(): Promise<readonly PublicExperiencePublication[]> {
     const result = await this.#pool.query<DbRow>(
       `${VISIBLE_PUBLICATIONS}

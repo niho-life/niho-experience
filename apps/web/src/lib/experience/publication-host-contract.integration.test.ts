@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readdir, readFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- This server-side integration test exercises the selected host client.
 import { createExperienceHostApiClient } from "@niho-experience/api-client/host";
 import { ExperiencePublicationRepository } from "@niho-experience/experience-store";
 import { GuestBookingRepository } from "@niho-experience/experience-store";
@@ -19,6 +20,9 @@ const SLUG = "synthetic-niho-contract-experience";
 const mocks = vi.hoisted(() => ({
   config: {
     experienceHostPublicationApiEnabled: true,
+    experiencePublicationsEnabled: true,
+    guestBookingEnabled: true,
+    apiMode: "http",
     experiencePublicationConsentVersion: "listing-contract-v1",
     siteUrl: "https://experience.example.test",
   },
@@ -27,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   selectedHostApiClient: vi.fn(),
   repository: undefined as unknown,
   clearSessionCookie: vi.fn(),
+  bookingRepository: undefined as unknown,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -41,10 +46,15 @@ vi.mock("@/lib/host/server", () => ({
   }),
   clearSessionCookie: mocks.clearSessionCookie,
 }));
-vi.mock("@/lib/experience/store-server", () => ({ experiencePublicationRepository: () => mocks.repository }));
+vi.mock("@/lib/experience/store-server", () => ({
+  experiencePublicationRepository: () => mocks.repository,
+  guestBookingRepository: () => mocks.bookingRepository,
+}));
 
 import { publicationHostBoundary } from "./publication-host-boundary";
 import { publicationCollectionRequest, publicationRequest } from "./publication-http";
+import { getSitePublicExperience } from "./site-publications";
+import { sitePublicationCard, cancellationSummary } from "./site-card-model";
 
 const content = {
   lead: "A synthetic Experience used to verify the NIHO v1 contract.",
@@ -65,11 +75,11 @@ const saleTerms = {
   offerPrices: null,
   childPricing: null,
   minimumParticipants: 1,
-  minimumChargeableParticipants: 1,
+  minimumChargeableParticipants: 2,
   maxPartySize: 6,
   cancellationPolicy: "CUSTOM",
-  cancellationWindowMinutesBeforeStart: 1440,
-  cancellationRefundBasisPoints: 10_000,
+  cancellationWindowMinutesBeforeStart: 90,
+  cancellationRefundBasisPoints: 3_750,
   minimumAttendance: null,
   bookingQuestions: [],
   conditionsVersion: null,
@@ -94,17 +104,21 @@ async function isolatedSchema(run: (pool: import("pg").Pool) => Promise<void>) {
 }
 
 describe("NIHO Host API v1 → Experience owner publication → booking (synthetic)", {
-  skip: TEST_DATABASE_URL === undefined ? "TEST_DATABASE_URL is not set" : false,
+  skip: TEST_DATABASE_URL === undefined,
 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.assign(mocks.config, {
+      experiencePublicationsEnabled: true,
+      guestBookingEnabled: true,
+      apiMode: "http",
       experienceHostPublicationApiEnabled: true,
       experiencePublicationConsentVersion: CONSENT_VERSION,
       siteUrl: "https://experience.example.test",
     });
     mocks.session.mockResolvedValue({ accessToken: "synthetic-niho-session-bearer" });
     mocks.accessTokenUsable.mockReturnValue(true);
+    mocks.bookingRepository = undefined;
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -114,6 +128,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       const publicationRepository = new ExperiencePublicationRepository(pool);
       const experienceStore = new ExperienceStore(pool);
       const bookingRepository = new GuestBookingRepository(pool);
+      mocks.bookingRepository = bookingRepository;
       const stripe = await registration.provisionHostSeller({
         providerId: EXPERIENCE_PROVIDER_ID,
         legacyProviderId: LEGACY_PROVIDER_ID,
@@ -132,7 +147,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         accessToken: "synthetic-niho-session-bearer",
         serviceIdToken: "synthetic-experience-service-id-token",
         fetch: async (input, init) => {
-          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+          const url = new URL(String(input));
           const headers = new Headers(init?.headers);
           contractRequests.push({
             url: `${url.pathname}${url.search}`,
@@ -230,9 +245,20 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       const terms = await bookingRepository.publicBookingTerms(SLUG);
       expect(terms?.sellerDisplayName).toBe("Synthetic legal seller");
       expect(terms?.offers).toHaveLength(1);
+      const siteProduct = await getSitePublicExperience(SLUG);
+      expect(siteProduct?.kind).toBe("published");
+      if (siteProduct?.kind !== "published") throw new Error("Synthetic publication was not readable.");
+      expect(siteProduct.item.publication.publicTitle).toBe("Synthetic contract experience");
+      expect(siteProduct.item.saleTerms).not.toHaveProperty("providerId");
+      expect(siteProduct.item.saleTerms).not.toHaveProperty("productId");
+      expect(siteProduct.item.saleTerms?.offers[0]?.cancellationPolicy.code).toBe("CUSTOM");
+      expect(siteProduct.item.saleTerms?.offers[0]?.minimumChargeableParticipants).toBe(2);
+      const card = sitePublicationCard(siteProduct.item);
+      expect(card).toMatchObject({ slug: SLUG, title: "Synthetic contract experience", priceLabel: "¥4,000", offers: [{ id: rule.id, minimumParticipants: 1, maxPartySize: 6 }] });
+      expect(cancellationSummary(siteProduct.item.saleTerms!.offers[0]!)).toBe("37.5% refund when cancelled at least 90 minutes before the start");
       const fingerprint = createHash("sha256").update("[]", "utf8").digest("hex");
       const booking = await bookingRepository.startGuestBooking({
-        slug: SLUG, offerId: rule.id, occurrenceDate: occurrenceDay, adultCount: 1, childCount: 0, expectedTotalYen: 4_000,
+        slug: SLUG, offerId: rule.id, occurrenceDate: occurrenceDay, adultCount: 1, childCount: 0, expectedTotalYen: 8_000,
         bookingQuestionsFingerprint: fingerprint, termsConsentVersion: "synthetic-site-terms-v1",
         currentConsentVersion: "synthetic-site-terms-v1", conditionsConsentVersion: null,
         guestName: "Synthetic Guest", guestEmail: "guest@example.test", guestLanguage: "EN",

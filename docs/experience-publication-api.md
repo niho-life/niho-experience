@@ -1,15 +1,18 @@
 # Experience owner-seller API contract
 
+本書の本人・Connect境界の正は [NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。NIHO v1.0.0は未配備で、ExperienceのHTTP APIは環境flagが揃うまで閉じる。
+
 Status: implementation contract for #330 / #369 / #377. The host UI consumes these operations. The product owner is the seller; product requests never select a seller, provider, or payment account. The existing calendar API has its own selected-provider context and validates the logged-in NIHO membership before writing.
 
 ## Identity and seller boundary
 
-- The host uses the existing NIHO app-connect session cookie. NIHO access/refresh tokens stay server-side.
-- Each request obtains the currently authenticated NIHO user ID and current OWNER authority from the NIHO common account contract. Experience must not trust a user ID or role supplied by the browser.
-- Experience resolves or creates the seller's Experience workspace from that verified identity. A stale local membership alone never grants access.
-- The same seller owns the configured Stripe Connect destination. The NIHO contract returns the connected account reference and current readiness for that seller; the Experience browser DTO never includes the reference.
+- The host uses the existing NIHO app-connect session. The Experience server keeps NIHO access/refresh tokens in its sealed server-side session; it does not share NIHO cookies or expose tokens to browser JavaScript/storage.
+- Every product request gets the current `nihoUserId` and `accountStatus` from NIHO Host contract v1.0.0 using the AppConnection bearer plus the Experience runtime service ID token. That response has no provider directory and no NIHO OWNER claim. The browser cannot supply the person ID or role.
+- Experience checks an active local `provider_memberships` row with role `OWNER`, linked to the exact current NIHO ID in the operator-provisioned `seller_niho_account_ref`. On a first request, it may create that local OWNER row only when the exact mapping exists and there is no conflicting membership. Missing/ambiguous/conflicting mappings fail closed. `ownerUserId` and `legacyProviderId` are never substitutes for the current person.
+- The Connect projection is read by the exact Experience-configured `legacyProviderId`. Its returned Stripe account ID must equal that seller profile's configured `stripeConnectAccountRef`; current charge/payout readiness and NIHO payment-reuse consent are checked. The Experience browser DTO never includes either reference.
+- A new seller requires an operator-provisioned Experience seller profile and an explicit fee setting before first use. The provisioning step does not grant OWNER, create products, or publish. It is documented in [NIHO Host v1 consumer contract](host-niho-v1-consumer.md).
 - `sellerDisplayName` is the seller's public legal/trade display. It is not copied from Stripe's account label. For the first community dinner, Panasonic is both seller and payout owner; “NIHOkamakura” is only the Stripe account label.
-- The host checks current identity and Connect readiness when it reads or changes a product. The public catalog is the durable publication snapshot and does not expire when this short-lived check expires. A different seller and recipient are not modeled for this flow.
+- The host checks current identity, local Experience OWNER permission, exact account mapping, and NIHO Connect readiness when it reads or changes a product. The public catalog is the durable publication snapshot and does not expire when this short-lived check expires. A different seller and recipient are not modeled for this flow.
 
 ## Host operations
 
@@ -73,7 +76,7 @@ The public API returns the accepted minimum charge and cancellation rule for gue
 
 ### Publish, stop, and resume
 
-`POST /host/api/products/{productId}/publish` (also resumes a seller-stopped product) sends `{ "version": "…", "consentVersion": "…", "accepted": true }`. The server checks current OWNER authority, seller/Connect readiness, seller display, consent, product content and photo rights, prices, explicit cancellation terms, NIHO's provider fee configuration, and at least one saleable schedule. A missing provider fee configuration returns `FEE_SETTINGS_REQUIRED`; the seller cannot choose or override it. It never publishes unsaved input.
+`POST /host/api/products/{productId}/publish` (also resumes a seller-stopped product) sends `{ "version": "…", "consentVersion": "…", "accepted": true }`. The server checks current OWNER authority, seller/Connect readiness, seller display, consent, product content and photo rights, prices, explicit cancellation terms, the explicit Experience fee setting loaded during seller provisioning, and at least one saleable schedule. A missing fee configuration returns `FEE_SETTINGS_REQUIRED`; the seller cannot choose or override it. It never publishes unsaved input.
 
 `POST /host/api/products/{productId}/stop` sends `{ "version": "…" }`. It removes the product from catalog, details, metadata, sitemap, and new checkout admission. Existing bookings and their immutable snapshots remain available.
 
@@ -83,9 +86,10 @@ An operations suspension uses a separate Admin session. Clearing it does not pub
 
 ## Public reads and checkout
 
-- `GET /api/public/experiences` returns the current active publications.
-- `GET /api/public/experiences/{slug}` returns the same explicit public projection or a non-disclosing 404.
-- Public DTOs contain seller display, sale terms needed before booking, and same-origin photo URLs. They omit user/provider IDs, Connect/NIHO references, unpublished drafts, private meeting access details, internal readiness, and minimum attendance.
+- `GET /api/public/experiences` returns active Experience publication snapshots; `GET /api/public/experiences/{slug}` returns one such public projection or a non-disclosing 404. These publication endpoints contain the published manuscript, photos, seller display, price floor, and meeting disclosure, but no schedule offers.
+- `GET /api/public/experiences/{slug}/availability` reads the active, sellable Experience snapshot. `GET /api/public/experiences/{slug}/sale-terms` returns its lossless public sale terms, including `CUSTOM` cancellation details and the minimum-charge floor, without provider/product IDs. `POST /api/public/experiences/{slug}/checkout` creates a hold from the same snapshot. The legacy `/booking-terms` route remains an adapter for old NIHO-content pages and only represents cancellation terms supported by that older contract.
+- The English catalog merges NIHO's public catalog with Experience products that have an active publication and valid sale terms. If a slug is present in Experience, the NIHO card is hidden. Experience metadata, canonical URL, detail SSR, and sitemap use that published snapshot. A failed Experience DB read fails the page closed rather than selecting a same-slug NIHO product. Products without sale terms can render their published detail but are omitted from the booking catalog and cannot start Checkout.
+- The host/editor public DTOs omit user/provider IDs, Connect/NIHO references, unpublished drafts, private meeting access details, internal readiness, and minimum attendance. The sale-terms endpoint is a separate allowlisted projection; it never includes the internal Experience provider/product keys.
 - Catalog, detail, and availability use the active Experience publication snapshot; they do not expire with the host's short-lived readiness check. Checkout uses only that publication snapshot, calculates selected schedule price and booking conditions in the booking transaction, and saves seller, price, cancellation, minimum-charge, and minimum-attendance snapshots.
 - Before returning a new Checkout URL, the server rechecks the exact account in the booking snapshot with Stripe and requires current charge and payout readiness. Stripe then creates Checkout on that same Connect account. If readiness changed, no payment URL is returned; the short booking hold expires under the normal hold policy.
 - The Experience checkout has no legacy NIHO fallback or cutover prerequisite. A stopped, suspended, or unpublished product cannot start a new checkout.

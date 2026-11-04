@@ -4,12 +4,16 @@ import { SAMPLE_TERMS } from "./testing/guest-booking-fixtures";
 
 /** Which experiences this site sells (#285), against a stubbed store. */
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { apiMode: "mock" as "mock" | "http", experiencePublicationsEnabled: false, guestBookingEnabled: true, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  publicationRepository: null as null | Record<string, ReturnType<typeof vi.fn>>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
-vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository }));
+vi.mock("@/lib/experience/store-server", () => ({
+  guestBookingRepository: () => state.repository,
+  experiencePublicationRepository: () => state.publicationRepository,
+}));
 
 import { GET as bookingTerms } from "@/app/api/public/experiences/[slug]/booking-terms/route";
 import { bookingSourceOf, detailForSale, guestBookingSale, guestBookingSources, japaneseBookingOpen, siteNextDates } from "./guest-booking-source";
@@ -28,12 +32,13 @@ const READY = { termsFingerprint: `sha256:${"a".repeat(64)}`, bookingReady: true
 const failing = () => vi.fn(async () => { throw new Error("connection refused: postgresql://user@db/experience"); });
 
 beforeEach(() => {
-  state.config = { guestBookingEnabled: true, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { apiMode: "mock", experiencePublicationsEnabled: false, guestBookingEnabled: true, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
     publicBookingTerms: vi.fn(async (slug: string) => (slug === "sample-tea" ? SAMPLE_TERMS : null)),
     sellableSlugs: vi.fn(async (slugs: readonly string[]) => slugs.filter((slug) => slug === "sample-tea")),
     listPublicAvailability: vi.fn(async (slug: string) => (slug === "sample-tea" ? AVAILABILITY : null)),
   };
+  state.publicationRepository = null;
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -124,6 +129,32 @@ describe("where a page of cards reads availability", () => {
     expect(await guestBookingSources(["sample-walk", "sample-tea", "sample-walk"])).toEqual({
       nihoWebOrigin: "https://niho.example", siteOrigin: null, siteSlugs: [], closedSlugs: ["sample-walk", "sample-tea"],
     });
+  });
+
+  it("never falls back to NIHO availability for a reserved new-seller slug", async () => {
+    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: true };
+    state.publicationRepository = { listClaimedSlugs: vi.fn(async () => ["stopped-seller-product", "sample-walk"]) };
+    const sources = await guestBookingSources(["sample-walk", "sample-tea", "stopped-seller-product"]);
+    expect(sources).toEqual({
+      nihoWebOrigin: "https://niho.example",
+      siteOrigin: "https://experience.example",
+      siteSlugs: ["sample-tea"],
+      closedSlugs: ["sample-walk", "stopped-seller-product"],
+    });
+    expect(state.publicationRepository.listClaimedSlugs).toHaveBeenCalledOnce();
+  });
+
+  it("keeps new-seller slugs closed when publication is disabled without hiding legacy NIHO products", async () => {
+    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: false };
+    state.publicationRepository = { listClaimedSlugs: vi.fn(async () => ["stopped-seller-product"]) };
+    const sources = await guestBookingSources(["sample-walk", "stopped-seller-product"]);
+    expect(sources).toEqual({
+      nihoWebOrigin: "https://niho.example",
+      siteOrigin: null,
+      siteSlugs: [],
+      closedSlugs: ["stopped-seller-product"],
+    });
+    expect(state.publicationRepository.listClaimedSlugs).toHaveBeenCalledOnce();
   });
 });
 

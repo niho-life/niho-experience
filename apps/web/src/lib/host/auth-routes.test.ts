@@ -279,15 +279,21 @@ describe("refresh (http mode)", () => {
 describe("API relay (http mode)", () => {
   const context = (...path: string[]) => ({ params: Promise.resolve({ path }) });
 
-  it("forwards allowed calls with the Bearer token and without browser cookies", async () => {
-    handler = () => json(200, { providers: [] });
-    const response = await relayGet(new NextRequest(`${SITE}/host/api/experience-providers?status=x`, { headers: { cookie: sessionCookie(30 * MIN), accept: "application/json" } }), context("experience-providers"));
+  it("forwards the remaining allowed profile read with the Bearer token and without browser cookies", async () => {
+    handler = () => json(200, { user: { displayName: "Synthetic" }, userIconImage: null });
+    const response = await relayGet(new NextRequest(`${SITE}/host/api/auth/me`, { headers: { cookie: sessionCookie(30 * MIN), accept: "application/json" } }), context("auth", "me"));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(calls[0]!.url.href).toBe(`${NIHO}/api/experience-providers?status=x`);
+    expect(calls[0]!.url.href).toBe(`${NIHO}/api/auth/me`);
     const sent = new Headers(calls[0]!.init.headers);
     expect(sent.get("authorization")).toBe("Bearer access-1");
     expect(sent.get("cookie")).toBeNull();
+  });
+
+  it("rejects query expansion on the profile read before calling NIHO", async () => {
+    const response = await relayGet(new NextRequest(`${SITE}/host/api/auth/me?include=members`, { headers: { cookie: sessionCookie(30 * MIN) } }), context("auth", "me"));
+    expect(response.status).toBe(404);
+    expect(calls).toHaveLength(0);
   });
 
   it("asks the browser to refresh instead of calling NIHO with an expiring token", async () => {
@@ -297,10 +303,11 @@ describe("API relay (http mode)", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("answers 404 for other NIHO paths and 403 for cross-site changes", async () => {
+  it("answers 404 before NIHO for removed provider APIs", async () => {
     const cookie = sessionCookie(30 * MIN);
     expect((await relayGet(new NextRequest(`${SITE}/host/api/users`, { headers: { cookie } }), context("users"))).status).toBe(404);
-    expect((await relayPost(new NextRequest(`${SITE}/host/api/experience-providers`, { method: "POST", headers: { cookie, origin: SITE, "sec-fetch-site": "same-site" }, body: "{}" }), context("experience-providers"))).status).toBe(403);
+    expect((await relayGet(new NextRequest(`${SITE}/host/api/experience-providers`, { headers: { cookie } }), context("experience-providers"))).status).toBe(404);
+    expect((await relayPost(new NextRequest(`${SITE}/host/api/experience-providers`, { method: "POST", headers: { cookie, origin: SITE, "sec-fetch-site": "same-origin" }, body: "{}" }), context("experience-providers"))).status).toBe(404);
     expect(calls).toHaveLength(0);
   });
 });

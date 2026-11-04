@@ -1,6 +1,6 @@
 # 構成とデータ境界
 
-> **現行方針（2026-11-04）**: niho-experienceが商品・公開版・開催枠・予約・取引の正本を持つ。本人が商品を作り、公開・停止・再開する。旧NIHO体験商品の利用者はいないため商品/予約の移行と切替は不要。現在のNIHO認証本人と同じ販売者のConnect口座だけをサーバー契約で参照する。コミュニティディナーは販売者・受取先ともPanasonicで、NIHOkamakuraはStripe表示名。Checkoutは有効なExperience公開版だけを対象にする。下記にある古い段階・移行図は歴史的な設計記録として読み、[ADR 0002](adr/0002-experience-domain-ownership.md) と [ホスト公開契約](experience-publication-api.md) を優先する。
+> **現行方針（2026-11-04）**: niho-experienceが商品・公開版・開催枠・Experience予約・取引の正本を持つ。本人が商品を作り、公開・停止・再開する。新しいExperience販売に旧NIHO商品の移行や同一開催回の二重販売を持ち込まない。既存の旧NIHO予約照会・履行・取消／返金はNIHO側の責任に残す。現在のNIHO認証本人と同じ販売者のConnect口座だけをサーバー契約で参照する。コミュニティディナーは販売者・受取先ともPanasonicで、NIHOkamakuraはStripe表示名。Checkoutは有効なExperience公開版だけを対象にする。[ADR 0002](adr/0002-experience-domain-ownership.md) と [NIHO Host v1 consumer contract](host-niho-v1-consumer.md) を優先する。
 
 決定日：2026-10-19。画面の独立開発と、NIHOアカウント・販売者口座・売上管理の共通利用を両立する。
 
@@ -11,7 +11,8 @@
 | 担当 | 持つもの |
 | --- | --- |
 | niho-experience（公開） | トップ、検索、詳細、予約入力、公開本文のSSR、SEO、翻訳UI、APIクライアント、合成fixture、ホストの画面（`/host`：登録・体験ページ・予約対応・売上の画面、セッション、NIHOのAPIの中継）、Admin予約支援UI（`/admin`：独立セッションと選別されたAdmin APIの中継。仮契約は[Admin予約支援](admin-support.md)） |
-| NIHO共通基盤 | ログイン、現在の本人・OWNER権限、同じ販売者のConnect口座とreadiness |
+| NIHO共通基盤 | ログイン、現在の本人ID、明示指定されたConnect口座のreadinessと再利用同意。ExperienceのOWNER権限は含まない |
+| Experience | seller mappingとOWNER membership、商品・公開・予約・取引の権限と正本 |
 | Stripe | 既存Connect Directによる決済、必要な販売者の本人確認・口座情報の収集 |
 
 バックエンドのソースを公開できないから分けるのではなく、共通業務の正本を一か所に保つために分ける。個人情報の保護は、API認可、公開データの選別、実行環境、配備権限によって担保する。
@@ -34,7 +35,9 @@ flowchart LR
 
 旅行者は英語のページで体験を探し、日時・人数・料金・販売者・キャンセル条件を確認する。会員登録を求めず、必要最小限の連絡先をゲストAPIへ送信し、StripeのCheckoutに移る。価格、在庫、販売者、決済口座は共通APIが決定する。v1の予約確認は既存NIHO側を使い、決済の成立はwebhookを正とする。
 
-提供者（ホスト）は、このサイトの `/host` で登録・体験ページ・予約対応・売上を扱う（オーナー決定 2026-10-21・[#84](https://github.com/niho-life/niho-experience/issues/84)）。ログインはNIHOに任せ、NIHOの確認画面で「接続する」を押すと一度きりのコードでこのサイトへ戻る。このサイトのサーバーがコードをNIHO専用Web access tokenへ交換し、refresh tokenとともにHttpOnly cookieへ暗号化して持つ。ブラウザのJavaScriptにはトークンを渡さず、画面からの操作は `/host/api/*` からサーバーがNIHOの提供者APIを呼ぶ。現在の交換応答はNIHO user IDとメールを返さないため、Experience内のprovider-scoped記録は選択中providerの `ownerUserId` に結び、操作権限はNIHO APIのscoped token検証とExperience側role ceilingの両方で制限する。個人アカウント本人の識別が必要な機能へowner IDを転用しない。NIHOの通常provider DTOはOWNER / EDITORを返し、COHOST運営API v1.1.0は agreed-not-deployed のため、COHOSTの予約UI・権限はNIHO側契約の配備と受入まで閉じる。OWNERは販売者・法的同意・Stripe売上受取・メンバー管理を担い、配備後のCOHOSTはそのproviderの全体験・予約に対する原稿、写真、日程、定員、予約承認・辞退、返信を担う。EDITORの既存範囲は広げない。既存ログイン、権限のある販売者、接続済みStripe口座を再利用する。NIHOが原稿作成や公開を手伝い、提供者には開催・受入に必要な操作を中心に見せる。口座未接続者の必要な本人確認は残る。
+提供者（ホスト）は `/host` へNIHOでログインする。Experience serverが一度きりのコードをNIHO専用Web access tokenへ交換し、tokenはsealed server-side sessionだけに保持する。NIHO cookieは共有せず、ブラウザーへtokenを渡さない。現在のNIHO Host v1.0.0は本人IDとACTIVE状態、明示指定したlegacy Connect readだけを提供し、provider一覧・登録・更新・Connect変更やExperience商品APIは持たない。契約のsource SHA、認証headers、response schema、配備条件は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)を参照する。
+
+Experienceの商品APIは各要求でNIHOの現在本人IDを取得し、運営登録済みのseller profileにあるNIHO account referenceと完全一致するExperienceの有効OWNER membershipだけを許可する。初回ログインは一致するprofileが一つあり競合membershipがない場合だけExperience OWNER membershipを結ぶ。NIHOが返さないroleを推測せず、`ownerUserId`や旧provider IDで本人を代用しない。Connectはprofileで固定したlegacy lookup keyで読み、返却Stripe account IDの完全一致・readiness・NIHO payment reuse consentを公開前に確認する。商品原稿・写真・販売条件・公開・Experience予約と返金はExperienceが所有し、旧NIHO予約の照会・履行・取消／返金はNIHOが保持する。
 
 NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ昇格させず、Experience内の[商品限定運営者](product-operators.md) grantでカレンダーだけを扱う。NIHOのfresh identityとhost API接続確認は省略せず、予約・売上・Google管理などprovider-wide情報は公開しない。
 

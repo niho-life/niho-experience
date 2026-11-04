@@ -53,7 +53,7 @@ export function nihoAuthDeps(): NihoAuthDeps {
   return { fetch, nihoOrigin: config.nihoWebOrigin };
 }
 
-/** NIHO's API for this session: the real origin in http mode, the synthetic one in mock mode. */
+/** NIHO request transport: the real origin in http mode, the synthetic one in mock mode. */
 export function nihoApiFetch(session: HostSession): typeof fetch {
   return isHostMock() ? createMockHostFetch(session.mockScenario ?? "default") : fetch;
 }
@@ -68,8 +68,9 @@ export type ProvidersLoad =
   | { status: "error" };
 
 /**
- * NIHO's host API for this session, typed by the host contract (#87). Server
- * only: it sends the session's NIHO-scoped Web access token. Browser code calls /host/api/* instead.
+ * Legacy provider-list and provider-edit operations are excluded from Host v1.
+ * Keep this compatibility entrypoint fail-closed; live consumers use the selected
+ * v1 client. Server only; browser code calls Experience /host/api/* instead.
  */
 export function hostApiClient(session: HostSession): ExperienceHostApiClient {
   void session;
@@ -88,7 +89,14 @@ export async function selectedHostApiClient(session: HostSession, options: { leg
       return value.slice(7);
     })();
   const apiFetch = isHostMock()
-    ? createMockExperienceHostFetch({ accessToken: session.accessToken, serviceIdToken, legacyProviderId: options.legacyProviderId })
+    ? createMockExperienceHostFetch({
+      accessToken: session.accessToken,
+      serviceIdToken,
+      legacyProviderId: options.legacyProviderId,
+      stripeAccountId: session.mockScenario === "payments-pending" ? null : undefined,
+      connectReady: session.mockScenario !== "payments-pending",
+      reuseConsentAccepted: session.mockScenario !== "payments-pending",
+    })
     : fetch;
   return createSelectedExperienceHostApiClient({
     nihoWebOrigin: config.nihoWebOrigin,
@@ -98,7 +106,7 @@ export async function selectedHostApiClient(session: HostSession, options: { leg
   });
 }
 
-/** The signed-in host's providers, fetched once per request for the frame and the page. */
+/** Resolve the signed-in NIHO identity to local Experience seller memberships. */
 export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
   const session = await readHostSession();
   if (!session) return { status: "signed-out" };

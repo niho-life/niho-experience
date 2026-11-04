@@ -4,6 +4,7 @@ import { GuestCheckoutError, StoreNotFoundError, type GuestBookingStart } from "
 import { config } from "@/lib/config";
 import { checkoutError, readGuestCheckout, storeCheckoutError } from "@/lib/experience/guest-booking-http";
 import { fromThisSite, publicEmpty, publicJson } from "@/lib/experience/public-http";
+import { legacyRouteAllowedForSlug } from "@/lib/experience/site-publications";
 import { guestBookingRepository } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
@@ -34,6 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
   if (!fromThisSite(request)) return publicEmpty(403);
+  if (!await legacyRouteAllowedForSlug(slug)) return publicEmpty(404);
   // The incident switch (#15) stops new bookings here as it hides the booking entrance.
   if (!config.bookingsEnabled) return checkoutError("UNAVAILABLE");
   const bookings = guestBookingRepository();

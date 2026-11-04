@@ -88,13 +88,12 @@ async function loadMeetingDefaults(provider: Pick<HostProvider, "id" | "memberRo
 }
 
 /**
- * Everything the console pages show for one provider: the home rows and numbers,
- * the experiences and the settings' starting values. Mock mode returns the synthetic
- * sets; http mode is empty while the host contract has no such API (see console-data.ts).
- * The provider's own fields come from NIHO's provider detail in both modes, falling back
- * to the list. The (client) settings form gets display fields and, for its actions, the
- * provider's id (already in `?providerId=`) and the ids of the owner's spots it may share;
- * never NIHO's other internal ids (the owner's user, the vessel spot). The notification
+ * Everything the old console pages show for one seller workspace: the home rows and numbers,
+ * the experiences and the settings' starting values. Mock mode returns synthetic sets; http
+ * mode does not read a NIHO provider list/detail because Host v1 has no such operation.
+ * Seller fields come from the local Experience seller profile. The (client) settings form
+ * gets display fields and the Experience provider id; Connect lookup keys and NIHO IDs remain
+ * server-side. The notification
  * settings are the owner's only (niho-app spec §17.4); http mode reads them from the experience
  * DB once HOST_NOTIFICATION_SETTINGS_ENABLED is on (#109), and they stay 準備中 until then.
  * Only 設定 asks for them (`notifications`) and for 既定の集合案内 (`meetingPoint`); the other pages

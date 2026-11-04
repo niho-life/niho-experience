@@ -4,7 +4,7 @@ import type { PublicBookingTerms } from "@niho-experience/experience-store";
 import { nihoBookingSources, type BookingSource, type BookingSources } from "@/lib/booking-source";
 import { config } from "@/lib/config";
 import { detailNextDates } from "@/lib/detail-page";
-import { guestBookingRepository } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, guestBookingRepository } from "@/lib/experience/store-server";
 import type { ExperienceDetailForSite } from "@/lib/experience-types";
 import { siteSaleTerms, withSiteSaleTerms, type SiteSaleTerms } from "@/lib/guest-booking-terms";
 import { japaneseBookingAllowed } from "@/lib/localized-release";
@@ -60,8 +60,20 @@ export async function guestBookingSources(slugs: readonly string[]): Promise<Boo
   const bookings = guestBookingRepository();
   if (!bookings) return closed;
   try {
-    const siteSlugs = await bookings.sellableSlugs(slugs);
-    return siteSlugs.length ? { ...niho, siteOrigin: siteOrigin(), siteSlugs } : niho;
+    const publications = config.apiMode === "http" ? experiencePublicationRepository() : null;
+    const [siteSlugs, claimedSlugs] = await Promise.all([
+      bookings.sellableSlugs(slugs),
+      publications ? publications.listClaimedSlugs() : Promise.resolve([]),
+    ]);
+    const claimed = new Set(claimedSlugs);
+    const sellable = new Set(siteSlugs);
+    const closedSlugs = [...new Set(slugs.filter((slug) => claimed.has(slug) && !sellable.has(slug)))];
+    return {
+      ...niho,
+      siteOrigin: siteSlugs.length ? siteOrigin() : null,
+      siteSlugs,
+      closedSlugs,
+    };
   } catch (error) {
     logFailure("slugs", error);
     return closed;
