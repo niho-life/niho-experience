@@ -29,6 +29,7 @@ export interface GuestBookingMeetingGuide extends Omit<GuestMeetingGuide, "dayOf
 }
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
+const MULTILINE_CONTROL = /[\u0000-\u0009\u000B-\u001F\u007F]/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const GUIDE_KEYS = ["collectionOverview", "address", "accessInstructions", "entranceInstructions", "mapUrl", "photoAssetId", "itemsToBring", "weatherPlan"] as const;
 
@@ -43,16 +44,25 @@ function boundedText(value: unknown, field: string, max: number, allowEmpty = fa
   return value.trim();
 }
 
+function boundedMultilineText(value: unknown, field: string, max: number, allowEmpty = false): string {
+  if (typeof value !== "string") throw new StoreValidationError(`${field} is invalid.`);
+  const normalized = value.replace(/\r\n?/g, "\n");
+  if (normalized.length > max || MULTILINE_CONTROL.test(normalized) || (!allowEmpty && !normalized.trim())) {
+    throw new StoreValidationError(`${field} is invalid.`);
+  }
+  return normalized.trim();
+}
+
 export function validateGuestMeetingGuide(value: unknown): GuestMeetingGuide {
   if (!isRecord(value) || Object.keys(value).some((key) => !GUIDE_KEYS.includes(key as typeof GUIDE_KEYS[number]))
     || GUIDE_KEYS.some((key) => !Object.hasOwn(value, key))) {
     throw new StoreValidationError("guide has an unsupported shape.");
   }
   const collectionOverview = boundedText(value.collectionOverview, "guide.collectionOverview", 200);
-  const address = boundedText(value.address, "guide.address", 500);
-  const accessInstructions = boundedText(value.accessInstructions, "guide.accessInstructions", 2_000, true);
-  const entranceInstructions = boundedText(value.entranceInstructions, "guide.entranceInstructions", 2_000, true);
-  const weatherPlan = boundedText(value.weatherPlan, "guide.weatherPlan", 2_000, true);
+  const address = boundedMultilineText(value.address, "guide.address", 500);
+  const accessInstructions = boundedMultilineText(value.accessInstructions, "guide.accessInstructions", 2_000, true);
+  const entranceInstructions = boundedMultilineText(value.entranceInstructions, "guide.entranceInstructions", 2_000, true);
+  const weatherPlan = boundedMultilineText(value.weatherPlan, "guide.weatherPlan", 2_000, true);
   if (value.mapUrl !== null && (typeof value.mapUrl !== "string" || value.mapUrl.length > 2_048)) throw new StoreValidationError("guide.mapUrl is invalid.");
   let mapUrl: string | null = null;
   if (typeof value.mapUrl === "string" && value.mapUrl.trim()) {
