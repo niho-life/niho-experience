@@ -10,8 +10,8 @@
 // to $GITHUB_OUTPUT: `env` and `secrets` for --set-env-vars / --set-secrets, `expected_env`, `expected_secrets` and
 // `names` (every name the table can set) for checking the revision afterwards, and `summary`.
 //
-// To add a flag: one entry in FLAGS and a row in docs/production-deploy.md「機能のフラグ」. The workflows need no
-// change. apps/web/src/lib/deploy-runtime-flags.test.ts checks each entry against resolve-config.ts.
+// To add a flag: one entry in FLAGS and rows in docs/production-deploy.md「機能のフラグ」 and the staging guide. The
+// workflows need no change. apps/web/src/lib/deploy-runtime-flags.test.ts checks each entry against resolve-config.ts.
 //
 //   DEPLOY_VARS='${{ toJSON(vars) }}' node scripts/deploy/runtime-flags.mjs --target stg|prod --host-console true|false --site-url https://…
 
@@ -38,6 +38,7 @@ export const SHAPES = Object.freeze({
   httpsOrigin: { pattern: /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/, words: "an exact https origin without path, credentials or query" },
   // Semicolons preserve the two callers as one gcloud value; the runtime accepts the same closed list.
   serviceAccountList: { pattern: new RegExp(`^${SERVICE_ACCOUNT}(;${SERVICE_ACCOUNT})*$`), words: "service account emails separated by semicolons, without spaces" },
+  serviceAccountEmail: { pattern: new RegExp(`^${SERVICE_ACCOUNT}$`), words: "a single service account email" },
   vapidPublicKey: { pattern: /^B[A-Za-z0-9_-]{86}$/, words: "an uncompressed P-256 public key in base64url" },
   vapidSubject: { pattern: new RegExp(`^(mailto:${ADDRESS}|${HTTPS_URL})$`), words: "mailto: an address, or an https URL" },
 });
@@ -65,6 +66,15 @@ export const FLAGS = Object.freeze([
       { env: "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", variable: "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
     ],
     fixed: { EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE: siteUrl },
+  },
+  {
+    env: "GUIDE_ADMIN_API_ENABLED",
+    variable: "GUIDE_ADMIN_API_ENABLED",
+    needs: ["DATABASE"],
+    settings: [
+      { env: "GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL", variable: "GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL", shape: "serviceAccountEmail" },
+    ],
+    fixed: { GUIDE_ADMIN_AUDIENCE: siteUrl },
   },
   {
     env: "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",

@@ -58,6 +58,7 @@ const SETTING: Record<string, string> = {
   httpsUrl: "https://example.com/privacy",
   httpsOrigin: "https://editor.example.com",
   serviceAccountList: "caller@sample-project.iam.gserviceaccount.com",
+  serviceAccountEmail: "admin@sample-project.iam.gserviceaccount.com",
   vapidPublicKey: `B${"A".repeat(86)}`,
   vapidSubject: "mailto:ops@example.com",
 };
@@ -66,6 +67,7 @@ const secretRef = (target: Target, item: Item) => (target === "stg" ? `${item.st
 /** Each flag's config setting: a new flag without one here fails "covers every flag". */
 const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
+  GUIDE_ADMIN_API_ENABLED: "guideAdminApiEnabled",
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
   EXPERIENCE_GUIDE_PUBLIC_SOURCE: "guidePublicSource",
   EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "guideAppCardsEnabled",
@@ -151,6 +153,27 @@ describe("the deploy workflows' feature flags", () => {
     ]);
     vars.PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS += ";EDITOR_AUTH_MODE=stub";
     expect(resolve("prod", vars).problems.join(" ")).toContain("PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS");
+  });
+
+  it("configures the private Guide Admin API for one service account and the fixed service URL audience", () => {
+    const vars = closure("prod", "GUIDE_ADMIN_API_ENABLED");
+    vars.PROD_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL = "guide-admin@sample-project.iam.gserviceaccount.com";
+    const resolved = resolve("prod", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(resolved.env).toEqual({
+      GUIDE_ADMIN_API_ENABLED: "true",
+      GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "guide-admin@sample-project.iam.gserviceaccount.com",
+      GUIDE_ADMIN_AUDIENCE: SITE.prod,
+    });
+    expect(resolveConfig(revision("prod", resolved))).toMatchObject({
+      guideAdminApiEnabled: true,
+      guideAdminAudience: SITE.prod,
+      guideAdminServiceAccountEmail: "guide-admin@sample-project.iam.gserviceaccount.com",
+    });
+    const invalid = resolve("prod", { ...vars, PROD_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "person@example.com" });
+    expect(invalid.problems.join(" ")).toContain("PROD_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL");
+    expect(invalid.problems.join(" ")).not.toContain("person@example.com");
+    expect(resolve("prod", { PROD_GUIDE_ADMIN_API_ENABLED: "true" }).problems.join(" ")).toContain("PROD_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL");
   });
 
   it("requires current authority before switching the publication source", () => {
