@@ -2,6 +2,24 @@
 
 対象：[#169](https://github.com/niho-life/niho-experience/issues/169)。店舗が完成案を見て参加を決め、必要な本人手続きを経て販売を始められるようにする。店舗が販売者となり、NIHOや許可された協力者が制作・運営を支援する。
 
+## 現行：Experience正本へ直接準備する通常フロー
+
+運営provisioning済みで、既存NIHOアカウントとのseller mappingが確定している提供者は、旧準備案件を経由せずExperience正本へ直接、非公開の商品下書きを準備できる。
+
+- 事務局は現在のNIHO Admin専用ログインで`/admin/products`を開き、提供者名・販売者名から対象を選ぶ。DTOと画面にはNIHO user ID、Connect参照、DB接続、JSON入力を出さない。
+- 固定BFFは`/admin/api/product-workspaces*`である。全requestで現在の`AdminHttpSession`とADMINを再検証し、serverで得たactor、選択したExperience provider、商品を境界検証する。mutationはsame-origin、bounded/closed JSON、private/no-storeで扱う。
+- 事務局はホストと同じ商品フォーム・写真処理・料金/取消条件・calendar処理を使い、未公開かつ一度も公開されていない下書きだけを作成・更新する。操作actorはOWNERへ置き換えず、同じtransactionの`admin_product_draft_audit_events`へ記録する。
+- 事務局にはpublish、stop、販売者変更、Connect/本人状態の変更、提供者共通写真・ロゴの変更を提供しない。事務局の保存を掲載同意、英語原稿の本人確認、販売準備完了として記録しない。
+- OWNERは本人の初回Experienceログイン時に従来どおりmembershipを得る。`/host/experiences`で同じ下書き・写真・価格・取消条件・開催枠を確認し、既存のreadinessと本人同意の検証を通って自分で公開する。公開後のpublic SSR、availability、checkoutは通常経路を使う。
+- 開閉条件は既存のAdmin console、Experience host publication、DB接続だけで、新しいflagはない。migration `0058_admin_product_drafts.sql`とruntime grantの適用、およびseller profileの運営provisioningは配備前提である。
+
+この通常フローは、保存済みの`/admin/preparations`案件、旧API、previewを商品IDとして解釈せず、削除もしない。本人未登録の匿名確認から本人受入へ進む流れ、既存mappingがない提供者、COHOST追加はまだこのExperience正本の下書きへ接続していないため、Issue #169全体の完了条件には含めない。
+
+
+## 旧準備案件・匿名確認の設計と保存済みデータ
+
+以下は従来の準備案件APIと匿名確認の設計・実装記録である。保存済みデータとpreviewは保持するが、現行のExperience商品へは未接続。商品の公開操作・権限の正本は上記の通常フローとADR 0002を優先し、旧審査や事務局による販売開始を新商品へ適用しない。
+
 ## 店舗の利用の流れ
 
 1. 事務局が店舗の意向・素材の利用許諾を確認し、非公開の掲載準備案件を作る。
@@ -66,6 +84,8 @@ Stripeから戻ったことや、設定リンクを開いたことを準備完�
 - [Host本人のNIHOサポート設定](host-support-settings.md)
 
 ## 実装されたpathと接続条件
+
+### 旧準備案件のpathと接続条件
 
 - 事務局：`/admin/preparations`、`/admin/preparations/[caseId]`
 - 店舗の匿名確認：`/host/preparations/review#<token>`。tokenはfragmentから同一originの`POST /host/api/preparations/review`へ一度だけ渡し、URLから直ちに除去する。その後は`/host`に限定したsealed HttpOnly cookieで再確認と修正依頼を行う。
