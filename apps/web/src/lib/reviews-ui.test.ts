@@ -39,6 +39,9 @@ describe("the line under the title and the card line", () => {
     expect(reviewHeadline(reviewDisplay(ok(POTTERY)))).toEqual({ label: "2 reviews", accessibleLabel: "2 reviews. Go to the reviews", href: "#reviews" });
     expect(reviewHeadline(reviewDisplay(ok(CYCLING)))).toMatchObject({ label: "1 review" });
     expect(reviewHeadline(reviewDisplay(ok(DINNER)))).toEqual({ label: "New", isNew: true });
+    expect(reviewHeadline(reviewDisplay(ok(INDIGO)), "ja")).toEqual({ label: "★ 4.9 · 12件のレビュー", accessibleLabel: "5点満点中4.9点、12件のレビュー。レビューへ移動", href: "#reviews" });
+    expect(reviewHeadline(reviewDisplay(ok(POTTERY)), "ja")).toMatchObject({ label: "2件のレビュー" });
+    expect(reviewHeadline(reviewDisplay(ok(DINNER)), "ja")).toEqual({ label: "New", isNew: true });
   });
 
   it("puts a line on cards that have reviews and none on the rest", () => {
@@ -47,6 +50,7 @@ describe("the line under the title and the card line", () => {
     expect(cardReviewLine(reviewsResponseFor(DINNER, 1).summary)).toBeNull();
     expect(cardReviewLine(null)).toBeNull();
     expect(cardReviewLine(undefined)).toBeNull();
+    expect(cardReviewLine(reviewsResponseFor(POTTERY, 1).summary, "ja")).toEqual({ text: "2件のレビュー", label: "2件のレビュー" });
   });
 
   it("adds the line to the matching cards only", () => {
@@ -62,6 +66,7 @@ describe("the line under the title and the card line", () => {
   it("formats counts, averages, ratings and the month in Japan time", () => {
     expect(countLabel(1)).toBe("1 review");
     expect(countLabel(12)).toBe("12 reviews");
+    expect(countLabel(12, "ja")).toBe("12件のレビュー");
     expect(averageLabel(4.92)).toBe("4.9");
     expect(averageLabel(5)).toBe("5.0");
     expect(ratingLabel(5)).toBe("Rated 5 out of 5");

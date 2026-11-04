@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HostReview } from "@/host/types";
-import { replySignature, reportSignature, reviewAttempt, withRevision, withSavedReview } from "./live-review-state";
+import { replySignature, reportSignature, reviewAttempt, withRevision, withReviewTranslation, withSavedReview } from "./live-review-state";
 
 const review = (id: string, english: string | null = null): HostReview => ({
   id,
@@ -43,5 +43,27 @@ describe("live review state", () => {
     const revisions = { r1: 0, r2: 0 };
     expect(withRevision(revisions, "r2", 1)).toEqual({ r1: 0, r2: 1 });
     expect(revisions).toEqual({ r1: 0, r2: 0 });
+  });
+
+  it("applies only a translation of the same original, retaining stale reply metadata for CAS", () => {
+    const revisions = { r1: 3, r2: 1 };
+    const other = review("r1", "Other reply");
+    const opened = { ...review("r2", "Reply when the draft opened"), report: { at: "2026-10-31T12:00", reason: "untrue" as const } };
+    const fromStore = {
+      ...review("r2", "Newer reply from another screen"),
+      body: { original: "Lovely.", language: "en" as const, translation: "素敵でした。" },
+      report: { at: "2026-10-31T13:00", reason: "personal" as const },
+    };
+
+    const patched = withReviewTranslation([other, opened], fromStore);
+    expect(patched[0]).toBe(other);
+    expect(patched[1]).toEqual({ ...opened, body: { ...opened.body, translation: "素敵でした。" } });
+    expect(patched[1]?.reply).toBe(opened.reply);
+    expect(patched[1]?.report).toBe(opened.report);
+    expect(revisions).toEqual({ r1: 3, r2: 1 });
+
+    expect(withReviewTranslation([opened], { ...fromStore, body: { ...fromStore.body, original: "Changed original" } })).toEqual([opened]);
+    expect(withReviewTranslation([opened], { ...fromStore, id: "unknown" })).toEqual([opened]);
+    expect(withReviewTranslation([opened], { ...fromStore, body: { ...fromStore.body, translation: null } })).toEqual([opened]);
   });
 });

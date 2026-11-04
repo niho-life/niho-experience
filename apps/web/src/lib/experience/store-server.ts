@@ -138,7 +138,7 @@ export function guestQuestionRepository(): GuestQuestionRepository | null {
 export function guestReviewRepository(): GuestReviewRepository | null {
   if (!config.guestReviewsEnabled) return null;
   const pool = experiencePool();
-  return pool ? new GuestReviewRepository(pool) : null;
+  return pool ? new GuestReviewRepository(pool, { includeNativePublications: config.experiencePublicationsEnabled }) : null;
 }
 
 /** 体験の一覧's ★ (#108): every shown review counted by experience, behind レビュー's flag and the experience DB. */

@@ -7,7 +7,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { journeyApi: "off" } }));
 vi.mock("@/lib/experience/store-server", () => ({ guestReviewRepository: () => state.repository, guestQuestionRepository: () => null }));
 
-import { getLiveReviews } from "./journey";
+import { getLiveReviews, getReviewSummaries } from "./journey";
 import { reviewDisplay, reviewHeadline } from "./reviews-ui";
 import { reviewsForJsonLd } from "./structured-data";
 
@@ -26,7 +26,30 @@ const item = (index: number, extra: Partial<PublicGuestReview> = {}): PublicGues
 const answer = (count: number, average: number | null, reviews: PublicGuestReview[], tags: PublicGuestReviews["summary"]["tags"] = []): PublicGuestReviews => ({ summary: { count, average, tags }, reviews });
 
 beforeEach(() => {
-  state.repository = { listPublishedReviews: vi.fn(async () => answer(0, null, [])) };
+  state.repository = {
+    listPublishedReviews: vi.fn(async () => answer(0, null, [])),
+    listPublishedReviewSummaries: vi.fn(async () => new Map([
+      ["sample-tea", { count: 2, average: 4.5, tags: [{ label: "Great host", count: 2 }] }],
+      ["sample-new", { count: 0, average: null, tags: [] }],
+    ])),
+  };
+});
+
+describe("getReviewSummaries", () => {
+  it("reads every card slug in one store call and only returns real review lines", async () => {
+    const summaries = await getReviewSummaries(["sample-tea", "sample-new"]);
+    expect(state.repository?.listPublishedReviewSummaries).toHaveBeenCalledOnce();
+    expect(state.repository?.listPublishedReviewSummaries).toHaveBeenCalledWith(["sample-tea", "sample-new"]);
+    expect([...summaries]).toEqual([["sample-tea", { count: 2, average: 4.5, tags: [{ label: "Great host", count: 2 }] }]]);
+  });
+
+  it("does not turn a failed aggregate read into a zero-review summary", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    state.repository!.listPublishedReviewSummaries!.mockRejectedValueOnce(new TypeError("synthetic private review"));
+    expect(await getReviewSummaries(["sample-tea"])).toEqual(new Map());
+    expect(logged).toHaveBeenCalledWith("Experience card guest review summaries failed", { error: "TypeError" });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("synthetic private review");
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 

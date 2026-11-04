@@ -47,11 +47,12 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const nativeSlugs = new Set(siteCatalog.claimedSlugs);
   const catalog = result.ok ? result.data.experiences.filter((experience) => !nativeSlugs.has(experience.slug)) : [];
   const items = filterExperienceSummaries(catalog, searchQuery);
-  const legacyCards = withReviewLines(buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview), await getReviewSummaries(items.map((item) => item.slug)));
+  const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = sitePublications
     .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
     .map(sitePublicationCard);
-  const cards = [...legacyCards, ...nativeCards];
+  const cardsWithoutReviews = [...legacyCards, ...nativeCards];
+  const cards = withReviewLines(cardsWithoutReviews, await getReviewSummaries(cardsWithoutReviews.map((card) => card.slug)));
   if (!result.ok && result.kind !== "not_found" && cards.length === 0) return <ErrorState title="We couldn't load experiences" />;
 
   // Where each card's availability is read: NIHO, or this site for an experience sold here (#285).
