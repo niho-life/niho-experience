@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { hostFetch } from "@/lib/host/client-session";
 import { HOST_HOME_PATH } from "@/lib/host/routes";
 import { FieldRow, FieldSection } from "./fields";
@@ -61,24 +61,25 @@ export function HostExperienceSupportSettings({ providerId, displayName }: { pro
   const [refreshKey, setRefreshKey] = useState(0);
   const stay = useRef<HTMLButtonElement>(null);
 
-  const reload = useCallback(async (signal?: AbortSignal) => {
-    const result = await readState(providerId, signal);
-    if (signal?.aborted) return;
-    if (!result.ok) {
-      setNotice({ tone: result.status === 401 || result.status === 403 ? "warning" : "error", text: loadError(result.status) });
-      return;
-    }
-    setSaved(result.state.setting);
-    setHasSaved(true);
-    setNotice(null);
-  }, [providerId]);
-
   useEffect(() => {
     const abort = new AbortController();
-    setLoading(true);
-    void reload(abort.signal).finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    void readState(providerId, abort.signal).then((result) => {
+      if (abort.signal.aborted) return;
+      if (!result.ok) {
+        setNotice({ tone: result.status === 401 || result.status === 403 ? "warning" : "error", text: loadError(result.status) });
+        return;
+      }
+      setSaved(result.state.setting);
+      setHasSaved(true);
+      setNotice(null);
+    }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
-  }, [reload, refreshKey]);
+  }, [providerId, refreshKey]);
+
+  const refresh = () => {
+    setLoading(true);
+    setRefreshKey((value) => value + 1);
+  };
 
   const currentConsent = saved?.supportConsentVersion === CONSENT_VERSION && (saved.supportAgreementRevision ?? 0) > 0;
   const dirty = choice !== null && (saved === null || !currentConsent || choice !== saved.supportEnabled);
@@ -130,7 +131,7 @@ export function HostExperienceSupportSettings({ providerId, displayName }: { pro
       <p className="mb-4 max-w-3xl text-ink-soft">{displayName}で新しく受け付ける予約の支援範囲と手数料を設定します。</p>
       <FieldSection id="experience-support-setting" title={displayName} status={currentConsent ? { label: saved?.supportEnabled ? "サポートON" : "サポートOFF", tone: saved?.supportEnabled ? "ok" : "draft" } : { label: "同意が必要", tone: "wait" }}>
         {loading ? <p role="status">現在の設定を読み込んでいます…</p> : null}
-        {!loading && !hasSaved ? <div role="alert" className="rounded-xl bg-warn-pale p-3 text-sm text-warn"><p>{notice?.text ?? "現在の設定を確認できませんでした。未設定とは扱わず、保存は行いません。"}</p><button type="button" className={`${consoleButtonClass("secondary")} mt-3`} onClick={() => setRefreshKey((value) => value + 1)}>もう一度読み込む</button></div> : null}
+        {!loading && !hasSaved ? <div role="alert" className="rounded-xl bg-warn-pale p-3 text-sm text-warn"><p>{notice?.text ?? "現在の設定を確認できませんでした。未設定とは扱わず、保存は行いません。"}</p><button type="button" className={`${consoleButtonClass("secondary")} mt-3`} onClick={refresh}>もう一度読み込む</button></div> : null}
         {hasSaved ? <>
           {!currentConsent ? <p className="mb-3 rounded-xl bg-warn-pale p-3 text-sm font-bold text-warn">この提供者のExperience予約には現在の同意がありません。以前の設定や過去の予約には同意を補いません。ONまたはOFFを選び、現在の条件を確認してください。</p> : null}
           <FieldRow label="利用設定" labelId="experience-support-choice">
@@ -146,7 +147,7 @@ export function HostExperienceSupportSettings({ providerId, displayName }: { pro
           <FieldRow label="同意版" labelId="experience-support-consent"><p id="experience-support-consent" className="text-sm text-ink-soft">Experienceサポート規約 {CONSENT_VERSION}{saved?.supportAgreementRevision ? ` · 現在の同意改訂 ${saved.supportAgreementRevision}` : " · 未同意"}</p></FieldRow>
           <div className="border-t border-line pt-3 md:pl-[184px]">
             <button type="button" disabled={!dirty || choice === null || saving || loading} onClick={() => setConfirming(true)} className={consoleButtonClass("primary", "md", "disabled:cursor-not-allowed disabled:opacity-50")}>{saving ? "保存中…" : "選択内容を確認"}</button>
-            <button type="button" disabled={saving || loading} onClick={() => setRefreshKey((value) => value + 1)} className={`${consoleButtonClass("secondary")} ml-2`}>現在値を再読み込み</button>
+            <button type="button" disabled={saving || loading} onClick={refresh} className={`${consoleButtonClass("secondary")} ml-2`}>現在値を再読み込み</button>
             {notice ? <p role={notice.tone === "error" ? "alert" : "status"} className={`mt-2 text-sm font-bold ${notice.tone === "success" ? "text-moss" : notice.tone === "warning" ? "text-warn" : "text-danger"}`}>{notice.text}</p> : null}
           </div>
         </> : null}

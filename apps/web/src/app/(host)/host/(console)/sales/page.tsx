@@ -132,12 +132,15 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
 async function HostExperienceSettlementPanel({ provider }: { provider: HostProvider }) {
   const repository = experienceSupportRepository();
   if (!repository) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">決済費用の実費を読み込めません。データベース接続を確認してください。</p>;
+  let summaries: Awaited<ReturnType<typeof repository.listHostSummaries>> | null = null;
+  let failed = false;
   try {
-    const summaries = await repository.listHostSummaries(ownerActor(provider), 100);
-    return <SettlementSummaryList items={summaries} heading="Experience予約の決済費用精算" />;
+    summaries = await repository.listHostSummaries(ownerActor(provider), 100);
   } catch {
-    return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">決済費用の実費を読み込めません。権限またはデータベース接続を確認して再読み込みしてください。</p>;
+    failed = true;
   }
+  if (failed || summaries === null) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">決済費用の実費を読み込めません。権限またはデータベース接続を確認して再読み込みしてください。</p>;
+  return <SettlementSummaryList items={summaries} heading="Experience予約の決済費用精算" />;
 }
 
 /** この口座への入金 for the month shown: nothing when it is not open to this account, a message when Stripe fails. */
