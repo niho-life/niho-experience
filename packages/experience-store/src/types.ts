@@ -244,6 +244,8 @@ export interface PricingSnapshot {
   readonly seats: number;
   /** What the guest pays. Payment confirmation compares the charge with this, never unitAmount × seats. */
   readonly totalAmount: number;
+  /** New snapshots state this explicitly; absent on historical snapshots, where totalAmount determines it. */
+  readonly paymentRequired?: boolean;
   readonly cancellationTermsRef: string;
   /** Guest bookings (#285) only. */
   readonly breakdown?: PricingBreakdown;
@@ -262,7 +264,7 @@ export interface PricingSnapshot {
 export interface PlatformFeeSnapshot {
   readonly supportEnabled: boolean;
   readonly basisPoints: 1000 | 1500;
-  /** floor(totalAmount × basisPoints / 10000) in yen: at least 1 and below totalAmount. */
+  /** floor(totalAmount × basisPoints / 10000) in yen; zero for a free booking, otherwise at least 1 and below totalAmount. */
   readonly amount: number;
   /** Absent on historical rows. Never inferred from the current provider setting. */
   readonly supportConsentVersion?: string;

@@ -209,6 +209,47 @@ async function setSendState(pool: Pool, refundId: string, attempts: number, clai
 const AUTO = { limit: 10, olderThanSeconds: 120, leaseSeconds: 120 } as const;
 
 describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: databaseUrl === undefined }, () => {
+  it("confirms and cancels a free booking without payment, ledger, or refund rows", async () => {
+    await withSchema(async (context) => {
+      const { pool, guests, cancellations, outbox } = context;
+      await pool.query("UPDATE experience_products SET unit_amount=0 WHERE provider_id='provider-a' AND id='walk'");
+      await guests.setSaleTerms(ownerA, "walk", {
+        childPricing: { priceYen: 0, minAge: 4, maxAge: 12, adultRequired: false }, minimumParticipants: 1, maxPartySize: 6,
+        cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
+      }, 1);
+      await seedTestPublications(pool);
+
+      const made = await guests.startGuestBooking(request({ adultCount: 1, childCount: 1, expectedTotalYen: 0 }));
+      assert.equal(made.status, "CONFIRMED");
+      assert.equal(made.booking.pricingSnapshot.paymentRequired, false);
+      assert.equal(made.checkoutSessionRef, null);
+      const confirmation = (await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 })).confirmations
+        .find((item) => item.email?.publicBookingId === made.publicBookingId);
+      const confirmationEmail = confirmation?.email;
+      assert.ok(confirmationEmail);
+      assert.equal(confirmationEmail.totalAmount, 0);
+      assert.equal((await ledger(pool, made.publicBookingId)).length, 0);
+      assert.deepEqual(await refunds(pool, made.publicBookingId), []);
+      assert.equal(await seatsLeft(context, day(5)), 10);
+
+      const start = await startsIn(pool, made.publicBookingId, 49 * HOUR_MS);
+      const session = await sessionFor(context, made.publicBookingId);
+      const result = await cancellations.cancelAsGuest(session, made.publicBookingId, {
+        commandId: randomUUID(), choice: "POLICY_CANCEL", shownDeadlineUtc: deadline48(start),
+      });
+      assert.equal(result?.outcome, "CANCELLED");
+      assert.deepEqual(result?.refunds, []);
+      assert.deepEqual(await refunds(pool, made.publicBookingId), []);
+      assert.equal((await ledger(pool, made.publicBookingId)).length, 0);
+      assert.equal(await seatsLeft(context, day(5)), 12);
+      const topics = await outboxTopics(pool, made.publicBookingId);
+      assert.ok(topics.includes("booking.confirmed"));
+      assert.ok(topics.includes(HOST_NOTIFICATION_TOPICS.newBooking));
+      assert.ok(topics.includes(GUEST_NOTICE_TOPICS.cancelled));
+      assert.ok(topics.includes(HOST_NOTIFICATION_TOPICS.cancellation));
+    });
+  });
+
   it("uses the snapshotted refund percentage for custom cancellation and rounds down to whole yen", async () => {
     await withSchema(async (context) => {
       const { pool, cancellations } = context;

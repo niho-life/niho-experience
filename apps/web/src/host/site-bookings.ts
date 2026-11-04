@@ -53,7 +53,7 @@ const SUPPORT_OUTCOME_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** "11/4 に取消（ホスト · 雨・荒天）" and where the refund is: what 予約's detail says of a cancelled booking. */
-export function siteCancellationLines(booking: Pick<HostBooking, "cancelledAt" | "site">): string[] {
+export function siteCancellationLines(booking: Pick<HostBooking, "amountYen" | "cancelledAt" | "site">): string[] {
   const cancellation = booking.site?.cancellation;
   if (!cancellation) return [];
   const lines: string[] = [];
@@ -64,7 +64,7 @@ export function siteCancellationLines(booking: Pick<HostBooking, "cancelledAt" |
   if (cancellation.refundedYen > 0) lines.push(`${yen(cancellation.refundedYen)} を返金済み`);
   if (cancellation.refundPendingYen > 0) lines.push(`${yen(cancellation.refundPendingYen)} を返金中（Stripe の処理待ち）`);
   if (cancellation.refundFailed) lines.push("返金に失敗しました。NIHO サポートが対応します");
-  if (booking.cancelledAt && cancellation.refundedYen === 0 && cancellation.refundPendingYen === 0 && !cancellation.refundFailed) lines.push("返金なし");
+  if (booking.cancelledAt && cancellation.refundedYen === 0 && cancellation.refundPendingYen === 0 && !cancellation.refundFailed) lines.push(booking.amountYen === 0 ? "支払いなし・返金なし" : "返金なし");
   return lines;
 }
 

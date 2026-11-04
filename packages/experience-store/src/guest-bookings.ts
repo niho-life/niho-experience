@@ -48,6 +48,7 @@ import {
 import { salesWindowOf, selectPayoutAccounts, selectSales, type HostSalesWindow, type HostSalesWindowOptions } from "./host-sales.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import {
   BOOKING_COLUMNS,
   OVERRIDE_COLUMNS,
@@ -471,8 +472,8 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
       }
       ids.add(raw.offerId);
       assertMoney(raw.adultPriceYen, `offerPrices.${index}.adultPriceYen`);
-      if (raw.adultPriceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
-        throw new StoreValidationError(`offerPrices.${index}.adultPriceYen must be at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
+      if (raw.adultPriceYen !== 0 && raw.adultPriceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+        throw new StoreValidationError(`offerPrices.${index}.adultPriceYen must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
       }
       return { offerId: raw.offerId, adultPriceYen: raw.adultPriceYen };
     });
@@ -486,8 +487,8 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
     const maxAge = integerIn(child.maxAge, "childPricing.maxAge", minAge, 17);
     if (typeof child.adultRequired !== "boolean") throw new StoreValidationError("childPricing.adultRequired must be a boolean.");
     // A party of children only pays the child price alone, which must still be a chargeable amount.
-    if (!child.adultRequired && child.priceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
-      throw new StoreValidationError(`childPricing.priceYen must be at least ${GUEST_BOOKING_LIMITS.minimumChargeYen} when children may book without an adult.`);
+    if (!child.adultRequired && child.priceYen !== 0 && child.priceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+      throw new StoreValidationError(`childPricing.priceYen must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen} when children may book without an adult.`);
     }
     childPricing = { priceYen: child.priceYen, minAge, maxAge, adultRequired: child.adultRequired };
   }
@@ -592,7 +593,7 @@ function validOfferPriceRows(value: unknown, allowEmpty = false): OfferPriceInpu
     const offerId = String(row.offerId);
     const adultPriceYen = typeof row.adultPriceYen === "number" ? row.adultPriceYen : Number(row.adultPriceYen);
     if (!OFFER_ID.test(offerId) || ids.has(offerId) || !Number.isSafeInteger(adultPriceYen)
-        || adultPriceYen < GUEST_BOOKING_LIMITS.minimumChargeYen || adultPriceYen > 9_999_999_999) {
+        || (adultPriceYen !== 0 && adultPriceYen < GUEST_BOOKING_LIMITS.minimumChargeYen) || adultPriceYen > 9_999_999_999) {
       throw new StoreValidationError(`Database returned an invalid offer price at ${index}.`);
     }
     ids.add(offerId);
@@ -792,6 +793,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
     ? termsFromPublicationSnapshot(row.sale_terms_snapshot, product.providerId, product.id)
     : await readSaleTerms(client, product.providerId, product.id, lock);
   if (terms === null) return null;
+  if (!salePriceSetMatchesProduct(product.unitAmount, terms)) return null;
   const settings = await client.query<DbRow>(
     `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1${lock ? " FOR SHARE" : ""}`,
     [product.providerId],
@@ -803,14 +805,27 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   if (saleSettings.supportConsentVersion !== EXPERIENCE_SUPPORT_CONSENT_VERSION || saleSettings.supportAgreementRevision === null) return null;
   const sellable = { product, terms, settings: saleSettings };
   const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [product.unitAmount];
-  return adultPrices.every((price) => chargeableFee(price, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints))
+  return salePriceSetMatchesProduct(product.unitAmount, terms)
+    && adultPrices.every((price) => chargeableFee(price, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints))
     ? sellable : null;
 }
 
 /** A JPY price Stripe can charge, and an ID that fits the guest idempotency key (loadSellable, sellableSlugs). */
 export function sellableProduct(product: Pick<ProductRecord, "id" | "currency" | "unitAmount">): boolean {
-  return product.currency === "JPY" && product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
+  return product.currency === "JPY" && (product.unitAmount === 0 || product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen)
     && product.id.length <= MAX_SELLABLE_PRODUCT_ID_LENGTH;
+}
+
+/** Free products are all-zero: a paid adult product cannot mix in a zero-priced offer (or vice versa). */
+export function salePriceSetMatchesProduct(unitAmount: number, terms: {
+  readonly offerPrices?: readonly OfferPriceInput[] | null;
+  readonly childPricing: ChildPricing | null;
+}): boolean {
+  const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [unitAmount];
+  if (unitAmount === 0) return adultPrices.every((price) => price === 0) && (terms.childPricing === null || terms.childPricing.priceYen === 0);
+  return unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
+    && adultPrices.every((price) => price >= GUEST_BOOKING_LIMITS.minimumChargeYen)
+    && (terms.childPricing === null || terms.childPricing.adultRequired || terms.childPricing.priceYen >= GUEST_BOOKING_LIMITS.minimumChargeYen);
 }
 
 /**
@@ -818,6 +833,7 @@ export function sellableProduct(product: Pick<ProductRecord, "id" | "currency" |
  * is one that Stripe accepts.
  */
 export function chargeableFee(unitAmount: number, child: ChildPricing | null, basisPoints: number): boolean {
+  if (unitAmount === 0) return child === null || child.priceYen === 0;
   const smallest = child !== null && !child.adultRequired ? Math.min(unitAmount, child.priceYen) : unitAmount;
   return chargeablePlatformFee(smallest, basisPoints);
 }
@@ -1343,8 +1359,11 @@ export class GuestBookingRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
-      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
+      const product = await client.query<DbRow>("SELECT unit_amount FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
       if (product.rows[0] === undefined) throw new StoreNotFoundError("product");
+      if (!salePriceSetMatchesProduct(Number(product.rows[0].unit_amount), terms)) {
+        throw new StoreValidationError("A free product must price every offer and child at ¥0; paid offers must meet Stripe's minimum charge.");
+      }
       const child = terms.childPricing;
       const values = [
         actor.providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
@@ -1683,6 +1702,7 @@ export class GuestBookingRepository {
         const pricedIds = new Set(terms.offerPrices.map((price) => price.offerId));
         if (activeOfferIds.length === 0 || activeOfferIds.some((offerId) => !pricedIds.has(offerId))) return false;
       }
+      if (!salePriceSetMatchesProduct(unitAmount, terms)) return false;
       const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [unitAmount];
       return adultPrices.every((price) => chargeableFee(price, terms!.childPricing, Number(row.platform_fee_basis_points)));
     });
@@ -1840,8 +1860,8 @@ export class GuestBookingRepository {
         adultPriceYen, terms.childPricing, request.adultCount, request.childCount, terms.minimumChargeableParticipants,
       );
       if (request.expectedTotalYen !== totalYen) throw new GuestCheckoutError("PRICE_CHANGED", { currentTotalYen: totalYen });
-      // Unreachable with the ¥50 minimum and today's rates; a fee Stripe would refuse is not for sale.
-      if (!chargeablePlatformFee(totalYen, settings.platformFeeBasisPoints)) throw new StoreNotFoundError("experience for sale");
+      // A free product skips Stripe; paid bookings still need an application fee Stripe accepts.
+      if (totalYen !== 0 && !chargeablePlatformFee(totalYen, settings.platformFeeBasisPoints)) throw new StoreNotFoundError("experience for sale");
       if (request.bookingQuestionsFingerprint !== terms.bookingQuestionsFingerprint) throw new GuestCheckoutError("QUESTIONS_CHANGED");
       const answers = checkedAnswers(terms.bookingQuestions, request.answers);
 
@@ -1936,6 +1956,30 @@ export class GuestBookingRepository {
           request.clientRequestKey, request.fingerprint, JSON.stringify(request.utm),
         ],
       );
+      if (totalYen === 0) {
+        const confirmed = await client.query<DbRow>(
+          `UPDATE bookings SET status='CONFIRMED', confirmed_at=clock_timestamp(), updated_at=clock_timestamp()
+            WHERE provider_id=$1 AND id=$2 AND status='HOLD'
+            RETURNING ${BOOKING_COLUMNS}`,
+          [providerId, placed.bookingRowId],
+        );
+        const booking = bookingFromRow(confirmed.rows[0]!);
+        await client.query(
+          `INSERT INTO outbox_messages (provider_id,aggregate_type,aggregate_id,topic,deduplication_key,payload)
+           VALUES ($1,'booking',$2,'booking.confirmed',$3,$4::jsonb)
+           ON CONFLICT (provider_id,deduplication_key) DO NOTHING`,
+          [providerId, booking.publicBookingId, `guest-booking-confirmed:${booking.publicBookingId}`, JSON.stringify({ publicBookingId: booking.publicBookingId, providerId, outcome: "CONFIRMED" })],
+        );
+        await enqueueNewBookingNotification(client, {
+          providerId, bookingId: booking.publicBookingId, experienceTitle: product.publicTitle,
+          startsAt: booking.occurrenceSnapshot.startUtc, seats: headCount,
+        });
+        await enqueueCalendarRecalculation(client, {
+          providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_confirmed",
+        });
+        if (ipWindow) await countCheckoutIpAttempt(client, ipWindow);
+        return { kind: "started", booking: startResult(booking, product.publicTitle, request.guestEmail, null) };
+      }
       if (ipWindow) await countCheckoutIpAttempt(client, ipWindow);
       return { kind: "started", booking: startResult(placed.booking, product.publicTitle, request.guestEmail, null) };
     });

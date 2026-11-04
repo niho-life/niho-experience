@@ -39,10 +39,14 @@ function positive(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value > 0;
 }
 
+function priceEntered(value: number | null): value is number {
+  return value !== null && Number.isSafeInteger(value) && (value === 0 || value >= 50);
+}
+
 /** What one offer still lacks before the page can be listed. */
 export function offerGaps(offer: HostOffer): ListingRequirement[] {
   const gaps: ListingRequirement[] = [];
-  if (!positive(offer.adultPriceYen)) gaps.push("料金");
+  if (!priceEntered(offer.adultPriceYen)) gaps.push("料金");
   if (!positive(offer.capacity)) gaps.push("定員");
   if (offer.weekdays.length === 0) gaps.push("開催曜日");
   if (!offer.startTime) gaps.push("開始時刻");
@@ -117,14 +121,14 @@ export function offerScheduleLabel(offer: HostOffer): string {
   return parts.length ? parts.join(" · ") : "日程が未入力";
 }
 
-/** "¥30,000〜": the adult price a booking starts from. */
+/** The adult price a booking starts from, or "無料" for a zero-price offer. */
 export function offerPriceLabel(offer: HostOffer): string {
-  return positive(offer.adultPriceYen) ? `${yen(offer.adultPriceYen)}〜` : "料金が未入力";
+  return offer.adultPriceYen === 0 ? "無料" : positive(offer.adultPriceYen) ? `${yen(offer.adultPriceYen)}〜` : "料金が未入力";
 }
 
-/** "子ども ¥12,000", under the adult price, when the offer has a child price. */
+/** A child price under the adult price, when the offer has one. */
 export function offerChildPriceLabel(offer: HostOffer): string | null {
-  return offer.childPriceYen === null ? null : `子ども ${yen(offer.childPriceYen)}`;
+  return offer.childPriceYen === null ? null : `子ども ${offer.childPriceYen === 0 ? "無料" : yen(offer.childPriceYen)}`;
 }
 
 /** 表紙にする: the photo at `index` moves to the front; the others keep their order. */
@@ -153,7 +157,7 @@ export function moveItem<T>(items: readonly T[], index: number, by: -1 | 1): T[]
 export function listingSummary(page: ListingContent & Pick<HostExperience, "status">): Pick<HostExperience, "cover" | "schedule" | "missing"> {
   const first = page.offers[0];
   const schedule =
-    first && positive(first.adultPriceYen) && positive(first.capacity) && positive(first.durationMinutes) && first.startTime && first.weekdays.length > 0
+    first && priceEntered(first.adultPriceYen) && positive(first.capacity) && positive(first.durationMinutes) && first.startTime && first.weekdays.length > 0
       ? { weekdays: weekdayLabels(first.weekdays), start: first.startTime, durationMinutes: first.durationMinutes, capacity: first.capacity, priceFromYen: first.adultPriceYen }
       : null;
   return { cover: page.photos[0]?.url ?? null, schedule, missing: page.status === "draft" ? listingRequirements(page) : [] };

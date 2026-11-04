@@ -106,6 +106,7 @@ function guestPlatformFee(settings: GuestPricingInput["platformFee"], totalAmoun
   if (!Number.isSafeInteger(supportAgreementRevision) || supportAgreementRevision < 1) {
     throw new StoreValidationError("The support agreement revision is missing.");
   }
+  if (totalAmount === 0) return { supportEnabled, basisPoints, amount: 0, supportConsentVersion, supportAgreementRevision };
   if (!chargeablePlatformFee(totalAmount, basisPoints)) throw new StoreValidationError("The platform fee must be at least 1 and below the booking total.");
   return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints), supportConsentVersion, supportAgreementRevision };
 }
@@ -152,6 +153,7 @@ export function buildSnapshots(
       unitAmount: product.unitAmount,
       seats,
       totalAmount,
+      paymentRequired: totalAmount > 0,
       cancellationTermsRef: product.cancellationTermsRef,
       ...(guest === undefined ? {} : {
         breakdown: { ...guest.breakdown, minimumChargeableParticipants },

@@ -85,11 +85,11 @@ export function normalizeOrigin(value: string): string {
 
 /** 体験サイトの支払い後のページ（BookingReturn の `?type=instant|approval`）。支払い済みの再送への応答（#285 第2段）。 */
 const SITE_RETURN_PATH = "/booking/return";
-const SITE_RETURN_QUERY = /^\?type=(?:instant|approval)$/;
+const SITE_RETURN_QUERY = /^(?:\?type=(?:instant|approval)|\?type=instant&payment=free)$/;
 
 /**
  * checkout の応答の遷移先として受け付ける URL か。Stripe の Checkout か、NIHO の origin の予約確認ページだけ。
- * `thisSite`（origin が体験サイト自身）のときは、NIHO の予約確認ページの代わりにこのサイトの `/booking/return?type=…` だけ。
+ * `thisSite`（origin が体験サイト自身）のときは、NIHO の予約確認ページの代わりにこのサイトの `/booking/return?type=…` と固定の無料予約戻り先だけ。
  * 想定外の URL（別ドメイン・javascript: 等）には遷移しない。
  */
 export function isAllowedCheckoutRedirect(candidate: string, nihoWebOrigin: string, options: { thisSite?: boolean } = {}): boolean {

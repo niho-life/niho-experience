@@ -324,6 +324,7 @@ interface LockedBooking {
   readonly policy: GuestCancellationPolicy | null;
   readonly deadlineUtc: string | null;
   readonly refundBasisPoints: number;
+  readonly totalAmount: number;
   readonly connectedAccountId: string;
   readonly stripePaymentRef: string | null;
   readonly party: number;
@@ -351,6 +352,7 @@ function lockedFromRow(row: DbRow): LockedBooking {
     policy,
     deadlineUtc: freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart),
     refundBasisPoints: cancellation.refundBasisPoints,
+    totalAmount: amount(pricing.totalAmount, "pricing_snapshot.totalAmount"),
     connectedAccountId: text(seller.stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
     stripePaymentRef: typeof row.stripe_payment_ref === "string" ? row.stripe_payment_ref : null,
     party: amount(row.party, "party"),
@@ -537,9 +539,7 @@ async function enqueueGuestNotice(client: PoolClient, booking: LockedBooking, to
   );
 }
 
-/** Cancels a locked CONFIRMED or PAYMENT_REVIEW booking: its seats go back, its refund is requested, the guest is told. */
-async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec & { readonly refund: SupportRefundChoice }): Promise<RefundSubmission>;
-async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec & { readonly refund: null }): Promise<null>;
+/** Cancels a locked CONFIRMED or PAYMENT_REVIEW booking: its seats go back, any payment refund is requested, the guest is told. */
 async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: CancelSpec): Promise<RefundSubmission | null> {
   const wasConfirmed = booking.status === "CONFIRMED";
   await client.query(
@@ -554,7 +554,9 @@ async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: Ca
       WHERE provider_id = $1 AND booking_id = $2 AND status = 'OPEN'`,
     [booking.providerId, booking.rowId, spec.requestStatus, spec.resolvedBy],
   );
-  const refund = spec.refund === null ? null : await insertRefund(client, booking, { commandId: spec.commandId, choice: spec.refund, requestedBy: spec.by });
+  const refund = spec.refund === null || booking.totalAmount === 0
+    ? null
+    : await insertRefund(client, booking, { commandId: spec.commandId, choice: spec.refund, requestedBy: spec.by });
   // Seats return: stored inventory counts CONFIRMED only; the calendar and channels recalculate the occurrence.
   await enqueueCalendarRecalculation(client, {
     providerId: booking.providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_cancelled",
@@ -778,6 +780,14 @@ export class BookingCancellations {
       if (booking.status !== "CONFIRMED") return done("NOT_CANCELLABLE");
       const free = booking.deadlineUtc !== null && booking.deadlineUtc > booking.nowUtc;
       if (input.shownDeadlineUtc !== booking.deadlineUtc) return done("CHANGED");
+      if (booking.totalAmount === 0) {
+        if (booking.endUtc <= booking.nowUtc) return done("NOT_CANCELLABLE");
+        await cancelLocked(client, booking, {
+          by: "GUEST", reason: "GUEST_REQUEST", note: null, refund: null, commandId, notifyHost: true,
+          requestStatus: "CLOSED", resolvedBy: null,
+        });
+        return done("CANCELLED");
+      }
       if (input.choice === "FULL_REFUND" || input.choice === "POLICY_CANCEL") {
         if (!free || (input.choice === "FULL_REFUND" && booking.refundBasisPoints !== 10_000)) return done("CHANGED");
         const refundChoice = await configuredGuestRefund(client, booking);
@@ -792,7 +802,7 @@ export class BookingCancellations {
           by: "GUEST", reason: "GUEST_REQUEST", note: null, refund: refundChoice, commandId, notifyHost: true,
           requestStatus: "CLOSED", resolvedBy: null,
         });
-        return done("CANCELLED", [refund]);
+        return done("CANCELLED", refund ? [refund] : []);
       }
       if (free) return done("CHANGED");
       if (booking.endUtc <= booking.nowUtc) return done("NOT_CANCELLABLE");
@@ -845,7 +855,7 @@ export class BookingCancellations {
         by: "HOST", reason, note, refund: { kind: "FULL" }, commandId, notifyHost: false, requestStatus: "CLOSED", resolvedBy: null,
       });
       await recordResult(client, key, { outcome: "CANCELLED", bookingIds: [booking.publicBookingId] });
-      return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: [refund] };
+      return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: refund ? [refund] : [] };
     });
   }
 
@@ -900,9 +910,10 @@ export class BookingCancellations {
       }
       const refunds: RefundSubmission[] = [];
       for (const booking of bookings) {
-        refunds.push(await cancelLocked(client, booking, {
+        const refund = await cancelLocked(client, booking, {
           by: "HOST", reason, note, refund: { kind: "FULL" }, commandId, notifyHost: false, requestStatus: "CLOSED", resolvedBy: null,
-        }));
+        });
+        if (refund) refunds.push(refund);
       }
       // No new bookings for the called-off occurrence(s): what この回を中止 promises.
       const occurrences = new Map(bookings.map((booking) => [booking.occurrenceId, booking.ruleId]));
@@ -965,7 +976,7 @@ export class BookingCancellations {
         by: "SUPPORT", reason, note, refund, commandId, notifyHost: true, requestStatus: "CLOSED", resolvedBy: actorRef,
       });
       await recordResult(client, key, { outcome: "CANCELLED", bookingIds: [booking.publicBookingId] });
-      return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: [submission] };
+      return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: submission ? [submission] : [] };
     });
   }
 
@@ -1013,7 +1024,7 @@ export class BookingCancellations {
           by: "SUPPORT", reason: "GUEST_REQUEST", note: approve.note, refund: approve.refund, commandId, notifyHost: true, requestStatus: "APPROVED", resolvedBy: actorRef,
         });
         await recordResult(client, key, { outcome: "CANCELLED", bookingIds: [booking.publicBookingId] });
-        return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: [submission] };
+        return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: submission ? [submission] : [] };
       }
       await client.query(
         `UPDATE booking_cancellation_requests SET status = 'DECLINED', resolved_at = clock_timestamp(), resolved_by = $2, decline_message = $3
@@ -1052,7 +1063,7 @@ export class BookingCancellations {
         by: "SUPPORT", reason: "LATE_PAYMENT", note: null, refund: { kind: "FULL" }, commandId, notifyHost: false, requestStatus: "CLOSED", resolvedBy: actorRef,
       });
       await recordResult(client, key, { outcome: "CANCELLED", bookingIds: [booking.publicBookingId] });
-      return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: [submission] };
+      return { outcome: "CANCELLED", repeated: false, bookingIds: [booking.publicBookingId], refunds: submission ? [submission] : [] };
     });
   }
 

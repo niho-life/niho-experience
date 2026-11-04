@@ -107,6 +107,7 @@ describe("store boundary validation", () => {
       unitAmount: 4500,
       seats: 2,
       totalAmount: 9000,
+      paymentRequired: true,
       cancellationTermsRef: "terms-v1",
     });
     assert.equal(snapshots.occurrenceSnapshot.startUtc, occurrence.startUtc);
