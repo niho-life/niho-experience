@@ -137,7 +137,7 @@ export const FLAGS = Object.freeze([
   {
     env: "EXPERIENCE_TRANSLATE_API_ENABLED",
     variable: "TRANSLATE_API_ENABLED",
-    // NIHO予約はNIHO APIで検証し、site bookingは販売flagが有効なときだけExperience DBで検証する。
+    // NIHO予約はNIHO APIで検証する。site予約は販売ONなら通常表示し、販売OFFでも通訳flagでread-only表示する。
     needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {

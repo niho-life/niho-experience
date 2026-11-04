@@ -4,7 +4,7 @@ import { createExperienceTranslateRoomsClient, type ExperienceTranslateRoomsFail
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError, type HostGuestBooking } from "@niho-experience/experience-store";
 import { todayInJapan } from "@/host/format";
 import { guestNeedsInterpretation } from "@/host/translate";
-import { asOwner } from "@/host/site-bookings-server";
+import { asTranslateOwner } from "@/host/site-bookings-server";
 import { HOST_SESSION_ENDED_TEXT } from "@/host/errors";
 import { MOCK_TODAY } from "@/host/mock/bookings";
 import { MOCK_SITE_BOOKINGS } from "@/host/mock/site-bookings";
@@ -80,8 +80,6 @@ export function siteTranslateBookingEligible(booking: Pick<HostGuestBooking, "st
 /** NIHO OWNERとExperience DBの予約所属を毎回照合してからsite-booking用NIHO clientを返す。 */
 export async function loadSiteTranslateRoomsClient(providerId: string, bookingId: string, action: SiteTranslateRoomAction) {
   if (!translateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
-  // Keep Experience-owned bookings closed while this site is not selling; the NIHO-booking BFF stays independent.
-  if (!isHostMock() && !config.guestBookingEnabled) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
   const session = await readHostSession();
   if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
   if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
@@ -97,7 +95,7 @@ export async function loadSiteTranslateRoomsClient(providerId: string, bookingId
     if (!found) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
     booking = found;
   } else {
-    const owner = await asOwner(providerId);
+    const owner = await asTranslateOwner(providerId);
     if (!owner.ok) {
       if (owner.message === HOST_SESSION_ENDED_TEXT) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
       if (owner.message === SITE_BOOKING_LOAD_FAILED_TEXT) return { ok: false as const, response: translateRoomsJson({ error: "store_unavailable" }, 502) };

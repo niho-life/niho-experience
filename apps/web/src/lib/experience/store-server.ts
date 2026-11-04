@@ -149,6 +149,13 @@ export function guestBookingRepository(): GuestBookingRepository | null {
   return pool ? new GuestBookingRepository(pool) : null;
 }
 
+/** Existing site bookings for the host's interpreter flow; exposes only reads while guest sales are closed. */
+export function translateSiteBookingRepository(): Pick<GuestBookingRepository, "listGuestBookingsForHost" | "getGuestBookingForHost"> | null {
+  if (config.apiMode !== "http" || !config.hostConsoleEnabled || !config.experienceTranslateApiEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestBookingRepository(pool) : null;
+}
+
 /** 出欠 (#107): null until its flag (and so booking on this site) is on and the experience DB is configured. */
 export function bookingAttendance(): BookingAttendance | null {
   if (!config.hostAttendanceEnabled) return null;
