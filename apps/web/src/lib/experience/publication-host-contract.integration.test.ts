@@ -218,12 +218,6 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       });
       expect(await pool.query("SELECT role,active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2", [EXPERIENCE_PROVIDER_ID, NIHO_USER_ID]))
         .toMatchObject({ rows: [{ role: "OWNER", active: true }] });
-      await bookingRepository.setProviderSupportSettings(boundary.value.actor, {
-        supportEnabled: false,
-        consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION,
-        expectedVersion: 1,
-      });
-
       const confirmation = await confirmPublicationEnglish(() => ({ japanese, english }));
       const createResponse = await publicationCollectionRequest(new Request("https://experience.example.test/host/api/products", {
         method: "POST",
@@ -258,7 +252,11 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       const readBody = await readResponse.json() as { product: { version: string; offers: { id: string }[]; publicationBlockers: string[] } };
       expect(readBody.product.offers).toEqual([expect.objectContaining({ id: OFFER_ID })]);
       expect(readBody.product.publicationBlockers).toContain("CANCELLATION_TERMS_REQUIRED");
+      expect(readBody.product.publicationBlockers).toContain("SUPPORT_CONSENT_REQUIRED");
       expect(readBody.product.publicationBlockers).not.toContain("SCHEDULE_REQUIRED");
+      await bookingRepository.setProviderSupportSettings(boundary.value.actor, {
+        supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 1,
+      });
       const termsResponse = await publicationRequest(
         new Request(`https://experience.example.test/host/api/products/${productId}/sale-terms`, {
           method: "PUT",

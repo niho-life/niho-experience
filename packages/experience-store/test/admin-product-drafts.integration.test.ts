@@ -6,6 +6,7 @@ import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -109,6 +110,9 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
       );
 
       assert.deepEqual(await publications.ensureMappedOwnerMembership(owner.nihoUserId), { kind: "linked" });
+      await new GuestBookingRepository(pool).setProviderSupportSettings(owner, {
+        supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 1,
+      });
       const inherited = await publications.getProduct(owner, draft.id);
       assert.equal(inherited.publicTitle, draft.publicTitle);
       assert.deepEqual(inherited.content, draft.content);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
   GUEST_BOOKING_LIMITS,
+  EXPERIENCE_SUPPORT_CONSENT_VERSION,
   activeRules,
   questionsFingerprint,
   cancellationPolicyCode,
@@ -35,6 +36,7 @@ export type ExperiencePublicationBlocker =
   | "CONNECT_NOT_READY"
   | "CONSENT_OUTDATED"
   | "FEE_SETTINGS_REQUIRED"
+  | "SUPPORT_CONSENT_REQUIRED"
   | "MANUSCRIPT_REQUIRED"
   | "OPERATIONS_SUSPENDED"
   | "OWNER_NOT_CURRENT"
@@ -593,10 +595,12 @@ async function blockers(
     [product.providerId, product.id, product.slug],
   );
   const feeSettings = await client.query(
-    "SELECT provider_id FROM provider_sale_settings WHERE provider_id=$1 FOR SHARE",
+    "SELECT provider_id,support_consent_version,support_agreement_revision FROM provider_sale_settings WHERE provider_id=$1 FOR SHARE",
     [product.providerId],
   );
   if (!feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
+  else if (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+    || feeSettings.rows[0].support_agreement_revision === null) result.push("SUPPORT_CONSENT_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
