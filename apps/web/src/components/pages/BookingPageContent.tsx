@@ -15,7 +15,7 @@ import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, type SiteLocale } from "@/lib/localized-content";
 import type { ExperienceDetailForSite } from "@/lib/experience-types";
-import { bookingSourceOf, detailForSale, guestBookingSale, japaneseBookingOpen, type GuestBookingSale } from "@/lib/guest-booking-source";
+import { bookingSourceOf, detailForSale, detailWithSiteSellerDisplayName, guestBookingSale, japaneseBookingOpen, type GuestBookingSale } from "@/lib/guest-booking-source";
 
 export async function BookingPageContent({ params, searchParams, locale }: { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams>; locale: SiteLocale }) {
   const { slug } = await params;
@@ -28,7 +28,7 @@ export async function BookingPageContent({ params, searchParams, locale }: { par
       const [selected, siteCopy, selectedSale] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), guestBookingSale(slug)]);
       assertSameJapaneseRelease(siteCopy.releaseId, selected);
       sale = selectedSale;
-      experience = selected.experience; copy = siteCopy.copy; bookingReady = japaneseBookingOpen(sale, selected);
+      experience = detailWithSiteSellerDisplayName(selected.experience, selectedSale); copy = siteCopy.copy; bookingReady = japaneseBookingOpen(sale, selected);
     } catch { return <JapaneseUnavailable />; }
   } else {
     const result = await getExperienceForSite(slug, query);
