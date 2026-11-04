@@ -5,14 +5,17 @@ import type { HostProvider } from "@/lib/host/providers";
 /** 予約's bookings made on this site against a stubbed experience store and NIHO provider list (#285 slice 8). */
 const state = vi.hoisted(() => ({
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  translateStore: null as null | Record<string, ReturnType<typeof vi.fn>>,
   cancellations: null as null | Record<string, ReturnType<typeof vi.fn>>,
   submit: null as null | ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>,
   session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "memberRole">[] },
   mock: false,
+  config: { apiMode: "http", hostConsoleEnabled: true, guestBookingEnabled: true, guestMailEnabled: true, experienceTranslateApiEnabled: false },
 }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, bookingCancellations: () => state.cancellations }));
+vi.mock("@/lib/config", () => ({ config: state.config }));
+vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, translateSiteBookingRepository: () => state.translateStore, bookingCancellations: () => state.cancellations }));
 vi.mock("@niho-experience/experience-payments", () => ({ submitBookingRefund: (...args: unknown[]) => state.submit!(...args) }));
 vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers, isHostMock: () => state.mock }));
 vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
@@ -47,6 +50,8 @@ beforeEach(() => {
     listGuestBookingsForHost: vi.fn(async () => ({ bookings: [STORED], nextCursor: null })),
     getGuestBookingForHost: vi.fn(async () => OTHER),
   };
+  state.translateStore = null;
+  Object.assign(state.config, { apiMode: "http", hostConsoleEnabled: true, guestBookingEnabled: true, guestMailEnabled: true, experienceTranslateApiEnabled: false });
   state.cancellations = {
     cancelAsHost: vi.fn(async () => ({ outcome: "CANCELLED", repeated: false, bookingIds: [BOOKING_ID], refunds: [REFUND] })),
     recordRefundSubmission: vi.fn(async () => "SUCCEEDED"),
@@ -79,6 +84,21 @@ describe("loadSiteBookings", () => {
       state.store!.getGuestBookingForHost!.mockRejectedValueOnce(error);
       expect(await loadSiteBookings(OWNER, "not-a-booking")).toMatchObject({ status: "live", requestedMissing: true, bookings: [expect.objectContaining({ id: BOOKING_ID })] });
     }
+  });
+
+  it("sales OFFでも通訳flagがONなら既存予約をread-onlyで表示し、guest actionsとpaginationを閉じる", async () => {
+    state.store = null;
+    state.translateStore = {
+      listGuestBookingsForHost: vi.fn(async () => ({ bookings: [STORED], nextCursor: "hidden-next-page" })),
+      getGuestBookingForHost: vi.fn(async () => OTHER),
+    };
+    Object.assign(state.config, { guestBookingEnabled: false, guestMailEnabled: false, experienceTranslateApiEnabled: true });
+
+    const load = await loadSiteBookings(OWNER, BOOKING_ID);
+
+    expect(load).toMatchObject({ status: "live", readOnly: true, messages: false, nextCursor: null, bookings: [expect.objectContaining({ id: BOOKING_ID })] });
+    expect(state.translateStore.listGuestBookingsForHost).toHaveBeenCalledWith(ACTOR, { from: expect.any(String), limit: 100 });
+    expect(state.translateStore.getGuestBookingForHost).not.toHaveBeenCalled();
   });
 
   it("keeps today's screen while closed, for anyone but the owner, and while the experience DB has no OWNER for them", async () => {

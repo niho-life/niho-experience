@@ -12,7 +12,7 @@ vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository }));
 
 import { GET as bookingTerms } from "@/app/api/public/experiences/[slug]/booking-terms/route";
-import { bookingSourceOf, detailForSale, guestBookingSale, guestBookingSources, japaneseBookingOpen, siteNextDates } from "./guest-booking-source";
+import { bookingSourceOf, detailForSale, detailWithSiteSellerDisplayName, guestBookingSale, guestBookingSources, japaneseBookingOpen, siteNextDates } from "./guest-booking-source";
 import { parseSiteSaleTerms, siteSaleTerms } from "./guest-booking-terms";
 
 const AVAILABILITY = {
@@ -83,11 +83,25 @@ describe("where one experience is sold", () => {
     const sold = detailForSale(detail, { kind: "site", terms: SAMPLE_TERMS });
     expect(sold.offers).toEqual(siteSaleTerms(SAMPLE_TERMS, "sample-terms-2026-10").offers);
     expect(sold.booking).toEqual({ ...detail.booking, checkoutAvailable: true, consentVersion: "sample-terms-2026-10" });
+    expect(sold.seller.displayName).toBe(SAMPLE_TERMS.sellerDisplayName);
     expect(sold.title).toBe(detail.title);
     const unknown = detailForSale(detail, { kind: "unknown" });
     expect(unknown.booking.checkoutAvailable).toBe(false);
     expect(unknown.offers).toBe(detail.offers);
     expect(detailForSale(detail, { kind: "niho" })).toBe(detail);
+  });
+
+  it("uses the active sale's seller name on Japanese pages without replacing the selected release's sale terms", () => {
+    const detail = buildFixtureExperiences()[0]!;
+    const localized = { ...detail, title: "日本語の体験", seller: { ...detail.seller, displayName: "翻訳releaseの販売者" } };
+    const selected = detailWithSiteSellerDisplayName(localized, { kind: "site", terms: SAMPLE_TERMS });
+
+    expect(selected.seller.displayName).toBe(SAMPLE_TERMS.sellerDisplayName);
+    expect(selected.seller.legalNoticeUrl).toBe(localized.seller.legalNoticeUrl);
+    expect(selected.offers).toBe(localized.offers);
+    expect(selected.booking).toBe(localized.booking);
+    expect(selected.title).toBe("日本語の体験");
+    expect(detailWithSiteSellerDisplayName(localized, { kind: "niho" })).toBe(localized);
   });
 
   it("reads the next dates of a product sold here from the store, and none on a failure", async () => {

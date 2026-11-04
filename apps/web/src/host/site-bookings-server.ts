@@ -14,7 +14,7 @@ import {
 } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-refunds";
-import { bookingCancellations, guestBookingRepository } from "@/lib/experience/store-server";
+import { bookingCancellations, guestBookingRepository, translateSiteBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable, type HostMockScenario } from "@/lib/host/session";
@@ -30,8 +30,8 @@ import type { HostBooking } from "./types";
 /*
  * 予約's bookings made on this site, kept in the experience DB (#285 slice 8, docs/guest-booking.md「ホストの画面」).
  * NIHO proves the account and that it is the provider's OWNER; the experience store checks its own OWNER
- * membership as well (ADR 0002), as 予約前の質問 does. Anyone else, or a deployment without
- * EXPERIENCE_GUEST_BOOKING_ENABLED and the DB, keeps today's screen. The guest's address never reaches the console.
+ * membership as well (ADR 0002), as 予約前の質問 does. With guest sales closed, the translate flag may expose
+ * existing bookings read-only for the OWNER's interpreter flow. The guest's address never reaches the console.
  */
 
 export const SITE_BOOKING_OWNER_ONLY_TEXT = "このサイトで受けた予約はオーナーが確認できます";
@@ -78,6 +78,8 @@ export type HostSiteBookingsLoad =
       today: string;
       /** Each booking leads to its messages with the guest (#285 slice 6b). */
       messages: boolean;
+      /** Guest sales are closed; existing reservations are shown for interpreter access only. */
+      readOnly: boolean;
       /** The preview's synthetic bookings (`?mock=site-bookings`): read only, nothing is sent. */
       preview?: true;
     })
@@ -89,7 +91,7 @@ export type HostSiteBookingsLoad =
 function previewSiteBookings(provider: HostProvider, requestedBooking: string | null, mockScenario: HostMockScenario | undefined): HostSiteBookingsLoad {
   if (mockScenario !== "site-bookings" || provider.memberRole !== "OWNER") return { status: "closed" };
   const requestedMissing = requestedBooking !== null && !MOCK_SITE_BOOKINGS.some((booking) => booking.publicBookingId === requestedBooking);
-  return { status: "live", ...screenPage(MOCK_SITE_BOOKINGS, null), requestedMissing, today: MOCK_TODAY, messages: false, preview: true };
+  return { status: "live", ...screenPage(MOCK_SITE_BOOKINGS, null), requestedMissing, today: MOCK_TODAY, messages: false, readOnly: true, preview: true };
 }
 
 /**
@@ -98,8 +100,10 @@ function previewSiteBookings(provider: HostProvider, requestedBooking: string | 
  */
 export async function loadSiteBookings(provider: HostProvider, requestedBooking: string | null, mockScenario?: HostMockScenario): Promise<HostSiteBookingsLoad> {
   if (isHostMock()) return previewSiteBookings(provider, requestedBooking, mockScenario);
-  const bookings = guestBookingRepository();
+  const salesBookings = guestBookingRepository();
+  const bookings = salesBookings ?? translateSiteBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
+  const readOnly = !salesBookings;
   const actor = ownerActor(provider);
   const today = todayInJapan(Date.now());
   try {
@@ -114,25 +118,42 @@ export async function loadSiteBookings(provider: HostProvider, requestedBooking:
         requestedMissing = true;
       }
     }
-    return { status: "live", ...screenPage(stored, page.nextCursor), requestedMissing, today, messages: siteBookingMessagesEnabled() };
+    return {
+      status: "live",
+      ...screenPage(stored, readOnly ? null : page.nextCursor),
+      requestedMissing,
+      today,
+      messages: siteBookingMessagesEnabled(),
+      readOnly,
+    };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }
 }
 
-type OwnerCheck = { ok: true; bookings: GuestBookingRepository; actor: HostActor } | { ok: false; message: string };
+type OwnerReadRepository = Pick<GuestBookingRepository, "getGuestBookingForHost">;
+type OwnerCheck<T extends OwnerReadRepository = GuestBookingRepository> = { ok: true; bookings: T; actor: HostActor } | { ok: false; message: string };
 
-/** A usable session, the store, and NIHO saying this account owns the provider. */
-export async function asOwner(providerId: string): Promise<OwnerCheck> {
+/** A usable session, a read repository, and NIHO saying this account owns the provider. */
+async function ownerWithBookings<T extends OwnerReadRepository>(providerId: string, bookings: T | null): Promise<OwnerCheck<T>> {
   const session = await readHostSession();
   if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
-  const bookings = guestBookingRepository();
   if (!bookings) return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? SITE_BOOKING_LOAD_FAILED_TEXT : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
   if (provider?.memberRole !== "OWNER") return { ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT };
   return { ok: true, bookings, actor: ownerActor(provider) };
+}
+
+/** Mutations require guest sales to be enabled; cancellations and pagination use this OWNER check. */
+export function asOwner(providerId: string): Promise<OwnerCheck> {
+  return ownerWithBookings(providerId, guestBookingRepository());
+}
+
+/** The interpreter BFF can only read the booking under the translate flag, without opening guest sales. */
+export function asTranslateOwner(providerId: string): Promise<OwnerCheck<OwnerReadRepository>> {
+  return ownerWithBookings(providerId, translateSiteBookingRepository());
 }
 
 /** 続きを見る: the bookings after the list's last one, from the cursor the previous page gave (it keeps that page's today). */

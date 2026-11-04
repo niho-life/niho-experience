@@ -13,12 +13,13 @@ import {
   type ExperiencePublicationState,
   type JsonValue,
   type ProductSaleTermsInput,
+  validateGuestMeetingGuide,
 } from "@niho-experience/experience-store";
 import { createHash, randomUUID } from "node:crypto";
 import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
-import { experiencePublicationRepository } from "./store-server";
+import { experiencePublicationRepository, guestMeetingGuideRepository } from "./store-server";
 import {
   publicationHostBoundary,
   publicationHostMutationAllowed,
@@ -38,7 +39,7 @@ type ProductDraftBody = {
   readonly currency: string;
   readonly unitAmount: number;
 };
-type Action = "read" | "save" | "publish" | "stop" | "readSaleTerms" | "saveSaleTerms";
+type Action = "read" | "save" | "publish" | "stop" | "readSaleTerms" | "saveSaleTerms" | "readBookingGuide" | "saveBookingGuide";
 const BODY_LIMIT = 256 * 1024;
 const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -195,7 +196,7 @@ function checksFor(content: Readonly<Record<string, unknown>>, photosReady: bool
 }
 
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {
-  if (action === "publish" || action === "stop") return "OWNER";
+  if (action === "publish" || action === "stop" || action === "readBookingGuide" || action === "saveBookingGuide") return "OWNER";
   if (action === "save" || action === "saveSaleTerms") return "EDIT";
   return "READ";
 }
@@ -257,12 +258,20 @@ export async function publicationRequest(request: Request, context: PublicationP
 
   let body: RecordValue | null = null;
   let revision: ProductRevision | null = null;
-  if (action !== "read" && action !== "readSaleTerms") {
+  if (action !== "read" && action !== "readSaleTerms" && action !== "readBookingGuide") {
     const parsed = await parseJson(request);
     if (parsed instanceof Response) return parsed;
     body = parsed;
-    revision = validActionBody(action, body);
-    if (!revision) return responseError("INVALID_INPUT", 400);
+    if (action === "saveBookingGuide") {
+      if (!exactKeys(body, ["expectedVersion", "guide"])
+        || (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || Number(body.expectedVersion) < 1))) {
+        return responseError("INVALID_INPUT", 400);
+      }
+      try { validateGuestMeetingGuide(body.guide); } catch { return responseError("INVALID_INPUT", 400); }
+    } else {
+      revision = validActionBody(action, body);
+      if (!revision) return responseError("INVALID_INPUT", 400);
+    }
     if (action === "publish") {
       if (body.accepted !== true) return responseError("PUBLICATION_BLOCKED", 422, { blockers: ["CONSENT_REQUIRED"] });
       if (body.consentVersion !== config.experiencePublicationConsentVersion) {
@@ -276,6 +285,12 @@ export async function publicationRequest(request: Request, context: PublicationP
   const { repository } = prepared;
   const actor = prepared.context.actor;
   try {
+    if (action === "readBookingGuide" || action === "saveBookingGuide") {
+      const guides = guestMeetingGuideRepository();
+      if (!guides) return responseError("UNAVAILABLE", 503);
+      if (action === "readBookingGuide") return noStoreJson({ bookingGuide: await guides.readForProduct(actor, productId) });
+      return noStoreJson({ bookingGuide: await guides.saveForProduct(actor, productId, body!.expectedVersion as number | null, body!.guide) });
+    }
     if (action === "read") return noStoreJson({ product: await productDto(repository, actor, productId), publicationConsentVersion: config.experiencePublicationConsentVersion });
     if (action === "readSaleTerms") return noStoreJson({ product: await productDto(repository, actor, productId) });
     const product = await repository.getProduct(actor, productId);

@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { requireOwner } from "./guest-questions.ts";
+import { enqueueNewReviewNotification } from "./host-notification-outbox.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor } from "./types.ts";
@@ -40,7 +41,7 @@ export const GUEST_REVIEW_LIMITS = {
 } as const;
 
 /** Whether the guest of a booking that ended may review it, beyond what the store checks itself. */
-export type GuestReviewEligibility = (booking: { readonly providerId: string; readonly bookingId: string; readonly endUtc: string }) => Promise<boolean>;
+export type GuestReviewEligibility = (booking: { readonly providerId: string; readonly bookingId: string; readonly endUtc: string }, client?: PoolClient) => Promise<boolean>;
 
 export interface SubmitGuestReviewInput {
   /** 1-5. */
@@ -327,9 +328,15 @@ export class GuestReviewRepository {
 
   constructor(pool: Pool, options: { eligibility?: GuestReviewEligibility } = {}) {
     this.#pool = pool;
-    // TODO(#104 #108): once attendance is recorded, plug the check that leaves out NO_SHOW bookings in here.
-    // Whether an unrecorded booking counts as attended is the owner's call (niho-app#19314 recommends it does).
-    this.#eligibility = options.eligibility ?? (async () => true);
+    // Only an explicit attendance mark permits a new review. An unrecorded booking remains pending until
+    // the owner settles its policy; a later NO_SHOW also invalidates a link that was already sent.
+    this.#eligibility = options.eligibility ?? (async ({ providerId, bookingId }, client) => {
+      const marked = await (client ?? pool).query<DbRow>(
+        "SELECT status FROM booking_attendance WHERE provider_id = $1 AND booking_id = $2::bigint FOR SHARE",
+        [providerId, bookingId],
+      );
+      return marked.rows[0]?.status === "ATTENDED";
+    });
   }
 
   /* ---------- the review link (server-side, for the thank-you email) ---------- */
@@ -353,7 +360,7 @@ export class GuestReviewRepository {
       const booking = found.rows[0];
       if (!booking || booking.reviewable !== true) throw new StoreNotFoundError("reviewable booking");
       if (booking.reviewed === true) throw new StoreConflictError("The booking already has a review.");
-      if (!(await this.#eligibility({ providerId: input.providerId, bookingId, endUtc: isoValue(booking, "end_at") }))) throw new StoreNotFoundError("reviewable booking");
+      if (!(await this.#eligibility({ providerId: input.providerId, bookingId, endUtc: isoValue(booking, "end_at") }, client))) throw new StoreNotFoundError("reviewable booking");
       const token = randomBytes(32).toString("base64url");
       const link = await client.query<DbRow>(
         `WITH now AS (SELECT clock_timestamp() AS at)
@@ -417,14 +424,15 @@ export class GuestReviewRepository {
         const providerId = String(link.provider_id);
         const bookingId = String(link.booking_id);
         const bookings = await client.query<DbRow>(
-          `SELECT b.product_id, ${ENDED_AT} AS end_at, ${REVIEWABLE} AS reviewable, ${REVIEWED} AS reviewed
-             FROM bookings b WHERE b.provider_id = $1 AND b.id = $2::bigint`,
+          `SELECT b.product_id, p.public_title, ${ENDED_AT} AS end_at, ${REVIEWABLE} AS reviewable, ${REVIEWED} AS reviewed
+             FROM bookings b JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+            WHERE b.provider_id = $1 AND b.id = $2::bigint FOR SHARE OF b`,
           [providerId, bookingId],
         );
         const booking = bookings.rows[0];
         if (!booking || booking.reviewable !== true) throw new StoreNotFoundError("review link");
         if (booking.reviewed === true) throw new StoreConflictError("The booking already has a review.");
-        if (!(await this.#eligibility({ providerId, bookingId, endUtc: isoValue(booking, "end_at") }))) throw new StoreNotFoundError("review link");
+        if (!(await this.#eligibility({ providerId, bookingId, endUtc: isoValue(booking, "end_at") }, client))) throw new StoreNotFoundError("review link");
         const reviewId = randomUUID();
         await client.query(
           `INSERT INTO guest_reviews
@@ -440,6 +448,7 @@ export class GuestReviewRepository {
             WHERE i.token_hash = $1 AND g.provider_id = i.provider_id AND g.id = $2::uuid`,
           [tokenDigest(token), reviewId, review.clientRequestKey],
         );
+        await enqueueNewReviewNotification(client, { providerId, reviewId, experienceTitle: String(booking.public_title) });
         return RECEIVED;
       });
     } catch (error) {

@@ -24,7 +24,7 @@ vi.mock("./server", () => ({
   isHostMock: () => mocks.hostMock,
   loadHostProviders: mocks.providers,
 }));
-vi.mock("@/host/site-bookings-server", () => ({ asOwner: mocks.owner }));
+vi.mock("@/host/site-bookings-server", () => ({ asTranslateOwner: mocks.owner }));
 vi.mock("@niho-experience/api-client/experience-translate-rooms", () => ({ createExperienceTranslateRoomsClient: mocks.create }));
 
 import { loadSiteTranslateRoomsClient, loadTranslateRoomsClient, readEmptyTranslateBody, siteTranslateBookingEligible, translateRoomsEnabled, translateRoomsEntry, translateRoomsFailure, translateRoomsMutationAllowed } from "./translate-rooms-server";
@@ -146,14 +146,17 @@ describe("translate rooms server boundary", () => {
     expect((other as { response: Response }).response.status).toBe(404);
   });
 
-  it("閉じているsite bookingのroom APIは販売を開かず404にする", async () => {
+  it("sales OFFでも通訳flagとOWNER・Experience membershipが有効なら既存予約を照合する", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
     mocks.config.guestBookingEnabled = false;
+    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    const booking = { status: "CONFIRMED", cancelledAtUtc: null, language: "EN", localDate: "2099-01-01" };
+    const getGuestBookingForHost = vi.fn().mockResolvedValue(booking);
+    mocks.owner.mockResolvedValue({ ok: true, bookings: { getGuestBookingForHost }, actor: { providerId: "provider_1", nihoUserId: "owner_1", calendarRoleCeiling: "OWNER" } });
     const result = await loadSiteTranslateRoomsClient("provider_1", "booking_1", "create");
-    expect(result.ok).toBe(false);
-    expect((result as { response: Response }).response.status).toBe(404);
-    expect(mocks.readHost).not.toHaveBeenCalled();
-    expect(mocks.owner).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(getGuestBookingForHost).toHaveBeenCalledWith(expect.objectContaining({ providerId: "provider_1" }), "booking_1");
+    expect(mocks.owner).toHaveBeenCalledWith("provider_1");
   });
 
   it("mock site-bookingsは合成予約の所属と条件だけでsite clientへ進む", async () => {

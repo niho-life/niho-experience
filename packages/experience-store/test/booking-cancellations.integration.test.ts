@@ -480,6 +480,18 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.equal(repeated.refunds.length, 2);
       const nothing = await cancellations.cancelSessionAsHost(ownerA, key, { commandId: randomUUID(), reason: "WEATHER" });
       assert.equal(nothing.outcome, "NOT_CANCELLABLE");
+      // A session with only an unpaid hold still stops selling, and a repeated command creates no refund.
+      const emptyDate = day(7);
+      const emptyHold = await guests.startGuestBooking(request({ occurrenceDate: emptyDate, guestEmail: "empty@example.com", adultCount: 1, childCount: 0, expectedTotalYen: 3000 }));
+      const emptyKey = { ...key, localDate: emptyDate };
+      const emptyCommand = randomUUID();
+      const empty = await cancellations.cancelSessionAsHost(ownerA, emptyKey, { commandId: emptyCommand, reason: "WEATHER" });
+      assert.equal(empty.outcome, "CANCELLED");
+      assert.deepEqual(empty.bookingIds, []);
+      assert.deepEqual(empty.refunds, []);
+      assert.equal((await booking(pool, emptyHold.publicBookingId)).status, "EXPIRED");
+      assert.equal((await cancellations.cancelSessionAsHost(ownerA, emptyKey, { commandId: emptyCommand, reason: "WEATHER" })).repeated, true);
+      assert.equal((await cancellations.cancelSessionAsHost(ownerA, emptyKey, { commandId: randomUUID(), reason: "WEATHER" })).outcome, "NOT_CANCELLABLE");
       // The host cannot take a payment under review.
       const hostReview = await cancellations.cancelAsHost(ownerA, review.publicBookingId, { commandId: randomUUID(), reason: "OTHER" });
       assert.equal(hostReview.outcome, "NOT_CANCELLABLE");

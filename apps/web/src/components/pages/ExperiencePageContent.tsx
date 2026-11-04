@@ -44,7 +44,7 @@ import { videoForExperience } from "@/lib/videos";
 import { YouTubeVideo } from "@/components/YouTubeVideo";
 import { dayOption } from "@/lib/date-filter";
 import { detailFromTokyoLine, detailGuideHeading, detailNextDates } from "@/lib/detail-page";
-import { bookingSourceOf, detailForSale, guestBookingSale, japaneseBookingOpen, siteNextDates, type GuestBookingSale } from "@/lib/guest-booking-source";
+import { bookingSourceOf, detailForSale, detailWithSiteSellerDisplayName, guestBookingSale, japaneseBookingOpen, siteNextDates, type GuestBookingSale } from "@/lib/guest-booking-source";
 
 type BlockProps = Record<string, unknown>;
 const blockText = (props: BlockProps, key: string, fallback: string) => typeof props[key] === "string" ? String(props[key]) : fallback;
@@ -143,7 +143,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       const [selected, siteCopy, selectedSale] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), guestBookingSale(slug)]);
       assertSameJapaneseRelease(siteCopy.releaseId, selected);
       sale = selectedSale;
-      e = selected.experience; copy = siteCopy.copy; japaneseBookingReady = japaneseBookingOpen(sale, selected); japaneseReleaseId = selected.releaseId;
+      e = detailWithSiteSellerDisplayName(selected.experience, selectedSale); copy = siteCopy.copy; japaneseBookingReady = japaneseBookingOpen(sale, selected); japaneseReleaseId = selected.releaseId;
     } else {
       const detail = await readExperience(slug, query);
       sale = await guestBookingSale(detail.slug);
