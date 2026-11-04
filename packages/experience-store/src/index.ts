@@ -201,6 +201,7 @@ export {
   HOST_CANCELLATION_REASONS,
   SESSION_CANCELLATION_REASONS,
   SUPPORT_CANCELLATION_REASONS,
+  SUPPORT_OPERATION_ACTIONS,
 } from "./booking-cancellations.ts";
 export { ExperienceSupportRepository } from "./support-settlement.ts";
 export type {
@@ -229,6 +230,9 @@ export type {
   StripeRefundStatus,
   SupportActor,
   SupportCancellationInput,
+  SupportOperationAction,
+  SupportOperationPreview,
+  SupportOperationPreviewInput,
   SupportQueue,
   SupportQueueBooking,
   SupportQueueRefund,

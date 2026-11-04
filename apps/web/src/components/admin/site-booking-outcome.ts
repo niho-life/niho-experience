@@ -1,5 +1,23 @@
 type RefundState = "REQUESTED" | "PENDING" | "SUCCEEDED" | "FAILED";
 type OutcomeMessage = { readonly tone: "ok" | "error"; readonly text: string };
+export type SiteBookingPreview = {
+  readonly action: "CANCEL" | "APPROVE_REQUEST" | "DECLINE_REQUEST" | "RESOLVE_PAYMENT_REVIEW" | "RETRY_REFUND" | "CLOSE_REFUND";
+  readonly expectedSnapshot: string;
+  readonly publicBookingId: string;
+  readonly providerId: string;
+  readonly experienceTitle: string;
+  readonly startUtc: string;
+  readonly bookingStatus: string;
+  readonly bookingStatusAfter: string;
+  readonly refundAmount: number;
+  readonly currency: string;
+  readonly cancellationRequestStatus: string | null;
+};
+
+const PREVIEW_ACTIONS = ["CANCEL", "APPROVE_REQUEST", "DECLINE_REQUEST", "RESOLVE_PAYMENT_REVIEW", "RETRY_REFUND", "CLOSE_REFUND"] as const;
+const HASH64 = /^[0-9a-f]{64}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REQUEST_STATES = ["OPEN", "APPROVED", "DECLINED", "CLOSED"] as const;
 
 const messages: Record<string, string> = {
   CONTACT_SENT: "NIHOサポートからの連絡を予約者へのメール配信キューに登録しました",
@@ -35,4 +53,29 @@ export function siteBookingOutcome(value: unknown): OutcomeMessage | null {
   if (states.includes("PENDING")) return { tone: "ok", text: `${text}。Stripeで返金処理中です` };
   if (states.length > 0) return { tone: "ok", text: `${text}。今回の返金完了を確認しました` };
   return { tone: "ok", text };
+}
+
+/** Only a typed business rejection confirms that this command did not run. A closed route or proxy refusal does not. */
+export function siteBookingCommandRejected(status: number, value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const error = (value as Record<string, unknown>).error;
+  return (status === 400 && error === "invalid_input") || (status === 409 && error === "conflict");
+}
+
+/** A malformed HTTP 200 must not arm a financial operation. */
+export function siteBookingPreview(value: unknown): SiteBookingPreview | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const preview = value as Record<string, unknown>;
+  if (typeof preview.action !== "string" || !(PREVIEW_ACTIONS as readonly string[]).includes(preview.action)
+      || typeof preview.expectedSnapshot !== "string" || !HASH64.test(preview.expectedSnapshot)
+      || typeof preview.publicBookingId !== "string" || !UUID.test(preview.publicBookingId)
+      || typeof preview.providerId !== "string" || preview.providerId.length === 0
+      || typeof preview.experienceTitle !== "string" || preview.experienceTitle.length === 0
+      || typeof preview.startUtc !== "string" || !Number.isFinite(Date.parse(preview.startUtc))
+      || typeof preview.bookingStatus !== "string" || preview.bookingStatus.length === 0
+      || typeof preview.bookingStatusAfter !== "string" || preview.bookingStatusAfter.length === 0
+      || typeof preview.refundAmount !== "number" || !Number.isSafeInteger(preview.refundAmount) || preview.refundAmount < 0
+      || typeof preview.currency !== "string" || !/^[A-Z]{3}$/.test(preview.currency)
+      || !(preview.cancellationRequestStatus === null || (typeof preview.cancellationRequestStatus === "string" && (REQUEST_STATES as readonly string[]).includes(preview.cancellationRequestStatus)))) return null;
+  return preview as SiteBookingPreview;
 }

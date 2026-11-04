@@ -69,6 +69,7 @@ const secretRef = (target: Target, item: Item) => (target === "stg" ? `${item.st
 
 /** Each flag's config setting: a new flag without one here fails "covers every flag". */
 const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
+  ADMIN_SUPPORT_CONSOLE_ENABLED: "adminSupportConsoleEnabled",
   EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
   GUIDE_ADMIN_API_ENABLED: "guideAdminApiEnabled",
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
@@ -137,7 +138,7 @@ const BASE = {
 };
 
 /** What Secret Manager would give, where resolve-config checks its shape. */
-const SECRET_VALUE: Record<string, string> = { EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587", HOST_PUSH_VAPID_PRIVATE_KEY: "A".repeat(43), EXPERIENCE_CALENDAR_FEED_KEY: `${"A".repeat(43)}=` };
+const SECRET_VALUE: Record<string, string> = { ADMIN_SESSION_SECRET: "a".repeat(48), EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587", HOST_PUSH_VAPID_PRIVATE_KEY: "A".repeat(43), EXPERIENCE_CALENDAR_FEED_KEY: `${"A".repeat(43)}=` };
 
 /** The revision's environment: the base, the table's values, and a synthetic value for each Secret reference. */
 function revision(target: Target, resolved: Resolved): Record<string, string> {
@@ -152,6 +153,17 @@ const resolve = (target: Target, vars: Vars, hostConsole = true) => resolveDeplo
 });
 
 describe("the deploy workflows' feature flags", () => {
+  it("keeps Admin off by default and derives its callback origin with a pinned dedicated key", () => {
+    const vars = closure("stg", "ADMIN_SUPPORT_CONSOLE_ENABLED");
+    const resolved = resolve("stg", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(resolved.env.NIHO_EXPERIENCE_ADMIN_ORIGIN).toBe(SITE.stg);
+    expect(resolved.secrets.ADMIN_SESSION_SECRET).toBe("experience-stg-admin-session-secret:3");
+    expect(resolveConfig(revision("stg", resolved)).adminSupportConsoleEnabled).toBe(true);
+    expect(resolve("prod", {}).env.ADMIN_SUPPORT_CONSOLE_ENABLED).toBeUndefined();
+    delete vars.STG_ADMIN_SESSION_SECRET_REF;
+    expect(resolve("stg", vars).problems.join(" ")).toContain("STG_ADMIN_SESSION_SECRET_REF");
+  });
   it("keeps the two article service callers in one deployment value", () => {
     const vars = closure("prod", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED");
     vars.PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS = "niho@sample-project.iam.gserviceaccount.com;editor@sample-project.iam.gserviceaccount.com";
