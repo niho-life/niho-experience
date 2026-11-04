@@ -361,7 +361,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
             </PageHead>
             {live ? (
               <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">
-                {live.readOnly ? "予約は閲覧のみです。通訳の開始・参加状況・終了だけ行えます" : niho ? "NIHO の予約と、このサイトで受けた予約です。申込経路で見分けられます" : "このサイトで受けた予約です"}
+                {live.readOnly && !live.preview ? "予約は閲覧のみです。通訳の開始・参加状況・終了だけ行えます" : niho ? "NIHO の予約と、このサイトで受けた予約です。申込経路で見分けられます" : "このサイトで受けた予約です"}
               </p>
             ) : null}
             {ota ? <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">{OTA_BOOKINGS_LIST_TEXT}</p> : null}
