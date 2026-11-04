@@ -125,7 +125,7 @@ function patternAt(value: unknown, path: string, pattern: RegExp, rule: string, 
 function saleTermsAt(value: unknown, problems: string[]): ProductSaleTermsInput | null {
   const terms = objectAt(value, "saleTerms", [
     "offerPrices",
-    "childPricing", "minimumParticipants", "minimumChargeableParticipants", "privateBooking", "maxPartySize",
+    "childPricing", "minimumParticipants", "minimumChargeableParticipants", "maxPartySize",
     "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints", "minimumAttendance",
     "bookingQuestions", "conditionsVersion",
   ], problems, ["childPricing", "minimumParticipants", "maxPartySize", "cancellationPolicy", "bookingQuestions", "conditionsVersion"]);

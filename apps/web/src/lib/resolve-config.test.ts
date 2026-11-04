@@ -15,6 +15,34 @@ describe("public API version rollout gate", () => {
   });
 });
 
+describe("Experience owner publication settings", () => {
+  const http = {
+    EXPERIENCE_API_MODE: "http",
+    HOST_CONSOLE_ENABLED: "true",
+    HOST_SESSION_SECRET: "s".repeat(32),
+    EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+    EXPERIENCE_PUBLIC_MEDIA_BUCKET: "experience-public-media-test",
+    EXPERIENCE_PUBLICATIONS_ENABLED: "true",
+    EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true",
+    EXPERIENCE_PUBLICATION_CONSENT_VERSION: "owner-publish-v1",
+  };
+
+  it("requires the NIHO common-contract audience before opening owner routes", () => {
+    expect(() => resolveConfig(http)).toThrow(/NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE/);
+    expect(() => resolveConfig({ ...http, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "http://public.example" }))
+      .toThrow(/NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE/);
+    expect(resolveConfig({ ...http, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://niho-api.example.test" }))
+      .toMatchObject({ experiencePublicationsEnabled: true, experienceHostPublicationApiEnabled: true });
+  });
+
+  it("keeps the host surface closed when either publication flag is off", () => {
+    expect(resolveConfig({ ...http, EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "false" }))
+      .toMatchObject({ experiencePublicationsEnabled: true, experienceHostPublicationApiEnabled: false });
+    expect(resolveConfig({ ...http, EXPERIENCE_PUBLICATIONS_ENABLED: "false" }))
+      .toMatchObject({ experiencePublicationsEnabled: false, experienceHostPublicationApiEnabled: false });
+  });
+});
+
 describe("guide admin service settings", () => {
   const complete = {
     EXPERIENCE_API_MODE: "http",

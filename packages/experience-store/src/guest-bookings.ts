@@ -151,8 +151,6 @@ export interface ProductSaleTermsInput {
   readonly minimumParticipants: number;
   /** A party below this count still pays at least this many adult prices. Defaults to the neutral value 1. */
   readonly minimumChargeableParticipants?: number;
-  /** Reserve one group for the occurrence; existing inventory settings may also require private booking. */
-  readonly privateBooking?: boolean;
   readonly maxPartySize: number;
   readonly cancellationPolicy: ProductSaleCancellationPolicy;
   /** Set both values with cancellationPolicy=CUSTOM to define a non-legacy cancellation rule. */
@@ -169,11 +167,10 @@ export interface ProductSaleTermsInput {
 export type ProductSaleCancellationPolicy = GuestCancellationPolicy | "CUSTOM";
 
 export interface NormalizedProductSaleTermsInput extends Omit<ProductSaleTermsInput,
-  "offerPrices" | "minimumChargeableParticipants" | "privateBooking" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance" | "cancellationPolicy"> {
+  "offerPrices" | "minimumChargeableParticipants" | "cancellationWindowMinutesBeforeStart" | "cancellationRefundBasisPoints" | "minimumAttendance" | "cancellationPolicy"> {
   readonly offerPrices?: readonly OfferPriceInput[];
   readonly cancellationPolicy: GuestCancellationPolicy;
   readonly minimumChargeableParticipants: number;
-  readonly privateBooking: boolean;
   readonly cancellationWindowMinutesBeforeStart: number | null;
   readonly cancellationRefundBasisPoints: number;
   readonly minimumAttendance: number | null;
@@ -204,7 +201,6 @@ export interface PublicBookingOffer {
   readonly maxPartySize: number;
   readonly minimumParticipants: number;
   readonly minimumChargeableParticipants: number;
-  readonly privateBooking: boolean;
   readonly durationMinutes: number;
   /** Asia/Tokyo HH:mm. */
   readonly startTime: string;
@@ -367,15 +363,14 @@ const MAX_SELLABLE_SLUGS_ASKED = 200;
 export const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
 export const TERMS_COLUMNS = `
   provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
-  minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+  minimum_participants, minimum_chargeable_participants, max_party_size,
   cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
   minimum_attendance, booking_questions,
   booking_questions_fingerprint, conditions_version, offer_prices_configured, version, updated_at`;
 
 /* ---------- sale terms ---------- */
 
-// The exported helpers in this part (columns, row mappers, validation, what is for sale, the schedule
-// expansion) are shared with site-sale-registration.ts (the operator's registration, #285 slice 9);
+// The exported validation and schedule helpers are shared with the operator's bootstrap utility;
 // index.ts does not export them.
 
 function plainText(value: unknown, path: string, max: number): string {
@@ -448,6 +443,7 @@ export function questionsFingerprint(questions: readonly BookingQuestion[]): str
 
 export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductSaleTermsInput {
   if (input === null || typeof input !== "object") throw new StoreValidationError("terms must be an object.");
+  if (Object.hasOwn(input, "privateBooking")) throw new StoreValidationError("privateBooking is no longer supported.");
   let offerPrices: readonly OfferPriceInput[] | undefined;
   if (input.offerPrices !== undefined && input.offerPrices !== null) {
     if (!Array.isArray(input.offerPrices) || input.offerPrices.length < 1 || input.offerPrices.length > 100) {
@@ -489,8 +485,6 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
     input.minimumChargeableParticipants === undefined ? 1 : input.minimumChargeableParticipants,
     "minimumChargeableParticipants", 1, maxPartySize,
   );
-  const privateBooking = input.privateBooking === undefined ? false : input.privateBooking;
-  if (typeof privateBooking !== "boolean") throw new StoreValidationError("privateBooking must be a boolean.");
   const minimumAttendance = input.minimumAttendance === undefined || input.minimumAttendance === null
     ? null
     : integerIn(input.minimumAttendance, "minimumAttendance", 1, 2_147_483_647);
@@ -529,7 +523,6 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
     childPricing,
     minimumParticipants,
     minimumChargeableParticipants,
-    privateBooking,
     maxPartySize,
     cancellationPolicy: input.cancellationPolicy === "CUSTOM" ? "NONE" : input.cancellationPolicy,
     cancellationWindowMinutesBeforeStart,
@@ -561,7 +554,6 @@ export function termsFromRow(row: DbRow): ProductSaleTerms {
     },
     minimumParticipants: Number(row.minimum_participants),
     minimumChargeableParticipants: Number(row.minimum_chargeable_participants),
-    privateBooking: row.private_booking === true,
     maxPartySize: Number(row.max_party_size),
     cancellationPolicy: String(row.cancellation_policy) as GuestCancellationPolicy,
     cancellationWindowMinutesBeforeStart: row.cancellation_window_minutes_before_start === null
@@ -684,7 +676,9 @@ function termsFromPublicationSnapshot(value: unknown, providerId: string, produc
   const snapshot = value as Record<string, unknown>;
   if (typeof snapshot.bookingQuestionsFingerprint !== "string") return null;
   try {
-    const normalized = validSaleTerms(snapshot as unknown as ProductSaleTermsInput);
+    const currentSnapshot = { ...snapshot };
+    delete currentSnapshot.privateBooking;
+    const normalized = validSaleTerms(currentSnapshot as unknown as ProductSaleTermsInput);
     const fingerprint = questionsFingerprint(normalized.bookingQuestions);
     if (fingerprint !== snapshot.bookingQuestionsFingerprint) return null;
     return {
@@ -752,30 +746,8 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
        FROM experience_products p
        LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
        LEFT JOIN experience_product_publications pub ON pub.id=s.current_publication_id
-       LEFT JOIN provider_publication_readiness r ON r.provider_id=s.provider_id
-       LEFT JOIN experience_product_cutovers cut ON cut.provider_id=p.provider_id AND cut.product_id=p.id
-      WHERE p.status='PUBLISHED' AND (
-        -- Legacy checkout remains available only for products that have not
-        -- entered the Experience cutover. Recording the cutover row closes
-        -- this path before the new publication exists.
-        (s.product_id IS NULL AND cut.product_id IS NULL AND p.slug=$1)
-        OR
-        (pub.slug=$1 AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL
+      WHERE p.status='PUBLISHED' AND pub.slug=$1 AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL
           AND s.owner_resume_required=false
-          AND r.account_usable=true AND r.connect_ready=true AND r.seller_display_ready=true
-          AND r.observed_at <= clock_timestamp() AND r.valid_until > clock_timestamp()
-          AND r.valid_until <= r.observed_at + interval '10 minutes'
-          AND r.required_consent_version=pub.consent_version
-          AND r.seller_niho_account_ref=pub.seller_niho_account_ref
-          AND r.stripe_connect_account_ref=pub.stripe_connect_account_ref
-          AND r.seller_display_name=pub.seller_display_name
-          AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=s.provider_id
-            AND m.niho_user_id=r.owner_niho_user_id AND m.role='OWNER' AND m.active=true)
-          AND cut.legacy_holds_drained_at IS NOT NULL
-          AND cut.inventory_import_batch_id IS NOT NULL
-          AND cut.experience_sales_started_at IS NOT NULL
-          AND cut.experience_sales_stopped_at IS NULL)
-      )
       ORDER BY p.provider_id,p.id LIMIT 2${lock ? " FOR SHARE OF p" : ""}`,
     [slug],
   );
@@ -906,7 +878,6 @@ function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBooking
     maxPartySize: terms.maxPartySize,
     minimumParticipants: terms.minimumParticipants,
     minimumChargeableParticipants: terms.minimumChargeableParticipants,
-    privateBooking: terms.privateBooking,
     durationMinutes: rule.durationMinutes,
     startTime: rule.localStartTime,
     weekdays: weekdaysOf(rule),
@@ -1291,7 +1262,7 @@ export class GuestBookingRepository {
       const child = terms.childPricing;
       const values = [
         actor.providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
-        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.privateBooking, terms.maxPartySize,
+        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.maxPartySize,
         terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
         terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion,
       ];
@@ -1299,10 +1270,10 @@ export class GuestBookingRepository {
         ? await client.query<DbRow>(
             `INSERT INTO experience_product_sale_terms (
                provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
-               minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+               minimum_participants, minimum_chargeable_participants, max_party_size,
                cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
                minimum_attendance, booking_questions, booking_questions_fingerprint, conditions_version
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)
              ON CONFLICT DO NOTHING
              RETURNING ${TERMS_COLUMNS}`,
             values,
@@ -1310,12 +1281,12 @@ export class GuestBookingRepository {
         : await client.query<DbRow>(
             `UPDATE experience_product_sale_terms
                 SET child_price_amount=$3, child_min_age=$4, child_max_age=$5, child_adult_required=$6,
-                    minimum_participants=$7, minimum_chargeable_participants=$8, private_booking=$9, max_party_size=$10,
-                    cancellation_policy=$11, cancellation_window_minutes_before_start=$12, cancellation_refund_basis_points=$13,
-                    minimum_attendance=$14, booking_questions=$15::jsonb,
-                    booking_questions_fingerprint=$16, conditions_version=$17,
+                    minimum_participants=$7, minimum_chargeable_participants=$8, max_party_size=$9,
+                    cancellation_policy=$10, cancellation_window_minutes_before_start=$11, cancellation_refund_basis_points=$12,
+                    minimum_attendance=$13, booking_questions=$14::jsonb,
+                    booking_questions_fingerprint=$15, conditions_version=$16,
                     version=version+1, updated_at=clock_timestamp()
-              WHERE provider_id=$1 AND product_id=$2 AND version=$18
+              WHERE provider_id=$1 AND product_id=$2 AND version=$17
               RETURNING ${TERMS_COLUMNS}`,
             [...values, expectedVersion],
           );
@@ -1523,19 +1494,10 @@ export class GuestBookingRepository {
     const asked = [...new Set(slugs.filter((slug) => typeof slug === "string" && slug.length >= 1 && slug.length <= 160))];
     if (asked.length === 0) return [];
     const result = await this.#pool.query<DbRow>(
-      `SELECT CASE WHEN pub.id IS NULL THEN p.slug ELSE pub.slug END AS slug,
-              p.id,p.provider_id,p.currency,p.unit_amount,
-              pub.id AS active_publication_id,pub.currency AS publication_currency,pub.unit_amount AS publication_unit_amount,
-              pub.sale_terms_snapshot,t.product_id IS NOT NULL AS has_terms,
-              t.child_price_amount,t.child_min_age,t.child_max_age,t.child_adult_required,
-              t.minimum_participants,t.minimum_chargeable_participants,t.private_booking,t.max_party_size,
-              t.cancellation_policy,t.cancellation_window_minutes_before_start,t.cancellation_refund_basis_points,
-              t.minimum_attendance,t.booking_questions,
-              t.booking_questions_fingerprint,t.conditions_version,t.offer_prices_configured,
+      `SELECT pub.slug AS slug,p.id,p.provider_id,
+              pub.currency AS publication_currency,pub.unit_amount AS publication_unit_amount,
+              pub.sale_terms_snapshot,
               s.platform_fee_basis_points,
-              (SELECT jsonb_agg(jsonb_build_object('offerId',op.rule_id,'adultPriceYen',op.adult_price_amount)
-                        ORDER BY op.rule_id COLLATE "C")
-                 FROM experience_offer_prices op WHERE op.provider_id=p.provider_id AND op.product_id=p.id) AS offer_prices,
               (SELECT array_agg(r.id ORDER BY r.id COLLATE "C") FROM schedule_rules r
                  WHERE r.provider_id=p.provider_id AND r.product_id=p.id AND (
                    r.ends_on IS NULL OR r.ends_on >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date
@@ -1546,27 +1508,10 @@ export class GuestBookingRepository {
          FROM experience_products p
          LEFT JOIN experience_product_publication_states state ON state.provider_id=p.provider_id AND state.product_id=p.id
          LEFT JOIN experience_product_publications pub ON pub.id=state.current_publication_id
-         LEFT JOIN provider_publication_readiness ready ON ready.provider_id=state.provider_id
-         LEFT JOIN experience_product_cutovers cut ON cut.provider_id=p.provider_id AND cut.product_id=p.id
-         LEFT JOIN experience_product_sale_terms t ON t.provider_id=p.provider_id AND t.product_id=p.id
          LEFT JOIN provider_sale_settings s ON s.provider_id=p.provider_id
-        WHERE p.status='PUBLISHED' AND (
-          (state.product_id IS NULL AND cut.product_id IS NULL AND p.slug=ANY($1::text[]))
-          OR
-          (pub.slug=ANY($1::text[]) AND state.self_stopped_at IS NULL
+        WHERE p.status='PUBLISHED' AND pub.slug=ANY($1::text[]) AND state.self_stopped_at IS NULL
             AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
-            AND ready.account_usable=true AND ready.connect_ready=true AND ready.seller_display_ready=true
-            AND ready.observed_at <= clock_timestamp() AND ready.valid_until > clock_timestamp()
-            AND ready.valid_until <= ready.observed_at + interval '10 minutes'
-            AND ready.required_consent_version=pub.consent_version
-            AND ready.seller_niho_account_ref=pub.seller_niho_account_ref
-            AND ready.stripe_connect_account_ref=pub.stripe_connect_account_ref
-            AND ready.seller_display_name=pub.seller_display_name
-            AND EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=state.provider_id
-              AND m.niho_user_id=ready.owner_niho_user_id AND m.role='OWNER' AND m.active=true)
-            AND cut.legacy_holds_drained_at IS NOT NULL AND cut.inventory_import_batch_id IS NOT NULL
-            AND cut.experience_sales_started_at IS NOT NULL AND cut.experience_sales_stopped_at IS NULL)
-        )`,
+        `,
       [asked],
     );
     const rowsBySlug = new Map<string, DbRow[]>();
@@ -1577,48 +1522,11 @@ export class GuestBookingRepository {
       if (rows?.length !== 1) return false;
       const row = rows[0]!;
       if (row.platform_fee_basis_points === null) return false;
-      const isPublication = row.active_publication_id !== null && row.active_publication_id !== undefined;
       const id = String(row.id);
-      const currency = String(isPublication ? row.publication_currency : row.currency);
-      const unitAmount = Number(isPublication ? row.publication_unit_amount : row.unit_amount);
+      const currency = String(row.publication_currency);
+      const unitAmount = Number(row.publication_unit_amount);
       if (!sellableProduct({ id, currency, unitAmount })) return false;
-      let terms: ProductSaleTerms | null;
-      if (isPublication) {
-        terms = termsFromPublicationSnapshot(row.sale_terms_snapshot, String(row.provider_id), id);
-      } else {
-        if (row.has_terms !== true) return false;
-        const childPricing: ChildPricing | null = row.child_price_amount === null ? null : {
-          priceYen: Number(row.child_price_amount),
-          minAge: Number(row.child_min_age),
-          maxAge: Number(row.child_max_age),
-          adultRequired: row.child_adult_required === true,
-        };
-        try {
-          const normalized = validSaleTerms({
-            childPricing,
-            minimumParticipants: Number(row.minimum_participants),
-            minimumChargeableParticipants: Number(row.minimum_chargeable_participants),
-            privateBooking: row.private_booking === true,
-            maxPartySize: Number(row.max_party_size),
-            cancellationPolicy: String(row.cancellation_policy) as GuestCancellationPolicy,
-            cancellationWindowMinutesBeforeStart: row.cancellation_window_minutes_before_start === null
-              ? null : Number(row.cancellation_window_minutes_before_start),
-            cancellationRefundBasisPoints: Number(row.cancellation_refund_basis_points),
-            minimumAttendance: row.minimum_attendance === null ? null : Number(row.minimum_attendance),
-            bookingQuestions: row.booking_questions as BookingQuestion[],
-            conditionsVersion: row.conditions_version === null ? null : String(row.conditions_version),
-          });
-          const fingerprint = questionsFingerprint(normalized.bookingQuestions);
-          const configured = row.offer_prices_configured === true;
-          if (configured !== (row.offer_prices !== null)) throw new StoreValidationError("inconsistent offer prices");
-          terms = fingerprint === String(row.booking_questions_fingerprint)
-            ? { ...normalized, providerId: String(row.provider_id), productId: id, bookingQuestionsFingerprint: fingerprint, version: 1,
-                updatedAtUtc: "1970-01-01T00:00:00.000Z", offerPrices: configured ? validOfferPriceRows(row.offer_prices) : null }
-            : null;
-        } catch {
-          terms = null;
-        }
-      }
+      const terms = termsFromPublicationSnapshot(row.sale_terms_snapshot, String(row.provider_id), id);
       if (terms === null) return false;
       const activeOfferIds = Array.isArray(row.active_offer_ids) ? row.active_offer_ids.map(String) : [];
       if (terms.offerPrices !== null) {
@@ -1837,7 +1745,6 @@ export class GuestBookingRepository {
             bookingTerms: {
               minimumParticipants: terms.minimumParticipants,
               minimumChargeableParticipants: terms.minimumChargeableParticipants,
-              privateBooking: terms.privateBooking,
               minimumAttendance: terms.minimumAttendance,
               maxPartySize: terms.maxPartySize,
               cancellationPolicy: terms.cancellationPolicy,

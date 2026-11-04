@@ -17,7 +17,7 @@ export type SiteSaleTerms = {
 };
 
 function legacyCancellationPolicy(offer: PublicBookingOffer): ExperienceOffer["cancellationPolicy"] {
-  if (offer.minimumChargeableParticipants !== 1 || offer.privateBooking) {
+  if (offer.minimumChargeableParticipants !== 1) {
     throw new Error("This sale condition cannot be represented by the legacy booking contract.");
   }
   const { code, freeCancellationHoursBefore } = offer.cancellationPolicy;

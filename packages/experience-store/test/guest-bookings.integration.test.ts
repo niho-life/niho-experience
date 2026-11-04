@@ -102,6 +102,78 @@ interface Context {
   readonly addRule: (productId: string, value: ScheduleRule) => Promise<void>;
 }
 
+const TEST_PUBLICATION_CONSENT = "guest-booking-fixture-v1";
+
+/** Seed the immutable public copy used by these booking-domain fixtures. Seller publication blockers are covered separately. */
+async function refreshTestPublication(pool: Pool, providerId: string, productId: string): Promise<void> {
+  const result = await pool.query<Record<string, unknown>>(
+    `SELECT p.*,t.child_price_amount,t.child_min_age,t.child_max_age,t.child_adult_required,
+            t.minimum_participants,t.minimum_chargeable_participants,t.max_party_size,t.cancellation_policy,
+            t.cancellation_window_minutes_before_start,t.cancellation_refund_basis_points,t.minimum_attendance,
+            t.booking_questions,t.booking_questions_fingerprint,t.conditions_version,t.version AS terms_version,
+            t.offer_prices_configured
+       FROM experience_products p
+       JOIN experience_product_sale_terms t ON t.provider_id=p.provider_id AND t.product_id=p.id
+      WHERE p.provider_id=$1 AND p.id=$2`,
+    [providerId, productId],
+  );
+  const row = result.rows[0];
+  if (!row || row.status !== "PUBLISHED") return;
+  const offerPrices = row.offer_prices_configured === true
+    ? (await pool.query<{ rule_id: string; adult_price_amount: string | number }>(
+      "SELECT rule_id,adult_price_amount FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2 ORDER BY rule_id",
+      [providerId, productId],
+    )).rows.map((price) => ({ offerId: price.rule_id, adultPriceYen: Number(price.adult_price_amount) }))
+    : null;
+  const childPricing = row.child_price_amount === null ? null : {
+    priceYen: Number(row.child_price_amount), minAge: Number(row.child_min_age),
+    maxAge: Number(row.child_max_age), adultRequired: row.child_adult_required === true,
+  };
+  const saleTermsSnapshot = {
+    offerPrices, childPricing,
+    minimumParticipants: Number(row.minimum_participants),
+    minimumChargeableParticipants: Number(row.minimum_chargeable_participants),
+    maxPartySize: Number(row.max_party_size), cancellationPolicy: String(row.cancellation_policy),
+    cancellationWindowMinutesBeforeStart: row.cancellation_window_minutes_before_start === null ? null : Number(row.cancellation_window_minutes_before_start),
+    cancellationRefundBasisPoints: Number(row.cancellation_refund_basis_points),
+    minimumAttendance: row.minimum_attendance === null ? null : Number(row.minimum_attendance),
+    bookingQuestions: row.booking_questions, bookingQuestionsFingerprint: String(row.booking_questions_fingerprint),
+    conditionsVersion: row.conditions_version === null ? null : String(row.conditions_version),
+  };
+  const publication = await pool.query<{ id: string | number }>(
+    `INSERT INTO experience_product_publications
+       (provider_id,product_id,draft_version,sale_terms_version,slug,public_title,content,currency,unit_amount,
+        cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
+        consent_version,published_by_niho_user_id,sale_terms_snapshot)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
+     ON CONFLICT (provider_id,product_id,draft_version,sale_terms_version,consent_version) DO NOTHING
+     RETURNING id`,
+    [providerId, productId, row.version, row.terms_version, row.slug, row.public_title, JSON.stringify(row.content),
+      row.currency, row.unit_amount, row.cancellation_terms_ref, row.seller_niho_account_ref,
+      row.stripe_connect_account_ref, row.seller_display_name, TEST_PUBLICATION_CONSENT,
+      providerId === "provider-b" ? "owner-b" : "owner-a", JSON.stringify(saleTermsSnapshot)],
+  );
+  const publicationId = publication.rows[0]?.id ?? (await pool.query<{ id: string | number }>(
+    `SELECT id FROM experience_product_publications
+      WHERE provider_id=$1 AND product_id=$2 AND draft_version=$3 AND sale_terms_version=$4 AND consent_version=$5`,
+    [providerId, productId, row.version, row.terms_version, TEST_PUBLICATION_CONSENT],
+  )).rows[0]?.id;
+  assert.ok(publicationId, "test publication was stored");
+  await pool.query(
+    `INSERT INTO experience_product_publication_states
+       (provider_id,product_id,current_publication_id,first_published_at)
+     SELECT $1,$2,$3,published_at FROM experience_product_publications WHERE id=$3
+     ON CONFLICT (provider_id,product_id) DO UPDATE
+       SET current_publication_id=EXCLUDED.current_publication_id,
+           first_published_at=COALESCE(experience_product_publication_states.first_published_at,EXCLUDED.first_published_at),
+           version=experience_product_publication_states.version+1,updated_at=clock_timestamp()
+     WHERE experience_product_publication_states.self_stopped_at IS NULL
+       AND experience_product_publication_states.operations_suspended_at IS NULL
+       AND experience_product_publication_states.owner_resume_required=false`,
+    [providerId, productId, publicationId],
+  );
+}
+
 /**
  * A fresh schema with every migration, synthetic providers (support off), members, products and sale
  * terms (no schedule rules).
@@ -140,6 +212,15 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
+    const setSaleTerms = guests.setSaleTerms.bind(guests);
+    Object.defineProperty(guests, "setSaleTerms", {
+      configurable: true,
+      value: async (...args: Parameters<GuestBookingRepository["setSaleTerms"]>) => {
+        const saved = await setSaleTerms(...args);
+        await refreshTestPublication(pool, args[0].providerId, args[1]);
+        return saved;
+      },
+    });
     await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
     await guests.setProviderSaleSettings("provider-b", { supportEnabled: false });
     await guests.setSaleTerms(ownerA, "tea", TEA_TERMS);
@@ -313,7 +394,6 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         maxPartySize: 6,
         minimumParticipants: 1,
         minimumChargeableParticipants: 1,
-        privateBooking: false,
         durationMinutes: 90,
         startTime: "10:00",
         weekdays: [0, 1, 2, 3, 4, 5, 6],
@@ -343,7 +423,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.equal((await guests.publicBookingTerms("sample-walk"))?.offers[0]?.cancellationPolicy.freeCancellationHoursBefore, null);
 
       // A public offer name is at most 80 characters.
-      await pool.query("UPDATE experience_products SET public_title=$1 WHERE id='walk'", [`Synthetic ${"long ".repeat(30)}walk`]);
+      await pool.query("UPDATE experience_products SET public_title=$1,version=version+1 WHERE id='walk'", [`Synthetic ${"long ".repeat(30)}walk`]);
+      await refreshTestPublication(pool, "provider-a", "walk");
       const longName = (await guests.publicBookingTerms("sample-walk"))?.offers[0]?.name ?? "";
       assert.equal([...longName].length, 80);
       assert.ok(longName.endsWith("…"));
@@ -351,7 +432,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       // Unpublishing or a second published product with the slug stops the sale.
       await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE id='kids'");
       assert.equal(await guests.publicBookingTerms("sample-kids"), null);
-      await pool.query("UPDATE experience_products SET status='PUBLISHED', slug='sample-tea' WHERE provider_id='provider-b' AND id='dup'");
+      await pool.query("UPDATE experience_products SET status='PUBLISHED',slug='sample-tea',version=version+1 WHERE provider_id='provider-b' AND id='dup'");
+      await refreshTestPublication(pool, "provider-b", "dup");
       assert.equal(await guests.publicBookingTerms("sample-tea"), null);
       await assert.rejects(() => guests.startGuestBooking(request()), StoreNotFoundError);
     });
@@ -367,7 +449,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await assert.rejects(() => guests.sellableSlugs(Array.from({ length: 201 }, (_, index) => `sample-${index}`)), StoreValidationError);
 
       // A second published product with the slug, unpublishing, and a provider without sale settings each stop the sale.
-      await pool.query("UPDATE experience_products SET slug='sample-tea' WHERE provider_id='provider-b' AND id='dup'");
+      await pool.query("UPDATE experience_products SET slug='sample-tea',version=version+1 WHERE provider_id='provider-b' AND id='dup'");
+      await refreshTestPublication(pool, "provider-b", "dup");
       await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE id='kids'");
       assert.deepEqual(await guests.sellableSlugs(["sample-tea", "sample-walk", "sample-kids"]), ["sample-walk"]);
       await pool.query("DELETE FROM provider_sale_settings WHERE provider_id='provider-a'");
@@ -375,11 +458,13 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
 
       // A price whose fee Stripe would refuse is not for sale: with support on, 15 % of ¥6 rounds down to ¥0.
       await guests.setProviderSaleSettings("provider-a", { supportEnabled: true });
-      await pool.query("UPDATE experience_products SET unit_amount=4000 WHERE id='walk'");
-      await pool.query("UPDATE experience_product_sale_terms SET child_price_amount=6, child_min_age=4, child_max_age=12, child_adult_required=false WHERE product_id='walk'");
+      await pool.query("UPDATE experience_products SET unit_amount=4000,version=version+1 WHERE id='walk'");
+      await pool.query("UPDATE experience_product_sale_terms SET child_price_amount=6,child_min_age=4,child_max_age=12,child_adult_required=false,version=version+1 WHERE product_id='walk'");
+      await refreshTestPublication(pool, "provider-a", "walk");
       assert.equal(await guests.publicBookingTerms("sample-walk"), null);
       assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
-      await pool.query("UPDATE experience_product_sale_terms SET child_adult_required=true WHERE product_id='walk'");
+      await pool.query("UPDATE experience_product_sale_terms SET child_adult_required=true,version=version+1 WHERE product_id='walk'");
+      await refreshTestPublication(pool, "provider-a", "walk");
       assert.notEqual(await guests.publicBookingTerms("sample-walk"), null);
       assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), ["sample-walk"]);
     });
@@ -427,7 +512,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
   it("sells a provider's products only with its sale settings, and fixes NIHO's fee on each booking", async () => {
     await withSchema(async ({ pool, store, guests, addRule }) => {
       await addRule("walk", rule("sample-walk-am"));
-      await pool.query("UPDATE experience_products SET unit_amount=3333 WHERE id='walk'");
+      await pool.query("UPDATE experience_products SET unit_amount=3333,version=version+1 WHERE id='walk'");
+      await refreshTestPublication(pool, "provider-a", "walk");
       const walk = (overrides: Partial<StartGuestBookingInput> = {}) => walkRequest({ expectedTotalYen: 3333, ...overrides });
 
       // No settings: none of the provider's products is for sale, whatever their terms (no fee is assumed).
@@ -548,7 +634,6 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         { cancellationRefundBasisPoints: 10001 },
         { minimumAttendance: -1 },
         { minimumAttendance: 2_147_483_648 },
-        { privateBooking: "yes" as never },
         { maxPartySize: 501 },
         { cancellationPolicy: "FLEXIBLE" as never },
         { conditionsVersion: "not-a-digest" },
@@ -558,7 +643,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
-  it("prices two offers independently, snapshots the selected price, and fails closed on an incomplete set", async () => {
+  it("prices two offers independently and keeps the published prices stable after mutable terms change", async () => {
     await withSchema(async ({ pool, guests, addRule }) => {
       await addRule("tea", rule("offer_community_tea_time", { localStartTime: "13:00", durationMinutes: 120 }));
       await addRule("tea", rule("offer_community_dinner", { localStartTime: "18:00", durationMinutes: 120 }));
@@ -640,23 +725,27 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await pool.query(
         "DELETE FROM experience_offer_prices WHERE provider_id='provider-a' AND product_id='tea' AND rule_id='offer_community_tea_time'",
       );
-      assert.equal(await guests.publicBookingTerms("sample-tea"), null);
-      assert.equal(await guests.listPublicAvailability("sample-tea"), null);
-      await assert.rejects(() => guests.startGuestBooking(request({
+      assert.deepEqual((await guests.publicBookingTerms("sample-tea"))?.offers.map((offer) => [offer.id, offer.pricing.adultPriceYen]), [
+        ["offer_community_tea_time", 16_000], ["offer_community_dinner", 31_000],
+      ]);
+      assert.notEqual(await guests.listPublicAvailability("sample-tea"), null);
+      const heldAtPublishedPrice = await guests.startGuestBooking(request({
         offerId: "offer_community_dinner", expectedTotalYen: 31_000,
-      })), StoreNotFoundError);
+      }));
+      assert.equal(heldAtPublishedPrice.booking.pricingSnapshot.unitAmount, 31_000);
       await pool.query("DELETE FROM experience_offer_prices WHERE provider_id='provider-a' AND product_id='tea'");
-      assert.equal(await guests.publicBookingTerms("sample-tea"), null, "a fully missing configured set cannot become the legacy fallback");
+      assert.deepEqual((await guests.publicBookingTerms("sample-tea"))?.offers.map((offer) => [offer.id, offer.pricing.adultPriceYen]), [
+        ["offer_community_tea_time", 16_000], ["offer_community_dinner", 31_000],
+      ], "a mutable draft edit cannot replace the active publication or fall back to the product base price");
     });
   });
 
-  it("publishes explicit booking conditions, applies the minimum charge and reserves a private occurrence for one group", async () => {
+  it("publishes explicit booking conditions, applies the minimum charge and admits another group while seats remain", async () => {
     await withSchema(async ({ guests, addRule, store }) => {
       await addRule("tea", rule("sample-am"));
       await guests.setSaleTerms(ownerA, "tea", {
         ...TEA_TERMS,
         minimumChargeableParticipants: 3,
-        privateBooking: true,
         cancellationWindowMinutesBeforeStart: 90,
         cancellationRefundBasisPoints: 3750,
         minimumAttendance: 4,
@@ -665,10 +754,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       const terms = await guests.publicBookingTerms("sample-tea");
       assert.ok(terms);
       assert.deepEqual(terms.offers[0]?.cancellationTerms, { cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3750 });
-      assert.deepEqual({
-        minimumChargeableParticipants: terms.offers[0]?.minimumChargeableParticipants,
-        privateBooking: terms.offers[0]?.privateBooking,
-      }, { minimumChargeableParticipants: 3, privateBooking: true });
+      assert.equal(terms.offers[0]?.minimumChargeableParticipants, 3);
+      assert.equal(Object.hasOwn(terms.offers[0]!, "privateBooking"), false);
       assert.equal(Object.hasOwn(terms.offers[0]!, "minimumAttendance"), false);
 
       const first = await guests.startGuestBooking(request({ adultCount: 1, childCount: 1, expectedTotalYen: 12_000 }));
@@ -676,7 +763,6 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.deepEqual(first.booking.pricingSnapshot.bookingTerms, {
         minimumParticipants: 1,
         minimumChargeableParticipants: 3,
-        privateBooking: true,
         minimumAttendance: 4,
         maxPartySize: 6,
         cancellationPolicy: "FREE_UNTIL_24H",
@@ -690,16 +776,15 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       const hostBooking = await guests.getGuestBookingForHost(ownerA, first.publicBookingId);
       assert.deepEqual(hostBooking.saleConditions, {
         minimumChargeableParticipants: 3,
-        privateBooking: true,
         minimumAttendance: 4,
         cancellationWindowMinutesBeforeStart: 90,
         cancellationRefundBasisPoints: 3750,
       });
 
-      await assert.rejects(
-        () => guests.startGuestBooking(request({ guestEmail: "second@example.com", expectedTotalYen: 12_000 })),
-        (error: unknown) => error instanceof GuestCheckoutError && error.code === "FULL",
-      );
+      const second = await guests.startGuestBooking(request({ guestEmail: "second@example.com", expectedTotalYen: 12_000 }));
+      assert.equal(second.totalAmount, 12_000);
+      assert.notEqual(second.publicBookingId, first.publicBookingId);
+      assert.equal(Object.hasOwn(second.booking.pricingSnapshot.bookingTerms!, "privateBooking"), false);
     });
   });
 
@@ -922,7 +1007,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       const same = request({ clientRequestKey: key, guestPhone: "+81 90 1234 5678", utm: { utmSource: "newsletter" } });
 
       // A retry gets the booking it already made even after the price, the site's consent version or the seats changed.
-      await pool.query("UPDATE experience_products SET unit_amount=5000 WHERE id='tea'");
+      await pool.query("UPDATE experience_products SET unit_amount=5000,version=version+1 WHERE id='tea'");
+      await refreshTestPublication(pool, "provider-a", "tea");
       await store.setOccurrenceSalesState(ownerA, "tea", "sample-am", { occurrenceId: occurrenceIdFor("sample-am", day(2)), desiredState: "CLOSED" }, null, randomUUID());
       assert.equal((await guests.startGuestBooking({ ...same, currentConsentVersion: "sample-terms-2026-11" })).publicBookingId, first.publicBookingId);
 
@@ -1024,7 +1110,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         currency: "JPY", unitAmount: 4000, seats: 3, totalAmount: 10_000, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2000, minimumChargeableParticipants: 1 }, cancellationPolicy: "FREE_UNTIL_24H",
         bookingTerms: {
-          minimumParticipants: 1, minimumChargeableParticipants: 1, privateBooking: false, maxPartySize: 6,
+          minimumParticipants: 1, minimumChargeableParticipants: 1, maxPartySize: 6,
           cancellationPolicy: "FREE_UNTIL_24H", cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000, bookingQuestions: QUESTIONS,
           bookingQuestionsFingerprint: nihoFingerprint(QUESTIONS), conditionsVersion: CONDITIONS, minimumAttendance: null,
         },
@@ -1049,7 +1135,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         currency: "JPY", unitAmount: 2500, seats: 2, totalAmount: 3000, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 0, childCount: 2, childUnitAmount: 1500, minimumChargeableParticipants: 1 }, cancellationPolicy: "FREE_UNTIL_48H",
         bookingTerms: {
-          minimumParticipants: 1, minimumChargeableParticipants: 1, privateBooking: false, maxPartySize: 4,
+          minimumParticipants: 1, minimumChargeableParticipants: 1, maxPartySize: 4,
           cancellationPolicy: "FREE_UNTIL_48H", cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000, bookingQuestions: [],
           bookingQuestionsFingerprint: nihoFingerprint([]), conditionsVersion: null, minimumAttendance: null,
         },
@@ -1400,7 +1486,7 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
         currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000,
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 }, providerAmount: 9000,
         saleConditions: {
-          minimumChargeableParticipants: 1, privateBooking: false, minimumAttendance: null,
+          minimumChargeableParticipants: 1, minimumAttendance: null,
           cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000,
         },
         cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: tea.booking.createdAtUtc, cancelledAtUtc: null,

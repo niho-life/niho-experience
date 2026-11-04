@@ -378,6 +378,12 @@ describe("database invariants", () => {
     assert.doesNotMatch(sql, /UPDATE experience_products|UPDATE schedule_rules|UPDATE experience_product_sale_terms/);
   });
 
+  it("removes private-booking configuration without rewriting historical snapshots", async () => {
+    const sql = await readFile(new URL("../migrations/0045_remove_private_booking.sql", import.meta.url), "utf8");
+    assert.match(sql, /ALTER TABLE experience_product_sale_terms DROP COLUMN private_booking/);
+    assert.doesNotMatch(sql, /UPDATE bookings|UPDATE experience_product_publications|DELETE FROM/);
+  });
+
   it("keeps one review per booking, review links only as hashes, and no guest contact or IP address (#104 #108)", async () => {
     const sql = await readFile(new URL("../migrations/0027_guest_reviews.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -519,5 +525,14 @@ describe("database invariants", () => {
     const code = sql.replace(/--.*$/gm, "");
     assert.doesNotMatch(code, /ALTER TABLE|DROP TABLE|UPDATE bookings|DELETE FROM bookings/);
     assert.doesNotMatch(code, /email|phone|address|bearer|secret|raw_response/i);
+  });
+
+  it("drops the retired product cutover and imported legacy inventory tables", async () => {
+    const sql = await readFile(new URL("../migrations/0046_remove_legacy_sales_cutover.sql", import.meta.url), "utf8");
+    const code = sql.replace(/--.*$/gm, "");
+    assert.match(code, /DROP TABLE IF EXISTS experience_legacy_reservation_inventory_current/);
+    assert.match(code, /DROP TABLE IF EXISTS experience_legacy_reservation_inventory/);
+    assert.match(code, /DROP TABLE IF EXISTS experience_product_cutovers/);
+    assert.doesNotMatch(code, /UPDATE experience_products|DELETE FROM experience_products|UPDATE bookings|DELETE FROM bookings/i);
   });
 });

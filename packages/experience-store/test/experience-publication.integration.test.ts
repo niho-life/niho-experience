@@ -285,7 +285,6 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
           childPricing: null,
           minimumParticipants: 2,
           minimumChargeableParticipants: 3,
-          privateBooking: true,
           maxPartySize: 6,
           cancellationPolicy: "CUSTOM",
           cancellationWindowMinutesBeforeStart: 90,
@@ -307,7 +306,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       );
       assert.equal(Number(activeTermsSnapshot.rows[0]?.sale_terms_version), 2);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.minimumChargeableParticipants, 3);
-      assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.privateBooking, true);
+      assert.equal(Object.hasOwn(activeTermsSnapshot.rows[0]?.sale_terms_snapshot ?? {}, "privateBooking"), false);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationWindowMinutesBeforeStart, 90);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationRefundBasisPoints, 3_750);
       assert.deepEqual(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.offerPrices, [
@@ -395,24 +394,25 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal(state.ownerResumeRequired, false);
       assert.ok(await publications.getPublicBySlug(original.slug));
 
-      // A current false readiness, expiry, seller mismatch, or OWNER loss all hide the same public copy.
+      // Readiness proves identity when the OWNER publishes. After publication, mutable readiness TTLs do not
+      // make a seller's listing vanish every few minutes; STOP and operations suspension control visibility.
       const notReady = await publications.recordReadiness(OWNER, readiness({ connectReady: false }), ready.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const expiredNow = Date.now();
       const expired = await publications.recordReadiness(OWNER, readiness({
         observedAtUtc: new Date(expiredNow - 2_000).toISOString(),
         validUntilUtc: new Date(expiredNow - 1_000).toISOString(),
       }), notReady.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const mismatchedSeller = await publications.recordReadiness(OWNER, readiness({ sellerDisplayName: "Another Synthetic Seller" }), expired.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const unusableAccount = await publications.recordReadiness(OWNER, readiness({ accountUsable: false }), mismatchedSeller.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const readyAgain = await publications.recordReadiness(OWNER, readiness(), unusableAccount.version);
       assert.ok(await publications.getPublicBySlug(original.slug));
       await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id=$1 AND niho_user_id=$2", [OWNER.providerId, OWNER.nihoUserId]);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
-      assert.equal((await publications.listPublic()).length, 0);
+      assert.ok(await publications.getPublicBySlug(original.slug));
+      assert.equal((await publications.listPublic()).length, 1);
       assert.equal(readyAgain.version, 6);
 
       const afterSnapshots = await pool.query(

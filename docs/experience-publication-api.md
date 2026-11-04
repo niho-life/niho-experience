@@ -1,230 +1,117 @@
-# Experience publication API contract
+# Experience owner-seller API contract
 
-Status: implementation contract for #330 / #369. The host UI consumes these routes; UI components are out of scope here.
+Status: implementation contract for #330 / #369 / #377. The host UI consumes these operations. The product owner is the seller; product requests never select a seller, provider, or payment account. The existing calendar API has its own selected-provider context and validates the logged-in NIHO membership before writing.
 
-The sale-terms contract also covers the Experience-side requirements tracked by [niho-coliving/niho-app#19138](https://github.com/niho-coliving/niho-app/issues/19138): cancellation window/refund rate, private booking, minimum chargeable participants, and operations-only minimum attendance. UI components remain D's scope.
+## Identity and seller boundary
 
-Rollout remains closed until A extends its host identity/Connect response with a stable current user ID and the seller-account mapping for the same provider. The present `GET /api/auth/me` omits the ID, and `ownerUserId` is registration metadata rather than an authentication claim. Experience must not substitute that field. Current payment readiness returns only `ready`/`reason`, so a product's local account reference cannot be proven to match it. Missing either datum returns `AUTH_CONTRACT_UNAVAILABLE` and cannot mutate publication state.
-
-## Identity and authorization boundary
-
-- Host requests use the existing NIHO host app-connect session cookie. Browser code never receives NIHO access or refresh tokens.
-- Every host request revalidates the NIHO session and provider membership through the exported Experience host contract. The route uses the returned `providerId` and current `memberRole`; it does not accept an actor ID from the request or use `ownerUserId` as the signed-in identity.
-- The Experience store checks the matching local provider membership again. OWNER mutations are enabled only after A supplies the authenticated user's stable ID and a verifiable seller-to-Connect mapping. An EDITOR is never represented as the OWNER in storage/audit. Until that contract is available, editor reads and all OWNER publication operations return `503 AUTH_CONTRACT_UNAVAILABLE` without reading or mutating Experience publication state.
-- Recommended A contract: include stable `user.id` in `GET /api/auth/me`, and expose a server-only provider publication-readiness response bound to that same OWNER with `sellerNihoAccountRef`, `stripeConnectAccountRef`, `sellerDisplayName`, readiness, a monotonic version, and an observation/expiry time. The existing browser-facing provider DTO remains allowlisted and does not receive account references. The Experience host API client must validate these fields before the BFF may construct a store actor or update readiness.
-- The current `getExperienceProviderPaymentReadiness` only returns `ready`, `reason`, and reuse consent; only `ready=true` and `reason=READY` count as Connect-ready, but that alone cannot prove the product's stored account mapping. An unavailable or malformed response fails closed. The browser cannot write readiness flags, account references, seller identity, or consent state.
-- The deployment's current listing-consent version is server configuration. A host must echo that version and send `accepted: true` for each initial publication or restart; an older version is a blocker.
+- The host uses the existing NIHO app-connect session cookie. NIHO access/refresh tokens stay server-side.
+- Each request obtains the currently authenticated NIHO user ID and current OWNER authority from the NIHO common account contract. Experience must not trust a user ID or role supplied by the browser.
+- Experience resolves or creates the seller's Experience workspace from that verified identity. A stale local membership alone never grants access.
+- The same seller owns the configured Stripe Connect destination. The NIHO contract returns the connected account reference and current readiness for that seller; the Experience browser DTO never includes the reference.
+- `sellerDisplayName` is the seller's public legal/trade display. It is not copied from Stripe's account label. For the first community dinner, Panasonic is both seller and payout owner; “NIHOkamakura” is only the Stripe account label.
+- The host checks current identity and Connect readiness when it reads or changes a product. The public catalog is the durable publication snapshot and does not expire when this short-lived check expires. A different seller and recipient are not modeled for this flow.
 
 ## Host operations
 
-All routes below are same-origin BFF endpoints, return `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Robots-Tag: noindex, nofollow`, and reject cross-origin mutations.
+All host responses use `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Robots-Tag: noindex, nofollow`. Mutations require same-origin requests. The server derives the seller from the session; no route accepts a `providerId` or seller ID from the browser.
 
-### Read editor state
+### List and create products
 
-`GET /host/api/publication/providers/{providerId}/products/{productId}`
+`GET /host/api/products` returns the current seller's products with one `version` per product and its publication state.
 
-Returns an allowlisted DTO:
+`POST /host/api/products` creates a new `DRAFT` product for the authenticated seller. The server generates the product ID and connects it to the seller's current Connect account. The request includes only editable product data; it cannot set OWNER identity, readiness, Stripe references, publication state, or booking snapshots. Repeating a slug already used by the same seller returns `409 VERSION_CONFLICT`.
 
-```json
-{
-  "draft": {
-    "slug": "synthetic-experience",
-    "publicTitle": "Synthetic experience",
-    "content": {},
-    "currency": "JPY",
-    "unitAmount": 8000,
-    "cancellationTermsRef": "terms-v1",
-    "version": 4
-  },
-  "publication": {
-    "state": "PUBLISHED",
-    "stateVersion": 7,
-    "publishedDraftVersion": 4,
-    "firstPublishedAtUtc": "2026-11-03T00:00:00.000Z",
-    "selfStoppedAtUtc": null,
-    "operationsSuspended": false,
-    "ownerResumeRequired": false
-  },
-  "readiness": {
-    "accountUsable": true,
-    "connectReady": true,
-    "sellerDisplayReady": true,
-    "consentVersion": "listing-v1",
-    "validUntilUtc": "2026-11-03T00:05:00.000Z"
-  },
-  "blockers": []
-}
-```
-
-The DTO never includes provider/user IDs, publication row IDs, Stripe/NIHO account references, suspension actor IDs, meeting address/access instructions, or database fields not listed above. `state` is one of `DRAFT`, `PUBLISHED`, `SELF_STOPPED`, `OPERATIONS_SUSPENDED`, or `RESUME_REQUIRED`.
-
-### Save draft
-
-`PATCH /host/api/publication/providers/{providerId}/products/{productId}`
+Example request:
 
 ```json
 {
-  "expectedDraftVersion": 4,
-  "expectedStateVersion": 7,
-  "draft": {
-    "slug": "synthetic-experience",
-    "publicTitle": "Updated synthetic experience",
-    "content": {},
-    "currency": "JPY",
-    "unitAmount": 9000,
-    "cancellationTermsRef": "terms-v1"
-  }
+  "slug": "kamakura-community-dinner",
+  "publicTitle": "Kamakura community dinner",
+  "content": {},
+  "currency": "JPY",
+  "unitAmount": 30000
 }
 ```
 
-Both versions are required. The server validates the complete draft and photo rights; browser-supplied `manuscriptReady` / `photosReady` booleans are rejected. Saving a valid draft while published atomically advances the immutable public snapshot and keeps the listing active. An incomplete draft can be kept without replacing the prior public snapshot; the response returns blocker codes. Existing booking snapshots do not change.
+The seller display name and Stripe destination come from the authenticated seller projection, not this request.
 
-### Read and save sale terms
+New products are created in Experience. There is no NIHO product import or old-sale cutover step.
 
-`GET /host/api/publication/providers/{providerId}/products/{productId}/sale-terms` returns the editable terms and the versions required by the next write:
+### Read and save a product
+
+`GET /host/api/products/{productId}` returns an allowlisted host DTO with `version`, editable draft, sale terms, public media previews, status, and seller display name. It does not return internal seller/provider IDs, Stripe references, meeting access details, or database fields. Schedule rules are managed through the existing host calendar API and remain attached to this product ID.
+
+The existing calendar read is `GET /host/calendar/data?providerId=…&fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD`; it returns product IDs, schedule rules, and their occurrences. A new rule is created with `POST /host/calendar/data` using `{ "providerId": "…", "action": "createRule", "experienceId": "{productId}", "rule": { ... }, "commandId": "{uuid}" }`. The server verifies the current NIHO membership before writing, uses `commandId` as the new rule ID, and returns its numeric `version`. Per-occurrence pause/resume and reschedule writes also use `commandId` plus that occurrence's `expectedVersion`. Existing schedules are not copied from NIHO.
+
+`PATCH /host/api/products/{productId}` replaces editable draft fields and sends `{ "version": "…", "draft": { ... } }`. The opaque `version` returned by the latest read covers the draft, sale terms, and publication state. A valid save while published updates the immutable public version and keeps the product published. Incomplete edits remain in the draft and leave the previous public version intact. Existing bookings do not change.
+
+### Save sale terms
+
+`PUT /host/api/products/{productId}/sale-terms` sends `{ "version": "…", "saleTerms": { ... } }` to replace the complete sale-terms object. The response includes the next version and blocker codes. Saving terms never publishes, stops, or resumes a product by itself. If the product is already published and the new terms are valid, the public version is advanced atomically.
+
+The editable terms include:
 
 ```json
 {
-  "draftVersion": 5,
-  "stateVersion": 8,
-  "saleTerms": {
-    "childPricing": null,
-    "minimumParticipants": 2,
-    "minimumChargeableParticipants": 3,
-    "privateBooking": false,
-    "maxPartySize": 6,
-    "cancellationPolicy": "CUSTOM",
-    "cancellationWindowMinutesBeforeStart": 1440,
-    "cancellationRefundBasisPoints": 5000,
-    "minimumAttendance": 4,
-    "bookingQuestions": [],
-    "conditionsVersion": null,
-    "version": 2,
-    "updatedAtUtc": "2026-11-03T00:00:00.000Z"
-  }
+  "offerPrices": [{ "offerId": "dinner-evening", "adultPriceYen": 30000 }],
+  "childPricing": { "priceYen": 12000, "minAge": 0, "maxAge": 12, "adultRequired": false },
+  "minimumParticipants": 1,
+  "minimumChargeableParticipants": 1,
+  "maxPartySize": 8,
+  "cancellationPolicy": "CUSTOM",
+  "cancellationWindowMinutesBeforeStart": 1440,
+  "cancellationRefundBasisPoints": 10000,
+  "minimumAttendance": null,
+  "bookingQuestions": [],
+  "conditionsVersion": null
 }
 ```
 
-`saleTerms` is `null` before the first terms row; `stateVersion` is `null` before any publication state exists. The DTO omits provider/product IDs and the internal booking-question fingerprint. The public site cannot yet display participation-condition text, so this API accepts only `conditionsVersion: null`.
+This example only documents field shape; its values are not approved product terms. The host must provide explicit cancellation window/refund values. `minimumChargeableParticipants` controls the adult-price floor and is separate from `minimumParticipants`, which controls whether a party may book. `minimumAttendance` is optional operations data and never appears in guest DTOs. It does not automatically cancel or refund a booking. There is no private-group/whole-booking field. `minimumChargeYen` remains Stripe's payment minimum and is not a seller's minimum price.
 
-`PATCH /host/api/publication/providers/{providerId}/products/{productId}/sale-terms` replaces the complete terms object. The request uses three independent compare-and-swap versions:
+The public API returns the accepted minimum charge and cancellation rule for guests. The host reservation/session API returns the accepted minimum charge, minimum attendance, and cancellation rule from the booking snapshot. No reader reconstructs them from current product settings.
 
-```json
-{
-  "expectedDraftVersion": 5,
-  "expectedStateVersion": 8,
-  "expectedSaleTermsVersion": 2,
-  "saleTerms": {
-    "childPricing": null,
-    "minimumParticipants": 2,
-    "minimumChargeableParticipants": 3,
-    "privateBooking": false,
-    "maxPartySize": 6,
-    "cancellationPolicy": "CUSTOM",
-    "cancellationWindowMinutesBeforeStart": 1440,
-    "cancellationRefundBasisPoints": 5000,
-    "minimumAttendance": 4,
-    "bookingQuestions": [],
-    "conditionsVersion": null
-  }
-}
-```
+### Publish, stop, and resume
 
-All three versions are required. A `null` `expectedSaleTermsVersion` means create only; a positive version means update only. A `null` `expectedStateVersion` means no publication state exists. The server validates the complete terms object, server-derived manuscript/photo checks, current draft and publication state, and the current sale-terms row in one transaction. It never accepts readiness or publication checks from the browser. If the product is actively published and every publication blocker is clear, it creates a new immutable publication snapshot for the new sale-terms version and advances `stateVersion` atomically. If a blocker remains, the editable terms are saved and the previous public snapshot stays active; the response sets `publicationUpdated: false` and returns the blocker array. Existing booking snapshots remain unchanged in either case. If the product is stopped, suspended, or not yet published, saving terms never publishes or resumes it.
+`POST /host/api/products/{productId}/publish` (also resumes a seller-stopped product) sends `{ "version": "…", "consentVersion": "…", "accepted": true }`. The server checks current OWNER authority, seller/Connect readiness, seller display, consent, product content and photo rights, prices, explicit cancellation terms, and at least one saleable schedule. It never publishes unsaved input.
 
-The successful response is `{ "draftVersion": 5, "stateVersion": 9, "saleTerms": { "…": "…", "version": 3, "updatedAtUtc": "…" }, "publicationUpdated": true, "blockers": [] }`. D should retain the returned versions and reread after an unknown timeout rather than replaying stale versions.
+`POST /host/api/products/{productId}/stop` sends `{ "version": "…" }`. It removes the product from catalog, details, metadata, sitemap, and new checkout admission. Existing bookings and their immutable snapshots remain available.
 
-The BFF currently returns `503 AUTH_CONTRACT_UNAVAILABLE` for both reads and writes because A does not yet return the authenticated user's stable ID and the matching seller/Connect mapping. Payload validation and the store/CAS contract are established, but no actor or store call is constructed until A supplies that contract.
+`POST /host/api/products/{productId}/media` uploads JPEG or PNG bytes. It requires `x-experience-photo-rights-confirmed: true`; `x-experience-photo-alt-text` and optional `x-experience-photo-credit` set public metadata. The response returns a host-only preview URL. Object paths and storage details are never sent by the browser.
 
-### Publish or restart
-
-`POST /host/api/publication/providers/{providerId}/products/{productId}/publish`
-
-```json
-{
-  "expectedDraftVersion": 5,
-  "expectedStateVersion": 7,
-  "consentVersion": "listing-v1",
-  "accepted": true
-}
-```
-
-OWNER only. The server rechecks current NIHO account/provider state, Connect readiness, seller display/account mapping, current consent, manuscript/media validation, price/terms, and schedule. It does not publish unsaved input. Successful restart preserves `firstPublishedAtUtc`; an operations suspension must first be cleared by operations, after which an OWNER must explicitly publish again.
-
-### Stop by owner
-
-`POST /host/api/publication/providers/{providerId}/products/{productId}/stop`
-
-```json
-{ "expectedStateVersion": 8 }
-```
-
-OWNER only. It removes the publication from catalog, detail, metadata, sitemap, and new checkout admission. Existing bookings and their immutable condition snapshots remain available to the host.
-
-## Operations suspension
-
-Platform Admin routes are separate from host routes and accept only the existing NIHO Experience Admin session. Host session roles cannot invoke them. The Experience BFF routes are `POST /admin/api/experience-publications/providers/{providerId}/products/{productId}/suspend` and `/clear-suspension`; they use the currently verified Admin actor ID and require same-origin requests.
-
-- `POST /admin/api/experience-publications/providers/{providerId}/products/{productId}/suspend` with `{ "expectedStateVersion": 9, "reasonCode": "POLICY_REVIEW" }`.
-- `POST /admin/api/experience-publications/providers/{providerId}/products/{productId}/clear-suspension` with `{ "expectedStateVersion": 10 }`.
-
-Clearing suspension does not publish. It leaves `ownerResumeRequired=true`; only a fresh OWNER publish/restart can make the item visible again.
+An operations suspension uses a separate Admin session. Clearing it does not publish; the OWNER must explicitly publish again.
 
 ## Public reads and checkout
 
-- `GET /api/public/experiences` returns `{ "experiences": PublicExperiencePublication[] }` for the current unique, active publications only.
-- `GET /api/public/experiences/{slug}` returns `{ "experience": PublicExperiencePublication }` or the same `404` for unknown, stopped, suspended, stale-readiness, invalid, or duplicate slugs.
-- Both use the explicit public projection. It contains no provider/product/user ID, Connect or NIHO reference, draft, private meeting details, or internal status. Photos contain only same-origin `src`, alt text, and optional public credit. `src` uses an opaque media ID at `/api/public/experience-media/{assetId}`; object keys are never returned. Media must be copied to the Experience media bucket, normalized to JPEG, and have confirmed public rights before publication.
-- Availability and checkout must recheck the same active publication, latest valid readiness projection, sale terms, and completed product cutover inside the booking transaction. The booking snapshot takes price, seller, cancellation terms, and other accepted conditions from the publication in that transaction, never from mutable draft fields.
-- A migrated product is not sellable until the old NIHO sale is stopped, outstanding holds are drained, confirmed future seats are imported into shared inventory, and the versioned cutover is enabled. Rollback closes Experience sale first; old NIHO sale may reopen only after the new channel is closed and its in-flight holds are reconciled.
+- `GET /api/public/experiences` returns the current active publications.
+- `GET /api/public/experiences/{slug}` returns the same explicit public projection or a non-disclosing 404.
+- Public DTOs contain seller display, sale terms needed before booking, and same-origin photo URLs. They omit user/provider IDs, Connect/NIHO references, unpublished drafts, private meeting access details, internal readiness, and minimum attendance.
+- Catalog, detail, and availability use the active Experience publication snapshot; they do not expire with the host's short-lived readiness check. Checkout uses only that publication snapshot, calculates selected schedule price and booking conditions in the booking transaction, and saves seller, price, cancellation, minimum-charge, and minimum-attendance snapshots.
+- Before returning a new Checkout URL, the server rechecks the exact account in the booking snapshot with Stripe and requires current charge and payout readiness. Stripe then creates Checkout on that same Connect account. If readiness changed, no payment URL is returned; the short booking hold expires under the normal hold policy.
+- The Experience checkout has no legacy NIHO fallback or cutover prerequisite. A stopped, suspended, or unpublished product cannot start a new checkout.
 
 ## Version and error contract
 
+The host keeps one opaque `version` per product and sends it as `version` on mutations. The server expands it into draft, terms, and publication-state CAS values. A conflict returns `409 VERSION_CONFLICT`; after an unknown timeout, the client rereads before retrying.
+
 | HTTP | `error.code` | Meaning |
 | --- | --- | --- |
-| 400 | `INVALID_INPUT` | Malformed/unknown field, invalid version, invalid content |
-| 401 | `SESSION_ENDED` / `SESSION_REFRESH_REQUIRED` | NIHO host session absent, revoked, or needs refresh |
-| 403 | `FORBIDDEN` | Current NIHO role or Experience membership does not allow the operation |
-| 404 | `NOT_FOUND` | Provider/product/publication is absent or not visible to this caller |
-| 409 | `VERSION_CONFLICT` | Draft/state/readiness version no longer matches; reread before retry |
-| 409 | `CUTOVER_INCOMPLETE` | Legacy sales/holds/seats have not reached the required cutover stage |
-| 422 | `PUBLICATION_BLOCKED` | Body includes the stable blocker-code array; no partial publication is written |
-| 502 | `READINESS_UNAVAILABLE` | NIHO auth/Connect contract could not be verified; state remains fail-closed |
-| 503 | `AUTH_CONTRACT_UNAVAILABLE` | The authenticated user's stable ID or matching seller-account mapping is absent from A's current contract; state remains fail-closed |
-| 503 | `STORE_UNAVAILABLE` | Experience DB or required media service is unavailable |
-| 413 | `INVALID_INPUT` | Request body exceeded the BFF size limit |
+| 400 | `INVALID_INPUT` | Malformed or unsupported fields |
+| 401 | `SESSION_ENDED` / `SESSION_REFRESH_REQUIRED` | NIHO host session is absent, revoked, or needs refresh |
+| 403 | `FORBIDDEN` | The current user is not the active OWNER |
+| 404 | `NOT_FOUND` | Product is absent or not visible to this seller |
+| 409 | `SELLER_PROFILE_AMBIGUOUS` / `SELLER_SETUP_REQUIRED` | NIHO has multiple OWNER seller profiles or the seller lacks a Connect destination |
+| 409 | `VERSION_CONFLICT` | The product changed; reread before retry |
+| 422 | `INVALID_INPUT` | Structurally valid JSON contains unsupported product values |
+| 422 | `PUBLICATION_BLOCKED` | Stable blocker-code array; nothing is partially published |
+| 422 | `PHOTO_RIGHTS_CONFIRMATION_REQUIRED` | The seller has not confirmed rights to the uploaded photo |
+| 415 | `UNSUPPORTED_FORMAT` | Public host media accepts JPEG and PNG input |
+| 502 | `READINESS_UNAVAILABLE` | NIHO identity/Connect state could not be verified |
+| 503 | `UNAVAILABLE` | Experience database or required media service is unavailable |
+| 413 | `INVALID_INPUT` | Request body exceeds the BFF limit |
 
-Responses do not include exception text, credentials, private identifiers, or personal data. A timeout is an unknown result: clients reread the DTO and compare versions; they do not assume the mutation succeeded or retry with the old version.
+Responses never include exception text, credentials, private IDs, or personal data. The UI does not ask the host to repair internal IDs or versions; it presents the blocker and the relevant seller/product setting.
 
-## Initial stable blocker codes
+## Stable publication blockers
 
 `ACCOUNT_NOT_USABLE`, `CANCELLATION_TERMS_REQUIRED`, `CONNECT_NOT_READY`, `CONSENT_OUTDATED`, `MANUSCRIPT_REQUIRED`, `OPERATIONS_SUSPENDED`, `OWNER_NOT_CURRENT`, `PHOTOS_REQUIRED`, `PRICE_REQUIRED`, `PUBLIC_CONTENT_INVALID`, `READINESS_EXPIRED`, `READINESS_MISSING`, `SCHEDULE_REQUIRED`, `SELLER_MISMATCH`, `SLUG_IN_USE`.
-
-## Sale-condition DTO for D
-
-`GET /api/public/experiences/{slug}` includes these offer fields (and the catalog uses the same projection):
-
-```json
-{
-  "minimumParticipants": 2,
-  "minimumChargeableParticipants": 3,
-  "privateBooking": false,
-  "cancellationPolicy": { "code": "CUSTOM", "freeCancellationHoursBefore": null },
-  "cancellationTerms": {
-    "cancellationWindowMinutesBeforeStart": 1440,
-    "refundBasisPoints": 5000
-  }
-}
-```
-
-`minimumChargeableParticipants` is a floor on the adult-price portion: checkout charges `max(adult price × adult count + child price × child count, adult price × minimumChargeableParticipants)`. It defaults to the neutral value `1`; it is separate from `minimumParticipants`, which controls whether a party may book. `privateBooking=true` makes one group reserve the occurrence and rejects a second active group in shared inventory.
-
-The cancellation window and refund rate are configured as a pair. For a custom rule, D sends `cancellationPolicy: "CUSTOM"` and both explicit values; omitting either is invalid. `refundBasisPoints` is 0–10000; the automatic refund amount is `floor(paid amount × basis points / 10000)` and prior successful/pending refunds are deducted before a new refund is created. A 10000-basis-point window retains the legacy free-cancellation wording. The host read DTO and public offer derive `CUSTOM` or an exact legacy code from the stored pair. Internally, custom rows keep the legacy-compatible `NONE` marker plus the explicit pair. Legacy 24-hour, 48-hour, and no-refund values migrate exactly to 1440/2880/null minutes and 10000/10000/0 basis points. No other window or rate is inferred.
-
-`minimumAttendance` is stored and snapshotted at checkout but never appears in guest DTOs. The host session DTO adds `confirmedParticipants` and `minimumAttendance: { required, confirmed, remaining } | null`; pending payment reviews do not count toward the run minimum. This is a report only: it does not cancel a session or change bookings automatically.
-
-The host booking DTO `HostGuestBooking.saleConditions` returns the accepted snapshot: `minimumChargeableParticipants`, `privateBooking`, `minimumAttendance`, `cancellationWindowMinutesBeforeStart`, and `cancellationRefundBasisPoints`. Missing minimum charge/private fields in older booking snapshots are `null`; cancellation window/rate are resolved from the historical 24-hour, 48-hour, or no-refund policy where possible. D can use these fields for the host booking/session UI without reading current mutable terms.
-
-The guest booking DTO returns `cancellationRefundBasisPoints` and `freeCancellationUntilUtc` from the same immutable snapshot. The legacy `freeCancellationOpen` boolean means the cancellation window is open; the displayed refund amount must use `cancellationRefundBasisPoints`. `POST /api/public/bookings/cancel` accepts `POLICY_CANCEL` during the configured window; it applies the snapshotted rate, including a 0% cancellation without a refund. `FULL_REFUND` is accepted only when the rate is 10000. The caller must send the displayed `shownDeadlineUtc`; if it changed before the write, the HTTP result is 200 `{ "outcome": "CHANGED" }` and no booking or refund changes. After the window, `REQUEST` opens the existing support request and leaves the booking confirmed.
-
-The interval, refund percentage, minimum chargeable party size, private-group semantics, and minimum-run threshold can be configured without selecting product defaults. The UI must not invent values. `minimumChargeYen` remains the existing payment minimum and is not a seller's minimum price.

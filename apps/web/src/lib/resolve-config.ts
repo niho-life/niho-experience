@@ -328,6 +328,8 @@ function guestBookingSettings(apiMode: "mock" | "http", env: Env, hostConsoleEna
 
 function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean) {
   const requested = env.EXPERIENCE_PUBLICATIONS_ENABLED === "true";
+  const hostApiRequested = env.EXPERIENCE_HOST_PUBLICATION_API_ENABLED === "true";
+  const nihoAudience = env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim() ?? "";
   const consentVersion = env.EXPERIENCE_PUBLICATION_CONSENT_VERSION?.trim() ?? "";
   const databaseConfigured = Boolean(env.EXPERIENCE_DATABASE_URL?.trim());
   if (requested && apiMode === "http" && !hostConsoleEnabled) {
@@ -342,9 +344,24 @@ function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostC
   if (requested && apiMode === "http" && !env.EXPERIENCE_PUBLIC_MEDIA_BUCKET?.trim()) {
     throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_PUBLIC_MEDIA_BUCKET");
   }
+  if (requested && hostApiRequested && apiMode === "http" && !nihoAudience) {
+    throw new Error("EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+  }
+  if (nihoAudience) {
+    let audienceUrl: URL;
+    try { audienceUrl = new URL(nihoAudience); }
+    catch { throw new Error("NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE must be an absolute HTTPS URL"); }
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(audienceUrl.hostname);
+    if (audienceUrl.username || audienceUrl.password || audienceUrl.search || audienceUrl.hash
+      || (audienceUrl.protocol !== "https:" && !(audienceUrl.protocol === "http:" && loopback))) {
+      throw new Error("NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE must be an HTTPS URL without credentials, query or fragment");
+    }
+  }
   if (consentVersion.length > 160) throw new Error("EXPERIENCE_PUBLICATION_CONSENT_VERSION must be at most 160 characters");
   return {
     enabled: apiMode === "http" && hostConsoleEnabled && requested && databaseConfigured && consentVersion.length > 0,
+    hostApiEnabled: apiMode === "http" && hostConsoleEnabled && requested && hostApiRequested && Boolean(nihoAudience),
+    nihoAudience,
     consentVersion,
   };
 }
@@ -683,6 +700,8 @@ export function resolveConfig(env: Env) {
     guestBookingConsentVersion: guestBooking.consentVersion,
     experiencePublicationsEnabled: experiencePublication.enabled,
     experiencePublicationConsentVersion: experiencePublication.consentVersion,
+    experienceHostPublicationApiEnabled: experiencePublication.hostApiEnabled,
+    nihoExperienceHostCommonContractAudience: experiencePublication.nihoAudience,
     hostAttendanceEnabled,
     // The mail job (empty while off). SMTP credentials are not here: they are read where they are used.
     guestMailEnabled: guestMail.enabled,

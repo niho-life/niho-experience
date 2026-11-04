@@ -48,7 +48,7 @@ describe("one list of NIHO's bookings and this site's", () => {
     localDate: "2026-11-05", localStartTime: "18:00", timeZone: "Asia/Tokyo", startUtc: "2026-11-05T09:00:00.000Z", endUtc: "2026-11-05T11:00:00.000Z",
     adultCount: 2, childCount: 0, language: "EN", guest: { name: "Site Guest", phone: null, note: null, answers: [] }, currency: "JPY",
     adultUnitAmount: 30000, childUnitAmount: null, totalAmount: 60000, platformFee: { supportEnabled: false, basisPoints: 1000, amount: 6000 }, providerAmount: 54000,
-    saleConditions: { minimumChargeableParticipants: 1, privateBooking: false, minimumAttendance: null, cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000 },
+    saleConditions: { minimumChargeableParticipants: 1, minimumAttendance: null, cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000 },
     cancellationPolicy: "FREE_UNTIL_48H", bookedAtUtc: "2026-10-31T03:04:00.000Z", paidAtUtc: "2026-10-31T03:06:00.000Z", cancelledAtUtc: null, cancelledBy: null,
     cancellationReason: null, cancellationNote: null, refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false,
   };

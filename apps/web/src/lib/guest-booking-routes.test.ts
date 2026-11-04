@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   config: { guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
+  stripeAccountRetrieve: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
   stripeCreate: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
   stripeRetrieve: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
 }));
@@ -15,6 +16,7 @@ vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => 
 // The real experience-payments runs against this stand-in for the Stripe SDK.
 vi.mock("stripe", () => ({
   default: class {
+    readonly accounts = { retrieve: (...args: unknown[]) => state.stripeAccountRetrieve!(...args) };
     readonly checkout = { sessions: { create: (...args: unknown[]) => state.stripeCreate!(...args), retrieve: (...args: unknown[]) => state.stripeRetrieve!(...args) } };
     readonly webhooks = {};
     constructor(key: string) {
@@ -109,6 +111,9 @@ beforeEach(() => {
     attachCheckoutSession: vi.fn(async () => undefined),
   };
   state.stripeKeys = [];
+  state.stripeAccountRetrieve = vi.fn(async (id: unknown) => ({
+    id, country: "JP", default_currency: "jpy", charges_enabled: true, payouts_enabled: true, details_submitted: true,
+  }));
   state.stripeCreate = vi.fn(async () => ({ id: "cs_test_sample1", url: "https://checkout.stripe.com/c/pay/cs_test_sample1" }));
   state.stripeRetrieve = vi.fn(async () => ({ id: "cs_test_sample1", status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_sample1", metadata: { booking_id: BOOKING_ID } }));
 });
@@ -175,7 +180,8 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
       utm: { utmSource: "newsletter" },
       clientRequestKey: KEY,
     });
-    expect(state.stripeKeys).toEqual(["sk_test_sample"]);
+    expect(state.stripeKeys).toEqual(["sk_test_sample", "sk_test_sample"]);
+    expect(state.stripeAccountRetrieve).toHaveBeenCalledWith("acct_SampleA0001");
     const [params, options] = state.stripeCreate!.mock.calls[0]!;
     expect(params).toMatchObject({
       mode: "payment",
@@ -188,6 +194,19 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     });
     expect(options).toEqual({ stripeAccount: "acct_SampleA0001", idempotencyKey: `experience-checkout:${BOOKING_ID}` });
     expect(state.repository?.attachCheckoutSession).toHaveBeenCalledWith(BOOKING_ID, "cs_test_sample1");
+  });
+
+  it("does not create a new Checkout Session when the published seller account cannot pay out", async () => {
+    state.stripeAccountRetrieve!.mockResolvedValueOnce({
+      id: "acct_SampleA0001", country: "JP", default_currency: "jpy",
+      charges_enabled: true, payouts_enabled: false, details_submitted: true,
+    });
+    const response = await checkout(post(CHECKOUT), slugParams());
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatchObject({ code: "UNAVAILABLE", retryable: false });
+    expect(state.repository?.startGuestBooking).toHaveBeenCalledTimes(1);
+    expect(state.stripeCreate).not.toHaveBeenCalled();
+    expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
   });
 
   it("drops the UTM fields under Do Not Track, and leaves out what the guest did not send", async () => {

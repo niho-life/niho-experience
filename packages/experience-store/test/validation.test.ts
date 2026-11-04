@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expandOccurrences, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "../src/errors.ts";
-import { termsFromRow } from "../src/guest-bookings.ts";
+import { termsFromRow, validSaleTerms } from "../src/guest-bookings.ts";
 import { buildSnapshots, chargeablePlatformFee, effectiveGoogleSyncStatus, normalizeCurrency, platformFeeAmount, validateBusySync } from "../src/validation.ts";
 
 const rule: ScheduleRule = {
@@ -19,6 +19,25 @@ const rule: ScheduleRule = {
 };
 
 describe("store boundary validation", () => {
+  it("rejects the retired private-booking setting while retaining minimum charge and attendance settings", () => {
+    const terms = {
+      childPricing: null,
+      minimumParticipants: 1,
+      minimumChargeableParticipants: 3,
+      minimumAttendance: 4,
+      maxPartySize: 6,
+      cancellationPolicy: "NONE" as const,
+      bookingQuestions: [],
+      conditionsVersion: null,
+    };
+    assert.throws(() => validSaleTerms({ ...terms, privateBooking: true } as never), StoreValidationError);
+    assert.deepEqual(validSaleTerms(terms), {
+      ...terms,
+      cancellationWindowMinutesBeforeStart: null,
+      cancellationRefundBasisPoints: 0,
+    });
+  });
+
   it("does not reinterpret a configured but missing offer-price set as the legacy fallback", () => {
     assert.throws(
       () => termsFromRow({ offer_prices_configured: true, offer_prices: null }),
@@ -30,7 +49,6 @@ describe("store boundary validation", () => {
       child_price_amount: null,
       minimum_participants: 1,
       minimum_chargeable_participants: 1,
-      private_booking: false,
       max_party_size: 6,
       cancellation_policy: "NONE",
       cancellation_window_minutes_before_start: null,

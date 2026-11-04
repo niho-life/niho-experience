@@ -77,7 +77,9 @@ describe("Experience runtime grants", () => {
     const dir = new URL("packages/experience-store/migrations/", repo);
     const tables = new Set<string>();
     for (const name of (await readdir(dir)).filter((file) => /^\d{4}_.*\.sql$/.test(file))) {
-      for (const match of (await readFile(new URL(name, dir), "utf8")).matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/g)) tables.add(match[1]!);
+      const sql = await readFile(new URL(name, dir), "utf8");
+      for (const match of sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/g)) tables.add(match[1]!);
+      for (const match of sql.matchAll(/DROP TABLE IF EXISTS ([a-z_]+)/g)) tables.delete(match[1]!);
     }
     assert.deepEqual(Object.keys(RUNTIME_TABLE_GRANTS).sort(), [...tables].sort());
   });

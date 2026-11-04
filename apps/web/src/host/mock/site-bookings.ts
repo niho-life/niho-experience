@@ -38,7 +38,6 @@ function booking({ name, support = false, ...fields }: Fields): HostGuestBooking
     cancellationPolicy: "FREE_UNTIL_48H",
     saleConditions: {
       minimumChargeableParticipants: null,
-      privateBooking: null,
       minimumAttendance: null,
       cancellationWindowMinutesBeforeStart: null,
       cancellationRefundBasisPoints: null,

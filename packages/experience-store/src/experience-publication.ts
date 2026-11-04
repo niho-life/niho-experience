@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
   questionsFingerprint,
@@ -77,6 +78,9 @@ export interface ExperiencePublicationDraftInput {
   readonly cancellationTermsRef: string;
 }
 
+/** OWNER create input. Product ID and seller/Connect fields are always generated or resolved by the server. */
+export type ExperiencePublicationDraftCreateInput = Omit<ExperiencePublicationDraftInput, "id" | "cancellationTermsRef">;
+
 /** Host DTO for editable sale terms. Internal provider/product IDs and the question fingerprint stay server-side. */
 export type ExperienceHostSaleTerms = Omit<ProductSaleTerms,
   "providerId" | "productId" | "bookingQuestionsFingerprint" | "cancellationPolicy"> & {
@@ -145,12 +149,34 @@ export interface PublicExperienceMediaAsset {
   readonly byteSize: number;
 }
 
+/** Allowlisted media metadata for the authenticated seller. Object keys stay server-side. */
+export interface ExperienceHostMediaAsset {
+  readonly id: string;
+  readonly position: number;
+  readonly width: number;
+  readonly height: number;
+  readonly byteSize: number;
+  readonly altText: string;
+  readonly publicCredit: string | null;
+}
+
+export interface ExperienceHostMediaAssetInput {
+  readonly id: string;
+  readonly objectKey: string;
+  readonly sourceRefHash: string;
+  readonly width: number;
+  readonly height: number;
+  readonly byteSize: number;
+  readonly altText: string;
+  readonly publicCredit: string | null;
+}
+
 const PUBLICATION_COLUMNS = `
   p.id AS publication_id,p.provider_id,p.product_id,p.slug,p.public_title,p.content,p.currency,
   p.unit_amount, p.seller_display_name, p.published_at, s.first_published_at`;
 
 const SALE_TERMS_COLUMNS = `provider_id,product_id,child_price_amount,child_min_age,child_max_age,child_adult_required,
-  minimum_participants,minimum_chargeable_participants,private_booking,max_party_size,cancellation_policy,
+  minimum_participants,minimum_chargeable_participants,max_party_size,cancellation_policy,
   cancellation_window_minutes_before_start,cancellation_refund_basis_points,minimum_attendance,booking_questions,
   booking_questions_fingerprint,conditions_version,version,updated_at`;
 
@@ -170,29 +196,15 @@ const VISIBLE_PUBLICATIONS = `
     SELECT ${PUBLICATION_COLUMNS}
       FROM experience_product_publication_states s
       JOIN experience_product_publications p ON p.id=s.current_publication_id
-      JOIN provider_publication_readiness r ON r.provider_id=s.provider_id
+      JOIN experience_products product ON product.provider_id=s.provider_id AND product.id=s.product_id
      WHERE s.self_stopped_at IS NULL
        AND s.operations_suspended_at IS NULL
        AND s.owner_resume_required=false
-       AND r.account_usable=true
-       AND r.connect_ready=true
-       AND r.seller_display_ready=true
-       AND r.observed_at <= clock_timestamp()
-       AND r.valid_until > clock_timestamp()
-       AND r.valid_until <= r.observed_at + interval '10 minutes'
-       AND r.required_consent_version=p.consent_version
-       AND r.seller_niho_account_ref=p.seller_niho_account_ref
-       AND r.stripe_connect_account_ref=p.stripe_connect_account_ref
-       AND r.seller_display_name=p.seller_display_name
+       AND product.status='PUBLISHED'
        AND NOT EXISTS (
          SELECT 1 FROM experience_product_publication_media media
          JOIN experience_product_media_assets asset ON asset.id=media.asset_id
           WHERE media.publication_id=p.id AND asset.state<>'READY'
-       )
-       AND EXISTS (
-         SELECT 1 FROM provider_memberships m
-          WHERE m.provider_id=r.provider_id AND m.niho_user_id=r.owner_niho_user_id
-            AND m.role='OWNER' AND m.active=true
        )
   )`;
 
@@ -255,7 +267,6 @@ function hostSaleTerms(terms: ProductSaleTerms): ExperienceHostSaleTerms {
     childPricing: terms.childPricing,
     minimumParticipants: terms.minimumParticipants,
     minimumChargeableParticipants: terms.minimumChargeableParticipants,
-    privateBooking: terms.privateBooking,
     maxPartySize: terms.maxPartySize,
     cancellationPolicy: cancellationPolicyCode(terms),
     cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
@@ -428,7 +439,6 @@ async function insertOrFindPublication(
     childPricing: terms.childPricing,
     minimumParticipants: terms.minimumParticipants,
     minimumChargeableParticipants: terms.minimumChargeableParticipants,
-    privateBooking: terms.privateBooking,
     maxPartySize: terms.maxPartySize,
     cancellationPolicy: terms.cancellationPolicy,
     cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
@@ -468,6 +478,195 @@ export class ExperiencePublicationRepository {
   readonly #pool: Pool;
 
   constructor(pool: Pool) { this.#pool = pool; }
+
+  /**
+   * Mirrors only the current OWNER proven by NIHO's authenticated host contract.
+   * The browser cannot choose the role and no other membership is inferred here.
+   */
+  async ensureOwnerWorkspace(actor: HostActor): Promise<void> {
+    assertStoreIdentifier(actor.providerId, "providerId");
+    assertStoreIdentifier(actor.nihoUserId, "nihoUserId");
+    await withTransaction(this.#pool, async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:owner-workspace`]);
+      await client.query("INSERT INTO experience_providers (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [actor.providerId]);
+      await client.query(
+        `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active)
+         VALUES ($1,$2,'OWNER',true)
+         ON CONFLICT (provider_id,niho_user_id) DO UPDATE
+           SET role='OWNER',active=true,updated_at=clock_timestamp()`,
+        [actor.providerId, actor.nihoUserId],
+      );
+    });
+  }
+
+  /** Current owner-owned drafts; provider and payment references are never part of the host DTO. */
+  async listProducts(actor: HostActor): Promise<readonly ProductRecord[]> {
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER"]);
+      const result = await client.query<DbRow>(
+        `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
+          WHERE p.provider_id=$1 ORDER BY p.created_at DESC,p.id COLLATE "C"`,
+        [actor.providerId],
+      );
+      return result.rows.map(productFromRow);
+    });
+  }
+
+  async getProduct(actor: HostActor, productId: string): Promise<ProductRecord> {
+    assertStoreIdentifier(productId, "productId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER"]);
+      const result = await client.query<DbRow>(
+        `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
+          WHERE p.provider_id=$1 AND p.id=$2`,
+        [actor.providerId, productId],
+      );
+      if (!result.rows[0]) throw new StoreNotFoundError("product");
+      return productFromRow(result.rows[0]);
+    });
+  }
+
+  /** Record the fresh NIHO/Connect result used by publication and public checkout. */
+  async refreshReadiness(actor: HostActor, input: ProviderPublicationReadinessInput): Promise<ProviderPublicationReadiness> {
+    validateReadiness(input);
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      const membership = await requireMembership(client, actor, ["OWNER"]);
+      const result = await client.query<DbRow>(
+        `INSERT INTO provider_publication_readiness
+           (provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
+            required_consent_version,observed_at,valid_until)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11::timestamptz)
+         ON CONFLICT (provider_id) DO UPDATE
+           SET owner_niho_user_id=EXCLUDED.owner_niho_user_id,
+               account_usable=EXCLUDED.account_usable,connect_ready=EXCLUDED.connect_ready,
+               seller_display_ready=EXCLUDED.seller_display_ready,
+               seller_niho_account_ref=EXCLUDED.seller_niho_account_ref,
+               stripe_connect_account_ref=EXCLUDED.stripe_connect_account_ref,
+               seller_display_name=EXCLUDED.seller_display_name,
+               required_consent_version=EXCLUDED.required_consent_version,
+               observed_at=EXCLUDED.observed_at,valid_until=EXCLUDED.valid_until,
+               version=provider_publication_readiness.version+1,updated_at=clock_timestamp()
+         RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+           seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
+           required_consent_version,observed_at,valid_until,version,updated_at`,
+        [actor.providerId, membership.nihoUserId, input.accountUsable, input.connectReady,
+          input.sellerDisplayReady, input.sellerNihoAccountRef, input.stripeConnectAccountRef,
+          input.sellerDisplayName, input.requiredConsentVersion, input.observedAtUtc, input.validUntilUtc],
+      );
+      return readinessFromRow(result.rows[0]!);
+    });
+  }
+
+  async listMedia(actor: HostActor, productId: string): Promise<readonly ExperienceHostMediaAsset[]> {
+    assertStoreIdentifier(productId, "productId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER"]);
+      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2", [actor.providerId, productId]);
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      const result = await client.query<DbRow>(
+        `SELECT id,source_position,width,height,byte_size,alt_text,public_credit
+           FROM experience_product_media_assets
+          WHERE provider_id=$1 AND product_id=$2 AND state='READY' ORDER BY source_position`,
+        [actor.providerId, productId],
+      );
+      return result.rows.map((row) => ({
+        id: String(row.id), position: safeInteger(row.source_position, "media position"),
+        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        publicCredit: row.public_credit === null ? null : String(row.public_credit),
+      }));
+    });
+  }
+
+  async addMedia(actor: HostActor, productId: string, input: ExperienceHostMediaAssetInput): Promise<ExperienceHostMediaAsset> {
+    assertStoreIdentifier(productId, "productId");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) {
+      throw new StoreValidationError("media.id must be a UUID v4.");
+    }
+    assertNonEmptyText(input.objectKey, "media.objectKey", 512);
+    if (!/^[0-9a-f]{64}$/.test(input.sourceRefHash)) throw new StoreValidationError("media.sourceRefHash must be a SHA-256 digest.");
+    if (!Number.isSafeInteger(input.width) || input.width < 1 || input.width > 2400
+      || !Number.isSafeInteger(input.height) || input.height < 1 || input.height > 2400
+      || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024) {
+      throw new StoreValidationError("media dimensions and size are invalid.");
+    }
+    if (typeof input.altText !== "string" || input.altText.length > 500) throw new StoreValidationError("media.altText is invalid.");
+    if (input.publicCredit !== null && (typeof input.publicCredit !== "string" || input.publicCredit.trim().length === 0 || input.publicCredit.length > 300)) {
+      throw new StoreValidationError("media.publicCredit is invalid.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      const next = await client.query<{ position: number }>(
+        `SELECT COALESCE(MAX(source_position)+1,0)::int AS position
+           FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2`,
+        [actor.providerId, productId],
+      );
+      const position = Number(next.rows[0]?.position);
+      if (!Number.isSafeInteger(position) || position < 0 || position > 19) throw new StoreValidationError("A product can have at most 20 photos.");
+      const result = await client.query<DbRow>(
+        `INSERT INTO experience_product_media_assets
+           (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,public_credit,rights_confirmed_at)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,clock_timestamp())
+         RETURNING id,source_position,width,height,byte_size,alt_text,public_credit`,
+        [input.id, actor.providerId, productId, position, input.objectKey, input.sourceRefHash,
+          input.width, input.height, input.byteSize, input.altText, input.publicCredit],
+      );
+      const row = result.rows[0]!;
+      return {
+        id: String(row.id), position: safeInteger(row.source_position, "media position"),
+        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        publicCredit: row.public_credit === null ? null : String(row.public_credit),
+      };
+    });
+  }
+
+  async createDraft(actor: HostActor, rawInput: ExperiencePublicationDraftCreateInput): Promise<ProductRecord> {
+    const id = randomUUID();
+    const input = validateDraft({ ...rawInput, id, cancellationTermsRef: randomUUID() });
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      const membership = await requireMembership(client, actor, ["OWNER"]);
+      const readinessResult = await client.query<DbRow>(
+        `SELECT owner_niho_user_id,account_usable,seller_display_ready,seller_niho_account_ref,
+                stripe_connect_account_ref,seller_display_name,
+                observed_at <= clock_timestamp() AND valid_until > clock_timestamp()
+                  AND valid_until <= observed_at + interval '10 minutes' AS currently_valid
+           FROM provider_publication_readiness WHERE provider_id=$1 FOR SHARE`,
+        [actor.providerId],
+      );
+      const readiness = readinessResult.rows[0];
+      if (!readiness || String(readiness.owner_niho_user_id) !== membership.nihoUserId
+          || readiness.account_usable !== true || readiness.seller_display_ready !== true
+          || readiness.currently_valid !== true) {
+        throw new StoreValidationError("A current OWNER and seller profile are required to create a product.");
+      }
+      const sellerNihoAccountRef = String(readiness.seller_niho_account_ref);
+      const stripeConnectAccountRef = String(readiness.stripe_connect_account_ref);
+      const sellerDisplayName = String(readiness.seller_display_name);
+      assertNonEmptyText(sellerNihoAccountRef, "readiness.sellerNihoAccountRef", 256);
+      assertNonEmptyText(stripeConnectAccountRef, "readiness.stripeConnectAccountRef", 256);
+      assertNonEmptyText(sellerDisplayName, "readiness.sellerDisplayName", 300);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${id}`]);
+      const result = await client.query<DbRow>(
+        `INSERT INTO experience_products
+           (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ($1,$2,$3,'DRAFT',$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT DO NOTHING
+         RETURNING ${PRODUCT_COLUMNS}`,
+        [actor.providerId, id, input.slug, input.publicTitle, JSON.stringify(input.content), input.currency,
+          input.unitAmount, input.cancellationTermsRef, sellerNihoAccountRef, stripeConnectAccountRef, sellerDisplayName],
+      );
+      if (!result.rows[0]) throw new StoreConflictError("A product with this slug already exists for the seller.");
+      return productFromRow(result.rows[0]);
+    });
+  }
 
   async getSaleTerms(actor: HostActor, productId: string): Promise<ExperienceHostSaleTermsState> {
     assertStoreIdentifier(productId, "productId");
@@ -521,7 +720,7 @@ export class ExperiencePublicationRepository {
       const child = terms.childPricing;
       const values = [
         actor.providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,
-        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.privateBooking, terms.maxPartySize,
+        terms.minimumParticipants, terms.minimumChargeableParticipants, terms.maxPartySize,
         terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
         terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion,
       ];
@@ -529,10 +728,10 @@ export class ExperiencePublicationRepository {
         ? await client.query<DbRow>(
           `INSERT INTO experience_product_sale_terms (
              provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
-             minimum_participants, minimum_chargeable_participants, private_booking, max_party_size,
+             minimum_participants, minimum_chargeable_participants, max_party_size,
              cancellation_policy, cancellation_window_minutes_before_start, cancellation_refund_basis_points,
              minimum_attendance, booking_questions, booking_questions_fingerprint, conditions_version
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)
            ON CONFLICT DO NOTHING
            RETURNING ${SALE_TERMS_COLUMNS}`,
           values,
@@ -540,12 +739,12 @@ export class ExperiencePublicationRepository {
         : await client.query<DbRow>(
           `UPDATE experience_product_sale_terms
               SET child_price_amount=$3, child_min_age=$4, child_max_age=$5, child_adult_required=$6,
-                  minimum_participants=$7, minimum_chargeable_participants=$8, private_booking=$9, max_party_size=$10,
-                  cancellation_policy=$11, cancellation_window_minutes_before_start=$12, cancellation_refund_basis_points=$13,
-                  minimum_attendance=$14, booking_questions=$15::jsonb,
-                  booking_questions_fingerprint=$16, conditions_version=$17,
+                  minimum_participants=$7, minimum_chargeable_participants=$8, max_party_size=$9,
+                  cancellation_policy=$10, cancellation_window_minutes_before_start=$11, cancellation_refund_basis_points=$12,
+                  minimum_attendance=$13, booking_questions=$14::jsonb,
+                  booking_questions_fingerprint=$15, conditions_version=$16,
                   version=version+1, updated_at=clock_timestamp()
-            WHERE provider_id=$1 AND product_id=$2 AND version=$18
+            WHERE provider_id=$1 AND product_id=$2 AND version=$17
             RETURNING ${SALE_TERMS_COLUMNS}`,
           [...values, input.expectedSaleTermsVersion],
         );
@@ -701,6 +900,8 @@ export class ExperiencePublicationRepository {
     input: {
       readonly expectedDraftVersion: number;
       readonly expectedStateVersion: number | null;
+      /** When supplied by a host API CAS token, publish only the terms the owner just reviewed. */
+      readonly expectedSaleTermsVersion?: number | null;
       readonly consentVersion: string;
       readonly checks: ExperiencePublicationContentChecks;
     },
@@ -708,6 +909,7 @@ export class ExperiencePublicationRepository {
     assertStoreIdentifier(productId, "productId");
     validateExpectedVersion(input.expectedDraftVersion, "expectedDraftVersion");
     validateExpectedVersion(input.expectedStateVersion, "expectedStateVersion");
+    if (input.expectedSaleTermsVersion !== undefined) validateExpectedVersion(input.expectedSaleTermsVersion, "expectedSaleTermsVersion");
     assertNonEmptyText(input.consentVersion, "consentVersion", 160);
     validateChecks(input.checks);
     return withTransaction(this.#pool, async (client) => {
@@ -724,8 +926,18 @@ export class ExperiencePublicationRepository {
       await lockPublicationSlugs(client, [product.slug]);
       const state = await lockedState(client, actor.providerId, productId);
       if ((state?.version ?? null) !== input.expectedStateVersion) throw new StoreConflictError("Publication state version mismatch: read the state again.");
+      if (input.expectedSaleTermsVersion !== undefined) {
+        const currentTerms = await readSaleTerms(client, actor.providerId, productId, true);
+        if ((currentTerms?.version ?? null) !== input.expectedSaleTermsVersion) {
+          throw new StoreConflictError("Sale terms version mismatch: read the terms again.");
+        }
+      }
       const blocked = await blockers(client, product, input.checks, input.consentVersion, state);
       if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
+      await client.query(
+        "UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2 AND status='DRAFT'",
+        [actor.providerId, productId],
+      );
       const publicationId = await insertOrFindPublication(client, product, input.consentVersion, actor.nihoUserId);
       const result = state === null
         ? await client.query<DbRow>(
