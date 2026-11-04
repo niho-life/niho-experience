@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { isValidElement, type ReactElement } from "react";
+import { createElement, isValidElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreValidationError } from "@niho-experience/experience-store";
+import type { GuestBookingView } from "@niho-experience/experience-store";
 
 /** 予約者の予約ページ (#285 slice 6): its routes and the booking page against a stubbed store, synthetic data only. */
 const state = vi.hoisted(() => ({
@@ -36,7 +38,7 @@ const SESSION = "sampleSessionAbcdefghijklmnopqrstuvwxyz0123";
 const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
 const OTHER = "1f8fad5b-d9cb-469f-a165-708677289502";
 const EXPIRES = "2026-12-31T00:00:00.000Z";
-const CONVERSATION = { open: true, messages: [{ id: "m-1", from: "host", atUtc: "2026-11-01T02:30:00.000Z", body: "Welcome!" }] };
+const CONVERSATION = { open: true, messages: [{ id: "m-1", from: "host" as const, atUtc: "2026-11-01T02:30:00.000Z", body: "Welcome!" }] };
 const COOKIE = `__Host-nb_${createHash("sha256").update(BOOKING).digest("hex").slice(0, 8)}`;
 const VIEW = {
   publicBookingId: BOOKING, status: "CONFIRMED", experienceTitle: "Synthetic walk", experienceSlug: "sample-walk",
@@ -206,6 +208,37 @@ describe("the guest's booking pages", () => {
     const view = await bookingPage(BOOKING);
     expect(view.type).toBe(GuestBookingDetails);
     expect(view.props.conversation).toBeNull();
+  });
+
+  it("shows private meeting logistics and day-of message shortcuts only on a confirmed booking", () => {
+    const guide = {
+      collectionOverview: "Blue flag beside the synthetic station entrance",
+      address: "1-2-3 Sample, Kamakura",
+      accessInstructions: "Walk east for two minutes.",
+      entranceInstructions: "Use the garden gate.",
+      mapUrl: "https://maps.example.test/synthetic",
+      photoAssetId: "00000000-0000-4000-8000-000000000401",
+      itemsToBring: ["Water bottle"],
+      weatherPlan: "The experience will move indoors in heavy rain.",
+      isDayOf: true,
+      photoUrl: `/api/public/bookings/${BOOKING}/meeting-photo`,
+    };
+    const confirmed = { ...VIEW, meetingGuide: guide } as unknown as GuestBookingView;
+    const confirmedHtml = renderToStaticMarkup(createElement(GuestBookingDetails, {
+      booking: confirmed, now: new Date("2026-11-14T02:00:00.000Z"), conversation: CONVERSATION,
+    }));
+    expect(confirmedHtml).toContain("Blue flag beside the synthetic station entrance");
+    expect(confirmedHtml).toContain("Water bottle");
+    expect(confirmedHtml).toContain("running late");
+    expect(confirmedHtml).toContain("meeting point");
+    expect(confirmedHtml).not.toContain("dayOfContactPhone");
+
+    const cancelled = { ...confirmed, status: "CANCELLED", refunds: [], meetingGuide: guide } as unknown as GuestBookingView;
+    const cancelledHtml = renderToStaticMarkup(createElement(GuestBookingDetails, {
+      booking: cancelled, now: new Date("2026-11-14T02:00:00.000Z"), conversation: { ...CONVERSATION, open: false },
+    }));
+    expect(cancelledHtml).not.toContain("Blue flag beside the synthetic station entrance");
+    expect(cancelledHtml).not.toContain("running late");
   });
 
   it("shows the same neutral page without a session, for another booking's cookie, an unknown ID or a refused session", async () => {

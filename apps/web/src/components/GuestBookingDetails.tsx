@@ -1,4 +1,5 @@
 import type { GuestBookingConversation, GuestBookingView, GuestRefundView } from "@niho-experience/experience-store";
+import Image from "next/image";
 import type { ReactNode } from "react";
 import { DATE_LONG, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName, zonedMoment } from "@/lib/booking-words";
 import { BookingCancel } from "./BookingCancel";
@@ -139,9 +140,39 @@ export function GuestBookingDetails({ booking, now, conversation = null, transla
         <ButtonLink href={`/experiences/${encodeURIComponent(booking.experienceSlug)}`} variant="secondary">See the experience</ButtonLink>
       </div>
 
+      {booking.status === "CONFIRMED" && booking.meetingGuide ? (
+        <section aria-labelledby="booking-meeting-guide" className="mt-10 border-t border-line pt-6">
+          <h2 id="booking-meeting-guide" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">Meeting details</h2>
+          <h3 className="mt-3 text-xl font-bold">{booking.meetingGuide.collectionOverview}</h3>
+          {booking.meetingGuide.photoUrl ? <Image src={booking.meetingGuide.photoUrl} width={1200} height={800} unoptimized alt="The outside of the meeting place" className="mt-4 max-h-80 w-full rounded-xl object-cover" referrerPolicy="no-referrer" /> : null}
+          <p className="mt-4 whitespace-pre-line text-[0.9375rem] font-bold [overflow-wrap:anywhere]">{booking.meetingGuide.address}</p>
+          {booking.meetingGuide.mapUrl ? <p className="mt-3"><a href={booking.meetingGuide.mapUrl} target="_blank" rel="noreferrer" className="font-bold text-moss underline">Open map</a></p> : null}
+          {booking.meetingGuide.accessInstructions ? <p className="mt-4 whitespace-pre-line text-[0.9375rem] [overflow-wrap:anywhere]">{booking.meetingGuide.accessInstructions}</p> : null}
+          {booking.meetingGuide.entranceInstructions ? <p className="mt-3 whitespace-pre-line text-[0.9375rem] [overflow-wrap:anywhere]">{booking.meetingGuide.entranceInstructions}</p> : null}
+          {booking.meetingGuide.itemsToBring.length ? (
+            <div className="mt-5">
+              <h3 className="font-bold">What to bring</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-[0.9375rem]">{booking.meetingGuide.itemsToBring.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
+            </div>
+          ) : null}
+          {booking.meetingGuide.weatherPlan ? <p className="mt-5 whitespace-pre-line text-[0.9375rem] [overflow-wrap:anywhere]"><span className="font-bold">Weather plan: </span>{booking.meetingGuide.weatherPlan}</p> : null}
+        </section>
+      ) : null}
+
       <section aria-labelledby="booking-messages" className="mt-10 border-t border-line pt-6">
         <h2 id="booking-messages" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">Messages with your host</h2>
-        <BookingMessages publicBookingId={booking.publicBookingId} hostDisplayName={booking.hostDisplayName} timeZone={booking.timeZone} conversation={conversation} translationNotice={translationNotice} />
+        <BookingMessages
+          publicBookingId={booking.publicBookingId}
+          hostDisplayName={booking.hostDisplayName}
+          timeZone={booking.timeZone}
+          conversation={conversation}
+          translationNotice={translationNotice}
+          quickReplies={booking.status === "CONFIRMED" && booking.meetingGuide?.isDayOf ? [
+            { label: "I'm running late", message: "I'm running late. My estimated arrival time is: " },
+            { label: "I can't find the meeting point", message: "I can't find the meeting point. Could you help me?" },
+            { label: "Something else", message: "Hi, I have a question about today's meeting." },
+          ] : []}
+        />
       </section>
       <CancelSection booking={booking} />
 

@@ -4,6 +4,7 @@ import {
   parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
+  parseDayBeforeSummaryPayload,
   parseGoogleCalendarAttentionPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
@@ -28,10 +29,9 @@ export const GOOGLE_CALENDAR_ATTENTION_NOTES = {
 } as const;
 
 /**
- * The notification job (#177 P2, owner decision 2026-10-31): sends what `outbox_messages` holds for
- * the host topics as Web Push. Questions to the host, guest bookings confirmed on this site (#285 slice 5),
- * those the guest or NIHO support cancelled (slice 7) and what a guest wrote on their booking page (slice 6b) write their rows; approval reminders and booking messages wait for those flows to move to
- * the experience DB (ADR 0002). Logs and answers counts only: never an endpoint, a payload or a booking.
+ * The notification job (#177 P2) sends Experience-owned rows from `outbox_messages` as Web Push.
+ * Booking, question, attendance, cancellation, review and summary flows write their own rows. This mapper
+ * accepts only explicit `host.notify.*` payloads and returns the minimum event; logs contain counts only.
  */
 const MESSAGE_STALE_MS = 24 * 60 * 60 * 1000;
 const RETRY_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
@@ -158,6 +158,27 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         experienceTitle: payload.experienceTitle,
         url: `${withQuery(HOST_REVIEWS_PATH, { providerId })}#review-${payload.reviewId}`,
         tag: `review-${payload.reviewId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.dayBeforeSummary) {
+    const payload = parseDayBeforeSummaryPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const japanToday = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date(now));
+    const tomorrow = new Date(`${japanToday}T00:00:00.000Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    if (payload.localDate !== tomorrow.toISOString().slice(0, 10)) return { ok: false, reason: "stale" };
+    const [year, month, day] = payload.localDate.split("-").map(Number);
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "DAY_BEFORE_SUMMARY",
+        note: `明日 ${year}年${month}月${day}日の確定予約：${payload.bookingCount}件・${payload.participantCount}名`,
+        url: HOST_BOOKINGS_PATH,
+        tag: `day-before-summary-${payload.localDate}`,
       },
     };
   }

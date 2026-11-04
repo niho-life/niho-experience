@@ -18,7 +18,11 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // 取消と返金 (#285 slice 7): commands are append-only; refunds and requests move through their states.
   booking_cancellation_commands: { write: I },
   booking_cancellation_requests: { write: IU },
+  // Short-lived, HMAC-only IP counters for public Checkout (#374); no address or guest reference is stored.
+  booking_checkout_ip_buckets: { write: IUD },
   booking_guests: { write: IU },
+  // Immutable after-booking logistics; DELETE is only used after the booking page's 30-day retention window.
+  booking_meeting_guide_snapshots: { write: ID },
   booking_inventory_snapshots: { write: I },
   booking_refunds: { write: IU },
   booking_resource_occupancies: { write: I },
@@ -48,6 +52,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_product_publication_media: { write: I },
   // Immutable public copies are inserted; state and short-lived NIHO/Connect readiness move independently.
   experience_product_publications: { write: I },
+  experience_product_booking_guides: { write: IU },
   experience_product_publication_states: { write: IU },
   experience_products: { write: IU },
   // A host workspace is created only after the BFF verifies the current NIHO OWNER.

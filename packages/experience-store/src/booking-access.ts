@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { cancellationTermsOf, freeCancellationDeadlineUtc } from "./cancellation-terms.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
+import { validateGuestMeetingGuide, type GuestBookingMeetingGuide } from "./guest-meeting-guides.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { GuestCancellationPolicy } from "./types.ts";
@@ -95,6 +96,8 @@ export interface GuestBookingView {
   readonly refunds: readonly GuestRefundView[];
   /** The guest's latest "Ask to cancel" while it is open or after support declined it; null otherwise. */
   readonly cancellationRequest: GuestCancellationRequestView | null;
+  /** Private logistics captured at payment confirmation; null when the host has not supplied them. */
+  readonly meetingGuide?: GuestBookingMeetingGuide | null;
 }
 
 export type GuestCancelledBy = "GUEST" | "HOST" | "SUPPORT";
@@ -156,6 +159,11 @@ function viewFromRow(row: DbRow): GuestBookingView {
   const freeCancellationUntilUtc = freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart);
   const status = text(row.status, "status");
   if (!(GUEST_BOOKING_VIEW_STATUSES as readonly string[]).includes(status)) throw new StoreError("Database returned an invalid status.");
+  const isDayOf = status === "CONFIRMED" && isOccurrenceDay(row.db_now, occurrence);
+  const rawGuide = row.meeting_guide;
+  const guide = status === "CONFIRMED" && rawGuide && typeof rawGuide === "object"
+    ? validateGuestMeetingGuide(rawGuide)
+    : null;
   return {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     status: status as GuestBookingViewStatus,
@@ -183,7 +191,31 @@ function viewFromRow(row: DbRow): GuestBookingView {
     experienceEnded: row.ended === true,
     refunds: (Array.isArray(row.refunds) ? row.refunds : []).map(refundView),
     cancellationRequest: requestView(row.request),
+    meetingGuide: guide ? {
+      collectionOverview: guide.collectionOverview,
+      address: guide.address,
+      accessInstructions: guide.accessInstructions,
+      entranceInstructions: guide.entranceInstructions,
+      mapUrl: guide.mapUrl,
+      photoAssetId: guide.photoAssetId,
+      itemsToBring: guide.itemsToBring,
+      weatherPlan: guide.weatherPlan,
+      isDayOf,
+      photoUrl: guide.photoAssetId ? `/api/public/bookings/${encodeURIComponent(text(row.public_booking_id, "public_booking_id"))}/meeting-photo` : null,
+    } : null,
   };
+}
+
+function isOccurrenceDay(databaseNow: unknown, occurrence: Record<string, unknown>): boolean {
+  const localDate = occurrence.localDate;
+  const timeZone = occurrence.timeZone;
+  const now = databaseNow instanceof Date ? databaseNow : typeof databaseNow === "string" ? new Date(databaseNow) : null;
+  if (typeof localDate !== "string" || typeof timeZone !== "string" || !now || !Number.isFinite(now.getTime())) return false;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const date = `${parts.find((item) => item.type === "year")?.value}-${parts.find((item) => item.type === "month")?.value}-${parts.find((item) => item.type === "day")?.value}`;
+    return date === localDate;
+  } catch { return false; }
 }
 
 const CANCELLED_BY: ReadonlySet<string> = new Set(["GUEST", "HOST", "SUPPORT"]);
@@ -317,6 +349,7 @@ export class GuestBookingAccess {
               b.created_at, b.cancelled_at, b.cancelled_by, b.cancellation_reason, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
               s.last_seen_at <= clock_timestamp() - make_interval(secs => $4) AS stale,
               clock_timestamp() AS db_now, ${END} <= clock_timestamp() AS ended,
+              guide_snapshot.guide AS meeting_guide,
               (SELECT jsonb_agg(jsonb_build_object('status', r.status, 'amount', r.amount, 'currency', r.currency, 'settled_at', r.settled_at) ORDER BY r.created_at)
                  FROM booking_refunds r WHERE r.provider_id = b.provider_id AND r.booking_id = b.id AND r.closed_at IS NULL) AS refunds,
               (SELECT jsonb_build_object('status', q.status, 'created_at', q.created_at, 'decline_message', q.decline_message)
@@ -327,6 +360,7 @@ export class GuestBookingAccess {
          JOIN booking_guests g ON g.provider_id = s.provider_id AND g.booking_id = s.booking_id
          JOIN bookings b ON b.provider_id = s.provider_id AND b.id = s.booking_id
          JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+         LEFT JOIN booking_meeting_guide_snapshots guide_snapshot ON guide_snapshot.provider_id=b.provider_id AND guide_snapshot.booking_id=b.id
         WHERE s.session_hash = $1 AND b.public_booking_id = $2::uuid
           AND s.revoked_at IS NULL AND s.idle_expires_at > clock_timestamp() AND s.absolute_expires_at > clock_timestamp()
           AND s.access_version = g.access_version AND g.pii_erased_at IS NULL AND b.status = ANY($3::text[])`,
@@ -345,6 +379,29 @@ export class GuestBookingAccess {
       );
     }
     return viewFromRow(row);
+  }
+
+  /** A rights-confirmed guide photo is readable only with the same live, one-booking session as the page. */
+  async readBookingMeetingPhoto(sessionId: string, publicBookingId: string): Promise<{ objectKey: string; byteSize: number } | null> {
+    if (!isSecret(sessionId) || !isBookingId(publicBookingId)) return null;
+    const found = await this.#pool.query<DbRow>(
+      `SELECT asset.object_key, asset.byte_size
+         FROM booking_sessions s
+         JOIN booking_guests g ON g.provider_id=s.provider_id AND g.booking_id=s.booking_id
+         JOIN bookings b ON b.provider_id=s.provider_id AND b.id=s.booking_id
+         JOIN booking_meeting_guide_snapshots guide ON guide.provider_id=b.provider_id AND guide.booking_id=b.id
+         JOIN experience_product_media_assets asset
+           ON asset.provider_id=b.provider_id AND asset.product_id=b.product_id
+          AND asset.id::text=guide.guide->>'photoAssetId' AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+        WHERE s.session_hash=$1 AND b.public_booking_id=$2::uuid AND b.status='CONFIRMED'
+          AND s.revoked_at IS NULL AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp()
+          AND s.access_version=g.access_version AND g.pii_erased_at IS NULL
+          AND (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $3) > clock_timestamp()`,
+      [digest(sessionId), publicBookingId.toLowerCase(), BOOKING_ACCESS_LIMITS.daysAfterExperience],
+    );
+    const row = found.rows[0];
+    if (!row || typeof row.object_key !== "string") return null;
+    return { objectKey: row.object_key, byteSize: count(row.byte_size, "meeting_photo.byte_size") };
   }
 
   /** Signs out on the device: the session reads nothing more. An unknown or ended session changes nothing. */

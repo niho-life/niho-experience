@@ -4,6 +4,8 @@
 
 2026-11-04 の簡素化決定（#330 / #369）: OWNER本人が商品を作り、必要条件を満たしたら公開・停止・再開する。通常保存で有効な公開版を維持する。旧商品・旧予約が無いためデータ移行と商品ごとの切替は行わない。[公開方針とAPI契約](host-publication.md) を正本とする。
 
+ゲスト予約を開くCloud Run revisionには、Secret Managerの32 byte以上のEXPERIENCE_CHECKOUT_IP_HMAC_KEYが要る。CheckoutはCloudflareのCF-Connecting-IPだけを読み、偽装可能なX-Forwarded-Forへfallbackしない。Cloud Run originをCloudflare経由に限定する入口設定をstg/prodで確認するまで、予約flagは有効化しない。
+
 ## この変更で利用できる範囲
 
 - `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHOのscoped tokenで現在のprovider membershipを検証し、Experienceのprovider actorは選択中providerの `ownerUserId` とrole ceilingで保管データへの権限を絞る。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
@@ -57,16 +59,20 @@
 | `EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED` | `true` のときだけ、http mode で OTA の予約の新規・取消・日時変更を、商品の OWNER と運営者へ push で知らせる（#194、`host.notify.ota_booking`）。OTA の名前・体験・日時・予約者の名前・人数だけで、連絡先は載せない。`HOST_PUSH_ENABLED=true` が無いと起動失敗。既定 `false`。同じ宛先へのメールは `EXPERIENCE_HOST_MAIL_ENABLED` も on のときに送る |
 | `EXPERIENCE_HOST_MAIL_ENABLED` | `true` のときだけ、http mode でホストへメールを送る（#194、オーナー決定 2026-11-01、[guest-booking.md](guest-booking.md) の「ホストへの通知」）。現在のNIHO app-connect応答はFirebase email claimとNIHO user IDを返さないため、ログインから既定宛先を自動複写しない。OWNERは設定 › 通知で宛先を入力し、確認メールの一度きりリンクから本人確認して有効化する。確認tokenはSHA-256だけを保存する。③このサイトの予約の確定・取消をOWNERへ、OTAの予約の新規・取消・日時変更を商品のOWNERと運営者へ、pushと同じ中身でメールする（メールjobの段 `hostBookingMails`）。`HOST_CONSOLE_ENABLED=true` と `EXPERIENCE_GUEST_MAIL_ENABLED=true` が無いと起動失敗。既定 `false`（メール送信なし）。権限の無くなった人の宛先を消す段（`hostAddressPurge`）はflagと関係なく動く |
 | `EXPERIENCE_GOOGLE_JOBS_AUDIENCE` / `EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL` | 2 つの Google の job を呼ぶ Cloud Scheduler の OIDC token の audience と、そのサービスアカウント。メール job とは別にする。ほかの呼び手は 401 |
-| `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `true` のときだけ、http mode で `GET /api/public/experiences/{slug}/reviews`（#104/#108、[guest-reviews.md](guest-reviews.md)）が experience DB（`0027`）のレビューと集計で答える。レビューは NIHO の確認なしで投稿されたらすぐ公開される（owner 2026-10-31）。既定 `false`（404）。`EXPERIENCE_DATABASE_URL` が無いと 503。投稿の画面（#285 スライス 6）ができるまでは、`true` にしても 0 件の応答になる。同じフラグで、体験詳細の「Reviews」（英語のページ。先頭 3 件と集計、"Show all" はこの route）と、OWNER の `/host/reviews`（一覧・返信 1 つ・報告）も experience DB から読む（`HOST_CONSOLE_ENABLED=true` が要る）。フラグ OFF・mock mode の画面は今までどおり |
+| `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `true` のときだけ、http mode で `GET /api/public/experiences/{slug}/reviews`（#104/#108、[guest-reviews.md](guest-reviews.md)）が experience DB（`0027`）のレビューと集計で答える。レビューは NIHO の確認なしで投稿されたらすぐ公開される（owner 2026-10-31）。既定 `false`（404）。`EXPERIENCE_DATABASE_URL` が無いと 503。体験詳細の「Reviews」（英語のページ。先頭 3 件と集計、"Show all" はこの route）、旅行者の `/reviews/write` と投稿APIはこのflagで開く。投稿と招待には `EXPERIENCE_GUEST_BOOKING_ENABLED`・`EXPERIENCE_HOST_ATTENDANCE_ENABLED` も要り、記録済み `ATTENDED` だけが対象（`NO_SHOW` と未記録は対象外）。OWNER の `/host/reviews`（一覧・返信 1 つ・報告）は `HOST_CONSOLE_ENABLED=true` も要る。既定 `false`。mock mode は合成データのまま |
 
 DB migration は `packages/experience-store/migrations/` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0046` は未使用の旧商品切替・移行在庫テーブルを削除する。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider・membership・商品は認証済み OWNER の操作から作成し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
+
+## 予約メールの配信後イベント（#375）
+
+Experience はNIHOと同じSMTP事業者・共有資格情報を使うが、送信台帳とguest mail outboxはExperience DBにある。NIHO #19711 のGmail DSN/ARF取込はNIHOの `OutboundEmailDelivery` とだけ照合し、Experienceのoutboxからは読めない。Gmail OAuthは受信箱を認証するがARF報告元は認証しない。Experience向けの署名済みbounce/complaint producer/API、再送抑止、運営表示は未接続で、実送信元・Return-Path・SPF/DKIM/DMARCも未確認。未接続をSMTP受理成功で代替しない。
 
 Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、NIHO editor auth、category/article/publication移行、権限失効・停止・UNLISTED・画像取消を合成データで受け入れる。次に `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` の候補revisionで、SSR/metadata/sitemapが次requestに反映されること、static記事が混在しないこと、公開catalogとの体験link交差、mediaの404/503/no-storeを確認する。受入前は`static`を維持し、editorだけの有効化を公開元切替とみなさない。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` は editor.niho.life の公開（設計の段階 3）が本番で使えるまで有効化しない。Secret Manager と配備 workflow への配線もそれまで行わない。
 
 ## ホスト販売の残作業
 
 1. Experienceには、NIHOの現在のログイン本人・OWNER権限・Connect口座を確認する商品APIがある。商品作成、編集、公開、停止、再開、写真、販売条件の操作はこのAPIを通す。公開情報・予約条件snapshot・新規CheckoutはExperienceの公開版を使い、旧NIHO体験販売へfallbackしない。
-2. このAPIはNIHO側の共通本人・Connect API（PR #19712）を前提にしており、契約の反映後に機能flagと配備設定をそろえる必要がある。ホストの商品編集画面への接続、開催枠を含む画面上の公開までの一周、DB統合テストの実行は引き続き必要。レビュー（#104/#108）の投稿画面・お礼メール、出欠による資格の除外、英訳の下書きは別機能。
+2. このAPIはNIHO側の共通本人・Connect API（PR #19712）を前提にしており、契約の反映後に機能flagと配備設定をそろえる必要がある。ホストの商品編集画面への接続、開催枠を含む画面上の公開までの一周、DB統合テストの実行は引き続き必要。レビュー（#104/#108）の英語firstの画面・お礼メール・出欠連動は別の実装箇所で追加済みだが、実メールと配備受入は未確認。
 3. Google busy の定期再照合と確定予約の書き込みは、独立した 2 つの job として実装した（#238、下の「Google の job」）。残りは staging での受入：Cloud Scheduler の 2 job と専用サービスアカウント、実 OAuth の接続・失効・再接続、watch の webhook の到達、専用 calendar への書き込みを確かめてから flag を開く。
 4. Stripe Checkoutは公開版に保存したPanasonicのConnect口座へ直接作成する。Checkoutの作成可否はStripeで確認し、口座が受け付けられない場合は支払いを開始しない。stagingでは成功・停止口座・再送の合成取引を確認する。
 5. DBバックアップ、監査、障害対応を受け入れ、合成データで公開/編集/停止/再開、予約snapshot、重複公開・二重在庫拒否を確認する。商品や予約の旧データ移行・旧販売の切戻しは不要。

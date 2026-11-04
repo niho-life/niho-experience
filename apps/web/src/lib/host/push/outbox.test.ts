@@ -34,7 +34,7 @@ function row(topic: string, payload: unknown, extra: Partial<ClaimedHostNotifica
 function fakeOutbox(messages: ClaimedHostNotification[]) {
   return {
     // Hands out the rows the way the store does: up to `limit` per claim, each only once.
-    claimDue: vi.fn(async (limit: number, _leaseMs: number) => messages.splice(0, limit)),
+    claimDue: vi.fn(async (limit: number) => messages.splice(0, limit)),
     complete: vi.fn(async () => {}),
     retryAt: vi.fn(async () => {}),
   };
@@ -64,6 +64,27 @@ describe("hostPushEventFromOutbox", () => {
       ok: true,
       event: { providerId: "provider-a", kind: "NEW_REVIEW", experienceTitle: "Synthetic tea", url: `/host/reviews?providerId=provider-a#review-${reviewId}`, tag: `review-${reviewId}` },
     });
+  });
+
+  it("delivers one next-day attendee summary with counts only and closes a missed day's summary", () => {
+    const summaryNow = Date.parse("2026-11-04T09:00:00.000Z"); // 18:00 in Japan
+    const payload = { v: 1, localDate: "2026-11-05", bookingCount: 2, participantCount: 3 };
+    const parsed = hostPushEventFromOutbox(row("host.notify.day_before_summary", payload), summaryNow);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a", kind: "DAY_BEFORE_SUMMARY",
+        note: "明日 2026年11月5日の確定予約：2件・3名",
+        url: "/host/bookings", tag: "day-before-summary-2026-11-05",
+      },
+    });
+    if (parsed.ok) {
+      const message = JSON.parse(hostPushPayload(parsed.event));
+      expect(message).toMatchObject({ title: "明日の参加者のまとめ", body: "明日 2026年11月5日の確定予約：2件・3名" });
+      expect(message.body).not.toContain("Synthetic Guest");
+    }
+    expect(hostPushEventFromOutbox(row("host.notify.day_before_summary", payload), Date.parse("2026-11-05T00:00:00.000Z")))
+      .toEqual({ ok: false, reason: "stale" });
   });
 
   it("turns an approval reminder into a deadline push that opens the booking", () => {

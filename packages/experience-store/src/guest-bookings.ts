@@ -95,6 +95,9 @@ export const GUEST_BOOKING_LIMITS = {
   activeHoldsPerGuestPerProduct: 2,
   activeHoldsPerProduct: 30,
   bookingsPerGuestPerHour: 5,
+  /** Shared checkout IP policy aligned with NIHO's public Checkout policy (#374, 5 attempts per 10 minutes). */
+  checkoutIpAttemptsPerWindow: 5,
+  checkoutIpWindowSeconds: 600,
   /** How many of the provider's lapsed holds a new checkout marks EXPIRED on its way (#285 slice 4). */
   lapsedHoldsExpiredPerCheckout: 100,
 } as const;
@@ -288,6 +291,8 @@ export interface StartGuestBookingInput {
   /** Leave out when the browser sends DNT: 1. */
   readonly utm?: GuestBookingUtm;
   readonly clientRequestKey: string;
+  /** HMAC-SHA256 of the trusted edge's client IP; raw IP is never passed into the store or persisted. */
+  readonly checkoutIpDigest?: string;
   /** Defaults to the repository's (35 minutes); 60-3600. */
   readonly holdSeconds?: number;
 }
@@ -1027,6 +1032,7 @@ interface ValidRequest {
   readonly note: string | null;
   readonly utm: Readonly<Record<string, string>>;
   readonly clientRequestKey: string;
+  readonly checkoutIpDigest: string | null;
   readonly holdSeconds: number;
   /** SHA-256 of everything the guest sent, for REQUEST_MISMATCH. */
   readonly fingerprint: string;
@@ -1104,6 +1110,9 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
   }
   const phone = guestPhone(input.guestPhone);
   if (typeof input.clientRequestKey !== "string" || !REQUEST_KEY.test(input.clientRequestKey)) throw invalid("clientRequestKey");
+  if (input.checkoutIpDigest !== undefined && (typeof input.checkoutIpDigest !== "string" || !/^[0-9a-f]{64}$/.test(input.checkoutIpDigest))) {
+    throw new StoreValidationError("checkoutIpDigest must be a lowercase SHA-256 digest.");
+  }
   // A name is one line: runs of spaces and line breaks become one space.
   const name = typeof input.guestName === "string" ? input.guestName.replace(/\s+/g, " ").trim() : "";
   if (name.length < 1 || name.length > GUEST_BOOKING_LIMITS.guestNameMaxLength || ANY_CONTROL.test(name)) throw invalid("guestName");
@@ -1166,7 +1175,7 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
     request.guestName, request.guestEmail, request.guestPhone, request.guestLanguage, request.note,
     UTM_KEYS.map((key) => utm[key] ?? null),
   ]), "utf8").digest("hex");
-  return { ...request, slug: input.slug, currentConsentVersion: input.currentConsentVersion, clientRequestKey: input.clientRequestKey, holdSeconds, fingerprint };
+  return { ...request, slug: input.slug, currentConsentVersion: input.currentConsentVersion, clientRequestKey: input.clientRequestKey, checkoutIpDigest: input.checkoutIpDigest ?? null, holdSeconds, fingerprint };
 }
 
 /** Answers against the offer's questions. Returns what is kept: answered questions only. */
@@ -1218,6 +1227,64 @@ function startResult(booking: BookingRecord, productTitle: string, guestEmail: s
     checkoutSessionRef,
     booking,
   };
+}
+
+interface CheckoutIpWindowLock {
+  readonly digest: string;
+  readonly startUtc: Date;
+  readonly retryAfterSeconds: number;
+}
+
+/** Locks one shared ten-minute IP bucket. Identity is an HMAC digest supplied by the trusted HTTP edge. */
+async function lockCheckoutIpWindow(client: PoolClient, digest: string, nowUtc: string): Promise<CheckoutIpWindowLock | null> {
+  const now = new Date(nowUtc);
+  const windowMs = GUEST_BOOKING_LIMITS.checkoutIpWindowSeconds * 1_000;
+  const startUtc = new Date(Math.floor(now.getTime() / windowMs) * windowMs);
+  // Retain only enough old buckets to cover retries around a window boundary. Cleanup is bounded and safe
+  // across replicas; rate enforcement itself is serialized on the current bucket row below.
+  await client.query(
+    `WITH expired AS (
+       SELECT ip_digest, window_started_at FROM booking_checkout_ip_buckets
+        WHERE window_started_at < $1::timestamptz - interval '20 minutes'
+        ORDER BY window_started_at LIMIT 200 FOR UPDATE SKIP LOCKED
+     )
+     DELETE FROM booking_checkout_ip_buckets b USING expired e
+      WHERE b.ip_digest=e.ip_digest AND b.window_started_at=e.window_started_at`,
+    [nowUtc],
+  );
+  await client.query(
+    `INSERT INTO booking_checkout_ip_buckets (ip_digest,window_started_at,attempt_count)
+     VALUES ($1,$2,0) ON CONFLICT (ip_digest,window_started_at) DO NOTHING`,
+    [digest, startUtc.toISOString()],
+  );
+  const locked = await client.query<{ attempt_count: number | string }>(
+    `SELECT attempt_count FROM booking_checkout_ip_buckets
+      WHERE ip_digest=$1 AND window_started_at=$2::timestamptz FOR UPDATE`,
+    [digest, startUtc.toISOString()],
+  );
+  if (!locked.rows[0]) throw new StoreConflictError("The checkout IP limit bucket could not be locked.");
+  const attemptCount = Number(locked.rows[0].attempt_count);
+  if (!Number.isSafeInteger(attemptCount) || attemptCount < 0 || attemptCount > GUEST_BOOKING_LIMITS.checkoutIpAttemptsPerWindow) {
+    throw new StoreConflictError("The checkout IP limit bucket is invalid.");
+  }
+  if (attemptCount >= GUEST_BOOKING_LIMITS.checkoutIpAttemptsPerWindow) {
+    return {
+      digest,
+      startUtc,
+      retryAfterSeconds: Math.max(1, Math.ceil((startUtc.getTime() + windowMs - now.getTime()) / 1_000)),
+    };
+  }
+  return { digest, startUtc, retryAfterSeconds: 0 };
+}
+
+async function countCheckoutIpAttempt(client: PoolClient, lock: CheckoutIpWindowLock): Promise<void> {
+  const changed = await client.query(
+    `UPDATE booking_checkout_ip_buckets SET attempt_count=attempt_count+1
+      WHERE ip_digest=$1 AND window_started_at=$2::timestamptz
+        AND attempt_count < $3`,
+    [lock.digest, lock.startUtc.toISOString(), GUEST_BOOKING_LIMITS.checkoutIpAttemptsPerWindow],
+  );
+  if (changed.rowCount !== 1) throw new StoreConflictError("The checkout IP limit bucket changed unexpectedly.");
 }
 
 /**
@@ -1630,7 +1697,10 @@ export class GuestBookingRepository {
     const productId = located.product.id;
     const idempotencyKey = `guest-checkout:${productId}:${request.clientRequestKey}`;
 
-    return withTransaction(this.#pool, async (client) => {
+    const outcome = await withTransaction(this.#pool, async (client): Promise<
+      | { readonly kind: "started"; readonly booking: GuestBookingStart }
+      | { readonly kind: "rate-limited"; readonly retryAfterSeconds: number }
+    > => {
       await lockProviderInventory(client, providerId);
       await lockBookingIdempotencyKey(client, providerId, idempotencyKey);
       const sellable = await loadSellable(client, request.slug, true);
@@ -1650,15 +1720,20 @@ export class GuestBookingRepository {
         );
         const guestRow = guest.rows[0];
         if (guestRow === undefined || guestRow.request_fingerprint !== request.fingerprint) throw new GuestCheckoutError("REQUEST_MISMATCH");
-        return startResult(
+        return { kind: "started", booking: startResult(
           bookingFromRow(previous.rows[0]),
           product.publicTitle,
           guestRow.guest_email === null ? null : String(guestRow.guest_email),
           guestRow.checkout_session_ref === null ? null : String(guestRow.checkout_session_ref),
-        );
+        ) };
       }
 
       const nowUtc = await databaseNow(client);
+      const ipWindow = request.checkoutIpDigest === null ? null : await lockCheckoutIpWindow(client, request.checkoutIpDigest, nowUtc);
+      if (ipWindow && ipWindow.retryAfterSeconds > 0) {
+        // Returning instead of throwing commits the bucket read and preserves an indistinguishable 429.
+        return { kind: "rate-limited", retryAfterSeconds: ipWindow.retryAfterSeconds };
+      }
       const today = tokyoDate(nowUtc);
       const rules = await activeRules(client, providerId, productId, today);
       if (!await offerPricesMatchActiveRules(client, terms, providerId, productId, today)) throw new StoreNotFoundError("experience for sale");
@@ -1773,8 +1848,16 @@ export class GuestBookingRepository {
           request.clientRequestKey, request.fingerprint, JSON.stringify(request.utm),
         ],
       );
-      return startResult(placed.booking, product.publicTitle, request.guestEmail, null);
+      if (ipWindow) await countCheckoutIpAttempt(client, ipWindow);
+      return { kind: "started", booking: startResult(placed.booking, product.publicTitle, request.guestEmail, null) };
     });
+    if (outcome.kind === "rate-limited") {
+      throw new GuestCheckoutError("RATE_LIMITED", {
+        retryAfterSeconds: outcome.retryAfterSeconds,
+        rateLimitReason: "checkout-ip-10m",
+      });
+    }
+    return outcome.booking;
   }
 
   /**

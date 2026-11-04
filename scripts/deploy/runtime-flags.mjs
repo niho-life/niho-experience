@@ -102,6 +102,7 @@ export const FLAGS = Object.freeze([
     secrets: [
       { env: "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", variable: "STRIPE_PLATFORM_SECRET_KEY_REF", stg: "STRIPE_CONNECT_PLATFORM_SECRET_KEY" },
       { env: "EXPERIENCE_STRIPE_WEBHOOK_SECRET", variable: "STRIPE_WEBHOOK_SECRET_REF", stg: "experience-stg-stripe-webhook-secret" },
+      { env: "EXPERIENCE_CHECKOUT_IP_HMAC_KEY", variable: "CHECKOUT_IP_HMAC_KEY_REF", stg: "experience-stg-checkout-ip-hmac-key" },
     ],
     settings: [
       { env: "EXPERIENCE_BOOKING_CONSENT_VERSION", variable: "BOOKING_CONSENT_VERSION", shape: "consentVersion" },

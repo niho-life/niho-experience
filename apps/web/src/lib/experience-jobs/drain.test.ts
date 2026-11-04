@@ -4,10 +4,13 @@ import type {
   BookingConfirmationEmail,
   BookingLinkClaim,
   BookingLinkEmail,
+  BookingMeetingGuideClaim,
+  BookingMeetingGuideEmail,
   BookingNoticeClaim,
   BookingNoticeEmail,
   ClaimedBookingConfirmation,
   ClaimedBookingLink,
+  ClaimedBookingMeetingGuide,
   ClaimedBookingMessage,
   ClaimedGuestQuestionReply,
   ClaimedQuestionReply,
@@ -413,6 +416,63 @@ describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => 
     expect(counts.bookingAccessPurge).toEqual({ purged: 4 });
     expect(s.onStepError.mock.calls).toEqual([["bookingLinks", "TypeError"]]);
     expect(experienceJobActivity(counts)).toEqual({ failed: true, active: true });
+  });
+});
+
+describe("runExperienceJobs › private meeting guide email (#376)", () => {
+  const email: BookingMeetingGuideEmail = {
+    publicBookingId: "0f8fad5b-d9cb-469f-a165-708677289501",
+    guestEmail: "guide@example.com", guestName: "Sample Guest", experienceTitle: "Synthetic walk",
+    localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+    collectionOverview: "Blue flag by the synthetic station", address: "1-2-3 Sample, Kamakura",
+    accessInstructions: "Walk east.", entranceInstructions: "Use the garden gate.",
+    mapUrl: "https://maps.example.test/synthetic", photoAssetId: "00000000-0000-4000-8000-000000000401",
+    itemsToBring: ["Water bottle"], weatherPlan: "Move indoors in heavy rain.",
+  };
+  const row: ClaimedBookingMeetingGuide = { id: "701", attempts: 1, email };
+
+  it("sends the captured guide with a private photo and a fresh booking-page grant", async () => {
+    const access = { issueBookingAccessGrant: vi.fn(async () => ({ token: TOKEN, expiresAtUtc: "2026-12-01T00:00:00.000Z" })), purgeExpiredAccess: vi.fn(async () => 0) };
+    const claimGuides = oneAtATime([row]);
+    const guides = {
+      claimMeetingGuideDayBefore: vi.fn(async (): Promise<BookingMeetingGuideClaim> => ({ guides: await claimGuides(), abandoned: 0 })),
+      completeMeetingGuideDayBefore: vi.fn(async () => {}),
+      retryMeetingGuideDayBefore: vi.fn(async () => "RETRY" as const),
+    };
+    const photos = { read: vi.fn(async () => new Uint8Array([0xff, 0xd8, 0xff])) };
+    const counts = await runExperienceJobs({ ...s.deps, access, meetingGuides: { outbox: guides, photos } });
+    expect(counts.meetingGuides).toMatchObject({ claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0 });
+    expect(guides.claimMeetingGuideDayBefore).toHaveBeenCalledWith({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.meetingGuideLeaseSeconds });
+    expect(photos.read).toHaveBeenCalledExactlyOnceWith(email.photoAssetId);
+    expect(access.issueBookingAccessGrant).toHaveBeenCalledExactlyOnceWith(email.publicBookingId);
+    expect(s.sent).toHaveLength(1);
+    expect(s.sent[0]!.to).toBe(email.guestEmail);
+    expect(s.sent[0]!.subject).toContain("Meeting details: Synthetic walk");
+    expect(s.sent[0]!.text).toContain(email.address);
+    expect(s.sent[0]!.text).toContain("https://maps.example.test/synthetic");
+    expect(s.sent[0]!.text).toContain(`${SITE}/bookings/open#g=${TOKEN}`);
+    expect(s.sent[0]!.attachments).toEqual([{ filename: "meeting-place.jpg", content: new Uint8Array([0xff, 0xd8, 0xff]), contentType: "image/jpeg", cid: "niho-meeting-place-photo" }]);
+    expect(JSON.stringify(s.sent[0])).not.toContain(email.photoAssetId);
+    expect(guides.completeMeetingGuideDayBefore).toHaveBeenCalledExactlyOnceWith(row.id);
+    expect(JSON.stringify(counts)).not.toContain("guide@example.com");
+  });
+
+  it("completes a cancelled or otherwise ineligible row without loading its private photo", async () => {
+    const ineligible: ClaimedBookingMeetingGuide = { ...row, email: null };
+    const access = { issueBookingAccessGrant: vi.fn(async () => null), purgeExpiredAccess: vi.fn(async () => 0) };
+    const claimGuides = oneAtATime([ineligible]);
+    const guides = {
+      claimMeetingGuideDayBefore: vi.fn(async (): Promise<BookingMeetingGuideClaim> => ({ guides: await claimGuides(), abandoned: 0 })),
+      completeMeetingGuideDayBefore: vi.fn(async () => {}),
+      retryMeetingGuideDayBefore: vi.fn(async () => "RETRY" as const),
+    };
+    const photos = { read: vi.fn(async () => new Uint8Array([1])) };
+    const counts = await runExperienceJobs({ ...s.deps, access, meetingGuides: { outbox: guides, photos } });
+    expect(counts.meetingGuides).toMatchObject({ claimed: 1, sent: 0, skipped: 1 });
+    expect(photos.read).not.toHaveBeenCalled();
+    expect(access.issueBookingAccessGrant).not.toHaveBeenCalled();
+    expect(s.mailer.sendMail).not.toHaveBeenCalled();
+    expect(guides.completeMeetingGuideDayBefore).toHaveBeenCalledExactlyOnceWith(row.id);
   });
 });
 

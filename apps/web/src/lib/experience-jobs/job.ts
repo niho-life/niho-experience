@@ -1,9 +1,10 @@
 import "server-only";
 import type { Pool } from "pg";
-import { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
+import { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
+import { experiencePublicMediaStorage } from "@/lib/experience/public-media-storage";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { hostNotificationAllowed } from "@/lib/host/push/outbox";
 import { smtpMailer, type Mailer } from "@/lib/mail/transport";
@@ -73,6 +74,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
   const errors: Record<string, string> = {};
   const outbox = new GuestMailOutbox(pool);
   const guestBooking = dependencies.bookingPages ?? config.guestBookingEnabled;
+  const guidePhotos = guestBooking ? experiencePublicMediaStorage() : null;
   const submit = guestBooking ? (dependencies.refundSubmitter ?? stripeRefundSubmitter)() : null;
   try {
     const counts = await (dependencies.run ?? runExperienceJobs)({
@@ -83,6 +85,11 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       reviewInvitations: config.guestReviewsEnabled && config.hostAttendanceEnabled
         ? { outbox, reviews: new GuestReviewRepository(pool) }
         : undefined,
+      meetingGuides: guestBooking && guidePhotos ? {
+        outbox,
+        photos: { read: (assetId) => guidePhotos.read(`experience-products/${assetId}.jpg`) },
+      } : undefined,
+      meetingGuideSnapshots: new GuestMeetingGuideRepository(pool),
       // The page needs both flags; this job runs only with guest mail on, so booking on this site decides.
       access: guestBooking ? new GuestBookingAccess(pool) : null,
       refunds: submit ? { cancellations: new BookingCancellations(pool), submit } : null,

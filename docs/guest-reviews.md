@@ -63,7 +63,7 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 ## 通知 producer と日本語化の引き継ぎ
 
 - `NEW_REVIEW` はレビューを保存する transaction 内で `host.notify.new_review` を積む。payload は review UUID と体験名だけで、予約者の名前・レビュー本文・予約IDは含めない。既存 host push job が OWNER の `/host/reviews` へ通知する。
-- `DAY_BEFORE_SUMMARY` は設定・push表示だけがあり、全チャネルの参加者を数える producer はまだ接続していない。Experience 内の予約だけで OTA 等を含む参加者まとめを作らない。対象範囲・時刻を決めた後に別途接続する。
+- `DAY_BEFORE_SUMMARY` producer は Experience 内の確定予約を対象にする（#109/#376）。JST 18:00 以降、翌日の `CONFIRMED` booking 件数と booking guest の人数だけを provider/date ごとに一度 outbox へ積む。OTA 予約は Experience の `booking_guests` に無いため含めない。通知設定（OFF可）、既存 host push job、`/host/bookings` を使い、guest/product detail は送らない。Scheduler/service account の配備は別途必要。
 - 現行投稿画面と表示文言は英語。投稿API の `language` は `EN` / `JA`（省略時 `EN`）で、保存先は `GuestReviewLanguage`。日本語画面を追加するときは E が文言・日付表示・エラー表示を翻訳し、`language: "JA"` を送り、同じ token・資格・冪等性契約を維持する。レビュー期限や未記録出欠の意味を翻訳作業で決めない。
 
 ## flag と配備
@@ -75,7 +75,8 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 
 ## まだ作っていないもの
 
-- `DAY_BEFORE_SUMMARY` のproducer。OTA等を含む対象範囲と送信時刻が未確認のため、現在は未接続。
+- 集合案内 API・migration の配備と、前日メールの実 SMTP 受信確認（#376）。
+- `DAY_BEFORE_SUMMARY` は producer を実装したが、host push Scheduler/service account の配備受入は未確認。
 
 ## 未決（オーナー判断。実装で決め打ちしていない）
 
