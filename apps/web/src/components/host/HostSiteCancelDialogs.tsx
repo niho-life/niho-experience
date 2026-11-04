@@ -10,10 +10,10 @@ import { CHOICE, CHOICE_INPUT, DANGER_BUTTON, GROUP_LABEL } from "./HostBookingD
 import { HostConfirmDialog } from "./HostConfirmDialog";
 
 /*
- * 取消 of the bookings made on this site (#285 slice 7): the host always refunds in full (the host's decision), so the
- * dialog asks only why (a fixed reason the guest's email words in English) and an optional note of the host's own,
- * which the guest never sees. Anything but a full refund goes through NIHO support. The dialog closes first and hands
- * the choice to the page, which sends it and says what happened.
+ * 取消 of the bookings made on this site (#285 slice 7): the host refunds paid bookings in full (the host's decision).
+ * Free bookings have no payment to return. The dialog asks only why (a fixed reason the guest's email words in English)
+ * and an optional note of the host's own, which the guest never sees. Anything but a full refund goes through NIHO
+ * support. The dialog closes first and hands the choice to the page, which sends it and says what happened.
  */
 
 export interface SiteCancelChoice {
@@ -77,12 +77,14 @@ export function SiteBookingCancelDialog({ guest, when, amountYen, onConfirm, onC
   return (
     <HostConfirmDialog
       title="予約を取り消しますか？"
-      description={`${guest}さんの予約（${when}）を取り消し、${yen(amountYen)} を全額返金します。この操作は元に戻せません。`}
+      description={amountYen === 0
+        ? `${guest}さんの無料予約（${when}）を取り消します。支払いは発生していません。この操作は元に戻せません。`
+        : `${guest}さんの予約（${when}）を取り消し、${yen(amountYen)} を全額返金します。この操作は元に戻せません。`}
       focusRef={first}
       hint={reason ? null : <p id={hintId} className="basis-full text-xs text-muted">取消理由を選ぶと取り消せます</p>}
       confirm={
         <button type="submit" disabled={!reason} aria-describedby={reason ? undefined : hintId} className={`${DANGER_BUTTON} ${DISABLED}`}>
-          {yen(amountYen)} を返金して取り消す
+          {amountYen === 0 ? "無料予約を取り消す" : `${yen(amountYen)} を返金して取り消す`}
         </button>
       }
       onConfirm={() => {
@@ -90,7 +92,7 @@ export function SiteBookingCancelDialog({ guest, when, amountYen, onConfirm, onC
       }}
       onClose={onClose}
     >
-      <p className="mt-3 text-[0.8125rem] text-ink-soft">予約者には取消と返金のお知らせがメールで届きます。一部だけの返金は NIHO サポートへご連絡ください。</p>
+      <p className="mt-3 text-[0.8125rem] text-ink-soft">{amountYen === 0 ? "予約者には取消のお知らせがメールで届きます。" : "予約者には取消と返金のお知らせがメールで届きます。一部だけの返金は NIHO サポートへご連絡ください。"}</p>
       <CancelFields reasons={SITE_CANCEL_REASONS} reason={reason} setReason={setReason} note={note} setNote={setNote} first={first} />
     </HostConfirmDialog>
   );
@@ -112,7 +114,7 @@ export function SiteSessionCancelDialog({ when, bookings, refundYen, onConfirm, 
   return (
     <HostConfirmDialog
       title="この回を中止しますか？"
-      description={`${when}の回を中止し、確定している ${bookings} 件の予約を取り消して、合計 ${yen(refundYen)} を全額返金します。この回は新しい予約を受け付けなくなります。この操作は元に戻せません。`}
+      description={`${when}の回を中止し、確定している ${bookings} 件の予約を取り消して、${refundYen === 0 ? "支払い済みの金額はありません" : `合計 ${yen(refundYen)} を全額返金します`}。この回は新しい予約を受け付けなくなります。この操作は元に戻せません。`}
       focusRef={first}
       hint={reason ? null : <p id={hintId} className="basis-full text-xs text-muted">中止の理由を選ぶと中止できます</p>}
       confirm={
@@ -125,7 +127,7 @@ export function SiteSessionCancelDialog({ when, bookings, refundYen, onConfirm, 
       }}
       onClose={onClose}
     >
-      <p className="mt-3 text-[0.8125rem] text-ink-soft">予約者には取消と返金のお知らせがメールで届きます。確認待ちの支払いは NIHO サポートが対応します。</p>
+      <p className="mt-3 text-[0.8125rem] text-ink-soft">{refundYen === 0 ? "予約者には取消のお知らせがメールで届きます。" : "予約者には取消と返金のお知らせがメールで届きます。"} 確認待ちの支払いは NIHO サポートが対応します。</p>
       <CancelFields reasons={SITE_SESSION_CANCEL_REASONS} reason={reason} setReason={setReason} note={note} setNote={setNote} first={first} />
     </HostConfirmDialog>
   );

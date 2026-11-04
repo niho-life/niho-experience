@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
  * sold here is INSTANT (the store's PublicBookingOffer), so the type is fixed.
  */
 const RETURN_PATH = "/booking/return?type=instant";
+const FREE_RETURN_PATH = "/booking/return?type=instant&payment=free";
 
 /** The class name only: Stripe's and the database's messages may repeat what was sent (an address, a session). */
 function logFailure(stage: "store" | "stripe", error: unknown): void {
@@ -38,7 +39,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (!config.bookingsEnabled) return checkoutError("UNAVAILABLE");
   const bookings = guestBookingRepository();
   const stripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY;
-  if (!bookings || !stripeKey) return checkoutError("CHECKOUT_UNAVAILABLE");
+  if (!bookings) return checkoutError("CHECKOUT_UNAVAILABLE");
   const parsed = await readGuestCheckout(request);
   if (!parsed.ok) return parsed.response;
 
@@ -62,10 +63,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   // A repeated request of a booking already paid: NIHO answers with its booking page (PublicExperienceCheckoutResponse);
   // here that is the page Stripe returned the guest to. It names no booking and says only what to expect next.
   if (started.status === "CONFIRMED" || started.status === "PAYMENT_REVIEW") {
-    return publicJson(201, { checkoutUrl: `${siteOrigin}${RETURN_PATH}` } satisfies ExperienceCheckoutResponse);
+    const returnPath = started.booking.pricingSnapshot.totalAmount === 0 ? FREE_RETURN_PATH : RETURN_PATH;
+    return publicJson(201, { checkoutUrl: `${siteOrigin}${returnPath}` } satisfies ExperienceCheckoutResponse);
   }
   // Expired or cancelled: these seats are gone. The page reads availability again and starts a new request.
   if (started.status !== "HOLD" || Date.parse(started.holdExpiresAt) <= Date.now()) return checkoutError("UNAVAILABLE");
+  if (!stripeKey) return checkoutError("CHECKOUT_UNAVAILABLE");
 
   // A publication is durable, but a connected account can lose charge or payout capability at any time.
   // Check the exact recipient saved in this booking before opening a new (or returning an existing) Session.

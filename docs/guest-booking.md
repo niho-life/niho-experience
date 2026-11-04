@@ -8,9 +8,9 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 
 1. **同意する規約**：旅行者が同意する規約の版は `EXPERIENCE_BOOKING_CONSENT_VERSION`。checkout の `consent.agreedVersion` がこれと違えば 422 `CONSENT_OUTDATED`。画面はこの版を詳細の `booking.consentVersion` として受け取り、規約の文書（リンク）は NIHO の詳細の `legalDocuments` を出す。参加の条件（#110）の版は商品の販売条件（`conditions_version`）にあり、`conditionsConsent.version` と照らす。
 2. **残席**：ブラウザが `GET /api/public/experiences/{slug}/availability`（任意で `?offerId=`）を読む。応答は NIHO の `PublicExperienceAvailabilityResponse` と同じ形で、日本時間の今日から 89 日後まで、要求ごとに数え、`no-store`。offer は商品の有効な繰り返し枠。ここで売っていない slug は本文なしの 404、形の誤った `offerId` は 400。
-3. **申込**：ブラウザが `POST /api/public/experiences/{slug}/checkout` へ NIHO の `PublicExperienceCheckoutRequest` と、journey の `guestPhone`・`conditionsConsent` を送る（このサイトのページからだけ。`guestLanguage` は当面 `EN`）。`GuestBookingRepository.startGuestBooking` が NIHO と同じ順で確かめ、1 トランザクションで席を 35 分仮押さえし、予約者を `booking_guests` に記録し、価格・取消条件・NIHO の手数料を予約の snapshot に固定する。
-4. **Stripe Checkout**：`createDirectCheckout` が販売者の Connect 口座に Direct charge の Checkout Session を作る。請求額・口座・手数料（`application_fee_amount`）はすべて予約の snapshot から取る。戻り先は支払い後が `/booking/return?type=instant`、取りやめが `/experiences/{slug}?checkout=cancelled`（どちらもこのサイト）。旅行者のメールアドレスは Stripe の入力欄の初期値（`customer_email`）にだけ渡す。Session を予約に記録し（`attachCheckoutSession`、1 回だけ）、`201 { checkoutUrl }` を返す。
-5. **確定**：支払いの確定は Stripe の webhook（`/api/experience/stripe/webhook`）だけで行う。署名を確かめ、販売者の口座と金額・通貨を snapshot と照らして `confirmBookingPayment` が確定し、台帳に記入する。戻り先のページは予約の完了を示さない（何が届くかだけを言う）。
+3. **申込**：ブラウザが `POST /api/public/experiences/{slug}/checkout` へ NIHO の `PublicExperienceCheckoutRequest` と、journey の `guestPhone`・`conditionsConsent` を送る（このサイトのページからだけ。`guestLanguage` は当面 `EN`）。`GuestBookingRepository.startGuestBooking` が NIHO と同じ順で確かめ、1 トランザクションで席を仮押さえし、予約者を `booking_guests` に記録し、価格・取消条件・NIHO の手数料を予約の snapshot に固定する。snapshot は `paymentRequired` を保存し、無料は `false`（過去snapshotで値が無ければ合計額から判定）。有料予約は35分の仮押さえを使う。完全無料商品（大人・子ども・全offerがすべて0円）は同じトランザクション内で即時確定し、Stripe決済と決済台帳を作らない。1〜49円や有料・無料価格の混在は販売不可。
+4. **決済または無料確定**：有料予約だけ、`createDirectCheckout` が販売者の Connect 口座に Direct charge の Checkout Session を作る。請求額・口座・手数料（`application_fee_amount`）は予約の snapshot から取る。戻り先は支払い後が `/booking/return?type=instant`、取りやめが `/experiences/{slug}?checkout=cancelled`（どちらもこのサイト）。旅行者のメールアドレスは Stripe の入力欄の初期値（`customer_email`）にだけ渡す。Session を予約に記録し（`attachCheckoutSession`、1 回だけ）、`201 { checkoutUrl }` を返す。無料予約はStripeを使わず、即時確定後に `/booking/return?type=instant&payment=free` を表示して、確認メールを案内する。
+5. **確定**：有料予約の決済確定は Stripe の webhook（`/api/experience/stripe/webhook`）だけで行う。署名を確かめ、販売者の口座と金額・通貨を snapshot と照らして `confirmBookingPayment` が確定し、台帳に記入する。無料予約は申込トランザクションで確定し、確認メール・ホスト通知・開催回再計算を同じトランザクションから積む。戻り先のページは予約の完了状態を照会しない（何が届くかだけを言う）。
 6. **放棄**：Session が支払われずに終わると、同じ webhook が仮押さえを解放する（`releaseGuestHold`、下の「放棄された Checkout と遅れた支払い」）。
 
 ## 再送と失敗
@@ -18,6 +18,7 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 | 場合 | 応答 |
 | --- | --- |
 | 同じ `clientRequestKey`・同じ内容（通信失敗の再送、Stripe から戻ってもう一度押した） | 同じ予約。Session があれば、それを販売者の口座から読み戻して同じ `checkoutUrl` を返す（仮押さえの残りが新しい Session に足りなくても）。Session がまだ無ければ作る（予約ごとの Stripe の冪等キーで、作り直しても同じ Session） |
+| 無料予約の同じ `clientRequestKey`・同じ内容の再送 | 同じ確定予約に対する `/booking/return?type=instant&payment=free` を返す。Stripe Session は作らない |
 | 同じ key の Session が支払い済みで、webhook がまだ確定していない | 201、`checkoutUrl` はこのサイトの `/booking/return?type=instant` |
 | 同じ key の Session が期限切れ | 409 `UNAVAILABLE`（画面は残席を読み直して選び直す） |
 | 同じ key で内容が違う | 409 `REQUEST_MISMATCH` |
@@ -163,6 +164,8 @@ NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だ
 | 予約者（予約ページのセッション、第6段） | 無料取消の期限（開始の 24／48 時間前）までは「Cancel and get a full refund」。期限のあとと `NONE` は「Ask to cancel」（NIHO サポートへの依頼。予約は確定のまま。1 予約 1 回で、お断りのあとは頼み直せない）。体験が終わったあとは何もできない | 期限まで：全額。期限のあと：自動の返金なし（サポートが決める） |
 | 提供者の OWNER（予約・この回） | 確定した予約 1 件、または 1 回の確定した予約すべて（この回を中止。その回は新しい予約を受け付けなくなる。開始前だけ）。理由は決まった一覧から必ず選び、メモは任意で予約者には届かない | 常に全額（ホストの判断） |
 | NIHO サポート（Admin の「サイト予約」） | 確定した予約の取消（予約番号）、「Ask to cancel」の承認・お断り（言葉は予約者にメール）、確認待ち（`PAYMENT_REVIEW`）の解決、返金の送り直し・手作業で済んだ返金を閉じる | 全額、または入力した額の一部。確認待ちは受け取った額の全額 |
+
+合計0円の予約は返金するお金がないため、予約者は体験終了前ならいつでも取消できる。席は戻り、予約者とホストへ通常の取消通知を送るが、`booking_refunds` と決済台帳には行を作らない。ホスト・サポートによる取消も同じく返金なし。
 
 OWNER は予約の画面と同じ二重の確認（NIHO が OWNER と言い、experience DB にも現役の OWNER membership）。EDITOR・サブホスト・商品限定運営者は取り消せない。確認待ちはサポートだけが扱う（ホストからは取り消せない）。
 

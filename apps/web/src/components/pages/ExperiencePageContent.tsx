@@ -18,7 +18,7 @@ import { config, isPreview } from "@/lib/config";
 import { childParticipationCopy, hostBio, imageAlt } from "@/lib/experience-copy";
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import type { SearchParams } from "@/lib/filters";
-import { formatDuration, formatTime, formatYen } from "@/lib/format";
+import { formatDuration, formatExperiencePriceYen, formatTime } from "@/lib/format";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { addMinutesToClock, formatClock, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { seoDescription } from "@/lib/seo-description";
@@ -166,13 +166,18 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const preferredOfferId = typeof query.offer === "string" && e.offers.some((offer) => offer.id === query.offer) ? query.offer : undefined;
   const bookingHref = browseHref(`/experiences/${e.slug}/book`, browseContext, preferredOfferId);
   const sellerLegalUrl = safeHttpsUrl(e.seller.legalNoticeUrl);
+  const freeExperience = e.offers.length > 0 && e.offers.every((offer) =>
+    offer.pricing.adultPriceYen === 0 && (offer.pricing.child === null || offer.pricing.child.priceYen === 0)
+  );
   // One policy for every option: show it here so travelers see it before choosing a date.
   const firstPolicy = e.offers[0]?.cancellationPolicy;
   const sharedPolicy = firstPolicy && e.offers.every((offer) =>
     offer.cancellationPolicy.code === firstPolicy.code &&
     offer.cancellationPolicy.freeCancellationHoursBefore === firstPolicy.freeCancellationHoursBefore
   ) ? firstPolicy : null;
-  const policyTitle = sharedPolicy
+  const policyTitle = freeExperience
+    ? (locale === "ja" ? "無料予約は体験終了までいつでもキャンセルできます" : "Free bookings can be cancelled any time before the experience ends")
+    : sharedPolicy
     ? sharedPolicy.code === "NONE"
       ? copy.text("detail.nonRefundable")
       : locale === "ja" ? `開始${sharedPolicy.freeCancellationHoursBefore}時間前までキャンセル無料` : `Free cancellation until ${sharedPolicy.freeCancellationHoursBefore} hours before the start`
@@ -198,6 +203,9 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       : modes.size === 1 && modes.has("INSTANT")
         ? copy.text("booking.instantNote")
         : copy.text("detail.policyApplies");
+  const cancellationNote = freeExperience
+    ? (locale === "ja" ? "お支払いはありません。" : "No payment is due.")
+    : acceptanceNote;
   const adultPrices = e.offers.map((offer) => offer.pricing.adultPriceYen);
   const canBook = config.bookingsEnabled && e.booking.checkoutAvailable && japaneseBookingReady;
   const approval = e.offers.filter((offer) => offer.acceptanceMode === "APPROVAL").length;
@@ -225,7 +233,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const booking: BookingSummary = {
     slug: e.slug,
     offers: e.offers.map((offer) => ({ id: offer.id, name: offer.name, adultPriceYen: offer.pricing.adultPriceYen })),
-    price: adultPrices.length ? formatYen(Math.min(...adultPrices), locale) : "—",
+    price: adultPrices.length ? formatExperiencePriceYen(Math.min(...adultPrices), locale) : "—",
     priceIsFrom: new Set(adultPrices).size > 1,
     childNote: children.price,
     schedule: scheduleSummary(e.offers, locale),
@@ -459,12 +467,12 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
             ) : null}
 
             <Section title="Cancellation">
-              {sharedPolicy ? (
+              {freeExperience || sharedPolicy ? (
                 <div className="flex items-start gap-3.5 rounded-[22px] bg-sand p-5">
                   <HandIcon name="umbrella" className="size-[38px] text-moss" />
                   <div>
                     <p className="text-[1.0625rem] font-extrabold">{policyTitle}</p>
-                    <p className="mt-1 text-[0.9375rem] text-ink-soft">{acceptanceNote}</p>
+                    <p className="mt-1 text-[0.9375rem] text-ink-soft">{cancellationNote}</p>
                   </div>
                 </div>
               ) : (
@@ -543,7 +551,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       } : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
-      cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
+      cancellation: { policy: (freeExperience || sharedPolicy) && policyTitle ? { title: policyTitle, acceptanceNote: cancellationNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
       booking: includeBooking ? bookingCardModel(booking, <BookingDatesController summary={booking} />) : undefined,
       checkoutCancelled: !japaneseBookingReady ? <div className="mt-5"><Notice tone="warn" title={copy.text("booking.unavailableJa")} role="status" action={sale.kind === "niho" ? undefined : <EnglishPageLink slug={e.slug} />} /></div>
         : checkoutCancelled ? <div className="mt-5">{sale.kind === "site" ? <SiteCheckoutCancelled bookingHref={bookingHref} /> : <Notice tone="info" title={copy.text("detail.checkoutCancelled")} role="status" action={<Link href={bookingHref} className="font-bold text-moss underline underline-offset-4">{copy.text("detail.chooseDate")}</Link>} />}</div> : undefined,

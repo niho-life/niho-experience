@@ -70,7 +70,7 @@ export interface HostSessionProps {
   providerId: string | null;
   /**
    * Bookings made on this site (#285 slice 8b, experience DB, http mode): calling the session off cancels every
-   * confirmed booking with a full refund (slice 7, `providerId` is the provider shown). `messages`: each guest leads
+   * confirmed booking (paid bookings are refunded in full, slice 7, `providerId` is the provider shown). `messages`: each guest leads
    * to their booking's thread (slice 6b). `attendance`: 出欠 is kept in the experience DB (#107, its flag), sent for
    * `providerId`. `besideNiho`: NIHO's bookings are 予約's own and these are its `?source=site`, where "‹ 予約" goes
    * back. Absent in mock mode.
@@ -224,7 +224,7 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
  * (niho-app#19321) and show what it reads back, with NIHO's result for each booking.
  *
  * This site's bookings (`site`, #285 slices 8b and 7): the guests with their phones, words and payments under review
- * (確認待ち, counted with the participants as ホーム counts them), and, before the start, この回を中止 with full refunds;
+ * (確認待ち, counted with the participants as ホーム counts them), and, before the start, この回を中止 with paid bookings refunded;
  * afterwards each guest's row says how their booking was cancelled and where its refund is. With `site.attendance`
  * (#107) the capacity and 来た / 来なかった, kept in the experience DB one booking at a time: the screen shows what the
  * store kept, and a failure leaves the mark as it was.
@@ -283,10 +283,16 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   // OTA bookings are cancelled on their site (#194): calling the session off here leaves them as they are.
   const own = bookings.filter((booking) => !booking.ota);
   const otaGuests = bookings.length - own.length;
-  // This site's bookings are called off with their own action (full refunds, by the store), below.
+  // This site's bookings are called off with their own action (paid bookings are refunded by the store), below.
   const cancellable = !site && canCancelSession(own, phase, cancellation !== null);
   const siteConfirmed = site ? own.filter((booking) => booking.status === "confirmed") : [];
   const siteCancellable = Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
+  const siteRefundYen = siteConfirmed.reduce((total, booking) => total + booking.amountYen, 0);
+  const siteCancellationLabel = siteRefundYen === 0
+    ? "この回を中止する（無料予約を取り消す）"
+    : siteConfirmed.some((booking) => booking.amountYen === 0)
+      ? "この回を中止する（有料予約は全額返金）"
+      : "この回を中止する（全員に全額返金）";
 
   /** Live: the OWNER calls the session off; the store answers the session as it is now. */
   const cancelSite = async (choice: SiteCancelChoice) => {
@@ -534,7 +540,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
             {siteCancel.error ? <p role="alert" className="mb-2 text-[0.8125rem] leading-normal font-bold text-danger">{siteCancel.error}</p> : null}
             {siteCancellable ? (
               <button type="button" disabled={siteCancel.busy} aria-busy={siteCancel.busy || undefined} onClick={() => setAsking("siteCancel")} className={`${DANGER_BUTTON} mb-2 max-md:w-full`}>
-                {siteCancel.busy ? "中止しています…" : "この回を中止する（全員に全額返金）"}
+                {siteCancel.busy ? "中止しています…" : siteCancellationLabel}
               </button>
             ) : null}
             <p className="text-[0.8125rem] leading-normal text-ink-soft">{SITE_SESSION_SUPPORT_TEXT}</p>
@@ -561,7 +567,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
         <SiteSessionCancelDialog
           when={`${shortDateWithWeekdayJa(session.date)}${session.start}`}
           bookings={siteConfirmed.length}
-          refundYen={siteConfirmed.reduce((total, booking) => total + booking.amountYen, 0)}
+          refundYen={siteRefundYen}
           onConfirm={(choice) => void cancelSite(choice)}
           onClose={() => setAsking(null)}
         />

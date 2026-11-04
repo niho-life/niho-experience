@@ -6,7 +6,7 @@ import { NO_JOURNEY_EXTRAS, computeExpectedTotalYen, conditionConsentTexts, crea
 import { hostNames } from "@/lib/card-model";
 import { JOURNEY_PROBLEMS, askHostTarget, freeCancellationDeadline } from "@/lib/journey-ui";
 import { dayOption } from "@/lib/date-filter";
-import { formatDuration, formatYen } from "@/lib/format";
+import { formatDuration, formatExperiencePriceYen } from "@/lib/format";
 import { formatClock, occurrenceTiming } from "@/lib/schedule";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { track } from "@/lib/analytics";
@@ -259,15 +259,25 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
     invalidGuestEmail: invalidField === "guestEmail",
     invalidNote: invalidField === "note",
     approval,
+    ...(total === 0 ? {
+      actionLabel: locale === "ja" ? "無料で予約" : "Book for free",
+      reviewHeading: locale === "ja" ? "予約内容を確認" : "Review your booking",
+      totalNote: locale === "ja" ? "お支払いはありません" : "No payment is due",
+      confirmationNote: locale === "ja" ? "送信後すぐに予約が確定し、詳細をメールでお送りします。" : "Your booking is confirmed as soon as you submit this form.",
+      sellerNote: locale === "ja" ? `${experience.seller.displayName}が提供します。お支払いはありません。` : `Sold by ${experience.seller.displayName}. No payment is due.`,
+      paymentDisclosure: locale === "ja" ? "この予約にお支払いはありません。" : "No payment is due for this booking.",
+    } : {}),
     review: [
       { label: copy.text("booking.date"), value: `${when} JST` },
       { label: copy.text("booking.guests"), value: guests },
-      { label: copy.text("booking.adults"), value: copy.text("booking.adultRow", { count: selection.adultCount, price: formatYen(offer.pricing.adultPriceYen, locale) }) },
-      ...(selection.childCount && offer.pricing.child ? [{ label: copy.text("booking.children"), value: copy.text("booking.childRow", { count: selection.childCount, price: formatYen(offer.pricing.child.priceYen, locale) }) }] : []),
-      ...(freeCancellation ? [{ label: "Free cancellation", value: freeCancellation.state === "until" ? `Until ${freeCancellation.label}` : "Not available for this date" }] : []),
+      { label: copy.text("booking.adults"), value: copy.text("booking.adultRow", { count: selection.adultCount, price: formatExperiencePriceYen(offer.pricing.adultPriceYen, locale) }) },
+      ...(selection.childCount && offer.pricing.child ? [{ label: copy.text("booking.children"), value: copy.text("booking.childRow", { count: selection.childCount, price: formatExperiencePriceYen(offer.pricing.child.priceYen, locale) }) }] : []),
+      ...(total !== 0 && freeCancellation ? [{ label: "Free cancellation", value: freeCancellation.state === "until" ? `Until ${freeCancellation.label}` : "Not available for this date" }] : []),
     ],
-    total: total === null ? copy.text("booking.totalUnavailable") : formatYen(total, locale),
-    policyTitle: policyTitle(offer.cancellationPolicy, locale),
+    total: total === null ? copy.text("booking.totalUnavailable") : formatExperiencePriceYen(total, locale),
+    policyTitle: total === 0
+      ? locale === "ja" ? "無料予約は体験終了までいつでもキャンセルできます" : "Free bookings can be cancelled any time before the experience ends"
+      : policyTitle(offer.cancellationPolicy, locale),
     sellerName: experience.seller.displayName,
     sellerLegalUrl: sellerLegalUrl ?? undefined,
     legalDocuments,

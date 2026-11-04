@@ -124,6 +124,7 @@ export type BookingNoticeEmail =
       readonly reason: string | null;
       /** The refund requested with the cancellation (and not failed), in the currency's smallest unit; 0 for none. */
       readonly refundAmount: number;
+      readonly totalAmount: number;
       readonly currency: string;
     })
   | (BookingNoticeFacts & { readonly kind: "REFUNDED"; readonly amount: number; readonly currency: string })
@@ -256,6 +257,7 @@ function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
       cancelledBy: by,
       reason: typeof row.cancellation_reason === "string" ? row.cancellation_reason : null,
       refundAmount: count(row.refunding_amount ?? 0, "refunding_amount"),
+      totalAmount: count(record(row.pricing_snapshot).totalAmount, "pricing_snapshot.totalAmount"),
       currency: text(record(row.pricing_snapshot).currency, "pricing_snapshot.currency"),
     };
   }

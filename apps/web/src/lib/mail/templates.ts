@@ -133,11 +133,13 @@ export function bookingConfirmationEmail(
   const experience = oneLine(email.experienceTitle);
   const host = oneLine(email.hostDisplayName);
   const time = `${email.localStartTime} ${zoneName(email.timeZone)}`;
-  const policy = cancellationTermsWords(email, options.now);
+  const policy = email.totalAmount === 0
+    ? "You can cancel this free booking any time before the experience ends."
+    : cancellationTermsWords(email, options.now);
   const grant = options.bookingPageGrant;
   return mail(`Your booking is confirmed: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, [
     { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
-    { kind: "p", text: "Your booking is confirmed and paid. Here are the details." },
+    { kind: "p", text: email.totalAmount === 0 ? "Your free booking is confirmed. No payment is due." : "Your booking is confirmed and paid. Here are the details." },
     {
       kind: "facts",
       rows: [
@@ -145,7 +147,7 @@ export function bookingConfirmationEmail(
         ["Date", calendarDate(email.localDate, DATE_LONG)],
         ["Time", time],
         ["Guests", party(email.adultCount, email.childCount)],
-        ["Total paid", money(email.totalAmount, email.currency)],
+        [email.totalAmount === 0 ? "Total" : "Total paid", email.totalAmount === 0 ? "Free" : money(email.totalAmount, email.currency)],
         ["Host", host],
         ["Booking reference", email.publicBookingId],
       ],
@@ -259,7 +261,7 @@ export function bookingNoticeEmail(email: BookingNoticeEmail, options: { readonl
     const host = oneLine(email.hostDisplayName);
     const refund = email.refundAmount > 0
       ? `We've started a refund of ${money(email.refundAmount, email.currency)} to the card you paid with. We'll email you again when it's done.`
-      : "No refund is due for this booking.";
+      : email.totalAmount === 0 ? "No payment was required, so no refund is due." : "No refund is due for this booking.";
     return mail(`Your booking is cancelled: ${experience}, ${when}`, [
       greeting,
       { kind: "p", text: cancelledBy({ cancelledBy: email.cancelledBy, cancellationReason: email.reason, hostDisplayName: host }) },
