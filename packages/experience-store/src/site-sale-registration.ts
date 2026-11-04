@@ -179,8 +179,10 @@ function sameProduct(product: ProductRecord, input: RegisterProductInput): boole
 function sameTerms(current: ProductSaleTerms, next: NormalizedProductSaleTermsInput, fingerprint: string): boolean {
   const child = (value: ProductSaleTermsInput["childPricing"]) =>
     value === null ? null : [value.priceYen, value.minAge, value.maxAge, value.adultRequired];
+  // An empty set clears overrides, so it matches only a product already on the base price.
   const pricesEqual = next.offerPrices === undefined || next.offerPrices === null
-    || JSON.stringify(current.offerPrices) === JSON.stringify([...next.offerPrices].sort((a, b) => a.offerId.localeCompare(b.offerId)));
+    || (next.offerPrices.length === 0 ? current.offerPrices === null
+      : JSON.stringify(current.offerPrices) === JSON.stringify([...next.offerPrices].sort((a, b) => a.offerId.localeCompare(b.offerId))));
   return pricesEqual && JSON.stringify(child(current.childPricing)) === JSON.stringify(child(next.childPricing))
     && current.minimumParticipants === next.minimumParticipants
     && current.minimumChargeableParticipants === next.minimumChargeableParticipants

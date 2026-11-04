@@ -470,7 +470,12 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await refreshTestPublication(pool, "provider-a", "walk");
       assert.equal(await guests.publicBookingTerms("sample-walk"), null);
       assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
+      // A paid child price below Stripe's minimum stays off sale even when an adult must come; ¥50 is chargeable.
       await pool.query("UPDATE experience_product_sale_terms SET child_adult_required=true,version=version+1 WHERE product_id='walk'");
+      await refreshTestPublication(pool, "provider-a", "walk");
+      assert.equal(await guests.publicBookingTerms("sample-walk"), null);
+      assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
+      await pool.query("UPDATE experience_product_sale_terms SET child_price_amount=50,version=version+1 WHERE product_id='walk'");
       await refreshTestPublication(pool, "provider-a", "walk");
       assert.notEqual(await guests.publicBookingTerms("sample-walk"), null);
       assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), ["sample-walk"]);
