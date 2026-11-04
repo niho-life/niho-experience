@@ -120,7 +120,7 @@ function SiteBookings({ site, provider, linkProviderId, niho, ota }: { site: Exc
       feeSummaryEnabled={false}
       translateEnabled={translateRoomsEnabled()}
       conversations={[]}
-      live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview }}
+      live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview, readOnly: site.readOnly }}
       niho={niho}
       ota={ota}
     />
@@ -132,9 +132,9 @@ function SiteBookings({ site, provider, linkProviderId, niho, ota }: { site: Exc
  * can do with it. The filter, the experience and the booking are the screen's own query: the
  * client screen reads them and moves between them without loading this page again.
  *
- * With EXPERIENCE_GUEST_BOOKING_ENABLED (http mode), the OWNER also sees the bookings travelers made on this
- * site (#285 slice 8): in place of the 準備中 screen while NIHO's bookings are not connected, or with NIHO's on
- * one list (#84, mock v2's one list; `?source=site`, which この回 and older links carry, is the same list).
+ * With EXPERIENCE_GUEST_BOOKING_ENABLED, the OWNER also sees the bookings travelers made on this site (#285 slice 8).
+ * With only EXPERIENCE_TRANSLATE_API_ENABLED, the same existing bookings are read-only for the interpreter flow.
+ * They replace the 準備中 screen while NIHO's bookings are not connected, or join NIHO's on one list (#84).
  * Anyone else, or an OWNER the experience DB does not know, keeps NIHO's list (HostLiveBookings). The preview
  * shows synthetic bookings made on this site with `?mock=site-bookings`.
  *

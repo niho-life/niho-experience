@@ -119,7 +119,7 @@ export interface HostBookingsProps {
    * slice 6b; メッセージ opens the booking's thread, or its empty one). `preview`: the preview's synthetic ones
    * (`?mock=site-bookings`), read only. Absent in mock mode otherwise.
    */
-  live?: { nextCursor: string | null; messages?: boolean; preview?: boolean } | null;
+  live?: { nextCursor: string | null; messages?: boolean; preview?: boolean; readOnly?: boolean } | null;
   /**
    * NIHO's bookings beside this site's (#84, provider operations on): read from NIHO in the browser and put on the
    * same list, each with NIHO's channel ("NIHO", "NIHO（体験サイト）"). One of them opens NIHO's booking
@@ -361,7 +361,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
             </PageHead>
             {live ? (
               <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">
-                {niho ? "NIHO の予約と、このサイトで受けた予約です。申込経路で見分けられます" : "このサイトで受けた予約です"}
+                {live.readOnly && !live.preview ? "予約は閲覧のみです。通訳の開始・参加状況・終了だけ行えます" : niho ? "NIHO の予約と、このサイトで受けた予約です。申込経路で見分けられます" : "このサイトで受けた予約です"}
               </p>
             ) : null}
             {ota ? <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">{OTA_BOOKINGS_LIST_TEXT}</p> : null}
@@ -510,7 +510,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 onDecline={() => {
                   if (change(shownSite.id, declineBooking)) report(shownSite.id, "申込をお断りしました");
                 }}
-                onSiteCancel={live && !live.preview && shownSite.site ? (choice) => void cancelSite(shownSite.id, choice) : undefined}
+                onSiteCancel={live && !live.preview && !live.readOnly && shownSite.site ? (choice) => void cancelSite(shownSite.id, choice) : undefined}
                 siteCancel={siteCancel?.bookingId === shownSite.id ? siteCancel : undefined}
                 onCancel={(cancellation: BookingCancellation) => {
                   const done = change(shownSite.id, (booking, at) => cancelBooking(booking, cancellation, at));
