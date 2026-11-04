@@ -52,6 +52,7 @@ const { FLAGS, CAPABILITIES, resolveDeployFlags, outputsOf, tableNames } = await
 
 const SITE: Record<Target, string> = { stg: "https://niho-experience-host-stg-sample-an.a.run.app", prod: "https://experience.niho.life" };
 const PREFIX: Record<Target, string> = { stg: "STG", prod: "PROD" };
+const NIHO_API_AUDIENCE: Record<Target, string> = { stg: "https://api-stg.niho.life", prod: "https://api.niho.life" };
 const SETTING: Record<string, string> = {
   consentVersion: "sample-terms-2026-11",
   bucketName: "experience-test-public-media",
@@ -143,7 +144,12 @@ function revision(target: Target, resolved: Resolved): Record<string, string> {
   return { ...BASE, SITE_URL: SITE[target], ...resolved.env, ...Object.fromEntries(Object.keys(resolved.secrets).map((name) => [name, SECRET_VALUE[name] ?? `synthetic-${name.toLowerCase()}`])) };
 }
 
-const resolve = (target: Target, vars: Vars, hostConsole = true) => resolveDeployFlags({ target, vars, hostConsole, siteUrl: SITE[target] });
+const resolve = (target: Target, vars: Vars, hostConsole = true) => resolveDeployFlags({
+  target,
+  vars: { [`${PREFIX[target]}_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE`]: NIHO_API_AUDIENCE[target], ...vars },
+  hostConsole,
+  siteUrl: SITE[target],
+});
 
 describe("the deploy workflows' feature flags", () => {
   it("keeps the two article service callers in one deployment value", () => {
@@ -166,6 +172,7 @@ describe("the deploy workflows' feature flags", () => {
     const resolved = resolve("prod", vars);
     expect(resolved.problems).toEqual([]);
     expect(resolved.env).toEqual({
+      NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.prod,
       GUIDE_ADMIN_API_ENABLED: "true",
       GUIDE_ADMIN_AUDIENCE: "https://niho-experience-sample-an.a.run.app",
       GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "guide-admin@sample-project.iam.gserviceaccount.com",
@@ -206,9 +213,23 @@ describe("the deploy workflows' feature flags", () => {
     expect(vars.STG_GUEST_BOOKING_ENABLED).toBeUndefined();
     const resolved = resolve("stg", vars);
     expect(resolved.problems).toEqual([]);
-    expect(resolved.env).toEqual({ EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_PWA_ENABLED: "true" });
+    expect(resolved.env).toEqual({ NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg, EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_PWA_ENABLED: "true" });
     expect(resolved.secrets).toEqual({});
     expect(resolveConfig(revision("stg", resolved))).toMatchObject({ guestBookingEnabled: false, experienceTranslateApiEnabled: true });
+  });
+  it("requires the NIHO API audience whenever the host console is deployed, independently of publication flags", () => {
+    const variable = "STG_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE";
+    const input = { target: "stg" as const, hostConsole: true, siteUrl: SITE.stg };
+    const missing = resolveDeployFlags({ ...input, vars: {} });
+    expect(missing.problems.join(" ")).toContain(variable);
+    expect(missing.on).toEqual(["HOST_PWA_ENABLED"]);
+    expect(missing.env).toEqual({ HOST_PWA_ENABLED: "true" });
+    const malformed = resolveDeployFlags({ ...input, vars: { [variable]: "https://experience.niho.life/path?secret" } });
+    expect(malformed.problems.join(" ")).toContain(variable);
+    expect(malformed.problems.join(" ")).not.toContain("?secret");
+    const valid = resolve("stg", {});
+    expect(valid.problems).toEqual([]);
+    expect(valid.env).toEqual({ NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg, HOST_PWA_ENABLED: "true" });
   });
   it("covers every flag of the table with a config setting", () => {
     expect(FLAGS.map((flag) => flag.env).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
@@ -216,9 +237,9 @@ describe("the deploy workflows' feature flags", () => {
   });
 
   it("keeps everything off by default (staging keeps the app it always had)", () => {
-    expect(resolve("prod", {})).toEqual({ problems: [], on: [], env: {}, secrets: {}, names: tableNames() });
-    expect(resolve("stg", {})).toMatchObject({ problems: [], on: ["HOST_PWA_ENABLED"], env: { HOST_PWA_ENABLED: "true" }, secrets: {} });
-    expect(resolve("stg", { STG_HOST_PWA_ENABLED: "false" })).toMatchObject({ problems: [], on: [], env: {} });
+    expect(resolve("prod", {})).toEqual({ problems: [], on: [], env: { NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.prod }, secrets: {}, names: tableNames() });
+    expect(resolve("stg", {})).toMatchObject({ problems: [], on: ["HOST_PWA_ENABLED"], env: { NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg, HOST_PWA_ENABLED: "true" }, secrets: {} });
+    expect(resolve("stg", { STG_HOST_PWA_ENABLED: "false" })).toMatchObject({ problems: [], on: [], env: { NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg } });
     // Variables of the other workflow are not read.
     expect(resolve("prod", { STG_GUEST_REVIEWS_ENABLED: "true" }).on).toEqual([]);
   });
@@ -319,7 +340,14 @@ describe("the deploy workflows' feature flags", () => {
     expect(outputs.secrets).toMatch(/^[A-Z][A-Z0-9_]*=[A-Za-z0-9_-]+:[1-9][0-9]*(,[A-Z][A-Z0-9_]*=[A-Za-z0-9_-]+:[1-9][0-9]*)*$/);
     expect(JSON.parse(outputs.expected_env!)).toEqual(resolved.env);
     expect(JSON.parse(outputs.expected_secrets!)).toEqual(resolved.secrets);
-    expect(outputsOf(resolve("prod", {}))).toEqual({ env: "", secrets: "", expected_env: "{}", expected_secrets: "{}", names: JSON.stringify(tableNames()), summary: "none" });
+    expect(outputsOf(resolve("prod", {}))).toEqual({
+      env: `NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE=${NIHO_API_AUDIENCE.prod}`,
+      secrets: "",
+      expected_env: JSON.stringify({ NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.prod }),
+      expected_secrets: "{}",
+      names: JSON.stringify(tableNames()),
+      summary: "none",
+    });
   });
 
   it("runs as the workflows run it: outputs to $GITHUB_OUTPUT, or every problem as an error and exit 1", () => {
@@ -327,12 +355,12 @@ describe("the deploy workflows' feature flags", () => {
     try {
       const output = join(dir, "output");
       const run = (vars: Vars, args: string[]) => spawnSync(process.execPath, [SCRIPT, ...args], { env: { ...process.env, DEPLOY_VARS: JSON.stringify(vars), GITHUB_OUTPUT: output }, encoding: "utf8" });
-      const ok = run({ PROD_GUEST_REVIEWS_ENABLED: "true", PROD_GCP_PROJECT_ID: "niho-app-prd" }, ["--target", "prod", "--host-console", "true", "--site-url", SITE.prod]);
+      const ok = run({ PROD_GUEST_REVIEWS_ENABLED: "true", PROD_GCP_PROJECT_ID: "niho-app-prd", PROD_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.prod }, ["--target", "prod", "--host-console", "true", "--site-url", SITE.prod]);
       expect(ok.status).toBe(0);
       expect(ok.stdout).toContain("Feature flags on: EXPERIENCE_GUEST_REVIEWS_ENABLED");
       const lines = readFileSync(output, "utf8").trim().split("\n");
       expect(lines.map((line) => line.slice(0, line.indexOf("=")))).toEqual(["env", "secrets", "expected_env", "expected_secrets", "names", "summary"]);
-      expect(lines[0]).toBe("env=EXPERIENCE_GUEST_REVIEWS_ENABLED=true");
+      expect(lines[0]).toBe(`env=EXPERIENCE_GUEST_REVIEWS_ENABLED=true,NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE=${NIHO_API_AUDIENCE.prod}`);
       const bad = run({ PROD_GUEST_BOOKING_ENABLED: "true", PROD_MAIL_FROM: "secret-looking@example.com" }, ["--target", "prod", "--host-console", "false", "--site-url", SITE.prod]);
       expect(bad.status).toBe(1);
       expect(bad.stdout).toMatch(/^::error title=Deploy flags::EXPERIENCE_GUEST_BOOKING_ENABLED \(PROD_GUEST_BOOKING_ENABLED\) needs enable_host_calendar=true$/m);

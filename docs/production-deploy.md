@@ -53,6 +53,7 @@ mock で出している機能を http mode で開くフラグを、repository va
   - 下の「前提」のフラグが ON か。ホストの画面と DB は `enable_host_calendar=true` のときだけ配線されるので、`false` の候補ではどのフラグも ON にできない
   - 要る設定の形と、Secret の参照が `secret-name:数字version` か
   - 前提は `apps/web/src/lib/resolve-config.ts` の規則と同じ。加えて、予約にはメールを要る（確認メールと予約ページのため）。`apps/web/src/lib/deploy-runtime-flags.test.ts` が、表の各フラグの出力を `resolveConfig` に通して、起動が失敗せずフラグが ON になることを確かめる
+- **host consoleの基礎設定**：`enable_host_calendar=true` なら `PROD_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE=https://api.niho.life` を常に設定する。NIHO本人確認のservice ID token向けaudienceであり、Experience公開API flagとは独立する。Host v1 APIが未配備・未受入なら `HOST_PUBLICATION_API_ENABLED` はOFFのまま。
 - **配備後の検証**：候補の revision の環境変数と Secret の参照のうち、表が扱う名前が、script の期待と完全に一致することを確かめる（余分なフラグも欠けも失敗）。昇格のときも variable を読み直して同じ検査をするので、候補を作ったあとで variable を変えると昇格は止まる。
 - **本番の `BOOKINGS_ENABLED` は `false` のまま**：予約のフラグを ON にしても checkout は `UNAVAILABLE` を返す。販売の開始は下の「個別ゲートと切戻し」の「予約・販売」で別に判断する。
 
@@ -61,7 +62,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_GUEST_BOOKING_ENABLED` | `GUEST_BOOKING_ENABLED` | ホストの画面・DB、メール | `BOOKING_CONSENT_VERSION`、`PRIVACY_POLICY_URL`（任意） | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | — |
 | `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*` | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
 | `EXPERIENCE_PUBLICATIONS_ENABLED` | `PUBLICATIONS_ENABLED` | ホストの画面・DB | `PUBLICATION_CONSENT_VERSION`、`PUBLIC_MEDIA_BUCKET` | DB capability → `EXPERIENCE_DATABASE_URL` | — |
-| `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `HOST_PUBLICATION_API_ENABLED` | Experience publications | `NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE` | — | — |
+| `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `HOST_PUBLICATION_API_ENABLED` | Experience publications | — | — | — |
 | `EXPERIENCE_PROVIDER_PAGES_API_ENABLED` | `PROVIDER_PAGES_API_ENABLED` | legacy NIHO provider-pages consumer（有効化禁止） | — | — | — |
 | `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `PROVIDER_OPERATIONS_API_ENABLED` | ホストの画面・DB | — | — | — |
 | `EXPERIENCE_TRANSLATE_API_ENABLED` | `TRANSLATE_API_ENABLED` | ホストの画面・DB | — | — | — |
