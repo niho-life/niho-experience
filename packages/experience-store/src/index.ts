@@ -27,11 +27,17 @@ export type {
   ExperiencePublicationDraftCreateInput,
   ExperienceHostMediaAsset,
   ExperienceHostMediaAssetInput,
+  ExperienceHostMediaSelectionInput,
+  ExperienceHostProviderMedia,
+  ExperienceHostProviderMediaAsset,
+  ExperienceHostProviderMediaAssetInput,
+  ExperienceHostProviderMediaSelectionInput,
   ProviderPublicationReadiness,
   ProviderPublicationReadinessInput,
   PublicationOperationsActor,
   PublicExperiencePublication,
   PublicExperienceMediaAsset,
+  PublicExperienceProviderMedia,
 } from "./experience-publication.ts";
 export type { BookingTermsSnapshot } from "./types.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
@@ -63,6 +69,7 @@ export {
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseGoogleCalendarAttentionPayload,
+  parseGuestEmailDeliveryFailedPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
@@ -76,6 +83,7 @@ export type {
   ClaimedHostNotification,
   DayBeforeSummaryPayload,
   GoogleCalendarAttentionPayload,
+  GuestEmailDeliveryFailedPayload,
   GuestMessagePayload,
   GuestQuestionPayload,
   HostNotificationTopic,
@@ -123,7 +131,7 @@ export type { GuestBookingMeetingGuide, GuestMeetingGuide, VersionedGuestMeeting
 export { BOOKING_ATTENDANCE_STATUSES, REVIEW_INVITATION_TOPIC, BookingAttendance } from "./booking-attendance.ts";
 export type { AttendanceRecordOutcome, AttendanceRecordResult, BookingAttendanceMark, BookingAttendanceStatus, HostSessionAttendance } from "./booking-attendance.ts";
 export { GUEST_MAIL_LIMITS, GUEST_MAIL_TOPIC, MEETING_GUIDE_DAY_BEFORE_TOPIC, GuestMailOutbox } from "./guest-mail-outbox.ts";
-export type { BookingMeetingGuideEmail, BookingMeetingGuideClaim, ClaimedBookingMeetingGuide } from "./guest-mail-outbox.ts";
+export type { BookingMeetingGuideEmail, BookingMeetingGuideClaim, ClaimedBookingMeetingGuide, GuestMailDeliveryFeedback, GuestMailDeliveryFeedbackResult } from "./guest-mail-outbox.ts";
 export { GUEST_TRANSLATION_LIMITS, GUEST_TRANSLATION_TOPIC, GuestQuestionTranslations } from "./guest-question-translations.ts";
 export type { ClaimedGuestTranslation, GuestTranslationClaim, GuestTranslationRetry } from "./guest-question-translations.ts";
 export type {

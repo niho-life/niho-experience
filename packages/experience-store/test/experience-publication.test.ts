@@ -54,7 +54,7 @@ const row = (disclosure: "PUBLIC" | "AFTER_BOOKING") => ({
   currency: "JPY",
   unit_amount: "4000",
   seller_display_name: "Synthetic Legal Seller",
-  photos: [{ asset_id: "00000000-0000-4000-8000-000000000401", alt_text: "Synthetic photo", public_credit: null }],
+  photos: [{ asset_id: "00000000-0000-4000-8000-000000000401", source_position: 0, placement: "GALLERY", alt_text: "Synthetic photo", alt_text_ja: "合成写真", public_credit: null }],
   published_at: "2026-11-03T00:00:00.000Z",
 });
 
@@ -63,9 +63,13 @@ describe("experience publication public projection", () => {
     const projected = projectPublicExperiencePublication(row("PUBLIC"));
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
-      "currency", "unitAmount", "sellerDisplayName", "photos", "publishedAtUtc",
+      "currency", "unitAmount", "sellerDisplayName", "photos", "providerPhoto", "businessLogo", "japanese", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
+    assert.deepEqual(projected?.photos, [{
+      src: "/api/public/experience-media/00000000-0000-4000-8000-000000000401",
+      alt: "Synthetic photo", altJa: "合成写真", publicCredit: null,
+    }]);
     assert.deepEqual(Object.keys(projected?.content ?? {}), [
       "lead", "description", "facts", "highlights", "included", "notIncluded", "knowBeforeYouGo",
       "notSuitableFor", "timeline",
@@ -83,6 +87,25 @@ describe("experience publication public projection", () => {
     assert.equal(projected?.meetingPointDisclosure, "AFTER_BOOKING");
     assert.equal(projected?.meetingPoint, null);
     assert.doesNotMatch(JSON.stringify(projected), /PRIVATE_(ADDRESS|ACCESS|ENTRANCE)|private-map-sentinel/);
+  });
+
+  it("projects seller profile media separately from product gallery and omits unset assets", () => {
+    const projected = projectPublicExperiencePublication({
+      ...row("AFTER_BOOKING"),
+      provider_media: [
+        { asset_id: "00000000-0000-4000-8000-000000000402", placement: "PROVIDER_PHOTO", alt_text: "Seller portrait", alt_text_ja: "販売者の写真", public_credit: null },
+        { asset_id: "00000000-0000-4000-8000-000000000403", placement: "BUSINESS_LOGO", alt_text: "Seller logo", alt_text_ja: "販売者のロゴ", public_credit: "Synthetic designer" },
+      ],
+    });
+    assert.deepEqual(projected?.providerPhoto, {
+      src: "/api/public/experience-provider-media/00000000-0000-4000-8000-000000000402",
+      alt: "Seller portrait", altJa: "販売者の写真", publicCredit: null,
+    });
+    assert.deepEqual(projected?.businessLogo, {
+      src: "/api/public/experience-provider-media/00000000-0000-4000-8000-000000000403",
+      alt: "Seller logo", altJa: "販売者のロゴ", publicCredit: "Synthetic designer",
+    });
+    assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_media: [] })?.providerPhoto, null);
   });
 
   it("fails closed when an approved content field has the wrong shape", () => {

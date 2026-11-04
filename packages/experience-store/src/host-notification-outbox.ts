@@ -21,6 +21,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   googleCalendarAttention: "host.notify.google_calendar_attention",
   otaBooking: "host.notify.ota_booking",
   newReview: "host.notify.new_review",
+  guestEmailDeliveryFailed: "host.notify.guest_email_delivery_failed",
   dayBeforeSummary: "host.notify.day_before_summary",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
@@ -95,6 +96,16 @@ export interface NewReviewPayload {
   readonly experienceTitle: string;
 }
 
+/** A guest booking email was rejected by the recipient's mail server. No guest identifier or address is included. */
+export interface GuestEmailDeliveryFailedPayload {
+  readonly v: 1;
+  readonly bookingId: string;
+  readonly classification: "NO_SUCH_ADDRESS" | "NO_SUCH_DOMAIN" | "REJECTED_BY_SERVER" | "MAILBOX_FULL" | "TEMPORARY_FAILED" | "OTHER";
+  readonly experienceTitle: string;
+  readonly startsAt: string;
+  readonly seats: number;
+}
+
 /** One provider's counts for confirmed bookings on a Japan-local date. No guest or product details. */
 export interface DayBeforeSummaryPayload {
   readonly v: 1;
@@ -163,6 +174,7 @@ const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
 const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
 const NEW_REVIEW_KEYS = ["experienceTitle", "reviewId", "v"];
+const GUEST_EMAIL_DELIVERY_FAILED_KEYS = ["bookingId", "classification", "experienceTitle", "seats", "startsAt", "v"];
 const DAY_BEFORE_SUMMARY_KEYS = ["bookingCount", "localDate", "participantCount", "v"];
 const OTA_BOOKING_KEYS = ["change", "experienceTitle", "productId", "ref", "seats", "site", "startsAt", "v"];
 const OTA_SITE = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
@@ -240,6 +252,14 @@ export function parseNewReviewPayload(value: unknown): NewReviewPayload | null {
   if (!isRecord(value) || !hasExactKeys(value, NEW_REVIEW_KEYS) || value.v !== 1) return null;
   if (typeof value.reviewId !== "string" || !HOST_REF.test(value.reviewId) || !title(value.experienceTitle)) return null;
   return { v: 1, reviewId: value.reviewId, experienceTitle: value.experienceTitle };
+}
+
+export function parseGuestEmailDeliveryFailedPayload(value: unknown): GuestEmailDeliveryFailedPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, GUEST_EMAIL_DELIVERY_FAILED_KEYS) || value.v !== 1) return null;
+  const { bookingId, classification, experienceTitle, startsAt, seats: count } = value;
+  if (!HOST_REF.test(String(bookingId)) || !title(experienceTitle) || !storedInstant(startsAt) || !seats(count)) return null;
+  if (!["NO_SUCH_ADDRESS", "NO_SUCH_DOMAIN", "REJECTED_BY_SERVER", "MAILBOX_FULL", "TEMPORARY_FAILED", "OTHER"].includes(String(classification))) return null;
+  return { v: 1, bookingId: String(bookingId), classification: classification as GuestEmailDeliveryFailedPayload["classification"], experienceTitle, startsAt, seats: count };
 }
 
 export function parseDayBeforeSummaryPayload(value: unknown): DayBeforeSummaryPayload | null {

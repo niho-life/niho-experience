@@ -6,12 +6,10 @@ import { isoValue, type DbRow } from "./rows.ts";
 import { assertCanonicalInstant } from "./validation.ts";
 
 /*
- * 売上 for bookings travelers made on this site (#91, ADR 0002): what the provider's OWNER reads of the payment
- * ledger (payment_ledger_entries). One entry per movement of money on the seller's Connect account: the guest's
- * payment, a refund Stripe accepted, and the reversal of a refund Stripe failed after accepting it. Each comes with
- * NIHO's fee it moved and what it moved for the provider. Read only: the payment webhook and the refunds write the
- * ledger (repository.ts, booking-cancellations.ts). Payouts to the bank are the Connect account's, kept by Stripe
- * and not here. Never the guest's email address; their name only while it is kept. No Stripe IDs leave the store.
+ * 売上 for bookings travelers made on this site (#91, ADR 0002): money movements from the provider's payment ledger,
+ * plus zero-amount rows for confirmed free bookings. Free bookings are not ledger entries and never create money
+ * movements. Read only. Payouts to the bank are the Connect account's, kept by Stripe and not here. Never the guest's
+ * email address; their name only while it is kept. No Stripe IDs leave the store.
  */
 
 export const HOST_SALES_LIMITS = {
@@ -23,7 +21,7 @@ export const HOST_SALES_LIMITS = {
   payoutAccounts: 5,
 } as const;
 
-export type HostSaleEntryKind = "PAYMENT" | "REFUND" | "REFUND_REVERSAL" | "ADJUSTMENT";
+export type HostSaleEntryKind = "PAYMENT" | "REFUND" | "REFUND_REVERSAL" | "ADJUSTMENT" | "FREE_BOOKING";
 
 export interface HostSaleRefund {
   readonly kind: "FULL" | "PARTIAL";
@@ -33,17 +31,17 @@ export interface HostSaleRefund {
 
 export interface HostSaleEntry {
   /**
-   * Stable and free of Stripe's IDs: `payment:{publicBookingId}` (a booking has one payment), `refund:{refundId}`,
-   * `refund-reversal:{refundId}`, `adjustment:{digest}`.
+   * Stable and free of Stripe's IDs: `payment:{publicBookingId}`, `refund:{refundId}`, `refund-reversal:{refundId}`,
+   * `adjustment:{digest}`, or `free-booking:{publicBookingId}`.
    */
   readonly key: string;
   /**
    * PAYMENT: the guest paid (also a payment under review). REFUND: Stripe accepted a refund (pending or done).
    * REFUND_REVERSAL: Stripe failed a refund it had accepted, and the money came back. ADJUSTMENT: anything else
-   * the ledger has (a dispute), kept as it is.
+   * the ledger has (a dispute), kept as it is. FREE_BOOKING is a zero-amount booking activity, not a ledger movement.
    */
   readonly kind: HostSaleEntryKind;
-  /** Signed as the ledger has it, in the currency's minor unit: a payment and a reversal add, a refund takes away. */
+  /** Signed ledger amount in the currency's minor unit; FREE_BOOKING is activity only and always has amount zero. */
   readonly amount: number;
   readonly currency: string;
   readonly occurredAtUtc: string;
@@ -138,19 +136,48 @@ const SELECT_SALES = `
    ORDER BY l.occurred_at DESC, (l.entry_id LIKE '${REVERSAL_PREFIX}%')::int DESC, l.entry_id DESC
    LIMIT $5`;
 
+/** Free bookings are booking activity, not payment-ledger rows. Keep them visible at ¥0 without inventing a charge. */
+const SELECT_FREE_BOOKINGS = `
+  SELECT b.public_booking_id::text AS public_booking_id, b.status, b.created_at,
+         b.occurrence_snapshot->>'localDate' AS local_date, b.occurrence_snapshot->>'localStartTime' AS local_start_time,
+         b.pricing_snapshot->>'currency' AS currency,
+         p.public_title, g.adult_count, g.child_count, g.guest_name, g.pii_erased_at IS NOT NULL AS erased
+    FROM bookings b
+    JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+    JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+   WHERE b.provider_id = $1 AND b.status IN ('CONFIRMED', 'CANCELLED')
+     AND b.pricing_snapshot->>'totalAmount' = '0'
+     AND (b.pricing_snapshot->>'paymentRequired' = 'false' OR b.pricing_snapshot->>'paymentRequired' IS NULL)
+     AND b.created_at >= $2::timestamptz AND b.created_at < $3::timestamptz
+   ORDER BY b.created_at DESC, b.public_booking_id DESC
+   LIMIT $4`;
+
 export async function selectSales(client: PoolClient, providerId: string, window: HostSalesWindowOptions): Promise<HostSalesWindow> {
   const rows = await client.query<DbRow>(SELECT_SALES, [providerId, HOST_GUEST_BOOKING_STATUSES, window.from, window.to, HOST_SALES_LIMITS.entries + 1]);
   if (rows.rows.length > HOST_SALES_LIMITS.entries) throw new StoreError("The sales window has more ledger entries than one read takes.");
+  const freeRows = await client.query<DbRow>(SELECT_FREE_BOOKINGS, [providerId, window.from, window.to, HOST_SALES_LIMITS.entries + 1]);
+  if (freeRows.rows.length > HOST_SALES_LIMITS.entries) throw new StoreError("The sales window has more free bookings than one read takes.");
+  const entries = [...rows.rows.map(saleEntryFromRow), ...freeRows.rows.map(freeBookingEntryFromRow)]
+    .sort((a, b) => Date.parse(b.occurredAtUtc) - Date.parse(a.occurredAtUtc) || a.key.localeCompare(b.key));
+  if (entries.length > HOST_SALES_LIMITS.entries) throw new StoreError("The sales window has more entries than one read takes.");
   const first = await client.query<DbRow>(
-    `SELECT min(l.occurred_at) AS first_at
-       FROM payment_ledger_entries l
-       JOIN bookings b ON b.provider_id = l.provider_id AND b.id = l.booking_id
-       JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
-      WHERE l.provider_id = $1 AND b.status = ANY($2::text[])`,
+    `SELECT min(activity.occurred_at) AS first_at FROM (
+       SELECT l.occurred_at
+         FROM payment_ledger_entries l
+         JOIN bookings b ON b.provider_id = l.provider_id AND b.id = l.booking_id
+         JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+        WHERE l.provider_id = $1 AND b.status = ANY($2::text[])
+       UNION ALL
+       SELECT b.created_at AS occurred_at
+         FROM bookings b JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+        WHERE b.provider_id = $1 AND b.status IN ('CONFIRMED', 'CANCELLED')
+          AND b.pricing_snapshot->>'totalAmount' = '0'
+          AND (b.pricing_snapshot->>'paymentRequired' = 'false' OR b.pricing_snapshot->>'paymentRequired' IS NULL)
+     ) activity`,
     [providerId, HOST_GUEST_BOOKING_STATUSES],
   );
   const firstRow = first.rows[0];
-  return { entries: rows.rows.map(saleEntryFromRow), firstEntryAtUtc: firstRow?.first_at === null || firstRow?.first_at === undefined ? null : isoValue(firstRow, "first_at") };
+  return { entries, firstEntryAtUtc: firstRow?.first_at === null || firstRow?.first_at === undefined ? null : isoValue(firstRow, "first_at") };
 }
 
 /* ---------- the accounts the money goes to (この口座への入金) ---------- */
@@ -223,7 +250,7 @@ function integer(value: unknown, key: string): number {
   return parsed;
 }
 
-function kindOf(row: DbRow): HostSaleEntryKind {
+function kindOf(row: DbRow): Exclude<HostSaleEntryKind, "FREE_BOOKING"> {
   const entryId = text(row.entry_id, "entry_id");
   if (row.kind === "PAYMENT_CAPTURED") return "PAYMENT";
   if (row.kind === "REFUND") return "REFUND";
@@ -231,7 +258,7 @@ function kindOf(row: DbRow): HostSaleEntryKind {
   return "ADJUSTMENT";
 }
 
-function keyOf(kind: HostSaleEntryKind, row: DbRow, publicBookingId: string): string {
+function keyOf(kind: Exclude<HostSaleEntryKind, "FREE_BOOKING">, row: DbRow, publicBookingId: string): string {
   const entryId = text(row.entry_id, "entry_id");
   if (kind === "PAYMENT") return `payment:${publicBookingId}`;
   // The refunds' entry IDs are the store's own refund IDs (booking-cancellations.ts), not Stripe's.
@@ -248,7 +275,7 @@ function refundOf(row: DbRow): HostSaleRefund | null {
 
 /** NIHO's fee the entry moved, when the booking's fee and payment are known and in the entry's currency. */
 function feeOf(kind: HostSaleEntryKind, row: DbRow, amount: number, currency: string): { amount: number; estimated: boolean } | null {
-  if (kind === "ADJUSTMENT") return { amount: 0, estimated: false };
+  if (kind === "ADJUSTMENT" || kind === "FREE_BOOKING") return { amount: 0, estimated: false };
   const fee = platformFeeOf(row.platform_fee);
   if (fee === null || row.pricing_currency !== currency || row.paid_currency !== currency || row.paid_amount === null || row.paid_amount === undefined) return null;
   const paid = integer(row.paid_amount, "paid_amount");
@@ -256,6 +283,33 @@ function feeOf(kind: HostSaleEntryKind, row: DbRow, amount: number, currency: st
   if (kind === "PAYMENT") return { amount: fee.amount, estimated: false };
   // A refund takes away (−amount refunded); its reversal brings it back (−amount, negative refunded).
   return refundFeeMovement(fee.amount, paid, integer(row.refunded_before, "refunded_before"), -amount);
+}
+
+function freeBookingEntryFromRow(row: DbRow): HostSaleEntry {
+  const publicBookingId = text(row.public_booking_id, "public_booking_id");
+  const currency = text(row.currency, "pricing_snapshot.currency");
+  if (currency !== "JPY" || (row.status !== "CONFIRMED" && row.status !== "CANCELLED")) {
+    throw new StoreError("Database returned an invalid free booking sales row.");
+  }
+  return {
+    key: `free-booking:${publicBookingId}`,
+    kind: "FREE_BOOKING",
+    amount: 0,
+    currency,
+    occurredAtUtc: isoValue(row, "created_at"),
+    publicBookingId,
+    productTitle: text(row.public_title, "public_title"),
+    bookingStatus: row.status,
+    localDate: text(row.local_date, "occurrence_snapshot.localDate"),
+    localStartTime: text(row.local_start_time, "occurrence_snapshot.localStartTime"),
+    adultCount: integer(row.adult_count, "adult_count"),
+    childCount: integer(row.child_count, "child_count"),
+    guestName: row.erased === true || typeof row.guest_name !== "string" ? null : row.guest_name,
+    platformFeeAmount: 0,
+    providerAmount: 0,
+    feeEstimated: false,
+    refund: null,
+  };
 }
 
 export function saleEntryFromRow(row: DbRow): HostSaleEntry {

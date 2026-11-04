@@ -518,6 +518,7 @@ describe("admin support console settings", () => {
     const off = {
       guestMailEnabled: false, guestMailSmtpHost: "", guestMailSmtpPort: 0, guestMailFrom: null, guestMailReplyTo: null,
       experienceJobsAudience: "", experienceJobsServiceAccountEmail: "",
+      guestMailFeedbackEnabled: false, guestMailFeedbackAudience: "", guestMailFeedbackServiceAccountEmail: "",
     };
     expect(resolveConfig({})).toMatchObject(off);
     // The mock never sends; "1" is not "true".
@@ -532,10 +533,24 @@ describe("admin support console settings", () => {
       guestMailReplyTo: { name: "", address: "support@example.com" },
       experienceJobsAudience: mail.EXPERIENCE_JOBS_AUDIENCE,
       experienceJobsServiceAccountEmail: mail.EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL,
+      guestMailFeedbackEnabled: false,
     });
     // The SMTP credentials are read where they are used, never kept in config.
     expect(JSON.stringify(on)).not.toMatch(/sample-smtp-user|sample-smtp-password/);
     expect(resolveConfig({ ...mail, SITE_URL: "http://localhost:3000" }).guestMailEnabled).toBe(true);
+
+    const feedback = {
+      ...mail,
+      EXPERIENCE_MAIL_FEEDBACK_AUDIENCE: "https://experience.example/internal/experience-mail-feedback/v1/events",
+      EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL: "niho-api@example.iam.gserviceaccount.com",
+    };
+    expect(resolveConfig(feedback)).toMatchObject({
+      guestMailFeedbackEnabled: true,
+      guestMailFeedbackAudience: feedback.EXPERIENCE_MAIL_FEEDBACK_AUDIENCE,
+      guestMailFeedbackServiceAccountEmail: feedback.EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL,
+    });
+    expect(() => resolveConfig({ ...mail, EXPERIENCE_MAIL_FEEDBACK_AUDIENCE: feedback.EXPERIENCE_MAIL_FEEDBACK_AUDIENCE }))
+      .toThrow("EXPERIENCE_MAIL_FEEDBACK_AUDIENCE and EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL must be set together");
 
     for (const name of [
       "EXPERIENCE_DATABASE_URL", "EXPERIENCE_SMTP_HOST", "EXPERIENCE_SMTP_PORT", "EXPERIENCE_SMTP_USER", "EXPERIENCE_SMTP_PASSWORD",

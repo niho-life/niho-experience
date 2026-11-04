@@ -49,6 +49,11 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_offer_prices: { write: IUD },
   experience_product_sale_terms: { write: IU },
   experience_product_media_assets: { write: I },
+  experience_product_media_selection: { write: ID },
+  // Provider originals are append-only except for revoking the replaced or removed asset.
+  experience_provider_media_assets: { write: IU },
+  experience_provider_media_selection: { write: IUD },
+  experience_provider_media_state: { write: IU },
   experience_product_publication_media: { write: I },
   // Immutable public copies are inserted; state and short-lived NIHO/Connect readiness move independently.
   experience_product_publications: { write: I },
@@ -90,6 +95,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   guest_question_threads: { write: IUD },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
+  // PII-free post-accept mail feedback; DELETE with the booking guest's PII erasure.
+  guest_mail_delivery_feedback: { write: ID, updateColumns: ["created_at"] },
   guide_admin_command_receipts: { write: I },
   guide_articles: { write: IU },
   guide_categories: { write: IU },

@@ -1,7 +1,7 @@
 import { EN_STATIC_COPY_V1, type DetailViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import type { ExperienceProviderPagePreviewOfferSummary, ExperienceProviderPagePreviewOccurrence, ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/legacy-host";
 import { groupSizeLabel, initialOf } from "@/lib/card-model";
-import { formatDay, formatDuration, formatTimeRange, formatYen, jstDateKey } from "@/lib/format";
+import { formatDay, formatDuration, formatExperiencePriceYen, formatTimeRange, jstDateKey } from "@/lib/format";
 import { addMinutesToClock, formatClock, joinAnd, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { iconForText } from "@/lib/themes";
 
@@ -55,7 +55,7 @@ function childLine(offers: readonly ExperienceProviderPagePreviewOfferSummary[])
   if (children.length !== offers.length || children.some((child) => child.min !== first.min || child.max !== first.max || child.adult !== first.adult)) return { fact: "Children: see options", price: "Children's terms vary by option" };
   const ages = first.min === first.max ? `age ${first.min}` : `ages ${first.min}–${first.max}`;
   const prices = [...new Set(children.map((child) => child.price))];
-  return { fact: `${ages}${first.adult ? " with an adult" : ""}`, price: `Children ${first.min === first.max ? first.min : `${first.min}–${first.max}`} ${prices.length > 1 ? "from " : ""}${formatYen(Math.min(...prices))}` };
+  return { fact: `${ages}${first.adult ? " with an adult" : ""}`, price: `Children ${first.min === first.max ? first.min : `${first.min}–${first.max}`} ${prices.length > 1 ? "from " : ""}${formatExperiencePriceYen(Math.min(...prices))}` };
 }
 
 /** The next bookable dates: the first bookable occurrence of each of the next days. */
@@ -143,7 +143,7 @@ export function buildPreviewView(preview: ExperienceProviderPagePreviewResponse,
   return {
     model,
     booking: {
-      price: adultPrices.length ? formatYen(Math.min(...adultPrices)) : "—",
+      price: adultPrices.length ? formatExperiencePriceYen(Math.min(...adultPrices)) : "—",
       priceIsFrom: new Set(adultPrices).size > 1,
       childNote: children.price,
       schedule: offers.length ? scheduleSummary(scheduleOffers.filter((offer) => offer.weekdays.length)) : null,

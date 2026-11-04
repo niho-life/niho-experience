@@ -1,7 +1,7 @@
 import type { ExperienceOffer } from "@niho-experience/api-client";
 import type { ExperienceDetailForSite, ExperienceSummaryForSite, PublicImageForSite } from "./experience-types";
 import { EN_STATIC_COPY_V1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
-import { formatDuration, formatYen } from "./format";
+import { formatDuration, formatExperiencePriceYen } from "./format";
 import { joinAnd, scheduleSummary } from "./schedule";
 import { editorialOf } from "./themes";
 
@@ -104,7 +104,7 @@ export function buildCardModel(summary: ExperienceSummaryForSite, detail: Experi
     lead: summary.lead,
     cover: summary.cover,
     durationLabel: durationLabel(summary, locale),
-    priceLabel: formatYen(summary.priceFrom.amountYen, locale),
+    priceLabel: formatExperiencePriceYen(summary.priceFrom.amountYen, locale),
   };
   const withOverride = editorialOf(summary, pilotPreview)?.withLabel;
   if (!detail) {

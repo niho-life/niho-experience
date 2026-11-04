@@ -18,7 +18,7 @@ import { config, isPreview } from "@/lib/config";
 import { childParticipationCopy, hostBio, imageAlt } from "@/lib/experience-copy";
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import type { SearchParams } from "@/lib/filters";
-import { formatDuration, formatTime, formatYen } from "@/lib/format";
+import { formatDuration, formatExperiencePriceYen, formatTime } from "@/lib/format";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { addMinutesToClock, formatClock, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { seoDescription } from "@/lib/seo-description";
@@ -51,8 +51,8 @@ const blockText = (props: BlockProps, key: string, fallback: string) => typeof p
 
 export type ExperiencePageContentProps = { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams>; locale: SiteLocale };
 async function readExperience(slug: string, query: SearchParams, locale: SiteLocale = "en") {
-  if (locale === "ja") return (await getJapaneseDetail(slug)).experience;
-  const result = await getExperienceForSite(slug, query);
+  if (locale === "ja" && !config.experiencePublicationsEnabled) return (await getJapaneseDetail(slug)).experience;
+  const result = await getExperienceForSite(slug, query, locale);
   if (!result.ok) {
     if (result.kind === "not_found") notFound();
     throw new Error("Public experience unavailable");
@@ -85,6 +85,13 @@ export async function englishExperienceMetadata({ params, searchParams }: Omit<E
 export async function japaneseExperienceMetadata({ params }: Omit<ExperiencePageContentProps, "locale">): Promise<Metadata> {
   try {
     const slug = (await params).slug;
+    if (config.experiencePublicationsEnabled) {
+      await getJapaneseCopy();
+      const detail = await readExperience(slug, {}, "ja");
+      const canonical = `${config.siteUrl}/ja/experiences/${detail.slug}`;
+      const english = `${config.siteUrl}/experiences/${detail.slug}`;
+      return { title: detail.title, description: seoDescription(detail.lead), alternates: { canonical, languages: { en: english, ja: canonical, "x-default": english } }, robots: config.indexingAllowed ? undefined : { index: false, follow: false }, openGraph: { title: detail.title, description: seoDescription(detail.lead), url: canonical, locale: "ja_JP", images: [] } };
+    }
     // The /ja layout renders nothing but "unavailable" without the static release: no hreflang or index for that.
     const [detail, copy, release] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), getPreparedJapaneseStaticRelease()]);
     assertSameJapaneseRelease(copy.releaseId, detail, release);
@@ -140,10 +147,20 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   let sale: GuestBookingSale = { kind: "niho" };
   try {
     if (locale === "ja") {
-      const [selected, siteCopy, selectedSale] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), guestBookingSale(slug)]);
-      assertSameJapaneseRelease(siteCopy.releaseId, selected);
+      const [siteCopy, selectedSale] = await Promise.all([getJapaneseCopy(), guestBookingSale(slug)]);
       sale = selectedSale;
-      e = detailWithSiteSellerDisplayName(selected.experience, selectedSale); copy = siteCopy.copy; japaneseBookingReady = japaneseBookingOpen(sale, selected); japaneseReleaseId = selected.releaseId;
+      if (config.experiencePublicationsEnabled) {
+        e = await readExperience(slug, query, "ja");
+        copy = siteCopy.copy;
+        japaneseBookingReady = sale.kind === "site" && config.guestBookingEnabled;
+      } else {
+        const selected = await getJapaneseDetail(slug);
+        assertSameJapaneseRelease(siteCopy.releaseId, selected);
+        e = detailWithSiteSellerDisplayName(selected.experience, selectedSale);
+        copy = siteCopy.copy;
+        japaneseBookingReady = japaneseBookingOpen(sale, selected);
+        japaneseReleaseId = selected.releaseId;
+      }
     } else {
       const detail = await readExperience(slug, query);
       sale = await guestBookingSale(detail.slug);
@@ -166,13 +183,31 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const preferredOfferId = typeof query.offer === "string" && e.offers.some((offer) => offer.id === query.offer) ? query.offer : undefined;
   const bookingHref = browseHref(`/experiences/${e.slug}/book`, browseContext, preferredOfferId);
   const sellerLegalUrl = safeHttpsUrl(e.seller.legalNoticeUrl);
+  const freeExperience = e.offers.length > 0 && e.offers.every((offer) =>
+    offer.pricing.adultPriceYen === 0 && (offer.pricing.child === null || offer.pricing.child.priceYen === 0)
+  );
   // One policy for every option: show it here so travelers see it before choosing a date.
   const firstPolicy = e.offers[0]?.cancellationPolicy;
+  const firstSaleCancellation = e.offers[0]?.saleCancellation;
   const sharedPolicy = firstPolicy && e.offers.every((offer) =>
     offer.cancellationPolicy.code === firstPolicy.code &&
-    offer.cancellationPolicy.freeCancellationHoursBefore === firstPolicy.freeCancellationHoursBefore
+    offer.cancellationPolicy.freeCancellationHoursBefore === firstPolicy.freeCancellationHoursBefore &&
+    offer.saleCancellation?.policyCode === firstSaleCancellation?.policyCode &&
+    offer.saleCancellation?.cancellationWindowMinutesBeforeStart === firstSaleCancellation?.cancellationWindowMinutesBeforeStart &&
+    offer.saleCancellation?.refundBasisPoints === firstSaleCancellation?.refundBasisPoints
   ) ? firstPolicy : null;
-  const policyTitle = sharedPolicy
+  const customWindow = firstSaleCancellation?.cancellationWindowMinutesBeforeStart;
+  const customRate = firstSaleCancellation ? firstSaleCancellation.refundBasisPoints / 100 : null;
+  const customPolicyTitle = firstSaleCancellation?.policyCode === "CUSTOM" && customWindow !== null && customWindow !== undefined
+    ? locale === "ja"
+      ? `${customWindow}分前までの取消で${customRate!.toLocaleString("ja-JP")}％返金`
+      : `${customRate!.toLocaleString("en-US")}% refund for cancellations up to ${customWindow} minutes before start`
+    : null;
+  const policyTitle = freeExperience
+    ? (locale === "ja" ? "無料予約は体験終了までいつでもキャンセルできます" : "Free bookings can be cancelled any time before the experience ends")
+    : sharedPolicy && customPolicyTitle
+    ? customPolicyTitle
+    : sharedPolicy
     ? sharedPolicy.code === "NONE"
       ? copy.text("detail.nonRefundable")
       : locale === "ja" ? `開始${sharedPolicy.freeCancellationHoursBefore}時間前までキャンセル無料` : `Free cancellation until ${sharedPolicy.freeCancellationHoursBefore} hours before the start`
@@ -188,9 +223,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const exterior = meeting && meeting.exteriorPhotoIndex !== null ? (e.photos[meeting.exteriorPhotoIndex] ?? null) : null;
   const mapUrl = meeting?.mapUrl ? safeHttpsUrl(meeting.mapUrl) : null;
   const paragraphs = e.description.split(/\n\s*\n/).filter((paragraph) => paragraph.trim());
-  // Owner decision 2026-10-20 (the approved mock): the second photo, or the cover, inside the stamp edge.
-  // Hosts' own faces stay on the chips next to their names.
-  const hostPhoto = e.photos[1] ?? e.cover ?? null;
+  const hostPhoto = e.hosts[0]?.avatar ?? null;
   const modes = new Set(e.offers.map((offer) => offer.acceptanceMode));
   const acceptanceNote =
     modes.size === 1 && modes.has("APPROVAL")
@@ -198,6 +231,9 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       : modes.size === 1 && modes.has("INSTANT")
         ? copy.text("booking.instantNote")
         : copy.text("detail.policyApplies");
+  const cancellationNote = freeExperience
+    ? (locale === "ja" ? "お支払いはありません。" : "No payment is due.")
+    : acceptanceNote;
   const adultPrices = e.offers.map((offer) => offer.pricing.adultPriceYen);
   const canBook = config.bookingsEnabled && e.booking.checkoutAvailable && japaneseBookingReady;
   const approval = e.offers.filter((offer) => offer.acceptanceMode === "APPROVAL").length;
@@ -225,7 +261,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const booking: BookingSummary = {
     slug: e.slug,
     offers: e.offers.map((offer) => ({ id: offer.id, name: offer.name, adultPriceYen: offer.pricing.adultPriceYen })),
-    price: adultPrices.length ? formatYen(Math.min(...adultPrices), locale) : "—",
+    price: adultPrices.length ? formatExperiencePriceYen(Math.min(...adultPrices), locale) : "—",
     priceIsFrom: new Set(adultPrices).size > 1,
     childNote: children.price,
     schedule: scheduleSummary(e.offers, locale),
@@ -459,12 +495,12 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
             ) : null}
 
             <Section title="Cancellation">
-              {sharedPolicy ? (
+              {freeExperience || sharedPolicy ? (
                 <div className="flex items-start gap-3.5 rounded-[22px] bg-sand p-5">
                   <HandIcon name="umbrella" className="size-[38px] text-moss" />
                   <div>
                     <p className="text-[1.0625rem] font-extrabold">{policyTitle}</p>
-                    <p className="mt-1 text-[0.9375rem] text-ink-soft">{acceptanceNote}</p>
+                    <p className="mt-1 text-[0.9375rem] text-ink-soft">{cancellationNote}</p>
                   </div>
                 </div>
               ) : (
@@ -522,7 +558,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       paragraphs,
       timeline: e.timeline.map((step) => ({ time: step.time ? formatClock(step.time, locale) : undefined, title: step.title, text: step.text, icon: iconForText(`${step.title} ${step.text}`, "clock"), photo: toImage(step.photoIndex !== null ? (e.photos[step.photoIndex] ?? null) : null, `${e.title}, ${step.title}`) })),
       // Host introductions (v1.1 `hosts[].bio`) as plain text, on the English page only: the Japanese release has no approved translation of them.
-      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined, storyLink: hostStoryGuide ? { href: `/guides/${hostStoryGuide.slug}`, label: "Read the host story" } : undefined },
+      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), logo: toImage(e.provider.logo), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined, storyLink: hostStoryGuide ? { href: `/guides/${hostStoryGuide.slug}`, label: "Read the host story" } : undefined },
       included: e.included,
       notIncluded: e.notIncluded,
       emptyListLabel: copy.text("detail.noneListed"),
@@ -543,7 +579,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       } : undefined,
       showAllKnowLabel: copy.text("detail.showAllCount", { count: e.knowBeforeYouGo.length }),
       notSuitable: e.notSuitableFor,
-      cancellation: { policy: sharedPolicy && policyTitle ? { title: policyTitle, acceptanceNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
+      cancellation: { policy: (freeExperience || sharedPolicy) && policyTitle ? { title: policyTitle, acceptanceNote: cancellationNote } : undefined, sellerName: e.seller.displayName, sellerLegalUrl: sellerLegalUrl ?? undefined },
       booking: includeBooking ? bookingCardModel(booking, <BookingDatesController summary={booking} />) : undefined,
       checkoutCancelled: !japaneseBookingReady ? <div className="mt-5"><Notice tone="warn" title={copy.text("booking.unavailableJa")} role="status" action={sale.kind === "niho" ? undefined : <EnglishPageLink slug={e.slug} />} /></div>
         : checkoutCancelled ? <div className="mt-5">{sale.kind === "site" ? <SiteCheckoutCancelled bookingHref={bookingHref} /> : <Notice tone="info" title={copy.text("detail.checkoutCancelled")} role="status" action={<Link href={bookingHref} className="font-bold text-moss underline underline-offset-4">{copy.text("detail.chooseDate")}</Link>} />}</div> : undefined,

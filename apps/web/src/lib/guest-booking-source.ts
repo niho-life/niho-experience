@@ -36,6 +36,23 @@ function siteOrigin(): string {
 
 /** Where one experience is sold. Never throws: a failure is "unknown". */
 export async function guestBookingSale(slug: string): Promise<GuestBookingSale> {
+  if (config.experiencePublicationsEnabled) {
+    if (!config.guestBookingEnabled) return UNKNOWN;
+    const publications = experiencePublicationRepository();
+    const bookings = guestBookingRepository();
+    if (!publications || !bookings) return UNKNOWN;
+    try {
+      const publication = await publications.getPublicBySlug(slug);
+      if (!publication) return UNKNOWN;
+      const terms = await bookings.publicBookingTerms(slug);
+      if (terms === null) return UNKNOWN;
+      siteSaleTerms(terms, config.guestBookingConsentVersion);
+      return { kind: "site", terms };
+    } catch (error) {
+      logFailure("publication-terms", error);
+      return UNKNOWN;
+    }
+  }
   if (!config.guestBookingEnabled) return NIHO;
   const bookings = guestBookingRepository();
   if (!bookings) return UNKNOWN;
@@ -55,6 +72,29 @@ export async function guestBookingSale(slug: string): Promise<GuestBookingSale> 
 /** Where a page of cards reads each card's availability, in one query. A failure closes every card on the page. */
 export async function guestBookingSources(slugs: readonly string[]): Promise<BookingSources> {
   const niho = nihoBookingSources(config.nihoWebOrigin);
+  if (config.experiencePublicationsEnabled) {
+    const unique = [...new Set(slugs)];
+    if (!unique.length) return niho;
+    const closed: BookingSources = { ...niho, closedSlugs: unique };
+    if (!config.guestBookingEnabled) return closed;
+    const publications = experiencePublicationRepository();
+    const bookings = guestBookingRepository();
+    if (!publications || !bookings) return closed;
+    try {
+      const [published, sellable] = await Promise.all([publications.listPublic(), bookings.sellableSlugs(unique)]);
+      const publicSlugs = new Set(published.map((item) => item.slug));
+      const siteSlugs = sellable.filter((slug) => publicSlugs.has(slug));
+      return {
+        nihoWebOrigin: niho.nihoWebOrigin,
+        siteOrigin: siteSlugs.length ? siteOrigin() : null,
+        siteSlugs,
+        closedSlugs: unique.filter((slug) => !siteSlugs.includes(slug)),
+      };
+    } catch (error) {
+      logFailure("publication-slugs", error);
+      return closed;
+    }
+  }
   if (!config.guestBookingEnabled || slugs.length === 0) return niho;
   const closed: BookingSources = { ...niho, closedSlugs: [...new Set(slugs)] };
   const bookings = guestBookingRepository();

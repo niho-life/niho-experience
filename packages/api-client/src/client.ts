@@ -85,11 +85,11 @@ export function normalizeOrigin(value: string): string {
 
 /** 体験サイトの支払い後のページ（BookingReturn の `?type=instant|approval`）。支払い済みの再送への応答（#285 第2段）。 */
 const SITE_RETURN_PATH = "/booking/return";
-const SITE_RETURN_QUERY = /^\?type=(?:instant|approval)$/;
+const SITE_RETURN_QUERY = /^(?:\?type=(?:instant|approval)|\?type=instant&payment=free)$/;
 
 /**
  * checkout の応答の遷移先として受け付ける URL か。Stripe の Checkout か、NIHO の origin の予約確認ページだけ。
- * `thisSite`（origin が体験サイト自身）のときは、NIHO の予約確認ページの代わりにこのサイトの `/booking/return?type=…` だけ。
+ * `thisSite`（origin が体験サイト自身）のときは、NIHO の予約確認ページの代わりにこのサイトの `/booking/return?type=…` と固定の無料予約戻り先だけ。
  * 想定外の URL（別ドメイン・javascript: 等）には遷移しない。
  */
 export function isAllowedCheckoutRedirect(candidate: string, nihoWebOrigin: string, options: { thisSite?: boolean } = {}): boolean {
@@ -482,9 +482,11 @@ export function createExperienceApiClient(options: ExperienceApiClientOptions) {
 
     /** locale は path で固定し、backend が release・terms・consent を再照合する。 */
     async startJapaneseCheckout(slug: string, body: ExperienceCheckoutRequest): Promise<LocalizedCheckoutResult> {
-      const response = await request(`/api/public/experiences/v1.2/ja/${encodeURIComponent(slug)}/checkout`, {
+      const response = await request(options.thisSite === true
+        ? `/api/public/experiences/${encodeURIComponent(slug)}/checkout`
+        : `/api/public/experiences/v1.2/ja/${encodeURIComponent(slug)}/checkout`, {
         method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
+        headers: { accept: "application/json", "content-type": "application/json", ...(options.thisSite === true ? { "accept-language": "ja" } : {}) },
         body: JSON.stringify(body),
       });
       if (!response) return { ok: false, kind: "network_error" };

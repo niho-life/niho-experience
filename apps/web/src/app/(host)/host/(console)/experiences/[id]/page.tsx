@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { HostExperienceEditor } from "@/components/host/HostExperienceEditor";
 import { HostLiveExperienceEditor } from "@/components/host/HostLiveExperienceEditor";
+import { HostPublicationWorkspace } from "@/components/host/HostPublicationWorkspace";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSubHeader } from "@/components/host/HostSubHeader";
@@ -41,6 +42,7 @@ function EditorUnavailable({ backHref }: { backHref: string }) {
 /** 体験の編集 (#89): the page, its photos and offers, and its one listing state. */
 export default async function HostExperiencePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
+  if (config.experienceHostPublicationApiEnabled) return <HostPublicationWorkspace productId={id} />;
   const context = await hostPageContext(query);
   if (!context) return null;
   const { provider, linkProviderId } = context;

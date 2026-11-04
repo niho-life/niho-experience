@@ -5,6 +5,8 @@ import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
 import { EmptyResults } from "@/components/States";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { getApi } from "@/lib/api";
+import { config } from "@/lib/config";
+import { listPublicationSummaries } from "@/lib/experience/publication-site";
 import { buildCardModels } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
 import { guestBookingSources } from "@/lib/guest-booking-source";
@@ -12,11 +14,13 @@ import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib
 import { filterExperienceSummaries, normalizeExperienceQuery, type SearchParams } from "@/lib/filters";
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
+import type { ExperienceSummaryForSite } from "@/lib/experience-types";
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   try {
     const query = await searchParams;
     const filtered = query.date !== undefined || query.guests !== undefined || normalizeExperienceQuery(query.q) !== "";
+    if (config.experiencePublicationsEnabled) return { title: "鎌倉の体験", description: "鎌倉の少人数制の体験を探せます。", alternates: { canonical: `${config.siteUrl}/ja/experiences`, languages: { en: `${config.siteUrl}/experiences`, ja: `${config.siteUrl}/ja/experiences`, "x-default": `${config.siteUrl}/experiences` } }, robots: filtered ? { index: false, follow: true } : undefined };
     return await japaneseStaticMetadata("experiences", filtered);
   } catch { return { title: "Japanese experiences unavailable", robots: { index: false, follow: false } }; }
 }
@@ -28,10 +32,12 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
   const query = await searchParams;
   let data;
   try {
-    const [copy, catalog, api] = await Promise.all([getJapaneseCopy(), getJapaneseCatalog(), getApi()]);
-    assertSameJapaneseRelease(copy.releaseId, catalog);
+    const [copy, api] = await Promise.all([getJapaneseCopy(), getApi()]);
+    let catalog: ExperienceSummaryForSite[];
+    if (config.experiencePublicationsEnabled) catalog = await listPublicationSummaries("kamakura", "ja");
+    else { const selected = await getJapaneseCatalog(); assertSameJapaneseRelease(copy.releaseId, selected); catalog = selected.experiences; }
     const searchQuery = normalizeExperienceQuery(query.q);
-    const items = filterExperienceSummaries(catalog.experiences, searchQuery);
+    const items = filterExperienceSummaries(catalog, searchQuery);
     const cards = buildCardModels(items, await loadDetails(api, items, true, "ja", copy.releaseId), false, "ja", copy.copy);
     const now = new Date(), finderDays = upcomingDays(now, FINDER_DAYS, "ja");
     const initialDate = parseDateParam(query.date, finderDays);

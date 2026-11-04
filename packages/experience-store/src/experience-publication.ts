@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
+  GUEST_BOOKING_LIMITS,
   questionsFingerprint,
   cancellationPolicyCode,
   databaseNow,
   offerPricesMatchActiveRules,
   readSaleTerms,
+  salePriceSetMatchesProduct,
   tokyoDate,
   validSaleTerms,
   writeOfferPrices,
@@ -168,14 +170,35 @@ export interface PublicExperienceMediaAsset {
   readonly byteSize: number;
 }
 
-/** Allowlisted media metadata for the authenticated seller. Object keys stay server-side. */
-export interface ExperienceHostMediaAsset {
+export interface PublicExperienceProviderMedia {
   readonly id: string;
-  readonly position: number;
+  readonly placement: "PROVIDER_PHOTO" | "BUSINESS_LOGO";
   readonly width: number;
   readonly height: number;
   readonly byteSize: number;
   readonly altText: string;
+  readonly altTextJa: string;
+  readonly publicCredit: string | null;
+}
+
+/** Allowlisted media metadata for the authenticated seller. Object keys stay server-side. */
+export interface ExperienceHostMediaAsset {
+  readonly id: string;
+  readonly position: number;
+  readonly sourcePosition: number;
+  readonly placement: "GALLERY";
+  readonly width: number;
+  readonly height: number;
+  readonly byteSize: number;
+  readonly altText: string;
+  readonly altTextJa: string;
+  readonly publicCredit: string | null;
+}
+
+export interface ExperienceHostMediaSelectionInput {
+  readonly id: string;
+  readonly altText: string;
+  readonly altTextJa: string;
   readonly publicCredit: string | null;
 }
 
@@ -187,7 +210,45 @@ export interface ExperienceHostMediaAssetInput {
   readonly height: number;
   readonly byteSize: number;
   readonly altText: string;
+  readonly altTextJa: string;
   readonly publicCredit: string | null;
+}
+
+export interface ExperienceHostProviderMediaAsset {
+  readonly id: string;
+  readonly placement: "PROVIDER_PHOTO" | "BUSINESS_LOGO";
+  readonly width: number;
+  readonly height: number;
+  readonly byteSize: number;
+  readonly altText: string;
+  readonly altTextJa: string;
+  readonly publicCredit: string | null;
+}
+
+export interface ExperienceHostProviderMediaAssetInput {
+  readonly id: string;
+  readonly objectKey: string;
+  readonly sourceRefHash: string;
+  readonly width: number;
+  readonly height: number;
+  readonly byteSize: number;
+  readonly placement: ExperienceHostProviderMediaAsset["placement"];
+  readonly altText: string;
+  readonly altTextJa: string;
+  readonly publicCredit: string | null;
+}
+
+export interface ExperienceHostProviderMediaSelectionInput {
+  readonly id: string;
+  readonly placement: ExperienceHostProviderMediaAsset["placement"];
+  readonly altText: string;
+  readonly altTextJa: string;
+  readonly publicCredit: string | null;
+}
+
+export interface ExperienceHostProviderMedia {
+  readonly version: number;
+  readonly assets: readonly ExperienceHostProviderMediaAsset[];
 }
 
 const PUBLICATION_COLUMNS = `
@@ -203,12 +264,24 @@ const PUBLIC_READER_COLUMNS = `
   slug,public_title,content,currency,unit_amount,seller_display_name,published_at,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
-      'asset_id',media.asset_id::text,'alt_text',media.alt_text,'public_credit',media.public_credit
+      'asset_id',media.asset_id::text,'alt_text',media.alt_text,'alt_text_ja',media.alt_text_ja,
+      'public_credit',media.public_credit,'placement',media.placement,'source_position',media.source_position
     ) ORDER BY media.position)
       FROM experience_product_publication_media media
       JOIN experience_product_media_assets asset ON asset.id=media.asset_id AND asset.state='READY'
      WHERE media.publication_id=visible_publications.publication_id
-  ),'[]'::jsonb) AS photos`;
+  ),'[]'::jsonb) AS photos,
+  COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'asset_id',selection.asset_id::text,'placement',selection.placement,
+      'alt_text',selection.alt_text,'alt_text_ja',selection.alt_text_ja,'public_credit',selection.public_credit
+    ) ORDER BY selection.placement)
+      FROM experience_provider_media_selection selection
+      JOIN experience_provider_media_assets asset
+        ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id
+       AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+     WHERE selection.provider_id=visible_publications.provider_id
+  ),'[]'::jsonb) AS provider_media`;
 
 const VISIBLE_PUBLICATIONS = `
   WITH visible_publications AS (
@@ -240,6 +313,28 @@ const iso = (value: unknown, field: string): string => {
 };
 
 const nullableIso = (value: unknown, field: string): string | null => value === null ? null : iso(value, field);
+
+async function readProviderMedia(client: PoolClient, providerId: string): Promise<ExperienceHostProviderMedia> {
+  const state = await client.query<{ version: number }>("SELECT version FROM experience_provider_media_state WHERE provider_id=$1", [providerId]);
+  const result = await client.query<DbRow>(
+    `SELECT asset.id,selection.placement,asset.width,asset.height,asset.byte_size,
+            selection.alt_text,selection.alt_text_ja,selection.public_credit
+       FROM experience_provider_media_selection selection
+       JOIN experience_provider_media_assets asset
+         ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id
+      WHERE selection.provider_id=$1 AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+      ORDER BY selection.placement`, [providerId],
+  );
+  return {
+    version: safeInteger(state.rows[0]?.version, "provider media version"),
+    assets: result.rows.map((row) => ({
+      id: String(row.id), placement: String(row.placement) as ExperienceHostProviderMediaAsset["placement"],
+      width: safeInteger(row.width, "provider media width"), height: safeInteger(row.height, "provider media height"),
+      byteSize: safeInteger(row.byte_size, "provider media byte_size"), altText: String(row.alt_text),
+      altTextJa: String(row.alt_text_ja), publicCredit: row.public_credit === null ? null : String(row.public_credit),
+    })),
+  };
+}
 
 function stateFromRow(row: DbRow): ExperiencePublicationState {
   return {
@@ -306,6 +401,9 @@ function validateDraft(input: ExperiencePublicationDraftInput): ExperiencePublic
   assertNonEmptyText(input.slug, "product.slug", 160);
   assertNonEmptyText(input.publicTitle, "product.publicTitle", 300);
   assertMoney(input.unitAmount, "product.unitAmount");
+  if (input.unitAmount !== 0 && input.unitAmount < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+    throw new StoreValidationError(`product.unitAmount must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
+  }
   assertNonEmptyText(input.cancellationTermsRef, "product.cancellationTermsRef", 512);
   if (!input.content || typeof input.content !== "object" || Array.isArray(input.content)) {
     throw new StoreValidationError("product.content must be a JSON object.");
@@ -396,14 +494,17 @@ async function blockers(
       ? [] : [manuscript.meetingPoint.exteriorPhotoIndex]),
   ];
   const media = await client.query<{ positions: number[] | null }>(
-    `SELECT COALESCE(array_agg(source_position ORDER BY source_position),'{}'::integer[]) AS positions
-       FROM experience_product_media_assets
-      WHERE provider_id=$1 AND product_id=$2 AND state='READY' AND rights_confirmed_at IS NOT NULL`,
+    `SELECT COALESCE(array_agg(asset.source_position ORDER BY selection.position),'{}'::integer[]) AS positions
+       FROM experience_product_media_selection selection
+       JOIN experience_product_media_assets asset
+         ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+      WHERE selection.provider_id=$1 AND selection.product_id=$2 AND selection.placement='GALLERY'
+        AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL`,
     [product.providerId, product.id],
   );
   const positions = new Set((media.rows[0]?.positions ?? []).map(Number));
   if (!checks.photosReady || positions.size === 0 || photoIndices.some((index) => !positions.has(index))) result.push("PHOTOS_REQUIRED");
-  if (product.currency !== "JPY" || product.unitAmount <= 0) result.push("PRICE_REQUIRED");
+  if (product.currency !== "JPY" || (product.unitAmount !== 0 && product.unitAmount < GUEST_BOOKING_LIMITS.minimumChargeYen)) result.push("PRICE_REQUIRED");
   const facts = await client.query<{ sale_terms: boolean; schedule: boolean; slug_in_use: boolean }>(
     `SELECT
        EXISTS (SELECT 1 FROM experience_product_sale_terms t WHERE t.provider_id=$1 AND t.product_id=$2) AS sale_terms,
@@ -424,6 +525,7 @@ async function blockers(
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
+  if (terms !== null && !salePriceSetMatchesProduct(product.unitAmount, terms)) result.push("PRICE_REQUIRED");
   if (terms !== null && terms.offerPrices !== null) {
     const today = tokyoDate(await databaseNow(client));
     if (!await offerPricesMatchActiveRules(client, terms, product.providerId, product.id, today)) result.push("PRICE_REQUIRED");
@@ -499,11 +601,15 @@ async function insertOrFindPublication(
   const publicationId = safeInteger(inserted.rows[0]?.id, "publication id");
   const media = await client.query(
     `INSERT INTO experience_product_publication_media
-       (publication_id,asset_id,provider_id,product_id,position,alt_text,public_credit)
-     SELECT $3,id,provider_id,product_id,source_position,alt_text,public_credit
-       FROM experience_product_media_assets
-      WHERE provider_id=$1 AND product_id=$2 AND state='READY' AND rights_confirmed_at IS NOT NULL
-      ORDER BY source_position`,
+       (publication_id,asset_id,provider_id,product_id,position,alt_text,alt_text_ja,public_credit,placement,source_position)
+     SELECT $3,asset.id,asset.provider_id,asset.product_id,
+            (row_number() OVER (ORDER BY CASE selection.placement WHEN 'GALLERY' THEN 0 WHEN 'PROVIDER_PHOTO' THEN 1 ELSE 2 END,selection.position)-1)::integer,
+            selection.alt_text,selection.alt_text_ja,selection.public_credit,selection.placement,asset.source_position
+       FROM experience_product_media_selection selection
+       JOIN experience_product_media_assets asset
+         ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+      WHERE selection.provider_id=$1 AND selection.product_id=$2 AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+      ORDER BY CASE selection.placement WHEN 'GALLERY' THEN 0 WHEN 'PROVIDER_PHOTO' THEN 1 ELSE 2 END,selection.position`,
     [product.providerId, product.id, publicationId],
   );
   if (media.rowCount === 0) throw new StoreConflictError("The publication has no rights-confirmed public media.");
@@ -688,17 +794,129 @@ export class ExperiencePublicationRepository {
       const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2", [actor.providerId, productId]);
       if (!product.rows[0]) throw new StoreNotFoundError("product");
       const result = await client.query<DbRow>(
-        `SELECT id,source_position,width,height,byte_size,alt_text,public_credit
-           FROM experience_product_media_assets
-          WHERE provider_id=$1 AND product_id=$2 AND state='READY' ORDER BY source_position`,
+        `SELECT asset.id,asset.source_position,selection.position,selection.placement,asset.width,asset.height,asset.byte_size,
+                selection.alt_text,selection.alt_text_ja,selection.public_credit
+           FROM experience_product_media_selection selection
+           JOIN experience_product_media_assets asset
+             ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+          WHERE selection.provider_id=$1 AND selection.product_id=$2 AND asset.state='READY'
+          ORDER BY CASE selection.placement WHEN 'GALLERY' THEN 0 WHEN 'PROVIDER_PHOTO' THEN 1 ELSE 2 END,selection.position`,
         [actor.providerId, productId],
       );
       return result.rows.map((row) => ({
-        id: String(row.id), position: safeInteger(row.source_position, "media position"),
+        id: String(row.id), position: safeInteger(row.position, "media position"),
+        sourcePosition: safeInteger(row.source_position, "media source position"),
+        placement: String(row.placement) as ExperienceHostMediaAsset["placement"],
         width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
-        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text), altTextJa: String(row.alt_text_ja),
         publicCredit: row.public_credit === null ? null : String(row.public_credit),
       }));
+    });
+  }
+
+  async getProviderMedia(actor: HostActor): Promise<ExperienceHostProviderMedia> {
+    assertStoreIdentifier(actor.providerId, "providerId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER"]);
+      await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1) ON CONFLICT DO NOTHING", [actor.providerId]);
+      return readProviderMedia(client, actor.providerId);
+    });
+  }
+
+  async addProviderMedia(actor: HostActor, expectedVersion: number, input: ExperienceHostProviderMediaAssetInput): Promise<ExperienceHostProviderMedia> {
+    assertStoreIdentifier(actor.providerId, "providerId");
+    validateExpectedVersion(expectedVersion, "expectedVersion");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) throw new StoreValidationError("provider media.id must be a UUID v4.");
+    assertNonEmptyText(input.objectKey, "provider media.objectKey", 512);
+    if (!/^[0-9a-f]{64}$/.test(input.sourceRefHash)) throw new StoreValidationError("provider media.sourceRefHash must be a SHA-256 digest.");
+    if (!Number.isSafeInteger(input.width) || input.width < 1 || input.width > 2400
+      || !Number.isSafeInteger(input.height) || input.height < 1 || input.height > 2400
+      || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024) throw new StoreValidationError("provider media dimensions and size are invalid.");
+    if (!["PROVIDER_PHOTO", "BUSINESS_LOGO"].includes(input.placement)) throw new StoreValidationError("provider media placement is invalid.");
+    if (typeof input.altText !== "string" || input.altText.trim().length === 0 || input.altText.length > 500
+      || typeof input.altTextJa !== "string" || input.altTextJa.trim().length === 0 || input.altTextJa.length > 500) throw new StoreValidationError("provider media alt text is invalid.");
+    if (input.publicCredit !== null && (typeof input.publicCredit !== "string" || input.publicCredit.trim().length === 0 || input.publicCredit.length > 300)) throw new StoreValidationError("provider media credit is invalid.");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1) ON CONFLICT DO NOTHING", [actor.providerId]);
+      const state = await client.query<{ version: number }>("SELECT version FROM experience_provider_media_state WHERE provider_id=$1 FOR UPDATE", [actor.providerId]);
+      if (!state.rows[0] || Number(state.rows[0].version) !== expectedVersion) throw new StoreConflictError("Provider media version mismatch.");
+      const old = await client.query<{ asset_id: string }>("SELECT asset_id FROM experience_provider_media_selection WHERE provider_id=$1 AND placement=$2 FOR UPDATE", [actor.providerId, input.placement]);
+      await client.query("DELETE FROM experience_provider_media_selection WHERE provider_id=$1 AND placement=$2", [actor.providerId, input.placement]);
+      if (old.rows[0]) await client.query("UPDATE experience_provider_media_assets SET state='REVOKED' WHERE provider_id=$1 AND id=$2::uuid", [actor.providerId, old.rows[0].asset_id]);
+      await client.query(
+        `INSERT INTO experience_provider_media_assets
+           (id,provider_id,object_key,source_ref_hash,width,height,byte_size,rights_confirmed_at)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,clock_timestamp())`,
+        [input.id, actor.providerId, input.objectKey, input.sourceRefHash, input.width, input.height, input.byteSize],
+      );
+      await client.query(
+        `INSERT INTO experience_provider_media_selection
+           (provider_id,placement,asset_id,alt_text,alt_text_ja,public_credit)
+         VALUES ($1,$2,$3::uuid,$4,$5,$6)`,
+        [actor.providerId, input.placement, input.id, input.altText, input.altTextJa, input.publicCredit],
+      );
+      const bumped = await client.query("UPDATE experience_provider_media_state SET version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND version=$2", [actor.providerId, state.rows[0]!.version]);
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Provider media version mismatch.");
+      return readProviderMedia(client, actor.providerId);
+    });
+  }
+
+  async saveProviderMediaSelection(actor: HostActor, expectedVersion: number, items: readonly ExperienceHostProviderMediaSelectionInput[]): Promise<ExperienceHostProviderMedia> {
+    assertStoreIdentifier(actor.providerId, "providerId");
+    validateExpectedVersion(expectedVersion, "expectedVersion");
+    if (!Array.isArray(items) || items.length > 2) throw new StoreValidationError("provider media selection is invalid.");
+    const ids = new Set<string>();
+    const placements = new Set<string>();
+    for (const item of items) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id)
+        || ids.has(item.id) || !["PROVIDER_PHOTO", "BUSINESS_LOGO"].includes(item.placement)
+        || placements.has(item.placement) || typeof item.altText !== "string" || item.altText.trim().length === 0 || item.altText.length > 500
+        || typeof item.altTextJa !== "string" || item.altTextJa.trim().length === 0 || item.altTextJa.length > 500
+        || (item.publicCredit !== null && (typeof item.publicCredit !== "string" || item.publicCredit.trim().length === 0 || item.publicCredit.length > 300))) throw new StoreValidationError("provider media selection item is invalid.");
+      ids.add(item.id); placements.add(item.placement);
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      const state = await client.query<{ version: number }>("SELECT version FROM experience_provider_media_state WHERE provider_id=$1 FOR UPDATE", [actor.providerId]);
+      if (!state.rows[0] || Number(state.rows[0].version) !== expectedVersion) throw new StoreConflictError("Provider media version mismatch.");
+      const selected = await client.query<{ asset_id: string; placement: string }>("SELECT asset_id,placement FROM experience_provider_media_selection WHERE provider_id=$1 ORDER BY placement FOR UPDATE", [actor.providerId]);
+      if (selected.rowCount !== items.length || items.some((item) => !selected.rows.some((row) => String(row.asset_id) === item.id && String(row.placement) === item.placement))) throw new StoreConflictError("Provider media selection changed; use the explicit remove or replace operation.");
+      for (const item of items) {
+        const updated = await client.query(
+        `UPDATE experience_provider_media_selection selection
+            SET alt_text=$4,alt_text_ja=$5,public_credit=$6
+           FROM experience_provider_media_assets asset
+          WHERE selection.provider_id=$1 AND selection.placement=$2 AND selection.asset_id=$3::uuid
+            AND asset.id=selection.asset_id AND asset.provider_id=selection.provider_id
+            AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL`,
+        [actor.providerId, item.placement, item.id, item.altText, item.altTextJa, item.publicCredit],
+        );
+        if (updated.rowCount !== 1) throw new StoreConflictError("Selected provider media is no longer available.");
+      }
+      const bumped = await client.query("UPDATE experience_provider_media_state SET version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND version=$2", [actor.providerId, expectedVersion]);
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Provider media version mismatch.");
+      return readProviderMedia(client, actor.providerId);
+    });
+  }
+
+  async revokeProviderMedia(actor: HostActor, assetId: string, expectedVersion: number): Promise<ExperienceHostProviderMedia> {
+    assertStoreIdentifier(actor.providerId, "providerId");
+    validateExpectedVersion(expectedVersion, "expectedVersion");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) throw new StoreNotFoundError("provider media");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      const state = await client.query<{ version: number }>("SELECT version FROM experience_provider_media_state WHERE provider_id=$1 FOR UPDATE", [actor.providerId]);
+      if (!state.rows[0] || Number(state.rows[0].version) !== expectedVersion) throw new StoreConflictError("Provider media version mismatch.");
+      const selected = await client.query("DELETE FROM experience_provider_media_selection WHERE provider_id=$1 AND asset_id=$2::uuid RETURNING asset_id", [actor.providerId, assetId]);
+      if (selected.rowCount !== 1) throw new StoreNotFoundError("provider media");
+      await client.query("UPDATE experience_provider_media_assets SET state='REVOKED' WHERE provider_id=$1 AND id=$2::uuid", [actor.providerId, assetId]);
+      const bumped = await client.query("UPDATE experience_provider_media_state SET version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND version=$2", [actor.providerId, expectedVersion]);
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Provider media version mismatch.");
+      return readProviderMedia(client, actor.providerId);
     });
   }
 
@@ -714,7 +932,8 @@ export class ExperiencePublicationRepository {
       || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024) {
       throw new StoreValidationError("media dimensions and size are invalid.");
     }
-    if (typeof input.altText !== "string" || input.altText.length > 500) throw new StoreValidationError("media.altText is invalid.");
+    if (typeof input.altText !== "string" || input.altText.trim().length === 0 || input.altText.length > 500) throw new StoreValidationError("media.altText is invalid.");
+    if (typeof input.altTextJa !== "string" || input.altTextJa.trim().length === 0 || input.altTextJa.length > 500) throw new StoreValidationError("media.altTextJa is invalid.");
     if (input.publicCredit !== null && (typeof input.publicCredit !== "string" || input.publicCredit.trim().length === 0 || input.publicCredit.length > 300)) {
       throw new StoreValidationError("media.publicCredit is invalid.");
     }
@@ -732,7 +951,7 @@ export class ExperiencePublicationRepository {
         [actor.providerId, productId],
       );
       const position = Number(next.rows[0]?.position);
-      if (!Number.isSafeInteger(position) || position < 0 || position > 19) throw new StoreValidationError("A product can have at most 20 photos.");
+      if (!Number.isSafeInteger(position) || position < 0 || position > 999) throw new StoreValidationError("A product has reached its media upload limit.");
       const result = await client.query<DbRow>(
         `INSERT INTO experience_product_media_assets
            (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,public_credit,rights_confirmed_at)
@@ -742,6 +961,16 @@ export class ExperiencePublicationRepository {
           input.width, input.height, input.byteSize, input.altText, input.publicCredit],
       );
       const row = result.rows[0]!;
+      const selectionPosition = (await client.query<{ position: number }>(
+        `SELECT COALESCE(MAX(position)+1,0)::int AS position FROM experience_product_media_selection
+          WHERE provider_id=$1 AND product_id=$2 AND placement='GALLERY'`, [actor.providerId, productId],
+      )).rows[0]?.position ?? 0;
+      await client.query(
+        `INSERT INTO experience_product_media_selection
+           (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+         VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
+        [actor.providerId, productId, input.id, selectionPosition, input.altText, input.altTextJa, input.publicCredit],
+      );
       const versioned = await client.query(
         `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND id=$2 AND version=$3 RETURNING version`,
@@ -749,11 +978,83 @@ export class ExperiencePublicationRepository {
       );
       if (versioned.rowCount !== 1) throw new StoreConflictError("Product changed while adding media.");
       return {
-        id: String(row.id), position: safeInteger(row.source_position, "media position"),
+        id: String(row.id), position: safeInteger(selectionPosition, "media position"), placement: "GALLERY",
+        sourcePosition: safeInteger(row.source_position, "media source position"),
         width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
-        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: input.altText, altTextJa: input.altTextJa,
         publicCredit: row.public_credit === null ? null : String(row.public_credit),
       };
+    });
+  }
+
+  async saveMediaSelection(
+    actor: HostActor,
+    productId: string,
+    expectedProductVersion: number,
+    items: readonly ExperienceHostMediaSelectionInput[],
+  ): Promise<readonly ExperienceHostMediaAsset[]> {
+    assertStoreIdentifier(productId, "productId");
+    validateExpectedVersion(expectedProductVersion, "expectedProductVersion");
+    if (!Array.isArray(items) || items.length > 20) throw new StoreValidationError("media selection is invalid.");
+    const ids = new Set<string>();
+    for (const item of items) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id)
+        || ids.has(item.id)
+        || typeof item.altText !== "string" || item.altText.trim().length === 0 || item.altText.length > 500
+        || typeof item.altTextJa !== "string" || item.altTextJa.trim().length === 0 || item.altTextJa.length > 500
+        || (item.publicCredit !== null && (typeof item.publicCredit !== "string" || item.publicCredit.trim().length === 0 || item.publicCredit.length > 300))) {
+        throw new StoreValidationError("media selection item is invalid.");
+      }
+      ids.add(item.id);
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      const product = await client.query<{ version: number }>(
+        "SELECT version FROM experience_products WHERE provider_id=$1 AND id=$2 FOR UPDATE", [actor.providerId, productId],
+      );
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      if (Number(product.rows[0].version) !== expectedProductVersion) throw new StoreConflictError("Product changed while saving media selection.");
+      const existing = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM experience_product_media_assets
+          WHERE provider_id=$1 AND product_id=$2 AND state='READY' AND rights_confirmed_at IS NOT NULL
+            AND id=ANY($3::uuid[])`,
+        [actor.providerId, productId, [...ids]],
+      );
+      if (Number(existing.rows[0]?.count ?? 0) !== ids.size) throw new StoreConflictError("A selected media asset is no longer available.");
+      await client.query("DELETE FROM experience_product_media_selection WHERE provider_id=$1 AND product_id=$2", [actor.providerId, productId]);
+      for (const [position, item] of items.entries()) {
+        await client.query(
+          `INSERT INTO experience_product_media_selection
+             (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+           VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
+          [actor.providerId, productId, item.id, position, item.altText, item.altTextJa, item.publicCredit],
+        );
+      }
+      const bumped = await client.query(
+        `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND id=$2 AND version=$3 RETURNING version`,
+        [actor.providerId, productId, expectedProductVersion],
+      );
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Product changed while saving media selection.");
+      const result = await client.query<DbRow>(
+        `SELECT asset.id,asset.source_position,selection.position,selection.placement,asset.width,asset.height,asset.byte_size,
+                selection.alt_text,selection.alt_text_ja,selection.public_credit
+           FROM experience_product_media_selection selection
+           JOIN experience_product_media_assets asset
+             ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+          WHERE selection.provider_id=$1 AND selection.product_id=$2
+          ORDER BY CASE selection.placement WHEN 'GALLERY' THEN 0 WHEN 'PROVIDER_PHOTO' THEN 1 ELSE 2 END,selection.position`,
+        [actor.providerId, productId],
+      );
+      return result.rows.map((row) => ({
+        id: String(row.id), position: safeInteger(row.position, "media position"),
+        sourcePosition: safeInteger(row.source_position, "media source position"),
+        placement: String(row.placement) as ExperienceHostMediaAsset["placement"],
+        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        altTextJa: String(row.alt_text_ja), publicCredit: row.public_credit === null ? null : String(row.public_credit),
+      }));
     });
   }
 
@@ -843,6 +1144,9 @@ export class ExperiencePublicationRepository {
       const product = productResult.rows[0] ? productFromRow(productResult.rows[0]) : null;
       if (!product) throw new StoreNotFoundError("product");
       if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      if (!salePriceSetMatchesProduct(product.unitAmount, terms)) {
+        throw new StoreValidationError("A free product must price every offer and child at ¥0; paid offers must meet Stripe's minimum charge.");
+      }
       const state = await lockedState(client, actor.providerId, productId);
       if ((state?.version ?? null) !== input.expectedStateVersion) {
         throw new StoreConflictError("Publication state version mismatch: read the state again.");
@@ -1178,6 +1482,27 @@ export class ExperiencePublicationRepository {
     });
   }
 
+  async hasPendingPublicationChanges(actor: HostActor, productId: string): Promise<boolean> {
+    assertStoreIdentifier(productId, "productId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER", "EDITOR", "VIEWER"]);
+      const result = await client.query<{ pending: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM experience_product_publication_states state
+             JOIN experience_products product ON product.provider_id=state.provider_id AND product.id=state.product_id
+             JOIN experience_product_publications publication ON publication.id=state.current_publication_id
+             LEFT JOIN experience_product_sale_terms terms ON terms.provider_id=product.provider_id AND terms.product_id=product.id
+            WHERE state.provider_id=$1 AND state.product_id=$2
+              AND (publication.draft_version<>product.version
+                OR publication.sale_terms_version IS DISTINCT FROM terms.version)
+         ) AS pending`,
+        [actor.providerId, productId],
+      );
+      return result.rows[0]?.pending === true;
+    });
+  }
+
   /** The one source for catalog, detail, metadata, sitemap and new-checkout admission. */
   async getPublicBySlug(slug: string): Promise<PublicExperiencePublication | null> {
     assertNonEmptyText(slug, "slug", 160);
@@ -1254,6 +1579,24 @@ export class ExperiencePublicationRepository {
     const row = result.rows[0];
     if (!row) return null;
     return { objectKey: String(row.object_key), byteSize: safeInteger(row.byte_size, "media byte_size") };
+  }
+
+  /** A provider profile image is public only while an active product by that seller is published. */
+  async getPublicProviderMediaAsset(assetId: string): Promise<PublicExperienceMediaAsset | null> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) return null;
+    const result = await this.#pool.query<DbRow>(
+      `${VISIBLE_PUBLICATIONS}
+       SELECT asset.object_key,asset.byte_size
+         FROM visible_publications publication
+         JOIN experience_provider_media_selection selection ON selection.provider_id=publication.provider_id
+         JOIN experience_provider_media_assets asset
+           ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id
+        WHERE asset.id=$1::uuid AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+        LIMIT 1`, [assetId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return { objectKey: String(row.object_key), byteSize: safeInteger(row.byte_size, "provider media byte_size") };
   }
 }
 

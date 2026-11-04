@@ -226,7 +226,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     await guests.setSaleTerms(ownerA, "tea", TEA_TERMS);
     await guests.setSaleTerms(ownerA, "walk", PLAIN_TERMS);
     await guests.setSaleTerms(ownerA, "kids", KIDS_TERMS);
-    for (const id of ["draft", "archived", "usd", "cheap", "dup"]) await guests.setSaleTerms(ownerA, id, PLAIN_TERMS);
+    for (const id of ["draft", "archived", "usd", "dup"]) await guests.setSaleTerms(ownerA, id, PLAIN_TERMS);
     await guests.setSaleTerms(ownerB, "dup", PLAIN_TERMS);
     const addRule = async (productId: string, value: ScheduleRule) => {
       const actor = productId === "dup-b" ? ownerB : ownerA;
@@ -640,6 +640,35 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       ] satisfies Partial<ProductSaleTermsInput>[]) {
         await assert.rejects(() => guests.setSaleTerms(ownerA, "tea", { ...TEA_TERMS, ...bad }, 2), StoreValidationError, JSON.stringify(bad).slice(0, 80));
       }
+    });
+  });
+
+  it("confirms an all-free booking without a Stripe checkout or payment ledger", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await pool.query("UPDATE experience_products SET unit_amount=0 WHERE provider_id='provider-a' AND id='walk'");
+      await guests.setSaleTerms(ownerA, "walk", PLAIN_TERMS, 1);
+      await addRule("walk", rule("sample-walk-am"));
+
+      const free = await guests.startGuestBooking(walkRequest({ expectedTotalYen: 0 }));
+      assert.equal(free.status, "CONFIRMED");
+      assert.equal(free.booking.status, "CONFIRMED");
+      assert.equal(free.totalAmount, 0);
+      assert.equal(free.checkoutSessionRef, null);
+      assert.equal(free.booking.pricingSnapshot.paymentRequired, false);
+      assert.equal(free.booking.pricingSnapshot.platformFee?.amount, 0);
+
+      const rows = await pool.query(
+        `SELECT b.status, g.checkout_session_ref, b.pricing_snapshot->>'paymentRequired' AS payment_required,
+                (SELECT count(*)::int FROM payment_ledger_entries l WHERE l.provider_id=b.provider_id AND l.booking_id=b.id) AS ledger_entries
+           FROM bookings b
+           JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+          WHERE b.public_booking_id=$1`,
+        [free.publicBookingId],
+      );
+      assert.deepEqual(rows.rows, [{ status: "CONFIRMED", checkout_session_ref: null, payment_required: "false", ledger_entries: 0 }]);
+      const topics = (await pool.query("SELECT topic FROM outbox_messages WHERE aggregate_id=$1 ORDER BY topic", [free.publicBookingId]))
+        .rows.map((row) => String(row.topic));
+      assert.deepEqual(topics, ["booking.confirmed", "host.notify.new_booking"]);
     });
   });
 
@@ -1148,7 +1177,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.ok(Math.abs(holdMilliseconds - 2_100_000) <= 5, String(holdMilliseconds));
       assert.ok(holdMilliseconds - (1_800_000 + 60_000) >= 180_000);
       assert.deepEqual(family.booking.pricingSnapshot, {
-        currency: "JPY", unitAmount: 4000, seats: 3, totalAmount: 10_000, cancellationTermsRef: "terms-v1",
+        currency: "JPY", unitAmount: 4000, seats: 3, totalAmount: 10_000, paymentRequired: true, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 2, childCount: 1, childUnitAmount: 2000, minimumChargeableParticipants: 1 }, cancellationPolicy: "FREE_UNTIL_24H",
         bookingTerms: {
           minimumParticipants: 1, minimumChargeableParticipants: 1, maxPartySize: 6,
@@ -1173,7 +1202,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
 
       const children = await guests.startGuestBooking(kidsRequest({ adultCount: 0, childCount: 2, expectedTotalYen: 3000 }));
       assert.deepEqual(children.booking.pricingSnapshot, {
-        currency: "JPY", unitAmount: 2500, seats: 2, totalAmount: 3000, cancellationTermsRef: "terms-v1",
+        currency: "JPY", unitAmount: 2500, seats: 2, totalAmount: 3000, paymentRequired: true, cancellationTermsRef: "terms-v1",
         breakdown: { adultCount: 0, childCount: 2, childUnitAmount: 1500, minimumChargeableParticipants: 1 }, cancellationPolicy: "FREE_UNTIL_48H",
         bookingTerms: {
           minimumParticipants: 1, minimumChargeableParticipants: 1, maxPartySize: 4,

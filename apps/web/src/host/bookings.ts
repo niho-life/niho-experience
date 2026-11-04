@@ -333,7 +333,7 @@ export function bookingStatusLabel(booking: Pick<HostBooking, "status" | "date">
 
 /** A row's second line: "2名 · ¥60,000 · 体験サイト". A booking made on a reservation site has no amount here (#194): "2名 · GetYourGuide". */
 export function bookingRowDetail(booking: Pick<HostBooking, "guests" | "amountYen" | "channel"> & { ota?: unknown }): string {
-  return (booking.ota ? [`${booking.guests}名`, booking.channel] : [`${booking.guests}名`, yen(booking.amountYen), booking.channel]).join(" · ");
+  return (booking.ota ? [`${booking.guests}名`, booking.channel] : [`${booking.guests}名`, booking.amountYen === 0 ? "無料" : yen(booking.amountYen), booking.channel]).join(" · ");
 }
 
 /** What the approval and cancel dialogs show of a booking (ホーム approves from its row too). */
@@ -351,8 +351,8 @@ export function peopleLabel(booking: Pick<HostBooking, "guests" | "adults" | "ch
 
 /** 内訳: "大人 ¥30,000 × 2 ＋ 子ども ¥12,000 × 1". */
 export function priceBreakdown(booking: Pick<HostBooking, "adults" | "children" | "adultPriceYen" | "childPriceYen">): string {
-  const parts = [`大人 ${yen(booking.adultPriceYen)} × ${booking.adults}`];
-  if (booking.children && booking.childPriceYen !== null) parts.push(`子ども ${yen(booking.childPriceYen)} × ${booking.children}`);
+  const parts = [`大人 ${booking.adultPriceYen === 0 ? "無料" : yen(booking.adultPriceYen)} × ${booking.adults}`];
+  if (booking.children && booking.childPriceYen !== null) parts.push(`子ども ${booking.childPriceYen === 0 ? "無料" : yen(booking.childPriceYen)} × ${booking.children}`);
   return parts.join(" ＋ ");
 }
 
@@ -456,11 +456,11 @@ export function bookingRequestRows(booking: HostBooking, experienceTitle: string
     Boolean(experienceTitle) && { label: "体験", value: experienceTitle },
     !site && { label: "商品", value: booking.offer },
     { label: "人数", value: peopleLabel(booking) },
-    { label: "金額", value: yen(booking.amountYen) },
+    { label: "金額", value: booking.amountYen === 0 ? "無料" : yen(booking.amountYen) },
     { label: "内訳", value: priceBreakdown(booking) },
     { label: "言語", value: guestLanguageLabel(booking.language) },
     { label: "申込経路", value: booking.channel },
-    site?.cancellationPolicy && { label: "取消条件", value: CANCELLATION_POLICY_LABELS[site.cancellationPolicy] },
+    site?.cancellationPolicy && { label: "取消条件", value: booking.amountYen === 0 ? "無料予約は体験終了まで取消可" : CANCELLATION_POLICY_LABELS[site.cancellationPolicy] },
     Boolean(booking.note.trim()) && { label: "申込メモ", value: booking.note, multiline: true },
     booking.answers.length > 0 && { label: "回答", answers: booking.answers },
     booking.meetingGuide && { label: "集合案内", value: meetingGuideLabel(booking.meetingGuide) },

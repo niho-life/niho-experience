@@ -69,6 +69,12 @@ describe("Experience owner publication is the only Experience checkout source", 
            'experience-products/00000000-0000-4000-8000-000000000451.jpg',$3,640,480,2048,'Synthetic photo',NULL,clock_timestamp())`,
         [OWNER.providerId, product.id, "4".repeat(64)],
       );
+      await pool.query(
+        `INSERT INTO experience_product_media_selection
+           (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+         VALUES ($1,$2,'00000000-0000-4000-8000-000000000451','GALLERY',0,'Synthetic photo','合成写真',NULL)`,
+        [OWNER.providerId, product.id],
+      );
       await store.saveScheduleRule(OWNER, product.id, rule, null, "00000000-0000-4000-8000-000000000452");
       await pool.query(
         `INSERT INTO experience_product_sale_terms

@@ -18,17 +18,19 @@ type Step = { icon: HandIconName; title: string; text: string };
  * says what to expect next, and its wording may follow the kind of booking (a fixed word on the URL, never free text, so
  * nobody can put their own wording on this page).
  */
-export function BookingReturn({ type, showReview }: { type: BookingReturnType | null; showReview: boolean }) {
+export function BookingReturn({ type, showReview, freeBooking = false }: { type: BookingReturnType | null; showReview: boolean; freeBooking?: boolean }) {
   const approval = type === "approval";
   const eyebrow = type ? "thank you" : "almost there";
-  const heading = approval ? "The host will review your request" : type ? "Check your email for your booking" : "Check your email";
+  const heading = approval ? "The host will review your request" : freeBooking ? "Check your email for your free booking" : type ? "Check your email for your booking" : "Check your email";
   const lead = approval
     ? "You are charged only if they accept. We email you either way."
-    : type
+    : freeBooking
+      ? "No payment is due. Your booking confirmation will arrive by email."
+      : type
       ? "Your confirmation comes by email once your payment goes through."
       : "We email you about your booking. If the host needs to approve your request, the email says so.";
   const steps: Step[] = [
-    { icon: "mail", title: approval ? "An email about your request" : "Your confirmation email", text: approval ? "It tells you the request is with the host. Another follows when they answer." : "The experience, the date and time, your group, what you paid and a link to your booking." },
+    { icon: "mail", title: approval ? "An email about your request" : "Your confirmation email", text: approval ? "It tells you the request is with the host. Another follows when they answer." : freeBooking ? "The experience, date and time, your group and a link to your booking. No payment is due." : "The experience, the date and time, your group, what you paid and a link to your booking." },
     { icon: "pin", title: "Meeting details", text: "Where to meet reaches you before the day." },
     { icon: "cal", title: "Meet your host", text: "On the day, meet your host where the meeting details say." },
     ...(showReview ? [{ icon: "chat" as const, title: "Share how it went", text: "After the experience, we ask how it was." }] : []),

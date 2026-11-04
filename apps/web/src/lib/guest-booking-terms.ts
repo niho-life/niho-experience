@@ -1,6 +1,6 @@
 import type { BookingQuestion, ExperienceOffer } from "@niho-experience/api-client";
 import type { PublicBookingOffer, PublicBookingTerms } from "@niho-experience/experience-store";
-import type { ExperienceDetailForSite } from "./experience-types";
+import type { ExperienceDetailForSite, ExperienceOfferForSite } from "./experience-types";
 
 /**
  * What defines the sale of an experience sold on this site (#285, docs/guest-booking.md), in the shapes the
@@ -11,15 +11,12 @@ import type { ExperienceDetailForSite } from "./experience-types";
  * notice and the legal documents (NIHO's platform terms) until the editor moves (#89).
  */
 export type SiteSaleTerms = {
-  offers: ExperienceOffer[];
+  offers: ExperienceOfferForSite[];
   booking: { consentVersion: string; checkoutAvailable: true; currency: "JPY"; timeZone: "Asia/Tokyo" };
   sellerDisplayName: string;
 };
 
 function legacyCancellationPolicy(offer: PublicBookingOffer): ExperienceOffer["cancellationPolicy"] {
-  if (offer.minimumChargeableParticipants !== 1) {
-    throw new Error("This sale condition cannot be represented by the legacy booking contract.");
-  }
   const { code, freeCancellationHoursBefore } = offer.cancellationPolicy;
   const { cancellationWindowMinutesBeforeStart, refundBasisPoints } = offer.cancellationTerms;
   if (code === "NONE" && cancellationWindowMinutesBeforeStart === null && refundBasisPoints === 0 && freeCancellationHoursBefore === null) {
@@ -31,7 +28,8 @@ function legacyCancellationPolicy(offer: PublicBookingOffer): ExperienceOffer["c
   if (code === "FREE_UNTIL_48H" && cancellationWindowMinutesBeforeStart === 2_880 && refundBasisPoints === 10_000 && freeCancellationHoursBefore === 48) {
     return { code, freeCancellationHoursBefore };
   }
-  throw new Error("This cancellation policy cannot be represented by the legacy booking contract.");
+  if (code === "CUSTOM") return { code: "NONE", freeCancellationHoursBefore: null };
+  throw new Error("This cancellation policy cannot be represented by the Experience page contract.");
 }
 
 /**
@@ -62,6 +60,12 @@ export function siteSaleTerms(terms: PublicBookingTerms, consentVersion: string)
       startTime: offer.startTime,
       weekdays: [...offer.weekdays],
       cancellationPolicy: legacyCancellationPolicy(offer),
+      minimumChargeableParticipants: offer.minimumChargeableParticipants,
+      saleCancellation: {
+        policyCode: offer.cancellationPolicy.code,
+        cancellationWindowMinutesBeforeStart: offer.cancellationTerms.cancellationWindowMinutesBeforeStart,
+        refundBasisPoints: offer.cancellationTerms.refundBasisPoints,
+      },
       acceptanceMode: offer.acceptanceMode,
       bookingQuestions: offer.bookingQuestions.map((question) => ({
         id: question.id,
@@ -113,9 +117,10 @@ const OFFER_KEYS = [
   "id", "name", "shortDescription", "pricing", "capacity", "maxPartySize", "minimumParticipants", "durationMinutes", "startTime",
   "weekdays", "cancellationPolicy", "acceptanceMode", "bookingQuestions", "bookingQuestionsFingerprint",
 ] as const;
+const OFFER_OPTIONAL_KEYS = ["minimumChargeableParticipants", "saleCancellation"] as const;
 
 function isOffer(value: unknown): value is ExperienceOffer {
-  if (!isObject(value) || !hasKeys(value, OFFER_KEYS)) return false;
+  if (!isObject(value) || !OFFER_KEYS.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !([...OFFER_KEYS, ...OFFER_OPTIONAL_KEYS] as readonly string[]).includes(key))) return false;
   const { pricing, cancellationPolicy: policy } = value;
   return isText(value.id, 64) && isText(value.name, 200) && (value.shortDescription === null || typeof value.shortDescription === "string")
     && isObject(pricing) && hasKeys(pricing, ["currency", "taxIncluded", "adultPriceYen", "child"])
@@ -127,7 +132,13 @@ function isOffer(value: unknown): value is ExperienceOffer {
     && ["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"].includes(policy.code as string) && [24, 48, null].includes(policy.freeCancellationHoursBefore as number | null)
     && (value.acceptanceMode === "INSTANT" || value.acceptanceMode === "APPROVAL")
     && Array.isArray(value.bookingQuestions) && value.bookingQuestions.length <= 5 && value.bookingQuestions.every(isQuestion)
-    && typeof value.bookingQuestionsFingerprint === "string" && /^[0-9a-f]{64}$/.test(value.bookingQuestionsFingerprint);
+    && typeof value.bookingQuestionsFingerprint === "string" && /^[0-9a-f]{64}$/.test(value.bookingQuestionsFingerprint)
+    && (!Object.hasOwn(value, "minimumChargeableParticipants") || isCount(value.minimumChargeableParticipants, 1))
+    && (!Object.hasOwn(value, "saleCancellation") || (isObject(value.saleCancellation)
+      && hasKeys(value.saleCancellation, ["policyCode", "cancellationWindowMinutesBeforeStart", "refundBasisPoints"])
+      && ["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE", "CUSTOM"].includes(String(value.saleCancellation.policyCode))
+      && (value.saleCancellation.cancellationWindowMinutesBeforeStart === null || isCount(value.saleCancellation.cancellationWindowMinutesBeforeStart))
+      && isCount(value.saleCancellation.refundBasisPoints) && value.saleCancellation.refundBasisPoints <= 10_000));
 }
 
 /** The route's answer, read as closed shapes (the browser trusts no response shape). Anything else is null. */
@@ -138,5 +149,5 @@ export function parseSiteSaleTerms(value: unknown): SiteSaleTerms | null {
     && isObject(booking) && hasKeys(booking, ["consentVersion", "checkoutAvailable", "currency", "timeZone"])
     && isText(booking.consentVersion, 100) && booking.checkoutAvailable === true && booking.currency === "JPY" && booking.timeZone === "Asia/Tokyo"
     && isText(value.sellerDisplayName, 300);
-  return valid ? value as SiteSaleTerms : null;
+  return valid ? value as unknown as SiteSaleTerms : null;
 }

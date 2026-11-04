@@ -114,7 +114,7 @@ function SiteFeePanel({ fee }: { fee: SiteFeeBreakdown }) {
           <strong>受付時 サポート{fee.supportEnabled ? "ON" : "OFF"}</strong>
           <span>{fee.percent}%（決済費用込み）</span>
         </p>
-        <AmountRows rows={[["予約者の支払い", yen(fee.totalYen)], ["NIHO の手数料", yen(fee.feeYen)], ["受取額", yen(fee.payoutYen)]]} />
+        <AmountRows rows={[["予約者の支払い", fee.totalYen === 0 ? "無料" : yen(fee.totalYen)], ["NIHO の手数料", yen(fee.feeYen)], ["受取額", yen(fee.payoutYen)]]} />
         <p className="mt-2 text-xs text-muted">通訳・お手伝いの人件費は含みません。必要な場合はホストから担当者へ直接支払います。</p>
       </div>
       {refunded ? (
@@ -199,7 +199,7 @@ export interface HostBookingDetailProps {
  * One booking (mock v2 `bookingDetail`): the guest and the state, 申込内容, 状態, what the
  * host can do now, メッセージ (the way into its thread) and 時系列. 承認・お断り・取消 are
  * asked in a dialog first. A booking made on this site (`booking.site`, #285 slices 8 and 7) can
- * be cancelled with a full refund (anything else through NIHO support); a cancelled one says who
+ * be cancelled (paid bookings are refunded in full; anything else through NIHO support); a cancelled one says who
  * cancelled, why and where its refund is, and its 料金・精算状況 comes from the experience DB
  * (SiteFeePanel). NIHO's support and fee panels, which know NIHO's bookings only, are left out.
  */
@@ -235,7 +235,7 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
           <>
             {siteCancel?.error ? <p role="alert" className="mb-2 text-[0.8125rem] leading-normal font-bold text-danger">{siteCancel.error}</p> : null}
             <button type="button" disabled={siteCancel?.busy} aria-busy={siteCancel?.busy || undefined} onClick={() => setAsking("siteCancel")} className={DANGER_BUTTON}>
-              {siteCancel?.busy ? "取り消しています…" : "取り消して全額を返金する"}
+              {siteCancel?.busy ? "取り消しています…" : booking.amountYen === 0 ? "無料予約を取り消す" : "取り消して全額を返金する"}
             </button>
             <p className={`${note} mt-2`}>{SITE_BOOKING_SUPPORT_TEXT}</p>
           </>

@@ -112,6 +112,16 @@ describe("createExperienceApiClient", () => {
     expect(init).toMatchObject({ cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
   });
 
+  it("Experience商品は日本語でも同じ公開Checkoutへ送る", async () => {
+    const fetchMock = respond(201, { checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_abc" });
+    const client = createExperienceApiClient({ nihoWebOrigin: ORIGIN, thisSite: true, fetch: fetchMock });
+    expect(await client.startJapaneseCheckout("x-y", BODY)).toEqual({ ok: true, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_abc" });
+    const [url, init] = (fetchMock as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${ORIGIN}/api/public/experiences/x-y/checkout`);
+    expect(new Headers(init.headers).get("accept-language")).toBe("ja");
+    expect(JSON.parse(String(init.body))).toEqual(BODY);
+  });
+
   it("cookie を送らず、旅行者の入力を URL に載せない", async () => {
     const fetchMock = respond(201, { checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_abc" });
     const client = createExperienceApiClient({ nihoWebOrigin: ORIGIN, fetch: fetchMock });

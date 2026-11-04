@@ -9,6 +9,8 @@ export interface MailMessage {
   readonly subject: string;
   readonly text: string;
   readonly html: string;
+  /** Opaque reference for the locally owned guest outbox row; never a booking id or guest address. */
+  readonly deliveryRef?: string;
   readonly attachments?: readonly { readonly filename: string; readonly content: Uint8Array; readonly contentType: "image/jpeg"; readonly cid: string }[];
 }
 
@@ -124,6 +126,9 @@ export function createMailer(mailboxes: { readonly from: Mailbox; readonly reply
   return {
     async sendMail(message) {
       if (sessionDown) return { ok: false, failure: "transient" };
+      if (message.deliveryRef !== undefined && !/^ex1_[0-9a-f]{32}$/.test(message.deliveryRef)) {
+        return { ok: false, failure: "permanent" };
+      }
       try {
         await transport.sendMail({
           from: mailboxes.from,
@@ -140,7 +145,10 @@ export function createMailer(mailboxes: { readonly from: Mailbox; readonly reply
             contentDisposition: "inline" as const,
           })) } : {}),
           // RFC 3834: out-of-office replies should not answer a message sent by a program.
-          headers: { "Auto-Submitted": "auto-generated" },
+          headers: {
+            "Auto-Submitted": "auto-generated",
+            ...(message.deliveryRef === undefined ? {} : { "X-NIHO-Mail-Ref": message.deliveryRef }),
+          },
           disableFileAccess: true,
           disableUrlAccess: true,
         });

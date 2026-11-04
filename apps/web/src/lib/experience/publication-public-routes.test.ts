@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     listPublic: vi.fn(),
     getPublicBySlug: vi.fn(),
     getPublicMediaAsset: vi.fn(),
+    getPublicProviderMediaAsset: vi.fn(),
   },
   storage: { read: vi.fn() },
 }));
@@ -25,6 +26,7 @@ vi.mock("@/lib/experience/public-http", () => ({
 import { GET as catalog } from "@/app/api/public/experiences/route";
 import { GET as detail } from "@/app/api/public/experiences/[slug]/route";
 import { GET as media } from "@/app/api/public/experience-media/[assetId]/route";
+import { GET as providerMedia } from "@/app/api/public/experience-provider-media/[assetId]/route";
 
 const publication = {
   slug: "synthetic-experience",
@@ -43,6 +45,7 @@ describe("Experience public publication routes", () => {
     mocks.repository.listPublic.mockResolvedValue([publication]);
     mocks.repository.getPublicBySlug.mockResolvedValue(publication);
     mocks.repository.getPublicMediaAsset.mockResolvedValue({ objectKey: `experience-products/${assetId}.jpg`, byteSize: 4 });
+    mocks.repository.getPublicProviderMediaAsset.mockResolvedValue({ objectKey: `experience-provider-media/${assetId}.jpg`, byteSize: 4 });
     mocks.storage.read.mockResolvedValue(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
   });
 
@@ -86,6 +89,23 @@ describe("Experience public publication routes", () => {
 
     mocks.repository.getPublicMediaAsset.mockResolvedValue(null);
     expect((await media(new Request(`https://experience.example/api/public/experience-media/${assetId}`), {
+      params: Promise.resolve({ assetId }),
+    })).status).toBe(404);
+  });
+
+  it("relays a seller profile image only while selected and public", async () => {
+    const response = await providerMedia(new Request(`https://experience.example/api/public/experience-provider-media/${assetId}`), {
+      params: Promise.resolve({ assetId }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-robots-tag")).toBe("noindex");
+    expect(await response.arrayBuffer()).toEqual(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]).buffer);
+    expect(mocks.repository.getPublicProviderMediaAsset).toHaveBeenCalledWith(assetId);
+    expect(mocks.storage.read).toHaveBeenCalledWith(`experience-provider-media/${assetId}.jpg`);
+
+    mocks.repository.getPublicProviderMediaAsset.mockResolvedValue(null);
+    expect((await providerMedia(new Request(`https://experience.example/api/public/experience-provider-media/${assetId}`), {
       params: Promise.resolve({ assetId }),
     })).status).toBe(404);
   });

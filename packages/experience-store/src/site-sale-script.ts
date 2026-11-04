@@ -144,8 +144,8 @@ export function parseSiteSaleInput(raw: unknown): SiteSaleInput {
   let unitAmountYen = 0;
   if (product) {
     const amount = product.unitAmountYen;
-    if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < MINIMUM_CHARGE_YEN || amount > MAXIMUM_AMOUNT) {
-      problems.push(`product.unitAmountYen must be a whole number of yen from ${MINIMUM_CHARGE_YEN} (Stripe's smallest charge)`);
+    if (typeof amount !== "number" || !Number.isSafeInteger(amount) || (amount !== 0 && amount < MINIMUM_CHARGE_YEN) || amount > MAXIMUM_AMOUNT) {
+      problems.push(`product.unitAmountYen must be ¥0 or at least ${MINIMUM_CHARGE_YEN} (Stripe's smallest charge)`);
     } else {
       unitAmountYen = amount;
     }

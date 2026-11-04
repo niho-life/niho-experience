@@ -20,22 +20,37 @@ import { bookingSourceOf, detailForSale, detailWithSiteSellerDisplayName, guestB
 export async function BookingPageContent({ params, searchParams, locale }: { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams>; locale: SiteLocale }) {
   const { slug } = await params;
   const query = await searchParams;
-  let experience: ExperienceDetailForSite, copy = EN_STATIC_COPY_V1, bookingReady = true;
+  let experience: ExperienceDetailForSite | null = null, copy = EN_STATIC_COPY_V1, bookingReady = true;
   // Where this experience is sold (#285): NIHO, this site (the sale comes from the experience DB), or unknown (not bookable now).
-  let sale: GuestBookingSale;
+  let sale: GuestBookingSale | null = null;
   if (locale === "ja") {
+    let unavailable = false;
     try {
-      const [selected, siteCopy, selectedSale] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), guestBookingSale(slug)]);
-      assertSameJapaneseRelease(siteCopy.releaseId, selected);
+      const [siteCopy, selectedSale] = await Promise.all([getJapaneseCopy(), guestBookingSale(slug)]);
       sale = selectedSale;
-      experience = detailWithSiteSellerDisplayName(selected.experience, selectedSale); copy = siteCopy.copy; bookingReady = japaneseBookingOpen(sale, selected);
-    } catch { return <JapaneseUnavailable />; }
+      if (config.experiencePublicationsEnabled) {
+        const published = await getExperienceForSite(slug, query, "ja");
+        if (!published.ok) unavailable = true;
+        else {
+          experience = published.data.experience; copy = siteCopy.copy;
+          bookingReady = sale.kind === "site" && config.guestBookingEnabled && experience.booking.checkoutAvailable;
+        }
+      } else {
+        const selected = await getJapaneseDetail(slug);
+        assertSameJapaneseRelease(siteCopy.releaseId, selected);
+        experience = detailWithSiteSellerDisplayName(selected.experience, selectedSale);
+        copy = siteCopy.copy;
+        bookingReady = japaneseBookingOpen(sale, selected);
+      }
+    } catch { unavailable = true; }
+    if (unavailable) return <JapaneseUnavailable />;
   } else {
     const result = await getExperienceForSite(slug, query);
     if (!result.ok) { if (result.kind === "not_found") notFound(); throw new Error("Public experience unavailable"); }
     sale = await guestBookingSale(result.data.experience.slug);
     experience = detailForSale(result.data.experience, sale);
   }
+  if (!experience || !sale) throw new Error("Public experience unavailable");
   const available = config.bookingsEnabled && experience.booking.checkoutAvailable && bookingReady;
   // Conditions, the optional mobile number and the host's name for the questions heading (src/lib/journey.ts): English mock only for now.
   const journey = locale === "en" ? await getJourneyExtras(experience.slug) : NO_JOURNEY_EXTRAS;

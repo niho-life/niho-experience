@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostLiveExperiences } from "@/components/host/HostLiveExperiences";
+import { HostPublicationWorkspace } from "@/components/host/HostPublicationWorkspace";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead, StatusPill } from "@/components/host/ui";
@@ -34,6 +35,9 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   if (!context) return null;
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
+  if (config.experienceHostPublicationApiEnabled) {
+    return <HostPublicationWorkspace bookingGuideHref={withProvider("/host/booking-guides", linkProviderId)} />;
+  }
   if (providerPagesEnabled()) {
     return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} bookingGuideHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", linkProviderId) : undefined} />;
   }

@@ -6,6 +6,7 @@ import {
   parseCancellationPayload,
   parseDayBeforeSummaryPayload,
   parseGoogleCalendarAttentionPayload,
+  parseGuestEmailDeliveryFailedPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
@@ -26,6 +27,15 @@ import type { HostPushEvent, HostPushKind } from "./payload";
 export const GOOGLE_CALENDAR_ATTENTION_NOTES = {
   REVOKED: "Google との接続が切れました。つなぎ直すまで、その予定を使う体験の新しい予約を止めています。受けた予約はそのままです。",
   UNAVAILABLE: "Google の予定を読めません。読めるまで、その予定を使う体験の新しい予約を止めています。受けた予約はそのままです。",
+} as const;
+
+const GUEST_EMAIL_DELIVERY_FAILURE_NOTES = {
+  NO_SUCH_ADDRESS: "宛先が相手側に存在しないと返されました。予約内容を開いて、連絡方法をご確認ください。",
+  NO_SUCH_DOMAIN: "宛先のドメインが見つからないと返されました。予約内容を開いて、連絡方法をご確認ください。",
+  REJECTED_BY_SERVER: "相手のメールサーバーが受け取りを拒みました。予約内容を開いて、別の連絡方法をご確認ください。",
+  MAILBOX_FULL: "相手の受信箱が満杯でメールが届きませんでした。予約内容を開いて、別の連絡方法をご確認ください。",
+  TEMPORARY_FAILED: "相手のサーバーに一時的な問題があり、再試行しても届きませんでした。予約内容を開いてご確認ください。",
+  OTHER: "相手にメールが届きませんでした。予約内容を開いてご確認ください。",
 } as const;
 
 /**
@@ -158,6 +168,23 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         experienceTitle: payload.experienceTitle,
         url: `${withQuery(HOST_REVIEWS_PATH, { providerId })}#review-${payload.reviewId}`,
         tag: `review-${payload.reviewId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed) {
+    const payload = parseGuestEmailDeliveryFailedPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "EMAIL_DELIVERY_FAILED",
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        note: GUEST_EMAIL_DELIVERY_FAILURE_NOTES[payload.classification],
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
+        tag: `email-delivery-failed-${payload.bookingId}`,
       },
     };
   }

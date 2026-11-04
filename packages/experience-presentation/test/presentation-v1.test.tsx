@@ -115,6 +115,12 @@ describe("v1 portable presentation", () => {
     for (const secret of ["Private studio", "Private address", "Private access", "Private entrance", "private-map", "private-exterior"]) expect(html).not.toContain(secret);
   });
 
+  it("renders the provider's localized business logo and accessible alt text", () => {
+    const html = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, provider: { ...detailModel.provider, logo: { src: "/synthetic/business-logo.svg", alt: "Synthetic Studio logo" } } }} />);
+    expect(html).toContain('src="/synthetic/business-logo.svg"');
+    expect(html).toContain('alt="Synthetic Studio logo"');
+  });
+
   it("retains published meeting directions and the overview for a public location", () => {
     const html = renderToStaticMarkup(<DetailViewV1 model={{ ...detailModel, meeting: {
       kind: "location", overview: "Near Kamakura station", name: "Public studio", address: "Public address", mapUrl: "https://example.invalid/public-map",
