@@ -32,7 +32,20 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      owner_bypass: ${{ steps.actor.outputs.owner_bypass }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select owner-only staging environment
+        id: actor
+        run: |
+          if bash scripts/check-production-owner.sh >/dev/null 2>&1; then
+            echo 'owner_bypass=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'owner_bypass=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Require explicitly enabled main deployment
         env:
           ENABLED: ${{ vars.STG_HOST_DEPLOY_ENABLED }}
@@ -80,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: host-staging
+      name: ${{ needs.validate.outputs.owner_bypass == 'true' && 'host-staging-owner' || 'host-staging' }}
       url: ${{ vars.STG_HOST_SERVICE_URL }}
     permissions:
       contents: read
@@ -137,6 +150,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Recheck owner identity before Google credentials
+        if: needs.validate.outputs.owner_bypass == 'true'
+        run: bash scripts/check-production-owner.sh
       - name: Require reviewed commit on main
         run: git merge-base --is-ancestor "$SHA" origin/main
       # Feature flags (docs/host-calendar-staging.md「機能のフラグ」): each needs every setting, Secret reference and

@@ -90,7 +90,7 @@ if ! gcloud iam workload-identity-pools describe "$POOL" --project "$PROJECT" --
   gcloud iam workload-identity-pools create "$POOL" --project "$PROJECT" --location global \
     --display-name 'Experience host staging only'
 fi
-condition="assertion.repository_id == '${GITHUB_REPO_ID}' && assertion.repository == 'niho-life/niho-experience' && assertion.ref == 'refs/heads/main' && assertion.environment == 'host-staging' && assertion.event_name == 'workflow_dispatch' && assertion.workflow_ref == 'niho-life/niho-experience/.github/workflows/deploy-host-staging.yml@refs/heads/main'"
+condition="assertion.repository_id == '${GITHUB_REPO_ID}' && assertion.repository == 'niho-life/niho-experience' && assertion.ref == 'refs/heads/main' && (assertion.environment == 'host-staging' || (assertion.environment == 'host-staging-owner' && assertion.actor_id in ['252574334', '119937906', '345803507'])) && assertion.event_name == 'workflow_dispatch' && assertion.workflow_ref == 'niho-life/niho-experience/.github/workflows/deploy-host-staging.yml@refs/heads/main'"
 mapping='google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.ref=assertion.ref,attribute.environment=assertion.environment'
 if ! gcloud iam workload-identity-pools providers describe "$PROVIDER" --project "$PROJECT" --location global --workload-identity-pool "$POOL" >/dev/null 2>&1; then
   gcloud iam workload-identity-pools providers create-oidc "$PROVIDER" --project "$PROJECT" --location global \
