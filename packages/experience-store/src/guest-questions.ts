@@ -17,7 +17,7 @@ export type GuestQuestionDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAIL
  * Where a message was written: the experience page's question form, the question reply page, a guest's booking page
  * (#285 slice 6b) or the host console.
  */
-export type GuestQuestionMessageSource = "SITE_FORM" | "REPLY_PAGE" | "BOOKING_PAGE" | "HOST_CONSOLE";
+export type GuestQuestionMessageSource = "SITE_FORM" | "REPLY_PAGE" | "BOOKING_PAGE" | "HOST_CONSOLE" | "SUPPORT_CONSOLE";
 /** A question before booking, or the messages of one booking made on this site (#285 slice 6b). */
 export type GuestThreadKind = "QUESTION" | "BOOKING";
 /** What the mail worker reports for one claimed reply. RETRY puts it back with a backoff while attempts remain. */
@@ -57,7 +57,7 @@ export interface SubmitGuestQuestionInput {
 
 export interface GuestQuestionMessage {
   readonly id: string;
-  readonly author: "GUEST" | "HOST";
+  readonly author: "GUEST" | "HOST" | "SUPPORT";
   readonly source: GuestQuestionMessageSource;
   /** The guest's own words, or the English the guest gets. */
   readonly body: string;
@@ -152,8 +152,17 @@ export interface ClaimedBookingMessage extends ClaimedHostMessage {
   readonly timeZone: string;
 }
 
+/** An explicit NIHO support message in a booking thread, sent through the existing durable mail outbox. */
+export interface ClaimedSupportBookingMessage extends ClaimedHostMessage {
+  readonly kind: "BOOKING_SUPPORT";
+  readonly publicBookingId: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+}
+
 /** What the mail worker sends: a reply to a question, or a host message about a booking. */
-export type ClaimedGuestQuestionReply = ClaimedQuestionReply | ClaimedBookingMessage;
+export type ClaimedGuestQuestionReply = ClaimedQuestionReply | ClaimedBookingMessage | ClaimedSupportBookingMessage;
 
 /** Before anyone wrote in a booking's thread, what メッセージ shows of it (#285 slice 6b). */
 export interface GuestBookingThreadStart {
@@ -774,7 +783,7 @@ export class GuestQuestionRepository {
                 lease_until = clock_timestamp() + make_interval(secs => $2)
            FROM due
           WHERE m.provider_id = due.provider_id AND m.id = due.id
-         RETURNING m.id, m.provider_id, m.thread_id, m.body, m.delivery_attempts, m.created_at`,
+         RETURNING m.id, m.provider_id, m.thread_id, m.author, m.body, m.delivery_attempts, m.created_at`,
         [limit, leaseSeconds, GUEST_QUESTION_LIMITS.deliveryAttempts],
       );
       const rows = [...claimed.rows].sort((a, b) => isoValue(a, "created_at").localeCompare(isoValue(b, "created_at")) || String(a.id).localeCompare(String(b.id)));
@@ -807,14 +816,16 @@ export class GuestQuestionRepository {
             continue;
           }
           const occurrence = (detail.occurrence_snapshot ?? {}) as Record<string, unknown>;
-          deliveries.push({
+          const bookingFields = {
             ...base,
-            kind: "BOOKING",
             publicBookingId: String(detail.public_booking_id),
             localDate: String(occurrence.localDate),
             localStartTime: String(occurrence.localStartTime),
             timeZone: String(occurrence.timeZone),
-          });
+          };
+          deliveries.push(row.author === "SUPPORT"
+            ? { ...bookingFields, kind: "BOOKING_SUPPORT" }
+            : { ...bookingFields, kind: "BOOKING" });
           continue;
         }
         const replyToken = randomBytes(32).toString("base64url");
@@ -848,13 +859,13 @@ export class GuestQuestionRepository {
               delivered_at = CASE WHEN $2 = 'SENT' THEN clock_timestamp() END,
               lease_until = CASE WHEN $2 = 'RETRY' AND delivery_attempts < $3
                 THEN clock_timestamp() + make_interval(mins => (2 ^ delivery_attempts)::int) END
-        WHERE id = $1::uuid AND author = 'HOST'
+          WHERE id = $1::uuid AND author IN ('HOST', 'SUPPORT')
           AND (delivery_status = 'SENDING' OR ($2 = 'SENT' AND delivery_status <> 'SENT'))
         RETURNING delivery_status`,
       [id, outcome, GUEST_QUESTION_LIMITS.deliveryAttempts],
     );
     if (updated.rows[0]) return String(updated.rows[0].delivery_status) as GuestQuestionDeliveryStatus;
-    const current = await this.#pool.query<DbRow>("SELECT delivery_status FROM guest_question_messages WHERE id = $1::uuid AND author = 'HOST'", [id]);
+    const current = await this.#pool.query<DbRow>("SELECT delivery_status FROM guest_question_messages WHERE id = $1::uuid AND author IN ('HOST', 'SUPPORT')", [id]);
     if (!current.rows[0]) throw new StoreNotFoundError("host reply");
     return String(current.rows[0].delivery_status) as GuestQuestionDeliveryStatus;
   }

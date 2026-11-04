@@ -44,6 +44,14 @@ export interface HostGuestBookingGuest {
   readonly answers: readonly HostGuestBookingAnswer[];
 }
 
+/** Minimal history shared with the provider: no Admin identity, command ID, internal note, or guest content. */
+export interface HostSupportHistoryEntry {
+  readonly type: "SUPPORT_ACTION" | "GUEST_CONTACT_SENT";
+  readonly action: string | null;
+  readonly outcome: string | null;
+  readonly occurredAtUtc: string;
+}
+
 export interface HostGuestBooking {
   readonly publicBookingId: string;
   readonly productId: string;
@@ -102,6 +110,8 @@ export interface HostGuestBooking {
   readonly refundFailed: boolean;
   /** The guest asked support to cancel ("Ask to cancel", past free cancellation) and support has not answered. */
   readonly cancellationRequested: boolean;
+  /** Only support operations and support contact timestamps; private case events are never selected. */
+  readonly supportHistory?: readonly HostSupportHistoryEntry[];
 }
 
 export interface HostGuestBookingPage {
@@ -259,7 +269,14 @@ const SELECT_HOST_BOOKINGS = `
          EXISTS (SELECT 1 FROM booking_refunds r
                   WHERE r.provider_id = b.provider_id AND r.booking_id = b.id AND r.status = 'FAILED' AND r.closed_at IS NULL) AS refund_failed,
          EXISTS (SELECT 1 FROM booking_cancellation_requests q
-                  WHERE q.provider_id = b.provider_id AND q.booking_id = b.id AND q.status = 'OPEN') AS cancellation_requested
+                  WHERE q.provider_id = b.provider_id AND q.booking_id = b.id AND q.status = 'OPEN') AS cancellation_requested,
+         (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'type', e.event_type, 'action', e.action, 'outcome', e.outcome, 'occurredAtUtc', e.occurred_at
+                  ) ORDER BY e.revision, e.occurred_at, e.id), '[]'::jsonb)
+             FROM (SELECT event_type, action, outcome, occurred_at, revision, id
+                     FROM experience_support_case_events
+                    WHERE provider_id=b.provider_id AND booking_id=b.id AND event_type IN ('SUPPORT_ACTION','GUEST_CONTACT_SENT')
+                    ORDER BY revision DESC, occurred_at DESC, id DESC LIMIT 50) e) AS support_history
     FROM bookings b
     JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
     JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
@@ -415,7 +432,17 @@ function answersOf(stored: unknown, terms: unknown): HostGuestBookingAnswer[] {
 export function platformFeeOf(value: unknown): PlatformFeeSnapshot | null {
   const fee = record(value);
   if (typeof fee.supportEnabled !== "boolean" || (fee.basisPoints !== 1000 && fee.basisPoints !== 1500)) return null;
-  return { supportEnabled: fee.supportEnabled, basisPoints: fee.basisPoints, amount: amount(fee.amount, "pricing_snapshot.platformFee.amount") };
+  const supportConsentVersion = typeof fee.supportConsentVersion === "string" ? fee.supportConsentVersion : undefined;
+  const supportAgreementRevision = Number.isSafeInteger(fee.supportAgreementRevision) && Number(fee.supportAgreementRevision) > 0
+    ? Number(fee.supportAgreementRevision)
+    : undefined;
+  return {
+    supportEnabled: fee.supportEnabled,
+    basisPoints: fee.basisPoints,
+    amount: amount(fee.amount, "pricing_snapshot.platformFee.amount"),
+    ...(supportConsentVersion === undefined ? {} : { supportConsentVersion }),
+    ...(supportAgreementRevision === undefined ? {} : { supportAgreementRevision }),
+  };
 }
 
 const optionalIso = (row: DbRow, key: string): string | null => (row[key] === null || row[key] === undefined ? null : isoValue(row, key));
@@ -455,6 +482,18 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
   const cancellationTerms = cancellationTermsOf(pricing);
   const policy = pricing.cancellationPolicy;
   const erased = row.erased === true;
+  const supportHistory = Array.isArray(row.support_history) ? row.support_history.map((raw): HostSupportHistoryEntry => {
+    const item = record(raw);
+    const type = item.type === "SUPPORT_ACTION" || item.type === "GUEST_CONTACT_SENT" ? item.type : null;
+    const occurred = typeof item.occurredAtUtc === "string" ? Date.parse(item.occurredAtUtc) : Number.NaN;
+    if (!type || !Number.isFinite(occurred)) throw new StoreError("Database returned invalid support history.");
+    return {
+      type,
+      action: typeof item.action === "string" ? item.action : null,
+      outcome: typeof item.outcome === "string" ? item.outcome : null,
+      occurredAtUtc: new Date(occurred).toISOString(),
+    };
+  }) : [];
   return {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     productId: text(row.product_id, "product_id"),
@@ -504,5 +543,6 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
     refundPendingAmount: amount(row.refund_pending_amount ?? 0, "refund_pending_amount"),
     refundFailed: row.refund_failed === true,
     cancellationRequested: row.cancellation_requested === true,
+    supportHistory,
   };
 }

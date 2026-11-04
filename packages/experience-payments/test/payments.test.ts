@@ -100,7 +100,7 @@ describe("createDirectCheckout", () => {
     assert.equal(receivedParams?.expires_at, 1_793_493_840);
     assert.equal(receivedParams?.success_url, "https://experience.example.test/booking/return?source=checkout");
     assert.deepEqual(receivedParams?.metadata, { source: "niho-experience", booking_id: BOOKING_ID });
-    assert.deepEqual(receivedParams?.payment_intent_data, { application_fee_amount: 800 });
+    assert.deepEqual(receivedParams?.payment_intent_data, { application_fee_amount: 800, metadata: { source: "niho-experience", booking_id: BOOKING_ID } });
     assert.deepEqual(receivedParams?.line_items, [{
       quantity: 1,
       price_data: {
@@ -174,7 +174,7 @@ describe("createDirectCheckout", () => {
       now: NOW,
     };
     await createDirectCheckout(input);
-    assert.deepEqual(receivedParams?.payment_intent_data, { application_fee_amount: 1_200 });
+    assert.deepEqual(receivedParams?.payment_intent_data, { application_fee_amount: 1_200, metadata: { source: "niho-experience", booking_id: BOOKING_ID } });
     assert.equal(receivedParams?.success_url, "https://experience.example.test/booking/return?type=instant");
     assert.equal(receivedParams?.cancel_url, "https://experience.example.test/experiences/sample-tea?checkout=cancelled");
     assert.equal(receivedParams?.customer_email, "guest@example.com");
@@ -475,11 +475,11 @@ describe("submitBookingRefund (#285 slice 7)", () => {
     ]);
   });
 
-  it("keeps NIHO's fee on a partial refund, and finds a refund made before instead of making another", async () => {
+  it("refunds NIHO's proportional fee on a partial refund, and finds a refund made before instead of making another", async () => {
     const calls = { list: [] as unknown[][], create: [] as unknown[][] };
-    const partial: RefundSubmission = { ...fullRefund, kind: "PARTIAL", amount: 3_000, refundApplicationFee: false };
+    const partial: RefundSubmission = { ...fullRefund, kind: "PARTIAL", amount: 3_000, refundApplicationFee: true };
     await submitBookingRefund({ refund: partial, stripe: stripeWith({ created: { id: "re_test_Partial1", amount: 3_000, status: "succeeded" } }, calls) });
-    assert.equal((calls.create[0]![0] as Record<string, unknown>).refund_application_fee, false);
+    assert.equal((calls.create[0]![0] as Record<string, unknown>).refund_application_fee, true);
 
     const again = { list: [] as unknown[][], create: [] as unknown[][] };
     const listed = [
@@ -508,7 +508,7 @@ describe("submitBookingRefund (#285 slice 7)", () => {
     const stripe = stripeWith({}, calls);
     for (const refund of [
       { ...fullRefund, refundApplicationFee: false },
-      { ...fullRefund, kind: "PARTIAL" as const },
+      { ...fullRefund, kind: "OTHER" as never },
       { ...fullRefund, refundId: "not-a-uuid" },
       { ...fullRefund, connectedAccountId: "acct_x" },
       { ...fullRefund, stripePaymentRef: "ch_Synthetic123" },

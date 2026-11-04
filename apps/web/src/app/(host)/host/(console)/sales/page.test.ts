@@ -33,6 +33,7 @@ vi.mock("@/host/data", () => ({
 }));
 vi.mock("@/host/site-sales-server", () => ({ loadSiteSales: (...args: unknown[]) => state.loadSiteSales!(...args) }));
 vi.mock("@/host/site-sales-payouts-server", () => ({ loadSitePayouts: (...args: unknown[]) => state.loadSitePayouts!(...args) }));
+vi.mock("@/lib/experience/store-server", () => ({ experienceSupportRepository: () => null }));
 
 import HostSalesPage from "./page";
 import { SalesLines, SalesLoading, SalesPayoutNoticeView, SalesPayoutsMessage, SalesPayoutsPanel, SalesScope, SalesSummaryPanel } from "@/components/host/HostSales";
@@ -92,12 +93,12 @@ describe("売上 with this site's ledger", () => {
     state.payouts = { status: "live", panel: { figures: [{ label: "入金予定", value: "¥42,500" }], notes: [], rows: [] } };
     const view = await page("2026-11");
     expect(state.loadSitePayouts).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), { mockScenario: undefined }, PAGE.month);
-    const boundary = view.all.find((item) => item.type === Suspense && item !== view.root) as ReactElement<{ fallback: ReactNode }> | undefined;
+    const boundary = view.all.find((item) => item.type === Suspense && isValidElement(item.props.fallback) && item.props.fallback.type === SalesPayoutsMessage) as ReactElement<{ fallback: ReactNode }> | undefined;
     const fallback = await elements(boundary?.props.fallback);
     expect(fallback.find((item) => item.type === SalesPayoutsMessage)?.props).toEqual({ text: SITE_PAYOUTS_LOADING_TEXT });
     expect(view.find(SalesPayoutsPanel)?.props.panel).toBe(state.payouts.panel);
     const order = view.all.filter((item) => item.type === SalesLines || item.type === Suspense || item.type === SalesPayoutsPanel).map((item) => item.type);
-    expect(order).toEqual([Suspense, SalesLines, Suspense, SalesPayoutsPanel]);
+    expect(order).toEqual([Suspense, SalesLines, Suspense, Suspense, SalesPayoutsPanel]);
   });
 
   it("says when Stripe could not be read, keeping this site's month, and leaves the section out when it is closed", async () => {

@@ -6,10 +6,10 @@ import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-dom
 import type { Pool } from "pg";
 import { BookingCancellations, type RefundSubmission } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreError, StoreValidationError } from "../src/errors.ts";
-import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
+import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import type { HostSaleEntry } from "../src/host-sales.ts";
 import { ExperienceStore } from "../src/repository.ts";
-import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 売上 (#91) against a real schema: the ledger of guest bookings as the OWNER reads it. Synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -61,7 +61,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
     // NIHO support off: 10 %.
-    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+    await consentSupportOffForTest(guests, ownerA);
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: { priceYen: 1500, minAge: 4, maxAge: 12, adultRequired: true }, minimumParticipants: 1, maxPartySize: 6,
       cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
@@ -117,10 +117,12 @@ describe("売上: the ledger of guest bookings for the OWNER", { skip: !database
       // The host cancels it: the whole ¥7,500 and NIHO's ¥750 go back.
       const full = await context.cancellations.cancelAsHost(ownerA, november.publicBookingId, { commandId: randomUUID(), reason: "WEATHER" });
       await refundEvent(context, full.refunds[0]!, "succeeded", "2026-11-02T01:00:00.000Z");
-      // Support refunds part of one: ¥3,333 and its share of the fee (333.3 → ¥333), still on its way.
+      // One booking opts into support (15%); its partial refund returns the rounded share of that frozen fee.
+      await context.guests.setProviderSupportSettings(ownerA, { supportEnabled: true, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 1 });
       const partial = await paid(context, "partial@example.com", "2026-11-03T01:00:00.000Z");
       const part = await context.cancellations.cancelAsSupport(support, partial.publicBookingId, { commandId: randomUUID(), reason: "OTHER", refund: { kind: "PARTIAL", amount: 3333 } });
       await refundEvent(context, part.refunds[0]!, "pending", "2026-11-04T01:00:00.000Z");
+      await context.guests.setProviderSupportSettings(ownerA, { supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 2 });
       // Stripe accepts a refund, then fails it: the money and NIHO's fee come back.
       const reversed = await paid(context, "reversed@example.com", "2026-11-05T01:00:00.000Z");
       const failing = await context.cancellations.cancelAsHost(ownerA, reversed.publicBookingId, { commandId: randomUUID(), reason: "ILLNESS" });
@@ -149,8 +151,8 @@ describe("売上: the ledger of guest bookings for the OWNER", { skip: !database
         [reversed.publicBookingId, "REFUND_REVERSAL", 7500, "JPY", 750, 6750, false, "FULL", "FAILED"],
         [reversed.publicBookingId, "REFUND", -7500, "JPY", -750, -6750, false, "FULL", "FAILED"],
         [reversed.publicBookingId, "PAYMENT", 7500, "JPY", 750, 6750, false, null, null],
-        [partial.publicBookingId, "REFUND", -3333, "JPY", -333, -3000, true, "PARTIAL", "PENDING"],
-        [partial.publicBookingId, "PAYMENT", 7500, "JPY", 750, 6750, false, null, null],
+        [partial.publicBookingId, "REFUND", -3333, "JPY", -500, -2833, true, "PARTIAL", "PENDING"],
+        [partial.publicBookingId, "PAYMENT", 7500, "JPY", 1125, 6375, false, null, null],
         [november.publicBookingId, "REFUND", -7500, "JPY", -750, -6750, false, "FULL", "SUCCEEDED"],
         [november.publicBookingId, "PAYMENT", 7500, "JPY", 750, 6750, false, null, null],
       ]);

@@ -2,6 +2,8 @@
 
 対象: [#118](https://github.com/niho-life/niho-experience/issues/118)、[#119](https://github.com/niho-life/niho-experience/issues/119)、親Epic [#117](https://github.com/niho-life/niho-experience/issues/117)。この文書は公開可能な画面契約であり、NIHO内部の権限・DB・決済スキーマではない。
 
+この文書のNIHO API read/operations contractと、このリポジトリが所有する新Experience予約の支援処理は別境界である。Experience DBを使う支援設定・Admin業務・実取引精算の実装と検証範囲は[Experience予約の支援・実費精算](support-settlement.md)を参照する。
+
 ## 現在の提供範囲
 
 `/admin/bookings` は、複数ホストの申込一覧、絞り込み、予約詳細、支援条件、相談、担当、運営メモ、連絡先の種類、Admin本人の対応履歴を確認する画面である。`/admin/notifications` は、サポートONで受け付けた合成予約について、新規申込、変更、取消、返金確認、新しい連絡の受信を確認する画面である。`EXPERIENCE_API_MODE=mock` と `ADMIN_SUPPORT_CONSOLE_ENABLED=true` の両方が設定されたときだけ、明示的な合成Adminログイン、合成予約、合成通知を表示する。フラグの既定値はOFFである。

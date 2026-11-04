@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { verifyDirectCheckoutWebhook, ExperiencePaymentsValidationError, isEndedCheckoutEvent, isRefundEvent } from "@niho-experience/experience-payments";
-import { bookingCancellations, experiencePool, experienceStore, guestHoldReleases } from "@/lib/experience/store-server";
+import { bookingCancellations, experiencePool, experienceStore, experienceSupportRepository, guestHoldReleases } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
 const MAX_WEBHOOK_BYTES = 256 * 1024;
@@ -22,7 +22,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   const store = experienceStore();
   const releases = guestHoldReleases();
   const cancellations = bookingCancellations();
-  if (!secret || !platformKey || !pool || !store || !releases || !cancellations) return reply(503);
+  const settlements = experienceSupportRepository();
+  if (!secret || !platformKey || !pool || !store || !releases || !cancellations || !settlements) return reply(503);
   const signature = request.headers.get("stripe-signature");
   if (!signature) return reply(400);
   if (Number(request.headers.get("content-length") ?? 0) > MAX_WEBHOOK_BYTES) return reply(413);
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       amount: event.amountTotal,
       currency: event.currency,
     });
+    await settlements.ensureSettlement(event.publicBookingId);
     return reply(204);
   } catch {
     // Stripe retries transient DB failures; the store handles duplicate delivery of either kind atomically.

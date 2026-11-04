@@ -70,6 +70,7 @@ export function hostThreadMessage(message: GuestQuestionMessage, language: Guest
     return { id: message.id, from: "guest", at, original: message.body, language: language === "JA" ? "ja" : "en", translation: message.bodyJa, viaEmail: message.source === "REPLY_PAGE" };
   }
   const status = message.deliveryStatus === "SENT" ? "sent" : message.deliveryStatus === "FAILED" ? "failed" : "pending";
+  if (message.author === "SUPPORT") return { id: message.id, from: "support", at, english: message.body, status };
   return { id: message.id, from: "host", at, japanese: message.bodyJa ?? "", english: message.body, status };
 }
 

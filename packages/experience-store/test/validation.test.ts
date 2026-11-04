@@ -137,10 +137,10 @@ describe("store boundary validation", () => {
         minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "NONE" as const,
         bookingQuestions: [], bookingQuestionsFingerprint: "0".repeat(64), conditionsVersion: null,
       },
-      platformFee: { supportEnabled, basisPoints },
+      platformFee: { supportEnabled, basisPoints, supportConsentVersion: "2026-10-23", supportAgreementRevision: 1 },
     });
     assert.deepEqual(buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", product, guest(true, 1500)).pricingSnapshot.platformFee, {
-      supportEnabled: true, basisPoints: 1500, amount: 499,
+      supportEnabled: true, basisPoints: 1500, amount: 499, supportConsentVersion: "2026-10-23", supportAgreementRevision: 1,
     });
     assert.throws(() => buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", product, guest(true, 1000)), StoreValidationError);
     assert.throws(() => buildSnapshots(occurrence, 2, "2098-12-01T00:00:00.000Z", { ...product, unitAmount: 6 }, guest(true, 1500)), StoreValidationError);

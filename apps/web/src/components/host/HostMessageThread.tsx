@@ -5,7 +5,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { draftReplyEnglish } from "@/host/actions";
 import { bookingsHref, shortDateTime } from "@/host/bookings";
 import { BOOKING_THREAD_CLOSED_TEXT, guestMessageView, MESSAGE_TEXT_LIMIT, REPLY_STATUS, replyDraftState, threadContext, threadHeading } from "@/host/messages";
-import type { HostGuestMessage, HostReplyMessage, HostThread } from "@/host/types";
+import type { HostGuestMessage, HostReplyMessage, HostSupportMessage, HostThread } from "@/host/types";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { ReplyDraftFields, useReplyDraft } from "./ReplyDraftFields";
@@ -96,6 +96,15 @@ function ReplyBubble({ message, providerName }: { message: HostReplyMessage; pro
       </p>
     </li>
   );
+}
+
+function SupportBubble({ message }: { message: HostSupportMessage }) {
+  const sent = message.status === "sent";
+  const failed = message.status === "failed";
+  return <li className="flex flex-col items-end">
+    <div className={`${BUBBLE} rounded-tr-md bg-info-pale`}><span className="sr-only">NIHOサポート：</span><p lang="en" className="whitespace-pre-wrap">{message.english}</p></div>
+    <p className={`${BUBBLE_META} justify-end`}><span className={`font-bold ${sent ? "text-moss" : failed ? "text-danger" : "text-muted"}`}>NIHOサポート · {REPLY_STATUS[message.status]}</span><MessageTime at={message.at} /></p>
+  </li>;
 }
 
 export interface ReplyInput {
@@ -206,7 +215,7 @@ export function HostMessageThread({ thread, experienceTitle, headingId, linkProv
       ) : null}
       {thread.messages.length ? (
         <ol aria-label="やりとり" className="flex flex-col gap-3.5 px-4 pt-1 pb-4 md:px-5">
-          {thread.messages.map((message) => (message.from === "guest" ? <GuestBubble key={message.id} message={message} guest={thread.guest} /> : <ReplyBubble key={message.id} message={message} providerName={providerName} />))}
+          {thread.messages.map((message) => (message.from === "guest" ? <GuestBubble key={message.id} message={message} guest={thread.guest} /> : message.from === "support" ? <SupportBubble key={message.id} message={message} /> : <ReplyBubble key={message.id} message={message} providerName={providerName} />))}
         </ol>
       ) : null}
       {thread.booking?.closed ? (

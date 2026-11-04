@@ -60,6 +60,17 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_product_booking_guides: { write: IU },
   experience_product_publication_states: { write: IU },
   experience_products: { write: IU },
+  // Support case content is private to current Admins; its event ledger stores only actor/action/outcome metadata.
+  experience_support_cases: { write: IU },
+  experience_support_case_commands: { write: I, updateColumns: ["created_at"] },
+  experience_support_case_events: { write: I },
+  // Notification producers are database triggers in the booking transaction; each Admin's read is append-only.
+  experience_support_admin_notifications: { write: I },
+  experience_support_admin_notification_reads: { write: I },
+  // Financial snapshots are updated by the reconciliation worker; transfer commands remain durable and auditable.
+  experience_booking_settlements: { write: IU },
+  experience_settlement_commands: { write: IU },
+  // A host workspace is created only after the BFF verifies the current NIHO OWNER.
   // A seller mapping is operator-provisioned; the BFF binds OWNER after the current NIHO identity matches it.
   experience_providers: { write: I, updateColumns: ["created_at"] },
   // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.

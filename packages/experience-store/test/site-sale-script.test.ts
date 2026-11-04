@@ -62,7 +62,7 @@ function storedProduct(overrides: Partial<ProductRecord> = {}): ProductRecord {
   };
 }
 
-const SETTINGS: ProviderSaleSettings = { providerId: INPUT.provider.id, supportEnabled: false, platformFeeBasisPoints: 1000, version: 2, updatedAtUtc: "2026-10-31T00:00:00.000Z" };
+const SETTINGS: ProviderSaleSettings = { providerId: INPUT.provider.id, supportEnabled: false, platformFeeBasisPoints: 1000, supportConsentVersion: null, supportAgreementRevision: null, supportConsentedBy: null, supportConsentedAtUtc: null, version: 2, updatedAtUtc: "2026-10-31T00:00:00.000Z" };
 
 const EMPTY: SiteSaleState = {
   providerExists: false, sellerProfile: null, membership: null, product: null, saleSettings: null, saleTerms: null,

@@ -77,7 +77,10 @@ export interface GuestPricingInput {
   readonly cancellationPolicy: GuestCancellationPolicy;
   readonly bookingTerms: BookingTermsSnapshot;
   /** The provider's sale settings at booking; the amount follows from the total. */
-  readonly platformFee: Omit<PlatformFeeSnapshot, "amount">;
+  readonly platformFee: Omit<PlatformFeeSnapshot, "amount"> & {
+    readonly supportConsentVersion: string;
+    readonly supportAgreementRevision: number;
+  };
 }
 
 /**
@@ -95,11 +98,17 @@ export function chargeablePlatformFee(totalAmount: number, basisPoints: number):
 }
 
 function guestPlatformFee(settings: GuestPricingInput["platformFee"], totalAmount: number): PlatformFeeSnapshot {
-  const { supportEnabled, basisPoints } = settings;
+  const { supportEnabled, basisPoints, supportConsentVersion, supportAgreementRevision } = settings;
   if (basisPoints !== (supportEnabled ? 1500 : 1000)) throw new StoreValidationError("The platform fee does not match the support setting.");
-  if (totalAmount === 0) return { supportEnabled, basisPoints, amount: 0 };
+  if (typeof supportConsentVersion !== "string" || supportConsentVersion.length < 1 || supportConsentVersion.length > 64) {
+    throw new StoreValidationError("The support consent version is missing.");
+  }
+  if (!Number.isSafeInteger(supportAgreementRevision) || supportAgreementRevision < 1) {
+    throw new StoreValidationError("The support agreement revision is missing.");
+  }
+  if (totalAmount === 0) return { supportEnabled, basisPoints, amount: 0, supportConsentVersion, supportAgreementRevision };
   if (!chargeablePlatformFee(totalAmount, basisPoints)) throw new StoreValidationError("The platform fee must be at least 1 and below the booking total.");
-  return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints) };
+  return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints), supportConsentVersion, supportAgreementRevision };
 }
 
 export function buildSnapshots(
