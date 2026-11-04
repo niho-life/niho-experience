@@ -1,5 +1,6 @@
 import "server-only";
 import { NO_JOURNEY_EXTRAS, usableConditions, usableFaq, type ExperienceReviewSummary, type JourneyDetailExtras, type JourneyReviews } from "@niho-experience/api-client";
+import { GUEST_REVIEW_LIMITS } from "@niho-experience/experience-store";
 import { config } from "./config";
 import { guestQuestionRepository, guestReviewRepository } from "./experience/store-server";
 
@@ -60,6 +61,25 @@ export async function getLiveReviews(slug: string): Promise<JourneyReviews | nul
   }
 }
 
+/** The catalog may exceed a single store request's count or total-character bound. */
+function reviewSummaryBatches(slugs: readonly string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let characters = 0;
+  for (const slug of new Set(slugs)) {
+    if (batch.length > 0 && (batch.length >= GUEST_REVIEW_LIMITS.publicSummarySlugsMax
+      || characters + slug.length > GUEST_REVIEW_LIMITS.publicSummarySlugCharactersMax)) {
+      batches.push(batch);
+      batch = [];
+      characters = 0;
+    }
+    batch.push(slug);
+    characters += slug.length;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
 /** The review summaries of the listed experiences, for the cards. Only experiences that have reviews are in the map. */
 export async function getReviewSummaries(slugs: readonly string[]): Promise<Map<string, ExperienceReviewSummary>> {
   const summaries = new Map<string, ExperienceReviewSummary>();
@@ -74,8 +94,10 @@ export async function getReviewSummaries(slugs: readonly string[]): Promise<Map<
   const reviews = guestReviewRepository();
   if (!reviews || slugs.length === 0) return summaries;
   try {
-    for (const [slug, summary] of await reviews.listPublishedReviewSummaries(slugs)) {
-      if (summary.count > 0) summaries.set(slug, summary);
+    for (const batch of reviewSummaryBatches(slugs)) {
+      for (const [slug, summary] of await reviews.listPublishedReviewSummaries(batch)) {
+        if (summary.count > 0) summaries.set(slug, summary);
+      }
     }
   } catch (error) {
     // A failed aggregate is neither zero reviews nor a reason to fabricate a rating line.

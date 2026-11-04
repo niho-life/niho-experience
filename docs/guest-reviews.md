@@ -34,7 +34,7 @@ DB は、レビューの内容（星・本文・タグ・表示名・メモ）�
 
 - `guest_reviews` は予約（`bookings`）への FK と `UNIQUE (provider_id, booking_id)` で「予約 1 件につきレビュー 1 件」を保つ。
 - 公開読取は native 体験では `experience_product_publication_states.current_publication_id` の immutable な公開slugを基準にし、本人停止・運営停止・`owner_resume_required`・非公開商品・素材未準備を除く。`GuestReviewRepository` の `includeNativePublications` は既定 `true` だが、web factory は `EXPERIENCE_PUBLICATIONS_ENABLED` を渡す。flag OFF では native candidate を読まず、現在/過去/編集draftの native slug claimは残して legacy 同名商品へのfallbackを防ぐ。native claimが無い従来商品だけ、ON/OFFとも従来どおり同じslugが1件だけの `PUBLISHED` 商品を読む。
-- カード集計は `listPublishedReviewSummaries` が最大100 slug（各160文字、合計8,000文字）を一括で読み、slugごとのN+1を作らない。公開DTOは件数、平均、公開タグ集計だけで、scope内部IDを返さない。
+- カード集計は `listPublishedReviewSummaries` が最大100 slug（各160文字、合計8,000文字）を一括で読み、slugごとのN+1を作らない。サイト側はslugを重複排除し、件数・合計文字数の両上限に収まるbatchへ分けるため、掲載数が増えても全件の集計を取得できる。公開DTOは件数、平均、公開タグ集計だけで、scope内部IDを返さない。
 - 公開 API が返すのは `id`（レビューの uuid・予約や利用者の識別子ではない）、星、本文、よかった点の表示名（英語）、表示名、`originLabel`、投稿日時（`publishedAt`）、`fromBooking`、提供者の返信（英語・ホスト名）だけ。**日本語の返信原文・提供者だけへのメモ・報告・予約 id・提供者や商品の内部 id・提供者の NIHO user id は返さない。**
 - 返信の `hostName` は現在の native 公開版（未claim legacyでは商品）の `seller_display_name` を 60 文字に切り詰める（api-client の検証が 60 文字を超える名前で応答全体を弾くため）。
 - ホストの読み取り（`listReviews` / `getReview`）は予約者のメール・電話・氏名を返さない（読みもしない）。予約者を指すのは表示名と、予約の `public_booking_id`、開催の開始時刻だけ。
