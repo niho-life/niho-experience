@@ -528,7 +528,7 @@ describe("database invariants", () => {
   });
 
   it("stores new Experience support consent, private Admin cases, notices and actual settlement evidence (#117 #121 #128 #380)", async () => {
-    const sql = await readFile(new URL("../migrations/0049_experience_support_and_settlement.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../migrations/0050_experience_support_and_settlement.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
     assert.match(sql, /COMMIT;\s*$/);
     const code = sql.replace(/--.*$/gm, "");
