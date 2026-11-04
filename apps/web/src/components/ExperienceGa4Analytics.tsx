@@ -3,17 +3,16 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
 import { doNotTrackEnabled, isPrivateLandingPath, sanitizeUmamiPayload } from "@/lib/analytics";
+import { createGtagQueue, type GtagCommand } from "@/lib/ga4-queue";
 
 const EXPERIENCE_ORIGIN = "https://experience.niho.life";
 const GA4_SCRIPT_ID = "niho-experience-ga4-tracker";
 const MEASUREMENT_ID = /^G-[A-Za-z0-9]{4,24}$/;
 
-type Gtag = (...args: unknown[]) => void;
-
 declare global {
   interface Window {
-    dataLayer?: unknown[][];
-    gtag?: Gtag;
+    dataLayer?: unknown[];
+    gtag?: GtagCommand;
     __nihoGa4MeasurementId?: string;
   }
 }
@@ -48,7 +47,7 @@ function existingGoogleTagIsCompatible(measurementId: string): boolean {
 function installGoogleTag(measurementId: string, page: SafePageView, pageReferrer: string): boolean {
   if (!existingGoogleTagIsCompatible(measurementId)) return false;
   if (!window.dataLayer) window.dataLayer = [];
-  if (!window.gtag) window.gtag = (...args) => window.dataLayer!.push(args);
+  if (!window.gtag) window.gtag = createGtagQueue(window.dataLayer);
 
   const gtag = window.gtag;
   if (window.__nihoGa4MeasurementId !== measurementId) {
