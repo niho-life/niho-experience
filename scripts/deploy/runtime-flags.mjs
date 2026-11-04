@@ -36,6 +36,7 @@ export const SHAPES = Object.freeze({
   mailbox: { pattern: new RegExp(`^(${ADDRESS}|[^<>",\\u0000-\\u001F\\u007F\\s][^<>",\\u0000-\\u001F\\u007F]{0,99} <${ADDRESS}>)$`), words: "an address, or Name <address> without commas or quotes" },
   httpsUrl: { pattern: new RegExp(`^${HTTPS_URL}$`), words: "an https URL with a lower-case host, no query or comma" },
   httpsOrigin: { pattern: /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/, words: "an exact https origin without path, credentials or query" },
+  cloudRunServiceUrl: { pattern: /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app$/, words: "a Cloud Run service URL ending in .run.app" },
   // Semicolons preserve the two callers as one gcloud value; the runtime accepts the same closed list.
   serviceAccountList: { pattern: new RegExp(`^${SERVICE_ACCOUNT}(;${SERVICE_ACCOUNT})*$`), words: "service account emails separated by semicolons, without spaces" },
   serviceAccountEmail: { pattern: new RegExp(`^${SERVICE_ACCOUNT}$`), words: "a single service account email" },
@@ -72,9 +73,9 @@ export const FLAGS = Object.freeze([
     variable: "GUIDE_ADMIN_API_ENABLED",
     needs: ["DATABASE"],
     settings: [
+      { env: "GUIDE_ADMIN_AUDIENCE", variable: "GUIDE_ADMIN_AUDIENCE", shape: "cloudRunServiceUrl" },
       { env: "GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL", variable: "GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL", shape: "serviceAccountEmail" },
     ],
-    fixed: { GUIDE_ADMIN_AUDIENCE: siteUrl },
   },
   {
     env: "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
