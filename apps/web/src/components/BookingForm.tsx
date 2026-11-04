@@ -80,7 +80,7 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
   useEffect(() => {
     if (!api) return;
     let active = true;
-    readAvailabilityFromApi(api, experience.slug, locale, releaseId, offer.id).then((occurrences) => {
+    readAvailabilityFromApi(api, experience.slug, locale, releaseId, offer.id, bookingSource).then((occurrences) => {
       if (!active) return;
       const occurrence = occurrences?.find((item) => item.offerId === offer.id && item.date === selection.date);
       setAvailabilityOk(selectionValid && !!occurrence?.bookable && occurrence.seatsLeft >= headCount);
@@ -89,7 +89,7 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       setChecking(false);
     }).catch(() => { if (active) { setAvailabilityOk(false); setStartAt(null); setEndAt(null); setChecking(false); } });
     return () => { active = false; };
-  }, [api, experience.slug, offer.id, selection.date, headCount, selectionValid, locale, releaseId]);
+  }, [api, experience.slug, offer.id, selection.date, headCount, selectionValid, locale, releaseId, bookingSource]);
   // The free-cancellation row follows the clock: if the deadline passes while the form is open, it turns to "Not available for this date".
   const freeHours = offer.cancellationPolicy.freeCancellationHoursBefore;
   useEffect(() => {

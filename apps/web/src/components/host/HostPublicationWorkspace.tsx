@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, PageHead } from "./ui";
+import { publicationTermsPayload } from "./publication-terms";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
 type SaleTerms = {
@@ -182,27 +183,6 @@ function termsForm(terms: SaleTerms | null): TermsForm {
     cancellationRefundBasisPoints: String(terms.cancellationRefundBasisPoints),
   };
 }
-function termsPayload(value: TermsForm): Record<string, unknown> | null {
-  const minimumParticipants = asNumber(value.minimumParticipants);
-  const minimumChargeableParticipants = asNumber(value.minimumChargeableParticipants);
-  const maxPartySize = asNumber(value.maxPartySize);
-  const minimumAttendance = value.minimumAttendance === "" ? null : asNumber(value.minimumAttendance);
-  if (minimumParticipants === null || minimumChargeableParticipants === null || maxPartySize === null
-    || value.cancellationPolicy === "" || (value.minimumAttendance !== "" && minimumAttendance === null)) return null;
-  const base: Record<string, unknown> = {
-    childPricing: null, minimumParticipants, minimumChargeableParticipants, maxPartySize,
-    minimumAttendance, cancellationPolicy: value.cancellationPolicy, bookingQuestions: [], conditionsVersion: null,
-  };
-  if (value.cancellationPolicy === "CUSTOM") {
-    const minutes = asNumber(value.cancellationWindowMinutesBeforeStart);
-    const refund = asNumber(value.cancellationRefundBasisPoints);
-    if (minutes === null || refund === null || refund > 10000) return null;
-    base.cancellationWindowMinutesBeforeStart = minutes;
-    base.cancellationRefundBasisPoints = refund;
-  }
-  return base;
-}
-
 function parseBaseline(value: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -446,7 +426,7 @@ export function HostPublicationWorkspace({ productId, create = false }: Props) {
     event?.preventDefault();
     if (!product || busy) return;
     const amount = asNumber(unitAmount);
-    const saleTerms = termsPayload(terms);
+    const saleTerms = publicationTermsPayload(terms, product.saleTerms);
     if (draftDirty && amount === null) { setError("価格を1円以上の整数で入力してください。"); return; }
     if (!draftDirty && !mediaDirty && !termsDirty && !providerMediaDirty) return;
     if (termsDirty && !saleTerms && !draftDirty && !mediaDirty && !providerMediaDirty) {

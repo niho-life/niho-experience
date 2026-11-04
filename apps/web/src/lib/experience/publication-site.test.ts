@@ -50,6 +50,15 @@ describe("Experience public site DTO", () => {
   });
 
   it("serves the publication's seller, localized manuscript, timeline, and photo alts without private IDs", async () => {
+    const customTerms = {
+      ...SAMPLE_TERMS,
+      offers: SAMPLE_TERMS.offers.map((offer, index) => index === 0 ? {
+        ...offer,
+        cancellationPolicy: { code: "CUSTOM" as const, freeCancellationHoursBefore: null },
+        cancellationTerms: { cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3750 },
+      } : offer),
+    };
+    state.bookings.publicBookingTerms.mockResolvedValue(customTerms);
     const english = await getPublicationDetail(publication.slug, "en");
     const japanese = await getPublicationDetail(publication.slug, "ja");
     expect(english).toMatchObject({
@@ -62,6 +71,9 @@ describe("Experience public site DTO", () => {
       canonicalUrl: "https://experience.example.test/ja/experiences/synthetic-dinner",
       title: "合成ディナー", photos: [{ alt: "合成料理" }], provider: { logo: { alt: "合成事業者ロゴ" } },
       timeline: [{ title: "歓迎", photoIndex: 0 }],
+      offers: expect.arrayContaining([expect.objectContaining({
+        saleCancellation: { policyCode: "CUSTOM", cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3750 },
+      })]),
     });
     expect(JSON.stringify({ english, japanese })).not.toMatch(/providerId|stripeConnectAccountRef|sellerNihoAccountRef/);
   });

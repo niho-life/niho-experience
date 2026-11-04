@@ -69,6 +69,11 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
     minimumChargeableParticipants: offer.minimumChargeableParticipants,
     cancellationTerms: offer.cancellationTerms,
+    saleCancellation: {
+      policyCode: offer.cancellationPolicy.code,
+      cancellationWindowMinutesBeforeStart: offer.cancellationTerms.cancellationWindowMinutesBeforeStart,
+      refundBasisPoints: offer.cancellationTerms.refundBasisPoints,
+    },
   })) ?? [];
   const localizedPhoto = (photo: { readonly src: string; readonly alt: string; readonly altJa: string }) => ({
     url: photo.src,
