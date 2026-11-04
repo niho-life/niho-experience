@@ -19,6 +19,7 @@ const LEGACY_PROVIDER_ID = "legacy-provider-contract-synthetic-330";
 const CONNECT_ACCOUNT_ID = "acct_ContractSeller330";
 const CONSENT_VERSION = "listing-contract-v1";
 const SLUG = "synthetic-niho-contract-experience";
+const OFFER_ID = "contract-synthetic-daily";
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -121,7 +122,7 @@ const content = {
 };
 
 const saleTerms = {
-  offerPrices: null,
+  offerPrices: [{ offerId: OFFER_ID, adultPriceYen: 5_000 }],
   childPricing: null,
   minimumParticipants: 1,
   minimumChargeableParticipants: 2,
@@ -245,7 +246,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         headers: {
           origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "application/json",
         },
-        body: JSON.stringify({ slug: SLUG, publicTitle: "Synthetic contract experience", content, currency: "JPY", unitAmount: 4_000 }),
+        body: JSON.stringify({ slug: SLUG, publicTitle: "Synthetic contract experience", content, currency: "JPY", unitAmount: 3_000 }),
       }), "create");
       expect(createResponse.status).toBe(201);
       const created = await createResponse.json() as { product: { id: string; version: string; draft: { version?: number } } };
@@ -259,7 +260,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       });
       const occurrenceDay = addLocalDays(new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10), 1);
       const rule: ScheduleRule = {
-        id: "contract-synthetic-daily", timeZone: "Asia/Tokyo", startsOn: occurrenceDay, endsOn: occurrenceDay,
+        id: OFFER_ID, timeZone: "Asia/Tokyo", startsOn: occurrenceDay, endsOn: occurrenceDay,
         localStartTime: "10:00", durationMinutes: 90, capacity: 4, bookingCutoffMinutes: 0,
         busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
       };
@@ -270,7 +271,10 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         { params: Promise.resolve({ productId }) }, "read",
       );
       expect(readResponse.status).toBe(200);
-      const readBody = await readResponse.json() as { product: { version: string } };
+      const readBody = await readResponse.json() as { product: { version: string; offers: { id: string }[]; publicationBlockers: string[] } };
+      expect(readBody.product.offers).toEqual([expect.objectContaining({ id: OFFER_ID })]);
+      expect(readBody.product.publicationBlockers).toContain("CANCELLATION_TERMS_REQUIRED");
+      expect(readBody.product.publicationBlockers).not.toContain("SCHEDULE_REQUIRED");
       const termsResponse = await publicationRequest(
         new Request(`https://experience.example.test/host/api/products/${productId}/sale-terms`, {
           method: "PUT",
@@ -282,7 +286,8 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         { params: Promise.resolve({ productId }) }, "saveSaleTerms",
       );
       expect(termsResponse.status).toBe(200);
-      const termsBody = await termsResponse.json() as { product: { version: string } };
+      const termsBody = await termsResponse.json() as { product: { version: string; publicationBlockers: string[] } };
+      expect(termsBody.product.publicationBlockers).toEqual([]);
       const publishResponse = await publicationRequest(
         new Request(`https://experience.example.test/host/api/products/${productId}/publish`, {
           method: "POST",
@@ -309,17 +314,45 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       expect(siteProduct.item.saleTerms?.offers[0]?.cancellationPolicy.code).toBe("CUSTOM");
       expect(siteProduct.item.saleTerms?.offers[0]?.minimumChargeableParticipants).toBe(2);
       const card = sitePublicationCard(siteProduct.item);
-      expect(card).toMatchObject({ slug: SLUG, title: "Synthetic contract experience", priceLabel: "¥4,000", offers: [{ id: rule.id, minimumParticipants: 1, maxPartySize: 6 }] });
+      expect(card).toMatchObject({ slug: SLUG, title: "Synthetic contract experience", priceLabel: "¥5,000", offers: [{ id: rule.id, minimumParticipants: 1, maxPartySize: 6 }] });
       expect(cancellationSummary(siteProduct.item.saleTerms!.offers[0]!)).toBe("37.5% refund when cancelled at least 90 minutes before the start");
       const fingerprint = createHash("sha256").update("[]", "utf8").digest("hex");
       const booking = await bookingRepository.startGuestBooking({
-        slug: SLUG, offerId: rule.id, occurrenceDate: occurrenceDay, adultCount: 1, childCount: 0, expectedTotalYen: 8_000,
+        slug: SLUG, offerId: rule.id, occurrenceDate: occurrenceDay, adultCount: 1, childCount: 0, expectedTotalYen: 10_000,
         bookingQuestionsFingerprint: fingerprint, termsConsentVersion: "synthetic-site-terms-v1",
         currentConsentVersion: "synthetic-site-terms-v1", conditionsConsentVersion: null,
         guestName: "Synthetic Guest", guestEmail: "guest@example.test", guestLanguage: "EN",
         clientRequestKey: `synthetic-contract-${randomUUID()}`,
       });
       expect(booking.status).toBe("HOLD");
+      expect(booking.booking.pricingSnapshot.unitAmount).toBe(5_000);
+
+      const latest = await publicationRequest(
+        new Request(`https://experience.example.test/host/api/products/${productId}`),
+        { params: Promise.resolve({ productId }) }, "read",
+      );
+      const current = await latest.json() as { product: { version: string } };
+      const cleared = await publicationRequest(
+        new Request(`https://experience.example.test/host/api/products/${productId}/sale-terms`, {
+          method: "PUT",
+          headers: { origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "application/json" },
+          body: JSON.stringify({ version: current.product.version, saleTerms: { ...saleTerms, offerPrices: [] } }),
+        }),
+        { params: Promise.resolve({ productId }) }, "saveSaleTerms",
+      );
+      expect(cleared.status).toBe(200);
+      expect((await publicationRepository.getSaleTerms(boundary.value.actor, productId)).saleTerms?.offerPrices).toBeNull();
+      expect((await bookingRepository.publicBookingTerms(SLUG))?.offers[0]?.pricing.adultPriceYen).toBe(3_000);
+      const atBasePrice = await bookingRepository.startGuestBooking({
+        slug: SLUG, offerId: rule.id, occurrenceDate: occurrenceDay, adultCount: 1, childCount: 0, expectedTotalYen: 6_000,
+        bookingQuestionsFingerprint: fingerprint, termsConsentVersion: "synthetic-site-terms-v1",
+        currentConsentVersion: "synthetic-site-terms-v1", conditionsConsentVersion: null,
+        guestName: "Another Synthetic Guest", guestEmail: "another-guest@example.test", guestLanguage: "EN",
+        clientRequestKey: `synthetic-cleared-price-${randomUUID()}`,
+      });
+      expect(atBasePrice.booking.pricingSnapshot).toMatchObject({ unitAmount: 3_000, totalAmount: 6_000 });
+      const previousSnapshot = await pool.query("SELECT pricing_snapshot FROM bookings WHERE public_booking_id=$1::uuid", [booking.publicBookingId]);
+      expect(previousSnapshot.rows[0]?.pricing_snapshot).toMatchObject({ unitAmount: 5_000, totalAmount: 10_000 });
       expect(contractRequests.map((request) => request.url)).toContain("/api/experience-host/identity");
       expect(contractRequests.map((request) => request.url)).toContain(`/api/experience-host/legacy-providers/${LEGACY_PROVIDER_ID}/connect-account`);
       expect(contractRequests.every((request) => request.authorization === "Bearer synthetic-niho-session-bearer"

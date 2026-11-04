@@ -15,6 +15,7 @@ export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } fr
 export { projectPublicExperiencePublicationManuscript } from "./experience-publication-projection.ts";
 export type {
   ExperienceHostSaleTerms,
+  ExperienceHostSaleOffer,
   ExperienceHostSaleTermsSaveInput,
   ExperienceHostSaleTermsSaveResult,
   ExperienceHostSaleTermsState,

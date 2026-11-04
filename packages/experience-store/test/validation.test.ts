@@ -38,6 +38,23 @@ describe("store boundary validation", () => {
     });
   });
 
+  it("accepts an explicit free child price but rejects ¥1–49 even when an adult is required", () => {
+    const terms = {
+      childPricing: { priceYen: 0, minAge: 4, maxAge: 12, adultRequired: true },
+      minimumParticipants: 1,
+      minimumChargeableParticipants: 1,
+      maxPartySize: 6,
+      cancellationPolicy: "NONE" as const,
+      bookingQuestions: [],
+      conditionsVersion: null,
+    };
+    assert.equal(validSaleTerms(terms).childPricing?.priceYen, 0);
+    for (const priceYen of [1, 25, 49]) {
+      assert.throws(() => validSaleTerms({ ...terms, childPricing: { ...terms.childPricing, priceYen } }), StoreValidationError);
+    }
+    assert.equal(validSaleTerms({ ...terms, childPricing: { ...terms.childPricing, priceYen: 50 } }).childPricing?.priceYen, 50);
+  });
+
   it("does not reinterpret a configured but missing offer-price set as the legacy fallback", () => {
     assert.throws(
       () => termsFromRow({ offer_prices_configured: true, offer_prices: null }),

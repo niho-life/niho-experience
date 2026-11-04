@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
   GUEST_BOOKING_LIMITS,
+  activeRules,
   questionsFingerprint,
   cancellationPolicyCode,
   databaseNow,
@@ -65,6 +66,15 @@ export class ExperiencePublicationBlockedError extends StoreValidationError {
 export interface ExperiencePublicationContentChecks {
   readonly manuscriptReady: boolean;
   readonly photosReady: boolean;
+}
+
+/** Current schedule rules the OWNER may price. Provider and inventory identifiers stay server-side. */
+export interface ExperienceHostSaleOffer {
+  readonly id: string;
+  readonly localStartTime: string;
+  readonly durationMinutes: number;
+  readonly capacity: number;
+  readonly recurrence: { readonly kind: "DAILY" | "WEEKLY" | "WEEKENDS" | "SELECTED_WEEKDAYS"; readonly weekdays?: readonly string[] };
 }
 
 /**
@@ -731,6 +741,49 @@ export class ExperiencePublicationRepository {
         [actor.providerId],
       );
       return result.rows.map(productFromRow);
+    });
+  }
+
+  /** Current, non-expired rules only. Their ids are the public offer ids used by sale terms. */
+  async listActiveSaleOffers(actor: HostActor, productId: string): Promise<readonly ExperienceHostSaleOffer[]> {
+    assertStoreIdentifier(productId, "productId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER"]);
+      const product = await client.query(
+        "SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2",
+        [actor.providerId, productId],
+      );
+      if (!product.rows[0]) throw new StoreNotFoundError("product");
+      const today = tokyoDate(await databaseNow(client));
+      return (await activeRules(client, actor.providerId, productId, today)).map(({ rule }) => ({
+        id: rule.id,
+        localStartTime: rule.localStartTime,
+        durationMinutes: rule.durationMinutes,
+        capacity: rule.capacity,
+        recurrence: rule.recurrence,
+      }));
+    });
+  }
+
+  /** Re-evaluate the saved draft; the browser never claims that a prerequisite is ready. */
+  async getPublicationBlockers(
+    actor: HostActor,
+    productId: string,
+    checks: ExperiencePublicationContentChecks,
+    consentVersion: string | null,
+  ): Promise<readonly ExperiencePublicationBlocker[]> {
+    assertStoreIdentifier(productId, "productId");
+    validateChecks(checks);
+    if (consentVersion !== null) assertNonEmptyText(consentVersion, "consentVersion", 160);
+    return withTransaction(this.#pool, async (client) => {
+      await requireMembership(client, actor, ["OWNER"]);
+      const productResult = await client.query<DbRow>(
+        `SELECT ${PRODUCT_COLUMNS} FROM experience_products p WHERE p.provider_id=$1 AND p.id=$2 FOR SHARE`,
+        [actor.providerId, productId],
+      );
+      if (!productResult.rows[0]) throw new StoreNotFoundError("product");
+      const state = await lockedState(client, actor.providerId, productId);
+      return blockers(client, productFromRow(productResult.rows[0]), checks, consentVersion, state);
     });
   }
 

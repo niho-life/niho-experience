@@ -54,9 +54,17 @@ export async function resolveCalendarContext(query: Record<string, string | stri
   const assignments = identity && repository ? await repository.listAssignments(identity) : [];
   const choices = calendarConsoleChoices(load.providers, assignments);
   const raw = typeof query.providerId === "string" ? query.providerId : null;
-  const requested = nihoIdOrNull(raw);
+  const explicitRequested = nihoIdOrNull(raw);
+  const productEntry = nihoIdOrNull(typeof query.experience === "string" ? query.experience : null);
+  const ownerChoices = choices.filter((choice) => choice.kind === "MEMBER" && choice.memberRole === "OWNER");
+  // Product creation is OWNER-only. When the editor sends a product, select the one exact current
+  // OWNER workspace instead of falling back to an unrelated editor/operator workspace.
+  if (raw === null && productEntry && ownerChoices.length !== 1) {
+    return { choices, choice: null, providerNotFound: true };
+  }
+  const requested = raw === null && productEntry ? ownerChoices[0]!.id : explicitRequested;
   const selected = selectProvider(choices, requested);
-  return { choices, choice: selected.provider, providerNotFound: raw !== null && (!requested || selected.requestedMissing) };
+  return { choices, choice: selected.provider, providerNotFound: raw !== null && (!explicitRequested || selected.requestedMissing) };
 }
 
 /** The page selector and HostShell must use the same product authority projection. */

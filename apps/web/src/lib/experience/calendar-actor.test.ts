@@ -26,6 +26,25 @@ describe("calendar actor", () => {
     expect(await resolveCalendarContext({ providerId: "provider-a" })).toMatchObject({ choice: { kind: "OPERATOR", id: "provider-a", memberRole: null } });
   });
 
+  it("opens an editor product in its one exact OWNER workspace instead of the first unrelated choice", async () => {
+    mocks.load = { status: "ok", nihoUserId: "operator-a", providers: [
+      { id: "editor-first", nihoUserId: "operator-a", displayName: "A editor workspace", memberRole: "EDITOR" },
+      { id: "owned-provider", nihoUserId: "operator-a", displayName: "Z owner workspace", memberRole: "OWNER" },
+    ] };
+    expect(await resolveCalendarContext({ experience: "product-synthetic" })).toMatchObject({
+      choice: { kind: "MEMBER", id: "owned-provider", memberRole: "OWNER" },
+      providerNotFound: false,
+    });
+  });
+
+  it("does not guess a workspace when a product entry has no unique OWNER", async () => {
+    mocks.load = { status: "ok", nihoUserId: "operator-a", providers: [
+      { id: "owner-a", nihoUserId: "operator-a", displayName: "Owner A", memberRole: "OWNER" },
+      { id: "owner-b", nihoUserId: "operator-a", displayName: "Owner B", memberRole: "OWNER" },
+    ] };
+    expect(await resolveCalendarContext({ experience: "product-synthetic" })).toMatchObject({ choice: null, providerNotFound: true });
+  });
+
   it("uses the Host v1 identity when no seller membership is returned", async () => {
     mocks.load = { status: "ok", nihoUserId: "operator-a", providers: [] };
     expect(await calendarActor("provider-a")).toMatchObject({ actor: { nihoUserId: "operator-a", calendarScope: "OPERATOR" }, access: { kind: "OPERATOR" } });

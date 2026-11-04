@@ -179,13 +179,22 @@ function publicationStatus(state: ExperiencePublicationState | null): ProductSta
 }
 
 async function productDto(repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>, actor: PublicationHostContext["actor"], productId: string) {
-  const [product, state, termsState, media, publicationNeedsUpdate] = await Promise.all([
+  const [product, state, termsState, media, publicationNeedsUpdate, offers] = await Promise.all([
     repository.getProduct(actor, productId),
     repository.getState(actor, productId),
     repository.getSaleTerms(actor, productId),
     repository.listMedia(actor, productId),
     repository.hasPendingPublicationChanges(actor, productId),
+    repository.listActiveSaleOffers(actor, productId),
   ]);
+  const gallery = media.filter((asset) => asset.placement === "GALLERY");
+  const photosReady = gallery.length > 0 && gallery.every((asset) => asset.altText.trim() !== "" && asset.altTextJa.trim() !== "");
+  const publicationBlockers = await repository.getPublicationBlockers(
+    actor,
+    productId,
+    checksFor(product.content, photosReady, product.publicTitle),
+    config.experiencePublicationConsentVersion,
+  );
   const revision: ProductRevision = {
     draft: product.version,
     state: state?.version ?? null,
@@ -196,6 +205,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     version: encodeRevision(revision),
     status: publicationStatus(state),
     publicationNeedsUpdate,
+    publicationBlockers,
     draft: {
       slug: product.slug,
       publicTitle: product.publicTitle,
@@ -205,6 +215,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     },
     sellerDisplayName: product.sellerDisplayName,
     saleTerms: termsState.saleTerms,
+    offers,
     media: media.map((asset) => ({
       ...asset,
       previewUrl: `/host/api/products/${encodeURIComponent(product.id)}/media/${encodeURIComponent(asset.id)}`,

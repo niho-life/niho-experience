@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     getSaleTerms: vi.fn(),
     listMedia: vi.fn(),
     hasPendingPublicationChanges: vi.fn(),
+    listActiveSaleOffers: vi.fn(),
+    getPublicationBlockers: vi.fn(),
     createDraft: vi.fn(),
     saveDraft: vi.fn(),
     saveSaleTerms: vi.fn(),
@@ -155,6 +157,8 @@ describe("Experience owner product API", () => {
     mocks.repository.getSaleTerms.mockResolvedValue({ draftVersion: 4, stateVersion: 3, saleTerms: terms });
     mocks.repository.listMedia.mockResolvedValue(media);
     mocks.repository.hasPendingPublicationChanges.mockResolvedValue(false);
+    mocks.repository.listActiveSaleOffers.mockResolvedValue([{ id: "dinner-evening", localStartTime: "18:00", durationMinutes: 90, capacity: 6, recurrence: { kind: "WEEKLY" } }]);
+    mocks.repository.getPublicationBlockers.mockResolvedValue([]);
     mocks.repository.createDraft.mockResolvedValue(product);
     mocks.repository.saveDraft.mockResolvedValue({ draft: product, publicationUpdated: true, blockers: [] });
     mocks.repository.saveSaleTerms.mockResolvedValue({ draftVersion: 4, stateVersion: 3, saleTerms: terms, publicationUpdated: true, blockers: [] });
@@ -192,6 +196,8 @@ describe("Experience owner product API", () => {
     const version = dto.version;
     expect(dto.version).toEqual(expect.any(String));
     expect(dto.media[0].previewUrl).toContain(media[0]!.id);
+    expect(dto.offers).toEqual([expect.objectContaining({ id: "dinner-evening", localStartTime: "18:00" })]);
+    expect(dto.publicationBlockers).toEqual([]);
 
     const saved = await saveProduct(request(`/host/api/products/${product.id}`, "PATCH", { version, draft }), context);
     expect(saved.status).toBe(200);
