@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeExperienceProviderPageListingRequest, decodeExperienceProviderPageMeetingPointUpdateRequest } from "../src/host/schema.ts";
+import { decodeExperienceProviderPageListingRequest, decodeExperienceProviderPageMeetingPointUpdateRequest } from "../src/legacy-host/schema.ts";
 
 const version = "2026-10-27T01:00:00.000Z";
 const meetingPoint = { overview: "（合成）駅の近く", address: "（合成）サンプル町 1 丁目", accessNote: "", mapUrl: "https://maps.example.test/sample", entranceNote: "（合成）木の門" };

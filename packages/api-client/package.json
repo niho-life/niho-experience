@@ -30,9 +30,17 @@
       "types": "./src/host/mock.ts",
       "default": "./src/host/mock.ts"
     },
-    "./host-schema": {
-      "types": "./src/host/schema.ts",
-      "default": "./src/host/schema.ts"
+    "./legacy-host": {
+      "types": "./src/legacy-host/index.ts",
+      "default": "./src/legacy-host/index.ts"
+    },
+    "./legacy-host/mock": {
+      "types": "./src/legacy-host/mock.ts",
+      "default": "./src/legacy-host/mock.ts"
+    },
+    "./legacy-host-schema": {
+      "types": "./src/legacy-host/schema.ts",
+      "default": "./src/legacy-host/schema.ts"
     },
     "./admin-auth": {
       "types": "./src/admin-auth/index.ts",
@@ -116,6 +124,7 @@
     },
     "./contract/experience-public-api.openapi.json": "./contract/experience-public-api.openapi.json",
     "./contract/experience-host-api.openapi.json": "./contract/experience-host-api.openapi.json",
+    "./contract/experience-legacy-host-api.openapi.json": "./contract/experience-legacy-host-api.openapi.json",
     "./contract/experience-admin-auth-api.openapi.json": "./contract/experience-admin-auth-api.openapi.json",
     "./contract/experience-admin-read-api.openapi.json": "./contract/experience-admin-read-api.openapi.json",
     "./contract/experience-admin-support-case-api.openapi.json": "./contract/experience-admin-support-case-api.openapi.json",

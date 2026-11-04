@@ -1,5 +1,5 @@
 import "server-only";
-import type { ExperienceHostApiClient, ExperienceHostApiFailure } from "@niho-experience/api-client/host";
+import type { ExperienceHostApiClient, ExperienceHostApiFailure } from "@niho-experience/api-client/legacy-host";
 import type { HostProvider } from "@/lib/host/providers";
 import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 import { hostApiClient, isHostMock } from "@/lib/host/server";

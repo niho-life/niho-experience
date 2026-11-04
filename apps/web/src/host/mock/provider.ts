@@ -9,7 +9,7 @@ import { MOCK_KITCHEN_THREADS } from "./threads";
 
 /*
  * The console's side of the two synthetic providers of the host contract's mock
- * (`@niho-experience/api-client/host/mock`, scenario `two-providers`; same ids): what the
+ * (`@niho-experience/api-client/legacy-host/mock`, scenario `two-providers`; same ids): what the
  * contract has no API for yet. The providers' own values, their review and their payout
  * account come from the contract mock itself. Names, URLs and addresses are invented;
  * emails use example.com, and the calendars' colors are the site's own tokens.

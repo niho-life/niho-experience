@@ -1,4 +1,4 @@
-import type { ExperienceHostApiFailure, ExperienceHostErrorReason } from "@niho-experience/api-client/host";
+import type { ExperienceHostApiFailure, ExperienceHostErrorReason } from "@niho-experience/api-client/legacy-host";
 
 /*
  * What the host reads when NIHO refuses a change (#88/#91): one sentence per `error.details.reason`

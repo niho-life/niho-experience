@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/legacy-host";
 import { EDITOR_LIMITS } from "@/host/editor";
 import { AddRowButton, EditorPanel, FIELD_LABEL, LIST_INPUT, LIST_INPUT_SUB, LIST_INPUT_TIME, RemoveButton, SUB_HEADING, TextList, useFocusAfterRender } from "./editor-parts";
 import { INPUT, SELECT, TEXTAREA } from "./fields";

@@ -1,4 +1,4 @@
-import type { ExperienceProviderKind, ExperienceProviderMemberRole, ExperienceProviderReviewStatus, ExperienceProviderWithMemberRole } from "@niho-experience/api-client/host";
+import type { ExperienceProviderKind, ExperienceProviderMemberRole, ExperienceProviderReviewStatus, ExperienceProviderWithMemberRole } from "@niho-experience/api-client/legacy-host";
 
 /**
  * Providers as NIHO's host API returns them. The shapes come from the host

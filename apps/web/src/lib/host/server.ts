@@ -3,7 +3,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { NextResponse } from "next/server";
-import { createExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/host";
+import { createExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/legacy-host";
 import { config } from "@/lib/config";
 import { cookieSealer } from "./cookie-seal";
 import { createMockHostFetch, MOCK_ACCESS_TOKEN_PREFIX, mockToken } from "./mock-niho";

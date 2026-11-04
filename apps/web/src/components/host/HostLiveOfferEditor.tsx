@@ -1,6 +1,6 @@
 "use client";
 
-import type { ExperienceProviderPageOffer } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageOffer } from "@niho-experience/api-client/legacy-host";
 import { appendLiveOffer, editLines, LIVE_OFFER_LIMIT, LIVE_QUESTION_LIMIT, LIVE_QUESTION_OPTION_LIMIT, moveLiveOffer, removeLiveOffer } from "./live-editor-state";
 import { consoleButtonClass } from "./host-ui";
 import { DISABLED } from "./editor-parts";

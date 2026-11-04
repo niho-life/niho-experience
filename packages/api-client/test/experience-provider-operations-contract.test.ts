@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
-import { EXPERIENCE_HOST_API_CONTRACT, EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT } from "../src/contract-meta.ts";
+import { EXPERIENCE_LEGACY_HOST_API_CONTRACT, EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT } from "../src/contract-meta.ts";
 import { EXPERIENCE_PROVIDER_OPERATION_ROLES } from "../src/experience-provider-operations/types.ts";
 import { generateContractTypes } from "../scripts/gen-types.ts";
 
@@ -43,10 +43,10 @@ describe("experience provider operations selected contract", () => {
 
   it("keeps page API roles narrower than the separate operational cohost role", async () => {
     const operations = (await readContract("experience-provider-operations-api.openapi.json")).document;
-    const host = (await readContract("experience-host-api.openapi.json")).document;
+    const host = (await readContract("experience-legacy-host-api.openapi.json")).document;
     expect(operations.components.schemas.ProviderRole?.enum).toEqual(["OWNER", "EDITOR", "COHOST"]);
     expect(host.components.schemas.ExperienceProviderMemberRole?.enum).toEqual(["OWNER", "EDITOR"]);
     expect(EXPERIENCE_PROVIDER_OPERATION_ROLES).toEqual(operations.components.schemas.ProviderRole?.enum);
-    expect(EXPERIENCE_HOST_API_CONTRACT.status).toBe("draft");
+    expect(EXPERIENCE_LEGACY_HOST_API_CONTRACT.deploymentStatus).toBe("legacy");
   });
 });

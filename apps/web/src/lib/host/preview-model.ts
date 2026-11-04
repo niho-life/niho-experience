@@ -1,5 +1,5 @@
 import { EN_STATIC_COPY_V1, type DetailViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
-import type { ExperienceProviderPagePreviewOfferSummary, ExperienceProviderPagePreviewOccurrence, ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPagePreviewOfferSummary, ExperienceProviderPagePreviewOccurrence, ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/legacy-host";
 import { groupSizeLabel, initialOf } from "@/lib/card-model";
 import { formatDay, formatDuration, formatTimeRange, formatYen, jstDateKey } from "@/lib/format";
 import { addMinutesToClock, formatClock, joinAnd, scheduleLine, scheduleSummary } from "@/lib/schedule";

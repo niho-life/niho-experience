@@ -1,5 +1,5 @@
 import "server-only";
-import type { ExperienceHostApiClient, ExperienceProviderConsent } from "@niho-experience/api-client/host";
+import type { ExperienceHostApiClient, ExperienceProviderConsent } from "@niho-experience/api-client/legacy-host";
 import { nihoIdOrNull, selectProvider, type HostProvider } from "@/lib/host/providers";
 import { hostApiClient, isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable, type HostSession } from "@/lib/host/session";

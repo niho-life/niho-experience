@@ -1,6 +1,6 @@
-import { decodeExperienceProviderUploadPolicyRequest } from "@niho-experience/api-client/host-schema";
+import { decodeExperienceProviderUploadPolicyRequest } from "@niho-experience/api-client/legacy-host-schema";
 import { isExperienceProviderOperationPathId } from "@niho-experience/api-client/experience-provider-operations-schema";
-import type { ExperienceProviderPhotoUploadForm, ExperienceProviderUploadPolicyResponse } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPhotoUploadForm, ExperienceProviderUploadPolicyResponse } from "@niho-experience/api-client/legacy-host";
 import { loadProviderPagesClient, providerPagesFailure } from "@/lib/host/provider-pages-server";
 import { providerOperationsJson, providerOperationsMutationAllowed, readProviderOperationsJson } from "@/lib/host/provider-operations-server";
 

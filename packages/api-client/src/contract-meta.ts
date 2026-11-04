@@ -8,14 +8,21 @@ export const EXPERIENCE_API_CONTRACT = {
   status: "agreed",
 } as const;
 
-/**
- * ホスト API の契約（contract/experience-host-api.openapi.json）の版と状態。`draft` は NIHO 側（niho-app の contracts/exports）が
- * 書き出したが、まだ NIHO の main に入っていない・配備されていない段階を表す。ホストの画面は mock で作り、実 API と接続済みとは扱わない。
- */
+/** NIHO Experience Host API v1.0.0 の選別契約。source SHA と hash は NIHO #19712 の export に固定する。 */
 export const EXPERIENCE_HOST_API_CONTRACT = {
+  version: "1.0.0",
+  sourceCommit: "b5b664e6bfcb0bc8d0be01ffa109a684647b17db",
+  sha256: "924ce2062be2c431ee6a4dd3a8322c48558e6d76f0a097bae75ae6222610023e",
+  status: "draft",
+  deploymentStatus: "not-deployed",
+} as const;
+
+/** Previous 0.4.0 NIHO page/provider client retained for migration screens only. */
+export const EXPERIENCE_LEGACY_HOST_API_CONTRACT = {
   version: "0.4.0",
   sourceCommit: "cc2a1503c4a01d9cc4c19ca295be72de623e4d60",
   status: "draft",
+  deploymentStatus: "legacy",
 } as const;
 
 /**

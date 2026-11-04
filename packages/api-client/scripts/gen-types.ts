@@ -1,5 +1,6 @@
 // 契約から型を作る。公開 API（contract/experience-public-api.openapi.json → src/generated/openapi.ts）と
-// ホスト API（contract/experience-host-api.openapi.json → src/generated/host-openapi.ts）、
+// NIHO host common contract v1（contract/experience-host-api.openapi.json → src/generated/host-openapi.ts）、
+// 移行中の旧 NIHO host API（contract/experience-legacy-host-api.openapi.json → src/generated/legacy-host-openapi.ts）、
 // Admin read API（contract/experience-admin-read-api.openapi.json → src/generated/admin-read-openapi.ts）、
 // Admin support case / operations API、host support history / settings API、fee summary API、translate rooms API を含む選別契約。
 // `--check` は書き込まず、生成結果とコミット済みの型が 1 つでも違えば失敗する（CI の drift 検査）。
@@ -8,11 +9,12 @@ import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
 
-export type ContractTarget = "public" | "host" | "admin-read" | "admin-support-case" | "admin-operations" | "host-support-history" | "host-support-settings" | "fee-summary" | "experience-preparations" | "experience-provider-operations" | "experience-translate-rooms";
+export type ContractTarget = "public" | "host" | "legacy-host" | "admin-read" | "admin-support-case" | "admin-operations" | "host-support-history" | "host-support-settings" | "fee-summary" | "experience-preparations" | "experience-provider-operations" | "experience-translate-rooms";
 
 const TARGETS: Record<ContractTarget, { contract: string; output: string }> = {
   public: { contract: "experience-public-api.openapi.json", output: "openapi.ts" },
   host: { contract: "experience-host-api.openapi.json", output: "host-openapi.ts" },
+  "legacy-host": { contract: "experience-legacy-host-api.openapi.json", output: "legacy-host-openapi.ts" },
   "admin-read": { contract: "experience-admin-read-api.openapi.json", output: "admin-read-openapi.ts" },
   "admin-support-case": { contract: "experience-admin-support-case-api.openapi.json", output: "admin-support-case-openapi.ts" },
   "admin-operations": { contract: "experience-admin-operations-api.openapi.json", output: "admin-operations-openapi.ts" },

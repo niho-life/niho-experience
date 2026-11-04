@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/legacy-host";
 import { EditorPanel } from "./editor-parts";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { consoleButtonClass } from "./host-ui";

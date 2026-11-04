@@ -1,5 +1,5 @@
 import "server-only";
-import type { ExperienceHostApiFailure } from "@niho-experience/api-client/host";
+import type { ExperienceHostApiFailure } from "@niho-experience/api-client/legacy-host";
 import { config } from "@/lib/config";
 import { clearSessionCookie, hostApiClient, readHostSession } from "./server";
 import { accessTokenUsable } from "./session";

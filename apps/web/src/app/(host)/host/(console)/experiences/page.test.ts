@@ -1,7 +1,7 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import type { ExperienceProviderPageListItem } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageListItem } from "@niho-experience/api-client/legacy-host";
 
 /** NIHO's host API powers page authoring independently of booking and team operations. */
 const state = vi.hoisted(() => ({

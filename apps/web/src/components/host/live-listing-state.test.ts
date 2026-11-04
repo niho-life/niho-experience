@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ExperienceProviderPageListing } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageListing } from "@niho-experience/api-client/legacy-host";
 import { hostListingReviewNote, LISTING_TEXT, listingRefusal, liveListingStatus, liveListingView, providerReviewLine, PUBLISH_BLOCKER_TEXT, publishBlockerText, readListingResponse } from "./live-listing-state";
 
 const SITE = "https://experience.example.test";

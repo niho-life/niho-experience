@@ -1,5 +1,5 @@
 /**
- * ホスト API の契約（contract/experience-host-api.openapi.json）の検証（Node・test 専用）。公開契約の監査
+ * 旧 host API の契約（contract/experience-legacy-host-api.openapi.json）の検証（Node・test 専用）。公開契約の監査
  * （`auditContractDocument`）とは別の規則で、公開契約の規則は変えない。
  *
  * - path は `/api/experience-providers` 以下と `GET /api/auth/me` だけ。各 operation の security は Bearer（`AppConnectWebAccessToken`）だけ。
@@ -10,7 +10,7 @@
  * - 項目名・引数名は `host-field-policy.json` の禁止の名前・語を含まない。禁止の語に当たる項目名は、`allowedPropertyNames` に
  *   schema ごとに書いた名前だけを、その語についてだけ許す（ほかの schema・ほかの名前・ほかの語は引き続き違反。語そのものの禁止は残す）。
  */
-import hostContractDocument from "../../contract/experience-host-api.openapi.json" with { type: "json" };
+import hostContractDocument from "../../contract/experience-legacy-host-api.openapi.json" with { type: "json" };
 import hostFieldPolicy from "../../contract/host-field-policy.json" with { type: "json" };
 import { createContractValidator, findForbiddenToken } from "./contract-validator.ts";
 

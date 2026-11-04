@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { ExperienceHostApiClient, ExperienceHostApiFailure, ExperienceProviderUpdateRequest } from "@niho-experience/api-client/host";
+import type { ExperienceHostApiClient, ExperienceHostApiFailure, ExperienceProviderUpdateRequest } from "@niho-experience/api-client/legacy-host";
 import { nihoIdOrNull, type HostProviderReviewStatus } from "@/lib/host/providers";
 import { HOST_HOME_PATH, HOST_MOCK_LOGIN_PATH, withProvider } from "@/lib/host/routes";
 import { hostApiClient, isHostMock, readHostSession } from "@/lib/host/server";
