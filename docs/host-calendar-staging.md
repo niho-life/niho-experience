@@ -124,6 +124,7 @@ Cloud Runのservice URLは `status.url` のhash形式に加え、service名・pr
 mock で出している機能を http mode で開くフラグを、`host-staging` Environment の Variable `STG_*` で候補 revision に渡す。表・前提・配備前の検査・配備後の検証は本番と同じで、[本番の「機能のフラグ」](production-deploy.md#機能のフラグ84) の表の `PROD_` を `STG_` に読み替える（`scripts/deploy/runtime-flags.mjs`）。staging で違うのは次の点。
 
 - **ホストの画面と DB は常にある**ので、前提の「ホストの画面・DB」はいつも満たす。サイトの URL は `STG_HOST_SERVICE_URL`、`<project>` は `niho-app-stg`。
+- **Guide Admin API** は `STG_GUIDE_ADMIN_API_ENABLED=true`、`STG_GUIDE_ADMIN_AUDIENCE`（Cloud Run service URL）、`STG_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`（NIHO stg API runtime SA 1つ）が必要。audienceは公開ドメインでも候補tag URLでもないCloud Run URLを使う。NIHO Admin BFFがstgへ配備・受入されるまではOFFに保つ。
 - **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
 - **体験ページの作成・編集**は `STG_PROVIDER_PAGES_API_ENABLED=true` でNIHOの限定ホストAPIへ接続する。NIHO stgのprovider pages APIとホストログインを配備し、ページ作成・編集・写真・掲載申請と別提供者/非OWNERの拒否を受け入れてから開く。このフラグ単独では予約運営・メッセージ・サブホスト管理、旅行者の予約・販売を開かない。
 - **ホストの提供者運営API操作**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` で予約一覧と承認/辞退/取消、メッセージ、サブホスト管理に接続する（体験ページ操作も含む）。NIHO stg に `APP_CONNECT_WEB_ORIGINS` と API の `EXPERIENCE_HOST_CONSOLE_URL` を正確なorigin/URLで設定し、N1/N2a/N2bと予約・顧客・売上を扱うN2c API（niho-app #19278）を配備してから、フラグが開くすべての画面・操作と権限拒否まで受け入れて開く。提供者登録自体はホスト画面の別操作。このフラグは旅行者の予約・販売を開かない。NIHO API上のメッセージを使うため、Experience独自の質問を使う `STG_GUEST_QUESTIONS_ENABLED` は `false` または未設定にする。

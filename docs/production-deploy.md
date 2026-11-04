@@ -143,12 +143,13 @@ NIHOapp側の変更は連携Aの担当へ集約する。stg Web の `EXPERIENCE_
 | variable（prefixを省略） | 開くもの | 必要な設定 |
 | --- | --- | --- |
 | `ARTICLE_AUTHORITY_API_ENABLED` | 現在OWNER・体験候補・関連権限API | DB、`ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS`、`NIHO_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE`、`EDITOR_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE` |
+| `GUIDE_ADMIN_API_ENABLED` | NIHO Admin BFFからの限定writer/category管理API | ホストの画面・DB、`GUIDE_ADMIN_AUDIENCE`（Cloud Run service URL）、`GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`（NIHO API runtime SA 1つ） |
 | `HOST_ARTICLE_LINKS_ENABLED` | ホスト設定のNIHO正本への招待・取消 | ホスト画面、`NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_LINKS_AUDIENCE`、`GUIDE_EDITOR_SITE_ORIGIN` |
 | `EDITOR_PUBLICATIONS_ENABLED` | 公開元を`editor`へ切替 | DB、authority API、`GUIDE_EDITOR_API_BASE_URL`、`GUIDE_EDITOR_API_TOKEN_REF`の固定数値版、`GUIDE_EDITOR_ASSET_ORIGIN`、`GUIDE_EDITOR_SITE_ORIGIN` |
 | `GUIDE_APP_CARDS_ENABLED` | NIHOライブラリ向けの公開summary | `EDITOR_PUBLICATIONS_ENABLED=true`。著者が`extras.app`を選んだlive公開版だけ。[記事カード契約](guide-app-cards.md) |
 
 許可サービスアカウントはセミコロン区切りで複数を指定する。gcloudのカンマ区切りと衝突せず、単一のenv値として渡し、runtimeでも同じリストを解釈する。サービス専用APIのaudienceは配備先の固定site URL。ホスト用`NIHO_ARTICLE_LINKS_AUDIENCE`はNIHOの既存writer resolver用audienceと一致させ、サービス専用の`NIHO_ARTICLE_AUTHORITY_AUDIENCE`と混同しない。
 
-NIHO追加API → Editor / Experience追加API → 相互認証と合成の負例確認 → ホスト入口 → 公開元切替の順で開く。writer解除・取消・OWNER変更・体験停止の次読取、既存カテゴリ停止後の記事維持、公開停止後の写真404、依存障害での関連表示非表示を確認する。owner指示により画面受入・実機操作は省略できる。Secret値の用意は各repoのowner専用手順に従い、AIが値を取得・表示しない。
+NIHO追加API → Editor / Experience追加API → 相互認証と合成の負例確認 → ホスト入口 → 公開元切替の順で開く。カテゴリ/writer管理には、NIHO Admin BFFが配備済みでExperienceの限定Guide Admin APIを呼べる状態を先に確認し、`GUIDE_ADMIN_API_ENABLED` はNIHOの正規runtime service accountだけを許可してから開く。writer解除・取消・OWNER変更・体験停止の次読取、既存カテゴリ停止後の記事維持、公開停止後の写真404、依存障害での関連表示非表示を確認する。owner指示により画面受入・実機操作は省略できる。Secret値の用意は各repoのowner専用手順に従い、AIが値を取得・表示しない。
 
 公開元flagをOFFに戻すと新revisionは従来のstaticになる。既存database公開元へ戻す場合は既存runbookの固定revision切戻しを使う。公開記事・旧下書き・招待履歴を消さない。新しい定期job・Schedulerは追加しない。
