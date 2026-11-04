@@ -1,5 +1,5 @@
 {
-  "provider": { "id": "sample-provider-0001", "displayName": "Sample Tea Studio" },
+  "provider": { "id": "sample-provider-0001", "legacyProviderId": "sample-niho-legacy-provider-0001", "displayName": "Sample Tea Studio" },
   "owner": { "nihoUserId": "sample-user-0001" },
   "supportEnabled": false,
   "product": {
@@ -8,7 +8,7 @@
     "title": "Sample tea ceremony",
     "unitAmountYen": 4000,
     "cancellationTermsRef": "sample-cancellation-terms-v1",
-    "sellerNihoAccountRef": "sample-seller-0001",
+    "sellerNihoAccountRef": "sample-user-0001",
     "stripeConnectAccountRef": "acct_SampleSeller0001",
     "sellerDisplayName": "Sample Tea Studio"
   }

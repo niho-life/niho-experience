@@ -121,6 +121,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   provider_memberships: { write: IU },
   provider_notification_preferences: { write: IU },
   provider_publication_readiness: { write: IU },
+  // Explicit Connect lookup mappings are written by the operator registration script only.
+  experience_host_seller_profiles: { write: [] },
   provider_sale_settings: { write: IU },
   resource_google_busy_intervals: { write: ID },
   resource_google_calendars: { write: IU },

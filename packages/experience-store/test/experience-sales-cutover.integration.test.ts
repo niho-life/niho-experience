@@ -38,6 +38,8 @@ describe("Experience owner publication is the only Experience checkout source", 
       const bookings = new GuestBookingRepository(pool);
       const sellerReadiness = {
         accountUsable: true, connectReady: true, sellerDisplayReady: true,
+        paymentReuseConsentAccepted: true, paymentReuseConsentVersion: "synthetic-payment-reuse-v1",
+        paymentReuseConsentedAtUtc: new Date(Date.now() - 2_000).toISOString(),
         sellerNihoAccountRef: "seller-owner-synthetic", stripeConnectAccountRef: "acct_owner_synthetic",
         sellerDisplayName: "Synthetic legal seller", requiredConsentVersion: CONSENT,
         observedAtUtc: new Date(Date.now() - 1_000).toISOString(), validUntilUtc: new Date(Date.now() + 60_000).toISOString(),

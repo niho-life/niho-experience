@@ -83,7 +83,7 @@ describe("product operator invitation HTTP boundary", () => {
     expect((await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context)).status).toBe(401);
     mocks.session = { accessToken: "access-token", accessTokenExpiresAt: Date.now() + 3600_000 };
     expect((await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context)).status).toBe(503);
-    mocks.providers = { status: "ok", providers: [{ id: "owner-provider", ownerUserId: "owner-a", memberRole: "OWNER" }] };
+    mocks.providers = { status: "ok", providers: [{ id: "owner-provider", nihoUserId: "owner-a", memberRole: "OWNER" }] };
     const response = await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ href: "/host/calendar?providerId=provider-a" });

@@ -27,7 +27,7 @@ vi.mock("./guest-reviews-server", () => ({ loadGuestReviews: (...args: unknown[]
 
 import { loadHomeTodos } from "./home-server";
 
-const PROVIDER = { id: "sample-provider", ownerUserId: "sample-owner", displayName: "Synthetic provider", memberRole: "OWNER" } as never;
+const PROVIDER = { id: "sample-provider", nihoUserId: "sample-owner", displayName: "Synthetic provider", memberRole: "OWNER" } as never;
 const SESSION = { accessToken: "synthetic-access-token", accessTokenExpiresAt: Number.MAX_SAFE_INTEGER } as never;
 
 const THREAD: HostThread = {

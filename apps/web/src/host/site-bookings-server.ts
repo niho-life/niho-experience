@@ -39,10 +39,10 @@ export const SITE_BOOKING_OWNER_ONLY_TEXT = "このサイトで受けた予約�
 /** The list reads this many bookings: the upcoming ones from today, the nearest first, then the latest past ones. */
 const LIST_LIMIT = 100;
 
-/** Use the selected provider's ownerUserId as its Experience actor; never infer identity from a connection ID. */
-export function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+/** Use the authenticated NIHO identity returned by contract v1; Experience checks membership again. */
+export function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /** The start of the day in Japan: the list's これから counts today's bookings, as the screen does (ホーム's 今日 too). */

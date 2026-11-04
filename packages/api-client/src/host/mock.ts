@@ -9,17 +9,21 @@ export function createMockExperienceHostFetch(options: {
   readonly stripeAccountId?: string | null;
   readonly connectReady?: boolean;
   readonly reuseConsentAccepted?: boolean;
+  readonly accessToken?: string;
+  readonly serviceIdToken?: string;
 } = {}): FetchLike {
   const nihoUserId = options.nihoUserId ?? "sample-niho-user";
   const legacyProviderId = options.legacyProviderId ?? "sample-provider-kitchen";
   const stripeAccountId = options.stripeAccountId === undefined ? "acct_synthetic12345678" : options.stripeAccountId;
   const connectReady = options.connectReady ?? true;
   const reuseConsentAccepted = options.reuseConsentAccepted ?? true;
+  const accessToken = options.accessToken ?? "synthetic-niho-access-token";
+  const serviceIdToken = options.serviceIdToken ?? MOCK_EXPERIENCE_HOST_SERVICE_TOKEN;
   return async (input, init = {}) => {
     const url = new URL(input);
     const headers = new Headers(init.headers);
-    if (init.method !== "GET" || headers.get("authorization") !== "Bearer synthetic-niho-access-token"
-      || headers.get("x-niho-experience-service-id-token") !== MOCK_EXPERIENCE_HOST_SERVICE_TOKEN
+    if (init.method !== "GET" || headers.get("authorization") !== `Bearer ${accessToken}`
+      || headers.get("x-niho-experience-service-id-token") !== serviceIdToken
       || init.credentials !== "omit" || init.cache !== "no-store" || init.redirect !== "error") {
       return Response.json({ error: { code: "FORBIDDEN" } }, { status: 403, headers: { "cache-control": "private, no-store" } });
     }

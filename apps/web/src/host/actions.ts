@@ -1,18 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import type { ExperienceHostApiClient, ExperienceHostApiFailure, ExperienceProviderUpdateRequest } from "@niho-experience/api-client/legacy-host";
 import { nihoIdOrNull, type HostProviderReviewStatus } from "@/lib/host/providers";
-import { HOST_HOME_PATH, HOST_MOCK_LOGIN_PATH, withProvider } from "@/lib/host/routes";
-import { hostApiClient, isHostMock, readHostSession } from "@/lib/host/server";
+import { isHostMock, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
-import { openStripe, stepNotice, syncStripe } from "./connect";
-import { readHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
-import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
+import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { draftGuestQuestionEnglish, loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
 import { draftGuestReviewEnglish } from "./guest-reviews-server";
-import { normalizeMeetingPoint } from "./meeting-point";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
@@ -33,30 +27,12 @@ import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
 import type { HostAttendance, HostBooking, HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
 
 /*
- * The host console's changes to NIHO (#88/#91), as server actions: each reads the session,
- * calls NIHO's host API through the typed client (hostApiClient: NIHO in http mode, the
- * contract mock in mock mode) and answers `{ ok, message }` with what NIHO has now. Arguments
- * come from the browser, so each is checked here; NIHO decides what the host may do.
- *
- * The contract mock keeps a write only within one client (docs/api-contract.md §9.1), so an
- * action reads the result back with the client that wrote it: the screen shows NIHO's answer,
- * also in the preview, where the next page load starts from the synthetic data again.
+ * Host seller registration/profile/review and Connect mutation belonged to NIHO's legacy host API.
+ * Contract v1 intentionally grants no such operations; Experience product authoring and publication
+ * use /host/api/products, while Connect onboarding remains an NIHO-owned prerequisite.
  */
-
-type Run<T extends object> = (client: ExperienceHostApiClient) => Promise<HostActionResult<T>>;
-
-async function withHostApi<T extends object>(run: Run<T>): Promise<HostActionResult<T>> {
-  const session = await readHostSession();
-  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
-  try {
-    return await run(hostApiClient(session));
-  } catch {
-    return { ok: false, message: HOST_NETWORK_ERROR_TEXT };
-  }
-}
-
-const refused = (failure: ExperienceHostApiFailure): { ok: false; message: string } => ({ ok: false, message: hostFailureMessage(failure) });
 const invalid = { ok: false, message: HOST_INVALID_INPUT_TEXT } as const;
+const legacyHostOperationUnavailable = "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。";
 
 /** A string from the browser, at most `max` characters long (NIHO checks the rest). */
 function text(value: unknown, max: number): string | null {
@@ -65,18 +41,6 @@ function text(value: unknown, max: number): string | null {
 
 /** NIHO's limits (the contract), with room for the spaces NIHO trims. */
 const LIMITS = { displayName: 200, bio: 4200, sellerDisclosureUrl: 2048, version: 100, spotId: 200, threadId: 200, reviewId: 200, experienceId: 200, cursor: 200 } as const;
-
-/** Pages that show the provider (the frame's name, 設定, 売上 and ホーム) read it again. */
-function refreshConsole() {
-  revalidatePath("/", "layout");
-}
-
-/**
- * The preview's way on after a registration: the contract mock forgets the new provider after
- * this request, so the synthetic host signs in again with a provider in the state a new one
- * starts in (未申請, no payout account; scenario `payments-pending`), where the next steps work.
- */
-const PREVIEW_AFTER_REGISTRATION = `${HOST_MOCK_LOGIN_PATH}?mock=payments-pending`;
 
 /** 提供者の登録 (#88): NIHO makes the host the provider's OWNER. `next` is the new provider's home. */
 type Registered = { next: string };
@@ -87,12 +51,7 @@ export async function registerProvider(input: RegisterProviderInput): Promise<Ho
   const sellerDisclosureUrl = text(input?.sellerDisclosureUrl, LIMITS.sellerDisclosureUrl);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
   if (!kind || displayName === null || bio === null || sellerDisclosureUrl === null || consentVersion === null) return invalid;
-  return withHostApi<Registered>(async (client) => {
-    const result = await client.registerExperienceProvider({ kind, displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl.trim() || null, consentVersion });
-    if (!result.ok) return refused(result);
-    const next = isHostMock() ? PREVIEW_AFTER_REGISTRATION : withProvider(HOST_HOME_PATH, nihoIdOrNull(result.data.provider.id));
-    return { ok: true, message: "登録しました。", next };
-  });
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /**
@@ -103,21 +62,11 @@ type ProfileSaved = { profile: ProviderProfile; reviewStatus: HostProviderReview
 export async function saveProviderProfile(input: ProviderProfileChange): Promise<HostActionResult<ProfileSaved>> {
   const providerId = nihoIdOrNull(input?.providerId);
   const changed = (field: keyof ProviderProfile) => input?.[field] !== undefined;
-  const body: ExperienceProviderUpdateRequest = {};
   for (const field of ["displayName", "bio", "sellerDisclosureUrl"] as const) {
     if (changed(field) && text(input[field], LIMITS[field]) === null) return invalid;
   }
-  if (changed("displayName")) body.displayName = input.displayName;
-  if (changed("bio")) body.bio = input.bio;
-  if (changed("sellerDisclosureUrl")) body.sellerDisclosureUrl = input.sellerDisclosureUrl?.trim() || null;
-  if (!providerId || Object.keys(body).length === 0) return invalid;
-  return withHostApi<ProfileSaved>(async (client) => {
-    const result = await client.updateExperienceProvider(providerId, body);
-    if (!result.ok) return refused(result);
-    refreshConsole();
-    const { displayName, bio, sellerDisclosureUrl, reviewStatus } = result.data.provider;
-    return { ok: true, message: "保存しました", profile: { displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl ?? "" }, reviewStatus };
-  });
+  if (!providerId || !Object.keys(input ?? {}).some((key) => ["displayName", "bio", "sellerDisclosureUrl"].includes(key))) return invalid;
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /**
@@ -127,14 +76,8 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
 type MeetingPointSaved = { meetingPoint: HostMeetingDefaults };
 export async function saveProviderMeetingPoint(input: { providerId: string; meetingPoint: HostMeetingDefaults }): Promise<HostActionResult<MeetingPointSaved>> {
   const providerId = nihoIdOrNull(input?.providerId);
-  const meetingPoint = normalizeMeetingPoint(input?.meetingPoint);
-  if (!providerId || !meetingPoint) return invalid;
-  return withHostApi<MeetingPointSaved>(async (client) => {
-    const result = await client.updateExperienceProviderMeetingPoint(providerId, meetingPoint);
-    if (!result.ok) return refused(result);
-    refreshConsole();
-    return { ok: true, message: "保存しました", meetingPoint: result.data.meetingPoint };
-  });
+  if (!providerId || !input?.meetingPoint) return invalid;
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /**
@@ -180,20 +123,7 @@ type ReviewRequested = { reviewStatus: HostProviderReviewStatus };
 export async function submitProviderReview(input: { providerId: string }): Promise<HostActionResult<ReviewRequested>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId) return invalid;
-  return withHostApi<ReviewRequested>(async (client) => {
-    const result = await client.submitExperienceProvider(providerId);
-    if (!result.ok) return refused(result);
-    const detail = await client.getExperienceProvider(providerId);
-    refreshConsole();
-    return { ok: true, message: "審査を申請しました。", reviewStatus: detail.ok && detail.data.provider ? detail.data.provider.reviewStatus : "REQUESTED" };
-  });
-}
-
-/** The payout account as NIHO has it now, read with the client that changed it. */
-async function payoutNow(client: ExperienceHostApiClient, providerId: string): Promise<HostPayoutLoad> {
-  const detail = await client.getExperienceProvider(providerId);
-  if (!detail.ok || !detail.data.provider) return { status: "error" };
-  return readHostPayout(client, detail.data.provider);
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /** 既存の口座を使う › 共有する (OWNER): one of the owner's spots' ready seller accounts, with NIHO's consent version. */
@@ -203,14 +133,7 @@ export async function sharePayoutAccount(input: { providerId: string; sourceSpot
   const sourceSpotId = text(input?.sourceSpotId, LIMITS.spotId);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
   if (!providerId || !sourceSpotId || consentVersion === null) return invalid;
-  return withHostApi<PayoutChanged>(async (client) => {
-    const result = await client.reuseExperienceProviderPayment(providerId, { sourceSpotId, consentVersion });
-    if (!result.ok) return refused(result);
-    const payout = await payoutNow(client, providerId);
-    refreshConsole();
-    const name = payout.status === "owner" ? payout.payout.sharedFrom : null;
-    return { ok: true, message: name ? `${name}の口座を共有しました。` : "口座を共有しました。", payout };
-  });
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /**
@@ -222,28 +145,14 @@ export async function openPayoutConnect(input: { providerId: string; step: "star
   const providerId = nihoIdOrNull(input?.providerId);
   const step = input?.step === "start" || input?.step === "resume" ? input.step : null;
   if (!providerId || !step) return invalid;
-  return withHostApi<StripeOpened>(async (client) => {
-    const opened = await openStripe(client, providerId, step);
-    if (opened.kind === "stripe") return { ok: true, message: "Stripe の画面へ移ります。", redirectTo: opened.url, payout: null };
-    const notice = stepNotice(opened);
-    if (notice.tone === "error") return { ok: false, message: notice.message };
-    const payout = await payoutNow(client, providerId);
-    refreshConsole();
-    return { ok: true, message: notice.message, redirectTo: null, payout };
-  });
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /** 状態を再確認 (OWNER): NIHO reads the account from Stripe again. */
 export async function syncPayoutAccount(input: { providerId: string }): Promise<HostActionResult<PayoutChanged>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId) return invalid;
-  return withHostApi<PayoutChanged>(async (client) => {
-    const synced = await syncStripe(client, providerId);
-    if (synced.kind !== "state") return { ok: false, message: synced.kind === "failed" ? stepNotice(synced).message : HOST_INVALID_INPUT_TEXT };
-    const payout = await payoutNow(client, providerId);
-    refreshConsole();
-    return { ok: true, message: stepNotice(synced).message, payout };
-  });
+  return { ok: false, message: legacyHostOperationUnavailable };
 }
 
 /**

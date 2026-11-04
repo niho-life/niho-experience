@@ -30,7 +30,6 @@ export type ExperienceHostApiClient = {
 };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const PROVIDER_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
 const ACCOUNT_ID_PATTERN = /^acct_[A-Za-z0-9]{8,250}$/;
 const READINESS_REASONS = ["NOT_CONNECTED", "VERIFICATION_REQUIRED", "CHARGES_DISABLED", "PAYOUTS_DISABLED", "RESTRICTED", "READY"] as const;
@@ -42,7 +41,7 @@ const exact = (value: JsonObject, keys: readonly string[]) => Object.keys(value)
 
 function parseIdentity(value: unknown): ExperienceHostIdentity | null {
   if (!isObject(value) || !exact(value, ["nihoUserId", "accountStatus"])
-    || typeof value.nihoUserId !== "string" || !ID_PATTERN.test(value.nihoUserId)
+    || typeof value.nihoUserId !== "string" || value.nihoUserId.length < 1 || value.nihoUserId.length > 128
     || value.accountStatus !== "ACTIVE") return null;
   return { nihoUserId: value.nihoUserId, accountStatus: "ACTIVE" };
 }

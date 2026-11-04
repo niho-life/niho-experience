@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   coverInput: vi.fn(),
   coverImage: vi.fn(),
   repository: {
-    ensureOwnerWorkspace: vi.fn(),
     refreshReadiness: vi.fn(),
     listProducts: vi.fn(),
     getProduct: vi.fn(),
@@ -54,9 +53,10 @@ import { POST as uploadProductMedia } from "@/app/(host)/host/api/products/[prod
 const actor = { providerId: "provider-private", nihoUserId: "niho-user-private" };
 const hostContext = {
   actor,
-  provider: { id: "provider-private", displayName: "Panasonic", memberRole: "OWNER" },
+  provider: { providerId: "provider-private", legacyProviderId: "legacy-provider-private", providerDisplayName: "Panasonic", sellerNihoAccountRef: "niho-user-private", stripeConnectAccountRef: "acct_PRIVATE", sellerDisplayName: "Panasonic" },
   readiness: {
     accountUsable: true, connectReady: true, sellerDisplayReady: true,
+    paymentReuseConsentAccepted: true, paymentReuseConsentVersion: "synthetic-consent-v1", paymentReuseConsentedAtUtc: "2026-11-04T00:00:00.000Z",
     sellerNihoAccountRef: "niho-user-private", stripeConnectAccountRef: "acct_PRIVATE",
     sellerDisplayName: "Panasonic", requiredConsentVersion: "listing-v1",
     observedAtUtc: "2026-11-04T00:00:00.000Z", validUntilUtc: "2026-11-04T00:05:00.000Z",
@@ -165,7 +165,7 @@ describe("Experience owner product API", () => {
     const listed = await listProducts(request("/host/api/products"));
     expect(listed.status).toBe(200);
     expect((await listed.json()).products).toHaveLength(1);
-    expect(mocks.repository.ensureOwnerWorkspace).toHaveBeenCalled();
+    expect(mocks.repository.refreshReadiness).toHaveBeenCalledWith(actor, hostContext.readiness);
     expect(mocks.repository.refreshReadiness).toHaveBeenCalledWith(actor, hostContext.readiness);
   });
 

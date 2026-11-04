@@ -58,9 +58,9 @@ export function japanMinute(utc: string): string {
   return actionTime(todayInJapan(at), at);
 }
 
-function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /** One stored message as メッセージ shows it: the guest's words (translation still null) or the host's reply and its email. */

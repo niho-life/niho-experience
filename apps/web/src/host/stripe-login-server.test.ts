@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const state = vi.hoisted(() => ({
   accounts: ["acct_Synthetic123"] as string[],
-  provider: { id: "provider_synthetic", ownerUserId: "user_synthetic", memberRole: "OWNER" as string | null },
+  provider: { id: "provider_synthetic", nihoUserId: "user_synthetic", memberRole: "OWNER" as string | null },
   listPayoutAccountsForHost: vi.fn(async () => state.accounts),
   createLoginLink: vi.fn(async (input?: unknown) => {
     void input;
@@ -29,7 +29,7 @@ import { hostStripeLoginUrl } from "./stripe-login-server";
 describe("hostStripeLoginUrl", () => {
   beforeEach(() => {
     state.accounts = ["acct_Synthetic123"];
-    state.provider = { id: "provider_synthetic", ownerUserId: "user_synthetic", memberRole: "OWNER" };
+    state.provider = { id: "provider_synthetic", nihoUserId: "user_synthetic", memberRole: "OWNER" };
     state.listPayoutAccountsForHost.mockClear();
     state.createLoginLink.mockClear();
     vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic");

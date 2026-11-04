@@ -15,7 +15,7 @@ import { calendarActor, resolveCalendarContext } from "./calendar-actor";
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.session = { accessToken: "sealed-token", accessTokenExpiresAt: Date.now() + 3600_000 };
-  mocks.load = { status: "ok", providers: [{ id: "owned-provider", ownerUserId: "operator-a", displayName: "Owned provider", memberRole: "OWNER" }] };
+  mocks.load = { status: "ok", providers: [{ id: "owned-provider", nihoUserId: "operator-a", displayName: "Owned provider", memberRole: "OWNER" }] };
   mocks.assignments.mockResolvedValue([{ providerId: "provider-a", productId: "tea", productTitle: "Tea", sellerDisplayName: "Synthetic seller", assignmentLabel: "Teacher", grantVersion: 1 }]);
 });
 
@@ -60,7 +60,7 @@ describe("calendar actor", () => {
   });
 
   it("keeps a real NIHO provider as MEMBER and does not create a false operator choice", async () => {
-    mocks.load = { status: "ok", providers: [{ id: "provider-a", ownerUserId: "operator-a", displayName: "Member provider", memberRole: "OWNER" }] };
+    mocks.load = { status: "ok", providers: [{ id: "provider-a", nihoUserId: "operator-a", displayName: "Member provider", memberRole: "OWNER" }] };
     const result = await calendarActor("provider-a");
     expect(result).toMatchObject({ access: { kind: "MEMBER", nihoRole: "OWNER" } });
     expect(mocks.assignments).not.toHaveBeenCalled();
@@ -68,15 +68,15 @@ describe("calendar actor", () => {
 
   it("uses the current NIHO membership for a provider before considering an operator grant", async () => {
     mocks.load = { status: "ok", providers: [
-      { id: "owned-provider", ownerUserId: "operator-a", displayName: "Owned provider", memberRole: "OWNER" },
-      { id: "provider-a", ownerUserId: "seller-a", displayName: "Member provider", memberRole: "COHOST" },
+      { id: "owned-provider", nihoUserId: "operator-a", displayName: "Owned provider", memberRole: "OWNER" },
+      { id: "provider-a", nihoUserId: "seller-a", displayName: "Member provider", memberRole: "COHOST" },
     ] };
     expect(await calendarActor("provider-a")).toMatchObject({ actor: { nihoUserId: "seller-a", calendarRoleCeiling: "EDITOR" }, access: { kind: "MEMBER", nihoRole: "COHOST" } });
     expect(mocks.assignments).not.toHaveBeenCalled();
   });
 
   it("uses the target provider owner ID for a cohost who owns no other provider", async () => {
-    mocks.load = { status: "ok", providers: [{ id: "provider-a", ownerUserId: "seller-a", displayName: "Member provider", memberRole: "COHOST" }] };
+    mocks.load = { status: "ok", providers: [{ id: "provider-a", nihoUserId: "seller-a", displayName: "Member provider", memberRole: "COHOST" }] };
     expect(await calendarActor("provider-a")).toMatchObject({ actor: { nihoUserId: "seller-a", calendarRoleCeiling: "EDITOR" }, access: { kind: "MEMBER", nihoRole: "COHOST" } });
     expect(mocks.assignments).not.toHaveBeenCalled();
   });

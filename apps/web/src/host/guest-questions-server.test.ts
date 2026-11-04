@@ -49,7 +49,7 @@ import { BOOKING_THREAD_CLOSED_TEXT, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAI
 
 const THREAD_ID = "00000000-0000-4000-8000-000000000106";
 const COMMAND_ID = "00000000-0000-4000-8000-0000000c0106";
-const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 
 const QUESTION: GuestQuestionMessage = { id: "m-1", author: "GUEST", source: "SITE_FORM", body: "Is there a vegetarian option?", bodyJa: null, createdAtUtc: "2026-10-31T01:02:03.000Z", deliveryStatus: null };

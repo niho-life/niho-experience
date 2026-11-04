@@ -1,5 +1,6 @@
 import { StoreError } from "./errors.ts";
 import type {
+  RegisterHostSellerProfileInput,
   RegisterProductInput,
   RegistrationOutcome,
   SaleReadiness,
@@ -25,8 +26,9 @@ export type SiteSaleExitCode = (typeof SITE_SALE_EXIT)[keyof typeof SITE_SALE_EX
 export const SITE_SALE_USAGE =
   "Usage: node scripts/experience/register-site-sale.mjs [plan|register|status] <input.json> [--yes]";
 
-/** NIHO's provider IDs as /host takes them in ?providerId= (apps/web/src/lib/host/providers.ts). */
-const NIHO_PROVIDER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Experience authority ID; NIHO's legacy lookup ID is a separate explicit field. */
+const EXPERIENCE_PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+const NIHO_LEGACY_PROVIDER_ID = /^[A-Za-z0-9_-]{1,200}$/;
 /** A store identifier no longer than the host session keeps a NIHO user ID (128). */
 const NIHO_USER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 /** A store identifier that fits the guest idempotency key (120). */
@@ -49,7 +51,7 @@ export class SiteSaleInputError extends Error {
 }
 
 export interface SiteSaleInput {
-  readonly provider: { readonly id: string; readonly displayName: string };
+  readonly provider: { readonly id: string; readonly legacyProviderId: string; readonly displayName: string };
   readonly owner: { readonly nihoUserId: string };
   /** NIHO support: on is a 15% fee, off 10% (provider_sale_settings). */
   readonly supportEnabled: boolean;
@@ -129,13 +131,14 @@ export function parseSiteSaleInput(raw: unknown): SiteSaleInput {
   const problems: string[] = [];
   const root = objectAt(raw, "input", ["provider", "owner", "supportEnabled", "product"], problems);
   if (root === null) throw new SiteSaleInputError(problems);
-  const provider = objectAt(root.provider, "provider", ["id", "displayName"], problems);
+  const provider = objectAt(root.provider, "provider", ["id", "legacyProviderId", "displayName"], problems);
   const owner = objectAt(root.owner, "owner", ["nihoUserId"], problems);
   const product = objectAt(root.product, "product", [
     "id", "slug", "title", "unitAmountYen", "cancellationTermsRef", "sellerNihoAccountRef", "stripeConnectAccountRef", "sellerDisplayName",
   ], problems);
   if (typeof root.supportEnabled !== "boolean") problems.push("supportEnabled must be true or false");
-  const providerId = provider ? patternAt(provider.id, "provider.id", NIHO_PROVIDER_ID, "NIHO's provider ID (1-64 letters, digits, _ or -)", problems) : "";
+  const providerId = provider ? patternAt(provider.id, "provider.id", EXPERIENCE_PROVIDER_ID, "an Experience provider ID", problems) : "";
+  const legacyProviderId = provider ? patternAt(provider.legacyProviderId, "provider.legacyProviderId", NIHO_LEGACY_PROVIDER_ID, "NIHO's legacy provider lookup ID", problems) : "";
   const displayName = provider ? textAt(provider.displayName, "provider.displayName", 300, problems) : "";
   const nihoUserId = owner ? patternAt(owner.nihoUserId, "owner.nihoUserId", NIHO_USER_ID, "a NIHO user ID (1-128 letters, digits or ._:@/-)", problems) : "";
   let unitAmountYen = 0;
@@ -160,9 +163,12 @@ export function parseSiteSaleInput(raw: unknown): SiteSaleInput {
     stripeConnectAccountRef: patternAt(product.stripeConnectAccountRef, "product.stripeConnectAccountRef", CONNECTED_ACCOUNT_ID, "a Stripe connected account ID (acct_…)", problems),
     sellerDisplayName: textAt(product.sellerDisplayName, "product.sellerDisplayName", 300, problems),
   };
+  if (parsedProduct && parsedProduct.sellerNihoAccountRef !== nihoUserId) {
+    problems.push("product.sellerNihoAccountRef must match the authenticated owner.nihoUserId");
+  }
   if (problems.length > 0 || parsedProduct === null) throw new SiteSaleInputError(problems.length > 0 ? problems : ["the input is incomplete"]);
   return {
-    provider: { id: providerId, displayName },
+    provider: { id: providerId, legacyProviderId, displayName },
     owner: { nihoUserId },
     supportEnabled: root.supportEnabled as boolean,
     product: parsedProduct,
@@ -177,6 +183,7 @@ export type SiteSaleStore = Pick<
   | "canRegister"
   | "currentState"
   | "registerProvider"
+  | "registerHostSellerProfile"
   | "linkProviderMember"
   | "registerProduct"
   | "setProviderSaleSettings"
@@ -264,7 +271,8 @@ export function productChanges(current: ProductRecord, input: SiteSaleInput): st
 
 function printPlan(state: SiteSaleState, input: SiteSaleInput, out: (line: string) => void): void {
   const { provider, owner, product } = input;
-  out(`Provider ${provider.id} (${provider.displayName}): ${state.providerExists ? "registered" : "register"}`);
+  out(`Experience provider ${provider.id} (${provider.displayName}): ${state.providerExists ? "registered" : "register"}`);
+  out(`NIHO legacy Connect lookup key ${masked(provider.legacyProviderId)}: ${state.sellerProfile?.legacyProviderId === provider.legacyProviderId ? "mapped" : "map explicitly"}`);
   const member = state.membership;
   const ownerAction = member === null ? "link as OWNER"
     : member.role !== "OWNER" ? `change role ${member.role} → OWNER${member.active ? "" : " and reactivate"}`
@@ -388,6 +396,15 @@ async function register(state: SiteSaleState, input: SiteSaleInput, deps: SiteSa
   }
   const providerId = input.provider.id;
   out(outcomeLine("Provider", await store.registerProvider({ providerId })));
+  const profile: RegisterHostSellerProfileInput = {
+    providerId,
+    legacyProviderId: input.provider.legacyProviderId,
+    providerDisplayName: input.provider.displayName,
+    sellerNihoAccountRef: input.product.sellerNihoAccountRef,
+    stripeConnectAccountRef: input.product.stripeConnectAccountRef,
+    sellerDisplayName: input.product.sellerDisplayName,
+  };
+  out(outcomeLine("Seller profile and Connect mapping", await store.registerHostSellerProfile(profile)));
   out(outcomeLine("Owner", await store.linkProviderMember({ providerId, nihoUserId: input.owner.nihoUserId, role: "OWNER" })));
   const product = await store.registerProduct(registerProductInput(input), state.product?.version);
   out(outcomeLine("Product", product.outcome));

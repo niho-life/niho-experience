@@ -33,6 +33,9 @@ const readiness = (overrides: Partial<Parameters<ExperiencePublicationRepository
   return {
     accountUsable: true,
     connectReady: true,
+    paymentReuseConsentAccepted: true,
+    paymentReuseConsentVersion: "synthetic-payment-reuse-v1",
+    paymentReuseConsentedAtUtc: new Date(now - 2_000).toISOString(),
     sellerDisplayReady: true,
     sellerNihoAccountRef: "seller-account-synthetic",
     stripeConnectAccountRef: "acct_synthetic_publication",

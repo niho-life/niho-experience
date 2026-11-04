@@ -1,7 +1,7 @@
 import "server-only";
 import { StoreRateLimitedError, StoreValidationError, type HostNotificationAddresses } from "@niho-experience/experience-store";
 import { hostNotificationAddresses } from "@/lib/experience/store-server";
-import { hostUserIdFromOwnedProviders, nihoIdOrNull } from "@/lib/host/providers";
+import { nihoIdOrNull } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
 import { HOST_SESSION_ENDED_TEXT } from "./errors";
@@ -9,8 +9,8 @@ import { NOTIFICATION_ADDRESS_TEXT, notificationAddressInput, notificationAddres
 import type { HostActionResult } from "./payout";
 
 /*
- * 設定 › 通知 › 宛先 (#194) kept in the experience DB (migration 0038). For a provider member, use the selected provider's
- * owner ID; for a product operator without membership there, use the single owner identity from their own provider list.
+ * 設定 › 通知 › 宛先 (#194) kept in the experience DB (migration 0038). Use the current NIHO identity from contract v1;
+ * Experience membership or an operator grant determines whether the caller can act for a provider.
  */
 
 export type HostNotificationAddressLoad =
@@ -24,8 +24,8 @@ async function currentUserId(providerId: string): Promise<string | null> {
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return null;
   const provider = providers.providers.find((entry) => entry.id === providerId);
-  if (provider) return provider.memberRole === "OWNER" ? nihoIdOrNull(provider.ownerUserId) : null;
-  return hostUserIdFromOwnedProviders(providers.providers);
+  if (provider && provider.memberRole !== "OWNER") return null;
+  return providers.nihoUserId;
 }
 
 export async function loadNotificationAddress(providerId: string, addresses: () => Store | null = hostNotificationAddresses): Promise<HostNotificationAddressLoad> {

@@ -8,7 +8,6 @@ import { invitationIdOrNull, withProvider } from "@/lib/host/routes";
 import { hostNotFound, loadHostProviders, noStoreJson, readHostSession, siteOrigin } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
 import { config } from "@/lib/config";
-import { hostUserIdFromOwnedProviders } from "@/lib/host/providers";
 
 export const runtime = "nodejs";
 
@@ -29,7 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!session || !accessTokenUsable(session, Date.now())) return noStoreJson({ error: "unauthenticated" }, 401);
   const identity = await loadHostProviders();
   if (identity.status !== "ok") return noStoreJson({ error: identity.status === "error" ? "identity_unavailable" : "unauthenticated" }, identity.status === "error" ? 503 : 401);
-  const nihoUserId = hostUserIdFromOwnedProviders(identity.providers);
+  const nihoUserId = identity.nihoUserId;
   if (!nihoUserId) return noStoreJson({ error: "identity_unavailable" }, 503);
   const repository = productOperatorRepository();
   if (!repository) return noStoreJson({ error: "unavailable" }, 503);

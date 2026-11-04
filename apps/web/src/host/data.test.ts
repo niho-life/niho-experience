@@ -8,13 +8,13 @@ const state = vi.hoisted(() => ({
   providers: [] as HostProvider[],
   scenario: "default" as HostMockScenario,
   notificationLoad: { status: "preparing" } as import("./notification-settings-server").HostNotificationSettingsLoad,
-  notificationCalls: [] as { providerId: string; ownerUserId: string }[],
+  notificationCalls: [] as { providerId: string; nihoUserId: string }[],
 }));
 vi.mock("server-only", () => ({}));
 // The experience DB's 通知 (#109) is its own module; here only what it answers.
 vi.mock("./notification-settings-server", () => ({
   loadNotificationSettings: async (provider: HostProvider) => {
-    state.notificationCalls.push({ providerId: provider.id, ownerUserId: provider.ownerUserId });
+    state.notificationCalls.push({ providerId: provider.id, nihoUserId: provider.nihoUserId });
     return state.notificationLoad;
   },
 }));
@@ -40,8 +40,8 @@ import { MOCK_SALES_PERIOD } from "./mock/sales";
 
 /** A provider as the host contract shapes it (synthetic values). */
 const provider = (fields: Pick<HostProvider, "id" | "displayName" | "memberRole"> & Partial<HostProvider>): HostProvider => ({
-  ownerUserId: "sample-user",
-  vesselSpotId: `${fields.id}-vessel`,
+  nihoUserId: "sample-user",
+  legacyProviderId: "sample-legacy-provider",
   kind: "INDIVIDUAL",
   bio: "",
   sellerDisclosureUrl: null,
@@ -169,7 +169,7 @@ describe("loadHostConsoleData", () => {
     expect(state.notificationCalls).toEqual([]);
     const live = await loadHostConsoleData(KITCHEN, { notifications: true });
     expect(live.settings).toMatchObject({ notifications: { email: { addresses: [] }, items }, notificationSource: "live" });
-    expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, ownerUserId: "sample-user" }]);
+    expect(state.notificationCalls).toEqual([{ providerId: KITCHEN.id, nihoUserId: "sample-user" }]);
     state.notificationLoad = { status: "error" };
     expect((await loadHostConsoleData(KITCHEN, { notifications: true })).settings.notificationSource).toBe("error");
     // An editor never reads them.

@@ -60,6 +60,15 @@ export interface RegisterProductInput {
   readonly sellerDisplayName: string;
 }
 
+export interface RegisterHostSellerProfileInput {
+  readonly providerId: string;
+  readonly legacyProviderId: string;
+  readonly providerDisplayName: string;
+  readonly sellerNihoAccountRef: string;
+  readonly stripeConnectAccountRef: string;
+  readonly sellerDisplayName: string;
+}
+
 export interface SiteSaleStateQuery {
   readonly providerId: string;
   readonly productId: string;
@@ -70,6 +79,7 @@ export interface SiteSaleStateQuery {
 /** What the database holds now for one registration (the script's plan compares it with the input). */
 export interface SiteSaleState {
   readonly providerExists: boolean;
+  readonly sellerProfile: RegisterHostSellerProfileInput | null;
   /** The membership of the input's NIHO user, active or not; null when there is none. */
   readonly membership: { readonly role: MembershipRole; readonly active: boolean } | null;
   readonly product: ProductRecord | null;
@@ -200,6 +210,8 @@ export class SiteSaleRegistration {
       `SELECT has_table_privilege(current_user, 'experience_providers', 'INSERT')
           AND has_table_privilege(current_user, 'provider_memberships', 'INSERT')
           AND has_table_privilege(current_user, 'provider_memberships', 'UPDATE')
+          AND has_table_privilege(current_user, 'experience_host_seller_profiles', 'INSERT')
+          AND has_table_privilege(current_user, 'experience_host_seller_profiles', 'UPDATE')
           AND has_table_privilege(current_user, 'experience_products', 'INSERT')
           AND has_table_privilege(current_user, 'experience_products', 'UPDATE')
           AND has_table_privilege(current_user, 'provider_sale_settings', 'INSERT')
@@ -221,8 +233,12 @@ export class SiteSaleRegistration {
     assertStoreIdentifier(query.nihoUserId, "nihoUserId");
     assertNonEmptyText(query.slug, "slug", 160);
     const pool = this.#pool;
-    const [provider, membership, product, settings, terms, slug, others] = await Promise.all([
+    const [provider, sellerProfile, membership, product, settings, terms, slug, others] = await Promise.all([
       pool.query("SELECT 1 FROM experience_providers WHERE id=$1", [query.providerId]),
+      pool.query<DbRow>(
+        `SELECT provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,
+                stripe_connect_account_ref,seller_display_name
+           FROM experience_host_seller_profiles WHERE provider_id=$1`, [query.providerId]),
       pool.query<DbRow>("SELECT role, active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2", [query.providerId, query.nihoUserId]),
       pool.query<DbRow>(`SELECT ${PRODUCT_COLUMNS} FROM experience_products WHERE provider_id=$1 AND id=$2`, [query.providerId, query.productId]),
       pool.query<DbRow>(`SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1`, [query.providerId]),
@@ -241,6 +257,14 @@ export class SiteSaleRegistration {
     const slugRow = slug.rows[0];
     return {
       providerExists: provider.rows[0] !== undefined,
+      sellerProfile: sellerProfile.rows[0] === undefined ? null : {
+        providerId: String(sellerProfile.rows[0].provider_id),
+        legacyProviderId: String(sellerProfile.rows[0].legacy_provider_id),
+        providerDisplayName: String(sellerProfile.rows[0].provider_display_name),
+        sellerNihoAccountRef: String(sellerProfile.rows[0].seller_niho_account_ref),
+        stripeConnectAccountRef: String(sellerProfile.rows[0].stripe_connect_account_ref),
+        sellerDisplayName: String(sellerProfile.rows[0].seller_display_name),
+      },
       membership: member === undefined ? null : { role: String(member.role) as MembershipRole, active: member.active === true },
       product: product.rows[0] === undefined ? null : productFromRow(product.rows[0]),
       saleSettings: settings.rows[0] === undefined ? null : saleSettingsFromRow(settings.rows[0]),
@@ -263,6 +287,50 @@ export class SiteSaleRegistration {
       [input.providerId],
     );
     return result.rows[0] === undefined ? "UNCHANGED" : "CREATED";
+  }
+
+  /** Writes the explicit Experience→NIHO legacy Connect key mapping; it never reads NIHO IDs from a list. */
+  async registerHostSellerProfile(input: RegisterHostSellerProfileInput): Promise<RegistrationOutcome> {
+    if (input === null || typeof input !== "object") throw new StoreValidationError("seller profile must be an object.");
+    assertStoreIdentifier(input.providerId, "sellerProfile.providerId");
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(input.legacyProviderId)) throw new StoreValidationError("sellerProfile.legacyProviderId is invalid.");
+    assertNonEmptyText(input.providerDisplayName, "sellerProfile.providerDisplayName", 300);
+    assertNonEmptyText(input.sellerNihoAccountRef, "sellerProfile.sellerNihoAccountRef", 256);
+    if (!/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) throw new StoreValidationError("sellerProfile.stripeConnectAccountRef is invalid.");
+    assertNonEmptyText(input.sellerDisplayName, "sellerProfile.sellerDisplayName", 300);
+    try {
+      return await withTransaction(this.#pool, async (client) => {
+        await requireProvider(client, input.providerId);
+        const current = await client.query<DbRow>(
+          `SELECT legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name
+             FROM experience_host_seller_profiles WHERE provider_id=$1 FOR UPDATE`, [input.providerId]);
+        const row = current.rows[0];
+        if (!row) {
+          await client.query(
+            `INSERT INTO experience_host_seller_profiles
+               (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [input.providerId, input.legacyProviderId, input.providerDisplayName, input.sellerNihoAccountRef, input.stripeConnectAccountRef, input.sellerDisplayName]);
+          return "CREATED";
+        }
+        const same = String(row.legacy_provider_id) === input.legacyProviderId
+          && String(row.provider_display_name) === input.providerDisplayName
+          && String(row.seller_niho_account_ref) === input.sellerNihoAccountRef
+          && String(row.stripe_connect_account_ref) === input.stripeConnectAccountRef
+          && String(row.seller_display_name) === input.sellerDisplayName;
+        if (same) return "UNCHANGED";
+        await client.query(
+          `UPDATE experience_host_seller_profiles
+              SET legacy_provider_id=$2,provider_display_name=$3,seller_niho_account_ref=$4,
+                  stripe_connect_account_ref=$5,seller_display_name=$6,updated_at=clock_timestamp()
+            WHERE provider_id=$1`,
+          [input.providerId, input.legacyProviderId, input.providerDisplayName, input.sellerNihoAccountRef, input.stripeConnectAccountRef, input.sellerDisplayName]);
+        return "UPDATED";
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new StoreConflictError("The NIHO legacy provider mapping is already assigned to another Experience seller.");
+      throw error;
+    }
   }
 
   /**

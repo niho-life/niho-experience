@@ -1,127 +1,125 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  config: {
-    experienceHostPublicationApiEnabled: true,
-    experiencePublicationConsentVersion: "listing-v1",
-    nihoExperienceHostCommonContractAudience: "https://niho.example.test",
-    nihoWebOrigin: "https://niho.example.test",
-    siteUrl: "https://experience.example.test",
-  },
+  config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" },
   read: vi.fn(),
   usable: vi.fn(),
-  providers: vi.fn(),
-  fetch: vi.fn(),
+  selectedClient: vi.fn(),
+  getIdentity: vi.fn(),
+  getConnect: vi.fn(),
+  ownerProfile: vi.fn(),
   clear: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("google-auth-library", () => ({
-  GoogleAuth: class {
-    async getIdTokenClient() {
-      return { getRequestHeaders: async () => ({ authorization: "Bearer synthetic-service-token" }) };
-    }
-  },
-}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@/lib/host/session", () => ({ accessTokenUsable: mocks.usable }));
 vi.mock("@/lib/host/server", () => ({
   readHostSession: mocks.read,
-  loadHostProviders: mocks.providers,
-  nihoApiFetch: () => mocks.fetch,
+  selectedHostApiClient: mocks.selectedClient,
   noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }),
   clearSessionCookie: mocks.clear,
+}));
+vi.mock("@/lib/experience/store-server", () => ({
+  experiencePublicationRepository: () => ({ currentOwnerSellerProfile: mocks.ownerProfile }),
 }));
 
 import { publicationHostBoundary } from "./publication-host-boundary";
 
-const identity = { nihoUserId: "niho-user-synthetic", accountStatus: "ACTIVE", addedContractField: true };
-const connect = {
-  legacyProviderId: "provider-synthetic",
-  stripeAccountId: "acct_synthetic_panasonic",
-  readiness: { ready: true, reason: "READY" },
-  addedContractField: "future-compatible",
+const profile = {
+  providerId: "experience-provider-synthetic",
+  legacyProviderId: "niho-legacy-provider-synthetic",
+  providerDisplayName: "Synthetic host",
+  sellerNihoAccountRef: "niho-user-synthetic",
+  stripeConnectAccountRef: "acct_synthetic12345678",
+  sellerDisplayName: "Synthetic legal seller",
 };
-const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "content-type": "application/json" } });
+const identity = { ok: true, data: { nihoUserId: "niho-user-synthetic", accountStatus: "ACTIVE" } };
+const connect = {
+  ok: true,
+  data: {
+    legacyProviderId: profile.legacyProviderId,
+    stripeAccountId: profile.stripeConnectAccountRef,
+    readiness: { ready: true, reason: "READY" },
+    paymentReuseConsent: { accepted: true, version: "reuse-v3", consentedAt: "2026-11-03T12:00:00.000Z" },
+  },
+};
 
-describe("Experience publication NIHO boundary", () => {
+describe("Experience publication NIHO contract v1 boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.assign(mocks.config, {
-      experienceHostPublicationApiEnabled: true,
-      experiencePublicationConsentVersion: "listing-v1",
-      nihoExperienceHostCommonContractAudience: "https://niho.example.test",
-      nihoWebOrigin: "https://niho.example.test",
-      siteUrl: "https://experience.example.test",
-    });
+    Object.assign(mocks.config, { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" });
     mocks.read.mockResolvedValue({ accessToken: "synthetic-session-token" });
     mocks.usable.mockReturnValue(true);
-    mocks.providers.mockResolvedValue({ status: "ok", providers: [{ id: "provider-synthetic", displayName: "Panasonic", memberRole: "OWNER" }] });
-    mocks.fetch.mockImplementation(async (input: string | URL | Request) => {
-      const url = String(input);
-      return url.endsWith("/identity") ? json(identity) : json(connect);
-    });
+    mocks.selectedClient.mockResolvedValue({ getIdentity: mocks.getIdentity, getLegacyConnectAccount: mocks.getConnect });
+    mocks.getIdentity.mockResolvedValue(identity);
+    mocks.getConnect.mockResolvedValue(connect);
+    mocks.ownerProfile.mockResolvedValue({ kind: "ready", profile });
   });
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it("uses the active identity and same-owner Connect account without unrelated Connect fields", async () => {
+  it("resolves current NIHO identity, Experience OWNER, and the explicitly mapped Connect account", async () => {
     const result = await publicationHostBoundary("OWNER");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.actor).toEqual({ providerId: "provider-synthetic", nihoUserId: "niho-user-synthetic" });
+    expect(mocks.ownerProfile).toHaveBeenCalledWith("niho-user-synthetic");
+    expect(mocks.getConnect).toHaveBeenCalledWith("niho-legacy-provider-synthetic");
+    expect(result.value.actor).toEqual({ providerId: "experience-provider-synthetic", nihoUserId: "niho-user-synthetic" });
     expect(result.value.readiness).toMatchObject({
       accountUsable: true,
       connectReady: true,
-      sellerDisplayReady: true,
+      paymentReuseConsentAccepted: true,
+      paymentReuseConsentVersion: "reuse-v3",
+      paymentReuseConsentedAtUtc: "2026-11-03T12:00:00.000Z",
       sellerNihoAccountRef: "niho-user-synthetic",
-      stripeConnectAccountRef: "acct_synthetic_panasonic",
-      sellerDisplayName: "Panasonic",
+      stripeConnectAccountRef: "acct_synthetic12345678",
+      sellerDisplayName: "Synthetic legal seller",
       requiredConsentVersion: "listing-v1",
     });
-    expect(mocks.fetch).toHaveBeenCalledTimes(2);
-    for (const [, init] of mocks.fetch.mock.calls) {
-      expect(init.headers).toMatchObject({
-        authorization: "Bearer synthetic-session-token",
-        "x-niho-experience-service-id-token": "synthetic-service-token",
-      });
-      expect(init.cache).toBe("no-store");
+  });
+
+  it("never substitutes the seller account reference for the current identity", async () => {
+    mocks.ownerProfile.mockResolvedValue({ kind: "ready", profile: { ...profile, sellerNihoAccountRef: "some-other-niho-user" } });
+    const result = await publicationHostBoundary("OWNER");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      expect(await result.response.json()).toEqual({ error: { code: "SELLER_IDENTITY_MISMATCH" } });
     }
+    expect(mocks.getConnect).not.toHaveBeenCalled();
   });
 
-  it("refuses a current non-OWNER before requesting a seller payout account", async () => {
-    mocks.providers.mockResolvedValue({ status: "ok", providers: [{ id: "provider-synthetic", displayName: "Panasonic", memberRole: "EDITOR" }] });
+  it("refuses ambiguous or missing Experience seller setup before reading Connect", async () => {
+    for (const [resolved, expected] of [
+      [{ kind: "ambiguous" }, "SELLER_PROFILE_AMBIGUOUS"],
+      [{ kind: "setup-required" }, "SELLER_SETUP_REQUIRED"],
+      [{ kind: "none" }, "FORBIDDEN"],
+    ] as const) {
+      mocks.ownerProfile.mockResolvedValueOnce(resolved);
+      const result = await publicationHostBoundary("OWNER");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect((await result.response.json()).error.code).toBe(expected);
+    }
+    expect(mocks.getConnect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the expected account in the readiness snapshot but blocks a mismatched Connect projection", async () => {
+    mocks.getConnect.mockResolvedValue({ ...connect, data: { ...connect.data, stripeAccountId: "acct_wrong_account123" } });
+    const result = await publicationHostBoundary("OWNER");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.readiness).toMatchObject({
+      connectReady: false,
+      stripeConnectAccountRef: profile.stripeConnectAccountRef,
+    });
+  });
+
+  it("clears an ended NIHO connection", async () => {
+    mocks.getIdentity.mockResolvedValue({ ok: false, kind: "error", status: 401 });
     const result = await publicationHostBoundary("OWNER");
     expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.response.status).toBe(403);
-    expect(await result.response.json()).toEqual({ error: { code: "FORBIDDEN" } });
-    expect(mocks.fetch).toHaveBeenCalledTimes(1); // identity only
-  });
-
-  it("does not choose between multiple seller profiles or Connect destinations", async () => {
-    mocks.providers.mockResolvedValue({ status: "ok", providers: [
-      { id: "provider-synthetic", displayName: "Panasonic", memberRole: "OWNER" },
-      { id: "provider-other", displayName: "Other seller", memberRole: "OWNER" },
-    ] });
-    const result = await publicationHostBoundary("OWNER");
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.response.status).toBe(409);
-    expect(await result.response.json()).toEqual({ error: { code: "SELLER_PROFILE_AMBIGUOUS" } });
-    expect(mocks.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails closed on malformed identity and clears an ended NIHO connection", async () => {
-    mocks.fetch.mockResolvedValueOnce(json({ ...identity, accountStatus: "PAUSED" }));
-    const malformed = await publicationHostBoundary("OWNER");
-    expect(malformed.ok).toBe(false);
-    if (!malformed.ok) expect(malformed.response.status).toBe(502);
-
-    mocks.fetch.mockResolvedValueOnce(json({ error: "unauthorized" }, 401));
-    const ended = await publicationHostBoundary("OWNER");
-    expect(ended.ok).toBe(false);
-    if (!ended.ok) expect(ended.response.status).toBe(401);
+    if (!result.ok) expect(result.response.status).toBe(401);
     expect(mocks.clear).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnect).not.toHaveBeenCalled();
   });
 });

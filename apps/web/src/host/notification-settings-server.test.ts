@@ -18,7 +18,7 @@ import { changeNotificationSettings, loadNotificationSettings } from "./notifica
 import { NOTIFICATION_OWNER_ONLY_TEXT, NOTIFICATION_SAVE_FAILED_TEXT } from "./notifications";
 
 const ITEMS = [{ key: "NEW_REVIEW", enabled: false, locked: false }];
-const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const calls: { method: string; actor: HostActor; changes?: HostNotificationChanges }[] = [];
 
 function storeAnswering(answer: () => Promise<unknown>) {
