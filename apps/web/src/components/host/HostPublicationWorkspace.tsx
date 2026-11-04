@@ -110,6 +110,9 @@ function apiErrorMessage(body: unknown, status: number): string {
   }
   return readError[code] ?? (status === 404 ? "商品が見つかりません。" : "処理できませんでした。入力を保持しています。時間をおいて再試行してください。");
 }
+function writeOutcomeNeedsReconciliation(status: number): boolean {
+  return status === 408 || status === 409 || status >= 500;
+}
 
 function contentFrom(product: Product): Record<string, unknown> {
   return {
@@ -454,27 +457,38 @@ export function HostPublicationWorkspace({
       return;
     }
     setBusy(true); setError(""); setNotice("");
+    let shouldReconcile = false;
     try {
       let current = product;
       let publicationUpdated = false;
       if (mediaDirty) {
+        shouldReconcile = true;
         const mediaResponse = await fetch(`${apiBase}/${encodeURIComponent(current.id)}/media`, {
           method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
           body: JSON.stringify({ version: current.version, media: mediaForm(mediaDraft) }),
         });
         const mediaBody: unknown = await mediaResponse.json().catch(() => null);
-        if (!mediaResponse.ok) throw new Error(apiErrorMessage(mediaBody, mediaResponse.status));
+        if (!mediaResponse.ok) {
+          shouldReconcile = writeOutcomeNeedsReconciliation(mediaResponse.status);
+          throw new Error(apiErrorMessage(mediaBody, mediaResponse.status));
+        }
+        if (!isRecord(mediaBody) || !isRecord(mediaBody.product)) throw new Error("写真の保存結果を確認できませんでした。");
         current = (mediaBody as ProductResponse).product;
+        shouldReconcile = false;
         setProduct(current); setMediaDraft(current.media);
       }
       if (draftDirty) {
         const draft = { slug: slug.trim(), publicTitle: title.trim(), content, currency: "JPY", unitAmount: amount! };
+        shouldReconcile = true;
         const response = await fetch(`${apiBase}/${encodeURIComponent(current.id)}`, { method: "PATCH", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: current.version, draft }) });
         const body: unknown = await response.json().catch(() => null);
         if (!response.ok) {
+          shouldReconcile = writeOutcomeNeedsReconciliation(response.status);
           throw new Error(apiErrorMessage(body, response.status));
         }
+        if (!isRecord(body) || !isRecord(body.product)) throw new Error("商品情報の保存結果を確認できませんでした。");
         current = (body as ProductResponse).product;
+        shouldReconcile = false;
         setProduct(current);
         publicationUpdated = Boolean((body as { publicationUpdated?: boolean }).publicationUpdated);
       }
@@ -482,30 +496,39 @@ export function HostPublicationWorkspace({
       let termsSaved = false;
       let savedProviderMedia = providerMediaDraft;
       if (termsDirty && saleTerms) {
+        shouldReconcile = true;
         const termsResponse = await fetch(`${apiBase}/${encodeURIComponent(saved.id)}/sale-terms`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: saved.version, saleTerms }) });
         const termsBody: unknown = await termsResponse.json().catch(() => null);
         if (!termsResponse.ok) {
+          shouldReconcile = writeOutcomeNeedsReconciliation(termsResponse.status);
           throw new Error(apiErrorMessage(termsBody, termsResponse.status));
         }
+        if (!isRecord(termsBody) || !isRecord(termsBody.product)) throw new Error("料金・販売条件の保存結果を確認できませんでした。");
         saved = (termsBody as ProductResponse).product;
+        shouldReconcile = false;
         setProduct(saved);
         termsSaved = true;
         publicationUpdated = Boolean((termsBody as { publicationUpdated?: boolean }).publicationUpdated);
       }
       if (providerMediaDirty) {
         if (providerMediaVersion === null) throw new Error("販売者プロフィールの保存版がありません。再読み込みしてください。");
+        shouldReconcile = true;
         const profileResponse = await fetch("/host/api/provider-media", {
           method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
           body: JSON.stringify({ version: providerMediaVersion, media: providerMediaForm(providerMediaDraft) }),
         });
         const profileBody: unknown = await profileResponse.json().catch(() => null);
-        if (!profileResponse.ok) throw new Error(apiErrorMessage(profileBody, profileResponse.status));
+        if (!profileResponse.ok) {
+          shouldReconcile = writeOutcomeNeedsReconciliation(profileResponse.status);
+          throw new Error(apiErrorMessage(profileBody, profileResponse.status));
+        }
         if (!isRecord(profileBody) || !isRecord(profileBody.providerMedia) || !Array.isArray(profileBody.providerMedia.assets)
           || !Number.isSafeInteger(profileBody.providerMedia.version)) throw new Error("販売者プロフィールの保存結果を確認できませんでした。");
         const savedProfile = profileBody.providerMedia;
         setProviderMediaVersion(savedProfile.version as number);
         savedProviderMedia = savedProfile.assets as ProviderMedia[];
         setProviderMediaDraft(savedProviderMedia);
+        shouldReconcile = false;
       }
       const savedContent = contentFrom(saved);
       const savedTerms = publicationTermsForm(saved.saleTerms, saved.offers);
@@ -521,9 +544,11 @@ export function HostPublicationWorkspace({
       else setNotice("下書きを保存しました。");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存結果を確認できませんでした。最新状態を読み直してください。");
-      // A timeout may follow a successful write. Fetch only a comparison snapshot; never hydrate
-      // the live form from sessionStorage or the server on this error path.
-      try { await refresh(true, true); } catch { /* The in-memory form and local draft remain untouched. */ }
+      // Only an uncertain write outcome or an explicit version conflict needs reconciliation.
+      // Fetch a comparison snapshot without hydrating the live form from storage or the server.
+      if (shouldReconcile) {
+        try { await refresh(true, true); } catch { /* The in-memory form and local draft remain untouched. */ }
+      }
     } finally { setBusy(false); }
   }
 
