@@ -280,12 +280,16 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
   };
 
   const open = (action: string, key: string, body: Record<string, unknown>) => {
+    if (busy || pending) {
+      setMessage({ tone: "error", text: "送信済みの操作結果を先に確認してください。確認が終わるまで別の操作は始められません。" });
+      return;
+    }
     setPending(null);
     setMessage(null);
     setForm({ action, key, body });
   };
   const set = (patch: Record<string, unknown>) => {
-    setPending(null);
+    if (busy || pending) return;
     setForm((current) => (current ? { ...current, body: { ...current.body, ...patch } } : current));
   };
 
@@ -294,10 +298,11 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
     form?.key === key ? (
       <div className="mt-3 rounded-xl border border-line bg-sand/50 p-3">
         <p className="font-extrabold">{title}</p>
-        <div className="mt-2 grid gap-2">{fields}</div>
+        <fieldset disabled={busy || pending !== null} className="mt-2 grid gap-2"><legend className="sr-only">{title}</legend>{fields}</fieldset>
+        {pending ? <p role="status" className="mt-2 text-sm text-ink-soft">送信済みの操作結果を確認しています。確認が終わるまで内容の変更や中止はできません。</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className={DANGER} disabled={busy} onClick={() => void send()}>{busy ? "送っています…" : label}</button>
-          <button type="button" className={BUTTON} disabled={busy} onClick={() => { setForm(null); setPending(null); }}>やめる</button>
+          <button type="button" className={DANGER} disabled={busy} onClick={() => void send()}>{busy ? "確認しています…" : pending ? "同じ操作の結果を確認" : label}</button>
+          <button type="button" className={BUTTON} disabled={busy || pending !== null} onClick={() => { setForm(null); setPending(null); }}>やめる</button>
         </div>
       </div>
     ) : null;
