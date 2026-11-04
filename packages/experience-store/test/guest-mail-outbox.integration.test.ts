@@ -9,7 +9,7 @@ import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingI
 import { GuestBookingAccess } from "../src/booking-access.ts";
 import { GUEST_MAIL_LIMITS, GuestMailOutbox, MEETING_GUIDE_DAY_BEFORE_TOPIC } from "../src/guest-mail-outbox.ts";
 import { GuestMeetingGuideRepository } from "../src/guest-meeting-guides.ts";
-import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox } from "../src/host-notification-outbox.ts";
+import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox, parseGuestEmailDeliveryFailedPayload } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
@@ -281,6 +281,7 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
 
   it("records a correlated hard bounce without PII, suppresses later guest mail, and notifies the host", async () => {
     await withSchema(async (context) => {
+      await context.pool.query("UPDATE experience_products SET public_title=$1 WHERE provider_id='provider-a' AND id='walk'", ["Long title ".repeat(24)]);
       const first = await confirmedGuest(context, "bounce-first", { guestEmail: "bounce@example.com" });
       const initial = await context.outbox.claimBookingConfirmations({ limit: 5, leaseSeconds: 60 });
       const confirmation = initial.confirmations.find((item) => item.email?.publicBookingId === first.publicBookingId)!;
@@ -302,6 +303,9 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       const notification = await context.pool.query("SELECT topic, payload FROM outbox_messages WHERE topic=$1", [HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed]);
       assert.equal(notification.rowCount, 1);
       assert.equal(JSON.stringify(notification.rows[0]).includes("bounce@example.com"), false);
+      const parsedNotification = parseGuestEmailDeliveryFailedPayload(notification.rows[0]?.payload);
+      assert.ok(parsedNotification);
+      assert.equal(parsedNotification.experienceTitle.length, 200);
 
       await context.outbox.completeBookingConfirmation(confirmation.id);
       const second = await confirmedGuest(context, "bounce-second", { guestEmail: "bounce@example.com" });

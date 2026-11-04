@@ -232,8 +232,20 @@ export type GuestMailDeliveryFeedbackResult = "RECORDED" | "DUPLICATE" | "UNMATC
 const ROW_ID = /^[1-9][0-9]{0,18}$/;
 const MAIL_DELIVERY_REF = /^ex1_[0-9a-f]{32}$/;
 const EXTERNAL_MAIL_EVENT_ID = /^[A-Za-z0-9_-]{10,80}$/;
+const HOST_NOTIFICATION_TITLE_MAX = 200;
 const UUID_TEXT = "'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'";
 const POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
+
+function hostNotificationTitle(value: string): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= HOST_NOTIFICATION_TITLE_MAX) return clean;
+  let clipped = "";
+  for (const character of clean) {
+    if (clipped.length + character.length > HOST_NOTIFICATION_TITLE_MAX - 1) break;
+    clipped += character;
+  }
+  return `${clipped}…`;
+}
 
 function sameFeedbackEvent(row: DbRow, input: GuestMailDeliveryFeedback): boolean {
   if (row.mail_delivery_ref !== input.deliveryRef || row.report_type !== input.reportType
@@ -596,7 +608,7 @@ export class GuestMailOutbox {
              'experienceTitle',$6::text,'startsAt',$7::text,'seats',$8::int))
            ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
           [row.provider_id, row.public_booking_id, HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed,
-            `host-email-delivery-failed:${input.deliveryRef}`, input.classification, row.public_title,
+            `host-email-delivery-failed:${input.deliveryRef}`, input.classification, hostNotificationTitle(String(row.public_title)),
             typeof occurrence.startUtc === "string" ? occurrence.startUtc : null, count(row.seats, "seats")],
         );
       }
