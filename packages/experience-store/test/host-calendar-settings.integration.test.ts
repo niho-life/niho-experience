@@ -10,6 +10,7 @@ import { HostCalendarSettings } from "../src/host-calendar-settings.ts";
 import { enqueueGoogleCalendarAttentionNotification } from "../src/host-notification-outbox.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 設定 › カレンダー (#109): the Google connection's state and the bookings feed, against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -75,6 +76,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
       childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
+    await seedTestPublications(pool);
     await run({ pool, store, guests, settings: new HostCalendarSettings(pool) });
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

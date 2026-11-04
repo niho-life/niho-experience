@@ -195,9 +195,9 @@ Secret の参照（`secret-name:VERSION`、数字 version だけ。workflow は�
 4. **Variables**：`host-staging` Environment に上の Variable と 6 個の `*_REF` を設定し、`STG_GUEST_MAIL_ENABLED=true` にしてから、最後に `STG_GUEST_BOOKING_ENABLED=true` にする。Experience独自の質問を受け入れる候補では `STG_GUEST_QUESTIONS_ENABLED=true`、NIHO提供者APIと予約を同じ候補で受け入れるときは `STG_GUEST_QUESTIONS_ENABLED=false`（または未設定）かつ `STG_PROVIDER_OPERATIONS_API_ENABLED=true` にする。相反する2つのフラグを同じ候補で有効にしない。
 5. **配備**：上の「手動配備と受入」と同じく `candidate` → `promote`。summary は「Stripe test bookings open」と `bookings=true (Stripe test mode)` になる。
 6. **Scheduler の再開**：昇格のあと `gcloud scheduler jobs resume experience-jobs-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる（401 は audience かサービスアカウントの不一致、404 は配信中の revision で gate が off、503 は Google の鍵・DB・SMTP）。
-7. **体験の登録**：合成の提供者・テストの Connect 口座で `scripts/experience/register-site-sale.mjs`（[guest-booking.md](guest-booking.md) の「体験の登録と切替（第9段）」）を流す。`plan` が出す鍵の種類が `test` であることを確かめ、`live` なら止めて Secret の version を見直す。
+7. **体験の公開**：NIHO の合成 OWNER セッションを使い、`/host/api/products` から商品を作成し、販売条件・開催枠・画像を設定してからOWNER公開APIを呼ぶ。公開応答と公開詳細DTOを確認し、Checkoutで受け取るConnect口座がこの合成テスト用口座であることを照合する。運営登録CLIは公開操作に使わない。
 
-止めるとき：`stop-sale --yes` で販売条件を消し、仮押さえの期限（35 分）と返金の完了を待つ。Scheduler を一時停止してから `STG_GUEST_BOOKING_ENABLED` を `false` に戻して配備・昇格する（出欠の `STG_HOST_ATTENDANCE_ENABLED` も予約が前提なので、先に `false` にする）。gate を戻すと Stripe の秘密も revision から外れ、それ以降の webhook は処理されない。
+止めるとき：OWNER停止APIで公開を止め、仮押さえの期限（35 分）と返金の完了を待つ。Scheduler を一時停止してから `STG_GUEST_BOOKING_ENABLED` を `false` に戻して配備・昇格する（出欠の `STG_HOST_ATTENDANCE_ENABLED` も予約が前提なので、先に `false` にする）。gate を戻すと Stripe の秘密も revision から外れ、それ以降の webhook は処理されない。
 
 ### 受入（Stripe テストモード）
 

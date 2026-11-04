@@ -11,25 +11,5 @@
     "sellerNihoAccountRef": "sample-seller-0001",
     "stripeConnectAccountRef": "acct_SampleSeller0001",
     "sellerDisplayName": "Sample Tea Studio"
-  },
-  "saleTerms": {
-    "childPricing": { "priceYen": 2000, "minAge": 6, "maxAge": 12, "adultRequired": true },
-    "minimumParticipants": 1,
-    "maxPartySize": 6,
-    "cancellationPolicy": "FREE_UNTIL_24H",
-    "bookingQuestions": [
-      {
-        "id": "diet",
-        "prompt": "Food needs",
-        "description": null,
-        "inputType": "SINGLE_SELECT",
-        "required": true,
-        "options": [
-          { "id": "veg", "label": "Vegetarian" },
-          { "id": "none", "label": "No restrictions" }
-        ]
-      }
-    ],
-    "conditionsVersion": null
   }
 }

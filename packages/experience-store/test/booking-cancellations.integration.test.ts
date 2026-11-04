@@ -11,6 +11,7 @@ import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingI
 import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 取消と返金 (#285 slice 7) against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -81,6 +82,7 @@ async function withSchema(
       bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
+    await seedTestPublications(pool);
     await run({ pool, store, guests, access: new GuestBookingAccess(pool), cancellations: new BookingCancellations(pool), outbox: new GuestMailOutbox(pool) });
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
