@@ -170,6 +170,17 @@ describe("the deploy workflows' feature flags", () => {
     const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED"));
     expect(resolveConfig(revision("prod", enabled)).guideAppCardsEnabled).toBe(true);
   });
+
+  it("opens NIHO booking translation with the host console and database without enabling guest sales", () => {
+    const vars = closure("stg", "EXPERIENCE_TRANSLATE_API_ENABLED");
+    expect(vars.STG_TRANSLATE_API_ENABLED).toBe("true");
+    expect(vars.STG_GUEST_BOOKING_ENABLED).toBeUndefined();
+    const resolved = resolve("stg", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(resolved.env).toEqual({ EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_PWA_ENABLED: "true" });
+    expect(resolved.secrets).toEqual({});
+    expect(resolveConfig(revision("stg", resolved))).toMatchObject({ guestBookingEnabled: false, experienceTranslateApiEnabled: true });
+  });
   it("covers every flag of the table with a config setting", () => {
     expect(FLAGS.map((flag) => flag.env).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
     expect(new Set(FLAGS.map((flag) => flag.variable)).size).toBe(FLAGS.length);
