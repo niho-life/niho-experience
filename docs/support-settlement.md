@@ -20,9 +20,10 @@
 ## 実費照合
 
 - 受付時の見込料率・見込NIHO利用料は不変snapshotから示し、売上総額や今の設定から再計算して上書きしない。
-- settlement workerはStripeのCharge、Balance Transaction、Application Fee、実際のProcessing Fee、返金一覧を読み、ローカル返金commandと照合する。返金履歴が不完全、費用負担者不明、金額不一致、結果不明なら最終金額を確定しない。
+- settlement workerはStripeのCharge、Balance Transaction、Application Fee、返金一覧を読み、ローカル返金commandと照合する。処理費用はBalance Transactionの`fee_details`から`application_fee`を除き、`stripe_fee`と`payment_method_passthrough_fee`を合算する。未知の費用区分や内訳不一致は要確認にし、合計`fee`を処理費用として補填しない。返金履歴が不完全、費用負担者不明、金額不一致、結果不明なら最終金額を確定しない。
 - Stripe上の処理費用負担者が接続口座ならNIHOが同額をホストへ補填する。APPLICATION負担なら追加補填しない。返金で戻らない処理費用はNIHOの負担に含める。
 - 最終ホスト額は「総額 − 成功返金 − 返還されていないNIHO利用料 − 口座負担の処理費用 + NIHO補填」。NIHO差引額は「NIHO利用料 − 利用料返還 − 実処理費用」。どちらもStripe証跡と補填Transferが揃うまではnull。
+- 返金行の追加・金額・状態・終了更新は同じDB transactionから照合を再予約する。settlement完了後にStripe上で直接作られた返金も拾うため、`SETTLED`行は30日おきに再照合する。
 - 補填Transfer commandをStripe呼出し前に永続化する。Transfer groupとcommand metadataで未知結果を再照合し、成功済みなら同じTransferを再利用する。Stripe idempotency保持期間を越え、Stripe側にTransferが見つからない未知結果は自動再送せず要確認へ送る。確定的な残高不足だけを別commandのbounded retry対象とする。
 - ホスト売上画面とAdmin予約画面で「見込」「実費確定」「処理中」「結果確認中」「要対応」を分け、支払済みやホスト入金済みとは表示しない。
 

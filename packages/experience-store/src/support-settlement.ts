@@ -460,7 +460,7 @@ export class ExperienceSupportRepository {
     const claimed = await this.#pool.query<DbRow>(
       `WITH due AS (
          SELECT provider_id,booking_id FROM experience_booking_settlements
-          WHERE status IN ('PREPARING','PROCESSING_COST_PENDING','PROCESSING','RESULT_UNKNOWN') AND next_reconcile_at<=clock_timestamp()
+          WHERE status IN ('PREPARING','PROCESSING_COST_PENDING','PROCESSING','RESULT_UNKNOWN','SETTLED') AND next_reconcile_at<=clock_timestamp()
           ORDER BY next_reconcile_at,updated_at LIMIT $1 FOR UPDATE SKIP LOCKED
        )
        UPDATE experience_booking_settlements s SET next_reconcile_at=clock_timestamp()+interval '5 minutes', updated_at=clock_timestamp()
@@ -630,7 +630,7 @@ export class ExperienceSupportRepository {
       const amount = nullableInteger(row, "processing_fee_amount");
       if (amount === null) return null;
       if (amount === 0) return null;
-      const currency = text(row, "currency").toLowerCase();
+      const currency = text(row, "currency");
       const destination = text(row, "stripe_account_ref");
       const group = `niho-experience-settlement:${id}`;
       const fp = createHash("sha256").update(JSON.stringify([id, amount, currency, destination, group])).digest("hex");

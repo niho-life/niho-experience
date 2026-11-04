@@ -620,9 +620,48 @@ export async function readBookingSettlement(input: ReadBookingSettlementInput): 
     : refunds.reduce((total, refund) => total + (refund.status === "succeeded" ? refund.amount : 0), 0);
   const pendingRefundAmount = refundHistoryTruncated || !refundStatusesKnown ? null
     : refunds.reduce((total, refund) => total + (refund.status === "pending" || refund.status === "requires_action" ? refund.amount : 0), 0);
-  const processingFeeAmount = balanceTransaction ? positiveOrZero(balanceTransaction.fee, "balance_transaction.fee") : null;
+  let processingFeeAmount: number | null = null;
   const processingFeeCurrency = balanceTransaction && typeof balanceTransaction.currency === "string"
     ? balanceTransaction.currency.toUpperCase() : null;
+  if (balanceTransaction) {
+    const totalFee = positiveOrZero(balanceTransaction.fee, "balance_transaction.fee");
+    const details = balanceTransaction.fee_details;
+    if (!Array.isArray(details)) {
+      issueCodes.push("processing_fee_breakdown_missing");
+    } else {
+      let detailTotal = 0;
+      let applicationFeeDetailTotal = 0;
+      let processingFeeDetailTotal = 0;
+      let validBreakdown = true;
+      for (const [index, detail] of details.entries()) {
+        const amount = positiveOrZero(detail.amount, `balance_transaction.fee_details.${index}.amount`);
+        const detailCurrency = typeof detail.currency === "string" ? detail.currency.toUpperCase() : "";
+        detailTotal += amount;
+        if (!Number.isSafeInteger(detailTotal) || detailCurrency !== processingFeeCurrency) {
+          issueCodes.push("processing_fee_breakdown_mismatch");
+          validBreakdown = false;
+        }
+        if (detail.type === "application_fee") {
+          applicationFeeDetailTotal += amount;
+        } else if (detail.type === "stripe_fee" || detail.type === "payment_method_passthrough_fee") {
+          processingFeeDetailTotal += amount;
+        } else {
+          // Unknown fee categories (for example withheld taxes) need an explicit settlement policy.
+          issueCodes.push("processing_fee_type_unknown");
+          validBreakdown = false;
+        }
+      }
+      if (detailTotal !== totalFee || applicationFeeAmount === null || applicationFeeDetailTotal !== applicationFeeAmount) {
+        issueCodes.push("processing_fee_breakdown_mismatch");
+        validBreakdown = false;
+      }
+      if (!Number.isSafeInteger(processingFeeDetailTotal)) {
+        issueCodes.push("processing_fee_breakdown_mismatch");
+        validBreakdown = false;
+      }
+      if (validBreakdown) processingFeeAmount = processingFeeDetailTotal;
+    }
+  }
   const balanceTransactionRef = balanceTransaction ? stripeReference(balanceTransaction.id, "txn_", "balance_transaction.id") : null;
   if (processingFeeAmount !== null && processingFeeCurrency !== input.expectedCurrency) issueCodes.push("processing_fee_currency_mismatch");
   return {

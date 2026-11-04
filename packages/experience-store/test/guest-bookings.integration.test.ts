@@ -1801,6 +1801,7 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       assert.equal(estimate.compensationAmount, 360);
       const command = await support.prepareCompensation(regular.publicBookingId);
       assert.equal(command?.amount, 360);
+      assert.equal(command?.currency, "JPY");
       assert.ok(command);
       await support.markCompensation(command.commandId, { status: "TRANSFERRED", stripeTransferRef: "tr_SampleTransfer001" });
       const settled = await support.recordStripeEvidence(regular.publicBookingId, evidence);
@@ -1843,6 +1844,20 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       await support.markCompensation(fullCommand.commandId, { status: "TRANSFERRED", stripeTransferRef: "tr_SampleTransfer002" });
       const full = await support.recordStripeEvidence(fullyRefunded.publicBookingId, fullEvidence);
       assert.deepEqual([full.final, full.successfulRefundAmount, full.hostNetAfterRefunds, full.nihoNetAfterProcessing], [true, 4_000, 0, -360]);
+
+      const settledBeforeRefund = await guests.startGuestBooking(request({ occurrenceDate: day(6), guestEmail: "settled-refund@example.com" }));
+      await payFor(store, settledBeforeRefund, 4_000, "support-settled-refund");
+      await support.ensureSettlement(settledBeforeRefund.publicBookingId);
+      const appPaidEvidence = {
+        ...evidence, connectedAccountId: settledBeforeRefund.stripeConnectAccountRef, feePayer: "APPLICATION" as const,
+      };
+      const settledBeforeCancellation = await support.recordStripeEvidence(settledBeforeRefund.publicBookingId, appPaidEvidence);
+      assert.equal(settledBeforeCancellation.final, true);
+      assert.equal(settledBeforeCancellation.status, "SETTLED");
+      await cancellations.cancelAsSupport({ nihoUserId: "admin-a" }, settledBeforeRefund.publicBookingId, {
+        commandId: randomUUID(), reason: "GUEST_REQUEST", note: null, refund: { kind: "FULL" },
+      });
+      assert.ok((await support.claimDueSettlements()).includes(settledBeforeRefund.publicBookingId));
     });
   });
 });

@@ -12,7 +12,10 @@ function settlementStripe(overrides: Record<string, unknown> = {}): SettlementSt
     accounts: { retrieve: async () => ({ id: ACCOUNT, controller: { fees: { payer: "account" } } }) },
     paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
       id: "ch_SampleCharge0001", payment_intent: PI, amount: 10_000, currency: "jpy",
-      balance_transaction: { id: "txn_SampleBalance0001", fee: 360, currency: "jpy" },
+      balance_transaction: { id: "txn_SampleBalance0001", fee: 1_860, currency: "jpy", fee_details: [
+        { amount: 1_500, currency: "jpy", type: "application_fee" },
+        { amount: 360, currency: "jpy", type: "stripe_fee" },
+      ] },
       application_fee: { id: "fee_SampleApplication1", amount: 1_500, amount_refunded: 375 },
     } }) },
     charges: { retrieve: async () => { throw new Error("unexpected charge lookup"); } },
@@ -71,6 +74,39 @@ describe("Experience actual settlement evidence", () => {
     assert.equal(evidence.feePayer, "APPLICATION");
     assert.equal(evidence.processingFeeAmount, 360);
     assert.equal(evidence.processingFeeCurrency, "JPY");
+  });
+
+  it("separates Application Fee from the actual fee details and leaves unknown fee types for review", async () => {
+    const stripe = settlementStripe({ paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
+      id: "ch_SampleCharge0001", payment_intent: PI, amount: 10_000, currency: "jpy",
+      balance_transaction: { id: "txn_SampleBalance0001", fee: 1_780, currency: "jpy", fee_details: [
+        { amount: 1_500, currency: "jpy", type: "application_fee" },
+        { amount: 260, currency: "jpy", type: "stripe_fee" },
+        { amount: 20, currency: "jpy", type: "payment_method_passthrough_fee" },
+      ] },
+      application_fee: { id: "fee_SampleApplication1", amount: 1_500, amount_refunded: 0 },
+    } }) } });
+    const evidence = await readBookingSettlement({
+      publicBookingId: BOOKING_ID, connectedAccountId: ACCOUNT, paymentIntentId: PI,
+      expectedGrossAmount: 10_000, expectedCurrency: "JPY", stripe,
+    });
+    assert.equal(evidence.processingFeeAmount, 280);
+    assert.equal(evidence.issueCode, null);
+
+    const unknown = settlementStripe({ paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
+      id: "ch_SampleCharge0001", payment_intent: PI, amount: 10_000, currency: "jpy",
+      balance_transaction: { id: "txn_SampleBalance0001", fee: 1_860, currency: "jpy", fee_details: [
+        { amount: 1_500, currency: "jpy", type: "application_fee" },
+        { amount: 360, currency: "jpy", type: "withheld_tax" },
+      ] },
+      application_fee: { id: "fee_SampleApplication1", amount: 1_500, amount_refunded: 0 },
+    } }) } });
+    const unknownEvidence = await readBookingSettlement({
+      publicBookingId: BOOKING_ID, connectedAccountId: ACCOUNT, paymentIntentId: PI,
+      expectedGrossAmount: 10_000, expectedCurrency: "JPY", stripe: unknown,
+    });
+    assert.equal(unknownEvidence.processingFeeAmount, null);
+    assert.equal(unknownEvidence.issueCode, "processing_fee_type_unknown");
   });
 
   it("leaves refund totals unknown when Stripe refund history is truncated", async () => {

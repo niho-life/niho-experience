@@ -528,7 +528,7 @@ describe("database invariants", () => {
   });
 
   it("stores new Experience support consent, private Admin cases, notices and actual settlement evidence (#117 #121 #128 #380)", async () => {
-    const sql = await readFile(new URL("../migrations/0047_experience_support_and_settlement.sql", import.meta.url), "utf8");
+    const sql = await readFile(new URL("../migrations/0049_experience_support_and_settlement.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
     assert.match(sql, /COMMIT;\s*$/);
     const code = sql.replace(/--.*$/gm, "");
@@ -540,6 +540,8 @@ describe("database invariants", () => {
     assert.match(code, /CREATE TABLE experience_support_admin_notification_reads/);
     assert.match(code, /CREATE TABLE experience_booking_settlements/);
     assert.match(code, /CREATE TABLE experience_settlement_commands/);
+    assert.match(code, /'REVIEW_REQUIRED', 'SETTLED'/);
+    assert.match(code, /booking_refunds_experience_settlement_reconcile/);
     assert.match(code, /booking_cancellation_commands_support_history/);
     assert.match(code, /guest_booking_message_experience_support_notice/);
     assert.match(code, /topic IN \('BOOKING_RECEIVED', 'PAYMENT_REVIEW', 'CANCELLATION_REQUEST', 'BOOKING_CANCELLED', 'REFUND_UPDATED', 'GUEST_MESSAGE'\)/);

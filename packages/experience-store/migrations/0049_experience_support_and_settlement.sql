@@ -177,7 +177,22 @@ CREATE TABLE experience_booking_settlements (
 );
 CREATE INDEX experience_booking_settlements_reconcile_idx
   ON experience_booking_settlements (next_reconcile_at, updated_at)
-  WHERE status IN ('PREPARING', 'PROCESSING_COST_PENDING', 'PROCESSING', 'RESULT_UNKNOWN', 'REVIEW_REQUIRED');
+  WHERE status IN ('PREPARING', 'PROCESSING_COST_PENDING', 'PROCESSING', 'RESULT_UNKNOWN', 'REVIEW_REQUIRED', 'SETTLED');
+
+-- Refund state changes queue a fresh read of actual Stripe evidence even after an earlier reconciliation settled.
+-- Settled rows are also polled less often for refunds made directly in Stripe outside this service.
+CREATE FUNCTION experience_queue_settlement_reconcile_after_refund() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE experience_booking_settlements
+     SET next_reconcile_at = LEAST(next_reconcile_at, clock_timestamp()), updated_at = clock_timestamp()
+   WHERE provider_id = NEW.provider_id AND booking_id = NEW.booking_id;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER booking_refunds_experience_settlement_reconcile
+  AFTER INSERT OR UPDATE OF amount, status, closed_at ON booking_refunds
+  FOR EACH ROW EXECUTE FUNCTION experience_queue_settlement_reconcile_after_refund();
 
 -- A transfer command is recorded before Stripe is called. Its stable UUID is both the idempotency key
 -- seed and the reconciliation selector (transfer_group + metadata) after Stripe's v1 key-retention window.
