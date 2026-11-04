@@ -58,7 +58,7 @@ export function HostLiveExperienceRow({ page, rating, linkProviderId }: { page: 
   );
 }
 
-export function HostLiveExperiences({ providerId, linkProviderId, ratings = {} }: { providerId: string; linkProviderId: string | null; ratings?: HostLiveExperienceRatings }) {
+export function HostLiveExperiences({ providerId, linkProviderId, ratings = {}, bookingGuideHref }: { providerId: string; linkProviderId: string | null; ratings?: HostLiveExperienceRatings; bookingGuideHref?: string }) {
   const [data, setData] = useState<ExperienceProviderPageListResponse | null>(null);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
@@ -91,7 +91,7 @@ export function HostLiveExperiences({ providerId, linkProviderId, ratings = {} }
   }
 
   return <HostPageBody>
-    <PageHead title="体験"><button type="button" className={consoleButtonClass("primary")} onClick={() => setCreating((value) => !value)}><HostIcon name="plus" className="size-4" />新しい体験</button></PageHead>
+    <PageHead title="体験"><div className="flex flex-wrap items-center gap-2">{bookingGuideHref ? <Link href={bookingGuideHref} className={consoleButtonClass("secondary")}>予約後の集合案内</Link> : null}<button type="button" className={consoleButtonClass("primary")} onClick={() => setCreating((value) => !value)}><HostIcon name="plus" className="size-4" />新しい体験</button></div></PageHead>
     {creating ? <form onSubmit={create} className={`${HOST_SURFACE} mb-3.5 grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto]`}><label className="font-extrabold">題名<input required maxLength={95} value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1 min-h-10 w-full rounded-xl border border-line-strong px-3" /></label><label className="font-extrabold">言語<select value={language} onChange={(event) => setLanguage(event.target.value as "JA" | "EN")} className="mt-1 min-h-10 w-full rounded-xl border border-line-strong px-3"><option value="JA">日本語</option><option value="EN">英語</option></select></label><button disabled={busy} className={`${consoleButtonClass("primary")} self-end disabled:opacity-50`}>{busy ? "作成中…" : "下書きを作成"}</button></form> : null}
     {error ? <p role="alert" className="mb-3.5 rounded-xl bg-danger-pale p-4 text-danger">{error} <button type="button" className="font-extrabold underline" onClick={() => void load()}>再試行</button></p> : null}
     <section aria-label="体験の一覧" className={HOST_SURFACE}>{data === null && !error ? <p className="p-5 text-ink-soft">読み込み中…</p> : data?.pages.length ? <ul>{data.pages.map((page) => <HostLiveExperienceRow key={page.id} page={page} rating={ratings[page.slug]} linkProviderId={linkProviderId} />)}</ul> : data ? <p className="p-5 text-ink-soft">まだ体験がありません。</p> : null}</section>

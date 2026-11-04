@@ -10,14 +10,17 @@ import {
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueNewBookingNotification,
+  enqueueNewReviewNotification,
   enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
+  parseDayBeforeSummaryPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseNewReviewPayload,
   parseOtaBookingPayload,
 } from "../src/host-notification-outbox.ts";
 
@@ -40,6 +43,15 @@ describe("host notification payloads (#177 P2)", () => {
     assert.deepEqual(parseGuestMessagePayload(message), message);
     assert.equal(parseApprovalDeadlinePayload(message), null);
     assert.equal(parseGuestMessagePayload(approval), null);
+  });
+
+  it("parses date-scoped host summaries without accepting guest or message details", () => {
+    const payload = { v: 1, localDate: "2026-11-05", bookingCount: 2, participantCount: 3 };
+    assert.deepEqual(parseDayBeforeSummaryPayload(payload), payload);
+    for (const bad of [
+      { ...payload, localDate: "2026-02-30" }, { ...payload, bookingCount: 0 },
+      { ...payload, participantCount: 1.5 }, { ...payload, guestName: "Synthetic Guest" },
+    ]) assert.equal(parseDayBeforeSummaryPayload(bad), null);
   });
 
   it("refuses a stored JSON null where an instant belongs", () => {
@@ -120,6 +132,18 @@ describe("question and new booking payloads (#285 slice 5)", () => {
       await assert.rejects(() => enqueueNewBookingNotification(client, bad), StoreValidationError);
     }
     assert.equal(calls.length, 0);
+  });
+});
+
+describe("new review notification (#109)", () => {
+  it("carries only the review reference and experience title", async () => {
+    const reviewId = "00000000-0000-4000-8000-000000000109";
+    const { client, calls } = recordingClient();
+    await enqueueNewReviewNotification(client, { providerId: "provider-a", reviewId, experienceTitle: "Synthetic tea" });
+    assert.deepEqual(calls[0]!.params.slice(0, 5), ["provider-a", "guest_review", reviewId, HOST_NOTIFICATION_TOPICS.newReview, `host-push:new-review:${reviewId}`]);
+    const payload = JSON.parse(String(calls[0]!.params[5]));
+    assert.deepEqual(parseNewReviewPayload(payload), { v: 1, reviewId, experienceTitle: "Synthetic tea" });
+    assert.equal(parseNewReviewPayload({ ...payload, guestEmail: "private@example.com" }), null);
   });
 });
 
@@ -227,8 +251,24 @@ describe("HostNotificationOutbox input checks", () => {
     assert.deepEqual(queries[0], [[
       HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
       HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage, HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
-      HOST_NOTIFICATION_TOPICS.otaBooking,
+      HOST_NOTIFICATION_TOPICS.otaBooking, HOST_NOTIFICATION_TOPICS.newReview,
+      HOST_NOTIFICATION_TOPICS.dayBeforeSummary,
     ], 10, 60_000]);
+  });
+
+  it("creates tomorrow's confirmed attendee summary after 18:00 Japan time with a unique date key", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const outbox = new HostNotificationOutbox({ query: async (sql: string, params: unknown[]) => {
+      calls.push({ sql, params }); return { rowCount: 1, rows: [] };
+    } } as never);
+    const now = new Date("2026-11-04T09:00:00.000Z"); // 18:00 in Japan
+    assert.equal(await outbox.enqueueDueDayBeforeSummaries(now), 1);
+    assert.deepEqual(calls[0]!.params, [now.toISOString(), HOST_NOTIFICATION_TOPICS.dayBeforeSummary]);
+    assert.match(calls[0]!.sql, /b\.status = 'CONFIRMED'/);
+    assert.match(calls[0]!.sql, /adult_count \+ g\.child_count/);
+    assert.match(calls[0]!.sql, /Asia\/Tokyo/);
+    assert.match(calls[0]!.sql, /ON CONFLICT \(provider_id, deduplication_key\) DO NOTHING/);
+    await assert.rejects(() => outbox.enqueueDueDayBeforeSummaries(new Date(Number.NaN)), StoreValidationError);
   });
 });
 

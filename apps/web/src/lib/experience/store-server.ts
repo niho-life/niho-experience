@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderNotificationSettings, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -24,6 +24,12 @@ export function experienceStore(): ExperienceStore | null {
 export function experiencePublicationRepository(): ExperiencePublicationRepository | null {
   const pool = experiencePool();
   return pool ? new ExperiencePublicationRepository(pool) : null;
+}
+
+/** Private owner-edited logistics captured into a booking snapshot at payment confirmation. */
+export function guestMeetingGuideRepository(): GuestMeetingGuideRepository | null {
+  const pool = experiencePool();
+  return pool ? new GuestMeetingGuideRepository(pool) : null;
 }
 
 export function productOperatorRepository(): ProductOperatorRepository | null {
@@ -145,6 +151,13 @@ export function guestReviewRatings(): GuestReviewRatings | null {
 /** 旅行者の予約 (#285, docs/guest-booking.md): null until its flag is on and the experience DB is configured. */
 export function guestBookingRepository(): GuestBookingRepository | null {
   if (!config.guestBookingEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestBookingRepository(pool) : null;
+}
+
+/** Existing site bookings for the host's interpreter flow; exposes only reads while guest sales are closed. */
+export function translateSiteBookingRepository(): Pick<GuestBookingRepository, "listGuestBookingsForHost" | "getGuestBookingForHost"> | null {
+  if (config.apiMode !== "http" || !config.hostConsoleEnabled || !config.experienceTranslateApiEnabled) return null;
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
 }

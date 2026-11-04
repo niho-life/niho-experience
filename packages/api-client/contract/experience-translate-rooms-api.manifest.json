@@ -6,8 +6,8 @@
   "sourceCommit": "5ed6ebac62b5f14dd0d114d7893bc0099d9df776",
   "sha256": "08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8e",
   "status": "agreed-not-deployed",
-  "deploymentStatus": "not-deployed",
-  "deploymentNote": "niho-appのselected exportをsourceCommitの固定SHAから同期済み。APIは未配備。stg配備・受入まではHTTP flagを開かない。",
+  "deploymentStatus": "stg-candidate-source-hash-verified",
+  "deploymentNote": "NIHO公式batch 41749480399のbackend配備jobは成功、候補SHAはac52bc026c0f5567fe3e713aa25bd0e8f34e2f2a（全体batchはtargeted smoke失敗）。固定sourceCommitと候補SHAのselected OpenAPIは同一git blobで、SHA256 08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8eを照合済み。runtimeのcontract read-backおよび実予約create/poll/endは未受入のため、EXPERIENCE_TRANSLATE_API_ENABLEDはOFFを維持する。",
   "openapiFile": "experience-translate-rooms-api.openapi.json",
   "sha256File": "experience-translate-rooms-api.openapi.json.sha256",
   "scope": [

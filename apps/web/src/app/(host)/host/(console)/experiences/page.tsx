@@ -14,6 +14,7 @@ import { experienceRating, reviewsHref } from "@/host/reviews";
 import { LISTING_STATUS } from "@/host/status";
 import { withProvider } from "@/lib/host/routes";
 import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
+import { config } from "@/lib/config";
 
 export const metadata: Metadata = { title: "体験" };
 
@@ -34,7 +35,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
   if (providerPagesEnabled()) {
-    return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} />;
+    return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} bookingGuideHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", linkProviderId) : undefined} />;
   }
   const { experiences } = await loadHostConsoleData(provider);
   const reviews = loadHostReviews(provider).list;
@@ -42,7 +43,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
 
   return (
     <HostPageBody>
-      <PageHead title="体験" />
+      <PageHead title="体験">{config.experienceHostPublicationApiEnabled ? <Link href={withProvider("/host/booking-guides", linkProviderId)} className="rounded-lg border border-line px-3 py-2 text-sm font-bold">予約後の集合案内</Link> : null}</PageHead>
       <section aria-label="体験の一覧" className={HOST_SURFACE}>
         {experiences.length ? (
           <ul>

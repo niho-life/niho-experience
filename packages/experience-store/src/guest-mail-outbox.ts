@@ -1,8 +1,10 @@
 import type { Pool } from "pg";
 import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
+import { REVIEW_INVITATION_TOPIC } from "./booking-attendance.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
+import { validateGuestMeetingGuide } from "./guest-meeting-guides.ts";
 import type { DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { GuestCancellationPolicy } from "./types.ts";
@@ -17,6 +19,7 @@ import type { GuestCancellationPolicy } from "./types.ts";
  * column: a claim moves `available_at` past the lease, so a row the job never finishes comes back by itself.
  */
 export const GUEST_MAIL_TOPIC = "booking.confirmed";
+export const MEETING_GUIDE_DAY_BEFORE_TOPIC = "booking.meeting_guide_day_before";
 
 export const GUEST_MAIL_LIMITS = {
   /** Claims of one confirmation, the first included. Retries wait 2, 4, 8, 16, 32, 60 and 60 minutes (about 3 hours). */
@@ -25,6 +28,8 @@ export const GUEST_MAIL_LIMITS = {
   linkAttempts: 5,
   /** Claims of one cancellation, refund or declined-request email: as a confirmation. */
   noticeAttempts: 8,
+  reviewInvitationAttempts: 8,
+  meetingGuideAttempts: 8,
   claimLimitMax: 50,
   leaseSecondsMin: 30,
   leaseSecondsMax: 3600,
@@ -100,6 +105,55 @@ export interface ClaimedBookingLink {
 
 export interface BookingLinkClaim {
   readonly links: readonly ClaimedBookingLink[];
+  readonly abandoned: number;
+}
+
+export interface ReviewInvitationEmail {
+  readonly providerId: string;
+  readonly bookingId: string;
+  readonly guestEmail: string;
+  readonly guestName: string;
+  readonly experienceTitle: string;
+}
+
+export interface ClaimedReviewInvitation {
+  readonly id: string;
+  readonly attempts: number;
+  readonly email: ReviewInvitationEmail | null;
+}
+
+export interface ReviewInvitationClaim {
+  readonly invitations: readonly ClaimedReviewInvitation[];
+  readonly abandoned: number;
+}
+
+/** Private logistics for one confirmed booking, fixed by its immutable meeting-guide snapshot. */
+export interface BookingMeetingGuideEmail {
+  readonly publicBookingId: string;
+  readonly guestEmail: string;
+  readonly guestName: string;
+  readonly experienceTitle: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+  readonly collectionOverview: string;
+  readonly address: string;
+  readonly accessInstructions: string;
+  readonly entranceInstructions: string;
+  readonly mapUrl: string | null;
+  readonly photoAssetId: string;
+  readonly itemsToBring: readonly string[];
+  readonly weatherPlan: string;
+}
+
+export interface ClaimedBookingMeetingGuide {
+  readonly id: string;
+  readonly attempts: number;
+  readonly email: BookingMeetingGuideEmail | null;
+}
+
+export interface BookingMeetingGuideClaim {
+  readonly guides: readonly ClaimedBookingMeetingGuide[];
   readonly abandoned: number;
 }
 
@@ -232,6 +286,41 @@ function linkEmailFromRow(row: DbRow): BookingLinkEmail | null {
   };
 }
 
+function reviewInvitationFromRow(row: DbRow): ReviewInvitationEmail | null {
+  if (row.status !== "CONFIRMED" || row.attendance_status !== "ATTENDED" || row.guest_email === null || row.guest_name === null) return null;
+  return {
+    providerId: text(row.provider_id, "provider_id"),
+    bookingId: text(row.booking_id, "booking_id"),
+    guestEmail: text(row.guest_email, "guest_email"),
+    guestName: text(row.guest_name, "guest_name"),
+    experienceTitle: text(row.public_title, "public_title"),
+  };
+}
+
+function meetingGuideEmailFromRow(row: DbRow): BookingMeetingGuideEmail | null {
+  if (row.status !== "CONFIRMED" || row.guest_email === null || row.guest_name === null || row.before_start !== true) return null;
+  const occurrence = record(row.occurrence_snapshot);
+  const guide = validateGuestMeetingGuide(row.meeting_guide);
+  if (!guide.photoAssetId) return null;
+  return {
+    publicBookingId: text(row.public_booking_id, "public_booking_id"),
+    guestEmail: text(row.guest_email, "guest_email"),
+    guestName: text(row.guest_name, "guest_name"),
+    experienceTitle: text(row.public_title, "public_title"),
+    localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
+    localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
+    timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
+    collectionOverview: guide.collectionOverview,
+    address: guide.address,
+    accessInstructions: guide.accessInstructions,
+    entranceInstructions: guide.entranceInstructions,
+    mapUrl: guide.mapUrl,
+    photoAssetId: guide.photoAssetId,
+    itemsToBring: guide.itemsToBring,
+    weatherPlan: guide.weatherPlan,
+  };
+}
+
 function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
   if (row.guest_email === null || row.guest_name === null) return null;
   const occurrence = record(row.occurrence_snapshot);
@@ -329,6 +418,38 @@ export class GuestMailOutbox {
     return this.#retry(BOOKING_LINK_TOPIC, GUEST_MAIL_LIMITS.linkAttempts, id, attempts);
   }
 
+  async claimReviewInvitations(options: { limit: number; leaseSeconds: number }): Promise<ReviewInvitationClaim> {
+    const { rows, abandoned } = await this.#claim(REVIEW_INVITATION_TOPIC, GUEST_MAIL_LIMITS.reviewInvitationAttempts, options);
+    return {
+      invitations: rows.map((row): ClaimedReviewInvitation => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: reviewInvitationFromRow(row) })).sort(byId),
+      abandoned,
+    };
+  }
+
+  async completeReviewInvitation(id: string): Promise<void> {
+    await this.#complete(REVIEW_INVITATION_TOPIC, id);
+  }
+
+  async retryReviewInvitation(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(REVIEW_INVITATION_TOPIC, GUEST_MAIL_LIMITS.reviewInvitationAttempts, id, attempts);
+  }
+
+  async claimMeetingGuideDayBefore(options: { limit: number; leaseSeconds: number }): Promise<BookingMeetingGuideClaim> {
+    const { rows, abandoned } = await this.#claim(MEETING_GUIDE_DAY_BEFORE_TOPIC, GUEST_MAIL_LIMITS.meetingGuideAttempts, options);
+    return {
+      guides: rows.map((row): ClaimedBookingMeetingGuide => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: meetingGuideEmailFromRow(row) })).sort(byId),
+      abandoned,
+    };
+  }
+
+  async completeMeetingGuideDayBefore(id: string): Promise<void> {
+    await this.#complete(MEETING_GUIDE_DAY_BEFORE_TOPIC, id);
+  }
+
+  async retryMeetingGuideDayBefore(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(MEETING_GUIDE_DAY_BEFORE_TOPIC, GUEST_MAIL_LIMITS.meetingGuideAttempts, id, attempts);
+  }
+
   /**
    * Up to `limit` due notices of a cancellation, a refund done or a declined request (#285 slice 7), as
    * claimBookingConfirmations. Each says what it says at the time it is sent: a refund that failed after all
@@ -354,6 +475,7 @@ export class GuestMailOutbox {
 
   async #claim(topic: string | readonly string[], maxAttempts: number, options: { limit: number; leaseSeconds: number }): Promise<{ rows: DbRow[]; abandoned: number }> {
     const topics = typeof topic === "string" ? [topic] : [...topic];
+    const reviewInvitation = topics.length === 1 && topics[0] === REVIEW_INVITATION_TOPIC;
     const limit = boundedInteger(options?.limit, "limit", 1, GUEST_MAIL_LIMITS.claimLimitMax);
     const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", GUEST_MAIL_LIMITS.leaseSecondsMin, GUEST_MAIL_LIMITS.leaseSecondsMax);
     return withTransaction(this.#pool, async (client) => {
@@ -376,17 +498,22 @@ export class GuestMailOutbox {
             WHERE o.id = due.id
            RETURNING o.id, o.attempts, o.provider_id, o.aggregate_id, o.topic, o.payload
          )
-         SELECT c.id::text AS id, c.attempts, c.topic, b.public_booking_id::text AS public_booking_id, b.status,
+         SELECT c.id::text AS id, c.attempts, c.topic, c.provider_id, b.id::text AS booking_id,
+                ${reviewInvitation ? "a.status" : "NULL::text"} AS attendance_status, b.public_booking_id::text AS public_booking_id, b.status,
                 b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot, b.cancelled_by, b.cancellation_reason,
                 (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
+                (b.occurrence_snapshot->>'startUtc')::timestamptz > clock_timestamp() AS before_start,
                 g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
+                guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
                   WHERE x.provider_id = b.provider_id AND x.booking_id = b.id AND x.status <> 'FAILED') AS refunding_amount,
                 r.status AS refund_status, r.amount AS refund_amount, r.currency AS refund_currency, q.decline_message
            FROM claimed c
            JOIN bookings b ON ${BOOKING_OF("c")}
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+           ${reviewInvitation ? "LEFT JOIN booking_attendance a ON a.provider_id = b.provider_id AND a.booking_id = b.id" : ""}
            JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+           LEFT JOIN booking_meeting_guide_snapshots guide_snapshot ON guide_snapshot.provider_id=b.provider_id AND guide_snapshot.booking_id=b.id
            LEFT JOIN booking_refunds r ON r.provider_id = b.provider_id AND r.booking_id = b.id
                  AND r.id = (CASE WHEN c.payload->>'refundId' ~ ${UUID_TEXT} THEN (c.payload->>'refundId')::uuid END)
            LEFT JOIN booking_cancellation_requests q ON q.provider_id = b.provider_id AND q.booking_id = b.id

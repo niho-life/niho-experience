@@ -30,6 +30,7 @@ import {
   type DbRow,
 } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
+import { snapshotGuestMeetingGuide } from "./guest-meeting-guides.ts";
 import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
@@ -1256,6 +1257,13 @@ export class ExperienceStore {
         [scope.providerId, bookingRow.id, outcome, input.stripePaymentRef],
       );
       const updatedBooking = bookingFromRow(oneRow(updated.rows, "booking"));
+      if (outcome === "CONFIRMED") {
+        await snapshotGuestMeetingGuide(client, {
+          providerId: scope.providerId,
+          bookingId: String(bookingRow.id),
+          productId: updatedBooking.productId,
+        });
+      }
       await client.query(
         `INSERT INTO payment_ledger_entries
            (provider_id, entry_id, booking_id, kind, amount, currency, stripe_payment_ref, stripe_event_id, occurred_at)

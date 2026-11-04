@@ -49,6 +49,7 @@ const payload = (overrides: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(HostNotificationOutbox.prototype, "enqueueDueDayBeforeSummaries").mockResolvedValue(0);
   mocks.config.hostPushJobEnabled = true;
   mocks.verifyIdToken.mockResolvedValue(payload());
   mocks.pool.mockReturnValue(fakePool);
@@ -113,6 +114,7 @@ describe("POST /internal/host-push/v1/drain", () => {
     expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     expect(await response.json()).toEqual(counts);
     expect(mocks.drain).toHaveBeenCalledOnce();
+    expect(HostNotificationOutbox.prototype.enqueueDueDayBeforeSummaries).toHaveBeenCalledOnce();
     const deps = mocks.drain.mock.calls[0]![0];
     expect(deps.outbox).toBeInstanceOf(HostNotificationOutbox);
     expect(deps.allowed).toBe(mocks.allowed);

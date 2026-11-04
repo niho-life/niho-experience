@@ -308,8 +308,11 @@ const BOOKING_CONSENT_VERSION = /^[\x21-\x7E]{1,100}$/;
 function guestBookingSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): { enabled: boolean; consentVersion: string } {
   if (apiMode !== "http" || env.EXPERIENCE_GUEST_BOOKING_ENABLED !== "true") return { enabled: false, consentVersion: "" };
   if (!hostConsoleEnabled) throw new Error("EXPERIENCE_GUEST_BOOKING_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
-  for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET"]) {
+  for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET", "EXPERIENCE_CHECKOUT_IP_HMAC_KEY"]) {
     if (!env[name]?.trim()) throw new Error(`EXPERIENCE_GUEST_BOOKING_ENABLED=true needs ${name} in http mode`);
+  }
+  if (Buffer.byteLength(env.EXPERIENCE_CHECKOUT_IP_HMAC_KEY!.trim(), "utf8") < 32) {
+    throw new Error("EXPERIENCE_CHECKOUT_IP_HMAC_KEY must be at least 32 bytes in http mode");
   }
   const consentVersion = env.EXPERIENCE_BOOKING_CONSENT_VERSION?.trim() ?? "";
   if (!BOOKING_CONSENT_VERSION.test(consentVersion)) {
@@ -399,8 +402,8 @@ const NO_GUEST_MAIL: GuestMailSettings = { enabled: false, smtpHost: "", smtpPor
 
 /**
  * 予約者へのメール (#285 slice 5, docs/guest-booking.md): the job behind POST /internal/experience-jobs/v1/drain
- * sends host replies and booking confirmations over SMTP (the provider NIHO uses, with experience's own
- * credentials) and erases guest data after a year. HTTP only. Turned on without everything it needs, the
+ * sends host replies and booking confirmations over the shared SMTP credentials NIHO already uses
+ * and erases guest data after a year. HTTP only. Turned on without everything it needs, the
  * server stops at start-up; messages name the setting, never its value. The SMTP user and password are
  * secrets read where they are used (lib/mail/transport.ts), like the Stripe keys, so they are not kept here.
  */
@@ -551,9 +554,9 @@ export function resolveConfig(env: Env) {
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
   // console is on and メッセージ is not showing NIHO's booking messages instead.
   const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && !experienceProviderOperationsApiEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
-  // 予約者のレビュー (#104/#108) kept in the experience DB: for now only the public read of published reviews, so it
-  // does not need the host console. The mock keeps its own synthetic reviews; http opens per environment after
-  // migration 0027 is applied and accepted.
+  // 予約者のレビュー (#104/#108) and attendance-gated invitations live in the experience DB. Public reads and
+  // writes use this flag; invitations also require guest booking, attendance and mail to be enabled. The mock keeps
+  // its own synthetic reviews; http opens per environment after migrations 0027 and 0033 are accepted.
   const guestReviewsEnabled = apiMode === "http" && env.EXPERIENCE_GUEST_REVIEWS_ENABLED === "true";
   // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,

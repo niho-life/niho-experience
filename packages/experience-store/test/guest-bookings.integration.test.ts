@@ -1094,6 +1094,47 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("limits new starts by an app-wide HMAC IP bucket and allows idempotent replays above the cap", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("tea", rule("sample-am"));
+      await addRule("walk", rule("sample-walk-am"));
+      const digest = "a".repeat(64);
+      const firstRequest = walkRequest({ occurrenceDate: day(2), guestEmail: "ip-1@example.com", checkoutIpDigest: digest });
+      const first = await guests.startGuestBooking(firstRequest);
+      for (let index = 2; index <= 5; index += 1) {
+        await guests.startGuestBooking(walkRequest({
+          occurrenceDate: day(index + 1), guestEmail: `ip-${index}@example.com`, checkoutIpDigest: digest,
+        }));
+      }
+
+      // A retry of the exact accepted operation is returned before the bucket check, even after the cap.
+      const replay = await guests.startGuestBooking({ ...firstRequest, checkoutIpDigest: "b".repeat(64) });
+      assert.equal(replay.publicBookingId, first.publicBookingId);
+      const retryRequest = walkRequest({ occurrenceDate: day(8), guestEmail: "ip-6@example.com", checkoutIpDigest: digest });
+      await assert.rejects(
+        guests.startGuestBooking(retryRequest),
+        (error: unknown) => {
+          assert.ok(error instanceof GuestCheckoutError);
+          assert.equal(error.code, "RATE_LIMITED");
+          assert.equal(error.rateLimitReason, "checkout-ip-10m");
+          assert.ok(error.retryAfterSeconds !== null && error.retryAfterSeconds >= 1 && error.retryAfterSeconds <= 600);
+          return true;
+        },
+      );
+      // Simulate Retry-After having elapsed; the same key and body now start one booking.
+      await pool.query(
+        "UPDATE booking_checkout_ip_buckets SET window_started_at=window_started_at-interval '10 minutes' WHERE ip_digest=$1",
+        [digest],
+      );
+      assert.equal((await guests.startGuestBooking(retryRequest)).status, "HOLD");
+      const buckets = await pool.query<{ attempt_count: number }>(
+        "SELECT attempt_count FROM booking_checkout_ip_buckets WHERE ip_digest=$1 ORDER BY window_started_at DESC",
+        [digest],
+      );
+      assert.deepEqual(buckets.rows.map((row) => row.attempt_count), [1, 5]);
+    });
+  });
+
   it("prices children apart, snapshots the breakdown, and confirms payment against the snapshot total", async () => {
     await withSchema(async ({ pool, store, guests, addRule }) => {
       await addRule("tea", rule("sample-am"));

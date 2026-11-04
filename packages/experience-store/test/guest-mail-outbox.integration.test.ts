@@ -6,7 +6,10 @@ import { addLocalDays, occurrenceIdFor, type ScheduleRule } from "@niho-experien
 import type { Pool } from "pg";
 import { StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
-import { GUEST_MAIL_LIMITS, GuestMailOutbox } from "../src/guest-mail-outbox.ts";
+import { GuestBookingAccess } from "../src/booking-access.ts";
+import { GUEST_MAIL_LIMITS, GuestMailOutbox, MEETING_GUIDE_DAY_BEFORE_TOPIC } from "../src/guest-mail-outbox.ts";
+import { GuestMeetingGuideRepository } from "../src/guest-meeting-guides.ts";
+import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
@@ -100,6 +103,122 @@ async function makeDue(pool: Pool): Promise<void> {
 }
 
 describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === undefined }, () => {
+  it("snapshots owner logistics on confirmation, sends the scheduled guide, suppresses cancellation, and purges old private copies", async () => {
+    await withSchema(async (context) => {
+      const { pool, guests, outbox } = context;
+      const guides = new GuestMeetingGuideRepository(pool);
+      const access = new GuestBookingAccess(pool);
+      const photoAssetId = randomUUID();
+      await pool.query(
+        `INSERT INTO experience_product_media_assets
+          (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,rights_confirmed_at)
+         VALUES ($1,'provider-a','walk',0,$2,$3,640,480,3,'Synthetic meeting place',clock_timestamp())`,
+        [photoAssetId, `experience-products/${photoAssetId}.jpg`, "a".repeat(64)],
+      );
+      const guide = {
+        collectionOverview: "Blue flag by the synthetic station",
+        address: "1-2-3 Sample, Kamakura",
+        accessInstructions: "Walk east for two minutes.",
+        entranceInstructions: "Use the garden gate.",
+        mapUrl: "https://maps.example.test/synthetic",
+        photoAssetId,
+        itemsToBring: ["Water bottle"],
+        weatherPlan: "Move indoors in heavy rain.",
+      };
+      assert.equal((await guides.saveForProduct(ownerA, "walk", null, guide)).version, 1);
+
+      const targetDate = day(2);
+      const start = await confirmedGuest(context, "meeting-guide", { occurrenceDate: targetDate, guestEmail: "guide@example.com" });
+      const bookingRow = await pool.query<{ id: string; public_booking_id: string }>(
+        "SELECT id::text, public_booking_id::text FROM bookings WHERE public_booking_id=$1::uuid", [start.publicBookingId],
+      );
+      const bookingId = bookingRow.rows[0]!.id;
+      const captured = await pool.query("SELECT guide_version::text, guide FROM booking_meeting_guide_snapshots WHERE booking_id=$1::bigint", [bookingId]);
+      assert.deepEqual(captured.rows[0], { guide_version: "1", guide });
+
+      const hostPush = new HostNotificationOutbox(pool);
+      const dateBefore = addLocalDays(targetDate, -1);
+      const summaryAt = new Date(`${dateBefore}T09:00:00.000Z`); // 18:00 JST the day before this booking
+      assert.equal(await hostPush.enqueueDueDayBeforeSummaries(summaryAt), 1);
+      assert.equal(await hostPush.enqueueDueDayBeforeSummaries(summaryAt), 0);
+      const summary = await pool.query("SELECT payload FROM outbox_messages WHERE topic=$1", [HOST_NOTIFICATION_TOPICS.dayBeforeSummary]);
+      assert.deepEqual(summary.rows[0]!.payload, { v: 1, localDate: targetDate, bookingCount: 1, participantCount: 1 });
+      assert.doesNotMatch(JSON.stringify(summary.rows[0]!.payload), /guide@example\.com|Sample Guest|1-2-3 Sample/);
+
+      const grant = await access.issueBookingAccessGrant(start.publicBookingId);
+      assert.ok(grant);
+      const session = await access.openBookingSession(grant!.token);
+      assert.ok(session);
+      const view = await access.readBookingSession(session!.sessionId, start.publicBookingId);
+      assert.equal(view?.meetingGuide?.address, guide.address);
+      assert.deepEqual(await access.readBookingMeetingPhoto(session!.sessionId, start.publicBookingId), {
+        objectKey: `experience-products/${photoAssetId}.jpg`, byteSize: 3,
+      });
+
+      // Editing the product guide never rewrites this reservation's immutable copy.
+      await guides.saveForProduct(ownerA, "walk", 1, { ...guide, address: "A later product edit" });
+      assert.equal((await pool.query("SELECT guide->>'address' AS address FROM booking_meeting_guide_snapshots WHERE booking_id=$1::bigint", [bookingId])).rows[0]!.address, guide.address);
+      await pool.query("UPDATE outbox_messages SET available_at=clock_timestamp()-interval '1 second' WHERE topic=$1 AND aggregate_id=$2", [MEETING_GUIDE_DAY_BEFORE_TOPIC, start.publicBookingId]);
+      const claim = await outbox.claimMeetingGuideDayBefore({ limit: 10, leaseSeconds: 120 });
+      const delivery = claim.guides.find((row) => row.email?.publicBookingId === start.publicBookingId);
+      assert.ok(delivery);
+      assert.equal(delivery?.email?.address, guide.address);
+      assert.equal(delivery?.email?.photoAssetId, photoAssetId);
+      assert.equal("guestPhone" in (delivery?.email ?? {}), false);
+      await outbox.completeMeetingGuideDayBefore(delivery!.id);
+
+      const cancelled = await confirmedGuest(context, "meeting-guide-cancelled", { guestEmail: "cancelled-guide@example.com" });
+      const cancelledGrant = await access.issueBookingAccessGrant(cancelled.publicBookingId);
+      assert.ok(cancelledGrant);
+      const cancelledSession = await access.openBookingSession(cancelledGrant!.token);
+      assert.ok(cancelledSession);
+      await pool.query("UPDATE bookings SET status='CANCELLED', confirmed_at=NULL, cancelled_at=clock_timestamp() WHERE public_booking_id=$1::uuid", [cancelled.publicBookingId]);
+      await pool.query("UPDATE outbox_messages SET available_at=clock_timestamp()-interval '1 second' WHERE topic=$1 AND aggregate_id=$2", [MEETING_GUIDE_DAY_BEFORE_TOPIC, cancelled.publicBookingId]);
+      const cancelledClaim = await outbox.claimMeetingGuideDayBefore({ limit: 10, leaseSeconds: 120 });
+      assert.equal(cancelledClaim.guides.length, 1);
+      assert.equal(cancelledClaim.guides[0]!.email, null);
+      assert.equal((await access.readBookingSession(cancelledSession!.sessionId, cancelled.publicBookingId))?.meetingGuide, null);
+      assert.equal(await access.readBookingMeetingPhoto(cancelledSession!.sessionId, cancelled.publicBookingId), null);
+
+      // The private snapshot outlives the booking page by no more than its documented 30-day window.
+      await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+      await pool.query("UPDATE bookings SET occurrence_snapshot=jsonb_set(occurrence_snapshot,'{endUtc}',to_jsonb('2025-10-31T15:00:00.000Z'::text)) WHERE id=$1::bigint", [bookingId]);
+      await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+      assert.equal(await guides.purgeEndedSnapshots({ endedBefore: "2025-12-01T00:00:00.000Z", limit: 10 }), 1);
+      assert.equal((await pool.query("SELECT 1 FROM booking_meeting_guide_snapshots WHERE booking_id=$1::bigint", [bookingId])).rowCount, 0);
+    });
+  });
+
+  it("claims an attended booking for the thank-you mail and suppresses a changed NO_SHOW mark", async () => {
+    await withSchema(async (context) => {
+      const { pool, outbox } = context;
+      const first = await confirmedGuest(context, "review-first");
+      const second = await confirmedGuest(context, "review-second", { clientRequestKey: randomUUID(), guestEmail: "second@example.com" });
+      const bookingIds = await pool.query<{ id: string; public_booking_id: string }>(
+        "SELECT id::text AS id, public_booking_id::text FROM bookings WHERE public_booking_id = ANY($1::uuid[]) ORDER BY id",
+        [[first.publicBookingId, second.publicBookingId]],
+      );
+      for (const row of bookingIds.rows) {
+        await pool.query("INSERT INTO booking_attendance (provider_id, booking_id, status, recorded_by) VALUES ('provider-a', $1::bigint, 'ATTENDED', 'owner-a')", [row.id]);
+        await pool.query(
+          `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
+           VALUES ('provider-a', 'booking', $1, 'guest.review_invitation', $2, '{}'::jsonb)`,
+          [row.public_booking_id, `review-invite-test:${row.id}`],
+        );
+      }
+      await pool.query("UPDATE booking_attendance SET status = 'NO_SHOW' WHERE booking_id = $1::bigint", [bookingIds.rows[1]!.id]);
+      const claim = await outbox.claimReviewInvitations({ limit: 10, leaseSeconds: 120 });
+      assert.equal(claim.invitations.length, 2);
+      assert.equal(claim.invitations.filter((row) => row.email !== null).length, 1);
+      assert.deepEqual(claim.invitations.find((row) => row.email)?.email, {
+        providerId: "provider-a", bookingId: bookingIds.rows[0]!.id, guestEmail: "guest@example.com",
+        guestName: "Sample Guest", experienceTitle: "Synthetic walk",
+      });
+      for (const row of claim.invitations) await outbox.completeReviewInvitation(row.id);
+      assert.deepEqual((await outbox.claimReviewInvitations({ limit: 10, leaseSeconds: 120 })).invitations, []);
+    });
+  });
+
   it("claims the confirmations of guest bookings only, with what the email needs, and never another row", async () => {
     await withSchema(async (context) => {
       const { pool, store, guests, outbox } = context;

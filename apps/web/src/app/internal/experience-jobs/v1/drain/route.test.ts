@@ -295,10 +295,11 @@ describe("experienceJobsDrainResponse dependencies", () => {
       hostAddressConfirmations: { off: true },
       hostBookingMails: { off: true },
       hostAddressPurge: { error: "unavailable" },
+      meetingGuideSnapshotPurge: { error: "unavailable" },
     });
     expect(pool.connect).toHaveBeenCalledTimes(5);
-    // The five steps that query directly, and the claim of refunds to send again.
-    expect(pool.query).toHaveBeenCalledTimes(6);
+    // The five steps that query directly, the claim of refunds to send again, and snapshot purge.
+    expect(pool.query).toHaveBeenCalledTimes(7);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();
     expect(mailer.close).toHaveBeenCalledOnce();

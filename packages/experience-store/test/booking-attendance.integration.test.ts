@@ -8,6 +8,8 @@ import { BookingAttendance } from "../src/booking-attendance.ts";
 import { BookingCancellations } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
+import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
+import { GuestReviewRepository } from "../src/guest-reviews.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
@@ -116,6 +118,29 @@ async function stored(pool: Pool, publicBookingId: string) {
 }
 
 describe("PostgreSQL booking attendance (#107)", { skip: databaseUrl === undefined }, () => {
+  it("connects a synthetic confirmed booking to attendance, a thank-you invitation and a public review", async () => {
+    await withSchema(async (context) => {
+      const made = await paid(context);
+      const mail = new GuestMailOutbox(context.pool);
+      const confirmations = await mail.claimBookingConfirmations({ limit: 1, leaseSeconds: 120 });
+      assert.equal(confirmations.confirmations[0]?.email?.publicBookingId, made.publicBookingId);
+      await mail.completeBookingConfirmation(confirmations.confirmations[0]!.id);
+      await startsIn(context.pool, made.publicBookingId, -3 * HOUR_MS);
+      assert.equal((await context.attendance.recordAsHost(ownerA, made.publicBookingId, "ATTENDED")).outcome, "RECORDED");
+      const invitation = await mail.claimReviewInvitations({ limit: 1, leaseSeconds: 120 });
+      const recipient = invitation.invitations[0]?.email;
+      assert.equal(recipient?.guestEmail, "guest@example.com");
+      const reviews = new GuestReviewRepository(context.pool);
+      const link = await reviews.issueInvitation({ providerId: recipient!.providerId, bookingId: recipient!.bookingId, ttlDays: 14 });
+      assert.equal((await reviews.openInvitation(link.token))?.experienceTitle, "Synthetic walk");
+      await reviews.submitReview(link.token, { rating: 5, body: "A good synthetic walk.", displayName: "Sample Guest", clientRequestKey: randomUUID() });
+      await mail.completeReviewInvitation(invitation.invitations[0]!.id);
+      const published = await context.pool.query("SELECT count(*)::int AS n FROM guest_reviews WHERE hidden_at IS NULL");
+      assert.equal(published.rows[0].n, 1);
+      assert.equal((await context.pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE topic = 'host.notify.new_review'")).rows[0].n, 1);
+    });
+  });
+
   it("takes no mark before the session starts, and reads the occurrence's capacity", async () => {
     await withSchema(async (context) => {
       const { pool, attendance } = context;
@@ -142,15 +167,27 @@ describe("PostgreSQL booking attendance (#107)", { skip: databaseUrl === undefin
       assert.equal(marked.mark?.publicBookingId, first.publicBookingId);
       assert.equal(marked.mark?.status, "ATTENDED");
       assert.deepEqual(await stored(pool, first.publicBookingId), { status: "ATTENDED", recorded_by: "owner-a", version: 1 });
+      const invitations = async () => (await pool.query<{ deduplication_key: string }>(
+        "SELECT deduplication_key FROM outbox_messages WHERE aggregate_id = $1 AND topic = 'guest.review_invitation' ORDER BY id",
+        [first.publicBookingId],
+      )).rows;
+      assert.equal((await invitations()).length, 1);
+      assert.deepEqual((await new GuestMailOutbox(pool).claimReviewInvitations({ limit: 1, leaseSeconds: 120 })).invitations, []);
 
       const again = await attendance.recordAsHost(ownerA, first.publicBookingId, "ATTENDED");
       assert.equal(again.outcome, "RECORDED");
       assert.equal(again.mark?.recordedAtUtc, marked.mark?.recordedAtUtc);
       assert.equal((await stored(pool, first.publicBookingId)).version, 1);
+      assert.equal((await invitations()).length, 1);
 
       const corrected = await attendance.recordAsHost(ownerA, first.publicBookingId, "NO_SHOW");
       assert.equal(corrected.mark?.status, "NO_SHOW");
       assert.equal((await stored(pool, first.publicBookingId)).version, 2);
+      assert.equal((await invitations()).length, 1);
+      await attendance.recordAsHost(ownerA, first.publicBookingId, "ATTENDED");
+      assert.equal((await invitations()).length, 2);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE aggregate_id = $1 AND topic = 'guest.review_invitation' AND processed_at IS NULL", [first.publicBookingId])).rows[0].n, 1);
+      await attendance.recordAsHost(ownerA, first.publicBookingId, "NO_SHOW");
 
       const read = await attendance.readSessionForHost(ownerA, SESSION);
       assert.equal(read.capacity, 12);
