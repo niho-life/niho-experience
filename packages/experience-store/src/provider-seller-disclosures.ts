@@ -83,11 +83,12 @@ export type WithdrawSellerDisclosureCommand = {
 type DbRow = Record<string, unknown>;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CONTROL = /[\u0000-\u001F\u007F]/;
+const ADDRESS_CONTROL = /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/;
 const PHONE = /^\+?[0-9 ()-]+$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function text(value: unknown, name: string, max: number): string {
-  if (typeof value !== "string" || value.length < 1 || value.length > max || value.trim() !== value || CONTROL.test(value)) {
+function text(value: unknown, name: string, max: number, control = CONTROL): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > max || value.trim() !== value || control.test(value)) {
     throw new StoreValidationError(`${name} is invalid.`);
   }
   return value;
@@ -123,7 +124,7 @@ export function validateSellerDisclosureInput(input: SellerDisclosureInput): Sel
   if (!EMAIL.test(publicEmail)) throw new StoreValidationError("publicEmail is invalid.");
   return {
     method: "NATIVE", sellerKind: input.sellerKind, sellerDisplayName, representativeName,
-    publicAddress: text(input.publicAddress, "publicAddress", 500), publicPhone, publicEmail, consentVersion, accepted: true,
+    publicAddress: text(input.publicAddress, "publicAddress", 500, ADDRESS_CONTROL).replace(/\r\n?/g, "\n"), publicPhone, publicEmail, consentVersion, accepted: true,
   };
 }
 

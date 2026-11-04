@@ -39,6 +39,18 @@ describe("provider seller disclosure validation", () => {
     }) as { externalUrl: string }).externalUrl, "https://seller.example.test/");
   });
 
+  it("preserves address lines while normalizing CRLF and rejects other control characters", () => {
+    const native = {
+      method: "NATIVE" as const, sellerKind: "PERSON" as const, sellerDisplayName: "Synthetic Seller", representativeName: null,
+      publicAddress: "1-2 Synthetic\r\nBuilding 3", publicPhone: "046-000-0000", publicEmail: "public@example.test",
+      consentVersion: "seller-public-disclosure-v1", accepted: true as const,
+    };
+    const result = validateSellerDisclosureInput(native);
+    assert.equal(result.method === "NATIVE" ? result.publicAddress : null, "1-2 Synthetic\nBuilding 3");
+    assert.throws(() => validateSellerDisclosureInput({ ...native, publicAddress: "Synthetic\tBuilding" }), StoreValidationError);
+    assert.throws(() => validateSellerDisclosureInput({ ...native, publicPhone: "046\n0000000" }), StoreValidationError);
+  });
+
   it("does not complete missing public facts or accept non-https pages", () => {
     assert.throws(() => validateSellerDisclosureInput({
       method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", representativeName: null,

@@ -41,7 +41,7 @@ describe("provider seller disclosure persistence", { skip: databaseUrl === undef
       const commandId = randomUUID();
       const input = {
         method: "NATIVE" as const, sellerKind: "PERSON" as const, sellerDisplayName: "Synthetic Legal Seller", representativeName: null,
-        publicAddress: "1-2 Synthetic, Kamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
+        publicAddress: "1-2 Synthetic,\nKamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
         consentVersion: "seller-public-disclosure-v1", accepted: true as const,
       };
       const firstResults = await Promise.all([
@@ -138,7 +138,7 @@ describe("provider seller disclosure persistence", { skip: databaseUrl === undef
       );
       assert.deepEqual(await repository.getPublicBySlug("synthetic-seller-page"), {
         method: "NATIVE", sellerKind: "PERSON", sellerDisplayName: "Synthetic Legal Seller", representativeName: null,
-        publicAddress: "1-2 Synthetic, Kamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
+        publicAddress: "1-2 Synthetic,\nKamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
       });
 
       await pool.query("UPDATE experience_product_publication_states SET self_stopped_at=clock_timestamp() WHERE provider_id=$1", [actor.providerId]);

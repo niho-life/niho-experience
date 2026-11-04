@@ -20,7 +20,8 @@ CREATE TABLE provider_seller_disclosures (
   public_address text CHECK (
     length(public_address) BETWEEN 1 AND 500
     AND public_address = btrim(public_address)
-    AND public_address !~ '[[:cntrl:]]'
+    -- The address textarea permits line breaks; other control characters remain forbidden.
+    AND replace(replace(public_address,chr(10),''),chr(13),'') !~ '[[:cntrl:]]'
   ),
   public_phone text CHECK (
     length(public_phone) BETWEEN 1 AND 40

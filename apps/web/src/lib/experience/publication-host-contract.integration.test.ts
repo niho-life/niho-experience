@@ -53,6 +53,8 @@ vi.mock("@/lib/host/server", () => ({
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePublicationRepository: () => mocks.repository,
   guestBookingRepository: () => mocks.bookingRepository,
+  // This existing flow has no seller disclosure configured yet.
+  providerSellerDisclosureRepository: () => null,
 }));
 
 import { publicationHostBoundary } from "./publication-host-boundary";
