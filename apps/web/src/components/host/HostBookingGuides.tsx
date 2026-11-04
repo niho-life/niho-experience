@@ -42,42 +42,50 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
   const [notice, setNotice] = useState("");
   const product = products.find((item) => item.id === productId) ?? null;
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (signal: AbortSignal) => {
+    if (signal.aborted) return;
     setLoading(true); setError("");
     try {
-      const response = await fetch("/host/api/products", { cache: "no-store" });
+      const response = await fetch("/host/api/products", { cache: "no-store", signal });
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(guideMessage(response.status));
       const value = await response.json() as { products?: Product[] };
+      if (signal.aborted) return;
       if (!Array.isArray(value.products)) throw new Error(guideMessage(500));
       setProducts(value.products);
       setProductId((current) => value.products!.some((item) => item.id === current) ? current : value.products![0]?.id ?? "");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : guideMessage(500)); }
-    finally { setLoading(false); }
+    } catch (reason) { if (!signal.aborted) setError(reason instanceof Error ? reason.message : guideMessage(500)); }
+    finally { if (!signal.aborted) setLoading(false); }
   }, []);
 
-  const loadGuide = useCallback(async (id: string) => {
+  const loadGuide = useCallback(async (id: string, signal: AbortSignal) => {
+    if (signal.aborted) return;
     if (!id) { setSaved(null); setDraft(BLANK); return; }
     setLoading(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`/host/api/products/${encodeURIComponent(id)}/booking-guide`, { cache: "no-store" });
+      const response = await fetch(`/host/api/products/${encodeURIComponent(id)}/booking-guide`, { cache: "no-store", signal });
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(guideMessage(response.status));
       const value = await response.json() as { bookingGuide: VersionedGuide };
+      if (signal.aborted) return;
       if (!value.bookingGuide) throw new Error(guideMessage(500));
       setSaved(value.bookingGuide);
       setDraft(value.bookingGuide.guide ?? { ...BLANK, photoAssetId: products.find((item) => item.id === id)?.media[0]?.id ?? null });
-    } catch (reason) { setSaved(null); setError(reason instanceof Error ? reason.message : guideMessage(500)); }
-    finally { setLoading(false); }
+    } catch (reason) {
+      if (!signal.aborted) { setSaved(null); setError(reason instanceof Error ? reason.message : guideMessage(500)); }
+    }
+    finally { if (!signal.aborted) setLoading(false); }
   }, [products]);
 
   useEffect(() => {
-    let active = true;
-    queueMicrotask(() => { if (active) void loadProducts(); });
-    return () => { active = false; };
+    const controller = new AbortController();
+    queueMicrotask(() => { if (!controller.signal.aborted) void loadProducts(controller.signal); });
+    return () => controller.abort();
   }, [loadProducts]);
   useEffect(() => {
-    let active = true;
-    queueMicrotask(() => { if (active) void loadGuide(productId); });
-    return () => { active = false; };
+    const controller = new AbortController();
+    queueMicrotask(() => { if (!controller.signal.aborted) void loadGuide(productId, controller.signal); });
+    return () => controller.abort();
   }, [loadGuide, productId]);
 
   function change<K extends keyof Guide>(key: K, value: Guide[K]) { setDraft((current) => ({ ...current, [key]: value })); }
