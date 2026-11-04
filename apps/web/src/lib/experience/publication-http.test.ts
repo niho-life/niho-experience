@@ -15,12 +15,17 @@ const mocks = vi.hoisted(() => ({
     getState: vi.fn(),
     getSaleTerms: vi.fn(),
     listMedia: vi.fn(),
+    hasPendingPublicationChanges: vi.fn(),
     createDraft: vi.fn(),
     saveDraft: vi.fn(),
     saveSaleTerms: vi.fn(),
     publish: vi.fn(),
     stop: vi.fn(),
     addMedia: vi.fn(),
+    getProviderMedia: vi.fn(),
+    addProviderMedia: vi.fn(),
+    saveProviderMediaSelection: vi.fn(),
+    revokeProviderMedia: vi.fn(),
   },
   meetingGuides: { readForProduct: vi.fn(), saveForProduct: vi.fn() },
   state: {} as Record<string, unknown>,
@@ -51,6 +56,8 @@ import { PUT as saveTerms } from "@/app/(host)/host/api/products/[productId]/sal
 import { POST as publishProduct } from "@/app/(host)/host/api/products/[productId]/publish/route";
 import { POST as stopProduct } from "@/app/(host)/host/api/products/[productId]/stop/route";
 import { POST as uploadProductMedia } from "@/app/(host)/host/api/products/[productId]/media/route";
+import { GET as readProviderMedia, PUT as saveProviderMedia } from "@/app/(host)/host/api/provider-media/route";
+import { POST as uploadProviderMedia } from "@/app/(host)/host/api/provider-media/upload/route";
 import { GET as readBookingGuide, PUT as saveBookingGuide } from "@/app/(host)/host/api/products/[productId]/booking-guide/route";
 
 const actor = { providerId: "provider-private", nihoUserId: "niho-user-private" };
@@ -102,7 +109,8 @@ const terms = {
   version: 2,
   updatedAtUtc: "2026-11-04T00:00:00.000Z",
 };
-const media = [{ id: "00000000-0000-4000-8000-000000000401", position: 0, width: 640, height: 480, byteSize: 4096, altText: "Synthetic dinner", publicCredit: null }];
+const media = [{ id: "00000000-0000-4000-8000-000000000401", position: 0, sourcePosition: 0, placement: "GALLERY", width: 640, height: 480, byteSize: 4096, altText: "Synthetic dinner", altTextJa: "合成ディナー", publicCredit: null }];
+const providerMedia = { version: 5, assets: [{ id: "00000000-0000-4000-8000-000000000402", placement: "PROVIDER_PHOTO", width: 640, height: 480, byteSize: 2048, altText: "Synthetic provider", altTextJa: "合成提供者", publicCredit: null }] };
 const draft = {
   slug: product.slug,
   publicTitle: product.publicTitle,
@@ -146,11 +154,16 @@ describe("Experience owner product API", () => {
     mocks.repository.getState.mockResolvedValue(state);
     mocks.repository.getSaleTerms.mockResolvedValue({ draftVersion: 4, stateVersion: 3, saleTerms: terms });
     mocks.repository.listMedia.mockResolvedValue(media);
+    mocks.repository.hasPendingPublicationChanges.mockResolvedValue(false);
     mocks.repository.createDraft.mockResolvedValue(product);
     mocks.repository.saveDraft.mockResolvedValue({ draft: product, publicationUpdated: true, blockers: [] });
     mocks.repository.saveSaleTerms.mockResolvedValue({ draftVersion: 4, stateVersion: 3, saleTerms: terms, publicationUpdated: true, blockers: [] });
     mocks.repository.publish.mockResolvedValue(state);
     mocks.repository.stop.mockResolvedValue({ ...state, selfStoppedAtUtc: "2026-11-04T01:00:00.000Z", version: 4 });
+    mocks.repository.getProviderMedia.mockResolvedValue(providerMedia);
+    mocks.repository.addProviderMedia.mockResolvedValue(providerMedia);
+    mocks.repository.saveProviderMediaSelection.mockResolvedValue(providerMedia);
+    mocks.repository.revokeProviderMedia.mockResolvedValue({ version: 6, assets: [] });
     mocks.meetingGuides.readForProduct.mockResolvedValue({ version: null, guide: null, updatedAtUtc: null });
     mocks.meetingGuides.saveForProduct.mockResolvedValue({ version: 1, guide: null, updatedAtUtc: "2026-11-04T01:00:00.000Z" });
   });
@@ -184,7 +197,7 @@ describe("Experience owner product API", () => {
     expect(saved.status).toBe(200);
     expect(mocks.repository.saveDraft).toHaveBeenCalledWith(actor, {
       ...draft, id: product.id, cancellationTermsRef: product.cancellationTermsRef,
-    }, 4, 3, expect.objectContaining({ manuscriptReady: true, photosReady: true }));
+    }, 4, 3, expect.objectContaining({ manuscriptReady: false, photosReady: true }));
 
     const termsSaved = await saveTerms(request(`/host/api/products/${product.id}/sale-terms`, "PUT", { version, saleTerms }), context);
     expect(termsSaved.status).toBe(200);
@@ -207,8 +220,8 @@ describe("Experience owner product API", () => {
 
   it("returns the next product version when a photo changes the publication draft", async () => {
     const addedMedia = {
-      id: "00000000-0000-4000-8000-000000000402", position: 1, width: 640, height: 480,
-      byteSize: 2048, altText: "Second synthetic photo", publicCredit: null,
+      id: "00000000-0000-4000-8000-000000000402", position: 1, sourcePosition: 1, placement: "GALLERY", width: 640, height: 480,
+      byteSize: 2048, altText: "Second synthetic photo", altTextJa: "2枚目の合成写真", publicCredit: null,
     };
     mocks.mediaStorage = { write: vi.fn().mockResolvedValue(undefined), read: vi.fn(), remove: vi.fn().mockResolvedValue(undefined) };
     mocks.coverInput.mockResolvedValue(Buffer.from("synthetic-original"));
@@ -221,7 +234,10 @@ describe("Experience owner product API", () => {
       method: "POST",
       headers: {
         origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "image/jpeg",
-        "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text": "Second synthetic photo",
+        "x-experience-photo-rights-confirmed": "true",
+        "x-experience-photo-alt-text-utf8-base64url": Buffer.from("Second synthetic photo").toString("base64url"),
+        "x-experience-photo-alt-text-ja-utf8-base64url": Buffer.from("2枚目の合成写真").toString("base64url"),
+        "x-experience-media-placement": "GALLERY",
       },
       body: Buffer.from("request-body"),
     }), context);
@@ -231,6 +247,59 @@ describe("Experience owner product API", () => {
     expect(body.asset.id).toBe(addedMedia.id);
     expect(body.product.version).toBe(Buffer.from("1:5:3:2").toString("base64url"));
     expect(body.product.media).toHaveLength(2);
+    expect(mocks.repository.addMedia).toHaveBeenCalledWith(actor, product.id, expect.objectContaining({
+      altText: "Second synthetic photo", altTextJa: "2枚目の合成写真",
+    }));
+  });
+
+  it("uses seller-level profile media with explicit rights, localized alts, and version CAS", async () => {
+    const read = await readProviderMedia(request("/host/api/provider-media"));
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({ providerMedia: { version: 5, assets: [{ previewUrl: `/host/api/provider-media/${providerMedia.assets[0]!.id}` }] } });
+
+    const updated = await saveProviderMedia(request("/host/api/provider-media", "PUT", {
+      version: 5,
+      media: [{ id: providerMedia.assets[0]!.id, placement: "PROVIDER_PHOTO", altText: "Reviewed provider", altTextJa: "確認済み提供者", publicCredit: null }],
+    }));
+    expect(updated.status).toBe(200);
+    expect(mocks.repository.saveProviderMediaSelection).toHaveBeenCalledWith(actor, 5, [{
+      id: providerMedia.assets[0]!.id, placement: "PROVIDER_PHOTO", altText: "Reviewed provider", altTextJa: "確認済み提供者", publicCredit: null,
+    }]);
+
+    mocks.mediaStorage = { write: vi.fn().mockResolvedValue(undefined), read: vi.fn(), remove: vi.fn().mockResolvedValue(undefined) };
+    mocks.coverInput.mockResolvedValue(Buffer.from("synthetic-provider-original"));
+    mocks.coverImage.mockResolvedValue({ bytes: Buffer.from("synthetic-provider-jpeg"), width: 640, height: 480 });
+    const uploaded = await uploadProviderMedia(new Request("https://experience.example.test/host/api/provider-media/upload", {
+      method: "POST",
+      headers: {
+        origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "image/jpeg",
+        "x-experience-photo-rights-confirmed": "true",
+        "x-experience-photo-alt-text-utf8-base64url": Buffer.from("Synthetic provider replacement").toString("base64url"),
+        "x-experience-photo-alt-text-ja-utf8-base64url": Buffer.from("合成提供者の差替え").toString("base64url"),
+        "x-experience-media-placement": "PROVIDER_PHOTO", "x-experience-provider-media-version": "5",
+      }, body: Buffer.from("synthetic-request"),
+    }));
+    expect(uploaded.status).toBe(201);
+    expect(mocks.repository.addProviderMedia).toHaveBeenCalledWith(actor, 5, expect.objectContaining({
+      placement: "PROVIDER_PHOTO", altText: "Synthetic provider replacement", altTextJa: "合成提供者の差替え",
+    }));
+  });
+
+  it("requires the current profile version before replacing a public profile image", async () => {
+    mocks.mediaStorage = { write: vi.fn(), read: vi.fn(), remove: vi.fn() };
+    const response = await uploadProviderMedia(new Request("https://experience.example.test/host/api/provider-media/upload", {
+      method: "POST",
+      headers: {
+        origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "image/jpeg",
+        "x-experience-photo-rights-confirmed": "true",
+        "x-experience-photo-alt-text-utf8-base64url": Buffer.from("Synthetic provider").toString("base64url"),
+        "x-experience-photo-alt-text-ja-utf8-base64url": Buffer.from("合成提供者").toString("base64url"),
+        "x-experience-media-placement": "PROVIDER_PHOTO",
+      }, body: Buffer.from("synthetic-request"),
+    }));
+    expect(response.status).toBe(400);
+    expect(mocks.coverInput).not.toHaveBeenCalled();
+    expect(mocks.mediaStorage.write).not.toHaveBeenCalled();
   });
 
   it("keeps booking logistics in the owner-only private guide contract, separate from sale terms", async () => {

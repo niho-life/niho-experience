@@ -4,8 +4,9 @@ import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type Bookin
 
 /** The public availability and checkout of 旅行者の予約 (#285) against a stubbed store and a stubbed Stripe SDK. */
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { guestBookingEnabled: true, bookingsEnabled: true, experiencePublicationsEnabled: false, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
   stripeAccountRetrieve: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
   stripeCreate: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
@@ -13,7 +14,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
-vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository }));
+vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository, experiencePublicationRepository: () => state.publications }));
 // The real experience-payments runs against this stand-in for the Stripe SDK.
 vi.mock("stripe", () => ({
   default: class {
@@ -115,12 +116,13 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
   vi.stubEnv("EXPERIENCE_CHECKOUT_IP_HMAC_KEY", CHECKOUT_IP_KEY);
-  state.config = { guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { guestBookingEnabled: true, bookingsEnabled: true, experiencePublicationsEnabled: false, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
     startGuestBooking: vi.fn(async () => started()),
     attachCheckoutSession: vi.fn(async () => undefined),
   };
+  state.publications = { getPublicBySlug: vi.fn(async () => ({ slug: "sample-tea" })) };
   state.stripeKeys = [];
   state.stripeAccountRetrieve = vi.fn(async (id: unknown) => ({
     id, country: "JP", default_currency: "jpy", charges_enabled: true, payouts_enabled: true, details_submitted: true,
@@ -206,6 +208,19 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     });
     expect(options).toEqual({ stripeAccount: "acct_SampleA0001", idempotencyKey: `experience-checkout:${BOOKING_ID}` });
     expect(state.repository?.attachCheckoutSession).toHaveBeenCalledWith(BOOKING_ID, "cs_test_sample1");
+  });
+
+  it("requires an active Experience publication and records Japanese guests on the shared checkout path", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    state.publications!.getPublicBySlug!.mockResolvedValueOnce(null);
+    const unpublished = await checkout(post(CHECKOUT), slugParams());
+    expect(unpublished.status).toBe(404);
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
+
+    const japanese = await checkout(post(CHECKOUT, { "accept-language": "ja-JP,ja;q=0.9,en;q=0.8" }), slugParams());
+    expect(japanese.status).toBe(201);
+    expect(state.repository?.startGuestBooking).toHaveBeenCalledWith(expect.objectContaining({ guestLanguage: "JA" }));
+    expect(state.publications!.getPublicBySlug).toHaveBeenCalledWith("sample-tea");
   });
 
   it("does not create a new Checkout Session when the published seller account cannot pay out", async () => {

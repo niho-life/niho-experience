@@ -482,9 +482,11 @@ export function createExperienceApiClient(options: ExperienceApiClientOptions) {
 
     /** locale は path で固定し、backend が release・terms・consent を再照合する。 */
     async startJapaneseCheckout(slug: string, body: ExperienceCheckoutRequest): Promise<LocalizedCheckoutResult> {
-      const response = await request(`/api/public/experiences/v1.2/ja/${encodeURIComponent(slug)}/checkout`, {
+      const response = await request(options.thisSite === true
+        ? `/api/public/experiences/${encodeURIComponent(slug)}/checkout`
+        : `/api/public/experiences/v1.2/ja/${encodeURIComponent(slug)}/checkout`, {
         method: "POST",
-        headers: { accept: "application/json", "content-type": "application/json" },
+        headers: { accept: "application/json", "content-type": "application/json", ...(options.thisSite === true ? { "accept-language": "ja" } : {}) },
         body: JSON.stringify(body),
       });
       if (!response) return { ok: false, kind: "network_error" };

@@ -51,8 +51,8 @@ const blockText = (props: BlockProps, key: string, fallback: string) => typeof p
 
 export type ExperiencePageContentProps = { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams>; locale: SiteLocale };
 async function readExperience(slug: string, query: SearchParams, locale: SiteLocale = "en") {
-  if (locale === "ja") return (await getJapaneseDetail(slug)).experience;
-  const result = await getExperienceForSite(slug, query);
+  if (locale === "ja" && !config.experiencePublicationsEnabled) return (await getJapaneseDetail(slug)).experience;
+  const result = await getExperienceForSite(slug, query, locale);
   if (!result.ok) {
     if (result.kind === "not_found") notFound();
     throw new Error("Public experience unavailable");
@@ -85,6 +85,13 @@ export async function englishExperienceMetadata({ params, searchParams }: Omit<E
 export async function japaneseExperienceMetadata({ params }: Omit<ExperiencePageContentProps, "locale">): Promise<Metadata> {
   try {
     const slug = (await params).slug;
+    if (config.experiencePublicationsEnabled) {
+      await getJapaneseCopy();
+      const detail = await readExperience(slug, {}, "ja");
+      const canonical = `${config.siteUrl}/ja/experiences/${detail.slug}`;
+      const english = `${config.siteUrl}/experiences/${detail.slug}`;
+      return { title: detail.title, description: seoDescription(detail.lead), alternates: { canonical, languages: { en: english, ja: canonical, "x-default": english } }, robots: config.indexingAllowed ? undefined : { index: false, follow: false }, openGraph: { title: detail.title, description: seoDescription(detail.lead), url: canonical, locale: "ja_JP", images: [] } };
+    }
     // The /ja layout renders nothing but "unavailable" without the static release: no hreflang or index for that.
     const [detail, copy, release] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), getPreparedJapaneseStaticRelease()]);
     assertSameJapaneseRelease(copy.releaseId, detail, release);
@@ -140,10 +147,20 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   let sale: GuestBookingSale = { kind: "niho" };
   try {
     if (locale === "ja") {
-      const [selected, siteCopy, selectedSale] = await Promise.all([getJapaneseDetail(slug), getJapaneseCopy(), guestBookingSale(slug)]);
-      assertSameJapaneseRelease(siteCopy.releaseId, selected);
+      const [siteCopy, selectedSale] = await Promise.all([getJapaneseCopy(), guestBookingSale(slug)]);
       sale = selectedSale;
-      e = detailWithSiteSellerDisplayName(selected.experience, selectedSale); copy = siteCopy.copy; japaneseBookingReady = japaneseBookingOpen(sale, selected); japaneseReleaseId = selected.releaseId;
+      if (config.experiencePublicationsEnabled) {
+        e = await readExperience(slug, query, "ja");
+        copy = siteCopy.copy;
+        japaneseBookingReady = sale.kind === "site" && config.guestBookingEnabled;
+      } else {
+        const selected = await getJapaneseDetail(slug);
+        assertSameJapaneseRelease(siteCopy.releaseId, selected);
+        e = detailWithSiteSellerDisplayName(selected.experience, selectedSale);
+        copy = siteCopy.copy;
+        japaneseBookingReady = japaneseBookingOpen(sale, selected);
+        japaneseReleaseId = selected.releaseId;
+      }
     } else {
       const detail = await readExperience(slug, query);
       sale = await guestBookingSale(detail.slug);
@@ -171,12 +188,25 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   );
   // One policy for every option: show it here so travelers see it before choosing a date.
   const firstPolicy = e.offers[0]?.cancellationPolicy;
+  const firstSaleCancellation = e.offers[0]?.saleCancellation;
   const sharedPolicy = firstPolicy && e.offers.every((offer) =>
     offer.cancellationPolicy.code === firstPolicy.code &&
-    offer.cancellationPolicy.freeCancellationHoursBefore === firstPolicy.freeCancellationHoursBefore
+    offer.cancellationPolicy.freeCancellationHoursBefore === firstPolicy.freeCancellationHoursBefore &&
+    offer.saleCancellation?.policyCode === firstSaleCancellation?.policyCode &&
+    offer.saleCancellation?.cancellationWindowMinutesBeforeStart === firstSaleCancellation?.cancellationWindowMinutesBeforeStart &&
+    offer.saleCancellation?.refundBasisPoints === firstSaleCancellation?.refundBasisPoints
   ) ? firstPolicy : null;
+  const customWindow = firstSaleCancellation?.cancellationWindowMinutesBeforeStart;
+  const customRate = firstSaleCancellation ? firstSaleCancellation.refundBasisPoints / 100 : null;
+  const customPolicyTitle = firstSaleCancellation?.policyCode === "CUSTOM" && customWindow !== null && customWindow !== undefined
+    ? locale === "ja"
+      ? `${customWindow}分前までの取消で${customRate!.toLocaleString("ja-JP")}％返金`
+      : `${customRate!.toLocaleString("en-US")}% refund for cancellations up to ${customWindow} minutes before start`
+    : null;
   const policyTitle = freeExperience
     ? (locale === "ja" ? "無料予約は体験終了までいつでもキャンセルできます" : "Free bookings can be cancelled any time before the experience ends")
+    : sharedPolicy && customPolicyTitle
+    ? customPolicyTitle
     : sharedPolicy
     ? sharedPolicy.code === "NONE"
       ? copy.text("detail.nonRefundable")
@@ -193,9 +223,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const exterior = meeting && meeting.exteriorPhotoIndex !== null ? (e.photos[meeting.exteriorPhotoIndex] ?? null) : null;
   const mapUrl = meeting?.mapUrl ? safeHttpsUrl(meeting.mapUrl) : null;
   const paragraphs = e.description.split(/\n\s*\n/).filter((paragraph) => paragraph.trim());
-  // Owner decision 2026-10-20 (the approved mock): the second photo, or the cover, inside the stamp edge.
-  // Hosts' own faces stay on the chips next to their names.
-  const hostPhoto = e.photos[1] ?? e.cover ?? null;
+  const hostPhoto = e.hosts[0]?.avatar ?? null;
   const modes = new Set(e.offers.map((offer) => offer.acceptanceMode));
   const acceptanceNote =
     modes.size === 1 && modes.has("APPROVAL")
@@ -530,7 +558,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       paragraphs,
       timeline: e.timeline.map((step) => ({ time: step.time ? formatClock(step.time, locale) : undefined, title: step.title, text: step.text, icon: iconForText(`${step.title} ${step.text}`, "clock"), photo: toImage(step.photoIndex !== null ? (e.photos[step.photoIndex] ?? null) : null, `${e.title}, ${step.title}`) })),
       // Host introductions (v1.1 `hosts[].bio`) as plain text, on the English page only: the Japanese release has no approved translation of them.
-      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined, storyLink: hostStoryGuide ? { href: `/guides/${hostStoryGuide.slug}`, label: "Read the host story" } : undefined },
+      provider: { name: e.provider.name, tagline: e.provider.tagline ?? undefined, photo: toImage(hostPhoto), logo: toImage(e.provider.logo), hosts: hostFaces.map((face) => ({ ...face, image: toImage(face.image) })), bios: locale === "en" ? e.hosts.flatMap((host) => { const text = hostBio(host); return text ? [{ name: host.displayName, text }] : []; }) : undefined, storyLink: hostStoryGuide ? { href: `/guides/${hostStoryGuide.slug}`, label: "Read the host story" } : undefined },
       included: e.included,
       notIncluded: e.notIncluded,
       emptyListLabel: copy.text("detail.noneListed"),

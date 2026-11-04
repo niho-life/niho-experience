@@ -49,7 +49,7 @@ export function SlotPicker({ experience, slug, offers, preview, availabilityIsPr
   useEffect(() => {
     if (!api) return;
     let active = true;
-    readAvailabilityFromApi(api, slug, locale, releaseId, offerId).then((nextOccurrences) => {
+    readAvailabilityFromApi(api, slug, locale, releaseId, offerId, bookingSource).then((nextOccurrences) => {
       if (!active) return;
       const valid = nextOccurrences !== null;
       setLoading(false);
@@ -58,7 +58,7 @@ export function SlotPicker({ experience, slug, offers, preview, availabilityIsPr
       setDate((current) => (current && nextOccurrences?.some((item) => item.offerId === offerId && item.date === current && item.bookable) ? current : ""));
     });
     return () => { active = false; };
-  }, [api, slug, offerId, locale, releaseId]);
+  }, [api, slug, offerId, locale, releaseId, bookingSource]);
 
   // A pre-selected date further down the list opens the full list so it stays in view.
   const selectedIndex = occurrences.findIndex((item) => item.date === date);
@@ -84,6 +84,6 @@ export function SlotPicker({ experience, slug, offers, preview, availabilityIsPr
     line: selected ? `${dayOption(selected.date, locale).label} · ${formatTime(selected.startAt, locale)}` : copy.text("booking.chooseDateLine"),
     canContinue,
   };
-  const retry = () => { setError(false); setLoading(true); if (api) readAvailabilityFromApi(api, slug, locale, releaseId, offerId).then((nextOccurrences) => { setLoading(false); setError(nextOccurrences === null); setOccurrences(nextOccurrences ?? []); }); else getBookingApi(preview, bookingSource).then(setApi).catch(() => { setError(true); setLoading(false); }); };
+  const retry = () => { setError(false); setLoading(true); if (api) readAvailabilityFromApi(api, slug, locale, releaseId, offerId, bookingSource).then((nextOccurrences) => { setLoading(false); setError(nextOccurrences === null); setOccurrences(nextOccurrences ?? []); }); else getBookingApi(preview, bookingSource).then(setApi).catch(() => { setError(true); setLoading(false); }); };
   return <BookingSelectionViewV1 model={model} titleAs={titleAs} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} callbacks={{ onOfferChange: (id) => { const item = offers.find((candidate) => candidate.id === id); setOfferId(id); setDate(""); setLoading(true); if (!item?.pricing.child) setChildCount(0); setShowAllDates(false); }, onDateChange: setDate, onCounterChange: (id, value) => id === "adult-count" ? setAdultCount(value) : setChildCount(value), onRetry: retry, onShowMore: () => setShowAllDates(true), onContinue: () => { if (locale === "en") track("slot_continue", { experience: slug, guests: headCount }); onContinue({ offerId, date, adultCount, childCount }); } }} />;
 }

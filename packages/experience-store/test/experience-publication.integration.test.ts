@@ -84,6 +84,12 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
            VALUES ($1,$2,$3,0,$4,$5,640,480,4096,'Synthetic public photo',NULL,clock_timestamp())`,
           [assetId, owner.providerId, id, `experience-products/${assetId}.jpg`, randomUUID().replaceAll("-", "").repeat(2)],
         );
+        await pool.query(
+          `INSERT INTO experience_product_media_selection
+             (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+           VALUES ($1,$2,$3,'GALLERY',0,'Synthetic public photo','合成写真',NULL)`,
+          [owner.providerId, id, assetId],
+        );
         const rule: ScheduleRule = {
           id: `${id}-daily`, timeZone: "Asia/Tokyo", startsOn: "2099-01-01", localStartTime: "10:00", durationMinutes: 90,
           capacity: 6, bookingCutoffMinutes: 60, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "DAILY" },
@@ -182,6 +188,12 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
          VALUES ('00000000-0000-4000-8000-000000000330',$1,$2,0,'experience-products/00000000-0000-4000-8000-000000000330.jpg',
            $3,640,480,4096,'Synthetic public photo',NULL,clock_timestamp())`,
         [OWNER.providerId, original.id, "3".repeat(64)],
+      );
+      await pool.query(
+        `INSERT INTO experience_product_media_selection
+           (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+         VALUES ($1,$2,'00000000-0000-4000-8000-000000000330','GALLERY',0,'Synthetic public photo','合成写真',NULL)`,
+        [OWNER.providerId, original.id],
       );
 
       const suspensionCheckViolation = (error: unknown): boolean =>
@@ -427,6 +439,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         height: 480,
         byteSize: 2048,
         altText: "Second synthetic photo",
+        altTextJa: "2枚目の合成写真",
         publicCredit: null,
       });
       const draftAfterPhotoAdd = await publications.getProduct(OWNER, original.id);
@@ -439,6 +452,57 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         checks: CHECKS,
       });
       assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, 2);
+
+      const providerPhotoId = randomUUID();
+      const logoId = randomUUID();
+      const profileWithPhoto = await publications.addProviderMedia(OWNER, 1, {
+        id: providerPhotoId, objectKey: `experience-provider-media/${providerPhotoId}.jpg`, sourceRefHash: "5".repeat(64),
+        width: 640, height: 480, byteSize: 2048, altText: "Synthetic host", altTextJa: "合成提供者",
+        placement: "PROVIDER_PHOTO", publicCredit: null,
+      });
+      await assert.rejects(
+        publications.addProviderMedia(OWNER, 1, {
+          id: randomUUID(), objectKey: `experience-provider-media/${randomUUID()}.jpg`, sourceRefHash: "6".repeat(64),
+          width: 640, height: 480, byteSize: 2048, altText: "Stale synthetic logo", altTextJa: "古い合成ロゴ",
+          placement: "BUSINESS_LOGO", publicCredit: null,
+        }),
+        (error: unknown) => error instanceof StoreConflictError,
+        "replacing seller media requires the current provider profile version",
+      );
+      const profileWithLogo = await publications.addProviderMedia(OWNER, profileWithPhoto.version, {
+        id: logoId, objectKey: `experience-provider-media/${logoId}.jpg`, sourceRefHash: "6".repeat(64),
+        width: 640, height: 480, byteSize: 2048, altText: "Synthetic business logo", altTextJa: "合成事業者ロゴ",
+        placement: "BUSINESS_LOGO", publicCredit: null,
+      });
+      assert.equal(profileWithPhoto.assets.length, 1);
+      assert.equal(profileWithLogo.assets.length, 2);
+      const confirmedProfile = await publications.saveProviderMediaSelection(OWNER, profileWithLogo.version, profileWithLogo.assets.map((asset) => ({
+        id: asset.id, placement: asset.placement, altText: `${asset.altText} reviewed`, altTextJa: `${asset.altTextJa} 確認済`, publicCredit: asset.publicCredit,
+      })));
+      const selectedMedia = (await publications.listMedia(OWNER, original.id))
+        .filter((asset) => asset.id !== "00000000-0000-4000-8000-000000000330")
+        .map(({ id, altText, altTextJa, publicCredit }) => ({ id, altText, altTextJa, publicCredit }));
+      await publications.saveMediaSelection(OWNER, original.id, (await publications.getProduct(OWNER, original.id)).version, selectedMedia);
+      const mediaEditedDraft = await publications.getProduct(OWNER, original.id);
+      state = await publications.publish(OWNER, original.id, {
+        expectedDraftVersion: mediaEditedDraft.version,
+        expectedStateVersion: state.version,
+        consentVersion: ready.requiredConsentVersion,
+        checks: CHECKS,
+      });
+      const editedPublic = await publications.getPublicBySlug(original.slug);
+      assert.equal(editedPublic?.photos.length, 1);
+      assert.equal(editedPublic?.photos[0]?.altJa, "2枚目の合成写真");
+      assert.equal(editedPublic?.providerPhoto?.altJa, "合成提供者 確認済");
+      assert.equal(editedPublic?.businessLogo?.altJa, "合成事業者ロゴ 確認済");
+      assert.match(editedPublic?.providerPhoto?.src ?? "", /^\/api\/public\/experience-provider-media\//);
+      assert.equal((await publications.getPublicProviderMediaAsset(providerPhotoId))?.objectKey, `experience-provider-media/${providerPhotoId}.jpg`);
+      const afterProviderPhotoRevocation = await publications.revokeProviderMedia(OWNER, providerPhotoId, confirmedProfile.version);
+      assert.equal(afterProviderPhotoRevocation.assets.length, 1);
+      assert.equal((await publications.getPublicBySlug(original.slug))?.providerPhoto, null, "explicit revocation immediately removes the provider photo from the public DTO");
+      assert.equal(await publications.getPublicProviderMediaAsset(providerPhotoId), null, "a revoked provider photo cannot be fetched through the public image route");
+      assert.equal((await publications.getPublicBySlug(original.slug))?.businessLogo?.altJa, "合成事業者ロゴ 確認済");
+      assert.equal(await publications.getPublicMediaAsset("00000000-0000-4000-8000-000000000330"), null);
 
       // Readiness proves identity when the OWNER publishes. After publication, mutable readiness TTLs do not
       // make a seller's listing vanish every few minutes; STOP and operations suspension control visibility.

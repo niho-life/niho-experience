@@ -5,7 +5,7 @@ import { config } from "@/lib/config";
 import { checkoutIpDigest } from "@/lib/experience/checkout-ip-limit";
 import { checkoutError, readGuestCheckout, storeCheckoutError } from "@/lib/experience/guest-booking-http";
 import { fromThisSite, publicEmpty, publicJson } from "@/lib/experience/public-http";
-import { guestBookingRepository } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, guestBookingRepository } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +36,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
   if (!fromThisSite(request)) return publicEmpty(403);
+  if (config.experiencePublicationsEnabled) {
+    const publications = experiencePublicationRepository();
+    if (!publications) return checkoutError("CHECKOUT_UNAVAILABLE");
+    try {
+      if (!await publications.getPublicBySlug(slug)) return publicEmpty(404);
+    } catch (error) {
+      logFailure("store", error);
+      return checkoutError("CHECKOUT_UNAVAILABLE");
+    }
+  }
   // The incident switch (#15) stops new bookings here as it hides the booking entrance.
   if (!config.bookingsEnabled) return checkoutError("UNAVAILABLE");
   const bookings = guestBookingRepository();
@@ -43,6 +53,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (!bookings) return checkoutError("CHECKOUT_UNAVAILABLE");
   const parsed = await readGuestCheckout(request);
   if (!parsed.ok) return parsed.response;
+  const guestLanguage = request.headers.get("accept-language")?.split(",", 1)[0]?.trim().toLowerCase().split("-", 1)[0] === "ja" ? "JA" : "EN";
   // Trust only Cloudflare's overwritten source-IP header after the Cloud Run origin is restricted to its
   // authenticated edge path. Do not fall back to attacker-controlled X-Forwarded-For or a browser ID.
   const clientIpDigest = checkoutIpDigest(request, process.env.EXPERIENCE_CHECKOUT_IP_HMAC_KEY ?? "");
@@ -54,8 +65,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       ...parsed.fields,
       slug,
       checkoutIpDigest: clientIpDigest,
-      // The Japanese path comes with #285 slice 10.
-      guestLanguage: "EN",
+      guestLanguage,
       currentConsentVersion: config.guestBookingConsentVersion,
     });
   } catch (error) {

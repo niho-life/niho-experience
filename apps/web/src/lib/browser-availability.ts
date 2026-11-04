@@ -14,8 +14,10 @@ export type AvailabilityRead = { ok: true; occurrences: Occurrence[] } | { ok: f
 const SHARE_MS = 5_000;
 const inflight = new Map<string, { at: number; promise: Promise<AvailabilityRead> }>();
 
-export async function readAvailabilityFromApi(api: ExperienceApiClient, slug: string, locale: "en" | "ja", releaseId: string | null, offerId?: OfferId): Promise<Occurrence[] | null> {
-  if (locale === "ja") {
+export async function readAvailabilityFromApi(api: ExperienceApiClient, slug: string, locale: "en" | "ja", releaseId: string | null, offerId?: OfferId, source?: BookingSource): Promise<Occurrence[] | null> {
+  // This site's public API owns both locales for products sold by Experience. Only NIHO's
+  // translated catalog uses its release-scoped Japanese availability route.
+  if (locale === "ja" && source?.kind !== "site") {
     const result = await api.getJapaneseAvailability(slug, offerId ? { offerId } : {});
     return result.ok && result.data.releaseId === releaseId ? result.data.occurrences : null;
   }

@@ -4,12 +4,13 @@ import { SAMPLE_TERMS } from "./testing/guest-booking-fixtures";
 
 /** Which experiences this site sells (#285), against a stubbed store. */
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { guestBookingEnabled: true, experiencePublicationsEnabled: false, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
-vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository }));
+vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.repository, experiencePublicationRepository: () => state.publications }));
 
 import { GET as bookingTerms } from "@/app/api/public/experiences/[slug]/booking-terms/route";
 import { bookingSourceOf, detailForSale, detailWithSiteSellerDisplayName, guestBookingSale, guestBookingSources, japaneseBookingOpen, siteNextDates } from "./guest-booking-source";
@@ -28,11 +29,15 @@ const READY = { termsFingerprint: `sha256:${"a".repeat(64)}`, bookingReady: true
 const failing = () => vi.fn(async () => { throw new Error("connection refused: postgresql://user@db/experience"); });
 
 beforeEach(() => {
-  state.config = { guestBookingEnabled: true, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { guestBookingEnabled: true, experiencePublicationsEnabled: false, siteUrl: "https://experience.example/", nihoWebOrigin: "https://niho.example", guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
     publicBookingTerms: vi.fn(async (slug: string) => (slug === "sample-tea" ? SAMPLE_TERMS : null)),
     sellableSlugs: vi.fn(async (slugs: readonly string[]) => slugs.filter((slug) => slug === "sample-tea")),
     listPublicAvailability: vi.fn(async (slug: string) => (slug === "sample-tea" ? AVAILABILITY : null)),
+  };
+  state.publications = {
+    getPublicBySlug: vi.fn(async (slug: string) => (slug === "sample-tea" ? { slug } : null)),
+    listPublic: vi.fn(async () => [{ slug: "sample-tea" }]),
   };
 });
 
@@ -46,6 +51,16 @@ describe("where one experience is sold", () => {
     expect(bookingSourceOf({ kind: "niho" })).toEqual({ kind: "niho", origin: "https://niho.example" });
   });
 
+  it("in publication mode fails closed for unpublished or unsellable products instead of falling back to NIHO", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    expect(await guestBookingSale("sample-tea")).toEqual({ kind: "site", terms: SAMPLE_TERMS });
+    expect(await guestBookingSale("sample-walk")).toEqual({ kind: "unknown" });
+    state.repository!.publicBookingTerms = vi.fn(async () => null);
+    expect(await guestBookingSale("sample-tea")).toEqual({ kind: "unknown" });
+    state.config = { ...state.config, guestBookingEnabled: false };
+    expect(await guestBookingSale("sample-tea")).toEqual({ kind: "unknown" });
+  });
+
   it("is this site for a product the experience DB sells, and NIHO for any other", async () => {
     const sale = await guestBookingSale("sample-tea");
     expect(sale).toEqual({ kind: "site", terms: SAMPLE_TERMS });
@@ -53,11 +68,11 @@ describe("where one experience is sold", () => {
     expect(await guestBookingSale("sample-walk")).toEqual({ kind: "niho" });
   });
 
-  it("closes a publication whose terms the legacy booking contract cannot represent", async () => {
+  it("closes a sale whose legacy cancellation code contradicts its exact cancellation terms", async () => {
     state.repository!.publicBookingTerms = vi.fn(async () => ({
       ...SAMPLE_TERMS,
       offers: SAMPLE_TERMS.offers.map((offer, index) => index === 0
-        ? { ...offer, cancellationPolicy: { code: "CUSTOM", freeCancellationHoursBefore: null }, cancellationTerms: { cancellationWindowMinutesBeforeStart: 240, refundBasisPoints: 3_750 } }
+        ? { ...offer, cancellationTerms: { cancellationWindowMinutesBeforeStart: 240, refundBasisPoints: 3_750 } }
         : offer),
     }));
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -137,6 +152,17 @@ describe("where a page of cards reads availability", () => {
     state.repository!.sellableSlugs = failing();
     expect(await guestBookingSources(["sample-walk", "sample-tea", "sample-walk"])).toEqual({
       nihoWebOrigin: "https://niho.example", siteOrigin: null, siteSlugs: [], closedSlugs: ["sample-walk", "sample-tea"],
+    });
+  });
+
+  it("in publication mode sends only currently published saleable slugs to this site's availability", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    expect(await guestBookingSources(["sample-tea", "sample-walk"])).toEqual({
+      nihoWebOrigin: "https://niho.example", siteOrigin: "https://experience.example", siteSlugs: ["sample-tea"], closedSlugs: ["sample-walk"],
+    });
+    state.config = { ...state.config, guestBookingEnabled: false };
+    expect(await guestBookingSources(["sample-tea"])).toEqual({
+      nihoWebOrigin: "https://niho.example", siteOrigin: null, siteSlugs: [], closedSlugs: ["sample-tea"],
     });
   });
 });

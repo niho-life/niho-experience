@@ -24,6 +24,12 @@ describe("the sale of an experience sold here (#285)", () => {
       acceptanceMode: offer.acceptanceMode,
       bookingQuestions: offer.bookingQuestions,
       bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
+      minimumChargeableParticipants: offer.minimumChargeableParticipants,
+      saleCancellation: {
+        policyCode: offer.cancellationPolicy.code,
+        cancellationWindowMinutesBeforeStart: offer.cancellationTerms.cancellationWindowMinutesBeforeStart,
+        refundBasisPoints: offer.cancellationTerms.refundBasisPoints,
+      },
     })));
     expect(JSON.stringify(sale)).not.toMatch(/provider-sample|"productId"|"providerId"|conditionsVersion/);
     // Copies, not the store's readonly arrays.
@@ -31,18 +37,21 @@ describe("the sale of an experience sold here (#285)", () => {
     expect(sale.offers[0]!.bookingQuestions[0]!.options).not.toBe(SAMPLE_TERMS.offers[0]!.bookingQuestions[0]!.options);
   });
 
-  it("refuses refund and pricing conditions the legacy booking contract cannot represent", () => {
+  it("preserves custom cancellation and minimum-chargeable terms outside legacy display fields", () => {
     const [offer, ...offers] = SAMPLE_TERMS.offers;
     const unrepresentable = (change: Partial<PublicBookingOffer>) => ({
       ...SAMPLE_TERMS,
       offers: [{ ...offer!, ...change }, ...offers],
     });
-    expect(() => siteSaleTerms(unrepresentable({
+    const custom = siteSaleTerms(unrepresentable({
       cancellationPolicy: { code: "CUSTOM", freeCancellationHoursBefore: null },
       cancellationTerms: { cancellationWindowMinutesBeforeStart: 240, refundBasisPoints: 3_750 },
-    }), "sample-terms-2026-10")).toThrow("This cancellation policy cannot be represented by the legacy booking contract.");
-    expect(() => siteSaleTerms(unrepresentable({ minimumChargeableParticipants: 2 }), "sample-terms-2026-10"))
-      .toThrow("This sale condition cannot be represented by the legacy booking contract.");
+    }), "sample-terms-2026-10");
+    expect(custom.offers[0]!.cancellationPolicy).toEqual({ code: "NONE", freeCancellationHoursBefore: null });
+    expect(custom.offers[0]!.saleCancellation).toEqual({
+      policyCode: "CUSTOM", cancellationWindowMinutesBeforeStart: 240, refundBasisPoints: 3_750,
+    });
+    expect(siteSaleTerms(unrepresentable({ minimumChargeableParticipants: 2 }), "sample-terms-2026-10").offers[0]!.minimumChargeableParticipants).toBe(2);
   });
 
   it("lays the sale over NIHO's detail and keeps NIHO's content, legal documents and seller notice", () => {
