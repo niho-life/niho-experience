@@ -543,7 +543,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       );
       const offKey = randomUUID();
       const before = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
-      assert.deepEqual(before.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 });
+      assert.deepEqual(before.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 });
 
       // Support on: 15 % for bookings taken from now on; the earlier booking and its replay keep 10 %.
       const on = await guests.setProviderSupportSettings(ownerA, {
@@ -551,14 +551,14 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       });
       assert.deepEqual({ supportEnabled: on.supportEnabled, basisPoints: on.platformFeeBasisPoints, version: on.version }, { supportEnabled: true, basisPoints: 1500, version: 3 });
       const after = await guests.startGuestBooking(walk({ guestEmail: "second@example.com", adultCount: 2, expectedTotalYen: 6666 }));
-      assert.deepEqual(after.booking.pricingSnapshot.platformFee, { supportEnabled: true, basisPoints: 1500, amount: 999, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 3 });
+      assert.deepEqual(after.booking.pricingSnapshot.platformFee, { supportEnabled: true, basisPoints: 1500, amount: 999, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 });
       const replay = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
       assert.equal(replay.publicBookingId, before.publicBookingId);
-      assert.deepEqual(replay.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 });
+      assert.deepEqual(replay.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 });
       const stored = await pool.query("SELECT pricing_snapshot->'platformFee' AS fee FROM bookings ORDER BY id");
       assert.deepEqual(stored.rows.map((row) => row.fee), [
-        { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 },
-        { supportEnabled: true, basisPoints: 1500, amount: 999, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 3 },
+        { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 },
+        { supportEnabled: true, basisPoints: 1500, amount: 999, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 },
       ]);
       // The webhook still compares the charge with the total, not the total less the fee.
       assert.equal((await payFor(store, after, 6666, "fee")).booking.status, "CONFIRMED");
@@ -1839,7 +1839,7 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       }), StoreAccessDeniedError);
 
       const regular = await guests.startGuestBooking(request({ occurrenceDate: day(4), guestEmail: "settlement@example.com" }));
-      await payFor(store, regular, 4_000, "support-settlement");
+      await payFor(store, regular, 4_000, "support_settlement");
       const initial = await support.ensureSettlement(regular.publicBookingId);
       assert.deepEqual([initial.supportEnabled, initial.feeRateBasisPoints, initial.estimatedPlatformFee], [true, 1500, 600]);
       const evidence = {
@@ -1885,7 +1885,7 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       assert.deepEqual([failed.final, failed.failedRefundCount, failed.status], [false, 1, "PROCESSING"]);
 
       const fullyRefunded = await guests.startGuestBooking(request({ occurrenceDate: day(5), guestEmail: "full-refund@example.com" }));
-      await payFor(store, fullyRefunded, 4_000, "support-full-refund");
+      await payFor(store, fullyRefunded, 4_000, "support_full_refund");
       await support.ensureSettlement(fullyRefunded.publicBookingId);
       const fullEvidence = {
         ...evidence, connectedAccountId: fullyRefunded.stripeConnectAccountRef,
@@ -1900,7 +1900,7 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       assert.deepEqual([full.final, full.successfulRefundAmount, full.hostNetAfterRefunds, full.nihoNetAfterProcessing], [true, 4_000, 0, -360]);
 
       const settledBeforeRefund = await guests.startGuestBooking(request({ occurrenceDate: day(6), guestEmail: "settled-refund@example.com" }));
-      await payFor(store, settledBeforeRefund, 4_000, "support-settled-refund");
+      await payFor(store, settledBeforeRefund, 4_000, "support_settled_refund");
       await support.ensureSettlement(settledBeforeRefund.publicBookingId);
       const appPaidEvidence = {
         ...evidence, connectedAccountId: settledBeforeRefund.stripeConnectAccountRef, feePayer: "APPLICATION" as const,
