@@ -2,6 +2,7 @@ import type { ExperienceCheckoutResponse } from "@niho-experience/api-client";
 import { createDirectCheckout, ExperiencePaymentsHoldTooShortError, retrieveConnectedAccount, retrieveDirectCheckout, type DirectCheckoutResult, type RetrievedDirectCheckout } from "@niho-experience/experience-payments";
 import { GuestCheckoutError, StoreNotFoundError, type GuestBookingStart } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
+import { checkoutIpDigest } from "@/lib/experience/checkout-ip-limit";
 import { checkoutError, readGuestCheckout, storeCheckoutError } from "@/lib/experience/guest-booking-http";
 import { fromThisSite, publicEmpty, publicJson } from "@/lib/experience/public-http";
 import { guestBookingRepository } from "@/lib/experience/store-server";
@@ -41,18 +42,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (!bookings || !stripeKey) return checkoutError("CHECKOUT_UNAVAILABLE");
   const parsed = await readGuestCheckout(request);
   if (!parsed.ok) return parsed.response;
+  // Trust only Cloudflare's overwritten source-IP header after the Cloud Run origin is restricted to its
+  // authenticated edge path. Do not fall back to attacker-controlled X-Forwarded-For or a browser ID.
+  const clientIpDigest = checkoutIpDigest(request, process.env.EXPERIENCE_CHECKOUT_IP_HMAC_KEY ?? "");
+  if (!clientIpDigest) return checkoutError("CHECKOUT_UNAVAILABLE");
 
   let started: GuestBookingStart;
   try {
     started = await bookings.startGuestBooking({
       ...parsed.fields,
       slug,
+      checkoutIpDigest: clientIpDigest,
       // The Japanese path comes with #285 slice 10.
       guestLanguage: "EN",
       currentConsentVersion: config.guestBookingConsentVersion,
     });
   } catch (error) {
-    if (error instanceof GuestCheckoutError) return storeCheckoutError(error);
+    if (error instanceof GuestCheckoutError) {
+      if (error.code === "RATE_LIMITED") {
+        console.info("Experience guest checkout rate limited", { reason: error.rateLimitReason ?? "booking-email-60m" });
+      }
+      return storeCheckoutError(error);
+    }
     if (error instanceof StoreNotFoundError) return publicEmpty(404);
     logFailure("store", error);
     return checkoutError("CHECKOUT_UNAVAILABLE");

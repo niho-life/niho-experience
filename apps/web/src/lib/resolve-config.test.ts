@@ -310,6 +310,7 @@ describe("admin support console settings", () => {
     expect(resolveConfig(withDatabase)).toMatchObject({ guestBookingEnabled: false, experienceTranslateApiEnabled: true });
     expect(resolveConfig({ ...withDatabase, EXPERIENCE_GUEST_BOOKING_ENABLED: "false" }).experienceTranslateApiEnabled).toBe(true);
     expect(() => resolveConfig({ ...withDatabase, EXPERIENCE_GUEST_BOOKING_ENABLED: "true" })).toThrow("EXPERIENCE_GUEST_BOOKING_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
+    expect(resolveConfig({ ...host, SITE_URL: "https://experience.example", EXPERIENCE_GUEST_BOOKING_ENABLED: "true", EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_sample", EXPERIENCE_STRIPE_WEBHOOK_SECRET: "whsec_sample", EXPERIENCE_CHECKOUT_IP_HMAC_KEY: "h".repeat(32), EXPERIENCE_BOOKING_CONSENT_VERSION: "sample-terms-2026-10" }).experienceTranslateApiEnabled).toBe(true);
   });
 
   it("keeps 設定 › 通知 in the experience DB only in http mode with its own flag and the host console (#109)", () => {
@@ -413,6 +414,7 @@ describe("admin support console settings", () => {
       EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused",
       EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_sample",
       EXPERIENCE_STRIPE_WEBHOOK_SECRET: "whsec_sample",
+      EXPERIENCE_CHECKOUT_IP_HMAC_KEY: "sample-checkout-ip-hmac-key".padEnd(32, "x"),
       EXPERIENCE_BOOKING_CONSENT_VERSION: "sample-terms-2026-10",
     };
     expect(resolveConfig({})).toMatchObject({ guestBookingEnabled: false, guestBookingConsentVersion: "" });
@@ -423,10 +425,11 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...sale, EXPERIENCE_BOOKING_CONSENT_VERSION: "  sample-terms-2026-10 " }).guestBookingConsentVersion).toBe("sample-terms-2026-10");
     expect(resolveConfig({ ...sale, SITE_URL: "http://localhost:3000" }).guestBookingEnabled).toBe(true);
 
-    for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET", "EXPERIENCE_BOOKING_CONSENT_VERSION"]) {
+    for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "EXPERIENCE_STRIPE_WEBHOOK_SECRET", "EXPERIENCE_CHECKOUT_IP_HMAC_KEY", "EXPERIENCE_BOOKING_CONSENT_VERSION"]) {
       expect(() => resolveConfig({ ...sale, [name]: undefined })).toThrow(name);
       expect(() => resolveConfig({ ...sale, [name]: " " })).toThrow(name);
     }
+    expect(() => resolveConfig({ ...sale, EXPERIENCE_CHECKOUT_IP_HMAC_KEY: "short" })).toThrow(/EXPERIENCE_CHECKOUT_IP_HMAC_KEY/);
     for (const version of ["two words", "x".repeat(101), "terms\u0000"]) {
       expect(() => resolveConfig({ ...sale, EXPERIENCE_BOOKING_CONSENT_VERSION: version })).toThrow(/EXPERIENCE_BOOKING_CONSENT_VERSION/);
     }

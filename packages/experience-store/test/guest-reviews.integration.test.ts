@@ -156,6 +156,34 @@ async function moveEnd(pool: Pool, value: SampleBooking, endUtc: string): Promis
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
 describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefined }, () => {
+  it("requires an explicit ATTENDED mark for invitation and submission, while retaining an already published review", async () => {
+    await withSchema(async ({ pool }) => {
+      const reviews = new GuestReviewRepository(pool);
+      const made = await booking(pool);
+      await bookerDetails(pool, made);
+      const invite = () => reviews.issueInvitation({ providerId: made.providerId, bookingId: made.id, ttlDays: 14 });
+      await assert.rejects(invite(), StoreNotFoundError);
+      await pool.query(
+        "INSERT INTO booking_attendance (provider_id, booking_id, status, recorded_by) VALUES ($1, $2::bigint, 'NO_SHOW', 'owner-a')",
+        [made.providerId, made.id],
+      );
+      await assert.rejects(invite(), StoreNotFoundError);
+      await pool.query("UPDATE booking_attendance SET status = 'ATTENDED' WHERE provider_id = $1 AND booking_id = $2::bigint", [made.providerId, made.id]);
+      const link = await invite();
+      assert.ok(await reviews.openInvitation(link.token));
+      await pool.query("UPDATE booking_attendance SET status = 'NO_SHOW' WHERE provider_id = $1 AND booking_id = $2::bigint", [made.providerId, made.id]);
+      assert.equal(await reviews.openInvitation(link.token), null);
+      await assert.rejects(reviews.submitReview(link.token, input()), StoreNotFoundError);
+      await pool.query("UPDATE booking_attendance SET status = 'ATTENDED' WHERE provider_id = $1 AND booking_id = $2::bigint", [made.providerId, made.id]);
+      await reviews.submitReview(link.token, input());
+      const event = await pool.query<{ topic: string }>("SELECT topic FROM outbox_messages WHERE provider_id = $1 AND topic = 'host.notify.new_review'", [made.providerId]);
+      assert.equal(event.rows.length, 1);
+      await pool.query("UPDATE booking_attendance SET status = 'NO_SHOW' WHERE provider_id = $1 AND booking_id = $2::bigint", [made.providerId, made.id]);
+      const published = await pool.query<{ id: string }>("SELECT id FROM guest_reviews WHERE provider_id = $1 AND booking_id = $2::bigint AND hidden_at IS NULL", [made.providerId, made.id]);
+      assert.equal(published.rows.length, 1);
+    });
+  });
+
   it("keeps one review per booking and what the guest wrote, the report and the first reply as the database requires", async () => {
     await withSchema(async (context) => {
       const { pool } = context;
@@ -329,7 +357,8 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       await assert.rejects(() => reviews.submitReview("short", input()), StoreNotFoundError);
 
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM guest_reviews")).rows[0].n, 3);
-      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox_messages")).rows[0].n, 0);
+      assert.deepEqual((await pool.query<{ topic: string }>("SELECT topic FROM outbox_messages ORDER BY id")).rows.map((row) => row.topic),
+        ["host.notify.new_review", "host.notify.new_review", "host.notify.new_review"]);
     });
   });
 

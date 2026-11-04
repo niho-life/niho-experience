@@ -829,7 +829,7 @@ export class BookingCancellations {
   /**
    * The provider's OWNER calls off a whole session (この回を中止): every confirmed booking of it is cancelled with a
    * full refund, and the occurrence is closed to new bookings (its seats would otherwise be on sale again). Payments
-   * under review stay for support. NOT_CANCELLABLE when the session has no confirmed booking.
+   * under review stay for support. An empty session can also be called off while its occurrence is still on sale.
    */
   async cancelSessionAsHost(actor: HostActor, session: HostGuestSessionKey, input: HostCancellationInput): Promise<CancellationResult> {
     const sessionKey = sessionKeyOf(session);
@@ -853,12 +853,27 @@ export class BookingCancellations {
           ORDER BY b.id
           LIMIT $6
           FOR UPDATE OF b`,
-        [actor.providerId, sessionKey.productId, sessionKey.offerId, sessionKey.localDate, sessionKey.localStartTime, BOOKING_CANCELLATION_LIMITS.sessionBookingsMax],
+        [actor.providerId, sessionKey.productId, sessionKey.offerId, sessionKey.localDate, sessionKey.localStartTime, BOOKING_CANCELLATION_LIMITS.sessionBookingsMax + 1],
       );
       const bookings = found.rows.map(lockedFromRow);
+      // Never report a whole-session cancellation after silently truncating the confirmed bookings.
+      if (bookings.length > BOOKING_CANCELLATION_LIMITS.sessionBookingsMax) throw new StoreConflictError("Too many bookings to cancel in one command.");
+      const emptyOccurrences = bookings.length === 0 ? await client.query<DbRow>(
+        `SELECT o.occurrence_id, o.rule_id
+           FROM schedule_occurrences o
+           LEFT JOIN schedule_occurrence_sales_states s
+             ON s.provider_id = o.provider_id AND s.rule_id = o.rule_id AND s.occurrence_id = o.occurrence_id
+          WHERE o.provider_id = $1 AND o.product_id = $2 AND o.rule_id = $3
+            AND o.local_date = $4::date AND o.local_start_time = $5::time
+            AND o.status = 'OPEN' AND COALESCE(s.desired_state, 'OPEN') = 'OPEN'
+          FOR UPDATE OF o`,
+        [actor.providerId, sessionKey.productId, sessionKey.offerId, sessionKey.localDate, sessionKey.localStartTime],
+      ) : null;
       if (bookings.length === 0) {
-        await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
-        return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
+        if (!emptyOccurrences?.rows.length) {
+          await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
+          return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
+        }
       }
       const refunds: RefundSubmission[] = [];
       for (const booking of bookings) {
@@ -867,7 +882,9 @@ export class BookingCancellations {
         }));
       }
       // No new bookings for the called-off occurrence(s): what この回を中止 promises.
-      for (const occurrence of new Map(bookings.map((booking) => [booking.occurrenceId, booking.ruleId]))) {
+      const occurrences = new Map(bookings.map((booking) => [booking.occurrenceId, booking.ruleId]));
+      for (const row of emptyOccurrences?.rows ?? []) occurrences.set(String(row.occurrence_id), String(row.rule_id));
+      for (const occurrence of occurrences) {
         // A hold still waiting for its payment goes too: a payment that arrives for an expired hold lands in
         // PAYMENT_REVIEW (confirmBookingPayment), for support, instead of confirming a booking for a session called off.
         await client.query(

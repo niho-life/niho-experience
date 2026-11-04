@@ -6,15 +6,10 @@ import { isoValue, type DbRow } from "./rows.ts";
 import { assertStoreIdentifier } from "./validation.ts";
 
 /**
- * The host app's push notifications kept in `outbox_messages` (#177 P2, owner decision 2026-10-31).
- * A guest question or an answer from the reply page (`guestQuestion`), a guest booking confirmed on
- * this site (`newBooking`, #285), one a guest or NIHO support cancelled (`cancellation`, #285 slice 7) and a
- * message a guest wrote on their booking page (`bookingMessage`, #285 slice 6b) write their rows in their own transactions; the approval and NIHO's booking
- * message rows (`guestMessage`) wait for those flows to move to the experience DB (ADR 0002). A Google calendar this
- * site cannot read (`googleCalendarAttention`, #238) is written by the Google calendar job. A booking on a reservation
- * site that was new, cancelled or moved (`otaBooking`, #194, owner decision 2026-11-01) is written by the external
- * ledger's transaction. The job claims only these topics: `booking.confirmed`, `guest_question.*` and every other topic
- * stay untouched.
+ * Host push notifications persisted in `outbox_messages` (#177 P2). Guest questions and booking messages,
+ * site bookings and cancellations, approval deadlines, Google calendar attention, OTA changes and new reviews
+ * are written by their owning transactions. The existing host push job produces the next-day summary. This
+ * class claims only the explicitly listed `host.notify.*` topics; guest mail and payment topics stay untouched.
  */
 export const HOST_NOTIFICATION_TOPICS = {
   approvalDeadline: "host.notify.approval_deadline",
@@ -25,6 +20,8 @@ export const HOST_NOTIFICATION_TOPICS = {
   bookingMessage: "host.notify.booking_message",
   googleCalendarAttention: "host.notify.google_calendar_attention",
   otaBooking: "host.notify.ota_booking",
+  newReview: "host.notify.new_review",
+  dayBeforeSummary: "host.notify.day_before_summary",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -91,6 +88,21 @@ export interface NewBookingPayload {
  */
 export type CancellationPayload = NewBookingPayload;
 
+/** A new public review; no guest name, review body or booking identifier leaves the store. */
+export interface NewReviewPayload {
+  readonly v: 1;
+  readonly reviewId: string;
+  readonly experienceTitle: string;
+}
+
+/** One provider's counts for confirmed bookings on a Japan-local date. No guest or product details. */
+export interface DayBeforeSummaryPayload {
+  readonly v: 1;
+  readonly localDate: string;
+  readonly bookingCount: number;
+  readonly participantCount: number;
+}
+
 /**
  * A Google calendar this site reads for busy times could not be read (#238): the provider-wide one (`PROVIDER`) or a
  * venue's or instructor's (`RESOURCE`). `REVOKED`: Google refused the connection; `UNAVAILABLE`: the reads keep failing.
@@ -150,6 +162,8 @@ const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
 const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
+const NEW_REVIEW_KEYS = ["experienceTitle", "reviewId", "v"];
+const DAY_BEFORE_SUMMARY_KEYS = ["bookingCount", "localDate", "participantCount", "v"];
 const OTA_BOOKING_KEYS = ["change", "experienceTitle", "productId", "ref", "seats", "site", "startsAt", "v"];
 const OTA_SITE = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
 const HOST_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -220,6 +234,23 @@ export function parseNewBookingPayload(value: unknown): NewBookingPayload | null
 /** The cancellation's payload (the same keys as a new booking's), or null for anything else. */
 export function parseCancellationPayload(value: unknown): CancellationPayload | null {
   return parseNewBookingPayload(value);
+}
+
+export function parseNewReviewPayload(value: unknown): NewReviewPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, NEW_REVIEW_KEYS) || value.v !== 1) return null;
+  if (typeof value.reviewId !== "string" || !HOST_REF.test(value.reviewId) || !title(value.experienceTitle)) return null;
+  return { v: 1, reviewId: value.reviewId, experienceTitle: value.experienceTitle };
+}
+
+export function parseDayBeforeSummaryPayload(value: unknown): DayBeforeSummaryPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, DAY_BEFORE_SUMMARY_KEYS) || value.v !== 1) return null;
+  const { localDate, bookingCount, participantCount } = value;
+  if (typeof localDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(localDate)) return null;
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== localDate) return null;
+  if (!Number.isSafeInteger(bookingCount) || (bookingCount as number) < 1
+    || !Number.isSafeInteger(participantCount) || (participantCount as number) < 1) return null;
+  return { v: 1, localDate, bookingCount: bookingCount as number, participantCount: participantCount as number };
 }
 
 export function parseGoogleCalendarAttentionPayload(value: unknown): GoogleCalendarAttentionPayload | null {
@@ -296,6 +327,26 @@ async function insertRow(
     [row.providerId, row.aggregateType ?? AGGREGATE_TYPE, row.bookingId, row.topic, row.deduplicationKey, JSON.stringify(row.payload), row.availableAt],
   );
   return result.rowCount ?? 0;
+}
+
+/** Written in the review transaction; retries of the same one-time link cannot produce another push. */
+export async function enqueueNewReviewNotification(
+  client: PoolClient,
+  input: { readonly providerId: string; readonly reviewId: string; readonly experienceTitle: string },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  if (!HOST_REF.test(input.reviewId)) throw new StoreValidationError("reviewId must be a UUID.");
+  const experienceTitle = clippedTitle(input.experienceTitle);
+  if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must not be empty.");
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.reviewId,
+    aggregateType: "guest_review",
+    topic: HOST_NOTIFICATION_TOPICS.newReview,
+    deduplicationKey: `host-push:new-review:${input.reviewId}`,
+    payload: { v: 1, reviewId: input.reviewId, experienceTitle } satisfies NewReviewPayload,
+    availableAt: null,
+  });
 }
 
 /**
@@ -584,6 +635,34 @@ export class HostNotificationOutbox {
 
   constructor(pool: Pool) {
     this.#pool = pool;
+  }
+
+  /**
+   * Snapshot tomorrow's confirmed guest counts once per provider after 18:00 Japan time. The existing
+   * push job calls this before draining; the unique date key makes concurrent and repeated runs safe.
+   */
+  async enqueueDueDayBeforeSummaries(now: Date): Promise<number> {
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new StoreValidationError("now must be a valid time.");
+    const result = await this.#pool.query(
+      `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload, available_at)
+       SELECT summary.provider_id, 'host_day_before_summary', summary.local_date, $2,
+              'host-push:day-before-summary:' || summary.local_date,
+              jsonb_build_object('v', 1, 'localDate', summary.local_date,
+                'bookingCount', summary.booking_count, 'participantCount', summary.participant_count), $1::timestamptz
+         FROM (
+           SELECT b.provider_id, b.occurrence_snapshot->>'localDate' AS local_date,
+                  count(*)::int AS booking_count, sum(g.adult_count + g.child_count)::int AS participant_count
+             FROM bookings b
+             JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+            WHERE b.status = 'CONFIRMED'
+              AND b.occurrence_snapshot->>'localDate' = (($1::timestamptz AT TIME ZONE 'Asia/Tokyo')::date + 1)::text
+              AND ($1::timestamptz AT TIME ZONE 'Asia/Tokyo')::time >= time '18:00'
+            GROUP BY b.provider_id, b.occurrence_snapshot->>'localDate'
+         ) summary
+       ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
+      [now.toISOString(), HOST_NOTIFICATION_TOPICS.dayBeforeSummary],
+    );
+    return result.rowCount ?? 0;
   }
 
   /** Up to `limit` due rows, oldest first, each claimed for `leaseMs`. Concurrent claimers never share a row. */

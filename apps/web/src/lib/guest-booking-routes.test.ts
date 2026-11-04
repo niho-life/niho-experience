@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type BookingRecord, type GuestBookingStart, type GuestCheckoutErrorCode } from "@niho-experience/experience-store";
 
@@ -32,6 +33,8 @@ const ORIGIN = "https://experience.example";
 const BOOKING_ID = "123e4567-e89b-42d3-a456-426614174285";
 const KEY = "00000000-0000-4000-8000-000000000285";
 const CONDITIONS = "c0".repeat(32);
+const CHECKOUT_IP_KEY = "sample-checkout-ip-hmac-key".padEnd(32, "x");
+const CHECKOUT_IP_DIGEST = createHmac("sha256", CHECKOUT_IP_KEY).update("experience-checkout-ip:v1\0").update("203.0.113.24").digest("hex");
 const CHECKOUT = {
   offerId: "sample-am",
   occurrenceDate: "2026-11-02",
@@ -91,7 +94,14 @@ function started(overrides: Partial<GuestBookingStart> = {}, holdMinutes = 35): 
 function post(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request(`${ORIGIN}/api/public/experiences/sample-tea/checkout`, {
     method: "POST",
-    headers: { origin: ORIGIN, "sec-fetch-site": "same-origin", "content-type": "application/json", ...headers },
+    headers: {
+      origin: ORIGIN,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+      "cf-connecting-ip": "203.0.113.24",
+      "cf-ray": "0123456789abcdef-NRT",
+      ...headers,
+    },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -104,6 +114,7 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
+  vi.stubEnv("EXPERIENCE_CHECKOUT_IP_HMAC_KEY", CHECKOUT_IP_KEY);
   state.config = { guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
@@ -179,6 +190,7 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
       note: "Window seat please",
       utm: { utmSource: "newsletter" },
       clientRequestKey: KEY,
+      checkoutIpDigest: CHECKOUT_IP_DIGEST,
     });
     expect(state.stripeKeys).toEqual(["sk_test_sample", "sk_test_sample"]);
     expect(state.stripeAccountRetrieve).toHaveBeenCalledWith("acct_SampleA0001");
@@ -207,6 +219,22 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.repository?.startGuestBooking).toHaveBeenCalledTimes(1);
     expect(state.stripeCreate).not.toHaveBeenCalled();
     expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a trusted edge IP is unavailable and logs only a rate-limit category", async () => {
+    const unavailable = await checkout(post(CHECKOUT, { "cf-connecting-ip": "not-an-ip" }), slugParams());
+    expect(unavailable.status).toBe(503);
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
+
+    state.repository!.startGuestBooking!.mockRejectedValueOnce(
+      new GuestCheckoutError("RATE_LIMITED", { retryAfterSeconds: 73, rateLimitReason: "checkout-ip-10m" }),
+    );
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const limited = await checkout(post(CHECKOUT), slugParams());
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("73");
+    expect(JSON.stringify(await limited.json())).not.toContain("checkout-ip-10m");
+    expect(log).toHaveBeenCalledWith("Experience guest checkout rate limited", { reason: "checkout-ip-10m" });
   });
 
   it("drops the UTM fields under Do Not Track, and leaves out what the guest did not send", async () => {

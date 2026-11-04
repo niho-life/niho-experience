@@ -44,7 +44,7 @@ export function analyticsModeForRuntime(apiMode: "http" | "mock", siteUrl: strin
  * booking, so no third-party script starts in that document (Umami's payloads would be dropped below anyway).
  */
 export function isPrivateLandingPath(pathname: string): boolean {
-  return pathname === "/bookings" || pathname.startsWith("/bookings/");
+  return pathname === "/bookings" || pathname.startsWith("/bookings/") || pathname === "/reviews/write";
 }
 
 /** `pathname` is where the document was opened. */

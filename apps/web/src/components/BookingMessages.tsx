@@ -66,7 +66,7 @@ function MessageList({ messages, hostDisplayName, timeZone }: { messages: readon
  * messages (cancelled, or 30 days after the experience) shows its history only. The key of a message stays the same
  * while its words do, so a retry after a lost answer never sends it twice.
  */
-export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, conversation, translationNotice = false }: {
+export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, conversation, translationNotice = false, quickReplies = [] }: {
   publicBookingId: string;
   hostDisplayName: string;
   timeZone: string;
@@ -74,6 +74,7 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
   conversation: GuestBookingConversation | null;
   /** The server says whether messages are translated into Japanese for the host (lib/translation-notice.ts); then one sentence says so. */
   translationNotice?: boolean;
+  quickReplies?: readonly { label: string; message: string }[];
 }) {
   const [sent, setSent] = useState<readonly SentHere[]>([]);
   const [open, setOpen] = useState(conversation?.open ?? false);
@@ -137,6 +138,18 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
       ) : null}
       {open ? (
         <form onSubmit={(event) => void submit(event)} noValidate className="mt-6">
+          {quickReplies.length ? (
+            <fieldset className="mb-4">
+              <legend className="mb-2 text-sm font-bold text-ink-soft">Quick message</legend>
+              <div className="flex flex-wrap gap-2">
+                {quickReplies.map((reply) => (
+                  <button key={reply.label} type="button" disabled={sending} onClick={() => { setMessage(reply.message); setProblem(null); }} className={buttonClass("secondary", "text-sm")}>
+                    {reply.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
           <label className={BOOKING_FIELD_LABEL_CLASS_V1}>
             Write to {hostDisplayName}
             <textarea

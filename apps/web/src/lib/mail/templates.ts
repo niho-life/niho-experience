@@ -1,4 +1,4 @@
-import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ReviewInvitationEmail } from "@niho-experience/experience-store";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -10,13 +10,15 @@ export interface RenderedMail {
   readonly subject: string;
   readonly text: string;
   readonly html: string;
+  readonly attachments?: readonly { readonly filename: string; readonly content: Uint8Array; readonly contentType: "image/jpeg"; readonly cid: string }[];
 }
 
 export type MailBlock =
   | { readonly kind: "p"; readonly text: string }
   | { readonly kind: "quote"; readonly text: string }
   | { readonly kind: "facts"; readonly rows: readonly (readonly [string, string])[] }
-  | { readonly kind: "link"; readonly lead: string; readonly label: string; readonly href: string };
+  | { readonly kind: "link"; readonly lead: string; readonly label: string; readonly href: string }
+  | { readonly kind: "image"; readonly cid: string; readonly alt: string };
 
 type Block = MailBlock;
 
@@ -46,6 +48,8 @@ function renderText(blocks: readonly Block[]): string {
         return block.rows.map(([label, value]) => `${label}: ${value}`).join("\n");
       case "link":
         return `${block.lead}\n${block.href}`;
+      case "image":
+        return `[${block.alt}]`;
     }
   }).join("\n\n")}\n`;
 }
@@ -64,6 +68,8 @@ function renderHtml(subject: string, blocks: readonly Block[], lang: "en" | "ja"
           `<tr><th scope="row" style="padding:2px 16px 2px 0;text-align:left;vertical-align:top;font-weight:600">${escapeHtml(label)}</th><td style="padding:2px 0">${escapeHtml(value)}</td></tr>`).join("")}</table>`;
       case "link":
         return `<p ${P}>${escapeHtml(block.lead)}<br><a href="${escapeHtml(block.href)}" style="color:#2f5d2a">${escapeHtml(block.label)}</a></p>`;
+      case "image":
+        return `<p ${P}><img src="cid:${escapeHtml(block.cid)}" alt="${escapeHtml(block.alt)}" style="display:block;max-width:100%;height:auto;border-radius:12px"></p>`;
     }
   }).join("\n");
   return `<!doctype html>
@@ -87,6 +93,44 @@ export function mail(subject: string, blocks: readonly MailBlock[], lang: "en" |
 /** `https://experience.example` + a path; the site origin is checked at start-up (resolve-config). */
 export function absolute(siteUrl: string, path: string): string {
   return new URL(path, `${siteUrl.replace(/\/+$/, "")}/`).href;
+}
+
+/** The token is issued immediately before sending and stays in the URL fragment. */
+export function reviewInvitationEmail(email: ReviewInvitationEmail, options: { readonly siteUrl: string; readonly token: string }): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  const link = `${absolute(options.siteUrl, "/reviews/write")}#t=${encodeURIComponent(options.token)}`;
+  return mail(`Thank you for joining ${experience}`, [
+    { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
+    { kind: "p", text: `Thank you for joining ${experience}. We hope you enjoyed your experience.` },
+    { kind: "p", text: "If you would like to share how it went, you can write one public review. Your private note to the host will stay private." },
+    { kind: "link", lead: "Write your review:", label: "Write a review", href: link },
+  ]);
+}
+
+/** Private location details for a confirmed booking. The photo is embedded as an attachment, never a public URL. */
+export function bookingMeetingGuideEmail(
+  email: BookingMeetingGuideEmail,
+  options: { readonly siteUrl: string; readonly bookingPageGrant: string; readonly photo: Uint8Array },
+): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  const cid = "niho-meeting-place-photo";
+  const blocks: MailBlock[] = [
+    { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
+    { kind: "p", text: `Here are the meeting details for ${experience}.` },
+    { kind: "facts", rows: [["Date", calendarDate(email.localDate, DATE_LONG)], ["Time", `${email.localStartTime} ${zoneName(email.timeZone)}`], ["Meeting place", oneLine(email.collectionOverview)]] },
+    { kind: "image", cid, alt: "The outside of the meeting place" },
+    { kind: "p", text: oneLine(email.address) },
+    ...(email.accessInstructions ? [{ kind: "p", text: body(email.accessInstructions) } as const] : []),
+    ...(email.entranceInstructions ? [{ kind: "p", text: body(email.entranceInstructions) } as const] : []),
+    ...(email.mapUrl ? [{ kind: "link", lead: "Open the meeting place on the map:", label: "Open map", href: email.mapUrl } as const] : []),
+    ...(email.itemsToBring.length ? [{ kind: "facts", rows: [["What to bring", email.itemsToBring.map(oneLine).join(", ")]] } as const] : []),
+    ...(email.weatherPlan ? [{ kind: "p", text: `Weather plan: ${body(email.weatherPlan)}` } as const] : []),
+    { kind: "link", lead: "If you are running late or need help finding the meeting place, message your host from your booking page:", label: "Open your booking", href: `${absolute(options.siteUrl, "/bookings/open")}#g=${encodeURIComponent(options.bookingPageGrant)}` },
+  ];
+  return {
+    ...mail(`Meeting details: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, blocks),
+    attachments: [{ filename: "meeting-place.jpg", content: options.photo, contentType: "image/jpeg", cid }],
+  };
 }
 
 export interface QuestionReplyMailInput {

@@ -5,6 +5,8 @@ import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor } from "./types.ts";
 
+export const REVIEW_INVITATION_TOPIC = "guest.review_invitation";
+
 /*
  * 出欠 (#107, migration 0033, docs/guest-booking.md「ホストの画面」) of the guest bookings made on this site: the
  * provider's OWNER marks each confirmed booking of a session 来た (ATTENDED) or 来なかった (NO_SHOW) from the session's
@@ -48,6 +50,7 @@ export interface AttendanceRecordResult {
 }
 
 const START = "(b.occurrence_snapshot->>'startUtc')::timestamptz";
+const END = "(b.occurrence_snapshot->>'endUtc')::timestamptz";
 /** One session as この回's address names it (the snapshot's experience, offer, local day and start), as host-guest-bookings.ts does. */
 const IN_SESSION = `b.product_id = $2 AND (b.occurrence_snapshot->>'ruleId') = $3
   AND (b.occurrence_snapshot->>'localDate') = $4 AND (b.occurrence_snapshot->>'localStartTime') = $5`;
@@ -124,7 +127,7 @@ export class BookingAttendance {
     return withTransaction(this.#pool, async (client) => {
       await requireBookingsOwner(client, actor);
       const found = await client.query<DbRow>(
-        `SELECT b.id, b.status, ${START} <= clock_timestamp() AS started
+        `SELECT b.id, b.status, ${START} <= clock_timestamp() AS started, ${END} AS end_at
            FROM bookings b
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
           WHERE b.provider_id = $1 AND b.public_booking_id = $2::uuid AND b.status = ANY($3::text[])
@@ -135,15 +138,34 @@ export class BookingAttendance {
       if (!booking) throw new StoreNotFoundError("guest booking");
       if (booking.status !== "CONFIRMED") return { outcome: "NOT_CONFIRMED", mark: await markOf(client, actor.providerId, booking.id, id) };
       if (booking.started !== true) return { outcome: "NOT_STARTED", mark: await markOf(client, actor.providerId, booking.id, id) };
-      await client.query(
+      const changed = await client.query<DbRow>(
         `INSERT INTO booking_attendance (provider_id, booking_id, status, recorded_by)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (provider_id, booking_id) DO UPDATE
            SET status = EXCLUDED.status, recorded_by = EXCLUDED.recorded_by,
                version = booking_attendance.version + 1, updated_at = clock_timestamp()
-           WHERE booking_attendance.status <> EXCLUDED.status`,
+           WHERE booking_attendance.status <> EXCLUDED.status
+         RETURNING version`,
         [actor.providerId, booking.id, status, actor.nihoUserId],
       );
+      if (changed.rows[0]) {
+        // A corrected mark supersedes an unsent invitation from the previous attendance version.
+        await client.query(
+          `UPDATE outbox_messages SET processed_at = clock_timestamp()
+            WHERE provider_id = $1 AND aggregate_type = 'booking' AND aggregate_id = $2
+              AND topic = $3 AND processed_at IS NULL`,
+          [actor.providerId, id, REVIEW_INVITATION_TOPIC],
+        );
+      }
+      if (status === "ATTENDED" && changed.rows[0]) {
+        await client.query(
+          `INSERT INTO outbox_messages
+             (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload, available_at)
+           VALUES ($1, 'booking', $2, $3, $4, '{}'::jsonb, GREATEST(clock_timestamp(), $5::timestamptz))
+           ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
+          [actor.providerId, id, REVIEW_INVITATION_TOPIC, `guest-mail:review-invitation:${id}:${changed.rows[0].version}`, booking.end_at],
+        );
+      }
       return { outcome: "RECORDED", mark: await markOf(client, actor.providerId, booking.id, id) };
     });
   }
