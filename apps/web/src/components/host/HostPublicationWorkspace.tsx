@@ -14,6 +14,8 @@ import {
 } from "./publication-terms";
 import { publicationCanPublish, publicationNextAction } from "./publication-workflow";
 import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishPublicationManuscript } from "./publication-confirmation";
+import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-rights";
+import { reapplyProviderMediaEdits } from "./publication-conflict";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
 type SaleTerms = {
@@ -238,8 +240,9 @@ export function HostPublicationWorkspace({
   const [providerMediaDraft, setProviderMediaDraft] = useState<ProviderMedia[]>([]);
   const [providerMediaVersion, setProviderMediaVersion] = useState<number | null>(null);
   const [providerMediaBaseline, setProviderMediaBaseline] = useState("");
-  const [rightsConfirmed, setRightsConfirmed] = useState(false);
+  const [photoRights, setPhotoRights] = useState<PhotoRightsConfirmation<File> | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  const rightsConfirmed = photoRightsConfirmed(photoRights, selectedPhoto, product?.id ?? null, photoPlacement);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
   const japaneseSourceRef = useRef<LocaleManuscript>(blankJapanese);
@@ -587,11 +590,13 @@ export function HostPublicationWorkspace({
         media: mediaForm(latest.media),
         providerMedia: latestProviderMediaForm,
       };
-      const localDraft = { slug, title, unitAmount, content, terms, media: mediaDraft, providerMedia: providerMediaDraft };
-      const localComparable = { ...localDraft, media: mediaForm(mediaDraft), providerMedia: providerMediaForm(providerMediaDraft) };
+      const retainedProviderMedia = reapplyProviderMediaEdits(latestProviderMedia, providerMediaDraft, JSON.parse(providerMediaBaseline || "[]") as ReturnType<typeof providerMediaForm>);
+      const localDraft = { slug, title, unitAmount, content, terms, media: mediaDraft, providerMedia: retainedProviderMedia };
+      const localComparable = { ...localDraft, media: mediaForm(mediaDraft), providerMedia: providerMediaForm(retainedProviderMedia) };
       setProduct(latest);
       setConsentVersion(isRecord(body) && typeof body.publicationConsentVersion === "string" ? body.publicationConsentVersion : consentVersion);
       setProviderMediaVersion(latestProviderVersion);
+      setProviderMediaDraft(retainedProviderMedia);
       setProviderMediaBaseline(JSON.stringify(latestProviderMediaForm));
       setBaseline(JSON.stringify(latestBaseline));
       if (JSON.stringify(localComparable) === JSON.stringify(latestBaseline)) clearLocal(storageNamespace, latest.id);
@@ -707,7 +712,7 @@ export function HostPublicationWorkspace({
         setProduct(next); setMediaDraft(next.media);
         setNotice("体験写真を追加しました。保存すると公開中の商品にも反映されます。");
       }
-      setSelectedPhoto(null); setRightsConfirmed(false); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
+      setSelectedPhoto(null); setPhotoRights(null); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "写真を追加できませんでした。選択した写真と入力を保持しています。"); }
     finally { setBusy(false); }
   }
@@ -834,7 +839,7 @@ export function HostPublicationWorkspace({
     </section>
     {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
     {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}
-    {error ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900"><p>{error}</p>{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
+    {error || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-green-50 p-3 text-green-900">{notice}</p> : null}
     {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
     <form id="product-editor" aria-busy={busy} onSubmit={(event) => void saveAll(event)} className="scroll-mt-24 space-y-4">
@@ -902,12 +907,12 @@ export function HostPublicationWorkspace({
           </div>)}
           {!providerMediaDraft.length ? <p className="mt-2 text-sm text-muted">プロフィール画像は未設定です。</p> : null}
         </div> : null}
-        {!adminDraft ? <label className="block text-sm font-bold text-ink-soft">新しい写真の用途<select value={photoPlacement} onChange={(event) => setPhotoPlacement(event.target.value as typeof photoPlacement)} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2"><option value="GALLERY">この体験の写真</option><option value="PROVIDER_PHOTO">提供者写真（全商品）</option><option value="BUSINESS_LOGO">事業者ロゴ（全商品）</option></select></label> : null}
+        {!adminDraft ? <label className="block text-sm font-bold text-ink-soft">新しい写真の用途<select value={photoPlacement} disabled={busy} onChange={(event) => { setPhotoPlacement(event.target.value as typeof photoPlacement); setPhotoRights(null); }} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2"><option value="GALLERY">この体験の写真</option><option value="PROVIDER_PHOTO">提供者写真（全商品）</option><option value="BUSINESS_LOGO">事業者ロゴ（全商品）</option></select></label> : null}
         <label className="block text-sm font-bold text-ink-soft">写真の説明（英語）<input value={photoAlt} onChange={(event) => setPhotoAlt(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal" /></label>
         <label className="block text-sm font-bold text-ink-soft">写真の説明（日本語）<input value={photoAltJa} onChange={(event) => setPhotoAltJa(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal" /></label>
         <Field label="写真クレジット（任意）" value={photoCredit} onChange={setPhotoCredit} />
-        <label className="block text-sm"><input type="file" accept="image/jpeg,image/png" onChange={(event) => setSelectedPhoto(event.target.files?.[0] ?? null)} className="block" /></label>
-        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
+        <label className="block text-sm"><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setPhotoRights(null); }} className="block" /></label>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
         <button type="button" disabled={busy || !!conflictProduct || !selectedPhoto || !rightsConfirmed || !photoAlt.trim() || !photoAltJa.trim()} className={consoleButtonClass("secondary")} onClick={() => void uploadPhoto()}>写真を追加・差し替え</button>
       </section>
       </fieldset>

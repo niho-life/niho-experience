@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { requireOwner } from "./guest-questions.ts";
 import { enqueueNewReviewNotification } from "./host-notification-outbox.ts";
+import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor } from "./types.ts";
@@ -34,7 +35,11 @@ export const GUEST_REVIEW_LIMITS = {
   displayNameMaxLength: 60,
   noteMaxLength: 500,
   reportNoteMaxLength: 500,
+  bodyJapaneseMaxLength: 4000,
   publicListMax: 50,
+  publicSummarySlugMaxLength: 160,
+  publicSummarySlugsMax: 100,
+  publicSummarySlugCharactersMax: 8_000,
   hostListMax: 100,
   submitWindowDays: 30,
   invitationTtlDaysMax: 30,
@@ -83,9 +88,16 @@ export type PublicGuestReview = {
   reply: { hostName: string; body: string } | null;
 };
 
+/** Public aggregate only. It contains no provider, product, booking or guest identity. */
+export type PublicGuestReviewSummary = {
+  count: number;
+  average: number | null;
+  tags: { label: string; count: number }[];
+};
+
 /** The shape of ExperienceReviewsResponse: the summary counts every shown review, whatever the limit. */
 export type PublicGuestReviews = {
-  summary: { count: number; average: number | null; tags: { label: string; count: number }[] };
+  summary: PublicGuestReviewSummary;
   reviews: PublicGuestReview[];
 };
 
@@ -315,6 +327,51 @@ function decodeCursor(cursor: unknown): { at: string; id: string } | null {
   return { at: match[1]!, id: match[2]!.toLowerCase() };
 }
 
+function publicSummarySlugs(values: readonly string[]): string[] {
+  if (!Array.isArray(values) || values.length > GUEST_REVIEW_LIMITS.publicSummarySlugsMax) {
+    throw new StoreValidationError(`slugs must contain at most ${GUEST_REVIEW_LIMITS.publicSummarySlugsMax} values.`);
+  }
+  let characters = 0;
+  const unique = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string" || value.length < 1 || value.length > GUEST_REVIEW_LIMITS.publicSummarySlugMaxLength) {
+      throw new StoreValidationError(`each slug must contain 1-${GUEST_REVIEW_LIMITS.publicSummarySlugMaxLength} characters.`);
+    }
+    characters += value.length;
+    if (characters > GUEST_REVIEW_LIMITS.publicSummarySlugCharactersMax) {
+      throw new StoreValidationError(`slugs must contain at most ${GUEST_REVIEW_LIMITS.publicSummarySlugCharactersMax} characters in total.`);
+    }
+    unique.add(value);
+  }
+  return [...unique];
+}
+
+const PUBLIC_REVIEW_SCOPE_CTES = `
+  review_scope_options AS (SELECT $2::boolean AS include_native_publications),
+  ${VISIBLE_PUBLICATIONS_CTE},
+  ${CLAIMED_PUBLICATION_SLUGS_CTE},
+  public_review_candidates AS (
+    SELECT requested.slug,requested.ordinality,publication.provider_id,publication.product_id,
+           publication.seller_display_name
+      FROM requested
+      JOIN visible_publications publication ON publication.slug=requested.slug
+      CROSS JOIN review_scope_options options
+     WHERE options.include_native_publications
+    UNION ALL
+    SELECT requested.slug,requested.ordinality,product.provider_id,product.id AS product_id,
+           product.seller_display_name
+      FROM requested
+      JOIN experience_products product ON product.slug=requested.slug AND product.status='PUBLISHED'
+     WHERE NOT EXISTS (SELECT 1 FROM claimed_publication_slugs claimed WHERE claimed.slug=requested.slug)
+  ),
+  public_review_scopes AS (
+    SELECT slug,ordinality,min(provider_id) AS provider_id,min(product_id) AS product_id,
+           min(seller_display_name) AS seller_display_name
+      FROM public_review_candidates
+     GROUP BY slug,ordinality
+    HAVING count(*)=1
+  )`;
+
 /**
  * 予約者のレビュー (#104, #108; migration 0027). The review page has no identity: it holds a one-time link
  * that the thank-you email (next slice) gets from `issueInvitation`. A review is shown from the moment it is
@@ -325,9 +382,11 @@ function decodeCursor(cursor: unknown): { at: string; id: string } | null {
 export class GuestReviewRepository {
   readonly #pool: Pool;
   readonly #eligibility: GuestReviewEligibility;
+  readonly #includeNativePublications: boolean;
 
-  constructor(pool: Pool, options: { eligibility?: GuestReviewEligibility } = {}) {
+  constructor(pool: Pool, options: { eligibility?: GuestReviewEligibility; includeNativePublications?: boolean } = {}) {
     this.#pool = pool;
+    this.#includeNativePublications = options.includeNativePublications ?? true;
     // Only an explicit attendance mark permits a new review. An unrecorded booking remains pending until
     // the owner settles its policy; a later NO_SHOW also invalidates a link that was already sent.
     this.#eligibility = options.eligibility ?? (async ({ providerId, bookingId }, client) => {
@@ -461,16 +520,69 @@ export class GuestReviewRepository {
   /* ---------- the experience page (public) ---------- */
 
   /**
-   * The shown reviews of the one PUBLISHED experience with this slug, the latest first, and the summary of all
-   * of them. Null when no experience, or more than one, has the slug.
+   * Review aggregates for public cards in one bounded query. Native products resolve through their
+   * current visible immutable publication. A native draft/current/historical slug claim prevents a
+   * same-slug legacy row from resurfacing; only an unclaimed legacy product keeps the old single
+   * PUBLISHED-product fallback.
+   */
+  async listPublishedReviewSummaries(productSlugs: readonly string[]): Promise<ReadonlyMap<string, PublicGuestReviewSummary>> {
+    const slugs = publicSummarySlugs(productSlugs);
+    const summaries = new Map<string, PublicGuestReviewSummary>();
+    if (slugs.length === 0) return summaries;
+    const result = await this.#pool.query<DbRow>(
+      `WITH requested(slug,ordinality) AS (
+         SELECT slug,ordinality FROM unnest($1::text[]) WITH ORDINALITY AS input(slug,ordinality)
+       ),
+       ${PUBLIC_REVIEW_SCOPE_CTES}
+       SELECT scope.slug,scope.ordinality,totals.review_count,totals.average,tags.tag,tags.tag_count
+         FROM public_review_scopes scope
+         CROSS JOIN LATERAL (
+           SELECT count(*)::int AS review_count,round(avg(review.rating),1)::text AS average
+             FROM guest_reviews review
+            WHERE review.provider_id=scope.provider_id AND review.product_id=scope.product_id
+              AND review.hidden_at IS NULL
+         ) totals
+         LEFT JOIN LATERAL (
+           SELECT selected.tag,count(*)::int AS tag_count
+             FROM guest_reviews review
+             CROSS JOIN LATERAL unnest(review.tags) selected(tag)
+            WHERE review.provider_id=scope.provider_id AND review.product_id=scope.product_id
+              AND review.hidden_at IS NULL
+            GROUP BY selected.tag
+         ) tags ON true
+        ORDER BY scope.ordinality,tags.tag_count DESC,tags.tag COLLATE "C"`,
+      [slugs, this.#includeNativePublications],
+    );
+    for (const row of result.rows) {
+      const slug = String(row.slug);
+      let summary = summaries.get(slug);
+      if (!summary) {
+        const count = Number(row.review_count);
+        summary = { count, average: count === 0 ? null : Number(row.average), tags: [] };
+        summaries.set(slug, summary);
+      }
+      const label = row.tag === null || row.tag === undefined ? undefined : TAG_LABELS.get(String(row.tag));
+      if (label) summary.tags.push({ label, count: Number(row.tag_count) });
+    }
+    for (const summary of summaries.values()) {
+      summary.tags.sort((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+    }
+    return summaries;
+  }
+
+  /**
+   * The shown reviews of the one public experience with this slug, the latest first, and the summary of all
+   * of them. Null when no visible/resolved experience, or more than one, has the slug.
    */
   async listPublishedReviews(productSlug: string, options: { limit?: number } = {}): Promise<PublicGuestReviews | null> {
     if (typeof productSlug !== "string" || productSlug.length < 1 || productSlug.length > 160) return null;
     const limit = boundedInteger(options.limit ?? GUEST_REVIEW_LIMITS.publicListMax, "limit", 1, GUEST_REVIEW_LIMITS.publicListMax);
-    // A slug is unique per provider only: two published experiences with it answer neither.
+    // A slug is unique per provider only: two visible/resolved experiences with it answer neither.
     const products = await this.#pool.query<DbRow>(
-      "SELECT provider_id, id, seller_display_name FROM experience_products WHERE slug = $1 AND status = 'PUBLISHED' ORDER BY provider_id, id LIMIT 2",
-      [productSlug],
+      `WITH requested(slug,ordinality) AS (VALUES ($1::text,1::bigint)),
+       ${PUBLIC_REVIEW_SCOPE_CTES}
+       SELECT provider_id,product_id AS id,seller_display_name FROM public_review_scopes`,
+      [productSlug, this.#includeNativePublications],
     );
     const product = products.rows.length === 1 ? products.rows[0]! : undefined;
     if (!product) return null;
@@ -573,6 +685,35 @@ export class GuestReviewRepository {
     const id = uuid(reviewId, "reviewId");
     return withTransaction(this.#pool, async (client) => {
       await requireOwner(client, actor);
+      return hostReview(client, actor.providerId, id);
+    });
+  }
+
+  /**
+   * Store a trusted Japanese translation of an English review once. A cached translation wins a
+   * race. Another provider's, hidden, or non-English review is not writable. OWNER membership is
+   * checked in this transaction, after the external translation has completed.
+   */
+  async setBodyJapaneseOnce(actor: HostActor, reviewId: string, japanese: string): Promise<HostGuestReview> {
+    const id = uuid(reviewId, "reviewId");
+    const bodyJa = text(japanese, "japanese", 1, GUEST_REVIEW_LIMITS.bodyJapaneseMaxLength);
+    return withTransaction(this.#pool, async (client) => {
+      await requireOwner(client, actor);
+      const locked = await client.query<DbRow>(
+        `SELECT language,body_ja FROM guest_reviews
+          WHERE provider_id=$1 AND id=$2::uuid AND hidden_at IS NULL FOR NO KEY UPDATE`,
+        [actor.providerId, id],
+      );
+      const row = locked.rows[0];
+      if (!row) throw new StoreNotFoundError("guest review");
+      if (row.language !== "EN") throw new StoreValidationError("Only an English review takes a Japanese translation.");
+      if (row.body_ja === null || row.body_ja === undefined) {
+        await client.query(
+          `UPDATE guest_reviews SET body_ja=$3
+            WHERE provider_id=$1 AND id=$2::uuid AND hidden_at IS NULL AND language='EN' AND body_ja IS NULL`,
+          [actor.providerId, id, bodyJa],
+        );
+      }
       return hostReview(client, actor.providerId, id);
     });
   }

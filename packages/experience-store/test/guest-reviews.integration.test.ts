@@ -146,6 +146,45 @@ async function insertRaw(pool: Pool, bookingId: string, overrides: Record<string
   await pool.query(`INSERT INTO guest_reviews (${columns.join(", ")}) VALUES (${columns.map((_, index) => `$${index + 1}`).join(", ")})`, Object.values(row));
 }
 
+async function seedNativePublication(pool: Pool): Promise<{ providerId: string; productId: string; owner: { providerId: string; nihoUserId: string } }> {
+  const providerId = "provider-native";
+  const productId = "native";
+  await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [providerId]);
+  await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,'owner-native','OWNER',true)", [providerId]);
+  await pool.query(
+    `INSERT INTO experience_host_seller_profiles
+       (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+     VALUES ($1,'legacy-native','Native workspace','seller-native','acct_NativeSynthetic','Native Seller')`,
+    [providerId],
+  );
+  await pool.query(
+    `INSERT INTO experience_products
+       (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+     VALUES ($1,$2,'native-unfinished-draft','PUBLISHED','Native draft','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller')`,
+    [providerId, productId],
+  );
+  await pool.query(
+    `INSERT INTO schedule_rules
+       (provider_id,id,product_id,time_zone,starts_on,local_start_time,duration_minutes,capacity,booking_cutoff_minutes,busy_buffer_before_minutes,busy_buffer_after_minutes,recurrence)
+     VALUES ($1,'rule-native',$2,'Asia/Tokyo','2000-01-01','10:00',90,6,60,0,0,'{"kind":"DAILY"}')`,
+    [providerId, productId],
+  );
+  const publication = await pool.query<{ id: string }>(
+    `INSERT INTO experience_product_publications
+       (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
+        seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
+     VALUES ($1,$2,1,'native-live','Native live','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller','consent-v1','owner-native')
+     RETURNING id::text`,
+    [providerId, productId],
+  );
+  await pool.query(
+    `INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at)
+     SELECT $1,$2,$3::bigint,published_at FROM experience_product_publications WHERE id=$3::bigint`,
+    [providerId, productId, publication.rows[0]!.id],
+  );
+  return { providerId, productId, owner: { providerId, nihoUserId: "owner-native" } };
+}
+
 /** A different snapshot end for a booking, past the snapshot trigger. */
 async function moveEnd(pool: Pool, value: SampleBooking, endUtc: string): Promise<void> {
   await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
@@ -178,6 +217,19 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       await reviews.submitReview(link.token, input());
       const event = await pool.query<{ topic: string }>("SELECT topic FROM outbox_messages WHERE provider_id = $1 AND topic = 'host.notify.new_review'", [made.providerId]);
       assert.equal(event.rows.length, 1);
+      const reviewId = String((await pool.query("SELECT id FROM guest_reviews WHERE provider_id=$1 AND booking_id=$2::bigint", [made.providerId, made.id])).rows[0]?.id);
+      assert.deepEqual((await reviews.listPublishedReviewSummaries(["sample-tea"])).get("sample-tea"), { count: 1, average: 5, tags: [{ label: "Great host", count: 1 }] });
+      assert.deepEqual((await reviews.listPublishedReviews("sample-tea"))?.reviews.map((review) => review.id), [reviewId]);
+      const japanese = await reviews.setBodyJapaneseOnce(ownerA, reviewId, "穏やかで素敵な午後でした。");
+      assert.equal(japanese.bodyJa, "穏やかで素敵な午後でした。");
+      const replied = await reviews.saveReply(ownerA, reviewId, {
+        english: "Thank you for spending the afternoon with us.", japanese: "一緒に過ごしてくださりありがとうございました。",
+        commandId: randomUUID(), expectedRevision: 0,
+      });
+      assert.equal(replied.reply?.revision, 1);
+      const publicAfterReply = await reviews.listPublishedReviews("sample-tea");
+      assert.deepEqual(publicAfterReply?.reviews[0]?.reply, { hostName: "Sample Seller A", body: "Thank you for spending the afternoon with us." });
+      assert.doesNotMatch(JSON.stringify(publicAfterReply), /穏やか|一緒に|bodyJa|noteToHost|bookingId|public_booking/i);
       await pool.query("UPDATE booking_attendance SET status = 'NO_SHOW' WHERE provider_id = $1 AND booking_id = $2::bigint", [made.providerId, made.id]);
       const published = await pool.query<{ id: string }>("SELECT id FROM guest_reviews WHERE provider_id = $1 AND booking_id = $2::bigint AND hidden_at IS NULL", [made.providerId, made.id]);
       assert.equal(published.rows.length, 1);
@@ -374,9 +426,12 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       const hidden = await reviewOf(context, await booking(pool), { rating: 1, tags: ["EASY_TO_FIND"] });
       await hide(pool, hidden);
       const walk = await reviewOf(context, await booking(pool, { productId: "walk" }), { rating: 2 });
+      const walkNewest = await reviewOf(context, await booking(pool, { productId: "walk" }), { rating: 4, tags: ["GOOD_VALUE"] });
       const river = await reviewOf(context, await booking(pool, { providerId: "provider-b", productId: "river" }), { rating: 3 });
       await reviewOf(context, await booking(pool, { productId: "dup" }));
       await reviewOf(context, await booking(pool, { productId: "draft" }));
+      const translated = await reviews.setBodyJapaneseOnce(ownerA, middle, "穏やかで素敵な体験でした。");
+      assert.equal(translated.bodyJa, "穏やかで素敵な体験でした。");
       const reply = await reviews.saveReply(ownerA, middle, { english: "Thank you for coming.", japanese: "来てくださってありがとう。", commandId: randomUUID(), expectedRevision: 0 });
       assert.equal(reply.reply?.revision, 1);
 
@@ -403,7 +458,7 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       assert.match(third!.publishedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
       assert.ok(Date.parse(second!.publishedAt) > Date.parse(third!.publishedAt));
       // Never the host's Japanese, the private note, the booking, the guest's details or the provider's ids.
-      assert.doesNotMatch(JSON.stringify(page), /来て|Sample private note|example\.com|provider-|owner-|"tea"|note_to_host|bookingId|bodyJa/);
+      assert.doesNotMatch(JSON.stringify(page), /穏やかで素敵|来て|Sample private note|example\.com|provider-|owner-|"tea"|note_to_host|bookingId|bodyJa/);
 
       // The limit cuts the list, never the summary.
       const one = await reviews.listPublishedReviews("sample-tea", { limit: 1 });
@@ -413,10 +468,20 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       await assert.rejects(() => reviews.listPublishedReviews("sample-tea", { limit: 51 }), StoreValidationError);
 
       // Each experience its own; one slug published by two providers, a draft or nothing answers null.
-      assert.deepEqual((await reviews.listPublishedReviews("sample-walk"))?.reviews.map((item) => item.id), [walk]);
+      assert.deepEqual((await reviews.listPublishedReviews("sample-walk"))?.reviews.map((item) => item.id), [walkNewest, walk]);
       assert.deepEqual((await reviews.listPublishedReviews("sample-river"))?.reviews.map((item) => item.id), [river]);
       for (const slug of ["sample-dup", "sample-draft", "sample-missing", "", "x".repeat(161)]) assert.equal(await reviews.listPublishedReviews(slug), null, slug);
       assert.deepEqual(await reviews.listPublishedReviews("sample-quiet"), { summary: { count: 0, average: null, tags: [] }, reviews: [] });
+      const summaries = await reviews.listPublishedReviewSummaries(["sample-quiet", "sample-river", "sample-walk", "sample-tea", "sample-missing", "sample-walk"]);
+      assert.deepEqual([...summaries], [
+        ["sample-quiet", { count: 0, average: null, tags: [] }],
+        ["sample-river", { count: 1, average: 3, tags: [{ label: "Great host", count: 1 }] }],
+        ["sample-walk", { count: 2, average: 3, tags: [{ label: "Good value", count: 1 }, { label: "Great host", count: 1 }] }],
+        ["sample-tea", page.summary],
+      ]);
+      await assert.rejects(() => reviews.listPublishedReviewSummaries(Array.from({ length: 101 }, (_, index) => `slug-${index}`)), StoreValidationError);
+      await assert.rejects(() => reviews.listPublishedReviewSummaries(["x".repeat(161)]), StoreValidationError);
+      await assert.rejects(() => reviews.listPublishedReviewSummaries(Array.from({ length: 51 }, (_, index) => `${index}-${"x".repeat(157)}`)), StoreValidationError);
 
       // A seller name longer than a review's name limit is cut to fit it.
       const long = await reviewOf(context, await booking(pool, { productId: "long" }));
@@ -424,6 +489,90 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       const longPage = await reviews.listPublishedReviews("sample-long");
       assert.equal(longPage?.reviews[0]?.reply?.hostName, LONG_SELLER.slice(0, 60));
       assert.deepEqual(longPage?.summary, { count: 1, average: 5, tags: [{ label: "Great host", count: 1 }] });
+    });
+  });
+
+  it("uses the current native publication slug and never falls back across native claims or stops", async () => {
+    await withSchema(async (context) => {
+      const { pool, reviews } = context;
+      const native = await seedNativePublication(pool);
+      const first = await reviewOf(context, await booking(pool, { providerId: native.providerId, productId: native.productId }), { rating: 5, tags: ["GREAT_HOST"] });
+      const second = await reviewOf(context, await booking(pool, { providerId: native.providerId, productId: native.productId }), { rating: 3, tags: ["CALM_ATMOSPHERE"] });
+      const legacy = await reviewOf(context, await booking(pool), { rating: 4, tags: ["GOOD_VALUE"] });
+      const nativeDisabled = new GuestReviewRepository(pool, { includeNativePublications: false });
+      assert.deepEqual((await reviews.listPublishedReviews("native-live"))?.reviews.map((review) => review.id), [second, first]);
+      assert.deepEqual((await reviews.listPublishedReviewSummaries(["native-live"])).get("native-live"), {
+        count: 2, average: 4, tags: [{ label: "Calm atmosphere", count: 1 }, { label: "Great host", count: 1 }],
+      });
+      // The editable draft was renamed after publication; only the immutable current slug is public.
+      assert.equal(await reviews.listPublishedReviews("native-unfinished-draft"), null);
+      // Turning the native renderer off hides current and draft native slugs while retaining the
+      // claim mask. An unrelated, unclaimed legacy product keeps the old public boundary.
+      assert.equal(await nativeDisabled.listPublishedReviews("native-live"), null);
+      assert.equal(await nativeDisabled.listPublishedReviews("native-unfinished-draft"), null);
+      assert.equal((await nativeDisabled.listPublishedReviewSummaries(["native-live", "native-unfinished-draft"])).size, 0);
+      assert.deepEqual((await nativeDisabled.listPublishedReviews("sample-tea"))?.reviews.map((review) => review.id), [legacy]);
+      assert.equal((await nativeDisabled.listPublishedReviewSummaries(["sample-tea"])).get("sample-tea")?.count, 1);
+
+      // A same-slug legacy product cannot appear while the native publication is current or after it stops.
+      await pool.query(
+        `INSERT INTO experience_products
+           (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ('provider-b','native-live-legacy','native-live','PUBLISHED','Legacy collision','{}','JPY',1000,'terms','seller','acct_synthetic','Legacy Seller')`,
+      );
+      await pool.query(
+        `INSERT INTO schedule_rules
+           (provider_id,id,product_id,time_zone,starts_on,local_start_time,duration_minutes,capacity,booking_cutoff_minutes,busy_buffer_before_minutes,busy_buffer_after_minutes,recurrence)
+         VALUES ('provider-b','rule-native-live-legacy','native-live-legacy','Asia/Tokyo','2000-01-01','10:00',90,6,60,0,0,'{"kind":"DAILY"}')`,
+      );
+      await reviewOf(context, await booking(pool, { providerId: "provider-b", productId: "native-live-legacy" }));
+      assert.deepEqual((await reviews.listPublishedReviews("native-live"))?.reviews.map((review) => review.id), [second, first]);
+      assert.equal(await nativeDisabled.listPublishedReviews("native-live"), null, "disabled native route never falls back to the collision");
+      await pool.query("UPDATE experience_product_publication_states SET self_stopped_at=clock_timestamp() WHERE provider_id=$1 AND product_id=$2", [native.providerId, native.productId]);
+      assert.equal(await reviews.listPublishedReviews("native-live"), null);
+      assert.equal((await reviews.listPublishedReviewSummaries(["native-live"])).has("native-live"), false);
+
+      await pool.query(
+        `UPDATE experience_product_publication_states
+            SET self_stopped_at=NULL,operations_suspended_at=clock_timestamp(),operations_suspension_code='POLICY_REVIEW',
+                operations_suspended_by_niho_user_id='operations-synthetic',owner_resume_required=true
+          WHERE provider_id=$1 AND product_id=$2`,
+        [native.providerId, native.productId],
+      );
+      assert.equal(await reviews.listPublishedReviews("native-live"), null);
+      await pool.query(
+        `UPDATE experience_product_publication_states
+            SET operations_suspended_at=NULL,operations_suspension_code=NULL,operations_suspended_by_niho_user_id=NULL
+          WHERE provider_id=$1 AND product_id=$2`,
+        [native.providerId, native.productId],
+      );
+      assert.equal(await reviews.listPublishedReviews("native-live"), null, "owner_resume_required remains closed");
+      await pool.query("UPDATE experience_product_publication_states SET owner_resume_required=false WHERE provider_id=$1 AND product_id=$2", [native.providerId, native.productId]);
+      assert.equal((await reviews.listPublishedReviews("native-live"))?.summary.count, 2);
+      await pool.query("UPDATE experience_products SET status='DRAFT' WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId]);
+      assert.equal(await reviews.listPublishedReviews("native-live"), null);
+      await pool.query("UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId]);
+
+      // A historical native slug is reserved too, even if an unclaimed legacy row has that slug.
+      await pool.query(
+        `INSERT INTO experience_product_publications
+           (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
+         VALUES ($1,$2,2,'native-old','Native old','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller','consent-v2','owner-native')`,
+        [native.providerId, native.productId],
+      );
+      await pool.query(
+        `INSERT INTO experience_products
+           (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ('provider-b','native-old-legacy','native-old','PUBLISHED','Old legacy collision','{}','JPY',1000,'terms','seller','acct_synthetic','Legacy Seller')`,
+      );
+      assert.equal(await reviews.listPublishedReviews("native-old"), null);
+      assert.equal(await nativeDisabled.listPublishedReviews("native-old"), null);
+      assert.equal((await nativeDisabled.listPublishedReviewSummaries(["native-old"])).has("native-old"), false);
+      await hide(pool, second);
+      assert.deepEqual((await reviews.listPublishedReviewSummaries(["native-live"])).get("native-live"), {
+        count: 1, average: 5, tags: [{ label: "Great host", count: 1 }],
+      });
     });
   });
 
@@ -453,6 +602,7 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
         await assert.rejects(() => reviews.listReviews(actor), StoreAccessDeniedError);
         await assert.rejects(() => reviews.summarizeReviews(actor), StoreAccessDeniedError);
         await assert.rejects(() => reviews.getReview(actor, second), StoreAccessDeniedError);
+        await assert.rejects(() => reviews.setBodyJapaneseOnce(actor, second, "日本語訳"), StoreAccessDeniedError);
         await assert.rejects(() => reviews.saveReply(actor, second, reply), StoreAccessDeniedError);
         await assert.rejects(() => reviews.reportReview(actor, second, report), StoreAccessDeniedError);
       }
@@ -472,10 +622,17 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       // Another provider's, a hidden one, or none at all is not found.
       for (const id of [river, hidden, randomUUID()]) {
         await assert.rejects(() => reviews.getReview(ownerA, id), StoreNotFoundError);
+        await assert.rejects(() => reviews.setBodyJapaneseOnce(ownerA, id, "日本語訳"), StoreNotFoundError);
         await assert.rejects(() => reviews.saveReply(ownerA, id, reply), StoreNotFoundError);
         await assert.rejects(() => reviews.reportReview(ownerA, id, report), StoreNotFoundError);
       }
       await assert.rejects(() => reviews.getReview(ownerA, "not-a-uuid"), StoreValidationError);
+      await assert.rejects(() => reviews.setBodyJapaneseOnce(ownerA, first, "日本語訳"), StoreValidationError, "a Japanese original is not translated");
+      const translated = await reviews.setBodyJapaneseOnce(ownerA, second, "穏やかで素敵な午後でした。");
+      assert.equal(translated.bodyJa, "穏やかで素敵な午後でした。");
+      assert.equal((await reviews.setBodyJapaneseOnce(ownerA, second, "競合した別の訳")).bodyJa, "穏やかで素敵な午後でした。");
+      await assert.rejects(() => reviews.setBodyJapaneseOnce(ownerA, second, "x".repeat(4001)), StoreValidationError);
+      assert.doesNotMatch(JSON.stringify(await reviews.listPublishedReviews("sample-tea")), /穏やか|競合した別の訳|Sample private note/);
 
       // 返信: on any shown review; the same command once; a stale revision is refused.
       const answered = await reviews.saveReply(ownerA, second, reply);
@@ -531,6 +688,7 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       assert.equal(counted[0]!.ratingTotal, page!.reviews.reduce((sum, item) => sum + item.rating, 0));
       assert.deepEqual((await reviews.summarizeReviews(ownerB)).map((item) => item.productId), ["river"]);
       await assert.rejects(() => reviews.getReview(ownerA, second), StoreNotFoundError);
+      await assert.rejects(() => reviews.setBodyJapaneseOnce(ownerA, second, "別の訳"), StoreNotFoundError);
       await assert.rejects(() => reviews.saveReply(ownerA, second, correction), StoreNotFoundError);
       await assert.rejects(() => reviews.saveReply(ownerA, second, { ...correction, commandId: randomUUID(), expectedRevision: 2 }), StoreNotFoundError);
       await assert.rejects(() => reviews.reportReview(ownerA, second, untrue), StoreNotFoundError);

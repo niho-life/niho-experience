@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PublicGuestReview, PublicGuestReviews } from "@niho-experience/experience-store";
+import { GUEST_REVIEW_LIMITS, type PublicGuestReview, type PublicGuestReviews } from "@niho-experience/experience-store";
 
 /** The experience page's reviews from a stubbed experience store (#104). */
 const state = vi.hoisted(() => ({ repository: null as null | Record<string, ReturnType<typeof vi.fn>> }));
@@ -7,7 +7,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { journeyApi: "off" } }));
 vi.mock("@/lib/experience/store-server", () => ({ guestReviewRepository: () => state.repository, guestQuestionRepository: () => null }));
 
-import { getLiveReviews } from "./journey";
+import { getLiveReviews, getReviewSummaries } from "./journey";
 import { reviewDisplay, reviewHeadline } from "./reviews-ui";
 import { reviewsForJsonLd } from "./structured-data";
 
@@ -26,7 +26,48 @@ const item = (index: number, extra: Partial<PublicGuestReview> = {}): PublicGues
 const answer = (count: number, average: number | null, reviews: PublicGuestReview[], tags: PublicGuestReviews["summary"]["tags"] = []): PublicGuestReviews => ({ summary: { count, average, tags }, reviews });
 
 beforeEach(() => {
-  state.repository = { listPublishedReviews: vi.fn(async () => answer(0, null, [])) };
+  state.repository = {
+    listPublishedReviews: vi.fn(async () => answer(0, null, [])),
+    listPublishedReviewSummaries: vi.fn(async () => new Map([
+      ["sample-tea", { count: 2, average: 4.5, tags: [{ label: "Great host", count: 2 }] }],
+      ["sample-new", { count: 0, average: null, tags: [] }],
+    ])),
+  };
+});
+
+describe("getReviewSummaries", () => {
+  it("reads every card slug in one store call and only returns real review lines", async () => {
+    const summaries = await getReviewSummaries(["sample-tea", "sample-new"]);
+    expect(state.repository?.listPublishedReviewSummaries).toHaveBeenCalledOnce();
+    expect(state.repository?.listPublishedReviewSummaries).toHaveBeenCalledWith(["sample-tea", "sample-new"]);
+    expect([...summaries]).toEqual([["sample-tea", { count: 2, average: 4.5, tags: [{ label: "Great host", count: 2 }] }]]);
+  });
+
+  it.each([
+    { bound: "count", slugs: Array.from({ length: 101 }, (_, index) => `sample-${index}`) },
+    { bound: "total characters", slugs: Array.from({ length: 60 }, (_, index) => `sample-${index}`.padEnd(160, "x")) },
+  ])("preserves every summary when a catalog exceeds the $bound bound", async ({ slugs }) => {
+    const summary = { count: 3, average: 5, tags: [] };
+    const batches: string[][] = [];
+    state.repository!.listPublishedReviewSummaries!.mockImplementation(async (batch: string[]) => {
+      expect(batch.length).toBeLessThanOrEqual(GUEST_REVIEW_LIMITS.publicSummarySlugsMax);
+      expect(batch.reduce((sum, slug) => sum + slug.length, 0)).toBeLessThanOrEqual(GUEST_REVIEW_LIMITS.publicSummarySlugCharactersMax);
+      batches.push(batch);
+      return new Map(batch.map((slug) => [slug, summary]));
+    });
+    const summaries = await getReviewSummaries([...slugs, ...slugs]);
+    expect(batches).toHaveLength(2);
+    expect(batches.flat()).toEqual(slugs);
+    expect([...summaries]).toEqual(slugs.map((slug) => [slug, summary]));
+  });
+
+  it("does not turn a failed aggregate read into a zero-review summary", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    state.repository!.listPublishedReviewSummaries!.mockRejectedValueOnce(new TypeError("synthetic private review"));
+    expect(await getReviewSummaries(["sample-tea"])).toEqual(new Map());
+    expect(logged).toHaveBeenCalledWith("Experience card guest review summaries failed", { error: "TypeError" });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("synthetic private review");
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 

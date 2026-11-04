@@ -130,7 +130,7 @@
 - **本人・権限**：選別契約v1.0.0の`GET /api/experience-host/identity`は現在の`nihoUserId`と`ACTIVE`だけを返し、Experience OWNER roleは返さない。Experienceの現在OWNER membershipとseller profile上の本人ID完全一致をserverで照合する。`ownerUserId`やprovider IDで本人を代用しない。
 - **Experience商品**：Eのhost editorは`/host/api/products*`、`sale-terms`、`media` BFFを呼ぶ。NIHO本人ID・権限・Connect参照はブラウザーへ出さず、商品・写真・販売条件・公開・停止／再開はExperienceが認可・保存する。
 - **旧NIHO予約**：NIHO Host v1の限定booking list/detail/approve/decline/cancel-refund/message操作を旧予約向けに残す。NIHOが照会・履行・取消／返金を引き続き担う。新しいExperience商品APIへ移行しない。
-- **契約状態**：NIHO Host v1.0.0はsource SHA `b5b664e6bfcb0bc8d0be01ffa109a684647b17db`、export SHA-256 `924ce2062be2c431ee6a4dd3a8322c48558e6d76f0a097bae75ae6222610023e`、draft / `not-deployed`。配備とacceptanceまではHTTP flagsをOFFにする。
+- **契約状態**：NIHO Host v1.0.0はsource SHA `b5b664e6bfcb0bc8d0be01ffa109a684647b17db`、export SHA-256 `924ce2062be2c431ee6a4dd3a8322c48558e6d76f0a097bae75ae6222610023e`。stagingのmanifestは niho-app #19784 で設定済みだが、実配備APIの同一hash readbackは未確認で、productionはOFF。配備とacceptanceまではHTTP flagsをOFFにする。
 
 ### 9.1 NIHO Host API v1.0.0（identity／Connect／legacy booking）
 

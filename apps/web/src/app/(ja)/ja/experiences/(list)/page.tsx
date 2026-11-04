@@ -15,6 +15,8 @@ import { filterExperienceSummaries, normalizeExperienceQuery, type SearchParams 
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
 import type { ExperienceSummaryForSite } from "@/lib/experience-types";
+import { getReviewSummaries } from "@/lib/journey";
+import { withReviewLines } from "@/lib/reviews-ui";
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   try {
@@ -38,7 +40,8 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
     else { const selected = await getJapaneseCatalog(); assertSameJapaneseRelease(copy.releaseId, selected); catalog = selected.experiences; }
     const searchQuery = normalizeExperienceQuery(query.q);
     const items = filterExperienceSummaries(catalog, searchQuery);
-    const cards = buildCardModels(items, await loadDetails(api, items, true, "ja", copy.releaseId), false, "ja", copy.copy);
+    const plainCards = buildCardModels(items, await loadDetails(api, items, true, "ja", copy.releaseId), false, "ja", copy.copy);
+    const cards = withReviewLines(plainCards, await getReviewSummaries(plainCards.map((card) => card.slug)), "ja");
     const now = new Date(), finderDays = upcomingDays(now, FINDER_DAYS, "ja");
     const initialDate = parseDateParam(query.date, finderDays);
     const initialGuests = parseGuestsParam(query.guests);

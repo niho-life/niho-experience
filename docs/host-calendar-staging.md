@@ -124,6 +124,7 @@ Cloud Runのservice URLは `status.url` のhash形式に加え、service名・pr
 mock で出している機能を http mode で開くフラグを、`host-staging` Environment の Variable `STG_*` で候補 revision に渡す。表・前提・配備前の検査・配備後の検証は本番と同じで、[本番の「機能のフラグ」](production-deploy.md#機能のフラグ84) の表の `PROD_` を `STG_` に読み替える（`scripts/deploy/runtime-flags.mjs`）。staging で違うのは次の点。
 
 - **ホストの画面と DB は常にある**ので、前提の「ホストの画面・DB」はいつも満たす。サイトの URL は `STG_HOST_SERVICE_URL`、`<project>` は `niho-app-stg`。
+- **Admin console** は `STG_ADMIN_SUPPORT_CONSOLE_ENABLED=true` と `STG_ADMIN_SESSION_SECRET_REF=experience-stg-admin-session-secret:VERSION_NUMBER` が必要。Host cookieとは別の専用32文字以上の乱数をSecret Managerへ保存し、そのsecretだけにruntimeのsecretAccessorを付ける。workflowは `NIHO_EXPERIENCE_ADMIN_ORIGIN` をサイトURLから導出する。NIHO側の専用origin許可、現在Admin認証、DB migrationの先行配備が済むまでOFFを保つ。このflagだけでは新予約/メールを開かない。
 - **Guide Admin API** は `STG_GUIDE_ADMIN_API_ENABLED=true`、`STG_GUIDE_ADMIN_AUDIENCE`（Cloud Run service URL）、`STG_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`（NIHO stg API runtime SA 1つ）が必要。audienceは公開ドメインでも候補tag URLでもないCloud Run URLを使う。NIHO Admin BFFがstgへ配備・受入されるまではOFFに保つ。
 - **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
 - **NIHO本人確認のtoken audience**は、host console稼働中は公開API flagと独立して `STG_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE=https://api-stg.niho.life` が必要。これはNIHO API向けの正確なoriginで、Experienceの候補URLではない。Host v1 API・service identity許可のstg受入が済むまでは `STG_HOST_PUBLICATION_API_ENABLED` をOFFに保つ。

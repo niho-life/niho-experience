@@ -2,7 +2,7 @@
 
 import { nihoIdOrNull } from "@/lib/host/providers";
 import { HOST_INVALID_INPUT_TEXT } from "./errors";
-import { loadMoreGuestReviews, reportGuestReview as reportStoredReview, saveGuestReviewReply, type HostGuestReviewPageView } from "./guest-reviews-server";
+import { loadMoreGuestReviews, readGuestReviewInJapanese, reportGuestReview as reportStoredReview, saveGuestReviewReply, type HostGuestReviewPageView } from "./guest-reviews-server";
 import type { HostActionResult } from "./payout";
 import { REVIEW_REPLY_TEXT_LIMIT, REVIEW_REPORT_NOTE_LIMIT, REVIEW_REPORT_REASONS } from "./reviews";
 import type { HostReview } from "./types";
@@ -28,6 +28,14 @@ function text(value: unknown, max: number): string | null {
 
 function commandIdOrNull(value: unknown): string | null {
   return typeof value === "string" && COMMAND_ID.test(value) ? value : null;
+}
+
+/** 日本語で読む: identifiers only. The server re-reads the trusted review body after OWNER checks. */
+export async function translateGuestReviewBody(input: { providerId: string; reviewId: string }): Promise<HostActionResult<Saved>> {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const reviewId = text(input?.reviewId, REVIEW_ID_LIMIT);
+  if (!providerId || !reviewId) return invalid;
+  return readGuestReviewInJapanese(providerId, reviewId);
 }
 
 /** 返信を公開する / 返信を直す: the English is required; the Japanese is empty when the host wrote the English directly. */

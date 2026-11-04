@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { draftReviewReplyEnglish } from "@/host/actions";
 import { guestMessageView } from "@/host/messages";
 import type { HostNotice } from "@/host/payout";
-import { loadMoreReviewList, publishGuestReviewReply, reportGuestReview } from "@/host/review-actions";
+import { loadMoreReviewList, publishGuestReviewReply, reportGuestReview, translateGuestReviewBody } from "@/host/review-actions";
 import {
   publishReviewReply,
   ratingLabel,
@@ -41,7 +41,7 @@ import { HostIcon } from "./HostIcon";
 import { HostNoticeLine } from "./HostNoticeLine";
 import { HostSubHeader } from "./HostSubHeader";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
-import { replySignature, reportSignature, reviewAttempt, withRevision, withSavedReview, type ReviewAttempt, type ReviewWrite } from "./live-review-state";
+import { replySignature, reportSignature, reviewAttempt, withRevision, withReviewTranslation, withSavedReview, type ReviewAttempt, type ReviewWrite } from "./live-review-state";
 import { ReplyDraftFields, useReplyDraft } from "./ReplyDraftFields";
 import { HostPageBody, InitialAvatar, PageHead, RatingStars } from "./ui";
 
@@ -55,7 +55,7 @@ const replyButtonId = (id: string) => `${reviewAnchor(id)}-reply-button`;
 const SMALL_HEADING = "font-sans text-xs leading-normal font-extrabold tracking-normal";
 
 /** What a guest wrote: NIHO's translation with their own words under it, or their words alone (and why). */
-function ReviewText({ text }: { text: HostReviewText }) {
+function ReviewText({ text, onTranslate, translating = false }: { text: HostReviewText; onTranslate?: () => void; translating?: boolean }) {
   const view = guestMessageView(text);
   return (
     <>
@@ -71,9 +71,14 @@ function ReviewText({ text }: { text: HostReviewText }) {
         </p>
       ) : null}
       {view.note ? (
-        <p className="mt-1.5 text-xs leading-normal">
-          <span className={`inline-flex items-center rounded-full px-2 font-extrabold ${view.untranslated ? "bg-warn-pale text-warn" : "bg-info-pale text-info"}`}>{view.note}</span>
-        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs leading-normal">
+          {!view.untranslated || !onTranslate ? <span className={`inline-flex items-center rounded-full px-2 font-extrabold ${view.untranslated ? "bg-warn-pale text-warn" : "bg-info-pale text-info"}`}>{view.note}</span> : null}
+          {view.untranslated && onTranslate ? (
+            <button type="button" onClick={onTranslate} disabled={translating} className={consoleButtonClass("secondary", "sm", DISABLED)}>
+              {translating ? "日本語にしています…" : "日本語で読む"}
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </>
   );
@@ -123,7 +128,7 @@ export interface ReplyInput {
  * (not dropped) while another review's reply is open, so the Japanese written so far stays; so
  * does a reply the store could not take (`busy` while it is sent, live).
  */
-function ReviewReplyComposer({ review, providerId, hidden, busy, onPublish, onCancel }: { review: HostReview; providerId: string; hidden: boolean; busy: boolean; onPublish: (reply: ReplyInput) => void; onCancel: () => void }) {
+function ReviewReplyComposer({ review, providerId, hidden, busy, onPublish, onCancel }: { review: HostReview; providerId: string; hidden: boolean; busy: ReviewBusy | null; onPublish: (reply: ReplyInput) => void; onCancel: () => void }) {
   const japaneseField = useRef<HTMLTextAreaElement>(null);
   const published = review.reply;
   const draft = useReplyDraft((japanese) => draftReviewReplyEnglish({ providerId, reviewId: review.id, japanese }), { initial: published ? replyDraftFrom(published) : undefined });
@@ -136,22 +141,22 @@ function ReviewReplyComposer({ review, providerId, hidden, busy, onPublish, onCa
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!canSend || draft.drafting || busy) return;
+    if (!canSend || draft.drafting || busy !== null) return;
     onPublish({ japanese: draft.japanese, english: draft.english });
   };
 
   return (
-    <form onSubmit={submit} hidden={hidden} aria-label={`${review.reviewer.name} さんへの返信`} aria-busy={busy || undefined} className="mt-3 border-t border-dashed border-line-strong pt-3">
+    <form onSubmit={submit} hidden={hidden} aria-label={`${review.reviewer.name} さんへの返信`} aria-busy={busy !== null || undefined} className="mt-3 border-t border-dashed border-line-strong pt-3">
       <ReplyDraftFields
         draft={draft}
         japaneseRef={japaneseField}
         maxLength={REVIEW_REPLY_TEXT_LIMIT}
         englishLabel="公開される英語"
-        submitLabel={busy ? "公開しています…" : "返信を公開する"}
-        canSubmit={canSend && !busy}
-        disabled={busy}
+        submitLabel={busy === "reply" ? "公開しています…" : "返信を公開する"}
+        canSubmit={canSend && busy === null}
+        disabled={busy !== null}
         extra={
-          <button type="button" onClick={onCancel} disabled={busy} className={consoleButtonClass("ghost", "md")}>
+          <button type="button" onClick={onCancel} disabled={busy !== null} className={consoleButtonClass("ghost", "md")}>
             やめる
           </button>
         }
@@ -233,11 +238,12 @@ interface ReviewRowProps {
   /** …and it is the one shown. */
   composing: boolean;
   /** Live: its reply or report is with the store. */
-  busy: ReviewWrite | null;
+  busy: ReviewBusy | null;
   notice: HostNotice | null;
   onReply: () => void;
   onCancel: () => void;
   onPublish: (reply: ReplyInput) => void;
+  onTranslate?: () => void;
   onReport: () => void;
 }
 
@@ -246,7 +252,7 @@ interface ReviewRowProps {
  * (translated, with the original), the note for the host, the reply and 報告する. Every review is
  * published when written (owner decision 2026-10-31), so each one takes a reply.
  */
-function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composing, busy, notice, onReply, onCancel, onPublish, onReport }: ReviewRowProps) {
+function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composing, busy, notice, onReply, onCancel, onPublish, onTranslate, onReport }: ReviewRowProps) {
   const stage = reviewReplyStage(review);
   const tags = reviewTagLabels(review.tags);
   return (
@@ -274,7 +280,7 @@ function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composin
           ) : null}
 
           <div className="mt-2.5">
-            <ReviewText text={review.body} />
+            <ReviewText text={review.body} onTranslate={onTranslate} translating={busy === "translate"} />
           </div>
 
           {review.privateNote ? (
@@ -285,11 +291,11 @@ function ReviewRow({ review, hidden, experienceTitle, providerId, kept, composin
           ) : null}
 
           {stage === "replied" && !composing ? <PublishedReply review={review} /> : null}
-          {kept ? <ReviewReplyComposer review={review} providerId={providerId} hidden={!composing} busy={busy === "reply"} onPublish={onPublish} onCancel={onCancel} /> : null}
+          {kept ? <ReviewReplyComposer review={review} providerId={providerId} hidden={!composing} busy={busy} onPublish={onPublish} onCancel={onCancel} /> : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {composing ? null : (
-              <button id={replyButtonId(review.id)} type="button" aria-describedby={headingId(review.id)} onClick={onReply} className={consoleButtonClass("secondary", "sm")}>
+              <button id={replyButtonId(review.id)} type="button" aria-describedby={headingId(review.id)} onClick={onReply} disabled={busy !== null} className={consoleButtonClass("secondary", "sm", DISABLED)}>
                 {stage === "replied" ? "返信を直す" : "返信する"}
               </button>
             )}
@@ -335,6 +341,7 @@ const LIVE_FAILED: Record<ReviewWrite, string> = {
   reply: "返信を公開できませんでした。時間をおいて、もう一度お試しください。",
   report: "報告できませんでした。時間をおいて、もう一度お試しください。",
 };
+type ReviewBusy = ReviewWrite | "translate";
 const MORE_FAILED = "レビューを読み込めませんでした。時間をおいて、もう一度お試しください。";
 
 /**
@@ -358,7 +365,7 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
   const [reporting, setReporting] = useState<HostReview | null>(null);
   /** Live: each reply's revision, what is with the store (by review), and the command id of each try. */
   const [revisions, setRevisions] = useState<Readonly<Record<string, number>>>(live?.revisions ?? {});
-  const [busy, setBusy] = useState<Readonly<Record<string, ReviewWrite>>>({});
+  const [busy, setBusy] = useState<Readonly<Record<string, ReviewBusy>>>({});
   /** Live: where the next page starts (null once every review is here), and how reading it went. */
   const [cursor, setCursor] = useState<string | null>(live?.nextCursor ?? null);
   const [more, setMore] = useState<{ busy: boolean; failed: string | null }>({ busy: false, failed: null });
@@ -434,6 +441,28 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
     attempts.current.delete(`${write}:${saved.review.id}`);
     replace(saved.review);
     setRevisions((current) => withRevision(current, saved.review.id, saved.revision));
+  };
+
+  /** Live: explicitly translate this one public review body. Reply drafts stay mounted and untouched. */
+  const translateBody = async (review: HostReview) => {
+    if (sending.current.has(review.id)) return;
+    sending.current.add(review.id);
+    setBusy((current) => ({ ...current, [review.id]: "translate" }));
+    say(review.id, "");
+    try {
+      const result = await translateGuestReviewBody({ providerId, reviewId: review.id });
+      if (!result.ok) {
+        fail(review.id, result.message);
+        return;
+      }
+      setReviews((current) => withReviewTranslation(current, result.review));
+      say(review.id, result.message);
+    } catch {
+      fail(review.id, "日本語にできませんでした。原文を読みながら返信するか、もう一度お試しください");
+    } finally {
+      sending.current.delete(review.id);
+      setBusy((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== review.id)));
+    }
   };
 
   const publishLive = async (review: HostReview, input: ReplyInput) => {
@@ -570,6 +599,7 @@ export function HostReviews({ reviews: initialReviews, experiences, now, linkPro
                   onReply={() => reply(review.id)}
                   onCancel={() => cancel(review.id)}
                   onPublish={(input) => publish(review, input)}
+                  onTranslate={live && review.body.language !== "ja" && review.body.translation === null ? () => void translateBody(review) : undefined}
                   onReport={() => setReporting(review)}
                 />
               ))}
