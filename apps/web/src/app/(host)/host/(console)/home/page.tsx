@@ -19,9 +19,10 @@ import { loadSiteHomeMonth } from "@/host/site-sales-server";
 import { SITE_HOME_LOAD_FAILED_TEXT, withSiteHome } from "@/host/site-sessions";
 import { loadSiteHome } from "@/host/site-sessions-server";
 import { config } from "@/lib/config";
-import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, HOST_SETTINGS_PATH, HOST_TRANSLATE_PATH, withProvider } from "@/lib/host/routes";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 import { isHostMock } from "@/lib/host/server";
+import { translateRoomsEnabled } from "@/lib/host/translate-rooms-server";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 
 export const metadata: Metadata = { title: "ホーム" };
@@ -184,6 +185,15 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
       {/* Keyed by provider: another provider's rows start from their own list. */}
       <HostHomeTodos key={provider.id} todos={home.todos} providerId={linkProviderId} />
       <HostAppBadge enabled={config.hostPwaEnabled} count={homeBadgeCount(home.todos)} />
+      {provider.memberRole === "OWNER" && translateRoomsEnabled() ? (
+        <section aria-labelledby="home-translate" className="mt-3.5 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-canvas px-4 py-3.5 md:px-5">
+          <div className="min-w-0 flex-[1_1_180px]">
+            <h2 id="home-translate" className="font-sans text-[0.9375rem] leading-normal font-extrabold tracking-normal">予約なしで通訳する</h2>
+            <p className="mt-0.5 text-[0.8125rem] leading-normal text-ink-soft">2人のNIHOアプリをつないで、日英の対面通訳を始めます。</p>
+          </div>
+          <Link href={link(HOST_TRANSLATE_PATH)} className={consoleButtonClass("primary")}>通訳を開く</Link>
+        </section>
+      ) : null}
       <DaySessions id="home-today" title="今日の開催" sessions={home.sessions.today} link={link} />
       <DaySessions id="home-tomorrow" title="明日の開催" sessions={home.sessions.tomorrow} link={link} />
       {/* Under the day's sessions: what needs doing and who comes first, the calendar after them. */}

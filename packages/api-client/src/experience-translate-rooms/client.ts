@@ -1,7 +1,17 @@
 import "server-only";
 import { normalizeOrigin, type FetchLike } from "../client.ts";
-import { isExperienceTranslateBookingId, isExperienceTranslateRoomPathId, isExperienceTranslateRoomsSchema } from "./schema.ts";
-import type { ExperienceTranslateRoomCreatedResponse, ExperienceTranslateRoomEndResponse, ExperienceTranslateRoomStatusResponse, ExperienceTranslateRoomsResult } from "./types.ts";
+import { hasSafeStandaloneTranslateInvites, isExperienceTranslateBookingId, isExperienceTranslateRoomPathId, isExperienceTranslateRoomsSchema, isStandaloneTranslateRoomId } from "./schema.ts";
+import type {
+  ExperienceTranslateRoomCreatedResponse,
+  ExperienceTranslateRoomEndResponse,
+  ExperienceTranslateRoomStatusResponse,
+  ExperienceTranslateRoomsResult,
+  StandaloneTranslateInviteResult,
+  StandaloneTranslateLanguage,
+  StandaloneTranslateRoom,
+  StandaloneTranslateRoomCreated,
+  StandaloneTranslateRoomCurrent,
+} from "./types.ts";
 
 /*
  * 対面通訳の部屋 (#181): the host's own ID token makes, reads and ends a room of one of the
@@ -48,9 +58,39 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
   }
   const roomsPath = (providerId: string, requestId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(requestId)}/translate-rooms`;
   const siteRoomsPath = (providerId: string, bookingId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/site-bookings/${encodeURIComponent(bookingId)}/translate-rooms`;
+  const standaloneRoomsPath = (providerId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/translate-rooms`;
   const ids = (...values: string[]) => values.every((value) => isExperienceTranslateRoomPathId(value));
   const invalid = <T>(): Promise<ExperienceTranslateRoomsResult<T>> => Promise.resolve({ ok: false, kind: "invalid_request" });
+  const safeInvites = <T extends StandaloneTranslateRoomCreated | StandaloneTranslateInviteResult>(name: string): Decoder<T> => (value) => {
+    if (!isExperienceTranslateRoomsSchema<T>(name, value)) return null;
+    return hasSafeStandaloneTranslateInvites(value) ? value : null;
+  };
   return {
+    createStandaloneRoom(providerId: string, hostLanguage: StandaloneTranslateLanguage) {
+      return ids(providerId) && (hostLanguage === "ja" || hostLanguage === "en")
+        ? request("POST", standaloneRoomsPath(providerId), 201, safeInvites<StandaloneTranslateRoomCreated>("StandaloneTranslateRoomCreated"), { hostLanguage })
+        : invalid<StandaloneTranslateRoomCreated>();
+    },
+    getCurrentStandaloneRoom(providerId: string) {
+      return ids(providerId)
+        ? request("GET", `${standaloneRoomsPath(providerId)}/current`, 200, schema<StandaloneTranslateRoomCurrent>("StandaloneTranslateRoomCurrent"))
+        : invalid<StandaloneTranslateRoomCurrent>();
+    },
+    getStandaloneRoom(providerId: string, roomId: string) {
+      return ids(providerId) && isStandaloneTranslateRoomId(roomId)
+        ? request("GET", `${standaloneRoomsPath(providerId)}/${encodeURIComponent(roomId)}`, 200, schema<StandaloneTranslateRoom>("StandaloneTranslateRoom"))
+        : invalid<StandaloneTranslateRoom>();
+    },
+    reissueStandaloneInvite(providerId: string, roomId: string, role: "host" | "guest") {
+      return ids(providerId) && isStandaloneTranslateRoomId(roomId) && (role === "host" || role === "guest")
+        ? request("POST", `${standaloneRoomsPath(providerId)}/${encodeURIComponent(roomId)}/invites/${role}`, 200, safeInvites<StandaloneTranslateInviteResult>("StandaloneTranslateInviteResult"), {})
+        : invalid<StandaloneTranslateInviteResult>();
+    },
+    endStandaloneRoom(providerId: string, roomId: string) {
+      return ids(providerId) && isStandaloneTranslateRoomId(roomId)
+        ? request("POST", `${standaloneRoomsPath(providerId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {})
+        : invalid<ExperienceTranslateRoomEndResponse>();
+    },
     /** Makes the room with both invites. The body is an empty object: the language comes from the booking. */
     createRoom(providerId: string, requestId: string) {
       return ids(providerId, requestId) ? request("POST", roomsPath(providerId, requestId), 201, schema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated"), {}) : invalid<ExperienceTranslateRoomCreatedResponse>();
