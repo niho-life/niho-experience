@@ -1,6 +1,6 @@
 # Experience owner-seller API contract
 
-本書の本人・Connect境界の正は [NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。NIHO v1.0.0は未配備で、ExperienceのHTTP APIは環境flagが揃うまで閉じる。
+本書の本人・Connect境界の正は [NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。NIHO v1.0.0はstagingのmanifestを設定済み（niho-app #19784）だが実配備readbackは未確認で、ExperienceのHTTP APIは環境flagが揃うまで閉じる。
 
 Status: implementation contract for #330 / #369 / #377. The host UI consumes these operations. The product owner is the seller; product requests never select a seller, provider, or payment account. The existing calendar API has its own selected-provider context and validates the logged-in NIHO membership before writing.
 
