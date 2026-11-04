@@ -84,7 +84,8 @@ function validDraft(value: unknown): value is ProductDraftBody {
     && typeof value.publicTitle === "string" && value.publicTitle.length >= 1 && value.publicTitle.length <= 300
     && isRecord(value.content)
     && value.currency === "JPY"
-    && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount) && value.unitAmount > 0;
+    && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
+    && (value.unitAmount === 0 || value.unitAmount >= 50);
 }
 
 function validSaleTermsShape(value: unknown): value is ProductSaleTermsInput {

@@ -36,11 +36,16 @@ function CancelSection({ booking }: { booking: GuestBookingView }) {
   if (booking.status === "CANCELLED") {
     body = booking.refunds.length
       ? booking.refunds.map((refund, index) => <p key={index} className={p}>{refundLine(refund, booking.timeZone)}</p>)
-      : <p className={p}>No refund was made for this booking.</p>;
+      : <p className={p}>{booking.totalAmount === 0 ? "No payment was required, so no refund was needed." : "No refund was made for this booking."}</p>;
   } else if (booking.status === "PAYMENT_REVIEW") {
     body = <p className={p}>NIHO support will email you about your payment. For questions, reply to your confirmation email.</p>;
   } else if (booking.experienceEnded) {
     body = <p className={p}>This experience has ended. For questions about it, reply to your confirmation email and NIHO support will help.</p>;
+  } else if (booking.totalAmount === 0) {
+    body = <>
+      <p className={p}>No payment was required. You can cancel this free booking any time before the experience ends.</p>
+      <BookingCancel publicBookingId={booking.publicBookingId} choice="REQUEST" shownDeadlineUtc={booking.freeCancellationUntilUtc} refundWords={null} freeBooking />
+    </>;
   } else if (booking.freeCancellationOpen && booking.freeCancellationUntilUtc) {
     const total = money(booking.totalAmount, booking.currency);
     body = (
@@ -94,12 +99,14 @@ function CancelSection({ booking }: { booking: GuestBookingView }) {
  */
 export function GuestBookingDetails({ booking, now, conversation = null, translationNotice = false }: { booking: GuestBookingView; now: Date; conversation?: GuestBookingConversation | null; translationNotice?: boolean }) {
   const status = STATUS[booking.status];
-  const policy = booking.status === "CANCELLED" ? null : cancellationWords(booking, now);
+  const policy = booking.status === "CANCELLED" ? null : booking.totalAmount === 0
+    ? "This free booking can be cancelled any time before the experience ends."
+    : cancellationWords(booking, now);
   const rows: [string, string][] = [
     ["Date", calendarDate(booking.localDate, DATE_LONG)],
     ["Time", `${booking.localStartTime} ${zoneName(booking.timeZone)}`],
     ["Guests", party(booking.adultCount, booking.childCount)],
-    ["Total paid", money(booking.totalAmount, booking.currency)],
+    [booking.totalAmount === 0 ? "Total" : "Total paid", booking.totalAmount === 0 ? "Free" : money(booking.totalAmount, booking.currency)],
     ["Host", booking.hostDisplayName],
     ["Booked by", booking.guestName],
     ["Booked on", `${zonedMoment(Date.parse(booking.bookedAtUtc), booking.timeZone)} ${zoneName(booking.timeZone)}`],

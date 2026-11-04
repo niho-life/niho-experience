@@ -97,6 +97,7 @@ export function chargeablePlatformFee(totalAmount: number, basisPoints: number):
 function guestPlatformFee(settings: GuestPricingInput["platformFee"], totalAmount: number): PlatformFeeSnapshot {
   const { supportEnabled, basisPoints } = settings;
   if (basisPoints !== (supportEnabled ? 1500 : 1000)) throw new StoreValidationError("The platform fee does not match the support setting.");
+  if (totalAmount === 0) return { supportEnabled, basisPoints, amount: 0 };
   if (!chargeablePlatformFee(totalAmount, basisPoints)) throw new StoreValidationError("The platform fee must be at least 1 and below the booking total.");
   return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints) };
 }
@@ -143,6 +144,7 @@ export function buildSnapshots(
       unitAmount: product.unitAmount,
       seats,
       totalAmount,
+      paymentRequired: totalAmount > 0,
       cancellationTermsRef: product.cancellationTermsRef,
       ...(guest === undefined ? {} : {
         breakdown: { ...guest.breakdown, minimumChargeableParticipants },

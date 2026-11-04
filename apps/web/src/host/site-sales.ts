@@ -5,15 +5,15 @@ import { addMonths, monthKey, monthLabelJa, parseMonthKey, rowDate, salesMonthNa
 import type { StatusLabel } from "./status";
 
 /*
- * 売上 for the bookings travelers made on this site (#91, ADR 0002): the experience DB's payment ledger, one month in
- * Japan at a time. The store gives each entry with NIHO's fee it moved and what it moved for the provider; this sums
- * and words them. Only this site's bookings: what is still sold through NIHO is not here, and the screen says so.
- * Payouts to the bank are Stripe's (the Connect account's): no 入金予定 or 入金済み is made up here. Type-only use of
- * the store: the preview's synthetic ledger goes through the same rules.
+ * 売上 for the bookings travelers made on this site (#91, ADR 0002): the experience DB's payment ledger plus explicit
+ * zero-amount free-booking activity, one month in Japan at a time. Free bookings stay separate from money totals.
+ * Only this site's bookings: what is still sold through NIHO is not here, and the screen says so. Payouts to the bank
+ * are Stripe's (the Connect account's): no 入金予定 or 入金済み is made up here. The preview's synthetic ledger uses
+ * the same rules.
  */
 
-export const SITE_SALES_SCOPE_TEXT = "このサイトで受けた予約の売上です。NIHO で販売している体験の売上は含みません。";
-export const SITE_SALES_HOME_SCOPE_TEXT = "このサイトで受けた予約の分";
+export const SITE_SALES_SCOPE_TEXT = "このサイトで受けた予約の売上です。無料予約は金額0円で件数に表示します。NIHO で販売している体験の売上は含みません。";
+export const SITE_SALES_HOME_SCOPE_TEXT = "このサイトで受けた予約の分。無料予約は件数のみ表示します。";
 export const SITE_SALES_LOAD_FAILED_TEXT = "売上を読み込めませんでした。時間をおいて、もう一度お試しください。";
 export const SITE_SALES_HOME_LOAD_FAILED_TEXT = "今月の売上を読み込めませんでした。";
 export const SITE_SALES_RECEIVED_NOTE = "受取額は、売上から NIHO の手数料と返金を引いた額です。口座への入金の予定と実績は Stripe で確認できます。";
@@ -71,6 +71,8 @@ export interface SiteSalesSummary {
   receivedYen: number | null;
   /** How many payments. */
   payments: number;
+  /** Confirmed free bookings, shown separately from payments and money totals. */
+  freeBookings: number;
   /** A partial refund's fee is worked out (siteSalesRows marks it 見込み). */
   feeEstimated: boolean;
   /** Entries not in yen. */
@@ -78,10 +80,14 @@ export interface SiteSalesSummary {
 }
 
 export function siteSalesSummary(entries: readonly HostSaleEntry[]): SiteSalesSummary {
-  const summary: SiteSalesSummary = { salesYen: 0, feeYen: 0, refundsYen: 0, adjustmentsYen: 0, receivedYen: 0, payments: 0, feeEstimated: false, otherCurrencies: 0 };
+  const summary: SiteSalesSummary = { salesYen: 0, feeYen: 0, refundsYen: 0, adjustmentsYen: 0, receivedYen: 0, payments: 0, freeBookings: 0, feeEstimated: false, otherCurrencies: 0 };
   for (const entry of entries) {
     if (entry.currency !== JPY) {
       summary.otherCurrencies += 1;
+      continue;
+    }
+    if (entry.kind === "FREE_BOOKING") {
+      summary.freeBookings += 1;
       continue;
     }
     if (entry.kind === "PAYMENT") {
@@ -103,6 +109,7 @@ export function siteSalesSummary(entries: readonly HostSaleEntry[]): SiteSalesSu
 export function siteSalesFigures(summary: SiteSalesSummary): SalesFigure[] {
   return [
     { label: "売上", value: yen(summary.salesYen) },
+    ...(summary.freeBookings ? [{ label: "無料予約", value: `${summary.freeBookings}件` }] : []),
     { label: "手数料", value: summary.feeYen === null ? UNKNOWN : yen(-summary.feeYen) },
     { label: "返金", value: yen(-summary.refundsYen) },
     ...(summary.adjustmentsYen ? [{ label: "調整", value: yen(summary.adjustmentsYen) }] : []),
@@ -136,8 +143,11 @@ const REFUNDING: StatusLabel = { label: "返金中", tone: "wait" };
 const REFUNDED: StatusLabel = { label: "返金済み", tone: "draft" };
 const REFUND_FAILED: StatusLabel = { label: "返金に失敗", tone: "stop" };
 const ADJUSTED: StatusLabel = { label: "調整", tone: "draft" };
+const FREE_BOOKED: StatusLabel = { label: "予約確定", tone: "draft" };
+const FREE_CANCELLED: StatusLabel = { label: "取消済み", tone: "draft" };
 
 function statusOf(entry: HostSaleEntry): StatusLabel {
+  if (entry.kind === "FREE_BOOKING") return entry.bookingStatus === "CANCELLED" ? FREE_CANCELLED : FREE_BOOKED;
   if (entry.kind === "PAYMENT") return entry.bookingStatus === "PAYMENT_REVIEW" ? UNDER_REVIEW : RECORDED;
   if (entry.kind === "REFUND_REVERSAL") return REFUND_FAILED;
   if (entry.kind === "ADJUSTMENT") return ADJUSTED;
@@ -152,6 +162,7 @@ function sessionOf(entry: HostSaleEntry): string {
 
 /** The fee the entry moved, as the row says it; null where an entry moves none. */
 function feeOf(entry: HostSaleEntry): string | null {
+  if (entry.kind === "FREE_BOOKING") return "決済なし・手数料なし";
   if (entry.kind === "ADJUSTMENT") return null;
   if (entry.platformFeeAmount === null) return "手数料は確認できません";
   if (entry.kind === "REFUND") return `手数料の戻り ${yen(-entry.platformFeeAmount)}${entry.feeEstimated ? "（見込み）" : ""}`;
@@ -162,7 +173,9 @@ const withGuest = (title: string, guest: string | null) => (guest ? `${title} ·
 
 function wordsOf(entry: HostSaleEntry): Pick<SalesRow, "title" | "detail"> {
   const parts: (string | null)[] =
-    entry.kind === "PAYMENT"
+    entry.kind === "FREE_BOOKING"
+      ? [CHANNEL, sessionOf(entry), "支払いなし"]
+      : entry.kind === "PAYMENT"
       ? [CHANNEL, sessionOf(entry), feeOf(entry)]
       : entry.kind === "REFUND"
         ? [CHANNEL, entry.productTitle, entry.refund?.kind === "PARTIAL" ? "一部返金" : "全額返金", feeOf(entry)]
@@ -171,14 +184,15 @@ function wordsOf(entry: HostSaleEntry): Pick<SalesRow, "title" | "detail"> {
           : [CHANNEL, entry.productTitle, "内容は NIHO サポートへお問い合わせください"];
   if (entry.currency !== JPY) parts.push("集計に含めていません");
   const title =
-    entry.kind === "PAYMENT" ? withGuest(entry.productTitle, entry.guestName)
+    entry.kind === "FREE_BOOKING" ? withGuest(`無料予約 · ${entry.productTitle}`, entry.guestName)
+    : entry.kind === "PAYMENT" ? withGuest(entry.productTitle, entry.guestName)
     : entry.kind === "REFUND" ? withGuest("返金", entry.guestName)
     : entry.kind === "REFUND_REVERSAL" ? withGuest("返金の取り消し", entry.guestName)
     : withGuest("調整", entry.guestName);
   return { title, detail: parts.filter(Boolean).join(" · ") };
 }
 
-/** 明細: each entry as the store gives them (the latest first), dated in Japan. Only money going back is red. */
+/** 明細: ledger movements and free bookings as the store gives them (the latest first), dated in Japan. */
 export function siteSalesRows(entries: readonly HostSaleEntry[]): SalesRow[] {
   return entries.map((entry) => ({
     key: entry.key,
@@ -213,6 +227,7 @@ export function siteHomeMonth(entries: readonly HostSaleEntry[], month: SalesMon
       { label: "返金", value: yen(-summary.refundsYen) },
       { label: "受取額", value: summary.receivedYen === null ? UNKNOWN : yen(summary.receivedYen) },
       { label: "支払い", value: `${summary.payments}件` },
+      ...(summary.freeBookings ? [{ label: "無料予約", value: `${summary.freeBookings}件` }] : []),
     ],
     note: SITE_SALES_HOME_SCOPE_TEXT,
   };

@@ -13,6 +13,7 @@ import {
   expandRules,
   questionsFingerprint,
   readSaleTerms,
+  salePriceSetMatchesProduct,
   saleSettingsFromRow,
   tokyoDate,
   validSaleTerms,
@@ -130,6 +131,9 @@ function validProduct(input: RegisterProductInput): RegisterProductInput {
   if (typeof input.status !== "string" || !PRODUCT_STATUSES.has(input.status)) throw new StoreValidationError("product.status is invalid.");
   assertNonEmptyText(input.publicTitle, "product.publicTitle", 300);
   assertMoney(input.unitAmount, "product.unitAmount");
+  if (input.unitAmount !== 0 && input.unitAmount < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+    throw new StoreValidationError(`product.unitAmount must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
+  }
   assertNonEmptyText(input.cancellationTermsRef, "product.cancellationTermsRef");
   assertNonEmptyText(input.sellerNihoAccountRef, "product.sellerNihoAccountRef", 256);
   assertNonEmptyText(input.stripeConnectAccountRef, "product.stripeConnectAccountRef", 256);
@@ -392,8 +396,11 @@ export class SiteSaleRegistration {
     const fingerprint = questionsFingerprint(terms.bookingQuestions);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [providerId, productId]);
+      const product = await client.query<DbRow>("SELECT unit_amount FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [providerId, productId]);
       if (product.rows[0] === undefined) throw new StoreNotFoundError("product");
+      if (!salePriceSetMatchesProduct(Number(product.rows[0].unit_amount), terms)) {
+        throw new StoreValidationError("A free product must price every offer and child at ¥0; paid offers must meet Stripe's minimum charge.");
+      }
       const current = await readSaleTerms(client, providerId, productId, true);
       const child = terms.childPricing;
       const values = [
@@ -497,8 +504,17 @@ export class SiteSaleRegistration {
       const otherCount = Number(others.rows[0]?.others ?? 0);
       add("UNIQUE_SLUG", otherCount === 0, "No other product publishes the slug.", `${otherCount} other published product(s) have the slug: neither is sold.`);
       add("JPY", product.currency === "JPY", "The price is in JPY.", "The price is not in JPY.");
-      add("MINIMUM_PRICE", product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen,
-        `The price is at least ¥${GUEST_BOOKING_LIMITS.minimumChargeYen}.`, `The price is below ¥${GUEST_BOOKING_LIMITS.minimumChargeYen}, Stripe's smallest charge.`);
+      const priceSetReady = terms === null
+        ? product.unitAmount === 0 || product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
+        : salePriceSetMatchesProduct(product.unitAmount, terms);
+      const priceReadyMessage = terms === null && product.unitAmount === 0
+        ? "The base price is ¥0; offer and child prices are checked when sale terms are set."
+        : terms !== null && product.unitAmount === 0
+          ? "Every offer and child price is free."
+          : `The price is at least ¥${GUEST_BOOKING_LIMITS.minimumChargeYen}.`;
+      add("MINIMUM_PRICE", priceSetReady,
+        priceReadyMessage,
+        `Prices must be ¥0 for a fully free product or at least ¥${GUEST_BOOKING_LIMITS.minimumChargeYen} for paid offers.`);
       const feeOk = settings !== null && chargeableFee(product.unitAmount, terms?.childPricing ?? null, settings.platformFeeBasisPoints);
       add("FEE_SETTINGS", feeOk,
         `NIHO's fee is set (support ${settings?.supportEnabled === true ? "on, 15%" : "off, 10%"}).`,

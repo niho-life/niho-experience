@@ -44,8 +44,8 @@ describe("掲載までに必要", () => {
   it("is empty once the title, a cover and complete offers are there", () => {
     expect(listingRequirements(page({ title: "Roast", photos: [PHOTO], offers: [COMPLETE] }))).toEqual([]);
     expect(listingRequirements(byId("community-dinner"))).toEqual([]);
-    // A blank title counts as none; a price of zero is not a price.
-    expect(listingRequirements(page({ title: "   ", photos: [PHOTO], offers: [{ ...COMPLETE, adultPriceYen: 0 }] }))).toEqual(["題名", "料金"]);
+    // A blank title counts as none; a zero price is a valid free offer.
+    expect(listingRequirements(page({ title: "   ", photos: [PHOTO], offers: [{ ...COMPLETE, adultPriceYen: 0 }] }))).toEqual(["題名"]);
   });
 
   it("asks a page written in Japanese for its Japanese title and its English confirmed (#110)", () => {
@@ -98,7 +98,7 @@ describe("申込の設定 rows", () => {
 
   it("adds the child price under the adult one when there is one", () => {
     expect(offerChildPriceLabel(DINNER)).toBe("子ども ¥12,000");
-    expect(offerChildPriceLabel({ ...DINNER, childPriceYen: 0 })).toBe("子ども ¥0");
+    expect(offerChildPriceLabel({ ...DINNER, childPriceYen: 0 })).toBe("子ども 無料");
     expect(offerChildPriceLabel({ ...DINNER, childPriceYen: null })).toBeNull();
   });
 
@@ -106,6 +106,7 @@ describe("申込の設定 rows", () => {
     expect(offerScheduleLabel({ ...emptyOffer("n"), durationMinutes: 90 })).toBe("90分");
     expect(offerScheduleLabel(emptyOffer("n"))).toBe("日程が未入力");
     expect(offerPriceLabel(emptyOffer("n"))).toBe("料金が未入力");
+    expect(offerPriceLabel({ ...emptyOffer("n"), adultPriceYen: 0 })).toBe("無料");
   });
 
   it("lists the days from Monday", () => {

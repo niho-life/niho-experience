@@ -6,7 +6,7 @@ import { getBookingApi } from "@/lib/browser-api";
 import type { BookingSource } from "@/lib/booking-source";
 import { dayLabelWithoutWeekday, dayOption } from "@/lib/date-filter";
 import type { ExperienceDetailForSite } from "@/lib/experience-types";
-import { formatDuration, formatTime, formatYen, pluralize } from "@/lib/format";
+import { formatDuration, formatExperiencePriceYen, formatTime, pluralize } from "@/lib/format";
 import { slotAvailabilityLabel } from "@/lib/availability-copy";
 import { track } from "@/lib/analytics";
 import { BookingSelectionViewV1, type BookingSelectionViewModelV1 } from "@niho/experience-presentation/v1";
@@ -71,15 +71,15 @@ export function SlotPicker({ experience, slug, offers, preview, availabilityIsPr
     summary,
     ...(offers.length ? {} : { unavailableMessage: copy.text("booking.newDatesSoon") }),
     offerDescription: offers.length === 1 ? offer?.shortDescription ?? undefined : undefined,
-    offers: offers.map((item) => ({ id: item.id, name: item.name, description: item.shortDescription ?? undefined, adultPrice: formatYen(item.pricing.adultPriceYen, locale), selected: offerId === item.id })),
+    offers: offers.map((item) => ({ id: item.id, name: item.name, description: item.shortDescription ?? undefined, adultPrice: formatExperiencePriceYen(item.pricing.adultPriceYen, locale), selected: offerId === item.id })),
     dates: { state: loading ? "loading" : error ? "error" : occurrences.length ? "ready" : "empty", provisional: availabilityIsProvisional, options: shownDates.map((item) => { const day = dayOption(item.date, locale); return { id: item.date, weekday: day.weekday, day: dayLabelWithoutWeekday(day, locale), time: `${formatTime(item.startAt, locale)} – ${formatTime(item.endAt, locale)}`, availability: item.bookable && availabilityIsProvisional ? undefined : slotAvailabilityLabel(item, availabilityIsProvisional, copy, locale), bookable: item.bookable, selected: date === item.date }; }), moreCount: moreDates },
     counters: offer ? [
-      { id: "adult-count", label: copy.text("booking.adults"), note: copy.text(offer.minimumParticipants > 1 ? "booking.adultMinimum" : "booking.each", { price: formatYen(offer.pricing.adultPriceYen, locale), minimum: offer.minimumParticipants }), value: adultCount, maximum: offer.maxPartySize, full: headCount >= offer.maxPartySize },
-      ...(offer.pricing.child ? [{ id: "child-count", label: copy.text("booking.children"), note: copy.text(offer.pricing.child.adultRequired ? "booking.childPriceAdult" : "booking.childPrice", { minimumAge: offer.pricing.child.minAge, maximumAge: offer.pricing.child.maxAge, price: formatYen(offer.pricing.child.priceYen, locale) }), value: childCount, maximum: offer.maxPartySize, full: headCount >= offer.maxPartySize }] : []),
+      { id: "adult-count", label: copy.text("booking.adults"), note: copy.text(offer.minimumParticipants > 1 ? "booking.adultMinimum" : "booking.each", { price: formatExperiencePriceYen(offer.pricing.adultPriceYen, locale), minimum: offer.minimumParticipants }), value: adultCount, maximum: offer.maxPartySize, full: headCount >= offer.maxPartySize },
+      ...(offer.pricing.child ? [{ id: "child-count", label: copy.text("booking.children"), note: copy.text(offer.pricing.child.adultRequired ? "booking.childPriceAdult" : "booking.childPrice", { minimumAge: offer.pricing.child.minAge, maximumAge: offer.pricing.child.maxAge, price: formatExperiencePriceYen(offer.pricing.child.priceYen, locale) }), value: childCount, maximum: offer.maxPartySize, full: headCount >= offer.maxPartySize }] : []),
     ] : undefined,
-    guestRange: offer ? { minimum: offer.minimumParticipants, maximum: offer.maxPartySize, childrenPrice: offer.pricing.child ? formatYen(offer.pricing.child.priceYen, locale) : undefined } : undefined,
+    guestRange: offer ? { minimum: offer.minimumParticipants, maximum: offer.maxPartySize, childrenPrice: offer.pricing.child ? formatExperiencePriceYen(offer.pricing.child.priceYen, locale) : undefined } : undefined,
     hint: canContinue ? undefined : hint,
-    total: total !== null && countsValid ? formatYen(total, locale) : copy.text("booking.checkCounts"),
+    total: total !== null && countsValid ? formatExperiencePriceYen(total, locale) : copy.text("booking.checkCounts"),
     totalIsAmount: total !== null && countsValid,
     line: selected ? `${dayOption(selected.date, locale).label} · ${formatTime(selected.startAt, locale)}` : copy.text("booking.chooseDateLine"),
     canContinue,
