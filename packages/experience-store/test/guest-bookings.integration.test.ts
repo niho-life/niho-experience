@@ -658,9 +658,11 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.equal(free.booking.pricingSnapshot.platformFee?.amount, 0);
 
       const rows = await pool.query(
-        `SELECT b.status, b.checkout_session_ref, b.pricing_snapshot->>'paymentRequired' AS payment_required,
+        `SELECT b.status, g.checkout_session_ref, b.pricing_snapshot->>'paymentRequired' AS payment_required,
                 (SELECT count(*)::int FROM payment_ledger_entries l WHERE l.provider_id=b.provider_id AND l.booking_id=b.id) AS ledger_entries
-           FROM bookings b WHERE b.public_booking_id=$1`,
+           FROM bookings b
+           JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+          WHERE b.public_booking_id=$1`,
         [free.publicBookingId],
       );
       assert.deepEqual(rows.rows, [{ status: "CONFIRMED", checkout_session_ref: null, payment_required: "false", ledger_entries: 0 }]);
