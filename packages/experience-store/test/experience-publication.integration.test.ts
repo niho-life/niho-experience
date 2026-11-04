@@ -6,12 +6,21 @@ import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";
 import { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "provider-synthetic", nihoUserId: "owner-synthetic" } as const;
 const EDITOR = { providerId: OWNER.providerId, nihoUserId: "editor-synthetic" } as const;
 const OPS = { nihoUserId: "operations-synthetic" } as const;
 const CHECKS = { manuscriptReady: true, photosReady: true } as const;
+
+async function consentSupport(pool: import("pg").Pool, actor: typeof OWNER | { providerId: string; nihoUserId: string }) {
+  const guests = new GuestBookingRepository(pool);
+  const current = await guests.getProviderSupportSettings(actor);
+  await guests.setProviderSupportSettings(actor, {
+    supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: current?.version ?? 0,
+  });
+}
 
 const manuscript = (description: string) => ({
   lead: "A synthetic lead.",
@@ -78,7 +87,10 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
 
       const store = new ExperienceStore(pool);
       const publications = new ExperiencePublicationRepository(pool);
-      for (const owner of [firstOwner, secondOwner]) await publications.recordReadiness(owner, readiness(), null);
+      for (const owner of [firstOwner, secondOwner]) {
+        await consentSupport(pool, owner);
+        await publications.recordReadiness(owner, readiness(), null);
+      }
       const prepareProduct = async (owner: { readonly providerId: string; readonly nihoUserId: string }, id: string, slug: string) => {
         const product = await store.createProduct(owner, {
           id, slug, status: "PUBLISHED", publicTitle: `Synthetic ${id}`, content: manuscript(`Synthetic ${id} copy.`),
@@ -301,6 +313,14 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         [OWNER.providerId],
       );
 
+      await assert.rejects(
+        publications.publish(OWNER, original.id, {
+          expectedDraftVersion: original.version, expectedStateVersion: null,
+          consentVersion: ready.requiredConsentVersion, checks: CHECKS,
+        }),
+        (error: unknown) => error instanceof ExperiencePublicationBlockedError && error.blockers.includes("SUPPORT_CONSENT_REQUIRED"),
+      );
+      await consentSupport(pool, OWNER);
       let state = await publications.publish(OWNER, original.id, {
         expectedDraftVersion: original.version,
         expectedStateVersion: null,
