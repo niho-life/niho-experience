@@ -118,6 +118,39 @@ test("通信断中も異なる期限のQRとリンクをそれぞれ失効させ
   await context.setOffline(false);
 });
 
+for (const { role, failure } of [{ role: "guest", failure: "network" }, { role: "host", failure: "502" }] as const) {
+  test(`再発行結果が不明でも${role}席だけ古い招待を消す（${failure}）`, async ({ page }) => {
+    await syntheticStandaloneRoute(page);
+    const target = `**/rooms/synthetic-room-1/invites/${role}`;
+    let failReissue!: () => void;
+    const release = new Promise<void>((resolve) => { failReissue = resolve; });
+    await page.route(target, async (route) => {
+      await release;
+      if (failure === "network") return route.abort("failed");
+      return route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "upstream_unavailable" }) });
+    }, { times: 1 });
+    await page.goto("/host/auth/mock-login");
+    await page.goto(`/host/translate?providerId=${PROVIDER}`);
+    await page.getByRole("button", { name: "通訳の部屋を作る" }).click();
+    const qr = page.getByRole("img", { name: "相手用の招待QRコード" });
+    const hostLink = page.getByRole("link", { name: "自分のNIHOアプリで開く" });
+    await expect(qr).toBeVisible();
+    await expect(hostLink).toHaveAttribute("href", invite("host").inviteUrl);
+    if (role === "host") await expect(page.getByRole("definition").first()).toContainText("接続中", { timeout: 10_000 });
+    const pending = page.waitForRequest((request) => request.url().endsWith(`/synthetic-room-1/invites/${role}`));
+    await page.getByRole("button", { name: role === "guest" ? "相手用を再発行" : "自分用を再発行", exact: true }).click();
+    if (role === "host") await page.getByRole("dialog", { name: "自分用の招待を再発行しますか？" }).getByRole("button", { name: "再発行する" }).click();
+    await pending;
+    await expect(role === "guest" ? qr : hostLink).toHaveCount(0);
+    await expect(role === "guest" ? hostLink : qr).toBeVisible();
+    failReissue();
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("通信を確認して");
+    await expect(role === "guest" ? qr : hostLink).toHaveCount(0);
+    await expect(role === "guest" ? hostLink : qr).toBeVisible();
+    await expect(page.getByRole("button", { name: role === "guest" ? "相手用QRを再発行" : "自分用リンクを再発行", exact: true })).toBeEnabled();
+  });
+}
+
 for (const lateResult of ["success", "network-error"] as const) {
   test(`pending再発行中の終了後も新規作成でき、古い${lateResult}を破棄する`, async ({ page }) => {
     let current: Record<string, unknown> | null = null;

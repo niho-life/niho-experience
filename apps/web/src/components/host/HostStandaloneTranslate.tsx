@@ -216,6 +216,8 @@ export function HostStandaloneTranslate({ providerId, providerName }: { provider
     const expectedRoomId = room.roomId;
     const generation = instance.current;
     setConfirming(null); setBusy(true); setError(""); setNotice("");
+    // Once sent, reissue may revoke the old credential even if its response is lost.
+    setInvites((current) => ({ ...current, [role]: null }));
     try {
       const response = await hostFetch(`${base}/${encodeURIComponent(expectedRoomId)}/invites/${role}`, { method: "POST" });
       if (!standaloneResponseIsCurrent(generation, instance.current, expectedRoomId, roomId.current)) return;
