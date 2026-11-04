@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { CheckoutAnswer, ExperienceApiClient, ExperienceCheckoutRequest, Occurrence } from "@niho-experience/api-client";
+import type { ExperienceApiClient, ExperienceCheckoutRequest, Occurrence } from "@niho-experience/api-client";
 import { createClientRequestKey } from "@niho-experience/api-client";
 import { getSiteBookingApi } from "@/lib/browser-api";
 import { formatYen } from "@/lib/format";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
+import { answersForCheckout } from "@/lib/experience/site-booking-answers";
 import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
 
 type QuestionAnswers = Record<string, string | string[]>;
@@ -59,12 +60,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     event.preventDefault();
     if (!api || !offer || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting) return;
     setProblem("");
-    const answersBody: CheckoutAnswer[] = offer.bookingQuestions.flatMap((question): CheckoutAnswer[] => {
-      const value = answers[question.id];
-      if (typeof value === "string" && value.trim()) return [{ questionId: question.id, text: value.trim() }];
-      if (Array.isArray(value) && value.length) return [{ questionId: question.id, optionIds: value }];
-      return [];
-    });
+    const answersBody = answersForCheckout(offer.bookingQuestions, answers);
     const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> = {
       offerId: offer.id,
       occurrenceDate: date,

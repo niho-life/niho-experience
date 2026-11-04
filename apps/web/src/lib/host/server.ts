@@ -29,6 +29,7 @@ import {
   type HostSession,
 } from "./session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
+import { parseBearerToken } from "./bearer-token";
 
 const serviceAuth = new GoogleAuth();
 
@@ -85,8 +86,9 @@ export async function selectedHostApiClient(session: HostSession, options: { leg
       const client = await serviceAuth.getIdTokenClient(config.nihoExperienceHostCommonContractAudience);
       const headers = await client.getRequestHeaders();
       const value = headers.authorization ?? headers.Authorization;
-      if (typeof value !== "string" || !/^Bearer [^\\s]+$/.test(value)) throw new Error("Experience service identity is unavailable");
-      return value.slice(7);
+      const token = parseBearerToken(value);
+      if (token === null) throw new Error("Experience service identity is unavailable");
+      return token;
     })();
   const apiFetch = isHostMock()
     ? createMockExperienceHostFetch({

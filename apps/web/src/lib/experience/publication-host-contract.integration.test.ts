@@ -197,6 +197,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       const created = await createResponse.json() as { product: { id: string; version: string; draft: { version?: number } } };
       const productId = created.product.id;
       expect(productId).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(await publicationRepository.listClaimedSlugs()).toEqual([SLUG]);
 
       await publicationRepository.addMedia(boundary.value.actor, productId, {
         id: randomUUID(), objectKey: `experience-products/${randomUUID()}.jpg`, sourceRefHash: "a".repeat(64),

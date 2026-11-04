@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import type { ExperienceProviderPageOfferPatch } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageOfferPatch } from "@niho-experience/api-client/legacy-host";
 
 /*
  * 体験の編集 (#89), NIHO 接続版: the mock editor's body fields (見どころ … 注意事項, 当日の流れ, 外観写真) and 日本語 / 英語（自動訳）

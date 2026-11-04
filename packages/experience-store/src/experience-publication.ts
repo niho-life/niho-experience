@@ -1195,12 +1195,14 @@ export class ExperiencePublicationRepository {
    */
   async listClaimedSlugs(): Promise<readonly string[]> {
     const result = await this.#pool.query<{ slug: string }>(
-      `SELECT product.slug FROM experience_products product
-        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
-       UNION
-       SELECT publication.slug FROM experience_product_publications publication
-        JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
-       ORDER BY slug COLLATE "C"`,
+      `SELECT claimed.slug FROM (
+         SELECT product.slug FROM experience_products product
+          JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+         UNION
+         SELECT publication.slug FROM experience_product_publications publication
+          JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
+       ) claimed
+       ORDER BY claimed.slug COLLATE "C"`,
     );
     return result.rows.map((row) => String(row.slug));
   }
