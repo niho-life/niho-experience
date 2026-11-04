@@ -201,7 +201,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
 
       await publicationRepository.addMedia(boundary.value.actor, productId, {
         id: randomUUID(), objectKey: `experience-products/${randomUUID()}.jpg`, sourceRefHash: "a".repeat(64),
-        width: 640, height: 480, byteSize: 2048, altText: "Synthetic photo", publicCredit: null,
+        width: 640, height: 480, byteSize: 2048, altText: "Synthetic photo", altTextJa: "合成写真", publicCredit: null,
       });
       const occurrenceDay = addLocalDays(new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10), 1);
       const rule: ScheduleRule = {
