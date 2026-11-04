@@ -5,6 +5,7 @@ import {
   GUEST_BOOKING_LIMITS,
   GuestBookingRepository,
   MAX_SELLABLE_PRODUCT_ID_LENGTH,
+  PLATFORM_FEE_BASIS_POINTS,
   SALE_SETTINGS_COLUMNS,
   TERMS_COLUMNS,
   activeRules,
@@ -30,8 +31,8 @@ import type { MembershipRole, ProductRecord, ProductStatus } from "./types.ts";
 import { assertMoney, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 
 /*
- * The operator's registration of an experience sold on this site (#285 slice 9; docs/guest-booking.md
- * 「体験の登録と切替（第9段）」). Every method here is for scripts/experience/register-site-sale.mjs only:
+ * Operator registration for legacy site-sale cutover and seller bootstrap. Every method here is called only by
+ * scripts/experience/register-site-sale.mjs or scripts/experience/provision-host-seller.mjs:
  * it takes no HostActor and checks no membership, so it must never be reachable from a route. This file
  * is not exported from index.ts (only from the `./site-sale-registration` subpath the script imports),
  * apps/web never imports it, and scripts/gcp/experience-db-grants.mjs lists it in OPERATOR_ONLY_SOURCES:
@@ -67,6 +68,17 @@ export interface RegisterHostSellerProfileInput {
   readonly sellerNihoAccountRef: string;
   readonly stripeConnectAccountRef: string;
   readonly sellerDisplayName: string;
+}
+
+export interface HostSellerProvisioningInput extends RegisterHostSellerProfileInput {
+  /** Explicit NIHO-approved platform fee configuration; never inferred or defaulted. */
+  readonly supportEnabled: boolean;
+}
+
+export interface HostSellerProvisioningState {
+  readonly providerExists: boolean;
+  readonly sellerProfile: RegisterHostSellerProfileInput | null;
+  readonly saleSettings: ProviderSaleSettings | null;
 }
 
 export interface SiteSaleStateQuery {
@@ -224,6 +236,125 @@ export class SiteSaleRegistration {
           AND has_table_privilege(current_user, 'experience_offer_prices', 'DELETE') AS allowed`,
     );
     return result.rows[0]?.allowed === true;
+  }
+
+  /** The least-privilege writer for a seller profile, legacy Connect mapping, and explicit NIHO fee. */
+  async canProvisionHostSeller(): Promise<boolean> {
+    const result = await this.#pool.query<DbRow>(
+      `SELECT has_table_privilege(current_user, 'experience_providers', 'INSERT')
+          AND has_table_privilege(current_user, 'experience_host_seller_profiles', 'INSERT')
+          AND has_table_privilege(current_user, 'provider_sale_settings', 'INSERT') AS allowed`,
+    );
+    return result.rows[0]?.allowed === true;
+  }
+
+  /** Read-only seller setup state. It contains no product, reservation, or host session data. */
+  async currentHostSellerState(providerId: string): Promise<HostSellerProvisioningState> {
+    assertStoreIdentifier(providerId, "providerId");
+    const [provider, profile, settings] = await Promise.all([
+      this.#pool.query("SELECT 1 FROM experience_providers WHERE id=$1", [providerId]),
+      this.#pool.query<DbRow>(
+        `SELECT provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,
+                stripe_connect_account_ref,seller_display_name
+           FROM experience_host_seller_profiles WHERE provider_id=$1`, [providerId]),
+      this.#pool.query<DbRow>(`SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1`, [providerId]),
+    ]);
+    const row = profile.rows[0];
+    return {
+      providerExists: provider.rows[0] !== undefined,
+      sellerProfile: row === undefined ? null : {
+        providerId: String(row.provider_id),
+        legacyProviderId: String(row.legacy_provider_id),
+        providerDisplayName: String(row.provider_display_name),
+        sellerNihoAccountRef: String(row.seller_niho_account_ref),
+        stripeConnectAccountRef: String(row.stripe_connect_account_ref),
+        sellerDisplayName: String(row.seller_display_name),
+      },
+      saleSettings: settings.rows[0] === undefined ? null : saleSettingsFromRow(settings.rows[0]),
+    };
+  }
+
+  /**
+   * Creates an operator-approved seller mapping and explicit fee setting without creating a product or
+   * granting a host role. The host boundary binds the OWNER role later only when the live NIHO identity
+   * exactly matches sellerNihoAccountRef. Existing mappings and fee settings are immutable here.
+   */
+  async provisionHostSeller(input: HostSellerProvisioningInput): Promise<{
+    readonly provider: RegistrationOutcome;
+    readonly sellerProfile: RegistrationOutcome;
+    readonly saleSettings: RegistrationOutcome;
+  }> {
+    if (input === null || typeof input !== "object" || typeof input.supportEnabled !== "boolean") {
+      throw new StoreValidationError("Host seller provisioning input is invalid.");
+    }
+    assertStoreIdentifier(input.providerId, "sellerProfile.providerId");
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(input.legacyProviderId)) throw new StoreValidationError("sellerProfile.legacyProviderId is invalid.");
+    assertNonEmptyText(input.providerDisplayName, "sellerProfile.providerDisplayName", 300);
+    assertNonEmptyText(input.sellerNihoAccountRef, "sellerProfile.sellerNihoAccountRef", 256);
+    if (!/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) throw new StoreValidationError("sellerProfile.stripeConnectAccountRef is invalid.");
+    assertNonEmptyText(input.sellerDisplayName, "sellerProfile.sellerDisplayName", 300);
+    try {
+      return await withTransaction(this.#pool, async (client) => {
+        const providerResult = await client.query(
+          "INSERT INTO experience_providers (id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id",
+          [input.providerId],
+        );
+        await requireProvider(client, input.providerId);
+        await client.query("SELECT id FROM experience_providers WHERE id=$1 FOR UPDATE", [input.providerId]);
+        const existingProfile = await client.query<DbRow>(
+          `SELECT provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,
+                  stripe_connect_account_ref,seller_display_name
+             FROM experience_host_seller_profiles WHERE provider_id=$1 FOR UPDATE`,
+          [input.providerId],
+        );
+        const profile = existingProfile.rows[0];
+        let profileOutcome: RegistrationOutcome;
+        if (profile === undefined) {
+          await client.query(
+            `INSERT INTO experience_host_seller_profiles
+               (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [input.providerId, input.legacyProviderId, input.providerDisplayName, input.sellerNihoAccountRef,
+              input.stripeConnectAccountRef, input.sellerDisplayName],
+          );
+          profileOutcome = "CREATED";
+        } else {
+          const matches = String(profile.legacy_provider_id) === input.legacyProviderId
+            && String(profile.provider_display_name) === input.providerDisplayName
+            && String(profile.seller_niho_account_ref) === input.sellerNihoAccountRef
+            && String(profile.stripe_connect_account_ref) === input.stripeConnectAccountRef
+            && String(profile.seller_display_name) === input.sellerDisplayName;
+          if (!matches) throw new StoreConflictError("An existing seller mapping differs; use the reviewed seller-mapping change process.");
+          profileOutcome = "UNCHANGED";
+        }
+
+        const existingSettings = await client.query<DbRow>(
+          `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1 FOR UPDATE`, [input.providerId]);
+        const settings = existingSettings.rows[0];
+        let settingsOutcome: RegistrationOutcome;
+        if (settings === undefined) {
+          const fee = input.supportEnabled ? PLATFORM_FEE_BASIS_POINTS.supportOn : PLATFORM_FEE_BASIS_POINTS.supportOff;
+          await client.query(
+            `INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,$2,$3)`,
+            [input.providerId, input.supportEnabled, fee],
+          );
+          settingsOutcome = "CREATED";
+        } else {
+          if (settings.support_enabled !== input.supportEnabled) {
+            throw new StoreConflictError("An existing NIHO fee setting differs; use the reviewed fee-change process.");
+          }
+          settingsOutcome = "UNCHANGED";
+        }
+        return {
+          provider: providerResult.rows[0] === undefined ? "UNCHANGED" as const : "CREATED" as const,
+          sellerProfile: profileOutcome,
+          saleSettings: settingsOutcome,
+        };
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new StoreConflictError("The NIHO account or legacy provider mapping is already assigned to another Experience seller.");
+      throw error;
+    }
   }
 
   /** Read only: what the database holds for this provider, NIHO user, product and slug. */

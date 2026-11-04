@@ -6,6 +6,7 @@ import { addLocalDays, occurrenceIdFor, type ScheduleRule } from "@niho-experien
 import type { Pool } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type BookingQuestion, type ProductSaleTermsInput } from "../src/guest-bookings.ts";
+import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { SiteSaleRegistration, type RegisterProductInput, type SaleReadiness } from "../src/site-sale-registration.ts";
 import { parseSiteSaleInput, runSiteSale, type SiteSaleCommand } from "../src/site-sale-script.ts";
@@ -82,6 +83,62 @@ async function registered(registration: SiteSaleRegistration): Promise<void> {
 }
 
 describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
+  it("provisions a new seller without creating products or membership, then binds only the exact live NIHO identity", async () => {
+    await withSchema(async ({ pool, registration }) => {
+      const mappedUser = "niho-user/@synthetic-host";
+      const input = {
+        providerId: "experience-new-seller-synthetic",
+        legacyProviderId: "niho-legacy-connect-synthetic",
+        providerDisplayName: "Synthetic Experience Workspace",
+        sellerNihoAccountRef: mappedUser,
+        stripeConnectAccountRef: "acct_SyntheticNewSeller01",
+        sellerDisplayName: "Synthetic New Seller",
+        supportEnabled: false,
+      } as const;
+      assert.equal(await registration.canProvisionHostSeller(), true);
+      assert.deepEqual(await registration.provisionHostSeller(input), {
+        provider: "CREATED", sellerProfile: "CREATED", saleSettings: "CREATED",
+      });
+      const setup = await registration.currentHostSellerState(input.providerId);
+      assert.equal(setup.providerExists, true);
+      assert.deepEqual(setup.sellerProfile, {
+        providerId: input.providerId,
+        legacyProviderId: input.legacyProviderId,
+        providerDisplayName: input.providerDisplayName,
+        sellerNihoAccountRef: input.sellerNihoAccountRef,
+        stripeConnectAccountRef: input.stripeConnectAccountRef,
+        sellerDisplayName: input.sellerDisplayName,
+      });
+      assert.deepEqual(setup.saleSettings && {
+        providerId: setup.saleSettings.providerId,
+        supportEnabled: setup.saleSettings.supportEnabled,
+        platformFeeBasisPoints: setup.saleSettings.platformFeeBasisPoints,
+        version: setup.saleSettings.version,
+      }, { providerId: input.providerId, supportEnabled: false, platformFeeBasisPoints: 1000, version: 1 });
+      const beforeLogin = await pool.query("SELECT (SELECT count(*) FROM provider_memberships WHERE provider_id=$1)::int AS memberships,(SELECT count(*) FROM experience_products WHERE provider_id=$1)::int AS products", [input.providerId]);
+      assert.deepEqual(beforeLogin.rows[0], { memberships: 0, products: 0 });
+
+      const publication = new ExperiencePublicationRepository(pool);
+      assert.deepEqual(await publication.ensureMappedOwnerMembership("wrong-niho-user"), { kind: "no-mapping" });
+      assert.deepEqual(await publication.currentOwnerSellerProfile(mappedUser), { kind: "none" });
+      assert.deepEqual(await publication.ensureMappedOwnerMembership(mappedUser), { kind: "linked" });
+      assert.deepEqual(await publication.ensureMappedOwnerMembership(mappedUser), { kind: "already-owner" });
+      const resolved = await publication.currentOwnerSellerProfile(mappedUser);
+      assert.equal(resolved.kind, "ready");
+      if (resolved.kind === "ready") {
+        assert.equal(resolved.profile.providerId, input.providerId);
+        assert.notEqual(resolved.profile.providerId, mappedUser);
+        assert.equal(resolved.profile.legacyProviderId, input.legacyProviderId);
+        assert.equal(resolved.profile.stripeConnectAccountRef, input.stripeConnectAccountRef);
+      }
+      assert.deepEqual(await publication.ensureMappedOwnerMembership("niho-user-unmapped"), { kind: "no-mapping" });
+      await assert.rejects(registration.provisionHostSeller({ ...input, supportEnabled: true }), StoreConflictError);
+      const unchanged = await registration.currentHostSellerState(input.providerId);
+      assert.equal(unchanged.saleSettings?.platformFeeBasisPoints, 1000, "an unapproved fee change is not applied");
+      assert.equal((await pool.query("SELECT count(*)::int AS count FROM experience_products WHERE provider_id=$1", [input.providerId])).rows[0]?.count, 0);
+    });
+  });
+
   it("registers a provider and links its owner idempotently, turning a changed or inactive membership into the asked role", async () => {
     await withSchema(async ({ pool, registration }) => {
       assert.equal(await registration.registerProvider({ providerId: "sample-provider-a" }), "CREATED");

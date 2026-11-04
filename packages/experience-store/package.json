@@ -21,6 +21,10 @@
     "./site-sale-script": {
       "types": "./src/site-sale-script.ts",
       "default": "./src/site-sale-script.ts"
+    },
+    "./host-seller-provisioning": {
+      "types": "./src/host-seller-provisioning.ts",
+      "default": "./src/host-seller-provisioning.ts"
     }
   },
   "scripts": {

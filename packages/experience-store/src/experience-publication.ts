@@ -515,6 +515,52 @@ export class ExperiencePublicationRepository {
 
   constructor(pool: Pool) { this.#pool = pool; }
 
+  /**
+   * First-login owner binding for an operator-provisioned seller profile. The only identity input is the
+   * currently verified NIHO account ID. A profile must already map that exact ID; this never uses a
+   * legacy NIHO provider ID, a browser-selected provider, or an inferred ownerUserId.
+   */
+  async ensureMappedOwnerMembership(nihoUserId: string): Promise<
+    | { readonly kind: "linked" | "already-owner" }
+    | { readonly kind: "no-mapping" | "ambiguous" | "membership-conflict" }
+  > {
+    assertStoreIdentifier(nihoUserId, "nihoUserId");
+    return withTransaction(this.#pool, async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 47))", [`experience-host-owner:${nihoUserId}`]);
+      const mapped = await client.query<DbRow>(
+        `SELECT provider_id FROM experience_host_seller_profiles
+          WHERE seller_niho_account_ref=$1 ORDER BY provider_id COLLATE "C" FOR SHARE`,
+        [nihoUserId],
+      );
+      if (mapped.rows.length === 0) return { kind: "no-mapping" } as const;
+      if (mapped.rows.length !== 1) return { kind: "ambiguous" } as const;
+      const providerId = String(mapped.rows[0]!.provider_id);
+      const existing = await client.query<DbRow>(
+        `SELECT role,active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2 FOR UPDATE`,
+        [providerId, nihoUserId],
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0]!;
+        return row.role === "OWNER" && row.active === true
+          ? { kind: "already-owner" } as const
+          : { kind: "membership-conflict" } as const;
+      }
+      const owners = await client.query<DbRow>(
+        `SELECT provider_id FROM provider_memberships
+          WHERE niho_user_id=$1 AND active=true AND role='OWNER'
+          ORDER BY provider_id COLLATE "C" FOR UPDATE`,
+        [nihoUserId],
+      );
+      if (owners.rows.length > 0) return { kind: "ambiguous" } as const;
+      await client.query(
+        `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active)
+         VALUES ($1,$2,'OWNER',true)`,
+        [providerId, nihoUserId],
+      );
+      return { kind: "linked" } as const;
+    });
+  }
+
   /** Host choices come from current Experience membership, never a NIHO provider directory. */
   async listHostProviders(nihoUserId: string): Promise<readonly ExperienceHostProviderMembership[]> {
     assertStoreIdentifier(nihoUserId, "nihoUserId");

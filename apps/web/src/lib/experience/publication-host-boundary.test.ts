@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getIdentity: vi.fn(),
   getConnect: vi.fn(),
   ownerProfile: vi.fn(),
+  ensureOwner: vi.fn(),
   clear: vi.fn(),
 }));
 
@@ -21,7 +22,10 @@ vi.mock("@/lib/host/server", () => ({
   clearSessionCookie: mocks.clear,
 }));
 vi.mock("@/lib/experience/store-server", () => ({
-  experiencePublicationRepository: () => ({ currentOwnerSellerProfile: mocks.ownerProfile }),
+  experiencePublicationRepository: () => ({
+    currentOwnerSellerProfile: mocks.ownerProfile,
+    ensureMappedOwnerMembership: mocks.ensureOwner,
+  }),
 }));
 
 import { publicationHostBoundary } from "./publication-host-boundary";
@@ -55,6 +59,7 @@ describe("Experience publication NIHO contract v1 boundary", () => {
     mocks.getIdentity.mockResolvedValue(identity);
     mocks.getConnect.mockResolvedValue(connect);
     mocks.ownerProfile.mockResolvedValue({ kind: "ready", profile });
+    mocks.ensureOwner.mockResolvedValue({ kind: "no-mapping" });
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -102,6 +107,17 @@ describe("Experience publication NIHO contract v1 boundary", () => {
       if (!result.ok) expect((await result.response.json()).error.code).toBe(expected);
     }
     expect(mocks.getConnect).not.toHaveBeenCalled();
+  });
+
+  it("binds first-login OWNER only from a pre-provisioned mapping matching the current NIHO identity", async () => {
+    mocks.ownerProfile.mockResolvedValueOnce({ kind: "none" }).mockResolvedValueOnce({ kind: "ready", profile });
+    mocks.ensureOwner.mockResolvedValue({ kind: "linked" });
+    const result = await publicationHostBoundary("OWNER");
+    expect(result.ok).toBe(true);
+    expect(mocks.ensureOwner).toHaveBeenCalledOnce();
+    expect(mocks.ensureOwner).toHaveBeenCalledWith("niho-user-synthetic");
+    expect(mocks.ownerProfile).toHaveBeenNthCalledWith(2, "niho-user-synthetic");
+    expect(mocks.getConnect).toHaveBeenCalledWith(profile.legacyProviderId);
   });
 
   it("keeps the expected account in the readiness snapshot but blocks a mismatched Connect projection", async () => {

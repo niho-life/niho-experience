@@ -50,6 +50,17 @@ export async function publicationHostBoundary(_operation: Operation): Promise<Pu
     let resolved: Awaited<ReturnType<typeof repository.currentOwnerSellerProfile>>;
     try { resolved = await repository.currentOwnerSellerProfile(identity.data.nihoUserId); }
     catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
+    if (resolved.kind === "none") {
+      // A pre-provisioned profile is bound to the seller's exact NIHO identity. This first login
+      // grants only that local Experience OWNER membership; it does not infer NIHO roles or IDs.
+      try {
+        const linked = await repository.ensureMappedOwnerMembership(identity.data.nihoUserId);
+        if (linked.kind === "no-mapping") return { ok: false, response: error("FORBIDDEN", 403) };
+        if (linked.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
+        if (linked.kind === "membership-conflict") return { ok: false, response: error("FORBIDDEN", 403) };
+        resolved = await repository.currentOwnerSellerProfile(identity.data.nihoUserId);
+      } catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
+    }
     if (resolved.kind === "none") return { ok: false, response: error("FORBIDDEN", 403) };
     if (resolved.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
     if (resolved.kind === "setup-required") return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
