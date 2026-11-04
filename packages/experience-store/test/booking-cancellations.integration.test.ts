@@ -215,8 +215,10 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.equal(made.booking.pricingSnapshot.paymentRequired, false);
       assert.equal(made.checkoutSessionRef, null);
       const confirmation = (await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 })).confirmations
-        .find((item) => item.email.publicBookingId === made.publicBookingId);
-      assert.equal(confirmation?.email.totalAmount, 0);
+        .find((item) => item.email?.publicBookingId === made.publicBookingId);
+      const confirmationEmail = confirmation?.email;
+      assert.ok(confirmationEmail);
+      assert.equal(confirmationEmail.totalAmount, 0);
       assert.equal((await ledger(pool, made.publicBookingId)).length, 0);
       assert.deepEqual(await refunds(pool, made.publicBookingId), []);
       assert.equal(await seatsLeft(context, day(5)), 10);
