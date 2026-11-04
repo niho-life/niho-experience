@@ -65,7 +65,7 @@ DB migration は `packages/experience-store/migrations/` の全SQLファイル�
 
 ## 予約メールの配信後イベント（#375）
 
-Experience はNIHOと同じSMTP事業者・共有資格情報を使うが、送信台帳とguest mail outboxはExperience DBにある。NIHO #19711 のGmail DSN/ARF取込はNIHOの `OutboundEmailDelivery` とだけ照合し、Experienceのoutboxからは読めない。Gmail OAuthは受信箱を認証するがARF報告元は認証しない。Experience向けの署名済みbounce/complaint producer/API、再送抑止、運営表示は未接続で、実送信元・Return-Path・SPF/DKIM/DMARCも未確認。未接続をSMTP受理成功で代替しない。
+Experience はNIHOと同じSMTP事業者・共有資格情報を使うが、送信台帳とguest mail outboxはExperience DBにある。NIHO運用資料では共有送信は `smtp.gmail.com` / `info@niho.life` とされ、`niho.life` の公開DNSは2026-11-04にGoogle MX、SPF `include:_spf.google.com ~all`、DKIM selector `google` のTXT、DMARC `p=none; adkim=r; aspf=r; pct=100` を観測した。これはExperience実行環境の実値や送信メールの認証・到達を証明しない。NIHO #19711 のDSN取込は `X-NIHO-Mail-Ref` / `Message-ID` と完全一致recipientでNIHOの `OutboundEmailDelivery` へ照合するが、Experience outboxとの対応付けはない。ARFはGmail OAuthだけでは報告元を認証できないためNIHO側でも運営の手動確認に留め、自動苦情記録・抑止に使わない。Experience向けの照合・記録・再送抑止・ホスト/運営表示は未接続。実送信メールのFrom/Return-Path、SPF/DKIM/DMARC alignmentと受信箱到達も未検証で、未接続をSMTP受理成功で代替しない。
 
 Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、NIHO editor auth、category/article/publication移行、権限失効・停止・UNLISTED・画像取消を合成データで受け入れる。次に `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` の候補revisionで、SSR/metadata/sitemapが次requestに反映されること、static記事が混在しないこと、公開catalogとの体験link交差、mediaの404/503/no-storeを確認する。受入前は`static`を維持し、editorだけの有効化を公開元切替とみなさない。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` は editor.niho.life の公開（設計の段階 3）が本番で使えるまで有効化しない。Secret Manager と配備 workflow への配線もそれまで行わない。
 
