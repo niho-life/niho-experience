@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { NextResponse } from "next/server";
 import { GoogleAuth } from "google-auth-library";
-import type { ExperienceHostApiClient } from "@niho-experience/api-client/legacy-host";
+import { createExperienceHostApiClient as createLegacyExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/legacy-host";
 import { createExperienceHostApiClient as createSelectedExperienceHostApiClient, type ExperienceHostApiClient as SelectedExperienceHostApiClient } from "@niho-experience/api-client/host";
 import { createMockExperienceHostFetch, MOCK_EXPERIENCE_HOST_SERVICE_TOKEN } from "@niho-experience/api-client/host/mock";
 import { config } from "@/lib/config";
@@ -68,14 +68,14 @@ export type ProvidersLoad =
   | { status: "rejected" }
   | { status: "error" };
 
-/**
- * Legacy provider-list and provider-edit operations are excluded from Host v1.
- * Keep this compatibility entrypoint fail-closed; live consumers use the selected
- * v1 client. Server only; browser code calls Experience /host/api/* instead.
- */
+/** Legacy provider client for synthetic preview only; live consumers use the selected Host v1 client. */
 export function hostApiClient(session: HostSession): ExperienceHostApiClient {
-  void session;
-  throw new Error("NIHO legacy host operations are outside contract v1.0.0");
+  if (!isHostMock()) throw new Error("NIHO legacy host operations are outside contract v1.0.0");
+  return createLegacyExperienceHostApiClient({
+    nihoWebOrigin: config.nihoWebOrigin,
+    accessToken: session.accessToken,
+    fetch: nihoApiFetch(session),
+  });
 }
 
 /** NIHO host common contract v1.0.0: identity and legacy Connect projection only. */
@@ -120,11 +120,32 @@ export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
       return { status: "error" };
     }
     if (isHostMock()) {
-      const previewProviders = usableProviders([
-        { id: "sample-provider-kitchen", legacyProviderId: "sample-provider-kitchen", displayName: "サンプルの台所", memberRole: "OWNER" as const },
-        { id: "sample-provider-studio", legacyProviderId: "sample-provider-studio", displayName: "サンプル工房", memberRole: "EDITOR" as const },
-      ]);
-      return { status: "ok", nihoUserId: identityResult.data.nihoUserId, providers: previewProviders.map((provider) => ({ ...provider, nihoUserId: identityResult.data.nihoUserId })) };
+      // Keep the existing synthetic scenarios (empty, payments-pending, cohost, etc.) in
+      // preview without reopening the legacy provider directory in the live HTTP contract.
+      const legacyMock = createLegacyExperienceHostApiClient({
+        nihoWebOrigin: config.nihoWebOrigin,
+        accessToken: session.accessToken,
+        fetch: nihoApiFetch(session),
+      });
+      const preview = await legacyMock.listExperienceProviders();
+      if (!preview.ok) {
+        if (preview.kind === "error" && preview.status === 401) return { status: "rejected" };
+        return { status: "error" };
+      }
+      const providers = usableProviders(preview.data.providers.map((provider) => ({
+        id: provider.id,
+        legacyProviderId: provider.id,
+        displayName: provider.displayName,
+        memberRole: session.mockScenario === "cohost" && provider.id === "sample-provider-kitchen" ? "COHOST" as const : provider.memberRole,
+        nihoUserId: identityResult.data.nihoUserId,
+        kind: provider.kind,
+        bio: provider.bio,
+        sellerDisclosureUrl: provider.sellerDisclosureUrl,
+        reviewStatus: provider.reviewStatus,
+        consentVersion: provider.consentVersion,
+        paymentReuseSourceSpotId: provider.paymentReuseSourceSpotId,
+      })));
+      return { status: "ok", nihoUserId: identityResult.data.nihoUserId, providers };
     }
     const repository = experiencePublicationRepository();
     if (!repository) return { status: "error" };

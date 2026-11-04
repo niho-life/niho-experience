@@ -1,16 +1,22 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import type { ExperienceHostApiClient, ExperienceHostApiFailure, ExperienceProviderUpdateRequest } from "@niho-experience/api-client/legacy-host";
 import { nihoIdOrNull, type HostProviderReviewStatus } from "@/lib/host/providers";
-import { isHostMock, readHostSession } from "@/lib/host/server";
+import { HOST_MOCK_LOGIN_PATH } from "@/lib/host/routes";
+import { hostApiClient, isHostMock, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
+import { openStripe, stepNotice, syncStripe } from "./connect";
+import { readMockHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
-import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
+import { HOST_INVALID_INPUT_TEXT, HOST_NETWORK_ERROR_TEXT, HOST_SESSION_ENDED_TEXT, hostFailureMessage } from "./errors";
 import { draftGuestQuestionEnglish, loadMoreGuestQuestions, openGuestQuestion, replyToGuestQuestion, type HostGuestQuestionPage } from "./guest-questions-server";
 import { draftGuestReviewEnglish } from "./guest-reviews-server";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockPageEnglishDraft } from "./mock/experiences";
 import { mockReviewEnglishDraft } from "./mock/reviews";
 import { mockEnglishDraft } from "./mock/threads";
+import { normalizeMeetingPoint } from "./meeting-point";
 import { changeNotificationAddress, confirmNotificationAddressToken } from "./notification-address-server";
 import type { HostNotificationAddressView } from "./notification-address";
 import { changeNotificationSettings } from "./notification-settings-server";
@@ -26,19 +32,26 @@ import type { HostActionResult, HostPayoutLoad, ProviderProfile, ProviderProfile
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
 import type { HostAttendance, HostBooking, HostMeetingDefaults, HostNotificationItem, HostPageText, HostThread } from "./types";
 
-/*
- * Host seller registration/profile/review and Connect mutation belonged to NIHO's legacy host API.
- * Contract v1 intentionally grants no such operations; Experience product authoring and publication
- * use /host/api/products, while Connect onboarding remains an NIHO-owned prerequisite.
- */
+/* Legacy provider operations below are synthetic-preview-only until their API contract is deployed. */
 const invalid = { ok: false, message: HOST_INVALID_INPUT_TEXT } as const;
 const LEGACY_HOST_OPERATION_UNAVAILABLE = "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。";
 
-async function legacyOperationUnavailable<T extends object>(): Promise<HostActionResult<T>> {
+type LegacyRun<T extends object> = (client: ExperienceHostApiClient) => Promise<HostActionResult<T>>;
+
+async function withLegacyHostMock<T extends object>(run: LegacyRun<T>): Promise<HostActionResult<T>> {
   const session = await readHostSession();
   if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
-  return { ok: false, message: LEGACY_HOST_OPERATION_UNAVAILABLE };
+  if (!isHostMock()) return { ok: false, message: LEGACY_HOST_OPERATION_UNAVAILABLE };
+  try {
+    return await run(hostApiClient(session));
+  } catch {
+    return { ok: false, message: HOST_NETWORK_ERROR_TEXT };
+  }
 }
+
+const refused = (failure: ExperienceHostApiFailure): { ok: false; message: string } => ({ ok: false, message: hostFailureMessage(failure) });
+function refreshConsole() { revalidatePath("/host", "layout"); }
+const PREVIEW_AFTER_REGISTRATION = `${HOST_MOCK_LOGIN_PATH}?mock=payments-pending`;
 
 /** A string from the browser, at most `max` characters long (NIHO checks the rest). */
 function text(value: unknown, max: number): string | null {
@@ -57,7 +70,11 @@ export async function registerProvider(input: RegisterProviderInput): Promise<Ho
   const sellerDisclosureUrl = text(input?.sellerDisclosureUrl, LIMITS.sellerDisclosureUrl);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
   if (!kind || displayName === null || bio === null || sellerDisclosureUrl === null || consentVersion === null) return invalid;
-  return legacyOperationUnavailable<Registered>();
+  return withLegacyHostMock<Registered>(async (client) => {
+    const result = await client.registerExperienceProvider({ kind, displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl.trim() || null, consentVersion });
+    if (!result.ok) return refused(result);
+    return { ok: true, message: "登録しました。", next: PREVIEW_AFTER_REGISTRATION };
+  });
 }
 
 /**
@@ -72,7 +89,17 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
     if (changed(field) && text(input[field], LIMITS[field]) === null) return invalid;
   }
   if (!providerId || !Object.keys(input ?? {}).some((key) => ["displayName", "bio", "sellerDisclosureUrl"].includes(key))) return invalid;
-  return legacyOperationUnavailable<ProfileSaved>();
+  const body: ExperienceProviderUpdateRequest = {};
+  if (changed("displayName")) body.displayName = input.displayName;
+  if (changed("bio")) body.bio = input.bio;
+  if (changed("sellerDisclosureUrl")) body.sellerDisclosureUrl = input.sellerDisclosureUrl?.trim() || null;
+  return withLegacyHostMock<ProfileSaved>(async (client) => {
+    const result = await client.updateExperienceProvider(providerId, body);
+    if (!result.ok) return refused(result);
+    refreshConsole();
+    const { displayName, bio, sellerDisclosureUrl, reviewStatus } = result.data.provider;
+    return { ok: true, message: "保存しました", profile: { displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl ?? "" }, reviewStatus };
+  });
 }
 
 /**
@@ -82,8 +109,14 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
 type MeetingPointSaved = { meetingPoint: HostMeetingDefaults };
 export async function saveProviderMeetingPoint(input: { providerId: string; meetingPoint: HostMeetingDefaults }): Promise<HostActionResult<MeetingPointSaved>> {
   const providerId = nihoIdOrNull(input?.providerId);
-  if (!providerId || !input?.meetingPoint) return invalid;
-  return legacyOperationUnavailable<MeetingPointSaved>();
+  const meetingPoint = normalizeMeetingPoint(input?.meetingPoint);
+  if (!providerId || !meetingPoint) return invalid;
+  return withLegacyHostMock<MeetingPointSaved>(async (client) => {
+    const result = await client.updateExperienceProviderMeetingPoint(providerId, meetingPoint);
+    if (!result.ok) return refused(result);
+    refreshConsole();
+    return { ok: true, message: "保存しました", meetingPoint: result.data.meetingPoint };
+  });
 }
 
 /**
@@ -129,7 +162,25 @@ type ReviewRequested = { reviewStatus: HostProviderReviewStatus };
 export async function submitProviderReview(input: { providerId: string }): Promise<HostActionResult<ReviewRequested>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId) return invalid;
-  return legacyOperationUnavailable<ReviewRequested>();
+  return withLegacyHostMock<ReviewRequested>(async (client) => {
+    const result = await client.submitExperienceProvider(providerId);
+    if (!result.ok) return refused(result);
+    const detail = await client.getExperienceProvider(providerId);
+    refreshConsole();
+    return { ok: true, message: "審査を申請しました。", reviewStatus: detail.ok && detail.data.provider ? detail.data.provider.reviewStatus : "REQUESTED" };
+  });
+}
+
+/** The preview's payout state as the contract mock sees it after a change. */
+async function mockPayoutNow(client: ExperienceHostApiClient, providerId: string): Promise<HostPayoutLoad> {
+  const detail = await client.getExperienceProvider(providerId);
+  if (!detail.ok || !detail.data.provider) return { status: "error" };
+  return readMockHostPayout(client, {
+    id: detail.data.provider.id,
+    legacyProviderId: detail.data.provider.id,
+    memberRole: "OWNER",
+    paymentReuseSourceSpotId: detail.data.provider.paymentReuseSourceSpotId,
+  });
 }
 
 /** 既存の口座を使う › 共有する (OWNER): one of the owner's spots' ready seller accounts, with NIHO's consent version. */
@@ -139,7 +190,14 @@ export async function sharePayoutAccount(input: { providerId: string; sourceSpot
   const sourceSpotId = text(input?.sourceSpotId, LIMITS.spotId);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
   if (!providerId || !sourceSpotId || consentVersion === null) return invalid;
-  return legacyOperationUnavailable<PayoutChanged>();
+  return withLegacyHostMock<PayoutChanged>(async (client) => {
+    const result = await client.reuseExperienceProviderPayment(providerId, { sourceSpotId, consentVersion });
+    if (!result.ok) return refused(result);
+    const payout = await mockPayoutNow(client, providerId);
+    refreshConsole();
+    const name = payout.status === "owner" ? payout.payout.sharedFrom : null;
+    return { ok: true, message: name ? `${name}の口座を共有しました。` : "口座を共有しました。", payout };
+  });
 }
 
 /**
@@ -151,14 +209,28 @@ export async function openPayoutConnect(input: { providerId: string; step: "star
   const providerId = nihoIdOrNull(input?.providerId);
   const step = input?.step === "start" || input?.step === "resume" ? input.step : null;
   if (!providerId || !step) return invalid;
-  return legacyOperationUnavailable<StripeOpened>();
+  return withLegacyHostMock<StripeOpened>(async (client) => {
+    const opened = await openStripe(client, providerId, step);
+    if (opened.kind === "stripe") return { ok: true, message: "Stripe の画面へ移ります。", redirectTo: opened.url, payout: null };
+    const notice = stepNotice(opened);
+    if (notice.tone === "error") return { ok: false, message: notice.message };
+    const payout = await mockPayoutNow(client, providerId);
+    refreshConsole();
+    return { ok: true, message: notice.message, redirectTo: null, payout };
+  });
 }
 
 /** 状態を再確認 (OWNER): NIHO reads the account from Stripe again. */
 export async function syncPayoutAccount(input: { providerId: string }): Promise<HostActionResult<PayoutChanged>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId) return invalid;
-  return legacyOperationUnavailable<PayoutChanged>();
+  return withLegacyHostMock<PayoutChanged>(async (client) => {
+    const synced = await syncStripe(client, providerId);
+    if (synced.kind !== "state") return { ok: false, message: synced.kind === "failed" ? stepNotice(synced).message : HOST_INVALID_INPUT_TEXT };
+    const payout = await mockPayoutNow(client, providerId);
+    refreshConsole();
+    return { ok: true, message: stepNotice(synced).message, payout };
+  });
 }
 
 /**

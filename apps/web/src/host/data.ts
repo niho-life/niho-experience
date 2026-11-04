@@ -1,8 +1,8 @@
 import "server-only";
 import type { ExperienceHostApiClient as SelectedExperienceHostApiClient } from "@niho-experience/api-client/host";
-import type { ExperienceProviderConsent } from "@niho-experience/api-client/legacy-host";
+import type { ExperienceHostApiClient as LegacyExperienceHostApiClient, ExperienceProviderConsent } from "@niho-experience/api-client/legacy-host";
 import { nihoIdOrNull, selectProvider, type HostProvider } from "@/lib/host/providers";
-import { isHostMock, loadHostProviders, readHostSession, selectedHostApiClient } from "@/lib/host/server";
+import { hostApiClient, isHostMock, loadHostProviders, readHostSession, selectedHostApiClient } from "@/lib/host/server";
 import { accessTokenUsable, type HostSession } from "@/lib/host/session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
 import type { BookingExperience, SessionQuery } from "./bookings";
@@ -87,6 +87,18 @@ async function loadMeetingDefaults(provider: Pick<HostProvider, "id" | "memberRo
   return mode === "mock" ? synthetic : null;
 }
 
+/** The contract mock retains provider detail/consent for the old preview screens only. */
+async function loadMockProviderDetail(provider: HostProvider) {
+  const session = await usableSession();
+  if (!session || !isHostMock()) return null;
+  try {
+    const result = await hostApiClient(session).getExperienceProvider(provider.id);
+    return result.ok && result.data.provider ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Everything the old console pages show for one seller workspace: the home rows and numbers,
  * the experiences and the settings' starting values. Mock mode returns synthetic sets; http
@@ -103,6 +115,8 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
   const mode = isHostMock() ? "mock" : "http";
   const session = await readHostSession();
   const snapshot = hostConsoleSnapshot(provider.id, mode, Date.now(), session?.mockScenario);
+  const legacyDetail = mode === "mock" ? await loadMockProviderDetail(provider) : null;
+  const displayProvider = legacyDetail?.provider;
   const owner = provider.memberRole === "OWNER";
   const [meetingPoint, notificationLoad] = await Promise.all([
     options.meetingPoint ? loadMeetingDefaults(provider, mode, snapshot.meetingPoint) : null,
@@ -113,13 +127,13 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
     home: hostHome(snapshot),
     experiences: snapshot.experiences,
     settings: {
-      displayName: provider.displayName,
-      kind: provider.kind ?? null,
-      bio: provider.bio ?? "",
-      sellerDisclosureUrl: provider.sellerDisclosureUrl ?? "",
-      reviewStatus: provider.reviewStatus ?? null,
-      // Contract v1 does not expose the old NIHO provider review or provider-terms APIs.
-      consentCurrent: null,
+      displayName: displayProvider?.displayName ?? provider.displayName,
+      kind: displayProvider?.kind ?? provider.kind ?? null,
+      bio: displayProvider?.bio ?? provider.bio ?? "",
+      sellerDisclosureUrl: displayProvider ? displayProvider.sellerDisclosureUrl ?? "" : provider.sellerDisclosureUrl ?? "",
+      reviewStatus: displayProvider?.reviewStatus ?? provider.reviewStatus ?? null,
+      // Host v1 has no provider-terms endpoint. Only the synthetic preview checks its mock consent.
+      consentCurrent: displayProvider && legacyDetail ? displayProvider.consentVersion === legacyDetail.consent.version : null,
       meetingPoint,
       calendar: snapshot.calendar,
       notifications: !owner ? null : notificationLoad?.status === "live" ? { email: { addresses: [] }, items: notificationLoad.items } : snapshot.notifications,
@@ -314,6 +328,35 @@ export async function readHostPayout(
   }
 }
 
+/** Legacy payout setup remains available to the synthetic preview; live HTTP uses Host v1 read-only. */
+export async function readMockHostPayout(
+  client: LegacyExperienceHostApiClient,
+  provider: Pick<HostProvider, "id" | "legacyProviderId" | "memberRole" | "paymentReuseSourceSpotId">,
+  options: { candidates?: boolean } = {},
+): Promise<HostPayoutLoad> {
+  if (provider.memberRole !== "OWNER") return { status: "not-owner" };
+  try {
+    const [readiness, candidates] = await Promise.all([
+      client.getExperienceProviderPaymentReadiness(provider.id),
+      options.candidates === false ? null : client.listExperienceProviderPaymentReuseCandidates(provider.id),
+    ]);
+    if (!readiness.ok) return { status: "error" };
+    const spots = candidates?.ok ? candidates.data.spots : [];
+    const sharedId = provider.paymentReuseSourceSpotId;
+    return {
+      status: "owner",
+      payout: {
+        reason: readiness.data.reason,
+        sharedFrom: sharedId ? (spots.find((spot) => spot.id === sharedId)?.name ?? "拠点") : null,
+        candidates: spots.filter((spot) => spot.ready).map(({ id, name }) => ({ id, name })),
+        reuseConsent: readiness.data.paymentReuseConsent,
+      },
+    };
+  } catch {
+    return { status: "error" };
+  }
+}
+
 export interface HostPayoutData {
   load: HostPayoutLoad;
   /** What Stripe's way back (`?connect=`) led to. */
@@ -328,11 +371,20 @@ export interface HostPayoutData {
  * a new link to send the host back to Stripe. Only the owner's account is read.
  */
 export async function loadHostPayout(provider: HostProvider, options: { candidates?: boolean; connect?: "return" | "refresh" | null } = {}): Promise<HostPayoutData> {
-  void options;
   if (provider.memberRole !== "OWNER") return { load: { status: "not-owner" }, notice: null, redirectTo: null };
   const session = await usableSession();
   if (!session) return { load: { status: "error" }, notice: null, redirectTo: null };
   try {
+    if (isHostMock()) {
+      const client = hostApiClient(session);
+      let notice: HostNotice | null = null;
+      if (options.connect) {
+        const step = options.connect === "return" ? await syncStripe(client, provider.id) : await openStripe(client, provider.id, "resume");
+        if (step.kind === "stripe") return { load: { status: "error" }, notice: null, redirectTo: step.url };
+        notice = stepNotice(step);
+      }
+      return { load: await readMockHostPayout(client, provider, options), notice, redirectTo: null };
+    }
     const client = await selectedHostApiClient(session, { legacyProviderId: provider.legacyProviderId });
     return { load: await readHostPayout(client, provider), notice: null, redirectTo: null };
   } catch {
@@ -340,5 +392,15 @@ export async function loadHostPayout(provider: HostProvider, options: { candidat
   }
 }
 
-/** Contract v1 intentionally has no NIHO provider registration or provider-terms endpoint. */
-export async function loadRegistrationConsent(): Promise<ExperienceProviderConsent | null> { return null; }
+/** Contract v1 intentionally has no NIHO provider-terms endpoint; synthetic terms are preview-only. */
+export async function loadRegistrationConsent(): Promise<ExperienceProviderConsent | null> {
+  if (!isHostMock()) return null;
+  const session = await usableSession();
+  if (!session) return null;
+  try {
+    const result = await hostApiClient(session).listExperienceProviders();
+    return result.ok ? result.data.consent : null;
+  } catch {
+    return null;
+  }
+}

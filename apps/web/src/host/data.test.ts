@@ -90,10 +90,10 @@ describe("loadHostConsoleData", () => {
     expect(data.settings).toEqual({
       displayName: "サンプルの台所",
       kind: "INDIVIDUAL",
-      bio: "",
-      sellerDisclosureUrl: "",
+      bio: "家庭料理を一緒に作る体験の、合成データの提供者です（sample）。",
+      sellerDisclosureUrl: "https://example.com/sample-kitchen/legal",
       reviewStatus: "APPROVED",
-      consentCurrent: null,
+      consentCurrent: true,
       meetingPoint: expect.objectContaining({ overview: "Near Kamakura Station, 5-minute walk", mapUrl: "https://maps.example.com/sample-kitchen" }),
       calendar: { google: expect.objectContaining({ status: "connected", account: "kitchen@example.com" }), icsUrl: expect.stringMatching(/^https:\/\/calendar\.example\.com\//) },
       notifications: { email: { addresses: ["kitchen@example.com"] }, items: expect.any(Array) },
@@ -119,7 +119,7 @@ describe("loadHostConsoleData", () => {
 
   it("mock: the studio is a business still in draft", async () => {
     const data = await loadHostConsoleData(STUDIO);
-    expect(data.settings).toMatchObject({ displayName: "サンプル工房", kind: "BUSINESS", reviewStatus: "DRAFT", consentCurrent: null });
+    expect(data.settings).toMatchObject({ displayName: "サンプル工房", kind: "BUSINESS", reviewStatus: "DRAFT", consentCurrent: true });
     expect(data.experiences.map((experience) => experience.status)).toEqual(["draft"]);
     expect(data.home.sessions).toEqual({ today: [], tomorrow: [], later: [] });
   });
@@ -183,10 +183,10 @@ describe("loadHostConsoleData", () => {
 describe("loadHostExperienceEditor", () => {
   it("passes verified mock publication facts, and keeps non-owner or unreadable facts closed", async () => {
     expect((await loadHostExperienceEditor(KITCHEN, "coffee")).publication).toEqual({
-      role: "OWNER", payoutReason: "READY", sellerDisclosureReady: false, consentCurrent: null, providerStatus: "available",
+      role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "available",
     });
     expect((await loadHostExperienceEditor(STUDIO, "calligraphy")).publication).toEqual({
-      role: "EDITOR", payoutReason: null, sellerDisclosureReady: false, consentCurrent: null, providerStatus: "available",
+      role: "EDITOR", payoutReason: null, sellerDisclosureReady: false, consentCurrent: true, providerStatus: "available",
     });
   });
 
@@ -325,24 +325,24 @@ describe("loadHostSales", () => {
 describe("loadHostPayout", () => {
   it("mock: the owner reads the kitchen's ready account; an editor reads nothing", async () => {
     expect(await loadHostPayout(KITCHEN)).toEqual({
-      load: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: null } },
+      load: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: { version: "sample-payment-reuse-consent-1", text: "（サンプル）拠点の販売者口座を、体験の売上の受取に使うことに同意します。この文言は合成データです。" } } },
       notice: null,
       redirectTo: null,
     });
     expect(await loadHostPayout(STUDIO)).toEqual({ load: { status: "not-owner" }, notice: null, redirectTo: null });
   });
 
-  it("mock: a provider without a Connect account has no candidate or reuse operation", async () => {
+  it("mock: a provider without a Connect account sees only ready reuse candidates", async () => {
     state.scenario = "payments-pending";
-    expect((await loadHostPayout(GARDEN)).load).toEqual({ status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [], reuseConsent: null } });
-    expect((await loadHostPayout(GARDEN, { candidates: false })).load).toMatchObject({ status: "owner", payout: { reason: "NOT_CONNECTED", candidates: [] } });
+    expect((await loadHostPayout(GARDEN)).load).toEqual({ status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [{ id: "sample-spot-house", name: "サンプルの拠点" }], reuseConsent: { version: "sample-payment-reuse-consent-1", text: "（サンプル）拠点の販売者口座を、体験の売上の受取に使うことに同意します。この文言は合成データです。" } } });
+    expect((await loadHostPayout(GARDEN, { candidates: false })).load).toMatchObject({ status: "owner", payout: { reason: "NOT_CONNECTED", candidates: [], reuseConsent: { version: "sample-payment-reuse-consent-1" } } });
   });
 
-  it("mock: Connect return and refresh do not mutate NIHO Connect state", async () => {
-    expect(await loadHostPayout(KITCHEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "READY" } }, notice: null, redirectTo: null });
+  it("mock: Connect return syncs the contract mock and refresh completes its preview step", async () => {
+    expect(await loadHostPayout(KITCHEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "READY" } }, notice: { tone: "success" }, redirectTo: null });
     state.scenario = "payments-pending";
-    expect(await loadHostPayout(GARDEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "NOT_CONNECTED" } }, notice: null, redirectTo: null });
-    expect(await loadHostPayout(GARDEN, { connect: "refresh" })).toMatchObject({ load: { payout: { reason: "NOT_CONNECTED" } }, notice: null, redirectTo: null });
+    expect(await loadHostPayout(GARDEN, { connect: "return" })).toMatchObject({ load: { payout: { reason: "NOT_CONNECTED" } }, notice: { tone: "error" }, redirectTo: null });
+    expect(await loadHostPayout(GARDEN, { connect: "refresh" })).toMatchObject({ load: { payout: { reason: "READY" } }, notice: { tone: "success" }, redirectTo: null });
   });
 
   it("http: Connect is read-only and never calls the removed setup-link endpoint", async () => {
@@ -375,8 +375,9 @@ describe("loadHostPayout", () => {
 });
 
 describe("loadRegistrationConsent", () => {
-  it("does not read provider terms from the removed NIHO provider list", async () => {
-    expect(await loadRegistrationConsent()).toBeNull();
+  it("reads synthetic terms only in mock mode", async () => {
+    state.scenario = "empty";
+    expect(await loadRegistrationConsent()).toEqual({ version: "sample-provider-consent-1", text: "（サンプル）提供者として登録し、NIHO の提供者規約に同意します。この文言は合成データです。" });
     state.config.apiMode = "http";
     const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
     expect(await loadRegistrationConsent()).toBeNull();
