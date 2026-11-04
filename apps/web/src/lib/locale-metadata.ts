@@ -3,8 +3,20 @@ import type { Metadata } from "next";
 import type { PageId } from "./page-document-contract";
 import { listExperiencesForSite } from "./api";
 import { config } from "./config";
-import { getJapaneseCatalog, getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
+import { getJapaneseCatalog, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
 import { isIndexableJapanesePage, mapJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
+import { experiencePublicationRepository } from "./experience/store-server";
+
+async function publicationLanguagePair(slug: string): Promise<boolean> {
+  if (!config.japaneseSiteEnabled) return false;
+  const repository = experiencePublicationRepository();
+  if (!repository) return false;
+  try {
+    await getJapaneseCopy();
+    return Boolean((await repository.getPublicBySlug(slug))?.japanese);
+  }
+  catch { return false; }
+}
 
 export async function englishAlternates(sourcePath: string, indexable = true): Promise<Metadata["alternates"]> {
   const canonical = `${config.siteUrl}${sourcePath === "/" ? "/" : sourcePath}`;
@@ -24,6 +36,11 @@ export async function englishAlternates(sourcePath: string, indexable = true): P
  * catalog with its detail from the same release (localized-mapping.ts). Otherwise /ja shows "unavailable".
  */
 export async function experienceAlternates(slug: string, canonical: string): Promise<Metadata["alternates"]> {
+  if (config.experiencePublicationsEnabled) {
+    return await publicationLanguagePair(slug)
+      ? { canonical, languages: pairLanguages(canonical, `${config.siteUrl}/ja/experiences/${slug}`) }
+      : { canonical, languages: { en: canonical, "x-default": canonical } };
+  }
   try {
     const [release, catalog, detail] = await Promise.all([getPreparedJapaneseStaticRelease(), getJapaneseCatalog(), getJapaneseDetail(slug)]);
     const link = mapJapaneseExperiences(release.releaseId, catalog, [detail]).get(slug);
@@ -38,6 +55,13 @@ export async function experienceAlternates(slug: string, canonical: string): Pro
  * hreflang points one way at a missing page.
  */
 export async function japaneseExperienceAlternates(slug: string, canonical: string): Promise<Metadata["alternates"]> {
+  if (config.experiencePublicationsEnabled) {
+    if (await publicationLanguagePair(slug)) {
+      const english = `${config.siteUrl}/experiences/${slug}`;
+      return { canonical, languages: pairLanguages(english, `${config.siteUrl}/ja/experiences/${slug}`) };
+    }
+    return { canonical };
+  }
   try {
     const [release, catalog, detail, english] = await Promise.all([getPreparedJapaneseStaticRelease(), getJapaneseCatalog(), getJapaneseDetail(slug), listExperiencesForSite("kamakura")]);
     const link = mapJapaneseExperiences(release.releaseId, catalog, [detail]).get(slug);

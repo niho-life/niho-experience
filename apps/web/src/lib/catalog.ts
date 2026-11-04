@@ -1,6 +1,8 @@
 import "server-only";
 import type { ExperienceApiClient } from "@niho-experience/api-client";
 import type { ExperienceDetailForSite, ExperienceSummaryForSite } from "./experience-types";
+import { config } from "./config";
+import { getPublicationDetail } from "./experience/publication-site";
 
 /**
  * Reads the public detail of every listed experience in parallel, for card data the
@@ -12,6 +14,7 @@ export async function loadDetails(api: ExperienceApiClient, summaries: Experienc
   const results = await Promise.all(
     summaries.map(async (summary) => {
       try {
+        if (config.experiencePublicationsEnabled) return await getPublicationDetail(summary.slug, locale);
         if (locale === "ja") {
           const result = await api.getJapaneseExperience(summary.slug);
           return result.ok && result.data.releaseId === releaseId ? result.data.experience : null;

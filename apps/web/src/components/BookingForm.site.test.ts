@@ -7,20 +7,24 @@ import { siteSaleTerms, withSiteSaleTerms } from "@/lib/guest-booking-terms";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 
 /** An experience sold here (#285): after QUESTIONS_CHANGED / PRICE_CHANGED / CONSENT_OUTDATED the form reads the sale from this site. */
-const state = vi.hoisted(() => ({ refresh: undefined as undefined | (() => Promise<void>) }));
+const state = vi.hoisted(() => ({
+  refresh: undefined as undefined | (() => Promise<void>),
+  locale: "en" as "en" | "ja",
+  model: null as null | Record<string, unknown>,
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/components/SiteLocale", async () => {
   const { EN_STATIC_COPY_V1 } = await import("@niho/experience-presentation/v1");
-  return { useSiteLocale: () => ({ locale: "en", releaseId: null }), useSiteCopy: () => EN_STATIC_COPY_V1 };
+  return { useSiteLocale: () => ({ locale: state.locale, releaseId: null }), useSiteCopy: () => EN_STATIC_COPY_V1 };
 });
 vi.mock("@niho/experience-presentation/v1", async (original) => ({
   ...await original<typeof import("@niho/experience-presentation/v1")>(),
-  BookingCheckoutViewV1: ({ callbacks }: { callbacks: { onRefresh: () => Promise<void> } }) => { state.refresh = callbacks.onRefresh; return null; },
+  BookingCheckoutViewV1: ({ model, callbacks }: { model: Record<string, unknown>; callbacks: { onRefresh: () => Promise<void> } }) => { state.model = model; state.refresh = callbacks.onRefresh; return null; },
 }));
 
 import { BookingForm } from "./BookingForm";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); state.locale = "en"; state.model = null; });
 
 it("reads the sale terms again from this site, not NIHO's detail, and keeps NIHO's content", async () => {
   const sale = siteSaleTerms(SAMPLE_TERMS, "sample-terms-2026-11");
@@ -46,4 +50,33 @@ it("reads the sale terms again from this site, not NIHO's detail, and keeps NIHO
   expect(latest.booking.consentVersion).toBe("sample-terms-2026-11");
   expect(latest.description).toBe(experience.description);
   expect(conditions).toBeUndefined();
+});
+
+it("renders Japanese minimum-charge and explicit custom cancellation terms with localized image alt", () => {
+  state.locale = "ja";
+  const base = buildFixtureExperiences()[0]!;
+  const localizedAlt = "合成カバー写真";
+  const experience = {
+    ...base,
+    cover: base.cover ? { ...base.cover, alt: localizedAlt } : null,
+    offers: base.offers.map((item, index) => index === 0 ? {
+      ...item,
+      minimumChargeableParticipants: 3,
+      cancellationPolicy: { code: "NONE" as const, freeCancellationHoursBefore: null },
+      saleCancellation: { policyCode: "CUSTOM" as const, cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3_750 },
+    } : item),
+  } as unknown as typeof base & { offers: Array<typeof base.offers[number] & { minimumChargeableParticipants: number; saleCancellation: { policyCode: "CUSTOM"; cancellationWindowMinutesBeforeStart: number; refundBasisPoints: number } }> };
+  const offer = experience.offers[0]!;
+  renderToStaticMarkup(createElement(BookingForm, {
+    api: null, apiUnavailable: true, experience, offer, selection: { offerId: offer.id, date: "2026-11-02", adultCount: 1, childCount: 0 },
+    preview: false, attributionEnabled: false, publicApiVersion: "1.2", onExperienceRefresh: vi.fn(() => true),
+    bookingSource: { kind: "site", origin: "https://experience.example" },
+    draft: { guestName: "", guestEmail: "", note: "", answerSets: {} }, onDraftChange: vi.fn(), attemptRef: { current: null }, onBack: vi.fn(),
+  }));
+  expect(state.model).toMatchObject({
+    total: "￥19,500",
+    policyTitle: "90分前までの取消で37.5％返金",
+    consentVersion: experience.booking.consentVersion,
+  });
+  expect(state.model?.summary).toMatchObject({ image: { alt: localizedAlt } });
 });

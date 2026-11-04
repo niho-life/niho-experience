@@ -25,11 +25,17 @@ export type {
   ExperiencePublicationDraftCreateInput,
   ExperienceHostMediaAsset,
   ExperienceHostMediaAssetInput,
+  ExperienceHostMediaSelectionInput,
+  ExperienceHostProviderMedia,
+  ExperienceHostProviderMediaAsset,
+  ExperienceHostProviderMediaAssetInput,
+  ExperienceHostProviderMediaSelectionInput,
   ProviderPublicationReadiness,
   ProviderPublicationReadinessInput,
   PublicationOperationsActor,
   PublicExperiencePublication,
   PublicExperienceMediaAsset,
+  PublicExperienceProviderMedia,
 } from "./experience-publication.ts";
 export type { BookingTermsSnapshot } from "./types.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";

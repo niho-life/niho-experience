@@ -253,6 +253,7 @@ export type DetailViewModelV1 = Readonly<{
         name: string;
         tagline?: string;
         photo?: DisplayImageV1 | null;
+        logo?: DisplayImageV1 | null;
         hosts: readonly FaceV1[];
         bios?: readonly DetailHostBioV1[];
         storyLink?: DetailStoryLinkV1;

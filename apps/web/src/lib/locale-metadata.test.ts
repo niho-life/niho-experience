@@ -7,17 +7,21 @@ const japanese = vi.hoisted(() => ({
   catalogRelease: "release-1",
   detailRelease: "release-1",
   english: ["translated-experience", "english-only"] as string[] | null,
+  copyReady: true,
+  publication: { japanese: { title: "合成体験" } } as null | { japanese: unknown | null },
+  publicationsEnabled: false,
 }));
 const READY = { termsFingerprint: `sha256:${"a".repeat(64)}`, bookingReady: true, unavailableCopyKey: null };
 
 vi.mock("server-only", () => ({}));
-vi.mock("./config", () => ({ config: { siteUrl: "https://experience.example.com", indexingAllowed: true } }));
+vi.mock("./config", () => ({ get config() { return { siteUrl: "https://experience.example.com", indexingAllowed: true, experiencePublicationsEnabled: japanese.publicationsEnabled, japaneseSiteEnabled: true }; } }));
 vi.mock("./api", () => ({
   listExperiencesForSite: async () => japanese.english
     ? { ok: true as const, data: { experiences: japanese.english.map((slug) => ({ slug })) } }
     : { ok: false as const, kind: "network_error" as const },
 }));
 vi.mock("./localized-content", () => ({
+  getJapaneseCopy: async () => { if (!japanese.copyReady) throw new Error("copy unavailable"); return { releaseId: "release-1" }; },
   getJapaneseCatalog: async () => ({ releaseId: japanese.catalogRelease, experiences: [{ slug: "translated-experience" }, { slug: "japanese-only" }] }),
   getJapaneseDetail: async (slug: string) => {
     if (slug !== "translated-experience" && slug !== "japanese-only") throw new Error("missing");
@@ -28,6 +32,7 @@ vi.mock("./localized-content", () => ({
     return { releaseId: japanese.staticRelease };
   },
 }));
+vi.mock("./experience/store-server", () => ({ experiencePublicationRepository: () => ({ getPublicBySlug: async () => japanese.publication }) }));
 
 import { experienceAlternates, japaneseExperienceAlternates } from "./locale-metadata";
 
@@ -41,6 +46,9 @@ beforeEach(() => {
   japanese.catalogRelease = "release-1";
   japanese.detailRelease = "release-1";
   japanese.english = ["translated-experience", "english-only"];
+  japanese.copyReady = true;
+  japanese.publication = { japanese: { title: "合成体験" } };
+  japanese.publicationsEnabled = false;
 });
 
 describe("experience hreflang", () => {
@@ -68,6 +76,16 @@ describe("experience hreflang", () => {
     japanese.catalogRelease = "release-1";
     japanese.detailRelease = "release-2";
     await expect(experienceAlternates("translated-experience", `${EN}/translated-experience`)).resolves.toEqual(englishOnly(`${EN}/translated-experience`));
+  });
+
+  it("pairs a published Experience translation when the common Japanese site copy is available", async () => {
+    japanese.publicationsEnabled = true;
+    await expect(experienceAlternates("synthetic-dinner", `${SITE}/experiences/synthetic-dinner`)).resolves.toEqual({
+      canonical: `${SITE}/experiences/synthetic-dinner`,
+      languages: { en: `${SITE}/experiences/synthetic-dinner`, ja: `${SITE}/ja/experiences/synthetic-dinner`, "x-default": `${SITE}/experiences/synthetic-dinner` },
+    });
+    japanese.copyReady = false;
+    await expect(experienceAlternates("synthetic-dinner", `${SITE}/experiences/synthetic-dinner`)).resolves.toEqual(englishOnly(`${SITE}/experiences/synthetic-dinner`));
   });
 });
 
@@ -104,5 +122,15 @@ describe("Japanese experience hreflang", () => {
     expect(languagesOf(`${JA}/translated-experience`)).toEqual(japanesePage?.languages);
     expect(languagesOf(`${EN}/english-only`)).toBeUndefined();
     expect(entries.map((entry) => entry.url)).not.toContain(`${JA}/japanese-only`);
+  });
+
+  it("pairs a Japanese Experience publication only while its English counterpart remains public", async () => {
+    japanese.publicationsEnabled = true;
+    await expect(japaneseExperienceAlternates("synthetic-dinner", `${SITE}/ja/experiences/synthetic-dinner`)).resolves.toEqual({
+      canonical: `${SITE}/ja/experiences/synthetic-dinner`,
+      languages: { en: `${SITE}/experiences/synthetic-dinner`, ja: `${SITE}/ja/experiences/synthetic-dinner`, "x-default": `${SITE}/experiences/synthetic-dinner` },
+    });
+    japanese.publication = null;
+    await expect(japaneseExperienceAlternates("synthetic-dinner", `${SITE}/ja/experiences/synthetic-dinner`)).resolves.toEqual({ canonical: `${SITE}/ja/experiences/synthetic-dinner` });
   });
 });

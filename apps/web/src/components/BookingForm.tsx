@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
-import { NO_JOURNEY_EXTRAS, computeExpectedTotalYen, conditionConsentTexts, createClientRequestKey, isValidGuestPhone, normalizeGuestPhone, usableConditions, type CheckoutAnswer, type ExperienceApiClient, type ExperienceConditions, type ExperienceCheckoutJourneyFields, type ExperienceCheckoutRequest, type ExperienceOffer, type JourneyDetailExtras } from "@niho-experience/api-client";
+import { NO_JOURNEY_EXTRAS, computeExpectedTotalYen, conditionConsentTexts, createClientRequestKey, isValidGuestPhone, normalizeGuestPhone, usableConditions, type CheckoutAnswer, type ExperienceApiClient, type ExperienceConditions, type ExperienceCheckoutJourneyFields, type ExperienceCheckoutRequest, type JourneyDetailExtras } from "@niho-experience/api-client";
 import { hostNames } from "@/lib/card-model";
 import { JOURNEY_PROBLEMS, askHostTarget, freeCancellationDeadline } from "@/lib/journey-ui";
 import { dayOption } from "@/lib/date-filter";
@@ -11,7 +11,7 @@ import { formatClock, occurrenceTiming } from "@/lib/schedule";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { track } from "@/lib/analytics";
 import { readBookingAttribution } from "@/lib/booking-attribution";
-import type { ExperienceDetailForSite } from "@/lib/experience-types";
+import type { ExperienceDetailForSite, ExperienceOfferForSite } from "@/lib/experience-types";
 import { policyTitle } from "./Policy";
 import type { BookingSelection } from "./SlotPicker";
 import { BookingCheckoutViewV1, type BookingCheckoutViewModelV1 } from "@niho/experience-presentation/v1";
@@ -26,7 +26,19 @@ import { checkoutProblem, fullNameValidationMessage, retryUnit } from "@/lib/boo
 export type BookingDraft = { guestName: string; guestEmail: string; guestPhone?: string; note: string; answerSets: Record<string, Record<string, string | string[]>> };
 export type CheckoutAttempt = { signature: string; key: string };
 
-export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, bookingSource, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOffer; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; /** Where `api` points; NIHO's API when left out. */ bookingSource?: BookingSource; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
+function offerCancellationTitle(offer: ExperienceOfferForSite, locale: "en" | "ja"): string {
+  const cancellation = offer.saleCancellation;
+  if (cancellation?.policyCode !== "CUSTOM") return policyTitle(offer.cancellationPolicy, locale);
+  if (cancellation.cancellationWindowMinutesBeforeStart === null) {
+    return cancellation.refundBasisPoints === 0 ? policyTitle(offer.cancellationPolicy, locale) : (locale === "ja" ? "取消条件を確認してください" : "Please review the cancellation terms");
+  }
+  const refundPercent = (cancellation.refundBasisPoints / 100).toLocaleString(locale === "ja" ? "ja-JP" : "en-US");
+  return locale === "ja"
+    ? `${cancellation.cancellationWindowMinutesBeforeStart}分前までの取消で${refundPercent}％返金`
+    : `${refundPercent}% refund for cancellations up to ${cancellation.cancellationWindowMinutesBeforeStart} minutes before start`;
+}
+
+export function BookingForm({ api, apiUnavailable, experience, offer, selection, preview, attributionEnabled, publicApiVersion, journey = NO_JOURNEY_EXTRAS, onExperienceRefresh, bookingSource, draft, onDraftChange, attemptRef, onBack, titleAs = "h1" }: { api: ExperienceApiClient | null; apiUnavailable: boolean; experience: ExperienceDetailForSite; offer: ExperienceOfferForSite; selection: BookingSelection; preview: boolean; attributionEnabled: boolean; publicApiVersion: "1.0" | "1.1" | "1.2"; journey?: JourneyDetailExtras; onExperienceRefresh: (experience: ExperienceDetailForSite, conditions?: ExperienceConditions | null) => boolean; /** Where `api` points; NIHO's API when left out. */ bookingSource?: BookingSource; draft: BookingDraft; onDraftChange: Dispatch<SetStateAction<BookingDraft>>; attemptRef: RefObject<CheckoutAttempt | null>; onBack: () => void; titleAs?: "h1" | "p" }) {
   const router = useRouter();
   const copy = useSiteCopy();
   const { locale, releaseId } = useSiteLocale();
@@ -45,7 +57,10 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
   const [clockNow, setClockNow] = useState(() => Date.now());
   const viewTracked = useRef(false);
   const alertRef = useRef<HTMLDivElement>(null);
-  const total = computeExpectedTotalYen(offer.pricing, selection.adultCount, selection.childCount);
+  const ordinaryTotal = computeExpectedTotalYen(offer.pricing, selection.adultCount, selection.childCount);
+  const minimumChargeableParticipants = offer.minimumChargeableParticipants ?? 1;
+  const minimumChargeTotal = offer.pricing.adultPriceYen * minimumChargeableParticipants;
+  const total = ordinaryTotal === null ? null : Math.max(ordinaryTotal, minimumChargeTotal);
   const headCount = selection.adultCount + selection.childCount;
   const selectionValid = Number.isInteger(selection.adultCount) && Number.isInteger(selection.childCount) && selection.adultCount >= 0 && selection.childCount >= 0 && headCount >= offer.minimumParticipants && headCount <= offer.maxPartySize && (selection.childCount === 0 || !!offer.pricing.child) && (!offer.pricing.child?.adultRequired || selection.childCount === 0 || selection.adultCount > 0);
   const retrySecondsRemaining = retryUntil === null ? 0 : Math.max(0, Math.ceil((retryUntil - clockNow) / 1000));
@@ -243,10 +258,15 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
   const guests = locale === "ja" ? `大人${selection.adultCount}名${selection.childCount ? `、子ども${selection.childCount}名` : ""}` : `${selection.adultCount} adult${selection.adultCount === 1 ? "" : "s"}${selection.childCount ? `, ${selection.childCount} child${selection.childCount === 1 ? "" : "ren"}` : ""}`;
   const legalDocuments = experience.booking.legalDocuments.flatMap((doc) => { const url = safeHttpsUrl(doc.url); return url ? [{ kind: doc.kind, url }] : []; });
   // "Free cancellation until Thu 12 Nov, 7:00 AM Japan time": the policy's hours counted back from the date's start (contract: FREE_UNTIL_24H / 48H).
-  const freeCancellation = locale === "en" ? freeCancellationDeadline(startAt ?? "", offer.cancellationPolicy.freeCancellationHoursBefore, new Date(clockNow)) : null;
+  const freeCancellation = freeCancellationDeadline(startAt ?? "", offer.cancellationPolicy.freeCancellationHoursBefore, new Date(clockNow));
+  const cancellationDeadlineLabel = freeCancellation?.state === "until" && locale === "ja" && startAt
+    ? new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", dateStyle: "medium", timeStyle: "short" }).format(
+      new Date(Date.parse(startAt) - (offer.cancellationPolicy.freeCancellationHoursBefore ?? 0) * 3_600_000),
+    )
+    : freeCancellation?.state === "until" ? freeCancellation.label : null;
   const hostTarget = askHostTarget(hostNames(experience));
   const model: BookingCheckoutViewModelV1 = {
-    summary: { title: experience.title, image: experience.cover ? { src: experience.cover.url, alt: "" } : null, summary: `${formatDuration(timing.durationMinutes, locale)} · ${formatClock(timing.startTime, locale)} JST · ${offer.name}` },
+    summary: { title: experience.title, image: experience.cover ? { src: experience.cover.url, alt: "alt" in experience.cover && typeof experience.cover.alt === "string" ? experience.cover.alt : experience.title } : null, summary: `${formatDuration(timing.durationMinutes, locale)} · ${formatClock(timing.startTime, locale)} JST · ${offer.name}` },
     availability: checkingAvailability ? "checking" : needsFreshDetails ? "stale" : availabilityOk ? "ready" : "unavailable",
     refreshing,
     refreshDisabled: refreshing || !api,
@@ -264,10 +284,15 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       { label: copy.text("booking.guests"), value: guests },
       { label: copy.text("booking.adults"), value: copy.text("booking.adultRow", { count: selection.adultCount, price: formatYen(offer.pricing.adultPriceYen, locale) }) },
       ...(selection.childCount && offer.pricing.child ? [{ label: copy.text("booking.children"), value: copy.text("booking.childRow", { count: selection.childCount, price: formatYen(offer.pricing.child.priceYen, locale) }) }] : []),
-      ...(freeCancellation ? [{ label: "Free cancellation", value: freeCancellation.state === "until" ? `Until ${freeCancellation.label}` : "Not available for this date" }] : []),
+      ...(freeCancellation ? [{
+        label: locale === "ja" ? "無料取消の期限" : "Free cancellation",
+        value: freeCancellation.state === "until"
+          ? locale === "ja" ? `開始${offer.cancellationPolicy.freeCancellationHoursBefore}時間前まで（${cancellationDeadlineLabel}）` : `Until ${cancellationDeadlineLabel}`
+          : locale === "ja" ? "この開催回は無料取消の期限を過ぎています" : "Not available for this date",
+      }] : []),
     ],
     total: total === null ? copy.text("booking.totalUnavailable") : formatYen(total, locale),
-    policyTitle: policyTitle(offer.cancellationPolicy, locale),
+    policyTitle: offerCancellationTitle(offer, locale),
     sellerName: experience.seller.displayName,
     sellerLegalUrl: sellerLegalUrl ?? undefined,
     legalDocuments,

@@ -51,7 +51,7 @@ function ErrorMessage({ error, onRetry, onReread }: { error: MutationError; onRe
 }
 
 /** Experience-owned host calendar. Browser state never decides inventory or authorization. */
-export function HostCalendarWorkspace({ providerId, legacyManagementUrl }: { providerId: string; legacyManagementUrl: string | null }) {
+export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyManagementUrl }: { providerId: string; initialExperienceId: string | null; legacyManagementUrl: string | null }) {
   const [today] = useState(todayInTokyo);
   const [activeWeek, setActiveWeek] = useState(() => weekStart(today));
   const [selectedDate, setSelectedDate] = useState(today);
@@ -73,6 +73,7 @@ export function HostCalendarWorkspace({ providerId, legacyManagementUrl }: { pro
   const [recurrence, setRecurrence] = useState("WEEKLY");
   const [weekdays, setWeekdays] = useState<string[]>([]);
   const requestSequence = useRef(0);
+  const initialExperiencePending = useRef(true);
   const refreshWasSave = useRef(false);
   const savingRef = useRef(false);
   const days = useMemo(() => weekDays(activeWeek), [activeWeek]);
@@ -93,7 +94,12 @@ export function HostCalendarWorkspace({ providerId, legacyManagementUrl }: { pro
         if (controller.signal.aborted || sequence !== requestSequence.current) return;
         setData(result);
         setDataFresh(true);
-        setExperienceId((current) => result.experiences.some((item) => item.id === current) ? current : "");
+        if (initialExperiencePending.current) {
+          initialExperiencePending.current = false;
+          setExperienceId(initialExperienceId && result.experiences.some((item) => item.id === initialExperienceId) ? initialExperienceId : "");
+        } else {
+          setExperienceId((current) => result.experiences.some((item) => item.id === current) ? current : "");
+        }
         setDialog((current) => {
           if (current?.kind !== "occurrence") return current;
           const item = result.occurrences.find((candidate) => candidate.id === current.item.id);
@@ -108,7 +114,7 @@ export function HostCalendarWorkspace({ providerId, legacyManagementUrl }: { pro
         else setReadError(error instanceof Error ? error.message : "読み込みに失敗しました。");
       })
       .finally(() => { if (!controller.signal.aborted && sequence === requestSequence.current) setLoading(false); });
-  }, [fromDate, providerId, toDate]);
+  }, [fromDate, initialExperienceId, providerId, toDate]);
 
   useEffect(() => { const controller = new AbortController(); const sequence = ++requestSequence.current; load(controller, sequence); return () => controller.abort(); }, [load, nonce]);
   const refreshAfterSave = (focusDate?: string) => {

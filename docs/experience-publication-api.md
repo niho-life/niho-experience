@@ -77,7 +77,23 @@ The public API returns the accepted minimum charge and cancellation rule for gue
 
 `POST /host/api/products/{productId}/stop` sends `{ "version": "…" }`. It removes the product from catalog, details, metadata, sitemap, and new checkout admission. Existing bookings and their immutable snapshots remain available.
 
-`POST /host/api/products/{productId}/media` uploads JPEG or PNG bytes. It requires `x-experience-photo-rights-confirmed: true`; `x-experience-photo-alt-text` and optional `x-experience-photo-credit` set public metadata. Adding media advances the draft revision; the response returns the uploaded asset and the updated product DTO (including its next opaque `version`) so the host can publish that exact revision. Until publish succeeds, the active public copy remains unchanged. Object paths and storage details are never sent by the browser.
+`POST /host/api/products/{productId}/media` uploads a JPEG or PNG to this product's gallery. It requires `x-experience-photo-rights-confirmed: true` and UTF-8 base64url values in `x-experience-photo-alt-text-utf8-base64url` and `x-experience-photo-alt-text-ja-utf8-base64url`. If supplied, `x-experience-media-placement` must be `GALLERY`; the server defaults it to that value. Optional `x-experience-photo-credit-utf8-base64url` sets the public credit. Base64url keeps Japanese and other Unicode text valid in HTTP headers. Seller profile photos and business logos use the provider-level routes below; they cannot be attached to a single product.
+
+`PUT /host/api/products/{productId}/media` sends `{ "version": "…", "media": [{ "id": "…", "altText": "…", "altTextJa": "…", "publicCredit": null }] }` to replace the draft's complete gallery selection and order. Only this seller's rights-confirmed assets can be selected. A removed image leaves the public version in place until a complete publication replaces it; older immutable product gallery media remains available to existing readers. Selection and upload both advance the product revision.
+
+Seller profile media is shared across every product owned by that seller:
+
+- `GET /host/api/provider-media` returns `{ "providerMedia": { "version": 1, "assets": [...] } }` for the authenticated OWNER. It contains only explicitly approved provider photos and business logos, with owner-only preview URLs.
+- `PUT /host/api/provider-media` accepts `{ "version": 1, "media": [{ "id": "…", "placement": "PROVIDER_PHOTO", "altText": "…", "altTextJa": "…", "publicCredit": null }] }`. This replaces the complete selected profile media and localized descriptions. `version` is a compare-and-swap token; a stale value returns `VERSION_CONFLICT` and does not overwrite the saved profile.
+- `POST /host/api/provider-media/upload` uses the same photo rights, localized-alt, and optional credit headers as product uploads, plus `x-experience-media-placement` set to `PROVIDER_PHOTO` or `BUSINESS_LOGO` and `x-experience-provider-media-version` set to the version returned by `GET`. A stale version returns `VERSION_CONFLICT`; the server does not replace the current image. A successful upload replaces the selected asset for that role for all of the seller's products. The checkbox confirms public use for the selected role and seller-wide scope.
+- `GET /host/api/provider-media/{assetId}` serves a private preview to the current OWNER. `DELETE` accepts `{ "version": 1 }`, revokes the selected asset immediately, removes it from every public DTO, and makes its public image URL unavailable. Replacement also revokes the old selected asset.
+- `GET /api/public/experience-provider-media/{assetId}` serves only a currently selected, rights-confirmed profile asset referenced by an active public seller listing. Its public DTO includes the selected locale's alt text and optional credit.
+
+An absent business logo is represented as `null`. The seller's configured display name remains the seller label when no company website is available. NIHO account avatars, location logos, and product gallery images do not automatically become seller profile media.
+
+`POST /host/api/products/{productId}/translation` accepts the product's Japanese manuscript and returns an English draft plus the source fingerprint. It uses the same current OWNER session boundary as product writes. The browser discards the result if either manuscript changed while the request was running. Translation output is never published until the host edits and confirms it; publication checks both source and English fingerprints again.
+
+Published photo alts are localized in the public DTO. English and Japanese product routes have locale-specific canonical URLs; `ja`/`en`/`x-default` hreflang and sitemap entries exist only when the current publication includes confirmed Japanese copy and the Japanese site chrome can render.
 
 An operations suspension uses a separate Admin session. Clearing it does not publish; the OWNER must explicitly publish again.
 
