@@ -31,6 +31,7 @@ export type ExperiencePublicationBlocker =
   | "CANCELLATION_TERMS_REQUIRED"
   | "CONNECT_NOT_READY"
   | "CONSENT_OUTDATED"
+  | "FEE_SETTINGS_REQUIRED"
   | "MANUSCRIPT_REQUIRED"
   | "OPERATIONS_SUSPENDED"
   | "OWNER_NOT_CURRENT"
@@ -386,6 +387,11 @@ async function blockers(
        ) AS slug_in_use`,
     [product.providerId, product.id, product.slug],
   );
+  const feeSettings = await client.query(
+    "SELECT provider_id FROM provider_sale_settings WHERE provider_id=$1 FOR SHARE",
+    [product.providerId],
+  );
+  if (!feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
@@ -599,7 +605,10 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
-      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
+      const product = await client.query<{ version: number }>(
+        "SELECT version FROM experience_products WHERE provider_id=$1 AND id=$2 FOR UPDATE",
+        [actor.providerId, productId],
+      );
       if (!product.rows[0]) throw new StoreNotFoundError("product");
       const next = await client.query<{ position: number }>(
         `SELECT COALESCE(MAX(source_position)+1,0)::int AS position
@@ -617,6 +626,12 @@ export class ExperiencePublicationRepository {
           input.width, input.height, input.byteSize, input.altText, input.publicCredit],
       );
       const row = result.rows[0]!;
+      const versioned = await client.query(
+        `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND id=$2 AND version=$3 RETURNING version`,
+        [actor.providerId, productId, product.rows[0].version],
+      );
+      if (versioned.rowCount !== 1) throw new StoreConflictError("Product changed while adding media.");
       return {
         id: String(row.id), position: safeInteger(row.source_position, "media position"),
         width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),

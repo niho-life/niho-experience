@@ -61,6 +61,10 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($3,$4,'OWNER')",
         [firstOwner.providerId, firstOwner.nihoUserId, secondOwner.providerId, secondOwner.nihoUserId],
       );
+      await pool.query(
+        "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000),($2,false,1000)",
+        [firstOwner.providerId, secondOwner.providerId],
+      );
 
       const store = new ExperienceStore(pool);
       const publications = new ExperiencePublicationRepository(pool);
@@ -150,6 +154,10 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       await pool.query(
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($1,$3,'EDITOR')",
         [OWNER.providerId, OWNER.nihoUserId, EDITOR.nihoUserId],
+      );
+      await pool.query(
+        "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000)",
+        [OWNER.providerId],
       );
 
       const store = new ExperienceStore(pool);
@@ -248,6 +256,21 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
           checks: CHECKS,
         }),
         StoreAccessDeniedError,
+      );
+
+      await pool.query("DELETE FROM provider_sale_settings WHERE provider_id=$1", [OWNER.providerId]);
+      await assert.rejects(
+        publications.publish(OWNER, original.id, {
+          expectedDraftVersion: original.version,
+          expectedStateVersion: null,
+          consentVersion: ready.requiredConsentVersion,
+          checks: CHECKS,
+        }),
+        (error: unknown) => error instanceof ExperiencePublicationBlockedError && error.blockers.includes("FEE_SETTINGS_REQUIRED"),
+      );
+      await pool.query(
+        "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000)",
+        [OWNER.providerId],
       );
 
       let state = await publications.publish(OWNER, original.id, {
@@ -393,6 +416,29 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(state.ownerResumeRequired, false);
       assert.ok(await publications.getPublicBySlug(original.slug));
+
+      const extraAssetId = randomUUID();
+      const beforePhotoAdd = await publications.getPublicBySlug(original.slug);
+      await publications.addMedia(OWNER, original.id, {
+        id: extraAssetId,
+        objectKey: `experience-products/${extraAssetId}.jpg`,
+        sourceRefHash: "4".repeat(64),
+        width: 640,
+        height: 480,
+        byteSize: 2048,
+        altText: "Second synthetic photo",
+        publicCredit: null,
+      });
+      const draftAfterPhotoAdd = await publications.getProduct(OWNER, original.id);
+      assert.equal(draftAfterPhotoAdd.version, incomplete.draft.version + 1);
+      assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, beforePhotoAdd?.photos.length);
+      state = await publications.publish(OWNER, original.id, {
+        expectedDraftVersion: draftAfterPhotoAdd.version,
+        expectedStateVersion: state.version,
+        consentVersion: ready.requiredConsentVersion,
+        checks: CHECKS,
+      });
+      assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, 2);
 
       // Readiness proves identity when the OWNER publishes. After publication, mutable readiness TTLs do not
       // make a seller's listing vanish every few minutes; STOP and operations suspension control visibility.

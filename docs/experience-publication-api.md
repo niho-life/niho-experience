@@ -73,11 +73,11 @@ The public API returns the accepted minimum charge and cancellation rule for gue
 
 ### Publish, stop, and resume
 
-`POST /host/api/products/{productId}/publish` (also resumes a seller-stopped product) sends `{ "version": "…", "consentVersion": "…", "accepted": true }`. The server checks current OWNER authority, seller/Connect readiness, seller display, consent, product content and photo rights, prices, explicit cancellation terms, and at least one saleable schedule. It never publishes unsaved input.
+`POST /host/api/products/{productId}/publish` (also resumes a seller-stopped product) sends `{ "version": "…", "consentVersion": "…", "accepted": true }`. The server checks current OWNER authority, seller/Connect readiness, seller display, consent, product content and photo rights, prices, explicit cancellation terms, NIHO's provider fee configuration, and at least one saleable schedule. A missing provider fee configuration returns `FEE_SETTINGS_REQUIRED`; the seller cannot choose or override it. It never publishes unsaved input.
 
 `POST /host/api/products/{productId}/stop` sends `{ "version": "…" }`. It removes the product from catalog, details, metadata, sitemap, and new checkout admission. Existing bookings and their immutable snapshots remain available.
 
-`POST /host/api/products/{productId}/media` uploads JPEG or PNG bytes. It requires `x-experience-photo-rights-confirmed: true`; `x-experience-photo-alt-text` and optional `x-experience-photo-credit` set public metadata. The response returns a host-only preview URL. Object paths and storage details are never sent by the browser.
+`POST /host/api/products/{productId}/media` uploads JPEG or PNG bytes. It requires `x-experience-photo-rights-confirmed: true`; `x-experience-photo-alt-text` and optional `x-experience-photo-credit` set public metadata. Adding media advances the draft revision; the response returns the uploaded asset and the updated product DTO (including its next opaque `version`) so the host can publish that exact revision. Until publish succeeds, the active public copy remains unchanged. Object paths and storage details are never sent by the browser.
 
 An operations suspension uses a separate Admin session. Clearing it does not publish; the OWNER must explicitly publish again.
 
@@ -110,8 +110,8 @@ The host keeps one opaque `version` per product and sends it as `version` on mut
 | 503 | `UNAVAILABLE` | Experience database or required media service is unavailable |
 | 413 | `INVALID_INPUT` | Request body exceeds the BFF limit |
 
-Responses never include exception text, credentials, private IDs, or personal data. The UI does not ask the host to repair internal IDs or versions; it presents the blocker and the relevant seller/product setting.
+Responses never include exception text, credentials, private IDs, or personal data. The UI does not ask the host to repair internal IDs, versions, or NIHO-controlled fee settings; it presents the blocker and the next required action.
 
 ## Stable publication blockers
 
-`ACCOUNT_NOT_USABLE`, `CANCELLATION_TERMS_REQUIRED`, `CONNECT_NOT_READY`, `CONSENT_OUTDATED`, `MANUSCRIPT_REQUIRED`, `OPERATIONS_SUSPENDED`, `OWNER_NOT_CURRENT`, `PHOTOS_REQUIRED`, `PRICE_REQUIRED`, `PUBLIC_CONTENT_INVALID`, `READINESS_EXPIRED`, `READINESS_MISSING`, `SCHEDULE_REQUIRED`, `SELLER_MISMATCH`, `SLUG_IN_USE`.
+`ACCOUNT_NOT_USABLE`, `CANCELLATION_TERMS_REQUIRED`, `CONNECT_NOT_READY`, `CONSENT_OUTDATED`, `FEE_SETTINGS_REQUIRED`, `MANUSCRIPT_REQUIRED`, `OPERATIONS_SUSPENDED`, `OWNER_NOT_CURRENT`, `PHOTOS_REQUIRED`, `PRICE_REQUIRED`, `PUBLIC_CONTENT_INVALID`, `READINESS_EXPIRED`, `READINESS_MISSING`, `SCHEDULE_REQUIRED`, `SELLER_MISMATCH`, `SLUG_IN_USE`.

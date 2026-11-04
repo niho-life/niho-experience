@@ -189,8 +189,8 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
   };
 }
 
-function checksFor(product: { readonly content: Readonly<Record<string, unknown>> }, photosReady: boolean) {
-  return { manuscriptReady: projectPublicExperiencePublicationManuscript(product.content as never) !== null, photosReady };
+function checksFor(content: Readonly<Record<string, unknown>>, photosReady: boolean) {
+  return { manuscriptReady: projectPublicExperiencePublicationManuscript(content as never) !== null, photosReady };
 }
 
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {
@@ -280,10 +280,11 @@ export async function publicationRequest(request: Request, context: PublicationP
     const product = await repository.getProduct(actor, productId);
     const state = await repository.getState(actor, productId);
     const terms = await repository.getSaleTerms(actor, productId);
-    const checks = checksFor(product, (await repository.listMedia(actor, productId)).length > 0);
+    const photosReady = (await repository.listMedia(actor, productId)).length > 0;
 
     if (action === "save") {
       const input = body!.draft as ProductDraftBody;
+      const checks = checksFor(input.content, photosReady);
       const result = await repository.saveDraft(actor, {
         id: productId,
         ...input,
@@ -296,6 +297,7 @@ export async function publicationRequest(request: Request, context: PublicationP
         blockers: result.blockers,
       });
     }
+    const checks = checksFor(product.content, photosReady);
     if (action === "saveSaleTerms") {
       const result = await repository.saveSaleTerms(actor, productId, {
         expectedDraftVersion: revision!.draft,
@@ -368,6 +370,7 @@ export async function publicationMediaRequest(request: Request, context: Publica
   const id = randomUUID();
   const objectKey = `experience-products/${id}.jpg`;
   let stored = false;
+  let registered = false;
   try {
     await storage.write(objectKey, processed.bytes);
     stored = true;
@@ -377,9 +380,14 @@ export async function publicationMediaRequest(request: Request, context: Publica
       altText, publicCredit,
     };
     const asset = await prepared.repository.addMedia(prepared.context.actor, productId, assetInput);
-    return noStoreJson({ asset: { ...asset, previewUrl: `/host/api/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(asset.id)}` } }, 201);
+    registered = true;
+    const product = await productDto(prepared.repository, prepared.context.actor, productId);
+    return noStoreJson({
+      asset: { ...asset, previewUrl: `/host/api/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(asset.id)}` },
+      product,
+    }, 201);
   } catch (error) {
-    if (stored) await storage.remove(objectKey).catch(() => undefined);
+    if (stored && !registered) await storage.remove(objectKey).catch(() => undefined);
     return mapStoreError(error);
   }
 }

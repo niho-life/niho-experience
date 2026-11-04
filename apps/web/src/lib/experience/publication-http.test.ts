@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" },
   boundary: vi.fn(),
   mutationAllowed: vi.fn(),
+  mediaStorage: null as null | { write: ReturnType<typeof vi.fn>; read: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> },
+  coverInput: vi.fn(),
+  coverImage: vi.fn(),
   repository: {
     ensureOwnerWorkspace: vi.fn(),
     refreshReadiness: vi.fn(),
@@ -34,11 +37,11 @@ vi.mock("./publication-host-boundary", () => ({
   publicationHostMutationAllowed: mocks.mutationAllowed,
 }));
 vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository }));
-vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => null }));
+vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => mocks.mediaStorage }));
 vi.mock("@/lib/editor/guide-cover-image", () => ({
   GuideCoverImageError: class extends Error { code = "invalid_image"; },
-  processGuideCoverImage: vi.fn(),
-  readGuideCoverInput: vi.fn(),
+  processGuideCoverImage: mocks.coverImage,
+  readGuideCoverInput: mocks.coverInput,
 }));
 
 import { GET as listProducts, POST as createProduct } from "@/app/(host)/host/api/products/route";
@@ -46,6 +49,7 @@ import { GET as readProduct, PATCH as saveProduct } from "@/app/(host)/host/api/
 import { PUT as saveTerms } from "@/app/(host)/host/api/products/[productId]/sale-terms/route";
 import { POST as publishProduct } from "@/app/(host)/host/api/products/[productId]/publish/route";
 import { POST as stopProduct } from "@/app/(host)/host/api/products/[productId]/stop/route";
+import { POST as uploadProductMedia } from "@/app/(host)/host/api/products/[productId]/media/route";
 
 const actor = { providerId: "provider-private", nihoUserId: "niho-user-private" };
 const hostContext = {
@@ -97,7 +101,18 @@ const terms = {
   updatedAtUtc: "2026-11-04T00:00:00.000Z",
 };
 const media = [{ id: "00000000-0000-4000-8000-000000000401", position: 0, width: 640, height: 480, byteSize: 4096, altText: "Synthetic dinner", publicCredit: null }];
-const draft = { slug: product.slug, publicTitle: product.publicTitle, content: product.content, currency: "JPY", unitAmount: product.unitAmount };
+const draft = {
+  slug: product.slug,
+  publicTitle: product.publicTitle,
+  content: {
+    lead: "A synthetic lead.", description: "A complete synthetic description.",
+    facts: { language: "English" }, highlights: ["A synthetic highlight."], included: ["Synthetic materials"],
+    notIncluded: [], knowBeforeYouGo: ["Synthetic guidance."], notSuitableFor: [], timeline: [],
+    meetingOverview: "Near a synthetic station.", meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null,
+  },
+  currency: "JPY",
+  unitAmount: product.unitAmount,
+};
 const saleTerms = {
   offerPrices: null, childPricing: null, minimumParticipants: 1, minimumChargeableParticipants: 1,
   maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_24H", minimumAttendance: 1, bookingQuestions: [], conditionsVersion: null,
@@ -120,6 +135,7 @@ function request(path: string, method = "GET", body?: unknown, headers: Record<s
 describe("Experience owner product API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.mediaStorage = null;
     Object.assign(mocks.config, { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" });
     mocks.boundary.mockResolvedValue({ ok: true, value: hostContext });
     mocks.mutationAllowed.mockReturnValue(true);
@@ -164,7 +180,7 @@ describe("Experience owner product API", () => {
     expect(saved.status).toBe(200);
     expect(mocks.repository.saveDraft).toHaveBeenCalledWith(actor, {
       ...draft, id: product.id, cancellationTermsRef: product.cancellationTermsRef,
-    }, 4, 3, expect.objectContaining({ manuscriptReady: false, photosReady: true }));
+    }, 4, 3, expect.objectContaining({ manuscriptReady: true, photosReady: true }));
 
     const termsSaved = await saveTerms(request(`/host/api/products/${product.id}/sale-terms`, "PUT", { version, saleTerms }), context);
     expect(termsSaved.status).toBe(200);
@@ -183,6 +199,34 @@ describe("Experience owner product API", () => {
     const stopped = await stopProduct(request(`/host/api/products/${product.id}/stop`, "POST", { version }), context);
     expect(stopped.status).toBe(200);
     expect(mocks.repository.stop).toHaveBeenCalledWith(actor, product.id, 3);
+  });
+
+  it("returns the next product version when a photo changes the publication draft", async () => {
+    const addedMedia = {
+      id: "00000000-0000-4000-8000-000000000402", position: 1, width: 640, height: 480,
+      byteSize: 2048, altText: "Second synthetic photo", publicCredit: null,
+    };
+    mocks.mediaStorage = { write: vi.fn().mockResolvedValue(undefined), read: vi.fn(), remove: vi.fn().mockResolvedValue(undefined) };
+    mocks.coverInput.mockResolvedValue(Buffer.from("synthetic-original"));
+    mocks.coverImage.mockResolvedValue({ bytes: Buffer.from("synthetic-jpeg"), width: 640, height: 480 });
+    mocks.repository.addMedia.mockResolvedValue(addedMedia);
+    mocks.repository.getProduct.mockResolvedValue({ ...product, version: 5 });
+    mocks.repository.getSaleTerms.mockResolvedValue({ draftVersion: 5, stateVersion: 3, saleTerms: terms });
+    mocks.repository.listMedia.mockResolvedValue([...media, addedMedia]);
+    const response = await uploadProductMedia(new Request(`https://experience.example.test/host/api/products/${product.id}/media`, {
+      method: "POST",
+      headers: {
+        origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "image/jpeg",
+        "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text": "Second synthetic photo",
+      },
+      body: Buffer.from("request-body"),
+    }), context);
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.asset.id).toBe(addedMedia.id);
+    expect(body.product.version).toBe(Buffer.from("1:5:3:2").toString("base64url"));
+    expect(body.product.media).toHaveLength(2);
   });
 
   it("rejects seller selection, old paths, stale versions and unaccepted consent", async () => {
