@@ -54,7 +54,7 @@ describe("where one experience is sold", () => {
   });
 
   it("in publication mode fails closed for unpublished or unsellable products instead of falling back to NIHO", async () => {
-    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: false };
     expect(await guestBookingSale("sample-tea")).toEqual({ kind: "site", terms: SAMPLE_TERMS });
     expect(await guestBookingSale("sample-walk")).toEqual({ kind: "unknown" });
     state.repository!.publicBookingTerms = vi.fn(async () => null);
@@ -157,21 +157,20 @@ describe("where a page of cards reads availability", () => {
     });
   });
 
-  it("keeps new-seller slugs closed when publication is disabled without hiding legacy NIHO products", async () => {
+  it("closes all unpublished HTTP slugs while the old switch is disabled", async () => {
     state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: false };
-    state.publications!.listClaimedSlugs = vi.fn(async () => ["stopped-seller-product"]);
     const sources = await guestBookingSources(["sample-walk", "stopped-seller-product"]);
     expect(sources).toEqual({
       nihoWebOrigin: "https://niho.example",
       siteOrigin: null,
       siteSlugs: [],
-      closedSlugs: ["stopped-seller-product"],
+      closedSlugs: ["sample-walk", "stopped-seller-product"],
     });
-    expect(state.publications!.listClaimedSlugs).toHaveBeenCalledOnce();
+    expect(state.publications!.listPublic).toHaveBeenCalledOnce();
   });
 
   it("in publication mode sends only currently published saleable slugs to this site's availability", async () => {
-    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: false };
     expect(await guestBookingSources(["sample-tea", "sample-walk"])).toEqual({
       nihoWebOrigin: "https://niho.example", siteOrigin: "https://experience.example", siteSlugs: ["sample-tea"], closedSlugs: ["sample-walk"],
     });

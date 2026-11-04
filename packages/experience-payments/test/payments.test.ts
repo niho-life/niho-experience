@@ -112,6 +112,28 @@ describe("createDirectCheckout", () => {
     assert.equal(JSON.stringify(receivedParams).includes("Synthetic Host"), false);
   });
 
+  it("uses the explicitly requested Japanese locale on Stripe Checkout", async () => {
+    let receivedParams: Stripe.Checkout.SessionCreateParams | undefined;
+    const stripe = {
+      checkout: { sessions: { create: async (params: Stripe.Checkout.SessionCreateParams) => {
+        receivedParams = params;
+        return { id: "cs_test_synthetic", url: "https://checkout.stripe.com/c/pay/synthetic" };
+      } } },
+    } as unknown as PaymentsStripeClient;
+
+    await createDirectCheckout({
+      booking: booking(),
+      applicationFeeAmount: 800,
+      returnOrigin: "https://experience.example.test",
+      returnPath: "/ja/booking/return",
+      locale: "ja",
+      stripe,
+      now: NOW,
+    });
+
+    assert.equal(receivedParams?.locale, "ja");
+  });
+
   it("charges a guest booking's snapshot total when children have their own price (#285)", async () => {
     let receivedParams: Stripe.Checkout.SessionCreateParams | undefined;
     const stripe = {

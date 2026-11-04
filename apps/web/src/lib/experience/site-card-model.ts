@@ -32,21 +32,21 @@ export function sitePublicationCard(item: SitePublicExperience): CardModel {
 }
 
 /** Presentation for a sale condition in public copy; used on the native seller page and booking UI. */
-export function cancellationSummary(offer: SitePublicOffer): string {
+export function cancellationSummary(offer: SitePublicOffer, locale: "en" | "ja" = "en"): string {
   const { cancellationPolicy, cancellationTerms } = offer;
-  if (cancellationPolicy.code === "NONE") return "Non-refundable";
+  if (cancellationPolicy.code === "NONE") return locale === "ja" ? "キャンセル時の返金はありません" : "Non-refundable";
   if (cancellationPolicy.code === "FREE_UNTIL_24H" || cancellationPolicy.code === "FREE_UNTIL_48H") {
-    return `Free cancellation until ${cancellationPolicy.freeCancellationHoursBefore} hours before the start`;
+    return locale === "ja" ? `開始${cancellationPolicy.freeCancellationHoursBefore}時間前までキャンセル無料` : `Free cancellation until ${cancellationPolicy.freeCancellationHoursBefore} hours before the start`;
   }
   const window = cancellationTerms.cancellationWindowMinutesBeforeStart;
   const percent = cancellationTerms.refundBasisPoints / 100;
-  if (window === null || percent === 0) return "No cancellation refund";
+  if (window === null || percent === 0) return locale === "ja" ? "キャンセル時の返金はありません" : "No cancellation refund";
   const hours = window / 60;
-  const deadline = Number.isInteger(hours) ? `${hours} hours` : `${window} minutes`;
-  return `${percent}% refund when cancelled at least ${deadline} before the start`;
+  const deadline = Number.isInteger(hours) ? `${hours}${locale === "ja" ? "時間" : " hours"}` : `${window}${locale === "ja" ? "分" : " minutes"}`;
+  return locale === "ja" ? `開始${deadline}前までのキャンセルで${percent}%返金` : `${percent}% refund when cancelled at least ${deadline} before the start`;
 }
 
-export function scheduleDescription(offer: SitePublicOffer): string {
-  const weekdays = offer.weekdays.length === 7 ? "Every day" : offer.weekdays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(" · ");
-  return `${weekdays} · ${formatClock(offer.startTime)} JST`;
+export function scheduleDescription(offer: SitePublicOffer, locale: "en" | "ja" = "en"): string {
+  const weekdays = offer.weekdays.length === 7 ? (locale === "ja" ? "毎日" : "Every day") : offer.weekdays.map((day) => (locale === "ja" ? ["日", "月", "火", "水", "木", "金", "土"] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])[day]).join(" · ");
+  return `${weekdays} · ${formatClock(offer.startTime, locale)} JST`;
 }

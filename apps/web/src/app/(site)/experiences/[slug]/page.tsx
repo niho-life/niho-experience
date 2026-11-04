@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { ExperiencePageContent, englishExperienceMetadata } from "@/components/pages/ExperiencePageContent";
 import { SitePublicationPage, sitePublicationMetadata } from "@/components/pages/SitePublicationPage";
 import { getSitePublicExperience } from "@/lib/experience/site-publications";
+import { config } from "@/lib/config";
+import { experienceAlternates } from "@/lib/locale-metadata";
 import type { SearchParams } from "@/lib/filters";
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams> };
@@ -12,7 +14,11 @@ export const revalidate = 0;
 
 export async function generateMetadata(props: Props): Promise<Metadata> {
   const local = await getSitePublicExperience((await props.params).slug);
-  if (local?.kind === "published") return sitePublicationMetadata(local.item);
+  if (local?.kind === "published") {
+    const metadata = sitePublicationMetadata(local.item);
+    const canonical = `${config.siteUrl}/experiences/${encodeURIComponent(local.item.publication.slug)}`;
+    return { ...metadata, alternates: await experienceAlternates(local.item.publication.slug, canonical) };
+  }
   if (local?.kind === "reserved") return { title: "Experience unavailable", robots: { index: false, follow: false } };
   return englishExperienceMetadata(props);
 }

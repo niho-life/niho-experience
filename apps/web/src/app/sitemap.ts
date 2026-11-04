@@ -22,9 +22,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     siteUrl: config.siteUrl,
     experiences,
     guides,
-    japanese: config.experiencePublicationsEnabled && japanese ? { ...japanese, experiences: new Map() } : japanese,
+    japanese: config.apiMode === "http" && japanese ? { ...japanese, experiences: new Map() } : japanese,
   });
-  if (!config.experiencePublicationsEnabled || !config.japaneseSiteEnabled) return base;
+  if (config.apiMode !== "http" || !config.japaneseSiteEnabled || !japanese) return base;
 
   try {
     await getJapaneseCopy();

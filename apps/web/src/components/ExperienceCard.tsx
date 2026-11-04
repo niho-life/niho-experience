@@ -6,7 +6,7 @@ import { browseHref, type BrowseContext } from "@/lib/browse-context";
 import { imageAlt } from "@/lib/experience-copy";
 import { CardDates, type CardDatesSource } from "./CardDates";
 import { PRESENTATION_PRIMITIVES_V1 } from "./PresentationV1";
-import { useSiteCopy } from "./SiteLocale";
+import { localeHref, useSiteCopy, useSiteLocale } from "./SiteLocale";
 
 export type CardOptions = {
   /** List page: 2-line lead and a 4:3 cover on phones. */
@@ -22,10 +22,10 @@ export type CardOptions = {
 
 /** One whole-card link (the title's link covers the card). No popularity, scarcity or review claims. */
 export function ExperienceCard({ card, variant = "home", priority = false, dates = { kind: "given", occurrences: null }, highlight = null, browseContext = {}, offerId }: { card: CardModel } & CardOptions) {
-  const copy = useSiteCopy();
+  const { copy, locale } = useSiteLocale();
   const model: ExperienceCardModelV1 = {
     ...card,
-    href: browseHref(`/experiences/${card.slug}`, browseContext, offerId),
+    href: localeHref(browseHref(`/experiences/${card.slug}`, browseContext, offerId), locale),
     cover: card.cover ? { src: card.cover.url, alt: imageAlt(card.cover, card.title) } : null,
     face: { ...card.face, image: card.face.image ? { src: card.face.image.url, alt: "" } : null },
     priceSuffix: ` ${copy.text("common.perAdult")}`,

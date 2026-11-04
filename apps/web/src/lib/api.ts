@@ -23,7 +23,7 @@ export async function getApi(searchParams?: Record<string, string | string[] | u
 
 /** Read the catalog version selected for this runtime; v1.2 stays opt-in until NIHO deploys it. */
 export async function listExperiencesForSite(region?: RegionKey, searchParams?: Record<string, string | string[] | undefined>) {
-  if (config.experiencePublicationsEnabled) {
+  if (config.apiMode === "http") {
     try {
       const { listPublicationSummaries } = await import("./experience/publication-site");
       return { ok: true, data: { experiences: await listPublicationSummaries(region) } } satisfies ReadResult<ExperienceCatalogResponseV11>;
@@ -44,7 +44,7 @@ export async function listExperiencesForSite(region?: RegionKey, searchParams?: 
 
 /** Read the detail version selected for this runtime; older deployments keep using the v1.0 path. */
 export async function getExperienceForSite(slug: string, searchParams?: Record<string, string | string[] | undefined>, locale: "en" | "ja" = "en") {
-  if (config.experiencePublicationsEnabled) {
+  if (config.apiMode === "http") {
     try {
       const { getPublicationDetail } = await import("./experience/publication-site");
       const experience = await getPublicationDetail(slug, locale);

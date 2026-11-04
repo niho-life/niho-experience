@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true, guestBookingEnabled: true as boolean },
   bookings: { publicBookingTerms: vi.fn() },
-  publications: { claimsSlug: vi.fn() },
+  publications: { getPublicBySlug: vi.fn() },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
@@ -20,7 +20,7 @@ describe("public Experience sale terms", () => {
     vi.clearAllMocks();
     Object.assign(mocks.config, { apiMode: "http", experiencePublicationsEnabled: true });
     mocks.config.guestBookingEnabled = true;
-    mocks.publications.claimsSlug.mockResolvedValue(false);
+    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop" });
     mocks.bookings.publicBookingTerms.mockResolvedValue({
       providerId: "private-provider",
       productId: "private-product",
@@ -65,9 +65,9 @@ describe("public Experience sale terms", () => {
     expect((await GET(new Request("https://experience.example/api/public/experiences/workshop/sale-terms"), { params: Promise.resolve({ slug: "workshop" }) })).status).toBe(404);
   });
 
-  it("keeps a new seller's slug private while the public publication switch is off", async () => {
+  it("keeps an unpublished slug private regardless of the old publication switch", async () => {
     mocks.config.experiencePublicationsEnabled = false;
-    mocks.publications.claimsSlug.mockResolvedValue(true);
+    mocks.publications.getPublicBySlug.mockResolvedValue(null);
     const response = await GET(new Request("https://experience.example/api/public/experiences/workshop/sale-terms"), { params: Promise.resolve({ slug: "workshop" }) });
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("");

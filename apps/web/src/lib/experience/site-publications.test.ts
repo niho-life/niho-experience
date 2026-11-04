@@ -18,7 +18,7 @@ vi.mock("@/lib/experience/store-server", () => ({
   guestBookingRepository: () => mocks.bookings,
 }));
 
-import { getSitePublicExperience, legacyRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
+import { getSitePublicExperience, publicExperienceRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
 
 const publication = {
   slug: "local-seller-experience",
@@ -73,6 +73,13 @@ describe("Experience site publication selection", () => {
     expect(result.claimedSlugs).toEqual([publication.slug, "stopped-experience"]);
   });
 
+  it("keeps unpublished participation-condition text out of checkout", async () => {
+    mocks.bookings.publicBookingTerms.mockResolvedValue({ ...terms, conditionsVersion: "c0".repeat(32) });
+    const result = await getSitePublicExperience(publication.slug);
+    expect(result?.kind === "published" ? result.item.saleTerms : undefined).toBeNull();
+    expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(false);
+  });
+
   it("does not consult Experience in mock or disabled publication mode", async () => {
     mocks.config.apiMode = "mock";
     expect(await getSitePublicExperience(publication.slug)).toBeNull();
@@ -80,15 +87,13 @@ describe("Experience site publication selection", () => {
     expect(mocks.publications.getPublicBySlug).not.toHaveBeenCalled();
   });
 
-  it("reserves new-seller slugs while Experience publication routes are disabled", async () => {
+  it("keeps every unpublished slug closed and reads active publications even when the legacy switch is off", async () => {
     mocks.config.experiencePublicationsEnabled = false;
-    mocks.publications.claimsSlug.mockImplementation(async (slug: string) => slug === "stopped-experience");
-    mocks.publications.listClaimedSlugs.mockResolvedValue(["stopped-experience"]);
-
+    mocks.publications.getPublicBySlug.mockResolvedValueOnce(null);
     expect(await getSitePublicExperience("stopped-experience")).toEqual({ kind: "reserved" });
-    expect(await listSitePublicExperiences()).toEqual({ experiences: [], claimedSlugs: ["stopped-experience"] });
-    expect(await legacyRouteAllowedForSlug("stopped-experience")).toBe(false);
-    expect(await legacyRouteAllowedForSlug("sample-tea")).toBe(true);
-    expect(mocks.publications.getPublicBySlug).not.toHaveBeenCalled();
+    expect((await listSitePublicExperiences()).experiences).toHaveLength(1);
+    mocks.publications.getPublicBySlug.mockResolvedValueOnce(null);
+    expect(await publicExperienceRouteAllowedForSlug("sample-tea")).toBe(false);
+    expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(true);
   });
 });

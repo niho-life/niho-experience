@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
   config: { indexingAllowed: true, apiMode: "http", experiencePublicationsEnabled: true, japaneseSiteEnabled: true, siteUrl: "https://experience.example.test" },
   publicationRows: [] as Array<{ slug: string; japanese: unknown; publishedAtUtc: string }>,
   claimedSlugs: [] as string[],
+  staticReady: true,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -11,7 +12,10 @@ vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("@/lib/api", () => ({ listExperiencesForSite: async () => ({ ok: true, data: { experiences: [{ slug: "synthetic-dinner", updatedAt: "2026-11-04T00:00:00.000Z" }] } }) }));
 vi.mock("@/lib/guide-registry", () => ({ indexableGuides: async () => [] }));
 vi.mock("@/lib/localized-content", () => ({
-  getPreparedJapaneseStaticRelease: async () => { throw new Error("no static Japanese shell release"); },
+  getPreparedJapaneseStaticRelease: async () => {
+    if (!state.staticReady) throw new Error("no static Japanese shell release");
+    return { pages: [], experiences: new Map() };
+  },
   getJapaneseCopy: async () => ({ releaseId: "copy-synthetic" }),
 }));
 vi.mock("@/lib/experience/site-publications", () => ({
@@ -30,6 +34,7 @@ beforeEach(() => {
   state.config = { indexingAllowed: true, apiMode: "http", experiencePublicationsEnabled: true, japaneseSiteEnabled: true, siteUrl: "https://experience.example.test" };
   state.publicationRows = [{ slug: "synthetic-dinner", japanese: { title: "合成ディナー" }, publishedAtUtc: "2026-11-04T00:00:00.000Z" }];
   state.claimedSlugs = ["synthetic-dinner"];
+  state.staticReady = true;
 });
 
 it("adds Japanese publication details with matching locale alternates to the sitemap", async () => {
@@ -46,6 +51,12 @@ it("adds Japanese publication details with matching locale alternates to the sit
 
 it("does not index Japanese product pages without confirmed translated copy", async () => {
   state.publicationRows = [{ slug: "synthetic-dinner", japanese: null, publishedAtUtc: "2026-11-04T00:00:00.000Z" }];
+  const entries = await sitemap();
+  expect(entries.some((entry) => entry.url === "https://experience.example.test/ja/experiences/synthetic-dinner")).toBe(false);
+});
+
+it("does not index a Japanese product while its common Japanese shell is unavailable", async () => {
+  state.staticReady = false;
   const entries = await sitemap();
   expect(entries.some((entry) => entry.url === "https://experience.example.test/ja/experiences/synthetic-dinner")).toBe(false);
 });

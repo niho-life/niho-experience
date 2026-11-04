@@ -127,18 +127,23 @@ export async function getPublicationDetail(slug: string, locale: Locale = "en"):
   const publication = await publications.getPublicBySlug(slug);
   if (!publication || (locale === "ja" && !publication.japanese)) return null;
   const booking = guestBookingRepository();
-  const terms = booking ? await booking.publicBookingTerms(slug) : null;
+  const candidate = booking ? await booking.publicBookingTerms(slug) : null;
+  const terms = candidate?.conditionsVersion === null ? candidate : null;
   return detailOf(publication, terms, locale);
 }
 
-/** The published product catalog. Non-saleable products remain visible with no booking offers. */
+/** The published, currently saleable product catalog. */
 export async function listPublicationSummaries(region?: string, locale: Locale = "en"): Promise<ExperienceSummaryV11[]> {
   if (region && region !== "kamakura") return [];
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");
   const rows = await publications.listPublic();
   const booking = guestBookingRepository();
-  return Promise.all(rows
+  const summaries = await Promise.all(rows
     .filter((publication) => locale !== "ja" || publication.japanese !== null)
-    .map(async (publication) => summaryOf(publication, booking ? await booking.publicBookingTerms(publication.slug) : null, locale)));
+    .map(async (publication) => {
+      const terms = booking ? await booking.publicBookingTerms(publication.slug) : null;
+      return terms?.conditionsVersion === null && terms.offers.length ? summaryOf(publication, terms, locale) : null;
+    }));
+  return summaries.filter((item): item is ExperienceSummaryV11 => item !== null);
 }

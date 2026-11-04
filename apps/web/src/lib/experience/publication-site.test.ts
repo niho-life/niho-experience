@@ -83,4 +83,10 @@ describe("Experience public site DTO", () => {
     state.publications.listPublic.mockResolvedValueOnce([{ ...publication, japanese: null }]);
     expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);
   });
+
+  it("omits a sale whose participation conditions cannot be shown for consent", async () => {
+    state.bookings.publicBookingTerms.mockResolvedValue({ ...SAMPLE_TERMS, conditionsVersion: "c0".repeat(32) });
+    expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);
+    expect(await getPublicationDetail(publication.slug, "ja")).toMatchObject({ booking: { checkoutAvailable: false }, offers: [] });
+  });
 });

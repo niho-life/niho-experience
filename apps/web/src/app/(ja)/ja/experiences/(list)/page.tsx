@@ -20,7 +20,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   try {
     const query = await searchParams;
     const filtered = query.date !== undefined || query.guests !== undefined || normalizeExperienceQuery(query.q) !== "";
-    if (config.experiencePublicationsEnabled) return { title: "鎌倉の体験", description: "鎌倉の少人数制の体験を探せます。", alternates: { canonical: `${config.siteUrl}/ja/experiences`, languages: { en: `${config.siteUrl}/experiences`, ja: `${config.siteUrl}/ja/experiences`, "x-default": `${config.siteUrl}/experiences` } }, robots: filtered ? { index: false, follow: true } : undefined };
+    if (config.apiMode === "http") return { title: "鎌倉の体験", description: "鎌倉の少人数制の体験を探せます。", alternates: { canonical: `${config.siteUrl}/ja/experiences`, languages: { en: `${config.siteUrl}/experiences`, ja: `${config.siteUrl}/ja/experiences`, "x-default": `${config.siteUrl}/experiences` } }, robots: filtered ? { index: false, follow: true } : undefined };
     return await japaneseStaticMetadata("experiences", filtered);
   } catch { return { title: "Japanese experiences unavailable", robots: { index: false, follow: false } }; }
 }
@@ -34,7 +34,7 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
   try {
     const [copy, api] = await Promise.all([getJapaneseCopy(), getApi()]);
     let catalog: ExperienceSummaryForSite[];
-    if (config.experiencePublicationsEnabled) catalog = await listPublicationSummaries("kamakura", "ja");
+    if (config.apiMode === "http") catalog = await listPublicationSummaries("kamakura", "ja");
     else { const selected = await getJapaneseCatalog(); assertSameJapaneseRelease(copy.releaseId, selected); catalog = selected.experiences; }
     const searchQuery = normalizeExperienceQuery(query.q);
     const items = filterExperienceSummaries(catalog, searchQuery);

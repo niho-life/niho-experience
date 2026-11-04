@@ -5,8 +5,8 @@ import { config } from "@/lib/config";
 import { checkoutIpDigest } from "@/lib/experience/checkout-ip-limit";
 import { checkoutError, readGuestCheckout, storeCheckoutError } from "@/lib/experience/guest-booking-http";
 import { fromThisSite, publicEmpty, publicJson } from "@/lib/experience/public-http";
-import { legacyRouteAllowedForSlug } from "@/lib/experience/site-publications";
-import { experiencePublicationRepository, guestBookingRepository } from "@/lib/experience/store-server";
+import { publicExperienceRouteAllowedForSlug } from "@/lib/experience/site-publications";
+import { guestBookingRepository } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,16 +37,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
   if (!fromThisSite(request)) return publicEmpty(403);
-  if (!await legacyRouteAllowedForSlug(slug)) return publicEmpty(404);
-  if (config.experiencePublicationsEnabled) {
-    const publications = experiencePublicationRepository();
-    if (!publications) return checkoutError("CHECKOUT_UNAVAILABLE");
-    try {
-      if (!await publications.getPublicBySlug(slug)) return publicEmpty(404);
-    } catch (error) {
-      logFailure("store", error);
-      return checkoutError("CHECKOUT_UNAVAILABLE");
-    }
+  try {
+    if (!await publicExperienceRouteAllowedForSlug(slug)) return publicEmpty(404);
+  } catch (error) {
+    logFailure("store", error);
+    return checkoutError("CHECKOUT_UNAVAILABLE");
   }
   // The incident switch (#15) stops new bookings here as it hides the booking entrance.
   if (!config.bookingsEnabled) return checkoutError("UNAVAILABLE");
@@ -56,6 +51,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const parsed = await readGuestCheckout(request);
   if (!parsed.ok) return parsed.response;
   const guestLanguage = request.headers.get("accept-language")?.split(",", 1)[0]?.trim().toLowerCase().split("-", 1)[0] === "ja" ? "JA" : "EN";
+  const returnPath = `${guestLanguage === "JA" ? "/ja" : ""}${RETURN_PATH}`;
+  const freeReturnPath = `${guestLanguage === "JA" ? "/ja" : ""}${FREE_RETURN_PATH}`;
   // Trust only Cloudflare's overwritten source-IP header after the Cloud Run origin is restricted to its
   // authenticated edge path. Do not fall back to attacker-controlled X-Forwarded-For or a browser ID.
   const clientIpDigest = checkoutIpDigest(request, process.env.EXPERIENCE_CHECKOUT_IP_HMAC_KEY ?? "");
@@ -86,8 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   // A repeated request of a booking already paid: NIHO answers with its booking page (PublicExperienceCheckoutResponse);
   // here that is the page Stripe returned the guest to. It names no booking and says only what to expect next.
   if (started.status === "CONFIRMED" || started.status === "PAYMENT_REVIEW") {
-    const returnPath = started.booking.pricingSnapshot.totalAmount === 0 ? FREE_RETURN_PATH : RETURN_PATH;
-    return publicJson(201, { checkoutUrl: `${siteOrigin}${returnPath}` } satisfies ExperienceCheckoutResponse);
+    return publicJson(201, { checkoutUrl: `${siteOrigin}${started.booking.pricingSnapshot.totalAmount === 0 ? freeReturnPath : returnPath}` } satisfies ExperienceCheckoutResponse);
   }
   // Expired or cancelled: these seats are gone. The page reads availability again and starts a new request.
   if (started.status !== "HOLD" || Date.parse(started.holdExpiresAt) <= Date.now()) return checkoutError("UNAVAILABLE");
@@ -115,7 +111,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       return checkoutError("CHECKOUT_UNAVAILABLE");
     }
     if (previous.status === "open") return publicJson(201, { checkoutUrl: previous.checkoutUrl } satisfies ExperienceCheckoutResponse);
-    if (previous.status === "complete") return publicJson(201, { checkoutUrl: `${siteOrigin}${RETURN_PATH}` } satisfies ExperienceCheckoutResponse);
+    if (previous.status === "complete") return publicJson(201, { checkoutUrl: `${siteOrigin}${returnPath}` } satisfies ExperienceCheckoutResponse);
     return checkoutError("UNAVAILABLE");
   }
 
@@ -124,8 +120,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     session = await createDirectCheckout({
       booking: started.booking,
       returnOrigin: siteOrigin,
-      returnPath: RETURN_PATH,
-      cancelPath: `/experiences/${encodeURIComponent(slug)}?checkout=cancelled`,
+      returnPath,
+      cancelPath: `${guestLanguage === "JA" ? "/ja" : ""}/experiences/${encodeURIComponent(slug)}?checkout=cancelled`,
+      locale: guestLanguage === "JA" ? "ja" : "auto",
       ...(started.guestEmail === null ? {} : { customerEmail: started.guestEmail }),
       platformStripeKey: stripeKey,
     });

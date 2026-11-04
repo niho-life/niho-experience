@@ -68,6 +68,17 @@ describe("checkout by source", () => {
     expect(init.referrerPolicy).toBe("same-origin");
     expect(init.credentials).toBe("omit");
     expect(JSON.parse(init.body as string)).toEqual(BODY);
+    expect(new Headers(init.headers).get("accept-language")).toBe("en");
+  });
+
+  it("sends the Japanese page locale explicitly even when the browser language is English", async () => {
+    const paid = `${SITE}/ja/booking/return?type=instant`;
+    const fetchMock = vi.fn(async () => Response.json({ checkoutUrl: paid }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getSiteBookingApi } = await import("./browser-api");
+    expect(await getSiteBookingApi(SITE, "ja").startCheckout("sample-tea", BODY)).toEqual({ ok: true, checkoutUrl: paid });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new Headers(init.headers).get("accept-language")).toBe("ja");
   });
 
   it("keeps NIHO's client for any other experience, where this site's return page is not a checkout answer", async () => {
