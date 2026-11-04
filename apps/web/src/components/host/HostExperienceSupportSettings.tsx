@@ -6,6 +6,7 @@ import { hostFetch } from "@/lib/host/client-session";
 import { HOST_HOME_PATH } from "@/lib/host/routes";
 import { FieldRow, FieldSection } from "./fields";
 import { HostConfirmDialog } from "./HostConfirmDialog";
+import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
 import { consoleButtonClass } from "./host-ui";
 import { HostSubHeader } from "./HostSubHeader";
 import { HostPageBody, PageHead } from "./ui";
@@ -83,6 +84,8 @@ export function HostExperienceSupportSettings({ providerId, displayName }: { pro
 
   const currentConsent = saved?.supportConsentVersion === CONSENT_VERSION && (saved.supportAgreementRevision ?? 0) > 0;
   const dirty = choice !== null && (saved === null || !currentConsent || choice !== saved.supportEnabled);
+  const leaveMode: HostLeaveMode = saving ? "saving" : dirty ? "dirty" : null;
+  const leaveGuard = useHostLeaveGuard(leaveMode);
   const save = async () => {
     if (choice === null || !dirty || saving) return;
     const expectedVersion = saved?.version ?? 0;
@@ -154,6 +157,7 @@ export function HostExperienceSupportSettings({ providerId, displayName }: { pro
       </FieldSection>
       <p className="mt-4 text-sm"><Link href="/host/support" className="underline">支援設定の対象一覧へ戻る</Link></p>
       {confirming ? <HostConfirmDialog focusRef={stay} stayRef={stay} title={`${displayName}のサポートを${fee ? "ON" : "OFF"}にしますか？`} description={`Experienceサポート規約 ${CONSENT_VERSION} に同意します。新規予約から合計${fee ? "15%" : "10%"}（決済費用込み）が適用されます。`} confirm={<button type="submit" disabled={saving} className={consoleButtonClass("primary")}>同意して保存</button>} onConfirm={() => void save()} onClose={() => setConfirming(false)}><div className="mt-4 space-y-2 rounded-xl bg-sand p-3 text-sm text-ink-soft"><p>ONではNIHO事務局と予約情報を共有し、予約前後の問い合わせ・確認・取消返金の連絡を支援します。</p><p>追加の人件費・通訳手配は含まず、個別の対応を保証しません。過去の予約には適用しません。</p><label className="flex items-start gap-2 pt-1 font-bold text-ink"><input type="checkbox" required className="mt-1 size-4 shrink-0" />サポート範囲・合計手数料・決済費用・適用時期と規約版を確認し、同意します</label></div></HostConfirmDialog> : null}
+      {leaveGuard.asking && leaveMode ? <HostLeaveDialog mode={leaveMode} requestKey={leaveGuard.requestKey} onStay={leaveGuard.stay} onLeave={leaveGuard.leave} /> : null}
     </HostPageBody>
   </>;
 }
