@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
+import { REVIEW_INVITATION_TOPIC } from "./booking-attendance.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
@@ -25,6 +26,7 @@ export const GUEST_MAIL_LIMITS = {
   linkAttempts: 5,
   /** Claims of one cancellation, refund or declined-request email: as a confirmation. */
   noticeAttempts: 8,
+  reviewInvitationAttempts: 8,
   claimLimitMax: 50,
   leaseSecondsMin: 30,
   leaseSecondsMax: 3600,
@@ -100,6 +102,25 @@ export interface ClaimedBookingLink {
 
 export interface BookingLinkClaim {
   readonly links: readonly ClaimedBookingLink[];
+  readonly abandoned: number;
+}
+
+export interface ReviewInvitationEmail {
+  readonly providerId: string;
+  readonly bookingId: string;
+  readonly guestEmail: string;
+  readonly guestName: string;
+  readonly experienceTitle: string;
+}
+
+export interface ClaimedReviewInvitation {
+  readonly id: string;
+  readonly attempts: number;
+  readonly email: ReviewInvitationEmail | null;
+}
+
+export interface ReviewInvitationClaim {
+  readonly invitations: readonly ClaimedReviewInvitation[];
   readonly abandoned: number;
 }
 
@@ -232,6 +253,17 @@ function linkEmailFromRow(row: DbRow): BookingLinkEmail | null {
   };
 }
 
+function reviewInvitationFromRow(row: DbRow): ReviewInvitationEmail | null {
+  if (row.status !== "CONFIRMED" || row.attendance_status !== "ATTENDED" || row.guest_email === null || row.guest_name === null) return null;
+  return {
+    providerId: text(row.provider_id, "provider_id"),
+    bookingId: text(row.booking_id, "booking_id"),
+    guestEmail: text(row.guest_email, "guest_email"),
+    guestName: text(row.guest_name, "guest_name"),
+    experienceTitle: text(row.public_title, "public_title"),
+  };
+}
+
 function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
   if (row.guest_email === null || row.guest_name === null) return null;
   const occurrence = record(row.occurrence_snapshot);
@@ -329,6 +361,22 @@ export class GuestMailOutbox {
     return this.#retry(BOOKING_LINK_TOPIC, GUEST_MAIL_LIMITS.linkAttempts, id, attempts);
   }
 
+  async claimReviewInvitations(options: { limit: number; leaseSeconds: number }): Promise<ReviewInvitationClaim> {
+    const { rows, abandoned } = await this.#claim(REVIEW_INVITATION_TOPIC, GUEST_MAIL_LIMITS.reviewInvitationAttempts, options);
+    return {
+      invitations: rows.map((row): ClaimedReviewInvitation => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: reviewInvitationFromRow(row) })).sort(byId),
+      abandoned,
+    };
+  }
+
+  async completeReviewInvitation(id: string): Promise<void> {
+    await this.#complete(REVIEW_INVITATION_TOPIC, id);
+  }
+
+  async retryReviewInvitation(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(REVIEW_INVITATION_TOPIC, GUEST_MAIL_LIMITS.reviewInvitationAttempts, id, attempts);
+  }
+
   /**
    * Up to `limit` due notices of a cancellation, a refund done or a declined request (#285 slice 7), as
    * claimBookingConfirmations. Each says what it says at the time it is sent: a refund that failed after all
@@ -354,6 +402,7 @@ export class GuestMailOutbox {
 
   async #claim(topic: string | readonly string[], maxAttempts: number, options: { limit: number; leaseSeconds: number }): Promise<{ rows: DbRow[]; abandoned: number }> {
     const topics = typeof topic === "string" ? [topic] : [...topic];
+    const reviewInvitation = topics.length === 1 && topics[0] === REVIEW_INVITATION_TOPIC;
     const limit = boundedInteger(options?.limit, "limit", 1, GUEST_MAIL_LIMITS.claimLimitMax);
     const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", GUEST_MAIL_LIMITS.leaseSecondsMin, GUEST_MAIL_LIMITS.leaseSecondsMax);
     return withTransaction(this.#pool, async (client) => {
@@ -376,7 +425,8 @@ export class GuestMailOutbox {
             WHERE o.id = due.id
            RETURNING o.id, o.attempts, o.provider_id, o.aggregate_id, o.topic, o.payload
          )
-         SELECT c.id::text AS id, c.attempts, c.topic, b.public_booking_id::text AS public_booking_id, b.status,
+         SELECT c.id::text AS id, c.attempts, c.topic, c.provider_id, b.id::text AS booking_id,
+                ${reviewInvitation ? "a.status" : "NULL::text"} AS attendance_status, b.public_booking_id::text AS public_booking_id, b.status,
                 b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot, b.cancelled_by, b.cancellation_reason,
                 (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
                 g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
@@ -386,6 +436,7 @@ export class GuestMailOutbox {
            FROM claimed c
            JOIN bookings b ON ${BOOKING_OF("c")}
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+           ${reviewInvitation ? "LEFT JOIN booking_attendance a ON a.provider_id = b.provider_id AND a.booking_id = b.id" : ""}
            JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
            LEFT JOIN booking_refunds r ON r.provider_id = b.provider_id AND r.booking_id = b.id
                  AND r.id = (CASE WHEN c.payload->>'refundId' ~ ${UUID_TEXT} THEN (c.payload->>'refundId')::uuid END)

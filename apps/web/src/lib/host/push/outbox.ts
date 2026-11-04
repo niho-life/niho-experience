@@ -8,6 +8,7 @@ import {
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseNewReviewPayload,
   parseOtaBookingPayload,
   STOPPABLE_HOST_NOTIFICATION_KEYS,
   type ClaimedHostNotification,
@@ -16,7 +17,7 @@ import {
   type StoppableHostNotificationKey,
 } from "@niho-experience/experience-store";
 import { providerNotificationSettings } from "@/lib/experience/store-server";
-import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_MESSAGES_PATH, withQuery } from "../routes";
+import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, withQuery } from "../routes";
 import { notifyHostDevices, type HostPushDeps, type HostPushReport } from "./notify";
 import type { HostPushEvent, HostPushKind } from "./payload";
 
@@ -141,6 +142,22 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         // The bookings made on this site (#285 slice 8), with this one opened.
         url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
         tag: `booking-${payload.bookingId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.newReview) {
+    const payload = parseNewReviewPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "NEW_REVIEW",
+        experienceTitle: payload.experienceTitle,
+        url: `${withQuery(HOST_REVIEWS_PATH, { providerId })}#review-${payload.reviewId}`,
+        tag: `review-${payload.reviewId}`,
       },
     };
   }

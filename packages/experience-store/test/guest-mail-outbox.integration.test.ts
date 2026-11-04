@@ -100,6 +100,36 @@ async function makeDue(pool: Pool): Promise<void> {
 }
 
 describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === undefined }, () => {
+  it("claims an attended booking for the thank-you mail and suppresses a changed NO_SHOW mark", async () => {
+    await withSchema(async (context) => {
+      const { pool, outbox } = context;
+      const first = await confirmedGuest(context, "review-first");
+      const second = await confirmedGuest(context, "review-second", { clientRequestKey: randomUUID(), guestEmail: "second@example.com" });
+      const bookingIds = await pool.query<{ id: string; public_booking_id: string }>(
+        "SELECT id::text AS id, public_booking_id::text FROM bookings WHERE public_booking_id = ANY($1::uuid[]) ORDER BY id",
+        [[first.publicBookingId, second.publicBookingId]],
+      );
+      for (const row of bookingIds.rows) {
+        await pool.query("INSERT INTO booking_attendance (provider_id, booking_id, status, recorded_by) VALUES ('provider-a', $1::bigint, 'ATTENDED', 'owner-a')", [row.id]);
+        await pool.query(
+          `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
+           VALUES ('provider-a', 'booking', $1, 'guest.review_invitation', $2, '{}'::jsonb)`,
+          [row.public_booking_id, `review-invite-test:${row.id}`],
+        );
+      }
+      await pool.query("UPDATE booking_attendance SET status = 'NO_SHOW' WHERE booking_id = $1::bigint", [bookingIds.rows[1]!.id]);
+      const claim = await outbox.claimReviewInvitations({ limit: 10, leaseSeconds: 120 });
+      assert.equal(claim.invitations.length, 2);
+      assert.equal(claim.invitations.filter((row) => row.email !== null).length, 1);
+      assert.deepEqual(claim.invitations.find((row) => row.email)?.email, {
+        providerId: "provider-a", bookingId: bookingIds.rows[0]!.id, guestEmail: "guest@example.com",
+        guestName: "Sample Guest", experienceTitle: "Synthetic walk",
+      });
+      for (const row of claim.invitations) await outbox.completeReviewInvitation(row.id);
+      assert.deepEqual((await outbox.claimReviewInvitations({ limit: 10, leaseSeconds: 120 })).invitations, []);
+    });
+  });
+
   it("claims the confirmations of guest bookings only, with what the email needs, and never another row", async () => {
     await withSchema(async (context) => {
       const { pool, store, guests, outbox } = context;

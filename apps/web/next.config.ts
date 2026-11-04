@@ -83,6 +83,7 @@ const nextConfig: NextConfig = {
       { source: "/preview/:path*", headers: privatePageHeaders },
       // The guest's reply page (#105): its one-time token is in the fragment; the page is private all the same.
       { source: "/questions/:path*", headers: privatePageHeaders },
+      { source: "/reviews/write", headers: privatePageHeaders },
       // The guest's booking pages (#285 slice 6): the link's grant is in the fragment and the booking behind a cookie;
       // root and children explicit, as for /admin.
       { source: "/bookings", headers: privatePageHeaders },

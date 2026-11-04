@@ -51,6 +51,7 @@ export {
   enqueueCancellationNotification,
   enqueueGoogleCalendarAttentionNotification,
   enqueueNewBookingNotification,
+  enqueueNewReviewNotification,
   enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
@@ -62,6 +63,7 @@ export {
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseNewReviewPayload,
   parseOtaBookingPayload,
 } from "./host-notification-outbox.ts";
 export type {
@@ -74,6 +76,7 @@ export type {
   GuestQuestionPayload,
   HostNotificationTopic,
   NewBookingPayload,
+  NewReviewPayload,
   OtaBookingChange,
   OtaBookingPayload,
 } from "./host-notification-outbox.ts";
@@ -111,7 +114,7 @@ export type {
 } from "./guest-questions.ts";
 export { GuestBookingMessages } from "./booking-messages.ts";
 export type { GuestBookingConversation, GuestBookingMessage, SendGuestBookingMessageInput } from "./booking-messages.ts";
-export { BOOKING_ATTENDANCE_STATUSES, BookingAttendance } from "./booking-attendance.ts";
+export { BOOKING_ATTENDANCE_STATUSES, REVIEW_INVITATION_TOPIC, BookingAttendance } from "./booking-attendance.ts";
 export type { AttendanceRecordOutcome, AttendanceRecordResult, BookingAttendanceMark, BookingAttendanceStatus, HostSessionAttendance } from "./booking-attendance.ts";
 export { GUEST_MAIL_LIMITS, GUEST_MAIL_TOPIC, GuestMailOutbox } from "./guest-mail-outbox.ts";
 export { GUEST_TRANSLATION_LIMITS, GUEST_TRANSLATION_TOPIC, GuestQuestionTranslations } from "./guest-question-translations.ts";
@@ -128,6 +131,9 @@ export type {
   ClaimedBookingConfirmation,
   ClaimedBookingLink,
   ClaimedBookingNotice,
+  ClaimedReviewInvitation,
+  ReviewInvitationClaim,
+  ReviewInvitationEmail,
 } from "./guest-mail-outbox.ts";
 export { GUEST_REVIEW_LIMITS, GUEST_REVIEW_REPORT_REASONS, GUEST_REVIEW_TAGS, GuestReviewRepository } from "./guest-reviews.ts";
 export type {

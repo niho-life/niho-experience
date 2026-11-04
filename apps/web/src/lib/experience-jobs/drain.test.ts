@@ -144,6 +144,26 @@ beforeEach(() => {
 });
 
 describe("runExperienceJobs", () => {
+  it("sends a review invitation only for a currently eligible attendance claim", async () => {
+    const rows = [
+      { id: "91", attempts: 1, email: null },
+      { id: "92", attempts: 1, email: { providerId: "provider-a", bookingId: "42", guestEmail: "guest@example.com", guestName: "Sample Guest", experienceTitle: "Synthetic walk" } },
+    ];
+    const outbox = {
+      claimReviewInvitations: vi.fn(async () => ({ invitations: rows.splice(0, 1), abandoned: 0 })),
+      completeReviewInvitation: vi.fn(async () => {}),
+      retryReviewInvitation: vi.fn(async () => "RETRY" as const),
+    };
+    const reviews = { issueInvitation: vi.fn(async () => ({ token: TOKEN, expiresAtUtc: "2026-11-15T00:00:00.000Z" })) };
+    const counts = await runExperienceJobs({ ...s.deps, reviewInvitations: { outbox, reviews } });
+    expect(counts.reviewInvitations).toEqual({ claimed: 2, sent: 1, skipped: 1, retried: 0, failed: 0, abandoned: 0 });
+    expect(reviews.issueInvitation).toHaveBeenCalledOnce();
+    expect(outbox.completeReviewInvitation).toHaveBeenCalledTimes(2);
+    expect(s.sent).toHaveLength(1);
+    expect(s.sent[0]?.html).toContain(`/reviews/write#t=${TOKEN}`);
+    expect(s.sent[0]?.text).toContain("Thank you for joining Synthetic walk");
+  });
+
   it("does nothing on an empty run, with each step's bounded claim and the erasure a year back", async () => {
     const counts = await runExperienceJobs(s.deps);
     expect(counts).toEqual({

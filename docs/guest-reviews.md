@@ -2,7 +2,7 @@
 
 Epic #103 の「レビュー」（旅行者の表示 #104、ホストの一覧と返信 #108）の現行設計。オーナー決定（2026-10-27 ADR 0002、2026-10-31「進めて」）により、レビューの保存先は NIHO（niho-app）ではなく experience DB（`packages/experience-store`、migration `0027_guest_reviews.sql`）に置く。旧 `journey.ts` の仮契約（NIHO #19314 が持つ前提）は、画面が読む応答の形だけを引き継ぐ。
 
-この文書は保存と公開の読み取り（PR 1）と、画面の接続（PR 2：体験詳細・`/host/reviews`）を書く。
+保存・公開・表示・投稿に加え、出欠からのお礼メールとホスト通知までの契約を書く。
 
 ## 決まっていること
 
@@ -13,10 +13,11 @@ Epic #103 の「レビュー」（旅行者の表示 #104、ホストの一覧�
 
 ## 流れ
 
-1. **お礼メール（後続スライス）**：体験が終わったあと、メール job が `issueInvitation` で予約ごとの一度きりのリンクを作って送る。リンクは `…#t=<token>` の fragment にだけ置く（質問の返信ページと同じ）。メール種別と送信は #285 のスライス 5 以降。
-2. **投稿（画面は #285 スライス 6）**：予約者がリンクを開くと `openInvitation` が体験名とホスト名だけを返し、`submitReview` がレビューを作る。**作った時点で公開される**。表示名は予約者がその場で入力する（`booking_guests` は 1 年で消えるので参照しない）。メール・電話・氏名はレビューに入れない。
-3. **読み取り**：`GET /api/public/experiences/{slug}/reviews`（公開、フラグ ON のときだけ）。
-4. **返信・報告**：提供者の OWNER が `/host/reviews` から `saveReply` / `reportReview`。
+1. **出欠**：OWNER が開催中または開催後に確定予約を `ATTENDED` / `NO_SHOW` として記録する。同じ値の再記録は新しい出欠版やお礼メールを作らない。変更時は未送信の古いお礼イベントを閉じ、`ATTENDED` への変更時だけ新しいイベントを追加する。
+2. **お礼メール**：`ATTENDED` の記録と同じ transaction で `guest.review_invitation` を outbox に積み、開催終了時刻以降に既存メール job が処理する。送信直前に予約資格を再確認し、`issueInvitation` で一度きりのリンクを発行する。リンクは `…#t=<token>` の fragment にだけ置く。同期送信失敗は既存 outbox の retry を使う。
+3. **投稿**：`/reviews/write` はリンクを開いた操作で `POST /api/public/reviews/open` を行う。メールスキャナーがリンクを読んでも消費しない。投稿は `POST /api/public/reviews` で受け、`submitReview` が出欠を再確認した transaction でレビューと `host.notify.new_review` を保存する。**作った時点で公開される**。表示名は予約者がその場で入力し、メール・電話・予約氏名はレビューに入れない。
+4. **読み取り**：`GET /api/public/experiences/{slug}/reviews`（公開、フラグ ON のときだけ）。
+5. **返信・報告**：提供者の OWNER が `/host/reviews` から `saveReply` / `reportReview`。
 
 ## 状態
 
@@ -42,7 +43,7 @@ DB は、レビューの内容（星・本文・タグ・表示名・メモ）�
 
 予約が `CONFIRMED` で、開催の終了を過ぎていて、終了から 30 日以内（`submitWindowDays`。niho-app#19314 の推奨値でオーナー未確定。下の未決 1）であること。
 
-**出欠（来なかった予約）の除外は未実装**。出欠の store が無いため、`GuestReviewRepository` のコンストラクタに `eligibility` の差し込み口だけを用意し、未指定なら全件を許す。出欠の記録（#285 の後続／niho-app#19321 相当）ができたら、`NO_SHOW` の予約を除く判定をここに差す。未記録を「来た」とみなすか、送った後に「来なかった」を付けたレビューをどうするかは、オーナー判断（niho-app#19314 の推奨は「みなす」。直接公開にしたので、送った後に付けた場合は `hidden_at` で隠す運用になる）。
+新しい招待の発行・表示・投稿は、開催終了後かつ現在の出欠が明示的に `ATTENDED` の場合だけ許す。`NO_SHOW` と未記録は同じ中立な「対象外」として扱う。出欠を後から `NO_SHOW` に直した場合、未使用リンクは開けず投稿も拒否する。すでに公開済みのレビューは自動で非公開にしない。レビュー期限・再招待時期の owner policy は別途未決であり、この接続では既存の `GUEST_REVIEW_LIMITS` を変更しない。
 
 ## 提供者の操作
 
@@ -59,18 +60,22 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 - **`/host/reviews`**：`loadGuestReviews`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER の一覧を 100 件ずつ既存の `HostReview` の形に写し、残りは一覧の下の「続きを見る」（`loadMoreReviewList`、store の cursor）で足す（#84）。見出しの平均・件数と体験の選択は、読み込んだページではなく全件から出す（store の `summarizeReviews`：表示中のレビューを商品ごとに件数と星の合計で数える。読むだけ）。全件が公開中なので「公開前」の状態は無く、全件に返信できる。返信・報告は server action（`review-actions.ts`）が入力を検めたうえで store を呼ぶ。ブラウザは試行ごとに command id を持ち、失敗して同じ内容でやり直すと同じ id を使うので、store は 1 回だけ受ける。返信の revision は一覧と一緒に画面へ渡し、保存のたびに更新する（ほかの画面で返信が変わっていれば「読み込み直してください」）。フラグ OFF・mock mode は今までの画面（mock の一覧／http の「準備中」）。
 - 予約者の英語の本文・メモには日本語訳がまだ無い（翻訳モジュール 5b まで `null`）ので、画面は原文に「翻訳できませんでした」を添えて出す（メッセージと同じ扱い）。
 
+## 通知 producer と日本語化の引き継ぎ
+
+- `NEW_REVIEW` はレビューを保存する transaction 内で `host.notify.new_review` を積む。payload は review UUID と体験名だけで、予約者の名前・レビュー本文・予約IDは含めない。既存 host push job が OWNER の `/host/reviews` へ通知する。
+- `DAY_BEFORE_SUMMARY` は設定・push表示だけがあり、全チャネルの参加者を数える producer はまだ接続していない。Experience 内の予約だけで OTA 等を含む参加者まとめを作らない。対象範囲・時刻を決めた後に別途接続する。
+- 現行投稿画面と表示文言は英語。投稿API の `language` は `EN` / `JA`（省略時 `EN`）で、保存先は `GuestReviewLanguage`。日本語画面を追加するときは E が文言・日付表示・エラー表示を翻訳し、`language: "JA"` を送り、同じ token・資格・冪等性契約を維持する。レビュー期限や未記録出欠の意味を翻訳作業で決めない。
+
 ## flag と配備
 
-- `EXPERIENCE_GUEST_REVIEWS_ENABLED`（http mode のときだけ、既定 `false`）。`true` で `GET /api/public/experiences/{slug}/reviews` が experience DB から答える。`false` の間は 404。`EXPERIENCE_DATABASE_URL` が無いと 503。
+- `EXPERIENCE_GUEST_REVIEWS_ENABLED`（http mode のときだけ、既定 `false`）。`true` で `GET /api/public/experiences/{slug}/reviews` が experience DB から答える。`false` の間は 404。`EXPERIENCE_DATABASE_URL` が無いと 503。投稿画面と招待 job は `EXPERIENCE_HOST_ATTENDANCE_ENABLED` も必要で、どちらかが off なら新しい招待・投稿は 404 / job skip となる。
 - mock mode は今までどおり合成のレビューだけを使い、DB に触れない。合成のレビューも投稿されたらそのまま公開の決定に合わせ、すべて公開中（「公開前」の状態と「NIHO が確認中です」の文は画面から外した。#84）。型の `HostReviewStatus` の `pending` はホームの判定（`home.ts`）が読むので残している。
-- 先に `0027_guest_reviews.sql` を適用する。runtime role には `guest_reviews` と `guest_review_invitations` の SELECT・INSERT・UPDATE が要る（`scripts/gcp/experience-db-grants.mjs`）。
-- 投稿の画面（スライス 6）ができるまでは、`true` にしても 0 件の応答になる。レビューが 0 件の間は、体験詳細に節の「be one of the first」だけが出る（#104 の「0 件」）。受入までは `false` のまま。
+- 先に `0027_guest_reviews.sql` と `0033_booking_attendance.sql` を適用する。runtime role には既存のレビュー／招待表の読み書き、出欠表の SELECT、既存 outbox の SELECT/INSERT/UPDATE が要る（`scripts/gcp/experience-db-grants.mjs`）。
+- レビューが 0 件の間は、体験詳細に節の「be one of the first」だけが出る（#104 の「0 件」）。実メールとproduction配備はこの実装の合成検証には含まれない。
 
 ## まだ作っていないもの
 
-- お礼メール（種別・送信 job）と書く画面（#285 スライス 5 以降・6）。
-- 投稿されたときのホストへの `NEW_REVIEW` 通知（`provider_notification_preferences` に鍵は既にある）。通知 job が投稿の event を読む形で足す。この PR は outbox に書かない。
-- 出欠による資格の除外（上）。
+- `DAY_BEFORE_SUMMARY` のproducer。OTA等を含む対象範囲と送信時刻が未確認のため、現在は未接続。
 
 ## 未決（オーナー判断。実装で決め打ちしていない）
 

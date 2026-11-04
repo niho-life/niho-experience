@@ -1,10 +1,10 @@
 import "server-only";
-import type { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
+import { GUEST_REVIEW_LIMITS, StoreConflictError, StoreNotFoundError, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
 import { hostAddressConfirmationEmail, hostBookingEmail } from "@/lib/mail/host-templates";
-import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail, reviewInvitationEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
 import { guestMessageToJapanese } from "@/lib/translation/prompts";
@@ -36,6 +36,8 @@ export const EXPERIENCE_JOB_LIMITS = {
   /** "Find your booking" (#285 slice 6): link emails a run sends, one claimed at a time like the confirmations. */
   bookingLinks: 20,
   bookingLinkLeaseSeconds: 120,
+  reviewInvitations: 20,
+  reviewInvitationLeaseSeconds: 120,
   /**
    * 返金の自動再送 (#285 slice 7b): refunds Stripe has not accepted that a run sends again, one claimed at a time. A
    * refund waits refundGraceSeconds after it was asked for, so the request's own send goes first. The lease is the
@@ -143,6 +145,7 @@ export interface ExperienceJobCounts {
   readonly questionReplies: QuestionReplyCounts | FailedStep;
   readonly bookingConfirmations: BookingConfirmationCounts | FailedStep;
   readonly bookingNotices: BookingNoticeCounts | FailedStep;
+  readonly reviewInvitations?: BookingConfirmationCounts | FailedStep;
   readonly bookingLinks: BookingLinkCounts | StepOff | FailedStep;
   readonly bookingRefunds: RefundResendCounts | StepOff | FailedStep;
   readonly guestTranslations: TranslationCounts | StepOff | FailedStep;
@@ -163,6 +166,11 @@ export interface ExperienceJobDeps {
   readonly confirmations: Pick<GuestMailOutbox, "claimBookingConfirmations" | "completeBookingConfirmation" | "retryBookingConfirmation">;
   readonly bookingLinks: Pick<GuestMailOutbox, "claimBookingLinks" | "completeBookingLink" | "retryBookingLink">;
   readonly notices: Pick<GuestMailOutbox, "claimBookingNotices" | "completeBookingNotice" | "retryBookingNotice">;
+  /** Present only when reviews and attendance are enabled. */
+  readonly reviewInvitations?: {
+    readonly outbox: Pick<GuestMailOutbox, "claimReviewInvitations" | "completeReviewInvitation" | "retryReviewInvitation">;
+    readonly reviews: Pick<GuestReviewRepository, "issueInvitation">;
+  };
   /**
    * The guest's booking page (#285 slice 6), or null while it is off: each email that links to it gets a fresh
    * one-time grant from here, built into the link's URL fragment.
@@ -371,6 +379,47 @@ async function sendBookingLinks(deps: ExperienceJobDeps, access: NonNullable<Exp
   return counts;
 }
 
+/** One thank-you email per ATTENDED mark. Recheck eligibility when issuing its token, after claiming. */
+async function sendReviewInvitations(deps: ExperienceJobDeps, source: NonNullable<ExperienceJobDeps["reviewInvitations"]>): Promise<BookingConfirmationCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.reviewInvitations)) {
+    const claim = await source.outbox.claimReviewInvitations({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.reviewInvitationLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.invitations;
+    if (!row) break;
+    counts.claimed += 1;
+    if (!row.email) {
+      await source.outbox.completeReviewInvitation(row.id);
+      counts.skipped += 1;
+      continue;
+    }
+    let token: string;
+    try {
+      ({ token } = await source.reviews.issueInvitation({
+        providerId: row.email.providerId, bookingId: row.email.bookingId, ttlDays: GUEST_REVIEW_LIMITS.invitationTtlDaysMax,
+      }));
+    } catch (error) {
+      if (!(error instanceof StoreNotFoundError || error instanceof StoreConflictError)) throw error;
+      await source.outbox.completeReviewInvitation(row.id);
+      counts.skipped += 1;
+      continue;
+    }
+    const mail = reviewInvitationEmail(row.email, { siteUrl: deps.siteUrl, token });
+    const result = await deps.mailer.sendMail({ to: row.email.guestEmail, ...mail });
+    if (result.ok || result.failure === "permanent") {
+      await source.outbox.completeReviewInvitation(row.id);
+      if (result.ok) counts.sent += 1;
+      else counts.failed += 1;
+    } else {
+      if (await source.outbox.retryReviewInvitation(row.id, row.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
 /**
  * 返金の自動再送 (#285 slice 7b): a cancellation commits its refund first and sends it after, so a send that never
  * reached Stripe (Stripe down, the process stopped) leaves a refund the guest was told had started. The store hands out
@@ -513,6 +562,9 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
   const bookingNotices = await step(deps, "bookingNotices", () => sendBookingNotices(deps));
+  const reviewInvitations = deps.reviewInvitations
+    ? await step(deps, "reviewInvitations", () => sendReviewInvitations(deps, deps.reviewInvitations!))
+    : undefined;
   const hostMail = deps.hostMail;
   const hostAddressConfirmations: ExperienceJobCounts["hostAddressConfirmations"] = hostMail
     ? await step(deps, "hostAddressConfirmations", () => sendHostAddressConfirmations(deps, hostMail))
@@ -551,6 +603,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   return {
     questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
     bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge,
+    ...(reviewInvitations ? { reviewInvitations } : {}),
   };
 }
 

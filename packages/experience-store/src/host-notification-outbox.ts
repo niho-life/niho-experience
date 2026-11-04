@@ -25,6 +25,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   bookingMessage: "host.notify.booking_message",
   googleCalendarAttention: "host.notify.google_calendar_attention",
   otaBooking: "host.notify.ota_booking",
+  newReview: "host.notify.new_review",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -91,6 +92,13 @@ export interface NewBookingPayload {
  */
 export type CancellationPayload = NewBookingPayload;
 
+/** A new public review; no guest name, review body or booking identifier leaves the store. */
+export interface NewReviewPayload {
+  readonly v: 1;
+  readonly reviewId: string;
+  readonly experienceTitle: string;
+}
+
 /**
  * A Google calendar this site reads for busy times could not be read (#238): the provider-wide one (`PROVIDER`) or a
  * venue's or instructor's (`RESOURCE`). `REVOKED`: Google refused the connection; `UNAVAILABLE`: the reads keep failing.
@@ -150,6 +158,7 @@ const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
 const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
+const NEW_REVIEW_KEYS = ["experienceTitle", "reviewId", "v"];
 const OTA_BOOKING_KEYS = ["change", "experienceTitle", "productId", "ref", "seats", "site", "startsAt", "v"];
 const OTA_SITE = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
 const HOST_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -220,6 +229,12 @@ export function parseNewBookingPayload(value: unknown): NewBookingPayload | null
 /** The cancellation's payload (the same keys as a new booking's), or null for anything else. */
 export function parseCancellationPayload(value: unknown): CancellationPayload | null {
   return parseNewBookingPayload(value);
+}
+
+export function parseNewReviewPayload(value: unknown): NewReviewPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, NEW_REVIEW_KEYS) || value.v !== 1) return null;
+  if (typeof value.reviewId !== "string" || !HOST_REF.test(value.reviewId) || !title(value.experienceTitle)) return null;
+  return { v: 1, reviewId: value.reviewId, experienceTitle: value.experienceTitle };
 }
 
 export function parseGoogleCalendarAttentionPayload(value: unknown): GoogleCalendarAttentionPayload | null {
@@ -296,6 +311,26 @@ async function insertRow(
     [row.providerId, row.aggregateType ?? AGGREGATE_TYPE, row.bookingId, row.topic, row.deduplicationKey, JSON.stringify(row.payload), row.availableAt],
   );
   return result.rowCount ?? 0;
+}
+
+/** Written in the review transaction; retries of the same one-time link cannot produce another push. */
+export async function enqueueNewReviewNotification(
+  client: PoolClient,
+  input: { readonly providerId: string; readonly reviewId: string; readonly experienceTitle: string },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  if (!HOST_REF.test(input.reviewId)) throw new StoreValidationError("reviewId must be a UUID.");
+  const experienceTitle = clippedTitle(input.experienceTitle);
+  if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must not be empty.");
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.reviewId,
+    aggregateType: "guest_review",
+    topic: HOST_NOTIFICATION_TOPICS.newReview,
+    deduplicationKey: `host-push:new-review:${input.reviewId}`,
+    payload: { v: 1, reviewId: input.reviewId, experienceTitle } satisfies NewReviewPayload,
+    availableAt: null,
+  });
 }
 
 /**

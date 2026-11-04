@@ -10,6 +10,7 @@ import {
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueNewBookingNotification,
+  enqueueNewReviewNotification,
   enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
   HostNotificationOutbox,
@@ -18,6 +19,7 @@ import {
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
+  parseNewReviewPayload,
   parseOtaBookingPayload,
 } from "../src/host-notification-outbox.ts";
 
@@ -120,6 +122,18 @@ describe("question and new booking payloads (#285 slice 5)", () => {
       await assert.rejects(() => enqueueNewBookingNotification(client, bad), StoreValidationError);
     }
     assert.equal(calls.length, 0);
+  });
+});
+
+describe("new review notification (#109)", () => {
+  it("carries only the review reference and experience title", async () => {
+    const reviewId = "00000000-0000-4000-8000-000000000109";
+    const { client, calls } = recordingClient();
+    await enqueueNewReviewNotification(client, { providerId: "provider-a", reviewId, experienceTitle: "Synthetic tea" });
+    assert.deepEqual(calls[0]!.params.slice(0, 5), ["provider-a", "guest_review", reviewId, HOST_NOTIFICATION_TOPICS.newReview, `host-push:new-review:${reviewId}`]);
+    const payload = JSON.parse(String(calls[0]!.params[5]));
+    assert.deepEqual(parseNewReviewPayload(payload), { v: 1, reviewId, experienceTitle: "Synthetic tea" });
+    assert.equal(parseNewReviewPayload({ ...payload, guestEmail: "private@example.com" }), null);
   });
 });
 
@@ -227,7 +241,7 @@ describe("HostNotificationOutbox input checks", () => {
     assert.deepEqual(queries[0], [[
       HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
       HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage, HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
-      HOST_NOTIFICATION_TOPICS.otaBooking,
+      HOST_NOTIFICATION_TOPICS.otaBooking, HOST_NOTIFICATION_TOPICS.newReview,
     ], 10, 60_000]);
   });
 });

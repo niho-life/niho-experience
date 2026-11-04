@@ -1,4 +1,4 @@
-import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage, ReviewInvitationEmail } from "@niho-experience/experience-store";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -87,6 +87,18 @@ export function mail(subject: string, blocks: readonly MailBlock[], lang: "en" |
 /** `https://experience.example` + a path; the site origin is checked at start-up (resolve-config). */
 export function absolute(siteUrl: string, path: string): string {
   return new URL(path, `${siteUrl.replace(/\/+$/, "")}/`).href;
+}
+
+/** The token is issued immediately before sending and stays in the URL fragment. */
+export function reviewInvitationEmail(email: ReviewInvitationEmail, options: { readonly siteUrl: string; readonly token: string }): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  const link = `${absolute(options.siteUrl, "/reviews/write")}#t=${encodeURIComponent(options.token)}`;
+  return mail(`Thank you for joining ${experience}`, [
+    { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
+    { kind: "p", text: `Thank you for joining ${experience}. We hope you enjoyed your experience.` },
+    { kind: "p", text: "If you would like to share how it went, you can write one public review. Your private note to the host will stay private." },
+    { kind: "link", lead: "Write your review:", label: "Write a review", href: link },
+  ]);
 }
 
 export interface QuestionReplyMailInput {

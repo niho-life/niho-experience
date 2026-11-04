@@ -58,6 +58,14 @@ beforeEach(() => {
 });
 
 describe("hostPushEventFromOutbox", () => {
+  it("opens a new review without putting reviewer details in the push", () => {
+    const reviewId = "00000000-0000-4000-8000-000000000109";
+    expect(hostPushEventFromOutbox(row("host.notify.new_review", { v: 1, reviewId, experienceTitle: "Synthetic tea" }), NOW)).toEqual({
+      ok: true,
+      event: { providerId: "provider-a", kind: "NEW_REVIEW", experienceTitle: "Synthetic tea", url: `/host/reviews?providerId=provider-a#review-${reviewId}`, tag: `review-${reviewId}` },
+    });
+  });
+
   it("turns an approval reminder into a deadline push that opens the booking", () => {
     const parsed = hostPushEventFromOutbox(row(APPROVAL, approvalPayload), NOW);
     expect(parsed).toEqual({
