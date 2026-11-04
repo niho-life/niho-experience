@@ -61,6 +61,10 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($3,$4,'OWNER')",
         [firstOwner.providerId, firstOwner.nihoUserId, secondOwner.providerId, secondOwner.nihoUserId],
       );
+      await pool.query(
+        "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000),($2,false,1000)",
+        [firstOwner.providerId, secondOwner.providerId],
+      );
 
       const store = new ExperienceStore(pool);
       const publications = new ExperiencePublicationRepository(pool);
@@ -150,6 +154,10 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       await pool.query(
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($1,$3,'EDITOR')",
         [OWNER.providerId, OWNER.nihoUserId, EDITOR.nihoUserId],
+      );
+      await pool.query(
+        "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000)",
+        [OWNER.providerId],
       );
 
       const store = new ExperienceStore(pool);
@@ -250,6 +258,21 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         StoreAccessDeniedError,
       );
 
+      await pool.query("DELETE FROM provider_sale_settings WHERE provider_id=$1", [OWNER.providerId]);
+      await assert.rejects(
+        publications.publish(OWNER, original.id, {
+          expectedDraftVersion: original.version,
+          expectedStateVersion: null,
+          consentVersion: ready.requiredConsentVersion,
+          checks: CHECKS,
+        }),
+        (error: unknown) => error instanceof ExperiencePublicationBlockedError && error.blockers.includes("FEE_SETTINGS_REQUIRED"),
+      );
+      await pool.query(
+        "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000)",
+        [OWNER.providerId],
+      );
+
       let state = await publications.publish(OWNER, original.id, {
         expectedDraftVersion: original.version,
         expectedStateVersion: null,
@@ -285,7 +308,6 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
           childPricing: null,
           minimumParticipants: 2,
           minimumChargeableParticipants: 3,
-          privateBooking: true,
           maxPartySize: 6,
           cancellationPolicy: "CUSTOM",
           cancellationWindowMinutesBeforeStart: 90,
@@ -307,7 +329,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       );
       assert.equal(Number(activeTermsSnapshot.rows[0]?.sale_terms_version), 2);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.minimumChargeableParticipants, 3);
-      assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.privateBooking, true);
+      assert.equal(Object.hasOwn(activeTermsSnapshot.rows[0]?.sale_terms_snapshot ?? {}, "privateBooking"), false);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationWindowMinutesBeforeStart, 90);
       assert.equal(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.cancellationRefundBasisPoints, 3_750);
       assert.deepEqual(activeTermsSnapshot.rows[0]?.sale_terms_snapshot.offerPrices, [
@@ -395,24 +417,48 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal(state.ownerResumeRequired, false);
       assert.ok(await publications.getPublicBySlug(original.slug));
 
-      // A current false readiness, expiry, seller mismatch, or OWNER loss all hide the same public copy.
+      const extraAssetId = randomUUID();
+      const beforePhotoAdd = await publications.getPublicBySlug(original.slug);
+      await publications.addMedia(OWNER, original.id, {
+        id: extraAssetId,
+        objectKey: `experience-products/${extraAssetId}.jpg`,
+        sourceRefHash: "4".repeat(64),
+        width: 640,
+        height: 480,
+        byteSize: 2048,
+        altText: "Second synthetic photo",
+        publicCredit: null,
+      });
+      const draftAfterPhotoAdd = await publications.getProduct(OWNER, original.id);
+      assert.equal(draftAfterPhotoAdd.version, incomplete.draft.version + 1);
+      assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, beforePhotoAdd?.photos.length);
+      state = await publications.publish(OWNER, original.id, {
+        expectedDraftVersion: draftAfterPhotoAdd.version,
+        expectedStateVersion: state.version,
+        consentVersion: ready.requiredConsentVersion,
+        checks: CHECKS,
+      });
+      assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, 2);
+
+      // Readiness proves identity when the OWNER publishes. After publication, mutable readiness TTLs do not
+      // make a seller's listing vanish every few minutes; STOP and operations suspension control visibility.
       const notReady = await publications.recordReadiness(OWNER, readiness({ connectReady: false }), ready.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const expiredNow = Date.now();
       const expired = await publications.recordReadiness(OWNER, readiness({
         observedAtUtc: new Date(expiredNow - 2_000).toISOString(),
         validUntilUtc: new Date(expiredNow - 1_000).toISOString(),
       }), notReady.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const mismatchedSeller = await publications.recordReadiness(OWNER, readiness({ sellerDisplayName: "Another Synthetic Seller" }), expired.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const unusableAccount = await publications.recordReadiness(OWNER, readiness({ accountUsable: false }), mismatchedSeller.version);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.ok(await publications.getPublicBySlug(original.slug));
       const readyAgain = await publications.recordReadiness(OWNER, readiness(), unusableAccount.version);
       assert.ok(await publications.getPublicBySlug(original.slug));
       await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id=$1 AND niho_user_id=$2", [OWNER.providerId, OWNER.nihoUserId]);
-      assert.equal(await publications.getPublicBySlug(original.slug), null);
-      assert.equal((await publications.listPublic()).length, 0);
+      assert.ok(await publications.getPublicBySlug(original.slug));
+      assert.equal((await publications.listPublic()).length, 1);
       assert.equal(readyAgain.version, 6);
 
       const afterSnapshots = await pool.query(

@@ -1,5 +1,5 @@
 import type { ExperienceCheckoutResponse } from "@niho-experience/api-client";
-import { createDirectCheckout, ExperiencePaymentsHoldTooShortError, retrieveDirectCheckout, type DirectCheckoutResult, type RetrievedDirectCheckout } from "@niho-experience/experience-payments";
+import { createDirectCheckout, ExperiencePaymentsHoldTooShortError, retrieveConnectedAccount, retrieveDirectCheckout, type DirectCheckoutResult, type RetrievedDirectCheckout } from "@niho-experience/experience-payments";
 import { GuestCheckoutError, StoreNotFoundError, type GuestBookingStart } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { checkoutError, readGuestCheckout, storeCheckoutError } from "@/lib/experience/guest-booking-http";
@@ -66,6 +66,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
   // Expired or cancelled: these seats are gone. The page reads availability again and starts a new request.
   if (started.status !== "HOLD" || Date.parse(started.holdExpiresAt) <= Date.now()) return checkoutError("UNAVAILABLE");
+
+  // A publication is durable, but a connected account can lose charge or payout capability at any time.
+  // Check the exact recipient saved in this booking before opening a new (or returning an existing) Session.
+  try {
+    const account = await retrieveConnectedAccount({ accountId: started.booking.sellerSnapshot.stripeConnectAccountRef, platformStripeKey: stripeKey });
+    if (account.kind === "unreachable") return checkoutError("CHECKOUT_UNAVAILABLE");
+    if (account.kind !== "ready") return checkoutError("UNAVAILABLE");
+  } catch (error) {
+    logFailure("stripe", error);
+    return checkoutError("CHECKOUT_UNAVAILABLE");
+  }
 
   // The same request again (back from Stripe, a second click): the Session made for this hold, even once the
   // hold is too short for a new one. Paid but not confirmed yet (the webhook is on its way): the return page.

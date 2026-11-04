@@ -76,7 +76,6 @@ export interface HostGuestBooking {
   /** The exact sale conditions in the accepted booking snapshot; null members mean a legacy snapshot lacked them. */
   readonly saleConditions: {
     readonly minimumChargeableParticipants: number | null;
-    readonly privateBooking: boolean | null;
     readonly minimumAttendance: number | null;
     readonly cancellationWindowMinutesBeforeStart: number | null;
     readonly cancellationRefundBasisPoints: number | null;
@@ -487,7 +486,6 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
         : Number.isSafeInteger(breakdown.minimumChargeableParticipants)
           ? Number(breakdown.minimumChargeableParticipants)
           : null,
-      privateBooking: typeof bookingTerms.privateBooking === "boolean" ? bookingTerms.privateBooking : null,
       minimumAttendance: bookingTerms.minimumAttendance === null || bookingTerms.minimumAttendance === undefined
         ? null
         : amount(bookingTerms.minimumAttendance, "pricing_snapshot.bookingTerms.minimumAttendance"),

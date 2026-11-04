@@ -43,8 +43,6 @@ describe("the sale of an experience sold here (#285)", () => {
     }), "sample-terms-2026-10")).toThrow("This cancellation policy cannot be represented by the legacy booking contract.");
     expect(() => siteSaleTerms(unrepresentable({ minimumChargeableParticipants: 2 }), "sample-terms-2026-10"))
       .toThrow("This sale condition cannot be represented by the legacy booking contract.");
-    expect(() => siteSaleTerms(unrepresentable({ privateBooking: true }), "sample-terms-2026-10"))
-      .toThrow("This sale condition cannot be represented by the legacy booking contract.");
   });
 
   it("lays the sale over NIHO's detail and keeps NIHO's content, legal documents and seller notice", () => {

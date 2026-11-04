@@ -218,8 +218,6 @@ export interface BookingTermsSnapshot {
   readonly minimumParticipants: number;
   /** Minimum adult-price-equivalent participants charged, even when the party is smaller. */
   readonly minimumChargeableParticipants?: number;
-  /** A single active booking group reserves this occurrence against later groups. */
-  readonly privateBooking?: boolean;
   /** Operations threshold fixed at checkout; intentionally excluded from all guest-facing DTOs. */
   readonly minimumAttendance?: number | null;
   readonly maxPartySize: number;

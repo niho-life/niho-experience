@@ -159,7 +159,7 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
       const updated = await registration.setSaleTermsAsOperator("sample-provider-a", "sample-tea", { ...TERMS, maxPartySize: 8 }, 1);
       assert.equal(updated.outcome, "UPDATED");
       assert.equal(updated.terms.version, 2);
-      assert.equal((await guests.publicBookingTerms("sample-tea-ceremony"))?.productId, "sample-tea");
+      assert.equal(await guests.publicBookingTerms("sample-tea-ceremony"), null, "operator sale terms do not create an owner publication");
 
       assert.deepEqual(await registration.removeSaleTerms("sample-provider-a", "sample-tea"), { removed: true });
       assert.deepEqual(await registration.removeSaleTerms("sample-provider-a", "sample-tea"), { removed: false });
@@ -189,7 +189,7 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
       await registration.setSaleTermsAsOperator("sample-provider-a", "sample-tea", TERMS);
       const selling = await registration.saleReadiness("sample-provider-a", "sample-tea");
       assert.deepEqual(failing(selling), []);
-      assert.deepEqual([selling.readyToOpen, selling.selling], [true, true]);
+      assert.deepEqual([selling.readyToOpen, selling.selling], [true, false]);
 
       await registration.removeSaleTerms("sample-provider-a", "sample-tea");
       const stopped = await registration.saleReadiness("sample-provider-a", "sample-tea");
@@ -257,7 +257,7 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
     });
   });
 
-  it("runs the script's commands against the database: register, the host's schedule, open-sale, stop-sale and again", async () => {
+  it("registers a seller without publishing, leaving public listing control to the OWNER", async () => {
     await withSchema(async ({ pool, registration, store, guests }) => {
       const example = JSON.parse(await readFile(new URL("../../../scripts/experience/site-sale.example.json", import.meta.url), "utf8")) as unknown;
       const input = parseSiteSaleInput(example);
@@ -275,25 +275,18 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
       const host = { providerId: input.provider.id, nihoUserId: input.owner.nihoUserId } as const;
 
       assert.equal(await run("plan", false), 0);
-      assert.equal(await run("open-sale"), 1, "open-sale before register");
       assert.equal(await run("register"), 0);
       assert.equal(await run("register"), 0, "register again changes nothing");
       const product = await pool.query("SELECT version, status, currency FROM experience_products");
       assert.deepEqual(product.rows, [{ version: "1", status: "PUBLISHED", currency: "JPY" }]);
       assert.equal(await guests.publicBookingTerms(slug), null, "register does not open the sale");
-      assert.equal(await run("open-sale"), 1, "no schedule yet");
 
       // The OWNER registered by the script sets the schedule in /host/calendar.
       await store.saveScheduleRule(host, input.product.id, rule("sample-am"), null, randomUUID());
-      assert.equal(await run("open-sale"), 0);
-      assert.equal((await guests.publicBookingTerms(slug))?.productId, input.product.id);
-      assert.equal(await run("open-sale"), 0, "open-sale again keeps the same terms");
-      assert.equal(await run("stop-sale"), 0);
-      assert.equal(await guests.publicBookingTerms(slug), null);
-      assert.equal(await run("stop-sale"), 0, "stop-sale again is fine");
-      assert.equal(await run("open-sale"), 0, "reopen");
       assert.equal(await run("status", false), 0);
-      assert.match(lines.at(-1)!, /selling here now: yes/);
+      assert.equal(await guests.publicBookingTerms(slug), null, "registration and schedule do not create an owner publication");
+      assert.match(lines.at(-1)!, /publicly listed now: no/);
+      assert.match(lines.join("\n"), /OWNER must finish and publish this product/);
     });
   });
 

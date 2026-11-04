@@ -1,8 +1,8 @@
-# 体験業務の移行と実行環境
+# 体験業務の実行環境
 
-この文書は [ADR 0002](adr/0002-experience-domain-ownership.md) の実装状況を示す。旧 NIHO API の予約・決済を止めるまで、新旧の正本を混同しない。
+この文書は [ADR 0002](adr/0002-experience-domain-ownership.md) の実装状況を示す。体験商品・開催枠・予約・決済の正本はExperienceに置き、旧NIHO体験商品の移行や並行販売は行わない。
 
-2026-11-03 の公開方針（#369）: 提供者と体験の事前承認を廃止し、必要条件を満たした OWNER が同意して自己公開する。通常保存での掲載停止・再審査はなくす。現行 HTTP の体験編集・掲載はまだ旧 NIHO API のため、モックの変更だけでは本番の承認はなくならない。[公開方針と HTTP 切替の受入](host-publication.md) を #330 の移行に含める。
+2026-11-04 の簡素化決定（#330 / #369）: OWNER本人が商品を作り、必要条件を満たしたら公開・停止・再開する。通常保存で有効な公開版を維持する。旧商品・旧予約が無いためデータ移行と商品ごとの切替は行わない。[公開方針とAPI契約](host-publication.md) を正本とする。
 
 ## この変更で利用できる範囲
 
@@ -59,17 +59,17 @@
 | `EXPERIENCE_GOOGLE_JOBS_AUDIENCE` / `EXPERIENCE_GOOGLE_JOBS_SERVICE_ACCOUNT_EMAIL` | 2 つの Google の job を呼ぶ Cloud Scheduler の OIDC token の audience と、そのサービスアカウント。メール job とは別にする。ほかの呼び手は 401 |
 | `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `true` のときだけ、http mode で `GET /api/public/experiences/{slug}/reviews`（#104/#108、[guest-reviews.md](guest-reviews.md)）が experience DB（`0027`）のレビューと集計で答える。レビューは NIHO の確認なしで投稿されたらすぐ公開される（owner 2026-10-31）。既定 `false`（404）。`EXPERIENCE_DATABASE_URL` が無いと 503。投稿の画面（#285 スライス 6）ができるまでは、`true` にしても 0 件の応答になる。同じフラグで、体験詳細の「Reviews」（英語のページ。先頭 3 件と集計、"Show all" はこの route）と、OWNER の `/host/reviews`（一覧・返信 1 つ・報告）も experience DB から読む（`HOST_CONSOLE_ENABLED=true` が要る）。フラグ OFF・mock mode の画面は今までどおり |
 
-DB migration は `packages/experience-store/migrations/` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0006` は上記の停止・移行手順を先に満たす。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider と membership の投入は権限を確認した移行処理に限定し、公開 CI・fixture に実 ID を置かない（ここで売る体験は、移行用の ID で動く登録スクリプト。[guest-booking.md](guest-booking.md) の「体験の登録と切替（第9段）」）。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
+DB migration は `packages/experience-store/migrations/` の全SQLファイルをファイル名の辞書順で適用する。`0010_guide_body_media.sql` と `0010_shared_inventory.sql` の両方を含める。`0046` は未使用の旧商品切替・移行在庫テーブルを削除する。`0009`/`0010` の private guide media、本文placement、runtime IAM は [Guide CMS](guide-cms.md) のゲートを満たす。provider・membership・商品は認証済み OWNER の操作から作成し、公開 CI・fixture に実 ID を置かない。本番配備 workflow は [#92 の受入手順](production-deploy.md#ホストカレンダーの本番候補を有効にする条件92) を満たした場合だけ、数値version固定の Secret と Cloud SQL instance を候補revisionへ渡す。migrationと実データ移行はworkflowで行わない。`HOST_CONSOLE_ENABLED=false` と `EDITOR_CONSOLE_ENABLED=false` は各画面とAPIを404で閉じる。Guide public sourceは別flagで、database modeはDB/bucket未設定なら起動失敗、実行中のDB/storage障害は静的記事へfallbackせず失敗を返す。
 
 Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、NIHO editor auth、category/article/publication移行、権限失効・停止・UNLISTED・画像取消を合成データで受け入れる。次に `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` の候補revisionで、SSR/metadata/sitemapが次requestに反映されること、static記事が混在しないこと、公開catalogとの体験link交差、mediaの404/503/no-storeを確認する。受入前は`static`を維持し、editorだけの有効化を公開元切替とみなさない。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` は editor.niho.life の公開（設計の段階 3）が本番で使えるまで有効化しない。Secret Manager と配備 workflow への配線もそれまで行わない。
 
-## 切替前の残作業
+## ホスト販売の残作業
 
-1. NIHO の安定した user ID、provider ID、Connect 口座の readiness を渡す限定契約を確定し、権限付きで provider・membership・商品を移す。体験コンテンツの編集 UI と公開 SSR を新正本へ接続する。#369 の自己公開、公開版の維持、本人停止と運営停止の分離、公開条件のサーバー検証を含め、旧 NIHO の掲載審査・保存時停止への依存を除く。
-2. 旅行者の availability・入力・checkout を experience API へ切り替える。ゲスト連絡先、同意、質問、条件、返金・取消、メール・通知の扱いを旧契約と比較して受け入れる。レビュー（#104/#108）は保存と公開の読み取り API までを experience DB に置いた（`0027`、[guest-reviews.md](guest-reviews.md)）。残りは、投稿のお礼メールと書く画面、出欠による資格の除外、英訳の下書き（NIHO の事前確認は無し・直接公開）。新旧で同じ開催回を同時に販売しない。
+1. Experienceには、NIHOの現在のログイン本人・OWNER権限・Connect口座を確認する商品APIがある。商品作成、編集、公開、停止、再開、写真、販売条件の操作はこのAPIを通す。公開情報・予約条件snapshot・新規CheckoutはExperienceの公開版を使い、旧NIHO体験販売へfallbackしない。
+2. このAPIはNIHO側の共通本人・Connect API（PR #19712）を前提にしており、契約の反映後に機能flagと配備設定をそろえる必要がある。ホストの商品編集画面への接続、開催枠を含む画面上の公開までの一周、DB統合テストの実行は引き続き必要。レビュー（#104/#108）の投稿画面・お礼メール、出欠による資格の除外、英訳の下書きは別機能。
 3. Google busy の定期再照合と確定予約の書き込みは、独立した 2 つの job として実装した（#238、下の「Google の job」）。残りは staging での受入：Cloud Scheduler の 2 job と専用サービスアカウント、実 OAuth の接続・失効・再接続、watch の webhook の到達、専用 calendar への書き込みを確かめてから flag を開く。
-4. Stripe Connect webhook を同じプラットフォームの NIHO アプリ決済から振り分け、署名・販売者口座・金額・イベント再送・期限切れを staging で検証する。旧予約の返金責任を整理する。
-5. データ移行、backup、監査、障害・切戻し手順を受け入れたあと、旧編集を read-only にし、公開予約の参照先を切り替える。
+4. Stripe Checkoutは公開版に保存したPanasonicのConnect口座へ直接作成する。Checkoutの作成可否はStripeで確認し、口座が受け付けられない場合は支払いを開始しない。stagingでは成功・停止口座・再送の合成取引を確認する。
+5. DBバックアップ、監査、障害対応を受け入れ、合成データで公開/編集/停止/再開、予約snapshot、重複公開・二重在庫拒否を確認する。商品や予約の旧データ移行・旧販売の切戻しは不要。
 
 公開 PR と CI は合成データのみを使い、本番 DB・Google/Stripe Secret には接続しない。
 

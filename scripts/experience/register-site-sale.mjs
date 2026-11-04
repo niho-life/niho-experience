@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Registers an experience sold on this site in the experience DB and opens or stops its sale (#285 slice 9).
-// Runbook: docs/guest-booking.md 「体験の登録と切替（第9段）」. The flow and the validation live in
+// Registers the seller workspace and product in the experience DB (#285 slice 9).
+// Public listing is controlled by the OWNER through the authenticated host API. The flow and validation live in
 // packages/experience-store/src/site-sale-script.ts (tested there); this file only wires the environment.
 //
-//   node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sale|status] <input.json> [--yes]
+//   node scripts/experience/register-site-sale.mjs [plan|register|status] <input.json> [--yes]
 //
 // Environment (never printed):
 //   EXPERIENCE_DATABASE_URL                the experience DB, connected as the migration identity for writes
 //   EXPERIENCE_DATABASE_ROLE               optional: the role to act as on that connection (SET ROLE at startup)
-//   EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY  register and open-sale: reads the seller's connected account
+//   EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY  register: reads the seller's connected account
 // Exit codes: 0 done, 1 refused (input, readiness, Stripe account, missing --yes, conflict), 2 unexpected.
 // It never writes NIHO and never prints a key, a connection URL or a driver message.
 import { readFile } from "node:fs/promises";
@@ -63,8 +63,8 @@ async function main() {
   const role = process.env.EXPERIENCE_DATABASE_ROLE;
   if (role !== undefined && role !== "" && !ROLE.test(role)) return refuse(["EXPERIENCE_DATABASE_ROLE is not a role name"]);
   const stripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY;
-  const needsStripe = args.yes && (args.command === "register" || args.command === "open-sale");
-  if (needsStripe && !stripeKey) return refuse(["EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY is not set (register and open-sale check the Stripe account)"]);
+  const needsStripe = args.yes && args.command === "register";
+  if (needsStripe && !stripeKey) return refuse(["EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY is not set (register checks the Stripe account)"]);
 
   // The role is a startup parameter, so every connection of the pool acts as it (an unknown role fails to connect).
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 2, ...(role ? { options: `-c role=${role}` } : {}) });

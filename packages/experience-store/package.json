@@ -21,18 +21,6 @@
     "./site-sale-script": {
       "types": "./src/site-sale-script.ts",
       "default": "./src/site-sale-script.ts"
-    },
-    "./sales-cutover": {
-      "types": "./src/experience-sales-cutover.ts",
-      "default": "./src/experience-sales-cutover.ts"
-    },
-    "./product-migration": {
-      "types": "./src/experience-product-migration.ts",
-      "default": "./src/experience-product-migration.ts"
-    },
-    "./publication-media-import": {
-      "types": "./src/experience-product-media-import.ts",
-      "default": "./src/experience-product-media-import.ts"
     }
   },
   "scripts": {

@@ -8,6 +8,7 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { GUEST_MAIL_LIMITS, GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
@@ -64,6 +65,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
       cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
+    await seedTestPublications(pool);
     await run({ pool, store, guests, outbox: new GuestMailOutbox(pool) });
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

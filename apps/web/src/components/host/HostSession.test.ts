@@ -17,7 +17,7 @@ const CONFIRMED: HostGuestBooking = {
   adultCount: 2, childCount: 1, language: "EN",
   guest: { name: "Sample Guest", phone: "+81 90 0000 0000", note: "Sample note", answers: [{ questionId: "arrival", prompt: "Arrival station", text: "Kamakura", options: [] }] },
   currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000, platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 },
-  saleConditions: { minimumChargeableParticipants: 1, privateBooking: false, minimumAttendance: null, cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000 },
+  saleConditions: { minimumChargeableParticipants: 1, minimumAttendance: null, cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000 },
   providerAmount: 9000, cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: "2026-10-31T03:04:00.000Z", paidAtUtc: "2026-10-31T03:06:00.000Z", cancelledAtUtc: null, cancelledBy: null, cancellationReason: null, cancellationNote: null, refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false,
 };
 const REVIEW: HostGuestBooking = { ...CONFIRMED, publicBookingId: "00000000-0000-4000-8000-000000000286", status: "PAYMENT_REVIEW", adultCount: 1, childCount: 0, guest: { name: "Review Guest", phone: null, note: null, answers: [] } };

@@ -9,6 +9,7 @@ import { StoreAccessDeniedError, StoreError, StoreValidationError } from "../src
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import type { HostSaleEntry } from "../src/host-sales.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 売上 (#91) against a real schema: the ledger of guest bookings as the OWNER reads it. Synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -66,6 +67,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
       cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
+    await seedTestPublications(pool);
     await run({ pool, store, guests, cancellations: new BookingCancellations(pool) });
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
@@ -216,9 +218,12 @@ describe("この口座への入金: the Stripe accounts of the OWNER's sales her
      VALUES ('provider-a',$1,$1,'PUBLISHED','Synthetic product','{}','JPY',3000,'terms-v1','seller-provider-a',$2,'Sample Seller A')`,
     [id, account],
   );
-  const terms = (id: string) => context.guests.setSaleTerms(ownerA, id, {
-    childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
-  });
+  const terms = async (id: string) => {
+    await context.guests.setSaleTerms(ownerA, id, {
+      childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
+    });
+    await seedTestPublications(context.pool);
+  };
   let context: Context;
 
   it("reads the accounts of products sold here and of the bookings' seller snapshots, and nothing else", async () => {
