@@ -314,7 +314,7 @@ test.describe("this site's ledger (?mock=site-sales)", () => {
     await signIn(page, "?mock=site-sales");
     await page.goto("/host/sales");
     await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
-    await expect(page.getByText("このサイトで受けた予約の売上です。NIHO で販売している体験の売上は含みません。")).toBeVisible();
+    await expect(page.getByText("無料予約は金額0円で件数に表示します。")).toBeVisible();
     await expect(monthNav(page)).toContainText("2026年10月");
 
     const october = summary(page, "2026年10月");

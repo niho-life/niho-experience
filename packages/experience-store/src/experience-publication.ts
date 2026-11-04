@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
+  GUEST_BOOKING_LIMITS,
   questionsFingerprint,
   cancellationPolicyCode,
   databaseNow,
   offerPricesMatchActiveRules,
   readSaleTerms,
+  salePriceSetMatchesProduct,
   tokyoDate,
   validSaleTerms,
   writeOfferPrices,
@@ -378,6 +380,9 @@ function validateDraft(input: ExperiencePublicationDraftInput): ExperiencePublic
   assertNonEmptyText(input.slug, "product.slug", 160);
   assertNonEmptyText(input.publicTitle, "product.publicTitle", 300);
   assertMoney(input.unitAmount, "product.unitAmount");
+  if (input.unitAmount !== 0 && input.unitAmount < GUEST_BOOKING_LIMITS.minimumChargeYen) {
+    throw new StoreValidationError(`product.unitAmount must be 0 or at least ${GUEST_BOOKING_LIMITS.minimumChargeYen}.`);
+  }
   assertNonEmptyText(input.cancellationTermsRef, "product.cancellationTermsRef", 512);
   if (!input.content || typeof input.content !== "object" || Array.isArray(input.content)) {
     throw new StoreValidationError("product.content must be a JSON object.");
@@ -470,7 +475,7 @@ async function blockers(
   );
   const positions = new Set((media.rows[0]?.positions ?? []).map(Number));
   if (!checks.photosReady || positions.size === 0 || photoIndices.some((index) => !positions.has(index))) result.push("PHOTOS_REQUIRED");
-  if (product.currency !== "JPY" || product.unitAmount <= 0) result.push("PRICE_REQUIRED");
+  if (product.currency !== "JPY" || (product.unitAmount !== 0 && product.unitAmount < GUEST_BOOKING_LIMITS.minimumChargeYen)) result.push("PRICE_REQUIRED");
   const facts = await client.query<{ sale_terms: boolean; schedule: boolean; slug_in_use: boolean }>(
     `SELECT
        EXISTS (SELECT 1 FROM experience_product_sale_terms t WHERE t.provider_id=$1 AND t.product_id=$2) AS sale_terms,
@@ -491,6 +496,7 @@ async function blockers(
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
+  if (terms !== null && !salePriceSetMatchesProduct(product.unitAmount, terms)) result.push("PRICE_REQUIRED");
   if (terms !== null && terms.offerPrices !== null) {
     const today = tokyoDate(await databaseNow(client));
     if (!await offerPricesMatchActiveRules(client, terms, product.providerId, product.id, today)) result.push("PRICE_REQUIRED");
@@ -1022,6 +1028,9 @@ export class ExperiencePublicationRepository {
       const product = productResult.rows[0] ? productFromRow(productResult.rows[0]) : null;
       if (!product) throw new StoreNotFoundError("product");
       if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      if (!salePriceSetMatchesProduct(product.unitAmount, terms)) {
+        throw new StoreValidationError("A free product must price every offer and child at ¥0; paid offers must meet Stripe's minimum charge.");
+      }
       const state = await lockedState(client, actor.providerId, productId);
       if ((state?.version ?? null) !== input.expectedStateVersion) {
         throw new StoreConflictError("Publication state version mismatch: read the state again.");

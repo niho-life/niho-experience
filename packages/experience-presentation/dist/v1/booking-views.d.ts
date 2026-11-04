@@ -88,6 +88,12 @@ export type BookingCheckoutViewModelV1 = Readonly<{
     invalidNote: boolean;
     questions: readonly BookingQuestionV1[];
     approval: boolean;
+    actionLabel?: string;
+    reviewHeading?: string;
+    totalNote?: string;
+    confirmationNote?: string;
+    sellerNote?: string;
+    paymentDisclosure?: string;
     review: readonly {
         label: string;
         value: string;

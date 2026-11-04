@@ -1,6 +1,8 @@
 const TZ = "Asia/Tokyo";
 const intlLocale = (locale: "en" | "ja") => locale === "ja" ? "ja-JP" : "en-US";
 export const formatYen = (amountYen: number, locale: "en" | "ja" = "en") => new Intl.NumberFormat(intlLocale(locale), { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(amountYen);
+/** A traveler-facing experience price: zero means free, while financial amounts keep using formatYen. */
+export const formatExperiencePriceYen = (amountYen: number, locale: "en" | "ja" = "en") => amountYen === 0 ? (locale === "ja" ? "無料" : "Free") : formatYen(amountYen, locale);
 export const formatDay = (iso: string, locale: "en" | "ja" = "en") => new Intl.DateTimeFormat(intlLocale(locale), { timeZone: TZ, weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
 export const formatLongDay = (iso: string, locale: "en" | "ja" = "en") => new Intl.DateTimeFormat(intlLocale(locale), { timeZone: TZ, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(iso));
 export const formatTime = (iso: string, locale: "en" | "ja" = "en") => new Intl.DateTimeFormat(intlLocale(locale), { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));

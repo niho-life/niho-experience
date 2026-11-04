@@ -6,7 +6,7 @@ import { readBookingAvailability } from "@/lib/browser-availability";
 import type { BookingSource } from "@/lib/booking-source";
 import { browseHref, type BrowseContext } from "@/lib/browse-context";
 import { dayLabelWithoutWeekday, dayOption, nextBookable } from "@/lib/date-filter";
-import { formatTime, formatYen } from "@/lib/format";
+import { formatExperiencePriceYen, formatTime } from "@/lib/format";
 import { type HandIconName } from "./HandIcon";
 import { buttonClass } from "./ui";
 import { DetailBookingCardV1, DetailBookingDatesV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
@@ -92,7 +92,7 @@ export function BookingDatesController({ summary }: { summary: BookingSummary })
   const items = Array.isArray(dates) ? dates.map((occurrence) => {
     const day = dayOption(occurrence.date, locale);
     const offer = offerFor(summary, occurrence);
-    const optionPrice = offer ? formatYen(offer.adultPriceYen, locale) : copy.text("booking.seeOption");
+    const optionPrice = offer ? formatExperiencePriceYen(offer.adultPriceYen, locale) : copy.text("booking.seeOption");
     const option = offer?.name ?? copy.text("booking.optionFallback");
     const session = sessionLabel(summary, occurrence, locale, copy);
     return { id: `${occurrence.offerId}-${occurrence.date}`, href: bookDateHref(summary, occurrence), ariaLabel: copy.text("booking.bookDateAria", { session, price: optionPrice }), weekday: day.weekday, day: dayLabelWithoutWeekday(day, locale), time: formatTime(occurrence.startAt, locale), option, price: optionPrice };

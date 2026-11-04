@@ -1,5 +1,5 @@
 import type { ExperienceOffer } from "@niho-experience/api-client";
-import { formatYen } from "./format";
+import { formatExperiencePriceYen } from "./format";
 
 type ImageCopy = { url?: string; alt?: string | null } | null;
 type HostCopy = { avatar?: ImageCopy; displayName?: string; bio?: string | null };
@@ -25,6 +25,6 @@ export function childParticipationCopy(offers: readonly ExperienceOffer[], local
   const prices = [...new Set(children.map((child) => child.priceYen))];
   return {
     fact: `${ages}${first.adultRequired ? (locale === "ja" ? "（大人同伴）" : " with an adult") : ""}`,
-    price: locale === "ja" ? `子ども（${first.minAge === first.maxAge ? first.minAge : `${first.minAge}〜${first.maxAge}`}歳）${prices.length > 1 ? "最低 " : ""}${formatYen(Math.min(...prices), locale)}` : `Children ${first.minAge === first.maxAge ? first.minAge : `${first.minAge}–${first.maxAge}`} ${prices.length > 1 ? "from " : ""}${formatYen(Math.min(...prices))}`,
+    price: locale === "ja" ? `子ども（${first.minAge === first.maxAge ? first.minAge : `${first.minAge}〜${first.maxAge}`}歳）${prices.length > 1 ? "最低 " : ""}${formatExperiencePriceYen(Math.min(...prices), locale)}` : `Children ${first.minAge === first.maxAge ? first.minAge : `${first.minAge}–${first.maxAge}`} ${prices.length > 1 ? "from " : ""}${formatExperiencePriceYen(Math.min(...prices))}`,
   };
 }

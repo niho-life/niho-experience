@@ -219,5 +219,11 @@ export async function cancelSiteBookingAsOwner(providerId: string, bookingId: st
     return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
   }
   if (done.result.outcome !== "CANCELLED") return { ok: true, message: SITE_CANCEL_NOT_CANCELLABLE_TEXT, booking };
-  return { ok: true, message: `予約を取り消しました。予約者に ${yen(booking.amountYen)} を全額返金します`, booking };
+  return {
+    ok: true,
+    message: booking.amountYen === 0
+      ? "無料予約を取り消しました。支払いは発生していないため、返金はありません"
+      : `予約を取り消しました。予約者に ${yen(booking.amountYen)} を全額返金します`,
+    booking,
+  };
 }

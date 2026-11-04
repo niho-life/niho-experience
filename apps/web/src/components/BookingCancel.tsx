@@ -20,6 +20,12 @@ const TEXT: Record<BookingCancelChoice, { start: string; confirm: string; busy: 
     question: "Ask NIHO support to cancel this booking? Your booking stays confirmed until support replies.",
   },
 };
+const FREE_BOOKING_TEXT = {
+  start: "Cancel this free booking",
+  confirm: "Yes, cancel my booking",
+  busy: "Cancelling…",
+  question: "Cancel this free booking? You can book again if places are available.",
+};
 
 /**
  * 取消 on the guest's booking page (#285 slice 7): one button, a confirmation step, then the page again (the server
@@ -27,16 +33,17 @@ const TEXT: Record<BookingCancelChoice, { start: string; confirm: string; busy: 
  * longer holds, the server changes nothing and the page offers the current options. The command's UUID stays the same
  * for a retry after a lost answer, so a second press never cancels or refunds twice.
  */
-export function BookingCancel({ publicBookingId, choice, shownDeadlineUtc, refundWords }: {
+export function BookingCancel({ publicBookingId, choice, shownDeadlineUtc, refundWords, freeBooking = false }: {
   publicBookingId: string;
   choice: BookingCancelChoice;
   shownDeadlineUtc: string | null;
   /** What the confirmation says about the money ("We'll refund ¥7,500 in full …"); null for a request. */
   refundWords: string | null;
+  freeBooking?: boolean;
 }) {
   const [step, setStep] = useState<Step>("idle");
   const commandId = useRef<string | null>(null);
-  const text = TEXT[choice];
+  const text = freeBooking ? FREE_BOOKING_TEXT : TEXT[choice];
 
   async function submit() {
     if (step === "busy") return;

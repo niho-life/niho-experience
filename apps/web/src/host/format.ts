@@ -119,5 +119,5 @@ export function experienceMeta(experience: Pick<HostExperience, "schedule" | "mi
   if (experience.missing.length > 0) return missingLine(experience.missing, (items) => items.join("・"));
   const schedule = experience.schedule;
   if (!schedule) return "日程と料金が未入力";
-  return [`${schedule.weekdays.join("・")} ${schedule.start}`, durationJa(schedule.durationMinutes), `定員${schedule.capacity}`, `${yen(schedule.priceFromYen)}〜`].join(" · ");
+  return [`${schedule.weekdays.join("・")} ${schedule.start}`, durationJa(schedule.durationMinutes), `定員${schedule.capacity}`, schedule.priceFromYen === 0 ? "無料" : `${yen(schedule.priceFromYen)}〜`].join(" · ");
 }
