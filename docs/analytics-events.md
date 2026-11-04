@@ -47,3 +47,10 @@
 4. CSPの `script-src` にscript取得先、`connect-src` に収集先を追加する（`apps/web/next.config.ts`）。Tracker scriptのSHA-384 SRIも更新時にレビューする。
 5. 計測をブロックしても一覧→予約→決済が動くことをE2Eで確認する。
 6. ファネルの分母と重複排除を決める。例：`booking_form_view` から `checkout_start` までの率は、同じ見積で重複を数えるか。確定予約は共通基盤のデータと突き合わせる。
+
+## Experience公開設定（#70）
+
+- GA4はNIHOapp #19255の `GET /api/public/experiences/site-settings` が返すExperience専用の公開設定だけを使う。`siteId`・承認origin・production-only gate・preview無効を閉じた形で検証し、未設定・不正・通信失敗なら読み込まない。
+- GA4は承認originの安全なページビューだけを送り、既存の予約ファネルイベントや売上・確定予約は転送しない。page location/titleは既存Umamiと同じ公開ルートallowlistで再構築し、予約結果ID・query・hash・自由入力を送らない。DNT時はタグ自体を読み込まない。
+- Search Console確認metaは本番のホームページだけに出す。DNS方式、未確認、無効設定では出さず、設定APIの解除後はSSRでmetaを返さない。
+- GA4 web data streamでは、自動履歴pageviewとURLを送るEnhanced Measurementを無効にする。実際のGA4/GSC設定、ポリシー公表と本番HTMLの受入はEが行う。GA4 IDやSearch Console確認値が設定されるまでは公開タグは出ない。
