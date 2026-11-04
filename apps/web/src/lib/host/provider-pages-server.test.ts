@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  config: { hostConsoleEnabled: true, experienceProviderPagesApiEnabled: false },
-  operations: false,
+  config: {
+    hostConsoleEnabled: true,
+    apiMode: "http" as "mock" | "http",
+    experienceProviderPagesApiEnabled: false,
+    experienceProviderOperationsApiEnabled: false,
+    experienceProviderOperationsPreviewEnabled: false,
+  },
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config }));
 vi.mock("./provider-operations-server", () => ({
-  providerOperationsEnabled: () => state.operations,
+  providerOperationsEnabled: () => state.config.hostConsoleEnabled && (state.config.experienceProviderOperationsApiEnabled || state.config.experienceProviderOperationsPreviewEnabled),
   providerOperationsJson: (body: unknown, status = 200) => Response.json(body, { status }),
 }));
 vi.mock("./server", () => ({ hostApiClient: vi.fn(), readHostSession: vi.fn(), clearSessionCookie: vi.fn() }));
@@ -18,8 +23,13 @@ import { providerPagesEnabled } from "./provider-pages-server";
 
 describe("provider pages rollout gate", () => {
   beforeEach(() => {
-    Object.assign(state.config, { hostConsoleEnabled: true, experienceProviderPagesApiEnabled: false });
-    state.operations = false;
+    Object.assign(state.config, {
+      hostConsoleEnabled: true,
+      apiMode: "http",
+      experienceProviderPagesApiEnabled: false,
+      experienceProviderOperationsApiEnabled: false,
+      experienceProviderOperationsPreviewEnabled: false,
+    });
   });
 
   it("stays closed by default and without the host console", () => {
@@ -29,14 +39,20 @@ describe("provider pages rollout gate", () => {
     expect(providerPagesEnabled()).toBe(false);
   });
 
-  it("keeps legacy page authoring closed after the Host v1 contract cutover", () => {
+  it("keeps the legacy page API closed in HTTP mode even when rollout flags are set", () => {
     state.config.experienceProviderPagesApiEnabled = true;
+    state.config.experienceProviderOperationsApiEnabled = true;
     expect(providerPagesEnabled()).toBe(false);
-    expect(state.operations).toBe(false);
   });
 
-  it("does not let the legacy provider-operations flag reopen page authoring", () => {
-    state.operations = true;
+  it("keeps the live editor available only in the explicit synthetic preview", () => {
+    state.config.apiMode = "mock";
+    state.config.experienceProviderOperationsPreviewEnabled = true;
+    expect(providerPagesEnabled()).toBe(true);
+    state.config.experienceProviderOperationsPreviewEnabled = false;
+    expect(providerPagesEnabled()).toBe(false);
+    state.config.experienceProviderOperationsPreviewEnabled = true;
+    state.config.hostConsoleEnabled = false;
     expect(providerPagesEnabled()).toBe(false);
   });
 });

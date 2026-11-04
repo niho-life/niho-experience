@@ -1,13 +1,13 @@
 import "server-only";
 import type { ExperienceHostApiFailure } from "@niho-experience/api-client/legacy-host";
+import { config } from "@/lib/config";
 import { clearSessionCookie, hostApiClient, readHostSession } from "./server";
 import { accessTokenUsable } from "./session";
-import { providerOperationsJson } from "./provider-operations-server";
+import { providerOperationsEnabled, providerOperationsJson } from "./provider-operations-server";
 
-/** Provider page authoring has its own rollout gate; the wider operations flag also includes it for compatibility. */
+/** Legacy provider pages remain available only in the explicitly enabled synthetic preview. */
 export function providerPagesEnabled(): boolean {
-  // NIHO contract v1 intentionally omits the legacy provider page API. Rollout flags cannot widen it.
-  return false;
+  return config.apiMode === "mock" && providerOperationsEnabled();
 }
 
 export async function loadProviderPagesClient() {
