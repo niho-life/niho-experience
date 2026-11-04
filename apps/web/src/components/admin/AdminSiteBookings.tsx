@@ -4,6 +4,7 @@ import { useCallback, useState, type ReactNode, type SyntheticEvent } from "reac
 import { decodeExperienceAdminSupportAdminListResponse, type ExperienceAdminSupportAdminListResponse } from "@niho-experience/api-client/admin-support-case";
 import type { ExperienceSettlementSummary, ExperienceSupportCase, ExperienceSupportNotification, SupportQueue, SupportQueueBooking } from "@niho-experience/experience-store";
 import { SettlementSummaryList } from "@/components/settlement/SettlementSummaryList";
+import { siteBookingOutcome } from "./site-booking-outcome";
 
 /*
  * サイト予約の取消・返金 (#285 slice 7, docs/guest-booking.md「取消と返金（第7段）」): what NIHO support has to look at
@@ -24,16 +25,6 @@ const REASONS = [
   { value: "OTHER", label: "その他" },
 ] as const;
 
-const OUTCOME_TEXT: Record<string, string> = {
-  CONTACT_SENT: "NIHOサポートからの連絡を予約者へのメール配信キューに登録しました",
-  CANCELLED: "取り消しました。返金を Stripe へ送りました",
-  DECLINED: "お断りしました。予約者にメールで届きます",
-  REFUND_RETRIED: "返金をもう一度送りました",
-  REFUND_CLOSED: "手作業で済んだ返金として閉じました",
-  NOT_CANCELLABLE: "状態が変わっていたため、何も変えませんでした。一覧を読み直しました",
-  CHANGED: "状態が変わっていたため、何も変えませんでした",
-  REQUESTED: "受け付けました",
-};
 const ERROR_TEXT: Record<string, string> = {
   invalid_input: "入力を確かめてください（金額は支払額より小さく、全額なら「全額」を選びます）",
   conflict: "同時に別の操作があったか、返金できる残額がありません。一覧を読み直してください",
@@ -157,9 +148,11 @@ function SupportCasePanel({ booking, onSessionExpired }: { booking: SupportQueue
       const response = await fetch(API, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
       const result = await response.json().catch(() => ({})) as { outcome?: string; error?: string };
       if (response.status === 401 || response.status === 403) { onSessionExpired(); return; }
-      if (response.ok) {
+      if (response.ok && result.outcome === "CONTACT_SENT" && siteBookingOutcome(result)) {
         setContactCommand(null); setContactText(""); await load();
         setMessage("予約者への連絡をメール配信キューに登録しました。");
+      } else if (response.ok) {
+        setMessage("送信結果を確認できません。入力を保持しています。同じ命令IDで照合してください。");
       } else {
         if (response.status < 500) setContactCommand(null);
         setMessage(ERROR_TEXT[result.error ?? ""] ?? "送信結果を確認できません。通信後は同じ命令IDで再試行します。");
@@ -270,12 +263,14 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
         setMessage({ tone: "error", text: ERROR_TEXT[result.error ?? ""] ?? "送れませんでした。もう一度お試しください（同じ操作として送り直します）" });
         return;
       }
+      const outcome = siteBookingOutcome(result);
+      if (!outcome || result.outcome === "CONTACT_SENT") {
+        setMessage({ tone: "error", text: "操作結果を確認できません。入力を保持しています。同じ操作として照合してください。" });
+        return;
+      }
       setPending(null);
       setForm(null);
-      const waiting = result.refunds?.some((refund) => refund.status === "REQUESTED");
-      // A refund the automatic resend is sending right now is not sent a second time (the same lease).
-      const inProgress = result.outcome === "REFUND_RETRIED" && result.refunds?.length === 0;
-      setMessage({ tone: "ok", text: `${inProgress ? "この返金は、ちょうど自動の再送が進めています。少し待って、一覧を読み直してください" : OUTCOME_TEXT[result.outcome ?? ""] ?? "完了しました"}${waiting ? "（Stripe がまだ受け付けていない返金があります。約 2 分後から自動で送り直します。一覧に残り続けたら、もう一度送ってください）" : ""}` });
+      setMessage(outcome);
       await refresh();
     } catch {
       setMessage({ tone: "error", text: "通信できませんでした。もう一度お試しください（同じ操作として送り直します）" });
