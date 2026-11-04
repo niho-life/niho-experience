@@ -25,7 +25,7 @@ describe("PostgreSQL provider notification settings (#109)", { skip: databaseUrl
       const settings = new ProviderNotificationSettings(pool);
       const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
 
-      // Nothing saved yet: all seven, in order, all on; only the three stoppable ones unlocked.
+      // Nothing saved yet: all notification keys, in order, all on; only the three stoppable ones unlocked.
       const initial = await settings.get(ownerA);
       assert.deepEqual(initial.map((item) => item.key), [...HOST_NOTIFICATION_KEYS]);
       assert.ok(initial.every((item) => item.enabled));

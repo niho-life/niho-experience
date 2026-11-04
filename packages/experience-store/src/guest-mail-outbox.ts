@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
 import { REVIEW_INVITATION_TOPIC } from "./booking-attendance.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
+import { HOST_NOTIFICATION_TOPICS } from "./host-notification-outbox.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
 import { validateGuestMeetingGuide } from "./guest-meeting-guides.ts";
@@ -66,6 +67,8 @@ export interface BookingConfirmationEmail {
 export interface ClaimedBookingConfirmation {
   /** The outbox row's bigint as text. */
   readonly id: string;
+  /** Opaque value sent in X-NIHO-Mail-Ref and returned by the NIHO feedback producer. */
+  readonly deliveryRef: string;
   /** Claims so far, this one included. */
   readonly attempts: number;
   /**
@@ -95,6 +98,7 @@ export interface BookingLinkEmail {
 /** One claimed BOOKING_LINK_TOPIC row. */
 export interface ClaimedBookingLink {
   readonly id: string;
+  readonly deliveryRef: string;
   readonly attempts: number;
   /**
    * What to send, or null when the page can no longer be opened: the guest's details were erased, the booking
@@ -118,6 +122,7 @@ export interface ReviewInvitationEmail {
 
 export interface ClaimedReviewInvitation {
   readonly id: string;
+  readonly deliveryRef: string;
   readonly attempts: number;
   readonly email: ReviewInvitationEmail | null;
 }
@@ -148,6 +153,7 @@ export interface BookingMeetingGuideEmail {
 
 export interface ClaimedBookingMeetingGuide {
   readonly id: string;
+  readonly deliveryRef: string;
   readonly attempts: number;
   readonly email: BookingMeetingGuideEmail | null;
 }
@@ -185,6 +191,7 @@ export type BookingNoticeEmail =
 
 export interface ClaimedBookingNotice {
   readonly id: string;
+  readonly deliveryRef: string;
   readonly attempts: number;
   /**
    * What to send, or null when nothing should go out: the guest's details were erased, the booking is not in the
@@ -200,13 +207,42 @@ export interface BookingNoticeClaim {
 }
 
 const NOTICE_TOPICS: readonly string[] = Object.values(GUEST_NOTICE_TOPICS);
+const GUEST_BOOKING_MAIL_TOPICS: readonly string[] = [
+  GUEST_MAIL_TOPIC,
+  BOOKING_LINK_TOPIC,
+  REVIEW_INVITATION_TOPIC,
+  MEETING_GUIDE_DAY_BEFORE_TOPIC,
+  ...NOTICE_TOPICS,
+];
 
 /** After a transient failure: tried again later, given up (attempts used up), or no longer this claim's row. */
 export type BookingConfirmationRetry = "RETRY" | "FAILED" | "STALE";
 
+export type GuestMailDeliveryFeedback = {
+  readonly eventId: string;
+  readonly deliveryRef: string;
+  readonly reportType: "BOUNCE" | "COMPLAINT";
+  readonly verification: "CORRELATED_DSN" | "UNVERIFIED_ARF";
+  readonly classification: "NO_SUCH_ADDRESS" | "NO_SUCH_DOMAIN" | "REJECTED_BY_SERVER" | "MAILBOX_FULL" | "TEMPORARY_FAILED" | "SPAM_COMPLAINT" | "OTHER";
+  readonly reportedAt: Date;
+};
+
+export type GuestMailDeliveryFeedbackResult = "RECORDED" | "DUPLICATE" | "UNMATCHED";
+
 const ROW_ID = /^[1-9][0-9]{0,18}$/;
+const MAIL_DELIVERY_REF = /^ex1_[0-9a-f]{32}$/;
+const EXTERNAL_MAIL_EVENT_ID = /^[A-Za-z0-9_-]{10,80}$/;
 const UUID_TEXT = "'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'";
 const POLICIES: ReadonlySet<string> = new Set(["FREE_UNTIL_24H", "FREE_UNTIL_48H", "NONE"]);
+
+function sameFeedbackEvent(row: DbRow, input: GuestMailDeliveryFeedback): boolean {
+  if (row.mail_delivery_ref !== input.deliveryRef || row.report_type !== input.reportType
+      || row.verification !== input.verification || row.classification !== input.classification) return false;
+  // A repeated provider report can arrive as a different Gmail message. The delivery ref and
+  // outcome define that duplicate; the first report's id and timestamp remain canonical.
+  if (row.external_event_id !== input.eventId) return true;
+  return row.reported_at instanceof Date && row.reported_at.getTime() === input.reportedAt.getTime();
+}
 
 /**
  * The row's booking, matched through its public ID. `aggregate_id` is text: the cast runs only on a UUID's
@@ -220,7 +256,10 @@ const BOOKING_OF = (row: string) =>
 const GUEST_ROW = (row: string) =>
   `${row}.topic = ANY($1::text[]) AND ${row}.aggregate_type = 'booking' AND ${row}.processed_at IS NULL
    AND EXISTS (SELECT 1 FROM bookings b JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
-                WHERE ${BOOKING_OF(row)})`;
+                WHERE ${BOOKING_OF(row)}
+                  AND NOT EXISTS (SELECT 1 FROM booking_guests suppressed
+                                   WHERE suppressed.provider_id=g.provider_id AND suppressed.guest_email_key=g.guest_email_key
+                                     AND suppressed.mail_suppressed_at IS NOT NULL))`;
 
 function boundedInteger(value: unknown, path: string, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new StoreValidationError(`${path} must be an integer from ${min} to ${max}.`);
@@ -377,7 +416,7 @@ export class GuestMailOutbox {
   async claimBookingConfirmations(options: { limit: number; leaseSeconds: number }): Promise<BookingConfirmationClaim> {
     const { rows, abandoned } = await this.#claim(GUEST_MAIL_TOPIC, GUEST_MAIL_LIMITS.confirmationAttempts, options);
     const confirmations = rows
-      .map((row): ClaimedBookingConfirmation => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: emailFromRow(row) }))
+      .map((row): ClaimedBookingConfirmation => ({ id: String(row.id), deliveryRef: text(row.mail_delivery_ref, "mail_delivery_ref"), attempts: count(row.attempts, "attempts"), email: emailFromRow(row) }))
       .sort(byId);
     return { confirmations, abandoned };
   }
@@ -403,7 +442,7 @@ export class GuestMailOutbox {
   async claimBookingLinks(options: { limit: number; leaseSeconds: number }): Promise<BookingLinkClaim> {
     const { rows, abandoned } = await this.#claim(BOOKING_LINK_TOPIC, GUEST_MAIL_LIMITS.linkAttempts, options);
     const links = rows
-      .map((row): ClaimedBookingLink => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: linkEmailFromRow(row) }))
+      .map((row): ClaimedBookingLink => ({ id: String(row.id), deliveryRef: text(row.mail_delivery_ref, "mail_delivery_ref"), attempts: count(row.attempts, "attempts"), email: linkEmailFromRow(row) }))
       .sort(byId);
     return { links, abandoned };
   }
@@ -421,7 +460,7 @@ export class GuestMailOutbox {
   async claimReviewInvitations(options: { limit: number; leaseSeconds: number }): Promise<ReviewInvitationClaim> {
     const { rows, abandoned } = await this.#claim(REVIEW_INVITATION_TOPIC, GUEST_MAIL_LIMITS.reviewInvitationAttempts, options);
     return {
-      invitations: rows.map((row): ClaimedReviewInvitation => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: reviewInvitationFromRow(row) })).sort(byId),
+      invitations: rows.map((row): ClaimedReviewInvitation => ({ id: String(row.id), deliveryRef: text(row.mail_delivery_ref, "mail_delivery_ref"), attempts: count(row.attempts, "attempts"), email: reviewInvitationFromRow(row) })).sort(byId),
       abandoned,
     };
   }
@@ -437,7 +476,7 @@ export class GuestMailOutbox {
   async claimMeetingGuideDayBefore(options: { limit: number; leaseSeconds: number }): Promise<BookingMeetingGuideClaim> {
     const { rows, abandoned } = await this.#claim(MEETING_GUIDE_DAY_BEFORE_TOPIC, GUEST_MAIL_LIMITS.meetingGuideAttempts, options);
     return {
-      guides: rows.map((row): ClaimedBookingMeetingGuide => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: meetingGuideEmailFromRow(row) })).sort(byId),
+      guides: rows.map((row): ClaimedBookingMeetingGuide => ({ id: String(row.id), deliveryRef: text(row.mail_delivery_ref, "mail_delivery_ref"), attempts: count(row.attempts, "attempts"), email: meetingGuideEmailFromRow(row) })).sort(byId),
       abandoned,
     };
   }
@@ -458,7 +497,7 @@ export class GuestMailOutbox {
   async claimBookingNotices(options: { limit: number; leaseSeconds: number }): Promise<BookingNoticeClaim> {
     const { rows, abandoned } = await this.#claim(NOTICE_TOPICS, GUEST_MAIL_LIMITS.noticeAttempts, options);
     const notices = rows
-      .map((row): ClaimedBookingNotice => ({ id: String(row.id), attempts: count(row.attempts, "attempts"), email: noticeFromRow(row) }))
+      .map((row): ClaimedBookingNotice => ({ id: String(row.id), deliveryRef: text(row.mail_delivery_ref, "mail_delivery_ref"), attempts: count(row.attempts, "attempts"), email: noticeFromRow(row) }))
       .sort(byId);
     return { notices, abandoned };
   }
@@ -473,12 +512,117 @@ export class GuestMailOutbox {
     return this.#retry(NOTICE_TOPICS, GUEST_MAIL_LIMITS.noticeAttempts, id, attempts);
   }
 
+  /**
+   * Persist a post-accept report from NIHO against the local opaque delivery reference. NIHO forwards
+   * no address, subject, body, or diagnostic. Only a correlated hard DSN suppresses later mail; an ARF
+   * candidate remains unverified and has no automatic host or delivery effect.
+   */
+  async recordDeliveryFeedback(input: GuestMailDeliveryFeedback): Promise<GuestMailDeliveryFeedbackResult> {
+    if (!EXTERNAL_MAIL_EVENT_ID.test(input.eventId)) throw new StoreValidationError("eventId must be a bounded external event id.");
+    if (!MAIL_DELIVERY_REF.test(input.deliveryRef)) throw new StoreValidationError("deliveryRef must be an opaque guest mail reference.");
+    if (!(input.reportedAt instanceof Date) || !Number.isFinite(input.reportedAt.getTime())) throw new StoreValidationError("reportedAt must be a valid date.");
+    const isBounce = input.reportType === "BOUNCE" && input.verification === "CORRELATED_DSN" && input.classification !== "SPAM_COMPLAINT";
+    const isComplaint = input.reportType === "COMPLAINT" && input.verification === "UNVERIFIED_ARF" && input.classification === "SPAM_COMPLAINT";
+    if (!isBounce && !isComplaint) throw new StoreValidationError("report type, verification and classification must agree.");
+
+    return withTransaction(this.#pool, async (client) => {
+      const existing = await client.query<DbRow>(
+        `SELECT external_event_id, mail_delivery_ref, report_type, verification, classification, reported_at
+           FROM guest_mail_delivery_feedback
+          WHERE external_event_id=$1 OR (mail_delivery_ref=$2 AND report_type=$3)
+          ORDER BY (external_event_id=$1) DESC
+          FOR UPDATE`,
+        [input.eventId, input.deliveryRef, input.reportType],
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0]!;
+        if (!sameFeedbackEvent(row, input)) {
+          throw new StoreError("An external mail feedback event id was reused with different content.");
+        }
+        return "DUPLICATE";
+      }
+
+      const source = await client.query<DbRow>(
+        `SELECT o.provider_id, b.id::text AS booking_id, b.public_booking_id::text AS public_booking_id,
+                b.occurrence_snapshot, g.guest_email_key, p.public_title,
+                (g.adult_count + g.child_count)::int AS seats
+           FROM outbox_messages o
+           JOIN bookings b ON ${BOOKING_OF("o")}
+           JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+           JOIN experience_products p ON p.provider_id=b.provider_id AND p.id=b.product_id
+          WHERE o.mail_delivery_ref=$1 AND o.aggregate_type='booking' AND o.topic=ANY($2::text[])
+          FOR UPDATE OF g`,
+        [input.deliveryRef, [...GUEST_BOOKING_MAIL_TOPICS]],
+      );
+      const row = source.rows[0];
+      if (!row || typeof row.guest_email_key !== "string") return "UNMATCHED";
+
+      const inserted = await client.query(
+        `INSERT INTO guest_mail_delivery_feedback
+           (external_event_id, mail_delivery_ref, provider_id, booking_id, report_type, verification, classification, reported_at)
+         VALUES ($1,$2,$3,$4::bigint,$5,$6,$7,$8)
+         ON CONFLICT DO NOTHING RETURNING external_event_id`,
+        [input.eventId, input.deliveryRef, row.provider_id, row.booking_id, input.reportType, input.verification, input.classification, input.reportedAt],
+      );
+      if (inserted.rowCount !== 1) {
+        const duplicate = await client.query<DbRow>(
+          `SELECT external_event_id, mail_delivery_ref, report_type, verification, classification, reported_at
+             FROM guest_mail_delivery_feedback
+            WHERE external_event_id=$1 OR (mail_delivery_ref=$2 AND report_type=$3)
+            ORDER BY (external_event_id=$1) DESC`,
+          [input.eventId, input.deliveryRef, input.reportType],
+        );
+        const current = duplicate.rows[0];
+        if (!current || !sameFeedbackEvent(current, input)) {
+          throw new StoreError("A mail delivery reference was reused with different feedback.");
+        }
+        return "DUPLICATE";
+      }
+
+      if (isBounce && (input.classification === "NO_SUCH_ADDRESS" || input.classification === "NO_SUCH_DOMAIN")) {
+        await client.query(
+          `UPDATE booking_guests
+              SET mail_suppressed_at=COALESCE(mail_suppressed_at,$3), mail_suppression_classification=COALESCE(mail_suppression_classification,$4)
+            WHERE provider_id=$1 AND guest_email_key=$2 AND pii_erased_at IS NULL`,
+          [row.provider_id, row.guest_email_key, input.reportedAt, input.classification],
+        );
+      }
+
+      if (isBounce) {
+        const occurrence = record(row.occurrence_snapshot);
+        await client.query(
+          `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
+           VALUES ($1,'booking',$2,$3,$4,jsonb_build_object('v',1,'bookingId',$2::text,'classification',$5::text,
+             'experienceTitle',$6::text,'startsAt',$7::text,'seats',$8::int))
+           ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
+          [row.provider_id, row.public_booking_id, HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed,
+            `host-email-delivery-failed:${input.deliveryRef}`, input.classification, row.public_title,
+            typeof occurrence.startUtc === "string" ? occurrence.startUtc : null, count(row.seats, "seats")],
+        );
+      }
+      return "RECORDED";
+    });
+  }
+
   async #claim(topic: string | readonly string[], maxAttempts: number, options: { limit: number; leaseSeconds: number }): Promise<{ rows: DbRow[]; abandoned: number }> {
     const topics = typeof topic === "string" ? [topic] : [...topic];
     const reviewInvitation = topics.length === 1 && topics[0] === REVIEW_INVITATION_TOPIC;
     const limit = boundedInteger(options?.limit, "limit", 1, GUEST_MAIL_LIMITS.claimLimitMax);
     const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", GUEST_MAIL_LIMITS.leaseSecondsMin, GUEST_MAIL_LIMITS.leaseSecondsMax);
     return withTransaction(this.#pool, async (client) => {
+      // A hard bounce may arrive while a later notice is waiting behind its backoff. Close those rows
+      // once their lease is due, without retrying the same address or changing business booking state.
+      const suppressed = await client.query(
+        `UPDATE outbox_messages m SET processed_at=clock_timestamp()
+          WHERE m.topic=ANY($1::text[]) AND m.aggregate_type='booking' AND m.processed_at IS NULL
+            AND m.available_at <= clock_timestamp()
+            AND EXISTS (SELECT 1 FROM bookings b JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+                         WHERE ${BOOKING_OF("m")} AND g.guest_email_key IS NOT NULL
+                           AND EXISTS (SELECT 1 FROM booking_guests suppressed
+                                        WHERE suppressed.provider_id=g.provider_id AND suppressed.guest_email_key=g.guest_email_key
+                                          AND suppressed.mail_suppressed_at IS NOT NULL))`,
+        [topics],
+      );
       const abandoned = await client.query(
         `UPDATE outbox_messages m SET processed_at = clock_timestamp()
           WHERE ${GUEST_ROW("m")} AND m.attempts >= $2 AND m.available_at <= clock_timestamp()`,
@@ -493,12 +637,13 @@ export class GuestMailOutbox {
             FOR UPDATE OF m SKIP LOCKED
          ), claimed AS (
            UPDATE outbox_messages o
-              SET available_at = clock_timestamp() + make_interval(secs => $4), attempts = o.attempts + 1
+              SET available_at = clock_timestamp() + make_interval(secs => $4), attempts = o.attempts + 1,
+                  mail_delivery_ref=COALESCE(o.mail_delivery_ref,'ex1_' || replace(gen_random_uuid()::text,'-',''))
              FROM due
             WHERE o.id = due.id
-           RETURNING o.id, o.attempts, o.provider_id, o.aggregate_id, o.topic, o.payload
+           RETURNING o.id, o.attempts, o.provider_id, o.aggregate_id, o.topic, o.payload, o.mail_delivery_ref
          )
-         SELECT c.id::text AS id, c.attempts, c.topic, c.provider_id, b.id::text AS booking_id,
+         SELECT c.id::text AS id, c.attempts, c.topic, c.provider_id, c.mail_delivery_ref, b.id::text AS booking_id,
                 ${reviewInvitation ? "a.status" : "NULL::text"} AS attendance_status, b.public_booking_id::text AS public_booking_id, b.status,
                 b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot, b.cancelled_by, b.cancellation_reason,
                 (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
@@ -520,7 +665,7 @@ export class GuestMailOutbox {
                  AND q.id = (CASE WHEN c.payload->>'requestId' ~ ${UUID_TEXT} THEN (c.payload->>'requestId')::uuid END)`,
         [topics, maxAttempts, limit, leaseSeconds, BOOKING_ACCESS_LIMITS.daysAfterExperience],
       );
-      return { rows: claimed.rows, abandoned: abandoned.rowCount ?? 0 };
+      return { rows: claimed.rows, abandoned: (abandoned.rowCount ?? 0) + (suppressed.rowCount ?? 0) };
     });
   }
 

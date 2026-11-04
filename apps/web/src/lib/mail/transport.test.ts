@@ -75,6 +75,18 @@ describe("createMailer", () => {
     expect(transport.close).toHaveBeenCalledOnce();
   });
 
+  it("adds only a validated opaque delivery reference for guest booking mail", async () => {
+    const transport = fakeTransport();
+    const mailer = createMailer(mailboxes, transport);
+    const deliveryRef = `ex1_${"a".repeat(32)}`;
+    expect(await mailer.sendMail({ ...message, deliveryRef })).toEqual({ ok: true });
+    expect(transport.sendMail).toHaveBeenCalledWith(expect.objectContaining({
+      headers: { "Auto-Submitted": "auto-generated", "X-NIHO-Mail-Ref": deliveryRef },
+    }));
+    expect(await mailer.sendMail({ ...message, deliveryRef: "ex1_not-a-token" })).toEqual({ ok: false, failure: "permanent" });
+    expect(transport.sendMail).toHaveBeenCalledOnce();
+  });
+
   it("answers the failure's class without throwing or logging what the server said", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
