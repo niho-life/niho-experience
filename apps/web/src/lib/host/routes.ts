@@ -35,6 +35,8 @@ export const HOST_SUPPORT_PATH = "/host/support";
 export const HOST_MESSAGES_PATH = "/host/messages";
 /** レビュー (#108): a screen under ホーム, not in the menu. */
 export const HOST_REVIEWS_PATH = "/host/reviews";
+/** 予約に紐づかないOWNER専用の対面通訳。ホームの下位画面で、下端タブは増やさない。 */
+export const HOST_TRANSLATE_PATH = "/host/translate";
 export const HOST_PREPARATIONS_PATH = "/host/preparations";
 export const HOST_PREPARATION_REVIEW_PATH = "/host/preparations/review";
 

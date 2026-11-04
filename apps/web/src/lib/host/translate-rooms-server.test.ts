@@ -27,9 +27,24 @@ vi.mock("./server", () => ({
 vi.mock("@/host/site-bookings-server", () => ({ asTranslateOwner: mocks.owner }));
 vi.mock("@niho-experience/api-client/experience-translate-rooms", () => ({ createExperienceTranslateRoomsClient: mocks.create }));
 
-import { loadSiteTranslateRoomsClient, loadTranslateRoomsClient, readEmptyTranslateBody, siteTranslateBookingEligible, translateRoomsEnabled, translateRoomsEntry, translateRoomsFailure, translateRoomsMutationAllowed } from "./translate-rooms-server";
+import { loadSiteTranslateRoomsClient, loadStandaloneTranslateRoomsClient, loadTranslateRoomsClient, readEmptyTranslateBody, readStandaloneTranslateCreateBody, siteTranslateBookingEligible, translateRoomsEnabled, translateRoomsEntry, translateRoomsFailure, translateRoomsMutationAllowed } from "./translate-rooms-server";
 
 const post = (body: BodyInit | null, headers: Record<string, string> = {}) => new Request("https://experience.example/host/api/translate/x", { method: "POST", headers: { origin: "https://experience.example", "sec-fetch-site": "same-origin", ...headers }, body });
+
+function oversizedChunkedRequest(contentType = "application/json") {
+  let cancelled = false;
+  let sent = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (sent) return;
+      sent = true;
+      controller.enqueue(new Uint8Array(2048).fill(0x78));
+    },
+    cancel() { cancelled = true; },
+  });
+  const init = { method: "POST", headers: { "content-type": contentType }, body, duplex: "half" } as RequestInit & { duplex: "half" };
+  return { request: new Request("https://experience.example/host/api/translate/x", init), cancelled: () => cancelled };
+}
 
 describe("translate rooms server boundary", () => {
   beforeEach(() => {
@@ -38,7 +53,7 @@ describe("translate rooms server boundary", () => {
     mocks.usable.mockReturnValue(true);
     mocks.create.mockReturnValue({ marker: "translate-client" });
     mocks.hostMock = false;
-    mocks.providers.mockResolvedValue({ status: "ok", providers: [{ id: "provider_1", memberRole: "OWNER" }] });
+    mocks.providers.mockResolvedValue({ status: "ok", providers: [{ id: "provider_1", legacyProviderId: "niho_provider_1", memberRole: "OWNER" }] });
   });
 
   it("is open in mock mode, and in http only behind its own flag with the host console", () => {
@@ -107,6 +122,57 @@ describe("translate rooms server boundary", () => {
     expect(await readEmptyTranslateBody(post("[]", { "content-type": "application/json" }))).toBe(false);
     expect(await readEmptyTranslateBody(post("not json", { "content-type": "application/json" }))).toBe(false);
     expect(await readEmptyTranslateBody(post("x".repeat(2048), { "content-type": "application/json" }))).toBe(false);
+  });
+
+  it("accepts only the bounded standalone language body", async () => {
+    expect(await readStandaloneTranslateCreateBody(post('{"hostLanguage":"ja"}', { "content-type": "application/json" }))).toEqual({ hostLanguage: "ja" });
+    expect(await readStandaloneTranslateCreateBody(post('{"hostLanguage":"en"}', { "content-type": "application/json" }))).toEqual({ hostLanguage: "en" });
+    expect(await readStandaloneTranslateCreateBody(post('{"hostLanguage":"fr"}', { "content-type": "application/json" }))).toBeNull();
+    expect(await readStandaloneTranslateCreateBody(post('{"hostLanguage":"ja","role":"host"}', { "content-type": "application/json" }))).toBeNull();
+    expect(await readStandaloneTranslateCreateBody(post("{}", { "content-type": "application/json" }))).toBeNull();
+    expect(await readStandaloneTranslateCreateBody(post('{"hostLanguage":"ja"}'))).toBeNull();
+    expect(await readStandaloneTranslateCreateBody(post("x".repeat(2048), { "content-type": "application/json" }))).toBeNull();
+  });
+
+  it("cancels oversized chunked bodies without relying on Content-Length", async () => {
+    const empty = oversizedChunkedRequest();
+    expect(empty.request.headers.has("content-length")).toBe(false);
+    expect(await readEmptyTranslateBody(empty.request)).toBe(false);
+    expect(empty.cancelled()).toBe(true);
+
+    const create = oversizedChunkedRequest();
+    expect(create.request.headers.has("content-length")).toBe(false);
+    expect(await readStandaloneTranslateCreateBody(create.request)).toBeNull();
+    expect(create.cancelled()).toBe(true);
+  });
+
+  it("standaloneは現在OWNERのlocal idをNIHO idへ解決し、予約・売上条件を読まない", async () => {
+    mocks.config.experienceTranslateApiEnabled = true;
+    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    const loaded = await loadStandaloneTranslateRoomsClient("provider_1");
+    expect(loaded).toEqual({ ok: true, nihoProviderId: "niho_provider_1", client: { marker: "translate-client" } });
+    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", accessToken: "sealed-host-token", fetch: mocks.upstreamFetch });
+    expect(mocks.owner).not.toHaveBeenCalled();
+  });
+
+  it("standaloneは他role・他provider・欠けたmapping・失効identityを閉じる", async () => {
+    mocks.config.experienceTranslateApiEnabled = true;
+    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    for (const providers of [
+      [{ id: "provider_1", legacyProviderId: "niho_provider_1", memberRole: "COHOST" }],
+      [{ id: "provider_2", legacyProviderId: "niho_provider_2", memberRole: "OWNER" }],
+      [{ id: "provider_1", legacyProviderId: "", memberRole: "OWNER" }],
+    ]) {
+      mocks.providers.mockResolvedValueOnce({ status: "ok", providers });
+      const denied = await loadStandaloneTranslateRoomsClient("provider_1");
+      expect(denied.ok).toBe(false);
+      expect((denied as { response: Response }).response.status).toBe(404);
+    }
+    mocks.providers.mockResolvedValueOnce({ status: "rejected" });
+    const rejected = await loadStandaloneTranslateRoomsClient("provider_1");
+    expect((rejected as { response: Response }).response.status).toBe(401);
+    expect(mocks.clear).toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("site createは確定・未取消・英語・当日以降だけを許可する", () => {

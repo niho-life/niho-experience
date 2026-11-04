@@ -56,6 +56,8 @@ describe("host navigation", () => {
     expect(selected("/host/messages/?providerId=sample-provider-kitchen&thread=th-3012")).toEqual(["ホーム"]);
     // So is レビュー (#108).
     expect(selected("/host/reviews?providerId=sample-provider-kitchen&experience=community-dinner#review-rv-5020")).toEqual(["ホーム"]);
+    // 予約なし通訳もホームの下位画面で、新しいタブにはしない (#401)。
+    expect(selected("/host/translate?providerId=sample-provider-kitchen")).toEqual(["ホーム"]);
     expect(selected("/host/messages-archive")).toEqual([]);
     expect(selected("/host/reviewsx")).toEqual([]);
     expect(selected("/host/experiences-archive")).toEqual([]);
@@ -69,6 +71,7 @@ describe("host navigation", () => {
     expect(hostBackLink("/host/experiences/community-dinner")).toEqual({ href: "/host/experiences", label: "体験" });
     expect(hostBackLink("/host/experiences/community-dinner/?providerId=sample-provider-kitchen")).toEqual({ href: "/host/experiences", label: "体験" });
     expect(hostBackLink("/host/bookings/session", "date=2026-10-22&start=18%3A00&experience=community-dinner&offer=offer-dinner")).toEqual({ href: "/host/bookings", label: "予約" });
+    expect(hostBackLink("/host/translate?providerId=sample-provider-kitchen")).toEqual({ href: "/host/home", label: "ホーム" });
     for (const path of ["/host", "/host/home", "/host/experiences", "/host/experiences?providerId=x", "/host/settings", "/host/register"]) expect(hostBackLink(path), path).toBeNull();
   });
 
