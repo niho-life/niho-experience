@@ -7,7 +7,7 @@ import type { Pool } from "pg";
 import { GuestBookingAccess } from "../src/booking-access.ts";
 import { BOOKING_CANCELLATION_LIMITS, BookingCancellations, GUEST_NOTICE_TOPICS, type RefundSubmission } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
-import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
+import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
@@ -54,6 +54,7 @@ async function withSchema(
   run: (context: Context) => Promise<void>,
   policy: "FREE_UNTIL_48H" | "NONE" = "FREE_UNTIL_48H",
   customCancellation?: { readonly windowMinutes: number | null; readonly refundBasisPoints: number },
+  supportEnabled = false,
 ): Promise<void> {
   const { Pool } = await import("pg");
   const schema = `cancellations_${randomUUID().replaceAll("-", "")}`;
@@ -71,7 +72,15 @@ async function withSchema(
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
-    await consentSupportOffForTest(guests, ownerA);
+    if (supportEnabled) {
+      await guests.setProviderSupportSettings(ownerA, {
+        supportEnabled: true,
+        consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION,
+        expectedVersion: 0,
+      });
+    } else {
+      await consentSupportOffForTest(guests, ownerA);
+    }
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: { priceYen: 1500, minAge: 4, maxAge: 12, adultRequired: true }, minimumParticipants: 1, maxPartySize: 6,
       cancellationPolicy: policy,
@@ -382,7 +391,7 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
          SELECT $1::uuid, provider_id, booking_id, $2::uuid, 'FULL', amount, currency, true, 'SUPPORT', stripe_payment_ref, 'REQUESTED' FROM booking_refunds LIMIT 1`,
         [randomUUID(), randomUUID()],
       ), /booking_refunds_one_full_idx/);
-    });
+    }, "FREE_UNTIL_48H", undefined, true);
   });
 
   it("lets the OWNER cancel one booking or a whole session with full refunds, and closes the session to new bookings", async () => {
@@ -500,7 +509,7 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.equal((await cancellations.supportQueue()).paymentReviews.length, 0);
       const notReview = await cancellations.resolvePaymentReview(support, late.publicBookingId, { commandId: randomUUID() });
       assert.equal(notReview.outcome, "NOT_CANCELLABLE");
-    });
+    }, "FREE_UNTIL_48H", undefined, true);
   });
 
   it("follows Stripe's answers and webhooks forward only, keeps the ledger, and shows failed refunds to support until settled", async () => {
@@ -583,7 +592,7 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       assert.deepEqual((await cancellations.supportQueue()).refunds.map((refund) => refund.refundStatus), ["PENDING"]);
       assert.equal(await cancellations.recordRefundSubmission(thirdRefund.refundId, { kind: "accepted", stripeRefundRef: "re_test_C1", status: "succeeded" }), "SUCCEEDED");
       assert.equal((await cancellations.supportQueue()).refunds.length, 0);
-    });
+    }, "FREE_UNTIL_48H", undefined, true);
   });
 
   it("does not subtract a refund from the ledger when an older pending answer arrives after its failure", async () => {
@@ -718,7 +727,7 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       for (const bad of [{ ...AUTO, limit: 0 }, { ...AUTO, limit: 51 }, { ...AUTO, limit: 1.5 }, { ...AUTO, olderThanSeconds: -1 }, { ...AUTO, leaseSeconds: 29 }, { ...AUTO, leaseSeconds: 3601 }]) {
         await assert.rejects(cancellations.claimRefundsToSend(bad), StoreValidationError);
       }
-    });
+    }, "FREE_UNTIL_48H", undefined, true);
   });
 
   it("never lets the job and support's resend, or two job runs, send the same refund at the same time", async () => {
@@ -766,6 +775,6 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       await setSendState(pool, refund.refundId, 0, null);
       assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
       assert.deepEqual((await cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID() })).outcome, "NOT_CANCELLABLE");
-    });
+    }, "FREE_UNTIL_48H", undefined, true);
   });
 });

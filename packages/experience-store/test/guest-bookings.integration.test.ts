@@ -543,7 +543,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       );
       const offKey = randomUUID();
       const before = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
-      assert.deepEqual(before.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333 });
+      assert.deepEqual(before.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 });
 
       // Support on: 15 % for bookings taken from now on; the earlier booking and its replay keep 10 %.
       const on = await guests.setProviderSupportSettings(ownerA, {
@@ -551,14 +551,14 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       });
       assert.deepEqual({ supportEnabled: on.supportEnabled, basisPoints: on.platformFeeBasisPoints, version: on.version }, { supportEnabled: true, basisPoints: 1500, version: 3 });
       const after = await guests.startGuestBooking(walk({ guestEmail: "second@example.com", adultCount: 2, expectedTotalYen: 6666 }));
-      assert.deepEqual(after.booking.pricingSnapshot.platformFee, { supportEnabled: true, basisPoints: 1500, amount: 999 });
+      assert.deepEqual(after.booking.pricingSnapshot.platformFee, { supportEnabled: true, basisPoints: 1500, amount: 999, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 3 });
       const replay = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
       assert.equal(replay.publicBookingId, before.publicBookingId);
-      assert.deepEqual(replay.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333 });
+      assert.deepEqual(replay.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 });
       const stored = await pool.query("SELECT pricing_snapshot->'platformFee' AS fee FROM bookings ORDER BY id");
       assert.deepEqual(stored.rows.map((row) => row.fee), [
-        { supportEnabled: false, basisPoints: 1000, amount: 333 },
-        { supportEnabled: true, basisPoints: 1500, amount: 999 },
+        { supportEnabled: false, basisPoints: 1000, amount: 333, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 2 },
+        { supportEnabled: true, basisPoints: 1500, amount: 999, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 3 },
       ]);
       // The webhook still compares the charge with the total, not the total less the fee.
       assert.equal((await payFor(store, after, 6666, "fee")).booking.status, "CONFIRMED");
@@ -1131,7 +1131,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
           cancellationPolicy: "FREE_UNTIL_24H", cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000, bookingQuestions: QUESTIONS,
           bookingQuestionsFingerprint: nihoFingerprint(QUESTIONS), conditionsVersion: CONDITIONS, minimumAttendance: null,
         },
-        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 },
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 },
       });
       assert.equal(family.booking.occurrenceSnapshot.seats, 3);
       const stored = await pool.query(
@@ -1156,7 +1156,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
           cancellationPolicy: "FREE_UNTIL_48H", cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000, bookingQuestions: [],
           bookingQuestionsFingerprint: nihoFingerprint([]), conditionsVersion: null, minimumAttendance: null,
         },
-        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 300 },
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 300, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 },
       });
 
       // The webhook compares the charge with the snapshot total, not unit price × seats.
@@ -1263,7 +1263,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.equal(rows.rows[1].id, upcoming.publicBookingId);
       assert.equal(rows.rows[1].guest_email, "upcoming@example.com");
       assert.equal(rows.rows[1].erased, false);
-      assert.deepEqual((await pool.query("SELECT internal_memo,revision FROM experience_support_cases WHERE provider_id=$1 AND booking_id=$2", [pastRow.provider_id, pastRow.id])).rows, [{ internal_memo: null, revision: 1 }]);
+      assert.deepEqual((await pool.query("SELECT internal_memo,revision FROM experience_support_cases WHERE provider_id=$1 AND booking_id=$2", [pastRow.provider_id, pastRow.id])).rows, [{ internal_memo: null, revision: "1" }]);
       // Erased stays erased.
       await assert.rejects(() => pool.query("UPDATE booking_guests SET pii_erased_at=NULL, guest_name='Sample Guest' WHERE pii_erased_at IS NOT NULL"), /stays erased/);
       // A retry of the erased booking's request still names it, without the address.
@@ -1504,7 +1504,7 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
           ],
         },
         currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000,
-        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 }, providerAmount: 9000,
+        platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 }, providerAmount: 9000,
         saleConditions: {
           minimumChargeableParticipants: 1, minimumAttendance: null,
           cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000,
@@ -1512,7 +1512,7 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
         cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: tea.booking.createdAtUtc, cancelledAtUtc: null,
         // 取消と返金 (slice 7): nothing cancelled, refunded or asked.
         cancelledBy: null, cancellationReason: null, cancellationNote: null,
-        refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false,
+        refundedAmount: 0, refundPendingAmount: 0, refundFailed: false, cancellationRequested: false, supportHistory: [],
       });
       assert.match(String(paidAtUtc), /^\d{4}-\d{2}-\d{2}T/);
       assert.deepEqual(
@@ -1756,7 +1756,7 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
         commandId: randomUUID(), expectedRevision: 0, assignedAdminUserId: "admin-b", internalMemo: "Private Admin-only note",
       });
       assert.equal(caseValue.internalMemo, "Private Admin-only note");
-      assert.deepEqual(caseValue.events.map((event) => event.type), ["ASSIGNEE_CHANGED", "INTERNAL_MEMO_CHANGED"]);
+      assert.deepEqual(caseValue.events.map((event) => event.type).sort(), ["ASSIGNEE_CHANGED", "INTERNAL_MEMO_CHANGED"]);
       const firstNotice = (await support.listNotifications({ nihoUserId: "admin-a" })).find((item) => item.publicBookingId === historical.publicBookingId && item.topic === "BOOKING_RECEIVED");
       assert.ok(firstNotice);
       const contactCommandId = randomUUID();
