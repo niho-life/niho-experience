@@ -560,9 +560,10 @@ export function resolveConfig(env: Env) {
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled);
-  // 対面通訳 (#181): site bookingの所属・状態をExperience DBで再検証するため、新予約の正本も必須。
+  // 対面通訳 (#181): NIHO予約はNIHO API、site bookingはExperience DBで所属・状態を検証する。
+  // site bookingは別のguest-booking flagが無いと画面・BFFとも閉じたまま。通訳自体は販売flagに依存しない。
   // http opens only after the selected NIHO API is deployed and accepted, per environment.
-  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && guestBooking.enabled && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
+  const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && Boolean(env.EXPERIENCE_DATABASE_URL?.trim()) && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   // 出欠 (#107) of the bookings made on this site, kept in the experience DB (migration 0033), with the capacity of
   // their session on この回. Only where those bookings are (the flag above); the mock records attendance on screen
   // only. http opens per environment after 0033 is applied and accepted.

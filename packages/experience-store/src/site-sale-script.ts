@@ -1,5 +1,4 @@
 import { StoreError } from "./errors.ts";
-import { questionsFingerprint, validSaleTerms, type ProductSaleTerms, type ProductSaleTermsInput } from "./guest-bookings.ts";
 import type {
   RegisterProductInput,
   RegistrationOutcome,
@@ -10,22 +9,21 @@ import type {
 import type { ProductRecord } from "./types.ts";
 
 /*
- * The operator's registration of an experience sold on this site (#285 slice 9; docs/guest-booking.md
- * 「体験の登録と切替（第9段）」): the input's validation and the command flow of
+ * The operator's seller workspace bootstrap (#285 slice 9): input validation and the command flow of
  * scripts/experience/register-site-sale.mjs. The store and the Stripe check are passed in; nothing here
  * reads the environment, a file, the network or the database. Output is plain English lines with no
  * secret: the Stripe account, the NIHO user and the seller's NIHO account show their last 4 characters only.
  */
 
-export const SITE_SALE_COMMANDS = ["plan", "register", "open-sale", "stop-sale", "status"] as const;
+export const SITE_SALE_COMMANDS = ["plan", "register", "status"] as const;
 export type SiteSaleCommand = (typeof SITE_SALE_COMMANDS)[number];
-const WRITE_COMMANDS: ReadonlySet<SiteSaleCommand> = new Set(["register", "open-sale", "stop-sale"]);
+const WRITE_COMMANDS: ReadonlySet<SiteSaleCommand> = new Set(["register"]);
 
 export const SITE_SALE_EXIT = { ok: 0, failed: 1, unexpected: 2 } as const;
 export type SiteSaleExitCode = (typeof SITE_SALE_EXIT)[keyof typeof SITE_SALE_EXIT];
 
 export const SITE_SALE_USAGE =
-  "Usage: node scripts/experience/register-site-sale.mjs [plan|register|open-sale|stop-sale|status] <input.json> [--yes]";
+  "Usage: node scripts/experience/register-site-sale.mjs [plan|register|status] <input.json> [--yes]";
 
 /** NIHO's provider IDs as /host takes them in ?providerId= (apps/web/src/lib/host/providers.ts). */
 const NIHO_PROVIDER_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -65,7 +63,6 @@ export interface SiteSaleInput {
     readonly stripeConnectAccountRef: string;
     readonly sellerDisplayName: string;
   };
-  readonly saleTerms: ProductSaleTermsInput;
 }
 
 export interface SiteSaleArguments {
@@ -81,12 +78,15 @@ export function parseSiteSaleArguments(argv: readonly string[]): SiteSaleArgumen
   const unknownFlag = rest.find((value) => value.startsWith("-"));
   if (unknownFlag !== undefined) throw new SiteSaleInputError(["unknown option (only --yes is accepted)"]);
   const [first, second, ...extra] = rest;
+  if (first === "open-sale" || first === "stop-sale") {
+    throw new SiteSaleInputError(["public listings can only be published or stopped by the OWNER through the authenticated host API"]);
+  }
   const named = SITE_SALE_COMMANDS.find((command) => command === first);
   const command: SiteSaleCommand = named ?? "plan";
   const inputPath = named === undefined ? first : second;
   if (inputPath === undefined || inputPath.length === 0) throw new SiteSaleInputError(["the input file path is missing"]);
   if ((named === undefined ? second : extra[0]) !== undefined) throw new SiteSaleInputError(["unknown command or extra arguments"]);
-  if (yes && !WRITE_COMMANDS.has(command)) throw new SiteSaleInputError([`--yes is only for register, open-sale and stop-sale`]);
+  if (yes && !WRITE_COMMANDS.has(command)) throw new SiteSaleInputError(["--yes is only for register"]);
   return { command, inputPath, yes };
 }
 
@@ -121,53 +121,13 @@ function patternAt(value: unknown, path: string, pattern: RegExp, rule: string, 
   return value;
 }
 
-/** Strict shapes for the sale terms (unknown fields refused); the values are then setSaleTerms' validation. */
-function saleTermsAt(value: unknown, problems: string[]): ProductSaleTermsInput | null {
-  const terms = objectAt(value, "saleTerms", [
-    "offerPrices",
-    "childPricing", "minimumParticipants", "minimumChargeableParticipants", "maxPartySize",
-    "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints", "minimumAttendance",
-    "bookingQuestions", "conditionsVersion",
-  ], problems, ["childPricing", "minimumParticipants", "maxPartySize", "cancellationPolicy", "bookingQuestions", "conditionsVersion"]);
-  if (terms === null) return null;
-  const before = problems.length;
-  if (terms.childPricing !== null && terms.childPricing !== undefined) {
-    objectAt(terms.childPricing, "saleTerms.childPricing", ["priceYen", "minAge", "maxAge", "adultRequired"], problems);
-  }
-  if (terms.offerPrices !== undefined && terms.offerPrices !== null) {
-    if (!Array.isArray(terms.offerPrices)) problems.push("saleTerms.offerPrices must be an array");
-    else terms.offerPrices.forEach((price: unknown, index) => {
-      objectAt(price, `saleTerms.offerPrices.${index}`, ["offerId", "adultPriceYen"], problems);
-    });
-  }
-  if (Array.isArray(terms.bookingQuestions)) {
-    terms.bookingQuestions.forEach((question: unknown, index) => {
-      const path = `saleTerms.bookingQuestions.${index}`;
-      const record = objectAt(question, path, ["id", "prompt", "description", "inputType", "required", "options"], problems);
-      if (record !== null && Array.isArray(record.options)) {
-        record.options.forEach((option: unknown, optionIndex) => objectAt(option, `${path}.options.${optionIndex}`, ["id", "label"], problems));
-      }
-    });
-  }
-  // Participation conditions (#110) cannot be shown on this site yet: every checkout would be refused.
-  if (terms.conditionsVersion !== null) problems.push("saleTerms.conditionsVersion must be null (this site cannot show participation conditions yet)");
-  if (problems.length > before) return null;
-  try {
-    return validSaleTerms(terms as unknown as ProductSaleTermsInput);
-  } catch (error) {
-    // The store's messages name the field and the rule, never the value.
-    problems.push(error instanceof StoreError ? `saleTerms: ${error.message}` : "saleTerms is invalid");
-    return null;
-  }
-}
-
 /**
  * The registration file, strictly: every field present, no unknown field, and every value the shape the
  * store and the site need. Errors name the field and the rule, never the value.
  */
 export function parseSiteSaleInput(raw: unknown): SiteSaleInput {
   const problems: string[] = [];
-  const root = objectAt(raw, "input", ["provider", "owner", "supportEnabled", "product", "saleTerms"], problems);
+  const root = objectAt(raw, "input", ["provider", "owner", "supportEnabled", "product"], problems);
   if (root === null) throw new SiteSaleInputError(problems);
   const provider = objectAt(root.provider, "provider", ["id", "displayName"], problems);
   const owner = objectAt(root.owner, "owner", ["nihoUserId"], problems);
@@ -200,14 +160,12 @@ export function parseSiteSaleInput(raw: unknown): SiteSaleInput {
     stripeConnectAccountRef: patternAt(product.stripeConnectAccountRef, "product.stripeConnectAccountRef", CONNECTED_ACCOUNT_ID, "a Stripe connected account ID (acct_…)", problems),
     sellerDisplayName: textAt(product.sellerDisplayName, "product.sellerDisplayName", 300, problems),
   };
-  const saleTerms = saleTermsAt(root.saleTerms, problems);
-  if (problems.length > 0 || parsedProduct === null || saleTerms === null) throw new SiteSaleInputError(problems.length > 0 ? problems : ["the input is incomplete"]);
+  if (problems.length > 0 || parsedProduct === null) throw new SiteSaleInputError(problems.length > 0 ? problems : ["the input is incomplete"]);
   return {
     provider: { id: providerId, displayName },
     owner: { nihoUserId },
     supportEnabled: root.supportEnabled as boolean,
     product: parsedProduct,
-    saleTerms,
   };
 }
 
@@ -222,8 +180,6 @@ export type SiteSaleStore = Pick<
   | "linkProviderMember"
   | "registerProduct"
   | "setProviderSaleSettings"
-  | "setSaleTermsAsOperator"
-  | "removeSaleTerms"
   | "saleReadiness"
 >;
 
@@ -244,7 +200,7 @@ export interface SiteSaleAccountSummary {
 
 export interface SiteSaleDependencies {
   readonly store: SiteSaleStore;
-  /** Reads the connected account with the experience platform key; only register and open-sale call it. */
+  /** Reads the connected account with the experience platform key; register calls it before writing. */
   readonly checkStripeAccount: (accountId: string) => Promise<SiteSaleAccountCheck>;
   /** "test", "live" or "unknown", from the key's prefix (stripeKeyMode); printed next to the account check. */
   readonly stripeKeyMode?: string;
@@ -306,36 +262,6 @@ export function productChanges(current: ProductRecord, input: SiteSaleInput): st
   return changes;
 }
 
-/** What open-sale would change in the sale terms, by field name. Empty when they are the same. */
-export function saleTermsChanges(current: ProductSaleTerms, next: ProductSaleTermsInput): string[] {
-  const changes: string[] = [];
-  if (next.offerPrices !== undefined && next.offerPrices !== null
-      && JSON.stringify(current.offerPrices) !== JSON.stringify([...next.offerPrices].sort((a, b) => a.offerId.localeCompare(b.offerId)))) {
-    changes.push("offerPrices");
-  }
-  if (JSON.stringify(current.childPricing) !== JSON.stringify(next.childPricing === null ? null : {
-    priceYen: next.childPricing.priceYen, minAge: next.childPricing.minAge, maxAge: next.childPricing.maxAge, adultRequired: next.childPricing.adultRequired,
-  })) changes.push("childPricing");
-  if (current.minimumParticipants !== next.minimumParticipants) changes.push("minimumParticipants");
-  if (current.maxPartySize !== next.maxPartySize) changes.push("maxPartySize");
-  if (current.cancellationPolicy !== next.cancellationPolicy) changes.push("cancellationPolicy");
-  if (current.bookingQuestionsFingerprint !== questionsFingerprint(next.bookingQuestions)) changes.push("bookingQuestions");
-  if (current.conditionsVersion !== next.conditionsVersion) changes.push("conditionsVersion");
-  return changes;
-}
-
-/** Why open-sale may not write the terms yet: the registration is missing or differs from the input. */
-export function registrationGaps(state: SiteSaleState, input: SiteSaleInput): string[] {
-  const gaps: string[] = [];
-  if (!state.providerExists) gaps.push("the provider is not registered");
-  if (state.membership === null || state.membership.role !== "OWNER" || !state.membership.active) gaps.push("the owner is not linked as an active OWNER");
-  if (state.product === null) gaps.push("the product is not registered");
-  else if (productChanges(state.product, input).length > 0) gaps.push("the registered product differs from the input");
-  if (state.saleSettings === null) gaps.push("NIHO's fee is not set for the provider");
-  else if (state.saleSettings.supportEnabled !== input.supportEnabled) gaps.push("NIHO's fee setting differs from the input");
-  return gaps;
-}
-
 function printPlan(state: SiteSaleState, input: SiteSaleInput, out: (line: string) => void): void {
   const { provider, owner, product } = input;
   out(`Provider ${provider.id} (${provider.displayName}): ${state.providerExists ? "registered" : "register"}`);
@@ -355,15 +281,11 @@ function printPlan(state: SiteSaleState, input: SiteSaleInput, out: (line: strin
     : settings.supportEnabled === input.supportEnabled ? `${supportLabel(settings.supportEnabled)}, unchanged`
       : `change ${supportLabel(settings.supportEnabled)} → ${supportLabel(input.supportEnabled)} (for every product of the provider, from the next booking)`}`);
   const terms = state.saleTerms;
-  out(`Sale terms: ${terms === null ? "none (open-sale writes them and opens the sale)"
-    : (() => {
-        const changes = saleTermsChanges(terms, input.saleTerms);
-        return changes.length === 0 ? "written, unchanged" : `written; open-sale would change ${changes.join(", ")}`;
-      })()}`);
+  out(`Sale terms: ${terms === null ? "not configured" : "configured; editable only by the OWNER through the host API"}`);
   if (state.slugUsedInProvider) out("WARNING: another product of this provider uses this slug; register refuses it.");
   else if (state.slugPublishedElsewhere) out("WARNING: another provider already publishes this slug; register refuses it (both would stop selling).");
   if (state.otherProductsWithSaleTerms.length > 0) {
-    const note = settings === null ? "setting NIHO's fee also opens their sale" : "a fee change applies to them too";
+    const note = settings === null ? "a fee setting applies to their next checkout if published" : "a fee change applies to their next checkout too";
     out(`WARNING: other products of the provider have sale terms (${state.otherProductsWithSaleTerms.join(", ")}): ${note}.`);
   }
 }
@@ -371,7 +293,7 @@ function printPlan(state: SiteSaleState, input: SiteSaleInput, out: (line: strin
 function printReadiness(readiness: SaleReadiness, out: (line: string) => void): void {
   out(`Readiness of ${readiness.providerId} / ${readiness.productId}:`);
   for (const check of readiness.checks) out(`  [${check.ok ? "ok" : "--"}] ${check.key}: ${check.detail}`);
-  out(`  ready to open: ${readiness.readyToOpen ? "yes" : "no"}; selling here now: ${readiness.selling ? "yes" : "no"}`);
+  out(`  prerequisites for OWNER publication: ${readiness.readyToOpen ? "yes" : "no"}; publicly listed now: ${readiness.selling ? "yes" : "no"}`);
 }
 
 /** Checks the seller's account; prints its summary. True when it can take this site's JPY charges. */
@@ -408,10 +330,9 @@ export function safeErrorLabel(error: unknown): string {
 
 /**
  * Runs one command and returns the exit code: 0 done, 1 refused (input, readiness, the Stripe account, a
- * missing --yes, a conflict), 2 unexpected. plan (read only) shows what register and open-sale would change
- * and the readiness; register writes the provider, the OWNER, the product and NIHO's fee (never the sale
- * terms); open-sale writes the sale terms after checking the registration, the readiness and the Stripe
- * account again; stop-sale removes them; status shows the readiness.
+ * missing --yes, a conflict), 2 unexpected. plan (read only) shows the registration and readiness;
+ * register writes the provider, OWNER, product and NIHO's fee. Public listing is controlled by the OWNER
+ * through the authenticated host API; this operator bootstrap cannot publish or stop a listing.
  */
 export async function runSiteSale(
   command: SiteSaleCommand,
@@ -443,9 +364,7 @@ export async function runSiteSale(
         + "Connect with the migration identity (docs/guest-booking.md 「体験の登録と切替（第9段）」).");
       return SITE_SALE_EXIT.failed;
     }
-    if (command === "register") return await register(state, input, deps);
-    if (command === "open-sale") return await openSale(state, input, deps);
-    return await stopSale(input, deps);
+    return await register(state, input, deps);
   } catch (error) {
     if (error instanceof StoreError) {
       // Store messages are fixed sentences that name fields, never values.
@@ -484,59 +403,10 @@ async function register(state: SiteSaleState, input: SiteSaleInput, deps: SiteSa
   }
   const readiness = await store.saleReadiness(providerId, input.product.id);
   printReadiness(readiness, out);
-  // Running register again on a product whose sale terms are set can itself start (or keep) the sale: publishing the
-  // product or the fee setting is what loadSellable() waits for. Say what is true, so nobody sells the dates on NIHO too.
   if (readiness.selling) {
-    out("Registered. The product is sold on this site now (its sale terms are already set and every check passes): "
-      + "do not sell the same dates on NIHO; stop-sale ends the sale here.");
+    out("Registered. An OWNER publication is already active; do not sell the same dates on NIHO.");
   } else {
-    out("Registered. The sale is not open: the host sets the schedule in /host/calendar, then run open-sale.");
+    out("Registered. The OWNER must finish and publish this product through the authenticated host API before it can be booked.");
   }
-  return SITE_SALE_EXIT.ok;
-}
-
-async function openSale(state: SiteSaleState, input: SiteSaleInput, deps: SiteSaleDependencies): Promise<SiteSaleExitCode> {
-  const { store, out } = deps;
-  const providerId = input.provider.id;
-  const productId = input.product.id;
-  const gaps = registrationGaps(state, input);
-  if (gaps.length > 0) {
-    out(`Refused: run register first (${gaps.join("; ")}). Nothing was written.`);
-    return SITE_SALE_EXIT.failed;
-  }
-  const before = await store.saleReadiness(providerId, productId);
-  printReadiness(before, out);
-  if (!before.readyToOpen) {
-    const failing = before.checks.filter((check) => !check.ok && check.key !== "SALE_TERMS" && check.key !== "NO_CONDITIONS").map((check) => check.key);
-    out(`Refused: not ready to open (${failing.join(", ")}). Nothing was written.`);
-    return SITE_SALE_EXIT.failed;
-  }
-  if (!await accountReady(state.product!.stripeConnectAccountRef, deps)) {
-    out("Refused: the seller's Stripe account cannot take this site's charges. Nothing was written.");
-    return SITE_SALE_EXIT.failed;
-  }
-  const written = await store.setSaleTermsAsOperator(providerId, productId, input.saleTerms, state.saleTerms?.version);
-  out(outcomeLine("Sale terms", written.outcome));
-  const after = await store.saleReadiness(providerId, productId);
-  printReadiness(after, out);
-  if (!after.selling) {
-    out("The sale terms are written but the product is not sold here: see the checks above (stop-sale removes them).");
-    return SITE_SALE_EXIT.failed;
-  }
-  out("The sale is open on this site. Check the live page and the booking flow now.");
-  return SITE_SALE_EXIT.ok;
-}
-
-async function stopSale(input: SiteSaleInput, deps: SiteSaleDependencies): Promise<SiteSaleExitCode> {
-  const { store, out } = deps;
-  const removed = await store.removeSaleTerms(input.provider.id, input.product.id);
-  out(removed.removed ? "Sale terms: removed" : "Sale terms: there were none");
-  const after = await store.saleReadiness(input.provider.id, input.product.id);
-  printReadiness(after, out);
-  if (after.selling) {
-    out("The product is still sold here: check the readiness above.");
-    return SITE_SALE_EXIT.failed;
-  }
-  out("The sale here is stopped. Bookings already made stay; cancel them with the slice 7 tools if needed.");
   return SITE_SALE_EXIT.ok;
 }

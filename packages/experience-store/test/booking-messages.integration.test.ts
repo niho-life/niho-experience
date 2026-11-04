@@ -12,6 +12,7 @@ import { GuestQuestionTranslations } from "../src/guest-question-translations.ts
 import { GuestQuestionRepository } from "../src/guest-questions.ts";
 import { HOST_NOTIFICATION_TOPICS, parseBookingMessagePayload } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 予約ごとのメッセージ (#285 slice 6b): a booking's thread between its guest and the host, against a real schema. Synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -73,6 +74,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
       cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
+    await seedTestPublications(pool);
     await run({ pool, store, guests, access: new GuestBookingAccess(pool), messages: new GuestBookingMessages(pool), questions: new GuestQuestionRepository(pool) });
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

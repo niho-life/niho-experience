@@ -25,7 +25,7 @@ const HEADERS = { "cache-control": "private, no-store", "referrer-policy": "no-r
 /** A POST here carries nothing. Anything beyond an empty body or `{}` is refused, so no field can be smuggled to NIHO. */
 const MAX_BODY_BYTES = 1024;
 
-/** The mock always has synthetic rooms; http waits for NIHO's site-booking API (#19672) behind EXPERIENCE_TRANSLATE_API_ENABLED. */
+/** The mock always has synthetic rooms; http opens the selected NIHO translate API behind its own flag. */
 export function translateRoomsEnabled(): boolean {
   return config.hostConsoleEnabled && (config.apiMode === "mock" || config.experienceTranslateApiEnabled);
 }
@@ -80,6 +80,8 @@ export function siteTranslateBookingEligible(booking: Pick<HostGuestBooking, "st
 /** NIHO OWNERとExperience DBの予約所属を毎回照合してからsite-booking用NIHO clientを返す。 */
 export async function loadSiteTranslateRoomsClient(providerId: string, bookingId: string, action: SiteTranslateRoomAction) {
   if (!translateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
+  // Keep Experience-owned bookings closed while this site is not selling; the NIHO-booking BFF stays independent.
+  if (!isHostMock() && !config.guestBookingEnabled) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
   const session = await readHostSession();
   if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
   if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };

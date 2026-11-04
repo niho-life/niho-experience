@@ -9,6 +9,7 @@ import { BookingCancellations } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 出欠 (#107) against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -72,6 +73,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
       childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });
     await store.saveScheduleRule(ownerA, "walk", RULE, null, randomUUID());
+    await seedTestPublications(pool);
     await run({ pool, store, guests, attendance: new BookingAttendance(pool), cancellations: new BookingCancellations(pool) });
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

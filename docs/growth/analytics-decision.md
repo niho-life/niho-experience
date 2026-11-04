@@ -1,17 +1,23 @@
 # 計測ツールと同意の方式（決定案）
 
-最終更新：2026-10-20（担当3）。対象：[#14](https://github.com/niho-life/niho-experience/issues/14)、[#37](https://github.com/niho-life/niho-experience/issues/37)。担当1から依頼された「計測ツール、同意の取り方、保存期間」への回答。
+最終更新：2026-11-03。対象：[#14](https://github.com/niho-life/niho-experience/issues/14)、[#37](https://github.com/niho-life/niho-experience/issues/37)、[#70](https://github.com/niho-life/niho-experience/issues/70)。担当1から依頼された「計測ツール、同意の取り方、保存期間」への回答。
 **アカウントの作成はオーナーが行う。** 有料プランの契約と広告タグの導入は、それぞれの授権の後にする。
+
+## #70 のExperience公開設定
+
+2026-11-03の #70 / NIHOapp #19255 により、Umamiを予約ファネルの計測先として維持しつつ、NIHOappが公開したExperience専用設定からGA4のページビューを送る経路を追加する。GA4は承認済み測定ID・本番origin・HTTPS・index許可が揃った場合だけ動作し、Do Not Track、プレビュー、別origin、非公開予約ルートでは送信しない。予約ファネルイベントや売上・確定予約はGA4へ送らない。
+
+このコード契約は訪問者の同意や公開ポリシーの承認を代替しない。GA4はcookieを使うため、Eは公開設定を有効にする前に同意・プライバシー公表の扱いを確認する。公開設定のGA4 IDが未選択なら、タグは読み込まれない。
 
 ## 結論
 
 | 項目 | 決定案 |
 | --- | --- |
-| 計測ツール | **Umami Cloud**（無料のHobbyプランで開始） |
-| 同意 | cookie・端末への保存・独自の訪問者IDを使わない範囲では、**同意バナーを出さない案**。プライバシーポリシーと外部送信の公表で計測の内容を知らせ、Do Not Trackを尊重する |
+| 計測ツール | **Umami Cloud**（予約ファネル）と、#70の承認済み公開設定がある場合に限るGA4（ページビューのみ） |
+| 同意 | Umamiのcookie・端末保存・独自訪問者IDを使わない範囲では、**同意バナーを出さない案**。GA4の本番有効化は別途同意・プライバシー公表の扱いを確認する |
 | 保存期間 | Hobbyプランの保存期間（6か月）に従う。長く残す数字は、月ごとの集計を非公開台帳に写す |
-| 送るもの | 担当1が実装した10イベント（[analytics-events.md](../analytics-events.md)）とページビュー。PII・token・クエリ文字列は送らない |
-| 見送るもの | GA4・広告タグ・session replay。広告の授権が出たときに、同意の取得（CMP）と一緒に改めて検討する |
+| 送るもの | Umamiへ許可済みファネルイベントとサニタイズ済みページビュー。GA4へは承認済み公開設定がある場合だけページビューを送り、PII・token・予約queryを送らない |
+| 見送るもの | 広告タグ・session replay。広告の授権が出たときに、同意の取得（CMP）と一緒に改めて検討する |
 
 ## 選んだ理由
 
@@ -28,7 +34,7 @@ v1の規模（少数の体験、30日の検証）では、無料枠と6か月の
 
 | ツール | 見送った理由 |
 | --- | --- |
-| Google Analytics 4 | cookieや広告識別子などの利用と地域別の同意設計が必要になる。GoogleのConsent Mode自体は同意を集める画面を提供しないため、採用時はCMP等の取得方法と地域別要件を先に確認する（[Google](https://support.google.com/analytics/answer/9976101)）。広告を始めるときに改めて検討する |
+| Google Analytics 4 | cookieや広告識別子などの利用と地域別の同意設計が必要になる。GoogleのConsent Mode自体は同意を集める画面を提供しないため、公開設定を本番で有効にする前にCMP等の取得方法と地域別要件を確認する（[Google](https://support.google.com/analytics/answer/9976101)）。#70ではGA4イベントを追加せず、ページビューのみ接続する |
 | Plausible | cookieを使わない点は同じ。2026-10-19の時点で公式の料金ページを確認できず、ファネルとイベントの値が含まれるプランと料金を検証できなかった |
 | PostHog | session replayなど、v1では使わない機能が多い。cookieを使わない設定（`persistence: "memory"`）ではページをまたぐと同じ訪問者として扱われず、ファネルが成り立たない（[PostHog](https://posthog.com/docs/libraries/js/persistence)） |
 | Cloudflare Web Analytics | 独自イベントがなく、ファネルを測れない |

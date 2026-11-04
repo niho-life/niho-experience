@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { StoreConflictError } from "../src/errors.ts";
-import type { ProductSaleTerms, ProviderSaleSettings } from "../src/guest-bookings.ts";
+import type { ProviderSaleSettings } from "../src/guest-bookings.ts";
 import type { SaleReadiness, SaleReadinessKey, SiteSaleState } from "../src/site-sale-registration.ts";
 import {
   SITE_SALE_EXIT,
@@ -104,11 +104,6 @@ function harness(options: {
     linkProviderMember: async (input) => { step("linkProviderMember", [input], true); return "CREATED"; },
     registerProduct: async (input, version) => { step("registerProduct", [input, version], true); return { product: storedProduct(), outcome: "CREATED" }; },
     setProviderSaleSettings: async (providerId, input, version) => { step("setProviderSaleSettings", [providerId, input, version], true); return SETTINGS; },
-    setSaleTermsAsOperator: async (providerId, productId, terms, version) => {
-      step("setSaleTermsAsOperator", [providerId, productId, terms, version], true);
-      return { terms: {} as ProductSaleTerms, outcome: "CREATED" };
-    },
-    removeSaleTerms: async (providerId, productId) => { step("removeSaleTerms", [providerId, productId], true); return { removed: true }; },
     saleReadiness: async () => { step("saleReadiness", [], false); return reports.length > 1 ? reports.shift()! : reports[0]!; },
   };
   const account: SiteSaleAccountCheck = options.account ?? {
@@ -138,9 +133,8 @@ describe("register-site-sale arguments (#285 slice 9)", () => {
   it("defaults to plan and takes --yes only for the write commands", () => {
     assert.deepEqual(parseSiteSaleArguments(["in.json"]), { command: "plan", inputPath: "in.json", yes: false });
     assert.deepEqual(parseSiteSaleArguments(["register", "in.json", "--yes"]), { command: "register", inputPath: "in.json", yes: true });
-    assert.deepEqual(parseSiteSaleArguments(["--yes", "stop-sale", "in.json"]), { command: "stop-sale", inputPath: "in.json", yes: true });
     assert.deepEqual(parseSiteSaleArguments(["status", "in.json"]), { command: "status", inputPath: "in.json", yes: false });
-    for (const argv of [[], ["register"], ["plan", "in.json", "--yes"], ["status", "in.json", "--yes"], ["regster", "in.json"], ["in.json", "more"], ["open-sale", "in.json", "--force"]]) {
+    for (const argv of [[], ["register"], ["plan", "in.json", "--yes"], ["status", "in.json", "--yes"], ["regster", "in.json"], ["in.json", "more"], ["open-sale"], ["open-sale", "in.json"], ["stop-sale"]]) {
       assert.throws(() => parseSiteSaleArguments(argv), SiteSaleInputError, argv.join(" "));
     }
   });
@@ -151,8 +145,6 @@ describe("register-site-sale input (#285 slice 9)", () => {
     assert.deepEqual(INPUT.provider, { id: "sample-provider-0001", displayName: "Sample Tea Studio" });
     assert.equal(INPUT.supportEnabled, false);
     assert.equal(INPUT.product.unitAmountYen, 4000);
-    assert.equal(INPUT.saleTerms.bookingQuestions.length, 1);
-    assert.equal(INPUT.saleTerms.conditionsVersion, null);
     assert.equal(registerProductInput(INPUT).status, "PUBLISHED");
   });
 
@@ -160,8 +152,7 @@ describe("register-site-sale input (#285 slice 9)", () => {
     assert.deepEqual(problemsOf(edited((copy) => { copy.extra = 1; })), ["input.extra is not a known field"]);
     assert.deepEqual(problemsOf(edited((copy) => { delete copy.owner; })), ["input.owner is missing", "owner must be an object"]);
     assert.deepEqual(problemsOf(edited((copy) => { copy.product.price = 1; })), ["product.price is not a known field"]);
-    assert.deepEqual(problemsOf(edited((copy) => { copy.saleTerms.childPricing.note = "x"; })), ["saleTerms.childPricing.note is not a known field"]);
-    assert.deepEqual(problemsOf(edited((copy) => { copy.saleTerms.bookingQuestions[0].options[0].hint = "x"; })), ["saleTerms.bookingQuestions.0.options.0.hint is not a known field"]);
+    assert.deepEqual(problemsOf(edited((copy) => { copy.saleTerms = {}; })), ["input.saleTerms is not a known field"]);
     assert.deepEqual(problemsOf([]), ["input must be an object"]);
   });
 
@@ -182,12 +173,6 @@ describe("register-site-sale input (#285 slice 9)", () => {
     assert.equal(problems.join("\n").includes(value), false);
   });
 
-  it("uses setSaleTerms' validation and refuses participation conditions this site cannot show", () => {
-    assert.deepEqual(problemsOf(edited((copy) => { copy.saleTerms.conditionsVersion = "c0".repeat(32); })),
-      ["saleTerms.conditionsVersion must be null (this site cannot show participation conditions yet)"]);
-    assert.deepEqual(problemsOf(edited((copy) => { copy.saleTerms.maxPartySize = 0; })), ["saleTerms: maxPartySize must be an integer from 1 to 500."]);
-    assert.deepEqual(problemsOf(edited((copy) => { copy.saleTerms.cancellationPolicy = "FLEXIBLE"; })), ["saleTerms: cancellationPolicy is invalid."]);
-  });
 });
 
 describe("register-site-sale flow (#285 slice 9)", () => {
@@ -199,7 +184,7 @@ describe("register-site-sale flow (#285 slice 9)", () => {
     const text = h.lines.join("\n");
     assert.match(text, /price ¥3,500 → ¥4,000/);
     assert.match(text, /stripeConnectAccountRef …Old9 → …0001/);
-    assert.match(text, /other products of the provider have sale terms \(sample-walk\): a fee change applies to them too/);
+    assert.match(text, /other products of the provider have sale terms \(sample-walk\): a fee change applies to their next checkout too/);
     assert.match(text, /\[--\] SALE_TERMS: SALE_TERMS detail/);
     assertMasked(h.lines);
   });
@@ -211,16 +196,14 @@ describe("register-site-sale flow (#285 slice 9)", () => {
   });
 
   it("writes nothing without --yes or with a connection that cannot register", async () => {
-    for (const command of ["register", "open-sale", "stop-sale"] as const) {
-      const h = harness({ state: REGISTERED });
-      assert.equal(await h.run(command), SITE_SALE_EXIT.failed);
-      assert.deepEqual(h.writes, []);
-      assert.match(h.lines.at(-1)!, /Nothing was written/);
-      const runtime = harness({ state: REGISTERED, canRegister: false });
-      assert.equal(await runtime.run(command, true), SITE_SALE_EXIT.failed);
-      assert.deepEqual(runtime.writes, []);
-      assert.deepEqual(runtime.stripeCalls, []);
-    }
+    const h = harness({ state: REGISTERED });
+    assert.equal(await h.run("register"), SITE_SALE_EXIT.failed);
+    assert.deepEqual(h.writes, []);
+    assert.match(h.lines.at(-1)!, /Nothing was written/);
+    const runtime = harness({ state: REGISTERED, canRegister: false });
+    assert.equal(await runtime.run("register", true), SITE_SALE_EXIT.failed);
+    assert.deepEqual(runtime.writes, []);
+    assert.deepEqual(runtime.stripeCalls, []);
   });
 
   it("register checks the Stripe account, then writes the provider, the OWNER, the product and the fee, never the sale terms", async () => {
@@ -249,19 +232,16 @@ describe("register-site-sale flow (#285 slice 9)", () => {
     assert.equal(same.writes.some(([method]) => method === "setProviderSaleSettings"), false);
   });
 
-  it("register says the product is sold here when the registration leaves it selling, and never claims the sale is closed then", async () => {
-    // Sale terms already set: registering again (the fee or the publication was the missing piece) opens the sale.
-    const selling = harness({ state: { ...REGISTERED, saleTerms: { version: 4 } as ProductSaleTerms }, readiness: [readiness([], true)] });
+  it("register preserves an existing owner publication and leaves publishing to the OWNER", async () => {
+    const selling = harness({ state: { ...REGISTERED, saleTerms: { version: 4 } as SiteSaleState["saleTerms"] }, readiness: [readiness([], true)] });
     assert.equal(await selling.run("register", true), SITE_SALE_EXIT.ok);
     const text = selling.lines.join("\n");
-    assert.match(text, /The product is sold on this site now/);
+    assert.match(text, /An OWNER publication is already active/);
     assert.match(text, /do not sell the same dates on NIHO/);
-    assert.doesNotMatch(text, /The sale is not open/);
-    // Nothing selling after the registration: the first registration's message stays.
     const closed = harness({ readiness: [readiness(["SALE_TERMS"], false)] });
     assert.equal(await closed.run("register", true), SITE_SALE_EXIT.ok);
-    assert.match(closed.lines.at(-1)!, /The sale is not open/);
-    assert.doesNotMatch(closed.lines.join("\n"), /sold on this site now/);
+    assert.match(closed.lines.at(-1)!, /OWNER must finish and publish this product/);
+    assert.doesNotMatch(closed.lines.join("\n"), /publication is already active/);
   });
 
   it("register refuses a taken slug or an account that cannot take charges, before writing", async () => {
@@ -281,41 +261,10 @@ describe("register-site-sale flow (#285 slice 9)", () => {
     assertMasked(unreachable.lines);
   });
 
-  it("open-sale needs the registration as the input says and every check but the terms", async () => {
-    const unregistered = harness({ state: { ...REGISTERED, saleSettings: { ...SETTINGS, supportEnabled: true } } });
-    assert.equal(await unregistered.run("open-sale", true), SITE_SALE_EXIT.failed);
-    assert.match(unregistered.lines.at(-1)!, /run register first \(NIHO's fee setting differs from the input\)/);
-    assert.deepEqual([unregistered.writes, unregistered.stripeCalls], [[], []]);
-
-    const notReady = harness({ state: REGISTERED, readiness: [readiness(["SALE_TERMS", "SCHEDULE"])] });
-    assert.equal(await notReady.run("open-sale", true), SITE_SALE_EXIT.failed);
-    assert.match(notReady.lines.at(-1)!, /not ready to open \(SCHEDULE\)/);
-    assert.deepEqual([notReady.writes, notReady.stripeCalls], [[], []]);
-
-    const badAccount = harness({ state: REGISTERED, account: { kind: "unreachable" } });
-    assert.equal(await badAccount.run("open-sale", true), SITE_SALE_EXIT.failed);
-    assert.deepEqual(badAccount.writes, []);
-  });
-
-  it("open-sale re-checks the stored Stripe account, writes the terms at the version read and confirms the sale", async () => {
-    const terms = { version: 4 } as ProductSaleTerms;
-    const h = harness({ state: { ...REGISTERED, saleTerms: terms }, readiness: [readiness(["SALE_TERMS"]), readiness([], true)] });
-    assert.equal(await h.run("open-sale", true), SITE_SALE_EXIT.ok);
-    assert.deepEqual(h.stripeCalls, [REGISTERED.product!.stripeConnectAccountRef]);
-    assert.deepEqual(h.writes, [["setSaleTermsAsOperator", INPUT.provider.id, INPUT.product.id, INPUT.saleTerms, 4]]);
-    assert.match(h.lines.at(-1)!, /The sale is open on this site/);
-
-    const notSold = harness({ state: REGISTERED, readiness: [readiness(["SALE_TERMS"]), readiness(["UNIQUE_SLUG"], false)] });
-    assert.equal(await notSold.run("open-sale", true), SITE_SALE_EXIT.failed);
-    assert.match(notSold.lines.at(-1)!, /written but the product is not sold here/);
-  });
-
-  it("stop-sale removes the terms and checks the product is no longer sold", async () => {
-    const h = harness({ state: REGISTERED, readiness: [readiness(["SALE_TERMS"])] });
-    assert.equal(await h.run("stop-sale", true), SITE_SALE_EXIT.ok);
-    assert.deepEqual(h.writes, [["removeSaleTerms", INPUT.provider.id, INPUT.product.id]]);
-    assert.deepEqual(h.stripeCalls, []);
-    assert.match(h.lines.join("\n"), /Sale terms: removed/);
+  it("does not expose public listing controls to the operator script", async () => {
+    for (const command of ["open-sale", "stop-sale"]) {
+      assert.throws(() => parseSiteSaleArguments([command, "in.json"]), SiteSaleInputError);
+    }
   });
 
   it("reports a store refusal as 1 and anything else as 2 without its message", async () => {

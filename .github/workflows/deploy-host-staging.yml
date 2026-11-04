@@ -32,7 +32,20 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      owner_bypass: ${{ steps.actor.outputs.owner_bypass }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select owner-only staging environment
+        id: actor
+        run: |
+          if bash scripts/check-production-owner.sh >/dev/null 2>&1; then
+            echo 'owner_bypass=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'owner_bypass=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Require explicitly enabled main deployment
         env:
           ENABLED: ${{ vars.STG_HOST_DEPLOY_ENABLED }}
@@ -80,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: host-staging
+      name: ${{ needs.validate.outputs.owner_bypass == 'true' && 'host-staging-owner' || 'host-staging' }}
       url: ${{ vars.STG_HOST_SERVICE_URL }}
     permissions:
       contents: read
@@ -96,7 +109,7 @@ jobs:
       REVISION: ${{ inputs.candidate_revision }}
       DIGEST: ${{ inputs.candidate_image_digest }}
       SITE_URL: ${{ vars.STG_HOST_SERVICE_URL }}
-      READY: ${{ vars.STG_HOST_CALENDAR_READY }}
+      CORE_READY: ${{ vars.STG_HOST_CORE_READY }}
       CLOUDSQL: ${{ vars.STG_HOST_CLOUDSQL_INSTANCE }}
       SESSION_REF: ${{ vars.STG_HOST_SESSION_SECRET_REF }}
       FIREBASE_REF: ${{ vars.STG_HOST_FIREBASE_WEB_API_KEY_REF }}
@@ -116,7 +129,7 @@ jobs:
           DEPLOYER: ${{ vars.STG_HOST_DEPLOY_SERVICE_ACCOUNT }}
           WIF: ${{ vars.STG_HOST_WIF_PROVIDER }}
         run: |
-          test "$READY" = true
+          test "$CORE_READY" = true
           test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
           [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
           [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ || "$SITE_URL" =~ ^https://niho-experience-host-stg-[0-9]+\.asia-northeast1\.run\.app$ ]]
@@ -137,6 +150,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Recheck owner identity before Google credentials
+        if: needs.validate.outputs.owner_bypass == 'true'
+        run: bash scripts/check-production-owner.sh
       - name: Require reviewed commit on main
         run: git merge-base --is-ancestor "$SHA" origin/main
       # Feature flags (docs/host-calendar-staging.md「機能のフラグ」): each needs every setting, Secret reference and

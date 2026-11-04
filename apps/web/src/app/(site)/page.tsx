@@ -27,12 +27,19 @@ import { homeJournal } from "@/lib/home-journal";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
 import { siteJsonLd } from "@/lib/structured-data";
 import { englishAlternates } from "@/lib/locale-metadata";
+import { getPublicSiteAnalyticsSettings } from "@/lib/public-site-analytics";
 
 const NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 const numberWord = (n: number) => NUMBER_WORDS[n] ?? String(n);
 
 export async function generateMetadata(): Promise<Metadata> {
-  return { ...publicMetadata("Meet the people of Kamakura", SITE_DESCRIPTION, `${config.siteUrl}/`), alternates: await englishAlternates("/") };
+  const settings = await getPublicSiteAnalyticsSettings();
+  const verification = settings?.searchConsoleVerification;
+  return {
+    ...publicMetadata("Meet the people of Kamakura", SITE_DESCRIPTION, `${config.siteUrl}/`),
+    alternates: await englishAlternates("/"),
+    ...(verification ? { other: { "google-site-verification": verification } } : {}),
+  };
 }
 
 const displayPhoto = (photo: SitePhoto): DisplayImageV1 => ({ src: photo.src, alt: photo.alt, position: photo.position });
