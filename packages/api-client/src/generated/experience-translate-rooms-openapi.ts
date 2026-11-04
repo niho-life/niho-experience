@@ -153,6 +153,152 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/experience-providers/{providerId}/translate-rooms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 予約なしの通訳ルームを作る
+         * @description 現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。
+         */
+        post: operations["postStandaloneTranslateRoom"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 予約なしルームの参加状況を取得する
+         * @description 現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。
+         */
+        get: operations["getStandaloneTranslateRoom"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 予約なしルームを終了する
+         * @description 現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。
+         */
+        post: operations["postStandaloneTranslateRoomEnd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/guest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 対象席の招待を明示再発行して旧資格を失効する
+         * @description 現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。
+         */
+        post: operations["postStandaloneTranslateGuestInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 対象席の招待を明示再発行して旧資格を失効する
+         * @description 現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。
+         */
+        post: operations["postStandaloneTranslateHostInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-providers/{providerId}/translate-rooms/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 進行中の予約なしルームを復元する（なければroomはnull）
+         * @description 現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。
+         */
+        get: operations["getCurrentStandaloneTranslateRoom"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -185,6 +331,40 @@ export type components = {
             /** @description 入力音声の合計分（0.1分単位・切り上げ）。予算の前払い予約とは別 */
             usageMinutes: number;
         };
+        StandaloneTranslateInvite: {
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uri */
+            inviteUrl: string;
+        };
+        StandaloneTranslateInviteResult: {
+            invite: components["schemas"]["StandaloneTranslateInvite"];
+            /** @enum {string} */
+            role: "host" | "guest";
+            roomId: string;
+        };
+        StandaloneTranslateRoom: {
+            /** Format: date-time */
+            expiresAt: string;
+            guestLanguage: components["schemas"]["TranslateLanguage"];
+            hostLanguage: components["schemas"]["TranslateLanguage"];
+            participants: components["schemas"]["ExperienceProviderTranslateRoomParticipant"][];
+            roomId: string;
+            /** @enum {string} */
+            state: "waiting" | "active" | "paused" | "ended";
+            usageMinutes: number;
+        };
+        StandaloneTranslateRoomCreated: {
+            guest: components["schemas"]["StandaloneTranslateInvite"];
+            host: components["schemas"]["StandaloneTranslateInvite"];
+            room: components["schemas"]["StandaloneTranslateRoom"];
+        };
+        StandaloneTranslateRoomCreateRequest: {
+            hostLanguage: components["schemas"]["TranslateLanguage"];
+        };
+        StandaloneTranslateRoomCurrent: {
+            room: components["schemas"]["StandaloneTranslateRoom"] | null;
+        };
         TranslateInviteParticipant: {
             /** @description 作成応答にだけ平文で載る。DBはhashだけ */
             inviteCode: string;
@@ -195,6 +375,8 @@ export type components = {
             inviteUrl: string;
             participantId: string;
         };
+        /** @enum {string} */
+        TranslateLanguage: "ja" | "en";
         TranslateRoomStateResult: {
             roomId: string;
             /** @enum {string} */
@@ -602,6 +784,504 @@ export interface operations {
             };
             /** @description NIHO API error (404) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postStandaloneTranslateRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StandaloneTranslateRoomCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandaloneTranslateRoomCreated"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (401) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getStandaloneTranslateRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandaloneTranslateRoom"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (401) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postStandaloneTranslateRoomEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyObject"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslateRoomStateResult"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (401) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postStandaloneTranslateGuestInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyObject"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandaloneTranslateInviteResult"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (401) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postStandaloneTranslateHostInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyObject"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandaloneTranslateInviteResult"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (401) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getCurrentStandaloneTranslateRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 体験の提供者（ExperienceProvider）のID。 */
+                providerId: components["parameters"]["TranslateExperienceProviderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandaloneTranslateRoomCurrent"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (401) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

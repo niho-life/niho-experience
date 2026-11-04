@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Translate Rooms API",
-    "version": "1.0.0",
-    "description": "旧NIHO予約とExperience予約UUIDの双方から使う日英2人通訳の最小契約。旅行者PII・NIHO private sourceは含めない。",
+    "version": "1.1.0",
+    "description": "予約なし・旧NIHO予約・Experience予約UUIDから使う日英2人通訳の最小契約。旅行者PII・NIHO private sourceは含めない。",
     "x-niho-contract-status": "agreed-not-deployed",
     "x-niho-contract-source": "niho-app contracts/openapi.yaml (source commit not fixed yet)",
     "x-niho-contract-sha256-file": "experience-translate-rooms-api.openapi.json.sha256"
@@ -25,6 +25,364 @@
     }
   ],
   "paths": {
+    "/api/experience-providers/{providerId}/translate-rooms": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        }
+      ],
+      "post": {
+        "operationId": "postStandaloneTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "予約なしの通訳ルームを作る",
+        "description": "現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。",
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateRoomCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StandaloneTranslateRoomCreateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/translate-rooms/current": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        }
+      ],
+      "get": {
+        "operationId": "getCurrentStandaloneTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "進行中の予約なしルームを復元する（なければroomはnull）",
+        "description": "現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateRoomCurrent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "get": {
+        "operationId": "getStandaloneTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "予約なしルームの参加状況を取得する",
+        "description": "現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateRoom"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/host": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postStandaloneTranslateHostInvite",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "対象席の招待を明示再発行して旧資格を失効する",
+        "description": "現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateInviteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/guest": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postStandaloneTranslateGuestInvite",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "対象席の招待を明示再発行して旧資格を失効する",
+        "description": "現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateInviteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/translate-rooms/{roomId}/end": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postStandaloneTranslateRoomEnd",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "予約なしルームを終了する",
+        "description": "現在のprovider OWNER向け予約なし通訳。予約付きroomを含めず、秘密・音声・字幕を保存しない。",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "401": {
+            "description": "NIHO API error (401)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms": {
       "parameters": [
         {
@@ -462,6 +820,156 @@
           }
         }
       },
+      "StandaloneTranslateInvite": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inviteUrl",
+          "expiresAt"
+        ],
+        "properties": {
+          "inviteUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StandaloneTranslateInviteResult": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
+          "role",
+          "invite"
+        ],
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "host",
+              "guest"
+            ]
+          },
+          "invite": {
+            "$ref": "#/components/schemas/StandaloneTranslateInvite"
+          }
+        }
+      },
+      "StandaloneTranslateRoom": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
+          "state",
+          "hostLanguage",
+          "guestLanguage",
+          "expiresAt",
+          "participants",
+          "usageMinutes"
+        ],
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "active",
+              "paused",
+              "ended"
+            ]
+          },
+          "hostLanguage": {
+            "$ref": "#/components/schemas/TranslateLanguage"
+          },
+          "guestLanguage": {
+            "$ref": "#/components/schemas/TranslateLanguage"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "participants": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/ExperienceProviderTranslateRoomParticipant"
+            }
+          },
+          "usageMinutes": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      },
+      "StandaloneTranslateRoomCreated": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "room",
+          "host",
+          "guest"
+        ],
+        "properties": {
+          "room": {
+            "$ref": "#/components/schemas/StandaloneTranslateRoom"
+          },
+          "host": {
+            "$ref": "#/components/schemas/StandaloneTranslateInvite"
+          },
+          "guest": {
+            "$ref": "#/components/schemas/StandaloneTranslateInvite"
+          }
+        }
+      },
+      "StandaloneTranslateRoomCreateRequest": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hostLanguage"
+        ],
+        "properties": {
+          "hostLanguage": {
+            "$ref": "#/components/schemas/TranslateLanguage"
+          }
+        }
+      },
+      "StandaloneTranslateRoomCurrent": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "room"
+        ],
+        "properties": {
+          "room": {
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StandaloneTranslateRoom"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
       "TranslateInviteParticipant": {
         "x-niho-experience-translate-rooms-dto": true,
         "type": "object",
@@ -489,6 +997,14 @@
             "description": "`{TRANSLATE_INVITE_BASE_URL}/t#<code>`（本番 https://niho.life、stg https://app-stg.niho.life。codeはfragmentに置き、`/i/` は会員招待の短縮リンクなので使わない）"
           }
         }
+      },
+      "TranslateLanguage": {
+        "x-niho-experience-translate-rooms-dto": true,
+        "type": "string",
+        "enum": [
+          "ja",
+          "en"
+        ]
       },
       "TranslateRoomStateResult": {
         "x-niho-experience-translate-rooms-dto": true,

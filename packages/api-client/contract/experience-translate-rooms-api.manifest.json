@@ -1,19 +1,21 @@
 {
   "name": "experience-translate-rooms-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "sourceRepository": "niho-app",
-  "sourceIssue": "niho-coliving/niho-app#19446",
-  "sourceCommit": "5ed6ebac62b5f14dd0d114d7893bc0099d9df776",
-  "sha256": "08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8e",
+  "sourceIssue": "niho-coliving/niho-app#19797",
+  "sourceCommit": "8a9c79b82341094fa44620b06f78097e76ef3114",
+  "sha256": "e080dbfef26e8188002b434fa43c939867e80eb5fd5d347f81eb9bf3e34c80bc",
   "status": "agreed-not-deployed",
-  "deploymentStatus": "stg-candidate-source-hash-verified",
-  "deploymentNote": "NIHO公式batch 41749480399のbackend配備jobは成功、候補SHAはac52bc026c0f5567fe3e713aa25bd0e8f34e2f2a（全体batchはtargeted smoke失敗）。固定sourceCommitと候補SHAのselected OpenAPIは同一git blobで、SHA256 08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8eを照合済み。runtimeのcontract read-backおよび実予約create/poll/endは未受入のため、EXPERIENCE_TRANSLATE_API_ENABLEDはOFFを維持する。",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "予約なしの通訳APIを追加した合意契約。API先行配備と有効ticketの受入までHTTP flagをOFFに維持する。",
   "openapiFile": "experience-translate-rooms-api.openapi.json",
   "sha256File": "experience-translate-rooms-api.openapi.json.sha256",
   "scope": [
     "OWNER creates a translate room for a legacy NIHO booking or an Experience DB public booking UUID",
     "room state, per-role joined/ready and usage minutes for the host screen's polling",
-    "host ends the room"
+    "host ends the room",
+    "OWNER creates/restores a standalone translate room without a booking",
+    "explicit per-seat invite reissue with old credentials revoked"
   ],
   "excludedScope": [
     "relay tickets, relay URLs, JWKS or the public invite join endpoint",

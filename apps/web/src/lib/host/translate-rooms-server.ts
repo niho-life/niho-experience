@@ -1,6 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import { createExperienceTranslateRoomsClient, type ExperienceTranslateRoomsFailure } from "@niho-experience/api-client/experience-translate-rooms";
+import { createExperienceTranslateRoomsClient, type ExperienceTranslateRoomsFailure, type StandaloneTranslateLanguage } from "@niho-experience/api-client/experience-translate-rooms";
+import { isExperienceTranslateRoomPathId } from "@niho-experience/api-client/experience-translate-rooms-schema";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError, type HostGuestBooking } from "@niho-experience/experience-store";
 import { todayInJapan } from "@/host/format";
 import { guestNeedsInterpretation } from "@/host/translate";
@@ -25,6 +26,43 @@ const HEADERS = { "cache-control": "private, no-store", "referrer-policy": "no-r
 /** A POST here carries nothing. Anything beyond an empty body or `{}` is refused, so no field can be smuggled to NIHO. */
 const MAX_BODY_BYTES = 1024;
 
+/** Reads at most `limit` bytes without first buffering an attacker-controlled body. */
+async function readBoundedTranslateBody(request: Request, limit = MAX_BODY_BYTES): Promise<string | null> {
+  const declaredHeader = request.headers.get("content-length");
+  const declared = declaredHeader === null ? null : Number(declaredHeader);
+  const body = request.body;
+  if (declared !== null && (!Number.isFinite(declared) || declared < 0 || declared > limit)) {
+    try { await body?.cancel(); } catch { /* The body may already be closed by the runtime. */ }
+    return null;
+  }
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        try { await reader.cancel(); } catch { /* Cancellation is best-effort. */ }
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { return null; }
+  } catch {
+    try { await reader.cancel(); } catch { /* Cancellation is best-effort. */ }
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** The mock always has synthetic rooms; http opens the selected NIHO translate API behind its own flag. */
 export function translateRoomsEnabled(): boolean {
   return config.hostConsoleEnabled && (config.apiMode === "mock" || config.experienceTranslateApiEnabled);
@@ -45,16 +83,27 @@ export function translateRoomsMutationAllowed(request: Request): boolean {
 
 /** True when the request body is empty or an empty JSON object. */
 export async function readEmptyTranslateBody(request: Request): Promise<boolean> {
-  const declared = Number(request.headers.get("content-length") ?? 0);
-  if (!Number.isFinite(declared) || declared > MAX_BODY_BYTES) return false;
-  let text: string;
-  try { text = await request.text(); } catch { return false; }
+  const text = await readBoundedTranslateBody(request);
+  if (text === null) return false;
   if (text === "") return true;
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) return false;
   try {
     const value = JSON.parse(text) as unknown;
     return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0;
   } catch { return false; }
+}
+
+/** The standalone create body is exactly `{hostLanguage:"ja"|"en"}` and stays small. */
+export async function readStandaloneTranslateCreateBody(request: Request): Promise<{ hostLanguage: StandaloneTranslateLanguage } | null> {
+  if (request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return null;
+  const text = await readBoundedTranslateBody(request);
+  if (text === null) return null;
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).length !== 1 || (record.hostLanguage !== "ja" && record.hostLanguage !== "en")) return null;
+    return { hostLanguage: record.hostLanguage };
+  } catch { return null; }
 }
 
 export async function loadTranslateRoomsClient() {
@@ -65,6 +114,47 @@ export async function loadTranslateRoomsClient() {
   try {
     return { ok: true as const, client: createExperienceTranslateRoomsClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch: nihoApiFetch(session) }) };
   } catch { return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) }; }
+}
+
+/**
+ * Resolves a browser-visible local Experience provider id to NIHO's provider id on every
+ * standalone request. The sealed session and current OWNER membership are authoritative here;
+ * NIHO then independently authorizes that same owner when the client calls its API.
+ */
+export async function loadStandaloneTranslateRoomsClient(localProviderId: string) {
+  if (!translateRoomsEnabled() || !isExperienceTranslateRoomPathId(localProviderId)) {
+    return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
+  }
+  const session = await readHostSession();
+  if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
+  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+  const identity = await loadHostProviders();
+  if (identity.status === "signed-out" || identity.status === "refresh") {
+    return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+  }
+  if (identity.status === "rejected") {
+    const response = translateRoomsJson({ error: "session_ended" }, 401);
+    clearSessionCookie(response);
+    return { ok: false as const, response };
+  }
+  if (identity.status !== "ok") return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) };
+  const provider = identity.providers.find((item) => item.id === localProviderId);
+  if (provider?.memberRole !== "OWNER" || !isExperienceTranslateRoomPathId(provider.legacyProviderId)) {
+    return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
+  }
+  try {
+    return {
+      ok: true as const,
+      nihoProviderId: provider.legacyProviderId,
+      client: createExperienceTranslateRoomsClient({
+        nihoWebOrigin: config.nihoWebOrigin,
+        accessToken: session.accessToken,
+        fetch: nihoApiFetch(session),
+      }),
+    };
+  } catch {
+    return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) };
+  }
 }
 
 export type SiteTranslateRoomAction = "create" | "status" | "end";
