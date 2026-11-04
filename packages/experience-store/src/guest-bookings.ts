@@ -1273,8 +1273,11 @@ export class GuestBookingRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER", "EDITOR"]);
-      const product = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
+      const product = await client.query<DbRow>("SELECT unit_amount FROM experience_products WHERE provider_id=$1 AND id=$2 FOR SHARE", [actor.providerId, productId]);
       if (product.rows[0] === undefined) throw new StoreNotFoundError("product");
+      if (!salePriceSetMatchesProduct(Number(product.rows[0].unit_amount), terms)) {
+        throw new StoreValidationError("A free product must price every offer and child at ¥0; paid offers must meet Stripe's minimum charge.");
+      }
       const child = terms.childPricing;
       const values = [
         actor.providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null, child?.adultRequired ?? null,

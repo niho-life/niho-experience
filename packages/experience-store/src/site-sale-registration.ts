@@ -504,9 +504,16 @@ export class SiteSaleRegistration {
       const otherCount = Number(others.rows[0]?.others ?? 0);
       add("UNIQUE_SLUG", otherCount === 0, "No other product publishes the slug.", `${otherCount} other published product(s) have the slug: neither is sold.`);
       add("JPY", product.currency === "JPY", "The price is in JPY.", "The price is not in JPY.");
-      const priceSetReady = terms !== null && salePriceSetMatchesProduct(product.unitAmount, terms);
+      const priceSetReady = terms === null
+        ? product.unitAmount === 0 || product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen
+        : salePriceSetMatchesProduct(product.unitAmount, terms);
+      const priceReadyMessage = terms === null && product.unitAmount === 0
+        ? "The base price is ¥0; offer and child prices are checked when sale terms are set."
+        : terms !== null && product.unitAmount === 0
+          ? "Every offer and child price is free."
+          : `The price is at least ¥${GUEST_BOOKING_LIMITS.minimumChargeYen}.`;
       add("MINIMUM_PRICE", priceSetReady,
-        product.unitAmount === 0 ? "Every offer and child price is free." : `The price is at least ¥${GUEST_BOOKING_LIMITS.minimumChargeYen}.`,
+        priceReadyMessage,
         `Prices must be ¥0 for a fully free product or at least ¥${GUEST_BOOKING_LIMITS.minimumChargeYen} for paid offers.`);
       const feeOk = settings !== null && chargeableFee(product.unitAmount, terms?.childPricing ?? null, settings.platformFeeBasisPoints);
       add("FEE_SETTINGS", feeOk,
