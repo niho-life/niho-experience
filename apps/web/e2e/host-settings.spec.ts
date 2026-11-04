@@ -12,7 +12,7 @@ const isDesktop = (projectName: string) => projectName === "host-desktop";
 const calendarPanel = (page: Page) => page.getByRole("region", { name: "カレンダー" });
 const notificationPanel = (page: Page) => page.getByRole("region", { name: "通知" });
 const overflowX = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-const NOTIFICATIONS = ["新しい予約・申込", "承認の期限が近い", "予約の取消", "予約前の質問・予約者からの連絡", "前日の参加者のまとめ", "新しいレビュー", "掲載と審査の結果"];
+const NOTIFICATIONS = ["新しい予約・申込", "承認の期限が近い", "予約の取消", "予約前の質問・予約者からの連絡", "前日の参加者のまとめ", "新しいレビュー", "予約者へのメールの不達", "掲載と審査の結果"];
 const STOPPABLE = ["予約前の質問・予約者からの連絡", "前日の参加者のまとめ", "新しいレビュー"];
 
 async function signIn(page: Page, query = "") {
@@ -212,7 +212,7 @@ test("the bookings feed's address answers nothing in the preview, privately", as
   expect(headers["referrer-policy"]).toBe("no-referrer");
 });
 
-test("通知: NIHO's seven notifications in its order; the three the owner may stop are kept by 保存", async ({ page }) => {
+test("通知: NIHO's eight notifications in its order; the three the owner may stop are kept by 保存", async ({ page }) => {
   await signIn(page);
   await page.goto("/host/settings");
   const panel = notificationPanel(page);
@@ -225,7 +225,7 @@ test("通知: NIHO's seven notifications in its order; the three the owner may s
   await expect(panel.getByRole("button", { name: "宛先を変える" })).toBeVisible();
 
   const switches = panel.getByRole("switch");
-  await expect(switches).toHaveCount(7);
+  await expect(switches).toHaveCount(8);
   for (const [index, name] of NOTIFICATIONS.entries()) await expect(switches.nth(index)).toHaveAccessibleName(name);
   await expect(panel.getByRole("switch", { name: "前日の参加者のまとめ" })).toHaveAccessibleDescription("毎日 18:00 · 翌日に確定の予約があるときだけ");
   for (const name of NOTIFICATIONS) {
