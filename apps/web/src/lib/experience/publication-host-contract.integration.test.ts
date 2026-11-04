@@ -56,6 +56,46 @@ import { publicationCollectionRequest, publicationRequest } from "./publication-
 import { getSitePublicExperience } from "./site-publications";
 import { sitePublicationCard, cancellationSummary } from "./site-card-model";
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+}
+
+const japanese = {
+  title: "合成の体験",
+  lead: "契約テスト用の合成体験です。",
+  description: "予約契約を確認するための合成原稿です。",
+  language: "英語",
+  highlights: ["合成の見どころ"],
+  included: ["合成の材料"],
+  notIncluded: [],
+  knowBeforeYouGo: ["合成の案内"],
+  notSuitableFor: [],
+  timeline: [],
+};
+
+const english = {
+  title: "Synthetic contract experience",
+  lead: "A synthetic Experience used to verify the NIHO v1 contract.",
+  description: "A synthetic host creates a product, publishes it and accepts a booking.",
+  language: "English",
+  highlights: ["A synthetic highlight."],
+  included: ["Synthetic materials"],
+  notIncluded: [],
+  knowBeforeYouGo: ["Synthetic guidance."],
+  notSuitableFor: [],
+  timeline: [],
+};
+
+const sourceFingerprint = fingerprint(japanese);
 const content = {
   lead: "A synthetic Experience used to verify the NIHO v1 contract.",
   description: "A synthetic host creates a product, publishes it and accepts a booking.",
@@ -69,6 +109,12 @@ const content = {
   meetingOverview: "Near a synthetic station.",
   meetingPointDisclosure: "AFTER_BOOKING",
   meetingPoint: null,
+  ja: japanese,
+  translation: {
+    sourceFingerprint,
+    confirmedSourceFingerprint: sourceFingerprint,
+    confirmedEnglishFingerprint: fingerprint(english),
+  },
 };
 
 const saleTerms = {
