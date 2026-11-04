@@ -112,7 +112,7 @@ export function publicationTermsPayload(value: PublicationTermsForm, existing: E
   }
 
   const payload: Record<string, unknown> = {
-    ...(offerPrices.length > 0 ? { offerPrices } : {}),
+    offerPrices,
     childPricing,
     minimumParticipants,
     minimumChargeableParticipants,

@@ -52,8 +52,16 @@ describe("publication sale terms form payload", () => {
       maxPartySize: "8",
       cancellationPolicy: "NONE",
     }, null);
-    expect(payload).not.toHaveProperty("offerPrices");
+    expect(payload).toHaveProperty("offerPrices", []);
     expect(payload).toMatchObject({ childPricing: null, bookingQuestions: [], conditionsVersion: null });
+  });
+
+  it("explicitly clears saved offer prices when every amount is removed", () => {
+    const saved = { ...existing, offerPrices: [{ offerId: "dinner-evening", adultPriceYen: 5_000 }] };
+    const edited = publicationTermsForm(saved, [{ id: "dinner-evening" }]);
+    expect(publicationTermsPayload({
+      ...edited, offerPrices: [{ offerId: "dinner-evening", adultPriceYen: "" }],
+    }, saved)).toHaveProperty("offerPrices", []);
   });
 
   it("accepts explicit free prices and rejects every ¥1–49 price", () => {

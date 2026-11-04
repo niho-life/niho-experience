@@ -74,6 +74,8 @@ This example only documents field shape; its values are not approved product ter
 
 The host UI edits cancellation windows as days/hours/minutes and refunds as a percentage, then converts them losslessly to minutes and basis points at the API boundary. Product, offer, and child prices accept explicit free `0`; any paid price must be at least ¥50, so ¥1–49 is rejected before and at the Store boundary. Existing booking snapshots are not rewritten.
 
+An explicit `offerPrices: []` clears all offer overrides and restores the product's base price. Omitting `offerPrices` (or sending `null`) preserves saved overrides for compatible older clients. Clearing the host form sends the explicit empty array; it never silently retains a previous offer price.
+
 The public API returns the accepted minimum charge and cancellation rule for guests. The host reservation/session API returns the accepted minimum charge, minimum attendance, and cancellation rule from the booking snapshot. No reader reconstructs them from current product settings.
 
 ### Publish, stop, and resume

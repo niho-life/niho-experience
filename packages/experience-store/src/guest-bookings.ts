@@ -152,8 +152,8 @@ export interface OfferPriceInput {
 
 export interface ProductSaleTermsInput {
   /**
-   * Complete replacement for every active offer. Omit for the legacy product.unit_amount fallback.
-   * Once persisted, omitting it on a later compatible write preserves the current set.
+   * Complete replacement for every active offer. An empty array clears overrides and restores product.unit_amount.
+   * Omission (or null) preserves the current set; a product without overrides uses product.unit_amount.
    */
   readonly offerPrices?: readonly OfferPriceInput[] | null;
   /** null: the product takes no children. */
@@ -459,8 +459,8 @@ export function validSaleTerms(input: ProductSaleTermsInput): NormalizedProductS
   if (Object.hasOwn(input, "privateBooking")) throw new StoreValidationError("privateBooking is no longer supported.");
   let offerPrices: readonly OfferPriceInput[] | undefined;
   if (input.offerPrices !== undefined && input.offerPrices !== null) {
-    if (!Array.isArray(input.offerPrices) || input.offerPrices.length < 1 || input.offerPrices.length > 100) {
-      throw new StoreValidationError("offerPrices must contain 1-100 active offers when provided.");
+    if (!Array.isArray(input.offerPrices) || input.offerPrices.length > 100) {
+      throw new StoreValidationError("offerPrices must contain at most 100 active offers; an empty array clears overrides.");
     }
     const ids = new Set<string>();
     offerPrices = input.offerPrices.map((raw, index) => {
@@ -648,6 +648,16 @@ export async function writeOfferPrices(
   prices: readonly OfferPriceInput[] | undefined,
   saleTermsVersion: number,
 ): Promise<void> {
+  if (prices?.length === 0) {
+    await client.query("DELETE FROM experience_offer_prices WHERE provider_id=$1 AND product_id=$2", [providerId, productId]);
+    const reset = await client.query(
+      `UPDATE experience_product_sale_terms SET offer_prices_configured=false
+        WHERE provider_id=$1 AND product_id=$2 AND version=$3`,
+      [providerId, productId, saleTermsVersion],
+    );
+    if (reset.rowCount !== 1) throw new StoreConflictError("Sale terms changed while clearing offer prices.");
+    return;
+  }
   const activeIds = await activeOfferIdsForWrite(client, providerId, productId);
   const existing = await client.query<DbRow>(
     `SELECT rule_id AS "offerId",adult_price_amount AS "adultPriceYen"
