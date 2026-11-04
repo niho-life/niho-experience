@@ -137,8 +137,8 @@ export const FLAGS = Object.freeze([
   {
     env: "EXPERIENCE_TRANSLATE_API_ENABLED",
     variable: "TRANSLATE_API_ENABLED",
-    // 新予約の所属・状態の正本をExperience DBで再検証してからNIHOへopaqueなUUIDだけを渡す。
-    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_BOOKING_ENABLED"],
+    // NIHO予約はNIHO APIで検証し、site bookingは販売flagが有効なときだけExperience DBで検証する。
+    needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {
     env: "EXPERIENCE_GUEST_QUESTIONS_ENABLED",
