@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /** 設定 › 通知 › 宛先 (#194): the session's own address only. A synthetic session and store. */
 const state = vi.hoisted(() => ({
   session: null as null | { accessTokenExpiresAt: number },
-  providers: { status: "ok", providers: [{ id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" }] } as Record<string, unknown>,
+  providers: { status: "ok", nihoUserId: "owner-a", providers: [{ id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" }] } as Record<string, unknown>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ hostNotificationAddresses: () => null }));
@@ -28,7 +28,7 @@ const TOKEN = "a".repeat(43);
 
 beforeEach(() => {
   state.session = { accessTokenExpiresAt: Date.now() + 60_000 };
-  state.providers = { status: "ok", providers: [{ id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" }] };
+  state.providers = { status: "ok", nihoUserId: "owner-a", providers: [{ id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" }] };
 });
 
 describe("the notification address on the server", () => {
@@ -42,20 +42,20 @@ describe("the notification address on the server", () => {
   });
 
   it("uses only the selected provider's OWNER identity and does not expose it to a cohost", async () => {
-    state.providers = { status: "ok", providers: [
+    state.providers = { status: "ok", nihoUserId: "owner-a", providers: [
       { id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" },
-      { id: "provider-b", nihoUserId: "owner-b", memberRole: "OWNER" },
+      { id: "provider-b", nihoUserId: "owner-a", memberRole: "OWNER" },
     ] };
     const s = store();
     expect(await loadNotificationAddress("provider-b", () => s)).toMatchObject({ status: "live" });
-    expect(s.get).toHaveBeenCalledWith("owner-b");
+    expect(s.get).toHaveBeenCalledWith("owner-a");
 
-    state.providers = { status: "ok", providers: [{ id: "provider-b", nihoUserId: "owner-b", memberRole: "COHOST" }] };
+    state.providers = { status: "ok", nihoUserId: "owner-a", providers: [{ id: "provider-b", nihoUserId: "owner-a", memberRole: "COHOST" }] };
     const cohostStore = store();
     expect(await loadNotificationAddress("provider-b", () => cohostStore)).toEqual({ status: "error" });
     expect(cohostStore.get).not.toHaveBeenCalled();
 
-    state.providers = { status: "ok", providers: [{ id: "owned-provider", nihoUserId: "owner-a", memberRole: "OWNER" }] };
+    state.providers = { status: "ok", nihoUserId: "owner-a", providers: [{ id: "owned-provider", nihoUserId: "owner-a", memberRole: "OWNER" }] };
     const operatorStore = store();
     expect(await loadNotificationAddress("assigned-provider", () => operatorStore)).toMatchObject({ status: "live" });
     expect(operatorStore.get).toHaveBeenCalledWith("owner-a");

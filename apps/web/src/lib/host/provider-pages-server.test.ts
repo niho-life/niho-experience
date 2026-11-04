@@ -29,14 +29,14 @@ describe("provider pages rollout gate", () => {
     expect(providerPagesEnabled()).toBe(false);
   });
 
-  it("opens page authoring independently from broader provider operations", () => {
+  it("keeps legacy page authoring closed after the Host v1 contract cutover", () => {
     state.config.experienceProviderPagesApiEnabled = true;
-    expect(providerPagesEnabled()).toBe(true);
+    expect(providerPagesEnabled()).toBe(false);
     expect(state.operations).toBe(false);
   });
 
-  it("keeps the previous provider-operations rollout compatible", () => {
+  it("does not let the legacy provider-operations flag reopen page authoring", () => {
     state.operations = true;
-    expect(providerPagesEnabled()).toBe(true);
+    expect(providerPagesEnabled()).toBe(false);
   });
 });

@@ -32,7 +32,13 @@ import type { HostAttendance, HostBooking, HostMeetingDefaults, HostNotification
  * use /host/api/products, while Connect onboarding remains an NIHO-owned prerequisite.
  */
 const invalid = { ok: false, message: HOST_INVALID_INPUT_TEXT } as const;
-const legacyHostOperationUnavailable = "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。";
+const LEGACY_HOST_OPERATION_UNAVAILABLE = "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。";
+
+async function legacyOperationUnavailable<T extends object>(): Promise<HostActionResult<T>> {
+  const session = await readHostSession();
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  return { ok: false, message: LEGACY_HOST_OPERATION_UNAVAILABLE };
+}
 
 /** A string from the browser, at most `max` characters long (NIHO checks the rest). */
 function text(value: unknown, max: number): string | null {
@@ -51,7 +57,7 @@ export async function registerProvider(input: RegisterProviderInput): Promise<Ho
   const sellerDisclosureUrl = text(input?.sellerDisclosureUrl, LIMITS.sellerDisclosureUrl);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
   if (!kind || displayName === null || bio === null || sellerDisclosureUrl === null || consentVersion === null) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<Registered>();
 }
 
 /**
@@ -66,7 +72,7 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
     if (changed(field) && text(input[field], LIMITS[field]) === null) return invalid;
   }
   if (!providerId || !Object.keys(input ?? {}).some((key) => ["displayName", "bio", "sellerDisclosureUrl"].includes(key))) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<ProfileSaved>();
 }
 
 /**
@@ -77,7 +83,7 @@ type MeetingPointSaved = { meetingPoint: HostMeetingDefaults };
 export async function saveProviderMeetingPoint(input: { providerId: string; meetingPoint: HostMeetingDefaults }): Promise<HostActionResult<MeetingPointSaved>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId || !input?.meetingPoint) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<MeetingPointSaved>();
 }
 
 /**
@@ -123,7 +129,7 @@ type ReviewRequested = { reviewStatus: HostProviderReviewStatus };
 export async function submitProviderReview(input: { providerId: string }): Promise<HostActionResult<ReviewRequested>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<ReviewRequested>();
 }
 
 /** 既存の口座を使う › 共有する (OWNER): one of the owner's spots' ready seller accounts, with NIHO's consent version. */
@@ -133,7 +139,7 @@ export async function sharePayoutAccount(input: { providerId: string; sourceSpot
   const sourceSpotId = text(input?.sourceSpotId, LIMITS.spotId);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
   if (!providerId || !sourceSpotId || consentVersion === null) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<PayoutChanged>();
 }
 
 /**
@@ -145,14 +151,14 @@ export async function openPayoutConnect(input: { providerId: string; step: "star
   const providerId = nihoIdOrNull(input?.providerId);
   const step = input?.step === "start" || input?.step === "resume" ? input.step : null;
   if (!providerId || !step) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<StripeOpened>();
 }
 
 /** 状態を再確認 (OWNER): NIHO reads the account from Stripe again. */
 export async function syncPayoutAccount(input: { providerId: string }): Promise<HostActionResult<PayoutChanged>> {
   const providerId = nihoIdOrNull(input?.providerId);
   if (!providerId) return invalid;
-  return { ok: false, message: legacyHostOperationUnavailable };
+  return legacyOperationUnavailable<PayoutChanged>();
 }
 
 /**

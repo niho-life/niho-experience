@@ -24,7 +24,7 @@ vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
 vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool }));
 vi.mock("@/lib/host/server", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/host/server")>();
-  return { ...original, loadHostProviders: async () => ({ status: "ok", providers: [{ id: "provider-a", nihoUserId: state.currentUserId, memberRole: "OWNER" }] }) };
+  return { ...original, loadHostProviders: async () => ({ status: "ok", nihoUserId: state.currentUserId, providers: [{ id: "provider-a", nihoUserId: state.currentUserId, memberRole: "OWNER" }] }) };
 });
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Secure-niho_host_session" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
 
