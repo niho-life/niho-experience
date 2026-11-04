@@ -11,7 +11,7 @@ import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingI
 import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { GuestReviewRepository } from "../src/guest-reviews.ts";
 import { ExperienceStore } from "../src/repository.ts";
-import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 出欠 (#107) against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -70,7 +70,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
-    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+    await consentSupportOffForTest(guests, ownerA);
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });

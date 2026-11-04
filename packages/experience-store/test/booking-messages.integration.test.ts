@@ -12,7 +12,7 @@ import { GuestQuestionTranslations } from "../src/guest-question-translations.ts
 import { GuestQuestionRepository } from "../src/guest-questions.ts";
 import { HOST_NOTIFICATION_TOPICS, parseBookingMessagePayload } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
-import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 予約ごとのメッセージ (#285 slice 6b): a booking's thread between its guest and the host, against a real schema. Synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -68,7 +68,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
-    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+    await consentSupportOffForTest(guests, ownerA);
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: { priceYen: 1500, minAge: 4, maxAge: 12, adultRequired: true }, minimumParticipants: 1, maxPartySize: 6,
       cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,

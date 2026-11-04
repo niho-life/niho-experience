@@ -206,7 +206,8 @@ export interface HostBookingDetailProps {
 export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | "siteCancel" | null>(null);
   const actions = bookingActions(booking.status);
-  const site = Boolean(booking.site);
+  const siteTerms = booking.site;
+  const site = Boolean(siteTerms);
   const siteFee = siteFeeBreakdown(booking);
   // 通訳を始める: a confirmed booking of an English-speaking guest whose day has not passed (#181).
   const translate = translateEnabled && translationOffered({ confirmed: booking.status === "confirmed", language: booking.language, date: booking.date }, today);
@@ -299,6 +300,14 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       <DetailSection title="状態">
         <Rows rows={bookingStateRows(booking)} />
       </DetailSection>
+      {siteTerms?.supportHistory?.length ? <DetailSection title="NIHOサポートの対応履歴">
+        <ol aria-label="NIHOサポートの対応履歴">
+          {siteTerms.supportHistory.map((event, index) => <li key={`${event.at}-${index}`} className="flex gap-2.5 py-1 text-[0.78125rem] leading-normal">
+            <time dateTime={`${event.at}+09:00`} className="w-[92px] shrink-0 text-muted tabular-nums">{shortDateTime(event.at)}</time>
+            <span className="min-w-0 [overflow-wrap:anywhere]">{event.text}</span>
+          </li>)}
+        </ol>
+      </DetailSection> : null}
       {site ? (
         siteFee ? <SiteFeePanel fee={siteFee} /> : null
       ) : (

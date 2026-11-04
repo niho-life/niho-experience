@@ -422,6 +422,8 @@ export interface HostSiteBookingTerms {
   cancellationPolicy: "FREE_UNTIL_24H" | "FREE_UNTIL_48H" | "NONE" | null;
   /** 取消と返金 (#285 slice 7): who cancelled, why, and where its refunds are. Absent on the preview's bookings. */
   cancellation?: HostSiteCancellation;
+  /** NIHO support actions shared with this provider, without Admin identity or private notes. */
+  supportHistory?: readonly { at: string; text: string }[];
 }
 
 /** A booking made on this site, cancelled or asked to be: what 予約's detail says of it. */
@@ -487,7 +489,16 @@ export interface HostReplyMessage {
   status: HostMessageStatus;
 }
 
-export type HostThreadMessage = HostGuestMessage | HostReplyMessage;
+/** A message NIHO support sent to the guest; explicitly separate from both guest and provider messages. */
+export interface HostSupportMessage {
+  id: string;
+  from: "support";
+  at: string;
+  english: string;
+  status: HostMessageStatus;
+}
+
+export type HostThreadMessage = HostGuestMessage | HostReplyMessage | HostSupportMessage;
 
 /** The booking a thread is joined to, as 予約 has it. */
 export interface HostThreadBooking {

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { SalesLines, SalesLoading, SalesMonthNav, SalesPayoutNoticeView, SalesPayoutsMessage, SalesPayoutsPanel, SalesScope, SalesSummaryPanel } from "@/components/host/HostSales";
+import { SettlementSummaryList } from "@/components/settlement/SettlementSummaryList";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostPayout, loadHostSales } from "@/host/data";
@@ -12,6 +13,8 @@ import { SITE_SALES_LOAD_FAILED_TEXT, SITE_SALES_SCOPE_TEXT } from "@/host/site-
 import { SITE_PAYOUTS_LOADING_TEXT } from "@/host/site-sales-payouts";
 import { loadSitePayouts } from "@/host/site-sales-payouts-server";
 import { loadSiteSales } from "@/host/site-sales-server";
+import { ownerActor } from "@/host/site-bookings-server";
+import { experienceSupportRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import type { HostSession } from "@/lib/host/session";
@@ -83,6 +86,9 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
         {noticeView}
         <SalesSummaryPanel page={site.page} providerId={stripeLoginProviderId} />
         <SalesLines page={site.page} />
+        <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">決済費用の実費を読み込んでいます…</p>}>
+          <HostExperienceSettlementPanel provider={provider} />
+        </Suspense>
         <Suspense fallback={<SalesPayoutsMessage text={SITE_PAYOUTS_LOADING_TEXT} />}>
           <HostSalesPayouts provider={provider} reader={reader} month={site.page.month} stripeLoginProviderId={stripeLoginProviderId} />
         </Suspense>
@@ -121,6 +127,20 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
       <SalesLines page={page} />
     </SalesFrame>
   );
+}
+
+async function HostExperienceSettlementPanel({ provider }: { provider: HostProvider }) {
+  const repository = experienceSupportRepository();
+  if (!repository) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">決済費用の実費を読み込めません。データベース接続を確認してください。</p>;
+  let summaries: Awaited<ReturnType<typeof repository.listHostSummaries>> | null = null;
+  let failed = false;
+  try {
+    summaries = await repository.listHostSummaries(ownerActor(provider), 100);
+  } catch {
+    failed = true;
+  }
+  if (failed || summaries === null) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">決済費用の実費を読み込めません。権限またはデータベース接続を確認して再読み込みしてください。</p>;
+  return <SettlementSummaryList items={summaries} heading="Experience予約の決済費用精算" />;
 }
 
 /** この口座への入金 for the month shown: nothing when it is not open to this account, a message when Stripe fails. */

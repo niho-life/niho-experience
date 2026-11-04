@@ -127,6 +127,18 @@ describe("siteBooking", () => {
     expect([asked.site?.cancellation?.requested, siteCancellationLines(asked)]).toEqual([true, []]);
   });
 
+  it("shares only support action, outcome, and time with the host", () => {
+    const booking = siteBooking({ ...STORED, supportHistory: [
+      { type: "SUPPORT_ACTION", action: "SUPPORT_APPROVE", outcome: "CANCELLED", occurredAtUtc: "2026-11-01T00:00:00.000Z" },
+      { type: "GUEST_CONTACT_SENT", action: null, outcome: null, occurredAtUtc: "2026-11-01T00:01:00.000Z" },
+    ] });
+    expect(booking.site?.supportHistory).toEqual([
+      { at: "2026-11-01T09:00", text: "取消依頼の承認・返金 · 予約を取り消しました" },
+      { at: "2026-11-01T09:01", text: "NIHOサポートから予約者へ連絡" },
+    ]);
+    expect(JSON.stringify(booking.site?.supportHistory)).not.toMatch(/admin|memo|commandId|Private/);
+  });
+
   it("adds the cancellation policy to 申込内容 (the fee is 料金・精算状況), and no refund total to 状態", () => {
     const booking = siteBooking(STORED);
     expect(bookingRequestRows(booking, "Synthetic tea ceremony")).toEqual([

@@ -43,14 +43,15 @@ function MessageList({ messages, hostDisplayName, timeZone }: { messages: readon
     <ol aria-label={`Your messages with ${hostDisplayName}`} className="mt-5 flex flex-col gap-3.5">
       {messages.map((message) => {
         const mine = message.from === "guest";
+        const sender = mine ? "You" : message.from === "support" ? "NIHO support" : hostDisplayName;
         return (
           <li key={message.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
             <div className={`max-w-[88%] rounded-2xl px-4 py-3 [overflow-wrap:anywhere] ${mine ? "rounded-tr-md bg-leaf-pale" : "rounded-tl-md bg-sand"}`}>
-              <span className="sr-only">{mine ? "You:" : `${hostDisplayName}:`}</span>
+              <span className="sr-only">{sender}:</span>
               <p className="whitespace-pre-wrap">{message.body}</p>
             </div>
             <p className="mt-1 px-1 text-xs text-muted">
-              {mine ? "You" : hostDisplayName} · <time dateTime={message.atUtc}>{zonedMoment(Date.parse(message.atUtc), timeZone)}</time>
+              {sender} · <time dateTime={message.atUtc}>{zonedMoment(Date.parse(message.atUtc), timeZone)}</time>
               {"sentHere" in message ? " · Sent" : null}
             </p>
           </li>

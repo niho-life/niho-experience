@@ -100,7 +100,7 @@ export const REPLY_STATUS: Record<HostMessageStatus, string> = { sent: "送信�
 
 /** One line of a message for a list: the Japanese the host reads (or the English the host wrote directly), spaces collapsed. */
 export function messagePreview(message: HostThreadMessage): string {
-  const text = message.from === "guest" ? guestMessageView(message).text : message.japanese || message.english;
+  const text = message.from === "guest" ? guestMessageView(message).text : message.from === "host" ? message.japanese || message.english : message.english;
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -128,6 +128,8 @@ export function waitingSince(thread: Pick<HostThread, "messages">): string | nul
   let since: string | null = null;
   for (const message of thread.messages) {
     if (message.from === "host") {
+      if (message.status !== "failed") since = null;
+    } else if (message.from === "support") {
       if (message.status !== "failed") since = null;
     } else {
       since ??= message.at;

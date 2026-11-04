@@ -112,6 +112,12 @@ export interface ProviderSaleSettings {
   /** NIHO support (docs/admin-support.md 支援条件). */
   readonly supportEnabled: boolean;
   readonly platformFeeBasisPoints: 1000 | 1500;
+  /** Null for rows written before the host accepted the Experience support agreement. */
+  readonly supportConsentVersion: string | null;
+  /** Null until the host explicitly accepts the Experience support agreement. */
+  readonly supportAgreementRevision: number | null;
+  readonly supportConsentedBy: string | null;
+  readonly supportConsentedAtUtc: string | null;
   readonly version: number;
   readonly updatedAtUtc: string;
 }
@@ -366,7 +372,8 @@ const MAX_LISTED_OCCURRENCES = 2_000;
 /** sellableSlugs answers for one page of cards. */
 const MAX_SELLABLE_SLUGS_ASKED = 200;
 
-export const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, version, updated_at";
+export const EXPERIENCE_SUPPORT_CONSENT_VERSION = "2026-10-23" as const;
+export const SALE_SETTINGS_COLUMNS = "provider_id, support_enabled, platform_fee_basis_points, support_consent_version, support_agreement_revision, support_consented_by, support_consented_at, version, updated_at";
 export const TERMS_COLUMNS = `
   provider_id, product_id, child_price_amount, child_min_age, child_max_age, child_adult_required,
   minimum_participants, minimum_chargeable_participants, max_party_size,
@@ -708,6 +715,14 @@ export function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
     platformFeeBasisPoints: Number(row.platform_fee_basis_points) === PLATFORM_FEE_BASIS_POINTS.supportOn
       ? PLATFORM_FEE_BASIS_POINTS.supportOn
       : PLATFORM_FEE_BASIS_POINTS.supportOff,
+    supportConsentVersion: typeof row.support_consent_version === "string" ? row.support_consent_version : null,
+    supportAgreementRevision: row.support_agreement_revision === null || row.support_agreement_revision === undefined
+      ? null
+      : Number(row.support_agreement_revision),
+    supportConsentedBy: typeof row.support_consented_by === "string" ? row.support_consented_by : null,
+    supportConsentedAtUtc: row.support_consented_at === null || row.support_consented_at === undefined
+      ? null
+      : isoValue(row, "support_consented_at"),
     version: Number(row.version),
     updatedAtUtc: isoValue(row, "updated_at"),
   };
@@ -784,7 +799,11 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
     [product.providerId],
   );
   if (settings.rows[0] === undefined) return null;
-  const sellable = { product, terms, settings: saleSettingsFromRow(settings.rows[0]) };
+  const saleSettings = saleSettingsFromRow(settings.rows[0]);
+  // Old rows are deliberately not completed from current policy. The OWNER must explicitly accept the
+  // current support agreement before new bookings can be taken.
+  if (saleSettings.supportConsentVersion !== EXPERIENCE_SUPPORT_CONSENT_VERSION || saleSettings.supportAgreementRevision === null) return null;
+  const sellable = { product, terms, settings: saleSettings };
   const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [product.unitAmount];
   return salePriceSetMatchesProduct(product.unitAmount, terms)
     && adultPrices.every((price) => chargeableFee(price, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints))
@@ -1525,15 +1544,18 @@ export class GuestBookingRepository {
       if (provider.rows[0] === undefined) throw new StoreNotFoundError("provider");
       const result = expectedVersion === undefined
         ? await client.query<DbRow>(
-            `INSERT INTO provider_sale_settings (provider_id, support_enabled, platform_fee_basis_points)
-             VALUES ($1,$2,$3)
+            `INSERT INTO provider_sale_settings
+               (provider_id, support_enabled, platform_fee_basis_points, support_consent_version, support_agreement_revision, support_consented_by, support_consented_at)
+             VALUES ($1,$2,$3,NULL,NULL,NULL,NULL)
              ON CONFLICT DO NOTHING
              RETURNING ${SALE_SETTINGS_COLUMNS}`,
             [providerId, input.supportEnabled, basisPoints],
           )
         : await client.query<DbRow>(
             `UPDATE provider_sale_settings
-                SET support_enabled=$2, platform_fee_basis_points=$3, version=version+1, updated_at=clock_timestamp()
+                SET support_enabled=$2, platform_fee_basis_points=$3, support_consent_version=NULL,
+                    support_agreement_revision=NULL, support_consented_by=NULL, support_consented_at=NULL,
+                    version=version+1, updated_at=clock_timestamp()
               WHERE provider_id=$1 AND version=$4
               RETURNING ${SALE_SETTINGS_COLUMNS}`,
             [providerId, input.supportEnabled, basisPoints, expectedVersion],
@@ -1545,6 +1567,65 @@ export class GuestBookingRepository {
           : "Sale settings version mismatch or sale settings not found for this provider.");
       }
       return saleSettingsFromRow(row);
+    });
+  }
+
+  /** Current OWNER's support consent and fee choice for future Experience bookings. */
+  async setProviderSupportSettings(
+    actor: HostActor,
+    input: { readonly supportEnabled: boolean; readonly consentVersion: string; readonly expectedVersion: number },
+  ): Promise<ProviderSaleSettings> {
+    assertStoreIdentifier(actor?.providerId, "actor.providerId");
+    assertStoreIdentifier(actor?.nihoUserId, "actor.nihoUserId");
+    if (typeof input?.supportEnabled !== "boolean" || input.consentVersion !== EXPERIENCE_SUPPORT_CONSENT_VERSION) {
+      throw new StoreValidationError("The support setting and current consent version are required.");
+    }
+    if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0) {
+      throw new StoreValidationError("expectedVersion must be a non-negative integer.");
+    }
+    const basisPoints = input.supportEnabled ? PLATFORM_FEE_BASIS_POINTS.supportOn : PLATFORM_FEE_BASIS_POINTS.supportOff;
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      const current = await client.query<DbRow>(
+        `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1 FOR UPDATE`,
+        [actor.providerId],
+      );
+      const row = current.rows[0];
+      if (row === undefined) {
+        if (input.expectedVersion !== 0) throw new StoreConflictError("Sale settings version mismatch.");
+        const inserted = await client.query<DbRow>(
+          `INSERT INTO provider_sale_settings
+             (provider_id, support_enabled, platform_fee_basis_points, support_consent_version, support_agreement_revision, support_consented_by, support_consented_at)
+           VALUES ($1,$2,$3,$4,1,$5,clock_timestamp()) RETURNING ${SALE_SETTINGS_COLUMNS}`,
+          [actor.providerId, input.supportEnabled, basisPoints, input.consentVersion, actor.nihoUserId],
+        );
+        return saleSettingsFromRow(inserted.rows[0]!);
+      }
+      if (Number(row.version) !== input.expectedVersion) throw new StoreConflictError("Sale settings version mismatch.");
+      const updated = await client.query<DbRow>(
+        `UPDATE provider_sale_settings
+            SET support_enabled=$2, platform_fee_basis_points=$3, support_consent_version=$4,
+                support_agreement_revision=COALESCE(support_agreement_revision,0)+1,
+                support_consented_by=$6, support_consented_at=clock_timestamp(),
+                version=version+1, updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND version=$5 RETURNING ${SALE_SETTINGS_COLUMNS}`,
+        [actor.providerId, input.supportEnabled, basisPoints, input.consentVersion, input.expectedVersion, actor.nihoUserId],
+      );
+      if (!updated.rows[0]) throw new StoreConflictError("Sale settings version mismatch.");
+      return saleSettingsFromRow(updated.rows[0]);
+    });
+  }
+
+  async getProviderSupportSettings(actor: HostActor): Promise<ProviderSaleSettings | null> {
+    assertStoreIdentifier(actor?.providerId, "actor.providerId");
+    assertStoreIdentifier(actor?.nihoUserId, "actor.nihoUserId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireBookingsOwner(client, actor);
+      const result = await client.query<DbRow>(
+        `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1`,
+        [actor.providerId],
+      );
+      return result.rows[0] ? saleSettingsFromRow(result.rows[0]) : null;
     });
   }
 
@@ -1583,7 +1664,7 @@ export class GuestBookingRepository {
       `SELECT pub.slug AS slug,p.id,p.provider_id,
               pub.currency AS publication_currency,pub.unit_amount AS publication_unit_amount,
               pub.sale_terms_snapshot,
-              s.platform_fee_basis_points,
+              s.platform_fee_basis_points, s.support_consent_version, s.support_agreement_revision,
               (SELECT array_agg(r.id ORDER BY r.id COLLATE "C") FROM schedule_rules r
                  WHERE r.provider_id=p.provider_id AND r.product_id=p.id AND (
                    r.ends_on IS NULL OR r.ends_on >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date
@@ -1607,7 +1688,9 @@ export class GuestBookingRepository {
       // A second active sale source with the slug stops the sale, as in loadSellable.
       if (rows?.length !== 1) return false;
       const row = rows[0]!;
-      if (row.platform_fee_basis_points === null) return false;
+      if (row.platform_fee_basis_points === null
+        || row.support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+        || row.support_agreement_revision === null) return false;
       const id = String(row.id);
       const currency = String(row.publication_currency);
       const unitAmount = Number(row.publication_unit_amount);
@@ -1849,7 +1932,12 @@ export class GuestBookingRepository {
               bookingQuestionsFingerprint: terms.bookingQuestionsFingerprint,
               conditionsVersion: terms.conditionsVersion,
             },
-            platformFee: { supportEnabled: settings.supportEnabled, basisPoints: settings.platformFeeBasisPoints },
+            platformFee: {
+              supportEnabled: settings.supportEnabled,
+              basisPoints: settings.platformFeeBasisPoints,
+              supportConsentVersion: settings.supportConsentVersion!,
+              supportAgreementRevision: settings.supportAgreementRevision!,
+            },
           },
         });
       } catch (error) {
@@ -2056,6 +2144,11 @@ export class GuestBookingRepository {
          UPDATE booking_cancellation_requests q SET decline_message=NULL
            FROM erased e
           WHERE q.provider_id=e.provider_id AND q.booking_id=e.booking_id AND q.decline_message IS NOT NULL
+       ), support_case_memos AS (
+         -- Admin-only free text may contain guest details too; clear it at the booking's existing PII deadline.
+         UPDATE experience_support_cases c SET internal_memo=NULL,revision=revision+1,updated_at=clock_timestamp()
+           FROM erased e
+          WHERE c.provider_id=e.provider_id AND c.booking_id=e.booking_id AND c.internal_memo IS NOT NULL
        ), feedback AS (
          DELETE FROM guest_mail_delivery_feedback f
           USING erased e

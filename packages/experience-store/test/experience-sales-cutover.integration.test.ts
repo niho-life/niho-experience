@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreNotFoundError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
-import { GuestBookingRepository } from "../src/guest-bookings.ts";
+import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { ExperienceStore } from "../src/repository.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -82,11 +82,9 @@ describe("Experience owner publication is the only Experience checkout source", 
          VALUES ($1,$2,1,3,4,4,'FREE_UNTIL_24H',90,3750,'[]'::jsonb,$3,$4)`,
         [OWNER.providerId, product.id, QUESTIONS_FINGERPRINT, CONDITIONS],
       );
-      await pool.query(
-        `INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points)
-         VALUES ($1,false,1000)`,
-        [OWNER.providerId],
-      );
+      await bookings.setProviderSupportSettings(OWNER, {
+        supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 0,
+      });
       const legacyProduct = await store.createProduct(OWNER, {
         id: "product-unpublished-synthetic", slug: "unpublished-owner-seller-synthetic", status: "PUBLISHED", publicTitle: "Synthetic unpublished legacy product",
         content: productContent, currency: "JPY", unitAmount: 1000, cancellationTermsRef: "cancel-legacy-v1",

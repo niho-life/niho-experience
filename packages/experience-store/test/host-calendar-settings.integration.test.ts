@@ -10,7 +10,7 @@ import { HostCalendarSettings } from "../src/host-calendar-settings.ts";
 import { enqueueGoogleCalendarAttentionNotification } from "../src/host-notification-outbox.ts";
 import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { ExperienceStore } from "../src/repository.ts";
-import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 設定 › カレンダー (#109): the Google connection's state and the bookings feed, against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -71,7 +71,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
-    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+    await consentSupportOffForTest(guests, ownerA);
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: null, minimumParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
     });

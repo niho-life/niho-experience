@@ -36,6 +36,21 @@ export const SITE_CANCEL_NOTE_MAX = 1000;
 
 const CANCELLED_BY = { GUEST: "guest", HOST: "host", SUPPORT: "support" } as const;
 const CANCELLED_BY_LABEL = { guest: "予約者", host: "ホスト", support: "NIHO サポート" } as const;
+const SUPPORT_ACTION_LABELS: Readonly<Record<string, string>> = {
+  SUPPORT_CANCEL: "予約の取消・返金",
+  SUPPORT_APPROVE: "取消依頼の承認・返金",
+  SUPPORT_DECLINE: "取消依頼への辞退",
+  SUPPORT_RESOLVE_REVIEW: "支払い確認後の取消・返金",
+  SUPPORT_RETRY_REFUND: "返金の再試行",
+  SUPPORT_CLOSE_REFUND: "返金対応の終了",
+};
+const SUPPORT_OUTCOME_LABELS: Readonly<Record<string, string>> = {
+  CANCELLED: "予約を取り消しました",
+  DECLINED: "取消依頼を辞退しました",
+  REFUND_RETRIED: "返金を再試行しました",
+  REFUND_CLOSED: "返金対応を終了しました",
+  NOT_CANCELLABLE: "操作対象外でした",
+};
 
 /** "11/4 に取消（ホスト · 雨・荒天）" and where the refund is: what 予約's detail says of a cancelled booking. */
 export function siteCancellationLines(booking: Pick<HostBooking, "amountYen" | "cancelledAt" | "site">): string[] {
@@ -137,6 +152,14 @@ export function siteBooking(stored: HostGuestBooking): HostBooking {
         refundFailed: stored.refundFailed,
         requested: stored.cancellationRequested,
       },
+      ...(stored.supportHistory?.length ? {
+        supportHistory: stored.supportHistory.map((entry) => ({
+          at: japanMinute(entry.occurredAtUtc),
+          text: entry.type === "GUEST_CONTACT_SENT"
+            ? "NIHOサポートから予約者へ連絡"
+            : [SUPPORT_ACTION_LABELS[entry.action ?? ""] ?? "NIHOサポート対応", SUPPORT_OUTCOME_LABELS[entry.outcome ?? ""]].filter(Boolean).join(" · "),
+        })),
+      } : {}),
     },
   };
 }

@@ -5,12 +5,13 @@ const policy = { policyVersion: "2026-10-23", consentVersion: "2026-10-23", offT
 type HostFixture = { kind: "SPOT" | "EXPERIENCE_PROVIDER"; id: string; displayName: string };
 type SettingFixture = { enabled: boolean; policyVersion: string; consentVersion: string; consentedAt: string; agreementRevision: number; sharedConsultationMemo: string | null; revision: number; updatedAt: string };
 type StateFixture = { host: HostFixture; setting: SettingFixture | null; settingState: string; policy: typeof policy; writeCapability: { writable: boolean; reason: string | null } };
+type ExperienceSettingFixture = { providerId: string; supportEnabled: boolean; platformFeeBasisPoints: 1000 | 1500; supportConsentVersion: string | null; supportAgreementRevision: number | null; version: number };
 const spot: HostFixture = { kind: "SPOT", id: "spot-1", displayName: "合成の通常拠点" };
-const provider: HostFixture = { kind: "EXPERIENCE_PROVIDER", id: "provider-1", displayName: "合成の外部提供者" };
+const provider: HostFixture = { kind: "EXPERIENCE_PROVIDER", id: "sample-provider-kitchen", displayName: "サンプルの台所" };
 const list = { hosts: [spot, provider], limit: 100, truncated: false };
 const unset = (host: HostFixture = spot): StateFixture => ({ host, setting: null, settingState: "UNSET", policy, writeCapability: { writable: true, reason: null } });
 const current = (host: HostFixture = spot, enabled = false, revision = 3): StateFixture => ({ host, setting: { enabled, policyVersion: policy.policyVersion, consentVersion: policy.consentVersion, consentedAt: "2026-10-23T01:00:00.000Z", agreementRevision: 2, sharedConsultationMemo: "合成の相談メモ", revision, updatedAt: "2026-10-23T01:00:00.000Z" }, settingState: "CURRENT", policy, writeCapability: { writable: true, reason: null } });
-const reconsent = (host: HostFixture = spot): StateFixture => ({ ...current(host, true), setting: { ...current(host, true).setting!, policyVersion: "2026-01-01", consentVersion: "2026-01-01" }, settingState: "RECONSENT_REQUIRED" });
+const priorExperienceSetting = (): { setting: ExperienceSettingFixture } => ({ setting: { providerId: provider.id, supportEnabled: true, platformFeeBasisPoints: 1500, supportConsentVersion: "2026-01-01", supportAgreementRevision: 2, version: 3 } });
 
 async function signIn(page: Page, empty = false) {
   await page.goto(`/host${empty ? "?mock=empty" : ""}`);
@@ -26,13 +27,17 @@ async function attemptNavigation(page: Page) {
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", headers: { "cache-control": "private, no-store" }, body: JSON.stringify(body) });
 
-async function stub(page: Page, options: { hosts?: typeof list; state?: StateFixture; onTarget?: (route: Route, method: string) => Promise<void> } = {}) {
+async function stub(page: Page, options: { hosts?: typeof list; state?: StateFixture; onTarget?: (route: Route, method: string) => Promise<void>; onExperienceTarget?: (route: Route, method: string) => Promise<void> } = {}) {
   await page.route("**/host/api/support-settings**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (url.pathname === "/host/api/support-settings") return json(route, options.hosts ?? list);
     if (options.onTarget) return options.onTarget(route, method);
     return json(route, options.state ?? unset(url.pathname.includes("EXPERIENCE_PROVIDER") ? provider : spot));
+  });
+  await page.route("**/host/api/experience-support-settings/**", async (route) => {
+    if (options.onExperienceTarget) return options.onExperienceTarget(route, route.request().method());
+    return json(route, priorExperienceSetting());
   });
 }
 
@@ -92,21 +97,21 @@ test("invalid, incomplete or duplicate target query never falls through to anoth
   await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toContainText("サポートON");
 });
 
-test("shows CURRENT ON/OFF, RECONSENT_REQUIRED and read-only write stop for both host kinds", async ({ page }) => {
+test("shows current Spot settings and requires explicit current consent for Experience", async ({ page }) => {
   await stub(page, { onTarget: async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path.includes("EXPERIENCE_PROVIDER")) return json(route, reconsent(provider));
     return json(route, { ...current(spot, false), writeCapability: { writable: false, reason: "SUPPORT_WRITES_DISABLED" } });
   } });
   await openSupport(page);
   const spotPanel = page.getByRole("region", { name: /合成の通常拠点/ });
   await expect(spotPanel).toContainText("サポートOFF");
   await expect(spotPanel).toContainText("現在は設定変更を受け付けていません");
-  await page.getByRole("link", { name: /合成の外部提供者/ }).click();
-  const providerPanel = page.getByRole("region", { name: /合成の外部提供者/ });
-  await expect(providerPanel).toContainText("再同意が必要");
-  await expect(providerPanel).toContainText("以前の設定は現在の規約版では有効ではありません");
-  await expect(providerPanel.getByRole("radio", { name: /サポートON/ })).toBeChecked();
+  await page.getByRole("link", { name: /サンプルの台所/ }).click();
+  const providerPanel = page.getByRole("region", { name: /サンプルの台所/ });
+  await expect(providerPanel).toContainText("同意が必要");
+  await expect(providerPanel).toContainText("以前の設定や過去の予約には同意を補いません");
+  await expect(providerPanel.getByRole("radio", { name: /サポートON/ })).not.toBeChecked();
+  await expect(providerPanel.getByRole("radio", { name: /サポートOFF/ })).not.toBeChecked();
+  await expect(providerPanel.getByRole("button", { name: "選択内容を確認" })).toBeDisabled();
 });
 
 test("an initial target failure stays distinct from UNSET and offers an in-place reload", async ({ page }) => {
@@ -310,8 +315,9 @@ test("an unknown result with writes disabled explains why the same payload canno
 test("browser back and forward stay actions re-arm the single history guard", async ({ page }) => {
   await stub(page, { onTarget: async (route) => json(route, current(new URL(route.request().url()).pathname.includes("EXPERIENCE_PROVIDER") ? provider : spot, false)) });
   await openSupport(page);
-  await page.getByRole("link", { name: /合成の外部提供者/ }).click();
-  await expect(page.getByRole("region", { name: /合成の外部提供者/ })).toBeVisible();
+  await page.getByRole("link", { name: /サンプルの台所/ }).click();
+  await expect(page.getByRole("region", { name: /サンプルの台所/ })).toBeVisible();
+  await page.getByRole("link", { name: "支援設定の対象一覧へ戻る" }).click();
   await page.getByRole("link", { name: /合成の通常拠点/ }).click();
   await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toBeVisible();
   await page.getByRole("link", { name: /^(ホーム|ホームへ戻る)$/ }).filter({ visible: true }).first().click();
@@ -332,12 +338,13 @@ test("browser back and forward stay actions re-arm the single history guard", as
 test("dirty link, host switch, logout and browser history stay guarded; unknown can be explicitly discarded", async ({ page }) => {
   await stub(page, { onTarget: async (route, method) => method === "PUT" ? json(route, { error: "unavailable" }, 503) : json(route, current(new URL(route.request().url()).pathname.includes("EXPERIENCE_PROVIDER") ? provider : spot, false, 3)) });
   await openSupport(page);
-  await page.getByRole("link", { name: /合成の外部提供者/ }).click();
-  await expect(page.getByRole("region", { name: /合成の外部提供者/ })).toBeVisible();
+  await page.getByRole("link", { name: /サンプルの台所/ }).click();
+  await expect(page.getByRole("region", { name: /サンプルの台所/ })).toBeVisible();
+  await page.getByRole("link", { name: "支援設定の対象一覧へ戻る" }).click();
   await page.getByRole("link", { name: /合成の通常拠点/ }).click();
   const panel = page.getByRole("region", { name: /合成の通常拠点/ });
   await panel.getByRole("radio", { name: /サポートON/ }).check();
-  await page.getByRole("link", { name: /合成の外部提供者/ }).click();
+  await page.getByRole("link", { name: /サンプルの台所/ }).click();
   let leave = page.getByRole("dialog", { name: "保存していない変更があります" });
   await expect(leave.getByRole("button", { name: "編集を続ける" })).toBeFocused();
   await leave.getByRole("button", { name: "編集を続ける" }).click();
@@ -352,30 +359,36 @@ test("dirty link, host switch, logout and browser history stay guarded; unknown 
   await confirm.getByRole("checkbox").check();
   await confirm.getByRole("button", { name: "同意して保存" }).click();
   await expect(panel.getByRole("button", { name: "同じ内容を再送" })).toBeVisible();
-  await page.getByRole("link", { name: /合成の外部提供者/ }).click();
+  await page.getByRole("link", { name: /サンプルの台所/ }).click();
   leave = page.getByRole("dialog", { name: "保存結果を確認できていません" });
   await expect(leave).toContainText("受付済みの処理があっても取り消されません");
   await leave.getByRole("button", { name: "確認を破棄して移動" }).click();
   await expect(page).toHaveURL(/hostKind=EXPERIENCE_PROVIDER/);
-  const nextPanel = page.getByRole("region", { name: /合成の外部提供者/ });
+  const nextPanel = page.getByRole("region", { name: /サンプルの台所/ });
   await nextPanel.getByRole("radio", { name: /サポートON/ }).check();
-  await page.getByRole("link", { name: /合成の通常拠点/ }).click();
+  await page.getByRole("link", { name: "支援設定の対象一覧へ戻る" }).click();
   await expect(page.getByRole("dialog", { name: "保存していない変更があります" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(nextPanel.getByRole("radio", { name: /サポートON/ })).toBeChecked();
+  await page.getByRole("link", { name: "支援設定の対象一覧へ戻る" }).click();
+  await page.getByRole("dialog", { name: "保存していない変更があります" }).getByRole("button", { name: "保存せずに移動" }).click();
+  await expect(page.getByRole("heading", { name: "NIHOサポート", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: /合成の通常拠点/ }).click();
+  await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toBeVisible();
 });
 
 test("401 clears target/input and a slow response from another target is ignored", async ({ page }) => {
   let reject = false;
   await stub(page, { onTarget: async (route) => {
-    const providerRequest = new URL(route.request().url()).pathname.includes("EXPERIENCE_PROVIDER");
-    if (providerRequest) { await new Promise((resolve) => setTimeout(resolve, 200)); return json(route, current(provider, true)); }
     if (reject) return json(route, { error: "unauthenticated" }, 401);
     return json(route, current(spot, false));
+  }, onExperienceTarget: async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return json(route, priorExperienceSetting());
   } });
   await openSupport(page);
-  await page.getByRole("link", { name: /合成の外部提供者/ }).click();
+  await page.getByRole("link", { name: /サンプルの台所/ }).click();
   await page.goto("/host/support?hostKind=SPOT&hostId=spot-1");
   await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toContainText("サポートOFF");
   await expect(page.getByText("サポートON", { exact: true })).toHaveCount(0);
@@ -383,6 +396,6 @@ test("401 clears target/input and a slow response from another target is ignored
   await page.reload();
   await expect(page.getByRole("main").getByRole("alert")).toContainText("読み込んだ設定と入力を消去しました");
   await page.waitForTimeout(300);
-  await expect(page.getByRole("region", { name: /合成の外部提供者/ })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: /サンプルの台所/ })).toHaveCount(0);
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });

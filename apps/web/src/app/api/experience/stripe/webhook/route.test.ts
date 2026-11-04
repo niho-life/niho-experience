@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   confirm: null as null | ReturnType<typeof vi.fn>,
   release: null as null | ReturnType<typeof vi.fn>,
   refund: null as null | ReturnType<typeof vi.fn>,
+  settlement: null as null | ReturnType<typeof vi.fn>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({
@@ -19,6 +20,7 @@ vi.mock("@/lib/experience/store-server", () => ({
   experienceStore: () => (state.confirm ? { confirmBookingPayment: state.confirm } : null),
   guestHoldReleases: () => (state.release ? { releaseGuestHold: state.release } : null),
   bookingCancellations: () => (state.refund ? { applyRefundEvent: state.refund } : null),
+  experienceSupportRepository: () => (state.settlement ? { ensureSettlement: state.settlement } : null),
 }));
 
 import { POST } from "./route";
@@ -62,6 +64,7 @@ beforeEach(() => {
   state.confirm = vi.fn().mockResolvedValue({ duplicateEvent: false });
   state.release = vi.fn().mockResolvedValue({ status: "EXPIRED", released: true, duplicateEvent: false });
   state.refund = vi.fn().mockResolvedValue({ status: "SUCCEEDED", duplicateEvent: false });
+  state.settlement = vi.fn().mockResolvedValue({ status: "PENDING" });
   errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -82,6 +85,7 @@ describe("experience Stripe webhook", () => {
       stripeEventId: "evt_Synthetic285", stripeEventType: "checkout.session.completed", eventOccurredAtUtc: "2026-11-01T00:50:00.000Z",
       amount: 8000, currency: "JPY",
     });
+    expect(state.settlement).toHaveBeenCalledWith(BOOKING_ID);
     expect(state.release).not.toHaveBeenCalled();
   });
 

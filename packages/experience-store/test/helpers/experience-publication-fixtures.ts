@@ -1,6 +1,17 @@
 import type { Pool } from "pg";
+import { EXPERIENCE_SUPPORT_CONSENT_VERSION, type GuestBookingRepository } from "../../src/guest-bookings.ts";
+import type { HostActor } from "../../src/types.ts";
 
 const TEST_PUBLICATION_CONSENT = "synthetic-owner-publication-v1";
+
+/** Explicit current owner consent is required before these synthetic products can be sold. */
+export async function consentSupportOffForTest(guests: Pick<GuestBookingRepository, "setProviderSupportSettings">, actor: HostActor): Promise<void> {
+  await guests.setProviderSupportSettings(actor, {
+    supportEnabled: false,
+    consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION,
+    expectedVersion: 0,
+  });
+}
 
 /** Seed the immutable public copies required by guest-booking integration fixtures. */
 export async function seedTestPublications(pool: Pool): Promise<void> {

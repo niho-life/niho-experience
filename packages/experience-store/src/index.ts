@@ -105,6 +105,7 @@ export type { HostCalendarFeed, HostCalendarFeedBooking, HostCalendarFeedIssue, 
 export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
 export type {
   ClaimedBookingMessage,
+  ClaimedSupportBookingMessage,
   ClaimedGuestQuestionReply,
   ClaimedQuestionReply,
   GuestBookingThreadStart,
@@ -182,6 +183,16 @@ export {
   SESSION_CANCELLATION_REASONS,
   SUPPORT_CANCELLATION_REASONS,
 } from "./booking-cancellations.ts";
+export { ExperienceSupportRepository } from "./support-settlement.ts";
+export type {
+  ExperienceSettlementSummary,
+  ExperienceSupportCase,
+  ExperienceSupportNotification,
+  SettlementInitializationResult,
+  SettlementSource,
+  SettlementTransferCommand,
+  StripeSettlementEvidence,
+} from "./support-settlement.ts";
 export type {
   CancellationActor,
   CancellationOutcome,
@@ -206,7 +217,7 @@ export type {
   SupportQueueReview,
   SupportRefundChoice,
 } from "./booking-cancellations.ts";
-export { GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS, validSaleTerms } from "./guest-bookings.ts";
+export { EXPERIENCE_SUPPORT_CONSENT_VERSION, GUEST_BOOKING_LIMITS, GuestBookingRepository, PLATFORM_FEE_BASIS_POINTS, validSaleTerms } from "./guest-bookings.ts";
 export { HOST_GUEST_BOOKING_LIMITS, HOST_GUEST_BOOKING_STATUSES } from "./host-guest-bookings.ts";
 export type {
   HostGuestBooking,
