@@ -33,8 +33,10 @@ DB は、レビューの内容（星・本文・タグ・表示名・メモ）�
 ## データの境界
 
 - `guest_reviews` は予約（`bookings`）への FK と `UNIQUE (provider_id, booking_id)` で「予約 1 件につきレビュー 1 件」を保つ。
+- 公開読取は native 体験では `experience_product_publication_states.current_publication_id` の immutable な公開slugを基準にし、本人停止・運営停止・`owner_resume_required`・非公開商品・素材未準備を除く。`GuestReviewRepository` の `includeNativePublications` は既定 `true` だが、web factory は `EXPERIENCE_PUBLICATIONS_ENABLED` を渡す。flag OFF では native candidate を読まず、現在/過去/編集draftの native slug claimは残して legacy 同名商品へのfallbackを防ぐ。native claimが無い従来商品だけ、ON/OFFとも従来どおり同じslugが1件だけの `PUBLISHED` 商品を読む。
+- カード集計は `listPublishedReviewSummaries` が最大100 slug（各160文字、合計8,000文字）を一括で読み、slugごとのN+1を作らない。サイト側はslugを重複排除し、件数・合計文字数の両上限に収まるbatchへ分けるため、掲載数が増えても全件の集計を取得できる。公開DTOは件数、平均、公開タグ集計だけで、scope内部IDを返さない。
 - 公開 API が返すのは `id`（レビューの uuid・予約や利用者の識別子ではない）、星、本文、よかった点の表示名（英語）、表示名、`originLabel`、投稿日時（`publishedAt`）、`fromBooking`、提供者の返信（英語・ホスト名）だけ。**日本語の返信原文・提供者だけへのメモ・報告・予約 id・提供者や商品の内部 id・提供者の NIHO user id は返さない。**
-- 返信の `hostName` は `experience_products.seller_display_name` を 60 文字に切り詰める（api-client の検証が 60 文字を超える名前で応答全体を弾くため）。
+- 返信の `hostName` は現在の native 公開版（未claim legacyでは商品）の `seller_display_name` を 60 文字に切り詰める（api-client の検証が 60 文字を超える名前で応答全体を弾くため）。
 - ホストの読み取り（`listReviews` / `getReview`）は予約者のメール・電話・氏名を返さない（読みもしない）。予約者を指すのは表示名と、予約の `public_booking_id`、開催の開始時刻だけ。
 - 投稿用リンクの token は 32 byte の乱数（base64url）。DB には SHA-256 だけを置き、生の token はメール（URL の fragment）にしか無い。期限は最長 30 日。使えるのは 1 回で、同じ `clientRequestKey` の再送だけが同じ結果になる。
 - IP アドレスは保存しない。outbox へは書かない。
@@ -54,11 +56,12 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 
 英語の下書き（日本語から英語）は、予約前の質問と同じ Claude API の翻訳（`EXPERIENCE_TRANSLATION_ENABLED`、[guest-questions.md](guest-questions.md) の「翻訳」）で作る（#84）。`draftGuestReviewEnglish`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER のレビューを読み、レビューの本文を文脈に、ホストの日本語を英語にする（依頼文は `REVIEW_REPLY_TO_ENGLISH_SYSTEM`：体験のページでほかの旅行者も読む返信として訳す。名前・ID・体験名は送らない）。何も保存・公開しない。翻訳が off のときは「英語にする機能は準備中です。英語を直接書いてください。」、API が答えない・断る・15 秒を過ぎたときは「英語にできませんでした。作り直すか、英語を直接書いてください」で、どちらもホストが英語を直接書ける。
 
+英語レビュー本文は、OWNER がその1件の「日本語で読む」を押したときだけ同じ翻訳基盤で日本語にする。server action が受けるのは provider ID と review ID だけで、現在のNIHO本人とExperience OWNERを確認してStoreから本文を読み、公開本文だけを `GUEST_TO_JAPANESE_SYSTEM` へ渡す。表示名、予約、連絡先、`noteToHost`、返信原文は送らない。既存 `body_ja` と日本語原文は外部呼出しなしで再利用する。翻訳後はrequest memoizeされていない `loadHostProvidersFresh` でNIHO identityと現在のseller membershipを読み直し、Storeもtransaction内でExperience OWNERを再確認して `body_ja` をset-once保存する。画面へ戻すときは同じreview ID・同じ原文の `body.translation` だけを差し替え、翻訳中に別画面で進んだ返信・報告・revisionへ追随しないため、開いていた返信draftは既存CASで保護される。翻訳off・API未設定・timeout・拒否・長すぎる結果では原文と返信draftを残す。
+
 ## 画面
 
-- **体験詳細（英語のページ）**：`getLiveReviews(slug)`（`apps/web/src/lib/journey.ts`）が、フラグ ON の http mode で先頭 3 件と集計を DB から読み、`JourneyReviews` として既存の「Reviews」の節に渡す。フラグ OFF・DB なし・その slug が experience DB で `PUBLISHED` でないときは `null`（節も "New" の印も出さない）、読めなかったときは `unavailable`（再試行つきの通知。件数 0 とは別）。見せ方（0 件の "be one of the first"、1〜2 件は件数と本文だけ・星なし、3 件以上は平均・タグ・"Show all N reviews"）と、構造化データを 3 件以上のときだけ出す規則は #113 のまま。"Show all" は、プレビューでなければこのサイトの `GET …/reviews?limit=50`（`getSiteReviewsApi`）を読む。
-- **`/host/reviews`**：`loadGuestReviews`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER の一覧を 100 件ずつ既存の `HostReview` の形に写し、残りは一覧の下の「続きを見る」（`loadMoreReviewList`、store の cursor）で足す（#84）。見出しの平均・件数と体験の選択は、読み込んだページではなく全件から出す（store の `summarizeReviews`：表示中のレビューを商品ごとに件数と星の合計で数える。読むだけ）。全件が公開中なので「公開前」の状態は無く、全件に返信できる。返信・報告は server action（`review-actions.ts`）が入力を検めたうえで store を呼ぶ。ブラウザは試行ごとに command id を持ち、失敗して同じ内容でやり直すと同じ id を使うので、store は 1 回だけ受ける。返信の revision は一覧と一緒に画面へ渡し、保存のたびに更新する（ほかの画面で返信が変わっていれば「読み込み直してください」）。フラグ OFF・mock mode は今までの画面（mock の一覧／http の「準備中」）。
-- 予約者の英語の本文・メモには日本語訳がまだ無い（翻訳モジュール 5b まで `null`）ので、画面は原文に「翻訳できませんでした」を添えて出す（メッセージと同じ扱い）。
+- **体験詳細（英語・既存日本語ページ）**：legacy-shaped の `ExperiencePageContent` と、native current publication の `SitePublicationPage` はどちらも `getLiveReviews(slug)`（`apps/web/src/lib/journey.ts`）を1回読み、先頭3件と集計を同じ `JourneyReviews` として題名下の見出し、レビュー本文、公開返信、JSON-LDへ渡す。フラグ OFF・DB なし・その slug が公開scopeでないときは `null`（節も "New" も出さない）、読めなかったときは `unavailable`（再試行つきの通知。件数0とは別）。見せ方（0件は既存の "New"、1〜2件は件数と本文だけ・星なし、3件以上は平均・タグ・全件表示）と、`TouristTrip` / `Product` の `Review` / `AggregateRating` を3件以上のときだけ出す規則は #113 のまま。ホーム・一覧・関連カードも同じ一括集計を使う。"Show all" は、プレビューでなければこのサイトの `GET …/reviews?limit=50`（`getSiteReviewsApi`）を読む。
+- **`/host/reviews`**：`loadGuestReviews`（`apps/web/src/host/guest-reviews-server.ts`）が OWNER の一覧を 100 件ずつ既存の `HostReview` の形に写し、残りは一覧の下の「続きを見る」（`loadMoreReviewList`、store の cursor）で足す（#84）。見出しの平均・件数と体験の選択は、読み込んだページではなく全件から出す（store の `summarizeReviews`）。全件が公開中なので「公開前」の状態は無く、全件に返信できる。英語本文は未翻訳の1件だけ明示的に「日本語で読む」ができ、非公開メモは翻訳しない。返信・報告は server action（`review-actions.ts`）が入力を検めたうえで store を呼ぶ。ブラウザは返信/報告の試行ごとに command id を持ち、返信の revision は一覧と一緒に画面へ渡して保存のたびに更新する。翻訳中/失敗時も返信入力をmountしたまま保つ。フラグ OFF・mock mode は今までの画面（mock の一覧／http の「準備中」）。
 
 ## 通知 producer と日本語化の引き継ぎ
 
@@ -81,6 +84,6 @@ OWNER だけ（`requireOwner`：NIHO がそのアカウントを提供者の OWN
 ## 未決（オーナー判断。実装で決め打ちしていない）
 
 1. **投稿の期限（`submitWindowDays` = 30 日）。** niho-app#19314 の推奨値でオーナー未確定。シンプルを優先するなら**この条件は外してよい**：リンク自体の期限（最長 30 日、メール job が決める）が実質の期限になり、同じ意味の条件が二つ要らない。外す場合は資格が「CONFIRMED で終了後」だけになる。
-2. **体験が `PUBLISHED` でなくなったあとのレビュー。** 招待の発行・表示・投稿は体験の公開状態を確かめない（`ARCHIVED` の体験にも書ける）。公開 API は `PUBLISHED` の体験だけを答えるので公開ページには出ず、体験が再公開されればレビューも戻る。推奨は**現状のまま**（書けても害は無く、確かめる条件を足すほうが複雑）。
-3. **承認制や niho-app#19314（NIHO 側のレビュー API）の扱い。** オーナー判断。この PR は触らない。experience が正本なので、#19314 は「experience の route を読む」に置き換わる想定だが、閉じるかどうかは決めない。
+2. **体験が公開scopeでなくなったあとのレビュー。** 招待の発行・表示・投稿は体験の公開状態を確かめない（停止中の体験にも書ける）。公開 API は現在可視なnative publication、または未claim legacyの単一 `PUBLISHED` 商品だけを答えるので公開ページには出ず、同じ商品が再公開されればレビューも戻る。推奨は**現状のまま**（書けても害は無く、確かめる条件を足すほうが複雑）。
+3. **投稿後の編集・削除。** ゲスト向けの編集・削除操作は未提供。本文は不変として保存し、報告でも自動非表示にしない。編集・削除依頼への対応方法は運用方針が未確定。事前承認なしの直接公開と、experienceを正本とする方針は確定済み（2026-10-31）。
 4. **レビューの `product_id` と予約の `product_id` の一致**は、今はストアだけが保証する（DB の FK で縛るには `bookings` に unique index を足す必要がある）。

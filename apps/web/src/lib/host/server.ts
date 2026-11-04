@@ -108,8 +108,8 @@ export async function selectedHostApiClient(session: HostSession, options: { leg
   });
 }
 
-/** Resolve the signed-in NIHO identity to local Experience seller memberships. */
-export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
+/** Resolve the signed-in NIHO identity to local Experience seller memberships without request memoization. */
+export async function loadHostProvidersFresh(): Promise<ProvidersLoad> {
   const session = await readHostSession();
   if (!session) return { status: "signed-out" };
   if (!accessTokenUsable(session, Date.now())) return { status: "refresh" };
@@ -170,7 +170,10 @@ export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
     // A misconfigured origin or an unusable token: show the error state, never the token.
     return { status: "error" };
   }
-});
+}
+
+/** Normal host reads share one identity and membership projection within a request. */
+export const loadHostProviders = cache(loadHostProvidersFresh);
 
 export type Renewal =
   | { outcome: "refreshed"; session: HostSession }

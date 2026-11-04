@@ -15,4 +15,9 @@ describe("host publication next action", () => {
     expect(publicationCanPublish({ dirty: false, blockers: [], suspended: true })).toBe(false);
     expect(publicationCanPublish({ dirty: false, blockers: [], suspended: false })).toBe(true);
   });
+
+  it("takes the OWNER to support/fee consent before offering publication", () => {
+    expect(publicationNextAction({ dirty: false, blockers: ["SUPPORT_CONSENT_REQUIRED"], published: false })).toBe("SUPPORT");
+    expect(publicationCanPublish({ dirty: false, blockers: ["SUPPORT_CONSENT_REQUIRED"], suspended: false })).toBe(false);
+  });
 });

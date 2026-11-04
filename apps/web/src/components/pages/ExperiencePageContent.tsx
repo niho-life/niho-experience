@@ -172,9 +172,11 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   }
   // Conditions, questions to the host and the FAQ have no NIHO contract yet: the mock serves them, a real API shows none (src/lib/journey.ts).
   // Related experiences and guides are English-only for now; both disappear when there are none or the catalogue cannot be read.
-  const [extras, relatedCards, liveReviews] = locale === "en"
-    ? await Promise.all([getJourneyExtras(e.slug, query), relatedExperienceCards(e.slug, query), getLiveReviews(e.slug)])
-    : [NO_JOURNEY_EXTRAS, [], null];
+  const [extras, relatedCards, liveReviews] = await Promise.all([
+    locale === "en" ? getJourneyExtras(e.slug, query) : Promise.resolve(NO_JOURNEY_EXTRAS),
+    locale === "en" ? relatedExperienceCards(e.slug, query) : Promise.resolve([]),
+    getLiveReviews(e.slug),
+  ]);
   // 予約者のレビュー kept in the experience DB (#104; http mode with its flag only) take the extras' place.
   const journey = liveReviews ? { ...extras, reviews: liveReviews } : extras;
   const relatedGuides = locale === "en" ? await guidesAboutExperience(e.slug) : { guides: [], draftSlugs: [] };
@@ -566,8 +568,8 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       know: e.knowBeforeYouGo,
       conditions: journey.conditions ? conditionRows(journey.conditions) : undefined,
       askHost: journey.questionsOpen ? <AskHost slug={e.slug} target={askHostTarget(hostNames(e))} face={faceOf(e)} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} translationNotice={translationNoticeShown(config)} /> : undefined,
-      reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews)) ?? undefined,
-      reviews: journey.reviews ? { title: "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} /> } : undefined,
+      reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews), locale) ?? undefined,
+      reviews: journey.reviews ? { title: locale === "ja" ? "レビュー" : "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} locale={locale} /> } : undefined,
       faq: journey.faq.length ? { title: "Questions before you book", items: journey.faq } : undefined,
       // Same no-store public availability as the booking controls. The API has no bookingClosesAt, so the band shows no cutoff or seat count.
       upcoming: upcomingDates.length ? <NextDateBand dates={upcomingDates} locale={locale} bookingHref={bookingHref} /> : undefined,

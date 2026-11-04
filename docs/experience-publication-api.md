@@ -1,6 +1,6 @@
 # Experience owner-seller API contract
 
-本書の本人・Connect境界の正は [NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。NIHO v1.0.0は未配備で、ExperienceのHTTP APIは環境flagが揃うまで閉じる。
+本書の本人・Connect境界の正は [NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。NIHO v1.0.0はstagingのmanifestを設定済み（niho-app #19784）だが実配備readbackは未確認で、ExperienceのHTTP APIは環境flagが揃うまで閉じる。
 
 Status: implementation contract for #330 / #369 / #377. The host UI consumes these operations. The product owner is the seller; product requests never select a seller, provider, or payment account. The existing calendar API has its own selected-provider context and validates the logged-in NIHO membership before writing.
 
@@ -81,6 +81,8 @@ The public API returns the accepted minimum charge and cancellation rule for gue
 ### Publish, stop, and resume
 
 `POST /host/api/products/{productId}/publish` (also resumes a seller-stopped product) sends `{ "version": "…", "consentVersion": "…", "accepted": true }`. The server checks current OWNER authority, seller/Connect readiness, seller display, consent, product content and photo rights, prices, explicit cancellation terms, the explicit Experience fee setting loaded during seller provisioning, and at least one saleable schedule. A missing fee configuration returns `FEE_SETTINGS_REQUIRED`; the seller cannot choose or override it. It never publishes unsaved input.
+
+An operationally provisioned fee row alone does not satisfy the OWNER's support/fee agreement. Missing or outdated explicit consent returns `SUPPORT_CONSENT_REQUIRED`, matching the existing booking admission gate. The host follows the existing support settings screen to review the current scope and total fee, explicitly consent, and return to the product. Admin drafting does not provide this consent.
 
 `POST /host/api/products/{productId}/stop` sends `{ "version": "…" }`. It removes the product from catalog, details, metadata, sitemap, and new checkout admission. Existing bookings and their immutable snapshots remain available.
 

@@ -60,7 +60,7 @@
 3. **レビュー（`AggregateRating`・`Review`）**（2026-10-22 更新・[#104](https://github.com/niho-life/niho-experience/issues/104)）：実際のレビューを集める仕組みの方針が決まったので、次の条件がすべて揃うときだけ出す。
    - 対象は、NIHOで予約した人だけが書き、投稿されたらそのまま公開されるレビュー（owner決定 2026-10-22。NIHOは公開前に確認しない：owner決定 2026-10-31）。OTAや拠点への評価、提供者が自分で書いたもの、予約を経由しないものは転用しない。
    - 実データ（HTTP API。レビューの出どころは experience の DB：`EXPERIENCE_GUEST_REVIEWS_ENABLED`）のときだけ。プレビューの合成のレビューは出さない。
-   - **画面に出している内容と一致させる**：平均は3件から画面に出すので、`aggregateRating` と `review` も3件以上のときだけ。1〜2件・0件・読めなかったときは何も出さない。出す `review` は画面の新しい順の件だけ。
+   - **画面に出している内容と一致させる**：legacy-shaped詳細とnative publication詳細のどちらも、同じ公開レビュー読取から平均を3件以上で画面に出すため、`aggregateRating` と `review` も3件以上のときだけ。1〜2件・0件・読めなかったときは何も出さない。出す `review` は画面の新しい順の件だけ。
    - 提供者の返信・よかった点の集計・予約や利用者の識別子は載せない。表示名は「名＋国・地域」だけ。
    - `TouristTrip` に `aggregateRating` と `review` を足し、同じ値を `Product` にも載せる（[#139](https://github.com/niho-life/niho-experience/issues/139)。`TouristTrip` はGoogleのリッチリザルトの対象外で、星が出るのは `Product`）。星が必ず出るとは限らない。表示と一致する構造化データとして置く。
    - 「0件」の `New` や「読めなかった」状態を、評価としては出さない。

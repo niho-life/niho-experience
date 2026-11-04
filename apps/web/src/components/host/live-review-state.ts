@@ -28,6 +28,18 @@ export function withSavedReview(reviews: readonly HostReview[], saved: HostRevie
   return reviews.map((review) => (review.id === saved.id ? saved : review));
 }
 
+/**
+ * A translation request may finish after the reply or report changed elsewhere. Apply only the
+ * Japanese rendering of the same immutable original; every other field remains the browser's
+ * current snapshot, including the reply whose CAS revision its draft was opened against.
+ */
+export function withReviewTranslation(reviews: readonly HostReview[], translated: HostReview): HostReview[] {
+  if (translated.body.translation === null) return [...reviews];
+  return reviews.map((review) => review.id === translated.id && review.body.original === translated.body.original
+    ? { ...review, body: { ...review.body, translation: translated.body.translation } }
+    : review);
+}
+
 /** The reply's revision the next correction is checked against. */
 export function withRevision(revisions: Readonly<Record<string, number>>, reviewId: string, revision: number): Record<string, number> {
   return { ...revisions, [reviewId]: revision };

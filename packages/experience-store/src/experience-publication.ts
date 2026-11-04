@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
   GUEST_BOOKING_LIMITS,
+  EXPERIENCE_SUPPORT_CONSENT_VERSION,
   activeRules,
   questionsFingerprint,
   cancellationPolicyCode,
@@ -25,6 +26,7 @@ import {
 import { productFromRow, type DbRow } from "./rows.ts";
 import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
+import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor, JsonValue, ProductRecord, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, normalizeCurrency } from "./validation.ts";
@@ -35,6 +37,7 @@ export type ExperiencePublicationBlocker =
   | "CONNECT_NOT_READY"
   | "CONSENT_OUTDATED"
   | "FEE_SETTINGS_REQUIRED"
+  | "SUPPORT_CONSENT_REQUIRED"
   | "MANUSCRIPT_REQUIRED"
   | "OPERATIONS_SUSPENDED"
   | "OWNER_NOT_CURRENT"
@@ -268,10 +271,6 @@ export interface ExperienceHostProviderMedia {
   readonly assets: readonly ExperienceHostProviderMediaAsset[];
 }
 
-const PUBLICATION_COLUMNS = `
-  p.id AS publication_id,p.provider_id,p.product_id,p.slug,p.public_title,p.content,p.currency,
-  p.unit_amount, p.seller_display_name, p.published_at, s.first_published_at`;
-
 const SALE_TERMS_COLUMNS = `provider_id,product_id,child_price_amount,child_min_age,child_max_age,child_adult_required,
   minimum_participants,minimum_chargeable_participants,max_party_size,cancellation_policy,
   cancellation_window_minutes_before_start,cancellation_refund_basis_points,minimum_attendance,booking_questions,
@@ -299,23 +298,6 @@ const PUBLIC_READER_COLUMNS = `
        AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
      WHERE selection.provider_id=visible_publications.provider_id
   ),'[]'::jsonb) AS provider_media`;
-
-const VISIBLE_PUBLICATIONS = `
-  WITH visible_publications AS (
-    SELECT ${PUBLICATION_COLUMNS}
-      FROM experience_product_publication_states s
-      JOIN experience_product_publications p ON p.id=s.current_publication_id
-      JOIN experience_products product ON product.provider_id=s.provider_id AND product.id=s.product_id
-     WHERE s.self_stopped_at IS NULL
-       AND s.operations_suspended_at IS NULL
-       AND s.owner_resume_required=false
-       AND product.status='PUBLISHED'
-       AND NOT EXISTS (
-         SELECT 1 FROM experience_product_publication_media media
-         JOIN experience_product_media_assets asset ON asset.id=media.asset_id
-          WHERE media.publication_id=p.id AND asset.state<>'READY'
-       )
-  )`;
 
 const safeInteger = (value: unknown, field: string): number => {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
@@ -593,10 +575,12 @@ async function blockers(
     [product.providerId, product.id, product.slug],
   );
   const feeSettings = await client.query(
-    "SELECT provider_id FROM provider_sale_settings WHERE provider_id=$1 FOR SHARE",
+    "SELECT provider_id,support_consent_version,support_agreement_revision FROM provider_sale_settings WHERE provider_id=$1 FOR SHARE",
     [product.providerId],
   );
   if (!feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
+  else if (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+    || feeSettings.rows[0].support_agreement_revision === null) result.push("SUPPORT_CONSENT_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
@@ -1962,7 +1946,7 @@ export class ExperiencePublicationRepository {
   async getPublicBySlug(slug: string): Promise<PublicExperiencePublication | null> {
     assertNonEmptyText(slug, "slug", 160);
     const result = await this.#pool.query<DbRow>(
-      `${VISIBLE_PUBLICATIONS}
+      `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT ${PUBLIC_READER_COLUMNS} FROM visible_publications WHERE slug=$1 ORDER BY publication_id DESC LIMIT 2`,
       [slug],
     );
@@ -1975,14 +1959,8 @@ export class ExperiencePublicationRepository {
    */
   async listClaimedSlugs(): Promise<readonly string[]> {
     const result = await this.#pool.query<{ slug: string }>(
-      `SELECT claimed.slug FROM (
-         SELECT product.slug FROM experience_products product
-          JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
-         UNION
-         SELECT publication.slug FROM experience_product_publications publication
-          JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
-       ) claimed
-       ORDER BY claimed.slug COLLATE "C"`,
+      `WITH ${CLAIMED_PUBLICATION_SLUGS_CTE}
+       SELECT slug FROM claimed_publication_slugs ORDER BY slug COLLATE "C"`,
     );
     return result.rows.map((row) => String(row.slug));
   }
@@ -1990,14 +1968,8 @@ export class ExperiencePublicationRepository {
   async claimsSlug(slug: string): Promise<boolean> {
     assertNonEmptyText(slug, "slug", 160);
     const result = await this.#pool.query(
-      `SELECT 1 FROM experience_products product
-        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
-        WHERE product.slug=$1
-       UNION ALL
-       SELECT 1 FROM experience_product_publications publication
-        JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
-        WHERE publication.slug=$1
-       LIMIT 1`,
+      `WITH ${CLAIMED_PUBLICATION_SLUGS_CTE}
+       SELECT 1 FROM claimed_publication_slugs WHERE slug=$1 LIMIT 1`,
       [slug],
     );
     return result.rows.length > 0;
@@ -2005,7 +1977,7 @@ export class ExperiencePublicationRepository {
 
   async listPublic(): Promise<readonly PublicExperiencePublication[]> {
     const result = await this.#pool.query<DbRow>(
-      `${VISIBLE_PUBLICATIONS}
+      `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT ${PUBLIC_READER_COLUMNS} FROM visible_publications
         WHERE NOT EXISTS (
           SELECT 1 FROM visible_publications duplicate
@@ -2023,7 +1995,7 @@ export class ExperiencePublicationRepository {
   async getPublicMediaAsset(assetId: string): Promise<PublicExperienceMediaAsset | null> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) return null;
     const result = await this.#pool.query<DbRow>(
-      `${VISIBLE_PUBLICATIONS}
+      `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT asset.object_key,asset.byte_size
          FROM visible_publications publication
          JOIN experience_product_publication_media media ON media.publication_id=publication.publication_id
@@ -2040,7 +2012,7 @@ export class ExperiencePublicationRepository {
   async getPublicProviderMediaAsset(assetId: string): Promise<PublicExperienceMediaAsset | null> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) return null;
     const result = await this.#pool.query<DbRow>(
-      `${VISIBLE_PUBLICATIONS}
+      `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT asset.object_key,asset.byte_size
          FROM visible_publications publication
          JOIN experience_provider_media_selection selection ON selection.provider_id=publication.provider_id

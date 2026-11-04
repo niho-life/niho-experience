@@ -9,10 +9,10 @@
 | 契約 | NIHO Experience Host v1.0.0 |
 | source | `niho-app` PR #19712 export commit `b5b664e6bfcb0bc8d0be01ffa109a684647b17db` |
 | export SHA-256 | `924ce2062be2c431ee6a4dd3a8322c48558e6d76f0a097bae75ae6222610023e` |
-| 状態 | draft / `not-deployed`。`EXPERIENCE_HOST_COMMON_CONTRACT_ENABLED` はNIHO側で既定OFF |
+| 状態 | NIHO側のstaging manifestは設定済み（niho-app #19784、2026-11-04 merge）。`EXPERIENCE_HOST_COMMON_CONTRACT_ENABLED=true`、audience `https://api-stg.niho.life`、caller `experience-host-stg-runtime@niho-app-stg.iam.gserviceaccount.com`。manifestのmergeは配備成功ではなく、実配備APIのreadbackは未確認。productionのflagは既定OFFのまま |
 | Experience consumer | `@niho-experience/api-client/host`。版・source SHA・hash・状態は `packages/api-client/src/contract-meta.ts` に固定 |
 
-NIHOapp PR #19712 は2026-11-04にmerge済みだが、契約APIの実配備は未確認でflagもOFF。NIHOapp #19121/#19278はopenのままで、Connect return URL・写真upload CORS・旧Host API互換のstaging設定／受入はNIHO側の残条件である。この変更範囲ではExperience consumerをv1に合わせ、NIHOappのコードや環境は変更しない。
+NIHOapp PR #19712 は2026-11-04にmerge済みで、stagingのmanifestは #19784 で有効化値に設定された。このcallerとaudienceはExperienceのstaging配備（`deploy-host-staging.yml` のruntime service account、`docs/host-calendar-staging.md` のaudience）と一致する。ただしmanifestのmergeは配備成功ではなく、実配備APIの同一export hash／source SHAの照合は未確認で、productionはOFF。NIHOapp #19121/#19278はopenのままで、Connect return URL・写真upload CORS・旧Host API互換のstaging設定／受入はNIHO側の残条件である。この変更範囲ではExperience consumerをv1に合わせ、NIHOappのコードや環境は変更しない。
 
 NIHO Host v1 が許すものは、現在本人の読取、既存Connect口座の限定readiness／再利用同意projection、旧NIHO予約の限定操作である。提供者一覧・作成・更新、Connect口座の作成・接続・変更、Experienceの商品・公開APIは含まれない。NIHOの禁止APIを復活させたり、権限やscopeを広げたりしない。
 
@@ -62,9 +62,9 @@ Checkout開始では予約transactionが有効snapshotのseller、Connect accoun
 
 ## 開けるための環境・配備ゲート
 
-コードと合成検証は実装されている。NIHO Host v1が`not-deployed`であるため、staging／productionのhost API flagはOFFのまま。NIHOapp #19121/#19278の設定・配備もExperienceから成功と見なさない。実環境を開くには次の条件を満たし、固定SHAで配備・受入する。
+コードと合成検証は実装されている。NIHO Host v1の実配備readbackが済むまで、Experienceのhost API flagは有効化しない（productionはNIHO側もOFF）。NIHOapp #19121/#19278の設定・配備もExperienceから成功と見なさない。実環境を開くには次の条件を満たし、固定SHAで配備・受入する。
 
-1. NIHOapp #19712 の同じexport hashを持つAPIをstagingへ先行配備し、`EXPERIENCE_HOST_COMMON_CONTRACT_ENABLED=true`、正確なExperience originの`APP_CONNECT_WEB_ORIGINS`、Experience runtime service accountのservice-ID allowlist、audienceを設定する。本人・identity失効・Connect不一致・未準備・再利用同意・旧予約読取／取消の応答を合成sellerで受け入れる。
+1. NIHOapp #19712 の同じexport hashを持つAPIをstagingへ先行配備し、`EXPERIENCE_HOST_COMMON_CONTRACT_ENABLED=true`、正確なExperience originの`APP_CONNECT_WEB_ORIGINS`、Experience runtime service accountのservice-ID allowlist、audienceを設定する。本人・identity失効・Connect不一致・未準備・再利用同意・旧予約読取／取消の応答を合成sellerで受け入れる。flag・audience・callerのstaging manifestは #19784 でmerge済みで、残るのは配備後の同一hash readbackと、この合成sellerによる受入である。
 2. Experience DBにmigration `0055_experience_host_seller_profiles.sql` を適用し、`scripts/gcp/experience-db-grants.mjs` のruntime grantsを同じrevisionに適用する。host runtimeはseller profileをread-only、membershipを必要な範囲のinsert/update、Experience商品・公開版・販売条件を既存のtable grantsで扱う。seller/Connect/feeの初期化CLIはmigration identityだけで書けることを確認する。
 3. Cloud Run runtime service accountにExperience DB、限定されたGCS公開media bucketのobject read/write/delete、NIHO API向けOIDC ID token発行だけを付ける。`HOST_CONSOLE_ENABLED=true` のhost consoleでは、公開API flagの状態にかかわらず `NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE` をNIHO APIのexact origin（stg `https://api-stg.niho.life`、prod `https://api.niho.life`）に設定する。公開を受け入れる段階では `EXPERIENCE_PUBLICATIONS_ENABLED=true`、`EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true`、`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_PUBLICATION_CONSENT_VERSION`、`EXPERIENCE_PUBLIC_MEDIA_BUCKET`、`SITE_URL` も設定する。掲載同意文とversionの承認を済ませる。
 4. `scripts/deploy/runtime-flags.mjs` のstaging／production variable `STG_/PROD_PUBLICATIONS_ENABLED` と `STG_/PROD_HOST_PUBLICATION_API_ENABLED` で段階設定する。API flagは公開flagとhost console／DBに依存し、いずれも既定OFF。`EXPERIENCE_GUEST_BOOKING_ENABLED` は別flagで、Stripe platform key・webhook secret・guest terms consent versionと、予約確認メールjob等の受入が別途必要。本番の`BOOKINGS_ENABLED`は販売開始判断が終わるまでfalseに保つ。

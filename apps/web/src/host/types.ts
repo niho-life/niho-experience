@@ -532,14 +532,13 @@ export interface HostThread {
 /*
  * レビュー (#108, Epic #103): only a guest who booked can write one, one per booking: 1–5 stars,
  * their words, the good points (fixed choices), the name and country they show, and a note for
- * the host only. NIHO checks a review before it is published and tells the host first. The host
- * may publish one reply (and correct it later) and report a review to NIHO, but never removes or
- * changes it. NIHO keeps the guest's words as written and its Japanese translation apart; the
+ * the host only. A stored review is public when submitted. The host may publish one reply (and
+ * correct it later) and report a review to NIHO, but never removes or changes it. Experience keeps
+ * the guest's words as written and its explicitly requested Japanese translation apart; the
  * host writes the reply in Japanese and checks the English that is published.
- * TODO(#87): NIHO's reviews (niho-app#19314) are not in the host contract yet.
  */
 
-/** 公開前 (NIHO is checking it) / 公開中 (on the experience's page). */
+/** `pending` remains for the legacy mock/home contract; Experience-stored reviews are `published`. */
 export type HostReviewStatus = "pending" | "published";
 
 /** What a guest wrote (the review, or the note to the host): their own words and NIHO's translation, as a guest's message has them. */
@@ -590,7 +589,7 @@ export interface HostReview {
   /** YYYY-MM-DDTHH:MM in Japan. */
   writtenAt: string;
   status: HostReviewStatus;
-  /** YYYY-MM-DDTHH:MM in Japan; null while NIHO checks it. */
+  /** YYYY-MM-DDTHH:MM in Japan; null only in the legacy mock `pending` state. */
   publishedAt: string | null;
   reply: HostReviewReply | null;
   report: HostReviewReport | null;

@@ -3,7 +3,9 @@ import type { Metadata } from "next";
 import { TrackView } from "@/components/Analytics";
 import { DesktopGallery, MobileGallery } from "@/components/DetailGallery";
 import { HandIcon } from "@/components/HandIcon";
+import { JsonLd } from "@/components/JsonLd";
 import { Photo } from "@/components/Photo";
+import { ReviewsSection } from "@/components/ReviewsSection";
 import { config } from "@/lib/config";
 import { formatDuration, formatYen } from "@/lib/format";
 import { iconForText } from "@/lib/themes";
@@ -11,6 +13,9 @@ import { publicMetadata } from "@/lib/public-metadata";
 import { seoDescription } from "@/lib/seo-description";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
+import { getLiveReviews } from "@/lib/journey";
+import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
+import { reviewsForJsonLd, sitePublicationJsonLd } from "@/lib/structured-data";
 
 export function sitePublicationMetadata(item: SitePublicExperience): Metadata {
   const { publication } = item;
@@ -21,8 +26,11 @@ export function sitePublicationMetadata(item: SitePublicExperience): Metadata {
   };
 }
 
-export function SitePublicationPage({ item, cancelled = false }: { item: SitePublicExperience; cancelled?: boolean }) {
+export async function SitePublicationPage({ item, cancelled = false }: { item: SitePublicExperience; cancelled?: boolean }) {
   const { publication, saleTerms, sellerDisclosure } = item;
+  const reviews = await getLiveReviews(publication.slug);
+  const headline = reviewHeadline(reviewDisplay(reviews));
+  const structured = sitePublicationJsonLd(item, config.siteUrl, config.bookingsEnabled && config.guestBookingEnabled, reviewsForJsonLd(reviews));
   const photos = publication.photos.map((photo) => ({ url: photo.src, alt: photo.alt }));
   const offers = saleTerms?.offers ?? [];
   const durationValues = [...new Set(offers.map((offer) => offer.durationMinutes))].sort((a, b) => a - b);
@@ -32,6 +40,8 @@ export function SitePublicationPage({ item, cancelled = false }: { item: SitePub
   const language = publication.content.facts.language.trim();
 
   return <>
+    <JsonLd data={structured.touristTrip} />
+    <JsonLd data={structured.product} />
     <TrackView event="experience_view" props={{ experience: publication.slug }} />
     <div className="overflow-x-clip">
       <MobileGallery photos={photos} title={publication.publicTitle} />
@@ -43,6 +53,10 @@ export function SitePublicationPage({ item, cancelled = false }: { item: SitePub
         {cancelled ? <p role="status" className="mt-5 rounded-2xl bg-sand p-4">Checkout was cancelled. Your booking was not completed.</p> : null}
         <header className="pt-5 lg:pt-3.5">
           <h1 className="text-[2.125rem] leading-[1.1] lg:max-w-[20ch] lg:text-[3.25rem]">{publication.publicTitle}</h1>
+          {headline ? headline.href
+            ? <Link href={headline.href} aria-label={headline.accessibleLabel} className="mt-3 inline-flex font-extrabold text-moss hover:underline">{headline.label}</Link>
+            : <span className="mt-3 inline-flex rounded-full bg-sand px-3 py-1 text-sm font-extrabold">{headline.label}</span>
+          : null}
           <p className="mt-4 text-[0.9375rem] text-ink-soft">Offered by <b className="text-ink">{publication.sellerDisplayName}</b>{sellerDisclosure ? <> · <a className="font-bold text-ink underline" href={sellerDisclosure.method === "EXTERNAL" ? sellerDisclosure.externalUrl : `/experiences/${encodeURIComponent(publication.slug)}/seller`} rel="noopener noreferrer">Seller information</a></> : null}</p>
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">Duration</span><p className="font-extrabold">{durations}</p></li> : null}
@@ -96,6 +110,10 @@ export function SitePublicationPage({ item, cancelled = false }: { item: SitePub
                 <p className="font-extrabold">{publication.meetingPoint.name}</p>
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
+            </section> : null}
+            {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+              <h2 className="text-2xl">Reviews</h2>
+              <div className="mt-4"><ReviewsSection slug={publication.slug} reviews={reviews} preview={false} nihoWebOrigin={config.nihoWebOrigin} /></div>
             </section> : null}
           </div>
 

@@ -86,6 +86,7 @@ const BLOCKER_COPY: Record<string, string> = {
   CONNECT_NOT_READY: "販売者の受取口座を確認してください。",
   CONSENT_OUTDATED: "掲載条件が更新されました。最新の条件を確認して公開してください。",
   FEE_SETTINGS_REQUIRED: "運営側の手数料設定が完了するまで公開できません。",
+  SUPPORT_CONSENT_REQUIRED: "NIHOサポートの利用範囲と合計手数料を確認し、現在の条件に同意してください。",
   MANUSCRIPT_REQUIRED: "日本語原稿と確認済みの英語原稿を完成させてください。",
   OPERATIONS_SUSPENDED: "運営停止中のため再開できません。",
   OWNER_NOT_CURRENT: "最新のOWNER権限を確認できません。ログインし直してください。",
@@ -678,6 +679,8 @@ export function HostPublicationWorkspace({
           ? <a className={consoleButtonClass("primary")} href="#product-editor">原稿を完成</a>
           : nextAction === "PHOTOS"
             ? <a className={consoleButtonClass("primary")} href="#product-editor">写真を追加</a>
+            : nextAction === "SUPPORT"
+              ? <Link className={consoleButtonClass("primary")} href="/host/settings#settings-support">サポート・手数料の条件を確認</Link>
             : nextAction === "PUBLISH"
               ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>同意して公開</button>
               : nextAction === "LIVE" && publicHref
@@ -689,6 +692,7 @@ export function HostPublicationWorkspace({
       : nextAction === "PRICING" ? "開催枠を確認したうえで、基本料金または枠別料金、人数、取消条件を保存してください。"
         : nextAction === "MANUSCRIPT" ? "日本語と英語の公開原稿を完成し、英語原稿を確認してください。"
           : nextAction === "PHOTOS" ? "掲載許諾を確認した商品写真と、日本語・英語の説明を追加してください。"
+            : nextAction === "SUPPORT" ? "予約受付の前に、NIHOサポートの利用範囲と合計手数料の条件を確認してください。"
             : nextAction === "EXTERNAL" ? "本人・受取口座・手数料・掲載条件の確認が必要です。下の未完了項目を確認してください。"
               : nextAction === "PUBLISH" ? "保存済みの公開内容と販売条件を確認し、掲載条件に同意して公開できます。"
                 : "公開中です。旅行者の詳細ページと予約画面を確認できます。";
