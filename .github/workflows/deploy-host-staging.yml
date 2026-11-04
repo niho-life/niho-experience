@@ -18,7 +18,7 @@ on:
         description: Revision from the successful candidate run (promote only)
         type: string
       candidate_image_digest:
-        description: sha256 digest from the successful candidate run (promote only)
+        description: Cloud Run runtime image digest from the successful candidate run (promote only)
         type: string
 
 permissions:
@@ -221,14 +221,14 @@ jobs:
             gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
             docker tag "host-staging:${SHA}" "$image"
             push_output="$(docker push "$image" 2>&1)" || { printf '%s\n' "$push_output"; exit 1; }
-            DIGEST="$(sed -nE 's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' <<< "$push_output" | tail -n1)"
-            [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+            PUSHED_DIGEST="$(sed -nE 's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' <<< "$push_output" | tail -n1)"
+            [[ "$PUSHED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
             watchdog_env=""
             if [ "$WATCHDOG" = true ]; then
               watchdog_env=",EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true,EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE=${SITE_URL},EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL=experience-ota-watchdog@niho-app-stg.iam.gserviceaccount.com"
             fi
             gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" \
-              --image "${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${DIGEST}" \
+              --image "${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${PUSHED_DIGEST}" \
               --service-account "$RUNTIME" --execution-environment gen2 \
               --port 8080 --cpu 1 --memory 512Mi --min-instances 0 --max-instances 2 \
               --no-traffic --tag "$CANDIDATE_TAG" \
@@ -261,9 +261,45 @@ jobs:
             fi
           fi
           revision="$(gcloud run revisions describe "$REVISION" --project "$PROJECT" --region "$REGION" --format=json)"
-          expected_image="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${DIGEST}"
-          if ! jq -e --arg image "$expected_image" --arg runtime "$RUNTIME" --arg sql "$CLOUDSQL" '
-            .spec.containers[0].image == $image and .spec.serviceAccountName == $runtime and
+          image_repo="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web"
+          runtime_image="$(jq -er '.spec.containers[0].image' <<< "$revision")"
+          resolved_image="$(jq -er '.status.imageDigest' <<< "$revision")"
+          runtime_digest="${runtime_image##*@}"
+          if [[ "$runtime_image" != "${image_repo}@sha256:"* || ! "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ || "$resolved_image" != "$runtime_image" ]]; then
+            printf '::error::Revision %s does not report a pinned runtime image digest (image=%s, resolved=%s).\n' \
+              "$REVISION" "$runtime_image" "$resolved_image" >&2
+            exit 1
+          fi
+          if [ "$ACTION" = candidate ]; then
+            if [ "$runtime_digest" != "$PUSHED_DIGEST" ]; then
+              # Cloud Run pins the platform image while Docker may push an OCI index.
+              manifest="$(curl -fsS --retry 3 --retry-all-errors \
+                -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+                -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+                "https://${REGION}-docker.pkg.dev/v2/${PROJECT}/${REPOSITORY}/web/manifests/${PUSHED_DIGEST}")"
+              if ! jq -e --arg digest "$runtime_digest" '
+                (.mediaType == "application/vnd.oci.image.index.v1+json" or
+                 .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json") and
+                ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] |
+                 length == 1 and .[0].digest == $digest)
+              ' <<< "$manifest" >/dev/null; then
+                printf '::error::Revision runtime digest %s is not the unique linux/amd64 child of pushed digest %s.\n' \
+                  "$runtime_digest" "$PUSHED_DIGEST" >&2
+                exit 1
+              fi
+            fi
+            # Promotion consumes Cloud Run's resolved runtime digest, not a possible OCI index digest.
+            DIGEST="$runtime_digest"
+          else
+            expected_image="${image_repo}@${DIGEST}"
+            if [[ "$runtime_image" != "$expected_image" || "$resolved_image" != "$expected_image" ]]; then
+              printf '::error::Revision %s image does not match the candidate runtime digest (expected=%s, image=%s, resolved=%s).\n' \
+                "$REVISION" "$expected_image" "$runtime_image" "$resolved_image" >&2
+              exit 1
+            fi
+          fi
+          if ! jq -e --arg runtime "$RUNTIME" --arg sql "$CLOUDSQL" '
+            .spec.serviceAccountName == $runtime and
             .metadata.annotations["run.googleapis.com/cloudsql-instances"] == $sql and
             .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
             (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default")) and
@@ -293,7 +329,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           sales="sales disabled"
           if [ "$GUEST_BOOKING" = true ]; then sales="Stripe test bookings open"; fi
-          { echo "Reviewed SHA: $SHA"; echo "Revision: $REVISION"; echo "Digest: $DIGEST"; echo "Candidate created with ${sales} and indexing blocked."; echo "Feature flags: ${FLAG_SUMMARY}"; } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Reviewed SHA: $SHA"
+            echo "Revision: $REVISION"
+            echo "Runtime image digest: $DIGEST"
+            if [ "$ACTION" = candidate ]; then echo "Pushed image digest: $PUSHED_DIGEST"; fi
+            echo "Candidate created with ${sales} and indexing blocked."
+            echo "Feature flags: ${FLAG_SUMMARY}"
+          } >> "$GITHUB_STEP_SUMMARY"
       # ID tokens expire quickly; mint immediately before the authenticated GETs.
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         id: smoke_auth
