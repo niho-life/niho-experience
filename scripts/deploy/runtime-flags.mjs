@@ -63,6 +63,14 @@ const siteUrl = ({ siteUrl: url }) => url;
  */
 export const FLAGS = Object.freeze([
   {
+    env: "ADMIN_SUPPORT_CONSOLE_ENABLED",
+    variable: "ADMIN_SUPPORT_CONSOLE_ENABLED",
+    // The workflows attach the native support DB with the host console capability.
+    needs: ["HOST_CONSOLE", "DATABASE"],
+    secrets: [{ env: "ADMIN_SESSION_SECRET", variable: "ADMIN_SESSION_SECRET_REF", stg: "experience-stg-admin-session-secret" }],
+    fixed: { NIHO_EXPERIENCE_ADMIN_ORIGIN: siteUrl },
+  },
+  {
     env: "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED",
     variable: "ARTICLE_AUTHORITY_API_ENABLED",
     needs: ["DATABASE"],
