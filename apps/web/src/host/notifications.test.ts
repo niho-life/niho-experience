@@ -24,7 +24,7 @@ describe("notification definitions", () => {
       ["CANCELLATION", "予約の取消", "予約者の取消・取消の依頼・期限切れ", false],
       ["GUEST_MESSAGE", "予約前の質問・予約者からの連絡", "日本語訳つきで届きます", true],
       ["DAY_BEFORE_SUMMARY", "前日の参加者のまとめ", "毎日 18:00 · 翌日に確定の予約があるときだけ", true],
-      ["NEW_REVIEW", "新しいレビュー", "公開される前に届きます", true],
+      ["NEW_REVIEW", "新しいレビュー", "投稿されたとき · すぐに", true],
       ["LISTING_REVIEW", "掲載と審査の結果", "掲載の承認・差し戻し・停止", false],
     ]);
     expect(NOTIFICATIONS.filter((definition) => definition.stoppable).map((definition) => definition.key)).toEqual([...STOPPABLE_NOTIFICATION_KEYS]);

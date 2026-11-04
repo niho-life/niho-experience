@@ -163,7 +163,7 @@ export function parseSiteSaleInput(raw: unknown): SiteSaleInput {
     stripeConnectAccountRef: patternAt(product.stripeConnectAccountRef, "product.stripeConnectAccountRef", CONNECTED_ACCOUNT_ID, "a Stripe connected account ID (acct_…)", problems),
     sellerDisplayName: textAt(product.sellerDisplayName, "product.sellerDisplayName", 300, problems),
   };
-  if (parsedProduct && parsedProduct.sellerNihoAccountRef !== nihoUserId) {
+  if (parsedProduct && NIHO_USER_ID.test(nihoUserId) && parsedProduct.sellerNihoAccountRef !== nihoUserId) {
     problems.push("product.sellerNihoAccountRef must match the authenticated owner.nihoUserId");
   }
   if (problems.length > 0 || parsedProduct === null) throw new SiteSaleInputError(problems.length > 0 ? problems : ["the input is incomplete"]);

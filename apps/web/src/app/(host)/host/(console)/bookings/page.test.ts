@@ -97,6 +97,13 @@ describe("予約 without NIHO's bookings (provider operations off)", () => {
     expect(view.props).toMatchObject({ translateEnabled: true, providerDataId: "sample-provider" });
   });
 
+  it("guest sales OFFの通訳用予約詳細はread-onlyのまま通訳actionを表示する", async () => {
+    state.site = { ...LIVE, readOnly: true, messages: false, nextCursor: null };
+    state.translateEnabled = true;
+    const view = await page({ booking: "b-1" });
+    expect(view.props).toMatchObject({ translateEnabled: true, live: { readOnly: true, messages: false, nextCursor: null } });
+  });
+
   it("keeps today's screen while this site's bookings are closed to the account", async () => {
     const view = await page();
     expect(view.props).toEqual({});

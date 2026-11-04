@@ -101,6 +101,12 @@ export function detailForSale<T extends ExperienceDetailForSite>(detail: T, sale
   return detail;
 }
 
+/** Japanese pages keep their selected-release booking terms, while the seller name follows the active sale contract. */
+export function detailWithSiteSellerDisplayName<T extends ExperienceDetailForSite>(detail: T, sale: GuestBookingSale): T {
+  if (sale.kind !== "site") return detail;
+  return { ...detail, seller: { ...detail.seller, displayName: sale.terms.sellerDisplayName } };
+}
+
 /** The next dates of a product sold here, read from the experience DB as the page reads NIHO's: a failure shows none. */
 export async function siteNextDates(slug: string): Promise<Occurrence[]> {
   const bookings = guestBookingRepository();

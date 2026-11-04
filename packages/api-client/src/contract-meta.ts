@@ -105,8 +105,8 @@ export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
 } as const;
 
 /**
- * 対面通訳の部屋（#181）。niho-appのselected exportを固定source commitから同期済み。APIは未配備。
- * http mode の BFF は EXPERIENCE_TRANSLATE_API_ENABLED=true まで開かない。
+ * 対面通訳の部屋（#181）。固定selected exportをNIHO stg候補のsource SHAと照合済み。
+ * runtime read-backと実予約create/poll/endの受入まではHTTP flagを開かない。
  */
 export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
   version: "1.0.0",
@@ -114,7 +114,7 @@ export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
   sourceCommit: "5ed6ebac62b5f14dd0d114d7893bc0099d9df776",
   sha256: "08bcabcb82f2f6eef9250f3503333f31cc36f944b1c6330f19b839164ccfcb8e",
   status: "agreed-not-deployed",
-  deploymentStatus: "not-deployed",
+  deploymentStatus: "stg-candidate-source-hash-verified",
 } as const;
 
 /** 予約に関わる時刻の基準。表示も日本時間（Asia/Tokyo）で行う。 */

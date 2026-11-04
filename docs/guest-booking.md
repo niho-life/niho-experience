@@ -27,7 +27,15 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 
 誤りの status と本文は NIHO の契約（[api-contract.md](api-contract.md) §7）と同じ（`error` の 8 項目、`RATE_LIMITED` に `Retry-After`）。加えて、このサイトのページ以外からの POST は本文なしの 403、16 KB を超える本文は 413（`VALIDATION_ERROR`）、flag が off かここで売っていない体験は本文なしの 404。`BOOKINGS_ENABLED=false`（障害時の停止 #15）では checkout が 409 `UNAVAILABLE` を返す。
 
-NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だが、ここでは期限まで残す（上の表）。仮押さえは NIHO の 31 分に対して 35 分（Stripe の Session が最短 30 分で、仮押さえの 60 秒前に切れるため）。上限は IP ではなく、メールアドレスと提供者ごとに 1 時間 5 件、決済待ちの仮押さえが予約者・商品ごとに 2 件、商品ごとに 30 件（IP アドレスは保存しない）。
+NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だが、ここでは期限まで残す（上の表）。仮押さえは NIHO の 31 分に対して 35 分（Stripe の Session が最短 30 分で、仮押さえの 60 秒前に切れるため）。既存上限はメールアドレスと提供者ごとに 1 時間 5 件、決済待ちの仮押さえが予約者・商品ごとに 2 件、商品ごとに 30 件。これらに加え、Checkout開始は同じIPで10分に5回まで（raw IPは保存しない）。
+
+### Checkout の不正対策 (#374)
+
+この経路はカード情報をサイトで受け取らず、Stripe-hosted Checkout Session（Connect Direct charge）へ移る。Checkout開始前に、Cloudflare edgeのCF-Connecting-IPをHMAC-SHA256でdigest化し、Experience DBの共有counterで同一IPを10分に5回までに制限する（NIHO #19313 / PR #19721と同じ上限）。同一リクエストkeyの既存予約は上限判定より先に返すため、安全な再送を妨げない。counterにはIP digest・10分bucket・回数だけを置き、raw IP・端末ID・メールは保存・ログ出力しない。X-Forwarded-Forにはfallbackしない。Cloud Run originをCloudflare以外から迂回できない入口制限と、EXPERIENCE_CHECKOUT_IP_HMAC_KEYのSecret Manager設定が予約flagを開く前提。stg/prodの入口制限・Secret・受入は未確認。
+
+Stripe-hosted CheckoutのRadarとDirect chargeの口座別設定を利用する。3DSは手動で常時要求せずStripe Radarのリスク判定へ任せる。Connected Account個別のRadar設定と拒否・追加認証のStripe test mode受入は未確認。
+
+IP制限の拒否は429 RATE_LIMITEDとRetry-Afterで返し、予約やメールの存在を示す理由は返さない。待機後は同じ内容・keyで再送でき、IP counterの拒否分類はraw値を含めず構造化ログへ記録する。信頼できるIP headerが無い場合は503 CHECKOUT_UNAVAILABLEでfail closedにする。Stripe test-modeでのRadar/3DS実動作は未検証として扱う。
 
 ## 放棄された Checkout と遅れた支払い（第4段）
 
@@ -46,14 +54,16 @@ NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だ
 このサイトで売った予約の確認メールは、NIHO ではなくこのサイトが送る。NIHO で売る商品の予約は今までどおり NIHO が送る。
 
 - **いつ・何を**：webhook が `confirmBookingPayment` で予約を確定すると、同じトランザクションで outbox に `booking.confirmed` が積まれる（payload は予約 ID だけ）。メール job はこのサイトの予約（`booking_guests` の行がある予約）の行だけを `GuestMailOutbox` で取り、予約者に「Your booking is confirmed: {体験}, {日付} {時刻}」を送る。本文は体験名、日付と開始時刻（日本時間。ホストが動かした回はその時刻）、大人と子どもの人数、支払った合計、予約時に固定した取消条件（無料取消の期限の時刻つき。期限を過ぎていれば返金なしと書く）、ホスト名、予約番号（public booking id）、体験ページへのリンク。集合場所は書かない（今は NIHO の内容のため）。ホストが集合の詳細を伝えることと、このメールへの返信は NIHO サポートに届くことを書く。予約ページ（第6段）が開いているときは、送る直前に発行した一度きりの grant で「View your booking」のリンク（`{SITE_URL}/bookings/open#g=<grant>`）を入れる（下の「予約者の予約ページ」）。ホストの返信（予約前の質問）も同じ job が送る（[guest-questions.md](guest-questions.md)）。
-- **送り方**：NIHO と同じ SMTP 事業者を experience 専用の資格情報で使い、nodemailer で送る（`apps/web/src/lib/mail/`）。From は `EXPERIENCE_MAIL_FROM`（表示名とアドレス）、Reply-To は `EXPERIENCE_MAIL_REPLY_TO`（NIHO サポート）。本文は英語の text と最小限の HTML で、画像・計測・外部の読み込みは無く、リンクは `SITE_URL` からの絶対 URL。予約者の名前は挨拶にだけ出し、アドレスは宛先にだけ使う。port 465 は最初から TLS、ほかの port は STARTTLS 必須（平文では送らない）。`Auto-Submitted: auto-generated` を付ける（不在の自動返信を抑える）。nodemailer のログは使わない（宛先や本文が出るため）。
+- **送り方**：NIHO と同じ SMTP 事業者・既存の共有資格情報を使い、nodemailer で送る（`apps/web/src/lib/mail/`）。Experience 専用のメール事業者・資格情報は追加しない（NIHO #19312 の2026-11-03決定）。From は `EXPERIENCE_MAIL_FROM`（表示名とアドレス）、Reply-To は `EXPERIENCE_MAIL_REPLY_TO`（NIHO サポート）。本文は英語の text と最小限の HTML、外部画像・計測・外部読み込みは無く、リンクは `SITE_URL` からの絶対 URL。#376 の集合案内だけ、権利確認済みの写真を MIME inline attachment として同封する。予約者の名前は挨拶にだけ出し、アドレスは宛先にだけ使う。port 465 は最初から TLS、ほかの port は STARTTLS 必須（平文では送らない）。`Auto-Submitted: auto-generated` を付ける（不在の自動返信を抑える）。nodemailer のログは使わない（宛先や本文が出るため）。
 - **失敗**：接続・timeout・TLS・ログイン・送信者の拒否・4xx は一時的な失敗で、2・4・8・16・32・60・60 分待って送り直し、8 回目で諦める（約 3 時間）。宛先や本文への 5xx は恒久的な失敗で、送り直さずに閉じる。SMTP への接続やログイン自体が失敗した回は、残りのメールを試さずに送り直しへ回す（障害時に 1 回の実行がメールの数だけ timeout を待たないため）。予約者の情報がもう消えている、または予約がもう確定でない（取消済み）ときは送らずに閉じる。送ったあとに記録できずに lease（2 分）が切れると、もう一度送ることがある（at-least-once）。
+- **配信後の不達・苦情（#375、Experience側は未接続）**：SMTP の受理は受信箱への到達を示さない。NIHO運用資料では共有SMTPは `smtp.gmail.com`、共通Fromは `info@niho.life`。2026-11-04に `niho.life` の公開DNSでGoogle MX、SPF `include:_spf.google.com ~all`、DKIM selector `google` のTXT、DMARC `p=none; adkim=r; aspf=r; pct=100` を観測したが、Experience実行環境の値、実送信メールの認証結果・Return-Path、受入先への到達は確認していない。NIHO #19711 のDSN取込は元メールの `X-NIHO-Mail-Ref` / `Message-ID` と完全一致recipientをNIHO `OutboundEmailDelivery` に照合してhard bounceを記録・抑止する。一方、Experience outboxはその台帳に登録されず照合されない。Gmail OAuthは受信箱を認証するだけでARF報告元を認証しないため、NIHO側でもARFは運営の手動確認に限り、自動苦情記録・抑止に使わない。Experience側のpost-accept event照合・記録・再送抑止・ホスト/運営の失敗表示と復旧は未接続。誤った成功状態を作らず、この境界をPRとIssue #375に残す。
+- **日本語化Eへの引継ぎ契約**：新しい英語の画面・メール文言は `BookingForm` の429待機、予約ページの集合案内と当日のメッセージ導線、出欠済み予約へのレビュー依頼・投稿画面、開催回中止後の取消・返金状態を対象にする。レビュー投稿資格は記録済み `ATTENDED` のみで、`NO_SHOW` と出欠未記録は対象外。予約に固定した取消条件と設定済みの写真・集合案内だけを表示し、レビュー期限・未記録出欠の補完・取消条件は新設しない。Eは文言の翻訳とアクセシビリティ表現を引き継ぎ、資格・状態遷移・メール送信条件はAPI/store契約のまま維持する。
 - **戻り先のページ**：`/booking/return` は NIHO の予約とこのサイトの予約の両方が戻る。どちらにも正しいように送り手を名乗らず、両方が送るものだけを書く（確認のメール、集合の詳細、当日）。NIHO だけが送る前日のリマインダーの約束は外した。確認メールに予約へのリンクがあることは、第6段から両方に当てはまる（NIHO は NIHO の予約ページ、このサイトは下の予約ページ）ので書く。予約の完了は今までどおり示さない。
 - **`booking.confirmed` の処理済み**：このサイトの予約の行の `processed_at` はこの job が使う。ほかの予約の行と、ほかの topic には触らない（ホストの push job がこの topic に触らないのと同じ）。同じ出来事を別に処理するもの（ホストへの通知など）は別の topic を積む。outbox の行は処理済みを 1 つしか持たないため（ホストへの push は `host.notify.new_booking`、下の「ホストへの通知」）。
-- **job**：`POST /internal/experience-jobs/v1/drain`。Cloud Scheduler が毎分、専用のサービスアカウントの Google ID token（audience は `EXPERIENCE_JOBS_AUDIENCE`）で呼ぶ。ホストの push job（`/internal/host-push/v1/drain`）と同じ形。1 回の実行は ①ホストの返信（予約前の質問と、6b からは予約ごとのメッセージ）②予約の確認 ②' 取消・返金・依頼へのお断りのお知らせ（第7段）③「Find your booking」のリンク（第6段、予約ページが開いているときだけ）③' Stripe が受けていない返金の自動再送（第7段の7b、`EXPERIENCE_GUEST_BOOKING_ENABLED` が on で Stripe の platform key があるときだけ。下の「取消と返金（第7段）」）④旅行者の質問・答えの日本語訳（10 件まで、`EXPERIENCE_TRANSLATION_ENABLED` のときだけ。[guest-questions.md](guest-questions.md) の「翻訳」）⑤予約者の情報の消去 ⑥質問の消去 ⑦予約ページの使えなくなった grant とセッションの削除（第6段）の順で、各段は独立している（1 つが失敗しても残りは動く）。①②②'③はメールを 1 件ずつ送る直前に取る（リースは 1 通の送信だけを覆い、待っているメールのリースが切れて別の実行に取り直されることはない）。各段 20 件（③'は 10 件）・40 秒まで、一時的な失敗が出たらその段の残りは次の回へ回す。⑤⑥は各 200 件まで、⑦は grant とセッションを各 500 件まで。応答と 1 行のログは件数だけで、宛先・名前・token・本文・DB の文は出さない。どれかの段が失敗した回は件数とともに 503。flag が off なら 404、設定したサービスアカウント以外は 401、Google の鍵・experience DB・SMTP の資格情報が無ければ 503。
+- **job**：`POST /internal/experience-jobs/v1/drain`。Cloud Scheduler が毎分、専用のサービスアカウントの Google ID token（audience は `EXPERIENCE_JOBS_AUDIENCE`）で呼ぶ。ホストの push job（`/internal/host-push/v1/drain`）と同じ形。1 回の実行は ①ホストの返信（予約前の質問と、6b からは予約ごとのメッセージ）②予約の確認 ②' 取消・返金・依頼へのお断りのお知らせ（第7段）②'' 前日集合案内（#376。個別の確定予約 snapshot を使う）③「Find your booking」のリンク（第6段、予約ページが開いているときだけ）③' Stripe が受けていない返金の自動再送（第7段の7b、`EXPERIENCE_GUEST_BOOKING_ENABLED` が on で Stripe の platform key があるときだけ。下の「取消と返金（第7段）」）④旅行者の質問・答えの日本語訳（10 件まで、`EXPERIENCE_TRANSLATION_ENABLED` のときだけ。[guest-questions.md](guest-questions.md) の「翻訳」）⑤予約者の情報の消去 ⑥質問の消去 ⑦予約ページの使えなくなった grant とセッションの削除、30 日を過ぎた集合案内 snapshot の削除（第6段・#376）の順で、各段は独立している（1 つが失敗しても残りは動く）。①②②'②''③はメールを 1 件ずつ送る直前に取る（リースは 1 通の送信だけを覆い、待っているメールのリースが切れて別の実行に取り直されることはない）。各段 20 件（③'は 10 件）・40 秒まで、一時的な失敗が出たらその段の残りは次の回へ回す。⑤⑥は各 200 件、snapshot は 500 件、⑦は grant とセッションを各 500 件まで。応答と 1 行のログは件数だけで、宛先・名前・token・本文・DB の文は出さない。どれかの段が失敗した回は件数とともに 503。flag が off なら 404、設定したサービスアカウント以外は 401、Google の鍵・experience DB・SMTP の資格情報が無ければ 503。
 - **保存期間**（オーナー決定 2026-10-31）：予約者の名前・アドレス・電話・備考・回答・UTM は体験の終了（取り消した予約は取消）から 1 年で消す（`eraseGuestData`）。同じときに、その予約のホストとのメッセージ（スレッドと本文、6b）も消す。支払いの確認中（`PAYMENT_REVIEW`）の予約、返金が済んでいない予約（Stripe が答えていない・処理中・失敗してサポートが閉じていない）と取消の依頼が開いている予約は残す（第7段）。消すときは、ホストの取消のメモとサポートのお断りの言葉も消す。異議申し立ては、扱うようになったときに除外へ加える。質問は最後のメッセージから 1 年でスレッドごと消す。
 - **設定**：`EXPERIENCE_GUEST_MAIL_ENABLED=true`（http mode だけ）のとき、`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_SMTP_HOST`・`EXPERIENCE_SMTP_PORT`・`EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD`、`EXPERIENCE_MAIL_FROM`・`EXPERIENCE_MAIL_REPLY_TO`、`EXPERIENCE_JOBS_AUDIENCE`・`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL` と https の `SITE_URL` が無いとサーバーは起動しない（誤りのメッセージは設定の名前だけで、値を出さない）。SMTP のユーザーとパスワードは使う場所で読み、`config` に置かない。
-- **配備時の作業（この PR では行わない）**：Cloud Scheduler の job（毎分・POST・OIDC token）とそのサービスアカウント（Cloud Run の呼び出し権限だけ）、Secret Manager の `EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD` と実行環境への配線、SMTP 事業者での experience 用の資格情報と送信ドメインの設定、runtime role への `guest_question_threads` の DELETE（`scripts/gcp/experience-db-grants.mjs`。メッセージと返信リンクは ON DELETE CASCADE で消え、PostgreSQL は表の所有者として実行する）。migration は増えない。
+- **配備時の作業（この PR では行わない）**：`0050_booking_meeting_guides.sql` と `0051_checkout_ip_rate_limit.sql` を適用し、`scripts/gcp/experience-db-grants.mjs` のruntime role権限を反映する。メールjobのCloud Scheduler（毎分・POST・OIDC token）とサービスアカウントを用意し、NIHOの既存共有SMTP SecretをExperience実行環境へ参照配線する（専用資格情報や事業者は追加しない）。予約flagを開く前に32 byte以上の `EXPERIENCE_CHECKOUT_IP_HMAC_KEY` とCloudflare以外からCloud Run originへ到達できない入口制限を確認する。#376 の前日案内producerにはhost push Scheduler/service accountも要る。実送信メールのFrom/Return-Path・認証alignment・受信箱到達と#375のExperience post-acceptイベントは未確認・未接続のまま残る。
 
 ## 予約者の予約ページ（第6段）
 
@@ -88,6 +98,17 @@ NIHO と違う点：失敗時の仮押さえは NIHO では「解放済み」だ
   - 開いたままの端末：その端末の cookie で予約を読める（サインアウトか期限まで）。
   - 応答が届かなかった開封：grant を使ったあとに応答が失われると、そのリンクはもう使えない（新しいリンクを頼む）。
 - **runtime role**：`booking_access_grants`・`booking_sessions` の SELECT・INSERT・UPDATE・DELETE（`scripts/gcp/experience-db-grants.mjs`）。`booking_guests`（`access_version` の UPDATE）と `outbox_messages` は今までの権限で足りる。先に `0029` を適用する（既存の書き手は新しい表と列を読まないので、新しい版より先に適用してよい）。
+
+### 予約後の集合案内（#376）
+
+ホスト OWNER は `/host/booking-guides` から商品ごとの集合案内を保存する。`GET/PUT /host/api/products/{productId}/booking-guide` は `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` と既存の OWNER BFF 境界を使い、公開原稿・販売条件・取消条件は変更しない。保存は `expectedVersion` で競合を検出する。写真は同じ商品の権利確認済み READY media だけを選べる。
+
+- 内容は集合場所の目印・住所・道順・入口説明・HTTPS地図URL・写真・持ち物・雨天時の案内。電話番号はこの契約に含めない。公開商品ページ・公開API・未確定予約には出さない。
+- 支払い確定 transaction で、現在の案内を予約単位の変更不可 snapshot に写す。設定が空だった予約は、開催前に初めて案内を保存した時だけ snapshot を作る。後の編集は既存予約へ反映しない。
+- 予約ページは `CONFIRMED` のときだけ snapshot を返す。取消後は案内と写真を返さない。写真は booking session cookie で同じ予約を確認する no-store route から配信する。
+- 開始の24時間前に個別の outbox 行を処理し、予約日時を件名にしたメールを送る。24時間以内の予約確定はすぐ送信対象になり、booking ID の冪等キーで再実行しても二重に積まない。送信時に取消済み・消去済み・開催開始後なら閉じる。集合写真は remote URL ではなく inline attachment。予約ページへのリンクは既存の一度きり grant の fragment に置く。
+- 予約当日は予約ページの既存メッセージ欄から「遅れています」「集合場所が見つかりません」「その他」の定型文を入力できる。送信は既存 `GuestBookingMessages.sendMessage` を使い、確認済み予約の当日だけ表示し、取消後・他予約の session からは送れない。
+- host の master guide は次の更新まで保持する。予約単位 snapshot は予約ページの絶対期限（開催終了の30日後）を過ぎた後に job が削除する。未確定の retention/access/recipient policy は追加していない。
 
 ## 予約ごとのメッセージ（第6段の続き）
 

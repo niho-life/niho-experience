@@ -15,7 +15,7 @@ API契約は、このリポの体験業務 v1 と、固定された NIHO host/ac
 | Deployer SA | `experience-host-stg-deployer`。対象Cloud Run serviceだけ `run.admin` / `run.invoker`、runtime SAだけ `serviceAccountUser` |
 | Jobs SA | `experience-jobs`。Cloud Scheduler の OIDC token 専用。projectのroleなし、対象Cloud Run serviceだけ `run.invoker` |
 | Cloud Scheduler | `experience-jobs-drain-stg`（`asia-northeast1`）。毎分 `POST {STG_HOST_SERVICE_URL}/internal/experience-jobs/v1/drain`、audience は `STG_HOST_SERVICE_URL`。一時停止で作り、予約を開く配備のあとに再開する |
-| OIDC | 専用pool `experience-host-staging` / provider `github`。固定repo ID・repo名・main・手動workflow・`host-staging` Environmentを検査 |
+| OIDC | 専用pool `experience-host-staging` / provider `github`。固定repo ID・repo名・main・手動workflowを検査。通常はレビュー必須の `host-staging`、指定ownerは `host-staging-owner` Environmentを使い、後者はGitHub actor IDも検査 |
 | Cloud SQL / VPC | 既存のprivate IPのみ・connector必須の `niho-app-db-stg` を使用するが、Experience専用DB・DBユーザーを別途作る。Cloud Runは既存 `default` VPC/subnetへのDirect VPC egress（private rangesのみ）とCloud SQL接続を併用する。NIHO業務DBへ接続しない |
 
 Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA鍵は付けない。deployerはSecretの値を読めず、DBにも接続しない。RuntimeのCloud SQL Clientは [Google公式のIAM条件](https://docs.cloud.google.com/sql/docs/postgres/iam-conditions) で既存instanceだけを許す。SQLのDB権限は別途制限する。
@@ -27,6 +27,20 @@ Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA�
 3. 出力された4個の `STG_HOST_*` をEnvironment Variablesへ登録する。値はresource識別子であり、秘密値ではない。追加で `STG_HOST_CORE_READY=false` をEnvironment Variablesへ登録する。既存providerの設定が異なる場合はscriptを止め、IAMを緩めずレビューする。
 4. 下記の専用bootstrap scriptを手動実行し、Experience専用DB・専用DBユーザー・バックアップ方針を用意する。NIHO業務DBを使わない。`packages/experience-store/migrations/` のSQLを名前順に適用する。RuntimeにDDL・role作成権限を渡さず、必要なtable/sequence DMLだけを付ける。共有instance内の他DBへの接続/読取を拒否できるか確認する。`setup-host-staging.sh` と配備workflowはDB変更を実行しない。
 5. 合成提供者と専用のテストNIHOアカウントを、正当な権限を持つ非公開のprovisioning経路で結ぶ。`provider_memberships` を含む実ID・SQL応答・接続URL・Google資格情報はGit、公開Issue、PR、CIログへ記録しない。実顧客・実提供者・本番DBの複製は使わない。
+
+### 指定ownerによる手動配備
+
+`host-staging` はrequired reviewer・自己承認禁止・deployment branch `main` の設定を維持する。`niho3`（GitHub actor ID `252574334`）、`takuyatakahama3`（`119937906`）、`taku-niho`（`345803507`）が手動起動したときだけ、workflowはrequired reviewerのない `host-staging-owner` Environmentを選ぶ。どちらのEnvironmentも `main` のみ許可する。workflowはowner用Environmentを選んだ後も、Google認証の直前に起動者と再実行者を確認する。
+
+workflow変更をmainへ反映した後、GitHubに `host-staging-owner` Environmentを作り、deployment branch policyを `main` のみにする。required reviewerは設定しない。`host-staging` にある全Environment Variableを同じ値で複製する。現在Environment secretは使っていない。今後Variableを追加したときは両Environmentへ同時に設定する。secretを使う必要が生じた場合はowner用Environmentにも安全な管理元から個別設定し、値を読み出したりログへ出したりしない。
+
+owner用Environmentの準備後、mainのレビュー済みSHAから次を一度実行する。scriptは現在のissuer・attribute mapping・従来のconditionが完全一致するときだけ、`host-staging-owner` と上記3 actor IDを許可するconditionへ更新し、変更後も完全一致を確認する。想定外の差があれば変更せず停止する。
+
+```sh
+CONFIRM_HOST_STAGING_OWNER_WIF=niho-app-stg bash scripts/gcp/update-host-staging-owner-wif.sh
+```
+
+`scripts/gcp/setup-host-staging.sh` は以後の再実行でも新しいconditionを要求する。owner以外の手動起動は引き続き `host-staging` のレビューを通り、owner用EnvironmentからのOIDC tokenも上記actor ID以外はGoogle側で拒否される。
 
 ### 専用DBの初回bootstrap
 
@@ -94,11 +108,12 @@ Cloud Runのservice URLは `status.url` のhash形式に加え、service名・pr
 
 ## 手動配備と受入
 
-1. **Deploy host staging** を `main` から手動実行し、`action=candidate`、`commit_sha` に起動時点mainと完全一致するレビュー済み40文字SHAを指定する。別jobが資格情報なしでstg CSPを含むimageをbuild・container smokeする。保護Environment承認後、同じartifactのchecksumを検査し、OIDCで専用deployerを使ってdigest固定の0%候補を作る。配信中revisionと割合が変わっていないことを確認する。
+1. **Deploy host staging** を `main` から手動実行し、`action=candidate`、`commit_sha` に起動時点mainと完全一致するレビュー済み40文字SHAを指定する。別jobが資格情報なしでstg CSPを含むimageをbuild・container smokeする。指定ownerは `host-staging-owner` を使い、それ以外は `host-staging` のrequired reviewer承認後に進む。どちらも同じartifactのchecksumを検査し、OIDCで専用deployerを使ってdigest固定の0%候補を作る。配信中revisionと割合が変わっていないことを確認する。
 2. 候補のimage/runtime/env/数字Secret参照/Cloud SQL接続設定を検査する。候補のGET smokeはdeployerのID tokenを使う。初回はprivateで検査し、初回昇格後の候補は公開済みserviceの設定を継承する。ID tokenは短命のため、配備後のGET直前に生成する。[auth action公式手順](https://github.com/google-github-actions/auth/blob/main/README.md) に従い `workloadIdentityUser` で生成する。Token Creatorの追加は不要。OAuth、予約作成、migrationは実行しない。
 3. 成功runのSHA・revision・digestを確認し、`action=promote` に同じ値を指定する。対象commitがmainに残り、構成が現在の保護設定と一致することを再確認する。候補を100%にした**後**、stable serviceへの未認証アクセスを許可する。初回placeholderを公開しない。`robots.txt`・host入口・配信revisionを検査し、失敗時は直前のtrafficへ戻す。初回で失敗した場合はIAM checkも有効へ戻す。昇格の成功・失敗いずれでも対象候補のtagを除去する。候補作成/GET検査が失敗した場合も今回runのtagを除去し、別候補のtagは触らない。rollbackやtag除去も失敗した場合は手動readbackして復旧する。
 4. Google Chromeでブラウザ名とstg URLを確認し、合成ホストでNIHOログイン→カレンダー→Google接続→合成busy表示→日程/休止保存→失効/切断→再接続を確認する。別提供者/別userの操作拒否、非OWNERのGoogle接続拒否、古い同期時の受付停止、cookieのHttpOnly/Secure/SameSite、tokenがstorage/公開cache/計測へ出ないことも確認する。ブラウザの画面だけでなく、専用DBへの保存・権限を非公開の管理経路で確認する。
 5. `SITE_INDEXING=block`、`HOST_SIGNUP_MODE=pilot` は固定。`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED=true` のときだけ `true`（Stripe テストモード、下の「旅行者の予約」）、それ以外は `false`。ほかの機能は下の「[機能のフラグ](#機能のフラグ84)」の Environment Variable で開く（既定は OFF。PWA だけ今までどおり ON）。この手順（カレンダー）の受入では、ゲスト予約・販売・本番Google接続を受け入れたとは扱わない（予約は下の受入で扱う）。定期同期workerの配備もこのworkflowの対象外で、同期が古いときの受付停止を確認する。
+  通訳（`STG_TRANSLATE_API_ENABLED=true`）はguest salesから独立する。sales OFFでも既存Experience予約をOWNERのread-only詳細へ表示し、通訳だけ使える。guest checkout・予約変更・取消/返金・メールは開かず、NIHO予約pathは従来どおりNIHO APIで確認する。
 6. 昇格せず破棄する候補は運用担当がtagを除去する。公開済みservice上では0%でもtag URLへアクセスできるため、保留候補のSHA・tag・破棄予定を運用記録で管理し、受入後に未使用tagがないことを確認する。tag除去はrevisionや配信中trafficの削除を意味しない。
 7. #92へはSHA・image digest・テスト項目と成否・未実施理由だけを残す。実ID、DB接続情報、OAuth state/code/token、cookie、Calendar ID、予定の件名/説明/参加者、スクリーンショット内の個人情報を公開しない。
 

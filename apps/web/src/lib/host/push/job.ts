@@ -32,9 +32,11 @@ function internalServiceJson(body: unknown, status = 200): Response {
   });
 }
 
-function drainWithPool(pool: Pool): Promise<HostNotificationDrainCounts> {
+async function drainWithPool(pool: Pool): Promise<HostNotificationDrainCounts> {
+  const outbox = new HostNotificationOutbox(pool);
+  await outbox.enqueueDueDayBeforeSummaries(new Date());
   return drainHostNotifications({
-    outbox: new HostNotificationOutbox(pool),
+    outbox,
     pushDeps: () => hostPushDeps(new HostPushSubscriptions(pool)),
     allowed: hostNotificationAllowed,
     now: Date.now,

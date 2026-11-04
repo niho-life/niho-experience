@@ -54,7 +54,7 @@ describe("Umami privacy filter", () => {
     expect(shouldStartUmami(websiteId, "0")).toBe(true);
     expect(shouldStartUmami("", "0")).toBe(false);
     // A document opened on the guest's booking pages (#285 slice 6) starts no third-party script.
-    for (const path of ["/bookings", "/bookings/open", "/bookings/0f8fad5b-d9cb-469f-a165-708677289501"]) expect(shouldStartUmami(websiteId, "0", path)).toBe(false);
+    for (const path of ["/bookings", "/bookings/open", "/bookings/0f8fad5b-d9cb-469f-a165-708677289501", "/reviews/write"]) expect(shouldStartUmami(websiteId, "0", path)).toBe(false);
     for (const path of ["/", "/experiences", "/booking/return", "/bookingsx"]) expect(shouldStartUmami(websiteId, "0", path)).toBe(true);
   });
 

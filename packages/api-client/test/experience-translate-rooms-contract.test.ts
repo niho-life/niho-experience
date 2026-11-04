@@ -26,12 +26,12 @@ describe("experience translate rooms selected contract", () => {
     expect(document.info.version).toBe(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.version);
     expect(document.info["x-niho-contract-status"]).toBe("agreed-not-deployed");
     const manifest = JSON.parse(await readFile(new URL("../contract/experience-translate-rooms-api.manifest.json", import.meta.url), "utf8")) as {
-      version: string; sourceIssue: string; sourceCommit: string | null; sha256: string; status: string;
+      version: string; sourceIssue: string; sourceCommit: string | null; sha256: string; status: string; deploymentStatus: string;
     };
     expect(manifest.sourceCommit).toMatch(/^[0-9a-f]{40}$/);
-    expect(manifest).toMatchObject({ version: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.version, sourceIssue: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.sourceIssue, sourceCommit: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.sourceCommit, sha256: hash, status: "agreed-not-deployed" });
+    expect(manifest).toMatchObject({ version: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.version, sourceIssue: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.sourceIssue, sourceCommit: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.sourceCommit, sha256: hash, status: "agreed-not-deployed", deploymentStatus: EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.deploymentStatus });
     expect(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.status).toBe("agreed-not-deployed");
-    expect(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.deploymentStatus).toBe("not-deployed");
+    expect(EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT.deploymentStatus).toBe("stg-candidate-source-hash-verified");
     expect(await readFile(new URL("../src/generated/experience-translate-rooms-openapi.ts", import.meta.url), "utf8")).toBe(
       await generateContractTypes("experience-translate-rooms"),
     );

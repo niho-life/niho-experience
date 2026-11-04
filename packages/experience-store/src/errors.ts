@@ -78,6 +78,8 @@ export interface GuestCheckoutErrorDetails {
   readonly currentTotalYen?: number;
   readonly occurrenceReason?: GuestCheckoutOccurrenceReason;
   readonly retryAfterSeconds?: number;
+  /** Internal telemetry only; the public checkout error shape never contains this field. */
+  readonly rateLimitReason?: "checkout-ip-10m" | "booking-email-60m";
 }
 
 /**
@@ -94,6 +96,7 @@ export class GuestCheckoutError extends StoreError {
   readonly occurrenceReason: GuestCheckoutOccurrenceReason | null;
   readonly retryable: boolean;
   readonly retryAfterSeconds: number | null;
+  readonly rateLimitReason: "checkout-ip-10m" | "booking-email-60m" | null;
 
   constructor(code: GuestCheckoutErrorCode, details: GuestCheckoutErrorDetails = {}) {
     super(`Guest checkout was refused: ${code}${details.field === undefined ? "" : ` (${details.field})`}.`);
@@ -107,6 +110,7 @@ export class GuestCheckoutError extends StoreError {
     // As NIHO: only RATE_LIMITED may be sent again with the same key and content.
     this.retryable = code === "RATE_LIMITED";
     this.retryAfterSeconds = details.retryAfterSeconds ?? null;
+    this.rateLimitReason = details.rateLimitReason ?? null;
   }
 }
 
