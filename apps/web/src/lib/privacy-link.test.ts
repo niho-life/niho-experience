@@ -14,6 +14,9 @@ const state = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 // The Japanese layout always renders the language switch, which reads the address.
 vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: () => new URLSearchParams() }));
+// These tests exercise footer links, not request-scoped analytics settings. A real Next request
+// supplies `headers()`; the server-only settings boundary is covered separately.
+vi.mock("@/lib/public-site-analytics", () => ({ getPublicSiteAnalyticsSettings: async () => null }));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; }, isPreview: false }));
 vi.mock("@/lib/guide-registry", () => ({ guideCatalogForSite: async () => state.guideCatalog, hasGuidesPage: () => state.hasGuides }));
 vi.mock("@/lib/localized-content", () => ({

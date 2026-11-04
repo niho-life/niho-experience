@@ -2,6 +2,7 @@ import "../globals.css";
 import "@niho/experience-presentation/v1/styles.css";
 import type { Metadata, Viewport } from "next";
 import { AnalyticsSetup } from "@/components/Analytics";
+import { ExperienceGa4Analytics } from "@/components/ExperienceGa4Analytics";
 import { AttributionCapture } from "@/components/AttributionCapture";
 import { analyticsModeForRuntime } from "@/lib/analytics";
 import { CodeSiteChrome } from "@/components/SiteChrome";
@@ -13,6 +14,7 @@ import { getJapaneseStaticCounterparts } from "@/lib/localized-content";
 import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { privacyFooterLink } from "@/lib/privacy-link";
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
+import { getPublicSiteAnalyticsSettings } from "@/lib/public-site-analytics";
 
 // Every page reads environment settings (indexing, API mode, host sign-up) at
 // request time, so the same build can run as preview or production.
@@ -37,6 +39,7 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const analyticsMode = analyticsModeForRuntime(config.apiMode, config.siteUrl, config.umamiWebsiteId);
+  const publicAnalytics = await getPublicSiteAnalyticsSettings();
   let counterparts: Readonly<Record<string, string>> = {};
   try { counterparts = await getJapaneseStaticCounterparts(); } catch { /* no approved JA release: expose no link */ }
   const guides = await guideCatalogForSite();
@@ -56,6 +59,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </a>
         <SiteLocaleProvider locale="en">
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
+          <ExperienceGa4Analytics measurementId={publicAnalytics?.ga4MeasurementId ?? null} />
           <AttributionCapture enabled={config.publicApiVersion === "1.2"} />
           <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={footerLinks}>
             {children}
