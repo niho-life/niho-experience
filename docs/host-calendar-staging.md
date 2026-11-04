@@ -22,9 +22,9 @@ Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA�
 
 ## 初期設定（運用担当がレビュー後に手動実施）
 
-1. GitHub Environment `host-staging` を新規作成し、deployment branchは `main` のみ、required reviewerと自己承認禁止を設定する。保護が実際に使えることを確認する。`STG_HOST_DEPLOY_ENABLED` は未設定または `false` のままにする。
+1. GitHub Environment `host-staging` を新規作成し、deployment branchは `main` のみ、required reviewerと自己承認禁止を設定する。保護が実際に使えることを確認する。`STG_HOST_CORE_READY` は未設定または `false`、`STG_HOST_DEPLOY_ENABLED` は未設定または `false` のままにする。
 2. 管理者が対象project・請求・既存instanceを確認して、レビュー済みSHAから `CONFIRM_HOST_STAGING_SETUP=niho-app-stg bash scripts/gcp/setup-host-staging.sh` を実行する。これは明示的なGCP変更である。scriptはAPI有効化、専用identity/repository/service/IAMを作る。DB・DBユーザー・Secret・既存サービス・共有instanceの設定は変更しない。初回はSecret/DBなしのprivate placeholderを作る。
-3. 出力された4個の `STG_HOST_*` をEnvironment Variablesへ登録する。値はresource識別子であり、秘密値ではない。既存providerの設定が異なる場合はscriptを止め、IAMを緩めずレビューする。
+3. 出力された4個の `STG_HOST_*` をEnvironment Variablesへ登録する。値はresource識別子であり、秘密値ではない。追加で `STG_HOST_CORE_READY=false` をEnvironment Variablesへ登録する。既存providerの設定が異なる場合はscriptを止め、IAMを緩めずレビューする。
 4. 下記の専用bootstrap scriptを手動実行し、Experience専用DB・専用DBユーザー・バックアップ方針を用意する。NIHO業務DBを使わない。`packages/experience-store/migrations/` のSQLを名前順に適用する。RuntimeにDDL・role作成権限を渡さず、必要なtable/sequence DMLだけを付ける。共有instance内の他DBへの接続/読取を拒否できるか確認する。`setup-host-staging.sh` と配備workflowはDB変更を実行しない。
 5. 合成提供者と専用のテストNIHOアカウントを、正当な権限を持つ非公開のprovisioning経路で結ぶ。`provider_memberships` を含む実ID・SQL応答・接続URL・Google資格情報はGit、公開Issue、PR、CIログへ記録しない。実顧客・実提供者・本番DBの複製は使わない。
 
@@ -90,7 +90,7 @@ Cloud Runのservice URLは `status.url` のhash形式に加え、service名・pr
 - Google OAuthはstg専用Web clientを作り、redirect URIを **`STG_HOST_SERVICE_URL` + `/host/calendar/google/callback`** の1つに限定する。Calendar APIの有効化、同意画面、検証用Googleアカウント、必要なscope（`calendar.calendarlist.readonly`、`calendar.events.freebusy`、`calendar.app.created`）を確認する。本番OAuth client・私用の実予定は使用しない。
 - NIHO連携担当はstg Webの `APP_CONNECT_WEB_ORIGINS` に **同じ `STG_HOST_SERVICE_URL` のexact origin** を追加し、接続API/許可された戻り先を確認する。Cloud Runのtag URLを列挙しない。本番 `niho.life` の設定・cookieを変更しない。
 - `SITE_URL` はstable service URL、NIHO APIとCSPは `https://app-stg.niho.life` に固定する。候補URLは構成・起動確認にだけ使う。ログインとOAuthの往復は、昇格後のstable URLで開始する。
-- Secret/IAM、専用DBとmigration、合成membership、Google/NIHO両方のredirectとorigin、先行API配備を管理担当が確認した後、Environment Variable `STG_HOST_CALENDAR_READY=true` を設定する。最後にRepository Variable `STG_HOST_DEPLOY_ENABLED=true` を設定する。足りない場合はworkflowが失敗して停止する。
+- Secret/IAM、専用DBとmigration、合成membership、NIHOのredirectと許可origin、先行API配備を管理担当が確認した後、Environment Variable `STG_HOST_CORE_READY=true` を設定する。これはホスト画面と認証の配備準備だけを表し、Google consent・Calendar接続・同期の受入を表さない。Calendarはこの変更で開かず、Calendar機能flagは別途受入するまでOFFに保つ。最後にRepository Variable `STG_HOST_DEPLOY_ENABLED=true` を設定する。足りない場合はworkflowが失敗して停止する。
 
 ## 手動配備と受入
 

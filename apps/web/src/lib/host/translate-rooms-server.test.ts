@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreNotFoundError } from "@niho-experience/experience-store";
 
 const mocks = vi.hoisted(() => ({
-  config: { hostConsoleEnabled: true, apiMode: "http" as "http" | "mock", experienceTranslateApiEnabled: false, nihoWebOrigin: "https://niho.example" },
+  config: { hostConsoleEnabled: true, apiMode: "http" as "http" | "mock", experienceTranslateApiEnabled: false, guestBookingEnabled: true, nihoWebOrigin: "https://niho.example" },
   readHost: vi.fn(),
   usable: vi.fn(),
   create: vi.fn(),
@@ -34,7 +34,7 @@ const post = (body: BodyInit | null, headers: Record<string, string> = {}) => ne
 describe("translate rooms server boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "http", experienceTranslateApiEnabled: false });
+    Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "http", experienceTranslateApiEnabled: false, guestBookingEnabled: true });
     mocks.usable.mockReturnValue(true);
     mocks.create.mockReturnValue({ marker: "translate-client" });
     mocks.hostMock = false;
@@ -44,6 +44,7 @@ describe("translate rooms server boundary", () => {
   it("is open in mock mode, and in http only behind its own flag with the host console", () => {
     expect(translateRoomsEnabled()).toBe(false);
     mocks.config.experienceTranslateApiEnabled = true;
+    mocks.config.guestBookingEnabled = false;
     expect(translateRoomsEnabled()).toBe(true);
     mocks.config.hostConsoleEnabled = false;
     expect(translateRoomsEnabled()).toBe(false);
@@ -56,6 +57,7 @@ describe("translate rooms server boundary", () => {
 
   it("uses only the sealed current host session and NIHO's fetch for that session", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
+    mocks.config.guestBookingEnabled = false;
     mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
     const loaded = await loadTranslateRoomsClient();
     expect(loaded).toEqual({ ok: true, client: { marker: "translate-client" } });
@@ -142,6 +144,16 @@ describe("translate rooms server boundary", () => {
     const other = await loadSiteTranslateRoomsClient("provider_2", "booking_1", "status");
     expect(other.ok).toBe(false);
     expect((other as { response: Response }).response.status).toBe(404);
+  });
+
+  it("閉じているsite bookingのroom APIは販売を開かず404にする", async () => {
+    mocks.config.experienceTranslateApiEnabled = true;
+    mocks.config.guestBookingEnabled = false;
+    const result = await loadSiteTranslateRoomsClient("provider_1", "booking_1", "create");
+    expect(result.ok).toBe(false);
+    expect((result as { response: Response }).response.status).toBe(404);
+    expect(mocks.readHost).not.toHaveBeenCalled();
+    expect(mocks.owner).not.toHaveBeenCalled();
   });
 
   it("mock site-bookingsは合成予約の所属と条件だけでsite clientへ進む", async () => {
