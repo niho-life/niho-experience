@@ -1,9 +1,10 @@
 import "server-only";
 import type { Pool } from "pg";
-import { BookingCancellations, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
+import { BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
+import type { SettlementReconciliationDeps } from "@/lib/experience/settlement-reconciliation";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { hostNotificationAllowed } from "@/lib/host/push/outbox";
 import { smtpMailer, type Mailer } from "@/lib/mail/transport";
@@ -32,6 +33,7 @@ export interface ExperienceJobDependencies {
   readonly refundSubmitter?: () => RefundSendDeps["submit"];
   /** Whether hosts get emails (#194, EXPERIENCE_HOST_MAIL_ENABLED): their address confirmations and booking emails. */
   readonly hostMail?: boolean;
+  readonly settlementReconciliation?: (pool: Pool) => SettlementReconciliationDeps | null;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
 }
 
@@ -92,6 +94,12 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       mailer,
       siteUrl: config.siteUrl,
       now: () => new Date(),
+      settlementReconciliation: (dependencies.settlementReconciliation ?? ((database) => {
+        const key = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY;
+        return guestBooking && key?.trim()
+          ? { repository: new ExperienceSupportRepository(database), platformStripeKey: key }
+          : null;
+      }))(pool) ?? undefined,
       onStepError: (step, errorName) => {
         errors[step] = errorName;
       },

@@ -1,4 +1,4 @@
-import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage } from "@niho-experience/experience-store";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -199,6 +199,23 @@ export function bookingMessageEmail(
         } as const]
       : []),
     { kind: "p", text: `Replying to this email reaches NIHO support, not ${host}.` },
+  ]);
+}
+
+/** A guest-facing Admin message clearly marked as NIHO support, sent through the booking message outbox. */
+export function supportBookingMessageEmail(
+  message: Pick<ClaimedSupportBookingMessage, "guestName" | "experienceTitle" | "english" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
+  options: { readonly siteUrl: string; readonly bookingPageGrant: string | null },
+): RenderedMail {
+  const experience = oneLine(message.experienceTitle);
+  const grant = options.bookingPageGrant;
+  return mail(`NIHO support sent you a message about your booking: ${experience}, ${calendarDate(message.localDate, DATE_SHORT)} ${message.localStartTime}`, [
+    { kind: "p", text: `Hi ${oneLine(message.guestName)},` },
+    { kind: "p", text: "NIHO support sent you a message about your booking:" },
+    { kind: "quote", text: body(message.english) },
+    { kind: "facts", rows: [["Experience", experience], ["Date", calendarDate(message.localDate, DATE_LONG)], ["Time", `${message.localStartTime} ${zoneName(message.timeZone)}`], ["Booking reference", message.publicBookingId]] },
+    ...(grant ? [{ kind: "link", lead: "Open your booking to continue the conversation with NIHO support. This link works once and opens the booking on one device, so please don't forward it.", label: "View your booking", href: bookingPageLink(options.siteUrl, grant) } as const] : []),
+    { kind: "p", text: "Replying to this email reaches NIHO support, not your provider." },
   ]);
 }
 

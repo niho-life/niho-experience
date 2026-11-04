@@ -13,6 +13,7 @@ import {
 } from "../src/errors.ts";
 import {
   GUEST_BOOKING_LIMITS,
+  EXPERIENCE_SUPPORT_CONSENT_VERSION,
   GuestBookingRepository,
   type BookingQuestion,
   type GuestBookingStart,
@@ -20,7 +21,10 @@ import {
   type PublicOccurrence,
   type StartGuestBookingInput,
 } from "../src/guest-bookings.ts";
+import { BookingCancellations } from "../src/booking-cancellations.ts";
+import { GuestBookingMessages } from "../src/booking-messages.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { ExperienceSupportRepository } from "../src/support-settlement.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
@@ -1219,6 +1223,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       const pastRequest = request({ clientRequestKey: pastKey, guestPhone: "+81 90 1234 5678", note: "Sample note", utm: { utmSource: "newsletter" } });
       const past = await guests.startGuestBooking(pastRequest);
       const upcoming = await guests.startGuestBooking(request({ occurrenceDate: day(3), guestEmail: "upcoming@example.com" }));
+      const pastRow = (await pool.query("SELECT provider_id,id FROM bookings WHERE public_booking_id=$1", [past.publicBookingId])).rows[0]!;
+      await pool.query("INSERT INTO experience_support_cases (provider_id,booking_id,internal_memo) VALUES ($1,$2,'guest email guest@example.com')", [pastRow.provider_id, pastRow.id]);
 
       // Nothing has ended yet; an instant in the future does not erase upcoming guests.
       assert.equal(await guests.eraseGuestData({ endedBefore: new Date(Date.now() + 365 * 86_400_000).toISOString() }), 0);
@@ -1244,6 +1250,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.equal(rows.rows[1].id, upcoming.publicBookingId);
       assert.equal(rows.rows[1].guest_email, "upcoming@example.com");
       assert.equal(rows.rows[1].erased, false);
+      assert.deepEqual((await pool.query("SELECT internal_memo,revision FROM experience_support_cases WHERE provider_id=$1 AND booking_id=$2", [pastRow.provider_id, pastRow.id])).rows, [{ internal_memo: null, revision: 1 }]);
       // Erased stays erased.
       await assert.rejects(() => pool.query("UPDATE booking_guests SET pii_erased_at=NULL, guest_name='Sample Guest' WHERE pii_erased_at IS NOT NULL"), /stays erased/);
       // A retry of the erased booking's request still names it, without the address.
@@ -1716,6 +1723,126 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
       assert.deepEqual(session && [session.localDate, session.participants, session.bookings], ["2020-01-01", 1, 1]);
       const [erased] = await guests.listGuestBookingsForSession(ownerA, key("walk", "sample-walk-pm", "2020-01-01", "14:00"));
       assert.deepEqual(erased && [erased.publicBookingId, erased.guest, erased.adultCount], [past.publicBookingId, null, 1]);
+    });
+  });
+
+  it("freezes booking consent, keeps Admin cases private, and reconciles actual fee/refund states", async () => {
+    await withSchema(async ({ pool, store, guests, addRule }) => {
+      await addRule("tea", rule("sample-am"));
+      await guests.setProviderSupportSettings(ownerA, { supportEnabled: true, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 1 });
+      const support = new ExperienceSupportRepository(pool);
+      const cancellations = new BookingCancellations(pool);
+      const messages = new GuestBookingMessages(pool);
+
+      const historical = await guests.startGuestBooking(request({ guestEmail: "historical@example.com" }));
+      await payFor(store, historical, 4_000, "support-history");
+      await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+      await pool.query("UPDATE bookings SET pricing_snapshot=jsonb_set(pricing_snapshot,'{platformFee,supportConsentVersion}',to_jsonb('2025-01-01'::text)) WHERE public_booking_id=$1", [historical.publicBookingId]);
+      await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+      const caseValue = await support.updateCase({ nihoUserId: "admin-a" }, historical.publicBookingId, {
+        commandId: randomUUID(), expectedRevision: 0, assignedAdminUserId: "admin-b", internalMemo: "Private Admin-only note",
+      });
+      assert.equal(caseValue.internalMemo, "Private Admin-only note");
+      assert.deepEqual(caseValue.events.map((event) => event.type), ["ASSIGNEE_CHANGED", "INTERNAL_MEMO_CHANGED"]);
+      const firstNotice = (await support.listNotifications({ nihoUserId: "admin-a" })).find((item) => item.publicBookingId === historical.publicBookingId && item.topic === "BOOKING_RECEIVED");
+      assert.ok(firstNotice);
+      const contactCommandId = randomUUID();
+      assert.deepEqual(await messages.sendSupportMessage({ nihoUserId: "admin-a" }, historical.publicBookingId, { commandId: contactCommandId, message: "NIHO support contact" }), { status: "received", repeated: false });
+      assert.deepEqual(await messages.sendSupportMessage({ nihoUserId: "admin-a" }, historical.publicBookingId, { commandId: contactCommandId, message: "NIHO support contact" }), { status: "received", repeated: true });
+      assert.equal((await support.listNotifications({ nihoUserId: "admin-a" })).some((item) => item.publicBookingId === historical.publicBookingId && item.topic === "GUEST_MESSAGE"), false);
+      const thread = await pool.query("SELECT id FROM guest_question_threads WHERE booking_id=(SELECT id FROM bookings WHERE public_booking_id=$1)", [historical.publicBookingId]);
+      assert.ok(thread.rows[0]?.id);
+      await pool.query(
+        `INSERT INTO guest_question_messages (id,provider_id,thread_id,author,source,body,client_request_key)
+         VALUES ($1::uuid,'provider-a',$2::uuid,'GUEST','BOOKING_PAGE','A guest question','notice-key-' || $1::text)`,
+        [randomUUID(), thread.rows[0].id],
+      );
+      assert.equal((await support.listNotifications({ nihoUserId: "admin-a" })).filter((item) => item.publicBookingId === historical.publicBookingId && item.topic === "GUEST_MESSAGE").length, 1);
+      await support.markNotificationRead({ nihoUserId: "admin-a" }, firstNotice.id);
+      assert.equal((await support.listNotifications({ nihoUserId: "admin-a" })).find((item) => item.id === firstNotice.id)?.read, true);
+      assert.equal((await support.listNotifications({ nihoUserId: "admin-b" })).find((item) => item.id === firstNotice.id)?.read, false);
+
+      await cancellations.cancelAsSupport({ nihoUserId: "admin-a" }, historical.publicBookingId, {
+        commandId: randomUUID(), reason: "GUEST_REQUEST", note: null, refund: { kind: "FULL" },
+      });
+      const afterAction = await support.getCase({ nihoUserId: "admin-a" }, historical.publicBookingId);
+      assert.equal(afterAction?.internalMemo, "Private Admin-only note");
+      assert.ok(afterAction?.events.some((event) => event.type === "SUPPORT_ACTION" && event.action === "SUPPORT_CANCEL" && event.outcome === "CANCELLED"));
+      const hostView = await guests.getGuestBookingForHost(ownerA, historical.publicBookingId);
+      const hostHistory = hostView.supportHistory ?? [];
+      assert.deepEqual(hostHistory.map(({ type }) => type), ["GUEST_CONTACT_SENT", "SUPPORT_ACTION"]);
+      assert.deepEqual([hostHistory.at(-1)?.action, hostHistory.at(-1)?.outcome], ["SUPPORT_CANCEL", "CANCELLED"]);
+      assert.doesNotMatch(JSON.stringify(hostView.supportHistory), /admin-a|Private Admin-only note|commandId/);
+
+      const legacy = await guests.startGuestBooking(request({ occurrenceDate: day(3), guestEmail: "legacy@example.com" }));
+      await payFor(store, legacy, 4_000, "support-legacy-null");
+      await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+      await pool.query("UPDATE bookings SET pricing_snapshot=pricing_snapshot #- '{platformFee,supportConsentVersion}' #- '{platformFee,supportAgreementRevision}' WHERE public_booking_id=$1", [legacy.publicBookingId]);
+      await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+      assert.equal(await support.getCase({ nihoUserId: "admin-a" }, legacy.publicBookingId), null);
+      await assert.rejects(() => cancellations.cancelAsSupport({ nihoUserId: "admin-a" }, legacy.publicBookingId, {
+        commandId: randomUUID(), reason: "GUEST_REQUEST", note: null, refund: { kind: "FULL" },
+      }), StoreAccessDeniedError);
+
+      const regular = await guests.startGuestBooking(request({ occurrenceDate: day(4), guestEmail: "settlement@example.com" }));
+      await payFor(store, regular, 4_000, "support-settlement");
+      const initial = await support.ensureSettlement(regular.publicBookingId);
+      assert.deepEqual([initial.supportEnabled, initial.feeRateBasisPoints, initial.estimatedPlatformFee], [true, 1500, 600]);
+      const evidence = {
+        connectedAccountId: regular.stripeConnectAccountRef, currency: "JPY", grossAmount: 4_000,
+        chargeRef: "ch_SampleCharge001", balanceTransactionRef: "txn_SampleBalance001", applicationFeeRef: "fee_SampleFee001",
+        feePayer: "ACCOUNT" as const, processingFeeAmount: 360, processingFeeCurrency: "JPY",
+        applicationFeeAmount: 600, applicationFeeRefunded: 0, successfulRefundAmount: 0, pendingRefundAmount: 0,
+        refunds: [], refundHistoryTruncated: false,
+      };
+      const estimate = await support.recordStripeEvidence(regular.publicBookingId, evidence);
+      assert.equal(estimate.status, "PROCESSING");
+      assert.equal(estimate.final, false);
+      assert.equal(estimate.compensationAmount, 360);
+      const command = await support.prepareCompensation(regular.publicBookingId);
+      assert.equal(command?.amount, 360);
+      assert.ok(command);
+      await support.markCompensation(command.commandId, { status: "TRANSFERRED", stripeTransferRef: "tr_SampleTransfer001" });
+      const settled = await support.recordStripeEvidence(regular.publicBookingId, evidence);
+      assert.deepEqual([settled.final, settled.hostNetAfterRefunds, settled.nihoNetAfterProcessing], [true, 3_400, 240]);
+
+      const partial = await support.recordStripeEvidence(regular.publicBookingId, {
+        ...evidence, applicationFeeRefunded: 150, successfulRefundAmount: 1_000,
+        refunds: [{ stripeRefundRef: "re_SampleRefund001", internalRefundId: null, amount: 1_000, currency: "JPY", status: "succeeded" }],
+      });
+      assert.deepEqual([partial.final, partial.successfulRefundAmount, partial.hostNetAfterRefunds, partial.nihoNetAfterProcessing], [true, 1_000, 2_550, 90]);
+      const pending = await support.recordStripeEvidence(regular.publicBookingId, {
+        ...evidence, applicationFeeRefunded: 150, successfulRefundAmount: 1_000, pendingRefundAmount: 500,
+        refunds: [
+          { stripeRefundRef: "re_SampleRefund001", internalRefundId: null, amount: 1_000, currency: "JPY", status: "succeeded" },
+          { stripeRefundRef: "re_SampleRefund002", internalRefundId: null, amount: 500, currency: "JPY", status: "pending" },
+        ],
+      });
+      assert.deepEqual([pending.final, pending.status, pending.pendingRefundAmount], [false, "PROCESSING", 500]);
+      const failed = await support.recordStripeEvidence(regular.publicBookingId, {
+        ...evidence, applicationFeeRefunded: 150, successfulRefundAmount: 1_000, pendingRefundAmount: 500,
+        refunds: [
+          { stripeRefundRef: "re_SampleRefund001", internalRefundId: null, amount: 1_000, currency: "JPY", status: "succeeded" },
+          { stripeRefundRef: "re_SampleRefund002", internalRefundId: null, amount: 500, currency: "JPY", status: "pending" },
+          { stripeRefundRef: "re_SampleRefund003", internalRefundId: null, amount: 100, currency: "JPY", status: "failed" },
+        ],
+      });
+      assert.deepEqual([failed.final, failed.failedRefundCount, failed.status], [false, 1, "PROCESSING"]);
+
+      const fullyRefunded = await guests.startGuestBooking(request({ occurrenceDate: day(5), guestEmail: "full-refund@example.com" }));
+      await payFor(store, fullyRefunded, 4_000, "support-full-refund");
+      await support.ensureSettlement(fullyRefunded.publicBookingId);
+      const fullEvidence = {
+        ...evidence, connectedAccountId: fullyRefunded.stripeConnectAccountRef,
+        refunds: [{ stripeRefundRef: "re_SampleFullRefund1", internalRefundId: null, amount: 4_000, currency: "JPY", status: "succeeded" as const }],
+        successfulRefundAmount: 4_000, applicationFeeRefunded: 600,
+      };
+      await support.recordStripeEvidence(fullyRefunded.publicBookingId, fullEvidence);
+      const fullCommand = await support.prepareCompensation(fullyRefunded.publicBookingId);
+      assert.ok(fullCommand);
+      await support.markCompensation(fullCommand.commandId, { status: "TRANSFERRED", stripeTransferRef: "tr_SampleTransfer002" });
+      const full = await support.recordStripeEvidence(fullyRefunded.publicBookingId, fullEvidence);
+      assert.deepEqual([full.final, full.successfulRefundAmount, full.hostNetAfterRefunds, full.nihoNetAfterProcessing], [true, 4_000, 0, -360]);
     });
   });
 });

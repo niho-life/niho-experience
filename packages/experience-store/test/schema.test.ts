@@ -527,6 +527,28 @@ describe("database invariants", () => {
     assert.doesNotMatch(code, /email|phone|address|bearer|secret|raw_response/i);
   });
 
+  it("stores new Experience support consent, private Admin cases, notices and actual settlement evidence (#117 #121 #128 #380)", async () => {
+    const sql = await readFile(new URL("../migrations/0047_experience_support_and_settlement.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const code = sql.replace(/--.*$/gm, "");
+    assert.match(code, /support_consent_version text/);
+    assert.match(code, /support_agreement_revision bigint/);
+    assert.match(code, /CREATE TABLE experience_support_cases/);
+    assert.match(code, /CREATE TABLE experience_support_case_commands/);
+    assert.match(code, /CREATE TABLE experience_support_case_events/);
+    assert.match(code, /CREATE TABLE experience_support_admin_notification_reads/);
+    assert.match(code, /CREATE TABLE experience_booking_settlements/);
+    assert.match(code, /CREATE TABLE experience_settlement_commands/);
+    assert.match(code, /booking_cancellation_commands_support_history/);
+    assert.match(code, /guest_booking_message_experience_support_notice/);
+    assert.match(code, /topic IN \('BOOKING_RECEIVED', 'PAYMENT_REVIEW', 'CANCELLATION_REQUEST', 'BOOKING_CANCELLED', 'REFUND_UPDATED', 'GUEST_MESSAGE'\)/);
+    assert.match(code, /NEW\.author <> 'GUEST'/);
+    assert.match(code, /guest_question_messages_author_check CHECK \(author IN \('GUEST', 'HOST', 'SUPPORT'\)\)/);
+    assert.doesNotMatch(code, /UPDATE bookings|DELETE FROM bookings|UPDATE provider_sale_settings/);
+    assert.doesNotMatch(code, /guest_email|guest_phone|guest_name|email text|phone text/);
+  });
+
   it("drops the retired product cutover and imported legacy inventory tables", async () => {
     const sql = await readFile(new URL("../migrations/0046_remove_legacy_sales_cutover.sql", import.meta.url), "utf8");
     const code = sql.replace(/--.*$/gm, "");

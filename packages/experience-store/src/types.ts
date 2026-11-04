@@ -264,6 +264,10 @@ export interface PlatformFeeSnapshot {
   readonly basisPoints: 1000 | 1500;
   /** floor(totalAmount × basisPoints / 10000) in yen: at least 1 and below totalAmount. */
   readonly amount: number;
+  /** Absent on historical rows. Never inferred from the current provider setting. */
+  readonly supportConsentVersion?: string;
+  /** Host's accepted support agreement revision at booking time; absent on historical rows. */
+  readonly supportAgreementRevision?: number;
 }
 
 export interface SellerSnapshot {

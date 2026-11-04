@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
-import type { BookingRecord, RefundSubmission, StripeRefundAnswer, StripeRefundStatus } from "@niho-experience/experience-store";
+import type { BookingRecord, RefundSubmission, SettlementTransferCommand, StripeRefundAnswer, StripeRefundStatus, StripeSettlementEvidence } from "@niho-experience/experience-store";
 
 const STRIPE_MINIMUM_EXPIRY_SECONDS = 30 * 60;
 const STRIPE_MAXIMUM_EXPIRY_SECONDS = 24 * 60 * 60;
@@ -21,6 +21,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CONTROL = /[\u0000-\u001F\u007F]/;
 
 export type PaymentsStripeClient = Pick<Stripe, "checkout" | "webhooks" | "refunds">;
+export type SettlementStripeClient = Pick<Stripe, "accounts" | "paymentIntents" | "charges" | "balanceTransactions" | "applicationFees" | "refunds" | "transfers">;
 
 export interface CreateDirectCheckoutInput {
   readonly booking: Readonly<BookingRecord>;
@@ -166,6 +167,13 @@ function resolveStripeClient(
     throw new ExperiencePaymentsValidationError("A platform Stripe key or injected Stripe client is required.");
   }
   return new Stripe(platformStripeKey);
+}
+
+function resolveSettlementStripeClient(key: string | undefined, injected: SettlementStripeClient | undefined): SettlementStripeClient {
+  if (injected !== undefined && key !== undefined) throw new ExperiencePaymentsValidationError("Provide either platformStripeKey or stripe, not both.");
+  if (injected !== undefined) return injected;
+  if (typeof key !== "string" || key.trim().length === 0) throw new ExperiencePaymentsValidationError("A platform Stripe key or injected Stripe client is required.");
+  return new Stripe(key);
 }
 
 function assertPositiveAmount(value: number, field: string): void {
@@ -366,7 +374,10 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
         },
       ],
       metadata: { source: "niho-experience", booking_id: bookingId },
-      payment_intent_data: { application_fee_amount: applicationFeeAmount },
+      payment_intent_data: {
+        application_fee_amount: applicationFeeAmount,
+        metadata: { source: "niho-experience", booking_id: bookingId },
+      },
     },
     {
       stripeAccount: input.booking.sellerSnapshot.stripeConnectAccountRef,
@@ -409,8 +420,8 @@ function assertRefundSubmission(refund: RefundSubmission): void {
   assertPositiveAmount(refund.amount, "refund.amount");
   if (typeof refund.currency !== "string" || !CURRENCY.test(refund.currency)) throw new ExperiencePaymentsValidationError("refund.currency must be three uppercase letters.");
   if (refund.kind !== "FULL" && refund.kind !== "PARTIAL") throw new ExperiencePaymentsValidationError("refund.kind must be FULL or PARTIAL.");
-  // NIHO's fee goes back with a full refund only; a partial one keeps it (docs/guest-booking.md).
-  if (refund.refundApplicationFee !== (refund.kind === "FULL")) throw new ExperiencePaymentsValidationError("refund.refundApplicationFee must be true for a full refund only.");
+  // Stripe returns the proportional part of NIHO's application fee on both full and partial refunds.
+  if (refund.refundApplicationFee !== true) throw new ExperiencePaymentsValidationError("refund.refundApplicationFee must be true so the application fee follows the refund proportion.");
 }
 
 function refundStatusOf(value: unknown): StripeRefundStatus {
@@ -470,6 +481,236 @@ export async function submitBookingRefund(input: SubmitBookingRefundInput): Prom
   if (typeof created.id !== "string" || !REFUND_ID.test(created.id)) throw new ExperiencePaymentsValidationError("Stripe returned a refund without a valid ID.");
   if (created.amount !== refund.amount) throw new ExperiencePaymentsValidationError("Stripe returned a refund of another amount.");
   return { kind: "accepted", stripeRefundRef: created.id, status: refundStatusOf(created.status), failureCode: failureCodeOf(created.failure_reason) };
+}
+
+export interface ReadBookingSettlementInput {
+  readonly publicBookingId: string;
+  readonly connectedAccountId: string;
+  readonly paymentIntentId: string;
+  readonly expectedGrossAmount: number;
+  readonly expectedCurrency: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: SettlementStripeClient;
+}
+
+export interface StripeSettlementRefund {
+  readonly stripeRefundRef: string;
+  readonly internalRefundId: string | null;
+  readonly amount: number;
+  readonly currency: string;
+  readonly status: "succeeded" | "pending" | "requires_action" | "failed" | "canceled" | "unknown";
+}
+
+function positiveOrZero(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new ExperiencePaymentsValidationError(`${field} is invalid.`);
+  return value;
+}
+
+function stripeReference(value: unknown, prefix: string, field: string): string {
+  const id = typeof value === "string" ? value : asRecord(value, field).id;
+  if (typeof id !== "string" || !id.startsWith(prefix) || id.length < 12 || id.length > 256) throw new ExperiencePaymentsValidationError(`${field} is missing or malformed.`);
+  return id;
+}
+
+function feePayerFromAccount(account: Stripe.Account): StripeSettlementEvidence["feePayer"] {
+  const payer = account.controller?.fees?.payer;
+  if (payer === "account" || payer === "application_custom" || payer === "application_express") return "ACCOUNT";
+  if (payer === "application") return "APPLICATION";
+  return null;
+}
+
+/**
+ * Reads actual fee and refund totals for an Experience direct charge. Unknown fee-payer/account/snapshot combinations
+ * are returned as review issues; this function never estimates Stripe's fee from a percentage.
+ */
+export async function readBookingSettlement(input: ReadBookingSettlementInput): Promise<StripeSettlementEvidence> {
+  if (typeof input.publicBookingId !== "string" || !UUID_V4.test(input.publicBookingId)) throw new ExperiencePaymentsValidationError("publicBookingId is malformed.");
+  if (typeof input.connectedAccountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.connectedAccountId)) throw new ExperiencePaymentsValidationError("connectedAccountId is malformed.");
+  if (typeof input.paymentIntentId !== "string" || !PAYMENT_INTENT_ID.test(input.paymentIntentId)) throw new ExperiencePaymentsValidationError("paymentIntentId is malformed.");
+  assertPositiveAmount(input.expectedGrossAmount, "expectedGrossAmount");
+  if (typeof input.expectedCurrency !== "string" || !CURRENCY.test(input.expectedCurrency)) throw new ExperiencePaymentsValidationError("expectedCurrency is malformed.");
+  const stripe = resolveSettlementStripeClient(input.platformStripeKey, input.stripe);
+  const options = { stripeAccount: input.connectedAccountId };
+  const account = await stripe.accounts.retrieve(input.connectedAccountId);
+  const payer = feePayerFromAccount(account);
+  const issueCodes: string[] = [];
+  if (!payer) issueCodes.push("fee_payer_unknown");
+  const intent = await stripe.paymentIntents.retrieve(input.paymentIntentId, { expand: ["latest_charge.balance_transaction", "latest_charge.application_fee"] }, options);
+  if (intent.id !== input.paymentIntentId || (intent.metadata?.booking_id && intent.metadata.booking_id !== input.publicBookingId.toLowerCase())) issueCodes.push("payment_intent_mismatch");
+  const latest = intent.latest_charge;
+  if (latest === null) {
+    return {
+      connectedAccountId: input.connectedAccountId,
+      currency: input.expectedCurrency,
+      grossAmount: input.expectedGrossAmount,
+      chargeRef: null,
+      balanceTransactionRef: null,
+      applicationFeeRef: null,
+          feePayer: payer,
+      processingFeeAmount: null,
+          processingFeeCurrency: null,
+      applicationFeeAmount: null,
+      applicationFeeRefunded: null,
+      successfulRefundAmount: 0,
+      pendingRefundAmount: 0,
+          refunds: [],
+          refundHistoryTruncated: false,
+      issueCode: issueCodes[0] ?? null,
+    };
+  }
+  const charge = typeof latest === "string"
+    ? await stripe.charges.retrieve(latest, { expand: ["balance_transaction", "application_fee"] }, options)
+    : latest;
+  const chargeRef = stripeReference(charge.id, "ch_", "charge.id");
+  if (charge.payment_intent && stripeReference(charge.payment_intent, "pi_", "charge.payment_intent") !== input.paymentIntentId) issueCodes.push("payment_intent_mismatch");
+  const currency = typeof charge.currency === "string" ? charge.currency.toUpperCase() : input.expectedCurrency;
+  const grossAmount = positiveOrZero(charge.amount, "charge.amount");
+  if (grossAmount !== input.expectedGrossAmount) issueCodes.push("gross_amount_mismatch");
+  if (currency !== input.expectedCurrency) issueCodes.push("currency_mismatch");
+  let balanceTransaction: Stripe.BalanceTransaction | null = null;
+  if (charge.balance_transaction) {
+    balanceTransaction = typeof charge.balance_transaction === "string"
+      ? await stripe.balanceTransactions.retrieve(charge.balance_transaction, {}, options)
+      : charge.balance_transaction;
+  }
+  let appFee: Stripe.ApplicationFee | null = null;
+  if (charge.application_fee) {
+    appFee = typeof charge.application_fee === "string"
+      ? await stripe.applicationFees.retrieve(charge.application_fee)
+      : charge.application_fee;
+  }
+  const applicationFeeRef = appFee ? stripeReference(appFee.id, "fee_", "application_fee.id") : null;
+  const applicationFeeAmount = appFee ? positiveOrZero(appFee.amount, "application_fee.amount") : null;
+  const applicationFeeRefunded = appFee ? positiveOrZero(appFee.amount_refunded, "application_fee.amount_refunded") : null;
+  if (applicationFeeAmount === null || applicationFeeAmount <= 0) issueCodes.push("application_fee_missing");
+  if (applicationFeeAmount !== null && applicationFeeRefunded !== null && applicationFeeRefunded > applicationFeeAmount) issueCodes.push("application_fee_refund_mismatch");
+  const refunds: StripeSettlementRefund[] = [];
+  let startingAfter: string | undefined;
+  let refundHistoryTruncated = false;
+  for (let page = 0; page < 100; page += 1) {
+    const result = await stripe.refunds.list({ payment_intent: input.paymentIntentId, limit: 100, ...(startingAfter ? { starting_after: startingAfter } : {}) }, options);
+    for (const refund of result.data) {
+      const status = refund.status === "succeeded" || refund.status === "pending" || refund.status === "requires_action"
+        || refund.status === "failed" || refund.status === "canceled" ? refund.status : "unknown";
+      if (status === "unknown") issueCodes.push("refund_status_unknown");
+      const currency = typeof refund.currency === "string" ? refund.currency.toUpperCase() : "";
+      if (currency !== input.expectedCurrency) issueCodes.push("refund_currency_mismatch");
+      const metadataId = refund.metadata?.refund_id;
+      const internalRefundId = typeof metadataId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(metadataId)
+        ? metadataId.toLowerCase() : null;
+      refunds.push({
+        stripeRefundRef: stripeReference(refund.id, "re_", "refund.id"),
+        internalRefundId,
+        amount: positiveOrZero(refund.amount, "refund.amount"),
+        currency,
+        status,
+      });
+    }
+    if (!result.has_more) break;
+    const last = result.data.at(-1)?.id;
+    if (page === 99 || !last || last === startingAfter) {
+      refundHistoryTruncated = true;
+      break;
+    }
+    startingAfter = last;
+  }
+  if (refundHistoryTruncated) issueCodes.push("refund_history_truncated");
+  const refundStatusesKnown = refunds.every((refund) => refund.status !== "unknown");
+  const successfulRefundAmount = refundHistoryTruncated || !refundStatusesKnown ? null
+    : refunds.reduce((total, refund) => total + (refund.status === "succeeded" ? refund.amount : 0), 0);
+  const pendingRefundAmount = refundHistoryTruncated || !refundStatusesKnown ? null
+    : refunds.reduce((total, refund) => total + (refund.status === "pending" || refund.status === "requires_action" ? refund.amount : 0), 0);
+  const processingFeeAmount = balanceTransaction ? positiveOrZero(balanceTransaction.fee, "balance_transaction.fee") : null;
+  const processingFeeCurrency = balanceTransaction && typeof balanceTransaction.currency === "string"
+    ? balanceTransaction.currency.toUpperCase() : null;
+  const balanceTransactionRef = balanceTransaction ? stripeReference(balanceTransaction.id, "txn_", "balance_transaction.id") : null;
+  if (processingFeeAmount !== null && processingFeeCurrency !== input.expectedCurrency) issueCodes.push("processing_fee_currency_mismatch");
+  return {
+    connectedAccountId: input.connectedAccountId,
+    currency,
+    grossAmount,
+    chargeRef,
+    balanceTransactionRef,
+    applicationFeeRef,
+    feePayer: payer,
+    processingFeeAmount,
+    processingFeeCurrency,
+    applicationFeeAmount,
+    applicationFeeRefunded,
+    successfulRefundAmount,
+    pendingRefundAmount,
+    refunds,
+    refundHistoryTruncated,
+    issueCode: issueCodes[0] ?? null,
+  };
+}
+
+export interface SubmitSettlementTransferInput {
+  readonly command: SettlementTransferCommand;
+  readonly platformStripeKey?: string;
+  readonly stripe?: SettlementStripeClient;
+  readonly now?: Date;
+}
+
+export type SettlementTransferAnswer =
+  | { readonly kind: "transferred"; readonly stripeTransferRef: string }
+  | { readonly kind: "already_transferred"; readonly stripeTransferRef: string }
+  | { readonly kind: "unknown" }
+  | { readonly kind: "retryable_failed"; readonly issueCode: string }
+  | { readonly kind: "review_required"; readonly issueCode: string };
+
+/**
+ * Finds a previous transfer before creating one. An unknown outcome may reuse its same idempotency key inside Stripe's
+ * retention window; after that, the stable transfer group is the reconciliation evidence and blind resubmission stops.
+ */
+export async function submitSettlementTransfer(input: SubmitSettlementTransferInput): Promise<SettlementTransferAnswer> {
+  const command = input.command;
+  if (!UUID.test(command.commandId) || !UUID_V4.test(command.publicBookingId) || !CONNECTED_ACCOUNT_ID.test(command.destinationAccountId)
+    || !Number.isSafeInteger(command.amount) || command.amount <= 0 || !CURRENCY.test(command.currency.toUpperCase())
+    || command.transferGroup !== `niho-experience-settlement:${command.publicBookingId}`) throw new ExperiencePaymentsValidationError("Settlement transfer command is malformed.");
+  const stripe = resolveSettlementStripeClient(input.platformStripeKey, input.stripe);
+  const found = await stripe.transfers.list({ transfer_group: command.transferGroup, limit: 100 });
+  const groupTransfers = found.data.filter((transfer) => transfer.transfer_group === command.transferGroup);
+  const matching = groupTransfers.filter((transfer) => transfer.metadata?.source === "niho-experience"
+    && transfer.metadata?.booking_id === command.publicBookingId.toLowerCase());
+  if (groupTransfers.length !== matching.length) return { kind: "review_required", issueCode: "settlement_transfer_group_occupied" };
+  if (matching.length > 1) return { kind: "review_required", issueCode: "duplicate_settlement_transfers" };
+  const previous = matching[0];
+  if (previous) {
+    const destination = stripeReference(previous.destination, "acct_", "transfer.destination");
+    if (previous.amount !== command.amount || previous.currency.toLowerCase() !== command.currency.toLowerCase() || destination !== command.destinationAccountId || previous.transfer_group !== command.transferGroup) {
+      return { kind: "review_required", issueCode: "settlement_transfer_mismatch" };
+    }
+    return { kind: "already_transferred", stripeTransferRef: stripeReference(previous.id, "tr_", "transfer.id") };
+  }
+  if (found.has_more) return { kind: "review_required", issueCode: "settlement_transfer_history_truncated" };
+  if (command.status === "REVIEW_REQUIRED") return { kind: "review_required", issueCode: "settlement_transfer_review_required" };
+  if (command.status === "TRANSFERRED") return { kind: "unknown" };
+  const now = input.now ?? new Date();
+  const commandAge = now.getTime() - Date.parse(command.createdAtUtc);
+  if (!Number.isFinite(commandAge) || commandAge > 23 * 60 * 60 * 1000) return { kind: "review_required", issueCode: "settlement_transfer_idempotency_window_expired" };
+  let transfer: Stripe.Transfer;
+  try {
+    transfer = await stripe.transfers.create({
+      amount: command.amount,
+      currency: command.currency.toLowerCase(),
+      destination: command.destinationAccountId,
+      transfer_group: command.transferGroup,
+      metadata: { source: "niho-experience", booking_id: command.publicBookingId.toLowerCase(), settlement_command_id: command.commandId.toLowerCase() },
+    }, { idempotencyKey: `experience-settlement:${command.commandId.toLowerCase()}` });
+  } catch (error) {
+    const refusal = definitiveRefusal(error);
+    if (refusal === "balance_insufficient" || refusal === "insufficient_funds") {
+      return { kind: "retryable_failed", issueCode: `settlement_transfer_${refusal}` };
+    }
+    if (refusal !== null) return { kind: "review_required", issueCode: `settlement_transfer_${refusal}` };
+    throw error;
+  }
+  if (transfer.amount !== command.amount || transfer.currency.toLowerCase() !== command.currency.toLowerCase()
+    || stripeReference(transfer.destination, "acct_", "transfer.destination") !== command.destinationAccountId) {
+    return { kind: "review_required", issueCode: "settlement_transfer_mismatch" };
+  }
+  return { kind: "transferred", stripeTransferRef: stripeReference(transfer.id, "tr_", "transfer.id") };
 }
 
 function asRecord(value: unknown, field: string): Record<string, unknown> {

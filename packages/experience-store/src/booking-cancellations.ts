@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { sessionBookingRef } from "./booking-access.ts";
 import { cancellationTermsOf, freeCancellationDeadlineUtc } from "./cancellation-terms.ts";
-import { StoreConflictError, StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
+import { StoreAccessDeniedError, StoreConflictError, StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { publicBookingIdOf, requireBookingsOwner, sessionKeyOf, type HostGuestSessionKey } from "./host-guest-bookings.ts";
 import { enqueueCancellationNotification } from "./host-notification-outbox.ts";
 import { lockProviderInventory } from "./inventory.ts";
@@ -202,6 +202,8 @@ export interface SupportQueueBooking {
   readonly cancellationPolicy: GuestCancellationPolicy | null;
   readonly cancellationRefundBasisPoints: number;
   readonly freeCancellationUntilUtc: string | null;
+  /** True only when this booking itself records current-version ON consent. */
+  readonly supportEligible: boolean;
 }
 
 export interface SupportQueueRequest extends SupportQueueBooking {
@@ -327,6 +329,7 @@ interface LockedBooking {
   readonly party: number;
   readonly title: string;
   readonly nowUtc: string;
+  readonly supportEligible: boolean;
 }
 
 function lockedFromRow(row: DbRow): LockedBooking {
@@ -353,7 +356,20 @@ function lockedFromRow(row: DbRow): LockedBooking {
     party: amount(row.party, "party"),
     title: text(row.public_title, "public_title"),
     nowUtc: isoValue(row, "db_now"),
+    supportEligible: (() => {
+      const fee = record(pricing.platformFee);
+      return fee.supportEnabled === true
+        && fee.basisPoints === 1500
+        && typeof fee.supportConsentVersion === "string"
+        && fee.supportConsentVersion.length > 0
+        && Number.isSafeInteger(fee.supportAgreementRevision)
+        && Number(fee.supportAgreementRevision) > 0;
+    })(),
   };
+}
+
+function requireBookingSupportConsent(booking: LockedBooking): void {
+  if (!booking.supportEligible) throw new StoreAccessDeniedError();
 }
 
 async function lockBooking(client: PoolClient, where: string, params: readonly unknown[]): Promise<LockedBooking | null> {
@@ -686,6 +702,7 @@ const QUEUE_JOINS = `
 function queueBookingFromRow(row: DbRow): SupportQueueBooking {
   const occurrence = record(row.occurrence_snapshot);
   const pricing = record(row.pricing_snapshot);
+  const fee = record(pricing.platformFee);
   const startUtc = text(occurrence.startUtc, "occurrence_snapshot.startUtc");
   const policy = typeof pricing.cancellationPolicy === "string" && POLICIES.has(pricing.cancellationPolicy) ? pricing.cancellationPolicy as GuestCancellationPolicy : null;
   const cancellation = cancellationTermsOf(pricing);
@@ -704,6 +721,12 @@ function queueBookingFromRow(row: DbRow): SupportQueueBooking {
     cancellationPolicy: policy,
     cancellationRefundBasisPoints: cancellation.refundBasisPoints,
     freeCancellationUntilUtc: freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart),
+    supportEligible: fee.supportEnabled === true
+      && fee.basisPoints === 1500
+      && typeof fee.supportConsentVersion === "string"
+      && fee.supportConsentVersion.length > 0
+      && Number.isSafeInteger(fee.supportAgreementRevision)
+      && Number(fee.supportAgreementRevision) > 0,
   };
 }
 
@@ -916,6 +939,7 @@ export class BookingCancellations {
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [providerId, id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
+      requireBookingSupportConsent(booking);
       if (booking.status !== "CONFIRMED") {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
         return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
@@ -957,6 +981,7 @@ export class BookingCancellations {
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [providerId, id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
+      requireBookingSupportConsent(booking);
       const open = await client.query<DbRow>(
         "SELECT id::text AS id FROM booking_cancellation_requests WHERE provider_id = $1 AND booking_id = $2 AND status = 'OPEN' FOR UPDATE",
         [providerId, booking.rowId],
@@ -1001,6 +1026,7 @@ export class BookingCancellations {
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [providerId, id]);
       if (!booking) throw new StoreNotFoundError("guest booking");
+      requireBookingSupportConsent(booking);
       if (booking.status !== "PAYMENT_REVIEW") {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
         return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
@@ -1041,6 +1067,9 @@ export class BookingCancellations {
       );
       const row = found.rows[0]!;
       const bookingIds = [text(row.public_booking_id, "public_booking_id")];
+      const booking = await lockBooking(client, "b.provider_id = $1 AND b.id = $2", [providerId, row.booking_id]);
+      if (!booking) throw new StoreNotFoundError("guest booking");
+      requireBookingSupportConsent(booking);
       if (row.status === "REQUESTED") {
         await recordResult(client, key, { outcome: "REFUND_RETRIED", bookingIds });
         return { outcome: "REFUND_RETRIED", repeated: false, bookingIds, refunds: await this.#leaseRequested(client, refundId) };
@@ -1049,7 +1078,6 @@ export class BookingCancellations {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
         return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
       }
-      const booking = await lockBooking(client, "b.provider_id = $1 AND b.id = $2", [providerId, row.booking_id]);
       const kind = row.kind === "FULL" ? "FULL" : "PARTIAL";
       const submission = await insertRefund(client, booking!, {
         commandId,
@@ -1078,6 +1106,14 @@ export class BookingCancellations {
       const key: CommandKey = { commandId, providerId, actorKind: "SUPPORT", actorRef, action: "SUPPORT_CLOSE_REFUND", fingerprint: fingerprint(["SUPPORT_CLOSE_REFUND", refundId.toLowerCase(), note]) };
       const previous = await previousResult(client, key);
       if (previous) return { ...previous, repeated: true, refunds: [] };
+      const target = await client.query<DbRow>(
+        `SELECT r.booking_id::text AS booking_id FROM booking_refunds r WHERE r.id=$1::uuid FOR UPDATE`,
+        [refundId],
+      );
+      if (!target.rows[0]) throw new StoreNotFoundError("refund");
+      const booking = await lockBooking(client, "b.provider_id = $1 AND b.id = $2", [providerId, target.rows[0].booking_id]);
+      if (!booking) throw new StoreNotFoundError("guest booking");
+      requireBookingSupportConsent(booking);
       const closed = await client.query<DbRow>(
         `UPDATE booking_refunds r SET closed_at = clock_timestamp(), close_note = $2, updated_at = clock_timestamp()
            FROM bookings b

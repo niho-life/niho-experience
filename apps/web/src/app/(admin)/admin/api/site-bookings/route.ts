@@ -11,6 +11,7 @@ import { config } from "@/lib/config";
 import { adminJson, adminMutationAllowed, isAdminHttp, loadAdminHttpSession } from "@/lib/admin/server";
 import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-refunds";
 import { bookingCancellations } from "@/lib/experience/store-server";
+import { guestBookingMessages } from "@/lib/experience/store-server";
 import { readBoundedJson } from "@/lib/read-bounded-json";
 
 export const runtime = "nodejs";
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 const BODY_LIMIT = 8 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTIONS = ["CANCEL", "APPROVE_REQUEST", "DECLINE_REQUEST", "RESOLVE_PAYMENT_REVIEW", "RETRY_REFUND", "CLOSE_REFUND"] as const;
+const ACTIONS = ["CANCEL", "APPROVE_REQUEST", "DECLINE_REQUEST", "RESOLVE_PAYMENT_REVIEW", "RETRY_REFUND", "CLOSE_REFUND", "CONTACT_GUEST"] as const;
 type Action = (typeof ACTIONS)[number];
 
 /*
@@ -89,6 +90,8 @@ function run(cancellations: BookingCancellations, actor: SupportActor, action: A
       return cancellations.retryRefund(actor, refundId, { commandId });
     case "CLOSE_REFUND":
       return cancellations.closeFailedRefund(actor, refundId, { commandId, note: str(body.note) ?? "" });
+    case "CONTACT_GUEST":
+      return null;
   }
 }
 
@@ -116,6 +119,19 @@ export async function POST(request: Request): Promise<Response> {
   const action = ACTIONS.find((item) => item === body.action);
   const commandId = str(body.commandId);
   if (!action || !commandId || !UUID.test(commandId)) return adminJson({ error: "invalid_input" }, 400);
+  if (action === "CONTACT_GUEST") {
+    const publicBookingId = str(body.publicBookingId);
+    const message = str(body.message);
+    if (!publicBookingId || !UUID.test(publicBookingId) || typeof message !== "string") return adminJson({ error: "invalid_input" }, 400);
+    const messages = guestBookingMessages();
+    if (!messages) return adminJson({ error: "unavailable" }, 503);
+    try {
+      const result = await messages.sendSupportMessage(session.actor, publicBookingId, { commandId, message });
+      return adminJson({ outcome: "CONTACT_SENT", repeated: result.repeated });
+    } catch (error) {
+      return failure(error);
+    }
+  }
   const cancellations = bookingCancellations();
   if (!cancellations) return adminJson({ error: "unavailable" }, 503);
   let result: CancellationResult;

@@ -4,10 +4,11 @@ import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refun
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
 import { hostAddressConfirmationEmail, hostBookingEmail } from "@/lib/mail/host-templates";
-import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail } from "@/lib/mail/templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
 import { guestMessageToJapanese } from "@/lib/translation/prompts";
+import { runSettlementReconciliation, type SettlementReconciliationCounts, type SettlementReconciliationDeps } from "@/lib/experience/settlement-reconciliation";
 
 /**
  * One run of the experience mail job (#285 slices 5-7, docs/guest-booking.md, docs/guest-questions.md), every
@@ -156,6 +157,7 @@ export interface ExperienceJobCounts {
   readonly hostBookingMails: HostMailCounts | StepOff | FailedStep;
   /** The addresses of hosts with no membership or grant left (#194), deleted whatever the flag. */
   readonly hostAddressPurge: PurgeCounts | FailedStep;
+  readonly settlementReconciliation?: SettlementReconciliationCounts | StepOff | FailedStep;
 }
 
 export interface ExperienceJobDeps {
@@ -193,6 +195,8 @@ export interface ExperienceJobDeps {
   /** SITE_URL: the origin of every link in the emails. */
   readonly siteUrl: string;
   readonly now: () => Date;
+  /** Actual Stripe fee/refund reconciliation and durable NIHO compensation transfers. */
+  readonly settlementReconciliation?: SettlementReconciliationDeps;
   /** Called once per failed step with the error's class name only (a database message can quote row values). */
   readonly onStepError?: (step: keyof ExperienceJobCounts, errorName: string) => void;
 }
@@ -238,10 +242,12 @@ async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionRep
     if (!reply) break;
     claimed += 1;
     let email;
-    if (reply.kind === "BOOKING") {
+    if (reply.kind === "BOOKING" || reply.kind === "BOOKING_SUPPORT") {
       // A grant per email: the raw token goes into this email's link only (#285 slice 6).
       const grant = deps.access ? await deps.access.issueBookingAccessGrant(reply.publicBookingId) : null;
-      email = bookingMessageEmail(reply, { siteUrl: deps.siteUrl, bookingPageGrant: grant?.token ?? null });
+      email = reply.kind === "BOOKING_SUPPORT"
+        ? supportBookingMessageEmail(reply, { siteUrl: deps.siteUrl, bookingPageGrant: grant?.token ?? null })
+        : bookingMessageEmail(reply, { siteUrl: deps.siteUrl, bookingPageGrant: grant?.token ?? null });
     } else {
       email = questionReplyEmail({
         siteUrl: deps.siteUrl,
@@ -548,9 +554,13 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const hostAddressPurge = await step(deps, "hostAddressPurge", async () => ({
     purged: await deps.hostAddresses.purge({ limit: EXPERIENCE_JOB_LIMITS.hostAddressesPurgedPerStep }),
   }));
+  const settlementReconciliation = deps.settlementReconciliation
+    ? await step(deps, "settlementReconciliation", () => runSettlementReconciliation(deps.settlementReconciliation!))
+    : { off: true } as const;
   return {
     questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
     bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge,
+    ...(deps.settlementReconciliation ? { settlementReconciliation } : {}),
   };
 }
 
