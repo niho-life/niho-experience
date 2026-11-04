@@ -66,6 +66,24 @@ describe("hostPushEventFromOutbox", () => {
     });
   });
 
+  it("notifies the host of an email failure without exposing the guest address", () => {
+    const bookingId = "00000000-0000-4000-8000-000000000210";
+    const parsed = hostPushEventFromOutbox(row("host.notify.guest_email_delivery_failed", {
+      v: 1, bookingId, classification: "NO_SUCH_ADDRESS", experienceTitle: "Synthetic Tea Ceremony",
+      startsAt: "2026-11-20T01:00:00.000Z", seats: 2,
+    }), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a", kind: "EMAIL_DELIVERY_FAILED", experienceTitle: "Synthetic Tea Ceremony",
+        startsAt: "2026-11-20T01:00:00.000Z", seats: 2,
+        note: "宛先が相手側に存在しないと返されました。予約内容を開いて、連絡方法をご確認ください。",
+        url: `/host/bookings?booking=${bookingId}&providerId=provider-a`, tag: `email-delivery-failed-${bookingId}`,
+      },
+    });
+    if (parsed.ok) expect(hostPushPayload(parsed.event)).not.toContain("guest@example");
+  });
+
   it("delivers one next-day attendee summary with counts only and closes a missed day's summary", () => {
     const summaryNow = Date.parse("2026-11-04T09:00:00.000Z"); // 18:00 in Japan
     const payload = { v: 1, localDate: "2026-11-05", bookingCount: 2, participantCount: 3 };

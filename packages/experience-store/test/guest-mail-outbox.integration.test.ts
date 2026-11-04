@@ -9,7 +9,7 @@ import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingI
 import { GuestBookingAccess } from "../src/booking-access.ts";
 import { GUEST_MAIL_LIMITS, GuestMailOutbox, MEETING_GUIDE_DAY_BEFORE_TOPIC } from "../src/guest-mail-outbox.ts";
 import { GuestMeetingGuideRepository } from "../src/guest-meeting-guides.ts";
-import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox } from "../src/host-notification-outbox.ts";
+import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox, parseGuestEmailDeliveryFailedPayload } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
@@ -276,6 +276,62 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       }
       await assert.rejects(() => outbox.completeBookingConfirmation("x"), StoreValidationError);
       await assert.rejects(() => outbox.retryBookingConfirmation(confirmation!.id, 0), StoreValidationError);
+    });
+  });
+
+  it("records a correlated hard bounce without PII, suppresses later guest mail, and notifies the host", async () => {
+    await withSchema(async (context) => {
+      await context.pool.query("UPDATE experience_products SET public_title=$1 WHERE provider_id='provider-a' AND id='walk'", ["Long title ".repeat(24)]);
+      const first = await confirmedGuest(context, "bounce-first", { guestEmail: "bounce@example.com" });
+      const initial = await context.outbox.claimBookingConfirmations({ limit: 5, leaseSeconds: 60 });
+      const confirmation = initial.confirmations.find((item) => item.email?.publicBookingId === first.publicBookingId)!;
+      assert.ok(confirmation.deliveryRef.startsWith("ex1_"));
+      const event = {
+        eventId: "niho_feedback_event_01", deliveryRef: confirmation.deliveryRef,
+        reportType: "BOUNCE" as const, verification: "CORRELATED_DSN" as const,
+        classification: "NO_SUCH_ADDRESS" as const, reportedAt: new Date("2026-11-04T03:00:00.000Z"),
+      };
+      assert.equal(await context.outbox.recordDeliveryFeedback(event), "RECORDED");
+      assert.equal(await context.outbox.recordDeliveryFeedback(event), "DUPLICATE");
+      assert.equal(await context.outbox.recordDeliveryFeedback({
+        ...event,
+        eventId: "niho_feedback_event_02",
+        reportedAt: new Date(event.reportedAt.getTime() + 1_000),
+      }), "DUPLICATE");
+      const ledger = await context.pool.query("SELECT report_type, verification, classification FROM guest_mail_delivery_feedback");
+      assert.deepEqual(ledger.rows, [{ report_type: "BOUNCE", verification: "CORRELATED_DSN", classification: "NO_SUCH_ADDRESS" }]);
+      const notification = await context.pool.query("SELECT topic, payload FROM outbox_messages WHERE topic=$1", [HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed]);
+      assert.equal(notification.rowCount, 1);
+      assert.equal(JSON.stringify(notification.rows[0]).includes("bounce@example.com"), false);
+      const parsedNotification = parseGuestEmailDeliveryFailedPayload(notification.rows[0]?.payload);
+      assert.ok(parsedNotification);
+      assert.equal(parsedNotification.experienceTitle.length, 200);
+
+      await context.outbox.completeBookingConfirmation(confirmation.id);
+      const second = await confirmedGuest(context, "bounce-second", { guestEmail: "bounce@example.com" });
+      const suppressed = await context.outbox.claimBookingConfirmations({ limit: 5, leaseSeconds: 60 });
+      assert.equal(suppressed.confirmations.some((item) => item.email?.guestEmail === "bounce@example.com"), false);
+      const pending = await context.pool.query(
+        "SELECT processed_at FROM outbox_messages WHERE topic='booking.confirmed' AND aggregate_id=$1 AND processed_at IS NOT NULL",
+        [second.publicBookingId],
+      );
+      assert.equal(pending.rowCount, 1);
+    });
+  });
+
+  it("records an unverified complaint candidate but does not suppress or notify", async () => {
+    await withSchema(async (context) => {
+      const booking = await confirmedGuest(context, "arf-candidate", { guestEmail: "arf@example.com" });
+      const claim = await context.outbox.claimBookingConfirmations({ limit: 5, leaseSeconds: 60 });
+      const confirmation = claim.confirmations.find((item) => item.email?.publicBookingId === booking.publicBookingId)!;
+      assert.equal(await context.outbox.recordDeliveryFeedback({
+        eventId: "niho_feedback_arf_0001", deliveryRef: confirmation.deliveryRef, reportType: "COMPLAINT",
+        verification: "UNVERIFIED_ARF", classification: "SPAM_COMPLAINT", reportedAt: new Date("2026-11-04T03:00:00.000Z"),
+      }), "RECORDED");
+      const state = await context.pool.query("SELECT mail_suppressed_at FROM booking_guests");
+      assert.equal(state.rows[0]?.mail_suppressed_at, null);
+      const notifications = await context.pool.query("SELECT id FROM outbox_messages WHERE topic=$1", [HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed]);
+      assert.equal(notifications.rowCount, 0);
     });
   });
 

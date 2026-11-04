@@ -65,6 +65,7 @@ export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   GUEST_MESSAGE: "予約者から連絡があります",
   DAY_BEFORE_SUMMARY: "明日の参加者のまとめ",
   NEW_REVIEW: "新しいレビュー",
+  EMAIL_DELIVERY_FAILED: "予約者へのメールが届きませんでした",
   LISTING_REVIEW: "掲載の審査結果",
   GOOGLE_CALENDAR_ATTENTION: "Googleカレンダーを確認してください",
 };

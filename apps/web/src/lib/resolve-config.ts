@@ -396,9 +396,12 @@ type GuestMailSettings = Readonly<{
   replyTo: Mailbox | null;
   jobAudience: string;
   jobServiceAccountEmail: string;
+  feedbackEnabled: boolean;
+  feedbackAudience: string;
+  feedbackServiceAccountEmail: string;
 }>;
 
-const NO_GUEST_MAIL: GuestMailSettings = { enabled: false, smtpHost: "", smtpPort: 0, from: null, replyTo: null, jobAudience: "", jobServiceAccountEmail: "" };
+const NO_GUEST_MAIL: GuestMailSettings = { enabled: false, smtpHost: "", smtpPort: 0, from: null, replyTo: null, jobAudience: "", jobServiceAccountEmail: "", feedbackEnabled: false, feedbackAudience: "", feedbackServiceAccountEmail: "" };
 
 /**
  * 予約者へのメール (#285 slice 5, docs/guest-booking.md): the job behind POST /internal/experience-jobs/v1/drain
@@ -427,6 +430,22 @@ function guestMailSettings(apiMode: "mock" | "http", env: Env): GuestMailSetting
   if (!SERVICE_ACCOUNT_EMAIL.test(jobServiceAccountEmail)) {
     throw new Error("EXPERIENCE_GUEST_MAIL_ENABLED=true needs EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL (a service account) in http mode");
   }
+  const feedbackAudience = env.EXPERIENCE_MAIL_FEEDBACK_AUDIENCE?.trim() ?? "";
+  const feedbackServiceAccountEmail = env.EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL?.trim() ?? "";
+  if (Boolean(feedbackAudience) !== Boolean(feedbackServiceAccountEmail)) {
+    throw new Error("EXPERIENCE_MAIL_FEEDBACK_AUDIENCE and EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL must be set together");
+  }
+  if (feedbackAudience) {
+    let audienceUrl: URL;
+    try { audienceUrl = new URL(feedbackAudience); } catch { throw new Error("EXPERIENCE_MAIL_FEEDBACK_AUDIENCE must be an absolute URL"); }
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(audienceUrl.hostname);
+    if (audienceUrl.username || audienceUrl.password || audienceUrl.hash || (audienceUrl.protocol !== "https:" && !(audienceUrl.protocol === "http:" && loopback))) {
+      throw new Error("EXPERIENCE_MAIL_FEEDBACK_AUDIENCE must use HTTPS without credentials or a fragment, except loopback HTTP");
+    }
+    if (!SERVICE_ACCOUNT_EMAIL.test(feedbackServiceAccountEmail)) {
+      throw new Error("EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL must be a service account");
+    }
+  }
   // Links in the emails are absolute: https (loopback http in development).
   let siteOrigin: string;
   try {
@@ -435,7 +454,10 @@ function guestMailSettings(apiMode: "mock" | "http", env: Env): GuestMailSetting
     throw new Error("SITE_URL must be an absolute URL");
   }
   deploymentOrigin(siteOrigin, "SITE_URL (for EXPERIENCE_GUEST_MAIL_ENABLED)");
-  return { enabled: true, smtpHost, smtpPort, from, replyTo, jobAudience, jobServiceAccountEmail };
+  return {
+    enabled: true, smtpHost, smtpPort, from, replyTo, jobAudience, jobServiceAccountEmail,
+    feedbackEnabled: Boolean(feedbackAudience), feedbackAudience, feedbackServiceAccountEmail,
+  };
 }
 
 /** The octets a padded standard base64 string decodes to; null when it is not one. Without Buffer: this module stays runtime-neutral. */
@@ -715,6 +737,9 @@ export function resolveConfig(env: Env) {
     guestMailReplyTo: guestMail.replyTo,
     experienceJobsAudience: guestMail.jobAudience,
     experienceJobsServiceAccountEmail: guestMail.jobServiceAccountEmail,
+    guestMailFeedbackEnabled: guestMail.feedbackEnabled,
+    guestMailFeedbackAudience: guestMail.feedbackAudience,
+    guestMailFeedbackServiceAccountEmail: guestMail.feedbackServiceAccountEmail,
     otaGuestDetailsEnabled: otaBooking.guestDetails,
     otaBookingNotificationsEnabled: otaBooking.notifications,
     hostMailEnabled,

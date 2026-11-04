@@ -100,6 +100,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   guest_question_threads: { write: IUD },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
+  // PII-free post-accept mail feedback; DELETE with the booking guest's PII erasure.
+  guest_mail_delivery_feedback: { write: ID, updateColumns: ["created_at"] },
   guide_admin_command_receipts: { write: I },
   guide_articles: { write: IU },
   guide_categories: { write: IU },

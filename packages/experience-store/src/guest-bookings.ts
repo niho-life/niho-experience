@@ -2131,6 +2131,7 @@ export class GuestBookingRepository {
        , erased AS (
          UPDATE booking_guests g
             SET guest_name=NULL, guest_email=NULL, guest_email_key=NULL, guest_phone=NULL, note=NULL,
+                mail_suppressed_at=NULL, mail_suppression_classification=NULL,
                 answers=NULL, utm=NULL, pii_erased_at=clock_timestamp()
            FROM due
           WHERE g.provider_id=due.provider_id AND g.booking_id=due.booking_id
@@ -2148,6 +2149,11 @@ export class GuestBookingRepository {
          UPDATE experience_support_cases c SET internal_memo=NULL,revision=revision+1,updated_at=clock_timestamp()
            FROM erased e
           WHERE c.provider_id=e.provider_id AND c.booking_id=e.booking_id AND c.internal_memo IS NOT NULL
+       ), feedback AS (
+         DELETE FROM guest_mail_delivery_feedback f
+          USING erased e
+          WHERE f.provider_id=e.provider_id AND f.booking_id=e.booking_id
+          RETURNING 1
        ), threads AS (
          -- The booking's messages with the host (#285 slice 6b): the thread and every message go (ON DELETE CASCADE).
          DELETE FROM guest_question_threads t
