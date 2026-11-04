@@ -4,9 +4,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports -- This server-side integration test exercises the selected host client.
 import { createExperienceHostApiClient } from "@niho-experience/api-client/host";
-import { ExperiencePublicationRepository } from "@niho-experience/experience-store";
-import { GuestBookingRepository } from "@niho-experience/experience-store";
-import { ExperienceStore } from "@niho-experience/experience-store";
+import {
+  EXPERIENCE_SUPPORT_CONSENT_VERSION,
+  ExperiencePublicationRepository,
+  GuestBookingRepository,
+  ExperienceStore,
+} from "@niho-experience/experience-store";
 import { SiteSaleRegistration } from "@niho-experience/experience-store/site-sale-registration";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -231,6 +234,11 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       });
       expect(await pool.query("SELECT role,active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2", [EXPERIENCE_PROVIDER_ID, NIHO_USER_ID]))
         .toMatchObject({ rows: [{ role: "OWNER", active: true }] });
+      await bookingRepository.setProviderSupportSettings(boundary.value.actor, {
+        supportEnabled: false,
+        consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION,
+        expectedVersion: 1,
+      });
 
       const createResponse = await publicationCollectionRequest(new Request("https://experience.example.test/host/api/products", {
         method: "POST",
