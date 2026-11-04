@@ -2,6 +2,8 @@
 // The feature flags the staging and production deploy workflows may put on a Cloud Run revision (#84), in one table
 // for both. Each flag is a GitHub variable `<PREFIX>_<variable>`: STG_ in the `host-staging` environment, PROD_ in the
 // repository. Unset or false keeps the flag off: none of its env, settings or Secret references are on the revision.
+// The host identity audience is a base host-console setting, not a feature flag: /host always uses it to mint the
+// NIHO API ID token, even while every optional host API remains closed.
 // true turns it on once everything it needs is set and well formed, and every flag it depends on is on too (the rules
 // of apps/web/src/lib/resolve-config.ts, so a revision never fails at start-up or opens half a feature). Otherwise
 // this prints every problem by variable name (never a value) and exits 1, before anything is deployed.
@@ -25,6 +27,10 @@ export const TARGETS = Object.freeze({
 
 /** What a flag may need besides other flags: the host console, and the experience DB (both workflows wire them together). */
 export const CAPABILITIES = Object.freeze(["HOST_CONSOLE", "DATABASE"]);
+
+const HOST_CONSOLE_SETTINGS = Object.freeze([
+  { env: "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE", variable: "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE", shape: "httpsOrigin" },
+]);
 
 const ADDRESS = "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+";
 const HTTPS_URL = "https://[a-z0-9-]+(\\.[a-z0-9-]+)+(/[A-Za-z0-9._~%/-]*)?";
@@ -150,9 +156,6 @@ export const FLAGS = Object.freeze([
     env: "EXPERIENCE_HOST_PUBLICATION_API_ENABLED",
     variable: "HOST_PUBLICATION_API_ENABLED",
     needs: ["EXPERIENCE_PUBLICATIONS_ENABLED"],
-    settings: [
-      { env: "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE", variable: "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE", shape: "httpsUrl" },
-    ],
   },
   {
     env: "EXPERIENCE_PROVIDER_PAGES_API_ENABLED",
@@ -238,7 +241,7 @@ const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Every Cloud Run name the table can set: what the revision must carry exactly as expected, and nothing else of. */
 export function tableNames() {
-  const names = new Set();
+  const names = new Set(HOST_CONSOLE_SETTINGS.map((setting) => setting.env));
   for (const flag of FLAGS) {
     names.add(flag.env);
     for (const item of [...(flag.secrets ?? []), ...(flag.settings ?? [])]) names.add(item.env);
@@ -281,6 +284,16 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
   const env = {};
   const secrets = {};
   const context = { project: settings.project, siteUrl: url };
+  if (hostConsole) {
+    for (const setting of HOST_CONSOLE_SETTINGS) {
+      const text = value(setting.variable);
+      if (!SHAPES[setting.shape].pattern.test(text)) {
+        problems.push(`host console needs ${name(setting.variable)}: ${SHAPES[setting.shape].words}`);
+      } else {
+        env[setting.env] = text;
+      }
+    }
+  }
   for (const flag of FLAGS) {
     if (!on.has(flag.env)) continue;
     const by = `${flag.env} (${name(flag.variable)})`;
