@@ -22,7 +22,7 @@ export function sitePublicationMetadata(item: SitePublicExperience): Metadata {
 }
 
 export function SitePublicationPage({ item, cancelled = false }: { item: SitePublicExperience; cancelled?: boolean }) {
-  const { publication, saleTerms } = item;
+  const { publication, saleTerms, sellerDisclosure } = item;
   const photos = publication.photos.map((photo) => ({ url: photo.src, alt: photo.alt }));
   const offers = saleTerms?.offers ?? [];
   const durationValues = [...new Set(offers.map((offer) => offer.durationMinutes))].sort((a, b) => a - b);
@@ -43,7 +43,7 @@ export function SitePublicationPage({ item, cancelled = false }: { item: SitePub
         {cancelled ? <p role="status" className="mt-5 rounded-2xl bg-sand p-4">Checkout was cancelled. Your booking was not completed.</p> : null}
         <header className="pt-5 lg:pt-3.5">
           <h1 className="text-[2.125rem] leading-[1.1] lg:max-w-[20ch] lg:text-[3.25rem]">{publication.publicTitle}</h1>
-          <p className="mt-4 text-[0.9375rem] text-ink-soft">Offered by <b className="text-ink">{publication.sellerDisplayName}</b></p>
+          <p className="mt-4 text-[0.9375rem] text-ink-soft">Offered by <b className="text-ink">{publication.sellerDisplayName}</b>{sellerDisclosure ? <> · <a className="font-bold text-ink underline" href={sellerDisclosure.method === "EXTERNAL" ? sellerDisclosure.externalUrl : `/experiences/${encodeURIComponent(publication.slug)}/seller`} rel="noopener noreferrer">Seller information</a></> : null}</p>
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">Duration</span><p className="font-extrabold">{durations}</p></li> : null}
             {language ? <li><span className="eyebrow">Language</span><p className="font-extrabold">{language}</p></li> : null}

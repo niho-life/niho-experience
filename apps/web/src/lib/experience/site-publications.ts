@@ -1,8 +1,8 @@
 import "server-only";
-import type { PublicExperiencePublication } from "@niho-experience/experience-store";
+import type { PublicExperiencePublication, PublicSellerDisclosure } from "@niho-experience/experience-store";
 import type { PublicBookingTerms } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { experiencePublicationRepository, guestBookingRepository } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, guestBookingRepository, providerSellerDisclosureRepository } from "@/lib/experience/store-server";
 
 /** Public checkout terms without the internal Experience provider/product keys. */
 export type SitePublicSaleTerms = Omit<PublicBookingTerms, "providerId" | "productId">;
@@ -10,6 +10,7 @@ export type SitePublicOffer = SitePublicSaleTerms["offers"][number];
 export type SitePublicExperience = {
   readonly publication: PublicExperiencePublication;
   readonly saleTerms: SitePublicSaleTerms | null;
+  readonly sellerDisclosure: PublicSellerDisclosure | null;
 };
 export type SitePublicExperienceLookup =
   | { readonly kind: "published"; readonly item: SitePublicExperience }
@@ -43,7 +44,14 @@ export async function getSitePublicExperience(slug: string): Promise<SitePublicE
   if (!publication) return await publications.claimsSlug(slug) ? { kind: "reserved" } : null;
   const bookings = guestBookingRepository();
   const terms = bookings ? await bookings.publicBookingTerms(slug) : null;
-  return { kind: "published", item: { publication, saleTerms: projectSitePublicSaleTerms(terms) } };
+  const disclosures = providerSellerDisclosureRepository();
+  const disclosure = disclosures ? await disclosures.getPublicBySlug(slug) : null;
+  const saleTerms = projectSitePublicSaleTerms(terms);
+  return { kind: "published", item: {
+    publication,
+    saleTerms,
+    sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null,
+  } };
 }
 
 /** List public Experience products with a valid sale; products without sale terms stay out of the booking catalog. */
@@ -57,10 +65,21 @@ export async function listSitePublicExperiences(): Promise<SitePublicCatalog> {
   const claimedSlugs = await publications.listClaimedSlugs();
   if (!config.experiencePublicationsEnabled) return { experiences: [], claimedSlugs };
   const items = await publications.listPublic();
-  if (!config.guestBookingEnabled) return { experiences: items.map((publication) => ({ publication, saleTerms: null })), claimedSlugs };
+  const disclosures = providerSellerDisclosureRepository();
+  if (!config.guestBookingEnabled) return {
+    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null }))),
+    claimedSlugs,
+  };
   const bookings = guestBookingRepository();
   if (!bookings) throw new Error("Experience public sales store is unavailable.");
-  const sales = await Promise.all(items.map(async (publication) => ({ publication, saleTerms: projectSitePublicSaleTerms(await bookings.publicBookingTerms(publication.slug)) })));
+  const sales = await Promise.all(items.map(async (publication) => {
+    const [terms, disclosure] = await Promise.all([
+      bookings.publicBookingTerms(publication.slug),
+      disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
+    ]);
+    const saleTerms = projectSitePublicSaleTerms(terms);
+    return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null };
+  }));
   return { experiences: sales, claimedSlugs };
 }
 

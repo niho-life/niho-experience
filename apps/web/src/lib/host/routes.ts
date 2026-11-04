@@ -31,6 +31,8 @@ export const HOST_SETTINGS_PATH = "/host/settings";
 export const HOST_NOTIFICATION_EMAIL_PATH = "/host/notification-email";
 /** 本人OWNERの通常Spot / 外部Providerに独立したNIHOサポート設定。 */
 export const HOST_SUPPORT_PATH = "/host/support";
+/** OWNERが公開専用の販売者情報を入力・撤回する独立画面。 */
+export const HOST_SELLER_PATH = "/host/seller";
 /** メッセージ (#106): a screen under ホーム, not in the menu. */
 export const HOST_MESSAGES_PATH = "/host/messages";
 /** レビュー (#108): a screen under ホーム, not in the menu. */

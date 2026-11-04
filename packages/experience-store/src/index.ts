@@ -12,6 +12,19 @@ export {
 export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "./experience-publication.ts";
+export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
+export type {
+  ExternalSellerDisclosureInput,
+  HostSellerDisclosure,
+  NativeSellerDisclosureInput,
+  PublicSellerDisclosure,
+  SaveSellerDisclosureCommand,
+  SellerDisclosureInput,
+  SellerDisclosureMethod,
+  SellerDisclosureState,
+  SellerKind,
+  WithdrawSellerDisclosureCommand,
+} from "./provider-seller-disclosures.ts";
 export { projectPublicExperiencePublicationManuscript } from "./experience-publication-projection.ts";
 export type {
   ExperienceHostSaleTerms,
