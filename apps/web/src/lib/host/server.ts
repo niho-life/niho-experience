@@ -3,7 +3,10 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { NextResponse } from "next/server";
-import { createExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/host";
+import { GoogleAuth } from "google-auth-library";
+import { createExperienceHostApiClient as createLegacyExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/legacy-host";
+import { createExperienceHostApiClient as createSelectedExperienceHostApiClient, type ExperienceHostApiClient as SelectedExperienceHostApiClient } from "@niho-experience/api-client/host";
+import { createMockExperienceHostFetch, MOCK_EXPERIENCE_HOST_SERVICE_TOKEN } from "@niho-experience/api-client/host/mock";
 import { config } from "@/lib/config";
 import { cookieSealer } from "./cookie-seal";
 import { createMockHostFetch, MOCK_ACCESS_TOKEN_PREFIX, mockToken } from "./mock-niho";
@@ -25,6 +28,10 @@ import {
   type HostLoginState,
   type HostSession,
 } from "./session";
+import { experiencePublicationRepository } from "@/lib/experience/store-server";
+import { parseBearerToken } from "./bearer-token";
+
+const serviceAuth = new GoogleAuth();
 
 export const isHostMock = () => config.apiMode === "mock";
 export const siteOrigin = () => new URL(config.siteUrl).origin;
@@ -47,13 +54,13 @@ export function nihoAuthDeps(): NihoAuthDeps {
   return { fetch, nihoOrigin: config.nihoWebOrigin };
 }
 
-/** NIHO's API for this session: the real origin in http mode, the synthetic one in mock mode. */
+/** NIHO request transport: the real origin in http mode, the synthetic one in mock mode. */
 export function nihoApiFetch(session: HostSession): typeof fetch {
   return isHostMock() ? createMockHostFetch(session.mockScenario ?? "default") : fetch;
 }
 
 export type ProvidersLoad =
-  | { status: "ok"; providers: HostProvider[] }
+  | { status: "ok"; nihoUserId: string; providers: HostProvider[] }
   | { status: "signed-out" }
   /** The NIHO Web access token is (nearly) expired: the browser refreshes, then reloads. */
   | { status: "refresh" }
@@ -61,33 +68,96 @@ export type ProvidersLoad =
   | { status: "rejected" }
   | { status: "error" };
 
-/**
- * NIHO's host API for this session, typed by the host contract (#87). Server
- * only: it sends the session's NIHO-scoped Web access token. Browser code calls /host/api/* instead.
- */
+/** Legacy provider client for synthetic preview only; live consumers use the selected Host v1 client. */
 export function hostApiClient(session: HostSession): ExperienceHostApiClient {
-  return createExperienceHostApiClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch: nihoApiFetch(session) });
+  if (!isHostMock()) throw new Error("NIHO legacy host operations are outside contract v1.0.0");
+  return createLegacyExperienceHostApiClient({
+    nihoWebOrigin: config.nihoWebOrigin,
+    accessToken: session.accessToken,
+    fetch: nihoApiFetch(session),
+  });
 }
 
-/** The signed-in host's providers, fetched once per request for the frame and the page. */
+/** NIHO host common contract v1.0.0: identity and legacy Connect projection only. */
+export async function selectedHostApiClient(session: HostSession, options: { legacyProviderId?: string } = {}): Promise<SelectedExperienceHostApiClient> {
+  const serviceIdToken = isHostMock()
+    ? MOCK_EXPERIENCE_HOST_SERVICE_TOKEN
+    : await (async () => {
+      const client = await serviceAuth.getIdTokenClient(config.nihoExperienceHostCommonContractAudience);
+      const headers = await client.getRequestHeaders();
+      const value = headers.authorization ?? headers.Authorization;
+      const token = parseBearerToken(value);
+      if (token === null) throw new Error("Experience service identity is unavailable");
+      return token;
+    })();
+  const apiFetch = isHostMock()
+    ? createMockExperienceHostFetch({
+      accessToken: session.accessToken,
+      serviceIdToken,
+      legacyProviderId: options.legacyProviderId,
+      stripeAccountId: session.mockScenario === "payments-pending" ? null : undefined,
+      connectReady: session.mockScenario !== "payments-pending",
+      reuseConsentAccepted: session.mockScenario !== "payments-pending",
+    })
+    : fetch;
+  return createSelectedExperienceHostApiClient({
+    nihoWebOrigin: config.nihoWebOrigin,
+    accessToken: session.accessToken,
+    serviceIdToken,
+    fetch: apiFetch,
+  });
+}
+
+/** Resolve the signed-in NIHO identity to local Experience seller memberships. */
 export const loadHostProviders = cache(async (): Promise<ProvidersLoad> => {
   const session = await readHostSession();
   if (!session) return { status: "signed-out" };
   if (!accessTokenUsable(session, Date.now())) return { status: "refresh" };
   try {
-    const result = await hostApiClient(session).listExperienceProviders();
-    if (result.ok) {
-      const providers = usableProviders(result.data.providers);
-      // The host API intentionally represents COHOST as EDITOR in its OWNER/EDITOR DTO.
-      // Restore the separate operational role only in this synthetic scenario so the
-      // preview exercises the cohost UI without changing the NIHO host API contract.
-      const scenarioProviders = isHostMock() && session.mockScenario === "cohost"
-        ? providers.map((provider) => provider.id === "sample-provider-kitchen" ? { ...provider, memberRole: "COHOST" as const } : provider)
-        : providers;
-      return { status: "ok", providers: scenarioProviders };
+    const identityResult = await (await selectedHostApiClient(session)).getIdentity();
+    if (!identityResult.ok) {
+      if (identityResult.kind === "error" && identityResult.status === 401) return { status: "rejected" };
+      return { status: "error" };
     }
-    if (result.kind !== "network_error" && result.status === 401) return { status: "rejected" };
-    return { status: "error" };
+    if (isHostMock()) {
+      // Keep the existing synthetic scenarios (empty, payments-pending, cohost, etc.) in
+      // preview without reopening the legacy provider directory in the live HTTP contract.
+      const legacyMock = createLegacyExperienceHostApiClient({
+        nihoWebOrigin: config.nihoWebOrigin,
+        accessToken: session.accessToken,
+        fetch: nihoApiFetch(session),
+      });
+      const preview = await legacyMock.listExperienceProviders();
+      if (!preview.ok) {
+        if (preview.kind === "error" && preview.status === 401) return { status: "rejected" };
+        return { status: "error" };
+      }
+      const providers = usableProviders(preview.data.providers.map((provider) => ({
+        id: provider.id,
+        legacyProviderId: provider.id,
+        displayName: provider.displayName,
+        memberRole: session.mockScenario === "cohost" && provider.id === "sample-provider-kitchen" ? "COHOST" as const : provider.memberRole,
+        nihoUserId: identityResult.data.nihoUserId,
+        kind: provider.kind,
+        bio: provider.bio,
+        sellerDisclosureUrl: provider.sellerDisclosureUrl,
+        reviewStatus: provider.reviewStatus,
+        consentVersion: provider.consentVersion,
+        paymentReuseSourceSpotId: provider.paymentReuseSourceSpotId,
+      })));
+      return { status: "ok", nihoUserId: identityResult.data.nihoUserId, providers };
+    }
+    const repository = experiencePublicationRepository();
+    if (!repository) return { status: "error" };
+    const members = await repository.listHostProviders(identityResult.data.nihoUserId);
+    const providers = usableProviders(members.map((member) => ({
+      id: member.providerId,
+      legacyProviderId: member.legacyProviderId,
+      displayName: member.providerDisplayName,
+      memberRole: member.memberRole,
+      nihoUserId: identityResult.data.nihoUserId,
+    })));
+    return { status: "ok", nihoUserId: identityResult.data.nihoUserId, providers };
   } catch {
     // A misconfigured origin or an unusable token: show the error state, never the token.
     return { status: "error" };

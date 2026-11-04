@@ -62,10 +62,9 @@ export default async function HostConsoleLayout({ children }: { children: React.
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
   let assignments: readonly ProductOperatorAssignment[] = [];
   if (load.status === "ok" && !isHostMock()) {
-    const identityIds = [...new Set(load.providers.filter((provider) => provider.memberRole === "OWNER").map((provider) => provider.ownerUserId))];
     const repository = productOperatorRepository();
-    if (identityIds.length === 1 && repository) {
-      try { assignments = await repository.listAssignments(identityIds[0]!); }
+    if (repository) {
+      try { assignments = await repository.listAssignments(load.nihoUserId); }
       catch { /* Operator grants fail closed. */ }
     }
   }

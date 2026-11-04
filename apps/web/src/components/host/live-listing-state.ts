@@ -1,4 +1,4 @@
-import type { ExperienceProviderPageDetail, ExperienceProviderPageListing, ExperienceProviderPageListingResponse, ExperienceProviderPagePublishBlocker } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageDetail, ExperienceProviderPageListing, ExperienceProviderPageListingResponse, ExperienceProviderPagePublishBlocker } from "@niho-experience/api-client/legacy-host";
 import { SITE_LISTING_STATUS, type StatusLabel } from "@/host/status";
 import type { HostProviderReviewStatus } from "@/lib/host/providers";
 

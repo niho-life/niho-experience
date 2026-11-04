@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/legacy-host";
 import { FieldSection, INPUT } from "./fields";
 import { consoleButtonClass } from "./host-ui";
 import { LIVE_PHOTO_LIMIT } from "./live-editor-state";

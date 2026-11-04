@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/legacy-host";
 import { buildPreviewView, previewNextDates } from "./preview-model";
 
 const offer = (id: string, patch: Partial<ExperienceProviderPagePreviewResponse["offers"][number]> = {}): ExperienceProviderPagePreviewResponse["offers"][number] => ({

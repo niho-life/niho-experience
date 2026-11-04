@@ -10,8 +10,8 @@ vi.mock("@/lib/host/server", () => ({
   requireHostConsole: vi.fn(), isHostMock: () => false,
   readHostSession: async () => ({ accessToken: "synthetic-access-token", displayName: "Synthetic teacher", iconUrl: null, accessTokenExpiresAt: Date.now() + 3600_000 }),
   loadHostProviders: async () => ({ status: "ok", providers: [
-    { id: "owned-provider", ownerUserId: "synthetic-cohost", displayName: "Owned provider", memberRole: "OWNER" },
-    { id: "provider-a", ownerUserId: "seller-a", displayName: "Synthetic provider", memberRole: "COHOST" },
+    { id: "owned-provider", nihoUserId: "synthetic-cohost", displayName: "Owned provider", memberRole: "OWNER" },
+    { id: "provider-a", nihoUserId: "seller-a", displayName: "Synthetic provider", memberRole: "COHOST" },
   ] }),
 }));
 

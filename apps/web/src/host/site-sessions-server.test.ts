@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
   attendance: null as null | Record<string, ReturnType<typeof vi.fn>>,
   session: null as null | { accessTokenExpiresAt: number },
-  providers: { status: "ok", providers: [] } as { status: string; providers?: { id: string; ownerUserId: string; memberRole: string }[] },
+  providers: { status: "ok", providers: [] } as { status: string; providers?: { id: string; nihoUserId: string; memberRole: string }[] },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, bookingAttendance: () => state.attendance }));
@@ -20,7 +20,7 @@ import { SITE_BOOKING_OWNER_ONLY_TEXT } from "./site-bookings-server";
 import { SITE_ATTENDANCE_FAILED_TEXT, SITE_ATTENDANCE_NOT_CONFIRMED_TEXT, SITE_ATTENDANCE_NOT_STARTED_TEXT } from "./site-sessions";
 import { loadSiteHome, loadSiteSession, recordSiteAttendanceAsOwner } from "./site-sessions-server";
 
-const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 const QUERY = { date: "2026-11-01", start: "10:00", experience: "tea", offer: "sample-am" };
 
@@ -48,7 +48,7 @@ beforeEach(() => {
   };
   state.attendance = null;
   state.session = { accessTokenExpiresAt: Date.now() + 3_600_000 };
-  state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" }] };
+  state.providers = { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" }] };
 });
 
 describe("loadSiteHome", () => {
@@ -148,9 +148,9 @@ describe("出欠 of this site's bookings (#107)", () => {
     state.session = null;
     expect(await recordSiteAttendanceAsOwner("sample-provider", STORED.publicBookingId, "attended")).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });
     state.session = { accessTokenExpiresAt: Date.now() + 3_600_000 };
-    state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "COHOST" }] };
+    state.providers = { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "COHOST" }] };
     expect(await recordSiteAttendanceAsOwner("sample-provider", STORED.publicBookingId, "attended")).toEqual({ ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT });
-    state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" }] };
+    state.providers = { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" }] };
     expect(state.attendance.recordAsHost).not.toHaveBeenCalled();
 
     for (const [error, message] of [

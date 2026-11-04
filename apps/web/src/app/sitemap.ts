@@ -4,34 +4,35 @@ import { config } from "@/lib/config";
 import { indexableGuides } from "@/lib/guide-registry";
 import { getJapaneseCopy, getPreparedJapaneseStaticRelease } from "@/lib/localized-content";
 import { sitemapEntries, type JapaneseSitemapRelease } from "@/lib/sitemap-entries";
-import { experiencePublicationRepository } from "@/lib/experience/store-server";
+import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 
 export const dynamic = "force-dynamic";
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   if (!config.indexingAllowed || config.apiMode === "mock") return [];
-  const result = await listExperiencesForSite("kamakura");
+  const [result, sitePublications] = await Promise.all([listExperiencesForSite("kamakura"), listSitePublicExperiences()]);
   let japanese: JapaneseSitemapRelease | null = null;
   try { japanese = await getPreparedJapaneseStaticRelease(); } catch { /* no approved JA release */ }
   // Guides only while some are published (ADR 0002), never drafts.
   const guides = await indexableGuides();
-  const experiences = result.ok ? result.data.experiences : [];
+  const localSlugs = new Set(sitePublications.claimedSlugs);
+  const legacyExperiences = result.ok ? result.data.experiences.filter((experience) => !localSlugs.has(experience.slug)) : [];
+  const localExperiences = sitePublications.experiences.flatMap(({ publication, saleTerms }) => saleTerms?.offers.length ? [{ slug: publication.slug, updatedAt: publication.publishedAtUtc }] : []);
+  const experiences = [...legacyExperiences, ...localExperiences];
   const base = sitemapEntries({
     siteUrl: config.siteUrl,
     experiences,
     guides,
     japanese: config.experiencePublicationsEnabled && japanese ? { ...japanese, experiences: new Map() } : japanese,
   });
-  if (!config.experiencePublicationsEnabled || !config.japaneseSiteEnabled || !result.ok) return base;
+  if (!config.experiencePublicationsEnabled || !config.japaneseSiteEnabled) return base;
 
   try {
     await getJapaneseCopy();
-    const repository = experiencePublicationRepository();
-    if (!repository) return base;
-    const publications = (await repository.listPublic()).filter((item) => item.japanese !== null);
+    const publications = sitePublications.experiences.filter((item) => item.publication.japanese !== null);
     const pairs = new Map(publications.map((item) => {
-      const english = `${config.siteUrl}/experiences/${encodeURIComponent(item.slug)}`;
-      const japaneseUrl = `${config.siteUrl}/ja/experiences/${encodeURIComponent(item.slug)}`;
-      return [english, { english, japanese: japaneseUrl, lastModified: item.publishedAtUtc }] as const;
+      const english = `${config.siteUrl}/experiences/${encodeURIComponent(item.publication.slug)}`;
+      const japaneseUrl = `${config.siteUrl}/ja/experiences/${encodeURIComponent(item.publication.slug)}`;
+      return [english, { english, japanese: japaneseUrl, lastModified: item.publication.publishedAtUtc }] as const;
     }));
     const entries = base.map((entry) => {
       const pair = pairs.get(entry.url);

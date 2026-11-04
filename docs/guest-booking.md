@@ -142,7 +142,7 @@ IP制限の拒否は429 RATE_LIMITEDとRetry-Afterで返し、予約やメール
 
 オーナー決定（2026-11-01、[#194](https://github.com/niho-life/niho-experience/issues/194#issuecomment-6551695490)）：通知先は本人が変更・確認できる。現在の app-connect はメールとNIHO user IDを返さないため、初回はOWNERが通知先を入力して確認する。以前に確認済みのアドレスは保持する。
 
-- **既定宛先**：NIHO app-connectの応答は表示名とアイコンだけで、NIHO user IDやemail claimを返さないため、新しいログインからメールを複写しない。宛先がないprovider OWNERは、設定 › 通知で自分のメールアドレスを入力し、確認メールの一度きりリンクを開いてから通知を受け取る。provider-scopedの宛先keyはproviderの `ownerUserId` を使い、tokenやconnection IDからNIHO user IDを推測しない。
+- **既定宛先**：NIHO app-connectのtoken交換応答にemail claimがない場合、ログインからemailを複写しない。宛先がないExperience OWNERは、設定 › 通知で自分のメールアドレスを入力し、確認メールの一度きりリンクを開いてから通知を受け取る。provider-scopedの宛先keyはserverがNIHO Host v1から確認した`nihoUserId`を使い、`ownerUserId`、token、connection IDから本人を推測しない。
 - **宛先の変更**（設定 › 通知 › 宛先、[design-system.md](design-system.md)）：provider OWNERは自分のprovider-scoped通知先を見て変更できる。商品の運営者だけの人は、自分が所有するproviderが一意に分かる場合のみ、自分の通知先を管理できる。COHOST / EDITORに売上・口座・他人の個人宛先の管理権限は与えない。「確認のメールを送る」で `host_notification_address_confirmations` に依頼とoutboxの `host.mail.address_confirmation` を積み、メール job が一度きりのtoken（32 byte、SHA-256だけを保存）を含む確認リンクを送る。リンクを開いて「このアドレスに切り替える」を押すと切り替わる（ページを開くだけでは変わらない）。依頼から1時間・1回だけ。新しい依頼・「取り消す」・「ログインのメールに戻す」で前の依頼は使えなくなる。1時間に5回まで。
 - **何を送るか**：push と同じ中身（[host-pwa.md](host-pwa.md) の通知 job）。題は push の題と体験・日時（「GetYourGuide で新しい予約：{体験} 11/14（土）10:00」）、本文は予約サイト（OTA のとき）・体験・日時（変更は前 → 後）・予約者の名前（OTA のときだけ）・人数と、push と同じ `/host` のリンク。OTA の予約は「取消・返金・予約者とのやりとりは {OTA} で行ってください」。予約者の連絡先・金額・外部 ID は載せない。日本語で、画像・計測・外部の読み込みは無い（予約者へのメールと同じ作り）。
 - **宛先**：push と同じ人。このサイトの予約は提供者の OWNER、OTA の予約は商品の OWNER と担当の運営者（`productRecipients` と同じ規則）。予約・台帳の transaction で、宛先がある人ごとに outbox に 1 行（`host.mail.*`、payload は push と同じ事実とrecipient key。予約者の名前は入れない）を積み、送るときに、その人がまだ宛先か（OWNER のまま、grant が有効）と、今の宛先（確認済みの選択アドレス、既存login copyがあればそれ）を読み直す。OTA の予約者の名前は、送るときに `external_reservation_guests` から読む（消去済みなら載せない）。
@@ -217,7 +217,7 @@ OWNER は予約の画面と同じ二重の確認（NIHO が OWNER と言い、ex
   - 異議申し立て（dispute）はまだ扱わない。
 - **配備時の作業（この PR では行わない）**：先に `0030`（7b の自動再送は `0031`。列を足すだけで、順序の制約はなく、新しい版より先でよい）を適用する（追加だけで、今の書き手は新しい列と表を読まず、今の outcome は広げた CHECK に入るので、新しい版より先に適用してよい）。体験の Connect webhook の endpoint に `refund.created`・`refund.updated`・`refund.failed` を足す（未設定なら、API が `succeeded` と答えた返金は記録されるが、`pending` の返金は `PENDING` のまま残り、7 日でサポートの一覧に出る）。runtime role に `booking_cancellation_commands` の INSERT、`booking_refunds`・`booking_cancellation_requests` の INSERT・UPDATE（`scripts/gcp/experience-db-grants.mjs`。`schedule_occurrence_sales_states` と `payment_ledger_entries` は今までの権限で足りる）。新しい設定は無い（Stripe の秘密鍵は checkout と同じ。メール job も同じ鍵を読む。無ければ自動の再送だけが止まる）。
 
-## 画面がどこから読むか（第3段）
+## 既存NIHO商品とExperience新規商品の読み先
 
 商品ごとにサーバーが決め（`apps/web/src/lib/guest-booking-source.ts`）、画面の部品へ渡す（`BookingSource`、`apps/web/src/lib/booking-source.ts`）。
 
@@ -226,17 +226,23 @@ OWNER は予約の画面と同じ二重の確認（NIHO が OWNER と言い、ex
 | flag off、mock、またはここで売っていない | NIHO の API（`nihoWebOrigin`）。今までと同じ | NIHO の詳細のまま |
 | ここで売る（`publicBookingTerms(slug)` が null でない） | このサイトの `/api/public/experiences/{slug}/availability`・`…/checkout`。POST は `referrerPolicy: "same-origin"`（経路が Origin を確かめる） | 下のとおり、販売を決める項目だけを experience DB から重ねる |
 | 不明（experience DB が読めない） | 何も読まない。予約の入口を出さず、今ある「受付停止」の状態にする。NIHO へは戻さない（切り替えた商品は NIHO で売らないため） | NIHO の詳細のまま、`checkoutAvailable: false` |
+| Experienceで新規作成・公開 | Experienceの `PublicBookingTerms` とavailability・checkout。slugが旧NIHOカタログと重なればExperienceを優先 | Experienceの公開snapshotをSSRし、その同じslugのmetadata・canonical・sitemapを出す |
 
-- 一覧・ホーム・ガイドのカードは、ページの slug をまとめて `GuestBookingRepository.sellableSlugs(slugs)`（1 query）に尋ね、カードごとに読み先を選ぶ。DB が読めなければ、そのページのカードはすべて「不明」：日付は出さず、一覧の日付絞り込みは今ある「日程を読めない」状態になる。
-- 詳細ページ（英語）は、NIHO の詳細が無ければ今までどおり not found（本文は編集画面が移るまで NIHO が正本、#89）。ここで売る商品は、NIHO の詳細に次を重ねる（`apps/web/src/lib/guest-booking-terms.ts` の 1 か所）。
+- 一覧ページはNIHOの公開一覧とExperience公開商品を合流する。Experienceに公開snapshotがあるslugはNIHO側を隠す。販売条件が売買可能でないExperience商品は一覧に出さず、SSR詳細は出しても予約不可にする。Availabilityは既存の `sellableSlugs(slugs)` を使ってカードごとに読み先を選ぶ。
+- Experience新規商品は`apps/web/src/lib/experience/site-publications.ts`から公開snapshotと販売条件を読み、本文・写真・seller・開催条件をSSRする。slugのcanonicalとmetadataはExperienceサイト自身が決め、sitemapも同じ公開slugを使う。NIHOの商品詳細を要求しない。slugが重なるとき、公開済みExperience商品がNIHO側の同じslugを置き換える。
+- 詳細ページ（英語）のうち、本文がまだNIHOにある旧商品は、NIHOの詳細に次を重ねる（`apps/web/src/lib/guest-booking-terms.ts` の 1 か所）。
   - experience DB から：`offers`（ID・開始時刻・所要時間・定員・人数の上下限・大人と子どもの料金・予約の質問と fingerprint・取消条件）、`booking.consentVersion`（`EXPERIENCE_BOOKING_CONSENT_VERSION`）、`booking.checkoutAvailable: true`、`seller.displayName`。最初の残席は `listPublicAvailability`。
   - NIHO のまま：本文・写真・ホスト・集合場所などの内容、`booking.legalDocuments`（同意するのは NIHO のプラットフォーム規約）、`seller.legalNoticeUrl`。
-- 一覧のカードの価格・日付の絞り込み（`?date=`）は NIHO の一覧のまま。カードの「次の日程」だけがこのサイトの残席を読む。
+- 旧NIHO商品の一覧カードはNIHOの価格・テーマ情報を使う。Experience新規商品のカードは公開販売条件の価格・人数・日程を使い、同じExperience availability APIを日付絞り込みに使う。
 - 障害時の停止（`BOOKINGS_ENABLED=false`）は、どちらの商品でも予約の入口を隠す。
 
 ### 読み直し（QUESTIONS_CHANGED・PRICE_CHANGED・CONSENT_OUTDATED）
 
-予約入力で checkout がこれらを返すと、画面は販売条件を読み直す。ここで売る商品は NIHO の詳細ではなく `GET /api/public/experiences/{slug}/booking-terms` を読む。本文は詳細ページが重ねるのと同じ形 `{ offers, booking: { consentVersion, checkoutAvailable: true, currency, timeZone }, sellerDisplayName }`（`legalDocuments` は含めず、ページにある NIHO の値を使う）。`no-store`。flag off・ここで売っていない slug は本文なしの 404、DB が読めなければ 503。画面は応答の形を確かめてから重ねる。
+旧NIHO商品の予約入力でcheckoutが価格・質問・同意の更新を返すと、画面は`GET /api/public/experiences/{slug}/booking-terms`を読み直してから続ける。Experience新規商品のbooking画面はそのExperience snapshot／販売条件APIを再読するため、旧NIHO detail adapterを通らない。両方とも内部provider/product IDをbrowserへ渡さず、`no-store`である。
+
+Experience新規商品の予約フォームは`PublicBookingTerms`の取消コードと数値条件をそのまま表示する。`CUSTOM`取消条件と`minimumChargeableParticipants`はlegacy NIHO detail型へ丸めず、表示金額をExperienceの課金計算と同じadult-price floorで計算する。最終金額、質問fingerprint、同意版、開催枠と残席はhold transactionで再検証される。
+
+このlossless public terms projectionは `GET /api/public/experiences/{slug}/sale-terms`（`{ saleTerms }`）で読める。provider/product IDを含まず、`no-store`。既存の `/booking-terms` は旧NIHO本文に販売条件を重ねる画面用なので、対応できない取消条件を返さない。
 
 ### 遷移先・CSP
 
@@ -276,7 +282,7 @@ OWNERがExperience上で商品を作成し、本文・写真・開催枠・料�
 
 販売者と受取先は同一。コミュニティディナーはPanasonicが販売者・受取先であり、「NIHOkamakura」はStripe Connect口座の表示名として扱う。最少課金人数と最少催行人数は商品ごとに設定できる。貸切条件は扱わない。取消条件などの未決値は推測して補わない。
 
-公開操作、DTO、version/CAS、エラーコードの契約は[experience-publication-api.md](experience-publication-api.md)に記載する。現状のhost APIはNIHOの認証本人と同じ販売者のConnect参照を取得できないため、その限定契約が利用可能になるまで認証境界は503で閉じる。
+公開操作、DTO、version/CAS、エラーコードの契約は[experience-publication-api.md](experience-publication-api.md)、本人・Experience権限・Connect参照の正本は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。consumer codeはv1に固定済みだが、NIHO APIはまだ`not-deployed`でExperienceのpublication flagも既定OFF。配備・環境設定・staging受入が揃うまでHTTP境界は閉じる。
 
 ## 旅行者向けのプライバシー（第6段の続き）
 

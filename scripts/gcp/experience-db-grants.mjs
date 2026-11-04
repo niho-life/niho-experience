@@ -71,6 +71,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_booking_settlements: { write: IU },
   experience_settlement_commands: { write: IU },
   // A host workspace is created only after the BFF verifies the current NIHO OWNER.
+  // A seller mapping is operator-provisioned; the BFF binds OWNER after the current NIHO identity matches it.
   experience_providers: { write: I, updateColumns: ["created_at"] },
   // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.
   external_reservation_attendance: { write: IU },
@@ -139,10 +140,13 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   provider_google_calendar_inventory: { write: ID, updateColumns: ["fetched_at"] },
   provider_google_calendars: { write: IUD },
   provider_google_connections: { write: IUD },
-  // The publication BFF mirrors its currently verified OWNER role; no browser role is accepted.
+  // The publication BFF binds only the verified NIHO identity to its explicitly mapped Experience seller.
   provider_memberships: { write: IU },
   provider_notification_preferences: { write: IU },
   provider_publication_readiness: { write: IU },
+  // Explicit Connect lookup mappings are written by the operator registration script only. The BFF's FOR SHARE
+  // needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path changes it.
+  experience_host_seller_profiles: { write: [], updateColumns: ["updated_at"] },
   provider_sale_settings: { write: IU },
   resource_google_busy_intervals: { write: ID },
   resource_google_calendars: { write: IU },
@@ -163,4 +167,5 @@ export const MIGRATION_LEDGER_TABLE = "experience_schema_migrations";
 // entrypoint never reach them.
 export const OPERATOR_ONLY_SOURCES = Object.freeze([
   "packages/experience-store/src/site-sale-registration.ts",
+  "packages/experience-store/src/host-seller-provisioning.ts",
 ]);

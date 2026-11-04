@@ -36,9 +36,7 @@ export async function openPushBff(request: NextRequest): Promise<PushBffRequest>
   if (isHostMock()) return { session, nihoUserId: "synthetic-host-user", body: body.value };
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { response: noStoreJson({ error: providers.status === "error" ? "identity_unavailable" : "unauthenticated" }, providers.status === "error" ? 503 : 401) };
-  const ownerIds = [...new Set(providers.providers.filter((provider) => provider.memberRole === "OWNER").map((provider) => provider.ownerUserId))];
-  if (ownerIds.length !== 1) return { response: noStoreJson({ error: ownerIds.length ? "identity_unavailable" : "forbidden" }, ownerIds.length ? 503 : 403) };
-  return { session, nihoUserId: ownerIds[0]!, body: body.value };
+  return { session, nihoUserId: providers.nihoUserId, body: body.value };
 }
 
 /** `{ endpoint }` of a browser push service, or the 400 to answer. */

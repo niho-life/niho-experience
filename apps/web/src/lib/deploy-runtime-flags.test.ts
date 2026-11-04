@@ -54,6 +54,7 @@ const SITE: Record<Target, string> = { stg: "https://niho-experience-host-stg-sa
 const PREFIX: Record<Target, string> = { stg: "STG", prod: "PROD" };
 const SETTING: Record<string, string> = {
   consentVersion: "sample-terms-2026-11",
+  bucketName: "experience-test-public-media",
   mailbox: "NIHO Sample <noreply@example.com>",
   httpsUrl: "https://example.com/privacy",
   httpsOrigin: "https://editor.example.com",
@@ -74,6 +75,8 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "guideAppCardsEnabled",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
+  EXPERIENCE_PUBLICATIONS_ENABLED: "experiencePublicationsEnabled",
+  EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "experienceHostPublicationApiEnabled",
   EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "experienceProviderPagesApiEnabled",
   EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "experienceProviderOperationsApiEnabled",
   EXPERIENCE_TRANSLATE_API_ENABLED: "experienceTranslateApiEnabled",

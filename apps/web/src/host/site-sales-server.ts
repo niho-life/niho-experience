@@ -38,7 +38,7 @@ function previewWindow({ from, to }: HostSalesWindowOptions): HostSalesWindow {
 }
 
 /** Where this account's sales made here are read from; null keeps today's screen. */
-function readerFor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">): LedgerReader | null {
+function readerFor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">): LedgerReader | null {
   if (provider.memberRole !== "OWNER") return null;
   if (isHostMock()) return session.mockScenario === "site-sales" ? { today: MOCK_TODAY, read: async (window) => previewWindow(window) } : null;
   const sales = hostSalesRepository();
@@ -58,7 +58,7 @@ function failed(error: unknown): { status: "closed" } | { status: "error" } {
  * 売上 for `?month=` (this month in Japan when it names none, a later one, or one before the provider's first entry):
  * the month's entries, its numbers and the months to move between.
  */
-export async function loadSiteSales(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">, requested: unknown): Promise<HostSiteSalesLoad> {
+export async function loadSiteSales(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">, requested: unknown): Promise<HostSiteSalesLoad> {
   const reader = readerFor(provider, session);
   if (!reader) return { status: "closed" };
   try {
@@ -76,7 +76,7 @@ export async function loadSiteSales(provider: Pick<HostProvider, "id" | "ownerUs
 }
 
 /** ホーム's card: this month in Japan. */
-export async function loadSiteHomeMonth(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">): Promise<HostSiteHomeMonthLoad> {
+export async function loadSiteHomeMonth(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">, session: Pick<HostSession, "mockScenario">): Promise<HostSiteHomeMonthLoad> {
   const reader = readerFor(provider, session);
   if (!reader) return { status: "closed" };
   const month = requestedSiteSalesMonth(null, reader.today);

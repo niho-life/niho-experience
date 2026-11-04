@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { ExperienceProviderPageListItem, ExperienceProviderPageListResponse } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageListItem, ExperienceProviderPageListResponse } from "@niho-experience/api-client/legacy-host";
 import { reviewsHref } from "@/host/reviews";
 import { PROVIDER_PAGE_STATUS } from "@/host/status";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";

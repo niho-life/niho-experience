@@ -9,12 +9,12 @@ const state = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ hostSalesRepository: () => state.store }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => state.mock }));
-vi.mock("./site-bookings-server", () => ({ ownerActor: (provider: { id: string; ownerUserId: string }) => ({ providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" }) }));
+vi.mock("./site-bookings-server", () => ({ ownerActor: (provider: { id: string; nihoUserId: string }) => ({ providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" }) }));
 
 import { loadSiteHomeMonth, loadSiteSales } from "./site-sales-server";
 import { SITE_SALES_HOME_SCOPE_TEXT } from "./site-sales";
 
-const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as const;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" } as const;
 const SESSION = { mockScenario: undefined };
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 const PAYMENT: HostSaleEntry = {
@@ -53,7 +53,7 @@ describe("売上 from the experience DB", () => {
   });
 
   it("keeps today's screen for anyone but the OWNER, without the store, and when the store refuses the OWNER", async () => {
-    expect(await loadSiteSales({ id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "EDITOR" }, SESSION, undefined)).toEqual({ status: "closed" });
+    expect(await loadSiteSales({ id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "EDITOR" }, SESSION, undefined)).toEqual({ status: "closed" });
     state.store!.listGuestSalesForHost.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await loadSiteSales(OWNER, SESSION, undefined)).toEqual({ status: "closed" });
     state.store = null;
@@ -74,7 +74,7 @@ describe("売上 from the experience DB", () => {
     expect(state.store!.listGuestSalesForHost).toHaveBeenCalledWith(ACTOR, NOVEMBER);
     state.store!.listGuestSalesForHost.mockRejectedValueOnce(new Error("down"));
     expect(await loadSiteHomeMonth(OWNER, SESSION)).toEqual({ status: "error" });
-    expect(await loadSiteHomeMonth({ id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "COHOST" }, SESSION)).toEqual({ status: "closed" });
+    expect(await loadSiteHomeMonth({ id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "COHOST" }, SESSION)).toEqual({ status: "closed" });
   });
 });
 

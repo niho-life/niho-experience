@@ -6,14 +6,17 @@ import { HOST_MOCK_SCENARIOS, type HostMockScenario } from "./session";
 const SITE = "https://experience.example.test";
 
 describe("relay path allowlist", () => {
-  it("passes only the selected provider routes and GET auth/me", () => {
-    expect(relayUpstreamPath("GET", ["experience-providers"])).toBe("/api/experience-providers");
-    expect(relayUpstreamPath("PATCH", ["experience-providers", "p_1", "pages", "page-2"])).toBe("/api/experience-providers/p_1/pages/page-2");
-    expect(relayUpstreamPath("POST", ["experience-providers", "p_1", "uploads", "policies"])).toBe("/api/experience-providers/p_1/uploads/policies");
-    expect(relayUpstreamPath("DELETE", ["experience-providers", "p_1", "photos", "a.jpg"])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", "p_1", "members"])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", "p_1", "bookings"])).toBeNull();
+  it("passes only GET auth/me; provider, Connect, and booking APIs are not browser-relayed", () => {
     expect(relayUpstreamPath("GET", ["auth", "me"])).toBe("/api/auth/me");
+    for (const [method, path] of [
+      ["GET", ["experience-providers"]],
+      ["POST", ["experience-providers"]],
+      ["PATCH", ["experience-providers", "p_1"]],
+      ["GET", ["experience-providers", "p_1", "pages"]],
+      ["POST", ["experience-providers", "p_1", "payments", "reuse"]],
+      ["POST", ["experience-providers", "p_1", "payments", "connect", "resume"]],
+      ["GET", ["experience-providers", "p_1", "bookings"]],
+    ] as const) expect(relayUpstreamPath(method, path)).toBeNull();
   });
 
   it("compares whole segments, never prefixes", () => {
@@ -33,13 +36,13 @@ describe("relay path allowlist", () => {
   });
 
   it("refuses dot segments, encoded separators and odd characters", () => {
-    expect(relayUpstreamPath("GET", ["experience-providers", "..", "users"])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", "."])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", "a/b"])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", "a%2Fb"])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", "a\\b"])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", ""])).toBeNull();
-    expect(relayUpstreamPath("GET", ["experience-providers", ...Array<string>(12).fill("x")])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", "..", "users"])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", "."])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", "a/b"])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", "a%2Fb"])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", "a\\b"])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", ""])).toBeNull();
+    expect(relayUpstreamPath("GET", ["auth", ...Array<string>(12).fill("x")])).toBeNull();
   });
 });
 

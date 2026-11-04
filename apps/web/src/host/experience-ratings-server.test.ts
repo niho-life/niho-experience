@@ -14,7 +14,7 @@ vi.mock("@/lib/experience/store-server", () => ({ guestReviewRatings: () => (sta
 
 import { loadExperienceRatings } from "./experience-ratings-server";
 
-const OWNER = { id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" } as const;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-owner", memberRole: "OWNER" } as const;
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-owner", calendarRoleCeiling: "OWNER" };
 
 beforeEach(() => {
@@ -40,7 +40,7 @@ describe("loadExperienceRatings", () => {
   it("is empty without reviews, for anyone else, closed, when the store does not count the OWNER, or when the read fails", async () => {
     state.byProduct!.mockResolvedValueOnce([]);
     expect(await loadExperienceRatings(OWNER)).toEqual({});
-    expect(await loadExperienceRatings({ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "EDITOR" })).toEqual({});
+    expect(await loadExperienceRatings({ id: "sample-provider", nihoUserId: "sample-owner", memberRole: "EDITOR" })).toEqual({});
     expect(state.byProduct).toHaveBeenCalledTimes(1);
 
     state.byProduct!.mockRejectedValueOnce(new StoreAccessDeniedError());

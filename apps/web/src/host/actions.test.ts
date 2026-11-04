@@ -37,8 +37,7 @@ vi.mock("@/lib/host/server", async (importActual) => {
 });
 
 import { draftPageEnglish, draftReplyEnglish, draftReviewReplyEnglish, loadMoreGuestQuestionThreads, openGuestQuestionThread, openPayoutConnect, recordSiteAttendance, registerProvider, saveProviderMeetingPoint, saveProviderProfile, sendGuestQuestionReply, sharePayoutAccount, submitProviderReview, syncPayoutAccount } from "./actions";
-import { PREVIEW_STRIPE_TEXT, STRIPE_LINK_UNUSABLE_TEXT, STRIPE_SYNCED_TEXT } from "./connect";
-import { HOST_ERROR_REASON_TEXT, HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
+import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
 import { GUEST_QUESTION_LOAD_FAILED_TEXT, GUEST_QUESTION_REPLY_FAILED_TEXT } from "./guest-questions-server";
 import { MESSAGE_TEXT_LIMIT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
@@ -48,12 +47,8 @@ import { EMPTY_PAGE_TEXT, PAGE_ENGLISH_UNAVAILABLE_TEXT } from "./page-english";
 import { MOCK_REPLY_EXAMPLES, PREVIEW_ENGLISH_DRAFT } from "./mock/threads";
 import { REVIEW_REPLY_TEXT_LIMIT } from "./reviews";
 
-// The contract mock's synthetic consents (packages/api-client/src/host/mock.ts).
-const PROVIDER_CONSENT = "sample-provider-consent-1";
-const REUSE_CONSENT = { version: "sample-payment-reuse-consent-1", text: "（サンプル）拠点の販売者口座を、体験の売上の受取に使うことに同意します。この文言は合成データです。" };
 const KITCHEN = "sample-provider-kitchen";
 const STUDIO = "sample-provider-studio";
-const GARDEN = "sample-provider-garden";
 
 /** http mode: NIHO is the global fetch, answering `respond` and recording what was sent. */
 function stubNiho(respond: (path: string) => Response) {
@@ -66,27 +61,6 @@ function stubNiho(respond: (path: string) => Response) {
   return calls;
 }
 
-const providerBody = (id: string) => ({
-  id,
-  ownerUserId: "sample-user",
-  vesselSpotId: `${id}-vessel`,
-  kind: "BUSINESS",
-  displayName: "合成スタジオ",
-  bio: "",
-  sellerDisclosureUrl: null,
-  reviewStatus: "DRAFT",
-  consentVersion: PROVIDER_CONSENT,
-  consentedAt: "2026-10-21T00:00:00.000Z",
-  submittedAt: null,
-  approvedAt: null,
-  paymentReuseConsentVersion: null,
-  paymentReuseConsentedAt: null,
-  paymentReuseSourceSpotId: null,
-  createdAt: "2026-10-21T00:00:00.000Z",
-  updatedAt: "2026-10-21T00:00:00.000Z",
-});
-const consents = { consent: { version: PROVIDER_CONSENT, text: "合成の同意文" }, paymentReuseConsent: REUSE_CONSENT };
-
 beforeEach(() => {
   state.config.apiMode = "mock";
   state.scenario = "default";
@@ -95,33 +69,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const registration = { kind: "BUSINESS", displayName: "合成スタジオ", bio: "合成の紹介文", sellerDisclosureUrl: "", consentVersion: PROVIDER_CONSENT };
+const registration = { kind: "BUSINESS", displayName: "合成スタジオ", bio: "合成の紹介文", sellerDisclosureUrl: "", consentVersion: "synthetic-consent" };
 
 describe("registerProvider", () => {
-  it("mock: registers with the contract mock, then signs in again as a host whose provider starts where a new one does", async () => {
-    state.scenario = "empty";
-    expect(await registerProvider(registration)).toEqual({ ok: true, message: "登録しました。", next: "/host/auth/mock-login?mock=payments-pending" });
-  });
-
-  it("mock: says in one sentence why NIHO refused it", async () => {
-    state.scenario = "empty";
-    expect(await registerProvider({ ...registration, consentVersion: "sample-provider-consent-0" })).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_CONSENT_OUTDATED });
-    expect(await registerProvider({ ...registration, sellerDisclosureUrl: "http://example.com/legal" })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
-    expect(await registerProvider({ ...registration, displayName: "   " })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
-  });
-
-  it("http: sends the registration to NIHO and opens the new provider's home", async () => {
-    state.config.apiMode = "http";
-    const calls = stubNiho(() => Response.json({ provider: providerBody("p_new-1"), ...consents }, { status: 201 }));
-    expect(await registerProvider({ ...registration, sellerDisclosureUrl: " https://example.com/legal " })).toEqual({ ok: true, message: "登録しました。", next: "/host/home?providerId=p_new-1" });
-    expect(calls).toEqual([
-      { method: "POST", path: "/api/experience-providers", body: { kind: "BUSINESS", displayName: "合成スタジオ", bio: "合成の紹介文", sellerDisclosureUrl: "https://example.com/legal", consentVersion: PROVIDER_CONSENT } },
-    ]);
-  });
-
-  it("refuses what the form never sends without asking NIHO", async () => {
+  it("validates form shape and never calls the removed NIHO provider-registration API", async () => {
     state.config.apiMode = "http";
     const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await registerProvider(registration)).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
     for (const input of [{ ...registration, kind: "COMPANY" }, { ...registration, displayName: 1 }, { ...registration, bio: "x".repeat(5000) }, null]) {
       expect(await registerProvider(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     }
@@ -130,32 +84,10 @@ describe("registerProvider", () => {
 });
 
 describe("saveProviderProfile", () => {
-  it("mock: saves what changed and shows what NIHO kept: a reviewed provider goes back to review", async () => {
-    const result = await saveProviderProfile({ providerId: KITCHEN, bio: "  合成の新しい紹介  " });
-    expect(result).toEqual({
-      ok: true,
-      message: "保存しました",
-      profile: { displayName: "サンプルの台所", bio: "合成の新しい紹介", sellerDisclosureUrl: "https://example.com/sample-kitchen/legal" },
-      reviewStatus: "REQUESTED",
-    });
-    expect(state.revalidated).toEqual(["/ layout"]);
-  });
-
-  it("mock: the seller page is the owner's; an editor changes the rest", async () => {
-    expect(await saveProviderProfile({ providerId: STUDIO, sellerDisclosureUrl: "https://example.com/studio" })).toEqual({ ok: false, message: "この操作をする権限がありません。提供者のオーナーに依頼してください。" });
-    expect(await saveProviderProfile({ providerId: STUDIO, displayName: "合成の工房" })).toMatchObject({ ok: true, profile: { displayName: "合成の工房", sellerDisclosureUrl: "" }, reviewStatus: "DRAFT" });
-  });
-
-  it("http: sends only the fields that changed, an empty seller page as none", async () => {
-    state.config.apiMode = "http";
-    const calls = stubNiho(() => Response.json({ provider: providerBody(KITCHEN) }));
-    expect(await saveProviderProfile({ providerId: KITCHEN, sellerDisclosureUrl: "  " })).toMatchObject({ ok: true });
-    expect(calls).toEqual([{ method: "PATCH", path: `/api/experience-providers/${KITCHEN}`, body: { sellerDisclosureUrl: null } }]);
-  });
-
-  it("refuses nothing to save, and ids that are not NIHO's, without asking NIHO", async () => {
+  it("keeps validation but never calls the removed NIHO provider-profile API", async () => {
     state.config.apiMode = "http";
     const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await saveProviderProfile({ providerId: KITCHEN, bio: "合成の新しい紹介" })).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
     expect(await saveProviderProfile({ providerId: KITCHEN })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     expect(await saveProviderProfile({ providerId: "../admin", bio: "x" })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     expect(calls).toEqual([]);
@@ -165,111 +97,42 @@ describe("saveProviderProfile", () => {
 describe("saveProviderMeetingPoint", () => {
   const meeting = { overview: "（合成）駅の近く", address: "（合成）サンプル町 1 丁目", accessNote: "", mapUrl: "https://maps.example.test/sample", entranceNote: "（合成）木の門" };
 
-  it("mock: NIHO keeps all five fields trimmed and answers what it kept", async () => {
-    const result = await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: { ...meeting, overview: "  （合成）駅の近く  " } });
-    expect(result).toEqual({ ok: true, message: "保存しました", meetingPoint: meeting });
-    expect(state.revalidated).toContain("/ layout");
-  });
-
-  it("http: sends the trimmed values in one PUT", async () => {
-    state.config.apiMode = "http";
-    const calls = stubNiho(() => Response.json({ meetingPoint: meeting }));
-    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: { ...meeting, entranceNote: " （合成）木の門\n" } })).toMatchObject({ ok: true, meetingPoint: meeting });
-    expect(calls).toEqual([{ method: "PUT", path: `/api/experience-providers/${KITCHEN}/meeting-point`, body: meeting }]);
-  });
-
-  it("refuses a missing or unknown field, a value over NIHO's limit and a map URL that is not https, without asking NIHO", async () => {
+  it("keeps input validation but never calls the removed NIHO meeting-point API", async () => {
     state.config.apiMode = "http";
     const calls = stubNiho(() => new Response(null, { status: 500 }));
-    for (const meetingPoint of [
-      { ...meeting, overview: "x".repeat(201) },
-      { ...meeting, address: "x".repeat(501) },
-      { ...meeting, accessNote: "x".repeat(2001) },
-      { ...meeting, entranceNote: "x".repeat(2001) },
-      { ...meeting, mapUrl: "http://maps.example.test/sample" },
-      { ...meeting, mapUrl: "https://user:secret@maps.example.test/sample" },
-      { ...meeting, mapUrl: "javascript:alert(1)" },
-      { overview: "", address: "", accessNote: "", mapUrl: "" },
-      { ...meeting, phone: "000" },
-      { ...meeting, overview: 1 },
-      null,
-    ]) expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: meetingPoint as never })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: meeting })).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
     expect(await saveProviderMeetingPoint({ providerId: "../admin", meetingPoint: meeting })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
-    // Spaces NIHO trims do not count toward the limit; an empty map URL is no map.
-    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: { ...meeting, overview: ` ${"x".repeat(200)} `, mapUrl: "" } })).toMatchObject({ ok: false });
-    expect(calls).toEqual([{ method: "PUT", path: `/api/experience-providers/${KITCHEN}/meeting-point`, body: { ...meeting, overview: "x".repeat(200), mapUrl: "" } }]);
-  });
-
-  it("answers NIHO's refusal in words", async () => {
-    state.config.apiMode = "http";
-    stubNiho(() => Response.json({ error: { code: "NOT_FOUND", message: "x", details: {} } }, { status: 404 }));
-    expect(await saveProviderMeetingPoint({ providerId: KITCHEN, meetingPoint: meeting })).toEqual({ ok: false, message: "提供者が見つかりません。権限が無いか、URL が正しくありません。" });
+    expect(calls).toEqual([]);
   });
 });
 
 describe("submitProviderReview", () => {
-  it("mock: a provider not submitted yet, with its https seller page, waits for NIHO's review", async () => {
-    state.scenario = "payments-pending";
-    expect(await submitProviderReview({ providerId: GARDEN })).toEqual({ ok: true, message: "審査を申請しました。", reviewStatus: "REQUESTED" });
-  });
-
-  it("mock: a reviewed provider cannot ask again, and an editor cannot ask at all", async () => {
-    expect(await submitProviderReview({ providerId: KITCHEN })).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_REVIEW_STATE_CONFLICT });
-    expect(await submitProviderReview({ providerId: STUDIO })).toEqual({ ok: false, message: "提供者が見つかりません。権限が無いか、URL が正しくありません。" });
+  it("does not call the removed NIHO review operation", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await submitProviderReview({ providerId: KITCHEN })).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
+    expect(calls).toEqual([]);
   });
 });
 
 describe("sharePayoutAccount", () => {
-  beforeEach(() => {
-    state.scenario = "payments-pending";
-  });
-
-  it("mock: shares a spot's ready account with NIHO's consent, and reads the account back", async () => {
-    expect(await sharePayoutAccount({ providerId: GARDEN, sourceSpotId: "sample-spot-house", consentVersion: REUSE_CONSENT.version })).toEqual({
-      ok: true,
-      message: "サンプルの拠点の口座を共有しました。",
-      payout: { status: "owner", payout: { reason: "READY", sharedFrom: "サンプルの拠点", candidates: [{ id: "sample-spot-house", name: "サンプルの拠点" }], reuseConsent: REUSE_CONSENT } },
-    });
-  });
-
-  it("mock: says why a spot's account cannot be shared", async () => {
-    const share = (sourceSpotId: string, consentVersion = REUSE_CONSENT.version) => sharePayoutAccount({ providerId: GARDEN, sourceSpotId, consentVersion });
-    expect(await share("sample-spot-annex")).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_PAYMENT_SOURCE_NOT_READY });
-    expect(await share("someone-elses-spot")).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_PAYMENT_SOURCE_FORBIDDEN });
-    expect(await share("sample-spot-house", "sample-payment-reuse-consent-0")).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_PAYMENT_CONSENT_OUTDATED });
-    state.scenario = "default";
-    expect(await sharePayoutAccount({ providerId: KITCHEN, sourceSpotId: "sample-spot-house", consentVersion: REUSE_CONSENT.version })).toEqual({ ok: false, message: "申込があるため口座は変更できません。" });
+  it("does not call the removed NIHO Connect-mutation operation", async () => {
+    state.config.apiMode = "http";
+    const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await sharePayoutAccount({ providerId: KITCHEN, sourceSpotId: "synthetic-spot", consentVersion: "synthetic-consent" }))
+      .toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
+    expect(calls).toEqual([]);
   });
 });
 
 describe("openPayoutConnect and syncPayoutAccount", () => {
-  it("mock: Stripe's page does not exist, so finishing it is stood in for and the account is read back", async () => {
-    state.scenario = "payments-pending";
-    expect(await openPayoutConnect({ providerId: GARDEN, step: "start" })).toEqual({
-      ok: true,
-      message: PREVIEW_STRIPE_TEXT,
-      redirectTo: null,
-      payout: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [{ id: "sample-spot-house", name: "サンプルの拠点" }], reuseConsent: REUSE_CONSENT } },
-    });
-  });
-
-  it("mock: reading an account that was never connected says so; a connected one is read again", async () => {
-    state.scenario = "payments-pending";
-    expect(await syncPayoutAccount({ providerId: GARDEN })).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_PAYMENT_NOT_CONNECTED });
-    state.scenario = "default";
-    expect(await syncPayoutAccount({ providerId: KITCHEN })).toMatchObject({ ok: true, message: STRIPE_SYNCED_TEXT, payout: { status: "owner", payout: { reason: "READY" } } });
-  });
-
-  it("http: follows only Stripe's own page", async () => {
+  it("does not call NIHO Connect mutation routes from the old host UI", async () => {
     state.config.apiMode = "http";
-    const link = (url: string) => () => Response.json({ url, expiresAt: "2026-10-21T00:05:00.000Z", ready: false, reason: "VERIFICATION_REQUIRED" });
-    stubNiho(link("https://connect.stripe.com/setup/e/acct_sample/abc"));
-    expect(await openPayoutConnect({ providerId: KITCHEN, step: "resume" })).toEqual({ ok: true, message: "Stripe の画面へ移ります。", redirectTo: "https://connect.stripe.com/setup/e/acct_sample/abc", payout: null });
-    stubNiho(link("https://connect.stripe.example.test/setup"));
-    expect(await openPayoutConnect({ providerId: KITCHEN, step: "start" })).toEqual({ ok: false, message: STRIPE_LINK_UNUSABLE_TEXT });
-    stubNiho(() => Response.json({ error: { code: "CONFLICT", message: "shared", details: { reason: "PROVIDER_PAYMENT_SHARED_ACCOUNT" } } }, { status: 409 }));
-    expect(await openPayoutConnect({ providerId: KITCHEN, step: "start" })).toEqual({ ok: false, message: HOST_ERROR_REASON_TEXT.PROVIDER_PAYMENT_SHARED_ACCOUNT });
+    const calls = stubNiho(() => new Response(null, { status: 500 }));
+    expect(await openPayoutConnect({ providerId: KITCHEN, step: "resume" })).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
+    expect(await syncPayoutAccount({ providerId: KITCHEN })).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
     expect(await openPayoutConnect({ providerId: KITCHEN, step: "elsewhere" as never })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    expect(calls).toEqual([]);
   });
 });
 

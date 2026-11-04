@@ -1,4 +1,4 @@
-import { decodeExperienceProviderPageMeetingPointUpdateRequest } from "@niho-experience/api-client/host-schema";
+import { decodeExperienceProviderPageMeetingPointUpdateRequest } from "@niho-experience/api-client/legacy-host-schema";
 import { isExperienceProviderOperationPathId } from "@niho-experience/api-client/experience-provider-operations-schema";
 import { isPageVersion, loadProviderPagesClient, providerPagesFailure } from "@/lib/host/provider-pages-server";
 import { providerOperationsJson, providerOperationsMutationAllowed, readProviderOperationsJson } from "@/lib/host/provider-operations-server";

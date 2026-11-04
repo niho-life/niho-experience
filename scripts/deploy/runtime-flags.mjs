@@ -33,6 +33,7 @@ const SERVICE_ACCOUNT = "[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\\.iam\\.gservicea
 /** Plain settings' shapes: what resolve-config accepts, narrowed to what --set-env-vars carries (never a comma). */
 export const SHAPES = Object.freeze({
   consentVersion: { pattern: /^[A-Za-z0-9._:+-]{1,100}$/, words: "letters, digits and ._:+- (1-100)" },
+  bucketName: { pattern: /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/, words: "a 3-63 character lower-case GCS bucket name" },
   mailbox: { pattern: new RegExp(`^(${ADDRESS}|[^<>",\\u0000-\\u001F\\u007F\\s][^<>",\\u0000-\\u001F\\u007F]{0,99} <${ADDRESS}>)$`), words: "an address, or Name <address> without commas or quotes" },
   httpsUrl: { pattern: new RegExp(`^${HTTPS_URL}$`), words: "an https URL with a lower-case host, no query or comma" },
   httpsOrigin: { pattern: /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/, words: "an exact https origin without path, credentials or query" },
@@ -135,6 +136,23 @@ export const FLAGS = Object.freeze([
       { env: "EXPERIENCE_MAIL_REPLY_TO", variable: "MAIL_REPLY_TO", shape: "mailbox" },
     ],
     fixed: { EXPERIENCE_JOBS_AUDIENCE: siteUrl, EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: serviceAccount("experience-jobs") },
+  },
+  {
+    env: "EXPERIENCE_PUBLICATIONS_ENABLED",
+    variable: "PUBLICATIONS_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE"],
+    settings: [
+      { env: "EXPERIENCE_PUBLICATION_CONSENT_VERSION", variable: "PUBLICATION_CONSENT_VERSION", shape: "consentVersion" },
+      { env: "EXPERIENCE_PUBLIC_MEDIA_BUCKET", variable: "PUBLIC_MEDIA_BUCKET", shape: "bucketName" },
+    ],
+  },
+  {
+    env: "EXPERIENCE_HOST_PUBLICATION_API_ENABLED",
+    variable: "HOST_PUBLICATION_API_ENABLED",
+    needs: ["EXPERIENCE_PUBLICATIONS_ENABLED"],
+    settings: [
+      { env: "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE", variable: "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE", shape: "httpsUrl" },
+    ],
   },
   {
     env: "EXPERIENCE_PROVIDER_PAGES_API_ENABLED",

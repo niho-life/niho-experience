@@ -16,11 +16,9 @@ export async function hostActor(providerId: unknown): Promise<{ actor: HostActor
   if (providers.status !== "ok") return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
   const provider = providers.providers.find((entry) => entry.id === id);
   if (!provider) return { response: noStoreJson({ error: "forbidden" }, 403) };
-  // NIHO app-connect does not reveal the signed-in user ID. Use this provider's
-  // stable owner ID as the Experience actor for every NIHO member role; the
-  // app-connect token and current NIHO role still authorize every upstream call.
-  const identity = nihoIdOrNull(provider.ownerUserId);
-  if (!identity) return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
+  // Current NIHO identity comes from contract v1; Experience membership is resolved separately.
+  const identity = providers.nihoUserId;
+  if (!identity || provider.nihoUserId !== identity) return { response: noStoreJson({ error: "identity_unavailable" }, 503) };
   const calendarRoleCeiling = provider.memberRole === "OWNER" ? "OWNER" : provider.memberRole === "EDITOR" || provider.memberRole === "COHOST" ? "EDITOR" : "VIEWER";
   return { actor: { providerId: id, nihoUserId: identity, calendarRoleCeiling }, nihoRole: provider.memberRole };
 }

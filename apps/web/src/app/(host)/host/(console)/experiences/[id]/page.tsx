@@ -50,7 +50,7 @@ export default async function HostExperiencePage({ params, searchParams }: { par
   const backHref = withProvider(HOST_EXPERIENCES_PATH, linkProviderId);
   const settingsHref = withProvider(HOST_SETTINGS_PATH, linkProviderId);
   if (providerPagesEnabled()) {
-    return <HostLiveExperienceEditor key={`${provider.id}/${id}`} providerId={provider.id} pageId={id} backHref={backHref} role={provider.memberRole} reviewStatus={provider.reviewStatus} settingsHref={settingsHref} siteUrl={config.siteUrl} />;
+    return <HostLiveExperienceEditor key={`${provider.id}/${id}`} providerId={provider.id} pageId={id} backHref={backHref} role={provider.memberRole} reviewStatus={provider.reviewStatus ?? null} settingsHref={settingsHref} siteUrl={config.siteUrl} />;
   }
   const { editor, host, today, publication } = await loadHostExperienceEditor(provider, id);
   if (editor.status === "missing") notFound();

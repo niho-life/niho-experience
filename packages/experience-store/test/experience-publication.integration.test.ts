@@ -33,9 +33,12 @@ const readiness = (overrides: Partial<Parameters<ExperiencePublicationRepository
   return {
     accountUsable: true,
     connectReady: true,
+    paymentReuseConsentAccepted: true,
+    paymentReuseConsentVersion: "synthetic-payment-reuse-v1",
+    paymentReuseConsentedAtUtc: new Date(now - 2_000).toISOString(),
     sellerDisplayReady: true,
     sellerNihoAccountRef: "seller-account-synthetic",
-    stripeConnectAccountRef: "acct_synthetic_publication",
+    stripeConnectAccountRef: "acct_SyntheticPublication",
     sellerDisplayName: "Synthetic Legal Seller",
     requiredConsentVersion: "publication-consent-synthetic-v1",
     observedAtUtc: new Date(now - 1_000).toISOString(),
@@ -58,6 +61,13 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       const secondOwner = { providerId: "provider-slug-second", nihoUserId: "owner-slug-second" } as const;
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1),($2)", [firstOwner.providerId, secondOwner.providerId]);
       await pool.query(
+        `INSERT INTO experience_host_seller_profiles
+           (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ($1,'legacy-slug-first','First seller','account-slug-first','acct_SyntheticSlugFirst','First seller'),
+                ($2,'legacy-slug-second','Second seller','account-slug-second','acct_SyntheticSlugSecond','Second seller')`,
+        [firstOwner.providerId, secondOwner.providerId],
+      );
+      await pool.query(
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($3,$4,'OWNER')",
         [firstOwner.providerId, firstOwner.nihoUserId, secondOwner.providerId, secondOwner.nihoUserId],
       );
@@ -73,7 +83,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         const product = await store.createProduct(owner, {
           id, slug, status: "PUBLISHED", publicTitle: `Synthetic ${id}`, content: manuscript(`Synthetic ${id} copy.`),
           currency: "JPY", unitAmount: 4_000, cancellationTermsRef: `terms-${id}`,
-          sellerNihoAccountRef: "seller-account-synthetic", stripeConnectAccountRef: "acct_synthetic_publication",
+          sellerNihoAccountRef: "seller-account-synthetic", stripeConnectAccountRef: "acct_SyntheticPublication",
           sellerDisplayName: "Synthetic Legal Seller",
         });
         const assetId = randomUUID();
@@ -158,6 +168,12 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [OWNER.providerId]);
       await pool.query(
+        `INSERT INTO experience_host_seller_profiles
+           (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ($1,'legacy-publication-owner','Synthetic seller workspace','seller-account-synthetic','acct_SyntheticPublication','Synthetic Legal Seller')`,
+        [OWNER.providerId],
+      );
+      await pool.query(
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($1,$3,'EDITOR')",
         [OWNER.providerId, OWNER.nihoUserId, EDITOR.nihoUserId],
       );
@@ -178,7 +194,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         unitAmount: 4_000,
         cancellationTermsRef: "cancellation-synthetic-v1",
         sellerNihoAccountRef: "seller-account-synthetic",
-        stripeConnectAccountRef: "acct_synthetic_publication",
+        stripeConnectAccountRef: "acct_SyntheticPublication",
         sellerDisplayName: "Synthetic Legal Seller",
       });
       await pool.query(
@@ -293,6 +309,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(state.version, 1);
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic tea");
+      assert.equal(await publications.claimsSlug(original.slug), true);
       assert.equal((await publications.getPublicBySlug(original.slug))?.photos[0]?.src,
         "/api/public/experience-media/00000000-0000-4000-8000-000000000330");
       assert.deepEqual(await publications.getPublicMediaAsset("00000000-0000-4000-8000-000000000330"), {
@@ -395,6 +412,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       state = (await publications.getState(OWNER, original.id))!;
       state = await publications.stop(OWNER, original.id, state.version);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.equal(await publications.claimsSlug(original.slug), true, "stopping removes public visibility but keeps the slug reserved against NIHO fallback");
       assert.equal(await publications.getPublicMediaAsset("00000000-0000-4000-8000-000000000330"), null);
       await assert.rejects(publications.stop(OWNER, original.id, state.version - 1), StoreConflictError);
       state = await publications.publish(OWNER, original.id, {
@@ -408,6 +426,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
 
       state = await publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.equal(await publications.claimsSlug(original.slug), true);
       await assert.rejects(
         publications.publish(OWNER, original.id, {
           expectedDraftVersion: incomplete.draft.version,

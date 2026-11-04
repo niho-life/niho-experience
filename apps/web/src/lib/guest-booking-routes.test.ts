@@ -4,7 +4,7 @@ import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type Bookin
 
 /** The public availability and checkout of 旅行者の予約 (#285) against a stubbed store and a stubbed Stripe SDK. */
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, bookingsEnabled: true, experiencePublicationsEnabled: false, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: false, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
   publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
@@ -116,13 +116,16 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
   vi.stubEnv("EXPERIENCE_CHECKOUT_IP_HMAC_KEY", CHECKOUT_IP_KEY);
-  state.config = { guestBookingEnabled: true, bookingsEnabled: true, experiencePublicationsEnabled: false, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { apiMode: "http", experiencePublicationsEnabled: false, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
     startGuestBooking: vi.fn(async () => started()),
     attachCheckoutSession: vi.fn(async () => undefined),
   };
-  state.publications = { getPublicBySlug: vi.fn(async () => ({ slug: "sample-tea" })) };
+  state.publications = {
+    claimsSlug: vi.fn(async () => false),
+    getPublicBySlug: vi.fn(async () => ({ slug: "sample-tea" })),
+  };
   state.stripeKeys = [];
   state.stripeAccountRetrieve = vi.fn(async (id: unknown) => ({
     id, country: "JP", default_currency: "jpy", charges_enabled: true, payouts_enabled: true, details_submitted: true,
@@ -164,6 +167,15 @@ describe("GET /api/public/experiences/[slug]/availability", () => {
     const off = await availability(get(), slugParams());
     expect(off.status).toBe(404);
     expect(await off.text()).toBe("");
+  });
+
+  it("does not expose a new seller's reserved slug through legacy availability when publication is disabled", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: false };
+    state.publications!.claimsSlug!.mockResolvedValue(true);
+    const response = await availability(get(), slugParams());
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+    expect(state.repository?.listPublicAvailability).not.toHaveBeenCalled();
   });
 });
 
@@ -234,6 +246,16 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.repository?.startGuestBooking).toHaveBeenCalledTimes(1);
     expect(state.stripeCreate).not.toHaveBeenCalled();
     expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("does not admit a new seller's reserved slug through legacy checkout when publication is disabled", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: false };
+    state.publications!.claimsSlug!.mockResolvedValue(true);
+    const response = await checkout(post(CHECKOUT), slugParams());
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
+    expect(state.stripeCreate).not.toHaveBeenCalled();
   });
 
   it("fails closed when a trusted edge IP is unavailable and logs only a rate-limit category", async () => {

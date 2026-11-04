@@ -17,6 +17,8 @@ async function relay(request: NextRequest, context: { params: Promise<{ path: st
   const method = request.method;
   const upstreamPath = relayUpstreamPath(method, path);
   if (!upstreamPath) return noStoreJson({ error: "not_found" }, 404);
+  // The contract's GET /api/auth/me accepts no query parameters.
+  if (request.nextUrl.search) return noStoreJson({ error: "not_found" }, 404);
   if (!mutationFromSameOrigin(method, request.headers, siteOrigin())) return noStoreJson({ error: "cross_site_request" }, 403);
 
   const session = decodeSession(sessionSealer(), request.cookies.get(SESSION_COOKIE)?.value, Date.now());

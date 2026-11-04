@@ -124,19 +124,18 @@ test("an expired ID token is refreshed once by the browser before the page shows
   expect(refreshes).toEqual(["POST"]);
 });
 
-test("the API relay serves the provider API to this site only", async ({ page }) => {
+test("the browser relay exposes only the read-only identity endpoint; provider APIs stay server-side", async ({ page }) => {
   await signIn(page);
   const result = await page.evaluate(async () => {
     const list = await fetch("/host/api/experience-providers");
     const other = await fetch("/host/api/users");
     const me = await fetch("/host/api/auth/me");
-    // A same-origin change passes the Origin check and reaches the contract mock, which refuses an empty registration.
     const change = await fetch("/host/api/experience-providers", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    return { list: list.status, providers: ((await list.json()) as { providers: unknown[] }).providers.length, other: other.status, me: me.status, change: change.status, cache: list.headers.get("cache-control") };
+    return { list: list.status, other: other.status, me: me.status, change: change.status, cache: list.headers.get("cache-control") };
   });
-  expect(result).toEqual({ list: 200, providers: 2, other: 404, me: 200, change: 400, cache: expect.stringContaining("no-store") });
+  expect(result).toEqual({ list: 404, other: 404, me: 200, change: 404, cache: expect.stringContaining("no-store") });
   const crossSite = await page.request.post("/host/api/experience-providers", { headers: { origin: "https://evil.example.test" }, data: {} });
-  expect(crossSite.status()).toBe(403);
+  expect(crossSite.status()).toBe(404);
 });
 
 test("signed-out visitors cannot open the console", async ({ page }) => {

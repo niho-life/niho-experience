@@ -163,8 +163,7 @@ async function prepareHost(operation: "READ" | "EDIT" | "OWNER"): Promise<
   const repository = experiencePublicationRepository();
   if (!repository) return { ok: false, response: responseError("UNAVAILABLE", 503) };
   try {
-    await repository.ensureOwnerWorkspace(boundary.value.actor);
-    if (boundary.value.readiness) await repository.refreshReadiness(boundary.value.actor, boundary.value.readiness);
+    await repository.refreshReadiness(boundary.value.actor, boundary.value.readiness);
     return { ok: true, context: boundary.value, repository };
   } catch (error) {
     return { ok: false, response: mapStoreError(error) };

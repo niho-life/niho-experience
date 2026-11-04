@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
   config: { otaGuestDetailsEnabled: true, hostAttendanceEnabled: false },
   assignments: [] as { providerId: string }[],
   session: { nihoUserId: "owner-a", accessTokenExpiresAt: Date.now() + 3_600_000 } as null | { nihoUserId: string; accessTokenExpiresAt: number },
-  providers: { status: "ok", providers: [{ id: "provider-a", ownerUserId: "owner-a", memberRole: "OWNER" }] } as Record<string, unknown>,
+  providers: { status: "ok", nihoUserId: "owner-a", providers: [{ id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" }] } as Record<string, unknown>,
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
 }));
 vi.mock("server-only", () => ({}));
@@ -23,7 +23,7 @@ import { MOCK_OTA_BOOKINGS } from "./mock/ota-bookings";
 import { loadOtaBookings, loadOtaHomeTodos, loadOtaSession, otaReaderFor, recordOtaAttendanceAsHost } from "./ota-bookings-server";
 
 const [gyg] = MOCK_OTA_BOOKINGS as [HostOtaBooking];
-const OWNER = { id: "provider-a", ownerUserId: "owner-a", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "provider-a", nihoUserId: "owner-a", memberRole: "OWNER" } as HostProvider;
 const EDITOR = { ...OWNER, memberRole: "EDITOR" } as HostProvider;
 const store = () => ({
   listForHost: vi.fn(async (): Promise<HostOtaBooking[]> => [gyg]),
@@ -37,7 +37,7 @@ beforeEach(() => {
   state.config = { otaGuestDetailsEnabled: true, hostAttendanceEnabled: false };
   state.assignments = [];
   state.session = { nihoUserId: "owner-a", accessTokenExpiresAt: Date.now() + 3_600_000 };
-  state.providers = { status: "ok", providers: [OWNER] };
+  state.providers = { status: "ok", nihoUserId: "owner-a", providers: [OWNER] };
   state.store = store();
 });
 

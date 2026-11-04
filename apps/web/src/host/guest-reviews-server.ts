@@ -50,9 +50,9 @@ const LIST_LIMIT = 100;
 const REASON_FROM_STORE: Record<GuestReviewReportReason, HostReviewReportReason> = { PERSONAL: "personal", UNTRUE: "untrue", INAPPROPRIATE: "inappropriate", OTHER: "other" };
 const REASON_TO_STORE: Record<HostReviewReportReason, GuestReviewReportReason> = { personal: "PERSONAL", untrue: "UNTRUE", inappropriate: "INAPPROPRIATE", other: "OTHER" };
 
-function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /**
@@ -123,7 +123,7 @@ export type HostGuestReviewsLoad =
   | { status: "error" };
 
 /** レビュー for an OWNER (NIHO's role): the provider's shown reviews. */
-export async function loadGuestReviews(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): Promise<HostGuestReviewsLoad> {
+export async function loadGuestReviews(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): Promise<HostGuestReviewsLoad> {
   const store = guestReviewRepository();
   if (!store) return { status: "closed" };
   if (provider.memberRole !== "OWNER") return { status: "owner-only" };

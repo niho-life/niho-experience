@@ -1,0 +1,13 @@
+{
+  "provider": {
+    "id": "experience-provider-synthetic-0001",
+    "legacyProviderId": "niho-legacy-provider-synthetic-0001",
+    "displayName": "Synthetic Experience provider"
+  },
+  "seller": {
+    "nihoAccountRef": "niho-account-synthetic-0001",
+    "stripeConnectAccountRef": "acct_SyntheticSeller0001",
+    "displayName": "Synthetic seller"
+  },
+  "supportEnabled": false
+}

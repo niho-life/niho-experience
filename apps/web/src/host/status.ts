@@ -1,4 +1,4 @@
-import type { ExperienceProviderPageListItem, ExperienceSiteListingStatus } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPageListItem, ExperienceSiteListingStatus } from "@niho-experience/api-client/legacy-host";
 import type { HostProviderReviewStatus } from "@/lib/host/providers";
 import type { PageEnglishStatus } from "./page-english";
 import type { HostBookingStatus, HostReviewStatus, ListingStatus, PaymentReadinessReason } from "./types";

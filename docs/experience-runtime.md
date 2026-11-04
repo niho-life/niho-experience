@@ -2,18 +2,18 @@
 
 この文書は [ADR 0002](adr/0002-experience-domain-ownership.md) の実装状況を示す。体験商品・開催枠・予約・決済の正本はExperienceに置き、旧NIHO体験商品の移行や並行販売は行わない。
 
-2026-11-04 の簡素化決定（#330 / #369）: OWNER本人が商品を作り、必要条件を満たしたら公開・停止・再開する。通常保存で有効な公開版を維持する。旧商品・旧予約が無いためデータ移行と商品ごとの切替は行わない。[公開方針とAPI契約](host-publication.md) を正本とする。
+2026-11-04 の簡素化決定（#330 / #369）: Experience OWNERが商品を作り、必要条件を満たしたら公開・停止・再開する。通常保存で有効な公開版を維持する。新しいExperience販売に旧NIHO商品の移行や同一開催回の二重販売を持ち込まない。旧NIHO予約の照会・履行・取消／返金責任はNIHO側に残す。[公開方針](host-publication.md) と [NIHO Host v1 consumer contract](host-niho-v1-consumer.md) を正本とする。
 
 ゲスト予約を開くCloud Run revisionには、Secret Managerの32 byte以上のEXPERIENCE_CHECKOUT_IP_HMAC_KEYが要る。CheckoutはCloudflareのCF-Connecting-IPだけを読み、偽装可能なX-Forwarded-Forへfallbackしない。Cloud Run originをCloudflare経由に限定する入口設定をstg/prodで確認するまで、予約flagは有効化しない。
 
 ## この変更で利用できる範囲
 
-- `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHOのscoped tokenで現在のprovider membershipを検証し、Experienceのprovider actorは選択中providerの `ownerUserId` とrole ceilingで保管データへの権限を絞る。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
+- `/host/calendar` は NIHO の app-connect でログインした提供者向け。NIHO Host v1から現在のNIHO本人IDを取り、Experienceの有効なmembershipとrole ceilingをExperience DBで検証する。Experienceの現在人IDに `ownerUserId` を代用しない。繰り返し開催枠、単発休止・日時変更、Google の busy 時間帯を扱う。
 - Google OAuth の refresh token は provider にひも付けて暗号化保存する。選択した読み取り元は接続時の primary calendar、書き込み先はアプリが作る専用 calendar。予定の件名・参加者・説明は DB とレスポンスに保存しない。
 - Google の busy の定期照合と、専用 calendar への確定予約の書き込みは、Cloud Scheduler が呼ぶ 2 つの job（#238、`0034`）。下の「Google の job」を参照。
 - `experience-domain` と `experience-store` は予約枠の判定、席の原子的な仮押さえ、支払 webhook による確定・台帳記入を提供する。`experience-payments` は共通 Stripe Connect 上の Direct charge Checkout と体験イベントの署名検証を提供する。webhook の受信経路は `/api/experience/stripe/webhook`。
 - `experience-store` の `GuestBookingRepository`（`0023`・`0025`、#285 の第1・2段）は、旅行者向けの販売条件・提供者ごとの NIHO の手数料・公開の開催枠と残席・ゲストの仮押さえ（35 分）を experience DB で扱える。`EXPERIENCE_GUEST_BOOKING_ENABLED` のとき、NIHO と同じ path の `GET /api/public/experiences/{slug}/availability` と `POST …/checkout` がこれと Stripe Checkout（手数料は予約の snapshot から）で答える。第3段から、ここで売る商品（販売条件と提供者の手数料設定がある商品）の旅行者の残席・価格・質問・申込は、flag が on のときこの経路と experience DB から読む。ほかの商品と flag off・mock は NIHO の API のまま。第8段から、ここで受けた予約を提供者の OWNER が `/host/bookings` で読める（読むだけ）。設計は [guest-booking.md](guest-booking.md)。
-- ここで売る商品を除く旅行者向け availability と checkout、旧 `/host/experiences` の編集、既存予約一覧はまだ NIHO API を使う。**このカレンダーの Google busy 判定は、現在販売中の旧予約枠には効かない。** 現行の枠を止める操作は NIHO 側でも行う。
+- Experience所有商品の原稿・写真・販売条件・公開はExperience publication APIを使う。旧NIHO予約の照会・取消／返金はNIHOの責任境界に残す。**このカレンダーの Google busy 判定は、NIHOの旧予約枠には効かない。** 現行の枠を止める操作はNIHO側でも行う。
 
 ## カレンダー変更の整合性
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CookieSealer } from "@/lib/host/cookie-seal";
 
 const mocks = vi.hoisted(() => ({
-  csrf: true, prepare: vi.fn(), accept: vi.fn(), session: null as Record<string, unknown> | null, providers: { status: "ok", providers: [] } as Record<string, unknown>,
+  csrf: true, prepare: vi.fn(), accept: vi.fn(), session: null as Record<string, unknown> | null, providers: { status: "ok", nihoUserId: "owner-a", providers: [] } as Record<string, unknown>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { hostConsoleEnabled: true, apiMode: "http", hostSessionSecret: "synthetic-invitation-secret-0123456789abcdef", siteUrl: "https://experience.example" } }));
@@ -30,7 +30,7 @@ const request = (path: string, body: unknown, cookie?: string) => new NextReques
 });
 
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.csrf = true; mocks.session = null; mocks.providers = { status: "ok", providers: [] };
+  vi.clearAllMocks(); mocks.csrf = true; mocks.session = null; mocks.providers = { status: "ok", nihoUserId: "owner-a", providers: [] };
   mocks.prepare.mockResolvedValue({ invitationId: ID, expiresAtUtc: new Date(Date.now() + 3600_000).toISOString() });
   mocks.accept.mockResolvedValue({ providerId: "provider-a", active: true });
 });
@@ -82,8 +82,9 @@ describe("product operator invitation HTTP boundary", () => {
     const cookie = `__Secure-niho_operator_invitation=${prepared.cookies.get("__Secure-niho_operator_invitation")?.value}`;
     expect((await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context)).status).toBe(401);
     mocks.session = { accessToken: "access-token", accessTokenExpiresAt: Date.now() + 3600_000 };
+    mocks.providers = { status: "ok", nihoUserId: null, providers: [] };
     expect((await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context)).status).toBe(503);
-    mocks.providers = { status: "ok", providers: [{ id: "owner-provider", ownerUserId: "owner-a", memberRole: "OWNER" }] };
+    mocks.providers = { status: "ok", nihoUserId: "owner-a", providers: [{ id: "owner-provider", nihoUserId: "owner-a", memberRole: "OWNER" }] };
     const response = await accept(request(`/host/invitations/${ID}/accept`, {}, cookie), context);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ href: "/host/calendar?providerId=provider-a" });

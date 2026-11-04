@@ -6,7 +6,7 @@ import type {
   ExperienceProviderPageOffer,
   ExperienceProviderPageOfferPatch,
   ExperienceProviderPagePatchRequest,
-} from "@niho-experience/api-client/host";
+} from "@niho-experience/api-client/legacy-host";
 import { MEETING_POINT_FIELDS, normalizeMeetingPoint } from "@/host/meeting-point";
 
 export type LiveEditorConflict = { path: string; label: string; local: unknown; remote: unknown };

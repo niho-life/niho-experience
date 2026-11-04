@@ -38,9 +38,9 @@ const CLOSED: HostCalendarLoad = { status: "closed" };
 /** Ties an address to this feed and its version: another use of the key never yields the same value. */
 const FEED_TOKEN_CONTEXT = "niho-experience/calendar-feed/v1";
 
-function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
@@ -101,7 +101,7 @@ function japanMinute(utc: string): string {
  * `feed` (設定 only) the bookings feed's address while its flag is on. Closed in the preview, for anyone else, without
  * the experience DB, or when the store does not count them as the OWNER.
  */
-export async function loadHostCalendar(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">, options: { feed: boolean }): Promise<HostCalendarLoad> {
+export async function loadHostCalendar(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">, options: { feed: boolean }): Promise<HostCalendarLoad> {
   if (isHostMock() || provider.memberRole !== "OWNER") return CLOSED;
   const settings = hostCalendarSettings();
   if (!settings) return CLOSED;

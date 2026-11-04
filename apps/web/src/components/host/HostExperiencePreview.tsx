@@ -3,7 +3,7 @@
 import NextImage from "next/image";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { DesktopGalleryViewV1, DetailViewV1, EN_STATIC_COPY_V1, MobileGalleryViewV1, PresentationRootV1, type DetailBookingCardModelV1, type DetailGalleryModelV1, type ImagePrimitiveProps, type LinkPrimitiveProps, type PresentationPrimitivesV1 } from "@niho/experience-presentation/v1";
-import type { ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/host";
+import type { ExperienceProviderPagePreviewResponse } from "@niho-experience/api-client/legacy-host";
 import { buildPreviewView, type PreviewBookingCard } from "@/lib/host/preview-model";
 import { consoleButtonClass } from "./host-ui";
 

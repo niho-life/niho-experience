@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/host";
-import { decodeExperienceProviderPagePatchRequest } from "@niho-experience/api-client/host-schema";
+import type { ExperienceProviderPageDetail } from "@niho-experience/api-client/legacy-host";
+import { decodeExperienceProviderPagePatchRequest } from "@niho-experience/api-client/legacy-host-schema";
 import { LIVE_PHOTO_LIMIT, appendLiveOffer, appendPhoto, conflictValueText, editLines, emptyLiveOffer, liveContentProblem, liveMeetingChanged, liveMeetingProblem, liveMeetingRequest, liveOfferProblem, makeCoverPhoto, mergeLiveMeeting, mergeLivePage, moveLiveOffer, movePhoto, normalizedTimeline, paddedTime, readLiveMeeting, removeLiveOffer, removePhoto, restoreSavedLiveOffers, serializeLivePagePatch, type LiveMeeting } from "./live-editor-state";
 
 const offer = (id: string, name: string, priceYen: number) => ({ id, name, shortDescription: null, sortOrder: 0, isActive: true, priceYen, childPriceYen: null, childMinAge: null, childMaxAge: null, adultRequiredForChild: false, capacity: 4, maxPartySize: 4, minimumParticipants: 1, weekdays: [2], startTime: "10:00", durationMinutes: 60, cutoffDays: 1, closedDates: [], cancellationPolicy: "FREE_UNTIL_24H" as const, acceptanceMode: "APPROVAL" as const, spaceScope: "ENTIRE_FACILITY" as const, useZone: [], bookingQuestions: [] });

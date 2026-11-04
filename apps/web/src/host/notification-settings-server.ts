@@ -22,9 +22,9 @@ export type HostNotificationSettingsLoad =
   | { status: "preparing" }
   | { status: "error" };
 
-function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
 /** The settings page's 通知 for an OWNER (NIHO's role); anyone else never reads them. */

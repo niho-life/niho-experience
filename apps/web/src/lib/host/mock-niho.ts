@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
-import type { MockHostScenario } from "@niho-experience/api-client/host/mock";
+import type { MockHostScenario } from "@niho-experience/api-client/legacy-host/mock";
 import { createMockTranslateRooms } from "./mock-translate-rooms";
 import type { HostMockScenario } from "./session";
 
 /**
  * NIHO's host API in mock mode (EXPERIENCE_API_MODE=mock): the synthetic,
- * contract-checked mock from `@niho-experience/api-client/host/mock` (#87),
+ * contract-checked mock from `@niho-experience/api-client/legacy-host/mock` (#87),
  * loaded only when a mock session calls it. Invented data only.
  */
 export const MOCK_ACCESS_TOKEN_PREFIX = "mock-access-token.";
@@ -37,7 +37,7 @@ export const HOST_MOCK_SCENARIO_MAP: Record<HostMockScenario, MockHostScenario> 
   "ota-bookings": "two-providers",
 };
 
-const loadMock = () => import("@niho-experience/api-client/host/mock");
+const loadMock = () => import("@niho-experience/api-client/legacy-host/mock");
 
 /** The synthetic signed-in host's display name. */
 export async function mockHostDisplayName(): Promise<string> {

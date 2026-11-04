@@ -124,59 +124,21 @@
 
 ## 9. 提供者の入口
 
-ホスト（提供者）の画面はこのサイトの `/host` で作ります（オーナー決定 2026-10-21・[#84](https://github.com/niho-life/niho-experience/issues/84)）。個人事業主・小規模店舗が登録し、原稿、Stripe、掲載申請、予約・売上を扱います。
+ホスト画面は `/host` に置く。NIHO Host v1の本人・Connect読取と、Experienceが所有する商品／公開BFFは別の契約である。現在の境界の正本は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)と[Experience publication API](experience-publication-api.md)。旧NIHO商品APIの一覧・登録・原稿・写真・掲載操作へ依存しない。
 
-- ログイン：NIHO の確認画面（`/connect/niho-experience`）で「接続する」を押すと、一度きりのコードで `/host/auth/callback` へ戻ります。このサイトのサーバーがコードを交換し、NIHO専用Web access tokenとrefresh tokenをHttpOnly cookieに暗号化して持ちます。ブラウザの JavaScript・storage・URL にトークンを出しません。NIHO のログイン cookie は共有しません（[#86](https://github.com/niho-life/niho-experience/issues/86)）。
-- API：画面は `/host/api/*` を呼び、サーバーが NIHO の `/api/experience-providers/**` と `GET /api/auth/me` をNIHO専用Web access tokenで呼びます。`/api/auth/me` は表示名・顔写真だけを返し、NIHO user IDとメールは返しません。provider DTOのroleは現在 OWNER / EDITOR で、COHOST運営契約 v1.1.0 は `agreed-not-deployed` です。tokenで呼べる範囲と操作権限はNIHOが毎回検証します。Experienceはprovider-scoped保存のactorに選択中providerの `ownerUserId` を使い、個人アカウント本人のIDが必要な機能には流用しません。
-- 契約：公開 API とは別に、NIHO が書き出したホスト API の契約を写し、別の監査・型・モックを持ちます（[#87](https://github.com/niho-life/niho-experience/issues/87)）。
-- 更新：NIHO専用Web access tokenの期限が近づいたら、接続のrefresh tokenを一度だけ直列に更新します。refresh tokenは更新のたびに取り替わり、古いtokenを再使用するとNIHOが接続を失効させるため、同じブラウザの複数タブで並行更新しません。ホストの接続tokenはFirebase ID tokenと別物です。
-- `HOST_CONSOLE_ENABLED` が off の間は、今の紹介ページと問い合わせの案内のままです。
+- **ログイン**：NIHOの確認画面で一度きりのcodeを受け、Experience serverがNIHO専用Web access/refresh tokenと交換する。tokenはsealed server-side sessionだけに保持し、NIHO cookieを共有しない。
+- **本人・権限**：選別契約v1.0.0の`GET /api/experience-host/identity`は現在の`nihoUserId`と`ACTIVE`だけを返し、Experience OWNER roleは返さない。Experienceの現在OWNER membershipとseller profile上の本人ID完全一致をserverで照合する。`ownerUserId`やprovider IDで本人を代用しない。
+- **Experience商品**：Eのhost editorは`/host/api/products*`、`sale-terms`、`media` BFFを呼ぶ。NIHO本人ID・権限・Connect参照はブラウザーへ出さず、商品・写真・販売条件・公開・停止／再開はExperienceが認可・保存する。
+- **旧NIHO予約**：NIHO Host v1の限定booking list/detail/approve/decline/cancel-refund/message操作を旧予約向けに残す。NIHOが照会・履行・取消／返金を引き続き担う。新しいExperience商品APIへ移行しない。
+- **契約状態**：NIHO Host v1.0.0はsource SHA `b5b664e6bfcb0bc8d0be01ffa109a684647b17db`、export SHA-256 `924ce2062be2c431ee6a4dd3a8322c48558e6d76f0a097bae75ae6222610023e`、draft / `not-deployed`。配備とacceptanceまではHTTP flagsをOFFにする。
 
-### 9.1 ホスト API の契約（[#87](https://github.com/niho-life/niho-experience/issues/87)）
+### 9.1 NIHO Host API v1.0.0（identity／Connect／legacy booking）
 
-- 置き場：ページ編集等は `packages/api-client/contract/experience-host-api.openapi.json`（＋ `.sha256`）。提供者チームと予約運営は独立した `experience-provider-operations-api.openapi.json` v1.1.0（`agreed-not-deployed`）で選別する。NIHO 側の実装と突き合わせた固定契約を写し、型を生成する（手順は §12 と同じ）。
-- 範囲：
-  - 提供者：一覧・登録・取得・更新・審査の申請
-  - 受取口座：準備・既存口座の再利用・接続
-  - 体験ページ：一覧・作成・取得・更新・削除・公開・公開停止・プレビュー
-  - 集合場所：提供者の既定と、ページごとの上書き
-  - 体験サイトへの掲載：取得・申請・取り下げ（OWNER だけ）
-  - 写真の上げ口：署名つき POST と、表示用の署名つき URL
-  - `GET /api/auth/me`（表示名と顔写真だけ）
-  - 予約：provider scope の一覧と詳細、承認・辞退、予約者1人へのメール送信。詳細はホストの送信本文と、予約者が認証済みWeb画面から送った返信本文を含む。予約前質問、メール返信の取込、自動翻訳は契約に無い。
-  - 顧客・売上（#91）は、NIHO 側が足した段で写す。
-- NIHO app の選別済みホスト契約 v0.4.0（source commit `cc2a1503c4a01d9cc4c19ca295be72de623e4d60`）を生成物のまま同期した。`ExperienceProviderPageListing.reviewNote` / `reviewNotedAt` はホスト向けの差戻し・停止理由だけを表し、公開ページや運営メモには使わない。契約は `draft` で、NIHO 側の #19236 が main へ入り配備されるまでは理由が届かない。v0.3.0 との移行中は不足フィールドを null として読み、画面は理由なしとして扱う。
-- 予約BFF：NIHOの一覧・詳細は `guestEmail` 等を含むため、ブラウザへそのまま中継しない。`/host/api/provider-operations/{providerId}/bookings/**` が固定DTOへサーバー側投影し、予約者メール、送信元の `replyToEmails`、provider内部IDを除外する。401/403を権限終了として扱い、別providerの予約は404のままにする。レスポンスは `private, no-store`。
-- 対面通訳（#181）：独立したselected契約`experience-translate-rooms-api.openapi.json` v1.0.0は`agreed-not-deployed`（source commitは確定前なのでnull）。Experience DB予約は専用BFF `/host/api/translate/site/providers/{providerId}/bookings/{bookingId}/rooms[/{roomId}[/end]]` が、fresh sealed session、NIHO OWNER、Experience store OWNER+予約所属を毎回照合する。createだけ確定・未取消・英語/未記録・当日以降、status/endは取消・日付変更後も許可する。NIHOへは公開UUIDだけを送り、旅行者PII・role・状態・言語・budgetを送らない。旧NIHO予約BFFは維持する。応答は招待URL・`waiting|active|paused|ended`・参加状況だけを`private, no-store`で返し、`participantId`・`inviteCode`・入室券は中継しない。stg受入までflagはOFF。境界は [architecture.md](architecture.md#対面通訳-181) を正とする。
-- 予約の送信：本文を画面内でそのまま確認してから1件ずつ送る。結果不明時は自動再送せず、最新詳細の送信履歴を読み直す。承認・辞退は確認の直前に最新詳細を読み、金額と結果を示す。取消・返金は専用の最新snapshot・確認UIを備えるまでこのBFFでは公開しない。
-- 失敗の本文：閉じた `ExperienceHostErrorResponse`。`error.code` と `error.details.reason` は enum で、`details` は理由ごとに決まった項目の組（oneOf）。400 以外は `supportId` を持つ。
-- 版の確かめ方：体験ページの保存と公開は header `x-niho-page-updated-at`（違えば 409 `PAGE_UPDATED`）、ページの集合場所は本文の `expectedUpdatedAt`（違えば 409 `PROVIDER_PAGE_CONFLICT`）。ページの集合場所を保存するとページの版が進むので、続く保存はその応答の `updatedAt` を使う。
-- 体験の編集の BFF（#89）：`/host/api/provider-pages/{providerId}/{pageId}` に、`/meeting-point`（GET・PUT。本文は契約の oneOf を ajv で確かめ、版の形も見る）と `/listing`（GET・PUT `{consentVersion}`・DELETE。NIHO は OWNER 以外に 404）を足した。どれも同一 origin の変更だけを通し、NIHO の失敗は `{ error: reason }` と同じ status で返す。画面は保存（本文 PATCH → 集合場所 PUT）と掲載の操作を分け、結果が分からない要求は再送しない。既定の集合案内（`/meeting-point`）は設定の server action が送る。
-- 体験ページのプレビューの BFF（#89）：`GET /host/api/provider-pages/{providerId}/{pageId}/preview`（読み取りだけ。ほかの method は 405）。同一 origin の画面からの GET で、クエリは 404、ID は `isExperienceProviderOperationPathId`、応答は型つきクライアントの `getExperienceProviderPagePreview`（NIHO の応答を `readPagePreview` で形ごと確かめる）をそのまま `private, no-store` で返す。`ExperienceProviderPagePreviewResponse` は NIHO の公開ページの組み立てと同形で、`spot.meetingPoint` は常に null、体験サイトの URL は無い。有効な商品が無い・無いページは 404（`permission_ended` とは別に、画面は「プレビューできる状態ではありません」と言う）。`relay.ts` の許可（`pages/{pageId}/preview` の GET）は変えない（この route が先に答える）。画面は `ExperienceProviderPagePreviewResponse` を `DetailViewModelV1` に写し（`lib/host/preview-model.ts`）、旅行者の体験詳細の部品で描く。mock mode は契約 mock の preview（保存は残らないので、プレビューも保存前の状態）。
-- 写真の並びの保存（#89）：画面は並び・表紙（先頭）・説明・外す を `PATCH {expectedUpdatedAt, patch: {photoObjectKeys, photoAlts}}` に載せる（2 つは同じ並び・同じ数で一緒に。20 枚まで・重複なし）。写真を足したときに先に上げるのは `upload-policy` の署名つき POST だけで、ページは変わらない。
-- 本文の保存（#89）：画面は本文を `PATCH {expectedUpdatedAt, patch: {content}}` の `content` に、変えたトップレベルのキーだけ載せる（`lead`・`facts`・`highlights`・`description`・`included`・`notIncluded`・`notSuitableFor`・`knowBeforeYouGo`・`timeline`・`meetingPoint`）。契約どおり `facts`・`meetingPoint` は中身ごと置き換わるので、`meetingPoint` は画面で直さない `entranceNote`（入口の案内。ページの集合場所の PUT とは別の項目）を読んだまま送り返す。文字列は前後の空白を除き、並びの空の行と、時刻・題・一言のどれも無い当日の流れの段は落としてから送る（NIHO も落としてから上限を数えるので、足しただけの空行は変更に数えない）。時刻は `HH:mm`（`8:30` は `08:30` にそろえる）。当日の流れの写真と外観写真は、同じ保存の `photoObjectKeys` の中から選び、写真を外すと画面でも同じ参照を外す（NIHO は保存時に null にする）。上限は見どころ 6・含まれる／含まれない／向かない人 8（各 120 字）・注意事項 8（200 字）・当日の流れ 6（題 60・一言 200）・ひとこと紹介 400・詳しい説明 4000・当日の言語 60。`hostUserIds` は提供者の体験ページでは空になるので送らない。競合の照合（409 のあとの「最新の保存内容と照合」）も同じ項目ごとに行い、当日の流れは 1 項目、外観写真は 1 項目として並べる。
-- 英語の自動訳の読み取り（#89・#110）：日本語のページの英語は、詳細ではなくプレビュー（`GET …/preview` の `page.titleEn`・`page.content.*En`・`timeline[].titleEn/textEn`・`facts.languageEn`）にだけある。NIHO が今の日本語から作ったものだけが入り、未生成・日本語を直したあとの項目は null で、英語のページ（`language: EN`）は常に null。契約 0.2.0 の入力（`ExperienceProviderPageContentInput`・`ExperienceProviderPagePatchRequest`）に英語の項目は無く、英語を作る・直す・確定する操作もないので、画面は英語（自動訳）のタブで読むだけにする（未作成の項目は日本語を添えてそう言う）。体験サイトに載せられるのは英語のページだけ（`language` の保存は `PATCH` の `language`）。足りない契約は #110 に記録する。
-- 写真の流れ：
-  1. サーバーが `createExperienceProviderUploadPolicy` で署名つき POST を受け取り、`toExperienceProviderPhotoUploadForm` でブラウザへ渡す。
-  2. ブラウザは fields を全部入れ、最後に `file` を足して GCS へ直接送る。
-  3. 返った `objectKey` を本文の `photoObjectKeys` に入れて保存する。
-  - GCS への直接送信は、NIHO 側でバケットの CORS に体験サイトの origin を足してから使う（#89 の受入）。
-- 監査：`auditHostContractDocument` と `contract/host-field-policy.json`。
-  - path は `/api/experience-providers` 以下と `GET /api/auth/me` だけ。認証は Bearer だけ。
-  - schema は `x-niho-experience-host-dto` の印つきで、閉じた形（oneOf の各組も含む）。応答の項目は全部 required。
-  - 閉じない schema（`openSchemas`）は、`ExperienceHostAuthMe`（me の一部）と `ExperienceProviderUploadPolicyFields`（GCS が名前を決める form の項目）の 2 つだけ。
-  - パスワード・メール・電話・Stripe などの語は禁止。例外は `allowedPropertyNames` で、schema と名前を明示して語ごとに許す。
-    - 写真の識別子（`objectKey` 系の 5 つ）：ホストが上げた写真を指すのに要る。
-    - `ExperienceProviderMeetingPoint.address`：集合場所はホストが入力して管理する。
-    - 同じ名前でも別の schema や別の語は違反のまま。
-- クライアント：`@niho-experience/api-client/host` の `createExperienceHostApiClient`。
-  - サーバー専用で、ブラウザのコードから実行時に import すると lint で止まる（型だけは可）。メソッド名は operationId と同じ。
-  - 結果は `{ ok: true, data }` か、`status`・`code`・`reason`（契約の enum の型）を持つエラー。応答は契約の項目だけを取り出す。
-  - 保存と公開は、読んだ版（`expectedUpdatedAt`）を引数に取る。
-- mock：`@niho-experience/api-client/host/mock` の `createMockExperienceHostFetch`。
-  - scenario は `empty`（提供者 0 件）・`two-providers`（OWNER で口座準備済み・体験ページ 2 件〔英語で公開中・掲載中／日本語の下書き〕・集合場所あり、と EDITOR で下書き）・`payments-pending`（口座未接続・再利用の候補あり）。
-  - 書き込みは同じ fetch の中だけで変わり、Web は要求ごとに作り直すので次の要求には残らない。
-  - 写真の URL は `https://uploads.niho-mock.test/...`（`isMockPhotoUrl`）。option `uploadsDisabled` で上げ口の 503 を再現できる。
+- **選別契約**：`packages/api-client/contract/experience-host-api.openapi.json`、生成型は `packages/api-client/src/generated/host-openapi.ts`、実装は`@niho-experience/api-client/host`。すべてのhost requestにAppConnection bearerとruntime service ID token（`x-niho-experience-service-id-token`）を付け、redirectなし・no-storeで呼ぶ。
+- **許可される本人／Connect path**：`GET /api/experience-host/identity`、`GET /api/experience-host/legacy-providers/{legacyProviderId}/connect-account`。ConnectはExperience seller mappingが指定するlegacy lookup keyのみ。結果account IDの完全一致を要する。
+- **許可される旧予約 path**：`GET /api/experience-providers/{providerId}/bookings`、`GET /api/experience-providers/{providerId}/bookings/{requestId}`、`POST .../approve`、`POST .../decline`、`POST .../cancel`、`POST .../message`。これらは旧NIHO予約の運営に限り、現在のNIHO権限をNIHOが検証する。
+- **禁止・未配備の依存**：NIHOのprovider一覧・登録・更新・削除、Connect onboarding／reuse／sync mutation、NIHO商品・ページ・写真・listing API。`experience-legacy-host-api.openapi.json`と`@niho-experience/api-client/legacy-host`は旧v0.4.0の参照・mock用途で、現在の販売HTTP経路から呼ばない。`hostApiClient()`はliveでfail closed。
+- **Experience新規seller**：運営のseller mappingと明示fee設定を先に登録し、初回host requestでNIHO本人ID完全一致時だけExperience OWNER membershipを結ぶ。手順と制限はconsumer contractに記載する。提供者一覧やNIHO roleを推測しない。
 
 ### 9.2 Host本人のNIHOサポート設定（#130）
 

@@ -24,7 +24,7 @@ import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
 import { cancelSiteBookingAsOwner, loadMoreSiteBookings, loadSiteBookings, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT } from "./site-bookings-server";
 
-const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 const BOOKING_ID = "00000000-0000-4000-8000-000000000285";
 const OTHER_ID = "00000000-0000-4000-8000-000000000286";

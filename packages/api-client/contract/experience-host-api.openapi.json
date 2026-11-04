@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Host API",
-    "version": "0.4.0",
-    "description": "niho-experience のホストの画面（/host）が、NIHO API 専用 app-connect access token（Bearer）で使う NIHO の API（選別して配布する版）。正本は niho-app の contracts/openapi.yaml。ここに無い項目・操作は使わない。",
+    "version": "1.0.0",
+    "description": "NIHOが保持する本人・旧Connect投影と、移行中のNIHO旧予約操作に限定する契約。Experienceのprovider・掲載・新予約・新決済はNIHO APIへ追加しない。旧予約の操作IDはNIHO側SpotCampaignPageBookingRequest.id（requestId）であり、Experience予約IDとは相互に使わない。",
     "x-niho-contract-status": "draft",
     "x-niho-contract-source": "niho-app contracts/openapi.yaml"
   },
@@ -30,7 +30,7 @@
           "Auth"
         ],
         "summary": "自分のユーザー情報・所属情報を取得",
-        "description": "`niho_app_client=niho-experience` の接続 token では、表示名と顔写真だけを返す。\n所属・連絡先・オンボーディング回答などは含まず、クエリ付き要求は 403 で拒否する。\n",
+        "description": "`niho_app_client=niho-experience` の接続 token では、表示名と顔写真だけを返す。\n所属・連絡先・オンボーディング回答などは含まず、クエリ付き要求は 403 で拒否する。\n`niho-camera` / `niho-docs` の接続 token では、canonical User.id・表示名・handle・顔写真だけを返す。\nMacクライアントの64KiB上限内で本人照合できるよう所属情報を含まず、クエリ付き要求は同様に403にする。\n",
         "operationId": "getAuthMe",
         "responses": {
           "200": {
@@ -57,1217 +57,52 @@
         ]
       }
     },
-    "/api/experience-providers": {
+    "/api/experience-host/identity": {
       "get": {
         "tags": [
-          "ExperienceProvider"
+          "Auth"
         ],
-        "summary": "自分が所属する体験の提供者の一覧",
-        "description": "ログイン中の本人が OWNER / EDITOR として所属する提供者を、登録の古い順に 200 件まで返す（platform ADMIN は全提供者）。\n`memberRole` は本人の役割（platform ADMIN で所属していなければ null）。`consent` は提供者の登録の同意、\n`paymentReuseConsent` は既存の拠点の販売者口座を売上の受取に再利用するときの同意（版と画面に出す文言）。\n",
-        "operationId": "listExperienceProviders",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          }
-        },
+        "summary": "Experience BFF向けに現在のNIHOログイン本人を確認する",
+        "description": "`niho-experience` の現在有効なAppConnection bearerとExperience runtime service accountのGoogle ID tokenを両方要求する。\nNIHO `User.id`だけを安定IDとして返す。User削除・LOGIN以外・Person停止/統合・Firebase無効・Firebase token失効・AppConnection失効/期限切れは認証失敗にする。\nFirebase/DB/設定またはGoogle ID token検証の一時障害は503でfail closed。全応答no-store。queryは受理しない。\nExperience側のprovider権限・予約・決済は判定しない。\n",
+        "operationId": "getExperienceHostIdentity",
         "security": [
           {
             "AppConnectWebAccessToken": []
           }
-        ]
-      },
-      "post": {
-        "tags": [
-          "ExperienceProvider"
         ],
-        "summary": "体験の提供者として自己登録する",
-        "description": "本人を OWNER とする提供者を作る（招待はない）。登録直後の審査の状態は `DRAFT`。\n`consentVersion` は一覧・詳細の `consent.version` と一致が必須。予約の通知先には本人の認証のメール（無ければアカウントの登録メール）を使う。\n422 の `error.details.reason`: `PROVIDER_CONSENT_OUTDATED`（同意の版が古い）・`PROVIDER_EMAIL_REQUIRED`（通知先のメールが無い）。\n",
-        "operationId": "registerExperienceProvider",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderRegisterRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "登録した",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderRegisterResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "422": {
-            "$ref": "#/components/responses/ExperienceHostUnprocessableEntity"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験の提供者の紹介を読む",
-        "description": "OWNER / EDITOR（platform ADMIN は全提供者）が読む。所属していない・存在しない提供者は区別せず 404。\n`provider` は読む間に消えたときだけ null。\n",
-        "operationId": "getExperienceProvider",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderDetailResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "patch": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験の提供者の紹介を直す",
-        "description": "OWNER / EDITOR（platform ADMIN）が紹介を直す。`sellerDisclosureUrl` を含む変更は OWNER と platform ADMIN だけで、EDITOR は 403。\n直すと、審査が `APPROVED` / `SUSPENDED` の提供者は `REQUESTED`（再審査）に戻り、掲載中の体験は止まる（`PAUSED`）。\n項目が 1 つも無い本文・知らない項目は 400。所属していない・存在しない提供者は 404。\n",
-        "operationId": "updateExperienceProvider",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderUpdateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/submit": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験の提供者の審査を申請する",
-        "description": "OWNER（platform ADMIN）が NIHO の審査を申請する。本文は読まない。審査が `DRAFT` / `REQUESTED` で、`sellerDisclosureUrl`（https）があり、\n登録の同意が今の版のときだけ `REQUESTED` にする。それ以外は 409（`error.details.reason`: `PROVIDER_REVIEW_STATE_CONFLICT`）。\nEDITOR・所属していない提供者は 404。\n",
-        "operationId": "submitExperienceProvider",
-        "responses": {
-          "200": {
-            "description": "申請した",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderSubmitResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/payments/readiness": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験の提供者の売上の受取口座の準備の状態",
-        "description": "OWNER（platform ADMIN）が、売上の受取口座（Stripe の連結アカウント）の準備の状態を読む。口座の ID・本人確認の項目は返さない。\nEDITOR・所属していない提供者は 404。\n",
-        "operationId": "getExperienceProviderPaymentReadiness",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPaymentReadinessResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/payments/reuse-candidates": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "売上の受取に再利用できる拠点の販売者口座の候補",
-        "description": "OWNER（platform ADMIN）が読む。本人が現役の OWNER である通常の拠点ごとに、その販売者口座の準備の状態を返す\n（`ready: true` の拠点だけ再利用できる）。EDITOR・所属していない提供者は 404。\n",
-        "operationId": "listExperienceProviderPaymentReuseCandidates",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPaymentReuseCandidatesResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/payments/reuse": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "拠点の販売者口座を体験の売上の受取に再利用する",
-        "description": "提供者の OWNER が、自分が現役の OWNER である拠点（`sourceSpotId`）の準備済みの販売者口座を、この提供者の売上の受取に共有する。\n拠点の側の口座・設定は変えない。掲載中の体験は止まる（`PAUSED`）。`consentVersion` は `paymentReuseConsent.version` と一致が必須。\n404: 提供者の OWNER でない（所属していなければ理由なし。platform ADMIN でも OWNER でなければ `PROVIDER_NOT_FOUND`）・\n`sourceSpotId` の OWNER でない・拠点に口座が無い（`PROVIDER_PAYMENT_SOURCE_FORBIDDEN`）。409: 申込が 1 件でもある（`PROVIDER_PAYMENT_LOCKED`）。\n422: 同意の版が古い（`PROVIDER_PAYMENT_CONSENT_OUTDATED`）・拠点の口座の準備が済んでいない（`PROVIDER_PAYMENT_SOURCE_NOT_READY`）。\n理由は `error.details.reason` に入る。\n",
-        "operationId": "reuseExperienceProviderPayment",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderPaymentReuseRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "再利用した",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/ExperienceHostUnprocessableEntity"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/payments/connect/start": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "売上の受取口座の Stripe の接続を始める",
-        "description": "提供者の OWNER が、Stripe の口座の登録の画面（アカウントリンク）の URL を受け取る。口座が無ければ作る（同じ提供者では冪等）。本文は読まない。\n`url` は一度きりで `expiresAt` まで。Stripe から戻る先（`refresh_url` / `return_url`）は API の設定で決まり、体験サイトのホストの画面\n（env `EXPERIENCE_HOST_CONSOLE_URL`）があれば `<その URL>?providerId=…&connect=refresh|return`、無ければ niho.life の提供者の画面。\n応答には準備の状態（`ready` / `reason`）も入る。\n404: 提供者の OWNER でない（所属していなければ理由なし。platform ADMIN でも OWNER でなければ `PROVIDER_NOT_FOUND`）。\n409: 決済の接続を使えない（`PROVIDER_CONNECT_UNAVAILABLE`）・\n拠点の口座を再利用している（`PROVIDER_PAYMENT_SHARED_ACCOUNT`）・口座が無いまま申込がある（`PROVIDER_PAYMENT_LOCKED`）。\n理由は `error.details.reason` に入る。\n",
-        "operationId": "startExperienceProviderPaymentConnect",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPaymentConnectResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/payments/connect/resume": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "売上の受取口座の Stripe の接続を続ける",
-        "description": "`start` と同じ処理（リンクの期限が切れた・Stripe の画面を途中で離れたときに、新しいリンクを受け取る）。応答・エラーも `start` と同じ。\n",
-        "operationId": "resumeExperienceProviderPaymentConnect",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPaymentConnectResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/payments/connect/sync": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "売上の受取口座の状態を Stripe から取り直す",
-        "description": "提供者の OWNER が、Stripe の口座の状態を取り直して保存し、準備の状態を返す（`url` / `expiresAt` は null）。本文は読まない。\n404 と 409 は `start` と同じで、加えて口座がまだ無ければ 409（`PROVIDER_PAYMENT_NOT_CONNECTED`）。\n",
-        "operationId": "syncExperienceProviderPaymentConnect",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPaymentConnectResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/meeting-point": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の集合場所の既定を読む",
-        "description": "OWNER / EDITOR（platform ADMIN）が、体験ページで上書きしないときに使う集合場所（既定）を読む。未設定の項目は空文字。\n所属していない・存在しない提供者は区別せず 404。\n",
-        "operationId": "getExperienceProviderMeetingPoint",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderMeetingPointResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の集合場所の既定を直す",
-        "description": "OWNER / EDITOR（platform ADMIN）が、集合場所の既定を全項目で置き換える。直すと、この提供者の掲載中の体験は止まる（`PAUSED`・再審査）。\n形が違う（項目が足りない・知らない項目・上限を超える・`mapUrl` が https の URL でない）と 400。所属していない・存在しない提供者は 404。\n",
-        "operationId": "updateExperienceProviderMeetingPoint",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderMeetingPoint"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "直した（保存した値）",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderMeetingPointResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページの一覧",
-        "description": "OWNER / EDITOR（platform ADMIN）が、提供者の体験ページを更新の新しい順に読む。項目は拠点の企画ページの一覧と同じ\n（`bookingCounts` は確定した予約の件数と、そのうち開催日が今日から 7 日以内〈JST〉の件数。`coverUrl` は表紙の w256 の派生の署名 URL）。\n`checkoutEnabled` は申込を受け付けるか。所属していない・存在しない提供者は区別せず 404。\n",
-        "operationId": "listExperienceProviderPages",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminCampaignPageListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページを作る（下書き）",
-        "description": "OWNER / EDITOR（platform ADMIN）が、型・題名・言語から下書きを作る。商品も既定値で 1 件作る（拠点の企画ページの作成と同じ）。\n`slug` を省くと題名から決める。応答は詳細と同じ形。失敗は `error.details.reason`（400 は `field` も）: 400 `PAGE_REQUEST_INVALID` / `PAGE_TITLE_INVALID` / `PAGE_SLUG_INVALID`、\n409 `PAGE_SLUG_TAKEN`（`field` = `slug`）。所属していない・存在しない提供者は 404（理由なし）。\n",
-        "operationId": "createExperienceProviderPage",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminCampaignPageCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "作った",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageDetail"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages/{pageId}": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        },
-        {
-          "$ref": "#/components/parameters/CampaignPageId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページを読む",
-        "description": "OWNER / EDITOR（platform ADMIN）が、本文・写真・商品・公開状態と、公開の前提を満たしていない理由（`publishBlockers`）を読む。\n拠点の企画ページの詳細と同じ項目に、写真の説明（`photoAlts`）が加わる。写真の `url` は w1024 の派生の署名 URL（派生の生成前は null）。\n保存・公開で `x-niho-page-updated-at` に送る版は `updatedAt`。別の提供者のページ・無いページは 404（`PAGE_NOT_FOUND`・`details.pageId`）。\n",
-        "operationId": "getExperienceProviderPage",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageDetail"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "patch": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページを直す（部分更新）",
-        "description": "OWNER / EDITOR（platform ADMIN）が、送った項目だけを変える。規則は拠点の企画ページの部分更新と同じで、違いは次だけ。\n- `x-niho-page-updated-at` に読んだ `updatedAt` を付けると、違えば 409 `PAGE_UPDATED`（別の操作で更新された。読み直してから直す）。\n  省くと版を確かめない。\n- `photoAlts`（写真の説明）は `photoObjectKeys` と同じ数で一緒に送る（`photoAlts` だけ・数が違えば 400 `PAGE_PHOTOS_INVALID`・\n  `field` = `photoAlts`）。`photoObjectKeys` だけを送ると、同じ写真の説明を並びに合わせて保つ。\n- 写真は、この提供者の上げ口（`POST /api/experience-providers/{providerId}/uploads/policies`）で上げた写真だけ\n  （ほかは 422 `PAGE_PHOTOS_INVALID`・`field` = `photoObjectKeys.<n>`）。\n- 保存すると、この体験の掲載は止まる（掲載中なら `PAUSED`・再審査）。\nほかの失敗は `error.details.reason`（400 は `field` も）: 400 `PAGE_REQUEST_INVALID` / `PAGE_TITLE_INVALID` / `PAGE_SLUG_INVALID` /\n`PAGE_CONTENT_INVALID` / `PAGE_PHOTOS_INVALID` / `PAGE_OFFER_INVALID` / `PAGE_OFFER_QUESTIONS_INVALID`、404 `PAGE_NOT_FOUND`、\n409 `PAGE_SLUG_TAKEN` / `PAGE_SLUG_LOCKED`（`details.slug` は今の slug）/ `PAGE_OFFER_HAS_BOOKINGS`、\n422 `PAGE_PUBLISH_BLOCKED`（公開中のページを公開の前提を満たさない内容へ変えようとした・`details.blockers`）。\n",
-        "operationId": "updateExperienceProviderPage",
         "parameters": [
           {
-            "$ref": "#/components/parameters/CampaignPageUpdatedAtHeader"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderPagePatchRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageDetail"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/ExperienceHostUnprocessableEntity"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページ（下書き）を消す",
-        "description": "OWNER / EDITOR（platform ADMIN）が、公開したことの無い下書きだけを消す（商品も消える。写真は消さない）。本文は読まない。\n公開したことがあれば 409 `PAGE_DELETE_PUBLISHED`、申込が 1 件でもあれば 409 `PAGE_DELETE_HAS_BOOKINGS`（どちらも公開停止で足りる）。\n無いページは 404 `PAGE_NOT_FOUND`。\n",
-        "operationId": "deleteExperienceProviderPage",
-        "responses": {
-          "200": {
-            "description": "消した",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminCampaignPageDeleteResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages/{pageId}/publish": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        },
-        {
-          "$ref": "#/components/parameters/CampaignPageId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページを公開する",
-        "description": "OWNER / EDITOR（platform ADMIN）が、初回の公開と停止からの再公開をする（`publishedAt` は初回のまま）。本文は読まない。\n`x-niho-page-updated-at` に読んだ `updatedAt` を付けると、違えば 409 `PAGE_UPDATED`。前提（題名・表紙・料金・定員・曜日・開始・所要・\n受取口座の準備・予約の通知先）を満たさなければ 422 `PAGE_PUBLISH_BLOCKED`（`details.blockers`）、写真に使えない画像があれば 422\n`PAGE_PHOTOS_INVALID`（`field` = `photoObjectKeys`）。無いページは 404 `PAGE_NOT_FOUND`。体験サイトへの掲載は別の操作\n（`experience-site-listing`）。\n",
-        "operationId": "publishExperienceProviderPage",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/CampaignPageUpdatedAtHeader"
+            "in": "header",
+            "name": "X-NIHO-Experience-Service-Id-Token",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            "description": "Experience runtime専用service accountのGoogle署名ID token。serverのみが送る。"
           }
         ],
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "現在activeなNIHO login account",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "private, no-store"
+                  ]
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageDetail"
+                  "$ref": "#/components/schemas/ExperienceHostIdentityResponse"
                 }
               }
             }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/ExperienceHostUnprocessableEntity"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages/{pageId}/unpublish": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        },
-        {
-          "$ref": "#/components/parameters/CampaignPageId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページの公開を止める",
-        "description": "OWNER / EDITOR（platform ADMIN）が公開を止める（申込は残る）。止めてあればそのまま返す。本文と `x-niho-page-updated-at` は読まない。\n止めると、この体験の掲載も止まる（掲載中なら `PAUSED`）。公開したことが無いページは 409 `PAGE_NOT_PUBLISHED`、無いページは 404\n`PAGE_NOT_FOUND`。\n",
-        "operationId": "unpublishExperienceProviderPage",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageDetail"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages/{pageId}/preview": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        },
-        {
-          "$ref": "#/components/parameters/CampaignPageId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "提供者の体験ページのプレビュー",
-        "description": "OWNER / EDITOR（platform ADMIN）が、NIHO の公開ページと同じ組み立てを、下書き・停止中でも読む（保存済みの内容だけ）。\n開催回は今日（JST）から 90 日で、受取口座の準備ができていなければ全部 `bookable: false`（`reason: unavailable`）。\n`Cache-Control: no-store`。無いページ・有効な商品が無いページは 404 `PAGE_NOT_FOUND`。\n",
-        "operationId": "getExperienceProviderPagePreview",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPagePreviewResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages/{pageId}/meeting-point": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        },
-        {
-          "$ref": "#/components/parameters/CampaignPageId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験ページの集合場所を読む",
-        "description": "OWNER / EDITOR（platform ADMIN）が、体験ページで使う集合場所を読む。`mode` が `INHERIT` なら提供者の既定、`OVERRIDE` なら\nこのページの上書きで、`meetingPoint` はどちらでも使われる値。無いページ・型 EXPERIENCE でないページは 404 `PROVIDER_PAGE_NOT_FOUND`。\nページの版（`updatedAt`）は返さない（詳細の `updatedAt` を使う）。\n",
-        "operationId": "getExperienceProviderPageMeetingPoint",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageMeetingPointResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験ページの集合場所を上書きする・既定に戻す",
-        "description": "OWNER / EDITOR（platform ADMIN）が、`mode: OVERRIDE`（`meetingPoint` の全項目）で上書きし、`mode: INHERIT` で提供者の既定に戻す。\n`expectedUpdatedAt` はページの `updatedAt`（違えば 409 `PROVIDER_PAGE_CONFLICT`）。保存するとページの版が進むので、続く保存には応答の\n`updatedAt` を使う。保存すると、この体験の掲載は止まる（掲載中なら `PAUSED`）。形が違えば 400、無いページは 404 `PROVIDER_PAGE_NOT_FOUND`。\n",
-        "operationId": "updateExperienceProviderPageMeetingPoint",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderPageMeetingPointUpdateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageMeetingPointUpdateResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/pages/{pageId}/experience-site-listing": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        },
-        {
-          "$ref": "#/components/parameters/CampaignPageId"
-        }
-      ],
-      "get": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験ページの体験サイトへの掲載を読む",
-        "description": "OWNER（platform ADMIN）が、掲載の状態と、申請の同意の版と文言を読む。掲載が無ければ `listing: null`。\nEDITOR・所属していない提供者は 404（理由なし）、別の提供者のページ・無いページは 404 `PROVIDER_PAGE_NOT_FOUND`。\n",
-        "operationId": "getExperienceProviderPageListing",
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageListingResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験ページの体験サイトへの掲載を申請する",
-        "description": "OWNER（platform ADMIN）が、同意の版（`consent.version`）を送って掲載を申請する。無ければ作り（`REQUESTED`）、取り下げ済みなら\n`REQUESTED` に戻す。申請中・掲載中・停止中は同意の版と時刻だけを直す。形が違えば 400。\n404 `EXPERIENCE_LISTING_NOT_FOUND`（ページが無い）、409 `EXPERIENCE_LISTING_STATUS_CONFLICT`（今の掲載の状態を扱えない）、\n422 `EXPERIENCE_LISTING_CONSENT_OUTDATED`（同意の版が古い）・`EXPERIENCE_LISTING_PAGE_NOT_ELIGIBLE`（公開中で英語の体験ページだけ）。\n",
-        "operationId": "requestExperienceProviderPageListing",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminExperienceSiteListingRequestBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "申請した（`listing` は null にならない）",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageListingResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/ExperienceHostConflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/ExperienceHostUnprocessableEntity"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験ページの体験サイトへの掲載を取り下げる",
-        "description": "OWNER（platform ADMIN）が掲載を取り下げる（`WITHDRAWN`。直ちに体験サイトの公開 API から消える。申込は残る）。取り下げ済みなら\nそのまま返す。掲載が無ければ 404 `EXPERIENCE_LISTING_NOT_FOUND`。\n",
-        "operationId": "withdrawExperienceProviderPageListing",
-        "responses": {
-          "200": {
-            "description": "取り下げた（`listing` は null にならない）",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderPageListingResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/ExperienceHostUnauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ExperienceHostForbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ExperienceHostNotFound"
-          }
-        },
-        "security": [
-          {
-            "AppConnectWebAccessToken": []
-          }
-        ]
-      }
-    },
-    "/api/experience-providers/{providerId}/uploads/policies": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ExperienceProviderId"
-        }
-      ],
-      "post": {
-        "tags": [
-          "ExperienceProvider"
-        ],
-        "summary": "体験ページの写真を上げる署名つき POST を受け取る",
-        "description": "OWNER / EDITOR（platform ADMIN）が、体験ページの写真を GCS へ直接上げる署名つき POST（multipart/form-data）を受け取る。\n`purpose` は `ARTICLE_IMAGE`、形式は JPEG・PNG・WebP、1 枚 10MB まで（ほかは 400）。上げ先の `objectKey` はサーバーが決め、\n提供者に属する写真になる（体験ページの `photoObjectKeys` に使う）。署名は 15 分。`upload.fields` を全部 form に入れ、最後に\n`file` を足して `upload.url` へ送る。写真の保存が止まっている（`uploads_disabled`）・署名に失敗した（`signing_circuit_open` /\n`signing_transient_failure`）ときは 503。失敗の `details` は `reason` と問い合わせ用 ID だけで、器の ID や署名診断は返さない。\n回数の上限は拠点・ユーザーの上げ口と提供者の `signed-url` と共有し、IP ごとに 30 回 / 60 秒。\n",
-        "operationId": "createExperienceProviderUploadPolicy",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExperienceProviderUploadPolicyRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "発行した",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperienceProviderUploadPolicyResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ExperienceHostBadRequest"
           },
           "401": {
             "$ref": "#/components/responses/ExperienceHostUnauthorized"
@@ -1281,6 +116,163 @@
           "503": {
             "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
           }
+        }
+      }
+    },
+    "/api/experience-host/legacy-providers/{legacyProviderId}/connect-account": {
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "summary": "NIHO旧providerのConnect参照・現在readiness・再利用同意を読む",
+        "description": "現在activeなNIHO accountとExperience runtime service accountの両方を要求し、pathのlegacyProviderIdが現在callerのNIHO ownerUserIdと一致する場合だけ返す。\nresponseはBFF内部専用。stripeAccountIdをブラウザーへ渡さない。readinessはStripeのlive Accountをread-onlyで取得し、Stripe・DB障害は古いsnapshotへfallbackせず503にする。\npaymentReuseConsent.acceptedは現行consent versionとconsentedAtの両方が存在するときだけtrue。provider権限やConnect操作は実行しない。queryは受理しない。\n",
+        "operationId": "getExperienceHostLegacyConnectAccount",
+        "security": [
+          {
+            "AppConnectWebAccessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "legacyProviderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "description": "NIHOの旧ExperienceProvider.id。Experience側のprovider IDは指定しない。"
+          },
+          {
+            "in": "header",
+            "name": "X-NIHO-Experience-Service-Id-Token",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            "description": "Experience runtime専用service accountのGoogle署名ID token。serverのみが送る。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "旧providerのConnect account projection",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "private, no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostLegacyConnectAccountResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/experience-providers/{providerId}/bookings": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExperienceProviderId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "summary": "提供者の予約一覧を読む",
+        "operationId": "listExperienceProviderBookings",
+        "description": "OWNER / 有効な COHOST（platform ADMIN）が、提供者の専用器に属する体験の予約だけを扱う。providerId・pageId・requestId は同じ提供者に結び、他の提供者やページは 404。応答は private, no-store。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          },
+          {
+            "name": "pageId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ExperienceHostBookingKnownBookingStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "provider-scoped bookings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostBookingBookingListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ExperienceHostConflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
         },
         "security": [
           {
@@ -1289,36 +281,82 @@
         ]
       }
     },
-    "/api/experience-providers/{providerId}/uploads/signed-url": {
+    "/api/experience-providers/{providerId}/bookings/{requestId}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/ExperienceHostBookingRequestId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "summary": "提供者の予約詳細を読む",
+        "operationId": "getExperienceProviderBooking",
+        "description": "OWNER / 有効な COHOST（platform ADMIN）が、提供者の専用器に属する体験の予約だけを扱う。providerId・pageId・requestId は同じ提供者に結び、他の提供者やページは 404。応答は private, no-store。",
+        "responses": {
+          "200": {
+            "description": "canonical host booking DTO without Stripe identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostBookingBookingDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ExperienceHostConflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "AppConnectWebAccessToken": []
+          }
+        ]
+      }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/approve": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/CampaignPageId"
+        },
+        {
+          "$ref": "#/components/parameters/ExperienceHostBookingRequestId"
         }
       ],
       "post": {
         "tags": [
           "ExperienceProvider"
         ],
-        "summary": "体験ページの写真を見る短命の署名つき URL を受け取る",
-        "description": "OWNER / EDITOR（platform ADMIN）が、この提供者の上げ口で上げた写真（`objectKey`）を見る署名つき URL を受け取る。保存前の写真の\n表示に使う（保存済みの写真は詳細の `photos[].url`）。別の提供者の写真・無い写真は 404（理由なし）、実体が無ければ 404\n`object_missing`、上げる期限が切れて署名を出し直せない写真は 403 `upload_expired`。写真の保存が止まっている（`uploads_disabled`）・\n実体の確認に失敗した（`object_lookup_failed`）・署名に失敗したときは 503。失敗の `details` は `reason` と問い合わせ用 ID だけで、\n器の ID・objectKey・署名診断は返さず、`requestId` / `supportId` でサーバーログを照会する。回数の上限は提供者の `policies` と共有し、\nIP ごとに 30 回 / 60 秒。\n",
-        "operationId": "createExperienceProviderUploadSignedUrl",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UploadSignedUrlRequest"
-              }
-            }
-          }
-        },
+        "summary": "予約を承認する",
+        "operationId": "approveExperienceProviderBooking",
+        "description": "OWNER / 有効な COHOST（platform ADMIN）が、提供者の専用器に属する体験の予約だけを扱う。providerId・pageId・requestId は同じ提供者に結び、他の提供者やページは 404。応答は private, no-store。",
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "予約の状態",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadSignedUrlResponse"
+                  "$ref": "#/components/schemas/ExperienceHostBookingBookingStatusResponse"
                 }
               }
             }
@@ -1335,8 +373,249 @@
           "404": {
             "$ref": "#/components/responses/ExperienceHostNotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/ExperienceHostConflict"
+          },
           "503": {
             "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "AppConnectWebAccessToken": []
+          }
+        ]
+      }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/decline": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/CampaignPageId"
+        },
+        {
+          "$ref": "#/components/parameters/ExperienceHostBookingRequestId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "summary": "予約を辞退する",
+        "operationId": "declineExperienceProviderBooking",
+        "description": "OWNER / 有効な COHOST（platform ADMIN）が、提供者の専用器に属する体験の予約だけを扱う。providerId・pageId・requestId は同じ提供者に結び、他の提供者やページは 404。応答は private, no-store。",
+        "responses": {
+          "200": {
+            "description": "予約の状態",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostBookingBookingStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ExperienceHostBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ExperienceHostConflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "AppConnectWebAccessToken": []
+          }
+        ]
+      }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/CampaignPageId"
+        },
+        {
+          "$ref": "#/components/parameters/ExperienceHostBookingRequestId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "summary": "予約を取り消し返金する",
+        "operationId": "cancelExperienceProviderBooking",
+        "description": "OWNER / 有効な COHOST（platform ADMIN）が、提供者の専用器に属する体験の予約だけを扱う。providerId・pageId・requestId は同じ提供者に結び、他の提供者やページは 404。応答は private, no-store。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperienceHostBookingCancelBookingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "existing booking cancellation service result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostBookingCancelBookingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ExperienceHostBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ExperienceHostConflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "AppConnectWebAccessToken": []
+          }
+        ]
+      }
+    },
+    "/api/experience-providers/{providerId}/pages/{pageId}/bookings/{requestId}/message": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExperienceProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/CampaignPageId"
+        },
+        {
+          "$ref": "#/components/parameters/ExperienceHostBookingRequestId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "ExperienceProvider"
+        ],
+        "summary": "予約した旅行者へメッセージを送る",
+        "operationId": "messageExperienceProviderGuest",
+        "description": "OWNER / 有効な COHOST（platform ADMIN）が、提供者の専用器に属する体験の予約だけを扱う。providerId・pageId・requestId は同じ提供者に結び、他の提供者やページは 404。応答は private, no-store。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperienceHostBookingMessageInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "queued host message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceHostBookingMessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ExperienceHostBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ExperienceHostConflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ExperienceHostServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "AppConnectWebAccessToken": []
+          }
+        ]
+      }
+    },
+    "/api/auth/app-connections/{connectionId}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mac アプリの接続を解除する",
+        "description": "自分の接続だけ（他人のは 404）。アプリの接続由来の token は自分の接続しか解除できない（他は 403 `app_connection_foreign`）。\nアプリ自身のログアウトは `?reason=logout`（`revokedReason: LOGOUT`。それ以外は `USER_REVOKED`）。既に失効なら 204 のまま。\nアプリ自身が解除した接続の token での再送は、認証で 401 `app_connection_revoked`（アプリは解除済みとして扱う）。\nFirebase の `revokeRefreshTokens` は呼ばない（接続の記録で個別に失効し、API の認証と `refresh` で照らす）。\n",
+        "operationId": "deleteAuthAppConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connectionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "logout"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "解除した（冪等）"
+          },
+          "401": {
+            "$ref": "#/components/responses/ExperienceHostUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExperienceHostForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ExperienceHostNotFound"
           }
         },
         "security": [
@@ -1356,198 +635,6 @@
       }
     },
     "schemas": {
-      "AdminCampaignPageBookingCounts": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "confirmed": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "確定した予約の件数"
-          },
-          "thisWeek": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "そのうち開催日が今日から 7 日以内（JST）の件数"
-          }
-        },
-        "required": [
-          "confirmed",
-          "thisWeek"
-        ],
-        "additionalProperties": false
-      },
-      "AdminCampaignPageCreateRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/SpotCampaignPageKind"
-          },
-          "title": {
-            "type": "string",
-            "description": "題名（前後の空白を除いて 95 字まで）。省くか空なら題名なしの下書き（編集画面でページ名を書く。公開には題名が要る）"
-          },
-          "language": {
-            "$ref": "#/components/schemas/SpotCampaignPageLanguage"
-          },
-          "slug": {
-            "type": "string",
-            "maxLength": 200,
-            "description": "省くと題名から決める（題名が無ければ短い ID）。小文字化・記号のハイフン化をしてから規則（3〜64 字）を確かめる"
-          }
-        },
-        "required": [
-          "kind",
-          "language"
-        ],
-        "additionalProperties": false
-      },
-      "AdminCampaignPageDeleteResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "deleted": {
-            "type": "boolean",
-            "enum": [
-              true
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "deleted"
-        ],
-        "additionalProperties": false
-      },
-      "AdminCampaignPageListItem": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/SpotCampaignPageKind"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "language": {
-            "$ref": "#/components/schemas/SpotCampaignPageLanguage"
-          },
-          "title": {
-            "type": "string"
-          },
-          "coverUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "表紙の w256 派生の署名 URL（派生の生成前・表紙なしは null）"
-          },
-          "status": {
-            "$ref": "#/components/schemas/SpotCampaignPageStatus"
-          },
-          "listOnEntrance": {
-            "type": "boolean"
-          },
-          "bookingCounts": {
-            "$ref": "#/components/schemas/AdminCampaignPageBookingCounts"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "slug",
-          "language",
-          "title",
-          "coverUrl",
-          "status",
-          "listOnEntrance",
-          "bookingCounts",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "AdminCampaignPageListResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "checkoutEnabled": {
-            "type": "boolean",
-            "description": "拠点で企画ページの申込を受け付ける（先行公開の許可リストによる）"
-          },
-          "pages": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdminCampaignPageListItem"
-            }
-          }
-        },
-        "required": [
-          "checkoutEnabled",
-          "pages"
-        ],
-        "additionalProperties": false
-      },
-      "AdminCampaignPagePhoto": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "objectKey": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string",
-            "nullable": true,
-            "description": "w1024 の派生の署名 URL（派生の生成前は null）"
-          }
-        },
-        "required": [
-          "objectKey",
-          "url"
-        ],
-        "additionalProperties": false
-      },
-      "AdminExperienceSiteListingConsent": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string",
-            "description": "申請の画面に出す同意の文言（版と対応）"
-          }
-        },
-        "required": [
-          "version",
-          "text"
-        ],
-        "additionalProperties": false
-      },
-      "AdminExperienceSiteListingRequestBody": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "consentVersion": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          }
-        },
-        "required": [
-          "consentVersion"
-        ],
-        "additionalProperties": false
-      },
       "ExperienceHostAuthMe": {
         "x-niho-experience-host-dto": true,
         "type": "object",
@@ -1589,6 +676,668 @@
           "userIconImage"
         ]
       },
+      "ExperienceHostBookingAnswerSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "questionId",
+          "prompt",
+          "inputType",
+          "text",
+          "options"
+        ],
+        "properties": {
+          "questionId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "inputType": {
+            "type": "string",
+            "enum": [
+              "SHORT_TEXT",
+              "LONG_TEXT",
+              "SINGLE_SELECT",
+              "MULTI_SELECT"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExperienceHostBookingQuestionOption"
+            }
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingAnswerSnapshots": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "$ref": "#/components/schemas/ExperienceHostBookingAnswerSnapshot"
+        },
+        "nullable": true,
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingBookingDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "offerId",
+          "offerName",
+          "occurrenceDate",
+          "startAt",
+          "endAt",
+          "headCount",
+          "adultCount",
+          "childCount",
+          "guestName",
+          "guestEmail",
+          "languageSnapshot",
+          "note",
+          "answers",
+          "status",
+          "unitPriceYen",
+          "adultPriceYen",
+          "childPriceYen",
+          "totalYen",
+          "paidAt",
+          "authorizedAt",
+          "approvalDeadlineAt",
+          "travelerCancelRequestedAt",
+          "cancelledAt",
+          "cancelReason",
+          "cancelMessage",
+          "refundedYen",
+          "createdAt",
+          "salesChannel",
+          "hostMessages",
+          "guestMessages",
+          "pageId",
+          "page"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "offerId": {
+            "type": "string"
+          },
+          "offerName": {
+            "type": "string"
+          },
+          "occurrenceDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "startAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "headCount": {
+            "type": "integer"
+          },
+          "adultCount": {
+            "type": "integer"
+          },
+          "childCount": {
+            "type": "integer"
+          },
+          "guestName": {
+            "type": "string"
+          },
+          "guestEmail": {
+            "type": "string"
+          },
+          "languageSnapshot": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "answers": {
+            "$ref": "#/components/schemas/ExperienceHostBookingAnswerSnapshots"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExperienceHostBookingKnownBookingStatus"
+          },
+          "unitPriceYen": {
+            "type": "integer"
+          },
+          "adultPriceYen": {
+            "type": "integer"
+          },
+          "childPriceYen": {
+            "type": "integer",
+            "nullable": true
+          },
+          "totalYen": {
+            "type": "integer"
+          },
+          "paidAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "authorizedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "approvalDeadlineAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "travelerCancelRequestedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "cancelReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "cancelMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "refundedYen": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "salesChannel": {
+            "type": "string"
+          },
+          "hostMessages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExperienceHostBookingHostMessage"
+            }
+          },
+          "guestMessages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExperienceHostBookingGuestMessage"
+            }
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "page": {
+            "$ref": "#/components/schemas/ExperienceHostBookingPageTitle"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingBookingDetailResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "booking",
+          "sender"
+        ],
+        "properties": {
+          "booking": {
+            "$ref": "#/components/schemas/ExperienceHostBookingBookingDetail"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/ExperienceHostBookingSender"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingBookingListItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "spotId",
+          "pageId",
+          "offerId",
+          "occurrenceDate",
+          "startAt",
+          "endAt",
+          "headCount",
+          "adultCount",
+          "childCount",
+          "offerNameSnapshot",
+          "totalYenSnapshot",
+          "guestName",
+          "guestEmail",
+          "note",
+          "questionAnswersJson",
+          "paidAt",
+          "authorizedAt",
+          "cancelledAt",
+          "refundedYen",
+          "createdAt",
+          "experienceSiteListingId",
+          "sellerDisplayNameSnapshot",
+          "page",
+          "status",
+          "salesChannel"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "spotId": {
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "offerId": {
+            "type": "string"
+          },
+          "occurrenceDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "startAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "headCount": {
+            "type": "integer"
+          },
+          "adultCount": {
+            "type": "integer"
+          },
+          "childCount": {
+            "type": "integer"
+          },
+          "offerNameSnapshot": {
+            "type": "string"
+          },
+          "totalYenSnapshot": {
+            "type": "integer"
+          },
+          "guestName": {
+            "type": "string"
+          },
+          "guestEmail": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "questionAnswersJson": {
+            "$ref": "#/components/schemas/ExperienceHostBookingAnswerSnapshots"
+          },
+          "paidAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "authorizedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "refundedYen": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "experienceSiteListingId": {
+            "type": "string",
+            "nullable": true
+          },
+          "sellerDisplayNameSnapshot": {
+            "type": "string",
+            "nullable": true
+          },
+          "page": {
+            "$ref": "#/components/schemas/ExperienceHostBookingPageTitle"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExperienceHostBookingProjectedBookingStatus"
+          },
+          "salesChannel": {
+            "$ref": "#/components/schemas/ExperienceHostBookingSalesChannel"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingBookingListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bookings",
+          "nextCursor"
+        ],
+        "properties": {
+          "bookings": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ExperienceHostBookingBookingListItem"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingBookingStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ExperienceHostBookingKnownBookingStatus"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingCancelBookingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "refund",
+          "reason",
+          "message"
+        ],
+        "properties": {
+          "refund": {
+            "type": "string",
+            "enum": [
+              "FULL",
+              "HALF",
+              "NONE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "HOST_CANNOT_HOST",
+              "GUEST_REQUEST",
+              "OTHER"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingCancelBookingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "refundedYen"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ExperienceHostBookingKnownBookingStatus"
+          },
+          "refundedYen": {
+            "type": "integer"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingGuestMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "body",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingHostMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "subject",
+          "body",
+          "createdAt",
+          "sentAt",
+          "failed",
+          "deliveryStatus"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "failed": {
+            "type": "boolean"
+          },
+          "deliveryStatus": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "SENT",
+              "FAILED",
+              "UNKNOWN"
+            ]
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingKnownBookingStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "PAYMENT_PENDING",
+          "PROVISIONAL",
+          "CONFIRMED",
+          "DECLINED",
+          "EXPIRED",
+          "CANCELLED",
+          "REFUND_NEEDED"
+        ],
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingMessageInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingMessageReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "subject",
+          "createdAt",
+          "sentAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingMessageResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/ExperienceHostBookingMessageReceipt"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingPageTitle": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingProjectedBookingStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "PAYMENT_PENDING",
+          "PROVISIONAL",
+          "CONFIRMED",
+          "DECLINED",
+          "EXPIRED",
+          "CANCELLED",
+          "REFUND_NEEDED",
+          "UNKNOWN"
+        ],
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingQuestionOption": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingSalesChannel": {
+        "type": "string",
+        "nullable": true,
+        "enum": [
+          "NIHO_PAGE",
+          "EMBED",
+          "EXPERIENCE_SITE"
+        ],
+        "x-niho-experience-host-dto": true
+      },
+      "ExperienceHostBookingSender": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "displayName",
+          "replyToEmails"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "replyToEmails": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "email"
+            }
+          }
+        },
+        "x-niho-experience-host-dto": true
+      },
       "ExperienceHostError": {
         "x-niho-experience-host-dto": true,
         "type": "object",
@@ -1628,9 +1377,10 @@
           "NOT_FOUND",
           "CONFLICT",
           "UNPROCESSABLE_ENTITY",
+          "RATE_LIMITED",
           "SERVICE_UNAVAILABLE"
         ],
-        "description": "status との対応: 400 `VALIDATION_ERROR`・401 `UNAUTHORIZED`・403 `FORBIDDEN` / `ACCOUNT_DELETED`（退会済みのアカウント）・\n404 `NOT_FOUND`・409 `CONFLICT`・422 `UNPROCESSABLE_ENTITY`・503 `SERVICE_UNAVAILABLE`。\n"
+        "description": "status との対応: 400 `VALIDATION_ERROR`・401 `UNAUTHORIZED`・403 `FORBIDDEN` / `ACCOUNT_DELETED`（退会済みのアカウント）・\n404 `NOT_FOUND`・409 `CONFLICT`・422 `UNPROCESSABLE_ENTITY`・429 `RATE_LIMITED`・503 `SERVICE_UNAVAILABLE`。\n"
       },
       "ExperienceHostErrorDetails": {
         "x-niho-experience-host-dto": true,
@@ -1809,7 +1559,7 @@
       "ExperienceHostErrorReason": {
         "x-niho-experience-host-dto": true,
         "type": "string",
-        "description": "`error.details.reason` の値。どの operation がどの理由を返すかは operation の説明に書く。\n- 認証（どの operation でも）: 401 `invalid_token` / `anonymous_provider_not_allowed` / `directory_only_account` / `app_connect_disabled` /\n  `app_connection_revoked`（接続が解除された。ログインし直す）、403 `app_client_scope`（この接続では呼べない API）、\n  503 `auth_user_lookup_failed` / `app_connection_lookup_failed`（一時的な失敗）。`GET /api/auth/me` は 401 `user_not_found` も返す。\n- 提供者・受取口座・集合場所: `PROVIDER_*`。体験ページ: `PAGE_*`。体験サイトへの掲載: `EXPERIENCE_LISTING_*`。\n- 写真: 403 `upload_expired`、404 `object_missing`、503 `uploads_disabled` / `object_lookup_failed` / `signing_circuit_open` /\n  `signing_transient_failure`。\n",
+        "description": "`error.details.reason` の値。どの operation がどの理由を返すかは operation の説明に書く。\n- 認証（どの operation でも）: 401 `invalid_token` / `anonymous_provider_not_allowed` / `directory_only_account` / `app_connect_disabled` /\n  `app_connection_revoked`（接続が解除された。ログインし直す）、403 `app_client_scope`（この接続では呼べない API）、\n  503 `auth_user_lookup_failed` / `app_connection_lookup_failed`（一時的な失敗）。`GET /api/auth/me` は 401 `user_not_found` も返す。\n- 提供者・受取口座・集合場所: `PROVIDER_*`。体験ページ: `PAGE_*`。体験サイトへの掲載: `EXPERIENCE_LISTING_*`。\n- 写真: 403 `upload_expired`、404 `object_missing`、503 `uploads_disabled` / `object_lookup_failed` / `signing_circuit_open` /\n  `signing_transient_failure`。\n- 予約前の質問の返信の下書き: 503 `TRANSLATION_UNAVAILABLE`（翻訳が使えない・失敗した。英語を自分で書いて送れる）。\n",
         "enum": [
           "invalid_token",
           "anonymous_provider_not_allowed",
@@ -1858,13 +1608,29 @@
           "object_missing",
           "object_lookup_failed",
           "signing_circuit_open",
-          "signing_transient_failure"
+          "signing_transient_failure",
+          "TRANSLATION_UNAVAILABLE",
+          "PAGE_BOOKING_NOT_FOUND",
+          "PAGE_BOOKING_CANCEL_INVALID",
+          "PAGE_BOOKING_REFUND_REQUIRED",
+          "PAGE_BOOKING_REFUND_UNAVAILABLE",
+          "PAGE_BOOKING_ALREADY_CANCELLED",
+          "PAGE_BOOKING_NOT_CANCELLABLE",
+          "PAGE_BOOKING_APPROVAL_UNAVAILABLE",
+          "PAGE_BOOKING_NOT_PENDING_APPROVAL",
+          "PAGE_BOOKING_APPROVAL_EXPIRED",
+          "PAGE_BOOKING_PAYMENT_UNAVAILABLE",
+          "PAGE_BOOKING_CONFIRMATION_PENDING",
+          "PAGE_BOOKING_DECLINE_UNAVAILABLE",
+          "PAGE_BOOKING_CAPTURED",
+          "PAGE_BOOKING_MESSAGE_INVALID",
+          "PAGE_BOOKING_MESSAGE_UNDELIVERABLE"
         ]
       },
       "ExperienceHostErrorResponse": {
         "x-niho-experience-host-dto": true,
         "type": "object",
-        "description": "ホストの API（体験の提供者の API と `GET /api/auth/me`）の失敗の本文。各 operation に書いた status の本文だけを約束する\n（書いていない status の 429・500 などは共通の層が返し、この形とは限らない）。画面は `error.code` と `error.details.reason` で分ける。\n",
+        "description": "ホストの API（NIHO本人・旧Connect・旧予約の投影と `GET /api/auth/me`）の失敗の本文。各 operation に書いた status の本文だけを約束する\n（書いていない status の 429・500 などは共通の層が返し、この形とは限らない）。画面は `error.code` と `error.details.reason` で分ける。\n",
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ExperienceHostError"
@@ -1875,1249 +1641,94 @@
         ],
         "additionalProperties": false
       },
-      "ExperienceProvider": {
+      "ExperienceHostIdentityResponse": {
         "x-niho-experience-host-dto": true,
         "type": "object",
-        "description": "体験の提供者（本人が読む形）",
+        "description": "現在activeなNIHO LOGIN accountの安定ID。Experienceのroleや予約権限を含まない。",
         "properties": {
-          "id": {
-            "type": "string"
-          },
-          "ownerUserId": {
+          "nihoUserId": {
             "type": "string",
-            "description": "登録した人の user ID（記録だけで、権限の根拠にしない。権限は memberRole）"
+            "minLength": 1,
+            "maxLength": 128
           },
-          "vesselSpotId": {
+          "accountStatus": {
             "type": "string",
-            "description": "提供者の体験・予約・売上を入れる内部の器（拠点）の ID。通常の拠点の API の権限は持たない"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ExperienceProviderKind"
-          },
-          "displayName": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "bio": {
-            "type": "string",
-            "maxLength": 4000
-          },
-          "sellerDisclosureUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "提供者が管理する特定商取引法の表示ページ（https）。未設定は null で、審査を申請できない"
-          },
-          "reviewStatus": {
-            "$ref": "#/components/schemas/ExperienceProviderReviewStatus"
-          },
-          "consentVersion": {
-            "type": "string",
-            "description": "登録で同意した版"
-          },
-          "consentedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "submittedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "description": "審査を最後に申請した時刻"
-          },
-          "approvedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "paymentReuseConsentVersion": {
-            "type": "string",
-            "nullable": true,
-            "description": "拠点の販売者口座の再利用に同意した版（再利用していなければ null）"
-          },
-          "paymentReuseConsentedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "paymentReuseSourceSpotId": {
-            "type": "string",
-            "nullable": true,
-            "description": "売上の受取に口座を共有している拠点の ID（再利用していなければ null）"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "ownerUserId",
-          "vesselSpotId",
-          "kind",
-          "displayName",
-          "bio",
-          "sellerDisclosureUrl",
-          "reviewStatus",
-          "consentVersion",
-          "consentedAt",
-          "submittedAt",
-          "approvedAt",
-          "paymentReuseConsentVersion",
-          "paymentReuseConsentedAt",
-          "paymentReuseSourceSpotId",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderConsent": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "同意の版と、画面に出す同意の文言（版と対応）。送るときは `version` をそのまま返す",
-        "properties": {
-          "version": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "version",
-          "text"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderDetailResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExperienceProviderWithMemberRole"
-              }
-            ]
-          },
-          "platformAdmin": {
-            "type": "boolean",
-            "description": "本人が platform ADMIN か"
-          },
-          "consent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          },
-          "paymentReuseConsent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          }
-        },
-        "required": [
-          "provider",
-          "platformAdmin",
-          "consent",
-          "paymentReuseConsent"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderKind": {
-        "x-niho-experience-host-dto": true,
-        "type": "string",
-        "enum": [
-          "INDIVIDUAL",
-          "BUSINESS"
-        ],
-        "description": "提供者の種別（個人 / 事業者）。Stripe の口座の種別にも使う"
-      },
-      "ExperienceProviderListResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "providers": {
-            "type": "array",
-            "maxItems": 200,
-            "items": {
-              "$ref": "#/components/schemas/ExperienceProviderWithMemberRole"
-            }
-          },
-          "platformAdmin": {
-            "type": "boolean",
-            "description": "本人が platform ADMIN か（全提供者を読める）"
-          },
-          "consent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          },
-          "paymentReuseConsent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          }
-        },
-        "required": [
-          "providers",
-          "platformAdmin",
-          "consent",
-          "paymentReuseConsent"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderMeetingPoint": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "集合場所（提供者の既定・体験ページの上書き）。公開の応答に出すのは `overview` だけで、ほかの項目は予約が確定した申込に写して\n予約者にだけ案内する。前後の空白を除いて保存する。未設定は空文字。\n",
-        "properties": {
-          "overview": {
-            "type": "string",
-            "maxLength": 200,
-            "description": "公開してよい大まかな場所"
-          },
-          "address": {
-            "type": "string",
-            "maxLength": 500,
-            "description": "集合場所の住所（予約者にだけ案内する）"
-          },
-          "accessNote": {
-            "type": "string",
-            "maxLength": 2000,
-            "description": "行き方"
-          },
-          "mapUrl": {
-            "type": "string",
-            "maxLength": 2048,
-            "pattern": "^(|https://.+)$",
-            "description": "地図の URL。空文字か https の URL（ユーザー名・パスワードを含まない）"
-          },
-          "entranceNote": {
-            "type": "string",
-            "maxLength": 2000,
-            "description": "入口・当日の案内"
-          }
-        },
-        "required": [
-          "overview",
-          "address",
-          "accessNote",
-          "mapUrl",
-          "entranceNote"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderMeetingPointResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "meetingPoint": {
-            "$ref": "#/components/schemas/ExperienceProviderMeetingPoint"
-          }
-        },
-        "required": [
-          "meetingPoint"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderMemberRole": {
-        "x-niho-experience-host-dto": true,
-        "type": "string",
-        "enum": [
-          "OWNER",
-          "EDITOR"
-        ],
-        "description": "提供者の中での本人の役割。EDITOR は紹介と原稿だけを直せる（予約・顧客・売上・受取口座・掲載の申請・審査の申請は OWNER だけ）。\n"
-      },
-      "ExperienceProviderPageContentInput": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "本文の部分更新（送ったトップレベルのキーだけを今の本文へ重ねる。`facts`・`meetingPoint` は送ると中身ごと置き換える）。null は空と同じ。\n上限は本文（`SpotCampaignPageExperienceContent`）と同じで、文字列は前後の空白を除き、配列の空の要素（当日の流れは時刻・題・一言の\nどれも無い段）は落としてから数える。当日の流れの写真と外観写真は `photoObjectKeys` の中から選ぶ（保存後の写真に無いものは null になる）。\n`hostUserIds` は拠点の運営メンバーだけを残すので、提供者の体験ページでは空になる。\n",
-        "properties": {
-          "lead": {
-            "type": "string",
-            "nullable": true
-          },
-          "facts": {
-            "type": "object",
-            "nullable": true,
-            "properties": {
-              "language": {
-                "type": "string",
-                "nullable": true
-              }
-            },
-            "additionalProperties": false
-          },
-          "highlights": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "timeline": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "object",
-              "nullable": true,
-              "properties": {
-                "time": {
-                  "type": "string",
-                  "nullable": true,
-                  "description": "時刻（\"HH:mm\"。空・null は時刻なし）"
-                },
-                "title": {
-                  "type": "string",
-                  "nullable": true
-                },
-                "text": {
-                  "type": "string",
-                  "nullable": true
-                },
-                "photoObjectKey": {
-                  "type": "string",
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "included": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "notIncluded": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "notSuitableFor": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "meetingPoint": {
-            "type": "object",
-            "nullable": true,
-            "properties": {
-              "entranceNote": {
-                "type": "string",
-                "nullable": true
-              },
-              "exteriorPhotoObjectKey": {
-                "type": "string",
-                "nullable": true
-              }
-            },
-            "additionalProperties": false
-          },
-          "knowBeforeYouGo": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "hostUserIds": {
-            "type": "array",
-            "nullable": true,
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "participationConditions": {
-            "type": "object",
-            "nullable": true,
-            "description": "参加の条件（#19318）。送ると全体を置き換える（null は全部未設定）。保存すると掲載中の体験は再審査になる。",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageParticipationConditions"
-              }
+            "enum": [
+              "ACTIVE"
             ]
           }
         },
-        "additionalProperties": false
-      },
-      "ExperienceProviderPageDetail": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "提供者の体験ページの詳細。項目は拠点の企画ページの詳細と同じで、写真の説明 `photoAlts` が加わる。\n`publicPath` は NIHO の公開ページの path（体験サイトの URL ではない）。\n",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/SpotCampaignPageKind"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "language": {
-            "$ref": "#/components/schemas/SpotCampaignPageLanguage"
-          },
-          "title": {
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/SpotCampaignPageStatus"
-          },
-          "listOnEntrance": {
-            "type": "boolean"
-          },
-          "publishedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "description": "初回公開（再公開でも変えない）。null は下書き"
-          },
-          "unpublishedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "content": {
-            "$ref": "#/components/schemas/SpotCampaignPageExperienceContent"
-          },
-          "photos": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdminCampaignPagePhoto"
-            }
-          },
-          "coverObjectKey": {
-            "type": "string",
-            "nullable": true,
-            "description": "表紙（写真の 1 枚目）"
-          },
-          "offer": {
-            "type": "object",
-            "nullable": true,
-            "description": "受付（作成時に同時に作るので通常は null にならない）",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageOffer"
-              }
-            ]
-          },
-          "offers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageOffer"
-            }
-          },
-          "publishBlockers": {
-            "type": "array",
-            "description": "公開の前提を満たしていない理由（空なら公開できる）",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPagePublishBlocker"
-            }
-          },
-          "publicPath": {
-            "type": "string",
-            "description": "公開ページの path（`/living/{spot.slug}/pages/{slug}`）"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "photoAlts": {
-            "type": "array",
-            "maxItems": 20,
-            "description": "写真の説明（`photos` と同じ並び。説明の無い写真は空文字）",
-            "items": {
-              "type": "string",
-              "maxLength": 200
-            }
-          }
-        },
         "required": [
-          "id",
-          "kind",
-          "slug",
-          "language",
-          "title",
-          "status",
-          "listOnEntrance",
-          "publishedAt",
-          "unpublishedAt",
-          "content",
-          "photos",
-          "coverObjectKey",
-          "offer",
-          "offers",
-          "publishBlockers",
-          "publicPath",
-          "createdAt",
-          "updatedAt",
-          "photoAlts"
+          "nihoUserId",
+          "accountStatus"
         ],
         "additionalProperties": false
       },
-      "ExperienceProviderPageListing": {
+      "ExperienceHostLegacyConnectAccountResponse": {
         "x-niho-experience-host-dto": true,
         "type": "object",
-        "description": "体験ページの体験サイトへの掲載（予約・個人情報を含まない）。`slug` と `regionKey` は初回の承認で決まる。審査理由はホスト表示用の公開可能な理由で、GET・PUT にだけ含む。\n拠点の掲載の応答と違い、体験サイトの URL は返さない。審査理由の欄は GET・PUT・DELETE に含め、取り下げ応答では null にする。\n",
+        "description": "BFF内でのみ使う旧NIHO providerのConnect参照。Stripe account IDをブラウザーへ返さない。",
         "properties": {
-          "id": {
-            "type": "string"
-          },
-          "spotId": {
+          "legacyProviderId": {
             "type": "string",
-            "description": "提供者の器の ID（`vesselSpotId`）"
+            "minLength": 1,
+            "maxLength": 200
           },
-          "campaignPageId": {
-            "type": "string",
-            "description": "体験ページの ID"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ExperienceSiteListingStatus"
-          },
-          "slug": {
+          "stripeAccountId": {
             "type": "string",
             "nullable": true,
-            "description": "体験サイトでの slug（初回の承認で決まる）"
+            "description": "旧Connect accountの参照。BFF内部専用で、Experienceのブラウザーへは渡さない。"
           },
-          "regionKey": {
-            "type": "string",
-            "nullable": true
-          },
-          "consentVersion": {
-            "type": "string",
-            "description": "申請で同意した版"
-          },
-          "consentedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "approvedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "pausedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "withdrawnAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "reviewNote": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 1000,
-            "description": "ホストに表示できる審査差戻し・停止理由。本人取消と自動停止では null。"
-          },
-          "reviewNotedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "description": "審査理由の記録時刻。本人取消と自動停止では null。"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "spotId",
-          "campaignPageId",
-          "status",
-          "slug",
-          "regionKey",
-          "consentVersion",
-          "consentedAt",
-          "approvedAt",
-          "pausedAt",
-          "withdrawnAt",
-          "reviewNote",
-          "reviewNotedAt",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPageListingResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "listing": {
-            "type": "object",
-            "nullable": true,
-            "description": "掲載（読むときは、まだ申請していなければ null）",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExperienceProviderPageListing"
-              }
-            ]
-          },
-          "consent": {
-            "$ref": "#/components/schemas/AdminExperienceSiteListingConsent"
-          }
-        },
-        "required": [
-          "listing",
-          "consent"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPageMeetingPointMode": {
-        "x-niho-experience-host-dto": true,
-        "type": "string",
-        "enum": [
-          "INHERIT",
-          "OVERRIDE"
-        ],
-        "description": "体験ページの集合場所。`INHERIT` は提供者の既定を使う、`OVERRIDE` はこのページで上書きする"
-      },
-      "ExperienceProviderPageMeetingPointResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/ExperienceProviderPageMeetingPointMode"
-          },
-          "meetingPoint": {
-            "$ref": "#/components/schemas/ExperienceProviderMeetingPoint"
-          }
-        },
-        "required": [
-          "mode",
-          "meetingPoint"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPageMeetingPointUpdateRequest": {
-        "x-niho-experience-host-dto": true,
-        "description": "体験ページの集合場所の上書き（`OVERRIDE`）か、提供者の既定へ戻す（`INHERIT`）。`expectedUpdatedAt` はページの `updatedAt`",
-        "oneOf": [
-          {
+          "readiness": {
             "type": "object",
             "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "INHERIT"
-                ]
-              },
-              "expectedUpdatedAt": {
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "mode",
-              "expectedUpdatedAt"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "OVERRIDE"
-                ]
-              },
-              "meetingPoint": {
-                "$ref": "#/components/schemas/ExperienceProviderMeetingPoint"
-              },
-              "expectedUpdatedAt": {
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "mode",
-              "meetingPoint",
-              "expectedUpdatedAt"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "ExperienceProviderPageMeetingPointUpdateResponse": {
-        "x-niho-experience-host-dto": true,
-        "description": "保存した集合場所と、新しいページの版（`updatedAt`）。`OVERRIDE` のときだけ `meetingPoint`（保存した値）が入る",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "INHERIT"
-                ]
-              },
-              "updatedAt": {
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "mode",
-              "updatedAt"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "OVERRIDE"
-                ]
-              },
-              "updatedAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "meetingPoint": {
-                "$ref": "#/components/schemas/ExperienceProviderMeetingPoint"
-              }
-            },
-            "required": [
-              "mode",
-              "updatedAt",
-              "meetingPoint"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "ExperienceProviderPagePatchRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "体験ページの部分更新（送った項目だけ）。拠点の企画ページの部分更新と同じ項目に `photoAlts` が加わる。\n`offer` と `offers` は一緒に送れない（400）。\n",
-        "properties": {
-          "title": {
-            "type": "string",
-            "description": "題名（前後の空白を除いて 95 字まで）"
-          },
-          "language": {
-            "$ref": "#/components/schemas/SpotCampaignPageLanguage"
-          },
-          "slug": {
-            "type": "string",
-            "maxLength": 200,
-            "description": "公開したことが無い間だけ変えられる"
-          },
-          "content": {
-            "$ref": "#/components/schemas/ExperienceProviderPageContentInput"
-          },
-          "photoObjectKeys": {
-            "type": "array",
-            "description": "写真の `objectKey`（並び順が表示順・1 枚目が表紙・重複を除いて 20 枚まで）。この提供者の上げ口で上げた写真だけ",
-            "items": {
-              "type": "string",
-              "maxLength": 512
-            }
-          },
-          "photoAlts": {
-            "type": "array",
-            "maxItems": 20,
-            "description": "写真の説明（`photoObjectKeys` と同じ並び・同じ数で一緒に送る。前後の空白は除く）",
-            "items": {
-              "type": "string",
-              "maxLength": 200
-            }
-          },
-          "offer": {
-            "$ref": "#/components/schemas/SpotCampaignPageOfferPatch"
-          },
-          "offers": {
-            "type": "array",
-            "maxItems": 50,
-            "description": "全商品の置き換え（既存の `id` は更新・省くと新規。予約履歴のある商品は省いて消せない）",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageOfferPatch"
-            }
-          },
-          "listOnEntrance": {
-            "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "ExperienceProviderPagePreviewOccurrence": {
-        "x-niho-experience-host-dto": true,
-        "description": "開催回。予約できる回は `bookable: true` で `reason` が無い。予約できない回は `bookable: false` と理由（`cutoff` = 締切を過ぎた、\n`full` = 満席、`unavailable` = 受取口座の準備ができていない・場所が空いていない）。\n",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "date": {
-                "type": "string",
-                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-                "description": "開催日（JST）"
-              },
-              "startAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "endAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "seatsLeft": {
-                "type": "integer",
-                "minimum": 0,
-                "description": "残席（0 未満にしない）"
-              },
-              "bookable": {
-                "type": "boolean",
-                "enum": [
-                  true
-                ]
-              }
-            },
-            "required": [
-              "date",
-              "startAt",
-              "endAt",
-              "seatsLeft",
-              "bookable"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "date": {
-                "type": "string",
-                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-                "description": "開催日（JST）"
-              },
-              "startAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "endAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "seatsLeft": {
-                "type": "integer",
-                "minimum": 0,
-                "description": "残席（0 未満にしない）"
-              },
-              "bookable": {
-                "type": "boolean",
-                "enum": [
-                  false
-                ]
+              "ready": {
+                "type": "boolean"
               },
               "reason": {
-                "type": "string",
-                "enum": [
-                  "cutoff",
-                  "full",
-                  "unavailable"
-                ]
+                "$ref": "#/components/schemas/ExperienceProviderPaymentReadinessReason"
               }
             },
             "required": [
-              "date",
-              "startAt",
-              "endAt",
-              "seatsLeft",
-              "bookable",
+              "ready",
               "reason"
             ],
             "additionalProperties": false
-          }
-        ]
-      },
-      "ExperienceProviderPagePreviewOffer": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "プレビューの商品と、その開催回",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/id"
           },
-          "name": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/name"
-          },
-          "shortDescription": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/shortDescription"
-          },
-          "sortOrder": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/sortOrder"
-          },
-          "priceYen": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/priceYen"
-          },
-          "childPriceYen": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/childPriceYen"
-          },
-          "childMinAge": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/childMinAge"
-          },
-          "childMaxAge": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/childMaxAge"
-          },
-          "adultRequiredForChild": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/adultRequiredForChild"
-          },
-          "currency": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/currency"
-          },
-          "capacity": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/capacity"
-          },
-          "maxPartySize": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/maxPartySize"
-          },
-          "minimumParticipants": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/minimumParticipants"
-          },
-          "durationMinutes": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/durationMinutes"
-          },
-          "startTime": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/startTime"
-          },
-          "cancellationPolicy": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/cancellationPolicy"
-          },
-          "acceptanceMode": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/acceptanceMode"
-          },
-          "bookingQuestions": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/bookingQuestions"
-          },
-          "bookingQuestionsFingerprint": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary/properties/bookingQuestionsFingerprint"
-          },
-          "occurrences": {
-            "type": "array",
-            "description": "今日（JST）から 90 日の開催回（日付順）",
-            "items": {
-              "$ref": "#/components/schemas/ExperienceProviderPagePreviewOccurrence"
-            }
+          "paymentReuseConsent": {
+            "$ref": "#/components/schemas/ExperienceHostPaymentReuseConsent"
           }
         },
         "required": [
-          "id",
-          "name",
-          "shortDescription",
-          "sortOrder",
-          "priceYen",
-          "childPriceYen",
-          "childMinAge",
-          "childMaxAge",
-          "adultRequiredForChild",
-          "currency",
-          "capacity",
-          "maxPartySize",
-          "minimumParticipants",
-          "durationMinutes",
-          "startTime",
-          "cancellationPolicy",
-          "acceptanceMode",
-          "bookingQuestions",
-          "bookingQuestionsFingerprint",
-          "occurrences"
+          "legacyProviderId",
+          "stripeAccountId",
+          "readiness",
+          "paymentReuseConsent"
         ],
         "additionalProperties": false
       },
-      "ExperienceProviderPagePreviewOfferSummary": {
+      "ExperienceHostPaymentReuseConsent": {
         "x-niho-experience-host-dto": true,
         "type": "object",
-        "description": "プレビューの商品（開催回を除く。公開ページの商品と同じ項目）",
+        "description": "NIHOが保存する現行Connect口座再利用同意のprojection。acceptedは現行版と同意時刻がある場合だけtrue。",
         "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "shortDescription": {
-            "type": "string",
-            "maxLength": 160,
-            "nullable": true
-          },
-          "sortOrder": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "priceYen": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "大人 1 人あたりの料金（円・税込）"
-          },
-          "childPriceYen": {
-            "type": "integer",
-            "minimum": 0,
-            "nullable": true
-          },
-          "childMinAge": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 17,
-            "nullable": true
-          },
-          "childMaxAge": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 17,
-            "nullable": true
-          },
-          "adultRequiredForChild": {
+          "accepted": {
             "type": "boolean"
           },
-          "currency": {
-            "type": "string",
-            "enum": [
-              "JPY"
-            ]
-          },
-          "capacity": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "maxPartySize": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "1 組の上限人数"
-          },
-          "minimumParticipants": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "1 組の申込人数の下限"
-          },
-          "durationMinutes": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "startTime": {
-            "type": "string",
-            "description": "開始時刻 `HH:mm`（JST）"
-          },
-          "cancellationPolicy": {
-            "$ref": "#/components/schemas/SpotCampaignPageCancellationPolicy"
-          },
-          "acceptanceMode": {
-            "$ref": "#/components/schemas/SpotCampaignPageAcceptanceMode"
-          },
-          "bookingQuestions": {
-            "type": "array",
-            "maxItems": 6,
-            "description": "申込時の質問（質問の無い商品は []）。参加の条件に対応できる食事があるときは先頭に定型の質問「食べものの希望」（#19318）",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageBookingQuestion"
-            }
-          },
-          "bookingQuestionsFingerprint": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$",
-            "description": "申込時の質問のセットの SHA-256（申込で照合する）"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "shortDescription",
-          "sortOrder",
-          "priceYen",
-          "childPriceYen",
-          "childMinAge",
-          "childMaxAge",
-          "adultRequiredForChild",
-          "currency",
-          "capacity",
-          "maxPartySize",
-          "minimumParticipants",
-          "durationMinutes",
-          "startTime",
-          "cancellationPolicy",
-          "acceptanceMode",
-          "bookingQuestions",
-          "bookingQuestionsFingerprint"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPagePreviewResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "体験ページのプレビュー。NIHO の公開ページの組み立てと同じ形で、違いは次だけ。\n提供者の器は住所を載せないので `spot.meetingPoint` は常に null（集合場所は `meeting-point` の API で扱う）。体験サイトの正規 URL\n（`experienceSiteUrl`）は無い。`offer` と `occurrences` は先頭の商品の写し（旧形式）。\n",
-        "properties": {
-          "page": {
-            "$ref": "#/components/schemas/PublicLivingCampaignPage"
-          },
-          "spot": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewSpot"
-          },
-          "hosts": {
-            "type": "array",
-            "description": "迎える人（提供者の器には運営メンバーがいないので通常は空）",
-            "items": {
-              "$ref": "#/components/schemas/PublicLivingCampaignPageHost"
-            }
-          },
-          "offers": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 12,
-            "items": {
-              "$ref": "#/components/schemas/ExperienceProviderPagePreviewOffer"
-            }
-          },
-          "offer": {
-            "$ref": "#/components/schemas/ExperienceProviderPagePreviewOfferSummary"
-          },
-          "occurrences": {
-            "type": "array",
-            "description": "先頭の商品の開催回（`offers[0].occurrences` と同じ）",
-            "items": {
-              "$ref": "#/components/schemas/ExperienceProviderPagePreviewOccurrence"
-            }
-          }
-        },
-        "required": [
-          "page",
-          "spot",
-          "hosts",
-          "offers",
-          "offer",
-          "occurrences"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPagePreviewSpot": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "提供者の器（公開ページの `spot` と同じ項目。`name` は提供者の表示名）",
-        "properties": {
-          "slug": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "logoUrl": {
+          "version": {
             "type": "string",
             "nullable": true
           },
-          "tagline": {
-            "type": "string",
-            "nullable": true
-          },
-          "taglineEn": {
-            "type": "string",
-            "nullable": true
-          },
-          "landingGround": {
-            "type": "string",
-            "enum": [
-              "LIGHT",
-              "DARK_WARM"
-            ]
-          },
-          "landingAccent": {
-            "type": "string",
-            "enum": [
-              "LEAF",
-              "CORAL",
-              "TERRACOTTA",
-              "SAND",
-              "SUMI"
-            ]
-          },
-          "landingFont": {
-            "type": "string",
-            "enum": [
-              "MARU",
-              "KAKU",
-              "MINCHO",
-              "KYOKASHO",
-              "MODERN",
-              "CLASSIC"
-            ]
-          },
-          "meetingPoint": {
-            "type": "object",
-            "nullable": true,
-            "enum": [
-              null
-            ],
-            "additionalProperties": false,
-            "description": "常に null（提供者の器は住所を載せない）"
-          }
-        },
-        "required": [
-          "slug",
-          "name",
-          "logoUrl",
-          "tagline",
-          "taglineEn",
-          "landingGround",
-          "landingAccent",
-          "landingFont",
-          "meetingPoint"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPaymentConnectResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "nullable": true,
-            "description": "Stripe の口座の登録の画面（一度きり）。`sync` では null"
-          },
-          "expiresAt": {
+          "consentedAt": {
             "type": "string",
             "format": "date-time",
-            "nullable": true,
-            "description": "`url` の期限。`sync` では null"
-          },
-          "ready": {
-            "type": "boolean",
-            "description": "`reason` が `READY` のときだけ true"
-          },
-          "reason": {
-            "$ref": "#/components/schemas/ExperienceProviderPaymentReadinessReason"
+            "nullable": true
           }
         },
         "required": [
-          "url",
-          "expiresAt",
-          "ready",
-          "reason"
+          "accepted",
+          "version",
+          "consentedAt"
         ],
         "additionalProperties": false
       },
@@ -3133,1485 +1744,6 @@
           "READY"
         ],
         "description": "受取口座の準備の状態。`NOT_CONNECTED`（口座が無い）・`VERIFICATION_REQUIRED`（本人確認・提出が済んでいない）・\n`CHARGES_DISABLED`（決済を受けられない）・`PAYOUTS_DISABLED`（入金を受けられない）・`RESTRICTED`（制限・停止・設定の不整合）・`READY`。\n"
-      },
-      "ExperienceProviderPaymentReadinessResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "ready": {
-            "type": "boolean",
-            "description": "`reason` が `READY` のときだけ true"
-          },
-          "reason": {
-            "$ref": "#/components/schemas/ExperienceProviderPaymentReadinessReason"
-          },
-          "paymentReuseConsent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          }
-        },
-        "required": [
-          "ready",
-          "reason",
-          "paymentReuseConsent"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPaymentReuseCandidate": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "本人が現役の OWNER である通常の拠点と、その販売者口座の準備の状態",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "拠点の ID（再利用の `sourceSpotId`）"
-          },
-          "name": {
-            "type": "string"
-          },
-          "ready": {
-            "type": "boolean",
-            "description": "`reason` が `READY` のときだけ true"
-          },
-          "reason": {
-            "$ref": "#/components/schemas/ExperienceProviderPaymentReadinessReason"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "ready",
-          "reason"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPaymentReuseCandidatesResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "spots": {
-            "type": "array",
-            "maxItems": 200,
-            "description": "本人が現役の OWNER である通常の拠点（提供者の一覧と同じ 200 件まで）",
-            "items": {
-              "$ref": "#/components/schemas/ExperienceProviderPaymentReuseCandidate"
-            }
-          },
-          "paymentReuseConsent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          }
-        },
-        "required": [
-          "spots",
-          "paymentReuseConsent"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderPaymentReuseRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "sourceSpotId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200,
-            "description": "再利用する拠点（候補の `id`）"
-          },
-          "consentVersion": {
-            "type": "string",
-            "maxLength": 100,
-            "description": "`paymentReuseConsent.version`"
-          }
-        },
-        "required": [
-          "sourceSpotId",
-          "consentVersion"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderRegisterRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "提供者の自己登録。前後の空白は除いてから長さを見る",
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/ExperienceProviderKind"
-          },
-          "displayName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
-          "bio": {
-            "type": "string",
-            "maxLength": 4000
-          },
-          "sellerDisclosureUrl": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 2048,
-            "description": "特定商取引法の表示ページ。https の URL（ユーザー名・パスワードを含まない）。後で設定するなら null"
-          },
-          "consentVersion": {
-            "type": "string",
-            "maxLength": 100,
-            "description": "一覧・詳細の `consent.version`"
-          }
-        },
-        "required": [
-          "kind",
-          "displayName",
-          "bio",
-          "sellerDisclosureUrl",
-          "consentVersion"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderRegisterResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/ExperienceProvider"
-          },
-          "consent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          },
-          "paymentReuseConsent": {
-            "$ref": "#/components/schemas/ExperienceProviderConsent"
-          }
-        },
-        "required": [
-          "provider",
-          "consent",
-          "paymentReuseConsent"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/ExperienceProvider"
-          }
-        },
-        "required": [
-          "provider"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderReviewStatus": {
-        "x-niho-experience-host-dto": true,
-        "type": "string",
-        "enum": [
-          "DRAFT",
-          "REQUESTED",
-          "APPROVED",
-          "SUSPENDED"
-        ],
-        "description": "NIHO の審査の状態。`DRAFT`（未申請）→ `REQUESTED`（申請中）→ `APPROVED`（承認）/ `SUSPENDED`（停止）。\n承認・停止の後に紹介を直すと `REQUESTED` に戻る。\n"
-      },
-      "ExperienceProviderSubmitResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "submitted": {
-            "type": "boolean",
-            "enum": [
-              true
-            ]
-          }
-        },
-        "required": [
-          "submitted"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderUpdateRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "紹介の変更（送った項目だけ変える。1 つ以上）。`sellerDisclosureUrl` は OWNER と platform ADMIN だけ",
-        "minProperties": 1,
-        "properties": {
-          "displayName": {
-            "$ref": "#/components/schemas/ExperienceProviderRegisterRequest/properties/displayName"
-          },
-          "bio": {
-            "$ref": "#/components/schemas/ExperienceProviderRegisterRequest/properties/bio"
-          },
-          "sellerDisclosureUrl": {
-            "$ref": "#/components/schemas/ExperienceProviderRegisterRequest/properties/sellerDisclosureUrl"
-          }
-        },
-        "additionalProperties": false
-      },
-      "ExperienceProviderUploadPolicyFields": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "署名つき POST の form の項目（名前と値は GCS の署名の規則で決まるので閉じない）。全部をそのまま form に入れ、最後に `file` を足す。\n",
-        "additionalProperties": {
-          "type": "string"
-        }
-      },
-      "ExperienceProviderUploadPolicyRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "体験ページの写真の署名つき POST の要求",
-        "properties": {
-          "purpose": {
-            "type": "string",
-            "enum": [
-              "ARTICLE_IMAGE"
-            ]
-          },
-          "contentType": {
-            "type": "string",
-            "enum": [
-              "image/jpeg",
-              "image/png",
-              "image/webp"
-            ]
-          },
-          "contentLength": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 1,
-            "maximum": 10485760,
-            "description": "任意（申告）。10MB を超えると 400"
-          }
-        },
-        "required": [
-          "purpose",
-          "contentType"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderUploadPolicyResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "uploadId": {
-            "type": "string"
-          },
-          "objectKey": {
-            "type": "string",
-            "description": "上げる先（体験ページの `photoObjectKeys`・写真の署名つき URL に使う）"
-          },
-          "upload": {
-            "type": "object",
-            "description": "GCS の署名つき POST（multipart/form-data で送る）",
-            "properties": {
-              "url": {
-                "type": "string",
-                "description": "送り先"
-              },
-              "fields": {
-                "$ref": "#/components/schemas/ExperienceProviderUploadPolicyFields"
-              }
-            },
-            "required": [
-              "url",
-              "fields"
-            ],
-            "additionalProperties": false
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "description": "署名の期限（過ぎたら発行し直す）"
-          },
-          "maxSizeBytes": {
-            "type": "integer",
-            "description": "1 枚の上限（10MB）"
-          }
-        },
-        "required": [
-          "uploadId",
-          "objectKey",
-          "upload",
-          "expiresAt",
-          "maxSizeBytes"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceProviderWithMemberRole": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "体験の提供者と、その中での本人の役割（一覧・詳細）。項目は `ExperienceProvider` と同じで、`memberRole` が加わる",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/id"
-          },
-          "ownerUserId": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/ownerUserId"
-          },
-          "vesselSpotId": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/vesselSpotId"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/kind"
-          },
-          "displayName": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/displayName"
-          },
-          "bio": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/bio"
-          },
-          "sellerDisclosureUrl": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/sellerDisclosureUrl"
-          },
-          "reviewStatus": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/reviewStatus"
-          },
-          "consentVersion": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/consentVersion"
-          },
-          "consentedAt": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/consentedAt"
-          },
-          "submittedAt": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/submittedAt"
-          },
-          "approvedAt": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/approvedAt"
-          },
-          "paymentReuseConsentVersion": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/paymentReuseConsentVersion"
-          },
-          "paymentReuseConsentedAt": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/paymentReuseConsentedAt"
-          },
-          "paymentReuseSourceSpotId": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/paymentReuseSourceSpotId"
-          },
-          "createdAt": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/createdAt"
-          },
-          "updatedAt": {
-            "$ref": "#/components/schemas/ExperienceProvider/properties/updatedAt"
-          },
-          "memberRole": {
-            "type": "string",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExperienceProviderMemberRole"
-              }
-            ],
-            "description": "本人の役割（platform ADMIN で所属していなければ null）"
-          }
-        },
-        "required": [
-          "id",
-          "ownerUserId",
-          "vesselSpotId",
-          "kind",
-          "displayName",
-          "bio",
-          "sellerDisclosureUrl",
-          "reviewStatus",
-          "consentVersion",
-          "consentedAt",
-          "submittedAt",
-          "approvedAt",
-          "paymentReuseConsentVersion",
-          "paymentReuseConsentedAt",
-          "paymentReuseSourceSpotId",
-          "createdAt",
-          "updatedAt",
-          "memberRole"
-        ],
-        "additionalProperties": false
-      },
-      "ExperienceSiteListingStatus": {
-        "x-niho-experience-host-dto": true,
-        "type": "string",
-        "enum": [
-          "REQUESTED",
-          "ACTIVE",
-          "PAUSED",
-          "WITHDRAWN"
-        ],
-        "description": "体験サイトへの掲載の状態（申請中・掲載中・停止中・取り下げ済み）"
-      },
-      "PublicLivingCampaignPage": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "properties": {
-          "slug": {
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/SpotCampaignPageKind"
-          },
-          "language": {
-            "$ref": "#/components/schemas/SpotCampaignPageLanguage"
-          },
-          "title": {
-            "type": "string"
-          },
-          "titleEn": {
-            "type": "string",
-            "nullable": true,
-            "description": "日本語原文の鮮度確認済み自動英訳。英語原文・未生成・原文更新後は null。"
-          },
-          "content": {
-            "$ref": "#/components/schemas/PublicLivingCampaignPageContent"
-          },
-          "photos": {
-            "type": "array",
-            "description": "写真（並び順が表示順・1 枚目が表紙）。w1024 の派生の署名 URL だけ（解決できない写真は落とす）。",
-            "items": {
-              "$ref": "#/components/schemas/PublicLivingCampaignPagePhoto"
-            }
-          },
-          "coverUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "表紙の w1024 派生の署名 URL。表紙が無い・派生が無ければ null。"
-          }
-        },
-        "required": [
-          "slug",
-          "kind",
-          "language",
-          "title",
-          "titleEn",
-          "content",
-          "photos",
-          "coverUrl"
-        ],
-        "additionalProperties": false
-      },
-      "PublicLivingCampaignPageContent": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "description": "型 EXPERIENCE の本文（§4.4）。迎える人と入口の案内は除く（hosts・spot.meetingPoint で返す）。空の項目は Web が出さない。",
-        "properties": {
-          "lead": {
-            "type": "string",
-            "description": "ひとこと紹介"
-          },
-          "leadEn": {
-            "type": "string",
-            "nullable": true,
-            "description": "lead の鮮度確認済み自動英訳。未生成・原文更新後は null。"
-          },
-          "facts": {
-            "type": "object",
-            "description": "要点の帯のうち本文が持つ項目（所要・人数・キャンセルは offer から導く）",
-            "properties": {
-              "language": {
-                "type": "string"
-              },
-              "languageEn": {
-                "type": "string",
-                "nullable": true
-              }
-            },
-            "required": [
-              "language",
-              "languageEn"
-            ],
-            "additionalProperties": false
-          },
-          "highlights": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "highlightsEn": {
-            "type": "array",
-            "description": "highlights と同じ index の鮮度確認済み自動英訳。未生成・原文更新後の要素は null。",
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "timeline": {
-            "type": "array",
-            "description": "当日の流れ（#17619）。空なら Web は見どころ（highlights）の箇条を出す。",
-            "items": {
-              "$ref": "#/components/schemas/PublicLivingCampaignPageTimelineItem"
-            }
-          },
-          "description": {
-            "type": "string",
-            "description": "詳しい説明（段落は空行区切り。Markdown ではない）"
-          },
-          "descriptionEn": {
-            "type": "string",
-            "nullable": true
-          },
-          "included": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "includedEn": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "notIncluded": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "notIncludedEn": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "notSuitableFor": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "notSuitableForEn": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "knowBeforeYouGo": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "knowBeforeYouGoEn": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        },
-        "required": [
-          "lead",
-          "leadEn",
-          "facts",
-          "highlights",
-          "highlightsEn",
-          "timeline",
-          "description",
-          "descriptionEn",
-          "included",
-          "includedEn",
-          "notIncluded",
-          "notIncludedEn",
-          "notSuitableFor",
-          "notSuitableForEn",
-          "knowBeforeYouGo",
-          "knowBeforeYouGoEn"
-        ],
-        "additionalProperties": false
-      },
-      "PublicLivingCampaignPageHost": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "properties": {
-          "displayName": {
-            "type": "string"
-          },
-          "avatarUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "プロフィールのアイコン（/api/media/avatar の proxy）。無ければ null。"
-          }
-        },
-        "required": [
-          "displayName",
-          "avatarUrl"
-        ],
-        "additionalProperties": false
-      },
-      "PublicLivingCampaignPagePhoto": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
-      },
-      "PublicLivingCampaignPageTimelineItem": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "description": "当日の流れの 1 段（#17619）。写真は原本の objectKey を返さず、page.photos[] の位置で返す。",
-        "properties": {
-          "time": {
-            "type": "string",
-            "description": "時刻（JST の \"HH:mm\"。空は時刻なし）"
-          },
-          "title": {
-            "type": "string"
-          },
-          "titleEn": {
-            "type": "string",
-            "nullable": true,
-            "description": "title の鮮度確認済み自動英訳。未生成・原文更新後は null。"
-          },
-          "text": {
-            "type": "string",
-            "description": "一言"
-          },
-          "textEn": {
-            "type": "string",
-            "nullable": true,
-            "description": "text の鮮度確認済み自動英訳。未生成・原文更新後は null。"
-          },
-          "photoIndex": {
-            "type": "integer",
-            "minimum": 0,
-            "nullable": true,
-            "description": "写真の page.photos[] の位置。写真が無い・派生の URL を作れなかったときは null。"
-          }
-        },
-        "required": [
-          "time",
-          "title",
-          "titleEn",
-          "text",
-          "textEn",
-          "photoIndex"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageAcceptanceMode": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "string",
-        "description": "受付の型。INSTANT は申込時決済、APPROVAL はmanual与信後にhost承認でcaptureする。",
-        "enum": [
-          "INSTANT",
-          "APPROVAL"
-        ]
-      },
-      "SpotCampaignPageAccessibilityCondition": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "段差と車いす。",
-        "properties": {
-          "wheelchair": {
-            "type": "string",
-            "enum": [
-              "ACCESSIBLE",
-              "PARTIAL",
-              "NOT_ACCESSIBLE"
-            ],
-            "description": "車いすで参加できる・一部（段差・介助）・参加できない"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "段差の様子（例「本堂まで石段」）"
-          }
-        },
-        "required": [
-          "wheelchair",
-          "note"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageAgeCondition": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "年齢。下限・大人と一緒・補足のどれも無ければ保存時に null になる。",
-        "properties": {
-          "minimumAge": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 0,
-            "maximum": 99,
-            "description": "参加できる年齢の下限（null は下限なし）"
-          },
-          "childrenWithAdult": {
-            "type": "boolean",
-            "description": "子どもは大人と一緒に参加する"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 120
-          }
-        },
-        "required": [
-          "minimumAge",
-          "childrenWithAdult",
-          "note"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageBookingQuestion": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "description": "商品の申込時の質問（Epic #17729 S1 #17730）。ホストが書いた文のまま返す（翻訳しない）。\n1 商品 5 問まで。旅行者は申込（checkout の `answers`）で 1 組に 1 つ答える。\n",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,40}$",
-            "description": "質問の id（商品の中で一意。回答の `questionId` に使う）"
-          },
-          "prompt": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120,
-            "description": "質問文（1 行）"
-          },
-          "description": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 300,
-            "description": "補足文（無ければ null）"
-          },
-          "inputType": {
-            "$ref": "#/components/schemas/SpotCampaignPageBookingQuestionInputType"
-          },
-          "required": {
-            "type": "boolean",
-            "description": "必須（記述式は空でない・選択式は 1 つ以上）"
-          },
-          "options": {
-            "type": "array",
-            "maxItems": 8,
-            "description": "選択式の選択肢（2〜8・同じ質問の中でラベルは重複しない）。記述式は []",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageBookingQuestionOption"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "prompt",
-          "description",
-          "inputType",
-          "required",
-          "options"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageBookingQuestionInput": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "申込時の質問の入力（#17730）。`id` は既存の質問を保つときに送る（無い・形が違えば `q_…` を採番する。同じ商品の中で重複すれば 400）。\n質問文は前後の空白を落とし改行を空白にして 1〜120 字、補足文は 0〜300 字（空は null）。選択式は選択肢 2〜8、記述式に送った\n`options` は落とす。\n",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "prompt": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "inputType": {
-            "$ref": "#/components/schemas/SpotCampaignPageBookingQuestionInputType"
-          },
-          "required": {
-            "type": "boolean",
-            "description": "省くと false"
-          },
-          "options": {
-            "type": "array",
-            "maxItems": 8,
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageBookingQuestionOptionInput"
-            }
-          }
-        },
-        "required": [
-          "prompt",
-          "inputType"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageBookingQuestionInputType": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "string",
-        "description": "申込時の質問の型（SHORT_TEXT = 短文 1 行、LONG_TEXT = 長文、SINGLE_SELECT = 1 つ選ぶ、MULTI_SELECT = いくつでも選ぶ・#17730）。",
-        "enum": [
-          "SHORT_TEXT",
-          "LONG_TEXT",
-          "SINGLE_SELECT",
-          "MULTI_SELECT"
-        ]
-      },
-      "SpotCampaignPageBookingQuestionOption": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "object",
-        "description": "選択式の質問の選択肢。",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9_-]{1,40}$"
-          },
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          }
-        },
-        "required": [
-          "id",
-          "label"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageBookingQuestionOptionInput": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "選択肢の入力。`id` は既存の選択肢を保つときに送る（無い・形が違えば `o_…` を採番する）。ラベルは 1 行・1〜80 字・同じ質問の中で重複しない。",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "label"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageCancellationPolicy": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "string",
-        "description": "体験の申込のキャンセル規定（FREE_UNTIL_24H / FREE_UNTIL_48H = 開催の 24 / 48 時間前まで無料で取り消せる、NONE = 返金なし）。",
-        "enum": [
-          "FREE_UNTIL_24H",
-          "FREE_UNTIL_48H",
-          "NONE"
-        ]
-      },
-      "SpotCampaignPageExperienceContent": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "型 EXPERIENCE の本文（§4.4）。書き込み時に検証・正規化したもの。",
-        "properties": {
-          "lead": {
-            "type": "string",
-            "maxLength": 400
-          },
-          "facts": {
-            "type": "object",
-            "properties": {
-              "language": {
-                "type": "string",
-                "maxLength": 60
-              }
-            },
-            "required": [
-              "language"
-            ],
-            "additionalProperties": false
-          },
-          "highlights": {
-            "type": "array",
-            "maxItems": 6,
-            "items": {
-              "type": "string",
-              "maxLength": 120
-            }
-          },
-          "timeline": {
-            "type": "array",
-            "maxItems": 6,
-            "description": "当日の流れ（#17619）。空なら公開ページは見どころの箇条を出す。",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageTimelineItem"
-            }
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 4000
-          },
-          "included": {
-            "type": "array",
-            "maxItems": 8,
-            "items": {
-              "type": "string",
-              "maxLength": 120
-            }
-          },
-          "notIncluded": {
-            "type": "array",
-            "maxItems": 8,
-            "items": {
-              "type": "string",
-              "maxLength": 120
-            }
-          },
-          "notSuitableFor": {
-            "type": "array",
-            "maxItems": 8,
-            "items": {
-              "type": "string",
-              "maxLength": 120
-            }
-          },
-          "meetingPoint": {
-            "type": "object",
-            "properties": {
-              "entranceNote": {
-                "type": "string",
-                "maxLength": 400
-              },
-              "exteriorPhotoObjectKey": {
-                "type": "string",
-                "nullable": true,
-                "description": "外観写真（photoObjectKeys の中の 1 枚・#17619）。写真から外すと保存時に null になる。"
-              }
-            },
-            "required": [
-              "entranceNote",
-              "exteriorPhotoObjectKey"
-            ],
-            "additionalProperties": false
-          },
-          "knowBeforeYouGo": {
-            "type": "array",
-            "maxItems": 8,
-            "items": {
-              "type": "string",
-              "maxLength": 200
-            }
-          },
-          "hostUserIds": {
-            "type": "array",
-            "maxItems": 4,
-            "description": "迎える人（拠点の運営メンバーの User.id）",
-            "items": {
-              "type": "string"
-            }
-          },
-          "participationConditions": {
-            "$ref": "#/components/schemas/SpotCampaignPageParticipationConditions"
-          }
-        },
-        "required": [
-          "lead",
-          "facts",
-          "highlights",
-          "timeline",
-          "description",
-          "included",
-          "notIncluded",
-          "notSuitableFor",
-          "meetingPoint",
-          "knowBeforeYouGo",
-          "hostUserIds",
-          "participationConditions"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageFoodCondition": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "食べもの。provided が false（出ない）のときの対応できる食事は空になる。",
-        "properties": {
-          "provided": {
-            "type": "boolean",
-            "description": "食べもの・飲みものが出るか"
-          },
-          "dietaryOptions": {
-            "type": "array",
-            "maxItems": 6,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "enum": [
-                "VEGETARIAN",
-                "VEGAN",
-                "HALAL",
-                "GLUTEN_FREE",
-                "NO_PORK",
-                "NO_ALCOHOL"
-              ]
-            },
-            "description": "対応できる食事（値の並びにそろえる）"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "何が出るか（例「終わったらお茶とお菓子」）"
-          }
-        },
-        "required": [
-          "provided",
-          "dietaryOptions",
-          "note"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageHostLanguagesCondition": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "ホストの言語。日本語・英語・補足のどれも無ければ保存時に null になる。",
-        "properties": {
-          "japanese": {
-            "type": "string",
-            "enum": [
-              "FLUENT",
-              "CONVERSATIONAL",
-              "BASIC"
-            ],
-            "nullable": true,
-            "description": "不自由なく話せる・日常会話・かんたんな言葉（話さないときは null）"
-          },
-          "english": {
-            "type": "string",
-            "enum": [
-              "FLUENT",
-              "CONVERSATIONAL",
-              "BASIC"
-            ],
-            "nullable": true
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "補助の資料など（例「英語の案内の紙あり」）"
-          }
-        },
-        "required": [
-          "japanese",
-          "english",
-          "note"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageKind": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "string",
-        "description": "企画ページの型。v1 は体験の申込（EXPERIENCE）だけ。",
-        "enum": [
-          "EXPERIENCE"
-        ]
-      },
-      "SpotCampaignPageLanguage": {
-        "x-niho-experience-host-dto": true,
-        "x-niho-public-dto": true,
-        "type": "string",
-        "description": "企画ページの言語（1 ページ 1 言語。画面の定型文・旅行者へのメールはこの言語）。",
-        "enum": [
-          "EN",
-          "JA"
-        ]
-      },
-      "SpotCampaignPageOffer": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "型 EXPERIENCE の受付（§4.2）。時刻は JST 固定。",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "shortDescription": {
-            "type": "string",
-            "maxLength": 160,
-            "nullable": true
-          },
-          "sortOrder": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "priceYen": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000,
-            "description": "大人 1 人あたりの料金（円・税込）。0 は未設定（公開の前提で料金を求める）"
-          },
-          "childPriceYen": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000,
-            "nullable": true
-          },
-          "childMinAge": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 17,
-            "nullable": true
-          },
-          "childMaxAge": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 17,
-            "nullable": true
-          },
-          "adultRequiredForChild": {
-            "type": "boolean"
-          },
-          "capacity": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
-          },
-          "maxPartySize": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500,
-            "description": "1 組の上限人数（定員以下）"
-          },
-          "minimumParticipants": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
-          },
-          "weekdays": {
-            "type": "array",
-            "maxItems": 7,
-            "description": "開催する曜日（0=日 … 6=土）",
-            "items": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 6
-            }
-          },
-          "startTime": {
-            "type": "string",
-            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
-          },
-          "durationMinutes": {
-            "type": "integer",
-            "minimum": 15,
-            "maximum": 720
-          },
-          "cutoffDays": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 60,
-            "description": "開催日の N 日前の 23:59 JST まで受け付ける（0 = 当日の開始時刻まで）"
-          },
-          "closedDates": {
-            "type": "array",
-            "maxItems": 366,
-            "description": "休みの日（JST・開催回から除く）",
-            "items": {
-              "type": "string",
-              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-            }
-          },
-          "cancellationPolicy": {
-            "$ref": "#/components/schemas/SpotCampaignPageCancellationPolicy"
-          },
-          "acceptanceMode": {
-            "$ref": "#/components/schemas/SpotCampaignPageAcceptanceMode"
-          },
-          "spaceScope": {
-            "type": "string",
-            "enum": [
-              "ENTIRE_FACILITY",
-              "DESIGNATED_AREA"
-            ]
-          },
-          "useZone": {
-            "type": "array",
-            "maxItems": 20,
-            "items": {
-              "type": "string"
-            }
-          },
-          "bookingQuestions": {
-            "type": "array",
-            "maxItems": 5,
-            "description": "申込時の質問（質問の無い商品は []・#17730）",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageBookingQuestion"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "shortDescription",
-          "sortOrder",
-          "isActive",
-          "priceYen",
-          "childPriceYen",
-          "childMinAge",
-          "childMaxAge",
-          "adultRequiredForChild",
-          "capacity",
-          "maxPartySize",
-          "minimumParticipants",
-          "weekdays",
-          "startTime",
-          "durationMinutes",
-          "cutoffDays",
-          "closedDates",
-          "cancellationPolicy",
-          "acceptanceMode",
-          "spaceScope",
-          "useZone",
-          "bookingQuestions"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageOfferPatch": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "受付の部分更新（送った項目だけ）。曜日・休みの日は重複を除いて並べ直す。",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "既存商品の更新時に指定。省略は新規商品"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "shortDescription": {
-            "type": "string",
-            "maxLength": 160,
-            "nullable": true
-          },
-          "sortOrder": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "priceYen": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
-          },
-          "childPriceYen": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000,
-            "nullable": true
-          },
-          "childMinAge": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 17,
-            "nullable": true
-          },
-          "childMaxAge": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 17,
-            "nullable": true
-          },
-          "adultRequiredForChild": {
-            "type": "boolean"
-          },
-          "capacity": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
-          },
-          "maxPartySize": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
-          },
-          "minimumParticipants": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
-          },
-          "weekdays": {
-            "type": "array",
-            "maxItems": 7,
-            "items": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 6
-            }
-          },
-          "startTime": {
-            "type": "string",
-            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
-          },
-          "durationMinutes": {
-            "type": "integer",
-            "minimum": 15,
-            "maximum": 720
-          },
-          "cutoffDays": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 60
-          },
-          "closedDates": {
-            "type": "array",
-            "maxItems": 366,
-            "items": {
-              "type": "string",
-              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-            }
-          },
-          "cancellationPolicy": {
-            "$ref": "#/components/schemas/SpotCampaignPageCancellationPolicy"
-          },
-          "acceptanceMode": {
-            "$ref": "#/components/schemas/SpotCampaignPageAcceptanceMode"
-          },
-          "spaceScope": {
-            "type": "string",
-            "enum": [
-              "ENTIRE_FACILITY",
-              "DESIGNATED_AREA"
-            ]
-          },
-          "useZone": {
-            "type": "array",
-            "maxItems": 20,
-            "items": {
-              "type": "string"
-            }
-          },
-          "bookingQuestions": {
-            "type": "array",
-            "maxItems": 5,
-            "description": "申込時の質問（全件の置き換え・#17730）。省くと既存の商品は今の質問を保ち、新しい商品は質問なし（[]）。違反は 400\n`PAGE_OFFER_QUESTIONS_INVALID`（`details.field` = `offers.<i>.bookingQuestions.<j>.prompt` など）。MCP（host-agent）からは\n送れない。\n",
-            "items": {
-              "$ref": "#/components/schemas/SpotCampaignPageBookingQuestionInput"
-            }
-          }
-        },
-        "additionalProperties": false
-      },
-      "SpotCampaignPageParticipationConditions": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "参加の条件（#19318・§4.4a）。項目ごとに null は未設定（公開の画面に出さない）。補足（note）はページの言語で書く 1 行（120 字まで・\n空は空文字）。体験サイトの公開 API（v1.4 の詳細）に出し、年齢・体の負担・段差と車いすは予約入力で同意を求める。食べものが出て\n対応できる食事があるときは、各商品の申込時の質問の先頭に定型の質問「食べものの希望」（id `niho_food`）が入る。\n本文の PATCH で送ると全体を置き換える（null は全部未設定）。保存すると提供者の体験の掲載は再審査になる。\n",
-        "properties": {
-          "age": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageAgeCondition"
-              }
-            ]
-          },
-          "physical": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPagePhysicalCondition"
-              }
-            ]
-          },
-          "hostLanguages": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageHostLanguagesCondition"
-              }
-            ]
-          },
-          "food": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageFoodCondition"
-              }
-            ]
-          },
-          "accessibility": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageAccessibilityCondition"
-              }
-            ]
-          },
-          "weather": {
-            "type": "object",
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpotCampaignPageWeatherCondition"
-              }
-            ]
-          }
-        },
-        "required": [
-          "age",
-          "physical",
-          "hostLanguages",
-          "food",
-          "accessibility",
-          "weather"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPagePhysicalCondition": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "体の負担。項目と補足のどちらも無ければ保存時に null になる。項目は値の並びにそろえて重複を落とす。",
-        "properties": {
-          "activities": {
-            "type": "array",
-            "maxItems": 4,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "enum": [
-                "FLOOR_SITTING",
-                "LONG_STANDING",
-                "WALKING",
-                "UNEVEN_GROUND"
-              ]
-            },
-            "description": "床に座る・長く立つ・歩く・坂や足場の悪い所を歩く"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "どのくらいか・補助（例「25 分 × 2 回・座布団と低い椅子あり」）"
-          }
-        },
-        "required": [
-          "activities",
-          "note"
-        ],
-        "additionalProperties": false
       },
       "SpotCampaignPagePublishBlocker": {
         "x-niho-experience-host-dto": true,
@@ -4632,110 +1764,6 @@
           "STRIPE_NOT_READY",
           "OPS_EMAIL_REQUIRED"
         ]
-      },
-      "SpotCampaignPageStatus": {
-        "x-niho-experience-host-dto": true,
-        "type": "string",
-        "description": "公開状態（DRAFT = 公開したことが無い、PUBLISHED = 公開中、UNPUBLISHED = 停止中）。",
-        "enum": [
-          "DRAFT",
-          "PUBLISHED",
-          "UNPUBLISHED"
-        ]
-      },
-      "SpotCampaignPageTimelineItem": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "当日の流れの 1 段（§4.4・#17619）。時刻・題・一言のどれも無い段は保存しない。",
-        "properties": {
-          "time": {
-            "type": "string",
-            "pattern": "^(|([01][0-9]|2[0-3]):[0-5][0-9])$",
-            "description": "時刻（JST の \"HH:mm\"。空は時刻なし）"
-          },
-          "title": {
-            "type": "string",
-            "maxLength": 60
-          },
-          "text": {
-            "type": "string",
-            "maxLength": 200,
-            "description": "一言"
-          },
-          "photoObjectKey": {
-            "type": "string",
-            "nullable": true,
-            "description": "写真（photoObjectKeys の中の 1 枚）。写真から外すと保存時に null になる。"
-          }
-        },
-        "required": [
-          "time",
-          "title",
-          "text",
-          "photoObjectKey"
-        ],
-        "additionalProperties": false
-      },
-      "SpotCampaignPageWeatherCondition": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "description": "雨の日。",
-        "properties": {
-          "policy": {
-            "type": "string",
-            "enum": [
-              "RAIN_OR_SHINE",
-              "ADJUSTED_FOR_RAIN",
-              "MAY_CANCEL"
-            ],
-            "description": "雨でも開催・雨の日は内容を変えて開催・荒天は中止（全額返金）"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "例「屋内で開催」"
-          }
-        },
-        "required": [
-          "policy",
-          "note"
-        ],
-        "additionalProperties": false
-      },
-      "UploadSignedUrlRequest": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "objectKey": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "objectKey"
-        ],
-        "additionalProperties": false
-      },
-      "UploadSignedUrlResponse": {
-        "x-niho-experience-host-dto": true,
-        "type": "object",
-        "properties": {
-          "objectKey": {
-            "type": "string"
-          },
-          "signedUrl": {
-            "type": "string"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "objectKey",
-          "signedUrl",
-          "expiresAt"
-        ],
-        "additionalProperties": false
       }
     },
     "responses": {
@@ -4812,7 +1840,7 @@
         }
       },
       "ExperienceHostServiceUnavailable": {
-        "description": "一時的に使えない（`SERVICE_UNAVAILABLE`）",
+        "description": "現在状態を確認できないため要求を実行しない（`SERVICE_UNAVAILABLE`）",
         "headers": {
           "X-Request-Id": {
             "$ref": "#/components/headers/XRequestId"
@@ -4846,24 +1874,6 @@
             }
           }
         }
-      },
-      "ExperienceHostUnprocessableEntity": {
-        "description": "内容の条件を満たさない（`UNPROCESSABLE_ENTITY`）",
-        "headers": {
-          "X-Request-Id": {
-            "$ref": "#/components/headers/XRequestId"
-          },
-          "X-Trace-Id": {
-            "$ref": "#/components/headers/XTraceId"
-          }
-        },
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ExperienceHostErrorResponse"
-            }
-          }
-        }
       }
     },
     "parameters": {
@@ -4876,14 +1886,14 @@
         },
         "description": "企画ページの ID（SpotCampaignPage.id）"
       },
-      "CampaignPageUpdatedAtHeader": {
-        "name": "x-niho-page-updated-at",
-        "in": "header",
-        "required": false,
-        "description": "読んだときのページの `updatedAt`（応答の文字列をそのまま）。今の版と違えば 409（`PAGE_UPDATED`）で保存しない。省くと版を確かめない。\n",
+      "ExperienceHostBookingRequestId": {
+        "name": "requestId",
+        "in": "path",
+        "required": true,
         "schema": {
           "type": "string",
-          "format": "date-time"
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "ExperienceProviderId": {

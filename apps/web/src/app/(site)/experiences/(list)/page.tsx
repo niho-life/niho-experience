@@ -18,6 +18,11 @@ import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } fr
 import { englishAlternates } from "@/lib/locale-metadata";
 import { guideCatalogForSite } from "@/lib/guide-registry";
 import { guestBookingSources } from "@/lib/guest-booking-source";
+import { listSitePublicExperiences } from "@/lib/experience/site-publications";
+import { sitePublicationCard } from "@/lib/experience/site-card-model";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   const query = await searchParams;
@@ -35,12 +40,19 @@ const FINDER_DAYS = 14;
 export default async function ExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
   const searchQuery = normalizeExperienceQuery(query.q);
-  const [api, result, guideCatalogResult] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite()]);
+  const [api, result, guideCatalogResult, siteCatalog] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite(), listSitePublicExperiences()]);
   const copy = EN_STATIC_COPY_V1;
-  if (!result.ok && result.kind !== "not_found") return <ErrorState title="We couldn't load experiences" />;
-  const catalog = result.ok ? result.data.experiences : [];
+  const theme = config.publicApiVersion === "1.2" ? normalizeExperienceTheme(query.theme) : undefined;
+  const sitePublications = siteCatalog.experiences;
+  const nativeSlugs = new Set(siteCatalog.claimedSlugs);
+  const catalog = result.ok ? result.data.experiences.filter((experience) => !nativeSlugs.has(experience.slug)) : [];
   const items = filterExperienceSummaries(catalog, searchQuery);
-  const cards = withReviewLines(buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview), await getReviewSummaries(items.map((item) => item.slug)));
+  const legacyCards = withReviewLines(buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview), await getReviewSummaries(items.map((item) => item.slug)));
+  const nativeCards = sitePublications
+    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
+    .map(sitePublicationCard);
+  const cards = [...legacyCards, ...nativeCards];
+  if (!result.ok && result.kind !== "not_found" && cards.length === 0) return <ErrorState title="We couldn't load experiences" />;
 
   // Where each card's availability is read: NIHO, or this site for an experience sold here (#285).
   const bookingSources = await guestBookingSources(cards.map((card) => card.slug));
@@ -48,7 +60,6 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const finderDays = upcomingDays(now, FINDER_DAYS);
   const catalogDate = config.publicApiVersion === "1.2" ? normalizeExperienceDate(query.date) : undefined;
   const initialDate = catalogDate ?? parseDateParam(query.date, finderDays);
-  const theme = config.publicApiVersion === "1.2" ? normalizeExperienceTheme(query.theme) : undefined;
   const date = config.publicApiVersion === "1.2" ? normalizeExperienceDate(query.date) : undefined;
   const initialGuests = parseGuestsParam(query.guests);
   const days = upcomingDays(now, CHIP_DAYS);

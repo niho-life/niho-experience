@@ -1,9 +1,7 @@
 import "server-only";
-import type { ExperienceHostApiClient, ExperienceHostApiFailure } from "@niho-experience/api-client/host";
 import type { HostProvider } from "@/lib/host/providers";
-import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
-import { hostApiClient, isHostMock } from "@/lib/host/server";
-import { accessTokenUsable, type HostSession } from "@/lib/host/session";
+import { isHostMock } from "@/lib/host/server";
+import type { HostSession } from "@/lib/host/session";
 import { actionTime } from "./bookings";
 import { todayInJapan } from "./format";
 import { loadGuestQuestions } from "./guest-questions-server";
@@ -26,43 +24,11 @@ export interface HostHomeTodosLoad {
 }
 
 /** NIHO's published pages whose listing is read, at most: ホーム does not wait on a long list. */
-const LISTING_READS = 20;
-
 type PagesRead = { pages: HomePage[]; listings: Record<string, HomePageListing | null>; failed: boolean };
 const NO_PAGES: PagesRead = { pages: [], listings: {}, failed: false };
 
-/** NIHO no longer lets this account in (sign-in again, or the permission ended): the layout says so, nothing to add. */
-const refused = (failure: ExperienceHostApiFailure) => failure.kind === "error" && [401, 403, 404].includes(failure.status);
-
-/** One published page's listing; undefined when it could not be read. */
-async function listingOf(client: ExperienceHostApiClient, providerId: string, pageId: string): Promise<HomePageListing | null | undefined> {
-  try {
-    const result = await client.getExperienceProviderPageListing(providerId, pageId);
-    if (!result.ok) return refused(result) ? null : undefined;
-    const listing = result.data.listing;
-    return listing ? { status: listing.status, consentedAt: listing.consentedAt } : null;
-  } catch {
-    return undefined;
-  }
-}
-
-/** NIHO's pages and the listings of the published ones (provider pages on, with a usable NIHO Web access token). */
-async function readPages(provider: HostProvider, session: HostSession): Promise<PagesRead> {
-  if (!providerPagesEnabled() || !accessTokenUsable(session, Date.now())) return NO_PAGES;
-  try {
-    const client = hostApiClient(session);
-    const result = await client.listExperienceProviderPages(provider.id);
-    if (!result.ok) return refused(result) ? NO_PAGES : { ...NO_PAGES, failed: true };
-    const pages: HomePage[] = result.data.pages.map((page) => ({ id: page.id, title: page.title, status: page.status }));
-    const published = pages.filter((page) => page.status === "PUBLISHED").slice(0, LISTING_READS);
-    const read = await Promise.all(published.map(async (page) => [page.id, await listingOf(client, provider.id, page.id)] as const));
-    const listings: Record<string, HomePageListing | null> = {};
-    for (const [id, listing] of read) if (listing !== undefined) listings[id] = listing;
-    return { pages, listings, failed: read.some(([, listing]) => listing === undefined) };
-  } catch {
-    return { ...NO_PAGES, failed: true };
-  }
-}
+/** Legacy NIHO pages/listings are outside contract v1 and do not drive Experience public pages. */
+async function readPages(_provider: HostProvider, _session: HostSession): Promise<PagesRead> { return NO_PAGES; }
 
 /** 次にすること for the provider in http mode; empty in the preview. */
 export async function loadHomeTodos(provider: HostProvider, session: HostSession): Promise<HostHomeTodosLoad> {

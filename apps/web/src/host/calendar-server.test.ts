@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
   google: true,
   store: null as null | { googleConnection: Fn; getFeed: Fn; issueFeed: Fn; revokeFeed: Fn },
   session: { accessTokenExpiresAt: Number.MAX_SAFE_INTEGER } as null | { accessTokenExpiresAt: number },
-  providers: { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" }] } as { status: string; providers?: { id: string; ownerUserId: string; memberRole: string }[] },
+  providers: { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-owner", memberRole: "OWNER" }] } as { status: string; providers?: { id: string; nihoUserId: string; memberRole: string }[] },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config }));
@@ -30,7 +30,7 @@ import { HOST_SESSION_ENDED_TEXT } from "./errors";
 
 const KEY = Buffer.alloc(32, 7);
 const SALT = Buffer.alloc(32, 1);
-const OWNER = { id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" } as const;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-owner", memberRole: "OWNER" } as const;
 const ACTOR = { providerId: "sample-provider", nihoUserId: "sample-owner", calendarRoleCeiling: "OWNER" };
 const CONNECTED: HostGoogleConnectionState = { revoked: false, blockingEnabled: true, syncStatus: "FRESH", lastSucceededAtUtc: "2026-11-01T01:05:30.000Z" };
 /** The address for the provider and salt under `key`, and what the store keeps of it. */
@@ -44,7 +44,7 @@ beforeEach(() => {
   state.config.hostCalendarFeedEnabled = true;
   state.google = true;
   state.session = { accessTokenExpiresAt: Number.MAX_SAFE_INTEGER };
-  state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" }] };
+  state.providers = { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-owner", memberRole: "OWNER" }] };
   state.store = {
     googleConnection: vi.fn(async () => CONNECTED),
     getFeed: vi.fn(async () => issuedUnder(KEY)),
@@ -156,7 +156,7 @@ describe("loadHostCalendar", () => {
   });
 
   it("is closed in the preview, for anyone else, without the store, and when the store does not count them as the OWNER", async () => {
-    expect(await loadHostCalendar({ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "EDITOR" }, { feed: true })).toEqual({ status: "closed" });
+    expect(await loadHostCalendar({ id: "sample-provider", nihoUserId: "sample-owner", memberRole: "EDITOR" }, { feed: true })).toEqual({ status: "closed" });
     state.store!.googleConnection.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await loadHostCalendar(OWNER, { feed: true })).toEqual({ status: "closed" });
     state.mock = true;
@@ -196,10 +196,10 @@ describe("URL を作る / URL を止める", () => {
   });
 
   it("is the OWNER's only, needs a usable session and the flag, and says when it failed", async () => {
-    state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "EDITOR" }] };
+    state.providers = { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-owner", memberRole: "EDITOR" }] };
     expect(await issueCalendarFeedAsOwner("sample-provider")).toEqual({ ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT });
     expect(await issueCalendarFeedAsOwner("other-provider")).toEqual({ ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT });
-    state.providers = { status: "ok", providers: [{ id: "sample-provider", ownerUserId: "sample-owner", memberRole: "OWNER" }] };
+    state.providers = { status: "ok", providers: [{ id: "sample-provider", nihoUserId: "sample-owner", memberRole: "OWNER" }] };
     state.store!.revokeFeed.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await revokeCalendarFeedAsOwner("sample-provider")).toEqual({ ok: false, message: CALENDAR_FEED_OWNER_ONLY_TEXT });
     state.store!.issueFeed.mockRejectedValueOnce(new Error("down"));

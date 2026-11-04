@@ -5,7 +5,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@niho-experience/api-client/experience-provider-operations-schema", () => ({
   isExperienceProviderOperationPathId: (value: unknown) => typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value),
 }));
-vi.mock("@niho-experience/api-client/host-schema", () => ({
+vi.mock("@niho-experience/api-client/legacy-host-schema", () => ({
   decodeExperienceProviderPagePatchRequest: (value: unknown) => value && typeof value === "object" && !Array.isArray(value)
     && !Object.keys(value).some((key) => !["title", "content", "offers", "photoObjectKeys", "photoAlts"].includes(key)) ? value : null,
 }));

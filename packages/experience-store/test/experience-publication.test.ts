@@ -122,6 +122,9 @@ describe("experience publication readiness validation", () => {
   const readiness = (observedAt: number, validUntil: number) => ({
     accountUsable: true,
     connectReady: true,
+    paymentReuseConsentAccepted: true,
+    paymentReuseConsentVersion: "synthetic-payment-reuse-v1",
+    paymentReuseConsentedAtUtc: new Date(observedAt - 1).toISOString(),
     sellerDisplayReady: true,
     sellerNihoAccountRef: "seller-synthetic",
     stripeConnectAccountRef: "acct_synthetic",

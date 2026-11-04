@@ -39,7 +39,7 @@ import { REVIEW_REPLY_TEXT_LIMIT, REVIEW_REPORT_NOTE_LIMIT, REVIEW_REPORTED_TEXT
 const REVIEW_ID = "00000000-0000-4000-8000-000000000108";
 const OTHER_REVIEW_ID = "00000000-0000-4000-8000-000000000109";
 const COMMAND_ID = "00000000-0000-4000-8000-0000000c0108";
-const OWNER = { id: "sample-provider", ownerUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
+const OWNER = { id: "sample-provider", nihoUserId: "sample-niho-user", memberRole: "OWNER" } as HostProvider;
 const ACTOR: HostActor = { providerId: "sample-provider", nihoUserId: "sample-niho-user", calendarRoleCeiling: "OWNER" };
 
 /** Written just now: no reply, no report, no note. */

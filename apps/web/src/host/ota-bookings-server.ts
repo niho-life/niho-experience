@@ -2,7 +2,7 @@ import "server-only";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError, type HostActor, type HostOtaBooking, type HostOtaBookings } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { hostOtaBookings, productOperatorRepository } from "@/lib/experience/store-server";
-import { hostUserIdFromOwnedProviders, type HostProvider } from "@/lib/host/providers";
+import { type HostProvider } from "@/lib/host/providers";
 import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable, type HostMockScenario } from "@/lib/host/session";
 import { addDays, todayInJapan } from "./format";
@@ -41,12 +41,12 @@ export interface OtaReader {
  * The reader for `providerId`: NIHO's OWNER, else a product operator with a grant there (the store narrows them to their
  * products). null for anyone else (an EDITOR or a COHOST without a grant reads none).
  */
-export async function otaReaderFor(providerId: string, provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null): Promise<OtaReader | null> {
+export async function otaReaderFor(providerId: string, provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole"> | null): Promise<OtaReader | null> {
   if (provider?.id === providerId && provider.memberRole === "OWNER") {
-    return { kind: "OWNER", actor: { providerId, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" } };
+    return { kind: "OWNER", actor: { providerId, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" } };
   }
   const providers = await loadHostProviders();
-  const nihoUserId = providers.status === "ok" ? hostUserIdFromOwnedProviders(providers.providers) : null;
+  const nihoUserId = providers.status === "ok" ? providers.nihoUserId : null;
   const repository = productOperatorRepository();
   if (!nihoUserId || !repository) return null;
   const assignments = await repository.listAssignments(nihoUserId);
@@ -91,7 +91,7 @@ export function otaBookingsShown(mockScenario?: HostMockScenario): boolean {
  */
 export async function loadOtaBookings(
   providerId: string,
-  provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null,
+  provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole"> | null,
   requested: string | null,
   mockScenario?: HostMockScenario,
   store: () => Pick<HostOtaBookings, "listForHost" | "getForHost"> | null = hostOtaBookings,
@@ -143,7 +143,7 @@ function sessionBooking(booking: HostBooking): HostBooking {
  */
 export async function loadOtaSession(
   providerId: string,
-  provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null,
+  provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole"> | null,
   query: SessionQuery,
   mockScenario?: HostMockScenario,
   store: () => Pick<HostOtaBookings, "listForHost" | "attendanceForHost"> | null = hostOtaBookings,
@@ -185,7 +185,7 @@ export async function loadOtaSession(
 /** ホーム's 次にすること: the OTA bookings read in the last three days whose session is ahead. None while closed or unreadable. */
 export async function loadOtaHomeTodos(
   providerId: string,
-  provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole"> | null,
+  provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole"> | null,
   mockScenario?: HostMockScenario,
   store: () => Pick<HostOtaBookings, "listForHost"> | null = hostOtaBookings,
 ): Promise<{ todos: HomeTodo[]; failed: boolean }> {

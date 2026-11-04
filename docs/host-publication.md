@@ -17,7 +17,7 @@ NIHOは共通ログインと現在の本人・Connect状態を提供する。Exp
 3. サーバーが必要条件を検証し、掲載条件への同意を受け取って公開する。
 4. 公開後は通常編集で掲載を維持する。本人は停止・再開でき、運営停止は本人の再開では解除できない。
 
-販売開始にoperator script、旧商品データの移行、旧販売停止確認、旧予約席の取り込みは要らない。Experienceで作成した商品だけを公開・販売する。
+初回利用前に運営がExperience seller／本人ID・Connect口座対応／承認済みfeeを登録する。これはNIHO v1が提供者一覧・Connect変更APIを持たないための明示設定で、商品やOWNER membershipは作らない。初回のNIHO認証時に現在本人IDとの完全一致を確認してからExperience OWNERを結ぶ。登録条件の詳細は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。旧商品データの移行、旧NIHO販売停止確認、旧予約席の取り込みは行わず、Experienceで作成した商品だけを公開・販売する。
 
 ## 販売条件
 
@@ -38,12 +38,12 @@ Stripe account ID、NIHO user ID、内部provider IDなどは公開DTOに出さ�
 
 ## 旧経路の終了
 
-オーナー確認により、旧NIHOの体験販売を利用するホスト・予約者はいない。Experienceでは旧商品登録・予約移行・二重販売切替・旧Checkout fallbackを実装経路から撤去する。NIHO本体の共通認証・Connect APIや、他機能のNIHO APIはこの判断の対象外。
+Experience新規販売はNIHO旧商品APIへ依存せず、旧NIHO予約をExperienceへ移行しない。同一開催回の二重販売や旧Checkout fallbackを新しい販売経路に作らない。旧NIHO予約の照会・履行・取消／返金は引き続きNIHOの責任として扱い、この決定で削除・移管しない。
 
 公開中商品の二重slug拒否、開催枠の共有在庫、予約holdの排他は引き続き有効。これらはExperience内の通常の公開・在庫保護である。
 
 ## 現在の実装と受入
 
-現在のExperience変更では、本人確認付きの商品作成・編集・公開・停止・再開API、写真アップロード、公開DTO、旧販売切替経路の撤去を追加している。公開版はOWNERが公開時に確かめた販売者と受取先を保存し、短期の本人確認期限が過ぎても商品掲載を維持する。Checkoutは公開版に保存した同じConnect口座へStripeセッションを作成する。
+ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary、seller provisioning、商品作成・編集・販売条件・写真・公開・停止／再開API、公開read、Checkout接続を実装する。公開版はOWNERが公開時に確認した販売者と受取先を保存し、短期のreadiness期限が過ぎても掲載を維持する。通常保存で有効な公開版を更新し、photo追加後は明示publishまで公開写真を変えない。
 
-このAPIはNIHO共通本人・Connect契約（PR #19712）を前提にする。残りはその契約を利用できる環境の設定、ホスト画面への接続、開催枠を含む画面上の一周、DB統合テストとstagingでの受入。PRのCIは本番DB、実口座、個人データを使わない。
+合成DB通し検証では、NIHO v1 identity/Connect応答からExperience OWNERを結び、商品作成・公開・公開read・予約holdまで確認する。追加のライフサイクル／SEO／Checkout route確認は対象テストで行う。残る条件はNIHO v1のstaging配備・service identity/origin設定、Experience DB migration/grants、GCS bucket/IAM、承認済みfee・販売者・同意文、Eの画面接続とstaging受入。本番データ・実口座・個人情報はPR検証に使わない。

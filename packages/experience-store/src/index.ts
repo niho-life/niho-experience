@@ -20,6 +20,8 @@ export type {
   ExperienceHostSaleTermsState,
   ExperiencePublicationBlocker,
   ExperiencePublicationContentChecks,
+  ExperienceHostSellerProfile,
+  ExperienceHostProviderMembership,
   ExperiencePublicationDraftInput,
   ExperiencePublicationState,
   ExperiencePublicationDraftCreateInput,

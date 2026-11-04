@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ExperienceHostApiFailure } from "@niho-experience/api-client/host";
+import type { ExperienceHostApiFailure } from "@niho-experience/api-client/legacy-host";
 import { HOST_ERROR_REASON_TEXT, hostFailureMessage } from "./errors";
 
 const refusal = (status: number, reason: string | null, code = "CONFLICT"): ExperienceHostApiFailure => ({ ok: false, kind: "error", status, code, reason, message: "NIHO's own words, not for hosts" });

@@ -1,5 +1,5 @@
 import type { ExperienceConditionKind } from "@niho-experience/api-client";
-import type { ExperienceProviderMeetingPoint, ExperienceProviderPaymentReadinessReason } from "@niho-experience/api-client/host";
+import type { ExperienceProviderMeetingPoint, ExperienceProviderPaymentReadinessReason } from "@niho-experience/api-client/legacy-host";
 import type { HostProviderKind, HostProviderReviewStatus, HostProviderRole } from "@/lib/host/providers";
 import type { NotificationSource } from "./notifications";
 import type { HostReviewTag } from "./reviews";

@@ -1,8 +1,4 @@
-/**
- * Rules for `/host/api/<rest>` → `${NIHO}/api/<rest>` (#86). The app-connect
- * token can only call the provider API and `GET /api/auth/me` on NIHO, and this
- * relay refuses everything else before it leaves the server.
- */
+/** Rules for the one legacy NIHO profile read still used by `/host/api/<rest>`. */
 export const RELAY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type RelayMethod = (typeof RELAY_METHODS)[number];
 
@@ -16,33 +12,16 @@ const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type", 
 const FORWARDED_RESPONSE_HEADERS = ["content-type", "content-language", "etag", "last-modified", "retry-after", "x-niho-page-updated-at"];
 
 /**
- * The NIHO path for decoded route segments, or null when the relay must answer 404.
- * Segments are compared whole, so `experience-providers-x` or `auth/me/x` never match.
+ * The only NIHO path exposed through this browser relay is the read-only
+ * `GET /api/auth/me`. Provider, Connect, and booking operations use their own
+ * server-side contracts and never pass through the browser relay.
  */
 export function relayUpstreamPath(method: string, segments: readonly string[]): string | null {
   if (segments.length === 0 || segments.length > MAX_SEGMENTS) return null;
   if (!segments.every((segment) => SEGMENT.test(segment) && segment !== "." && segment !== "..")) return null;
-  const [root, providerId, section, resourceId, action] = segments;
-  const authMe = method === "GET" && segments.length === 2 && root === "auth" && providerId === "me";
-  const providers = root === "experience-providers" && (
-    (segments.length === 1 && (method === "GET" || method === "POST")) ||
-    (segments.length === 2 && (method === "GET" || method === "PATCH")) ||
-    (segments.length === 3 && section === "submit" && method === "POST") ||
-    (segments.length === 3 && section === "meeting-point" && (method === "GET" || method === "PUT")) ||
-    (segments.length === 3 && section === "pages" && (method === "GET" || method === "POST")) ||
-    (segments.length === 4 && section === "pages" && (method === "GET" || method === "PATCH" || method === "DELETE")) ||
-    (segments.length === 5 && section === "pages" && ["publish", "unpublish"].includes(action ?? "") && method === "POST") ||
-    (segments.length === 5 && section === "pages" && ["preview", "meeting-point"].includes(action ?? "") && method === "GET") ||
-    (segments.length === 5 && section === "pages" && action === "meeting-point" && method === "PUT") ||
-    (segments.length === 5 && section === "pages" && action === "experience-site-listing" && ["GET", "PUT", "DELETE"].includes(method)) ||
-    (segments.length === 4 && section === "payments" && resourceId === "readiness" && method === "GET") ||
-    (segments.length === 4 && section === "payments" && resourceId === "reuse-candidates" && method === "GET") ||
-    (segments.length === 4 && section === "payments" && resourceId === "reuse" && method === "POST") ||
-    (segments.length === 5 && section === "payments" && resourceId === "connect" && ["start", "resume", "sync"].includes(action ?? "") && method === "POST") ||
-    (segments.length === 4 && section === "uploads" && ["policies", "signed-url"].includes(resourceId ?? "") && method === "POST")
-  );
-  const allowed = authMe || providers;
-  return allowed ? `/api/${segments.join("/")}` : null;
+  return method === "GET" && segments.length === 2 && segments[0] === "auth" && segments[1] === "me"
+    ? "/api/auth/me"
+    : null;
 }
 
 /**

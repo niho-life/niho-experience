@@ -6,7 +6,7 @@ import {
   type ExperienceHostApiResult,
   type ExperienceProviderMeetingPoint,
   type FetchLike,
-} from "../src/host/index.ts";
+} from "../src/legacy-host/index.ts";
 import {
   createMockExperienceHostFetch,
   isMockConnectUrl,
@@ -18,7 +18,7 @@ import {
   MOCK_PROVIDER_CONSENT,
   type MockExperienceHostFetchOptions,
   type MockHostScenario,
-} from "../src/host/mock.ts";
+} from "../src/legacy-host/mock.ts";
 import { createHostContractValidator, EXPERIENCE_HOST_CONTRACT_DOCUMENT, findSensitiveValues } from "../src/testing/index.ts";
 
 type AnyRecord = Record<string, any>;

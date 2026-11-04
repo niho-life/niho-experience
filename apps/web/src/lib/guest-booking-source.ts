@@ -100,8 +100,20 @@ export async function guestBookingSources(slugs: readonly string[]): Promise<Boo
   const bookings = guestBookingRepository();
   if (!bookings) return closed;
   try {
-    const siteSlugs = await bookings.sellableSlugs(slugs);
-    return siteSlugs.length ? { ...niho, siteOrigin: siteOrigin(), siteSlugs } : niho;
+    const publications = config.apiMode === "http" ? experiencePublicationRepository() : null;
+    const [siteSlugs, claimedSlugs] = await Promise.all([
+      bookings.sellableSlugs(slugs),
+      publications ? publications.listClaimedSlugs() : Promise.resolve([]),
+    ]);
+    const claimed = new Set(claimedSlugs);
+    const sellable = new Set(siteSlugs);
+    const closedSlugs = [...new Set(slugs.filter((slug) => claimed.has(slug) && !sellable.has(slug)))];
+    return {
+      ...niho,
+      siteOrigin: siteSlugs.length ? siteOrigin() : null,
+      siteSlugs,
+      closedSlugs,
+    };
   } catch (error) {
     logFailure("slugs", error);
     return closed;

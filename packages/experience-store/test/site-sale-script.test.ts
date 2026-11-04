@@ -65,11 +65,21 @@ function storedProduct(overrides: Partial<ProductRecord> = {}): ProductRecord {
 const SETTINGS: ProviderSaleSettings = { providerId: INPUT.provider.id, supportEnabled: false, platformFeeBasisPoints: 1000, supportConsentVersion: null, supportAgreementRevision: null, supportConsentedBy: null, supportConsentedAtUtc: null, version: 2, updatedAtUtc: "2026-10-31T00:00:00.000Z" };
 
 const EMPTY: SiteSaleState = {
-  providerExists: false, membership: null, product: null, saleSettings: null, saleTerms: null,
+  providerExists: false, sellerProfile: null, membership: null, product: null, saleSettings: null, saleTerms: null,
   slugPublishedElsewhere: false, slugUsedInProvider: false, otherProductsWithSaleTerms: [],
 };
 const REGISTERED: SiteSaleState = {
-  ...EMPTY, providerExists: true, membership: { role: "OWNER", active: true }, product: storedProduct(), saleSettings: SETTINGS,
+  ...EMPTY,
+  providerExists: true,
+  sellerProfile: {
+    providerId: INPUT.provider.id,
+    legacyProviderId: INPUT.provider.legacyProviderId,
+    providerDisplayName: INPUT.provider.displayName,
+    sellerNihoAccountRef: INPUT.product.sellerNihoAccountRef,
+    stripeConnectAccountRef: INPUT.product.stripeConnectAccountRef,
+    sellerDisplayName: INPUT.product.sellerDisplayName,
+  },
+  membership: { role: "OWNER", active: true }, product: storedProduct(), saleSettings: SETTINGS,
 };
 
 interface Harness {
@@ -101,6 +111,7 @@ function harness(options: {
     canRegister: async () => { step("canRegister", [], false); return options.canRegister ?? true; },
     currentState: async (query) => { step("currentState", [query], false); return options.state ?? EMPTY; },
     registerProvider: async (input) => { step("registerProvider", [input], true); return "CREATED"; },
+    registerHostSellerProfile: async (input) => { step("registerHostSellerProfile", [input], true); return "CREATED"; },
     linkProviderMember: async (input) => { step("linkProviderMember", [input], true); return "CREATED"; },
     registerProduct: async (input, version) => { step("registerProduct", [input, version], true); return { product: storedProduct(), outcome: "CREATED" }; },
     setProviderSaleSettings: async (providerId, input, version) => { step("setProviderSaleSettings", [providerId, input, version], true); return SETTINGS; },
@@ -142,7 +153,7 @@ describe("register-site-sale arguments (#285 slice 9)", () => {
 
 describe("register-site-sale input (#285 slice 9)", () => {
   it("reads the synthetic example", () => {
-    assert.deepEqual(INPUT.provider, { id: "sample-provider-0001", displayName: "Sample Tea Studio" });
+    assert.deepEqual(INPUT.provider, { id: "sample-provider-0001", legacyProviderId: "sample-niho-legacy-provider-0001", displayName: "Sample Tea Studio" });
     assert.equal(INPUT.supportEnabled, false);
     assert.equal(INPUT.product.unitAmountYen, 4000);
     assert.equal(registerProductInput(INPUT).status, "PUBLISHED");
@@ -206,12 +217,20 @@ describe("register-site-sale flow (#285 slice 9)", () => {
     assert.deepEqual(runtime.stripeCalls, []);
   });
 
-  it("register checks the Stripe account, then writes the provider, the OWNER, the product and the fee, never the sale terms", async () => {
+  it("register checks the Stripe account, then writes the provider, explicit seller mapping, OWNER, product and fee, never sale terms", async () => {
     const h = harness();
     assert.equal(await h.run("register", true), SITE_SALE_EXIT.ok);
     assert.deepEqual(h.stripeCalls, [ACCOUNT]);
     assert.deepEqual(h.writes, [
       ["registerProvider", { providerId: INPUT.provider.id }],
+      ["registerHostSellerProfile", {
+        providerId: INPUT.provider.id,
+        legacyProviderId: INPUT.provider.legacyProviderId,
+        providerDisplayName: INPUT.provider.displayName,
+        sellerNihoAccountRef: INPUT.product.sellerNihoAccountRef,
+        stripeConnectAccountRef: INPUT.product.stripeConnectAccountRef,
+        sellerDisplayName: INPUT.product.sellerDisplayName,
+      }],
       ["linkProviderMember", { providerId: INPUT.provider.id, nihoUserId: INPUT.owner.nihoUserId, role: "OWNER" }],
       ["registerProduct", registerProductInput(INPUT), undefined],
       ["setProviderSaleSettings", INPUT.provider.id, { supportEnabled: false }, undefined],
@@ -223,7 +242,7 @@ describe("register-site-sale flow (#285 slice 9)", () => {
   it("register updates at the versions it read, and leaves an unchanged fee alone", async () => {
     const changedFee = harness({ state: { ...REGISTERED, saleSettings: { ...SETTINGS, supportEnabled: true, platformFeeBasisPoints: 1500 } } });
     assert.equal(await changedFee.run("register", true), SITE_SALE_EXIT.ok);
-    assert.deepEqual(changedFee.writes.slice(2), [
+    assert.deepEqual(changedFee.writes.slice(3), [
       ["registerProduct", registerProductInput(INPUT), 3],
       ["setProviderSaleSettings", INPUT.provider.id, { supportEnabled: false }, 2],
     ]);

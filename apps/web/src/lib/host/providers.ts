@@ -1,25 +1,36 @@
-import type { ExperienceProviderKind, ExperienceProviderMemberRole, ExperienceProviderReviewStatus, ExperienceProviderWithMemberRole } from "@niho-experience/api-client/host";
-
 /**
- * Providers as NIHO's host API returns them. The shapes come from the host
- * contract (#87, `@niho-experience/api-client/host`); this file only holds the
- * console's rules for choosing and labelling them. Type-only import: client
- * components may use these helpers without pulling in the server-only client.
+ * Experience host seller profiles joined to NIHO's current identity. NIHO Host
+ * v1 does not return a provider directory. This file holds only the console's
+ * rules for choosing and labelling local Experience memberships. Type-only
+ * import: client components do not pull in the server-only NIHO client.
  */
 
 /** NIHO ids are opaque url-safe tokens; same rule as offer ids in the api-client mock. */
-export const NIHO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const NIHO_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export function nihoIdOrNull(value: unknown): string | null {
   return typeof value === "string" && NIHO_ID_PATTERN.test(value) ? value : null;
 }
 
-/** A provider in the signed-in host's list (server side only: it carries NIHO's internal ids). */
-export type HostProviderRole = ExperienceProviderMemberRole | "COHOST";
-export type HostProvider = Omit<ExperienceProviderWithMemberRole, "memberRole"> & { memberRole: HostProviderRole | null };
-export type HostProviderKind = ExperienceProviderKind;
-export type HostProviderReviewStatus = ExperienceProviderReviewStatus;
-
+/** A seller workspace for the signed-in host (server side only: includes NIHO lookup ids). */
+export type HostProviderRole = "OWNER" | "EDITOR" | "VIEWER" | "COHOST";
+export type HostProviderKind = "INDIVIDUAL" | "BUSINESS" | "SPOT";
+export type HostProviderReviewStatus = "DRAFT" | "REQUESTED" | "APPROVED" | "SUSPENDED";
+/** Current Experience membership plus the separately provisioned NIHO Connect lookup key. Server only. */
+export type HostProvider = {
+  readonly id: string;
+  readonly displayName: string;
+  readonly memberRole: HostProviderRole | null;
+  readonly nihoUserId: string;
+  readonly legacyProviderId: string;
+  /** Legacy editor metadata is optional while E connects the Experience product API. */
+  readonly kind?: HostProviderKind;
+  readonly bio?: string;
+  readonly sellerDisclosureUrl?: string | null;
+  readonly reviewStatus?: HostProviderReviewStatus | null;
+  readonly consentVersion?: string | null;
+  readonly paymentReuseSourceSpotId?: string | null;
+};
 /** What the sidebar's and the phone menu's provider switch (client components) receive: the id for `?providerId=`, the name and the role. */
 export type HostProviderChoice = Pick<HostProvider, "id" | "displayName" | "memberRole">;
 export type HostConsoleChoice =
@@ -33,16 +44,10 @@ export type HostConsoleChoice =
       readonly screens?: readonly string[];
     };
 
-const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", EDITOR: "編集者", COHOST: "サブホスト" };
+const ROLE_LABELS: Record<HostProviderRole, string> = { OWNER: "オーナー", EDITOR: "編集者", VIEWER: "閲覧者", COHOST: "サブホスト" };
 
 export function providerRoleLabel(role: HostProviderRole | null): string | null {
   return role ? ROLE_LABELS[role] : null;
-}
-
-/** Fallback identity for flows without a target provider: accept only one owner ID from the authenticated provider list. */
-export function hostUserIdFromOwnedProviders(providers: readonly Pick<HostProvider, "ownerUserId" | "memberRole">[]): string | null {
-  const ids = [...new Set(providers.filter((provider) => provider.memberRole === "OWNER").map((provider) => provider.ownerUserId))];
-  return ids.length === 1 ? ids[0]! : null;
 }
 
 /**

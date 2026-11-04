@@ -1,5 +1,5 @@
 import "server-only";
-import { isStripeConnectUrl, type ExperienceHostApiClient, type ExperienceHostApiFailure } from "@niho-experience/api-client/host";
+import { isStripeConnectUrl, type ExperienceHostApiClient, type ExperienceHostApiFailure } from "@niho-experience/api-client/legacy-host";
 import { isHostMock } from "@/lib/host/server";
 import { hostFailureMessage } from "./errors";
 import type { HostNotice } from "./payout";

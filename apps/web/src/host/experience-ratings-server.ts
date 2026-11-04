@@ -21,12 +21,12 @@ export interface ExperienceRatingLink {
 /** By the experience's slug. */
 export type ExperienceRatings = Record<string, ExperienceRatingLink>;
 
-function ownerActor(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): HostActor {
+function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.ownerUserId, calendarRoleCeiling: "OWNER" };
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
 }
 
-export async function loadExperienceRatings(provider: Pick<HostProvider, "id" | "ownerUserId" | "memberRole">): Promise<ExperienceRatings> {
+export async function loadExperienceRatings(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): Promise<ExperienceRatings> {
   if (isHostMock() || provider.memberRole !== "OWNER") return {};
   const store = guestReviewRatings();
   if (!store) return {};

@@ -37,6 +37,7 @@ export type ExperiencePublicationBlocker =
   | "MANUSCRIPT_REQUIRED"
   | "OPERATIONS_SUSPENDED"
   | "OWNER_NOT_CURRENT"
+  | "PAYMENT_REUSE_CONSENT_REQUIRED"
   | "PHOTOS_REQUIRED"
   | "PRICE_REQUIRED"
   | "PUBLIC_CONTENT_INVALID"
@@ -113,6 +114,9 @@ export interface ExperienceHostSaleTermsSaveResult extends Omit<ExperienceHostSa
 export interface ProviderPublicationReadinessInput {
   readonly accountUsable: boolean;
   readonly connectReady: boolean;
+  readonly paymentReuseConsentAccepted: boolean;
+  readonly paymentReuseConsentVersion: string | null;
+  readonly paymentReuseConsentedAtUtc: string | null;
   readonly sellerDisplayReady: boolean;
   readonly sellerNihoAccountRef: string;
   readonly stripeConnectAccountRef: string;
@@ -127,6 +131,20 @@ export interface ProviderPublicationReadiness extends ProviderPublicationReadine
   readonly ownerNihoUserId: string;
   readonly version: number;
   readonly updatedAtUtc: string;
+}
+
+/** Explicit bridge from an Experience seller to NIHO's legacy Connect lookup key. */
+export interface ExperienceHostSellerProfile {
+  readonly providerId: string;
+  readonly legacyProviderId: string;
+  readonly providerDisplayName: string;
+  readonly sellerNihoAccountRef: string;
+  readonly stripeConnectAccountRef: string;
+  readonly sellerDisplayName: string;
+}
+
+export interface ExperienceHostProviderMembership extends ExperienceHostSellerProfile {
+  readonly memberRole: "OWNER" | "EDITOR";
 }
 
 export interface ExperiencePublicationState {
@@ -339,6 +357,9 @@ function readinessFromRow(row: DbRow): ProviderPublicationReadiness {
     ownerNihoUserId: String(row.owner_niho_user_id),
     accountUsable: row.account_usable === true,
     connectReady: row.connect_ready === true,
+    paymentReuseConsentAccepted: row.payment_reuse_consent_accepted === true,
+    paymentReuseConsentVersion: row.payment_reuse_consent_version === null ? null : String(row.payment_reuse_consent_version),
+    paymentReuseConsentedAtUtc: nullableIso(row.payment_reuse_consented_at, "payment_reuse_consented_at"),
     sellerDisplayReady: row.seller_display_ready === true,
     sellerNihoAccountRef: String(row.seller_niho_account_ref),
     stripeConnectAccountRef: String(row.stripe_connect_account_ref),
@@ -393,9 +414,16 @@ function validateDraft(input: ExperiencePublicationDraftInput): ExperiencePublic
 }
 
 function validateReadiness(input: ProviderPublicationReadinessInput): void {
-  for (const value of [input.accountUsable, input.connectReady, input.sellerDisplayReady]) {
+  for (const value of [input.accountUsable, input.connectReady, input.paymentReuseConsentAccepted, input.sellerDisplayReady]) {
     if (typeof value !== "boolean") throw new StoreValidationError("Publication readiness flags must be booleans.");
   }
+  if (!(input.paymentReuseConsentVersion === null || typeof input.paymentReuseConsentVersion === "string")
+      || !(input.paymentReuseConsentedAtUtc === null || typeof input.paymentReuseConsentedAtUtc === "string")
+      || input.paymentReuseConsentAccepted !== (input.paymentReuseConsentVersion !== null && input.paymentReuseConsentedAtUtc !== null)) {
+    throw new StoreValidationError("Publication payment reuse consent is inconsistent.");
+  }
+  if (input.paymentReuseConsentVersion !== null) assertNonEmptyText(input.paymentReuseConsentVersion, "readiness.paymentReuseConsentVersion", 160);
+  if (input.paymentReuseConsentedAtUtc !== null) assertCanonicalInstant(input.paymentReuseConsentedAtUtc, "readiness.paymentReuseConsentedAtUtc");
   assertNonEmptyText(input.sellerNihoAccountRef, "readiness.sellerNihoAccountRef", 256);
   assertNonEmptyText(input.stripeConnectAccountRef, "readiness.stripeConnectAccountRef", 256);
   assertNonEmptyText(input.sellerDisplayName, "readiness.sellerDisplayName", 300);
@@ -431,7 +459,8 @@ async function lockedState(client: PoolClient, providerId: string, productId: st
 
 async function readinessRow(client: PoolClient, providerId: string, lock = false): Promise<DbRow | null> {
   const result = await client.query<DbRow>(
-    `SELECT provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+    `SELECT provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
+            payment_reuse_consent_version,payment_reuse_consented_at,seller_display_ready,
             seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
             required_consent_version,observed_at,valid_until,version,updated_at,
             observed_at <= clock_timestamp() AND valid_until > clock_timestamp()
@@ -518,6 +547,7 @@ async function blockers(
   if (currentOwner.rows[0]?.current_owner !== true) result.push("OWNER_NOT_CURRENT");
   if (!readiness.accountUsable) result.push("ACCOUNT_NOT_USABLE");
   if (!readiness.connectReady) result.push("CONNECT_NOT_READY");
+  if (!readiness.paymentReuseConsentAccepted) result.push("PAYMENT_REUSE_CONSENT_REQUIRED");
   if (!readiness.sellerDisplayReady
       || readiness.sellerNihoAccountRef !== product.sellerNihoAccountRef
       || readiness.stripeConnectAccountRef !== product.stripeConnectAccountRef
@@ -592,23 +622,103 @@ export class ExperiencePublicationRepository {
   constructor(pool: Pool) { this.#pool = pool; }
 
   /**
-   * Mirrors only the current OWNER proven by NIHO's authenticated host contract.
-   * The browser cannot choose the role and no other membership is inferred here.
+   * First-login owner binding for an operator-provisioned seller profile. The only identity input is the
+   * currently verified NIHO account ID. A profile must already map that exact ID; this never uses a
+   * legacy NIHO provider ID, a browser-selected provider, or an inferred ownerUserId.
    */
-  async ensureOwnerWorkspace(actor: HostActor): Promise<void> {
-    assertStoreIdentifier(actor.providerId, "providerId");
-    assertStoreIdentifier(actor.nihoUserId, "nihoUserId");
-    await withTransaction(this.#pool, async (client) => {
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:owner-workspace`]);
-      await client.query("INSERT INTO experience_providers (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [actor.providerId]);
+  async ensureMappedOwnerMembership(nihoUserId: string): Promise<
+    | { readonly kind: "linked" | "already-owner" }
+    | { readonly kind: "no-mapping" | "ambiguous" | "membership-conflict" }
+  > {
+    assertStoreIdentifier(nihoUserId, "nihoUserId");
+    return withTransaction(this.#pool, async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 47))", [`experience-host-owner:${nihoUserId}`]);
+      const mapped = await client.query<DbRow>(
+        `SELECT provider_id FROM experience_host_seller_profiles
+          WHERE seller_niho_account_ref=$1 ORDER BY provider_id COLLATE "C" FOR SHARE`,
+        [nihoUserId],
+      );
+      if (mapped.rows.length === 0) return { kind: "no-mapping" } as const;
+      if (mapped.rows.length !== 1) return { kind: "ambiguous" } as const;
+      const providerId = String(mapped.rows[0]!.provider_id);
+      const existing = await client.query<DbRow>(
+        `SELECT role,active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2 FOR UPDATE`,
+        [providerId, nihoUserId],
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0]!;
+        return row.role === "OWNER" && row.active === true
+          ? { kind: "already-owner" } as const
+          : { kind: "membership-conflict" } as const;
+      }
+      const owners = await client.query<DbRow>(
+        `SELECT provider_id FROM provider_memberships
+          WHERE niho_user_id=$1 AND active=true AND role='OWNER'
+          ORDER BY provider_id COLLATE "C" FOR UPDATE`,
+        [nihoUserId],
+      );
+      if (owners.rows.length > 0) return { kind: "ambiguous" } as const;
       await client.query(
         `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active)
-         VALUES ($1,$2,'OWNER',true)
-         ON CONFLICT (provider_id,niho_user_id) DO UPDATE
-           SET role='OWNER',active=true,updated_at=clock_timestamp()`,
-        [actor.providerId, actor.nihoUserId],
+         VALUES ($1,$2,'OWNER',true)`,
+        [providerId, nihoUserId],
       );
+      return { kind: "linked" } as const;
     });
+  }
+
+  /** Host choices come from current Experience membership, never a NIHO provider directory. */
+  async listHostProviders(nihoUserId: string): Promise<readonly ExperienceHostProviderMembership[]> {
+    assertStoreIdentifier(nihoUserId, "nihoUserId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT p.provider_id,p.legacy_provider_id,p.provider_display_name,p.seller_niho_account_ref,
+              p.stripe_connect_account_ref,p.seller_display_name,m.role
+         FROM provider_memberships m
+         JOIN experience_host_seller_profiles p ON p.provider_id=m.provider_id
+        WHERE m.niho_user_id=$1 AND m.active=true AND m.role IN ('OWNER','EDITOR')
+        ORDER BY p.provider_display_name COLLATE "C",p.provider_id COLLATE "C"`,
+      [nihoUserId],
+    );
+    return result.rows.map((row) => ({
+      providerId: String(row.provider_id),
+      legacyProviderId: String(row.legacy_provider_id),
+      providerDisplayName: String(row.provider_display_name),
+      sellerNihoAccountRef: String(row.seller_niho_account_ref),
+      stripeConnectAccountRef: String(row.stripe_connect_account_ref),
+      sellerDisplayName: String(row.seller_display_name),
+      memberRole: String(row.role) as "OWNER" | "EDITOR",
+    }));
+  }
+
+  /** Resolve exactly one current Experience OWNER and its explicit seller mapping. */
+  async currentOwnerSellerProfile(nihoUserId: string): Promise<
+    | { readonly kind: "none" }
+    | { readonly kind: "ambiguous" }
+    | { readonly kind: "setup-required" }
+    | { readonly kind: "ready"; readonly profile: ExperienceHostSellerProfile }
+  > {
+    assertStoreIdentifier(nihoUserId, "nihoUserId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT m.provider_id,p.legacy_provider_id,p.provider_display_name,p.seller_niho_account_ref,
+              p.stripe_connect_account_ref,p.seller_display_name
+         FROM provider_memberships m
+         LEFT JOIN experience_host_seller_profiles p ON p.provider_id=m.provider_id
+        WHERE m.niho_user_id=$1 AND m.active=true AND m.role='OWNER'
+        ORDER BY m.provider_id COLLATE "C"`,
+      [nihoUserId],
+    );
+    if (result.rows.length === 0) return { kind: "none" };
+    if (result.rows.length !== 1) return { kind: "ambiguous" };
+    const row = result.rows[0]!;
+    if (row.legacy_provider_id === null) return { kind: "setup-required" };
+    return { kind: "ready", profile: {
+      providerId: String(row.provider_id),
+      legacyProviderId: String(row.legacy_provider_id),
+      providerDisplayName: String(row.provider_display_name),
+      sellerNihoAccountRef: String(row.seller_niho_account_ref),
+      stripeConnectAccountRef: String(row.stripe_connect_account_ref),
+      sellerDisplayName: String(row.seller_display_name),
+    } };
   }
 
   /** Current owner-owned drafts; provider and payment references are never part of the host DTO. */
@@ -646,13 +756,17 @@ export class ExperiencePublicationRepository {
       const membership = await requireMembership(client, actor, ["OWNER"]);
       const result = await client.query<DbRow>(
         `INSERT INTO provider_publication_readiness
-           (provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+           (provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
+            payment_reuse_consent_version,payment_reuse_consented_at,seller_display_ready,
             seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
             required_consent_version,observed_at,valid_until)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11::timestamptz)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz,$8,$9,$10,$11,$12,$13::timestamptz,$14::timestamptz)
          ON CONFLICT (provider_id) DO UPDATE
            SET owner_niho_user_id=EXCLUDED.owner_niho_user_id,
                account_usable=EXCLUDED.account_usable,connect_ready=EXCLUDED.connect_ready,
+               payment_reuse_consent_accepted=EXCLUDED.payment_reuse_consent_accepted,
+               payment_reuse_consent_version=EXCLUDED.payment_reuse_consent_version,
+               payment_reuse_consented_at=EXCLUDED.payment_reuse_consented_at,
                seller_display_ready=EXCLUDED.seller_display_ready,
                seller_niho_account_ref=EXCLUDED.seller_niho_account_ref,
                stripe_connect_account_ref=EXCLUDED.stripe_connect_account_ref,
@@ -660,10 +774,12 @@ export class ExperiencePublicationRepository {
                required_consent_version=EXCLUDED.required_consent_version,
                observed_at=EXCLUDED.observed_at,valid_until=EXCLUDED.valid_until,
                version=provider_publication_readiness.version+1,updated_at=clock_timestamp()
-         RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+         RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
+           payment_reuse_consent_version,payment_reuse_consented_at,seller_display_ready,
            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
            required_consent_version,observed_at,valid_until,version,updated_at`,
         [actor.providerId, membership.nihoUserId, input.accountUsable, input.connectReady,
+          input.paymentReuseConsentAccepted, input.paymentReuseConsentVersion, input.paymentReuseConsentedAtUtc,
           input.sellerDisplayReady, input.sellerNihoAccountRef, input.stripeConnectAccountRef,
           input.sellerDisplayName, input.requiredConsentVersion, input.observedAtUtc, input.validUntilUtc],
       );
@@ -1127,27 +1243,32 @@ export class ExperiencePublicationRepository {
       await lockProviderInventory(client, actor.providerId);
       const membership = await requireMembership(client, actor, ["OWNER"]);
       const values = [actor.providerId, membership.nihoUserId, input.accountUsable, input.connectReady,
+        input.paymentReuseConsentAccepted, input.paymentReuseConsentVersion, input.paymentReuseConsentedAtUtc,
         input.sellerDisplayReady, input.sellerNihoAccountRef, input.stripeConnectAccountRef,
         input.sellerDisplayName, input.requiredConsentVersion, input.observedAtUtc, input.validUntilUtc];
       const result = expectedVersion === null
         ? await client.query<DbRow>(
           `INSERT INTO provider_publication_readiness
-             (provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+             (provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
+              payment_reuse_consent_version,payment_reuse_consented_at,seller_display_ready,
               seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
               required_consent_version,observed_at,valid_until)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11::timestamptz)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz,$8,$9,$10,$11,$12,$13::timestamptz,$14::timestamptz)
            ON CONFLICT DO NOTHING
-           RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+           RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
+             payment_reuse_consent_version,payment_reuse_consented_at,seller_display_ready,
              seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
              required_consent_version,observed_at,valid_until,version,updated_at`, values)
         : await client.query<DbRow>(
           `UPDATE provider_publication_readiness
-              SET owner_niho_user_id=$2,account_usable=$3,connect_ready=$4,seller_display_ready=$5,
-                  seller_niho_account_ref=$6,stripe_connect_account_ref=$7,seller_display_name=$8,
-                  required_consent_version=$9,observed_at=$10::timestamptz,valid_until=$11::timestamptz,
+              SET owner_niho_user_id=$2,account_usable=$3,connect_ready=$4,payment_reuse_consent_accepted=$5,
+                  payment_reuse_consent_version=$6,payment_reuse_consented_at=$7::timestamptz,seller_display_ready=$8,
+                  seller_niho_account_ref=$9,stripe_connect_account_ref=$10,seller_display_name=$11,
+                  required_consent_version=$12,observed_at=$13::timestamptz,valid_until=$14::timestamptz,
                   version=version+1,updated_at=clock_timestamp()
-            WHERE provider_id=$1 AND version=$12
-            RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,seller_display_ready,
+            WHERE provider_id=$1 AND version=$15
+            RETURNING provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
+              payment_reuse_consent_version,payment_reuse_consented_at,seller_display_ready,
               seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
               required_consent_version,observed_at,valid_until,version,updated_at`, [...values, expectedVersion]);
       if (!result.rows[0]) throw new StoreConflictError("Publication readiness version mismatch.");
@@ -1391,6 +1512,40 @@ export class ExperiencePublicationRepository {
       [slug],
     );
     return result.rows.length === 1 ? projectPublicExperiencePublication(result.rows[0]!) : null;
+  }
+
+  /**
+   * Internal route-selection guard: a mapped host seller's current or historical slug stays reserved after
+   * stop, suspension, rename, or draft so a same-slug legacy NIHO page cannot become visible again.
+   */
+  async listClaimedSlugs(): Promise<readonly string[]> {
+    const result = await this.#pool.query<{ slug: string }>(
+      `SELECT claimed.slug FROM (
+         SELECT product.slug FROM experience_products product
+          JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+         UNION
+         SELECT publication.slug FROM experience_product_publications publication
+          JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
+       ) claimed
+       ORDER BY claimed.slug COLLATE "C"`,
+    );
+    return result.rows.map((row) => String(row.slug));
+  }
+
+  async claimsSlug(slug: string): Promise<boolean> {
+    assertNonEmptyText(slug, "slug", 160);
+    const result = await this.#pool.query(
+      `SELECT 1 FROM experience_products product
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+        WHERE product.slug=$1
+       UNION ALL
+       SELECT 1 FROM experience_product_publications publication
+        JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
+        WHERE publication.slug=$1
+       LIMIT 1`,
+      [slug],
+    );
+    return result.rows.length > 0;
   }
 
   async listPublic(): Promise<readonly PublicExperiencePublication[]> {
