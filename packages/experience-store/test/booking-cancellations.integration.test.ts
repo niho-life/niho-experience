@@ -11,7 +11,7 @@ import { GuestBookingRepository, type GuestBookingStart, type StartGuestBookingI
 import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
-import { seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 取消と返金 (#285 slice 7) against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -71,7 +71,7 @@ async function withSchema(
     );
     const store = new ExperienceStore(pool);
     const guests = new GuestBookingRepository(pool);
-    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+    await consentSupportOffForTest(guests, ownerA);
     await guests.setSaleTerms(ownerA, "walk", {
       childPricing: { priceYen: 1500, minAge: 4, maxAge: 12, adultRequired: true }, minimumParticipants: 1, maxPartySize: 6,
       cancellationPolicy: policy,

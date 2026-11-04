@@ -25,6 +25,7 @@ import { BookingCancellations } from "../src/booking-cancellations.ts";
 import { GuestBookingMessages } from "../src/booking-messages.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { ExperienceSupportRepository } from "../src/support-settlement.ts";
+import { consentSupportOffForTest } from "./helpers/experience-publication-fixtures.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
@@ -225,8 +226,8 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
         return saved;
       },
     });
-    await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
-    await guests.setProviderSaleSettings("provider-b", { supportEnabled: false });
+    await consentSupportOffForTest(guests, ownerA);
+    await consentSupportOffForTest(guests, ownerB);
     await guests.setSaleTerms(ownerA, "tea", TEA_TERMS);
     await guests.setSaleTerms(ownerA, "walk", PLAIN_TERMS);
     await guests.setSaleTerms(ownerA, "kids", KIDS_TERMS);
@@ -461,7 +462,9 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.deepEqual(await guests.sellableSlugs(["sample-walk"]), []);
 
       // A price whose fee Stripe would refuse is not for sale: with support on, 15 % of ¥6 rounds down to ¥0.
-      await guests.setProviderSaleSettings("provider-a", { supportEnabled: true });
+      await guests.setProviderSupportSettings(ownerA, {
+        supportEnabled: true, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 0,
+      });
       await pool.query("UPDATE experience_products SET unit_amount=4000,version=version+1 WHERE id='walk'");
       await pool.query("UPDATE experience_product_sale_terms SET child_price_amount=6,child_min_age=4,child_max_age=12,child_adult_required=false,version=version+1 WHERE product_id='walk'");
       await refreshTestPublication(pool, "provider-a", "walk");
@@ -527,16 +530,26 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       await assert.rejects(() => guests.startGuestBooking(walk()), StoreNotFoundError);
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM bookings")).rows[0].n, 0);
 
-      // Support off: 10 %, rounded down to the yen.
-      const off = await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
-      assert.deepEqual({ ...off, updatedAtUtc: undefined }, { providerId: "provider-a", supportEnabled: false, platformFeeBasisPoints: 1000, version: 1, updatedAtUtc: undefined });
+      // Legacy/Admin settings do not imply a host's current agreement; only explicit current consent opens new sales.
+      const legacy = await guests.setProviderSaleSettings("provider-a", { supportEnabled: false });
+      assert.equal(legacy.supportConsentVersion, null);
+      assert.equal(await guests.publicBookingTerms("sample-walk"), null);
+      const off = await guests.setProviderSupportSettings(ownerA, {
+        supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: legacy.version,
+      });
+      assert.deepEqual(
+        { supportEnabled: off.supportEnabled, platformFeeBasisPoints: off.platformFeeBasisPoints, version: off.version },
+        { supportEnabled: false, platformFeeBasisPoints: 1000, version: 2 },
+      );
       const offKey = randomUUID();
       const before = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
       assert.deepEqual(before.booking.pricingSnapshot.platformFee, { supportEnabled: false, basisPoints: 1000, amount: 333 });
 
       // Support on: 15 % for bookings taken from now on; the earlier booking and its replay keep 10 %.
-      const on = await guests.setProviderSaleSettings("provider-a", { supportEnabled: true }, 1);
-      assert.deepEqual({ supportEnabled: on.supportEnabled, basisPoints: on.platformFeeBasisPoints, version: on.version }, { supportEnabled: true, basisPoints: 1500, version: 2 });
+      const on = await guests.setProviderSupportSettings(ownerA, {
+        supportEnabled: true, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 2,
+      });
+      assert.deepEqual({ supportEnabled: on.supportEnabled, basisPoints: on.platformFeeBasisPoints, version: on.version }, { supportEnabled: true, basisPoints: 1500, version: 3 });
       const after = await guests.startGuestBooking(walk({ guestEmail: "second@example.com", adultCount: 2, expectedTotalYen: 6666 }));
       assert.deepEqual(after.booking.pricingSnapshot.platformFee, { supportEnabled: true, basisPoints: 1500, amount: 999 });
       const replay = await guests.startGuestBooking(walk({ clientRequestKey: offKey }));
