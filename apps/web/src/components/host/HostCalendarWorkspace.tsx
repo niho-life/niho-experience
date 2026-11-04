@@ -14,7 +14,6 @@ import { HOST_DIALOG } from "./HostConfirmDialog";
 import { HostWeekCalendar, productTone } from "./HostWeekCalendar";
 import { PageHead, StatusPill } from "./ui";
 
-const API_PATH = "/host/calendar/data";
 const WEEKDAYS = [
   { id: "MONDAY", label: "月" }, { id: "TUESDAY", label: "火" }, { id: "WEDNESDAY", label: "水" },
   { id: "THURSDAY", label: "木" }, { id: "FRIDAY", label: "金" }, { id: "SATURDAY", label: "土" }, { id: "SUNDAY", label: "日" },
@@ -52,7 +51,21 @@ function ErrorMessage({ error, onRetry, onReread }: { error: MutationError; onRe
 }
 
 /** Experience-owned host calendar. Browser state never decides inventory or authorization. */
-export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyManagementUrl }: { providerId: string; initialExperienceId: string | null; legacyManagementUrl: string | null }) {
+export function HostCalendarWorkspace({
+  providerId,
+  initialExperienceId,
+  legacyManagementUrl,
+  apiPath = "/host/calendar/data",
+  draftPreparation = false,
+  productEditBase = "/host/experiences",
+}: {
+  providerId: string;
+  initialExperienceId: string | null;
+  legacyManagementUrl: string | null;
+  apiPath?: string;
+  draftPreparation?: boolean;
+  productEditBase?: string;
+}) {
   const [today] = useState(todayInTokyo);
   const [activeWeek, setActiveWeek] = useState(() => weekStart(today));
   const [selectedDate, setSelectedDate] = useState(today);
@@ -80,14 +93,14 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
   const days = useMemo(() => weekDays(activeWeek), [activeWeek]);
   const fromDate = days[0]!;
   const toDate = days[6]!;
-  const channelSnapshot = useHostChannelStatuses(providerId, `${activeWeek}:${nonce}`);
+  const channelSnapshot = useHostChannelStatuses(providerId, `${activeWeek}:${nonce}`, !draftPreparation);
   const channels = channelSnapshot.kind === "disabled" ? channelSnapshot : !dataFresh || saving || pendingCommand ? { kind: "loading" as const } : channelSnapshot;
   const allChannelSummary = channelSummary(channels);
   const invalidateData = () => { requestSequence.current += 1; setDataFresh(false); };
 
   const load = useCallback((controller: AbortController, sequence: number) => {
     setLoading(true); setDataFresh(false); setReadError(null);
-    const url = new URL(API_PATH, location.origin);
+    const url = new URL(apiPath, location.origin);
     url.search = new URLSearchParams({ providerId, fromDate, toDate }).toString();
     fetch(url, { credentials: "same-origin", cache: "no-store", signal: controller.signal })
       .then(async (response) => { if (!response.ok) throw new Error(response.status === 503 ? "カレンダーを準備しています。" : "カレンダーを読み込めませんでした。"); return response.json() as Promise<HostCalendarData>; })
@@ -115,7 +128,7 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
         else setReadError(error instanceof Error ? error.message : "読み込みに失敗しました。");
       })
       .finally(() => { if (!controller.signal.aborted && sequence === requestSequence.current) setLoading(false); });
-  }, [fromDate, initialExperienceId, providerId, toDate]);
+  }, [apiPath, fromDate, initialExperienceId, providerId, toDate]);
 
   useEffect(() => { const controller = new AbortController(); const sequence = ++requestSequence.current; load(controller, sequence); return () => controller.abort(); }, [load, nonce]);
   const refreshAfterSave = (focusDate?: string) => {
@@ -137,7 +150,7 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
     savingRef.current = true;
     setSaving(true); setMutationError(null); setNotice(null);
     try {
-      const response = await fetch(API_PATH, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(command.request) });
+      const response = await fetch(apiPath, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(command.request) });
       if (!response.ok) {
         if (retrying && response.status >= 400 && response.status < 500) {
           setMutationError({ message: "保存結果を確認できません。ログインと権限を確認してください。", retryCommand: true, reauth: response.status === 401 || response.status === 403 });
@@ -203,8 +216,8 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
   const dialogFeedback = mutationError ? <ErrorMessage error={mutationError} onRetry={() => void mutate()} onReread={reread} /> : readError ? <ErrorMessage error={{ message: readError, reread: true }} onRetry={() => undefined} onReread={reread} /> : null;
 
   return <div className="space-y-3.5">
-    <PageHead title="カレンダー"><span className="hidden lg:inline-flex">{allChannelSummary ? <StatusPill status={{ ...allChannelSummary, label: `掲載先 ${allChannelSummary.label}` }} /> : null}</span><button type="button" disabled={!dataFresh || !data?.canEdit || data.preview || data.experiences.length === 0} onClick={openAdd} className={consoleButtonClass("primary", "lg", "disabled:cursor-not-allowed disabled:opacity-50")}>枠を追加</button></PageHead>
-    {data?.scope !== "OPERATOR" ? <details className="rounded-xl bg-warn-pale px-3.5 py-1.5 text-sm text-warn"><summary className="flex min-h-11 cursor-pointer items-center font-extrabold">現行NIHOの受付には未反映です</summary><p className="pb-2">販売中の枠は現行画面でも管理してください。{legacyManagementUrl ? <> <a href={legacyManagementUrl} className="inline-flex min-h-11 items-center font-extrabold underline underline-offset-4">現行画面を開く</a></> : null}</p></details> : null}
+    <PageHead title={draftPreparation ? "代理登録の開催枠" : "カレンダー"}><span className="hidden lg:inline-flex">{!draftPreparation && allChannelSummary ? <StatusPill status={{ ...allChannelSummary, label: `掲載先 ${allChannelSummary.label}` }} /> : null}</span><button type="button" disabled={!dataFresh || !data?.canEdit || data.preview || data.experiences.length === 0} onClick={openAdd} className={consoleButtonClass("primary", "lg", "disabled:cursor-not-allowed disabled:opacity-50")}>枠を追加</button></PageHead>
+    {draftPreparation ? <p className="rounded-xl bg-sand px-3.5 py-3 text-sm text-ink-soft">非公開下書きの開催枠と定員を準備します。公開・停止・既存枠の販売操作はOWNER本人の通常画面で行います。</p> : data?.scope !== "OPERATOR" ? <details className="rounded-xl bg-warn-pale px-3.5 py-1.5 text-sm text-warn"><summary className="flex min-h-11 cursor-pointer items-center font-extrabold">現行NIHOの受付には未反映です</summary><p className="pb-2">販売中の枠は現行画面でも管理してください。{legacyManagementUrl ? <> <a href={legacyManagementUrl} className="inline-flex min-h-11 items-center font-extrabold underline underline-offset-4">現行画面を開く</a></> : null}</p></details> : null}
     {notice ? <div role="status" className="flex flex-wrap items-center gap-2 rounded-xl bg-leaf-pale px-3.5 py-2.5 font-bold text-moss"><span>{notice}</span>{notice.includes("更新できません") ? <button type="button" onClick={() => setNonce((value) => value + 1)} className="min-h-11 underline underline-offset-4">再読込</button> : null}</div> : null}
     {mutationError && dialog === null ? <ErrorMessage error={mutationError} onRetry={() => void mutate()} onReread={reread} /> : null}
     {readError && dialog === null ? <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl bg-warn-pale px-3.5 py-2.5 text-warn"><span>{readError}</span><button type="button" onClick={reread} className="min-h-11 font-extrabold underline underline-offset-4">再読込</button></div> : null}
@@ -218,7 +231,7 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
       <div className="-mx-4 flex min-w-0 gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0" role="group" aria-label="体験で絞り込む">
         {data.experiences.length > 1 ? <><button type="button" aria-pressed={experienceId === ""} onClick={() => setExperienceId("")} className={`min-h-10 shrink-0 rounded-full border px-3 text-xs font-extrabold ${experienceId === "" ? "border-ink bg-sand" : "border-line-strong bg-canvas"}`}>すべて</button>{data.experiences.map((item, index) => <button key={item.id} type="button" aria-pressed={experienceId === item.id} onClick={() => setExperienceId(item.id)} className={`flex min-h-10 max-w-64 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-extrabold ${experienceId === item.id ? "border-ink bg-sand" : "border-line-strong bg-canvas"}`}><span aria-hidden="true" className={`size-2 rounded-full border ${productTone(index)}`} /><span className="truncate">{item.title}</span></button>)}</> : data.experiences[0] ? <span className="flex min-h-10 items-center gap-2 rounded-full border border-line-strong px-3 text-xs font-extrabold"><span aria-hidden="true" className={`size-2 rounded-full border ${productTone(0)}`} />{data.experiences[0].title}</span> : null}
       </div>
-      {selectedProductId ? <Link href={`/host/experiences/${encodeURIComponent(selectedProductId)}`} className="inline-flex min-h-10 shrink-0 items-center text-sm font-extrabold underline underline-offset-4">商品編集へ戻る</Link> : null}
+      {selectedProductId ? <Link href={`${productEditBase}/${encodeURIComponent(selectedProductId)}`} className="inline-flex min-h-10 shrink-0 items-center text-sm font-extrabold underline underline-offset-4">商品編集へ戻る</Link> : null}
     </div> : null}
 
     {loading && !dataFresh ? <p role="status" className="py-10 text-center text-ink-soft">読み込んでいます…</p> : null}
@@ -228,7 +241,7 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
       <div className={view === "week" ? "lg:hidden" : ""}><HostCalendarAgenda day={selectedDate} occurrences={selectedOccurrences} busyIntervals={data.busyIntervals} productIndexes={productIndexes} onOpen={openOccurrence} /></div>
     </> : null}
 
-    {dataFresh && data?.scope === "MEMBER" ? <details className={`${HOST_SURFACE} px-4 py-3`}><summary className="flex min-h-11 cursor-pointer items-center font-extrabold">Google カレンダー</summary><div className="border-t border-line pt-3 text-sm"><div className="flex flex-wrap items-center gap-2">{data.google.connected ? <><StatusPill status={{ label: data.google.syncStatus === "FRESH" ? "接続中" : "確認待ち", tone: data.google.syncStatus === "FRESH" ? "ok" : "wait" }} />{data.google.canManage ? <><button type="button" disabled={saving} onClick={() => void mutateGoogle("sync")} className="min-h-11 px-2 font-extrabold underline underline-offset-4">再確認</button><button type="button" disabled={saving} onClick={() => setDialog({ kind: "disconnect" })} className="min-h-11 px-2 font-extrabold underline underline-offset-4">接続を切る</button></> : null}</> : data.google.canManage ? <a href={withProvider("/host/calendar/google/connect", providerId)} className="inline-flex min-h-11 items-center font-extrabold underline underline-offset-4">Google カレンダーをつなぐ</a> : <span className="text-ink-soft">未接続</span>}</div>{data.google.canManage && data.google.resourceSettingsEnabled ? <HostResourceGoogleSettings key={providerId} providerId={providerId} connected={data.google.connected} /> : null}</div></details> : null}
+    {!draftPreparation && dataFresh && data?.scope === "MEMBER" ? <details className={`${HOST_SURFACE} px-4 py-3`}><summary className="flex min-h-11 cursor-pointer items-center font-extrabold">Google カレンダー</summary><div className="border-t border-line pt-3 text-sm"><div className="flex flex-wrap items-center gap-2">{data.google.connected ? <><StatusPill status={{ label: data.google.syncStatus === "FRESH" ? "接続中" : "確認待ち", tone: data.google.syncStatus === "FRESH" ? "ok" : "wait" }} />{data.google.canManage ? <><button type="button" disabled={saving} onClick={() => void mutateGoogle("sync")} className="min-h-11 px-2 font-extrabold underline underline-offset-4">再確認</button><button type="button" disabled={saving} onClick={() => setDialog({ kind: "disconnect" })} className="min-h-11 px-2 font-extrabold underline underline-offset-4">接続を切る</button></> : null}</> : data.google.canManage ? <a href={withProvider("/host/calendar/google/connect", providerId)} className="inline-flex min-h-11 items-center font-extrabold underline underline-offset-4">Google カレンダーをつなぐ</a> : <span className="text-ink-soft">未接続</span>}</div>{data.google.canManage && data.google.resourceSettingsEnabled ? <HostResourceGoogleSettings key={providerId} providerId={providerId} connected={data.google.connected} /> : null}</div></details> : null}
 
     {dialog?.kind === "add" && data ? <WorkspaceDialog title="枠を追加" closeDisabled={saving || pendingCommand !== null} onClose={closeDialog}><form onSubmit={submitRule} className="grid gap-3">
       {dialogFeedback}<fieldset disabled={saving || pendingCommand !== null} className="contents">
@@ -245,9 +258,8 @@ export function HostCalendarWorkspace({ providerId, initialExperienceId, legacyM
       {dialogFeedback}
       <div className="border-y border-line py-4"><strong className="block text-base">{dateLabel(dialog.item.localDate)}</strong><span className="mt-1 block font-display text-2xl tabular-nums">{timeLabel(dialog.item.startUtc)}–{timeLabel(dialog.item.endUtc)}</span></div>
       <div className="flex flex-wrap items-center gap-2">{statePill(dialog.item)}{(dialog.item.confirmedSeats ?? 0) > 0 || (dialog.item.heldSeats ?? 0) > 0 ? <strong className="text-sm text-info">予約あり</strong> : null}{data?.scope === "MEMBER" ? <span className="text-sm text-ink-soft">定員 {dialog.item.capacity}人</span> : null}</div>
-      <HostCalendarChannelDetails state={channels} occurrenceId={dialog.item.id} />
-      <HostAirbnbGoogleSetup key={`${providerId}:${dialog.item.experienceId}:${dialog.item.id}:${data?.google.canManage}`} providerId={providerId} productId={dialog.item.experienceId} occurrenceId={dialog.item.id} canManage={data?.scope === "MEMBER" && data.google.canManage} onBusyChange={setAirbnbBusy} />
-      {data?.canEdit ? <>{!dialog.item.canReschedule ? null : <details className="group"><summary className="flex min-h-11 cursor-pointer items-center justify-between text-sm font-bold">日時を変更<span aria-hidden="true">⌄</span></summary><form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const localDate = String(form.get("localDate")); void mutate({ action: "rescheduleOccurrence", occurrenceId: dialog.item.id, expectedVersion: dialog.item.overrideVersion ?? null, localDate, localStartTime: String(form.get("localStartTime")) }, localDate); }} className="grid gap-3 rounded-xl bg-sand p-3"><fieldset disabled={saving || pendingCommand !== null || airbnbBusy} className="contents"><div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 text-sm font-extrabold">日付<input name="localDate" type="date" defaultValue={dialog.item.localDate} required className={FIELD} /></label><label className="grid gap-1 text-sm font-extrabold">開始<input name="localStartTime" type="time" defaultValue={dialog.item.localStartTime} required className={FIELD} /></label></div><button type="submit" disabled={saving || !dataFresh || pendingCommand !== null || airbnbBusy} className={consoleButtonClass("secondary", "lg", "w-full disabled:opacity-50")}>保存</button></fieldset></form></details>}
+      {!draftPreparation ? <><HostCalendarChannelDetails state={channels} occurrenceId={dialog.item.id} /><HostAirbnbGoogleSetup key={`${providerId}:${dialog.item.experienceId}:${dialog.item.id}:${data?.google.canManage}`} providerId={providerId} productId={dialog.item.experienceId} occurrenceId={dialog.item.id} canManage={data?.scope === "MEMBER" && data.google.canManage} onBusyChange={setAirbnbBusy} /></> : null}
+      {!draftPreparation && data?.canEdit ? <>{!dialog.item.canReschedule ? null : <details className="group"><summary className="flex min-h-11 cursor-pointer items-center justify-between text-sm font-bold">日時を変更<span aria-hidden="true">⌄</span></summary><form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const localDate = String(form.get("localDate")); void mutate({ action: "rescheduleOccurrence", occurrenceId: dialog.item.id, expectedVersion: dialog.item.overrideVersion ?? null, localDate, localStartTime: String(form.get("localStartTime")) }, localDate); }} className="grid gap-3 rounded-xl bg-sand p-3"><fieldset disabled={saving || pendingCommand !== null || airbnbBusy} className="contents"><div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 text-sm font-extrabold">日付<input name="localDate" type="date" defaultValue={dialog.item.localDate} required className={FIELD} /></label><label className="grid gap-1 text-sm font-extrabold">開始<input name="localStartTime" type="time" defaultValue={dialog.item.localStartTime} required className={FIELD} /></label></div><button type="submit" disabled={saving || !dataFresh || pendingCommand !== null || airbnbBusy} className={consoleButtonClass("secondary", "lg", "w-full disabled:opacity-50")}>保存</button></fieldset></form></details>}
       <div className="sticky -bottom-4 z-10 bg-canvas pt-2 pb-1"><button type="button" disabled={saving || !dataFresh || pendingCommand !== null || airbnbBusy} onClick={() => void mutate({ action: "setSalesState", occurrenceId: dialog.item.id, expectedVersion: dialog.item.salesStateVersion ?? null, desiredState: dialog.item.status === "CLOSED" ? "OPEN" : "CLOSED" }, dialog.item.localDate)} className={consoleButtonClass("primary", "lg", "w-full disabled:opacity-50")}>{dialog.item.status === "CLOSED" ? "受付を再開" : "受付を休止"}</button></div></> : <p className="text-sm font-bold text-warn">このカレンダーは変更できません</p>}
     </div></WorkspaceDialog> : null}
     {dialog?.kind === "disconnect" ? <WorkspaceDialog title="接続を切りますか？" onClose={closeDialog}><div className="space-y-3">{dialogFeedback}<p className="text-sm text-ink-soft">{data?.google.resourceBlockingEnabled ? "予約は消えません。会場・講師のGoogle確認は、再接続または「使わない」への変更まで保留になります。" : "予約は消えません。Google の予定による受付停止は終わります。"}</p><div className="flex justify-end gap-2"><button type="button" disabled={saving} onClick={closeDialog} className={consoleButtonClass("secondary", "lg")}>やめる</button><button type="button" disabled={saving || !dataFresh} onClick={() => void mutateGoogle("disconnect")} className={consoleButtonClass("primary", "lg", "disabled:opacity-50")}>接続を切る</button></div></div></WorkspaceDialog> : null}

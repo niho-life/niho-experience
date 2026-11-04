@@ -26,7 +26,7 @@ import { productFromRow, type DbRow } from "./rows.ts";
 import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { withTransaction } from "./transaction.ts";
-import type { HostActor, JsonValue, ProductRecord } from "./types.ts";
+import type { HostActor, JsonValue, ProductRecord, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, normalizeCurrency } from "./validation.ts";
 
 export type ExperiencePublicationBlocker =
@@ -155,6 +155,13 @@ export interface ExperienceHostSellerProfile {
 
 export interface ExperienceHostProviderMembership extends ExperienceHostSellerProfile {
   readonly memberRole: "OWNER" | "EDITOR";
+}
+
+/** Name-only seller choice exposed by the Admin draft BFF. */
+export interface ExperienceAdminDraftSeller {
+  readonly providerId: string;
+  readonly providerDisplayName: string;
+  readonly sellerDisplayName: string;
 }
 
 export interface ExperiencePublicationState {
@@ -386,6 +393,64 @@ function validateChecks(checks: ExperiencePublicationContentChecks): void {
   if (typeof checks.manuscriptReady !== "boolean" || typeof checks.photosReady !== "boolean") {
     throw new StoreValidationError("Publication content checks must be booleans established by the server validator.");
   }
+}
+
+function validateAdminDraftActor(actor: PublicationAdminDraftActor): void {
+  assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+}
+
+async function adminDraftSeller(client: PoolClient, providerId: string): Promise<ExperienceHostSellerProfile> {
+  assertStoreIdentifier(providerId, "providerId");
+  const result = await client.query<DbRow>(
+    `SELECT provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,
+            stripe_connect_account_ref,seller_display_name
+       FROM experience_host_seller_profiles WHERE provider_id=$1 FOR SHARE`,
+    [providerId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new StoreNotFoundError("seller workspace");
+  return {
+    providerId: String(row.provider_id), legacyProviderId: String(row.legacy_provider_id),
+    providerDisplayName: String(row.provider_display_name), sellerNihoAccountRef: String(row.seller_niho_account_ref),
+    stripeConnectAccountRef: String(row.stripe_connect_account_ref), sellerDisplayName: String(row.seller_display_name),
+  };
+}
+
+async function requireNeverPublishedAdminDraft(
+  client: PoolClient,
+  providerId: string,
+  productId: string,
+  lock: "" | " FOR SHARE" | " FOR UPDATE" = "",
+): Promise<ProductRecord> {
+  assertStoreIdentifier(providerId, "providerId");
+  assertStoreIdentifier(productId, "productId");
+  const result = await client.query<DbRow>(
+    `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
+      WHERE p.provider_id=$1 AND p.id=$2 AND p.status='DRAFT'
+        AND NOT EXISTS (
+          SELECT 1 FROM experience_product_publications publication
+           WHERE publication.provider_id=p.provider_id AND publication.product_id=p.id
+        )${lock}`,
+    [providerId, productId],
+  );
+  if (!result.rows[0]) throw new StoreAccessDeniedError();
+  return productFromRow(result.rows[0]);
+}
+
+async function auditAdminDraft(
+  client: PoolClient,
+  actor: PublicationAdminDraftActor,
+  providerId: string,
+  productId: string,
+  action: "DRAFT_CREATED" | "DRAFT_SAVED" | "SALE_TERMS_SAVED" | "MEDIA_ADDED" | "MEDIA_SELECTION_SAVED",
+  metadata: Readonly<Record<string, JsonValue>> = {},
+): Promise<void> {
+  await client.query(
+    `INSERT INTO admin_product_draft_audit_events
+       (actor_niho_user_id,provider_id,product_id,action,metadata)
+     VALUES ($1,$2,$3,$4,$5::jsonb)`,
+    [actor.nihoUserId, providerId, productId, action, JSON.stringify(metadata)],
+  );
 }
 
 function hostSaleTerms(terms: ProductSaleTerms): ExperienceHostSaleTerms {
@@ -630,6 +695,343 @@ export class ExperiencePublicationRepository {
   readonly #pool: Pool;
 
   constructor(pool: Pool) { this.#pool = pool; }
+
+  /** Operator-provisioned seller workspaces; payment and NIHO identity references never leave the store. */
+  async listAdminDraftSellers(actor: PublicationAdminDraftActor): Promise<readonly ExperienceAdminDraftSeller[]> {
+    validateAdminDraftActor(actor);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT provider_id,provider_display_name,seller_display_name
+         FROM experience_host_seller_profiles
+        ORDER BY provider_display_name COLLATE "C",seller_display_name COLLATE "C",provider_id COLLATE "C"
+        LIMIT 500`,
+    );
+    return result.rows.map((row) => ({
+      providerId: String(row.provider_id),
+      providerDisplayName: String(row.provider_display_name),
+      sellerDisplayName: String(row.seller_display_name),
+    }));
+  }
+
+  async listAdminDraftProducts(actor: PublicationAdminDraftActor, providerId: string): Promise<readonly ProductRecord[]> {
+    validateAdminDraftActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return withTransaction(this.#pool, async (client) => {
+      await adminDraftSeller(client, providerId);
+      const result = await client.query<DbRow>(
+        `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
+          WHERE p.provider_id=$1 AND p.status='DRAFT'
+            AND NOT EXISTS (
+              SELECT 1 FROM experience_product_publications publication
+               WHERE publication.provider_id=p.provider_id AND publication.product_id=p.id
+            )
+          ORDER BY p.created_at DESC,p.id COLLATE "C" LIMIT 500`,
+        [providerId],
+      );
+      return result.rows.map(productFromRow);
+    });
+  }
+
+  async getAdminDraftProduct(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<ProductRecord> {
+    validateAdminDraftActor(actor);
+    return withTransaction(this.#pool, async (client) => {
+      await adminDraftSeller(client, providerId);
+      return requireNeverPublishedAdminDraft(client, providerId, productId);
+    });
+  }
+
+  async listAdminDraftSaleOffers(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<readonly ExperienceHostSaleOffer[]> {
+    validateAdminDraftActor(actor);
+    return withTransaction(this.#pool, async (client) => {
+      await adminDraftSeller(client, providerId);
+      await requireNeverPublishedAdminDraft(client, providerId, productId);
+      const today = tokyoDate(await databaseNow(client));
+      return (await activeRules(client, providerId, productId, today)).map(({ rule }) => ({
+        id: rule.id, localStartTime: rule.localStartTime, durationMinutes: rule.durationMinutes,
+        capacity: rule.capacity, recurrence: rule.recurrence,
+      }));
+    });
+  }
+
+  async getAdminDraftSaleTerms(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<ExperienceHostSaleTermsState> {
+    validateAdminDraftActor(actor);
+    return withTransaction(this.#pool, async (client) => {
+      await adminDraftSeller(client, providerId);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId);
+      const terms = await readSaleTerms(client, providerId, productId);
+      return { draftVersion: product.version, stateVersion: null, saleTerms: terms ? hostSaleTerms(terms) : null };
+    });
+  }
+
+  async listAdminDraftMedia(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<readonly ExperienceHostMediaAsset[]> {
+    validateAdminDraftActor(actor);
+    return withTransaction(this.#pool, async (client) => {
+      await adminDraftSeller(client, providerId);
+      await requireNeverPublishedAdminDraft(client, providerId, productId);
+      const result = await client.query<DbRow>(
+        `SELECT asset.id,asset.source_position,selection.position,selection.placement,asset.width,asset.height,asset.byte_size,
+                selection.alt_text,selection.alt_text_ja,selection.public_credit
+           FROM experience_product_media_selection selection
+           JOIN experience_product_media_assets asset
+             ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+          WHERE selection.provider_id=$1 AND selection.product_id=$2 AND asset.state='READY'
+          ORDER BY selection.position`,
+        [providerId, productId],
+      );
+      return result.rows.map((row) => ({
+        id: String(row.id), position: safeInteger(row.position, "media position"),
+        sourcePosition: safeInteger(row.source_position, "media source position"), placement: "GALLERY" as const,
+        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        altTextJa: String(row.alt_text_ja), publicCredit: row.public_credit === null ? null : String(row.public_credit),
+      }));
+    });
+  }
+
+  async createDraftAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    rawInput: ExperiencePublicationDraftCreateInput,
+  ): Promise<ProductRecord> {
+    validateAdminDraftActor(actor);
+    const id = randomUUID();
+    const input = validateDraft({ ...rawInput, id, cancellationTermsRef: randomUUID() });
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      const seller = await adminDraftSeller(client, providerId);
+      const result = await client.query<DbRow>(
+        `INSERT INTO experience_products
+           (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ($1,$2,$3,'DRAFT',$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT DO NOTHING RETURNING ${PRODUCT_COLUMNS}`,
+        [providerId, id, input.slug, input.publicTitle, JSON.stringify(input.content), input.currency,
+          input.unitAmount, input.cancellationTermsRef, seller.sellerNihoAccountRef,
+          seller.stripeConnectAccountRef, seller.sellerDisplayName],
+      );
+      if (!result.rows[0]) throw new StoreConflictError("A product with this slug already exists for the seller.");
+      await auditAdminDraft(client, actor, providerId, id, "DRAFT_CREATED");
+      return productFromRow(result.rows[0]);
+    });
+  }
+
+  async saveDraftAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    rawInput: ExperiencePublicationDraftInput,
+    expectedDraftVersion: number,
+  ): Promise<ProductRecord> {
+    validateAdminDraftActor(actor);
+    const input = validateDraft(rawInput);
+    validateExpectedVersion(expectedDraftVersion, "expectedDraftVersion");
+    if (input.id === "" || expectedDraftVersion === null) throw new StoreValidationError("expectedDraftVersion is required.");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await adminDraftSeller(client, providerId);
+      const current = await requireNeverPublishedAdminDraft(client, providerId, input.id, " FOR UPDATE");
+      if (current.version !== expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      await lockPublicationSlugs(client, [current.slug, input.slug]);
+      const updated = await client.query<DbRow>(
+        `UPDATE experience_products
+            SET slug=$3,public_title=$4,content=$5::jsonb,currency=$6,unit_amount=$7,
+                cancellation_terms_ref=$8,version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND id=$2 AND version=$9 AND status='DRAFT'
+          RETURNING ${PRODUCT_COLUMNS}`,
+        [providerId, input.id, input.slug, input.publicTitle, JSON.stringify(input.content), input.currency,
+          input.unitAmount, input.cancellationTermsRef, expectedDraftVersion],
+      );
+      if (!updated.rows[0]) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      await auditAdminDraft(client, actor, providerId, input.id, "DRAFT_SAVED");
+      return productFromRow(updated.rows[0]);
+    });
+  }
+
+  async saveSaleTermsAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    input: Pick<ExperienceHostSaleTermsSaveInput, "expectedDraftVersion" | "expectedSaleTermsVersion" | "saleTerms">,
+  ): Promise<ExperienceHostSaleTerms> {
+    validateAdminDraftActor(actor);
+    const terms = validSaleTerms(input.saleTerms);
+    validateExpectedVersion(input.expectedDraftVersion, "expectedDraftVersion");
+    validateExpectedVersion(input.expectedSaleTermsVersion, "expectedSaleTermsVersion");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await adminDraftSeller(client, providerId);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
+      if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      if (!salePriceSetMatchesProduct(product.unitAmount, terms)) {
+        throw new StoreValidationError("A free product must price every offer and child at ¥0; paid offers must meet Stripe's minimum charge.");
+      }
+      const fingerprint = questionsFingerprint(terms.bookingQuestions);
+      const child = terms.childPricing;
+      const values = [providerId, productId, child?.priceYen ?? null, child?.minAge ?? null, child?.maxAge ?? null,
+        child?.adultRequired ?? null, terms.minimumParticipants, terms.minimumChargeableParticipants, terms.maxPartySize,
+        terms.cancellationPolicy, terms.cancellationWindowMinutesBeforeStart, terms.cancellationRefundBasisPoints,
+        terms.minimumAttendance, JSON.stringify(terms.bookingQuestions), fingerprint, terms.conditionsVersion];
+      const saved = input.expectedSaleTermsVersion === null
+        ? await client.query<DbRow>(
+          `INSERT INTO experience_product_sale_terms (
+             provider_id,product_id,child_price_amount,child_min_age,child_max_age,child_adult_required,
+             minimum_participants,minimum_chargeable_participants,max_party_size,cancellation_policy,
+             cancellation_window_minutes_before_start,cancellation_refund_basis_points,minimum_attendance,
+             booking_questions,booking_questions_fingerprint,conditions_version
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)
+           ON CONFLICT DO NOTHING RETURNING ${SALE_TERMS_COLUMNS}`,
+          values,
+        )
+        : await client.query<DbRow>(
+          `UPDATE experience_product_sale_terms
+              SET child_price_amount=$3,child_min_age=$4,child_max_age=$5,child_adult_required=$6,
+                  minimum_participants=$7,minimum_chargeable_participants=$8,max_party_size=$9,cancellation_policy=$10,
+                  cancellation_window_minutes_before_start=$11,cancellation_refund_basis_points=$12,
+                  minimum_attendance=$13,booking_questions=$14::jsonb,booking_questions_fingerprint=$15,
+                  conditions_version=$16,version=version+1,updated_at=clock_timestamp()
+            WHERE provider_id=$1 AND product_id=$2 AND version=$17 RETURNING ${SALE_TERMS_COLUMNS}`,
+          [...values, input.expectedSaleTermsVersion],
+        );
+      if (!saved.rows[0]) throw new StoreConflictError("Sale terms version mismatch: read the draft again.");
+      await writeOfferPrices(client, providerId, productId, terms.offerPrices, Number(saved.rows[0].version));
+      const written = await readSaleTerms(client, providerId, productId);
+      if (!written) throw new StoreConflictError("Sale terms disappeared while saving.");
+      await auditAdminDraft(client, actor, providerId, productId, "SALE_TERMS_SAVED");
+      return hostSaleTerms(written);
+    });
+  }
+
+  async addMediaAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    input: ExperienceHostMediaAssetInput,
+  ): Promise<ExperienceHostMediaAsset> {
+    validateAdminDraftActor(actor);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) throw new StoreValidationError("media.id must be a UUID v4.");
+    assertNonEmptyText(input.objectKey, "media.objectKey", 512);
+    if (!/^[0-9a-f]{64}$/.test(input.sourceRefHash)) throw new StoreValidationError("media.sourceRefHash must be a SHA-256 digest.");
+    if (!Number.isSafeInteger(input.width) || input.width < 1 || input.width > 2400
+      || !Number.isSafeInteger(input.height) || input.height < 1 || input.height > 2400
+      || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024) {
+      throw new StoreValidationError("media dimensions and size are invalid.");
+    }
+    if (typeof input.altText !== "string" || input.altText.trim().length === 0 || input.altText.length > 500
+      || typeof input.altTextJa !== "string" || input.altTextJa.trim().length === 0 || input.altTextJa.length > 500
+      || (input.publicCredit !== null && (typeof input.publicCredit !== "string" || input.publicCredit.trim().length === 0 || input.publicCredit.length > 300))) {
+      throw new StoreValidationError("media metadata is invalid.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await adminDraftSeller(client, providerId);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
+      const next = await client.query<{ position: number }>(
+        `SELECT COALESCE(MAX(source_position)+1,0)::int AS position
+           FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2`,
+        [providerId, productId],
+      );
+      const sourcePosition = Number(next.rows[0]?.position);
+      if (!Number.isSafeInteger(sourcePosition) || sourcePosition < 0 || sourcePosition > 999) throw new StoreValidationError("A product has reached its media upload limit.");
+      const result = await client.query<DbRow>(
+        `INSERT INTO experience_product_media_assets
+           (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,public_credit,rights_confirmed_at)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,clock_timestamp())
+         RETURNING id,source_position,width,height,byte_size,alt_text,public_credit`,
+        [input.id, providerId, productId, sourcePosition, input.objectKey, input.sourceRefHash,
+          input.width, input.height, input.byteSize, input.altText, input.publicCredit],
+      );
+      const selectionPosition = Number((await client.query<{ position: number }>(
+        `SELECT COALESCE(MAX(position)+1,0)::int AS position FROM experience_product_media_selection
+          WHERE provider_id=$1 AND product_id=$2 AND placement='GALLERY'`,
+        [providerId, productId],
+      )).rows[0]?.position ?? 0);
+      await client.query(
+        `INSERT INTO experience_product_media_selection
+           (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+         VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
+        [providerId, productId, input.id, selectionPosition, input.altText, input.altTextJa, input.publicCredit],
+      );
+      const bumped = await client.query(
+        `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND id=$2 AND version=$3 AND status='DRAFT'`,
+        [providerId, productId, product.version],
+      );
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Product changed while adding media.");
+      await auditAdminDraft(client, actor, providerId, productId, "MEDIA_ADDED", { assetId: input.id });
+      const row = result.rows[0]!;
+      return {
+        id: String(row.id), position: selectionPosition, sourcePosition, placement: "GALLERY",
+        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: input.altText, altTextJa: input.altTextJa,
+        publicCredit: row.public_credit === null ? null : String(row.public_credit),
+      };
+    });
+  }
+
+  async saveMediaSelectionAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    expectedProductVersion: number,
+    items: readonly ExperienceHostMediaSelectionInput[],
+  ): Promise<readonly ExperienceHostMediaAsset[]> {
+    validateAdminDraftActor(actor);
+    validateExpectedVersion(expectedProductVersion, "expectedProductVersion");
+    if (!Array.isArray(items) || items.length > 20) throw new StoreValidationError("media selection is invalid.");
+    const ids = new Set<string>();
+    for (const item of items) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id)
+        || ids.has(item.id) || typeof item.altText !== "string" || item.altText.trim().length === 0 || item.altText.length > 500
+        || typeof item.altTextJa !== "string" || item.altTextJa.trim().length === 0 || item.altTextJa.length > 500
+        || (item.publicCredit !== null && (typeof item.publicCredit !== "string" || item.publicCredit.trim().length === 0 || item.publicCredit.length > 300))) {
+        throw new StoreValidationError("media selection item is invalid.");
+      }
+      ids.add(item.id);
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await adminDraftSeller(client, providerId);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
+      if (product.version !== expectedProductVersion) throw new StoreConflictError("Product changed while saving media selection.");
+      const existing = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM experience_product_media_assets
+          WHERE provider_id=$1 AND product_id=$2 AND state='READY' AND rights_confirmed_at IS NOT NULL
+            AND id=ANY($3::uuid[])`,
+        [providerId, productId, [...ids]],
+      );
+      if (Number(existing.rows[0]?.count ?? 0) !== ids.size) throw new StoreConflictError("A selected media asset is no longer available.");
+      await client.query("DELETE FROM experience_product_media_selection WHERE provider_id=$1 AND product_id=$2", [providerId, productId]);
+      for (const [position, item] of items.entries()) {
+        await client.query(
+          `INSERT INTO experience_product_media_selection
+             (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+           VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
+          [providerId, productId, item.id, position, item.altText, item.altTextJa, item.publicCredit],
+        );
+      }
+      const bumped = await client.query(
+        `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND id=$2 AND version=$3 AND status='DRAFT'`,
+        [providerId, productId, expectedProductVersion],
+      );
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Product changed while saving media selection.");
+      await auditAdminDraft(client, actor, providerId, productId, "MEDIA_SELECTION_SAVED", { count: items.length });
+      const result = await client.query<DbRow>(
+        `SELECT asset.id,asset.source_position,selection.position,asset.width,asset.height,asset.byte_size,
+                selection.alt_text,selection.alt_text_ja,selection.public_credit
+           FROM experience_product_media_selection selection
+           JOIN experience_product_media_assets asset
+             ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+          WHERE selection.provider_id=$1 AND selection.product_id=$2 ORDER BY selection.position`,
+        [providerId, productId],
+      );
+      return result.rows.map((row) => ({
+        id: String(row.id), position: safeInteger(row.position, "media position"),
+        sourcePosition: safeInteger(row.source_position, "media source position"), placement: "GALLERY" as const,
+        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
+        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text),
+        altTextJa: String(row.alt_text_ja), publicCredit: row.public_credit === null ? null : String(row.public_credit),
+      }));
+    });
+  }
 
   /**
    * First-login owner binding for an operator-provisioned seller profile. The only identity input is the

@@ -47,3 +47,7 @@ Experience新規販売はNIHO旧商品APIへ依存せず、旧NIHO予約をExper
 ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary、seller provisioning、商品作成・編集・販売条件・写真・公開・停止／再開API、公開read、Checkout接続を実装する。公開版はOWNERが公開時に確認した販売者と受取先を保存し、短期のreadiness期限が過ぎても掲載を維持する。通常保存で有効な公開版を更新し、photo追加後は明示publishまで公開写真を変えない。
 
 合成DB通し検証では、NIHO v1 identity/Connect応答からExperience OWNERを結び、商品作成・公開・公開read・予約holdまで確認する。追加のライフサイクル／SEO／Checkout route確認は対象テストで行う。残る条件はNIHO v1のstaging配備・service identity/origin設定、Experience DB migration/grants、GCS bucket/IAM、承認済みfee・販売者・同意文、Eの画面接続とstaging受入。本番データ・実口座・個人情報はPR検証に使わない。
+
+## 手入力・代理登録された英語原稿の本人確認
+
+OWNERはAI翻訳の生成履歴がなくても、現在の日英原稿を照合して「英語原稿を確認」を実行できる。事務局が準備した原稿も同じ操作で引き継ぐ。確認は現在の日本語と英語それぞれのfingerprintへ結び、確認処理中の変更は受け付けない。日本語・英語の再編集は確認を解除する。確認操作は外部翻訳APIを呼ばず、保存・公開時のサーバーによる原稿・fingerprint・OWNER・掲載同意の検証を通す。

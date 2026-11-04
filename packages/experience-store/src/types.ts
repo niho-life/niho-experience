@@ -27,6 +27,11 @@ export interface InventoryAdminActor {
   readonly nihoUserId: string;
 }
 
+/** Built only after the dedicated NIHO Admin HTTP session is verified. */
+export interface PublicationAdminDraftActor {
+  readonly nihoUserId: string;
+}
+
 export interface InventoryAdminProvider {
   readonly id: string;
   readonly displayName: string;

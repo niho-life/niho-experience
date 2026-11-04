@@ -59,19 +59,7 @@ import { publicationHostBoundary } from "./publication-host-boundary";
 import { publicationCollectionRequest, publicationRequest } from "./publication-http";
 import { getSitePublicExperience } from "./site-publications";
 import { sitePublicationCard, cancellationSummary } from "./site-card-model";
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const object = value as Record<string, unknown>;
-    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
-
-function fingerprint(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
-}
+import { confirmPublicationEnglish } from "@/components/host/publication-confirmation";
 
 const japanese = {
   title: "合成の体験",
@@ -99,7 +87,6 @@ const english = {
   timeline: [],
 };
 
-const sourceFingerprint = fingerprint(japanese);
 const content = {
   lead: "A synthetic Experience used to verify the NIHO v1 contract.",
   description: "A synthetic host creates a product, publishes it and accepts a booking.",
@@ -114,11 +101,7 @@ const content = {
   meetingPointDisclosure: "AFTER_BOOKING",
   meetingPoint: null,
   ja: japanese,
-  translation: {
-    sourceFingerprint,
-    confirmedSourceFingerprint: sourceFingerprint,
-    confirmedEnglishFingerprint: fingerprint(english),
-  },
+  translation: null,
 };
 
 const saleTerms = {
@@ -241,12 +224,13 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
         expectedVersion: 1,
       });
 
+      const confirmation = await confirmPublicationEnglish(() => ({ japanese, english }));
       const createResponse = await publicationCollectionRequest(new Request("https://experience.example.test/host/api/products", {
         method: "POST",
         headers: {
           origin: "https://experience.example.test", "sec-fetch-site": "same-origin", "content-type": "application/json",
         },
-        body: JSON.stringify({ slug: SLUG, publicTitle: "Synthetic contract experience", content, currency: "JPY", unitAmount: 3_000 }),
+        body: JSON.stringify({ slug: SLUG, publicTitle: "Synthetic contract experience", content: { ...content, translation: confirmation }, currency: "JPY", unitAmount: 3_000 }),
       }), "create");
       expect(createResponse.status).toBe(201);
       const created = await createResponse.json() as { product: { id: string; version: string; draft: { version?: number } } };
