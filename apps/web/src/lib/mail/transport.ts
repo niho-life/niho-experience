@@ -9,6 +9,7 @@ export interface MailMessage {
   readonly subject: string;
   readonly text: string;
   readonly html: string;
+  readonly attachments?: readonly { readonly filename: string; readonly content: Uint8Array; readonly contentType: "image/jpeg"; readonly cid: string }[];
 }
 
 /**
@@ -34,6 +35,7 @@ export interface MailTransport {
     readonly subject: string;
     readonly text: string;
     readonly html: string;
+    readonly attachments?: { readonly filename: string; readonly content: Buffer; readonly contentType: "image/jpeg"; readonly cid: string }[];
     readonly headers: Readonly<Record<string, string>>;
     readonly disableFileAccess: true;
     readonly disableUrlAccess: true;
@@ -130,6 +132,13 @@ export function createMailer(mailboxes: { readonly from: Mailbox; readonly reply
           subject: message.subject,
           text: message.text,
           html: message.html,
+          ...(message.attachments ? { attachments: message.attachments.map((attachment) => ({
+            filename: attachment.filename,
+            content: Buffer.from(attachment.content),
+            contentType: attachment.contentType,
+            cid: attachment.cid,
+            contentDisposition: "inline" as const,
+          })) } : {}),
           // RFC 3834: out-of-office replies should not answer a message sent by a program.
           headers: { "Auto-Submitted": "auto-generated" },
           disableFileAccess: true,

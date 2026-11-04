@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     saveProviderMediaSelection: vi.fn(),
     revokeProviderMedia: vi.fn(),
   },
+  meetingGuides: { readForProduct: vi.fn(), saveForProduct: vi.fn() },
   state: {} as Record<string, unknown>,
 }));
 
@@ -41,7 +42,7 @@ vi.mock("./publication-host-boundary", () => ({
   publicationHostBoundary: mocks.boundary,
   publicationHostMutationAllowed: mocks.mutationAllowed,
 }));
-vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository }));
+vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository, guestMeetingGuideRepository: () => mocks.meetingGuides }));
 vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => mocks.mediaStorage }));
 vi.mock("@/lib/editor/guide-cover-image", () => ({
   GuideCoverImageError: class extends Error { code = "invalid_image"; },
@@ -57,6 +58,7 @@ import { POST as stopProduct } from "@/app/(host)/host/api/products/[productId]/
 import { POST as uploadProductMedia } from "@/app/(host)/host/api/products/[productId]/media/route";
 import { GET as readProviderMedia, PUT as saveProviderMedia } from "@/app/(host)/host/api/provider-media/route";
 import { POST as uploadProviderMedia } from "@/app/(host)/host/api/provider-media/upload/route";
+import { GET as readBookingGuide, PUT as saveBookingGuide } from "@/app/(host)/host/api/products/[productId]/booking-guide/route";
 
 const actor = { providerId: "provider-private", nihoUserId: "niho-user-private" };
 const hostContext = {
@@ -162,6 +164,8 @@ describe("Experience owner product API", () => {
     mocks.repository.addProviderMedia.mockResolvedValue(providerMedia);
     mocks.repository.saveProviderMediaSelection.mockResolvedValue(providerMedia);
     mocks.repository.revokeProviderMedia.mockResolvedValue({ version: 6, assets: [] });
+    mocks.meetingGuides.readForProduct.mockResolvedValue({ version: null, guide: null, updatedAtUtc: null });
+    mocks.meetingGuides.saveForProduct.mockResolvedValue({ version: 1, guide: null, updatedAtUtc: "2026-11-04T01:00:00.000Z" });
   });
 
   it("creates and lists a product without accepting or returning seller/provider/payment fields", async () => {
@@ -296,6 +300,31 @@ describe("Experience owner product API", () => {
     expect(response.status).toBe(400);
     expect(mocks.coverInput).not.toHaveBeenCalled();
     expect(mocks.mediaStorage.write).not.toHaveBeenCalled();
+  });
+
+  it("keeps booking logistics in the owner-only private guide contract, separate from sale terms", async () => {
+    const guide = {
+      collectionOverview: "Blue flag", address: "1-2-3 Synthetic, Kamakura", accessInstructions: "Walk east.",
+      entranceInstructions: "Use the garden gate.", mapUrl: "https://maps.example.test/synthetic",
+      photoAssetId: "00000000-0000-4000-8000-000000000401", itemsToBring: ["Water bottle"], weatherPlan: "Move indoors.",
+    };
+    const read = await readBookingGuide(request(`/host/api/products/${product.id}/booking-guide`), context);
+    expect(read.status).toBe(200);
+    expect((await read.json()).bookingGuide).toEqual({ version: null, guide: null, updatedAtUtc: null });
+    expect(mocks.boundary).toHaveBeenCalledWith("OWNER");
+
+    const saved = await saveBookingGuide(request(`/host/api/products/${product.id}/booking-guide`, "PUT", { expectedVersion: null, guide }), context);
+    expect(saved.status).toBe(200);
+    expect(mocks.meetingGuides.saveForProduct).toHaveBeenCalledWith(actor, product.id, null, guide);
+    expect(mocks.repository.saveSaleTerms).not.toHaveBeenCalled();
+    expect(mocks.repository.saveDraft).not.toHaveBeenCalled();
+
+    const withPhone = await saveBookingGuide(request(`/host/api/products/${product.id}/booking-guide`, "PUT", {
+      expectedVersion: null, guide: { ...guide, dayOfContactPhone: "+81 90 0000 0000" },
+    }), context);
+    expect(withPhone.status).toBe(400);
+    mocks.config.experienceHostPublicationApiEnabled = false;
+    expect((await readBookingGuide(request(`/host/api/products/${product.id}/booking-guide`), context)).status).toBe(404);
   });
 
   it("rejects seller selection, old paths, stale versions and unaccepted consent", async () => {

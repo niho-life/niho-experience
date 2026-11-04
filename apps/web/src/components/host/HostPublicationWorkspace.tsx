@@ -48,7 +48,7 @@ type TermsForm = {
   cancellationWindowMinutesBeforeStart: string;
   cancellationRefundBasisPoints: string;
 };
-type Props = { productId?: string; create?: boolean };
+type Props = { productId?: string; create?: boolean; bookingGuideHref?: string };
 
 const blankContent = {
   lead: "", description: "", facts: { language: "" }, highlights: [], included: [], notIncluded: [],
@@ -200,7 +200,7 @@ function Field({ label, value, onChange, multiline = false, rows = 3, placeholde
   return <label className="block text-sm font-bold text-ink-soft">{label}{multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={rows} placeholder={placeholder} className={`${common} resize-y font-normal`} /> : <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${common} font-normal`} />}</label>;
 }
 
-export function HostPublicationWorkspace({ productId, create = false }: Props) {
+export function HostPublicationWorkspace({ productId, create = false, bookingGuideHref }: Props) {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
@@ -637,7 +637,7 @@ export function HostPublicationWorkspace({ productId, create = false }: Props) {
     <button disabled={busy || !slug.trim() || !title.trim() || asNumber(unitAmount) === null} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "下書きを作成"}</button>
   </form></HostPageBody>;
 
-  if (!productId) return <HostPageBody><PageHead title="体験" /><section className={`${HOST_SURFACE} p-4 md:p-6`}>
+  if (!productId) return <HostPageBody><PageHead title="体験">{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
     <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">あなたが販売する体験</p><Link className={consoleButtonClass("primary")} href="/host/experiences/new">体験を作成</Link></div>
     {error ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
     {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`/host/experiences/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p></div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}

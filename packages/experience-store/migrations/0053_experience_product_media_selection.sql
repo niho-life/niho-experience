@@ -2,7 +2,7 @@ BEGIN;
 
 -- Keep uploaded gallery assets and already-published media immutable. This
 -- product-scoped selection is the mutable draft gallery; seller profile media
--- has its own provider-scoped lifecycle in 0043.
+-- has its own provider-scoped lifecycle in 0054.
 ALTER TABLE experience_product_publication_media
   ADD COLUMN placement text NOT NULL DEFAULT 'GALLERY'
     CHECK (placement = 'GALLERY'),
