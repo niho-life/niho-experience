@@ -121,12 +121,12 @@ export function offerScheduleLabel(offer: HostOffer): string {
   return parts.length ? parts.join(" · ") : "日程が未入力";
 }
 
-/** "¥30,000〜": the adult price a booking starts from. */
+/** The adult price a booking starts from, or "無料" for a zero-price offer. */
 export function offerPriceLabel(offer: HostOffer): string {
   return offer.adultPriceYen === 0 ? "無料" : positive(offer.adultPriceYen) ? `${yen(offer.adultPriceYen)}〜` : "料金が未入力";
 }
 
-/** "子ども ¥12,000", under the adult price, when the offer has a child price. */
+/** A child price under the adult price, when the offer has one. */
 export function offerChildPriceLabel(offer: HostOffer): string | null {
   return offer.childPriceYen === null ? null : `子ども ${offer.childPriceYen === 0 ? "無料" : yen(offer.childPriceYen)}`;
 }
