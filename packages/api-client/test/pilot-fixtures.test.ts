@@ -143,7 +143,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
     expect(JSON.stringify(dinner)).not.toContain("niho-exterior.jpg");
   });
 
-  it("Community Dinner reflects the approved source terms and staging-only provisional price", async () => {
+  it("Community Dinner reflects the owner's instant-confirmation decision and staging-only provisional price", async () => {
     const dinner = experiences.find((experience) => experience.slug === "kamakura-community-dinner");
     expect(dinner?.title).toBe("Kamakura Community Dinner with Locals");
     expect(dinner?.seller.displayName).toBe("パナソニックホールディングス株式会社");
@@ -169,7 +169,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
         weekdays: [0, 1, 2, 3, 4, 5, 6],
         capacity: 8,
         maxPartySize: 8,
-        acceptanceMode: "APPROVAL",
+        acceptanceMode: "INSTANT",
         cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
       },
       {
@@ -181,7 +181,7 @@ describe("pilot fixture（テストサイト用・推奨値）", () => {
         weekdays: [0, 1, 2, 3, 4, 5, 6],
         capacity: 8,
         maxPartySize: 8,
-        acceptanceMode: "APPROVAL",
+        acceptanceMode: "INSTANT",
         cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
       },
     ]);
