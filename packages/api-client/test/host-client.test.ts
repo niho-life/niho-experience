@@ -33,31 +33,9 @@ describe("NIHO host common client v1.0.0", () => {
   });
 
   it("rejects unsafe IDs and query keys before a request is sent", async () => {
-    const fetch = vi.fn(async () => Response.json({ bookings: [], nextCursor: null }));
+    const fetch = vi.fn(async () => Response.json({ legacyProviderId: "sample-provider-kitchen", stripeAccountId: null, readiness: { ready: false, reason: "NOT_CONNECTED" }, paymentReuseConsent: { accepted: false, version: null, consentedAt: null } }));
     const client = createExperienceHostApiClient({ ...OPTIONS, fetch });
     expect(await client.getLegacyConnectAccount("../owner")).toMatchObject({ ok: false, kind: "error", status: 404 });
-    expect(await client.listLegacyProviderBookings("provider-a", { cursor: "cursor", unused: "x" } as never)).toMatchObject({ ok: false, kind: "invalid_request" });
     expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("keeps old NIHO booking lookup and refund cancellation inside the v1.0 allowlist", async () => {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const fetch = vi.fn(async (input: string, init?: RequestInit) => {
-      calls.push({ url: input, ...(init ? { init } : {}) });
-      const cancel = new URL(input).pathname.endsWith("/cancel");
-      return Response.json(cancel ? { status: "CANCELLED", refundedYen: 12000 } : { bookings: [], nextCursor: null }, { status: 200 });
-    });
-    const client = createExperienceHostApiClient({ ...OPTIONS, fetch });
-    expect(await client.listLegacyProviderBookings("legacy-provider", { pageId: "legacy-page", status: "CONFIRMED" })).toEqual({ ok: true, data: { bookings: [], nextCursor: null } });
-    expect(await client.cancelLegacyProviderBooking("legacy-provider", "legacy-page", "request-1", { refund: "FULL", reason: "HOST_CANNOT_HOST", message: "合成の理由" })).toEqual({ ok: true, data: { status: "CANCELLED", refundedYen: 12000 } });
-    expect(calls[0]?.url).toBe(`${ORIGIN}/api/experience-providers/legacy-provider/bookings?pageId=legacy-page&status=CONFIRMED`);
-    expect(calls[1]?.url).toBe(`${ORIGIN}/api/experience-providers/legacy-provider/pages/legacy-page/bookings/request-1/cancel`);
-    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ refund: "FULL", reason: "HOST_CANNOT_HOST", message: "合成の理由" });
-    for (const call of calls) {
-      const headers = new Headers(call.init?.headers);
-      expect(headers.get("authorization")).toBe(`Bearer ${ACCESS}`);
-      expect(headers.get("x-niho-experience-service-id-token")).toBe(MOCK_EXPERIENCE_HOST_SERVICE_TOKEN);
-      expect(call.init).toMatchObject({ cache: "no-store", credentials: "omit", redirect: "error" });
-    }
   });
 });

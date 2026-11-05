@@ -1,7 +1,7 @@
 import { HOST_EXPERIENCES_PATH } from "@/lib/host/routes";
 import { bookingSessions, bookingsHref, seatsLabel, sessionHref, type BookingDialogSubject, type BookingExperience, type BookingSession, type SessionQuery } from "./bookings";
 import { addDays, agoJa, dateWithWeekdayJa, dayOfMonth, durationJa, listJa, missingLine, monthDayJa, remainingJa, shortDateWithWeekdayJa, todayInJapan, weekdayJa, yen } from "./format";
-import { guestMessageView, lastGuestMessage, messagesHref, quoteJa, sortThreads, threadKind, waitingSince, type MessagesQuery } from "./messages";
+import { guestMessageView, lastGuestMessage, messagesHref, quoteJa, sortThreads, threadKind, waitingSince } from "./messages";
 import { HOME_REVIEW_LIMIT, reviewerLabel, reviewReplyStage, reviewsHref, reviewsToAttend } from "./reviews";
 import { salesSummary, type SalesFigure, type SalesMonth } from "./sales";
 import { attendanceCounts, dietarySummary, SESSION_PHASE_LABELS, sessionBookings, sessionPhase } from "./session";
@@ -50,8 +50,6 @@ export interface HomeUpcoming {
   dietary: string;
   /** Today's rows only: 開始前 / 開催中 / 終了, and "終了 · 出欠が未記録" (warn) while attendance is still to record. */
   phase: { text: string; tone: "warn" | "muted" } | null;
-  /** Where the row's bookings come from when it is said: "このサイトの予約" beside NIHO's bookings (#285 slice 8b). */
-  source?: string;
 }
 
 /** ホーム's month card: its numbers, and whose they are when that needs saying. */
@@ -100,9 +98,9 @@ function requestTodos(experiences: readonly HostExperience[], bookings: readonly
 /**
  * The threads waiting for the host (#106), the longest wait first: the guest's latest words in
  * Japanese (the original when NIHO could not translate them), who and how long ago. 返信する opens
- * the thread in メッセージ; `source` is the threads' source there (`site`: this site's, see MessagesQuery).
+ * the thread in メッセージ.
  */
-export function threadTodos(threads: readonly HostThread[], now: string, source: MessagesQuery["source"] = null): HomeTodo[] {
+export function threadTodos(threads: readonly HostThread[], now: string): HomeTodo[] {
   return sortThreads(threads).flatMap((thread) => {
     const message = waitingSince(thread) ? lastGuestMessage(thread) : null;
     if (!message) return [];
@@ -115,7 +113,7 @@ export function threadTodos(threads: readonly HostThread[], now: string, source:
         title: quoteJa(view.text),
         detail: [`${thread.guest} さん`, agoJa(message.at, now), ...(view.note ? [view.note] : [])].join(" · "),
         approval: null,
-        action: { label: "返信する", href: messagesHref({ source, thread: thread.id }), primary: true },
+        action: { label: "返信する", href: messagesHref({ thread: thread.id }), primary: true },
       },
     ];
   });
@@ -237,11 +235,10 @@ export interface LiveHomeSources {
 /**
  * 次にすること in http mode, in the preview's order after its requests (this site's bookings are confirmed at once): the
  * threads waiting for an answer, the reviews to answer, the drafts to finish, the listings under review. The threads are
- * this site's (the experience DB's), so 返信する says `source=site`: beside NIHO's booking messages (provider operations
- * on) メッセージ opens this site's threads only with it, and without NIHO's it ignores it.
+ * Experience threads and open directly in メッセージ.
  */
 export function liveHomeTodos(sources: LiveHomeSources): HomeTodo[] {
-  return [...threadTodos(sources.threads, sources.now, "site"), ...reviewTodos(sources.reviewExperiences, sources.reviews), ...pageTodos(sources.pages, sources.listings)];
+  return [...threadTodos(sources.threads, sources.now), ...reviewTodos(sources.reviewExperiences, sources.reviews), ...pageTodos(sources.pages, sources.listings)];
 }
 
 /** Where 次にすること reads from in http mode, each of which may fail on its own. */

@@ -1,18 +1,14 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { HostMessages } from "@/components/host/HostMessages";
-import { HostLiveBookings } from "@/components/host/HostLiveBookings";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSubHeader } from "@/components/host/HostSubHeader";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
-import { hostPageContext, loadHostMessages } from "@/host/data";
-import { countSiteBookingThreads, GUEST_QUESTION_LOAD_FAILED_TEXT, loadGuestQuestions, type HostGuestQuestionsLoad } from "@/host/guest-questions-server";
-import { messagesHref } from "@/host/messages";
+import { hostPageContext } from "@/host/data";
+import { GUEST_QUESTION_LOAD_FAILED_TEXT, loadGuestQuestions, type HostGuestQuestionsLoad } from "@/host/guest-questions-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
-import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 
 export const metadata: Metadata = { title: "メッセージ" };
 
@@ -20,7 +16,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 const UNAVAILABLE = {
   title: "この画面は準備中です",
-  body: "予約後のWeb返信と予約者への個別連絡は、NIHO との接続を有効にしたあと、ここから読み書きできます。予約前の質問はまだ利用できません。",
+  body: "Experience のメッセージ接続を有効にすると、予約前の質問とExperience予約の会話をここで確認できます。",
 };
 
 /** HTTP rollout gate while the provider booking conversation contract is disabled; also the questions' read failure. */
@@ -39,19 +35,8 @@ function MessagesUnavailable({ homeHref, title = UNAVAILABLE.title, body = UNAVA
   );
 }
 
-/** Above NIHO's booking messages (provider operations): the way to the threads of bookings made on this site (#285 slice 6b). */
-function SiteThreadsNotice({ count, href }: { count: number; href: string }) {
-  return (
-    <p className="mb-3.5 rounded-xl bg-sand p-3 text-sm">
-      <Link href={href} className="font-extrabold text-ink underline underline-offset-2">
-        このサイトで受けた予約のメッセージが {count} 件あります
-      </Link>
-    </p>
-  );
-}
-
 /** The threads kept in the experience DB (questions, and this site's bookings' messages) as the client screen shows them. */
-function SiteThreads({ questions, provider, linkProviderId, besideNiho }: { questions: Extract<HostGuestQuestionsLoad, { status: "live" }>; provider: HostProvider; linkProviderId: string | null; besideNiho: boolean }) {
+function SiteThreads({ questions, provider, linkProviderId }: { questions: Extract<HostGuestQuestionsLoad, { status: "live" }>; provider: HostProvider; linkProviderId: string | null }) {
   if (questions.requestedMissing) notFound();
   return (
     <HostMessages
@@ -64,7 +49,7 @@ function SiteThreads({ questions, provider, linkProviderId, besideNiho }: { ques
       linkProviderId={linkProviderId}
       providerId={provider.id}
       providerName={provider.displayName}
-      live={{ loaded: questions.loaded, nextCursor: questions.nextCursor, besideNiho }}
+      live={{ loaded: questions.loaded, nextCursor: questions.nextCursor }}
     />
   );
 }
@@ -76,8 +61,7 @@ function SiteThreads({ questions, provider, linkProviderId, besideNiho }: { ques
  * from the query and moves between threads without loading this page again.
  *
  * Bookings made on this site (#285 slice 6b) have their threads among the questions (`?booking=` opens one from 予約
- * or この回, empty until the host's first message). Beside NIHO's booking messages (provider operations) the screen
- * stays NIHO's, with a notice that leads to this site's threads (`?source=site`), which every link keeps.
+ * or この回, empty until the host's first message).
  */
 export default async function HostMessagesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -91,37 +75,8 @@ export default async function HostMessagesPage({ searchParams }: { searchParams:
   const thread = [query.thread].flat()[0] || null;
   const booking = [query.booking].flat()[0] || null;
   const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
-  if (providerOperationsEnabled()) {
-    if ([query.source].flat()[0] === "site") {
-      const site = await loadGuestQuestions(provider, thread, booking);
-      if (site.status === "error") return <MessagesUnavailable homeHref={homeHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
-      if (site.status === "live") return <SiteThreads questions={site} provider={provider} linkProviderId={linkProviderId} besideNiho />;
-    }
-    const count = await countSiteBookingThreads(provider);
-    const notice = count > 0 ? <SiteThreadsNotice count={count} href={messagesHref({ providerId: linkProviderId, source: "site" })} /> : null;
-    return <><HostSubHeader backHref={homeHref} backLabel="ホーム" title="" /><HostLiveBookings key={`${provider.id}/messages`} providerId={provider.id} initialBookingId={booking} mode="messages" siteNotice={notice} /></>;
-  }
-  // 予約前の質問 and this site's bookings' messages kept in the experience DB (#106, #285 slice 6b): the OWNER's threads.
-  // Anyone else, or while closed, keeps the screen below.
   const questions = await loadGuestQuestions(provider, thread, booking);
   if (questions.status === "error") return <MessagesUnavailable homeHref={homeHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
-  if (questions.status === "live") return <SiteThreads questions={questions} provider={provider} linkProviderId={linkProviderId} besideNiho={false} />;
-  const { list, requested, experiences, today, now } = await loadHostMessages(provider, { thread, booking });
-  if (list.status === "unavailable") return <MessagesUnavailable homeHref={homeHref} />;
-  // Another provider's thread or booking, a booking that can no longer be written to, or none at all.
-  if (requested?.status === "missing") notFound();
-  return (
-    // Keyed by provider: another provider's threads start from their own list.
-    <HostMessages
-      key={provider.id}
-      threads={list.threads}
-      newThread={requested?.status === "new" ? requested.thread : null}
-      experiences={experiences}
-      today={today}
-      now={now}
-      linkProviderId={linkProviderId}
-      providerId={provider.id}
-      providerName={provider.displayName}
-    />
-  );
+  if (questions.status === "closed") return <MessagesUnavailable homeHref={homeHref} />;
+  return <SiteThreads questions={questions} provider={provider} linkProviderId={linkProviderId} />;
 }

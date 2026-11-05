@@ -55,32 +55,26 @@ describe("loadSiteHome", () => {
   it("reads the OWNER's sessions from the start of today in Japan into today's rows and 次にすること", async () => {
     // 01:30 on 1 November in Japan.
     vi.useFakeTimers({ now: Date.parse("2026-10-31T16:30:00.000Z"), toFake: ["Date"] });
-    const load = await loadSiteHome(OWNER, false);
+    const load = await loadSiteHome(OWNER);
     expect(state.store?.listGuestSessionsForHost).toHaveBeenCalledWith(ACTOR, { from: "2026-10-31T15:00:00.000Z", limit: 100 });
     expect(load.status).toBe("live");
     if (load.status !== "live") return;
-    expect(load.sessions.today.map((row) => [row.title, row.seats, row.bookings, row.phase?.text, row.source])).toEqual([["Synthetic tea ceremony", "3名", "2件", "開始前", undefined]]);
+    expect(load.sessions.today.map((row) => [row.title, row.seats, row.bookings, row.phase?.text])).toEqual([["Synthetic tea ceremony", "3名", "2件", "開始前"]]);
     expect(load.sessions.tomorrow).toEqual([]);
     expect(load.todos.map((todo) => [todo.title, todo.action?.href])).toEqual([["確認待ちの支払いがあります", "/host/bookings/session?date=2026-11-01&start=10%3A00&experience=tea&offer=sample-am"]]);
     expect(JSON.stringify(load)).not.toMatch(/@|\+81|Sample Guest/);
   });
 
-  it("labels the rows and keeps ?source=site beside NIHO's bookings", async () => {
-    vi.useFakeTimers({ now: Date.parse("2026-10-31T16:30:00.000Z"), toFake: ["Date"] });
-    const load = await loadSiteHome(OWNER, true);
-    expect(load.status === "live" && load.sessions.today[0]).toMatchObject({ source: "このサイトの予約", href: expect.stringContaining("source=site") });
-  });
-
   it("keeps today's screen while closed, for anyone but the owner, and says when the DB fails", async () => {
     for (const memberRole of ["EDITOR", "COHOST"] as const) {
-      expect(await loadSiteHome({ ...OWNER, memberRole }, false)).toEqual({ status: "closed" });
+      expect(await loadSiteHome({ ...OWNER, memberRole })).toEqual({ status: "closed" });
     }
     state.store!.listGuestSessionsForHost!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadSiteHome(OWNER, false)).toEqual({ status: "closed" });
+    expect(await loadSiteHome(OWNER)).toEqual({ status: "closed" });
     state.store!.listGuestSessionsForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await loadSiteHome(OWNER, false)).toEqual({ status: "error" });
+    expect(await loadSiteHome(OWNER)).toEqual({ status: "error" });
     state.store = null;
-    expect(await loadSiteHome(OWNER, false)).toEqual({ status: "closed" });
+    expect(await loadSiteHome(OWNER)).toEqual({ status: "closed" });
   });
 });
 

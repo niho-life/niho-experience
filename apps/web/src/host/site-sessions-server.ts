@@ -40,18 +40,17 @@ export type HostSiteHomeLoad =
   | { status: "error" };
 
 /**
- * ホーム for an OWNER (NIHO's role): the provider's sessions with guests from this site from the start of today in
- * Japan, and 次にすること for the payments under review. `besideNiho`: NIHO's bookings are 予約's own (provider
- * operations), so the rows say they are this site's and lead to この回 with `?source=site`.
+ * ホーム for an OWNER (NIHO's role): the provider's Experience sessions with guests from today in Japan, and
+ * 次にすること for the payments under review.
  */
-export async function loadSiteHome(provider: HostProvider, besideNiho: boolean): Promise<HostSiteHomeLoad> {
+export async function loadSiteHome(provider: HostProvider): Promise<HostSiteHomeLoad> {
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
   const now = Date.now();
   const today = todayInJapan(now);
   try {
     const sessions = await bookings.listGuestSessionsForHost(ownerActor(provider), { from: startOfJapanDay(today), limit: HOME_SESSION_LIMIT });
-    return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now), besideNiho), todos: siteHomeTodos(sessions, besideNiho) };
+    return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now)), todos: siteHomeTodos(sessions) };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }

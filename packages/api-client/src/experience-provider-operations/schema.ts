@@ -3,8 +3,6 @@ import addFormatsModule from "ajv-formats";
 import contractDocument from "../../contract/experience-provider-operations-api.openapi.json" with { type: "json" };
 import { toJsonSchema } from "../public-schema-validation.ts";
 import type {
-  ExperienceProviderCancelBookingInput,
-  ExperienceProviderMessageInput,
   ExperienceProviderPutMemberInput,
   ExperienceProviderResolveMemberInput,
 } from "./types.ts";
@@ -35,14 +33,7 @@ export function isExperienceProviderOperationsSchema<T>(name: string, value: unk
 export const isExperienceProviderOperationPathId = (value: unknown): value is string =>
   typeof value === "string" && value.length >= 1 && value.length <= 200 && value !== "." && value !== ".." && !/[/\\%\u0000-\u001f\u007f]/.test(value);
 
-export const isExperienceProviderBookingCursor = (value: unknown): value is string =>
-  typeof value === "string" && value.length >= 1 && value.length <= 2048 && !/[\u0000-\u001f\u007f]/.test(value);
-
 export const decodeExperienceProviderResolveMemberInput = (value: unknown): ExperienceProviderResolveMemberInput | null =>
   isExperienceProviderOperationsSchema<ExperienceProviderResolveMemberInput>("ResolveMemberInput", value) ? value : null;
 export const decodeExperienceProviderPutMemberInput = (value: unknown): ExperienceProviderPutMemberInput | null =>
   isExperienceProviderOperationsSchema<ExperienceProviderPutMemberInput>("PutMemberInput", value) ? value : null;
-export const decodeExperienceProviderCancelBookingInput = (value: unknown): ExperienceProviderCancelBookingInput | null =>
-  isExperienceProviderOperationsSchema<ExperienceProviderCancelBookingInput>("CancelBookingInput", value) ? value : null;
-export const decodeExperienceProviderMessageInput = (value: unknown): ExperienceProviderMessageInput | null =>
-  isExperienceProviderOperationsSchema<ExperienceProviderMessageInput>("MessageInput", value) ? value : null;

@@ -85,12 +85,12 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `false` | NIHO Host v1のidentity/Connect readとExperience OWNER boundaryを使うhost BFF。NIHO v1の配備・service identity許可・exact origin・stg受入までOFF。提供者一覧やNIHO商品APIは使わない。audienceはhost consoleの基礎設定として別途必要。詳細は[consumer contract](host-niho-v1-consumer.md) |
 | `EXPERIENCE_PUBLICATION_CONSENT_VERSION` | 未設定 | 掲載同意の承認済み版。BFFからホストへ返す版識別子で、承認された同意文と対にしてのみ設定する。未設定なら同意不足として公開不可 |
 | `EXPERIENCE_PROVIDER_PAGES_API_ENABLED` | `false` | legacy NIHO provider-pages API。Experience商品の原稿・写真・公開には使わず、flagを開かない |
-| `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `false` | OWNER/COHOSTの予約・メッセージ・提供者チーム操作。体験ページAPIも含む。認証PR #19282/#19353、API PR #19405、consumer PR #170の配備・受入後にだけ開く。Admin consoleとは独立 |
+| `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `false` | OWNER/COHOSTの提供者メンバー操作と体験ページAPI。NIHO予約操作はExperience consumerから撤去済み。認証PR #19282/#19353、API PR #19405、consumer PR #170の配備・受入後にだけ開く。Admin consoleとは独立 |
 | `EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED` | `false` | mock mode専用の合成UI確認。HTTP失敗時のfallbackには使わない |
 | `EXPERIENCE_RESOURCE_GOOGLE_ENABLED` / `EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED` | `false` | 資源別Google busy入力とwatchを段階的に開く。mock/previewはbrowser stubだけで、実OAuth・DB・workerを開かない |
 | `EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL` | 未設定 | watch有効時の本番公開HTTPS URL（`/api/google/calendar/watch`）。preview・localhostは指定しない |
 | `EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED` / `EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED` | `false` | Cloud Scheduler が呼ぶ Google の busy 照合と予約カレンダー書き込みの job（#238、[experience-runtime.md](experience-runtime.md#google-の-job)）。mock/preview では開かない |
-| `EXPERIENCE_TRANSLATE_API_ENABLED` | `false` | 予約詳細の「通訳を始める」（#181）のBFF。http modeでは`HOST_CONSOLE_ENABLED=true`とDBが前提。NIHO予約の通訳はguest sales flagに依存しない。Experience DB予約はguest sales OFFでもOWNERのread-only画面と通訳pathだけ開き、guest checkout・予約変更・取消/返金・メールは開かない。NIHO新APIとstgのOWNER・store所属・予約状態・旧/site source分離・create/poll/endの受入後にだけ開く。mockはflagなしで旧/site両pathを合成する |
+| `EXPERIENCE_TRANSLATE_API_ENABLED` | `false` | Experience予約詳細の「通訳を始める」（#181）のBFF。http modeでは`HOST_CONSOLE_ENABLED=true`とDBが前提。guest sales flagに依存しない。guest checkout・予約変更・取消/返金・メールは開かない。NIHO APIとstgのOWNER・store所属・予約状態・create/poll/endの受入後にだけ開く。mockはflagなしでExperience予約とstandalone pathを合成する |
 | `HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightが選別契約形のbrowser responseをstubし、BFF・実保存は開かない |
 | `EXPERIENCE_FEE_SUMMARY_API_ENABLED` | `false` | Admin/Host共通の予約別実料金・精算GET。HTTP modeかつ各console/sessionが有効で、NIHO側API配備・受入後だけ開く |
 | `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightのbrowser stubだけを使い、実BFFや合成成功fallbackは開かない |

@@ -17,8 +17,6 @@ import type { HostAttendance, HostBooking } from "./types";
  * Type-only use of the store: the screens' client code shares these rules and texts.
  */
 
-/** Beside NIHO's bookings (provider operations on): the rows and the todos of this site's bookings say so. */
-export const SITE_SESSION_LABEL = "このサイトの予約";
 /** 次にすること for a session with payments under review (確認待ち). */
 export const SITE_PAYMENT_REVIEW_TODO_TITLE = "確認待ちの支払いがあります";
 /** ホーム when the sessions could not be read: the rows and todos above may be missing some. */
@@ -41,9 +39,9 @@ function queryOf(session: HostGuestSession): SessionQuery {
   return { date: session.localDate, start: session.localStartTime, experience: session.productId, offer: session.offerId };
 }
 
-/** この回 of a session of this site; beside NIHO's bookings with `?source=site`, so "‹ 予約" goes back to this site's. */
-export function siteSessionHref(session: HostGuestSession, besideNiho: boolean): string {
-  return sessionHref({ ...queryOf(session), source: besideNiho ? "site" : null });
+/** この回 of a session of this site. */
+export function siteSessionHref(session: HostGuestSession): string {
+  return sessionHref(queryOf(session));
 }
 
 /** HH:MM in Japan of the session's end. */
@@ -51,12 +49,12 @@ function endOf(session: Pick<HostGuestSession, "localDate" | "endUtc">): string 
   return actionTime(session.localDate, Date.parse(session.endUtc)).slice(11);
 }
 
-function homeRow(session: HostGuestSession, now: string | null, besideNiho: boolean): HomeUpcoming {
+function homeRow(session: HostGuestSession, now: string | null): HomeUpcoming {
   const minutes = Math.round((Date.parse(session.endUtc) - Date.parse(session.startUtc)) / 60_000);
   const span = { date: session.localDate, start: session.localStartTime, end: endOf(session) };
   return {
     key: `site/${session.localDate}T${session.localStartTime}/${session.productId}/${session.offerId}`,
-    href: siteSessionHref(session, besideNiho),
+    href: siteSessionHref(session),
     dateLabel: dateWithWeekdayJa(session.localDate),
     weekday: weekdayJa(session.localDate),
     day: dayOfMonth(session.localDate),
@@ -69,25 +67,24 @@ function homeRow(session: HostGuestSession, now: string | null, besideNiho: bool
     dietary: "",
     // No attendance is kept for them: today's rows say only where the session stands.
     phase: now ? { text: SESSION_PHASE_LABELS[sessionPhase(span, now)], tone: "muted" } : null,
-    ...(besideNiho ? { source: SITE_SESSION_LABEL } : {}),
   };
 }
 
 /**
  * ホーム's 今日・明日・これからの開催 from this site's sessions (the nearest first, from today): today's also once
- * started or over, tomorrow's, and `limit` after that, as homeSessions splits NIHO's. `now` is YYYY-MM-DDTHH:MM in Japan.
+ * started or over, tomorrow's, and `limit` after that. `now` is YYYY-MM-DDTHH:MM in Japan.
  * Who may come counts the confirmed bookings and the payments under review (the store's participants).
  */
-export function siteHomeSessions(sessions: readonly HostGuestSession[], now: string, besideNiho: boolean, limit = 3): HomeSessions {
+export function siteHomeSessions(sessions: readonly HostGuestSession[], now: string, limit = 3): HomeSessions {
   const [today = ""] = now.split("T");
   const tomorrow = addDays(today, 1);
   return {
-    today: sessions.filter((session) => session.localDate === today).map((session) => homeRow(session, now, besideNiho)),
-    tomorrow: sessions.filter((session) => session.localDate === tomorrow).map((session) => homeRow(session, null, besideNiho)),
+    today: sessions.filter((session) => session.localDate === today).map((session) => homeRow(session, now)),
+    tomorrow: sessions.filter((session) => session.localDate === tomorrow).map((session) => homeRow(session, null)),
     later: sessions
       .filter((session) => session.localDate > tomorrow)
       .slice(0, limit)
-      .map((session) => homeRow(session, null, besideNiho)),
+      .map((session) => homeRow(session, null)),
   };
 }
 
@@ -95,23 +92,22 @@ export function siteHomeSessions(sessions: readonly HostGuestSession[], now: str
  * 次にすること: one row per session with payments under review (確認待ち: paid after the hold ended, no seat kept),
  * leading to この回. Nothing on the screen settles them yet (NIHO support does), so they are not in the app badge.
  */
-export function siteHomeTodos(sessions: readonly HostGuestSession[], besideNiho: boolean): HomeTodo[] {
+export function siteHomeTodos(sessions: readonly HostGuestSession[]): HomeTodo[] {
   return sessions
     .filter((session) => session.paymentReviews > 0)
     .map((session) => ({
       key: `site-payment-review/${session.localDate}T${session.localStartTime}/${session.productId}/${session.offerId}`,
       status: BOOKING_STATUS.payment_review,
-      aside: besideNiho ? { text: SITE_SESSION_LABEL, tone: "muted" } : null,
+      aside: null,
       title: SITE_PAYMENT_REVIEW_TODO_TITLE,
       detail: [`${shortDateWithWeekdayJa(session.localDate)}${session.localStartTime}`, session.productTitle, `${session.paymentReviews} 件`, "席は確保されていません"].join(" · "),
       approval: null,
-      action: { label: "この回を見る", href: siteSessionHref(session, besideNiho), primary: false },
+      action: { label: "この回を見る", href: siteSessionHref(session), primary: false },
     }));
 }
 
 /**
- * ホーム with this site's part: its todos first (NIHO's are none in http mode yet), and its sessions after NIHO's
- * on each day. Without NIHO's bookings they are the whole screen; beside them, each row says it is this site's.
+ * ホーム with this site's Experience reservations and sessions.
  */
 export function withSiteHome(home: HostHomeData, site: SiteHome): HostHomeData {
   return {

@@ -17,9 +17,8 @@ describe("translate room DTOs", () => {
     expect(text).not.toContain("inviteCode");
   });
 
-  it("予約sourceごとに旧BFFとsite専用BFFを混ぜない", () => {
-    expect(translateRoomsBffPath("niho", "provider 1", "booking/1")).toBe("translate/providers/provider%201/bookings/booking%2F1/rooms");
-    expect(translateRoomsBffPath("site", "provider 1", "booking/1")).toBe("translate/site/providers/provider%201/bookings/booking%2F1/rooms");
+  it("uses the Experience-only booking path", () => {
+    expect(translateRoomsBffPath("provider 1", "booking/1")).toBe("translate/site/providers/provider%201/bookings/booking%2F1/rooms");
   });
 
   it("turns the participants list into host and guest, missing roles not joined", () => {

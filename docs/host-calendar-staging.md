@@ -113,7 +113,7 @@ Cloud Runのservice URLは `status.url` のhash形式に加え、service名・pr
 3. 成功runのSHA・revision・**Cloud Run runtime image digest**を確認し、`action=promote` に同じ値を指定する。DockerがOCI indexをpushした場合はCloud Runが使う`linux/amd64`子manifest digestを入力し、pushed image digestとは区別する。対象commitがmainに残り、構成が現在の保護設定と一致することを再確認する。候補を100%にした**後**、stable serviceへの未認証アクセスを許可する。初回placeholderを公開しない。`robots.txt`・host入口・配信revisionを検査し、失敗時は直前のtrafficへ戻す。初回で失敗した場合はIAM checkも有効へ戻す。昇格の成功・失敗いずれでも対象候補のtagを除去する。候補作成/GET検査が失敗した場合も今回runのtagを除去し、別候補のtagは触らない。rollbackやtag除去も失敗した場合は手動readbackして復旧する。
 4. Google Chromeでブラウザ名とstg URLを確認し、合成ホストでNIHOログイン→カレンダー→Google接続→合成busy表示→日程/休止保存→失効/切断→再接続を確認する。別提供者/別userの操作拒否、非OWNERのGoogle接続拒否、古い同期時の受付停止、cookieのHttpOnly/Secure/SameSite、tokenがstorage/公開cache/計測へ出ないことも確認する。ブラウザの画面だけでなく、専用DBへの保存・権限を非公開の管理経路で確認する。
 5. `SITE_INDEXING=block`、`HOST_SIGNUP_MODE=pilot` は固定。`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED=true` のときだけ `true`（Stripe テストモード、下の「旅行者の予約」）、それ以外は `false`。ほかの機能は下の「[機能のフラグ](#機能のフラグ84)」の Environment Variable で開く（既定は OFF。PWA だけ今までどおり ON）。この手順（カレンダー）の受入では、ゲスト予約・販売・本番Google接続を受け入れたとは扱わない（予約は下の受入で扱う）。定期同期workerの配備もこのworkflowの対象外で、同期が古いときの受付停止を確認する。
-  通訳（`STG_TRANSLATE_API_ENABLED=true`）はguest salesから独立する。sales OFFでも既存Experience予約をOWNERのread-only詳細へ表示し、通訳だけ使える。guest checkout・予約変更・取消/返金・メールは開かず、NIHO予約pathは従来どおりNIHO APIで確認する。
+  通訳（`STG_TRANSLATE_API_ENABLED=true`）はguest salesから独立する。sales OFFでも既存Experience予約をOWNERのread-only詳細へ表示し、通訳だけ使える。guest checkout・予約変更・取消/返金・メールは開かず、旧NIHO予約の一覧・通訳pathはExperienceから呼ばない。
 6. 昇格せず破棄する候補は運用担当がtagを除去する。公開済みservice上では0%でもtag URLへアクセスできるため、保留候補のSHA・tag・破棄予定を運用記録で管理し、受入後に未使用tagがないことを確認する。tag除去はrevisionや配信中trafficの削除を意味しない。
 7. #92へはSHA・image digest・テスト項目と成否・未実施理由だけを残す。実ID、DB接続情報、OAuth state/code/token、cookie、Calendar ID、予定の件名/説明/参加者、スクリーンショット内の個人情報を公開しない。
 
@@ -129,7 +129,7 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 - **`STG_HOST_PWA_ENABLED` は未設定なら ON**（今までどおり）。`false` で止める。
 - **NIHO本人確認のtoken audience**は、host console稼働中は公開API flagと独立して `STG_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE=https://api-stg.niho.life` が必要。これはNIHO API向けの正確なoriginで、Experienceの候補URLではない。Host v1 API・service identity許可のstg受入が済むまでは `STG_HOST_PUBLICATION_API_ENABLED` をOFFに保つ。
 - **Experience商品・原稿・写真・公開**はNIHO provider-pages APIを使わない。新しいNIHO Host v1（#19712）を同じsource hashでstg配備し、`APP_CONNECT_WEB_ORIGINS` とruntime service identity allowlist/audienceを設定、identity失効・Connect不一致・readiness・payment reuse consentを受け入れてから `STG_PUBLICATIONS_ENABLED=true` と `STG_HOST_PUBLICATION_API_ENABLED=true` を段階的に開く。`EXPERIENCE_PUBLICATION_CONSENT_VERSION`、`EXPERIENCE_PUBLIC_MEDIA_BUCKET`、migration `0047`、runtime grants、GCS IAMも必要。NIHO契約が未配備の間は両flagをOFFにする。
-- **旧NIHO予約の運営業務**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` で予約一覧・詳細・承認/辞退/取消／返金・メッセージなどに接続する。NIHOは旧予約の照会・返金責任を保持する。`APP_CONNECT_WEB_ORIGINS`、許可service identity、旧予約APIを配備し、その画面・権限拒否を受け入れてから開く。このflagはExperience商品・公開を開かない。NIHO API上のメッセージを使う場合は、Experience独自質問の `STG_GUEST_QUESTIONS_ENABLED` を `false` または未設定にする。
+- **Experience提供者メンバー操作**は `STG_PROVIDER_OPERATIONS_API_ENABLED=true` で接続する。旧NIHO予約の一覧・詳細・操作・メッセージはExperienceから撤去済みで、NIHO旧予約APIをこの画面へ接続しない。このflagはExperience商品・公開を開かない。Experience予約の会話と予約前質問はExperience APIを使う。
 - **legacy NIHO provider pages** は `STG_PROVIDER_PAGES_API_ENABLED` を開かない。Experience商品をNIHO旧商品APIで登録・編集しない。
 - **Experience独自の質問**（「Ask the host」）は `STG_GUEST_QUESTIONS_ENABLED=true` で別に受け入れる。この受入では `STG_PROVIDER_OPERATIONS_API_ENABLED` を `false` または未設定にし、Experience DBの質問と `/questions/reply` を確認する。2つのメッセージ経路は同時に有効化できないため、両方を受け入れるときは別々の候補revisionで行う。
 - **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
@@ -227,7 +227,7 @@ Google Chrome でブラウザ名と stable URL を確かめてから行う。予
 2. **予約**：Stripe のテストカード（`4242 4242 4242 4242`、未来の期限、任意の CVC）で 1 件予約する。`/booking/return` は予約の完了を約束しない。Stripe のテストモードで endpoint への配信が 2xx、`/host/bookings` に確定として出る。NIHO app 側の予約・台帳が増えない（NIHO の既存 webhook がこの Session を処理しない）。
 3. **確認メール**：Scheduler の次の実行（1 分以内）で「Your booking is confirmed」が届く。From・Reply-To が設定どおりで、リンクの origin が stable URL。
 4. **予約ページ**：メールのリンクから「Open your booking」で `/bookings/{id}` が開く。cookie `__Host-nb_…` が `HttpOnly`・`Secure`・`SameSite=Lax`。使用済みのリンクは開けない。`/bookings` の「Find your booking」で同じアドレスにリンクのメールが届く。
-5. **メッセージ**：このサイトの予約ページから送った内容は OWNER の `/host/messages?source=site` に出て、ホストの返信は次の job でメールになり予約ページに出る。`STG_PROVIDER_OPERATIONS_API_ENABLED` が `false` または未設定なら、体験ページの「Ask the host」から質問し、返信メールの `/questions/reply` で答えられる。`STG_PROVIDER_OPERATIONS_API_ENABLED=true` なら「Ask the host」は無効のまま、NIHO APIの予約メッセージ一覧・返信と、このサイトの予約メッセージの両方を受け入れ、OWNER以外や別提供者のアクセスを拒否することを確認する。
+5. **メッセージ**：Experience予約の会話と予約前の質問はOWNERの `/host/messages` に表示し、返信はExperienceのjob経由でメールと予約ページへ届ける。NIHO旧予約APIの一覧・返信はExperienceから呼ばない。確認では、Experience予約の会話、予約前質問、OWNER以外・別提供者の拒否を別々に確認する。
 6. **取消と返金**：予約者が無料取消の期限内に「Cancel and get a full refund」で取り消し、Stripe のテストモードで返金ができ、`refund.*` の webhook のあと取消のメールが届く。別の予約で OWNER の取消（予約 1 件）も確かめる。サポートの取消・承認（Admin）は staging で開いていないので対象外。
 7. **ホストの画面**：OWNER で予約・ホーム・この回（予約者の電話はここだけ）にこの予約が出る。OWNER でない・別の提供者のアカウントでは見えない。
 8. **翻訳（英語にする）**：`STG_TRANSLATION_ENABLED` が off の間は、「英語にする」は使えないことを伝える文（`REPLY_DRAFT_UNAVAILABLE_TEXT`）を出し、旅行者の英語の日本語訳も作られない（訳の待ち行は残り、on にすると古いものから訳す）。on にしたら、旅行者の文の訳はメール job の次の実行（毎分、1 回 10 件・60 秒まで）で `/host/messages` に出て、「英語にする」はその場で（15 秒まで）下書きを返すことを確かめる。

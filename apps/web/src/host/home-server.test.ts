@@ -20,7 +20,6 @@ vi.mock("@/lib/host/server", () => ({
     return { listExperienceProviderPages: state.listPages, getExperienceProviderPageListing: state.listing };
   },
 }));
-vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 vi.mock("@/lib/host/provider-pages-server", () => ({ providerPagesEnabled: () => state.providerPages }));
 vi.mock("./guest-questions-server", () => ({ loadGuestQuestions: (...args: unknown[]) => state.questions!(...args) }));
 vi.mock("./guest-reviews-server", () => ({ loadGuestReviews: (...args: unknown[]) => state.reviews!(...args) }));
@@ -28,7 +27,6 @@ vi.mock("./guest-reviews-server", () => ({ loadGuestReviews: (...args: unknown[]
 import { loadHomeTodos } from "./home-server";
 
 const PROVIDER = { id: "sample-provider", nihoUserId: "sample-owner", displayName: "Synthetic provider", memberRole: "OWNER" } as never;
-const SESSION = { accessToken: "synthetic-access-token", accessTokenExpiresAt: Number.MAX_SAFE_INTEGER } as never;
 
 const THREAD: HostThread = {
   id: "thread-1", experienceId: "walk", guest: "Lucas", topic: null, booking: null,
@@ -55,7 +53,7 @@ beforeEach(() => {
 
 describe("loadHomeTodos", () => {
   it("lists the threads, then the reviews, reading them as メッセージ and レビュー do (nothing marked read)", async () => {
-    const load = await loadHomeTodos(PROVIDER, SESSION);
+    const load = await loadHomeTodos(PROVIDER);
     expect(state.questions).toHaveBeenCalledWith(PROVIDER, null);
     expect(state.reviews).toHaveBeenCalledWith(PROVIDER);
     expect(load.failed).toEqual([]);
@@ -69,7 +67,7 @@ describe("loadHomeTodos", () => {
 
   it("does not read legacy NIHO drafts or listings after the Experience contract cutover", async () => {
     state.providerPages = true;
-    const load = await loadHomeTodos(PROVIDER, SESSION);
+    const load = await loadHomeTodos(PROVIDER);
     expect(load.failed).toEqual([]);
     expect(load.todos.map((todo) => todo.key)).toEqual(["thread-thread-1", "guest-review-review-1"]);
     expect(state.client).not.toHaveBeenCalled();
@@ -80,7 +78,7 @@ describe("loadHomeTodos", () => {
   it("does not issue legacy listing reads, even when more than 20 pages are configured", async () => {
     state.providerPages = true;
     state.listPages!.mockResolvedValueOnce({ ok: true, data: { checkoutEnabled: true, pages: Array.from({ length: 25 }, (_, index) => page(`p${index}`, "PUBLISHED")) } });
-    await loadHomeTodos(PROVIDER, SESSION);
+    await loadHomeTodos(PROVIDER);
     expect(state.listPages).not.toHaveBeenCalled();
     expect(state.listing).not.toHaveBeenCalled();
   });
@@ -89,38 +87,30 @@ describe("loadHomeTodos", () => {
     state.providerPages = true;
     state.questions!.mockResolvedValueOnce({ status: "error" });
     state.listing!.mockImplementation(async (_providerId: unknown, pageId: unknown) => (pageId === "live-a" ? listing("REQUESTED") : { ok: false, kind: "network_error" }));
-    const partly = await loadHomeTodos(PROVIDER, SESSION);
+    const partly = await loadHomeTodos(PROVIDER);
     expect(partly.failed).toEqual(["messages"]);
     expect(partly.todos.map((todo) => todo.key)).toEqual(["guest-review-review-1"]);
 
     state.reviews!.mockResolvedValueOnce({ status: "error" });
     state.listPages!.mockResolvedValueOnce({ ok: false, kind: "error", status: 503, code: "SERVICE_UNAVAILABLE", reason: null, message: "" });
-    const failed = await loadHomeTodos(PROVIDER, SESSION);
+    const failed = await loadHomeTodos(PROVIDER);
     expect(failed.failed).toEqual(["reviews"]);
     expect(failed.todos.map((todo) => todo.key)).toEqual(["thread-thread-1"]);
 
     state.listPages!.mockRejectedValueOnce(new Error("down"));
-    expect((await loadHomeTodos(PROVIDER, SESSION)).failed).toEqual([]);
+    expect((await loadHomeTodos(PROVIDER)).failed).toEqual([]);
   });
 
-  it("adds nothing for closed sources, NIHO refusing the account, or an ID token about to expire", async () => {
-    state.providerPages = true;
+  it("adds nothing for closed Experience sources", async () => {
     state.questions!.mockResolvedValueOnce({ status: "closed" });
     state.reviews!.mockResolvedValueOnce({ status: "owner-only" });
-    state.listPages!.mockResolvedValueOnce({ ok: false, kind: "error", status: 403, code: "FORBIDDEN", reason: null, message: "" });
-    expect(await loadHomeTodos(PROVIDER, SESSION)).toEqual({ todos: [], failed: [] });
-
-    state.listing!.mockResolvedValue({ ok: false, kind: "error", status: 404, code: "NOT_FOUND", reason: null, message: "" });
-    expect((await loadHomeTodos(PROVIDER, SESSION)).failed).toEqual([]);
-
-    state.client.mockClear();
-    await loadHomeTodos(PROVIDER, { nihoUserId: "sample-owner", accessTokenExpiresAt: 0 } as never);
+    expect(await loadHomeTodos(PROVIDER)).toEqual({ todos: [], failed: [] });
     expect(state.client).not.toHaveBeenCalled();
   });
 
   it("is empty in the preview, which has its own", async () => {
     state.mock = true;
-    expect(await loadHomeTodos(PROVIDER, SESSION)).toEqual({ todos: [], failed: [] });
+    expect(await loadHomeTodos(PROVIDER)).toEqual({ todos: [], failed: [] });
     expect(state.questions).not.toHaveBeenCalled();
     expect(state.reviews).not.toHaveBeenCalled();
   });

@@ -173,7 +173,7 @@ describe("hostPushEventFromOutbox", () => {
         experienceTitle: "Synthetic Tea Ceremony",
         startsAt: "2026-11-20T01:00:00.000Z",
         seats: 3,
-        url: `/host/messages?thread=${THREAD}&source=site&providerId=provider-a`,
+        url: `/host/messages?thread=${THREAD}&providerId=provider-a`,
         tag: `booking-message-${THREAD}`,
       },
     });
@@ -206,7 +206,7 @@ describe("hostPushEventFromOutbox", () => {
         experienceTitle: "Synthetic Tea Ceremony",
         startsAt: "2026-11-20T01:00:00.000Z",
         seats: 4,
-        url: `/host/bookings?booking=${BOOKING}&source=site&providerId=provider-a`,
+        url: `/host/bookings?booking=${BOOKING}&providerId=provider-a`,
         tag: `booking-${BOOKING}`,
       },
     });
@@ -225,7 +225,7 @@ describe("hostPushEventFromOutbox", () => {
         experienceTitle: "Synthetic Tea Ceremony",
         startsAt: "2026-11-20T01:00:00.000Z",
         seats: 4,
-        url: `/host/bookings?booking=${BOOKING}&source=site&providerId=provider-a`,
+        url: `/host/bookings?booking=${BOOKING}&providerId=provider-a`,
         tag: `cancellation-${BOOKING}`,
       },
     });

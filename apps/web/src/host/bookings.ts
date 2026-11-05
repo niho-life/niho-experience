@@ -488,16 +488,14 @@ export function bookingStateRows(booking: HostBooking): BookingRow[] {
 
 export interface BookingsQuery {
   providerId?: string | null;
-  /** `site`: the bookings made on this site, where NIHO's list is the screen's own (#285 slice 8). */
-  source?: "site" | null;
   filter?: BookingFilter;
   experience?: string | null;
   booking?: string | null;
 }
 
-/** The bookings screen's address: `?providerId=`, the source, the filter (これから, the default, stays out), the experience and the booking. */
-export function bookingsHref({ providerId, source, filter, experience, booking }: BookingsQuery = {}): string {
-  return withQuery(HOST_BOOKINGS_PATH, { providerId, source, filter: filter === "upcoming" ? null : filter, experience, booking });
+/** The bookings screen's address: `?providerId=`, the filter, the experience and the booking. */
+export function bookingsHref({ providerId, filter, experience, booking }: BookingsQuery = {}): string {
+  return withQuery(HOST_BOOKINGS_PATH, { providerId, filter: filter === "upcoming" ? null : filter, experience, booking });
 }
 
 /** One session as its screen's address names it (この回, #107): the day, the start, the experience and the offer. */
@@ -510,12 +508,9 @@ export interface SessionQuery {
   offer: string;
 }
 
-/**
- * この回's address, under 予約: `?providerId=`, the source (`site`: a session of this site's bookings beside NIHO's,
- * #285 slice 8b, so "‹ 予約" goes back to them), then the session.
- */
-export function sessionHref({ providerId, source, ...session }: SessionQuery & { providerId?: string | null; source?: "site" | null }): string {
-  return withQuery(HOST_BOOKING_SESSION_PATH, { providerId, source, date: session.date, start: session.start, experience: session.experience, offer: session.offer });
+/** この回's address, under 予約: `?providerId=`, then the session. */
+export function sessionHref({ providerId, ...session }: SessionQuery & { providerId?: string | null }): string {
+  return withQuery(HOST_BOOKING_SESSION_PATH, { providerId, date: session.date, start: session.start, experience: session.experience, offer: session.offer });
 }
 
 /** The session a booking belongs to, as この回's address names it. */

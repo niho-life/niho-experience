@@ -7,7 +7,7 @@ const BOOKING: HostCalendarFeedBooking = {
   bookingId: "41", productId: "sample-walk", offerId: "sample-walk-am", productTitle: "Synthetic walk",
   startUtc: "2026-11-05T01:00:00.000Z", endUtc: "2026-11-05T02:30:00.000Z", localDate: "2026-11-05", localStartTime: "10:00", seats: 3,
 };
-const OPTIONS = { origin: "https://experience.example", providerId: "sample-provider", now: Date.UTC(2026, 10, 1, 3, 4, 5), besideNiho: false };
+const OPTIONS = { origin: "https://experience.example", providerId: "sample-provider", now: Date.UTC(2026, 10, 1, 3, 4, 5) };
 
 /** The unfolded lines (RFC 5545 §3.1). */
 const unfold = (ics: string) => ics.replace(/\r\n /g, "").split("\r\n");
@@ -42,8 +42,8 @@ describe("the bookings feed", () => {
     expect(bookingsIcs([], OPTIONS)).toContain("X-PUBLISHED-TTL:PT1H\r\nEND:VCALENDAR\r\n");
   });
 
-  it("links この回 as this site's session beside NIHO's bookings", () => {
-    expect(unfold(bookingsIcs([BOOKING], { ...OPTIONS, besideNiho: true })).find((line) => line.startsWith("DESCRIPTION:"))).toContain("?providerId=sample-provider&source=site&date=2026-11-05");
+  it("links directly to the Experience session", () => {
+    expect(unfold(bookingsIcs([BOOKING], OPTIONS)).find((line) => line.startsWith("DESCRIPTION:"))).toContain("?providerId=sample-provider&date=2026-11-05");
   });
 
   it("keeps a booking's UID across reads, different per booking and provider, and saying nothing about either", () => {

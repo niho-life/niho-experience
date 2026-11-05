@@ -21,19 +21,14 @@ export const REPLY_DRAFT_UNAVAILABLE_TEXT = "英語にする機能は準備中�
 
 export interface MessagesQuery {
   providerId?: string | null;
-  /**
-   * `site`: this site's threads beside NIHO's booking messages (#285 slice 6b), where every link keeps it. Without
-   * NIHO's (provider operations off) the screen ignores it.
-   */
-  source?: "site" | null;
   thread?: string | null;
   /** A booking's thread, or an empty one to start when it has none yet. */
   booking?: string | null;
 }
 
-/** The messages screen's address: `?providerId=`, the source, then the thread or the booking. */
-export function messagesHref({ providerId, source, thread, booking }: MessagesQuery = {}): string {
-  return withQuery(HOST_MESSAGES_PATH, { providerId, source, thread, booking });
+/** The messages screen's address: `?providerId=`, then the thread or the booking. */
+export function messagesHref({ providerId, thread, booking }: MessagesQuery = {}): string {
+  return withQuery(HOST_MESSAGES_PATH, { providerId, thread, booking });
 }
 
 /** This site's booking without a thread yet (#285 slice 6b): the empty thread's id, which the first reply replaces. */
@@ -220,21 +215,4 @@ export function emptyThreadFor(booking: Pick<HostBooking, "id" | "experienceId" 
     booking: { id: booking.id, date: booking.date, start: booking.start, guests: booking.guests },
     messages: [],
   };
-}
-
-/** What a booking shows of its thread: the last message in one line and when it was written. */
-export interface BookingConversation {
-  bookingId: string;
-  threadId: string;
-  text: string;
-  /** YYYY-MM-DDTHH:MM in Japan. */
-  at: string;
-}
-
-/** The threads joined to a booking, for 予約's メッセージ (#90 → #106). */
-export function bookingConversations(threads: readonly HostThread[]): BookingConversation[] {
-  return threads.flatMap((thread) => {
-    const last = lastMessage(thread);
-    return thread.booking && last ? [{ bookingId: thread.booking.id, threadId: thread.id, text: messagePreview(last), at: last.at }] : [];
-  });
 }

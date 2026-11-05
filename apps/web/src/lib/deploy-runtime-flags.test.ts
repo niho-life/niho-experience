@@ -219,7 +219,7 @@ describe("the deploy workflows' feature flags", () => {
     expect(resolveConfig(revision("prod", enabled)).guideAppCardsEnabled).toBe(true);
   });
 
-  it("opens NIHO booking translation with the host console and database without enabling guest sales", () => {
+  it("opens Experience booking translation with the host console and database without enabling guest sales", () => {
     const vars = closure("stg", "EXPERIENCE_TRANSLATE_API_ENABLED");
     expect(vars.STG_TRANSLATE_API_ENABLED).toBe("true");
     expect(vars.STG_GUEST_BOOKING_ENABLED).toBeUndefined();
@@ -268,13 +268,12 @@ describe("the deploy workflows' feature flags", () => {
     });
 
     it(`${target}: every compatible flag starts the server and turns on in resolve-config`, () => {
-      const compatible = FLAGS.filter((flag) => flag.env !== "EXPERIENCE_GUEST_QUESTIONS_ENABLED");
-      const vars = Object.assign({}, ...compatible.map((flag) => varsOf(target, flag))) as Vars;
+      const vars = Object.assign({}, ...FLAGS.map((flag) => varsOf(target, flag))) as Vars;
       const resolved = resolve(target, vars);
       expect(resolved.problems).toEqual([]);
-      expect(resolved.on).toEqual(compatible.map((flag) => flag.env));
+      expect(resolved.on).toEqual(FLAGS.map((flag) => flag.env));
       const config = resolveConfig(revision(target, resolved));
-      for (const flag of compatible) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
+      for (const flag of FLAGS) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
       // The jobs are called by their own service accounts on the stable URL.
       expect(config.hostPushJobEnabled).toBe(true);
       expect(resolved.env).toMatchObject({
@@ -306,14 +305,6 @@ describe("the deploy workflows' feature flags", () => {
     for (const flag of FLAGS) {
       const { problems } = resolve("prod", closure("prod", flag.env), false);
       expect(problems.some((problem) => problem.includes("enable_host_calendar=true")), flag.env).toBe(true);
-    }
-  });
-
-  it("refuses to combine the NIHO provider API with Experience-owned guest questions", () => {
-    for (const target of ["stg", "prod"] as const) {
-      const both = { ...closure(target, "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED"), ...closure(target, "EXPERIENCE_GUEST_QUESTIONS_ENABLED") };
-      const { problems } = resolve(target, both);
-      expect(problems).toContain(`EXPERIENCE_GUEST_QUESTIONS_ENABLED (${PREFIX[target]}_GUEST_QUESTIONS_ENABLED) conflicts with EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED (${PREFIX[target]}_PROVIDER_OPERATIONS_API_ENABLED)`);
     }
   });
 

@@ -574,8 +574,8 @@ export function resolveConfig(env: Env) {
   // 予約前の質問 (#105/#106) kept in the experience DB (docs/guest-questions.md): the traveler's "Ask the host", the
   // reply page and the OWNER's メッセージ. The mock keeps its own synthetic questions; http opens per environment
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
-  // console is on and メッセージ is not showing NIHO's booking messages instead.
-  const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && !experienceProviderOperationsApiEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
+  // console is on. Provider membership operations are independent of Experience reservations and questions.
+  const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
   // 予約者のレビュー (#104/#108) and attendance-gated invitations live in the experience DB. Public reads and
   // writes use this flag; invitations also require guest booking, attendance and mail to be enabled. The mock keeps
   // its own synthetic reviews; http opens per environment after migrations 0027 and 0033 are accepted.
@@ -585,7 +585,7 @@ export function resolveConfig(env: Env) {
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled);
-  // 対面通訳 (#181): NIHO予約はNIHO API、site bookingはExperience DBで所属・状態を検証する。
+  // 対面通訳 (#181): Experience予約はExperience DBで所属・状態を検証する。旧NIHO予約経路は使わない。
   // site bookingは別のguest-booking flagが無いと画面・BFFとも閉じたまま。通訳自体は販売flagに依存しない。
   // http opens only after the selected NIHO API is deployed and accepted, per environment.
   const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && Boolean(env.EXPERIENCE_DATABASE_URL?.trim()) && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";

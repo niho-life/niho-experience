@@ -223,8 +223,8 @@ describe("siteBookingExperiences and the merges of 続きを見る", () => {
 });
 
 describe("bookingsHref", () => {
-  it("keeps ?source=site for this site's bookings beside NIHO's, and leaves it out otherwise", () => {
-    expect(bookingsHref({ providerId: "sample-provider", source: "site", filter: "past", booking: "b-1" })).toBe("/host/bookings?providerId=sample-provider&source=site&filter=past&booking=b-1");
-    expect(bookingsHref({ providerId: "sample-provider", source: null, filter: "upcoming" })).toBe("/host/bookings?providerId=sample-provider");
+  it("links the selected Experience booking without a legacy-source selector", () => {
+    expect(bookingsHref({ providerId: "sample-provider", filter: "past", booking: "b-1" })).toBe("/host/bookings?providerId=sample-provider&filter=past&booking=b-1");
+    expect(bookingsHref({ providerId: "sample-provider", filter: "upcoming" })).toBe("/host/bookings?providerId=sample-provider");
   });
 });

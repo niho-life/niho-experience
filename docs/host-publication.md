@@ -38,7 +38,7 @@ Stripe account ID、NIHO user ID、内部provider IDなどは公開DTOに出さ�
 
 ## 旧経路の終了
 
-Experience新規販売はNIHO旧商品APIへ依存せず、旧NIHO予約をExperienceへ移行しない。同一開催回の二重販売や旧Checkout fallbackを新しい販売経路に作らない。旧NIHO予約の照会・履行・取消／返金は引き続きNIHOの責任として扱い、この決定で削除・移管しない。
+Experience新規販売はNIHO旧商品APIへ依存せず、旧NIHO予約をExperienceへ移行しない。同一開催回の二重販売や旧Checkout fallbackを新しい販売経路に作らない。旧NIHO予約APIはExperienceから呼ばず、Experience予約画面の一覧・詳細・操作にも使わない。既存のNIHO側データは読み取り・移行・削除せず、このExperience変更の対象外とする。
 
 公開中商品の二重slug拒否、開催枠の共有在庫、予約holdの排他は引き続き有効。これらはExperience内の通常の公開・在庫保護である。
 

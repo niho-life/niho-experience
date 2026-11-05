@@ -129,8 +129,8 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         experienceTitle: payload.experienceTitle,
         startsAt: payload.startsAt,
         seats: payload.seats,
-        // This site's threads (#285 slice 6b), with this one opened; `source=site` keeps them beside NIHO's messages.
-        url: withQuery(HOST_MESSAGES_PATH, { thread: payload.threadId, source: "site", providerId }),
+        // This site's threads (#285 slice 6b), with this one opened.
+        url: withQuery(HOST_MESSAGES_PATH, { thread: payload.threadId, providerId }),
         // The guest's next message in the same booking replaces the earlier notification.
         tag: `booking-message-${payload.threadId}`,
       },
@@ -150,7 +150,7 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         startsAt: payload.startsAt,
         seats: payload.seats,
         // The bookings made on this site (#285 slice 8), with this one opened.
-        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
         tag: `booking-${payload.bookingId}`,
       },
     };
@@ -223,7 +223,7 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         startsAt: payload.startsAt,
         seats: payload.seats,
         // The bookings made on this site (#285 slice 8), with the cancelled one opened.
-        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, source: "site", providerId }),
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
         tag: `cancellation-${payload.bookingId}`,
       },
     };

@@ -106,16 +106,6 @@ export async function readStandaloneTranslateCreateBody(request: Request): Promi
   } catch { return null; }
 }
 
-export async function loadTranslateRoomsClient() {
-  if (!translateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
-  const session = await readHostSession();
-  if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
-  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
-  try {
-    return { ok: true as const, client: createExperienceTranslateRoomsClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch: nihoApiFetch(session) }) };
-  } catch { return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) }; }
-}
-
 /**
  * Resolves a browser-visible local Experience provider id to NIHO's provider id on every
  * standalone request. The sealed session and current OWNER membership are authoritative here;

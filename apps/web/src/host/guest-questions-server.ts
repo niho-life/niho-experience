@@ -201,20 +201,6 @@ export async function loadGuestQuestions(provider: HostProvider, requestedThread
   }
 }
 
-/**
- * Beside NIHO's booking messages (provider operations): how many bookings made on this site have a thread, for the
- * notice that leads to them (`?source=site`). 0 when they are closed here, for anyone but the OWNER, or unreadable.
- */
-export async function countSiteBookingThreads(provider: HostProvider): Promise<number> {
-  const site = siteThreadRepository();
-  if (!site || site.kind === "QUESTION" || provider.memberRole !== "OWNER") return 0;
-  try {
-    return await site.repository.countThreads(ownerActor(provider), { kind: "BOOKING" });
-  } catch {
-    return 0;
-  }
-}
-
 type OwnerCheck = { ok: true; questions: GuestQuestionRepository; kind: GuestThreadKind | null; actor: HostActor } | { ok: false; message: string };
 
 /** A usable session, the store, and NIHO saying this account owns the provider. */

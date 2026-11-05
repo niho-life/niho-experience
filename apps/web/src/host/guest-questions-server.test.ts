@@ -37,7 +37,6 @@ import {
   GUEST_QUESTION_MISSING_TEXT,
   GUEST_QUESTION_OWNER_ONLY_TEXT,
   GUEST_QUESTION_REPLY_FAILED_TEXT,
-  countSiteBookingThreads,
   hostThread,
   loadGuestQuestions,
   loadMoreGuestQuestions,
@@ -331,13 +330,4 @@ describe("this site's bookings' threads (#285 slice 6b)", () => {
     expect(JSON.stringify(body.messages)).not.toContain("traveler_message");
   });
 
-  it("counts the bookings' threads for the notice beside NIHO's messages, 0 when closed or unreadable", async () => {
-    expect(await countSiteBookingThreads(OWNER)).toBe(2);
-    expect(state.store?.countThreads).toHaveBeenCalledWith(ACTOR, { kind: "BOOKING" });
-    expect(await countSiteBookingThreads({ ...OWNER, memberRole: "EDITOR" })).toBe(0);
-    state.store!.countThreads!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await countSiteBookingThreads(OWNER)).toBe(0);
-    state.kind = "QUESTION";
-    expect(await countSiteBookingThreads(OWNER)).toBe(0);
-  });
 });
