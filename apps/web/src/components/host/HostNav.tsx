@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
 import { nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
-import { hostSupportPath, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
+import { hostSupportPath, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, HOST_SELLER_PATH, withProvider } from "@/lib/host/routes";
 import { HostIcon, type HostIconName } from "./HostIcon";
 import { AccountAvatar, InitialAvatar, type HostAccount } from "./ui";
 
@@ -162,6 +162,10 @@ export function HostSidebar({ account, providers, nihoAppUrl, editorUrl }: HostC
         </>
       ) : null}
       <div className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
+        {current?.kind !== "OPERATOR" && current?.memberRole === "OWNER" ? <Link href={HOST_SELLER_PATH} className={FOOT_LINK}>
+          <HostIcon name="settings" className="size-3.5" />
+          <span>販売者表示</span>
+        </Link> : null}
         {current?.kind !== "OPERATOR" ? <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} className={FOOT_LINK}>
           <HostIcon name="settings" className="size-3.5" />
           <span>NIHOサポート</span>
@@ -233,6 +237,10 @@ function AccountMenu({ account, providers, nihoAppUrl, editorUrl }: HostChromePr
           </div>
         ) : null}
         <div className="flex flex-col gap-0.5 border-t border-line py-1">
+          {current?.kind !== "OPERATOR" && current?.memberRole === "OWNER" ? <Link href={HOST_SELLER_PATH} onClick={() => menu.current?.removeAttribute("open")} className={MENU_LINK}>
+            <HostIcon name="settings" className="size-3.5" />
+            <span>販売者表示</span>
+          </Link> : null}
           {current?.kind !== "OPERATOR" ? <Link href={hostSupportPath(current ? "EXPERIENCE_PROVIDER" : null, current?.id)} onClick={() => menu.current?.removeAttribute("open")} className={MENU_LINK}>
             <HostIcon name="settings" className="size-3.5" />
             <span>NIHOサポート</span>

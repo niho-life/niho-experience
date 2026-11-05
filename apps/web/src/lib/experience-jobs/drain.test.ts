@@ -184,6 +184,7 @@ describe("runExperienceJobs", () => {
       hostAddressConfirmations: { off: true },
       hostBookingMails: { off: true },
       hostAddressPurge: { purged: 0 },
+      providerMediaCleanup: { off: true },
     });
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: false });
     // The addresses of hosts whose access ended go whatever host email's flag (#194).
@@ -296,6 +297,7 @@ describe("runExperienceJobs", () => {
       hostAddressConfirmations: { off: true },
       hostBookingMails: { off: true },
       hostAddressPurge: { purged: 0 },
+      providerMediaCleanup: { off: true },
     });
     expect(s.onStepError.mock.calls).toEqual([["questionReplies", "Error"], ["bookingConfirmations", "TypeError"], ["questionErasure", "RangeError"]]);
     expect(experienceJobActivity(counts)).toEqual({ failed: true, active: true });
@@ -307,6 +309,28 @@ describe("runExperienceJobs", () => {
     s.confirmations.claimBookingConfirmations.mockResolvedValueOnce({ confirmations: [confirmationFor(1)], abandoned: 0 });
     const counts = await runExperienceJobs(s.deps);
     expect(JSON.stringify(counts)).not.toMatch(/example\.com|Sample|sampleToken|tea|walk/i);
+  });
+
+  it("tries every provider media object, aggregates deletion failures, and leaves later steps running", async () => {
+    const claims = [
+      { assetId: "00000000-0000-4000-8000-000000000001", objectKey: "experience-provider-media/00000000-0000-4000-8000-000000000001.jpg" },
+      { assetId: "00000000-0000-4000-8000-000000000002", objectKey: "experience-provider-media/00000000-0000-4000-8000-000000000002.jpg" },
+    ];
+    const repository = {
+      claim: vi.fn(async () => claims),
+      complete: vi.fn(async () => true),
+    };
+    const storage = {
+      remove: vi.fn().mockRejectedValueOnce(new Error("synthetic object failure")).mockResolvedValueOnce(undefined),
+    };
+    s.guests.eraseGuestData.mockResolvedValueOnce(1);
+    const counts = await runExperienceJobs({ ...s.deps, providerMediaCleanup: { repository, storage } });
+    expect(counts.providerMediaCleanup).toEqual({ error: "unavailable" });
+    expect(storage.remove).toHaveBeenCalledTimes(2);
+    expect(repository.complete).toHaveBeenCalledExactlyOnceWith(claims[1]);
+    expect(counts.guestErasure).toEqual({ erased: 1 });
+    expect(s.onStepError).toHaveBeenCalledWith("providerMediaCleanup", "ProviderMediaCleanupError");
+    expect(JSON.stringify(counts)).not.toMatch(/experience-provider-media|00000000/);
   });
 });
 

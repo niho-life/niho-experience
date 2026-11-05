@@ -30,6 +30,7 @@ const saleTerms = {
   conditionsVersion: SAMPLE_TERMS.conditionsVersion,
 };
 const item = {
+  sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Host", externalUrl: "https://seller.example.test/legal" },
   publication: {
     slug: "native-review-page",
     publicTitle: "Native review page",
@@ -96,6 +97,7 @@ describe("native publication reviews", () => {
     expect(html).toContain("★ 4.7 · 3 reviews");
     expect(html).toContain("Reply from Synthetic Host");
     expect(html).toContain("Thank you for joining us.");
+    expect(html).toContain("https://seller.example.test/legal");
     expect(html).not.toContain("</script><script>alert(1)</script>");
 
     const nodes = jsonLd(html);

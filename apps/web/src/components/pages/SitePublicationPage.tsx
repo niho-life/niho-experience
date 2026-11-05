@@ -27,7 +27,7 @@ export function sitePublicationMetadata(item: SitePublicExperience): Metadata {
 }
 
 export async function SitePublicationPage({ item, cancelled = false }: { item: SitePublicExperience; cancelled?: boolean }) {
-  const { publication, saleTerms } = item;
+  const { publication, saleTerms, sellerDisclosure } = item;
   const reviews = await getLiveReviews(publication.slug);
   const headline = reviewHeadline(reviewDisplay(reviews));
   const structured = sitePublicationJsonLd(item, config.siteUrl, config.bookingsEnabled && config.guestBookingEnabled, reviewsForJsonLd(reviews));
@@ -57,7 +57,7 @@ export async function SitePublicationPage({ item, cancelled = false }: { item: S
             ? <Link href={headline.href} aria-label={headline.accessibleLabel} className="mt-3 inline-flex font-extrabold text-moss hover:underline">{headline.label}</Link>
             : <span className="mt-3 inline-flex rounded-full bg-sand px-3 py-1 text-sm font-extrabold">{headline.label}</span>
           : null}
-          <p className="mt-4 text-[0.9375rem] text-ink-soft">Offered by <b className="text-ink">{publication.sellerDisplayName}</b></p>
+          <p className="mt-4 text-[0.9375rem] text-ink-soft">Offered by <b className="text-ink">{publication.sellerDisplayName}</b>{sellerDisclosure ? <> · <a className="font-bold text-ink underline" href={sellerDisclosure.method === "EXTERNAL" ? sellerDisclosure.externalUrl : `/experiences/${encodeURIComponent(publication.slug)}/seller`} rel="noopener noreferrer">Seller information</a></> : null}</p>
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">Duration</span><p className="font-extrabold">{durations}</p></li> : null}
             {language ? <li><span className="eyebrow">Language</span><p className="font-extrabold">{language}</p></li> : null}
