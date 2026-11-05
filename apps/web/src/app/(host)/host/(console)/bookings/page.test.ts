@@ -75,7 +75,7 @@ describe("Experience bookings", () => {
     expect(view.type).toBe(HostBookings);
     expect(view.props).toMatchObject({ bookings: LIVE.bookings, providerId: "sample-provider", providerDataId: "sample-provider", live: { nextCursor: "sample-cursor", messages: true } });
     expect(view.props).not.toHaveProperty("niho");
-    expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "b-1", undefined);
+    expect(state.loadSiteBookings).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), "b-1");
   });
 
   it("keeps the screen unavailable when Experience bookings are closed and reports read failures", async () => {

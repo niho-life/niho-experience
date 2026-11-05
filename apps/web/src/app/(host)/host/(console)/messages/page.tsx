@@ -49,7 +49,7 @@ function SiteThreads({ questions, provider, linkProviderId }: { questions: Extra
       linkProviderId={linkProviderId}
       providerId={provider.id}
       providerName={provider.displayName}
-      live={{ loaded: questions.loaded, nextCursor: questions.nextCursor }}
+      live={questions.preview ? undefined : { loaded: questions.loaded, nextCursor: questions.nextCursor }}
     />
   );
 }

@@ -16,14 +16,17 @@ import {
 } from "@niho-experience/experience-store";
 import { siteThreadRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
-import { loadHostProviders, readHostSession } from "@/lib/host/server";
+import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
 import { anthropicTranslator, type Translator } from "@/lib/translation/anthropic";
 import { hostReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
-import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, newBookingThreadId, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, emptyThreadFor, newBookingThreadId, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { mockExperienceBookings, mockExperienceThreads } from "./mock/experience-reservations";
+import { MOCK_NOW, MOCK_TODAY } from "./mock/bookings";
+import { siteBooking, siteBookingExperiences } from "./site-bookings";
 import type { HostActionResult } from "./payout";
 import type { HostThread, HostThreadBooking, HostThreadMessage } from "./types";
 
@@ -147,6 +150,7 @@ export type HostGuestQuestionsLoad =
       nextCursor: string | null;
       today: string;
       now: string;
+      preview?: true;
     }
   /** Not kept here for them: the flag is off, no DB, not the OWNER (NIHO or the experience DB). Today's screen. */
   | { status: "closed" }
@@ -158,6 +162,20 @@ export type HostGuestQuestionsLoad =
  * anyone wrote, its empty one.
  */
 export async function loadGuestQuestions(provider: HostProvider, requestedThread: string | null, requestedBooking: string | null = null): Promise<HostGuestQuestionsLoad> {
+  if (isHostMock()) {
+    if (provider.memberRole !== "OWNER") return { status: "closed" };
+    const stored = mockExperienceBookings(provider.id);
+    const threads = mockExperienceThreads(provider.id);
+    const booking = stored.find((row) => row.publicBookingId === requestedBooking);
+    const bookedThread = threads.find((row) => row.booking?.id === requestedBooking);
+    const newThread = !requestedThread && booking && !bookedThread ? emptyThreadFor(siteBooking(booking)) : null;
+    if (newThread?.booking) newThread.booking.site = true;
+    return {
+      status: "live", threads, newThread, loaded: threads.map((thread) => thread.id),
+      requestedMissing: requestedThread ? !threads.some((thread) => thread.id === requestedThread) : requestedBooking !== null && !booking,
+      experiences: siteBookingExperiences(stored), nextCursor: null, today: MOCK_TODAY, now: MOCK_NOW, preview: true,
+    };
+  }
   const site = siteThreadRepository();
   if (!site || provider.memberRole !== "OWNER") return { status: "closed" };
   const { repository: questions, kind } = site;

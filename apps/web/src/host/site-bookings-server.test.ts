@@ -111,15 +111,16 @@ describe("loadSiteBookings", () => {
     expect(await loadSiteBookings(OWNER, null)).toEqual({ status: "closed" });
   });
 
-  it("shows the preview's synthetic bookings to the OWNER with `?mock=site-bookings` only, and never asks the store in mock mode", async () => {
+  it("uses the same Experience preview for ordinary sign-in and the explicit scenario, scoped to its provider", async () => {
     state.mock = true;
-    const preview = await loadSiteBookings(OWNER, null, "site-bookings");
-    expect(preview).toMatchObject({ status: "live", preview: true, messages: false, nextCursor: null, today: "2026-10-21", requestedMissing: false });
+    const kitchen = { ...OWNER, id: "sample-provider-kitchen" };
+    const preview = await loadSiteBookings(kitchen, null);
+    expect(preview).toMatchObject({ status: "live", preview: true, messages: true, nextCursor: null, today: "2026-10-21", requestedMissing: false });
     expect(preview.status === "live" && preview.bookings.map((booking) => booking.status)).toEqual(["confirmed", "cancelled", "confirmed", "cancelled", "payment_review", "cancelled", "confirmed"]);
     expect(preview.status === "live" && preview.bookings.every((booking) => booking.site?.fee && booking.phone === null)).toBe(true);
-    expect(await loadSiteBookings(OWNER, "00000000-0000-4000-8000-0000000000ff", "site-bookings")).toMatchObject({ status: "live", requestedMissing: true });
-    for (const scenario of [undefined, "default", "site-sales"] as const) expect(await loadSiteBookings(OWNER, null, scenario)).toEqual({ status: "closed" });
-    expect(await loadSiteBookings({ ...OWNER, memberRole: "EDITOR" }, null, "site-bookings")).toEqual({ status: "closed" });
+    expect(await loadSiteBookings(kitchen, "00000000-0000-4000-8000-0000000000ff")).toMatchObject({ status: "live", requestedMissing: true });
+    expect(await loadSiteBookings({ ...OWNER, id: "sample-provider-studio" }, null)).toMatchObject({ status: "live", bookings: [] });
+    expect(await loadSiteBookings({ ...OWNER, memberRole: "EDITOR" }, null)).toEqual({ status: "closed" });
     expect(state.store?.listGuestBookingsForHost).not.toHaveBeenCalled();
   });
 

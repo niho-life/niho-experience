@@ -94,7 +94,7 @@ export default async function HostSessionPage({ searchParams }: { searchParams: 
       session={view}
       now={site.status === "live" ? site.now : otaNow}
       providerId={linkProviderId}
-      site={{ providerId: provider.id, messages: site.status === "live" && site.messages, attendance: site.status === "live" && site.attendance }}
+      site={{ providerId: provider.id, messages: site.status === "live" && site.messages, attendance: site.status === "live" && site.attendance, preview: site.status === "live" ? site.preview : undefined }}
       ota={ota}
     />
   );

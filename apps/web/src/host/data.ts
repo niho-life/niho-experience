@@ -19,6 +19,8 @@ import {
   type HostSalesList,
 } from "./console-data";
 import { loadNotificationSettings } from "./notification-settings-server";
+import { mockExperienceBookings, mockExperienceThreads } from "./mock/experience-reservations";
+import { siteBooking } from "./site-bookings";
 import { isSellerPageUrl, type HostNotice, type HostPayoutLoad } from "./payout";
 import type { HostExperience, HostGoogleConnection, HostMeetingDefaults, HostPublicationReadiness, HostSettings } from "./types";
 
@@ -110,7 +112,7 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
   ]);
   return {
     today: snapshot.today,
-    home: hostHome(snapshot),
+    home: hostHome(mode === "mock" ? { ...snapshot, bookings: mockExperienceBookings(provider.id).map(siteBooking), threads: mockExperienceThreads(provider.id) } : snapshot),
     experiences: snapshot.experiences,
     settings: {
       displayName: displayProvider?.displayName ?? provider.displayName,

@@ -103,7 +103,9 @@ describe("loadHostConsoleData", () => {
     expect(state.notificationCalls).toEqual([]);
     expect(data.googleConnection).toBe(MOCK_GOOGLE_CONNECTION);
     expect(data.experiences).toHaveLength(3);
-    expect(data.home.todos).toHaveLength(10);
+    expect(data.home.todos).toHaveLength(8);
+    expect(data.home.todos.some((todo) => todo.approval !== null)).toBe(false);
+    expect(data.home.sessions.later[0]?.href).toContain("date=2026-10-24");
   });
 
   it("mock: the notification settings are the owner's only, as NIHO answers them", async () => {

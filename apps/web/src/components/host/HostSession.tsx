@@ -72,7 +72,7 @@ export interface HostSessionProps {
    * to their booking's thread (slice 6b). `attendance`: 出欠 is kept in the experience DB (#107, its flag), sent for
    * `providerId`. Absent when only OTA bookings are shown.
    */
-  site?: { providerId?: string; messages?: boolean; attendance?: boolean } | null;
+  site?: { providerId?: string; messages?: boolean; attendance?: boolean; preview?: true } | null;
   /**
    * Bookings made on reservation sites among the session's (#194 PR B): their guests with their site's badge and the
    * phone the site gave, never cancelled or written to from here (their site does that). `attendance`: their 出欠 is
@@ -240,7 +240,7 @@ export function HostSession({ session, now, providerId, site = null, ota = null 
   // The moment the screen stands at: the page's for the preview (fixed) and the first render; this site's bookings
   // follow the time in Japan from then on (the store still decides by its own clock).
   const [clock, setClock] = useState(now);
-  const live = site !== null;
+  const live = site !== null && !site.preview;
   useEffect(() => {
     if (!live) return;
     const tick = () => {
@@ -281,7 +281,7 @@ export function HostSession({ session, now, providerId, site = null, ota = null 
   // This site's bookings are called off with their own action (paid bookings are refunded by the store), below.
   const cancellable = !site && canCancelSession(own, phase, cancellation !== null);
   const siteConfirmed = site ? own.filter((booking) => booking.status === "confirmed") : [];
-  const siteCancellable = Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
+  const siteCancellable = !site?.preview && Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
   const siteRefundYen = siteConfirmed.reduce((total, booking) => total + booking.amountYen, 0);
   const siteCancellationLabel = siteRefundYen === 0
     ? "この回を中止する（無料予約を取り消す）"

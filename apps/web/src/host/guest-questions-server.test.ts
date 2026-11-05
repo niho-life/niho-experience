@@ -17,6 +17,7 @@ import type { HostProvider } from "@/lib/host/providers";
 
 /** メッセージ's questions against a stubbed experience store and NIHO provider list (#106). */
 const state = vi.hoisted(() => ({
+  mock: false,
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
   kind: null as GuestThreadKind | null,
   session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
@@ -24,7 +25,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ siteThreadRepository: () => (state.store ? { repository: state.store, kind: state.kind } : null) }));
-vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
+vi.mock("@/lib/host/server", () => ({ isHostMock: () => state.mock, readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
 vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { APIConnectionTimeoutError, InternalServerError } from "@anthropic-ai/sdk";
@@ -62,6 +63,7 @@ const SUMMARY: GuestQuestionThreadSummary = { ...STORED, lastMessage: ANSWER };
 const THREAD: GuestQuestionThread = { ...STORED, messages: [QUESTION, REPLY, ANSWER] };
 
 beforeEach(() => {
+  state.mock = false;
   state.store = {
     listThreads: vi.fn(async () => ({ threads: [SUMMARY], nextCursor: null })),
     markThreadRead: vi.fn(async () => undefined),
@@ -98,6 +100,18 @@ describe("hostThread", () => {
 });
 
 describe("loadGuestQuestions", () => {
+  it("joins preview conversations to the same Experience booking and rejects another provider's deep link", async () => {
+    state.mock = true;
+    const owner = { ...OWNER, id: "sample-provider-kitchen" };
+    const id = "00000000-0000-4000-8000-00000000b101";
+    const load = await loadGuestQuestions(owner, null, id);
+    expect(load).toMatchObject({ status: "live", preview: true, requestedMissing: false });
+    expect(load.status === "live" && load.threads.find((thread) => thread.booking?.id === id)).toMatchObject({ guest: "Hannah Kim", booking: { id, site: true } });
+    expect(await loadGuestQuestions({ ...owner, id: "sample-provider-studio" }, null, id)).toMatchObject({ status: "live", requestedMissing: true, threads: [] });
+    expect(await loadGuestQuestions(owner, "another-thread")).toMatchObject({ status: "live", requestedMissing: true });
+    expect(await loadGuestQuestions({ ...owner, memberRole: "EDITOR" }, null)).toEqual({ status: "closed" });
+    expect(state.store!.listThreads).not.toHaveBeenCalled();
+  });
   it("lists the OWNER's questions with their last message, and opens the one asked for in full (read)", async () => {
     const list = await loadGuestQuestions(OWNER, null);
     expect(list).toMatchObject({ status: "live", loaded: [], requestedMissing: false, experiences: [{ id: "tea", title: "Synthetic tea" }] });

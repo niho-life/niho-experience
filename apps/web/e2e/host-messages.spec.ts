@@ -39,38 +39,16 @@ function recordSent(page: Page): string[] {
   return sent;
 }
 
-test("ホーム lists each request with the time left, then the threads waiting longest; 承認 asks first and takes the row away", async ({ page }) => {
+test("ホーム opens the Experience conversation without a legacy approval task", async ({ page }) => {
   await signIn(page);
   const rows = todos(page);
-  await expect(rows).toHaveCount(10);
-  for (const text of ["承認待ち", "あと 6 時間", "Lucas & Mia Chen さん · 10/22（木）18:00 · Kamakura Community Dinner with Locals · 2名 · ¥60,000", "期限を過ぎると自動でお断りになります"]) await expect(rows.nth(0)).toContainText(text);
-  for (const text of ["あと 44 時間", "Ana Souza さん · 10/29（木）18:00 · Kamakura Community Dinner with Locals · 3名 · ¥72,000"]) await expect(rows.nth(1)).toContainText(text);
-  // The threads, the longest wait first: an untranslated question reads in the original.
-  for (const text of ["返信待ち", "予約前の質問", "「안녕하세요.", "Jiwoo Han さん · 6 時間前 · 翻訳できませんでした"]) await expect(rows.nth(2)).toContainText(text);
-  for (const text of ["予約者からの連絡", "「ありがとうございます！ 電車は 17:40 ごろに着きます。", "Sofia Rossi さん · 4 時間前 · 英語から翻訳"]) await expect(rows.nth(3)).toContainText(text);
-  for (const text of ["予約前の質問", "「こんにちは！ 9 歳の娘と一緒にディナーに参加できますか？", "Emma Wilson さん · 2 時間前 · 英語から翻訳"]) await expect(rows.nth(4)).toContainText(text);
-  await expect(rows.nth(0).getByRole("link", { name: "詳しく見る" })).toHaveAttribute("href", "/host/bookings?booking=bk-2041");
-  await expect(rows.nth(4).getByRole("link", { name: "返信する" })).toHaveAttribute("href", "/host/messages?thread=th-3012");
-
-  const sent = recordSent(page);
-  const ask = page.getByRole("dialog", { name: "申込を承認しますか？" });
-  const approve = rows.nth(0).getByRole("button", { name: "承認する" });
-  await approve.click();
-  for (const text of ["Lucas & Mia Chen", "10月22日（木）18:00–20:00 · Dinner", "¥60,000"]) await expect(ask).toContainText(text);
-  await expect(ask.getByRole("button", { name: "やめる" })).toBeFocused();
-  await ask.getByRole("button", { name: "やめる" }).click();
-  await expect(ask).toHaveCount(0);
-  await expect(rows).toHaveCount(10);
-
-  await approve.click();
-  await ask.getByRole("button", { name: "決済して承認" }).click();
-  await expect(ask).toHaveCount(0);
-  await expect(page.getByRole("status").filter({ hasText: "Lucas & Mia Chen さんの申込を承認しました" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 2, name: "次にすること" })).toBeFocused();
-  await expect(rows).toHaveCount(9);
-  await expect(rows.filter({ hasText: "Lucas & Mia Chen" })).toHaveCount(0);
-  await expect(rows.nth(0)).toContainText("Ana Souza さん");
-  expect(sent).toEqual([]);
+  await expect(rows).toHaveCount(8);
+  await expect(page.getByRole("button", { name: "承認する" })).toHaveCount(0);
+  await expect(rows.nth(0)).toContainText("Jiwoo Han");
+  await expect(rows.nth(1)).toContainText("Hannah Kim");
+  await expect(rows.nth(2).getByRole("link", { name: "返信する" })).toHaveAttribute("href", "/host/messages?thread=th-3012");
+  await rows.nth(1).getByRole("link", { name: "返信する" }).click();
+  await expect(thread(page, "Hannah Kim さんとの連絡")).toBeVisible();
 });
 
 test("返信する opens the thread; the English is made, checked and only then sent", async ({ page }, testInfo) => {
@@ -163,12 +141,12 @@ test("返信する opens the thread; the English is made, checked and only then 
 
 test("an email answer and an untranslated question read as they are, and 予約 opens the same thread", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/bookings?booking=bk-2031");
-  await page.getByRole("region", { name: "Sofia Rossi", exact: true }).getByRole("link", { name: "やりとりを開く" }).click();
-  await expect(page).toHaveURL(/\/host\/messages\?thread=th-3004$/);
-  const sofia = thread(page, "Sofia Rossi さんとの連絡");
-  for (const text of ["Kamakura Community Dinner with Locals", "10/27（火）18:00 · 3名"]) await expect(sofia).toContainText(text);
-  await expect(sofia.getByRole("link", { name: "予約を見る" })).toHaveAttribute("href", "/host/bookings?booking=bk-2031");
+  await page.goto("/host/bookings?booking=00000000-0000-4000-8000-00000000b101");
+  await page.getByRole("region", { name: "Hannah Kim", exact: true }).getByRole("link", { name: "メッセージを開く" }).click();
+  await expect(page).toHaveURL(/\/host\/messages\?booking=00000000-0000-4000-8000-00000000b101$/);
+  const sofia = thread(page, "Hannah Kim さんとの連絡");
+  for (const text of ["Kamakura Community Dinner with Locals", "10/24（土）18:00 · 2名"]) await expect(sofia).toContainText(text);
+  await expect(sofia.getByRole("link", { name: "予約を見る" })).toHaveAttribute("href", "/host/bookings?booking=00000000-0000-4000-8000-00000000b101");
   const items = messages(sofia);
   await expect(items).toHaveCount(2);
   // The host's note before the dinner (moved from the booking), and Sofia's answer by email.
@@ -218,19 +196,19 @@ test("英語にする keeps the Japanese when it fails, and the English can be w
 
 test("メッセージを送る starts a booking's thread; threads that are not the provider's do not open", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/bookings?booking=bk-2035");
-  await page.getByRole("region", { name: "Noah Williams", exact: true }).getByRole("link", { name: "メッセージを送る" }).click();
-  await expect(page).toHaveURL(/\/host\/messages\?booking=bk-2035$/);
-  const noah = thread(page, "Noah Williams さんとの連絡");
-  await expect(noah).toContainText("10/24（土）18:00 · 1名");
+  await page.goto("/host/bookings?booking=00000000-0000-4000-8000-00000000b103");
+  await page.getByRole("region", { name: "Noah Park", exact: true }).getByRole("link", { name: "メッセージを開く" }).click();
+  await expect(page).toHaveURL(/\/host\/messages\?booking=00000000-0000-4000-8000-00000000b103$/);
+  const noah = thread(page, "Noah Park さんとの連絡");
+  await expect(noah).toContainText("10/27（火）18:00 · 2名");
   await expect(noah.getByRole("list", { name: "やりとり" })).toHaveCount(0);
   await noah.getByRole("button", { name: "英語を直接書く" }).click();
-  await noah.getByRole("textbox", { name: "Noah Williams さんに届く英語" }).fill("See you on Saturday at 18:00!");
+  await noah.getByRole("textbox", { name: "Noah Park さんに届く英語" }).fill("See you on Saturday at 18:00!");
   await noah.getByRole("button", { name: "この英語で送る" }).click();
   await expect(noah.getByRole("status").filter({ hasText: "送りました" })).toBeVisible();
   await expect(messages(noah)).toHaveCount(1);
   await expect(messages(noah).first().locator('[lang="en"]')).toHaveText("See you on Saturday at 18:00!");
-  await expect(page).toHaveURL(/\?booking=bk-2035$/);
+  await expect(page).toHaveURL(/\?booking=00000000-0000-4000-8000-00000000b103$/);
 
   // A request that ended has nothing to start; another provider's thread is not this one's.
   expect((await page.goto("/host/messages?booking=bk-2026"))?.status()).toBe(404);
@@ -246,12 +224,12 @@ test("メッセージ lists the waiting threads first; it is a screen under ホ�
   const rows = list(page).getByRole("link");
   await expect(rows).toHaveCount(4);
   await expect(rows.nth(0)).toContainText("Jiwoo Han");
-  await expect(rows.nth(1)).toContainText("Sofia Rossi");
+  await expect(rows.nth(1)).toContainText("Hannah Kim");
   await expect(rows.nth(2)).toContainText("Emma Wilson");
   await expect(rows.nth(3)).toContainText("Daniel Fischer");
   for (const index of [0, 1, 2]) await expect(rows.nth(index)).toContainText("返信待ち");
   await expect(rows.nth(3)).not.toContainText("返信待ち");
-  for (const text of ["10/27（火）予約 · Kamakura Community Dinner with Locals", "11:05"]) await expect(rows.nth(1)).toContainText(text);
+  for (const text of ["10/24（土）予約 · Kamakura Community Dinner with Locals", "11:05"]) await expect(rows.nth(1)).toContainText(text);
   for (const text of ["予約前 · Kamakura Community Dinner with Locals", "10/20", "はい、ご用意できます。"]) await expect(rows.nth(3)).toContainText(text);
   await expect(rows.nth(2)).toHaveAttribute("href", "/host/messages?providerId=sample-provider-kitchen&thread=th-3012");
 
@@ -282,20 +260,15 @@ test("メッセージ lists the waiting threads first; it is a screen under ホ�
 
 test("ホーム and メッセージ have no WCAG 2.2 AA violations", async ({ page }) => {
   await signIn(page);
-  await todos(page).first().getByRole("button", { name: "承認する" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await audit(page, "home: approve dialog");
-  await page.getByRole("dialog").getByRole("button", { name: "決済して承認" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "申込を承認しました" })).toBeVisible();
-  await audit(page, "home: approved");
+  await audit(page, "home: Experience conversations");
 
-  for (const path of ["/host/messages", "/host/messages?thread=th-3004", "/host/messages?thread=th-3010", "/host/messages?booking=bk-2035"]) {
+  for (const path of ["/host/messages", "/host/messages?thread=th-3004", "/host/messages?thread=th-3010", "/host/messages?booking=00000000-0000-4000-8000-00000000b103"]) {
     await page.goto(path);
     await expect(page.locator("main").getByRole("heading").first()).toBeVisible();
     await audit(page, path);
   }
   await page.goto("/host/messages?thread=th-3004");
-  const sofia = thread(page, "Sofia Rossi さんとの連絡");
+  const sofia = thread(page, "Hannah Kim さんとの連絡");
   await sofia.getByText("送った英語").click();
   const japanese = sofia.getByRole("textbox", { name: "日本語で書く" });
   await japanese.fill("はい、入口の横にスーツケースを置ける場所があります。17:40 ごろでしたら、そのままお越しください。");
@@ -325,19 +298,17 @@ test.describe("320px narrow phone", () => {
       expect(box && box.x >= 0 && box.x + box.width <= 320, label).toBe(true);
     };
     await signIn(page);
-    for (const path of ["/host/home", "/host/messages", "/host/messages?thread=th-3012", "/host/messages?thread=th-3004", "/host/messages?thread=th-3010", "/host/messages?booking=bk-2035"]) {
+    for (const path of ["/host/home", "/host/messages", "/host/messages?thread=th-3012", "/host/messages?thread=th-3004", "/host/messages?thread=th-3010", "/host/messages?booking=00000000-0000-4000-8000-00000000b103"]) {
       await page.goto(path);
       await expect(page.locator("main").getByRole("heading").first()).toBeVisible();
       expect(await overflowX(page), path).toBeLessThanOrEqual(0);
     }
     await page.goto("/host/home");
-    const lucas = todos(page).first();
-    await inside(lucas.getByRole("button", { name: "承認する" }), "home: 承認する");
-    await inside(lucas.getByRole("link", { name: "詳しく見る" }), "home: 詳しく見る");
+    await inside(todos(page).first().getByRole("link", { name: "返信する" }), "home: 返信する");
     await inside(page.getByRole("link", { name: "メッセージを見る" }), "home: メッセージを見る");
 
     await page.goto("/host/messages?thread=th-3004");
-    const sofia = thread(page, "Sofia Rossi さんとの連絡");
+    const sofia = thread(page, "Hannah Kim さんとの連絡");
     // The reply stays at the bottom of the screen.
     await expect(sofia.getByRole("button", { name: "この英語で送る" })).toBeInViewport();
     await inside(page.getByRole("link", { name: "メッセージへ戻る" }), "‹ メッセージ");

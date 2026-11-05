@@ -140,7 +140,7 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
   }
   if (provider.memberRole === "EDITOR") notFound();
   const [site, otaLoad] = await Promise.all([
-    loadSiteBookings(provider, requested, mockScenario),
+    loadSiteBookings(provider, requested),
     loadOtaBookings(provider.id, provider, requested, mockScenario),
   ]);
   const ota = otaRows(otaLoad);
