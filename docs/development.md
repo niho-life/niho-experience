@@ -28,6 +28,8 @@ http://localhost:3000 を開く。フッター最下部の1行「Preview with sa
 
 Claude Codeのクラウド環境のようにChromiumが入っている環境では、`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium` を付けるとブラウザの取得を省ける。
 
+WebのVitestは `unit` と `integration` に分ける。DB統合テスト（`*.integration.test.ts`）は単体テストの後に最大2ファイルずつ実行し、各ケースの全migration適用を含めて30秒を上限とする。単体テストは既定の5秒を維持する。DB統合テストには合成データ専用の `TEST_DATABASE_URL` が必要で、対象だけなら `npm -C apps/web test -- --project integration <ファイル>` を使う。CIの全件検証には両projectを含める。
+
 ## コンテナ
 
 本番はCloud Run（入口はCloudflare）で動かす（[ADR 0001](adr/0001-web-stack.md)）。
