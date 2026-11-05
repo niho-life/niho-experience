@@ -126,6 +126,8 @@ ALB/DNSは、この文書の設定とGoogle Cloudの[Cloud Run custom domain手�
 
 NIHOapp側の変更は連携Aの担当へ集約する。stg Web の `EXPERIENCE_SITE_ALLOWED_ORIGINS` は検証用サイトの exact origin、本番 Web は `https://experience.niho.life` の exact origin に限定する。GET availability と POST checkout の path/method だけ CORS を許し、ワイルドカードや資格情報付きCORSを使わない。`EXPERIENCE_SITE_PUBLIC_ORIGIN` は、承認済み原稿が本番ホストで表示されるまで**未設定**とする。この変数を入れると NIHO側の canonical・sitemap・中断時の戻り先が新サイトへ切り替わるため、両側を同時にreadbackする。env の反映は [NIHO連携runbook](https://github.com/niho-coliving/niho-app/blob/main/ops/runbooks/experience-site/experience-site-integration.md) と Cloud Run manifest の経路を使う。
 
+Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https://experience.niho.life` を正規配備経路で反映し、現在のNIHO Admin session検証とExperience migration `0058`・`0061`、runtime grantsを受け入れてから `ADMIN_SUPPORT_CONSOLE_ENABLED`、`PUBLICATIONS_ENABLED`、`HOST_PUBLICATION_API_ENABLED` を有効化する。販売者の現在OWNER/Connect readiness、口頭または書面での確認、掲載同意version、写真権利を本番候補で確認する。Adminは販売者のHost sessionを更新できないため、公開直前に販売者がHost画面を開いて作成した5分以内のreadiness snapshotが必要。合成受入とmigration/readbackが済む前にAdminまたは公開APIのflagを開かない。
+
 ## 個別ゲートと切戻し
 
 | ゲート | 開く前の証跡 |

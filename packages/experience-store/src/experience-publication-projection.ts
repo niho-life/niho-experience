@@ -74,6 +74,49 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+}
+
+/**
+ * An Admin publication may use its immutable review receipt as bilingual review
+ * evidence. This marker exists only in the in-memory projection; the draft and
+ * immutable publication content retain no OWNER confirmation fields.
+ */
+function reviewedAdminContent(row: UnknownRecord, content: UnknownRecord): UnknownRecord {
+  if (row.publisher_kind !== "ADMIN_PROXY") return content;
+  const review = record(row.admin_proxy_review);
+  const japanese = record(content.ja);
+  if (!review || !japanese || typeof review.contentFingerprint !== "string"
+    || typeof review.japaneseFingerprint !== "string" || typeof review.englishFingerprint !== "string") return content;
+  const english = {
+    title: row.public_title,
+    lead: content.lead,
+    description: content.description,
+    language: record(content.facts)?.language ?? null,
+    highlights: content.highlights,
+    included: content.included,
+    notIncluded: content.notIncluded,
+    knowBeforeYouGo: content.knowBeforeYouGo,
+    notSuitableFor: content.notSuitableFor,
+    timeline: content.timeline,
+  };
+  const contentFingerprint = fingerprint(content);
+  const japaneseFingerprint = fingerprint(japanese);
+  const englishFingerprint = fingerprint(english);
+  if (review.contentFingerprint !== contentFingerprint
+    || review.japaneseFingerprint !== japaneseFingerprint
+    || review.englishFingerprint !== englishFingerprint) return content;
+  return {
+    ...content,
+    translation: {
+      sourceFingerprint: japaneseFingerprint,
+      confirmedSourceFingerprint: japaneseFingerprint,
+      confirmedEnglishFingerprint: englishFingerprint,
+    },
+  };
+}
+
 const record = (value: unknown): UnknownRecord | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as UnknownRecord
@@ -313,7 +356,10 @@ const instant = (value: unknown): string | null => {
 export function projectPublicExperiencePublication(row: UnknownRecord): PublicExperiencePublication | null {
   const slug = text(row.slug, false);
   const publicTitle = text(row.public_title, false);
-  let manuscript = projectPublicExperiencePublicationManuscript(row.content);
+  const storedContent = record(row.content);
+  if (!storedContent) return null;
+  const source = reviewedAdminContent(row, storedContent);
+  let manuscript = projectPublicExperiencePublicationManuscript(source);
   const currency = typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null;
   const unitAmount = safeInteger(row.unit_amount);
   const sellerDisplayName = text(row.seller_display_name, false);
@@ -322,8 +368,6 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const publishedAtUtc = instant(row.published_at);
   if (slug === null || publicTitle === null || manuscript === null || currency === null || unitAmount === null
       || sellerDisplayName === null || media === null || providerMedia === null || publishedAtUtc === null) return null;
-  const source = record(row.content);
-  if (!source) return null;
   manuscript = remapPhotoReferences(manuscript, source, media.galleryPositionBySourcePosition);
   if (!manuscript) return null;
   const japanese = projectJapaneseManuscript(row, source, publicTitle, media.galleryPositionBySourcePosition);

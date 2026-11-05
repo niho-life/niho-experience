@@ -3,8 +3,17 @@
  * parameters: these fragments contain table and column names only.
  */
 export const VISIBLE_PUBLICATION_COLUMNS = `
-  p.id AS publication_id,p.provider_id,p.product_id,p.slug,p.public_title,p.content,p.currency,
-  p.unit_amount,p.seller_display_name,p.published_at,s.first_published_at`;
+  p.id AS publication_id,p.provider_id,p.product_id,p.draft_version,p.publisher_kind,
+  p.slug,p.public_title,p.content,p.currency,p.unit_amount,p.seller_display_name,p.published_at,s.first_published_at,
+  (SELECT jsonb_build_object(
+      'contentFingerprint',audit.content_fingerprint,
+      'japaneseFingerprint',audit.japanese_fingerprint,
+      'englishFingerprint',audit.english_fingerprint
+    )
+     FROM admin_proxy_publication_audit_events audit
+    WHERE audit.publication_id=p.id AND audit.provider_id=p.provider_id AND audit.product_id=p.product_id
+      AND audit.draft_version=p.draft_version AND audit.actor_niho_user_id=p.published_by_admin_niho_user_id
+  ) AS admin_proxy_review`;
 
 export const VISIBLE_PUBLICATIONS_CTE = `
   visible_publications AS (
