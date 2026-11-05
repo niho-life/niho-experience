@@ -249,8 +249,9 @@ export function HostPublicationWorkspace({
   const englishDraftRef = useRef<{ title: string; content: Record<string, unknown> }>({ title: "", content: blankContent });
 
   const baselineForm = useMemo(() => parseBaseline(baseline), [baseline]);
-  const draftFormJson = useMemo(() => JSON.stringify({ slug, title, unitAmount, content }), [slug, title, unitAmount, content]);
-  const baselineDraftJson = baselineForm ? JSON.stringify({ slug: baselineForm.slug, title: baselineForm.title, unitAmount: baselineForm.unitAmount, content: baselineForm.content }) : "";
+  // jsonb may return object keys in a different order; only content changes are unsaved.
+  const draftFormJson = useMemo(() => canonicalJson({ slug, title, unitAmount, content }), [slug, title, unitAmount, content]);
+  const baselineDraftJson = baselineForm ? canonicalJson({ slug: baselineForm.slug, title: baselineForm.title, unitAmount: baselineForm.unitAmount, content: baselineForm.content }) : "";
   const draftDirty = !!product && (!baselineForm || draftFormJson !== baselineDraftJson);
   const termsDirty = !!product && (!baselineForm || JSON.stringify(terms) !== JSON.stringify(baselineForm.terms));
   const mediaDirty = !!product && (!baselineForm || JSON.stringify(mediaForm(mediaDraft)) !== JSON.stringify(baselineForm.media));
@@ -330,10 +331,13 @@ export function HostPublicationWorkspace({
     const serverForm = { slug: current.draft.slug, title: current.draft.publicTitle, unitAmount: String(current.draft.unitAmount), content: nextContent, terms: nextTerms, media: mediaForm(current.media), providerMedia: providerMediaForm(currentProviderMedia) };
     if (restoreLocal && restored && isRecord(restored) && typeof restored.slug === "string" && typeof restored.title === "string" && isRecord(restored.content) && isRecord(restored.terms)) {
       const restoredProviderMedia = storedProviderMedia(restored.providerMedia, currentProviderMedia);
-      setSlug(restored.slug); setTitle(restored.title); setUnitAmount(String(restored.unitAmount ?? "")); setContent(restored.content); setTerms(storedTerms(restored.terms, nextTerms)); setMediaDraft(storedMedia(restored.media, current.media)); setProviderMediaDraft(restoredProviderMedia);
+      const restoredTerms = storedTerms(restored.terms, nextTerms);
+      const restoredMedia = storedMedia(restored.media, current.media);
+      const restoredForm = { slug: restored.slug, title: restored.title, unitAmount: String(restored.unitAmount ?? ""), content: restored.content, terms: restoredTerms, media: mediaForm(restoredMedia), providerMedia: providerMediaForm(restoredProviderMedia) };
+      setSlug(restoredForm.slug); setTitle(restoredForm.title); setUnitAmount(restoredForm.unitAmount); setContent(restoredForm.content); setTerms(restoredTerms); setMediaDraft(restoredMedia); setProviderMediaDraft(restoredProviderMedia);
       setBaseline(JSON.stringify(serverForm));
       setProviderMediaBaseline(JSON.stringify(providerMediaForm(currentProviderMedia)));
-      if (JSON.stringify(restored) !== JSON.stringify(serverForm)) setNotice("保存していない入力を復元しました。");
+      if (canonicalJson(restoredForm) !== canonicalJson(serverForm)) setNotice("保存していない入力を復元しました。");
       japaneseSourceRef.current = japaneseManuscript(restored.content);
       englishDraftRef.current = { title: restored.title, content: restored.content };
     } else {
@@ -599,7 +603,7 @@ export function HostPublicationWorkspace({
       setProviderMediaDraft(retainedProviderMedia);
       setProviderMediaBaseline(JSON.stringify(latestProviderMediaForm));
       setBaseline(JSON.stringify(latestBaseline));
-      if (JSON.stringify(localComparable) === JSON.stringify(latestBaseline)) clearLocal(storageNamespace, latest.id);
+      if (canonicalJson(localComparable) === canonicalJson(latestBaseline)) clearLocal(storageNamespace, latest.id);
       else saveLocal(storageNamespace, latest.id, localDraft);
       setConflictProduct(null);
       setNotice("最新の保存状態を基準に、入力を保持しました。保存すると競合した項目をこの入力で更新します。");
