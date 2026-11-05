@@ -99,7 +99,7 @@ test("この回: the session's OTA guests with their site's badge and phone, and
   await page.goto("/host/bookings");
   await list(page).getByRole("link", { name: /10月22日（木）18:00/ }).click();
   await expect(page).toHaveURL(/\/host\/bookings\/session\?/);
-  await expect(page.getByText("予約サイトの予約の取消・連絡は、その予約サイトで行ってください")).toBeVisible();
+  await expect(page.getByText(/取消・返金・予約者とのやりとりは、その予約サイトで行ってください/)).toBeVisible();
   const guests = page.getByRole("region", { name: "参加者" });
   const traveler = guests.getByRole("listitem").filter({ hasText: "Sample Traveler" });
   await expect(traveler).toContainText("GetYourGuide");

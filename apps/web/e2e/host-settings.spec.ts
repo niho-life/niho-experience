@@ -138,10 +138,10 @@ test("a calendar whose access was taken away in Google says so on ホーム and 
   await signIn(page, "?mock=calendar-revoked");
   const card = page.getByRole("region", { name: "Google カレンダーの接続が切れました" });
   await expect(card).toContainText("もう一度つなぐまで、予定の確認と書き込みを止めています");
-  // Below today's and tomorrow's sessions, above これからの開催.
+  // After the todo list and before the upcoming sessions, including a day with no session.
   const cardBox = (await card.boundingBox())!;
-  const tomorrow = (await page.getByRole("region", { name: "明日の開催" }).boundingBox())!;
-  expect(cardBox.y).toBeGreaterThan(tomorrow.y + tomorrow.height);
+  const todos = (await page.getByRole("region", { name: "次にすること" }).boundingBox())!;
+  expect(cardBox.y).toBeGreaterThan(todos.y + todos.height);
   expect((await page.getByRole("region", { name: "これからの開催" }).boundingBox())!.y).toBeGreaterThan(cardBox.y + cardBox.height);
   expect(await overflowX(page)).toBeLessThanOrEqual(0);
 

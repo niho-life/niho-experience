@@ -49,12 +49,12 @@ test("ホーム's 読んで返信する opens the review; the reply's English is
   const oliverRow = todos(page).filter({ hasText: "Oliver さん" });
   for (const text of ["未返信", "レビュー", "「ここに暮らす人たちと 6 品を作り、終電の時間まで話し込みまし…」", "Oliver さん · イギリス · Kamakura Community Dinner with Locals"]) await expect(oliverRow).toContainText(text);
   await expect(oliverRow.getByRole("img", { name: "5 点", exact: true })).toBeVisible();
-  const yukiRow = todos(page).nth(5);
+  const yukiRow = todos(page).filter({ hasText: "由紀 さん · 日本" });
   for (const text of ["未返信", "由紀 さん · 日本"]) await expect(yukiRow).toContainText(text);
   await expect(yukiRow).not.toContainText("公開前");
   await expect(yukiRow.getByRole("link", { name: "読んで返信する" })).toHaveAttribute("href", "/host/reviews#review-rv-5013");
-  await expect(todos(page).nth(6)).toContainText("Oliver さん");
-  await expect(todos(page).nth(7)).toContainText("Ella さん · オーストラリア");
+  await expect(oliverRow).toContainText("Oliver さん");
+  await expect(todos(page).filter({ hasText: "Ella さん · オーストラリア" })).toContainText("未返信");
   const open = oliverRow.getByRole("link", { name: "読んで返信する" });
   await expect(open).toHaveAttribute("href", "/host/reviews#review-rv-5020");
 

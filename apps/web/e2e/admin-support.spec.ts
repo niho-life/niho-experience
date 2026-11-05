@@ -228,12 +228,12 @@ test("host settings link to the independent support page and booking history sta
   const support = page.getByRole("region", { name: "NIHOサポート" });
   await expect(support).toContainText("体験の設定とは分けて確認・変更します");
   await expect(support.getByRole("link", { name: "NIHOサポート設定を開く" })).toHaveAttribute("href", /\/host\/support\?hostKind=EXPERIENCE_PROVIDER&hostId=/);
-  await page.goto("/host/bookings?booking=bk-2041");
-  await expect(page.getByRole("region", { name: "NIHOサポート" })).toContainText("手数料 15%（受付時）");
-  await expect(page.getByRole("region", { name: "NIHOサポート" })).toContainText("NIHO サポート 佐藤");
-  await page.goto("/host/bookings?booking=bk-2038");
-  await expect(page.getByRole("region", { name: "NIHOサポート" })).toContainText("手数料 10%（受付時）");
-  await expect(page.getByRole("region", { name: "NIHOサポート" })).toContainText("現在の設定を変えても、受付時の条件は変わりません");
+  await page.goto("/host/bookings?booking=00000000-0000-4000-8000-00000000b103");
+  await expect(page.getByRole("region", { name: "料金・精算状況" })).toContainText("15%（決済費用込み）");
+  await expect(page.getByRole("region", { name: "料金・精算状況" })).toContainText("受付時 サポートON");
+  await page.goto("/host/bookings?booking=00000000-0000-4000-8000-00000000b101");
+  await expect(page.getByRole("region", { name: "料金・精算状況" })).toContainText("10%（決済費用込み）");
+  await expect(page.getByRole("region", { name: "料金・精算状況" })).toContainText("受付時 サポートOFF");
 });
 
 test.describe("admin accessibility and responsive layout", () => {
