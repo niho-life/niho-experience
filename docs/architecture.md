@@ -20,20 +20,21 @@
 ```mermaid
 flowchart LR
   G[旅行者] --> W[niho-experience]
-  W -->|公開カタログ・SSR| API[NIHO共通API]
+  W -->|公開カタログ・SSR| API[Experience API]
   G -->|画面から限定ゲストAPIへ予約入力を送信| API
   H[ホスト] --> HC[niho-experience /host]
   HC -->|ログイン| N[NIHOの確認画面]
   N -->|一度きりのコード| HC
-  HC -->|Bearer・サーバーから| API
-  API --> DB[商品・予約・売上台帳]
+  HC -->|本人の操作| API
+  API -->|現在本人・Connect口座の限定読取| NAPI[NIHO共通API]
+  API --> DB[Experience商品・予約・売上台帳]
   API --> S[販売者口座のStripe Direct Checkout]
   S -->|署名済みイベント| API
 ```
 
 ## 旅行者と提供者
 
-旅行者は英語のページで体験を探し、日時・人数・料金・販売者・キャンセル条件を確認する。会員登録を求めず、必要最小限の連絡先をゲストAPIへ送信し、StripeのCheckoutに移る。価格、在庫、販売者、決済口座は共通APIが決定する。v1の予約確認は既存NIHO側を使い、決済の成立はwebhookを正とする。
+旅行者は英語のページで体験を探し、日時・人数・料金・販売者・キャンセル条件を確認する。会員登録を求めず、必要最小限の連絡先をExperienceのゲストAPIへ送信し、有料予約はStripeのCheckoutに移る。価格、在庫、販売者、決済口座はExperienceの公開版と取引処理が決定する。予約確認・取消／返金もExperienceが扱い、決済の成立は署名を検証したwebhookを正とする。
 
 提供者（ホスト）は `/host` へNIHOでログインする。Experience serverが一度きりのコードをNIHO専用Web access tokenへ交換し、tokenはsealed server-side sessionだけに保持する。NIHO cookieは共有せず、ブラウザーへtokenを渡さない。現在のNIHO Host v1.0.0は本人IDとACTIVE状態、明示指定したlegacy Connect readだけを提供し、provider一覧・登録・更新・Connect変更やExperience商品APIは持たない。契約のsource SHA、認証headers、response schema、配備条件は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)を参照する。
 
