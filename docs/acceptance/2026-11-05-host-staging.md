@@ -17,6 +17,10 @@
 
 初回DB起動時にmaintenanceが継続していたため、最初のmigration preflightとNIHO配備は失敗した。SQL受付後、公式runner／失敗jobの再実行で成功を確認した。最初の失敗を成功扱いにしていない。
 
+## 保存判定修正の再配備
+
+PR #418の固定SHA `0f98043cf9ff568dfe84d59ce26c4a2a916c7acc` を[公式candidate workflow](https://github.com/niho-life/niho-experience/actions/runs/41965787002)で配備し、revision `niho-experience-host-stg-00028-gug` のReady、source SHA、publications／host API ON、guest booking OFF、indexing block、同じテスト同意版とprivate bucketを照合した。[promote](https://github.com/niho-life/niho-experience/actions/runs/41966220094)も成功し、同じrevisionがstableの100%であることを確認した。
+
 ## OWNERの画面で確認した範囲
 
 - オーナーが実行時に承認したNIHOアカウントをstagingへ接続し、ホストホームへ復帰した。
@@ -27,11 +31,11 @@
 - 合成の集合案内（実在しない住所・道順・持ち物）を保存した。写真未選択はAPIが拒否するため、権利確認済みテスト写真を選んで保存した。確定予約へのsnapshot・mail配信は未検証。
 - OWNERの実行時承認後、サポートOFF／合計10%（決済費用込み）と現行規約への同意をホスト画面で保存し、同意改訂1のreadbackを確認した。新規staging予約だけに適用する。
 - 未公開slugのSSR・公開detail・availabilityは404、公開APIはno-store。匿名host productsと写真readは401、集合案内の編集画面はログインへ戻る。未公開写真の公開routeは404／no-store、一覧・sitemapにも下書きは出ない。robotsは全pathを検索除外にしている。
-- 下書き保存後もキー順の差だけで未保存表示が残る不具合を発見した。修正は #417 / PR #418、実環境の再確認は配備後に行う。
+- 下書き保存後もキー順の差だけで未保存表示が残る不具合を発見した。修正は #417 / PR #418（merge `0f98043cf9ff568dfe84d59ce26c4a2a916c7acc`）。CIのWeb 2,254件とE2E 846件が成功し、型・lint・ビルド・premerge-gateも成功。E2Eの既定条件による87件skipは変更せず、修正版stagingでも、同じ下書きの復元で未保存表示が出ず、実際の英文変更では未保存になり、英語確認→保存後に未保存表示が消えて保存ボタンが無効になることを確認した。
 
 ## 続けて確認する事項
 
-1. #418の固定SHA配備後に、下書き保存・再読込・本当の編集時の未保存判定を確認する。
+1. 保存判定修正のstaging確認は完了。公開前blockerはNIHOの口座再利用同意だけになった。
 2. NIHOの受取口座再利用同意とExperience掲載同意を本人の明示操作で満たす。現在NIHO Host v1は同意projectionのreadだけで、旧NIHO画面はExperienceへredirectされるため、本人が同意を登録する現行導線が無い。共通基盤の限定Connect契約として[NIHO #19121へ記録](https://github.com/niho-coliving/niho-app/issues/19121#issuecomment-6649117694)した。旧payments/reuseの復活、DBへの同意の直接作成、公開gateの緩和はしない。
 3. 合成商品で公開→通常編集で掲載維持→本人停止→再開、SSR・metadata・catalog・写真・availabilityの一致を確認する。
 4. Stripe testのゲスト入力→Checkout→webhook確定→予約照会→取消／返金、満席・停止・失敗時の復帰を確認する。
