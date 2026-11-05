@@ -1,4 +1,4 @@
-export type PublicationNextAction = "SAVE" | "SCHEDULE" | "PRICING" | "MANUSCRIPT" | "PHOTOS" | "SUPPORT" | "EXTERNAL" | "PUBLISH" | "LIVE";
+export type PublicationNextAction = "SAVE" | "SCHEDULE" | "PRICING" | "MANUSCRIPT" | "PHOTOS" | "SUPPORT" | "PAYMENT_CONSENT" | "EXTERNAL" | "PUBLISH" | "LIVE";
 
 export function publicationNextAction(input: {
   readonly dirty: boolean;
@@ -12,6 +12,7 @@ export function publicationNextAction(input: {
   if (blockers.has("MANUSCRIPT_REQUIRED") || blockers.has("PUBLIC_CONTENT_INVALID")) return "MANUSCRIPT";
   if (blockers.has("PHOTOS_REQUIRED")) return "PHOTOS";
   if (blockers.has("SUPPORT_CONSENT_REQUIRED")) return "SUPPORT";
+  if (blockers.has("PAYMENT_REUSE_CONSENT_REQUIRED")) return "PAYMENT_CONSENT";
   if (blockers.size > 0) return "EXTERNAL";
   return input.published ? "LIVE" : "PUBLISH";
 }

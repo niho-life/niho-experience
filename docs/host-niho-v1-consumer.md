@@ -20,7 +20,9 @@ ExperienceがNIHO Host v1から消費するのは、現在本人の読取と既�
 
 2026-11-05の受入では、既存口座がREADYでも、同意未登録で現在の公開条件を満たさないsellerを確認した。現在のNIHO v1は同意のreadだけで、旧NIHO提供者画面はExperienceへredirectされ、Experienceの旧共有操作はmock専用のため、本人の同意登録へ進めない。この不足は[NIHO共通基盤 #19121](https://github.com/niho-coliving/niho-app/issues/19121#issuecomment-6649117694)で追う。
 
-必要なのは、NIHO側で本人・現在の同一口座・現行同意文を確認し、明示同意を監査可能に保存してExperienceへ戻す限定経路である。口座の付替えを伴う旧`payments/reuse`や運営によるDBの直接更新で代用しない。新しい経路と契約版がNIHOで提供されるまでconsumerのscopeを増やさず、既存の公開gateを維持する。
+NIHO側の[現在口座利用同意 #19864](https://github.com/niho-coliving/niho-app/issues/19864)で、本人・現在の同一口座・現行同意文を確認し、明示同意を監査可能に保存してExperienceへ戻す限定経路を実装する。ExperienceのOWNER編集画面は `PAYMENT_REUSE_CONSENT_REQUIRED` のとき、server設定のNIHO originにある固定path `/connect/experience-payments` を案内する。URLには本人・provider・口座参照やtokenを含めず、referrerも送らない。NIHO API/Webの先行配備後にこの導線を配備する。
+
+口座の付替えを伴う旧`payments/reuse`や運営によるDBの直接更新で代用しない。Host v1.0.0のread DTO・選別export・consumerのscopeは変更せず、既存の公開gateを維持する。NIHOの同意保存・readbackと実際の公開は、stagingの受入が終わるまで未完了とする。
 
 ## 認証・本人・Experience権限
 

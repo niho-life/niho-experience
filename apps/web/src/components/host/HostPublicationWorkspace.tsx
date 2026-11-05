@@ -61,6 +61,7 @@ type Props = {
   productId?: string;
   create?: boolean;
   bookingGuideHref?: string;
+  paymentConsentHref?: string;
   mode?: "host" | "admin-draft";
   apiBase?: string;
   experiencesBase?: string;
@@ -218,6 +219,7 @@ export function HostPublicationWorkspace({
   productId,
   create = false,
   bookingGuideHref,
+  paymentConsentHref,
   mode = "host",
   apiBase = "/host/api/products",
   experiencesBase = "/host/experiences",
@@ -843,6 +845,8 @@ export function HostPublicationWorkspace({
             ? <a className={consoleButtonClass("primary")} href="#product-editor">写真を追加</a>
             : nextAction === "SUPPORT"
               ? <Link className={consoleButtonClass("primary")} href="/host/settings#settings-support">サポート・手数料の条件を確認</Link>
+            : nextAction === "PAYMENT_CONSENT" && paymentConsentHref
+              ? <a className={consoleButtonClass("primary")} href={paymentConsentHref} referrerPolicy="no-referrer">NIHOで受取口座を確認</a>
             : nextAction === "PUBLISH"
               ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>同意して公開</button>
               : nextAction === "LIVE" && publicHref
@@ -856,6 +860,7 @@ export function HostPublicationWorkspace({
         : nextAction === "MANUSCRIPT" ? "日本語と英語の公開原稿を完成し、英語原稿を確認してください。"
           : nextAction === "PHOTOS" ? "掲載許諾を確認した商品写真と、日本語・英語の説明を追加してください。"
             : nextAction === "SUPPORT" ? "予約受付の前に、NIHOサポートの利用範囲と合計手数料の条件を確認してください。"
+            : nextAction === "PAYMENT_CONSENT" ? "現在の受取口座をExperienceで利用する同意を、NIHOで確認してください。"
             : nextAction === "EXTERNAL" ? "本人・受取口座・手数料・掲載条件の確認が必要です。下の未完了項目を確認してください。"
               : nextAction === "PUBLISH" ? "保存済みの公開内容と販売条件を確認し、掲載条件に同意して公開できます。"
                 : "公開中です。旅行者の詳細ページと予約画面を確認できます。";
