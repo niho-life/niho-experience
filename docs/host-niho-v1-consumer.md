@@ -16,6 +16,12 @@ NIHOapp PR #19712 とstaging manifest #19784 はmerge済み。2026-11-05に公�
 
 ExperienceがNIHO Host v1から消費するのは、現在本人の読取と既存Connect口座の限定readiness／再利用同意projectionだけである。提供者一覧・作成・更新、Connect口座の作成・接続・変更、Experienceの商品・公開APIは含まれない。NIHOの禁止APIを復活させたり、権限やscopeを広げたりしない。
 
+### 本人の口座再利用同意（stagingで確認した残条件）
+
+2026-11-05の受入では、既存口座がREADYでも、同意未登録で現在の公開条件を満たさないsellerを確認した。現在のNIHO v1は同意のreadだけで、旧NIHO提供者画面はExperienceへredirectされ、Experienceの旧共有操作はmock専用のため、本人の同意登録へ進めない。この不足は[NIHO共通基盤 #19121](https://github.com/niho-coliving/niho-app/issues/19121#issuecomment-6649117694)で追う。
+
+必要なのは、NIHO側で本人・現在の同一口座・現行同意文を確認し、明示同意を監査可能に保存してExperienceへ戻す限定経路である。口座の付替えを伴う旧`payments/reuse`や運営によるDBの直接更新で代用しない。新しい経路と契約版がNIHOで提供されるまでconsumerのscopeを増やさず、既存の公開gateを維持する。
+
 ## 認証・本人・Experience権限
 
 1. NIHO app-connect の一度きりコード交換で得たNIHO Web access／refresh tokenはExperienceのsealed server-side sessionだけに保持する。NIHO cookieは共有せず、tokenをブラウザーJavaScript、storage、ログ、公開DTOへ渡さない。
