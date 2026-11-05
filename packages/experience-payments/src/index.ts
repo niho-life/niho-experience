@@ -37,6 +37,8 @@ export interface CreateDirectCheckoutInput {
   readonly returnPath: string;
   /** Where Stripe sends a guest who leaves Checkout: a trusted local path on returnOrigin, as returnPath. */
   readonly cancelPath?: string;
+  /** Set a locale explicitly for localized flows; `auto` follows the guest's browser language. */
+  readonly locale?: "auto" | "ja";
   /** Prefills Stripe's email field. Never put it in metadata; leave it out once the guest data is erased. */
   readonly customerEmail?: string;
   readonly platformStripeKey?: string;
@@ -358,6 +360,7 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
   const session = await stripe.checkout.sessions.create(
     {
       mode: "payment",
+      locale: input.locale ?? "auto",
       payment_method_types: ["card"],
       success_url: successUrl,
       ...(cancelUrl === undefined ? {} : { cancel_url: cancelUrl }),

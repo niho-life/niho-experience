@@ -21,7 +21,7 @@ function error(status: 404 | 503) {
 
 /** A provider image is returned only while it remains selected and a product by its seller is public. */
 export async function GET(_request: Request, context: Context) {
-  if (!config.experiencePublicationsEnabled) return error(404);
+  if (config.apiMode !== "http" || !config.experiencePublicationsEnabled) return error(404);
   const assetId = (await context.params).assetId;
   if (!UUID_V4.test(assetId)) return error(404);
   try {

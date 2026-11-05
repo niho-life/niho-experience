@@ -28,8 +28,12 @@ export function getSiteReviewsApi(siteOrigin: string) {
  * the checkout POST carry this site's Origin, which the route checks. `thisSite` accepts the site's own
  * `/booking/return` as a checkout answer (a booking already paid) and no NIHO booking page.
  */
-export function getSiteBookingApi(siteOrigin: string) {
-  return createExperienceApiClient({ nihoWebOrigin: siteOrigin, thisSite: true, fetch: (input, init) => fetch(input, { ...init, referrerPolicy: "same-origin" }) });
+export function getSiteBookingApi(siteOrigin: string, locale: "en" | "ja" = "en") {
+  return createExperienceApiClient({ nihoWebOrigin: siteOrigin, thisSite: true, fetch: (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("accept-language", locale);
+    return fetch(input, { ...init, headers, referrerPolicy: "same-origin" });
+  } });
 }
 
 /** Browser only: the client for one experience's availability and checkout, from where the server says it is sold. */

@@ -14,7 +14,7 @@ const japanese = vi.hoisted(() => ({
 const READY = { termsFingerprint: `sha256:${"a".repeat(64)}`, bookingReady: true, unavailableCopyKey: null };
 
 vi.mock("server-only", () => ({}));
-vi.mock("./config", () => ({ get config() { return { siteUrl: "https://experience.example.com", indexingAllowed: true, experiencePublicationsEnabled: japanese.publicationsEnabled, japaneseSiteEnabled: true }; } }));
+vi.mock("./config", () => ({ get config() { return { apiMode: japanese.publicationsEnabled ? "http" : "mock", siteUrl: "https://experience.example.com", indexingAllowed: true, experiencePublicationsEnabled: japanese.publicationsEnabled, japaneseSiteEnabled: true }; } }));
 vi.mock("./api", () => ({
   listExperiencesForSite: async () => japanese.english
     ? { ok: true as const, data: { experiences: japanese.english.map((slug) => ({ slug })) } }
@@ -84,7 +84,7 @@ describe("experience hreflang", () => {
       canonical: `${SITE}/experiences/synthetic-dinner`,
       languages: { en: `${SITE}/experiences/synthetic-dinner`, ja: `${SITE}/ja/experiences/synthetic-dinner`, "x-default": `${SITE}/experiences/synthetic-dinner` },
     });
-    japanese.copyReady = false;
+    japanese.staticRelease = null;
     await expect(experienceAlternates("synthetic-dinner", `${SITE}/experiences/synthetic-dinner`)).resolves.toEqual(englishOnly(`${SITE}/experiences/synthetic-dinner`));
   });
 });

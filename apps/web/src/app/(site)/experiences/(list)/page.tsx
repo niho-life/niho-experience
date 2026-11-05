@@ -42,7 +42,9 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const searchQuery = normalizeExperienceQuery(query.q);
   const [api, result, guideCatalogResult, siteCatalog] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite(), listSitePublicExperiences()]);
   const copy = EN_STATIC_COPY_V1;
-  const theme = config.publicApiVersion === "1.2" ? normalizeExperienceTheme(query.theme) : undefined;
+  // Native publications have no theme field yet; keep the unsupported filter out of the live form.
+  const themesEnabled = config.apiMode === "mock" && config.publicApiVersion === "1.2";
+  const theme = themesEnabled ? normalizeExperienceTheme(query.theme) : undefined;
   const sitePublications = siteCatalog.experiences;
   const nativeSlugs = new Set(siteCatalog.claimedSlugs);
   const catalog = result.ok ? result.data.experiences.filter((experience) => !nativeSlugs.has(experience.slug)) : [];
@@ -71,7 +73,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     theme,
     date: initialDate ?? undefined,
     guests: initialGuests,
-    filtersEnabled: config.publicApiVersion === "1.2",
+    filtersEnabled: themesEnabled,
     filtersActive: Boolean(searchQuery || theme || date || initialGuests !== null),
   };
   const listContent = (
@@ -83,7 +85,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
         initialDate={initialDate}
         initialGuests={initialGuests}
         browseContext={{ q: searchQuery || undefined, theme }}
-        catalogDateFiltered={config.publicApiVersion === "1.2" && Boolean(date)}
+        catalogDateFiltered={config.apiMode === "mock" && config.publicApiVersion === "1.2" && Boolean(date)}
         preview={isPreview}
         bookingSources={bookingSources}
         search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />}
@@ -94,7 +96,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     } />
   );
   return <>
-    <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: items.length }} />
+    <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: cards.length }} />
     {listContent}
     {guideCatalogResult.guides.length ? (
       <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">

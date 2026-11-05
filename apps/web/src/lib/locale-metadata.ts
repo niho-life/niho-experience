@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import type { PageId } from "./page-document-contract";
 import { listExperiencesForSite } from "./api";
 import { config } from "./config";
-import { getJapaneseCatalog, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
+import { getJapaneseCatalog, getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
 import { isIndexableJapanesePage, mapJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
 import { experiencePublicationRepository } from "./experience/store-server";
 
@@ -12,7 +12,7 @@ async function publicationLanguagePair(slug: string): Promise<boolean> {
   const repository = experiencePublicationRepository();
   if (!repository) return false;
   try {
-    await getJapaneseCopy();
+    await getPreparedJapaneseStaticRelease();
     return Boolean((await repository.getPublicBySlug(slug))?.japanese);
   }
   catch { return false; }
@@ -36,7 +36,7 @@ export async function englishAlternates(sourcePath: string, indexable = true): P
  * catalog with its detail from the same release (localized-mapping.ts). Otherwise /ja shows "unavailable".
  */
 export async function experienceAlternates(slug: string, canonical: string): Promise<Metadata["alternates"]> {
-  if (config.experiencePublicationsEnabled) {
+  if (config.apiMode === "http") {
     return await publicationLanguagePair(slug)
       ? { canonical, languages: pairLanguages(canonical, `${config.siteUrl}/ja/experiences/${slug}`) }
       : { canonical, languages: { en: canonical, "x-default": canonical } };
@@ -55,7 +55,7 @@ export async function experienceAlternates(slug: string, canonical: string): Pro
  * hreflang points one way at a missing page.
  */
 export async function japaneseExperienceAlternates(slug: string, canonical: string): Promise<Metadata["alternates"]> {
-  if (config.experiencePublicationsEnabled) {
+  if (config.apiMode === "http") {
     if (await publicationLanguagePair(slug)) {
       const english = `${config.siteUrl}/experiences/${slug}`;
       return { canonical, languages: pairLanguages(english, `${config.siteUrl}/ja/experiences/${slug}`) };

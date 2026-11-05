@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  config: { experiencePublicationsEnabled: true },
+  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true },
   repository: {
     listPublic: vi.fn(),
     getPublicBySlug: vi.fn(),
@@ -41,6 +41,7 @@ const assetId = "00000000-0000-4000-8000-000000000451";
 describe("Experience public publication routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.config.apiMode = "http";
     mocks.config.experiencePublicationsEnabled = true;
     mocks.repository.listPublic.mockResolvedValue([publication]);
     mocks.repository.getPublicBySlug.mockResolvedValue(publication);
@@ -49,7 +50,7 @@ describe("Experience public publication routes", () => {
     mocks.storage.read.mockResolvedValue(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
   });
 
-  it("serves the Experience catalog projection and honors the kill switch", async () => {
+  it("serves the Experience catalog only while the public publication switch is on", async () => {
     const response = await catalog();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ experiences: [publication] });
@@ -57,7 +58,20 @@ describe("Experience public publication routes", () => {
 
     mocks.config.experiencePublicationsEnabled = false;
     expect((await catalog()).status).toBe(404);
-    expect(mocks.repository.listPublic).toHaveBeenCalledOnce();
+    expect(mocks.repository.listPublic).toHaveBeenCalledTimes(1);
+    mocks.config.apiMode = "mock";
+    expect((await catalog()).status).toBe(404);
+  });
+
+  it("closes every public read and both image relays while publication is disabled", async () => {
+    mocks.config.experiencePublicationsEnabled = false;
+    const request = new Request("https://experience.example/api/public/experiences/synthetic-experience");
+    expect((await catalog()).status).toBe(404);
+    expect((await detail(request, { params: Promise.resolve({ slug: publication.slug }) })).status).toBe(404);
+    expect((await media(request, { params: Promise.resolve({ assetId }) })).status).toBe(404);
+    expect((await providerMedia(request, { params: Promise.resolve({ assetId }) })).status).toBe(404);
+    for (const method of Object.values(mocks.repository)) expect(method).not.toHaveBeenCalled();
+    expect(mocks.storage.read).not.toHaveBeenCalled();
   });
 
   it("serves only currently public details and hides unavailable slugs uniformly", async () => {

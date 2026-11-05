@@ -5,16 +5,15 @@ import { nihoBookingSources, type BookingSource, type BookingSources } from "@/l
 import { config } from "@/lib/config";
 import { detailNextDates } from "@/lib/detail-page";
 import { experiencePublicationRepository, guestBookingRepository } from "@/lib/experience/store-server";
+import { projectSitePublicSaleTerms } from "@/lib/experience/site-publications";
 import type { ExperienceDetailForSite } from "@/lib/experience-types";
 import { siteSaleTerms, withSiteSaleTerms, type SiteSaleTerms } from "@/lib/guest-booking-terms";
 import { japaneseBookingAllowed } from "@/lib/localized-release";
 
 /*
- * Which experiences this site sells (#285, docs/guest-booking.md). Products switch one by one: with
- * EXPERIENCE_GUEST_BOOKING_ENABLED, a product the experience DB sells (publicBookingTerms) books through this
- * site's routes; every other product keeps NIHO's path unchanged, and the flag off or the preview changes nothing.
- * A switched product no longer sells on NIHO, so when the DB cannot answer the product is "unknown": that request
- * shows it as not bookable and never falls back to NIHO's availability or checkout.
+ * HTTP pages sell only currently active Experience publications. An unpublished slug, missing sale terms,
+ * unsupported participation conditions, or a store failure closes booking without a NIHO fallback.
+ * Mock preview keeps its synthetic route selection.
  */
 
 export type GuestBookingSale =
@@ -36,8 +35,8 @@ function siteOrigin(): string {
 
 /** Where one experience is sold. Never throws: a failure is "unknown". */
 export async function guestBookingSale(slug: string): Promise<GuestBookingSale> {
-  if (config.experiencePublicationsEnabled) {
-    if (!config.guestBookingEnabled) return UNKNOWN;
+  if (config.apiMode === "http") {
+    if (!config.guestBookingEnabled || !config.experiencePublicationsEnabled) return UNKNOWN;
     const publications = experiencePublicationRepository();
     const bookings = guestBookingRepository();
     if (!publications || !bookings) return UNKNOWN;
@@ -45,7 +44,7 @@ export async function guestBookingSale(slug: string): Promise<GuestBookingSale> 
       const publication = await publications.getPublicBySlug(slug);
       if (!publication) return UNKNOWN;
       const terms = await bookings.publicBookingTerms(slug);
-      if (terms === null) return UNKNOWN;
+      if (!terms || projectSitePublicSaleTerms(terms) === null) return UNKNOWN;
       siteSaleTerms(terms, config.guestBookingConsentVersion);
       return { kind: "site", terms };
     } catch (error) {
@@ -72,10 +71,11 @@ export async function guestBookingSale(slug: string): Promise<GuestBookingSale> 
 /** Where a page of cards reads each card's availability, in one query. A failure closes every card on the page. */
 export async function guestBookingSources(slugs: readonly string[]): Promise<BookingSources> {
   const niho = nihoBookingSources(config.nihoWebOrigin);
-  if (config.experiencePublicationsEnabled) {
+  if (config.apiMode === "http") {
     const unique = [...new Set(slugs)];
     if (!unique.length) return niho;
     const closed: BookingSources = { ...niho, closedSlugs: unique };
+    if (!config.experiencePublicationsEnabled) return closed;
     if (!config.guestBookingEnabled) return closed;
     const publications = experiencePublicationRepository();
     const bookings = guestBookingRepository();
@@ -83,7 +83,9 @@ export async function guestBookingSources(slugs: readonly string[]): Promise<Boo
     try {
       const [published, sellable] = await Promise.all([publications.listPublic(), bookings.sellableSlugs(unique)]);
       const publicSlugs = new Set(published.map((item) => item.slug));
-      const siteSlugs = sellable.filter((slug) => publicSlugs.has(slug));
+      const candidates = sellable.filter((slug) => publicSlugs.has(slug));
+      const siteSlugs = (await Promise.all(candidates.map(async (slug) => ({ slug, terms: await bookings.publicBookingTerms(slug) }))))
+        .filter(({ terms }) => projectSitePublicSaleTerms(terms) !== null).map(({ slug }) => slug);
       return {
         nihoWebOrigin: niho.nihoWebOrigin,
         siteOrigin: siteSlugs.length ? siteOrigin() : null,
@@ -100,19 +102,12 @@ export async function guestBookingSources(slugs: readonly string[]): Promise<Boo
   const bookings = guestBookingRepository();
   if (!bookings) return closed;
   try {
-    const publications = config.apiMode === "http" ? experiencePublicationRepository() : null;
-    const [siteSlugs, claimedSlugs] = await Promise.all([
-      bookings.sellableSlugs(slugs),
-      publications ? publications.listClaimedSlugs() : Promise.resolve([]),
-    ]);
-    const claimed = new Set(claimedSlugs);
-    const sellable = new Set(siteSlugs);
-    const closedSlugs = [...new Set(slugs.filter((slug) => claimed.has(slug) && !sellable.has(slug)))];
+    const siteSlugs = await bookings.sellableSlugs(slugs);
     return {
       ...niho,
       siteOrigin: siteSlugs.length ? siteOrigin() : null,
       siteSlugs,
-      closedSlugs,
+      closedSlugs: [],
     };
   } catch (error) {
     logFailure("slugs", error);
@@ -132,8 +127,7 @@ export function saleTermsOf(terms: PublicBookingTerms): SiteSaleTerms {
 }
 
 /**
- * The English detail as the page shows it: NIHO's content, and for a product sold here this site's sale
- * (guest-booking-terms.ts). An unknown product takes no bookings (its booking entrance is not shown).
+ * Overlay sale terms on the preview detail. HTTP publication pages use their own manuscript.
  */
 export function detailForSale<T extends ExperienceDetailForSite>(detail: T, sale: GuestBookingSale): T {
   if (sale.kind === "site") return withSiteSaleTerms(detail, saleTermsOf(sale.terms));

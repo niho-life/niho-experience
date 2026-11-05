@@ -7,6 +7,8 @@ import { guestBookingSources } from "@/lib/guest-booking-source";
 import { HomeFinder } from "@/components/HomeFinder";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { getApi } from "@/lib/api";
+import { config } from "@/lib/config";
+import { listPublicationSummaries } from "@/lib/experience/publication-site";
 import { buildCardModels } from "@/lib/card-model";
 import type { CardModel } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
@@ -20,7 +22,7 @@ import { withReviewLines } from "@/lib/reviews-ui";
 
 const cardModel = (card: CardModel): ExperienceCardModelV1 => ({
   ...card,
-  href: `/experiences/${card.slug}`,
+  href: `/ja/experiences/${card.slug}`,
   cover: card.cover ? { src: card.cover.url, alt: imageAlt(card.cover, card.title) } : null,
   face: { ...card.face, image: card.face.image ? { src: card.face.image.url, alt: imageAlt(card.face.image, card.face.name) } : null },
   priceSuffix: " / 大人",
@@ -34,12 +36,14 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function JapaneseHome() {
   let data;
   try {
-    const [copy, catalog, api] = await Promise.all([getJapaneseCopy(), getJapaneseCatalog(), getApi()]);
-    assertSameJapaneseRelease(copy.releaseId, catalog);
-    const details = await loadDetails(api, catalog.experiences, true, "ja", copy.releaseId);
-    const plainCards = buildCardModels(catalog.experiences, details, false, "ja", copy.copy);
+    const [copy, api] = await Promise.all([getJapaneseCopy(), getApi()]);
+    const catalog = config.apiMode === "http" ? await listPublicationSummaries("kamakura", "ja") : await getJapaneseCatalog();
+    if (!Array.isArray(catalog)) assertSameJapaneseRelease(copy.releaseId, catalog);
+    const summaries = Array.isArray(catalog) ? catalog : catalog.experiences;
+    const details = await loadDetails(api, summaries, true, "ja", copy.releaseId);
+    const plainCards = buildCardModels(summaries, details, false, "ja", copy.copy);
     const cards = withReviewLines(plainCards, await getReviewSummaries(plainCards.map((card) => card.slug)), "ja");
-    data = { copy, catalog, cards };
+    data = { copy, cards };
   } catch { return <JapaneseUnavailable />; }
   const { copy, cards } = data;
   const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };

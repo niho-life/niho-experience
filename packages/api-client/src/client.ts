@@ -84,7 +84,7 @@ export function normalizeOrigin(value: string): string {
 }
 
 /** 体験サイトの支払い後のページ（BookingReturn の `?type=instant|approval`）。支払い済みの再送への応答（#285 第2段）。 */
-const SITE_RETURN_PATH = "/booking/return";
+const SITE_RETURN_PATHS = new Set(["/booking/return", "/ja/booking/return"]);
 const SITE_RETURN_QUERY = /^(?:\?type=(?:instant|approval)|\?type=instant&payment=free)$/;
 
 /**
@@ -101,7 +101,7 @@ export function isAllowedCheckoutRedirect(candidate: string, nihoWebOrigin: stri
   }
   if (url.protocol !== "https:" || url.username || url.password) return false;
   if (url.origin === STRIPE_CHECKOUT_ORIGIN) return true;
-  if (options.thisSite) return url.origin === normalizeOrigin(nihoWebOrigin) && url.pathname === SITE_RETURN_PATH && SITE_RETURN_QUERY.test(url.search) && !url.hash;
+  if (options.thisSite) return url.origin === normalizeOrigin(nihoWebOrigin) && SITE_RETURN_PATHS.has(url.pathname) && SITE_RETURN_QUERY.test(url.search) && !url.hash;
   return url.origin === normalizeOrigin(nihoWebOrigin) && /^\/living\/[^/]+\/pages\/[^/]+\/bookings\/[^/]+$|^\/experiences\/bookings\/[^/]+$/.test(url.pathname);
 }
 

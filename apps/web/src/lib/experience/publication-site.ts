@@ -125,34 +125,38 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
 
 /** Experience's active publication and sale snapshot, exposed to existing page components through their read model. */
 export async function getPublicationDetail(slug: string, locale: Locale = "en"): Promise<ExperienceDetailV11 | null> {
+  if (!config.experiencePublicationsEnabled) return null;
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");
   const publication = await publications.getPublicBySlug(slug);
   if (!publication || (locale === "ja" && !publication.japanese)) return null;
   const booking = guestBookingRepository();
-  const [terms, disclosure] = await Promise.all([
+  const [candidate, disclosure] = await Promise.all([
     booking ? booking.publicBookingTerms(slug) : null,
     providerSellerDisclosureRepository()?.getPublicBySlug(slug) ?? null,
   ]);
-  const safeDisclosure = disclosure && (!terms || terms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null;
+  const terms = candidate?.conditionsVersion === null ? candidate : null;
+  const safeDisclosure = disclosure && (!candidate || candidate.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null;
   return detailOf(publication, terms, locale, safeDisclosure);
 }
 
-/** The published product catalog. Non-saleable products remain visible with no booking offers. */
+/** The published, currently saleable product catalog. */
 export async function listPublicationSummaries(region?: string, locale: Locale = "en"): Promise<ExperienceSummaryV11[]> {
+  if (!config.experiencePublicationsEnabled) return [];
   if (region && region !== "kamakura") return [];
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");
   const rows = await publications.listPublic();
   const booking = guestBookingRepository();
   const disclosures = providerSellerDisclosureRepository();
-  return Promise.all(rows
+  const summaries = await Promise.all(rows
     .filter((publication) => locale !== "ja" || publication.japanese !== null)
     .map(async (publication) => {
       const [terms, disclosure] = await Promise.all([
         booking ? booking.publicBookingTerms(publication.slug) : null,
         disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
       ]);
-      return summaryOf(publication, terms, locale, disclosure && (!terms || terms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null);
+      return terms?.conditionsVersion === null && terms.offers.length ? summaryOf(publication, terms, locale, disclosure && terms.sellerDisplayName === disclosure.sellerDisplayName ? disclosure : null) : null;
     }));
+  return summaries.filter((item): item is ExperienceSummaryV11 => item !== null);
 }

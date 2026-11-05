@@ -6,15 +6,15 @@ import { getPublicationDetail } from "./experience/publication-site";
 
 /**
  * Reads the public detail of every listed experience in parallel, for card data the
- * summary does not carry (hosts, weekdays, capacity). In HTTP mode these reads use the
- * client's shared 60-second cache (lib/api.ts). A failed read is left out of the map so
+ * summary does not carry (hosts, weekdays, capacity). HTTP reads use the Experience
+ * publication store. A failed read is left out of the map so
  * the caller can still render that card from its summary.
  */
 export async function loadDetails(api: ExperienceApiClient, summaries: ExperienceSummaryForSite[], useV11 = false, locale: "en" | "ja" = "en", releaseId?: string): Promise<Map<string, ExperienceDetailForSite>> {
   const results = await Promise.all(
     summaries.map(async (summary) => {
       try {
-        if (config.experiencePublicationsEnabled) return await getPublicationDetail(summary.slug, locale);
+        if (config.apiMode === "http") return await getPublicationDetail(summary.slug, locale);
         if (locale === "ja") {
           const result = await api.getJapaneseExperience(summary.slug);
           return result.ok && result.data.releaseId === releaseId ? result.data.experience : null;

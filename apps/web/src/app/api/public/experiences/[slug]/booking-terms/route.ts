@@ -1,6 +1,6 @@
 import { config } from "@/lib/config";
 import { publicEmpty, publicJson } from "@/lib/experience/public-http";
-import { legacyRouteAllowedForSlug } from "@/lib/experience/site-publications";
+import { publicExperienceRouteAllowedForSlug } from "@/lib/experience/site-publications";
 import { guestBookingRepository } from "@/lib/experience/store-server";
 import { saleTermsOf } from "@/lib/guest-booking-source";
 import type { SiteSaleTerms } from "@/lib/guest-booking-terms";
@@ -18,7 +18,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   if (!config.guestBookingEnabled) return publicEmpty(404);
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
-  if (!await legacyRouteAllowedForSlug(slug)) return publicEmpty(404);
+  try {
+    if (!await publicExperienceRouteAllowedForSlug(slug)) return publicEmpty(404);
+  } catch {
+    return publicEmpty(503);
+  }
   const bookings = guestBookingRepository();
   if (!bookings) return publicEmpty(503);
   try {

@@ -1,7 +1,7 @@
 import type { PublicErrorResponse } from "@niho-experience/api-client";
 import { config } from "@/lib/config";
 import { publicEmpty, publicJson } from "@/lib/experience/public-http";
-import { legacyRouteAllowedForSlug } from "@/lib/experience/site-publications";
+import { publicExperienceRouteAllowedForSlug } from "@/lib/experience/site-publications";
 import { guestBookingRepository } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
@@ -19,7 +19,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   if (!config.guestBookingEnabled) return publicEmpty(404);
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
-  if (!await legacyRouteAllowedForSlug(slug)) return publicEmpty(404);
+  try {
+    if (!await publicExperienceRouteAllowedForSlug(slug)) return publicEmpty(404);
+  } catch {
+    return publicEmpty(503);
+  }
   const offerId = new URL(request.url).searchParams.get("offerId");
   if (offerId !== null && !OFFER_ID.test(offerId)) {
     return publicJson(400, { error: { code: "VALIDATION_ERROR", message: "offerId is invalid." } } satisfies PublicErrorResponse);

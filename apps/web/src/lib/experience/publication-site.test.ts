@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" },
+  config: { experiencePublicationsEnabled: true, guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" },
   publications: { getPublicBySlug: vi.fn(), listPublic: vi.fn() },
   bookings: { publicBookingTerms: vi.fn() },
   disclosures: { getPublicBySlug: vi.fn() },
@@ -45,7 +45,7 @@ const publication = {
 
 describe("Experience public site DTO", () => {
   beforeEach(() => {
-    state.config = { guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" };
+    state.config = { experiencePublicationsEnabled: true, guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" };
     state.publications.getPublicBySlug.mockReset().mockResolvedValue(publication);
     state.publications.listPublic.mockReset().mockResolvedValue([publication]);
     state.bookings.publicBookingTerms.mockReset().mockResolvedValue({ ...SAMPLE_TERMS, sellerDisplayName: "Panasonic" });
@@ -93,6 +93,12 @@ describe("Experience public site DTO", () => {
     expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);
   });
 
+  it("omits a sale whose participation conditions cannot be shown for consent", async () => {
+    state.bookings.publicBookingTerms.mockResolvedValue({ ...SAMPLE_TERMS, conditionsVersion: "c0".repeat(32) });
+    expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);
+    expect(await getPublicationDetail(publication.slug, "ja")).toMatchObject({ booking: { checkoutAvailable: false }, offers: [] });
+  });
+
   it("keeps an external https seller page and fails closed on a sale-term seller mismatch", async () => {
     state.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Panasonic", externalUrl: "https://seller.example.test/legal" });
     expect(await getPublicationDetail(publication.slug, "en")).toMatchObject({
@@ -102,4 +108,14 @@ describe("Experience public site DTO", () => {
     state.bookings.publicBookingTerms.mockResolvedValue({ ...SAMPLE_TERMS, sellerDisplayName: "Different Seller" });
     expect(await getPublicationDetail(publication.slug, "en")).toMatchObject({ seller: { legalNoticeUrl: "" }, booking: { legalDocuments: [] } });
   });
+});
+
+it("does not read a publication or sale when public publication is disabled", async () => {
+  vi.clearAllMocks();
+  state.config.experiencePublicationsEnabled = false;
+  expect(await getPublicationDetail(publication.slug)).toBeNull();
+  expect(await listPublicationSummaries("kamakura")).toEqual([]);
+  expect(state.publications.getPublicBySlug).not.toHaveBeenCalled();
+  expect(state.publications.listPublic).not.toHaveBeenCalled();
+  expect(state.bookings.publicBookingTerms).not.toHaveBeenCalled();
 });

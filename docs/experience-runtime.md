@@ -12,7 +12,7 @@
 - Google OAuth の refresh token は provider にひも付けて暗号化保存する。選択した読み取り元は接続時の primary calendar、書き込み先はアプリが作る専用 calendar。予定の件名・参加者・説明は DB とレスポンスに保存しない。
 - Google の busy の定期照合と、専用 calendar への確定予約の書き込みは、Cloud Scheduler が呼ぶ 2 つの job（#238、`0034`）。下の「Google の job」を参照。
 - `experience-domain` と `experience-store` は予約枠の判定、席の原子的な仮押さえ、支払 webhook による確定・台帳記入を提供する。`experience-payments` は共通 Stripe Connect 上の Direct charge Checkout と体験イベントの署名検証を提供する。webhook の受信経路は `/api/experience/stripe/webhook`。
-- `experience-store` の `GuestBookingRepository`（`0023`・`0025`、#285 の第1・2段）は、旅行者向けの販売条件・提供者ごとの NIHO の手数料・公開の開催枠と残席・ゲストの仮押さえ（35 分）を experience DB で扱える。`EXPERIENCE_GUEST_BOOKING_ENABLED` のとき、NIHO と同じ path の `GET /api/public/experiences/{slug}/availability` と `POST …/checkout` がこれと Stripe Checkout（手数料は予約の snapshot から）で答える。第3段から、ここで売る商品（販売条件と提供者の手数料設定がある商品）の旅行者の残席・価格・質問・申込は、flag が on のときこの経路と experience DB から読む。ほかの商品と flag off・mock は NIHO の API のまま。第8段から、ここで受けた予約を提供者の OWNER が `/host/bookings` で読める（読むだけ）。設計は [guest-booking.md](guest-booking.md)。
+- `experience-store` の `GuestBookingRepository`（`0023`・`0025`、#285 の第1・2段）は、旅行者向けの販売条件・提供者ごとの手数料・公開の開催枠と残席・ゲストの仮押さえ（35 分）を Experience DB で扱う。HTTPの公開カタログ・詳細・予約は公開中のExperience publicationと販売条件だけを読み、DB障害・未公開slug・販売停止時は旧NIHO商品APIへ戻らない。`EXPERIENCE_PUBLICATIONS_ENABLED=false` ではカタログ・詳細・公開画像と新規販売を閉じ、旧商品経路へ戻さない。`EXPERIENCE_GUEST_BOOKING_ENABLED` のとき同じpathの `GET /api/public/experiences/{slug}/availability` と `POST …/checkout` がExperience StoreとStripe Checkout（手数料は予約snapshotから）で答える。日本語商品本文は確認済み `publication.japanese` のみ表示し、日本語の予約も同じStoreに保存する。共通UI文言は既存の日本語copy releaseを使う。言語切替・hreflang・sitemapの商品対応は現在公開中の確認済み日本語publicationから共通に生成する。nativeのテーマ項目が未接続の間はHTTPでテーマ選択を出さず、日付はavailabilityで照合する。mock previewの合成経路は維持する。ここで受けた予約は提供者の OWNER が `/host/bookings` で読める（読むだけ）。設計は [guest-booking.md](guest-booking.md)。
 - Experience所有商品の原稿・写真・販売条件・公開はExperience publication APIを使う。旧NIHO予約の照会・取消／返金はNIHOの責任境界に残す。**このカレンダーの Google busy 判定は、NIHOの旧予約枠には効かない。** 現行の枠を止める操作はNIHO側でも行う。
 
 ## カレンダー変更の整合性
@@ -73,7 +73,7 @@ Guide CMSの公開切替は販売正本の切替と分離する。まずstaging�
 ## ホスト販売の残作業
 
 1. Experienceには、NIHOの現在のログイン本人・OWNER権限・Connect口座を確認する商品APIがある。商品作成、編集、公開、停止、再開、写真、販売条件の操作はこのAPIを通す。公開情報・予約条件snapshot・新規CheckoutはExperienceの公開版を使い、旧NIHO体験販売へfallbackしない。
-2. このAPIはNIHO側の共通本人・Connect API（PR #19712）を前提にしており、契約の反映後に機能flagと配備設定をそろえる必要がある。ホストの商品編集画面への接続、開催枠を含む画面上の公開までの一周、DB統合テストの実行は引き続き必要。レビュー（#104/#108）の英語firstの画面・お礼メール・出欠連動は別の実装箇所で追加済みだが、実メールと配備受入は未確認。
+2. `/host/experiences` は Experience の商品APIを使う編集画面へ接続済みで、原稿・写真・料金・取消条件、開催枠への導線、公開・通常保存・停止・再開を扱う（#403/#404/#406）。旅行者のHTTPカタログ・詳細・CheckoutもExperience publication/storeを正本にし、旧NIHO商品APIへfallbackしない。実際のホスト利用には、NIHO共通本人・Connect API（PR #19712）のstaging配備とservice identity許可、`EXPERIENCE_PUBLICATIONS_ENABLED` / `EXPERIENCE_HOST_PUBLICATION_API_ENABLED`、掲載同意文・version、Experience DB migration/runtime grants、公開media bucket/IAMの設定と受入が残る。合成DBを使った公開・編集時の公開版維持・停止/再開・予約snapshot・旧販売拒否はこの変更の対象検証で確認する。レビュー（#104/#108）の英語firstの画面・お礼メール・出欠連動は別の実装箇所で追加済みだが、実メールと配備受入は未確認。
 3. Google busy の定期再照合と確定予約の書き込みは、独立した 2 つの job として実装した（#238、下の「Google の job」）。残りは staging での受入：Cloud Scheduler の 2 job と専用サービスアカウント、実 OAuth の接続・失効・再接続、watch の webhook の到達、専用 calendar への書き込みを確かめてから flag を開く。
 4. Stripe Checkoutは公開版に保存したPanasonicのConnect口座へ直接作成する。Checkoutの作成可否はStripeで確認し、口座が受け付けられない場合は支払いを開始しない。stagingでは成功・停止口座・再送の合成取引を確認する。
 5. DBバックアップ、監査、障害対応を受け入れ、合成データで公開/編集/停止/再開、予約snapshot、重複公開・二重在庫拒否を確認する。商品や予約の旧データ移行・旧販売の切戻しは不要。

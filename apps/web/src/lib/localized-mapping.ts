@@ -61,6 +61,25 @@ export function mapJapaneseExperiences(releaseId: string, catalog: CatalogInput 
   return links;
 }
 
+/** Published native Japanese manuscripts pair independently of the former NIHO product catalog. */
+export function mapPublicationJapaneseExperiences(
+  items: readonly { readonly publication: { readonly slug: string; readonly japanese: unknown }; readonly saleTerms: { readonly offers: readonly unknown[] } | null }[],
+  bookingsEnabled: boolean,
+): JapaneseExperienceMapping {
+  const links = new Map<string, JapaneseExperienceLink>();
+  for (const { publication, saleTerms } of items) {
+    const { slug } = publication;
+    if (!SLUG.test(slug) || publication.japanese == null) continue;
+    links.set(slug, {
+      slug,
+      englishPath: `/experiences/${slug}`,
+      japanesePath: `/ja/experiences/${slug}`,
+      bookingReady: bookingsEnabled && Boolean(saleTerms?.offers.length),
+    });
+  }
+  return links;
+}
+
 /** Language-switch rows: every paired detail, and its booking page only where Japanese booking is known open. */
 export function experienceCounterparts(mapping: JapaneseExperienceMapping): Record<string, string> {
   const rows: Record<string, string> = {};

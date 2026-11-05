@@ -115,10 +115,11 @@ export function experienceProductJsonLd(e: ExperienceDetailForSite, siteUrl: str
 }
 
 /** Product and TouristTrip for the native publication renderer, using only fields visible on that page. */
-export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: string, bookingsEnabled: boolean, reviews: ReturnType<typeof reviewsForJsonLd>): { touristTrip: JsonLd; product: JsonLd } {
+export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: string, bookingsEnabled: boolean, reviews: ReturnType<typeof reviewsForJsonLd>, locale: JsonLdLocale = "en"): { touristTrip: JsonLd; product: JsonLd } {
   const { publication, saleTerms } = item;
   const origin = siteUrl.replace(/\/$/, "");
-  const url = `${origin}/experiences/${publication.slug}`;
+  const japanese = locale === "ja" ? publication.japanese : null;
+  const url = `${origin}${locale === "ja" ? "/ja" : ""}/experiences/${publication.slug}`;
   const images = publication.photos.flatMap((photo) => {
     const candidate = photo.src.startsWith("/") ? `${origin}${photo.src}` : photo.src;
     const safe = safeHttpsUrl(candidate);
@@ -126,8 +127,8 @@ export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: strin
   });
   const offers = saleTerms?.offers ?? [];
   const facts: JsonLd = {
-    name: publication.publicTitle,
-    description: publication.content.lead,
+    name: japanese?.title ?? publication.publicTitle,
+    description: japanese?.lead ?? publication.content.lead,
     url,
     ...(images.length ? { image: images } : {}),
     ...reviewJsonLdFacts(reviews),
@@ -145,7 +146,7 @@ export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: strin
   };
   const provider = { "@type": "Organization", name: publication.sellerDisplayName };
   return {
-    touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: "en", provider },
+    touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, provider },
     product: { "@context": "https://schema.org", "@type": "Product", ...facts, brand: provider },
   };
 }

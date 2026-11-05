@@ -15,7 +15,7 @@ import { config } from "./config";
 import { getApi } from "./api";
 import type { PageId } from "./page-document-contract";
 import { assertSameJapaneseRelease, JapaneseReleaseUnavailable } from "./localized-release";
-import { experienceCounterparts, mapJapaneseExperiences } from "./localized-mapping";
+import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences } from "./localized-mapping";
 import { readBoundedJson } from "./read-bounded-json";
 export { assertSameJapaneseRelease, JapaneseReleaseUnavailable, japaneseBookingAllowed } from "./localized-release";
 
@@ -138,10 +138,11 @@ export const getJapaneseDetail = cache(async (slug: string): Promise<SelectedExp
 });
 
 export const getPreparedJapaneseStaticRelease = cache(async () => {
+  if (!config.japaneseSiteEnabled) throw new JapaneseReleaseUnavailable("disabled");
   const [copy, catalog, ...pages] = await Promise.all([
     getJapaneseCopy(),
     // Optional: without this release's catalog the static pages still render, only with no experience pairs.
-    getJapaneseCatalog().catch(() => null),
+    config.apiMode === "http" ? Promise.resolve(null) : getJapaneseCatalog().catch(() => null),
     getJapanesePage("home"),
     getJapanesePage("experiences"),
     getJapanesePage("host"),
@@ -149,7 +150,12 @@ export const getPreparedJapaneseStaticRelease = cache(async () => {
   ]);
   assertSameJapaneseRelease(copy.releaseId, ...pages);
   const pageById = Object.freeze(Object.fromEntries(pages.map((page) => [page.route.pageId, page])) as Readonly<Record<keyof typeof STATIC_SOURCE_PATHS, JapanesePage>>);
-  const experiences = mapJapaneseExperiences(copy.releaseId, catalog);
+  const nativeCatalog = config.apiMode === "http"
+    ? await import("./experience/site-publications").then((source) => source.listSitePublicExperiences()).catch(() => null)
+    : null;
+  const experiences = config.apiMode === "http"
+    ? mapPublicationJapaneseExperiences(nativeCatalog?.experiences ?? [], config.bookingsEnabled && config.guestBookingEnabled)
+    : mapJapaneseExperiences(copy.releaseId, catalog);
   const counterparts = Object.freeze({ ...Object.fromEntries(pages.map((page) => [page.route.sourcePath, page.route.path])), ...experienceCounterparts(experiences) });
   return Object.freeze({ releaseId: copy.releaseId, copy, pages: Object.freeze(pages), pageById, experiences, counterparts });
 });

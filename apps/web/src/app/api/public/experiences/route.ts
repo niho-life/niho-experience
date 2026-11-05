@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 /** The host UI and public consumers read the Experience-owned publication catalog. */
 export async function GET() {
-  if (!config.experiencePublicationsEnabled) return publicEmpty(404);
+  if (config.apiMode !== "http" || !config.experiencePublicationsEnabled) return publicEmpty(404);
   try {
     const repository = experiencePublicationRepository();
     if (repository === null) return publicJson(503, { error: { code: "STORE_UNAVAILABLE" } });

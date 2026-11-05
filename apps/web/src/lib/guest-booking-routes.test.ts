@@ -4,7 +4,7 @@ import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type Bookin
 
 /** The public availability and checkout of 旅行者の予約 (#285) against a stubbed store and a stubbed Stripe SDK. */
 const state = vi.hoisted(() => ({
-  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: false, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
   publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
@@ -116,8 +116,9 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
   vi.stubEnv("EXPERIENCE_CHECKOUT_IP_HMAC_KEY", CHECKOUT_IP_KEY);
-  state.config = { apiMode: "http", experiencePublicationsEnabled: false, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { apiMode: "http", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
+    publicBookingTerms: vi.fn(async () => ({ conditionsVersion: null, offers: [] })),
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
     startGuestBooking: vi.fn(async () => started()),
     attachCheckoutSession: vi.fn(async () => undefined),
@@ -169,9 +170,16 @@ describe("GET /api/public/experiences/[slug]/availability", () => {
     expect(await off.text()).toBe("");
   });
 
-  it("does not expose a new seller's reserved slug through legacy availability when publication is disabled", async () => {
+  it("does not read availability while public publication is disabled", async () => {
     state.config = { ...state.config, experiencePublicationsEnabled: false };
-    state.publications!.claimsSlug!.mockResolvedValue(true);
+    expect((await availability(get(), slugParams())).status).toBe(404);
+    expect(state.publications!.getPublicBySlug).not.toHaveBeenCalled();
+    expect(state.repository!.listPublicAvailability).not.toHaveBeenCalled();
+  });
+
+  it("does not expose any unpublished slug through availability", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    state.publications!.getPublicBySlug!.mockResolvedValue(null);
     const response = await availability(get(), slugParams());
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("");
@@ -233,6 +241,19 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(japanese.status).toBe(201);
     expect(state.repository?.startGuestBooking).toHaveBeenCalledWith(expect.objectContaining({ guestLanguage: "JA" }));
     expect(state.publications!.getPublicBySlug).toHaveBeenCalledWith("sample-tea");
+    const [params] = state.stripeCreate!.mock.calls[0]!;
+    expect(params).toMatchObject({
+      success_url: `${ORIGIN}/ja/booking/return?type=instant`,
+      cancel_url: `${ORIGIN}/ja/experiences/sample-tea?checkout=cancelled`,
+      locale: "ja",
+    });
+  });
+
+  it("does not accept consent for participation conditions whose text is absent from the public page", async () => {
+    state.repository!.publicBookingTerms!.mockResolvedValue({ conditionsVersion: "c0".repeat(32), offers: [] });
+    const response = await checkout(post(CHECKOUT), slugParams());
+    expect(response.status).toBe(404);
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
   });
 
   it("does not create a new Checkout Session when the published seller account cannot pay out", async () => {
@@ -248,9 +269,8 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it("does not admit a new seller's reserved slug through legacy checkout when publication is disabled", async () => {
+  it("does not admit any new Checkout Session while public publication is disabled", async () => {
     state.config = { ...state.config, experiencePublicationsEnabled: false };
-    state.publications!.claimsSlug!.mockResolvedValue(true);
     const response = await checkout(post(CHECKOUT), slugParams());
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("");
@@ -450,7 +470,7 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "");
     await unavailable();
     // Nothing releases the hold on failure: the store has no such call to make.
-    expect(Object.keys(state.repository!)).toEqual(["listPublicAvailability", "startGuestBooking", "attachCheckoutSession"]);
+    expect(Object.keys(state.repository!)).toEqual(["publicBookingTerms", "listPublicAvailability", "startGuestBooking", "attachCheckoutSession"]);
 
     const logged = JSON.stringify(log.flatMap((spy) => spy.mock.calls));
     expect(log[0]!.mock.calls.length).toBeGreaterThanOrEqual(3);
