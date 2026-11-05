@@ -42,7 +42,7 @@ function EditorUnavailable({ backHref }: { backHref: string }) {
 /** 体験の編集 (#89): the page, its photos and offers, and its one listing state. */
 export default async function HostExperiencePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  if (config.experienceHostPublicationApiEnabled) return <HostPublicationWorkspace productId={id} />;
+  if (config.experienceHostPublicationApiEnabled) return <HostPublicationWorkspace productId={id} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} />;
   const context = await hostPageContext(query);
   if (!context) return null;
   const { provider, linkProviderId } = context;

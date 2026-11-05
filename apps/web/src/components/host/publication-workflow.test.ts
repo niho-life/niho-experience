@@ -20,4 +20,13 @@ describe("host publication next action", () => {
     expect(publicationNextAction({ dirty: false, blockers: ["SUPPORT_CONSENT_REQUIRED"], published: false })).toBe("SUPPORT");
     expect(publicationCanPublish({ dirty: false, blockers: ["SUPPORT_CONSENT_REQUIRED"], suspended: false })).toBe(false);
   });
+
+  it("guides current-account consent without bypassing saved-content or support requirements", () => {
+    const blockers = ["PAYMENT_REUSE_CONSENT_REQUIRED"];
+    expect(publicationNextAction({ dirty: false, blockers, published: false })).toBe("PAYMENT_CONSENT");
+    expect(publicationNextAction({ dirty: true, blockers, published: false })).toBe("SAVE");
+    expect(publicationNextAction({ dirty: false, blockers: [...blockers, "SCHEDULE_REQUIRED"], published: false })).toBe("SCHEDULE");
+    expect(publicationNextAction({ dirty: false, blockers: [...blockers, "SUPPORT_CONSENT_REQUIRED"], published: false })).toBe("SUPPORT");
+    expect(publicationCanPublish({ dirty: false, blockers, suspended: false })).toBe(false);
+  });
 });
