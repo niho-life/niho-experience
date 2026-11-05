@@ -17,12 +17,12 @@ import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-ref
 import { bookingCancellations, guestBookingRepository, translateSiteBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { isHostMock, loadHostProviders, readHostSession } from "@/lib/host/server";
-import { accessTokenUsable, type HostMockScenario } from "@/lib/host/session";
+import { accessTokenUsable } from "@/lib/host/session";
 import type { BookingExperience } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan, yen } from "./format";
 import { MOCK_TODAY } from "./mock/bookings";
-import { MOCK_SITE_BOOKINGS } from "./mock/site-bookings";
+import { mockExperienceBookings } from "./mock/experience-reservations";
 import type { HostActionResult } from "./payout";
 import { SITE_BOOKING_LOAD_FAILED_TEXT, siteBooking, siteBookingExperiences } from "./site-bookings";
 import type { HostBooking } from "./types";
@@ -87,19 +87,20 @@ export type HostSiteBookingsLoad =
   | { status: "closed" }
   | { status: "error" };
 
-/** The preview's `?mock=site-bookings` (mock mode): the same screen from synthetic bookings, for the OWNER. */
-function previewSiteBookings(provider: HostProvider, requestedBooking: string | null, mockScenario: HostMockScenario | undefined): HostSiteBookingsLoad {
-  if (mockScenario !== "site-bookings" || provider.memberRole !== "OWNER") return { status: "closed" };
-  const requestedMissing = requestedBooking !== null && !MOCK_SITE_BOOKINGS.some((booking) => booking.publicBookingId === requestedBooking);
-  return { status: "live", ...screenPage(MOCK_SITE_BOOKINGS, null), requestedMissing, today: MOCK_TODAY, messages: false, readOnly: true, preview: true };
+/** The ordinary mock sign-in and the explicit site-bookings alias share this provider-scoped preview. */
+function previewSiteBookings(provider: HostProvider, requestedBooking: string | null): HostSiteBookingsLoad {
+  if (provider.memberRole !== "OWNER") return { status: "closed" };
+  const bookings = mockExperienceBookings(provider.id);
+  const requestedMissing = requestedBooking !== null && !bookings.some((booking) => booking.publicBookingId === requestedBooking);
+  return { status: "live", ...screenPage(bookings, null), requestedMissing, today: MOCK_TODAY, messages: true, readOnly: true, preview: true };
 }
 
 /**
  * 予約 for an OWNER (NIHO's role): the provider's bookings made here, with the one `?booking=` names among them.
- * Mock mode reads the preview's synthetic bookings with `?mock=site-bookings` (`mockScenario`), and none otherwise.
+ * Mock mode reads the same provider-scoped Experience fixtures for every scenario; no external booking API is called.
  */
-export async function loadSiteBookings(provider: HostProvider, requestedBooking: string | null, mockScenario?: HostMockScenario): Promise<HostSiteBookingsLoad> {
-  if (isHostMock()) return previewSiteBookings(provider, requestedBooking, mockScenario);
+export async function loadSiteBookings(provider: HostProvider, requestedBooking: string | null): Promise<HostSiteBookingsLoad> {
+  if (isHostMock()) return previewSiteBookings(provider, requestedBooking);
   const salesBookings = guestBookingRepository();
   const bookings = salesBookings ?? translateSiteBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };

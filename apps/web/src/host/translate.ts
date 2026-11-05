@@ -39,9 +39,8 @@ export interface HostTranslateRoomEndResponse {
 
 export const NOT_JOINED: HostTranslateParticipantStatus = { joined: false, ready: false };
 
-export function translateRoomsBffPath(source: "niho" | "site", providerId: string, bookingId: string): string {
-  const namespace = source === "site" ? "translate/site" : "translate";
-  return `${namespace}/providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(bookingId)}/rooms`;
+export function translateRoomsBffPath(providerId: string, bookingId: string): string {
+  return `translate/site/providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(bookingId)}/rooms`;
 }
 
 export function projectTranslateRoom(value: ExperienceTranslateRoomCreatedResponse): HostTranslateRoomResponse {

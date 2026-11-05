@@ -7,7 +7,6 @@ import { sessionSections } from "./session";
 import { SITE_BOOKING_ERASED_TEXT, siteBooking, siteBookingExperiences } from "./site-bookings";
 import {
   SITE_PAYMENT_REVIEW_TODO_TITLE,
-  SITE_SESSION_LABEL,
   siteHomeSessions,
   siteHomeTodos,
   siteSessionBooking,
@@ -86,7 +85,7 @@ const QUERY = { date: "2026-11-01", start: "10:00", experience: "tea", offer: "s
 
 describe("siteHomeSessions", () => {
   it("splits the sessions into today, tomorrow and the next few, with who may come and where today's stand", () => {
-    const sessions = siteHomeSessions([TODAY, TOMORROW, ...LATER], NOW, false);
+    const sessions = siteHomeSessions([TODAY, TOMORROW, ...LATER], NOW);
     expect(sessions.today).toEqual<HomeUpcoming[]>([
       {
         key: "site/2026-11-01T10:00/tea/sample-am",
@@ -105,26 +104,26 @@ describe("siteHomeSessions", () => {
     ]);
     expect(sessions.tomorrow.map((row) => [row.title, row.seats, row.phase])).toEqual([["Synthetic walk", "1名", null]]);
     expect(sessions.later.map((row) => row.dateLabel)).toEqual(["11月3日（火）", "11月4日（水）", "11月5日（木）"]);
-    expect(siteHomeSessions([TODAY], "2026-11-01T12:00", false).today[0]?.phase).toEqual({ text: "終了", tone: "muted" });
-    expect(siteHomeSessions([TODAY], "2026-11-01T09:00", false).today[0]?.phase).toEqual({ text: "開始前", tone: "muted" });
+    expect(siteHomeSessions([TODAY], "2026-11-01T12:00").today[0]?.phase).toEqual({ text: "終了", tone: "muted" });
+    expect(siteHomeSessions([TODAY], "2026-11-01T09:00").today[0]?.phase).toEqual({ text: "開始前", tone: "muted" });
   });
 
-  it("labels the rows beside NIHO's bookings and leads them to この回 with ?source=site", () => {
-    const [row] = siteHomeSessions([TODAY], NOW, true).today;
-    expect(row).toMatchObject({ source: SITE_SESSION_LABEL, href: "/host/bookings/session?source=site&date=2026-11-01&start=10%3A00&experience=tea&offer=sample-am" });
-    expect(siteHomeSessions([TODAY], NOW, false).today[0]).not.toHaveProperty("source");
+  it("links the Experience session directly without a legacy-source selector", () => {
+    const [row] = siteHomeSessions([TODAY], NOW).today;
+    expect(row).toMatchObject({ href: "/host/bookings/session?date=2026-11-01&start=10%3A00&experience=tea&offer=sample-am" });
+    expect(row).not.toHaveProperty("source");
   });
 
   it("names the same session as 予約's heading for the same bookings", () => {
     const booking = siteBooking(STORED);
     const [group] = bookingGroups([booking], siteBookingExperiences([STORED]), { filter: "upcoming", experienceId: null }, "2026-11-01");
-    expect(group && sessionHref(group)).toBe(siteSessionHref(TODAY, false));
+    expect(group && sessionHref(group)).toBe(siteSessionHref(TODAY));
   });
 });
 
 describe("siteHomeTodos", () => {
   it("asks about each session with payments under review, leading to この回, and leaves them out of the app badge", () => {
-    const todos = siteHomeTodos([TODAY, ...LATER], false);
+    const todos = siteHomeTodos([TODAY, ...LATER]);
     expect(todos).toEqual([
       {
         key: "site-payment-review/2026-11-04T10:00/tea/sample-am",
@@ -137,15 +136,14 @@ describe("siteHomeTodos", () => {
       },
     ]);
     expect(homeBadgeCount(todos)).toBe(0);
-    expect(siteHomeTodos(LATER, true)[0]).toMatchObject({ aside: { text: SITE_SESSION_LABEL, tone: "muted" }, action: { href: expect.stringContaining("source=site") } });
   });
 });
 
 describe("withSiteHome", () => {
-  it("puts this site's todos first and its sessions after NIHO's on each day, keeping the month", () => {
+  it("puts Experience todos first and sessions after existing console rows, keeping the month", () => {
     const niho = { key: "niho", title: "NIHO" } as HomeUpcoming;
     const home: HostHomeData = { todos: [{ key: "draft-1" } as HostHomeData["todos"][number]], sessions: { today: [niho], tomorrow: [], later: [niho] }, month: null };
-    const site = { todos: siteHomeTodos(LATER, true), sessions: siteHomeSessions([TODAY, TOMORROW, ...LATER], NOW, true) };
+    const site = { todos: siteHomeTodos(LATER), sessions: siteHomeSessions([TODAY, TOMORROW, ...LATER], NOW) };
     const merged = withSiteHome(home, site);
     expect(merged.todos.map((todo) => todo.key)).toEqual(["site-payment-review/2026-11-04T10:00/tea/sample-am", "draft-1"]);
     expect(merged.sessions.today.map((row) => row.key)).toEqual(["niho", "site/2026-11-01T10:00/tea/sample-am"]);

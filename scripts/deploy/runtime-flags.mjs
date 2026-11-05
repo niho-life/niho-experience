@@ -185,7 +185,6 @@ export const FLAGS = Object.freeze([
     env: "EXPERIENCE_GUEST_QUESTIONS_ENABLED",
     variable: "GUEST_QUESTIONS_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE"],
-    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED"],
   },
   {
     env: "EXPERIENCE_TRANSLATION_ENABLED",

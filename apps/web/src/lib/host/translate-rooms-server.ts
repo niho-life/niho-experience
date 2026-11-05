@@ -8,7 +8,7 @@ import { guestNeedsInterpretation } from "@/host/translate";
 import { asTranslateOwner } from "@/host/site-bookings-server";
 import { HOST_SESSION_ENDED_TEXT } from "@/host/errors";
 import { MOCK_TODAY } from "@/host/mock/bookings";
-import { MOCK_SITE_BOOKINGS } from "@/host/mock/site-bookings";
+import { mockExperienceBookings } from "@/host/mock/experience-reservations";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import { config } from "@/lib/config";
 import { mutationFromSameOrigin } from "./relay";
@@ -106,16 +106,6 @@ export async function readStandaloneTranslateCreateBody(request: Request): Promi
   } catch { return null; }
 }
 
-export async function loadTranslateRoomsClient() {
-  if (!translateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
-  const session = await readHostSession();
-  if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
-  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
-  try {
-    return { ok: true as const, client: createExperienceTranslateRoomsClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch: nihoApiFetch(session) }) };
-  } catch { return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) }; }
-}
-
 /**
  * Resolves a browser-visible local Experience provider id to NIHO's provider id on every
  * standalone request. The sealed session and current OWNER membership are authoritative here;
@@ -178,10 +168,10 @@ export async function loadSiteTranslateRoomsClient(providerId: string, bookingId
   if (isHostMock()) {
     const providers = await loadHostProviders();
     const provider = providers.status === "ok" ? providers.providers.find((item) => item.id === providerId) : null;
-    if (session.mockScenario !== "site-bookings" || provider?.memberRole !== "OWNER") {
+    if (provider?.memberRole !== "OWNER") {
       return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
     }
-    const found = MOCK_SITE_BOOKINGS.find((item) => item.publicBookingId === bookingId);
+    const found = mockExperienceBookings(providerId).find((item) => item.publicBookingId === bookingId);
     if (!found) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
     booking = found;
   } else {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   addReply,
-  bookingConversations,
   bookingOfNewThread,
   emptyThreadFor,
   guestMessageView,
@@ -82,8 +81,7 @@ describe("the threads", () => {
     expect(messagesHref()).toBe("/host/messages");
     expect(messagesHref({ thread: "th-3012" })).toBe("/host/messages?thread=th-3012");
     expect(messagesHref({ providerId: "sample-provider-kitchen", booking: "bk-2044" })).toBe("/host/messages?providerId=sample-provider-kitchen&booking=bk-2044");
-    // This site's threads beside NIHO's (#285 slice 6b) keep ?source=site.
-    expect(messagesHref({ providerId: "sample-provider-kitchen", source: "site", thread: "th-1" })).toBe("/host/messages?providerId=sample-provider-kitchen&source=site&thread=th-1");
+    expect(messagesHref({ providerId: "sample-provider-kitchen", thread: "th-1" })).toBe("/host/messages?providerId=sample-provider-kitchen&thread=th-1");
   });
 
   it("names this site's booking without a thread by an id only that booking reads back (#285 slice 6b)", () => {
@@ -130,11 +128,6 @@ describe("the reply", () => {
     });
   });
 
-  it("gives each booking with a thread its last message", () => {
-    expect(bookingConversations(MOCK_KITCHEN_THREADS)).toEqual([
-      { bookingId: "bk-2031", threadId: "th-3004", text: "ありがとうございます！ 電車は 17:40 ごろに着きます。ディナーの間、スーツケースを置いておける場所はありますか？", at: "2026-10-21T11:05" },
-    ]);
-  });
 });
 
 describe("the synthetic threads", () => {

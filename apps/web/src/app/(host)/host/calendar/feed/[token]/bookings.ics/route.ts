@@ -1,6 +1,5 @@
 import { config } from "@/lib/config";
 import { hostCalendarSettings } from "@/lib/experience/store-server";
-import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 import { isHostMock, siteOrigin } from "@/lib/host/server";
 import { bookingsIcs } from "@/host/calendar-feed";
 import { calendarFeedTokenHash, calendarFeedTokenMatches } from "@/host/calendar-server";
@@ -45,7 +44,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
     const window = { fromUtc: startOfJapanDay(addDays(today, -DAYS_BEFORE)), toUtc: startOfJapanDay(addDays(today, DAYS_AFTER)) };
     const feed = await settings.readFeed(calendarFeedTokenHash(token), window, (issue) => calendarFeedTokenMatches(token, issue));
     if (!feed) return notFound();
-    const body = bookingsIcs(feed.bookings, { origin: siteOrigin(), providerId: feed.providerId, now, besideNiho: providerOperationsEnabled() });
+    const body = bookingsIcs(feed.bookings, { origin: siteOrigin(), providerId: feed.providerId, now });
     return new Response(body, {
       status: 200,
       headers: { ...PRIVATE, "content-type": "text/calendar; charset=utf-8", "content-disposition": 'inline; filename="bookings.ics"' },

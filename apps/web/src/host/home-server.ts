@@ -1,7 +1,6 @@
 import "server-only";
 import type { HostProvider } from "@/lib/host/providers";
 import { isHostMock } from "@/lib/host/server";
-import type { HostSession } from "@/lib/host/session";
 import { actionTime } from "./bookings";
 import { todayInJapan } from "./format";
 import { loadGuestQuestions } from "./guest-questions-server";
@@ -28,15 +27,15 @@ type PagesRead = { pages: HomePage[]; listings: Record<string, HomePageListing |
 const NO_PAGES: PagesRead = { pages: [], listings: {}, failed: false };
 
 /** Legacy NIHO pages/listings are outside contract v1 and do not drive Experience public pages. */
-async function readPages(_provider: HostProvider, _session: HostSession): Promise<PagesRead> { return NO_PAGES; }
+async function readPages(): Promise<PagesRead> { return NO_PAGES; }
 
 /** 次にすること for the provider in http mode; empty in the preview. */
-export async function loadHomeTodos(provider: HostProvider, session: HostSession): Promise<HostHomeTodosLoad> {
+export async function loadHomeTodos(provider: HostProvider): Promise<HostHomeTodosLoad> {
   if (isHostMock()) return { todos: [], failed: [] };
   const [questions, reviews, pages] = await Promise.all([
     loadGuestQuestions(provider, null),
     loadGuestReviews(provider),
-    readPages(provider, session),
+    readPages(),
   ]);
   const now = Date.now();
   const sources: LiveHomeSources = {

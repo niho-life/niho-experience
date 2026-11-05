@@ -2,6 +2,7 @@ import "server-only";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError, type HostSessionAttendance } from "@niho-experience/experience-store";
 import { bookingAttendance, guestBookingRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
+import { isHostMock } from "@/lib/host/server";
 import { actionTime, type SessionQuery } from "./bookings";
 import type { HostSessionView } from "./console-data";
 import { todayInJapan } from "./format";
@@ -21,6 +22,8 @@ import {
   type SiteHome,
 } from "./site-sessions";
 import type { HostAttendance } from "./types";
+import { mockExperienceBookings } from "./mock/experience-reservations";
+import { MOCK_NOW } from "./mock/bookings";
 
 /*
  * ホーム and この回 for the bookings made on this site, kept in the experience DB (#285 slice 8b,
@@ -40,18 +43,17 @@ export type HostSiteHomeLoad =
   | { status: "error" };
 
 /**
- * ホーム for an OWNER (NIHO's role): the provider's sessions with guests from this site from the start of today in
- * Japan, and 次にすること for the payments under review. `besideNiho`: NIHO's bookings are 予約's own (provider
- * operations), so the rows say they are this site's and lead to この回 with `?source=site`.
+ * ホーム for an OWNER (NIHO's role): the provider's Experience sessions with guests from today in Japan, and
+ * 次にすること for the payments under review.
  */
-export async function loadSiteHome(provider: HostProvider, besideNiho: boolean): Promise<HostSiteHomeLoad> {
+export async function loadSiteHome(provider: HostProvider): Promise<HostSiteHomeLoad> {
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
   const now = Date.now();
   const today = todayInJapan(now);
   try {
     const sessions = await bookings.listGuestSessionsForHost(ownerActor(provider), { from: startOfJapanDay(today), limit: HOME_SESSION_LIMIT });
-    return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now), besideNiho), todos: siteHomeTodos(sessions, besideNiho) };
+    return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now)), todos: siteHomeTodos(sessions) };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }
@@ -68,6 +70,7 @@ export type HostSiteSessionLoad =
       messages: boolean;
       /** 出欠 is kept for these bookings, and the capacity read (#107, EXPERIENCE_HOST_ATTENDANCE_ENABLED). */
       attendance: boolean;
+      preview?: true;
     }
   | { status: "closed" }
   | { status: "error" };
@@ -78,6 +81,11 @@ export type HostSiteSessionLoad =
  * screen's: a mark shown as 未記録 that is not would be put right by mistake.
  */
 export async function loadSiteSession(provider: HostProvider, query: SessionQuery): Promise<HostSiteSessionLoad> {
+  if (isHostMock()) {
+    if (provider.memberRole !== "OWNER") return { status: "closed" };
+    const stored = mockExperienceBookings(provider.id).filter((booking) => booking.productId === query.experience && booking.offerId === query.offer && booking.localDate === query.date && booking.localStartTime === query.start);
+    return { status: "live", session: siteSessionView(stored, query), now: MOCK_NOW, messages: true, attendance: false, preview: true };
+  }
   const bookings = guestBookingRepository();
   if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
   const attendance = bookingAttendance();

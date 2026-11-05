@@ -507,7 +507,7 @@ export interface HostThreadBooking {
   date: string;
   start: string;
   guests: number;
-  /** A booking made on this site (#285 slice 6b): 予約を見る opens this site's bookings (`?source=site`). */
+  /** A booking made on this site (#285 slice 6b): 予約を見る opens the Experience booking. */
   site?: true;
   /**
    * This site's booking no longer takes messages (cancelled, or 30 days after the experience): the history stays,

@@ -70,7 +70,7 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 - migration は無い。runtime role の権限も増えない（`outbox_messages` と `guest_question_messages` の INSERT・UPDATE は既にある）。
 - **配備時の作業（この PR では行わない）**：Anthropic Console で experience 専用の workspace と API key を作り、Secret Manager に `EXPERIENCE_ANTHROPIC_API_KEY` として置いて実行環境へ数値 version で配線する（ほかの秘密と同じ）。workspace に利用上限を設ける。旅行者向けのプライバシー（`/privacy`）の文言をオーナーが確認する（Anthropic への送信を書いてある）。
 - mock mode は今までどおり合成の質問と画面だけを使い、DB に触れない。
-- `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` が有効な環境では、`/host/messages` は今までどおり NIHO の予約メッセージ（`HostLiveBookings`）を出す。そこではホストが質問を読めないので、`EXPERIENCE_GUEST_QUESTIONS_ENABLED` も効かない（旅行者の「Ask the host」も出さない）。このサイトで受けた予約のメッセージ（6b）は、題の下の知らせから `?source=site` で開く（[guest-booking.md](guest-booking.md)）。
+- `/host/messages` はExperienceの質問とExperience予約のメッセージを同じ一覧で扱う。NIHO旧予約APIへの切替やfallbackは行わない（[guest-booking.md](guest-booking.md)）。
 - 予約のスレッド（6b）は予約ページ（`EXPERIENCE_GUEST_BOOKING_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED`）が開いているときに出る。質問の flag と片方だけが開いているときは、`/host/messages` はその種類のスレッドだけを出す。
 
 ## 次のスライスで足すもの

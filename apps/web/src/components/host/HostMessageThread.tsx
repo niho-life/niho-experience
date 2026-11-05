@@ -202,7 +202,7 @@ export function HostMessageThread({ thread, experienceTitle, headingId, linkProv
             <p className="text-xs leading-normal text-muted">{threadContext(thread)}</p>
           </div>
           {thread.booking ? (
-            <Link href={bookingsHref({ providerId: linkProviderId, booking: thread.booking.id, source: thread.booking.site ? "site" : null })} className={consoleButtonClass("secondary", "sm")}>
+            <Link href={bookingsHref({ providerId: linkProviderId, booking: thread.booking.id })} className={consoleButtonClass("secondary", "sm")}>
               予約を見る
             </Link>
           ) : null}

@@ -383,12 +383,11 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_REVIEWS_ENABLED: "true" }).guestReviewsEnabled).toBe(true);
   });
 
-  it("takes no question the OWNER could not read (#106)", () => {
+  it("opens Experience guest questions for the OWNER when the host console is available (#106)", () => {
     // No host console: nobody would see the question.
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
-    // メッセージ shows NIHO's booking messages instead of the questions.
     const host = { EXPERIENCE_API_MODE: "http", HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
-    expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "true", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
+    expect(resolveConfig({ ...host, EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "true", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(true);
   });
 
   it("opens NIHO provider page authoring independently from bookings and team operations", () => {

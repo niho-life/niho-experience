@@ -18,7 +18,7 @@ export const MOCK_STANDALONE_ROOM_TTL_MS = 90 * 60 * 1000;
 export const MOCK_TIMELINE = { hostJoined: 4_000, hostReady: 7_000, guestJoined: 10_000, guestReady: 13_000 } as const;
 
 type RoomState = "waiting" | "active" | "paused" | "ended";
-interface MockRoom { source: "niho" | "site"; providerId: string; requestId: string; roomId: string; createdAt: number; endedAt: number | null; hostInviteUrl: string; guestInviteUrl: string; hostParticipantId: string; guestParticipantId: string; hostCode: string; guestCode: string }
+interface MockRoom { providerId: string; requestId: string; roomId: string; createdAt: number; endedAt: number | null; hostInviteUrl: string; guestInviteUrl: string; hostParticipantId: string; guestParticipantId: string; hostCode: string; guestCode: string }
 interface MockStandaloneRoom {
   providerId: string;
   roomId: string;
@@ -31,7 +31,7 @@ interface MockStandaloneRoom {
   guestInvite: { code: string; issuedAt: number };
 }
 
-const ROOMS_PATH = /^\/api\/experience-providers\/([^/]+)\/(bookings|site-bookings)\/([^/]+)\/translate-rooms(?:\/([^/]+)(\/end)?)?$/;
+const ROOMS_PATH = /^\/api\/experience-providers\/([^/]+)\/site-bookings\/([^/]+)\/translate-rooms(?:\/([^/]+)(\/end)?)?$/;
 const STANDALONE_PATH = /^\/api\/experience-providers\/([^/]+)\/translate-rooms(?:\/(current|([^/]+)(?:\/(end)|\/invites\/(host|guest))?))?$/;
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -113,7 +113,7 @@ export interface MockTranslateRooms {
 export function createMockTranslateRooms(): MockTranslateRooms {
   const rooms = new Map<string, MockRoom>();
   const standalone = new Map<string, MockStandaloneRoom>();
-  const key = (source: "niho" | "site", providerId: string, requestId: string, roomId: string) => `${source}\u0000${providerId}\u0000${requestId}\u0000${roomId}`;
+  const key = (providerId: string, requestId: string, roomId: string) => `${providerId}\u0000${requestId}\u0000${roomId}`;
   return {
     async route(request, deps) {
       let pathname: string;
@@ -174,11 +174,11 @@ export function createMockTranslateRooms(): MockTranslateRooms {
       }
       const match = ROOMS_PATH.exec(pathname);
       if (!match) return null;
-      let source: "niho" | "site", providerId: string, requestId: string, roomId: string | undefined;
+      let providerId: string, requestId: string, roomId: string | undefined;
       try {
-        providerId = decodeURIComponent(match[1] ?? ""); source = match[2] === "site-bookings" ? "site" : "niho"; requestId = decodeURIComponent(match[3] ?? ""); roomId = match[4] === undefined ? undefined : decodeURIComponent(match[4]);
+        providerId = decodeURIComponent(match[1] ?? ""); requestId = decodeURIComponent(match[2] ?? ""); roomId = match[3] === undefined ? undefined : decodeURIComponent(match[3]);
       } catch { return notFound(); }
-      const end = match[5] !== undefined;
+      const end = match[4] !== undefined;
       const method = request.method.toUpperCase();
       if (!(await deps.providerExists(providerId))) return notFound();
       const now = deps.now();
@@ -186,11 +186,11 @@ export function createMockTranslateRooms(): MockTranslateRooms {
         if (method !== "POST") return notFound();
         const hostCode = inviteCode(), guestCode = inviteCode();
         const room: MockRoom = {
-          source, providerId, requestId, roomId: token("mock-room-"), createdAt: now, endedAt: null,
+          providerId, requestId, roomId: token("mock-room-"), createdAt: now, endedAt: null,
           hostParticipantId: token("mock-participant-"), guestParticipantId: token("mock-participant-"), hostCode, guestCode,
           hostInviteUrl: `${MOCK_INVITE_ORIGIN}/t#${hostCode}`, guestInviteUrl: `${MOCK_INVITE_ORIGIN}/t#${guestCode}`,
         };
-        rooms.set(key(source, providerId, requestId, room.roomId), room);
+        rooms.set(key(providerId, requestId, room.roomId), room);
         return json(201, {
           roomId: room.roomId, state: "waiting",
           host: { participantId: room.hostParticipantId, inviteCode: room.hostCode, inviteUrl: room.hostInviteUrl },
@@ -198,7 +198,7 @@ export function createMockTranslateRooms(): MockTranslateRooms {
           expiresAt: new Date(now + MOCK_INVITE_TTL_MS).toISOString(),
         });
       }
-      const room = rooms.get(key(source, providerId, requestId, roomId));
+      const room = rooms.get(key(providerId, requestId, roomId));
       if (!room) return notFound();
       if (end) {
         if (method !== "POST") return notFound();

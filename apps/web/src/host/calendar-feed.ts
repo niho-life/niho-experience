@@ -15,8 +15,6 @@ export interface BookingsIcsOptions {
   providerId: string;
   /** Epoch milliseconds: DTSTAMP. */
   now: number;
-  /** Beside NIHO's bookings (provider operations on): この回's link says the session is this site's (`?source=site`). */
-  besideNiho: boolean;
 }
 
 /** One line folded at 75 octets (RFC 5545 §3.1), never inside a UTF-8 character. */
@@ -58,7 +56,6 @@ export function bookingEventUid(providerId: string, bookingId: string, origin: s
 function event(booking: HostCalendarFeedBooking, options: BookingsIcsOptions, stamp: string): string[] {
   const session = sessionHref({
     providerId: options.providerId,
-    source: options.besideNiho ? "site" : null,
     date: booking.localDate,
     start: booking.localStartTime,
     experience: booking.productId,

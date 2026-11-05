@@ -763,7 +763,7 @@ describe("host emails (#194)", () => {
     expect(site!.subject).toBe("新しい予約・申込：Synthetic walk 11/14（土）10:00");
     expect(site!.text).toContain("このサイトで新しい予約を受けました。");
     expect(site!.text).toContain("人数: 2名");
-    expect(site!.text).toContain(`${SITE}/host/bookings?booking=0f8fad5b-d9cb-469f-a165-708677289501&source=site&providerId=provider-a`);
+    expect(site!.text).toContain(`${SITE}/host/bookings?booking=0f8fad5b-d9cb-469f-a165-708677289501&providerId=provider-a`);
     expect(site!.html).toContain('<html lang="ja">');
 
     expect(ota!.subject).toBe("じゃらん の予約の日時が変わりました：Synthetic tea 11/16（月）10:00");

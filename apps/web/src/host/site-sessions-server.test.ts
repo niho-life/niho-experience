@@ -4,6 +4,7 @@ import type { HostProvider } from "@/lib/host/providers";
 
 /** ホーム and この回 for the bookings made on this site against a stubbed experience store (#285 slice 8b, #107). */
 const state = vi.hoisted(() => ({
+  mock: false,
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
   attendance: null as null | Record<string, ReturnType<typeof vi.fn>>,
   session: null as null | { accessTokenExpiresAt: number },
@@ -11,7 +12,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, bookingAttendance: () => state.attendance }));
-vi.mock("@/lib/host/server", () => ({ readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
+vi.mock("@/lib/host/server", () => ({ isHostMock: () => state.mock, readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
 vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
 
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
@@ -41,6 +42,7 @@ const KEY = { productId: "tea", offerId: "sample-am", localDate: "2026-11-01", l
 const MARK = { publicBookingId: STORED.publicBookingId, status: "ATTENDED", recordedAtUtc: "2026-11-01T01:20:00.000Z" };
 
 beforeEach(() => {
+  state.mock = false;
   vi.useRealTimers();
   state.store = {
     listGuestSessionsForHost: vi.fn(async () => [SESSION]),
@@ -55,36 +57,39 @@ describe("loadSiteHome", () => {
   it("reads the OWNER's sessions from the start of today in Japan into today's rows and 次にすること", async () => {
     // 01:30 on 1 November in Japan.
     vi.useFakeTimers({ now: Date.parse("2026-10-31T16:30:00.000Z"), toFake: ["Date"] });
-    const load = await loadSiteHome(OWNER, false);
+    const load = await loadSiteHome(OWNER);
     expect(state.store?.listGuestSessionsForHost).toHaveBeenCalledWith(ACTOR, { from: "2026-10-31T15:00:00.000Z", limit: 100 });
     expect(load.status).toBe("live");
     if (load.status !== "live") return;
-    expect(load.sessions.today.map((row) => [row.title, row.seats, row.bookings, row.phase?.text, row.source])).toEqual([["Synthetic tea ceremony", "3名", "2件", "開始前", undefined]]);
+    expect(load.sessions.today.map((row) => [row.title, row.seats, row.bookings, row.phase?.text])).toEqual([["Synthetic tea ceremony", "3名", "2件", "開始前"]]);
     expect(load.sessions.tomorrow).toEqual([]);
     expect(load.todos.map((todo) => [todo.title, todo.action?.href])).toEqual([["確認待ちの支払いがあります", "/host/bookings/session?date=2026-11-01&start=10%3A00&experience=tea&offer=sample-am"]]);
     expect(JSON.stringify(load)).not.toMatch(/@|\+81|Sample Guest/);
   });
 
-  it("labels the rows and keeps ?source=site beside NIHO's bookings", async () => {
-    vi.useFakeTimers({ now: Date.parse("2026-10-31T16:30:00.000Z"), toFake: ["Date"] });
-    const load = await loadSiteHome(OWNER, true);
-    expect(load.status === "live" && load.sessions.today[0]).toMatchObject({ source: "このサイトの予約", href: expect.stringContaining("source=site") });
-  });
-
   it("keeps today's screen while closed, for anyone but the owner, and says when the DB fails", async () => {
     for (const memberRole of ["EDITOR", "COHOST"] as const) {
-      expect(await loadSiteHome({ ...OWNER, memberRole }, false)).toEqual({ status: "closed" });
+      expect(await loadSiteHome({ ...OWNER, memberRole })).toEqual({ status: "closed" });
     }
     state.store!.listGuestSessionsForHost!.mockRejectedValueOnce(new StoreAccessDeniedError());
-    expect(await loadSiteHome(OWNER, false)).toEqual({ status: "closed" });
+    expect(await loadSiteHome(OWNER)).toEqual({ status: "closed" });
     state.store!.listGuestSessionsForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
-    expect(await loadSiteHome(OWNER, false)).toEqual({ status: "error" });
+    expect(await loadSiteHome(OWNER)).toEqual({ status: "error" });
     state.store = null;
-    expect(await loadSiteHome(OWNER, false)).toEqual({ status: "closed" });
+    expect(await loadSiteHome(OWNER)).toEqual({ status: "closed" });
   });
 });
 
 describe("loadSiteSession", () => {
+  it("opens the ordinary preview's same Experience reservation without reading the store", async () => {
+    state.mock = true;
+    const query = { date: "2026-10-24", start: "18:00", experience: "community-dinner", offer: "offer-dinner" };
+    const load = await loadSiteSession({ ...OWNER, id: "sample-provider-kitchen" }, query);
+    expect(load).toMatchObject({ status: "live", preview: true, attendance: false, messages: true, session: { bookings: [{ id: "00000000-0000-4000-8000-00000000b101", guest: "Hannah Kim" }] } });
+    expect(await loadSiteSession({ ...OWNER, id: "sample-provider-studio" }, query)).toMatchObject({ status: "live", session: null });
+    expect(await loadSiteSession({ ...OWNER, memberRole: "EDITOR" }, query)).toEqual({ status: "closed" });
+    expect(state.store!.listGuestBookingsForSession).not.toHaveBeenCalled();
+  });
   it("reads the session the address names by its snapshot's day and start, with the guests' phones", async () => {
     vi.useFakeTimers({ now: Date.parse("2026-11-01T01:30:00.000Z"), toFake: ["Date"] });
     const load = await loadSiteSession(OWNER, QUERY);

@@ -20,7 +20,6 @@ import { SITE_HOME_LOAD_FAILED_TEXT, withSiteHome } from "@/host/site-sessions";
 import { loadSiteHome } from "@/host/site-sessions-server";
 import { config } from "@/lib/config";
 import { HOST_BOOKINGS_PATH, HOST_SALES_PATH, HOST_SETTINGS_PATH, HOST_TRANSLATE_PATH, withProvider } from "@/lib/host/routes";
-import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
 import { isHostMock } from "@/lib/host/server";
 import { translateRoomsEnabled } from "@/lib/host/translate-rooms-server";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
@@ -28,11 +27,6 @@ import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 export const metadata: Metadata = { title: "ホーム" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
-
-/** Where a row's bookings come from, when it says so: "このサイトの予約" beside NIHO's (#285 slice 8b). */
-function SessionSource({ item }: { item: HomeUpcoming }) {
-  return item.source ? <span className="block text-xs leading-normal font-extrabold text-muted">{item.source}</span> : null;
-}
 
 /** The day of a session: its weekday over the day (the full date for screen readers). */
 function SessionDay({ item }: { item: HomeUpcoming }) {
@@ -65,7 +59,6 @@ function DaySessions({ id, title, sessions, link }: { id: string; title: string;
             <SessionDay item={item} />
             <span id={`${id}-${index}`} className="min-w-0 flex-[1_1_150px]">
               {item.phase ? <span className={`block text-xs leading-normal font-extrabold ${item.phase.tone === "warn" ? "text-warn" : "text-muted"}`}>{item.phase.text}</span> : null}
-              <SessionSource item={item} />
               <span className={`block ${LIST_ROW_TITLE}`}>{item.title}</span>
               <span className={`block ${LIST_ROW_DETAIL}`}>{item.detail}</span>
               {item.dietary ? <span className={`block ${LIST_ROW_DETAIL}`}>{item.dietary}</span> : null}
@@ -110,9 +103,8 @@ function CalendarPromptCard({ prompt, href }: { prompt: HomeCalendarPrompt; href
  * ホーム (mock v2, the journey mock's H1): what needs doing, today's and tomorrow's sessions, the
  * calendar's card while Google Calendar is not connected (#109), the sessions after, and this month's numbers.
  *
- * With EXPERIENCE_GUEST_BOOKING_ENABLED (http mode), the OWNER's sessions with bookings made on this site and their
- * payments under review join them (#285 slice 8b; この回 reads those bookings). Without NIHO's bookings (provider
- * operations off) they fill the screen; beside NIHO's, each of their rows says "このサイトの予約".
+ * With EXPERIENCE_GUEST_BOOKING_ENABLED (http mode), the OWNER's Experience sessions and their payments under review
+ * appear here (#285 slice 8b; この回 reads those bookings).
  *
  * With HOST_SALES_LEDGER_ENABLED (http mode), the month card is the OWNER's sales of bookings made on this site this
  * month in Japan (#91), read from the experience DB's ledger as 売上 reads it, and says whose they are.
@@ -137,9 +129,9 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   }
   const [{ home: consoleHome, settings }, site, siteMonth, live, liveCalendar, ota] = await Promise.all([
     loadHostConsoleData(provider),
-    loadSiteHome(provider, providerOperationsEnabled()),
+    loadSiteHome(provider),
     loadSiteHomeMonth(provider, context.session),
-    loadHomeTodos(provider, context.session),
+    loadHomeTodos(provider),
     loadHostCalendar(provider, { feed: false }),
     // New bookings made on reservation sites (#194 PR B).
     loadOtaHomeTodos(provider.id, provider, context.session.mockScenario),
@@ -212,7 +204,6 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
                   <Link href={link(item.href)} className={`${LIST_ROW} hover:bg-sand/60`}>
                     <SessionDay item={item} />
                     <span className="min-w-0 flex-1">
-                      <SessionSource item={item} />
                       <span className={`block ${LIST_ROW_TITLE}`}>{item.title}</span>
                       <span className={`block ${LIST_ROW_DETAIL}`}>{item.detail}</span>
                     </span>

@@ -26,7 +26,7 @@ describe("host emails", () => {
   });
 
   it("words this site's cancellation without a site or a guest", () => {
-    const mail = hostBookingEmail({ providerId: "provider-a", kind: "CANCELLATION", experienceTitle: "Synthetic walk", startsAt: "2026-11-14T01:00:00.000Z", seats: 1, url: "/host/bookings?booking=b1&source=site&providerId=provider-a", tag: "cancellation-b1" }, { siteUrl: SITE });
+    const mail = hostBookingEmail({ providerId: "provider-a", kind: "CANCELLATION", experienceTitle: "Synthetic walk", startsAt: "2026-11-14T01:00:00.000Z", seats: 1, url: "/host/bookings?booking=b1&providerId=provider-a", tag: "cancellation-b1" }, { siteUrl: SITE });
     expect(mail.subject).toBe("予約が取り消されました：Synthetic walk 11/14（土）10:00");
     expect(mail.text).toContain("このサイトで受けた予約が取り消されました。");
     expect(mail.text).toContain("予約: 体験サイト");

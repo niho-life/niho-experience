@@ -25,10 +25,10 @@ const CANCELLED: HostGuestBooking = { ...CONFIRMED, publicBookingId: "00000000-0
 const ERASED: HostGuestBooking = { ...CONFIRMED, publicBookingId: "00000000-0000-4000-8000-000000000288", adultCount: 1, childCount: 0, guest: null };
 const QUERY = { date: "2026-11-01", start: "10:00", experience: "tea", offer: "sample-am" };
 
-function render(now: string, besideNiho: boolean, providerId?: string, attendance = false): string {
+function render(now: string, providerId?: string, attendance = false): string {
   const marks = attendance ? { capacity: 8, marks: [{ publicBookingId: CONFIRMED.publicBookingId, status: "ATTENDED" as const, recordedAtUtc: "2026-11-01T01:20:00.000Z" }] } : null;
   const session = siteSessionView([CONFIRMED, REVIEW, CANCELLED, ERASED], QUERY, marks)!;
-  return renderToStaticMarkup(createElement(HostSession, { session, now, conversations: [], providerId: "sample-provider", site: { besideNiho, providerId, attendance } }));
+  return renderToStaticMarkup(createElement(HostSession, { session, now, providerId: "sample-provider", site: { providerId, attendance } }));
 }
 
 /** The buttons of a guest's 出欠, as rendered: [label, pressed, disabled]. */
@@ -39,7 +39,7 @@ function attendanceButtons(html: string, guest: string): [string, boolean, boole
 
 describe("HostSession for this site's bookings", () => {
   it("lists the confirmed guests and the payment under review with the phone, words and counts, and no NIHO action", () => {
-    const html = render("2026-11-01T09:00", false);
+    const html = render("2026-11-01T09:00");
     expect(html).toContain("このサイトで受けた予約です");
     expect(html).toContain("参加 5 名");
     expect(html).toContain("うち確認待ち 1 名（席は確保されていません）");
@@ -59,26 +59,26 @@ describe("HostSession for this site's bookings", () => {
   });
 
   it("offers calling the session off with full refunds before the start only (#285 slice 7)", () => {
-    expect(render("2026-11-01T09:00", false, "sample-provider")).toContain("この回を中止する（全員に全額返金）");
-    expect(render("2026-11-01T10:30", false, "sample-provider")).not.toContain("この回を中止する（");
+    expect(render("2026-11-01T09:00", "sample-provider")).toContain("この回を中止する（全員に全額返金）");
+    expect(render("2026-11-01T10:30", "sample-provider")).not.toContain("この回を中止する（");
   });
 
-  it("records no attendance once the session started, and goes back to this site's bookings beside NIHO's", () => {
-    const html = render("2026-11-01T12:00", true);
+  it("records no attendance once the session started and links back to Experience bookings", () => {
+    const html = render("2026-11-01T12:00");
     expect(html).toContain("終了しました");
     expect(html).not.toContain("来なかった");
     expect(html).not.toContain("出欠");
-    expect(html).toContain('href="/host/bookings?providerId=sample-provider&amp;source=site"');
+    expect(html).toContain('href="/host/bookings?providerId=sample-provider"');
   });
 
   it("records 出欠 where it is kept (#107): locked before the start, open after it, with the capacity", () => {
-    const before = render("2026-11-01T09:00", false, "sample-provider", true);
+    const before = render("2026-11-01T09:00", "sample-provider", true);
     expect(before).toContain("参加 5 名 · 定員 8");
     expect(before).toContain("出欠は開始後に付けられます");
     expect(attendanceButtons(before, "Sample Guest")).toEqual([["来た", true, true], ["来なかった", false, true]]);
     expect(before).not.toContain("来た 1 件");
 
-    const after = render("2026-11-01T10:30", false, "sample-provider", true);
+    const after = render("2026-11-01T10:30", "sample-provider", true);
     expect(after).toContain("来た 1 件 · 来なかった 0 件 · 未記録 1 件");
     expect(after).not.toContain("出欠は開始後に付けられます");
     expect(attendanceButtons(after, "Sample Guest")).toEqual([["来た", true, false], ["来なかった", false, false]]);
@@ -90,7 +90,7 @@ describe("HostSession for this site's bookings", () => {
   });
 
   it("records nothing without the provider to send it for", () => {
-    const html = render("2026-11-01T10:30", false, undefined, true);
+    const html = render("2026-11-01T10:30", undefined, true);
     expect(html).not.toContain("さんの出欠");
     expect(html).not.toContain("未記録");
   });
@@ -104,8 +104,8 @@ describe("HostSession with OTA bookings (#194 PR B)", () => {
   const renderWith = (now: string, extra: ReturnType<typeof ota>[], attendance: boolean) => {
     const session = { ...siteSessionView([CONFIRMED], QUERY, attendance ? { capacity: 8, marks: [] } : null)! };
     return renderToStaticMarkup(createElement(HostSession, {
-      session: { ...session, bookings: [...session.bookings, ...extra] }, now, conversations: [], providerId: "sample-provider",
-      site: { besideNiho: false, providerId: "sample-provider", attendance }, ota: { attendance },
+      session: { ...session, bookings: [...session.bookings, ...extra] }, now, providerId: "sample-provider",
+      site: { providerId: "sample-provider", attendance }, ota: { attendance },
     }));
   };
 
@@ -130,7 +130,7 @@ describe("HostSession with OTA bookings (#194 PR B)", () => {
 
   it("is a session of OTA guests alone, with nothing of this site's to call off", () => {
     const session = { date: QUERY.date, start: QUERY.start, end: "20:00", experienceId: QUERY.experience, offerId: QUERY.offer, title: "Dinner", offer: "Dinner", capacity: null, meetingArea: "", bookings: [ota(0)] };
-    const html = renderToStaticMarkup(createElement(HostSession, { session, now: "2026-11-01T09:00", conversations: [], providerId: "sample-provider", site: { besideNiho: false, providerId: "sample-provider" }, ota: { attendance: false } }));
+    const html = renderToStaticMarkup(createElement(HostSession, { session, now: "2026-11-01T09:00", providerId: "sample-provider", site: { providerId: "sample-provider" }, ota: { attendance: false } }));
     expect(html).toContain("予約サイトで受けた予約です。取消・返金・予約者とのやりとりは、その予約サイトで行ってください");
     expect(html).not.toContain("この回を中止する");
     expect(html).not.toContain("一部だけの返金は NIHO サポートへご連絡ください");

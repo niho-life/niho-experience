@@ -3,20 +3,19 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 type Load = Mock<(...args: unknown[]) => Promise<unknown>>;
 
-/** この回's choice between NIHO's sessions and this site's bookings (#285 slice 8b), against stubbed data. */
+/** Experience開催回ページが旧予約ソースを持たず、Experience/OTAデータを使うことを確認する。 */
 const state = vi.hoisted(() => ({
-  providerOperations: false,
   memberRole: "OWNER" as string,
   site: { status: "closed" } as Record<string, unknown>,
+  ota: { status: "closed" } as Record<string, unknown>,
+  otaShown: false,
   loadSiteSession: null as null | Load,
-  loadHostSession: null as null | Load,
+  loadOtaSession: null as null | Load,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", async (importActual) => ({
   ...(await importActual<typeof import("next/navigation")>()),
-  notFound: () => {
-    throw new Error("NOT_FOUND");
-  },
+  notFound: () => { throw new Error("NOT_FOUND"); },
 }));
 vi.mock("@/host/data", () => ({
   hostPageContext: async () => ({
@@ -26,24 +25,28 @@ vi.mock("@/host/data", () => ({
     providerNotFound: false,
     linkProviderId: "sample-provider",
   }),
-  loadHostSession: (...args: unknown[]) => state.loadHostSession!(...args),
 }));
 vi.mock("@/host/site-sessions-server", () => ({ loadSiteSession: (...args: unknown[]) => state.loadSiteSession!(...args) }));
-vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => state.providerOperations }));
+vi.mock("@/host/ota-bookings-server", () => ({
+  loadOtaSession: (...args: unknown[]) => state.loadOtaSession!(...args),
+  otaBookingsShown: () => state.otaShown,
+}));
+vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: async () => ({ choices: [], choice: null, providerNotFound: false }) }));
 
 import HostSessionPage from "./page";
 import { HostSession } from "@/components/host/HostSession";
 
 const QUERY = { date: "2026-11-01", start: "10:00", experience: "tea", offer: "sample-am" };
 const VIEW = { date: "2026-11-01", start: "10:00", end: "11:30", experienceId: "tea", offerId: "sample-am", title: "Synthetic tea ceremony", offer: "Synthetic tea ceremony", capacity: null, meetingArea: "", bookings: [{ id: "b-1" }] };
-const LIVE = { status: "live", session: VIEW, now: "2026-11-01T09:00" };
+const LIVE = { status: "live", session: VIEW, now: "2026-11-01T09:00", messages: true, attendance: true };
 
 beforeEach(() => {
-  state.providerOperations = false;
   state.memberRole = "OWNER";
   state.site = { status: "closed" };
+  state.ota = { status: "closed" };
+  state.otaShown = false;
   state.loadSiteSession = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.site);
-  state.loadHostSession = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({ lookup: { status: "unavailable" }, now: "2026-11-01T09:00", conversations: [] }));
+  state.loadOtaSession = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.ota);
 });
 
 async function page(query: Record<string, string> = QUERY): Promise<ReactElement<Record<string, unknown>>> {
@@ -52,56 +55,36 @@ async function page(query: Record<string, string> = QUERY): Promise<ReactElement
   return element as ReactElement<Record<string, unknown>>;
 }
 
-describe("この回 without NIHO's bookings (provider operations off)", () => {
-  it("shows the OWNER this site's bookings of the session, read only, in place of 準備中", async () => {
+describe("Experience session", () => {
+  it("shows the OWNER's Experience guests and attendance controls", async () => {
     state.site = LIVE;
     const view = await page();
     expect(view.type).toBe(HostSession);
-    // No OTA bookings here (#194 PR B: their flag is off).
-    expect(view.props).toEqual({ session: VIEW, now: "2026-11-01T09:00", conversations: [], providerId: "sample-provider", site: { besideNiho: false, providerId: "sample-provider" }, ota: null });
+    expect(view.props).toEqual({ session: VIEW, now: "2026-11-01T09:00", providerId: "sample-provider", site: { providerId: "sample-provider", messages: true, attendance: true }, ota: null });
     expect(state.loadSiteSession).toHaveBeenCalledWith(expect.objectContaining({ id: "sample-provider" }), QUERY);
-    expect(state.loadHostSession).not.toHaveBeenCalled();
   });
 
-  it("passes on whether 出欠 is kept for these bookings (#107)", async () => {
-    state.site = { ...LIVE, messages: true, attendance: true };
-    expect((await page()).props.site).toEqual({ besideNiho: false, providerId: "sample-provider", messages: true, attendance: true });
-  });
-
-  it("keeps today's screen while this site's bookings are closed to the account", async () => {
-    const view = await page();
-    expect((view.type as { name: string }).name).toBe("SessionUnavailable");
-    expect(view.props).toEqual({ backHref: "/host/bookings?providerId=sample-provider" });
-    expect(state.loadHostSession).toHaveBeenCalled();
-  });
-
-  it("says the guests could not be read, and finds no session without this site's bookings", async () => {
+  it("says when Experience session data is unavailable and rejects unknown sessions", async () => {
+    expect((await page()).props).toEqual({ backHref: "/host/bookings?providerId=sample-provider" });
     state.site = { status: "error" };
-    expect((await page()).props).toMatchObject({ title: "参加者を読み込めませんでした", backHref: "/host/bookings?providerId=sample-provider" });
+    expect((await page()).props).toMatchObject({ title: "参加者を読み込めませんでした" });
     state.site = { ...LIVE, session: null };
     await expect(page()).rejects.toThrow("NOT_FOUND");
-    await expect(page({ date: "2026-11-01" })).rejects.toThrow("NOT_FOUND");
-  });
-});
-
-describe("この回 beside NIHO's bookings (provider operations on)", () => {
-  beforeEach(() => {
-    state.providerOperations = true;
   });
 
-  it("shows this site's bookings for ?source=site, going back to them", async () => {
-    state.site = LIVE;
-    const view = await page({ ...QUERY, source: "site" });
-    expect(view.type).toBe(HostSession);
-    expect(view.props.site).toEqual({ besideNiho: true, providerId: "sample-provider" });
-    state.site = { status: "error" };
-    expect((await page({ ...QUERY, source: "site" })).props).toMatchObject({ backHref: "/host/bookings?providerId=sample-provider&source=site" });
-  });
-
-  it("keeps NIHO's screen without ?source=site", async () => {
-    state.site = LIVE;
-    const view = await page();
-    expect((view.type as { name: string }).name).toBe("SessionUnavailable");
+  it("keeps the session OWNER-only", async () => {
+    state.memberRole = "EDITOR";
+    await expect(page()).rejects.toThrow("NOT_FOUND");
     expect(state.loadSiteSession).not.toHaveBeenCalled();
+  });
+
+  it("adds OTA guests when the read-only OTA integration is enabled", async () => {
+    state.site = LIVE;
+    state.otaShown = true;
+    state.ota = { status: "live", bookings: [], attendance: false, now: "2026-11-01T09:30" };
+    const view = await page();
+    expect(view.type).toBe(HostSession);
+    expect(view.props).toMatchObject({ site: { providerId: "sample-provider" }, ota: { attendance: false } });
+    expect(state.loadOtaSession).toHaveBeenCalledWith("sample-provider", expect.objectContaining({ memberRole: "OWNER" }), QUERY, undefined);
   });
 });

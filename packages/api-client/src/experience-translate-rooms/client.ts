@@ -56,7 +56,6 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     const decoded = decode(value);
     return decoded === null ? { ok: false, kind: "unexpected_response", status } : { ok: true, data: decoded };
   }
-  const roomsPath = (providerId: string, requestId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/bookings/${encodeURIComponent(requestId)}/translate-rooms`;
   const siteRoomsPath = (providerId: string, bookingId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/site-bookings/${encodeURIComponent(bookingId)}/translate-rooms`;
   const standaloneRoomsPath = (providerId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/translate-rooms`;
   const ids = (...values: string[]) => values.every((value) => isExperienceTranslateRoomPathId(value));
@@ -90,16 +89,6 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
       return ids(providerId) && isStandaloneTranslateRoomId(roomId)
         ? request("POST", `${standaloneRoomsPath(providerId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {})
         : invalid<ExperienceTranslateRoomEndResponse>();
-    },
-    /** Makes the room with both invites. The body is an empty object: the language comes from the booking. */
-    createRoom(providerId: string, requestId: string) {
-      return ids(providerId, requestId) ? request("POST", roomsPath(providerId, requestId), 201, schema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated"), {}) : invalid<ExperienceTranslateRoomCreatedResponse>();
-    },
-    getRoom(providerId: string, requestId: string, roomId: string) {
-      return ids(providerId, requestId, roomId) ? request("GET", `${roomsPath(providerId, requestId)}/${encodeURIComponent(roomId)}`, 200, schema<ExperienceTranslateRoomStatusResponse>("ExperienceProviderTranslateRoomStatus")) : invalid<ExperienceTranslateRoomStatusResponse>();
-    },
-    endRoom(providerId: string, requestId: string, roomId: string) {
-      return ids(providerId, requestId, roomId) ? request("POST", `${roomsPath(providerId, requestId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {}) : invalid<ExperienceTranslateRoomEndResponse>();
     },
     /** Experience DBの公開予約UUIDをopaqueな文脈として渡す。状態・言語・roleは送らない。 */
     createSiteRoom(providerId: string, bookingId: string) {

@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { actionTime, bookingsHref, bookingStatusLabel, respondByLabel } from "@/host/bookings";
 import type { HostSessionView } from "@/host/console-data";
 import { shortDateWithWeekdayJa, todayInJapan } from "@/host/format";
-import { messagesHref, type BookingConversation } from "@/host/messages";
+import { messagesHref } from "@/host/messages";
 import {
   ATTENDANCE_CHOICES,
   ATTENDANCE_LOCKED_TEXT,
@@ -64,18 +64,15 @@ export interface HostSessionProps {
    * started, and when an action is dated. This site's bookings move on from it with the time in Japan.
    */
   now: string;
-  /** The threads of the session's bookings (#106). */
-  conversations: readonly BookingConversation[];
   /** The URL's own `?providerId=` (when well formed), carried on every link. */
   providerId: string | null;
   /**
    * Bookings made on this site (#285 slice 8b, experience DB, http mode): calling the session off cancels every
    * confirmed booking (paid bookings are refunded in full, slice 7, `providerId` is the provider shown). `messages`: each guest leads
    * to their booking's thread (slice 6b). `attendance`: 出欠 is kept in the experience DB (#107, its flag), sent for
-   * `providerId`. `besideNiho`: NIHO's bookings are 予約's own and these are its `?source=site`, where "‹ 予約" goes
-   * back. Absent in mock mode.
+   * `providerId`. Absent when only OTA bookings are shown.
    */
-  site?: { besideNiho: boolean; providerId?: string; messages?: boolean; attendance?: boolean } | null;
+  site?: { providerId?: string; messages?: boolean; attendance?: boolean; preview?: true } | null;
   /**
    * Bookings made on reservation sites among the session's (#194 PR B): their guests with their site's badge and the
    * phone the site gave, never cancelled or written to from here (their site does that). `attendance`: their 出欠 is
@@ -229,7 +226,7 @@ function GuestRow({ booking, messageHref, aside, children }: { booking: HostBook
  * (#107) the capacity and 来た / 来なかった, kept in the experience DB one booking at a time: the screen shows what the
  * store kept, and a failure leaves the mark as it was.
  */
-export function HostSession({ session, now, conversations, providerId, site = null, ota = null }: HostSessionProps) {
+export function HostSession({ session, now, providerId, site = null, ota = null }: HostSessionProps) {
   const [bookings, setBookings] = useState<readonly HostBooking[]>(session.bookings);
   const [notice, setNotice] = useState("");
   const [cancellation, setCancellation] = useState<{ reason: SessionCancelReason; results: SessionCancelResult[] } | null>(null);
@@ -243,7 +240,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   // The moment the screen stands at: the page's for the preview (fixed) and the first render; this site's bookings
   // follow the time in Japan from then on (the store still decides by its own clock).
   const [clock, setClock] = useState(now);
-  const live = site !== null;
+  const live = site !== null && !site.preview;
   useEffect(() => {
     if (!live) return;
     const tick = () => {
@@ -255,7 +252,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   }, [live]);
 
   const heading = sessionHeading(session);
-  const backHref = bookingsHref({ providerId, source: site?.besideNiho ? "site" : null });
+  const backHref = bookingsHref({ providerId });
   const phase = sessionPhase(session, clock);
   const today = clock.slice(0, 10);
   const { participants, requests } = sessionSections(session.bookings, bookings);
@@ -272,9 +269,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
     // An OTA booking's guest is written to on its site (#194).
     if (booking.ota) return null;
     // This site's bookings (#285 slice 6b): the booking's thread, or its empty one, among this site's threads.
-    if (site) return site.messages ? messagesHref({ providerId, source: site.besideNiho ? "site" : null, booking: booking.id }) : null;
-    const thread = conversations.find((conversation) => conversation.bookingId === booking.id);
-    return thread ? messagesHref({ providerId, thread: thread.threadId }) : messagesHref({ providerId, booking: booking.id });
+    return site?.messages ? messagesHref({ providerId, booking: booking.id }) : null;
   };
   const contacts: SessionContact[] = [...participants, ...requests].flatMap((booking) => {
     const href = messageHref(booking);
@@ -286,7 +281,7 @@ export function HostSession({ session, now, conversations, providerId, site = nu
   // This site's bookings are called off with their own action (paid bookings are refunded by the store), below.
   const cancellable = !site && canCancelSession(own, phase, cancellation !== null);
   const siteConfirmed = site ? own.filter((booking) => booking.status === "confirmed") : [];
-  const siteCancellable = Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
+  const siteCancellable = !site?.preview && Boolean(site?.providerId) && phase === "before" && siteConfirmed.length > 0;
   const siteRefundYen = siteConfirmed.reduce((total, booking) => total + booking.amountYen, 0);
   const siteCancellationLabel = siteRefundYen === 0
     ? "この回を中止する（無料予約を取り消す）"

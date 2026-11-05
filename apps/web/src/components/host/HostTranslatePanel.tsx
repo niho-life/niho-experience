@@ -65,7 +65,6 @@ function EndDialog({ onConfirm, onClose }: { onConfirm: () => void; onClose: () 
 }
 
 export interface HostTranslatePanelProps {
-  source: "niho" | "site";
   providerId: string;
   bookingId: string;
   /** Booking eligibility gates new rooms; an existing room must remain controllable after cancellation. */
@@ -77,8 +76,8 @@ export interface HostTranslatePanelProps {
   onAuthorizationEnded?: (status: 401 | 403) => void;
 }
 
-export function HostTranslatePanel({ source, providerId, bookingId, canStart = true, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
-  const base = translateRoomsBffPath(source, providerId, bookingId);
+export function HostTranslatePanel({ providerId, bookingId, canStart = true, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
+  const base = translateRoomsBffPath(providerId, bookingId);
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [busy, setBusy] = useState(false);

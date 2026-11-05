@@ -27,7 +27,7 @@ vi.mock("./server", () => ({
 vi.mock("@/host/site-bookings-server", () => ({ asTranslateOwner: mocks.owner }));
 vi.mock("@niho-experience/api-client/experience-translate-rooms", () => ({ createExperienceTranslateRoomsClient: mocks.create }));
 
-import { loadSiteTranslateRoomsClient, loadStandaloneTranslateRoomsClient, loadTranslateRoomsClient, readEmptyTranslateBody, readStandaloneTranslateCreateBody, siteTranslateBookingEligible, translateRoomsEnabled, translateRoomsEntry, translateRoomsFailure, translateRoomsMutationAllowed } from "./translate-rooms-server";
+import { loadSiteTranslateRoomsClient, loadStandaloneTranslateRoomsClient, readEmptyTranslateBody, readStandaloneTranslateCreateBody, siteTranslateBookingEligible, translateRoomsEnabled, translateRoomsEntry, translateRoomsFailure, translateRoomsMutationAllowed } from "./translate-rooms-server";
 
 const post = (body: BodyInit | null, headers: Record<string, string> = {}) => new Request("https://experience.example/host/api/translate/x", { method: "POST", headers: { origin: "https://experience.example", "sec-fetch-site": "same-origin", ...headers }, body });
 
@@ -68,29 +68,6 @@ describe("translate rooms server boundary", () => {
     expect(translateRoomsEntry()).toEqual({ today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
     mocks.config.hostConsoleEnabled = false;
     expect(translateRoomsEntry()).toBeNull();
-  });
-
-  it("uses only the sealed current host session and NIHO's fetch for that session", async () => {
-    mocks.config.experienceTranslateApiEnabled = true;
-    mocks.config.guestBookingEnabled = false;
-    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
-    const loaded = await loadTranslateRoomsClient();
-    expect(loaded).toEqual({ ok: true, client: { marker: "translate-client" } });
-    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", accessToken: "sealed-host-token", fetch: mocks.upstreamFetch });
-  });
-
-  it("answers 404 while closed, 401 without a session and 401 refresh when the token is nearly out", async () => {
-    expect((await loadTranslateRoomsClient()).ok).toBe(false);
-    expect((await loadTranslateRoomsClient() as { response: Response }).response.status).toBe(404);
-    mocks.config.experienceTranslateApiEnabled = true;
-    mocks.readHost.mockResolvedValue(null);
-    expect((await loadTranslateRoomsClient() as { response: Response }).response.status).toBe(401);
-    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
-    mocks.usable.mockReturnValue(false);
-    const refresh = (await loadTranslateRoomsClient() as { response: Response }).response;
-    expect(refresh.status).toBe(401);
-    expect(await refresh.json()).toEqual({ error: "session_refresh_required" });
-    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("maps NIHO's refusals without their bodies, clears the cookie on 401 and keeps 404 as not_found", async () => {
