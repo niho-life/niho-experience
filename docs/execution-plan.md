@@ -1,6 +1,6 @@
 # Epic・着手順・担当への指示
 
-作成日：2026-10-19。進捗の正本はGitHub Issue。設計の合意とIssue起票まで完了しており、各実装Issueは未着手。
+作成日：2026-10-19。以下は旧NIHO正本を前提とした初期計画の記録であり、現在の実装進捗・責務・担当指示として使わない。現行の責務は [architecture.md](architecture.md) と [ADR 0002](adr/0002-experience-domain-ownership.md)、進捗はGitHub Issue・merge済みPRを正とする。公開・商品管理・予約の主要導線がmainに入り、現在は #285・#92・#15 でstaging接続・運用・本番公開の受入を追跡する。
 
 ## 全体像
 

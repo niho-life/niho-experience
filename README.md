@@ -3,7 +3,7 @@
 地域の人・暮らし・文化に出会う、旅行者向けの体験予約サイト。
 最初の地域は鎌倉。訪日旅行者が地元の人による体験を探し、会員登録なしで予約できることを目指します。
 
-**現在はモックプレビューの段階です。** 合成データで一覧・詳細・予約入力・決済復帰の画面を確認できます。実在の予約・決済はまだ受け付けません。
+**公開画面・ホスト画面・Experience取引APIの主要導線を実装し、stagingで実API接続の検証を進めています。** 本番の予約受付と検索公開は停止しています。ローカルのモックプレビューでは合成データで一覧・詳細・予約入力・決済復帰を確認できます。実装済みと実環境での受入済みを分け、残作業は [予約受付 #285](https://github.com/niho-life/niho-experience/issues/285)、[ホスト受入 #92](https://github.com/niho-life/niho-experience/issues/92)、[本番公開 #15](https://github.com/niho-life/niho-experience/issues/15) で追跡します。
 
 ```sh
 npm ci
@@ -23,9 +23,8 @@ npm run dev   # http://localhost:3000
 
 ## 構成
 
-この公開リポは画面・SSR・SEO・公開APIクライアントと、ホスト（提供者）の画面 `/host` を担当します。
-NIHOの共通基盤が、ログイン、権限、商品管理、予約、Stripe Connect Direct、返金、売上台帳を担当します。ホストの画面はNIHOでログインし、NIHOのAPIで操作します（[#84](https://github.com/niho-life/niho-experience/issues/84)）。
-既存のNIHOアカウントと販売者口座を活用します。
+このリポは公開画面・SSR・SEO、ホスト画面 `/host` と、体験商品・公開版・開催枠・在庫・予約・決済状態・返金記録・売上台帳の正本を担当します。
+NIHO共通基盤はアカウントとStripe Connect口座の正本です。ホストはNIHOでログインし、ExperienceのOWNER権限で商品・予約を操作します。NIHOの現在本人と既存口座の限定契約をサーバーから参照し、ブラウザーへtokenを渡しません。新規販売はExperienceの公開版だけを使い、旧NIHO商品・予約APIへfallbackしません（[ADR 0002](docs/adr/0002-experience-domain-ownership.md)）。
 
 - [構成・データ境界](docs/architecture.md)
 - [公開API契約（仮契約）](docs/api-contract.md)
