@@ -7,8 +7,9 @@ const state = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config }));
-vi.mock("@/lib/api", () => ({
-  listExperiencesForSite: async () => ({ ok: true as const, data: { experiences: [{ slug: "tea-ceremony", updatedAt: "2026-10-20T00:00:00Z" }] } }),
+vi.mock("@/lib/api", () => ({ listExperiencesForSite: () => { throw new Error("Sitemap must not read a former NIHO product catalog"); } }));
+vi.mock("@/lib/experience/site-publications", () => ({
+  listSitePublicExperiences: async () => ({ claimedSlugs: ["tea-ceremony"], experiences: [{ publication: { slug: "tea-ceremony", publishedAtUtc: "2026-10-20T00:00:00Z", japanese: null }, saleTerms: { offers: [{}] } }] }),
 }));
 vi.mock("@/lib/guide-registry", () => ({ indexableGuides: async () => [{ slug: "rainy-day", updatedAt: "2026-10-25" }] }));
 vi.mock("@/lib/localized-content", async () => {

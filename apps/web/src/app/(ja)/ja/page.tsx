@@ -17,6 +17,8 @@ import { imageAlt } from "@/lib/experience-copy";
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
 import { BANNER_VIDEO, HERO_PHOTO, HOST_BAND_VIDEO, POSTCARDS } from "@/lib/site-media";
+import { getReviewSummaries } from "@/lib/journey";
+import { withReviewLines } from "@/lib/reviews-ui";
 
 const cardModel = (card: CardModel): ExperienceCardModelV1 => ({
   ...card,
@@ -39,7 +41,8 @@ export default async function JapaneseHome() {
     if (!Array.isArray(catalog)) assertSameJapaneseRelease(copy.releaseId, catalog);
     const summaries = Array.isArray(catalog) ? catalog : catalog.experiences;
     const details = await loadDetails(api, summaries, true, "ja", copy.releaseId);
-    const cards = buildCardModels(summaries, details, false, "ja", copy.copy);
+    const plainCards = buildCardModels(summaries, details, false, "ja", copy.copy);
+    const cards = withReviewLines(plainCards, await getReviewSummaries(plainCards.map((card) => card.slug)), "ja");
     data = { copy, cards };
   } catch { return <JapaneseUnavailable />; }
   const { copy, cards } = data;

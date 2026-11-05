@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 
 const state = vi.hoisted(() => ({
-  config: { guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" },
+  config: { experiencePublicationsEnabled: true, guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" },
   publications: { getPublicBySlug: vi.fn(), listPublic: vi.fn() },
   bookings: { publicBookingTerms: vi.fn() },
+  disclosures: { getPublicBySlug: vi.fn() },
 }));
 
 vi.mock("server-only", () => ({}));
@@ -12,6 +13,7 @@ vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("./store-server", () => ({
   experiencePublicationRepository: () => state.publications,
   guestBookingRepository: () => state.bookings,
+  providerSellerDisclosureRepository: () => state.disclosures,
 }));
 
 import { getPublicationDetail, listPublicationSummaries } from "./publication-site";
@@ -43,15 +45,20 @@ const publication = {
 
 describe("Experience public site DTO", () => {
   beforeEach(() => {
-    state.config = { guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" };
+    state.config = { experiencePublicationsEnabled: true, guestBookingEnabled: true, guestBookingConsentVersion: "consent-synthetic-v1", siteUrl: "https://experience.example.test" };
     state.publications.getPublicBySlug.mockReset().mockResolvedValue(publication);
     state.publications.listPublic.mockReset().mockResolvedValue([publication]);
-    state.bookings.publicBookingTerms.mockReset().mockResolvedValue(SAMPLE_TERMS);
+    state.bookings.publicBookingTerms.mockReset().mockResolvedValue({ ...SAMPLE_TERMS, sellerDisplayName: "Panasonic" });
+    state.disclosures.getPublicBySlug.mockReset().mockResolvedValue({
+      method: "NATIVE", sellerKind: "PERSON", sellerDisplayName: "Panasonic", representativeName: null,
+      publicAddress: "Synthetic public address", publicPhone: "046-000-0000", publicEmail: "seller@example.test",
+    });
   });
 
   it("serves the publication's seller, localized manuscript, timeline, and photo alts without private IDs", async () => {
     const customTerms = {
       ...SAMPLE_TERMS,
+      sellerDisplayName: "Panasonic",
       offers: SAMPLE_TERMS.offers.map((offer, index) => index === 0 ? {
         ...offer,
         cancellationPolicy: { code: "CUSTOM" as const, freeCancellationHoursBefore: null },
@@ -63,7 +70,9 @@ describe("Experience public site DTO", () => {
     const japanese = await getPublicationDetail(publication.slug, "ja");
     expect(english).toMatchObject({
       canonicalUrl: "https://experience.example.test/experiences/synthetic-dinner",
-      seller: { displayName: "Panasonic" }, provider: { name: "Panasonic", logo: { alt: "Synthetic business logo" } },
+      seller: { displayName: "Panasonic", legalNoticeUrl: "https://experience.example.test/experiences/synthetic-dinner/seller" },
+      provider: { kind: "INDIVIDUAL", name: "Panasonic", logo: { alt: "Synthetic business logo" } },
+      booking: { legalDocuments: [{ kind: "COMMERCIAL_TRANSACTIONS", url: "https://experience.example.test/experiences/synthetic-dinner/seller" }] },
       hosts: [{ displayName: "Panasonic", avatar: { alt: "Synthetic provider" } }],
       photos: [{ alt: "Synthetic meal" }], timeline: [{ title: "Welcome", photoIndex: 0 }],
     });
@@ -89,4 +98,24 @@ describe("Experience public site DTO", () => {
     expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);
     expect(await getPublicationDetail(publication.slug, "ja")).toMatchObject({ booking: { checkoutAvailable: false }, offers: [] });
   });
+
+  it("keeps an external https seller page and fails closed on a sale-term seller mismatch", async () => {
+    state.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Panasonic", externalUrl: "https://seller.example.test/legal" });
+    expect(await getPublicationDetail(publication.slug, "en")).toMatchObject({
+      seller: { legalNoticeUrl: "https://seller.example.test/legal" },
+      booking: { legalDocuments: [{ kind: "COMMERCIAL_TRANSACTIONS", url: "https://seller.example.test/legal" }] },
+    });
+    state.bookings.publicBookingTerms.mockResolvedValue({ ...SAMPLE_TERMS, sellerDisplayName: "Different Seller" });
+    expect(await getPublicationDetail(publication.slug, "en")).toMatchObject({ seller: { legalNoticeUrl: "" }, booking: { legalDocuments: [] } });
+  });
+});
+
+it("does not read a publication or sale when public publication is disabled", async () => {
+  vi.clearAllMocks();
+  state.config.experiencePublicationsEnabled = false;
+  expect(await getPublicationDetail(publication.slug)).toBeNull();
+  expect(await listPublicationSummaries("kamakura")).toEqual([]);
+  expect(state.publications.getPublicBySlug).not.toHaveBeenCalled();
+  expect(state.publications.listPublic).not.toHaveBeenCalled();
+  expect(state.bookings.publicBookingTerms).not.toHaveBeenCalled();
 });

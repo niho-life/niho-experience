@@ -7,11 +7,17 @@ const state = vi.hoisted(() => ({
   responses: new Map<string, unknown | null>(),
   catalog: null as { releaseId: string; slugs: string[] } | null,
   catalogReads: 0,
-  config: { japaneseSiteEnabled: true, nihoWebOrigin: "https://niho.example", siteUrl: "https://experience.example.com", indexingAllowed: true },
+  nativeFailed: false,
+  native: [] as { publication: { slug: string; japanese: { title: string } | null }; saleTerms: { offers: unknown[] } | null }[],
+  config: { apiMode: "mock" as "mock" | "http", experiencePublicationsEnabled: true, bookingsEnabled: true, guestBookingEnabled: true, japaneseSiteEnabled: true, nihoWebOrigin: "https://niho.example", siteUrl: "https://experience.example.com", indexingAllowed: true },
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("./config", () => ({ config: state.config }));
+vi.mock("./experience/site-publications", () => ({ listSitePublicExperiences: async () => {
+  if (state.nativeFailed) throw new Error("synthetic store unavailable");
+  return { experiences: state.native, claimedSlugs: state.native.map(({ publication }) => publication.slug) };
+} }));
 vi.mock("./api", () => ({
   getApi: async () => ({
     getJapaneseSiteCopy: async () => ({ ok: true as const, data: { schemaVersion: 2, releaseId: state.releaseId, locale: "ja", values: defaultStaticCopyValuesV1() } }),
@@ -49,6 +55,11 @@ beforeEach(() => {
   state.responses.clear();
   state.catalog = null;
   state.catalogReads = 0;
+  state.native = [];
+  state.nativeFailed = false;
+  state.config.apiMode = "mock";
+  state.config.bookingsEnabled = true;
+  state.config.guestBookingEnabled = true;
   state.config.japaneseSiteEnabled = true;
   installValidRelease();
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
@@ -157,6 +168,39 @@ describe("experience pairs in the prepared release (#59)", () => {
     await expect(getJapaneseCatalog()).rejects.toMatchObject({ reason: "disabled" });
     await expect(getJapaneseDetail("tea-ceremony")).rejects.toMatchObject({ reason: "disabled" });
     expect(fetch).not.toHaveBeenCalled();
+    expect(state.catalogReads).toBe(0);
+  });
+});
+
+describe("native publication language counterparts", () => {
+  it.each([true, false])("pairs only active confirmed native manuscripts, with booking enabled=%s", async (bookingEnabled) => {
+    state.config.apiMode = "http";
+    state.config.guestBookingEnabled = bookingEnabled;
+    state.catalog = { releaseId: state.releaseId, slugs: ["old-niho-only"] };
+    state.native = [
+      { publication: { slug: "native-only", japanese: { title: "公開日本語" } }, saleTerms: { offers: [{}] } },
+      { publication: { slug: "untranslated", japanese: null }, saleTerms: { offers: [{}] } },
+      { publication: { slug: "no-sale", japanese: { title: "準備中" } }, saleTerms: null },
+    ];
+    const { getJapaneseStaticCounterparts } = await import("./localized-content");
+    const counterparts = await getJapaneseStaticCounterparts();
+    expect(counterparts["/experiences/native-only"]).toBe("/ja/experiences/native-only");
+    expect(counterparts["/experiences/native-only/book"]).toBe(bookingEnabled ? "/ja/experiences/native-only/book" : undefined);
+    expect(counterparts["/experiences/no-sale"]).toBe("/ja/experiences/no-sale");
+    expect(counterparts["/experiences/no-sale/book"]).toBeUndefined();
+    expect(counterparts["/experiences/untranslated"]).toBeUndefined();
+    expect(counterparts["/experiences/old-niho-only"]).toBeUndefined();
+    expect(state.catalogReads).toBe(0);
+  });
+
+  it("keeps the static Japanese shell when the native store fails, without former product fallback", async () => {
+    state.config.apiMode = "http";
+    state.nativeFailed = true;
+    state.catalog = { releaseId: state.releaseId, slugs: ["old-niho-only"] };
+    const { getPreparedJapaneseStaticRelease } = await import("./localized-content");
+    const release = await getPreparedJapaneseStaticRelease();
+    expect(release.pages).toHaveLength(4);
+    expect(release.experiences.size).toBe(0);
     expect(state.catalogReads).toBe(0);
   });
 });

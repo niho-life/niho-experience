@@ -4,7 +4,7 @@ import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type Bookin
 
 /** The public availability and checkout of 旅行者の予約 (#285) against a stubbed store and a stubbed Stripe SDK. */
 const state = vi.hoisted(() => ({
-  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: false, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
   publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
@@ -116,7 +116,7 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
   vi.stubEnv("EXPERIENCE_CHECKOUT_IP_HMAC_KEY", CHECKOUT_IP_KEY);
-  state.config = { apiMode: "http", experiencePublicationsEnabled: false, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { apiMode: "http", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
   state.repository = {
     publicBookingTerms: vi.fn(async () => ({ conditionsVersion: null, offers: [] })),
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
@@ -170,8 +170,15 @@ describe("GET /api/public/experiences/[slug]/availability", () => {
     expect(await off.text()).toBe("");
   });
 
-  it("does not expose any unpublished slug through availability", async () => {
+  it("does not read availability while public publication is disabled", async () => {
     state.config = { ...state.config, experiencePublicationsEnabled: false };
+    expect((await availability(get(), slugParams())).status).toBe(404);
+    expect(state.publications!.getPublicBySlug).not.toHaveBeenCalled();
+    expect(state.repository!.listPublicAvailability).not.toHaveBeenCalled();
+  });
+
+  it("does not expose any unpublished slug through availability", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: true };
     state.publications!.getPublicBySlug!.mockResolvedValue(null);
     const response = await availability(get(), slugParams());
     expect(response.status).toBe(404);
@@ -262,9 +269,8 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it("does not admit a new seller's reserved slug through legacy checkout when publication is disabled", async () => {
+  it("does not admit any new Checkout Session while public publication is disabled", async () => {
     state.config = { ...state.config, experiencePublicationsEnabled: false };
-    state.publications!.getPublicBySlug!.mockResolvedValue(null);
     const response = await checkout(post(CHECKOUT), slugParams());
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("");

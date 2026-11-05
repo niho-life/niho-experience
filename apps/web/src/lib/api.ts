@@ -21,9 +21,10 @@ export async function getApi(searchParams?: Record<string, string | string[] | u
   });
 }
 
-/** Read the catalog version selected for this runtime; v1.2 stays opt-in until NIHO deploys it. */
+/** HTTP products come only from enabled Experience publications; mock keeps the selected fixture contract. */
 export async function listExperiencesForSite(region?: RegionKey, searchParams?: Record<string, string | string[] | undefined>) {
   if (config.apiMode === "http") {
+    if (!config.experiencePublicationsEnabled) return { ok: true, data: { experiences: [] } } satisfies ReadResult<ExperienceCatalogResponseV11>;
     try {
       const { listPublicationSummaries } = await import("./experience/publication-site");
       return { ok: true, data: { experiences: await listPublicationSummaries(region) } } satisfies ReadResult<ExperienceCatalogResponseV11>;
@@ -42,9 +43,10 @@ export async function listExperiencesForSite(region?: RegionKey, searchParams?: 
     : client.listExperiences(region ? { region } : {});
 }
 
-/** Read the detail version selected for this runtime; older deployments keep using the v1.0 path. */
+/** Read the current native publication in HTTP mode without a former NIHO product fallback. */
 export async function getExperienceForSite(slug: string, searchParams?: Record<string, string | string[] | undefined>, locale: "en" | "ja" = "en") {
   if (config.apiMode === "http") {
+    if (!config.experiencePublicationsEnabled) return { ok: false, kind: "not_found" } as const;
     try {
       const { getPublicationDetail } = await import("./experience/publication-site");
       const experience = await getPublicationDetail(slug, locale);

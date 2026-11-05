@@ -42,16 +42,19 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const searchQuery = normalizeExperienceQuery(query.q);
   const [api, result, guideCatalogResult, siteCatalog] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite(), listSitePublicExperiences()]);
   const copy = EN_STATIC_COPY_V1;
-  const theme = config.publicApiVersion === "1.2" ? normalizeExperienceTheme(query.theme) : undefined;
+  // Native publications have no theme field yet; keep the unsupported filter out of the live form.
+  const themesEnabled = config.apiMode === "mock" && config.publicApiVersion === "1.2";
+  const theme = themesEnabled ? normalizeExperienceTheme(query.theme) : undefined;
   const sitePublications = siteCatalog.experiences;
   const nativeSlugs = new Set(siteCatalog.claimedSlugs);
   const catalog = result.ok ? result.data.experiences.filter((experience) => !nativeSlugs.has(experience.slug)) : [];
   const items = filterExperienceSummaries(catalog, searchQuery);
-  const legacyCards = withReviewLines(buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview), await getReviewSummaries(items.map((item) => item.slug)));
+  const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = sitePublications
     .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
     .map(sitePublicationCard);
-  const cards = [...legacyCards, ...nativeCards];
+  const cardsWithoutReviews = [...legacyCards, ...nativeCards];
+  const cards = withReviewLines(cardsWithoutReviews, await getReviewSummaries(cardsWithoutReviews.map((card) => card.slug)));
   if (!result.ok && result.kind !== "not_found" && cards.length === 0) return <ErrorState title="We couldn't load experiences" />;
 
   // Where each card's availability is read: NIHO, or this site for an experience sold here (#285).
@@ -70,7 +73,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     theme,
     date: initialDate ?? undefined,
     guests: initialGuests,
-    filtersEnabled: config.publicApiVersion === "1.2",
+    filtersEnabled: themesEnabled,
     filtersActive: Boolean(searchQuery || theme || date || initialGuests !== null),
   };
   const listContent = (
@@ -82,7 +85,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
         initialDate={initialDate}
         initialGuests={initialGuests}
         browseContext={{ q: searchQuery || undefined, theme }}
-        catalogDateFiltered={config.publicApiVersion === "1.2" && Boolean(date)}
+        catalogDateFiltered={config.apiMode === "mock" && config.publicApiVersion === "1.2" && Boolean(date)}
         preview={isPreview}
         bookingSources={bookingSources}
         search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />}
@@ -93,7 +96,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     } />
   );
   return <>
-    <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: items.length }} />
+    <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: cards.length }} />
     {listContent}
     {guideCatalogResult.guides.length ? (
       <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">

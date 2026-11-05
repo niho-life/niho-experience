@@ -61,7 +61,7 @@ export const PAST_CONFIRMED_BOOKING: StatusLabel = { label: "確定", tone: "dra
 /** A thread whose last word is the guest's (メッセージ, #106). */
 export const THREAD_WAITING: StatusLabel = { label: "返信待ち", tone: "wait" };
 
-/** A guest's review (#108): NIHO checks it before it is published. */
+/** A guest's review (#108). `pending` remains only for the legacy mock/home contract; stored reviews are published. */
 export const REVIEW_STATUS: Record<HostReviewStatus, StatusLabel> = {
   pending: { label: "公開前", tone: "wait" },
   published: { label: "公開中", tone: "ok" },

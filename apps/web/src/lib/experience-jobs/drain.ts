@@ -1,6 +1,7 @@
 import "server-only";
 import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, StoreConflictError, StoreNotFoundError, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
+import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
 import { hostAddressConfirmationEmail, hostBookingEmail } from "@/lib/mail/host-templates";
@@ -69,6 +70,8 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostMailLeaseSeconds: 120,
   /** People whose access ended, their addresses deleted per run. */
   hostAddressesPurgedPerStep: 200,
+  /** Revoked, unselected provider identity images physically removed per run. */
+  providerMediaCleanup: 20,
 } as const;
 
 export interface QuestionReplyCounts {
@@ -164,6 +167,8 @@ export interface ExperienceJobCounts {
   readonly hostBookingMails: HostMailCounts | StepOff | FailedStep;
   /** The addresses of hosts with no membership or grant left (#194), deleted whatever the flag. */
   readonly hostAddressPurge: PurgeCounts | FailedStep;
+  /** Off when public media storage is not configured; claims remain unfinished in that case. */
+  readonly providerMediaCleanup: ProviderMediaCleanupCounts | StepOff | FailedStep;
   readonly settlementReconciliation?: SettlementReconciliationCounts | StepOff | FailedStep;
 }
 
@@ -208,6 +213,8 @@ export interface ExperienceJobDeps {
   } | null;
   /** Deletes the addresses of hosts whose access ended (#194), whatever the flag: what was kept while it was on still goes. */
   readonly hostAddresses: Pick<HostNotificationAddresses, "purge">;
+  /** Present only when public media storage is configured. */
+  readonly providerMediaCleanup?: ProviderMediaCleanupDeps | null;
   readonly mailer: Mailer;
   /** SITE_URL: the origin of every link in the emails. */
   readonly siteUrl: string;
@@ -647,6 +654,17 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const guestTranslations: ExperienceJobCounts["guestTranslations"] = translator
     ? await step(deps, "guestTranslations", () => translateGuestMessages(deps, translator))
     : { off: true };
+  const providerMediaCleanup: ExperienceJobCounts["providerMediaCleanup"] = deps.providerMediaCleanup
+    ? await step(deps, "providerMediaCleanup", async () => {
+      const counts = await cleanupProviderMedia(deps.providerMediaCleanup!, EXPERIENCE_JOB_LIMITS.providerMediaCleanup);
+      if (counts.failed > 0) {
+        const error = new Error("One or more provider media objects could not be removed.");
+        error.name = "ProviderMediaCleanupError";
+        throw error;
+      }
+      return counts;
+    })
+    : { off: true };
   const cutoff = () => new Date(deps.now().getTime() - EXPERIENCE_JOB_LIMITS.retentionDays * 86_400_000).toISOString();
   const guestErasure = await step(deps, "guestErasure", async () => ({
     erased: await deps.guests.eraseGuestData({ endedBefore: cutoff(), limit: EXPERIENCE_JOB_LIMITS.erasedPerStep }),
@@ -676,7 +694,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     : { off: true } as const;
   return {
     questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
-    bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge,
+    bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge, providerMediaCleanup,
     ...(deps.settlementReconciliation ? { settlementReconciliation } : {}),
     ...(meetingGuideSnapshotPurge ? { meetingGuideSnapshotPurge } : {}),
     ...(reviewInvitations ? { reviewInvitations } : {}),

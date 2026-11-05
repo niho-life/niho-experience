@@ -6,7 +6,7 @@ import { groupSizeLabel, initialOf, shortLanguageNote } from "@/lib/card-model";
 
 /** A card made only from Experience's public manuscript and sale projection. */
 export function sitePublicationCard(item: SitePublicExperience): CardModel {
-  const { publication, saleTerms } = item;
+  const { publication, saleTerms, sellerDisclosure } = item;
   const offers = saleTerms?.offers ?? [];
   const durations = offers.map((offer) => offer.durationMinutes).sort((a, b) => a - b);
   const weekdaysAndTimes = offers.map((offer) => ({ weekdays: [...offer.weekdays], startTime: offer.startTime }));
@@ -14,13 +14,19 @@ export function sitePublicationCard(item: SitePublicExperience): CardModel {
   const firstPhoto = publication.photos[0];
   const prices = offers.map((offer) => offer.pricing.adultPriceYen);
   const image = firstPhoto ? { url: firstPhoto.src, alt: firstPhoto.alt } : null;
+  const faceMedia = sellerDisclosure?.sellerKind === "BUSINESS"
+    ? publication.businessLogo
+    : sellerDisclosure?.sellerKind === "PERSON"
+      ? publication.providerPhoto
+      : publication.providerPhoto ?? publication.businessLogo;
+  const faceImage = faceMedia ? { url: faceMedia.src, alt: faceMedia.alt } : null;
   return {
     slug: publication.slug,
     title: publication.publicTitle,
     lead: publication.content.lead,
     cover: image,
     withLabel: `with ${publication.sellerDisplayName}`,
-    face: { name: publication.sellerDisplayName, initial: initialOf(publication.sellerDisplayName), image: null },
+    face: { name: publication.sellerDisplayName, initial: initialOf(publication.sellerDisplayName), image: faceImage },
     groupLabel: offers.length ? groupSizeLabel(offers.map((offer) => ({ capacity: offer.capacity, maxPartySize: offer.maxPartySize, minimumParticipants: offer.minimumParticipants }))) : null,
     durationLabel: durations.length ? durations[0] === durations.at(-1) ? formatDuration(durations[0]!, "en") : `${formatDuration(durations[0]!, "en")}–${formatDuration(durations.at(-1)!, "en")}` : "See details",
     language: language ? { short: shortLanguageNote(language), full: language } : null,

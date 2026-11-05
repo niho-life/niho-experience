@@ -146,6 +146,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   provider_memberships: { write: IU },
   provider_notification_preferences: { write: IU },
   provider_publication_readiness: { write: IU },
+  // Current OWNER writes only explicitly public seller fields. Idempotency receipts are append-only metadata
+  // (actor, request fingerprint, action and applied version) and never duplicate disclosure/contact bodies.
+  provider_seller_disclosures: { write: IU },
+  provider_seller_disclosure_commands: { write: I },
   // Explicit Connect lookup mappings are written by the operator registration script only. The BFF's FOR SHARE
   // needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path changes it.
   experience_host_seller_profiles: { write: [], updateColumns: ["updated_at"] },

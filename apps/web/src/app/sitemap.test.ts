@@ -11,13 +11,15 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("@/lib/api", () => ({ listExperiencesForSite: async () => ({ ok: true, data: { experiences: [{ slug: "synthetic-dinner", updatedAt: "2026-11-04T00:00:00.000Z" }] } }) }));
 vi.mock("@/lib/guide-registry", () => ({ indexableGuides: async () => [] }));
-vi.mock("@/lib/localized-content", () => ({
-  getPreparedJapaneseStaticRelease: async () => {
-    if (!state.staticReady) throw new Error("no static Japanese shell release");
-    return { pages: [], experiences: new Map() };
-  },
-  getJapaneseCopy: async () => ({ releaseId: "copy-synthetic" }),
-}));
+vi.mock("@/lib/localized-content", async () => {
+  const { mapPublicationJapaneseExperiences } = await import("@/lib/localized-mapping");
+  return {
+    getPreparedJapaneseStaticRelease: async () => {
+      if (!state.staticReady) throw new Error("no static Japanese shell release");
+      return { pages: [], experiences: mapPublicationJapaneseExperiences(state.publicationRows.map((publication) => ({ publication, saleTerms: { offers: [{}] } })), true) };
+    },
+  };
+});
 vi.mock("@/lib/experience/site-publications", () => ({
   listSitePublicExperiences: async () => ({
     claimedSlugs: state.claimedSlugs,

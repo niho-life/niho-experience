@@ -21,7 +21,7 @@ function error(status: 404 | 503) {
 
 /** Anonymous JPEG relay; current publication visibility and media rights are rechecked for each fetch. */
 export async function GET(_request: Request, context: Context) {
-  if (config.apiMode !== "http") return error(404);
+  if (config.apiMode !== "http" || !config.experiencePublicationsEnabled) return error(404);
   const assetId = (await context.params).assetId;
   if (!UUID_V4.test(assetId)) return error(404);
   try {

@@ -1,6 +1,7 @@
 import type { JourneyReviews } from "@niho-experience/api-client";
 import type { Guide } from "@/content/guides/types";
 import type { ExperienceDetailForSite } from "./experience-types";
+import type { SitePublicExperience } from "./experience/site-publications";
 import { shareableGuideImage } from "./guides";
 import { reviewDisplay } from "./reviews-ui";
 import { safeHttpsUrl } from "./safe-url";
@@ -23,11 +24,27 @@ export function breadcrumbJsonLd(siteUrl: string, items: { name: string; path: s
 /**
  * What the structured data may say about reviews: only what the page shows. The rating and the review list appear on the page
  * from three reviews, so that is when they are marked up (one or two reviews are shown without stars: nothing to mark up).
- * Reviews are NIHO's checked reviews from guests who booked (docs/growth/seo-content-policy.md).
+ * Reviews are submitted public reviews from guests who booked (docs/growth/seo-content-policy.md).
  */
 export function reviewsForJsonLd(reviews: JourneyReviews | null): { count: number; average: number; items: Extract<JourneyReviews, { status: "ok" }>["items"] } | null {
   const display = reviewDisplay(reviews);
   return display.kind === "rated" && reviews?.status === "ok" ? { count: display.count, average: display.average, items: reviews.items } : null;
+}
+
+/** Review fields shared by both legacy-shaped and native public experience nodes. */
+function reviewJsonLdFacts(reviews: ReturnType<typeof reviewsForJsonLd>): JsonLd {
+  return reviews
+    ? {
+        aggregateRating: { "@type": "AggregateRating", ratingValue: Math.round(reviews.average * 10) / 10, reviewCount: reviews.count, bestRating: 5, worstRating: 1 },
+        review: reviews.items.map((item) => ({
+          "@type": "Review",
+          reviewRating: { "@type": "Rating", ratingValue: item.rating, bestRating: 5, worstRating: 1 },
+          author: { "@type": "Person", name: item.displayName },
+          datePublished: item.publishedAt.slice(0, 10),
+          reviewBody: item.body,
+        })),
+      }
+    : {};
 }
 
 type JsonLdLocale = "en" | "ja";
@@ -50,18 +67,7 @@ function experienceFacts(e: ExperienceDetailForSite, siteUrl: string, bookingsEn
     description: e.lead,
     url,
     ...(images.length ? { image: images } : {}),
-    ...(reviews
-      ? {
-          aggregateRating: { "@type": "AggregateRating", ratingValue: Math.round(reviews.average * 10) / 10, reviewCount: reviews.count, bestRating: 5, worstRating: 1 },
-          review: reviews.items.map((item) => ({
-            "@type": "Review",
-            reviewRating: { "@type": "Rating", ratingValue: item.rating, bestRating: 5, worstRating: 1 },
-            author: { "@type": "Person", name: item.displayName },
-            datePublished: item.publishedAt.slice(0, 10),
-            reviewBody: item.body,
-          })),
-        }
-      : {}),
+    ...reviewJsonLdFacts(reviews),
     ...(bookingsEnabled && e.booking.checkoutAvailable && e.offers.length
       ? {
           offers: {
@@ -105,6 +111,43 @@ export function experienceProductJsonLd(e: ExperienceDetailForSite, siteUrl: str
     "@type": "Product",
     ...experienceFacts(e, siteUrl, bookingsEnabled, reviews, locale),
     brand: { "@type": "Organization", name: e.provider.name },
+  };
+}
+
+/** Product and TouristTrip for the native publication renderer, using only fields visible on that page. */
+export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: string, bookingsEnabled: boolean, reviews: ReturnType<typeof reviewsForJsonLd>, locale: JsonLdLocale = "en"): { touristTrip: JsonLd; product: JsonLd } {
+  const { publication, saleTerms } = item;
+  const origin = siteUrl.replace(/\/$/, "");
+  const japanese = locale === "ja" ? publication.japanese : null;
+  const url = `${origin}${locale === "ja" ? "/ja" : ""}/experiences/${publication.slug}`;
+  const images = publication.photos.flatMap((photo) => {
+    const candidate = photo.src.startsWith("/") ? `${origin}${photo.src}` : photo.src;
+    const safe = safeHttpsUrl(candidate);
+    return safe ? [safe] : [];
+  });
+  const offers = saleTerms?.offers ?? [];
+  const facts: JsonLd = {
+    name: japanese?.title ?? publication.publicTitle,
+    description: japanese?.lead ?? publication.content.lead,
+    url,
+    ...(images.length ? { image: images } : {}),
+    ...reviewJsonLdFacts(reviews),
+    ...(bookingsEnabled && offers.length
+      ? {
+          offers: {
+            "@type": "Offer",
+            url,
+            price: Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)),
+            priceCurrency: "JPY",
+            seller: { "@type": "Organization", name: saleTerms?.sellerDisplayName ?? publication.sellerDisplayName },
+          },
+        }
+      : {}),
+  };
+  const provider = { "@type": "Organization", name: publication.sellerDisplayName };
+  return {
+    touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, provider },
+    product: { "@context": "https://schema.org", "@type": "Product", ...facts, brand: provider },
   };
 }
 

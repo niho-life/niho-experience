@@ -9,7 +9,7 @@ export const revalidate = 0;
 
 /** Stopped, suspended, stale-readiness and duplicate slugs share the same public 404. */
 export async function GET(_request: Request, context: Context) {
-  if (config.apiMode !== "http") return publicEmpty(404);
+  if (config.apiMode !== "http" || !config.experiencePublicationsEnabled) return publicEmpty(404);
   const { slug } = await context.params;
   try {
     const repository = experiencePublicationRepository();

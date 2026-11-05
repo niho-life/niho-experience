@@ -54,7 +54,7 @@ describe("where one experience is sold", () => {
   });
 
   it("in publication mode fails closed for unpublished or unsellable products instead of falling back to NIHO", async () => {
-    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: false };
+    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: true };
     expect(await guestBookingSale("sample-tea")).toEqual({ kind: "site", terms: SAMPLE_TERMS });
     expect(await guestBookingSale("sample-walk")).toEqual({ kind: "unknown" });
     state.repository!.publicBookingTerms = vi.fn(async () => null);
@@ -166,11 +166,11 @@ describe("where a page of cards reads availability", () => {
       siteSlugs: [],
       closedSlugs: ["sample-walk", "stopped-seller-product"],
     });
-    expect(state.publications!.listPublic).toHaveBeenCalledOnce();
+    expect(state.publications!.listPublic).not.toHaveBeenCalled();
   });
 
   it("in publication mode sends only currently published saleable slugs to this site's availability", async () => {
-    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: false };
+    state.config = { ...state.config, apiMode: "http", experiencePublicationsEnabled: true };
     expect(await guestBookingSources(["sample-tea", "sample-walk"])).toEqual({
       nihoWebOrigin: "https://niho.example", siteOrigin: "https://experience.example", siteSlugs: ["sample-tea"], closedSlugs: ["sample-walk"],
     });

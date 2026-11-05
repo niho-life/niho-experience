@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     listClaimedSlugs: vi.fn(),
   },
   bookings: { publicBookingTerms: vi.fn() },
+  disclosures: { getPublicBySlug: vi.fn() },
 }));
 
 vi.mock("server-only", () => ({}));
@@ -16,6 +17,7 @@ vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePublicationRepository: () => mocks.publications,
   guestBookingRepository: () => mocks.bookings,
+  providerSellerDisclosureRepository: () => mocks.disclosures,
 }));
 
 import { getSitePublicExperience, publicExperienceRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
@@ -52,11 +54,16 @@ describe("Experience site publication selection", () => {
     mocks.publications.listPublic.mockResolvedValue([publication]);
     mocks.publications.listClaimedSlugs.mockResolvedValue([publication.slug, "stopped-experience"]);
     mocks.bookings.publicBookingTerms.mockResolvedValue(terms);
+    mocks.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" });
   });
 
   it("projects native sale terms without Experience IDs and keeps stopped slugs reserved", async () => {
     const published = await getSitePublicExperience(publication.slug);
-    expect(published).toEqual({ kind: "published", item: { publication, saleTerms: expect.objectContaining({ sellerDisplayName: "Synthetic seller", offers: terms.offers }) } });
+    expect(published).toEqual({ kind: "published", item: {
+      publication,
+      saleTerms: expect.objectContaining({ sellerDisplayName: "Synthetic seller", offers: terms.offers }),
+      sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" },
+    } });
     expect(published?.kind === "published" ? published.item.saleTerms : null).not.toHaveProperty("providerId");
     expect(published?.kind === "published" ? published.item.saleTerms : null).not.toHaveProperty("productId");
 
@@ -64,6 +71,12 @@ describe("Experience site publication selection", () => {
     mocks.publications.claimsSlug.mockResolvedValue(true);
     expect(await getSitePublicExperience("stopped-experience")).toEqual({ kind: "reserved" });
     expect(mocks.bookings.publicBookingTerms).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits a disclosure when current sale terms name another seller", async () => {
+    mocks.bookings.publicBookingTerms.mockResolvedValue({ ...terms, sellerDisplayName: "Different seller" });
+    const published = await getSitePublicExperience(publication.slug);
+    expect(published?.kind === "published" ? published.item.sellerDisclosure : undefined).toBeNull();
   });
 
   it("merges published items while returning claimed slugs only for server-side shadowing", async () => {
@@ -87,13 +100,24 @@ describe("Experience site publication selection", () => {
     expect(mocks.publications.getPublicBySlug).not.toHaveBeenCalled();
   });
 
-  it("keeps every unpublished slug closed and reads active publications even when the legacy switch is off", async () => {
+  it("keeps every HTTP slug closed while public publication is off", async () => {
     mocks.config.experiencePublicationsEnabled = false;
     mocks.publications.getPublicBySlug.mockResolvedValueOnce(null);
     expect(await getSitePublicExperience("stopped-experience")).toEqual({ kind: "reserved" });
-    expect((await listSitePublicExperiences()).experiences).toHaveLength(1);
+    expect((await listSitePublicExperiences()).experiences).toHaveLength(0);
     mocks.publications.getPublicBySlug.mockResolvedValueOnce(null);
     expect(await publicExperienceRouteAllowedForSlug("sample-tea")).toBe(false);
-    expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(true);
+    expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(false);
   });
+});
+
+it("closes publication-off detail, catalog and sale paths without a legacy fallback", async () => {
+  vi.clearAllMocks();
+  mocks.config.experiencePublicationsEnabled = false;
+  expect(await getSitePublicExperience(publication.slug)).toEqual({ kind: "reserved" });
+  expect(await listSitePublicExperiences()).toEqual({ experiences: [], claimedSlugs: [] });
+  expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(false);
+  expect(mocks.publications.getPublicBySlug).not.toHaveBeenCalled();
+  expect(mocks.publications.listPublic).not.toHaveBeenCalled();
+  expect(mocks.bookings.publicBookingTerms).not.toHaveBeenCalled();
 });

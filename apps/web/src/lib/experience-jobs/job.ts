@@ -1,11 +1,11 @@
 import "server-only";
 import type { Pool } from "pg";
-import { BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostMailOutbox, HostNotificationAddresses } from "@niho-experience/experience-store";
+import { BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostMailOutbox, HostNotificationAddresses, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
 import type { SettlementReconciliationDeps } from "@/lib/experience/settlement-reconciliation";
-import { experiencePublicMediaStorage } from "@/lib/experience/public-media-storage";
+import { experiencePublicMediaStorage, type ExperiencePublicMediaStorage } from "@/lib/experience/public-media-storage";
 import { verifyGoogleServiceIdentity, type GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
 import { hostNotificationAllowed } from "@/lib/host/push/outbox";
 import { smtpMailer, type Mailer } from "@/lib/mail/transport";
@@ -35,6 +35,7 @@ export interface ExperienceJobDependencies {
   /** Whether hosts get emails (#194, EXPERIENCE_HOST_MAIL_ENABLED): their address confirmations and booking emails. */
   readonly hostMail?: boolean;
   readonly settlementReconciliation?: (pool: Pool) => SettlementReconciliationDeps | null;
+  readonly mediaStorage?: () => ExperiencePublicMediaStorage | null;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
 }
 
@@ -76,7 +77,8 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
   const errors: Record<string, string> = {};
   const outbox = new GuestMailOutbox(pool);
   const guestBooking = dependencies.bookingPages ?? config.guestBookingEnabled;
-  const guidePhotos = guestBooking ? experiencePublicMediaStorage() : null;
+  const mediaStorage = (dependencies.mediaStorage ?? experiencePublicMediaStorage)();
+  const guidePhotos = guestBooking ? mediaStorage : null;
   const submit = guestBooking ? (dependencies.refundSubmitter ?? stripeRefundSubmitter)() : null;
   try {
     const counts = await (dependencies.run ?? runExperienceJobs)({
@@ -99,6 +101,10 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       otaGuests: new ExternalReservationGuests(pool),
       hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
       hostAddresses: new HostNotificationAddresses(pool),
+      providerMediaCleanup: mediaStorage ? {
+        repository: new ProviderMediaCleanupRepository(pool),
+        storage: mediaStorage,
+      } : null,
       translations: new GuestQuestionTranslations(pool),
       translator: (dependencies.translator ?? (() => anthropicTranslator({ timeoutMs: EXPERIENCE_JOB_LIMITS.translationTimeoutMs })))(),
       mailer,

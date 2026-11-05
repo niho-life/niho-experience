@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations } from "@niho-experience/experience-store";
+import { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
 
 /** The experience mail job's trigger (#285 slice 5) with a synthetic Google identity, pool, mailer and run. */
 const mocks = vi.hoisted(() => ({
@@ -28,6 +28,7 @@ vi.mock("google-auth-library", () => ({
 }));
 
 import type { GoogleServiceTokenVerifier } from "@/lib/google-service-identity";
+import type { ExperienceJobCounts, ExperienceJobDeps } from "@/lib/experience-jobs/drain";
 import { experienceJobsDrainResponse } from "@/lib/experience-jobs/job";
 import * as route from "./route";
 
@@ -46,6 +47,7 @@ const counts = {
   hostAddressConfirmations: { claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   hostBookingMails: { claimed: 2, sent: 2, skipped: 0, retried: 0, failed: 0, abandoned: 0 },
   hostAddressPurge: { purged: 1 },
+  providerMediaCleanup: { claimed: 1, deleted: 1, stale: 0, failed: 0 },
 };
 const idle = {
   questionReplies: { claimed: 0, sent: 0, retried: 0, failed: 0 },
@@ -61,6 +63,7 @@ const idle = {
   hostAddressConfirmations: { off: true },
   hostBookingMails: { off: true },
   hostAddressPurge: { purged: 0 },
+  providerMediaCleanup: { off: true },
 };
 const fakePool = { query: vi.fn(), connect: vi.fn() };
 const fakeMailer = { sendMail: vi.fn(), close: vi.fn() };
@@ -82,6 +85,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // No Stripe platform key unless a test sets one: refunds are not resent.
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "");
+  vi.stubEnv("EXPERIENCE_PUBLIC_MEDIA_BUCKET", "");
   mocks.config.guestMailEnabled = true;
   mocks.verifyIdToken.mockResolvedValue(payload());
   mocks.pool.mockReturnValue(fakePool);
@@ -161,6 +165,7 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     // Translation is off in this configuration: no Claude API. Nor is there a Stripe key, so refunds are not resent.
     expect(deps.translator).toBeNull();
     expect(deps.refunds).toBeNull();
+    expect(deps.providerMediaCleanup).toBeNull();
     expect(deps.mailer).toBe(fakeMailer);
     expect(deps.siteUrl).toBe("https://experience.example");
     expect(deps.now()).toBeInstanceOf(Date);
@@ -180,6 +185,23 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     } finally {
       vi.mocked(console.info).mockRestore();
     }
+  });
+
+  it("enables revoked provider media cleanup only when public media storage is configured", async () => {
+    const storage = { write: vi.fn(), read: vi.fn(), remove: vi.fn() };
+    const run = vi.fn<(deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>>(async () => idle as ExperienceJobCounts);
+    const response = await experienceJobsDrainResponse(new Request(URL, { method: "POST", headers: { authorization: "Bearer synthetic.jwt.token" } }), {
+      settings: { enabled: true, audience: mocks.config.experienceJobsAudience, serviceAccountEmail: mocks.config.experienceJobsServiceAccountEmail },
+      verifier: { verify: vi.fn().mockResolvedValue({ ok: true, claims: { iss: "accounts.google.com", aud: mocks.config.experienceJobsAudience, email: mocks.config.experienceJobsServiceAccountEmail, emailVerified: true, exp: Math.floor(Date.now() / 1000) + 60 } }) },
+      pool: () => fakePool as never,
+      mailer: () => fakeMailer,
+      mediaStorage: () => storage,
+      run,
+    });
+    expect(response.status).toBe(200);
+    const cleanup = run.mock.calls[0]![0].providerMediaCleanup;
+    expect(cleanup?.repository).toBeInstanceOf(ProviderMediaCleanupRepository);
+    expect(cleanup?.storage).toBe(storage);
   });
 
   it("puts no booking page link in the emails while booking on this site is off", async () => {
@@ -295,6 +317,7 @@ describe("experienceJobsDrainResponse dependencies", () => {
       hostAddressConfirmations: { off: true },
       hostBookingMails: { off: true },
       hostAddressPurge: { error: "unavailable" },
+      providerMediaCleanup: { off: true },
       meetingGuideSnapshotPurge: { error: "unavailable" },
     });
     expect(pool.connect).toHaveBeenCalledTimes(5);

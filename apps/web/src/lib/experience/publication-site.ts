@@ -1,12 +1,12 @@
 import "server-only";
 import type { ExperienceDetailV11, ExperienceSummaryV11 } from "@niho-experience/api-client";
-import type { PublicBookingTerms, PublicExperiencePublication } from "@niho-experience/experience-store";
-import { experiencePublicationRepository, guestBookingRepository } from "./store-server";
+import type { PublicBookingTerms, PublicExperiencePublication, PublicSellerDisclosure } from "@niho-experience/experience-store";
+import { experiencePublicationRepository, guestBookingRepository, providerSellerDisclosureRepository } from "./store-server";
 import { config } from "@/lib/config";
 
 type Locale = "en" | "ja";
 
-function summaryOf(publication: PublicExperiencePublication, terms: PublicBookingTerms | null, locale: Locale): ExperienceSummaryV11 {
+function summaryOf(publication: PublicExperiencePublication, terms: PublicBookingTerms | null, locale: Locale, disclosure: PublicSellerDisclosure | null): ExperienceSummaryV11 {
   const durations = terms?.offers.map((offer) => offer.durationMinutes) ?? [];
   const prices = terms?.offers.map((offer) => offer.pricing.adultPriceYen) ?? [];
   const firstPhoto = publication.photos[0];
@@ -17,7 +17,7 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
     duration: { minMinutes: durations.length ? Math.min(...durations) : 0, maxMinutes: durations.length ? Math.max(...durations) : 0 },
     lead: locale === "ja" && publication.japanese ? publication.japanese.lead : publication.content.lead,
     priceFrom: { amountYen: prices.length ? Math.min(...prices) : publication.unitAmount, taxIncluded: true, unit: "PER_ADULT" },
-    provider: { kind: "BUSINESS", name: publication.sellerDisplayName },
+    provider: { kind: disclosure?.sellerKind === "PERSON" ? "INDIVIDUAL" : "BUSINESS", name: publication.sellerDisplayName },
     region: { key: "kamakura", name: "Kamakura" },
     slug: publication.slug,
     title: locale === "ja" && publication.japanese ? publication.japanese.title : publication.publicTitle,
@@ -25,7 +25,7 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
   };
 }
 
-function detailOf(publication: PublicExperiencePublication, terms: PublicBookingTerms | null, locale: Locale): ExperienceDetailV11 {
+function detailOf(publication: PublicExperiencePublication, terms: PublicBookingTerms | null, locale: Locale, disclosure: PublicSellerDisclosure | null): ExperienceDetailV11 {
   const japanese = locale === "ja" ? publication.japanese : null;
   const content = japanese ? {
     title: japanese.title,
@@ -83,12 +83,15 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const providerPhoto = publication.providerPhoto ? localizedPhoto(publication.providerPhoto) : null;
   const businessLogo = publication.businessLogo ? localizedPhoto(publication.businessLogo) : null;
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;
+  const sellerLegalUrl = disclosure?.method === "EXTERNAL"
+    ? disclosure.externalUrl
+    : disclosure?.method === "NATIVE" ? `${config.siteUrl}/experiences/${encodeURIComponent(publication.slug)}/seller` : "";
   return {
     booking: {
       checkoutAvailable: Boolean(terms?.offers.length && config.guestBookingEnabled),
       consentVersion: config.guestBookingConsentVersion,
       currency: "JPY",
-      legalDocuments: [],
+      legalDocuments: sellerLegalUrl ? [{ kind: "COMMERCIAL_TRANSACTIONS", url: sellerLegalUrl }] : [],
       timeZone: "Asia/Tokyo",
     },
     canonicalUrl,
@@ -110,9 +113,9 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     notSuitableFor: [...content.notSuitableFor],
     offers,
     photos,
-    provider: { kind: "BUSINESS", name: publication.sellerDisplayName, tagline: null, logo: businessLogo },
+    provider: { kind: disclosure?.sellerKind === "PERSON" ? "INDIVIDUAL" : "BUSINESS", name: publication.sellerDisplayName, tagline: null, logo: businessLogo },
     region: { key: "kamakura", name: "Kamakura" },
-    seller: { displayName: publication.sellerDisplayName, legalNoticeUrl: "" },
+    seller: { displayName: publication.sellerDisplayName, legalNoticeUrl: sellerLegalUrl },
     slug: publication.slug,
     timeline: [...content.timeline],
     title: content.title,
@@ -122,28 +125,38 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
 
 /** Experience's active publication and sale snapshot, exposed to existing page components through their read model. */
 export async function getPublicationDetail(slug: string, locale: Locale = "en"): Promise<ExperienceDetailV11 | null> {
+  if (!config.experiencePublicationsEnabled) return null;
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");
   const publication = await publications.getPublicBySlug(slug);
   if (!publication || (locale === "ja" && !publication.japanese)) return null;
   const booking = guestBookingRepository();
-  const candidate = booking ? await booking.publicBookingTerms(slug) : null;
+  const [candidate, disclosure] = await Promise.all([
+    booking ? booking.publicBookingTerms(slug) : null,
+    providerSellerDisclosureRepository()?.getPublicBySlug(slug) ?? null,
+  ]);
   const terms = candidate?.conditionsVersion === null ? candidate : null;
-  return detailOf(publication, terms, locale);
+  const safeDisclosure = disclosure && (!candidate || candidate.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null;
+  return detailOf(publication, terms, locale, safeDisclosure);
 }
 
 /** The published, currently saleable product catalog. */
 export async function listPublicationSummaries(region?: string, locale: Locale = "en"): Promise<ExperienceSummaryV11[]> {
+  if (!config.experiencePublicationsEnabled) return [];
   if (region && region !== "kamakura") return [];
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");
   const rows = await publications.listPublic();
   const booking = guestBookingRepository();
+  const disclosures = providerSellerDisclosureRepository();
   const summaries = await Promise.all(rows
     .filter((publication) => locale !== "ja" || publication.japanese !== null)
     .map(async (publication) => {
-      const terms = booking ? await booking.publicBookingTerms(publication.slug) : null;
-      return terms?.conditionsVersion === null && terms.offers.length ? summaryOf(publication, terms, locale) : null;
+      const [terms, disclosure] = await Promise.all([
+        booking ? booking.publicBookingTerms(publication.slug) : null,
+        disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
+      ]);
+      return terms?.conditionsVersion === null && terms.offers.length ? summaryOf(publication, terms, locale, disclosure && terms.sellerDisplayName === disclosure.sellerDisplayName ? disclosure : null) : null;
     }));
   return summaries.filter((item): item is ExperienceSummaryV11 => item !== null);
 }

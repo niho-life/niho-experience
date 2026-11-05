@@ -13,14 +13,12 @@ import { sendRefunds, stripeRefundSubmitter } from "@/lib/experience/booking-ref
 import { bookingCancellations } from "@/lib/experience/store-server";
 import { guestBookingMessages } from "@/lib/experience/store-server";
 import { readBoundedJson } from "@/lib/read-bounded-json";
+import { parseContactCommand, parseFinancialCommand, type FinancialCommand } from "./request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BODY_LIMIT = 8 * 1024;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTIONS = ["CANCEL", "APPROVE_REQUEST", "DECLINE_REQUEST", "RESOLVE_PAYMENT_REVIEW", "RETRY_REFUND", "CLOSE_REFUND", "CONTACT_GUEST"] as const;
-type Action = (typeof ACTIONS)[number];
 
 /*
  * 取消と返金 for NIHO support (#285 slice 7, docs/guest-booking.md「取消と返金（第7段）」): the bookings made on this
@@ -61,37 +59,20 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 
-const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
-
-function refundChoice(value: unknown): { kind: "FULL" } | { kind: "PARTIAL"; amount: number } | null {
-  if (typeof value !== "object" || value === null) return null;
-  const choice = value as Record<string, unknown>;
-  if (choice.kind === "FULL") return { kind: "FULL" };
-  if (choice.kind === "PARTIAL" && Number.isSafeInteger(choice.amount)) return { kind: "PARTIAL", amount: choice.amount as number };
-  return null;
-}
-
-function run(cancellations: BookingCancellations, actor: SupportActor, action: Action, body: Record<string, unknown>, commandId: string): Promise<CancellationResult> | null {
-  const bookingId = str(body.publicBookingId) ?? "";
-  const refundId = str(body.refundId) ?? "";
-  const refund = refundChoice(body.refund);
-  switch (action) {
+function run(cancellations: BookingCancellations, actor: SupportActor, command: FinancialCommand): Promise<CancellationResult> {
+  switch (command.action) {
     case "CANCEL":
-      if (!refund) return null;
-      return cancellations.cancelAsSupport(actor, bookingId, { commandId, reason: str(body.reason) as never, note: str(body.note) ?? null, refund });
+      return cancellations.cancelAsSupport(actor, command.publicBookingId!, { commandId: command.commandId, expectedSnapshot: command.expectedSnapshot, reason: command.reason as never, note: command.note ?? null, refund: command.refund! });
     case "APPROVE_REQUEST":
-      if (!refund) return null;
-      return cancellations.resolveCancellationRequest(actor, bookingId, { commandId, decision: "APPROVE", refund, note: str(body.note) ?? null });
+      return cancellations.resolveCancellationRequest(actor, command.publicBookingId!, { commandId: command.commandId, expectedSnapshot: command.expectedSnapshot, decision: "APPROVE", refund: command.refund!, note: command.note ?? null });
     case "DECLINE_REQUEST":
-      return cancellations.resolveCancellationRequest(actor, bookingId, { commandId, decision: "DECLINE", message: str(body.message) ?? "" });
+      return cancellations.resolveCancellationRequest(actor, command.publicBookingId!, { commandId: command.commandId, expectedSnapshot: command.expectedSnapshot, decision: "DECLINE", message: command.message! });
     case "RESOLVE_PAYMENT_REVIEW":
-      return cancellations.resolvePaymentReview(actor, bookingId, { commandId });
+      return cancellations.resolvePaymentReview(actor, command.publicBookingId!, { commandId: command.commandId, expectedSnapshot: command.expectedSnapshot });
     case "RETRY_REFUND":
-      return cancellations.retryRefund(actor, refundId, { commandId });
+      return cancellations.retryRefund(actor, command.refundId!, { commandId: command.commandId, expectedSnapshot: command.expectedSnapshot });
     case "CLOSE_REFUND":
-      return cancellations.closeFailedRefund(actor, refundId, { commandId, note: str(body.note) ?? "" });
-    case "CONTACT_GUEST":
-      return null;
+      return cancellations.closeFailedRefund(actor, command.refundId!, { commandId: command.commandId, expectedSnapshot: command.expectedSnapshot, note: command.note ?? "" });
   }
 }
 
@@ -116,29 +97,25 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return adminJson({ error: "invalid_input" }, 400);
   }
-  const action = ACTIONS.find((item) => item === body.action);
-  const commandId = str(body.commandId);
-  if (!action || !commandId || !UUID.test(commandId)) return adminJson({ error: "invalid_input" }, 400);
-  if (action === "CONTACT_GUEST") {
-    const publicBookingId = str(body.publicBookingId);
-    const message = str(body.message);
-    if (!publicBookingId || !UUID.test(publicBookingId) || typeof message !== "string") return adminJson({ error: "invalid_input" }, 400);
+  if (body.action === "CONTACT_GUEST") {
+    const command = parseContactCommand(body);
+    if (!command) return adminJson({ error: "invalid_input" }, 400);
     const messages = guestBookingMessages();
     if (!messages) return adminJson({ error: "unavailable" }, 503);
     try {
-      const result = await messages.sendSupportMessage(session.actor, publicBookingId, { commandId, message });
+      const result = await messages.sendSupportMessage(session.actor, command.publicBookingId, { commandId: command.commandId, message: command.message });
       return adminJson({ outcome: "CONTACT_SENT", repeated: result.repeated });
     } catch (error) {
       return failure(error);
     }
   }
+  const command = parseFinancialCommand(body);
+  if (!command) return adminJson({ error: "invalid_input" }, 400);
   const cancellations = bookingCancellations();
   if (!cancellations) return adminJson({ error: "unavailable" }, 503);
   let result: CancellationResult;
   try {
-    const pending = run(cancellations, session.actor, action, body, commandId);
-    if (!pending) return adminJson({ error: "invalid_input" }, 400);
-    result = await pending;
+    result = await run(cancellations, session.actor, command);
   } catch (error) {
     return failure(error);
   }

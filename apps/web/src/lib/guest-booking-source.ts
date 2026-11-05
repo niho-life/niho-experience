@@ -36,7 +36,7 @@ function siteOrigin(): string {
 /** Where one experience is sold. Never throws: a failure is "unknown". */
 export async function guestBookingSale(slug: string): Promise<GuestBookingSale> {
   if (config.apiMode === "http") {
-    if (!config.guestBookingEnabled) return UNKNOWN;
+    if (!config.guestBookingEnabled || !config.experiencePublicationsEnabled) return UNKNOWN;
     const publications = experiencePublicationRepository();
     const bookings = guestBookingRepository();
     if (!publications || !bookings) return UNKNOWN;
@@ -75,6 +75,7 @@ export async function guestBookingSources(slugs: readonly string[]): Promise<Boo
     const unique = [...new Set(slugs)];
     if (!unique.length) return niho;
     const closed: BookingSources = { ...niho, closedSlugs: unique };
+    if (!config.experiencePublicationsEnabled) return closed;
     if (!config.guestBookingEnabled) return closed;
     const publications = experiencePublicationRepository();
     const bookings = guestBookingRepository();
