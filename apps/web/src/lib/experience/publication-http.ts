@@ -6,7 +6,7 @@ import {
   StoreNotFoundError,
   StoreValidationError,
   validSaleTerms,
-  projectPublicExperiencePublicationManuscript,
+  publicationManuscriptReview,
   type ExperienceHostMediaAssetInput,
   type ExperienceHostMediaSelectionInput,
   type ExperienceHostProviderMediaAssetInput,
@@ -235,29 +235,8 @@ async function providerMediaDto(repository: NonNullable<ReturnType<typeof experi
 }
 
 function checksFor(content: Readonly<Record<string, unknown>>, photosReady: boolean, publicTitle: string) {
-  const japanese = content.ja;
-  const translation = content.translation;
-  const english = {
-    title: publicTitle,
-    lead: content.lead,
-    description: content.description,
-    language: isRecord(content.facts) ? content.facts.language : null,
-    highlights: content.highlights,
-    included: content.included,
-    notIncluded: content.notIncluded,
-    knowBeforeYouGo: content.knowBeforeYouGo,
-    notSuitableFor: content.notSuitableFor,
-    timeline: content.timeline,
-  };
-  const localeReady = validLocaleManuscript(japanese)
-    && isRecord(translation)
-    && typeof translation.sourceFingerprint === "string"
-    && typeof translation.confirmedSourceFingerprint === "string"
-    && typeof translation.confirmedEnglishFingerprint === "string"
-    && translation.sourceFingerprint === createHash("sha256").update(canonicalJson(japanese), "utf8").digest("hex")
-    && translation.confirmedSourceFingerprint === translation.sourceFingerprint
-    && translation.confirmedEnglishFingerprint === createHash("sha256").update(canonicalJson(english), "utf8").digest("hex");
-  return { manuscriptReady: projectPublicExperiencePublicationManuscript(content as never) !== null && localeReady, photosReady };
+  const review = publicationManuscriptReview(content, publicTitle);
+  return { manuscriptReady: review.publicContentReady && review.ownerConfirmed, photosReady };
 }
 
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {

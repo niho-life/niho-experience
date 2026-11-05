@@ -23,7 +23,7 @@ export function AdminProducts() {
     return () => controller.abort();
   }, []);
   return <div className="mx-auto max-w-4xl px-4 py-8 md:px-7">
-    <div className="mb-5"><p className="text-xs font-extrabold text-muted">Experience 正本</p><h1 className="font-display text-3xl font-medium">商品の代理登録</h1><p className="mt-2 text-ink-soft">運営登録済みの提供者を名前で選び、非公開下書きを準備します。公開はOWNER本人のホスト画面だけで行えます。</p></div>
+    <div className="mb-5"><p className="text-xs font-extrabold text-muted">Experience 正本</p><h1 className="font-display text-3xl font-medium">商品の代理登録</h1><p className="mt-2 text-ink-soft">運営登録済みの提供者を名前で選び、非公開下書きを準備します。販売者へ確認後、通常公開と同じ条件を満たす一度も公開されていない下書きは、OWNER本人を装わず事務局として代理公開できます。</p></div>
     <section className={`${HOST_SURFACE} p-4 md:p-6`}>
       <h2 className="font-extrabold">提供者・販売者を選ぶ</h2>
       {error ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}

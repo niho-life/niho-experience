@@ -1,10 +1,10 @@
 # 構成とデータ境界
 
-> **現行方針（2026-11-04）**: niho-experienceが商品・公開版・開催枠・Experience予約・取引の正本を持つ。本人が商品を作り、公開・停止・再開する。新しいExperience販売に旧NIHO商品の移行や同一開催回の二重販売を持ち込まない。既存の旧NIHO予約照会・履行・取消／返金はNIHO側の責任に残す。現在のNIHO認証本人と同じ販売者のConnect口座だけをサーバー契約で参照する。コミュニティディナーは販売者・受取先ともPanasonicで、NIHOkamakuraはStripe表示名。Checkoutは有効なExperience公開版だけを対象にする。[ADR 0002](adr/0002-experience-domain-ownership.md) と [NIHO Host v1 consumer contract](host-niho-v1-consumer.md) を優先する。
+> **現行方針（2026-11-05）**: niho-experienceが商品・公開版・開催枠・Experience予約・取引の正本を持つ。通常は本人が商品を作り、公開・停止・再開する。販売者へ確認した後、現在のNIHO Adminが未公開DRAFTを事務局判断で代理公開する例外を追加した。AdminをOWNERとして扱わず、同じ公開条件・実Admin actor・確認方法を監査する。新しいExperience販売に旧NIHO商品の移行や同一開催回の二重販売を持ち込まない。既存の旧NIHO予約照会・履行・取消／返金はNIHO側の責任に残す。現在のNIHO認証本人と同じ販売者のConnect口座だけをサーバー契約で参照する。コミュニティディナーは販売者・受取先ともPanasonicで、NIHOkamakuraはStripe表示名。Checkoutは有効なExperience公開版だけを対象にする。[ADR 0002](adr/0002-experience-domain-ownership.md) と [NIHO Host v1 consumer contract](host-niho-v1-consumer.md) を優先する。
 
 決定日：2026-10-19。画面の独立開発と、NIHOアカウント・販売者口座・売上管理の共通利用を両立する。
 
-2026-11-03 のオーナー決定で、提供者の登録審査・体験ごとの掲載承認・通常保存時の再審査は廃止する。必要条件を満たした OWNER が同意して公開・停止・再開し、運営による規約違反等の停止は独立して残す。目標仕様と現行 HTTP 版の移行境界は [ホスト自身による体験の公開](host-publication.md)（#369）を正とする。以下の NIHO の「掲載審査」は切替前の現状を説明する。
+2026-11-03 のオーナー決定で、提供者の登録審査・体験ごとの掲載承認・通常保存時の再審査は廃止する。必要条件を満たした OWNER が同意して公開・停止・再開し、運営による規約違反等の停止は独立して残す。2026-11-05 の例外では、事務局が準備した未公開商品だけを、販売者確認と同じ公開条件・immutable監査の後に代理公開できる。目標仕様と現行 HTTP 版の移行境界は [ホスト自身による体験の公開](host-publication.md)（#369）と [事務局の代理登録](assisted-launch.md) を正とする。以下の NIHO の「掲載審査」は切替前の現状を説明する。
 
 ## 責務
 

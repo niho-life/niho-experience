@@ -2,7 +2,7 @@
 
 本書の本人・Connect境界の正は [NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。NIHO v1.0.0はstagingのmanifestを設定済み（niho-app #19784）だが実配備readbackは未確認で、ExperienceのHTTP APIは環境flagが揃うまで閉じる。
 
-Status: implementation contract for #330 / #369 / #377. The host UI consumes these operations. The product owner is the seller; product requests never select a seller, provider, or payment account. The existing calendar API has its own selected-provider context and validates the logged-in NIHO membership before writing.
+Status: implementation contract for #169 / #330 / #369 / #377. The host UI consumes OWNER operations; the Admin console has a separate first-publication-only boundary. The product owner is the seller; host product requests never select a seller, provider, or payment account. The existing calendar API has its own selected-provider context and validates the logged-in NIHO membership before writing.
 
 ## Identity and seller boundary
 
@@ -106,6 +106,28 @@ Published photo alts are localized in the public DTO. English and Japanese produ
 
 An operations suspension uses a separate Admin session. Clearing it does not publish; the OWNER must explicitly publish again.
 
+## Admin proxy first publication
+
+`/admin/api/product-workspaces/{providerId}/products/{productId}` remains a fixed Admin BFF. Every request revalidates the dedicated current NIHO Admin session and ADMIN role. Mutations require the configured exact Admin origin and `Sec-Fetch-Site: same-origin`; responses are private/no-store/noindex. If Admin console, Experience publication API, required secret/session, or HTTP mode is unavailable, the surface remains closed. The selected provider must be an operator-provisioned seller workspace, and the product must still be `DRAFT` with no publication row.
+
+`POST .../{productId}/english-review` accepts only `{ "version": "…", "reviewed": true }`. The server computes the full content and Japanese/English manuscript fingerprints from the saved revision and stores the verified Admin actor plus those fingerprints in an immutable row. The UI displays the current fingerprints so the Admin review is tied to the exact saved copy. It does not set the draft's OWNER-confirmation fields or claim that the seller reviewed the English. Public projection validates the immutable Admin audit fingerprints for `ADMIN_PROXY` publications and creates only an in-memory projection marker; neither draft nor publication snapshot is rewritten as OWNER-confirmed.
+
+`POST .../{productId}/publish` accepts exactly:
+
+```json
+{
+  "version": "opaque-cas",
+  "accepted": true,
+  "sellerConfirmationMethod": "VERBAL",
+  "photoRightsConfirmed": true,
+  "consentVersion": "approved-current-version"
+}
+```
+
+`sellerConfirmationMethod` is `VERBAL` or `WRITTEN`; there is no free-text/PII field. The server requires the configured consent version, an Admin English review matching the current draft revision and fingerprints, and rights-confirmed selected media. It then reuses the same Store blocker calculation as OWNER publication, including current OWNER, seller/Connect readiness and freshness, seller display, payment reuse consent, support fee agreement, content, photos, prices, cancellation, saleable schedule, slug conflict, and operations suspension. Missing or stale readiness fails closed. Admin cannot impersonate the seller or refresh readiness through the seller's Host session; the seller must have opened Host recently enough to create the existing five-minute readiness snapshot before the office publishes.
+
+The first publication transaction CAS-checks draft/state/sale-terms versions, changes only `DRAFT` to `PUBLISHED`, writes the immutable publication with `publisher_kind=ADMIN_PROXY` and the actual Admin NIHO actor, advances publication state, and writes the immutable proxy audit containing the same publication/revision/sale-terms/consent/actor plus seller-confirmed boolean, confirmation method, photo-rights boolean, and the reviewed content/manuscript fingerprints. Admin actor is not inserted into `provider_memberships`. This API has no stop, resume, seller, Connect, or republish operation; OWNER publication keeps `publisher_kind=OWNER`.
+
 ## Public reads and checkout
 
 - `GET /api/public/experiences` returns active Experience publication snapshots; `GET /api/public/experiences/{slug}` returns one such public projection or a non-disclosing 404. These publication endpoints contain the published manuscript, photos, seller display, price floor, and meeting disclosure, but no schedule offers.
@@ -140,4 +162,4 @@ Responses never include exception text, credentials, private IDs, or personal da
 
 ## Stable publication blockers
 
-`ACCOUNT_NOT_USABLE`, `CANCELLATION_TERMS_REQUIRED`, `CONNECT_NOT_READY`, `CONSENT_OUTDATED`, `FEE_SETTINGS_REQUIRED`, `MANUSCRIPT_REQUIRED`, `OPERATIONS_SUSPENDED`, `OWNER_NOT_CURRENT`, `PHOTOS_REQUIRED`, `PRICE_REQUIRED`, `PUBLIC_CONTENT_INVALID`, `READINESS_EXPIRED`, `READINESS_MISSING`, `SCHEDULE_REQUIRED`, `SELLER_MISMATCH`, `SLUG_IN_USE`.
+`ACCOUNT_NOT_USABLE`, `CANCELLATION_TERMS_REQUIRED`, `CONNECT_NOT_READY`, `CONSENT_OUTDATED`, `FEE_SETTINGS_REQUIRED`, `SUPPORT_CONSENT_REQUIRED`, `MANUSCRIPT_REQUIRED`, `OPERATIONS_SUSPENDED`, `OWNER_NOT_CURRENT`, `PAYMENT_REUSE_CONSENT_REQUIRED`, `PHOTOS_REQUIRED`, `PRICE_REQUIRED`, `PUBLIC_CONTENT_INVALID`, `READINESS_EXPIRED`, `READINESS_MISSING`, `SCHEDULE_REQUIRED`, `SELLER_MISMATCH`, `SLUG_IN_USE`.
