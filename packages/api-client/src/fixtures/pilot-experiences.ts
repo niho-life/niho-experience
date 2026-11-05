@@ -278,7 +278,8 @@ export function buildPilotExperiences(): ExperienceDetail[] {
           startTime: "18:00",
           weekdays: [0, 1, 2, 3, 4, 5, 6],
           cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
-          acceptanceMode: "APPROVAL",
+          // Owner decision (2026-11-05): start Experience with instant confirmation.
+          acceptanceMode: "INSTANT",
           bookingQuestions: [PILOT_NOTES_QUESTION],
           bookingQuestionsFingerprint: PILOT_QUESTION_FINGERPRINTS.dinner,
         },
@@ -300,7 +301,7 @@ export function buildPilotExperiences(): ExperienceDetail[] {
           startTime: "13:00",
           weekdays: [0, 1, 2, 3, 4, 5, 6],
           cancellationPolicy: { code: "FREE_UNTIL_24H", freeCancellationHoursBefore: 24 },
-          acceptanceMode: "APPROVAL",
+          acceptanceMode: "INSTANT",
           bookingQuestions: [PILOT_NOTES_QUESTION],
           bookingQuestionsFingerprint: PILOT_QUESTION_FINGERPRINTS.dinner,
         },
