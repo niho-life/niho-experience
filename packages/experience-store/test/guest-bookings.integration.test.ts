@@ -601,6 +601,44 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("lets only the provider's active, uncapped OWNER read or change the support setting, and a refusal changes nothing", async () => {
+    await withSchema(async ({ pool, guests }) => {
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ('provider-a','former-a','OWNER',false)");
+      const row = async () => (await pool.query(
+        "SELECT support_enabled, platform_fee_basis_points, support_consent_version, support_agreement_revision, version FROM provider_sale_settings WHERE provider_id='provider-a'",
+      )).rows[0];
+      const before = await row();
+      const current = await guests.getProviderSupportSettings(ownerA);
+      assert.equal(current?.version, Number(before.version));
+      const turnOn = { supportEnabled: true, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: current!.version };
+
+      // Not the OWNER, an inactive OWNER, another provider's OWNER, NIHO capping the role, a product operator.
+      for (const actor of [
+        editorA,
+        viewerA,
+        { providerId: "provider-a", nihoUserId: "former-a" },
+        { providerId: "provider-a", nihoUserId: "owner-b" },
+        { ...ownerA, calendarRoleCeiling: "EDITOR" as const },
+        { ...ownerA, calendarScope: "OPERATOR" as const },
+      ]) {
+        await assert.rejects(() => guests.getProviderSupportSettings(actor), StoreAccessDeniedError, JSON.stringify(actor));
+        await assert.rejects(() => guests.setProviderSupportSettings(actor, turnOn), StoreAccessDeniedError, JSON.stringify(actor));
+      }
+      // provider-b's OWNER acting on its own provider leaves provider-a alone too.
+      const b = await guests.getProviderSupportSettings(ownerB);
+      await guests.setProviderSupportSettings(ownerB, { ...turnOn, expectedVersion: b!.version });
+      assert.deepEqual(await row(), before);
+
+      // Another consent version, or a stale version, is refused before anything is written.
+      await assert.rejects(() => guests.setProviderSupportSettings(ownerA, { ...turnOn, consentVersion: "sample-terms-older" }), StoreValidationError);
+      await assert.rejects(() => guests.setProviderSupportSettings(ownerA, { ...turnOn, expectedVersion: current!.version + 1 }), StoreConflictError);
+      assert.deepEqual(await row(), before);
+
+      // The OWNER itself still can.
+      assert.equal((await guests.setProviderSupportSettings(ownerA, turnOn)).supportEnabled, true);
+    });
+  });
+
   it("still sells an occurrence of an ended rule that the host moved to a later day", async () => {
     await withSchema(async ({ pool, guests, addRule }) => {
       await addRule("tea", rule("sample-old", { startsOn: day(-20), endsOn: day(-1) }));
