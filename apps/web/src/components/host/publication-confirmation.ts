@@ -60,3 +60,20 @@ export async function confirmPublicationEnglish(readCurrent: () => Manuscripts) 
   }
   return { sourceFingerprint, confirmedSourceFingerprint: sourceFingerprint, confirmedEnglishFingerprint };
 }
+
+/** The translation block names the current Japanese text as the one the English was confirmed against (#110). */
+export function englishIsConfirmed(translation: unknown): boolean {
+  if (translation === null || typeof translation !== "object" || Array.isArray(translation)) return false;
+  const block = translation as Record<string, unknown>;
+  return typeof block.sourceFingerprint === "string" && block.confirmedSourceFingerprint === block.sourceFingerprint;
+}
+
+/**
+ * While an experience is live, a Japanese edit takes the English confirmation away but the live page keeps the English
+ * written before the edit. Say so, so the host does not think the public English already follows the new Japanese.
+ */
+export function liveEnglishStaleNote(status: string, englishConfirmed: boolean): string | null {
+  return status === "PUBLISHED" && !englishConfirmed
+    ? "公開中の英語ページは、日本語を変更する前の英語のままです。英語原稿を確認して保存し、公開内容を更新すると、新しい英語に切り替わります。"
+    : null;
+}

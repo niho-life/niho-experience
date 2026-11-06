@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreNotFoundError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "provider-owner-seller-synthetic", nihoUserId: "owner-seller-synthetic" } as const;
@@ -23,13 +23,9 @@ const productContent = {
 
 describe("Experience owner publication is the only Experience checkout source", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("does not sell unpublished legacy products and snapshots published terms for new reservations", async () => {
-    const { Pool } = await import("pg");
-    const schema = `experience_owner_seller_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "experience_owner_seller", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [OWNER.providerId]);
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER')", [OWNER.providerId, OWNER.nihoUserId]);
 
@@ -178,8 +174,7 @@ describe("Experience owner publication is the only Experience checkout source", 
       });
       assert.equal((await bookings.publicBookingTerms(SLUG))?.sellerDisplayName, "Synthetic legal seller", "the owner can explicitly resume sales");
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
-      await pool.end();
+      await db.dispose();
     }
   });
 });

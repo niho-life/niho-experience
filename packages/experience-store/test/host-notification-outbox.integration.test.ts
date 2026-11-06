@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, it } from "node:test";
 import {
@@ -9,6 +7,7 @@ import {
   HostNotificationOutbox,
 } from "../src/host-notification-outbox.ts";
 import { withTransaction } from "../src/transaction.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const HOUR = 60 * 60 * 1000;
@@ -16,13 +15,9 @@ const booking = { providerId: "provider-a", experienceTitle: "Synthetic Tea Cere
 
 describe("PostgreSQL host notification outbox (#177 P2)", { skip: databaseUrl === undefined }, () => {
   it("enqueues, cancels, claims with SKIP LOCKED and a lease, and never touches other topics", async () => {
-    const { Pool } = await import("pg");
-    const schema = `host_notification_outbox_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "host_notification_outbox", { max: 6 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       const rows = async (where = "TRUE") => (await pool.query(
         `SELECT id::text AS id, provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload, available_at, processed_at, attempts
@@ -121,8 +116,7 @@ describe("PostgreSQL host notification outbox (#177 P2)", { skip: databaseUrl ==
       assert.deepEqual([...ids, ...rest.map((row) => row.id)].sort(), pending.map((row) => row.id).sort());
       assert.deepEqual(await rows("topic = 'booking.confirmed'"), [other]);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

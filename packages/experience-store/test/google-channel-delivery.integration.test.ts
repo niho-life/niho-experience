@@ -1,27 +1,21 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { ChannelRuntime } from "../src/channels.ts";
 import { GoogleChannelDeliveryRepository } from "../src/google-channel-delivery.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { StoreConflictError, StoreValidationError } from "../src/errors.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}`;
 
 describe("PostgreSQL Google channel delivery journal", { skip: databaseUrl === undefined }, () => {
   it("fences duplicate intents across lease epochs and keeps Google separate from Airbnb verification", async () => {
-    const { Pool } = await import("pg");
-    const schema = `google_delivery_test_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "google_delivery_test", { max: 6 });
+    const pool = db.pool;
     let now = new Date("2099-01-01T00:00:00.000Z");
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       await pool.query(`INSERT INTO experience_products
@@ -148,8 +142,7 @@ describe("PostgreSQL Google channel delivery journal", { skip: databaseUrl === u
       now = new Date(now.getTime() + 200_000);
       await assert.rejects(() => repository.prepareDispatch(worker, reclaimed.id, reclaimed.leaseToken), StoreConflictError);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

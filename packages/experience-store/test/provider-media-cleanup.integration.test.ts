@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { ProviderMediaCleanupRepository } from "../src/public-media-cleanup.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("provider media cleanup persistence (#378)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("claims only revoked unselected assets, rechecks completion, and keeps concurrent delivery idempotent", async () => {
-    const { Pool } = await import("pg");
-    const schema = `provider_media_cleanup_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "provider_media_cleanup", { max: 4 });
+    const pool = db.pool;
     const providerId = "provider-media-cleanup-synthetic";
     const ids = {
       ready: randomUUID(), selected: randomUUID(), eligible: randomUUID(), unsafe: randomUUID(), changed: randomUUID(),
@@ -18,9 +17,6 @@ describe("provider media cleanup persistence (#378)", { skip: databaseUrl === un
     };
     const objectKey = (id: string) => `experience-provider-media/${id}.jpg`;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [providerId]);
       const insertAsset = (id: string, state: "READY" | "REVOKED", key = objectKey(id)) => pool.query(
         `INSERT INTO experience_provider_media_assets
@@ -82,8 +78,7 @@ describe("provider media cleanup persistence (#378)", { skip: databaseUrl === un
       const retry = await repository.claim(1);
       assert.equal(retry[0]?.assetId, ids.unsafe, "an attempted failure remains retryable after fresh work");
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
-      await pool.end();
+      await db.dispose();
     }
   });
 });

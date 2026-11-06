@@ -39,6 +39,8 @@ const HOST_CONSOLE_SETTINGS = Object.freeze([
 const ADDRESS = "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+";
 const HTTPS_URL = "https://[a-z0-9-]+(\\.[a-z0-9-]+)+(/[A-Za-z0-9._~%/-]*)?";
 const SERVICE_ACCOUNT = "[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\\.iam\\.gserviceaccount\\.com";
+const CHANNEL_CAPABILITY = "(observe|readReservations|close|open|create)";
+const CHANNEL_ADAPTER = `[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9]+=${CHANNEL_CAPABILITY}(\\+${CHANNEL_CAPABILITY})*`;
 
 /** Plain settings' shapes: what resolve-config accepts, narrowed to what --set-env-vars carries (never a comma). */
 export const SHAPES = Object.freeze({
@@ -53,6 +55,12 @@ export const SHAPES = Object.freeze({
   serviceAccountEmail: { pattern: new RegExp(`^${SERVICE_ACCOUNT}$`), words: "a single service account email" },
   vapidPublicKey: { pattern: /^B[A-Za-z0-9_-]{86}$/, words: "an uncompressed P-256 public key in base64url" },
   vapidSubject: { pattern: new RegExp(`^(mailto:${ADDRESS}|${HTTPS_URL})$`), words: "mailto: an address, or an https URL" },
+  // The OTA adapters' short form (apps/web/src/lib/experience/channel-adapters.ts): only its shape; the runtime refuses
+  // a key listed twice or a capability repeated.
+  channelAdapters: {
+    pattern: new RegExp(`^${CHANNEL_ADAPTER}(;${CHANNEL_ADAPTER})*$`),
+    words: "site/adapter@version=capability(+capability) entries joined by semicolons, capabilities from observe, readReservations, close, open and create, without commas or spaces",
+  },
 });
 
 const serviceAccount = (name) => ({ project }) => `${name}@${project}.iam.gserviceaccount.com`;
@@ -246,6 +254,34 @@ export const FLAGS = Object.freeze([
   // revision にだけ渡るので HOST_CONSOLE を要する。NIHO の日本語 release の実配備と実機確認が済むまで ON にしない
   // （docs/localization-consumer.md「有効化の前に確かめること」）。
   { env: "EXPERIENCE_JAPANESE_SITE_ENABLED", variable: "JAPANESE_SITE_ENABLED", needs: ["HOST_CONSOLE"] },
+  // OTA の枠管理 (#194, docs/ota-runtime.md): the start-up gates of resolve-config.ts, all off by default. The watchdog is
+  // called by Cloud Scheduler with its own service account; the runtime (worker API) needs the manager that configures
+  // listings, the watchdog that recovers stuck jobs and holds new OPENs, and an allowlist of adapters. The Google OAuth
+  // client the resource and Airbnb flags need is the host console's.
+  {
+    env: "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED",
+    variable: "CHANNEL_WATCHDOG_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE"],
+    fixed: { EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE: siteUrl, EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL: serviceAccount("experience-ota-watchdog") },
+  },
+  { env: "EXPERIENCE_CHANNEL_MANAGER_ENABLED", variable: "CHANNEL_MANAGER_ENABLED", needs: ["ADMIN_SUPPORT_CONSOLE_ENABLED", "DATABASE"] },
+  {
+    env: "EXPERIENCE_CHANNEL_RUNTIME_ENABLED",
+    variable: "CHANNEL_RUNTIME_ENABLED",
+    needs: ["EXPERIENCE_CHANNEL_MANAGER_ENABLED", "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED", "DATABASE"],
+    settings: [{ env: "EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS", variable: "CHANNEL_SUPPORTED_ADAPTERS", shape: "channelAdapters" }],
+  },
+  { env: "EXPERIENCE_RESOURCE_GOOGLE_ENABLED", variable: "RESOURCE_GOOGLE_ENABLED", needs: ["HOST_CONSOLE", "DATABASE"] },
+  {
+    env: "EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED",
+    variable: "RESOURCE_GOOGLE_WATCH_ENABLED",
+    needs: ["EXPERIENCE_RESOURCE_GOOGLE_ENABLED"],
+    fixed: { EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL: ({ siteUrl: url }) => `${url}/api/google/calendar/watch` },
+  },
+  { env: "EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED", variable: "AIRBNB_GOOGLE_SETUP_ENABLED", needs: ["HOST_CONSOLE", "DATABASE"] },
+  { env: "EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED", variable: "AIRBNB_GOOGLE_ACTIVATION_ENABLED", needs: ["EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED"] },
+  { env: "EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED", variable: "AIRBNB_GOOGLE_DELIVERY_ENABLED", needs: ["EXPERIENCE_CHANNEL_RUNTIME_ENABLED"] },
+  { env: "EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED", variable: "AIRBNB_GOOGLE_OBSERVATION_ENABLED", needs: ["EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED"] },
 ]);
 
 const PROD_SECRET_REF = /^[A-Za-z0-9_-]+:[1-9][0-9]*$/;

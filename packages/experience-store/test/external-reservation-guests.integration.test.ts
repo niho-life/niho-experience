@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
@@ -13,6 +12,7 @@ import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox, parseOtaBookingPayloa
 import { HostOtaBookings } from "../src/host-ota-bookings.ts";
 import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 // 予約者の情報つきの OTA の予約 (#194, owner decision 2026-11-01). Synthetic data only.
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -45,16 +45,10 @@ const observation = (
 
 describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === undefined }, () => {
   it("keeps the guest's details, tells the product's people, shows them to them only, and erases them after a year", { timeout: 180_000 }, async () => {
-    const { Pool } = await import("pg");
-    const schema = `ota_guests_${randomUUID().replaceAll("-", "")}`;
-    const pool: Pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
-    let created = false;
+    const db = await createIsolatedDatabase(databaseUrl, "ota_guests", { max: 8 });
+    const pool: Pool = db.pool;
     const clock = { now: new Date(T0) };
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      created = true;
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((file) => /^\d{4}.*\.sql$/.test(file)).sort();
-      for (const file of migrations) await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query(
         `INSERT INTO provider_memberships (provider_id,niho_user_id,role)
@@ -410,8 +404,7 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       assert.equal((await guestRow("R2"))?.guest_name, null);
       assert.equal("guestName" in (await notifications())[2]!.payload, true, "a row younger than 48 hours waits for the push job");
     } finally {
-      if (created) await pool.query(`DROP SCHEMA "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { addLocalDays, occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
@@ -10,6 +10,7 @@ import { ExperiencePublicationRepository } from "../src/experience-publication.t
 import { ExperienceStore } from "../src/repository.ts";
 import { SiteSaleRegistration, type RegisterProductInput, type SaleReadiness } from "../src/site-sale-registration.ts";
 import { parseSiteSaleInput, runSiteSale, type SiteSaleCommand } from "../src/site-sale-script.ts";
+import { createIsolatedDatabase, type IsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "sample-provider-a", nihoUserId: "sample-user-a" } as const;
@@ -52,7 +53,7 @@ function failing(readiness: SaleReadiness): string[] {
 
 interface Context {
   readonly pool: Pool;
-  readonly schema: string;
+  readonly db: IsolatedDatabase;
   readonly registration: SiteSaleRegistration;
   readonly store: ExperienceStore;
   readonly guests: GuestBookingRepository;
@@ -60,17 +61,12 @@ interface Context {
 
 /** A fresh schema with every migration and no rows: the registration starts from nothing. */
 async function withSchema(run: (context: Context) => Promise<void>): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `site_sale_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "site_sale", { max: 4 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-    await run({ pool, schema, registration: new SiteSaleRegistration(pool), store: new ExperienceStore(pool), guests: new GuestBookingRepository(pool) });
+    await run({ pool, db, registration: new SiteSaleRegistration(pool), store: new ExperienceStore(pool), guests: new GuestBookingRepository(pool) });
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 
@@ -353,11 +349,10 @@ describe("SiteSaleRegistration (#285 slice 9)", { skip: databaseUrl === undefine
   });
 
   it("tells a connection that may write the registration from one that may only read", async () => {
-    await withSchema(async ({ schema, registration }) => {
+    await withSchema(async ({ db, registration }) => {
       assert.equal(await registration.canRegister(), true);
-      const { Pool } = await import("pg");
       // pg_read_all_data reads every table and writes none, like a role without the registration grants.
-      const reader = new Pool({ connectionString: databaseUrl, max: 1, options: `-c search_path=${schema} -c role=pg_read_all_data` });
+      const reader = db.extraPool({ max: 1, options: "-c role=pg_read_all_data" });
       try {
         const readOnly = new SiteSaleRegistration(reader);
         let allowed: boolean;

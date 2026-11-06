@@ -120,7 +120,7 @@ NIHO側のADMIN UI、招待、outboxはこのリポジトリでは実装しな�
 
 契約は niho-editor の v1 で確定した（正本: `docs/security/editor-publish-api-v1.md` と型・検証・合成例の `packages/editor-publish-contract`）。当初は設計文書からの**仮契約**で実装していたが、このリポの読み取り側を v1 に合わせた（Epic #251）。パス・項目名・形の読み取りは `apps/web/src/lib/editor-publication/contract.ts` の1ファイルに閉じ込めてあり、契約が変わるときはまずこのファイルとテスト（`contract.test.ts`、fixture）を直す。
 
-Secret Manager・配備 workflow への `GUIDE_EDITOR_API_*` の配線は、editor 公開が本番で使えるまで行わない（変更なし）。NIHO の面の資格は、現行の editor では不透明な Bearer 資格（editor 側に SHA-256・audience `exp`・期限だけを置く暫定の方式。署名つきのサービス間 token の契約ができるまで）で、これまでの固定の `Authorization: Bearer ${GUIDE_EDITOR_API_TOKEN}` のまま読める。ただし**資格には期限がある**。期限切れ・失効・再発行前の旧資格は 401 で、キャッシュがあっても必ず失敗させる（下記）。資格の払い出しと期限切れ前の入れ替えは配備の運用に入れる。`api.editor.niho.life` の DNS・ALB は別作業。
+`GUIDE_EDITOR_API_*` の Secret Manager・配備 workflow への配線は、公式配備の flag 表（`scripts/deploy/runtime-flags.mjs`）の `EDITOR_PUBLICATIONS_ENABLED` にある（既定OFF。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor`、base URL、token の Secret 参照、handle は `exp` 固定。[production-deploy.md](production-deploy.md)「機能のフラグ」）。本番で ON にするのは、editor 公開が本番で使えるようになってからである。NIHO の面の資格は、現行の editor では不透明な Bearer 資格（editor 側に SHA-256・audience `exp`・期限だけを置く暫定の方式。署名つきのサービス間 token の契約ができるまで）で、これまでの固定の `Authorization: Bearer ${GUIDE_EDITOR_API_TOKEN}` のまま読める。ただし**資格には期限がある**。期限切れ・失効・再発行前の旧資格は 401 で、キャッシュがあっても必ず失敗させる（下記）。資格の払い出しと期限切れ前の入れ替えは配備の運用に入れる。`api.editor.niho.life` の DNS・ALB は別作業。
 
 ### 契約（editor v1）
 
