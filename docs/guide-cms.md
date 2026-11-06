@@ -222,7 +222,7 @@ editor の本文は AST が正本で、`markdown` はその投影（`##` `###`�
 | カテゴリ | `category`（`required`） | `category`（`oneOf` なし） | 入力欄は editor 側に無い（下の「残る差」） |
 | 見出し1つ以上 | `min-headings`（`min`） | `headings`（`min`） | |
 | `CONFIRM` なし | `no-confirm-marker` | `noConfirm` | |
-| 関連体験が掲載中 | `related-experiences-listed`（`lookup`） | `relatedLive` | 外の事実は editor がサーバーの `facts` として渡す。`lookup` は不要 |
+| 関連体験が掲載中 | `related-experiences-listed`（`lookup`） | **宣言しない**（任意） | オーナー決定（2026-11-07）で関連体験は任意。editor の `relatedLive` は関連体験を 1 件以上要求するため宣言から外した。選んだ関連体験は表示のたびに権限と掲載を再判定する（#255） |
 
 experience が受信時に再確認するのは安全に関わるもの（英語、Markdown subset、https の許可 origin の写真）と、表示の上限（題名110。editor の宣言でも止める）だけで、編集上の条件は editor の公開前チェックに任せる。`title`・`images` の kind を知らない editor は宣言ごと拒否するので、この 2 つは editor#316 の配備後に宣言へ足した。関連体験の再判定（権限・掲載状態）は #255。
 
