@@ -11,7 +11,9 @@ const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|ota-bookings|sales|messages|session|reviews|settings|support|standalone-translate|pwa)|admin-support)\.spec\.ts/;
 const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-bookings-unified|host-calendar|host-airbnb-google-setup|admin-channel-workspace|guides-editor-source)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
-const ADMIN_CASE_SPEC = /admin-(support-case|operations)\.spec\.ts/;
+const ADMIN_CASE_SPEC = /admin-(support-case|operations|site-bookings)\.spec\.ts/;
+// サイト予約 (#121/#128) also at 320px, on the same server.
+const ADMIN_SITE_BOOKINGS_SPEC = /admin-site-bookings\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;
 // Synthetic guide drafts (docs/content/guides.md), shown on the first server only. An absolute path, as the setting requires.
 const GUIDE_DRAFTS_DIR = fileURLToPath(new URL("./e2e/fixtures/guide-drafts", import.meta.url));
@@ -52,6 +54,7 @@ export default defineConfig({
     { name: "admin-read-desktop", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, baseURL: adminReadBaseURL } },
     { name: "admin-case-mobile-360", testMatch: ADMIN_CASE_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: adminCaseBaseURL } },
     { name: "admin-case-desktop", testMatch: ADMIN_CASE_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...desktop, baseURL: adminCaseBaseURL } },
+    { name: "admin-site-bookings-mobile-320", testMatch: ADMIN_SITE_BOOKINGS_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile320, baseURL: adminCaseBaseURL } },
     { name: "fee-summary-mobile-360", testMatch: FEE_SUMMARY_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: feeSummaryBaseURL } },
     { name: "fee-summary-desktop", testMatch: FEE_SUMMARY_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...desktop, baseURL: feeSummaryBaseURL } },
   ],
@@ -85,7 +88,7 @@ export default defineConfig({
       url: `${adminCaseBaseURL}/admin`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { ...serverEnv, PORT: String(ADMIN_CASE_PORT), ADMIN_SUPPORT_CONSOLE_ENABLED: "true", ADMIN_SUPPORT_READ_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CASE_PREVIEW_ENABLED: "true", ADMIN_OPERATIONS_PREVIEW_ENABLED: "true", SITE_URL: adminCaseBaseURL },
+      env: { ...serverEnv, PORT: String(ADMIN_CASE_PORT), ADMIN_SUPPORT_CONSOLE_ENABLED: "true", ADMIN_SUPPORT_READ_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CASE_PREVIEW_ENABLED: "true", ADMIN_OPERATIONS_PREVIEW_ENABLED: "true", ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED: "true", SITE_URL: adminCaseBaseURL },
     },
     {
       command: "sh scripts/start-standalone.sh",

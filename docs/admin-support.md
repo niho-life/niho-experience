@@ -28,6 +28,8 @@ read flagをONにしたHTTP画面は、予約一覧・deep link詳細・通知�
 
 `ADMIN_OPERATIONS_PREVIEW_ENABLED=true` もmock専用の合成UI受入flagである。ブラウザ要求を契約形fixtureでstubし、二重送信、snapshot競合、POST時409、許可だけの変更、結果不明・404からの同ID照合、再送不可時のGET回復、401全消去と遅延応答破棄、caseとoperationsの離脱guard合成、UUID queryからGETだけの復帰を検証する。mock BFF、実決済、実返金、実メールへ接続しない。
 
+`ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED=true` もmock専用で、新Experience予約の「サイト予約」（`/admin/site-bookings`）を合成fixtureで描く。サポートONの予約一覧・予約番号で開く入口を含み、根拠は予約時snapshotだけである（`docs/guest-booking.md`「取消と返金（第7段）」）。
+
 `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED=true` もmock専用である。Admin read previewとHost予約プレビューのパネルだけを開き、Playwrightが契約形responseをbrowser requestへ返す。HTTPでは無視し、mock BFF・決済・返金・Transfer・台帳へ接続しない。
 
 予約の承認・辞退・取消／返金、連絡送信はcase flagだけをONにしても表示しない。operationsの専用flagとAPI snapshotが許可した操作だけを表示する。旧予約や不正な支援snapshotをOFF・10%へ補完せず、case読取に失敗したときも未担当・空メモを作らない。担当・内部メモはcase APIの `writeCapability` とCAS revisionだけに従う。返金の増分・返金後累計はoperations GETの`refundOptions`をそのまま使い、画面で率や金額を再計算しない。

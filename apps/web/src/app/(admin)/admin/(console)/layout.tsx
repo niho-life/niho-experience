@@ -16,7 +16,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
     const session = await readAdminSession();
     if (!session) redirect(ADMIN_ENTRY_PATH);
     const { unreadCount } = adminPreviewNotifications(session.id, session.expiresAt);
-    return <AdminShell actorName={session.actorName} unreadCount={unreadCount} channelManager={channelManager}>{children}</AdminShell>;
+    return <AdminShell actorName={session.actorName} unreadCount={unreadCount} channelManager={channelManager} siteBookings={config.adminSiteBookingsPreviewEnabled}>{children}</AdminShell>;
   }
   if (!isAdminHttp()) redirect(ADMIN_ENTRY_PATH);
   const load = await loadAdminHttpSession();

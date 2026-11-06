@@ -542,6 +542,9 @@ export function resolveConfig(env: Env) {
   // selected operations API is deployed and accepted.
   const adminOperationsApiEnabled = apiMode === "http" && env.ADMIN_OPERATIONS_API_ENABLED === "true";
   const adminOperationsPreviewEnabled = apiMode === "mock" && env.ADMIN_OPERATIONS_PREVIEW_ENABLED === "true";
+  // サイト予約 (#121/#128): synthetic /admin/site-bookings for Playwright only. Mock mode only, so an HTTP deployment
+  // ignores it; the page renders fixtures and the browser's API calls are stubbed (its BFF stays closed in mock mode).
+  const adminSiteBookingsPreviewEnabled = apiMode === "mock" && env.ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED === "true";
   // Host history is read-only, but its selected endpoint is also agreed-not-deployed.
   const hostSupportHistoryApiEnabled = apiMode === "http" && env.HOST_SUPPORT_HISTORY_API_ENABLED === "true";
   // Host本人の支援設定は独立契約。配備・受入まではHTTP BFFを閉じる。
@@ -705,6 +708,7 @@ export function resolveConfig(env: Env) {
     adminSupportCasePreviewEnabled,
     adminOperationsApiEnabled,
     adminOperationsPreviewEnabled,
+    adminSiteBookingsPreviewEnabled,
     hostSupportHistoryApiEnabled,
     hostSupportSettingsApiEnabled,
     hostSupportSettingsPreviewEnabled,

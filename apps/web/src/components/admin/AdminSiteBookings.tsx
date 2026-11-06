@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { decodeExperienceAdminSupportAdminListResponse, type ExperienceAdminSupportAdminListResponse } from "@niho-experience/api-client/admin-support-case";
-import type { ExperienceSettlementSummary, ExperienceSupportCase, ExperienceSupportNotification, SupportQueue, SupportQueueBooking } from "@niho-experience/experience-store";
+import type { ExperienceSettlementSummary, ExperienceSupportCase, ExperienceSupportNotification, SupportEnabledBookingsPage, SupportQueue, SupportQueueBooking } from "@niho-experience/experience-store";
 import { SettlementSummaryList } from "@/components/settlement/SettlementSummaryList";
 import { siteBookingCommandRejected, siteBookingOutcome, siteBookingPreview, type SiteBookingPreview } from "./site-booking-outcome";
 import {
@@ -54,6 +54,21 @@ const REFUND_STATE = {
   PENDING: () => "Stripe の処理中（7 日以上）",
   FAILED: (code: string | null) => `返金に失敗（${code ?? "理由不明"}）`,
 } as const;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BOOKING_STATUS: Record<string, { label: string; className: string }> = {
+  CONFIRMED: { label: "確定", className: "bg-leaf-pale text-moss" },
+  PAYMENT_REVIEW: { label: "確認待ち", className: "bg-sand text-warn" },
+  CANCELLED: { label: "取消済み", className: "bg-sand text-muted" },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const known = BOOKING_STATUS[status] ?? { label: status, className: "bg-sand text-muted" };
+  return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-extrabold ${known.className}`}>{known.label}</span>;
+}
+
+/** Only bookings whose own snapshot records support ON: the server decides, and the screen never shows one it did not. */
+const supportRows = (bookings: readonly SupportQueueBooking[]) => bookings.filter((booking) => booking.supportEligible);
 
 const yen = (amount: number) => `¥${amount.toLocaleString("ja-JP")}`;
 const japanTime = (utc: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(utc));
@@ -310,7 +325,7 @@ function previewBody(form: NonNullable<Form>): Record<string, unknown> {
     : { action: form.action, ...target };
 }
 
-export function AdminSiteBookings({ initial, notifications = [], settlements = [] }: { initial: SupportQueue; notifications?: ExperienceSupportNotification[]; settlements?: ExperienceSettlementSummary[] }) {
+export function AdminSiteBookings({ initial, supportBookings, notifications = [], settlements = [] }: { initial: SupportQueue; supportBookings?: SupportEnabledBookingsPage; notifications?: ExperienceSupportNotification[]; settlements?: ExperienceSettlementSummary[] }) {
   const financialOwnerId = useId();
   const [queue, setQueue] = useState(initial);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -321,6 +336,13 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [cancelId, setCancelId] = useState("");
+  const [supportList, setSupportList] = useState<readonly SupportQueueBooking[]>(() => supportRows(supportBookings?.bookings ?? []));
+  const [supportCursor, setSupportCursor] = useState<string | null>(supportBookings?.nextCursor ?? null);
+  const [supportListBusy, setSupportListBusy] = useState(false);
+  const [supportListMessage, setSupportListMessage] = useState("");
+  const [lookupId, setLookupId] = useState("");
+  const [lookup, setLookup] = useState<SupportQueueBooking | null>(null);
+  const [lookupMessage, setLookupMessage] = useState("");
   const operationLockRef = useRef<SiteBookingOperationLock | null>(null);
   const [operationLock, setOperationLock] = useState<SiteBookingOperationLock | null>(null);
 
@@ -351,7 +373,73 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
     setPrepared(null);
     setPending(null);
     setCancelId("");
+    setSupportList([]);
+    setSupportCursor(null);
+    setLookup(null);
+    setLookupId("");
+    setLookupMessage("");
+    setSupportListMessage("");
   }, []);
+
+  /** One page of support-ON bookings, or null after a failure (the session is ended on 401/403). */
+  const fetchSupportBookings = useCallback(async (query: string): Promise<SupportEnabledBookingsPage | null> => {
+    const response = await fetch(`${API}/bookings${query}`, { cache: "no-store", credentials: "same-origin" });
+    if (response.status === 401 || response.status === 403) { expireSession(); return null; }
+    if (!response.ok) return null;
+    const page = await response.json().catch(() => null) as SupportEnabledBookingsPage | null;
+    return page && Array.isArray(page.bookings) ? { bookings: supportRows(page.bookings), nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null } : null;
+  }, [expireSession]);
+
+  const loadMoreSupport = async () => {
+    if (!supportCursor || supportListBusy) return;
+    setSupportListBusy(true);
+    setSupportListMessage("");
+    try {
+      const page = await fetchSupportBookings(`?cursor=${encodeURIComponent(supportCursor)}`);
+      if (!page) { setSupportListMessage("続きを読み込めませんでした。もう一度お試しください。"); return; }
+      setSupportList((current) => [...current, ...page.bookings.filter((booking) => !current.some((item) => item.publicBookingId === booking.publicBookingId))]);
+      setSupportCursor(page.nextCursor);
+    } catch {
+      setSupportListMessage("続きを読み込めませんでした。通信状態を確かめてください。");
+    } finally {
+      setSupportListBusy(false);
+    }
+  };
+
+  const openByBookingId = async () => {
+    // Opening another booking replaces the panel that is open, and with it the command a contact or an action is still
+    // waiting on (its UUID, and the owner of the screen's operation lock): the search waits until that is settled.
+    if (operationLockRef.current !== null) return;
+    const id = lookupId.trim().toLowerCase();
+    setLookup(null);
+    if (!UUID.test(id)) { setLookupMessage("予約番号の形式が違います（36文字のUUID）。"); return; }
+    setSupportListBusy(true);
+    setLookupMessage("");
+    try {
+      const page = await fetchSupportBookings(`?publicBookingId=${encodeURIComponent(id)}`);
+      if (!page) { setLookupMessage("予約を読み込めませんでした。もう一度お試しください。"); return; }
+      const found = page.bookings[0] ?? null;
+      setLookup(found);
+      if (!found) setLookupMessage("サポートONで受け付けた予約に、この予約番号はありません。");
+    } catch {
+      setLookupMessage("予約を読み込めませんでした。通信状態を確かめてください。");
+    } finally {
+      setSupportListBusy(false);
+    }
+  };
+
+  /** After an action on one booking, its row in the support-ON list (and the one opened by number) is read again. */
+  const refreshSupportBooking = async (publicBookingId: string) => {
+    try {
+      const page = await fetchSupportBookings(`?publicBookingId=${encodeURIComponent(publicBookingId)}`);
+      const fresh = page?.bookings[0];
+      if (!fresh) return;
+      setSupportList((current) => current.map((booking) => booking.publicBookingId === publicBookingId ? fresh : booking));
+      setLookup((current) => current?.publicBookingId === publicBookingId ? fresh : current);
+    } catch {
+      // The row stays as it is; reopening the page reads it again.
+    }
+  };
 
   const refresh = async () => {
     try {
@@ -428,6 +516,7 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
       setForm(null);
       setMessage(outcome);
       await refresh();
+      if (typeof request.publicBookingId === "string") await refreshSupportBooking(request.publicBookingId);
     } catch {
       applyLockTransition(markFinancialUnknown(operationLockRef.current, financialOwnerId));
       setMessage({ tone: "error", text: "通信できませんでした。もう一度お試しください（同じ操作として送り直します）" });
@@ -504,6 +593,40 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
     </label>
   );
 
+  /** Support's own cancellation of a confirmed booking: reason, full or partial refund, note (the same for every entry). */
+  const cancelFields = () => (
+    <>
+      <label className="grid gap-1">取消理由
+        <select className={FIELD} value={String(form?.body.reason ?? "")} onChange={(event) => set({ reason: event.currentTarget.value })}>
+          <option value="">選んでください</option>
+          {REASONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
+        </select>
+      </label>
+      <fieldset className="flex flex-wrap gap-3">
+        <legend className="sr-only">返金</legend>
+        <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind !== "PARTIAL"} onChange={() => set({ refund: { kind: "FULL" } })} />全額（NIHO 手数料も返す）</label>
+        <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind === "PARTIAL"} onChange={() => set({ refund: { kind: "PARTIAL", amount: 0 } })} />一部（NIHO 手数料も額に比例して返す）</label>
+      </fieldset>
+      {(form?.body.refund as { kind?: string } | undefined)?.kind === "PARTIAL" ? (
+        <label className="grid gap-1">返金額（円、支払額未満）
+          <input type="number" min={1} inputMode="numeric" className={FIELD} value={String((form?.body.refund as { amount?: number }).amount || "")} onChange={(event) => set({ refund: { kind: "PARTIAL", amount: Number(event.currentTarget.value) } })} />
+        </label>
+      ) : null}
+      {noteField("メモ（任意・予約者には届きません）", "note")}
+    </>
+  );
+  const openCancel = (key: string, publicBookingId: string) => open("CANCEL", key, { publicBookingId, refund: { kind: "FULL" }, reason: "", note: "" });
+  /** A support-ON booking: its facts and status, its case, and for a confirmed one support's cancellation. */
+  const supportBookingRow = (booking: SupportQueueBooking, keyPrefix: string) => (
+    <li key={`${keyPrefix}-${booking.publicBookingId}`} className="min-w-0 rounded-2xl border border-line bg-canvas p-4">
+      <StatusBadge status={booking.status} />
+      <div className="mt-1"><BookingFacts booking={booking} /></div>
+      <SupportCasePanel booking={booking} operationLock={operationLock} onBeginContact={beginContact} onContactUnknown={contactUnknown} onReleaseContact={releaseContact} onSessionExpired={expireSession} />
+      {booking.status === "CONFIRMED" ? <div className="mt-2"><button type="button" disabled={operationLock !== null} className={BUTTON} onClick={() => openCancel(`${keyPrefix}-cancel-${booking.publicBookingId}`, booking.publicBookingId)}>この予約を取り消す</button></div> : null}
+      {confirmPanel(`${keyPrefix}-cancel-${booking.publicBookingId}`, `予約 ${booking.publicBookingId} を取り消します`, cancelFields(), "取り消して返金する")}
+    </li>
+  );
+
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
       <h1 className="font-display text-2xl font-medium">サイト予約の取消・返金</h1>
@@ -572,6 +695,22 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
         </ul>
       </section>
 
+      <section aria-labelledby="site-support-bookings" className="mt-8">
+        <h2 id="site-support-bookings" className="text-lg font-extrabold">サポートONの予約（{supportList.length}{supportCursor ? "+" : ""}）</h2>
+        <form className="mt-2 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void openByBookingId(); }}>
+          <label className="grid min-w-0 flex-1 basis-60 gap-1">予約番号で開く
+            <input className={FIELD} value={lookupId} inputMode="text" autoComplete="off" spellCheck={false} disabled={supportListBusy || operationLock !== null} aria-describedby={operationLock !== null ? "site-lookup-locked" : undefined} onChange={(event) => { setLookupId(event.currentTarget.value.trim()); setLookupMessage(""); }} />
+          </label>
+          <button type="submit" className={`${BUTTON} self-end`} disabled={!lookupId || supportListBusy || operationLock !== null}>開く</button>
+        </form>
+        {operationLock !== null ? <p id="site-lookup-locked" className="mt-2 text-xs text-muted">いまの操作（結果の確認を含む）を終えるまで、別の予約は開けません。</p> : null}
+        {lookupMessage ? <p role="status" className="mt-2 text-sm font-bold text-warn">{lookupMessage}</p> : null}
+        {lookup ? <ul aria-label="予約番号で開いた予約" className="mt-2 grid gap-2">{supportBookingRow(lookup, "lookup")}</ul> : null}
+        {supportList.length ? <ul aria-label="サポートONの予約一覧" className="mt-3 grid gap-2">{supportList.map((booking) => supportBookingRow(booking, "support"))}</ul> : <p className="mt-3 text-sm text-muted">サポートONで受け付けた予約はまだありません。</p>}
+        {supportCursor ? <button type="button" className={`${BUTTON} mt-3`} disabled={supportListBusy} onClick={() => void loadMoreSupport()}>{supportListBusy ? "読み込んでいます…" : "もっと見る"}</button> : null}
+        {supportListMessage ? <p role="status" className="mt-2 text-sm font-bold text-warn">{supportListMessage}</p> : null}
+      </section>
+
       <section aria-labelledby="site-cancel" className="mt-8">
         <h2 id="site-cancel" className="text-lg font-extrabold">予約番号で取り消す</h2>
         <p className="text-ink-soft">確定している予約を、全額または一部の返金で取り消します。ホストに通知が届きます。</p>
@@ -584,25 +723,7 @@ export function AdminSiteBookings({ initial, notifications = [], settlements = [
         {confirmPanel(
           "cancel-by-id",
           `予約 ${String(form?.body.publicBookingId ?? "")} を取り消します`,
-          <>
-            <label className="grid gap-1">取消理由
-              <select className={FIELD} value={String(form?.body.reason ?? "")} onChange={(event) => set({ reason: event.currentTarget.value })}>
-                <option value="">選んでください</option>
-                {REASONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
-              </select>
-            </label>
-            <fieldset className="flex flex-wrap gap-3">
-              <legend className="sr-only">返金</legend>
-              <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind !== "PARTIAL"} onChange={() => set({ refund: { kind: "FULL" } })} />全額（NIHO 手数料も返す）</label>
-              <label className="inline-flex items-center gap-1.5"><input type="radio" checked={(form?.body.refund as { kind?: string } | undefined)?.kind === "PARTIAL"} onChange={() => set({ refund: { kind: "PARTIAL", amount: 0 } })} />一部（NIHO 手数料も額に比例して返す）</label>
-            </fieldset>
-            {(form?.body.refund as { kind?: string } | undefined)?.kind === "PARTIAL" ? (
-              <label className="grid gap-1">返金額（円、支払額未満）
-                <input type="number" min={1} inputMode="numeric" className={FIELD} value={String((form?.body.refund as { amount?: number }).amount || "")} onChange={(event) => set({ refund: { kind: "PARTIAL", amount: Number(event.currentTarget.value) } })} />
-              </label>
-            ) : null}
-            {noteField("メモ（任意・予約者には届きません）", "note")}
-          </>,
+          cancelFields(),
           "取り消して返金する",
         )}
       </section>
