@@ -76,7 +76,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `MOCK_CATALOG` | `synthetic` | mock時の体験一覧。`pilot` は掲載許可のある最初の5体験を推奨値で表示（[docs/content/README.md](content/README.md)）。検索には出ない |
 | `GUIDE_DRAFTS_DIR` | 未設定 | mock 時だけ読む。ガイド記事の下書きのフォルダ（絶対パス、git 管理しない非公開台帳）。`/guides` に「Draft」の印つきで出る（[docs/content/guides.md](content/guides.md)） |
 | `NEXT_PUBLIC_NIHO_WEB_ORIGIN` | `https://niho.life` | 公開Web APIのorigin。stgでは `https://app-stg.niho.life` |
-| `SITE_INDEXING` | 未設定＝検索除外 | `allow` かつ `EXPERIENCE_API_MODE=http` の時だけindex許可（合成データは設定を誤っても検索に出ない）。本番受入（#15）後に設定 |
+| `SITE_INDEXING` | 未設定＝検索除外 | `allow` かつ `EXPERIENCE_API_MODE=http` の時だけindex許可（合成データは設定を誤っても検索に出ない）。本番はオーナー決定（2026-11-07）で `allow`（`deploy-production.yml`） |
 | `SITE_URL` | `http://localhost:3000` | canonical・sitemapの起点。正式ドメインは未定 |
 | `BOOKINGS_ENABLED` | `true` | `false` で新規予約を止める（障害時。#15の手順） |
 | `HOST_SIGNUP_MODE` | `pilot` | `open` はNIHO側のセルフ登録（連携B）が使えるようになってから |

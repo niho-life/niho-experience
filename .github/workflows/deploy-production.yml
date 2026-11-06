@@ -173,7 +173,7 @@ jobs:
           digest="$(sed -nE 's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' <<< "$push_output" | tail -n1)"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Deploy candidate with sales and indexing disabled
+      - name: Deploy candidate with sales disabled and search indexing allowed
         id: candidate
         env:
           FLAG_ENV: ${{ steps.flags.outputs.env }}
@@ -185,7 +185,7 @@ jobs:
           image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${{ steps.pushed_image.outputs.digest }}"
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
-          env_vars='EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider,GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life'
+          env_vars='EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=allow,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider,GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life'
           runtime_options=()
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             test "$HOST_CALENDAR_READY" = true
@@ -258,7 +258,7 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_PUBLIC_API_VERSION") | .value' <<< "$revision_json")" = 1.0
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "BOOKINGS_ENABLED") | .value' <<< "$revision_json")" = false
-          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = block
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = allow
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_SIGNUP_MODE") | .value' <<< "$revision_json")" = pilot
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "GUIDE_EDITOR_SITE_ORIGIN") | .value' <<< "$revision_json")" = https://editor.niho.life
@@ -296,14 +296,23 @@ jobs:
           page="$(curl -fsS "${URL}/experiences")"
           if grep -qF 'Preview with sample data' <<< "$page"; then exit 1; fi
           if grep -qF 'Details to be confirmed' <<< "$page"; then exit 1; fi
-          curl -fsS "${URL}/robots.txt" | grep -qF 'Disallow: /'
+          # Search indexing is open (owner 2026-11-07): no site-wide block, the sitemap is announced and lists the top page,
+          # the private paths stay excluded, and the top page carries no noindex.
+          robots="$(curl -fsS "${URL}/robots.txt")"
+          if grep -qxF 'Disallow: /' <<< "$robots"; then exit 1; fi
+          grep -qxF 'Sitemap: https://experience.niho.life/sitemap.xml' <<< "$robots"
+          for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
+            grep -qxF "Disallow: ${private_path}" <<< "$robots"
+          done
+          curl -fsS "${URL}/sitemap.xml" | grep -qF '<loc>https://experience.niho.life'
+          if curl -fsS "${URL}/" | grep -qE '<meta name="robots" content="[^"]*noindex'; then exit 1; fi
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
           {
             echo "Candidate: ${REVISION} ${URL}"
             echo "Runtime image digest (candidate_image_digest): ${runtime_digest}"
             echo "Pushed image digest: ${pushed_digest}"
-            echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=block; host signup=pilot; host calendar=${HOST_CALENDAR_ENABLED}"
+            echo "Commit: ${GITHUB_SHA}; bookings=false; indexing=allow; host signup=pilot; host calendar=${HOST_CALENDAR_ENABLED}"
             echo "Feature flags: ${FLAG_SUMMARY}"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -374,7 +383,7 @@ jobs:
           test "$(jq -r '.metadata.labels.commit' <<< "$revision_json")" = "${CANDIDATE_SHA:0:12}"
           jq -e '.status.conditions[] | select(.type == "Ready" and .status == "True")' <<< "$revision_json" >/dev/null
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "BOOKINGS_ENABLED") | .value' <<< "$revision_json")" = false
-          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = block
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = allow
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_SIGNUP_MODE") | .value' <<< "$revision_json")" = pilot
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "GUIDE_EDITOR_SITE_ORIGIN") | .value' <<< "$revision_json")" = https://editor.niho.life
@@ -432,7 +441,16 @@ jobs:
           page="$(curl -fsS "${URL}/experiences")"
           if grep -qF 'Preview with sample data' <<< "$page"; then exit 1; fi
           if grep -qF 'Details to be confirmed' <<< "$page"; then exit 1; fi
-          curl -fsS "${URL}/robots.txt" | grep -qF 'Disallow: /'
+          # Search indexing is open (owner 2026-11-07): no site-wide block, the sitemap is announced and lists the top page,
+          # the private paths stay excluded, and the top page carries no noindex.
+          robots="$(curl -fsS "${URL}/robots.txt")"
+          if grep -qxF 'Disallow: /' <<< "$robots"; then exit 1; fi
+          grep -qxF 'Sitemap: https://experience.niho.life/sitemap.xml' <<< "$robots"
+          for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
+            grep -qxF "Disallow: ${private_path}" <<< "$robots"
+          done
+          curl -fsS "${URL}/sitemap.xml" | grep -qF '<loc>https://experience.niho.life'
+          if curl -fsS "${URL}/" | grep -qE '<meta name="robots" content="[^"]*noindex'; then exit 1; fi
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
       - name: Promote the reviewed existing revision

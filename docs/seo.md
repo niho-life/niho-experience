@@ -57,7 +57,8 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 - `SITE_INDEXING=allow` **かつ** `EXPERIENCE_API_MODE=http` の時だけindexを許可する。それ以外（プレビュー・合成データ）は全ページ `noindex, nofollow`、robots.txtは全体を拒否、sitemapは空。
 - 値はリクエスト時に読むので、同じイメージのまま環境変数だけで切り替えられる。
-- 本番で有効にするのは公開受入（#15）の後。
+- 本番はオーナー決定（2026-11-07）で、販売開始（#15）より先に有効にした。`deploy-production.yml` が `SITE_INDEXING=allow` と `BOOKINGS_ENABLED=false` を設定し、候補と昇格の前に robots.txt（全体拒否が無い・sitemapの告知・非公開パスの除外）、sitemap、トップに `noindex` が無いことを確かめる。止める時は `block` に戻すPRを配備するか、直前の revision へ traffic を戻す。
+- 体験詳細の canonical は API（今は NIHO の公開API）が返す正規URLに従う。NIHO 側の `EXPERIENCE_SITE_PUBLIC_ORIGIN` が未設定の間は NIHO の企画ページ（`noindex`）を指すため、体験詳細はこのサイトの URL では索引に載らない想定。載せるには NIHO 側の切替が要る（[production-deploy.md](production-deploy.md#niho-の実apiとの整合)）。
 
 ## クローラーと AI 検索（robots.txt）
 
@@ -88,7 +89,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 - Search Console：ドメインプロパティ `experience.niho.life` を 2026-10-26 に追加した。親の `niho.life` のドメインプロパティを DNS で確認済みのため、所有権は自動で確認された。担当者を足す時は最小権限（閲覧だけなら「制限付き」）。
 - Bing Webmaster Tools：オーナーのアカウントで登録済み（2026-10-26）。
-- 検索公開（#15）の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
+- 検索公開の配備の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
 - 月次で見るもの：Search Console の「生成 AI 機能」レポートと、Bing の AI Performance レポート（計測の Issue で扱う）。数値は公開 Issue に貼らない。
 
 ## 初期HTMLに入れるもの
