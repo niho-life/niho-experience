@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { ChannelRuntime, type ChannelCapabilities, type ClaimedChannelJob, type WorkerIdentity } from "../src/channels.ts";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const T0 = "2099-01-01T00:00:00.000Z";
@@ -27,16 +27,10 @@ interface Fixture {
 }
 
 async function withFixture(name: string, work: (fixture: Fixture) => Promise<void>): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `${name}_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
-  let created = false;
+  const db = await createIsolatedDatabase(databaseUrl, `${name}`, { max: 8 });
+  const pool = db.pool;
   const clock = { now: new Date(T0) };
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    created = true;
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((file) => /^\d{4}.*\.sql$/.test(file)).sort();
-    for (const file of migrations) await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
     await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
     await pool.query(
@@ -69,8 +63,7 @@ async function withFixture(name: string, work: (fixture: Fixture) => Promise<voi
     const workerA = await runtime.authenticateWorker(credential.bearerToken);
     await work({ pool, runtime, store, clock, workerA });
   } finally {
-    if (created) await pool.query(`DROP SCHEMA "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 

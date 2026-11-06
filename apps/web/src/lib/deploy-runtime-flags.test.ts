@@ -64,6 +64,7 @@ const SETTING: Record<string, string> = {
   serviceAccountEmail: "admin@sample-project.iam.gserviceaccount.com",
   vapidPublicKey: `B${"A".repeat(86)}`,
   vapidSubject: "mailto:ops@example.com",
+  channelAdapters: "GetYourGuide/gyg-browser@1=observe+close+open",
 };
 const secretRef = (target: Target, item: Item) => (target === "stg" ? `${item.stg}:3` : `sample-${item.variable.toLowerCase().replaceAll("_", "-")}:2`);
 
@@ -98,6 +99,15 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "otaBookingNotificationsEnabled",
   EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
+  EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "channelWatchdogEnabled",
+  EXPERIENCE_CHANNEL_MANAGER_ENABLED: "channelManagerEnabled",
+  EXPERIENCE_CHANNEL_RUNTIME_ENABLED: "channelRuntimeEnabled",
+  EXPERIENCE_RESOURCE_GOOGLE_ENABLED: "resourceGoogleEnabled",
+  EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED: "resourceGoogleWatchEnabled",
+  EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED: "airbnbGoogleSetupEnabled",
+  EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED: "airbnbGoogleActivationEnabled",
+  EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED: "airbnbGoogleDeliveryEnabled",
+  EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED: "airbnbGoogleObservationEnabled",
 };
 
 const byEnv = new Map(FLAGS.map((flag) => [flag.env, flag]));
@@ -244,6 +254,84 @@ describe("the deploy workflows' feature flags", () => {
     expect(valid.problems).toEqual([]);
     expect(valid.env).toEqual({ NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg, HOST_PWA_ENABLED: "true" });
   });
+  it("puts the OTA watchdog on a revision exactly as the workflows wired it by hand before the table (#194)", () => {
+    // Staging: audience SITE_URL; production: https://experience.niho.life. Each project's experience-ota-watchdog caller.
+    const project: Record<Target, string> = { stg: "niho-app-stg", prod: "niho-app-prd" };
+    for (const target of ["stg", "prod"] as const) {
+      const resolved = resolve(target, { [`${PREFIX[target]}_CHANNEL_WATCHDOG_ENABLED`]: "true" });
+      expect(resolved.problems, target).toEqual([]);
+      const env = Object.fromEntries(Object.entries(resolved.env).filter(([name]) => name.includes("CHANNEL")));
+      // Besides the watchdog's three: only the host console's audience (and staging's PWA, on by default).
+      expect(Object.keys(resolved.env).filter((name) => !name.includes("CHANNEL")).sort(), target).toEqual(
+        target === "stg" ? ["HOST_PWA_ENABLED", "NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE"] : ["NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE"],
+      );
+      expect(env, target).toEqual({
+        EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "true",
+        EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE: SITE[target],
+        EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL: `experience-ota-watchdog@${project[target]}.iam.gserviceaccount.com`,
+      });
+      expect(resolved.secrets, target).toEqual({});
+      expect(resolveConfig(revision(target, resolved)).channelWatchdogEnabled, target).toBe(true);
+    }
+    expect(resolve("prod", {}).env.EXPERIENCE_CHANNEL_WATCHDOG_ENABLED).toBeUndefined();
+    // Production refused the watchdog without the host calendar; the table refuses it the same way.
+    expect(resolve("prod", { PROD_CHANNEL_WATCHDOG_ENABLED: "true" }, false).problems).toEqual([
+      "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED (PROD_CHANNEL_WATCHDOG_ENABLED) needs enable_host_calendar=true",
+    ]);
+  });
+
+  it("takes the OTA adapters only in the short form without commas or spaces", () => {
+    const vars = closure("stg", "EXPERIENCE_CHANNEL_RUNTIME_ENABLED");
+    const accepted = [
+      "GetYourGuide/gyg-browser@1=observe+close+open",
+      "GetYourGuide/gyg-browser@1=observe+readReservations;Viator/viator.api_v2@12=observe+close+open+create",
+    ];
+    for (const adapters of accepted) {
+      const resolved = resolve("stg", { ...vars, STG_CHANNEL_SUPPORTED_ADAPTERS: adapters });
+      expect(resolved.problems, adapters).toEqual([]);
+      expect(resolved.env.EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS).toBe(adapters);
+      expect(resolveConfig(revision("stg", resolved)).channelRuntimeEnabled, adapters).toBe(true);
+    }
+    const refused = [
+      "",
+      "GetYourGuide/gyg-browser@1=observe,close",
+      "GetYourGuide/gyg-browser@1=observe;Viator/viator@1=close,open",
+      "GetYourGuide/gyg-browser@1=observe + close",
+      " GetYourGuide/gyg-browser@1=observe",
+      "GetYourGuide/gyg-browser@1=",
+      "GetYourGuide/gyg-browser@1=observe;",
+      "GetYourGuide/gyg-browser@v1=observe",
+      "gyg-browser@1=observe",
+      "GetYourGuide/gyg-browser@1=delete",
+      "{\"GetYourGuide/gyg-browser@1\":{\"canObserve\":true}}",
+    ];
+    for (const adapters of refused) {
+      const { problems } = resolve("stg", { ...vars, STG_CHANNEL_SUPPORTED_ADAPTERS: adapters });
+      expect(problems, adapters).toHaveLength(1);
+      expect(problems[0], adapters).toContain("STG_CHANNEL_SUPPORTED_ADAPTERS");
+      if (adapters) expect(problems[0], adapters).not.toContain(adapters);
+    }
+  });
+
+  it("opens the OTA runtime only with the Admin console behind the channel manager, and the watchdog", () => {
+    const vars = closure("prod", "EXPERIENCE_CHANNEL_RUNTIME_ENABLED");
+    expect(vars).toMatchObject({ PROD_ADMIN_SUPPORT_CONSOLE_ENABLED: "true", PROD_CHANNEL_MANAGER_ENABLED: "true", PROD_CHANNEL_WATCHDOG_ENABLED: "true" });
+    expect(resolve("prod", vars).problems).toEqual([]);
+    const withoutAdmin = resolve("prod", { ...vars, PROD_ADMIN_SUPPORT_CONSOLE_ENABLED: "false" }).problems;
+    expect(withoutAdmin).toEqual(["EXPERIENCE_CHANNEL_MANAGER_ENABLED (PROD_CHANNEL_MANAGER_ENABLED) needs ADMIN_SUPPORT_CONSOLE_ENABLED"]);
+    const withoutWatchdog = resolve("prod", { ...vars, PROD_CHANNEL_WATCHDOG_ENABLED: "false" }).problems;
+    expect(withoutWatchdog).toEqual(["EXPERIENCE_CHANNEL_RUNTIME_ENABLED (PROD_CHANNEL_RUNTIME_ENABLED) needs EXPERIENCE_CHANNEL_WATCHDOG_ENABLED"]);
+  });
+
+  it("points the Google calendar watch at the stable site's webhook", () => {
+    for (const target of ["stg", "prod"] as const) {
+      const resolved = resolve(target, closure(target, "EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED"));
+      expect(resolved.problems, target).toEqual([]);
+      expect(resolved.env.EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL, target).toBe(`${SITE[target]}/api/google/calendar/watch`);
+      expect(resolveConfig(revision(target, resolved)).resourceGoogleWatchEnabled, target).toBe(true);
+    }
+  });
+
   it("covers every flag of the table with a config setting", () => {
     expect(FLAGS.map((flag) => flag.env).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
     expect(new Set(FLAGS.map((flag) => flag.variable)).size).toBe(FLAGS.length);

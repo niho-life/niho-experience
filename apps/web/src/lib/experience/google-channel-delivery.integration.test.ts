@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import {
@@ -15,6 +14,7 @@ vi.mock("server-only", () => ({}));
 
 import { saveGoogleConnection } from "./google-connection";
 import { executeGoogleChannelDelivery } from "./google-channel-delivery";
+import { createIsolatedDatabase } from "../../../../../packages/experience-store/test/helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -39,14 +39,8 @@ afterAll(() => {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
-  const { Pool } = await import("pg");
-  const schema = `web_google_delivery_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
-  await pool.query(`CREATE SCHEMA "${schema}"`);
-  const migrationUrl = new URL("../../../../../packages/experience-store/migrations/", import.meta.url);
-  for (const name of (await readdir(migrationUrl)).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-    await pool.query(await readFile(new URL(name, migrationUrl), "utf8"));
-  }
+  const db = await createIsolatedDatabase(databaseUrl, "web_google_delivery", { max: 8 });
+  const pool = db.pool;
   await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
   await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
   await pool.query(`INSERT INTO experience_products
@@ -110,13 +104,12 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const worker = await runtime.authenticateWorker(credential.bearerToken);
   const claimed = await runtime.claim(worker);
   if (!claimed) throw new Error("Synthetic Google delivery job was not claimable");
-  return { schema, pool, runtime, admin, account, listing, worker, claimed, generation,
+  return { db, pool, runtime, admin, account, listing, worker, claimed, generation,
     setNow: (value: Date) => { clockOffsetMs = value.getTime() - Date.now(); } };
 }
 
 async function cleanup(value: Fixture): Promise<void> {
-  await value.pool.query(`DROP SCHEMA IF EXISTS "${value.schema}" CASCADE`).catch(() => undefined);
-  await value.pool.end();
+  await value.db.dispose();
 }
 
 function injected(fetchImpl: typeof fetch) {

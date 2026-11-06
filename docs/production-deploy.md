@@ -83,10 +83,31 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED` | `OTA_BOOKING_NOTIFICATIONS_ENABLED` | push・DB | — | — | — |
 | `EXPERIENCE_HOST_MAIL_ENABLED` | `HOST_MAIL_ENABLED` | ホストの画面・DB、メール | — | — | — |
 | `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
+| `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED` | `CHANNEL_WATCHDOG_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE`＝サイトの URL、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL`＝`experience-ota-watchdog@<project>` |
+| `EXPERIENCE_CHANNEL_MANAGER_ENABLED` | `CHANNEL_MANAGER_ENABLED` | Admin（`ADMIN_SUPPORT_CONSOLE_ENABLED`）・DB | — | — | — |
+| `EXPERIENCE_CHANNEL_RUNTIME_ENABLED` | `CHANNEL_RUNTIME_ENABLED` | 掲載先の設定（manager）、watchdog、DB | `CHANNEL_SUPPORTED_ADAPTERS` → `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS`（短い書式） | — | — |
+| `EXPERIENCE_RESOURCE_GOOGLE_ENABLED` | `RESOURCE_GOOGLE_ENABLED` | ホストの画面・DB（Google OAuth の 3 つはホストの画面の配線が入れる） | — | — | — |
+| `EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED` | `RESOURCE_GOOGLE_WATCH_ENABLED` | リソースごとの Google | — | — | `EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL`＝サイトの URL ＋ `/api/google/calendar/watch` |
+| `EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED` | `AIRBNB_GOOGLE_SETUP_ENABLED` | ホストの画面・DB（Google OAuth は上と同じ） | — | — | — |
+| `EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED` | `AIRBNB_GOOGLE_ACTIVATION_ENABLED` | Airbnb×Google の設定（SETUP） | — | — | — |
+| `EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED` | `AIRBNB_GOOGLE_DELIVERY_ENABLED` | OTA の runtime | — | — | — |
+| `EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED` | `AIRBNB_GOOGLE_OBSERVATION_ENABLED` | Airbnb×Google の反映（DELIVERY） | — | — | — |
 
 - OTA の 2 つ（#194）は、OTA の予約の取込みそのものは開かない（取込みは channel runtime の設定のまま）。`0036` を先に適用する。[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」「ホストへの通知（#194）」。
 - ホストへのメール（#194、オーナー決定 2026-11-01）：ログインのときに NIHO の確認済みのメールを写し、設定 › 通知で宛先を変えられ、新しい予約・取消・日時変更をメールでも知らせる。メールはメール job が送るので、メール（`EXPERIENCE_GUEST_MAIL_ENABLED`）が要る。新しい Secret・Scheduler・サービスアカウントは無い。**`0038` を新しいコードより先に適用する**（予約の確定・取消と OTA の台帳の transaction が、宛先の表を読んで行を積むため。フラグが off でも読む。off の間は宛先が 1 件も無いので行は積まれない）。[guest-booking.md](guest-booking.md) の「ホストへの通知」。
 - 日本語サイト（#59）の `JAPANESE_SITE_ENABLED` は、公式配備の表に載せただけで、既定は OFF（`STG_` / `PROD_` とも未設定）。ON にするのは、日本語の文言（このリポの `ja-static-copy.ts`。`EXPERIENCE_PUBLICATIONS_ENABLED` の環境では NIHO の release は使わない）をオーナーが確認し、実機確認が済んでから、専用の変更で行う（[localization-consumer.md](localization-consumer.md)「有効化の前に確かめること」）。
+- OTA の枠管理（#194、[ota-runtime.md](ota-runtime.md)、[ota-google-channel-flow.md](ota-google-channel-flow.md)）の 9 つは、すべて既定 OFF。**今はどの variable も作らない**（`STG_` / `PROD_` とも未設定のまま）。
+  - `CHANNEL_WATCHDOG_ENABLED` は、これまで表に無く stg・本番の workflow に直接書かれていたが、表へ移った。variable 名は同じなので、既存の `STG_CHANNEL_WATCHDOG_ENABLED` / `PROD_CHANNEL_WATCHDOG_ENABLED` はそのまま使える（Cloud Run に付く 3 つの環境変数の名前と値も以前と同じ）。
+  - `CHANNEL_SUPPORTED_ADAPTERS` は短い書式だけを受け付ける：`site/adapter@version=能力(+能力)` を `;` でつなぐ（例 `GetYourGuide/gyg-browser@1=observe+close+open`）。能力は `observe`・`readReservations`・`close`・`open`・`create`。`--set-env-vars` の区切りになるので、値にカンマ・空白を持てない（JSON の書式は配備では使えない）。
+  - runtime は manager（掲載先の設定）・watchdog・adapters を要る。新しい OPEN の保留（heartbeat の途絶後の `open_hold_since`）を watchdog がするため、watchdog 無しでは開かない。manager は Admin を要るので、runtime には `ADMIN_SUPPORT_CONSOLE_ENABLED` も要る。
+  - Google の watch の webhook（`EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL`）は workflow がサイトの URL から入れる。variable は無い。
+  - **有効化の順序**（どれも variable を変えて配備するだけ。止めるときは variable を消して新しい候補を作る）：
+    1. `CHANNEL_WATCHDOG_ENABLED`（配備・昇格のあとで Cloud Scheduler `experience-ota-watchdog` を再開する。[ota-runtime.md](ota-runtime.md)「クラウド watchdog」）
+    2. `CHANNEL_MANAGER_ENABLED`
+    3. `CHANNEL_SUPPORTED_ADAPTERS` と `CHANNEL_RUNTIME_ENABLED`（最初は読取りと開閉だけ。`create` は付けない）
+    4. `RESOURCE_GOOGLE_ENABLED`（watch は `RESOURCE_GOOGLE_WATCH_ENABLED` で別に開く）
+    5. Airbnb×Google を `AIRBNB_GOOGLE_SETUP_ENABLED` → `AIRBNB_GOOGLE_ACTIVATION_ENABLED` → `AIRBNB_GOOGLE_DELIVERY_ENABLED` → `AIRBNB_GOOGLE_OBSERVATION_ENABLED`
+  - 本番は stg の受入のあとで、同じ順に開く。
 - 「ホストの画面・DB」は本番では `enable_host_calendar=true`（と `PROD_HOST_CALENDAR_READY=true`）。サイトの URL は `https://experience.niho.life`、`<project>` は `niho-app-prd`。
 - `PROVIDER_PAGES_API_ENABLED` はlegacy NIHO provider-pages consumerのflagで、Experience商品・原稿・写真・公開には使用しない。新しい販売フローではOFFを維持する。
 - `PROVIDER_OPERATIONS_API_ENABLED` は旧NIHO予約の一覧・詳細・承認/辞退/取消／返金・メッセージなど、NIHOが引き続き所有する予約運営業務の限定APIだけを扱う。NIHO本番に `APP_CONNECT_WEB_ORIGINS` と許可されたservice identityを設定し、契約と旧予約権限をstgで受け入れてから開く。Experienceの商品・原稿・写真・公開は `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` が使うExperience BFFだけで行う。NIHOのtokenはExperience serverだけで扱う。旧 `niho.life/experiences/provider` 転送はNIHO Web側の別配備。

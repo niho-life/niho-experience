@@ -1,29 +1,23 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { ChannelRuntime } from "../src/channels.ts";
 import { BookingUnavailableError, StoreConflictError } from "../src/errors.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
 
 describe("PostgreSQL shared inventory", { skip: databaseUrl === undefined }, () => {
   it("serializes private groups and shared resources while keeping legacy seats and durable reconciliation", async () => {
-    const { Pool } = await import("pg");
-    const schema = `shared_inventory_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "shared_inventory", { max: 8 });
+    const pool = db.pool;
     const actor = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
     const otherActor = { providerId: "provider-b", nihoUserId: "owner-b" } as const;
     let sequence = 1;
     const nextCommand = () => command(sequence++);
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url)))
-        .filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query(
         `INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES
@@ -270,8 +264,7 @@ describe("PostgreSQL shared inventory", { skip: databaseUrl === undefined }, () 
       await runtime.consumeCalendarOutbox(200, worker);
       assert.equal((await pool.query("SELECT processed_at FROM outbox_messages WHERE deduplication_key='notification-only'")).rows[0]?.processed_at, null);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

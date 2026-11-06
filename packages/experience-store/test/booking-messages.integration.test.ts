@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
@@ -13,6 +12,7 @@ import { GuestQuestionRepository } from "../src/guest-questions.ts";
 import { HOST_NOTIFICATION_TOPICS, parseBookingMessagePayload } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 /** 予約ごとのメッセージ (#285 slice 6b): a booking's thread between its guest and the host, against a real schema. Synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -51,13 +51,9 @@ interface Context {
 }
 
 async function withSchema(run: (context: Context) => Promise<void>): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `booking_messages_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "booking_messages", { max: 4 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
     await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ('provider-a','owner-a','OWNER',true),('provider-a','editor-a','EDITOR',true),('provider-b','owner-b','OWNER',true)");
     await pool.query(
@@ -77,8 +73,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     await seedTestPublications(pool);
     await run({ pool, store, guests, access: new GuestBookingAccess(pool), messages: new GuestBookingMessages(pool), questions: new GuestQuestionRepository(pool) });
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 

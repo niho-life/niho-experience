@@ -1,3 +1,5 @@
+import { parseChannelAdapters } from "./experience/channel-adapters";
+
 type Env = Record<string, string | undefined>;
 
 /**
@@ -292,6 +294,137 @@ function hostMailSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled:
   if (!hostConsoleEnabled) throw new Error("EXPERIENCE_HOST_MAIL_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
   if (!guestMailEnabled) throw new Error("EXPERIENCE_HOST_MAIL_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true (the mail job) in http mode");
   return true;
+}
+
+/*
+ * OTA の枠管理 (docs/ota-runtime.md, docs/ota-google-channel-flow.md). These settings are the start-up gate and the deploy
+ * table's counterpart (scripts/deploy/runtime-flags.mjs): a flag turned on without what it needs stops the server, naming
+ * the setting, never its value. The routes and jobs still read process.env where they are used (channel-runtime.ts,
+ * resource-google.ts, google-channel-*.ts), so these do not change what is served. HTTP only, all off by default.
+ */
+
+const GOOGLE_OAUTH_SETTINGS = ["EXPERIENCE_GOOGLE_CLIENT_ID", "EXPERIENCE_GOOGLE_CLIENT_SECRET", "EXPERIENCE_GOOGLE_TOKEN_KEY"] as const;
+
+function requireSettings(name: string, env: Env, required: readonly string[]): void {
+  for (const setting of required) {
+    if (!env[setting]?.trim()) throw new Error(`${name}=true needs ${setting} in http mode`);
+  }
+}
+
+function isHttpsOrigin(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash;
+}
+
+/** The public endpoint Google calls for watched calendars: https, not loopback, at /api/google/calendar/watch. */
+function isGoogleWatchWebhookUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && !isLoopbackHost(url.hostname) && !url.username && !url.password && !url.search && !url.hash
+    && url.pathname === "/api/google/calendar/watch";
+}
+
+/**
+ * The OTA runtime watchdog (POST /internal/ota/v1/watchdog): Cloud Scheduler calls it with a Google ID token of its own
+ * service account, so both identity settings are required; it reads the experience DB under the host console's deploy.
+ */
+function channelWatchdogSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): boolean {
+  const name = "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  requireSettings(name, env, ["EXPERIENCE_DATABASE_URL"]);
+  if (!isHttpsOrigin(env.EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE?.trim() ?? "")) {
+    throw new Error(`${name}=true needs EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE (an https origin) in http mode`);
+  }
+  if (!SERVICE_ACCOUNT_EMAIL.test(env.EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL?.trim() ?? "")) {
+    throw new Error(`${name}=true needs EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL (a service account) in http mode`);
+  }
+  return true;
+}
+
+/** The Admin channel manager API (掲載先の設定): behind a fresh Admin session, on the experience DB. */
+function channelManagerSetting(apiMode: "mock" | "http", env: Env, adminSupportConsoleEnabled: boolean): boolean {
+  const name = "EXPERIENCE_CHANNEL_MANAGER_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!adminSupportConsoleEnabled) throw new Error(`${name}=true needs ADMIN_SUPPORT_CONSOLE_ENABLED=true in http mode`);
+  requireSettings(name, env, ["EXPERIENCE_DATABASE_URL"]);
+  return true;
+}
+
+/**
+ * The worker API (claim, preflight, result): only with the manager that configures listings, the watchdog that recovers
+ * stuck jobs, and a valid allowlist of at least one adapter (an empty or malformed one would claim nothing).
+ */
+function channelRuntimeSetting(apiMode: "mock" | "http", env: Env, channelManagerEnabled: boolean, channelWatchdogEnabled: boolean): boolean {
+  const name = "EXPERIENCE_CHANNEL_RUNTIME_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!channelManagerEnabled) throw new Error(`${name}=true needs EXPERIENCE_CHANNEL_MANAGER_ENABLED=true in http mode`);
+  if (!channelWatchdogEnabled) throw new Error(`${name}=true needs EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true in http mode`);
+  requireSettings(name, env, ["EXPERIENCE_DATABASE_URL"]);
+  const adapters = parseChannelAdapters(env.EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS);
+  if (!adapters || Object.keys(adapters).length === 0) {
+    throw new Error(`${name}=true needs EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS (a valid allowlist of at least one adapter) in http mode`);
+  }
+  return true;
+}
+
+/** Per-resource Google busy input (#238), and its push notifications from Google to the public webhook. */
+function resourceGoogleSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): { enabled: boolean; watchEnabled: boolean } {
+  const name = "EXPERIENCE_RESOURCE_GOOGLE_ENABLED";
+  const watchName = "EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED";
+  const enabled = apiMode === "http" && env[name] === "true";
+  const watchEnabled = apiMode === "http" && env[watchName] === "true";
+  if (enabled) {
+    if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+    requireSettings(name, env, ["EXPERIENCE_DATABASE_URL", ...GOOGLE_OAUTH_SETTINGS]);
+  }
+  if (watchEnabled) {
+    if (!enabled) throw new Error(`${watchName}=true needs ${name}=true in http mode`);
+    if (!isGoogleWatchWebhookUrl(env.EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL?.trim() ?? "")) {
+      throw new Error(`${watchName}=true needs EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL (the public https /api/google/calendar/watch) in http mode`);
+    }
+  }
+  return { enabled, watchEnabled };
+}
+
+/**
+ * Airbnb availability through an app-created Google output calendar (#270): the OWNER's setup and activation of a binding,
+ * and the channel runtime's delivery to it and the observation paired with that delivery.
+ */
+function airbnbGoogleSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, channelRuntimeEnabled: boolean): {
+  setupEnabled: boolean;
+  activationEnabled: boolean;
+  deliveryEnabled: boolean;
+  observationEnabled: boolean;
+} {
+  const on = (name: string) => apiMode === "http" && env[name] === "true";
+  const setupEnabled = on("EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED");
+  const activationEnabled = on("EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED");
+  const deliveryEnabled = on("EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED");
+  const observationEnabled = on("EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED");
+  if (setupEnabled) {
+    if (!hostConsoleEnabled) throw new Error("EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
+    requireSettings("EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED", env, ["EXPERIENCE_DATABASE_URL", ...GOOGLE_OAUTH_SETTINGS]);
+  }
+  if (activationEnabled && !setupEnabled) {
+    throw new Error("EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED=true needs EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED=true in http mode");
+  }
+  if (deliveryEnabled && !channelRuntimeEnabled) {
+    throw new Error("EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED=true needs EXPERIENCE_CHANNEL_RUNTIME_ENABLED=true in http mode");
+  }
+  if (observationEnabled && !deliveryEnabled) {
+    throw new Error("EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED=true needs EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED=true in http mode");
+  }
+  return { setupEnabled, activationEnabled, deliveryEnabled, observationEnabled };
 }
 
 /** The terms version a traveler agrees to (consent.agreedVersion, 1-100 characters): printable ASCII without spaces. */
@@ -605,6 +738,12 @@ export function resolveConfig(env: Env) {
   const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
   const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
+  // OTA の枠管理: start-up gates only; the routes still read their flags from process.env (see channelWatchdogSetting).
+  const channelWatchdogEnabled = channelWatchdogSetting(apiMode, env, hostConsoleEnabled);
+  const channelManagerEnabled = channelManagerSetting(apiMode, env, adminSupportConsoleEnabled);
+  const channelRuntimeEnabled = channelRuntimeSetting(apiMode, env, channelManagerEnabled, channelWatchdogEnabled);
+  const resourceGoogle = resourceGoogleSettings(apiMode, env, hostConsoleEnabled);
+  const airbnbGoogle = airbnbGoogleSettings(apiMode, env, hostConsoleEnabled, channelRuntimeEnabled);
   // 設定 › カレンダー's bookings feed (#109) for other calendars. The mock keeps its synthetic address on screen; http
   // opens per environment after migration 0035 is applied and accepted.
   const hostCalendarFeedEnabled = hostCalendarFeedSetting(apiMode, env, hostConsoleEnabled);
@@ -749,6 +888,16 @@ export function resolveConfig(env: Env) {
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,
     googleJobsServiceAccountEmail: googleCalendarJobs.serviceAccountEmail,
+    // OTA の枠管理: for the start-up gate and the deploy table; the routes read process.env, not these.
+    channelWatchdogEnabled,
+    channelManagerEnabled,
+    channelRuntimeEnabled,
+    resourceGoogleEnabled: resourceGoogle.enabled,
+    resourceGoogleWatchEnabled: resourceGoogle.watchEnabled,
+    airbnbGoogleSetupEnabled: airbnbGoogle.setupEnabled,
+    airbnbGoogleActivationEnabled: airbnbGoogle.activationEnabled,
+    airbnbGoogleDeliveryEnabled: airbnbGoogle.deliveryEnabled,
+    airbnbGoogleObservationEnabled: airbnbGoogle.observationEnabled,
     // The feed's key is not here: it is read where it is used.
     hostCalendarFeedEnabled,
     // The Claude API key is not here: it is read where it is used.

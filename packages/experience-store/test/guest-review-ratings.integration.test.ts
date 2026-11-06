@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { StoreAccessDeniedError } from "../src/errors.ts";
 import { GuestReviewRatings } from "../src/guest-review-ratings.ts";
 import { GuestReviewRepository } from "../src/guest-reviews.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 /** 体験の一覧's ★ (#108): every shown review counted and averaged by experience, against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -13,13 +13,9 @@ const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
 const ownerB = { providerId: "provider-b", nihoUserId: "owner-b" } as const;
 
 async function withSchema(run: (pool: Pool) => Promise<void>): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `review_ratings_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "review_ratings", { max: 4 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
     await pool.query(
       `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES
@@ -42,8 +38,7 @@ async function withSchema(run: (pool: Pool) => Promise<void>): Promise<void> {
     }
     await run(pool);
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 
