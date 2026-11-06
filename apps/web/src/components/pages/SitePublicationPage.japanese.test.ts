@@ -19,8 +19,8 @@ const item = {
   publication: {
     slug: "synthetic-tea",
     publicTitle: "Synthetic English title",
-    content: { lead: "English lead", description: "English description", facts: { language: "English" }, highlights: [], included: ["English materials"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [] },
-    japanese: { title: "合成茶道体験", lead: "日本語の紹介", description: "日本語の説明", language: "日本語", highlights: [], included: ["日本語の材料"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [] },
+    content: { lead: "English lead", description: "English description", facts: { language: "English" }, highlights: [], included: ["English materials"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [{ question: "English FAQ question", answer: "English FAQ answer" }] },
+    japanese: { title: "合成茶道体験", lead: "日本語の紹介", description: "日本語の説明", language: "日本語", highlights: [], included: ["日本語の材料"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] },
     photos: [{ src: "/synthetic-photo.jpg", alt: "English photo alt", altJa: "日本語の写真", publicCredit: null }],
     providerPhoto: null,
     businessLogo: null,
@@ -70,6 +70,18 @@ describe("Experience publication Japanese sale presentation", () => {
       languages: { en: "https://experience.example.test/experiences/synthetic-tea", ja: "https://experience.example.test/ja/experiences/synthetic-tea", "x-default": "https://experience.example.test/experiences/synthetic-tea" },
     });
     expect(sitePublicationMetadata(item, "ja").openGraph).toMatchObject({ locale: "ja_JP", title: "合成茶道体験" });
+  });
+
+  it("shows only the Japanese manuscript's FAQ: none when the Japanese FAQ is empty, never the English one", async () => {
+    const empty = renderToStaticMarkup(await SitePublicationPage({ item, locale: "ja" }));
+    expect(empty).not.toContain('id="faq"');
+    expect(empty).not.toContain("English FAQ question");
+    const withFaq = { ...item, publication: { ...item.publication, japanese: { ...item.publication.japanese!, faq: [{ question: "雨でも開催しますか？", answer: "屋内で開催します。" }] } } } as SitePublicExperience;
+    const html = renderToStaticMarkup(await SitePublicationPage({ item: withFaq, locale: "ja" }));
+    expect(html).toMatch(/<h2[^>]*>よくある質問<\/h2>/);
+    expect(html).toContain("雨でも開催しますか？");
+    expect(html).toContain("屋内で開催します。");
+    expect(html).not.toContain("English FAQ question");
   });
 
   it("shows Japanese booking conditions, consent, total, and action labels", () => {

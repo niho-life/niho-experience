@@ -28,6 +28,12 @@ import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
+import {
+  englishPublicationManuscriptOf,
+  publicationFaqIssue,
+  publicationManuscriptFingerprint,
+  validPublicationLocaleManuscript,
+} from "./experience-publication-manuscript.ts";
 import type { HostActor, JsonValue, ProductRecord, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, normalizeCurrency } from "./validation.ts";
 
@@ -417,14 +423,8 @@ function validateChecks(checks: ExperiencePublicationContentChecks): void {
   }
 }
 
-const MANUSCRIPT_LOCALE_KEYS = ["title", "lead", "description", "language", "highlights", "included", "notIncluded", "knowBeforeYouGo", "notSuitableFor", "timeline"] as const;
-
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function exactObjectKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  return Object.keys(value).every((key) => expected.includes(key)) && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function canonicalJson(value: unknown): string {
@@ -435,24 +435,6 @@ function canonicalJson(value: unknown): string {
   return serialized;
 }
 
-function validLocaleManuscript(value: unknown): value is Record<string, unknown> {
-  if (!isJsonRecord(value) || !exactObjectKeys(value, MANUSCRIPT_LOCALE_KEYS)) return false;
-  for (const key of ["title", "lead", "description", "language"] as const) {
-    if (typeof value[key] !== "string" || value[key].length > (key === "description" ? 8_000 : 1_000)) return false;
-  }
-  for (const key of ["highlights", "included", "notIncluded", "knowBeforeYouGo", "notSuitableFor"] as const) {
-    if (!Array.isArray(value[key]) || value[key].length > 30
-      || value[key].some((item) => typeof item !== "string" || item.length > 1_000)) return false;
-  }
-  if (!Array.isArray(value.timeline) || value.timeline.length > 20 || value.timeline.some((item) => !isJsonRecord(item)
-    || !exactObjectKeys(item, ["time", "title", "text", "photoIndex"])
-    || typeof item.time !== "string" || item.time.length > 80
-    || typeof item.title !== "string" || item.title.length > 200
-    || typeof item.text !== "string" || item.text.length > 1_000
-    || (item.photoIndex !== null && (!Number.isSafeInteger(item.photoIndex) || Number(item.photoIndex) < 0)))) return false;
-  return true;
-}
-
 const fingerprint = (value: unknown): string => createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
 
 /** Shared server-side content/fingerprint review. ADMIN review never writes OWNER confirmation into the draft. */
@@ -461,20 +443,10 @@ export function publicationManuscriptReview(
   publicTitle: string,
 ): ExperiencePublicationManuscriptReview {
   const japanese = content.ja;
-  const english = {
-    title: publicTitle,
-    lead: content.lead,
-    description: content.description,
-    language: isJsonRecord(content.facts) ? content.facts.language : null,
-    highlights: content.highlights,
-    included: content.included,
-    notIncluded: content.notIncluded,
-    knowBeforeYouGo: content.knowBeforeYouGo,
-    notSuitableFor: content.notSuitableFor,
-    timeline: content.timeline,
-  };
-  const japaneseFingerprint = validLocaleManuscript(japanese) ? fingerprint(japanese) : null;
-  const englishFingerprint = validLocaleManuscript(english) ? fingerprint(english) : null;
+  const english = englishPublicationManuscriptOf(publicTitle, content);
+  // An empty or absent FAQ is excluded from both fingerprints (byte-identical to pre-FAQ manuscripts).
+  const japaneseFingerprint = validPublicationLocaleManuscript(japanese) ? publicationManuscriptFingerprint(japanese) : null;
+  const englishFingerprint = validPublicationLocaleManuscript(english) ? publicationManuscriptFingerprint(english) : null;
   const translation = content.translation;
   const ownerConfirmed = japaneseFingerprint !== null && englishFingerprint !== null
     && isJsonRecord(translation)
@@ -636,6 +608,12 @@ function validateDraft(input: ExperiencePublicationDraftInput): ExperiencePublic
   }
   try { JSON.stringify(input.content); }
   catch (error) { throw new StoreValidationError("product.content must be JSON serializable.", { cause: error }); }
+  // FAQ is optional, but a written FAQ must be complete: nothing is dropped silently.
+  const faqIssue = input.content.faq === undefined ? null : publicationFaqIssue(input.content.faq);
+  if (faqIssue) throw new StoreValidationError(`product.content.${faqIssue}`);
+  const japanese = input.content.ja;
+  const japaneseFaqIssue = isJsonRecord(japanese) && japanese.faq !== undefined ? publicationFaqIssue(japanese.faq) : null;
+  if (japaneseFaqIssue) throw new StoreValidationError(`product.content.ja.${japaneseFaqIssue}`);
   return { ...input, currency: normalizeCurrency(input.currency) };
 }
 

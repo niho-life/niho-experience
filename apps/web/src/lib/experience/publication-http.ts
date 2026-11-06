@@ -6,7 +6,10 @@ import {
   StoreNotFoundError,
   StoreValidationError,
   validSaleTerms,
+  publicationFaqIssue,
+  publicationManuscriptFingerprint,
   publicationManuscriptReview,
+  validPublicationLocaleManuscript,
   type ExperienceHostMediaAssetInput,
   type ExperienceHostMediaSelectionInput,
   type ExperienceHostProviderMediaAssetInput,
@@ -58,12 +61,6 @@ function isRecord(value: unknown): value is RecordValue {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (isRecord(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-
 function exactKeys(value: RecordValue, allowed: readonly string[], required: readonly string[] = allowed): boolean {
   return Object.keys(value).every((key) => allowed.includes(key)) && required.every((key) => Object.hasOwn(value, key));
 }
@@ -97,12 +94,19 @@ function decodeRevision(value: unknown): ProductRevision | null {
   } catch { return null; }
 }
 
+/** Optional FAQ (English top-level, Japanese under `ja`): absent is fine, a written one must be complete. */
+function validContentFaq(content: RecordValue): boolean {
+  if (content.faq !== undefined && publicationFaqIssue(content.faq) !== null) return false;
+  return !isRecord(content.ja) || content.ja.faq === undefined || publicationFaqIssue(content.ja.faq) === null;
+}
+
 function validDraft(value: unknown): value is ProductDraftBody {
   return isRecord(value)
     && exactKeys(value, ["slug", "publicTitle", "content", "currency", "unitAmount"])
     && typeof value.slug === "string" && value.slug.length >= 1 && value.slug.length <= 160
     && typeof value.publicTitle === "string" && value.publicTitle.length >= 1 && value.publicTitle.length <= 300
     && isRecord(value.content)
+    && validContentFaq(value.content)
     && value.currency === "JPY"
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
     && (value.unitAmount === 0 || value.unitAmount >= 50);
@@ -617,24 +621,7 @@ export async function providerMediaAssetRequest(request: Request, context: { par
   } catch (error) { return mapStoreError(error); }
 }
 
-const MANUSCRIPT_LOCALE_KEYS = ["title", "lead", "description", "language", "highlights", "included", "notIncluded", "knowBeforeYouGo", "notSuitableFor", "timeline"] as const;
-
-function validLocaleManuscript(value: unknown): value is Record<string, string | readonly string[]> {
-  if (!isRecord(value) || !exactKeys(value, MANUSCRIPT_LOCALE_KEYS)) return false;
-  for (const key of ["title", "lead", "description", "language"] as const) {
-    if (typeof value[key] !== "string" || value[key].length > (key === "description" ? 8_000 : 1_000)) return false;
-  }
-  for (const key of ["highlights", "included", "notIncluded", "knowBeforeYouGo", "notSuitableFor"] as const) {
-    if (!Array.isArray(value[key]) || value[key].length > 30 || value[key].some((item) => typeof item !== "string" || item.length > 1_000)) return false;
-  }
-  if (!Array.isArray(value.timeline) || value.timeline.length > 20 || value.timeline.some((item) => !isRecord(item)
-    || !exactKeys(item, ["time", "title", "text", "photoIndex"])
-    || typeof item.time !== "string" || item.time.length > 80
-    || typeof item.title !== "string" || item.title.length > 200
-    || typeof item.text !== "string" || item.text.length > 1_000
-    || (item.photoIndex !== null && (!Number.isSafeInteger(item.photoIndex) || (item.photoIndex as number) < 0)))) return false;
-  return true;
-}
+const faqLength = (manuscript: Readonly<Record<string, unknown>>): number => Array.isArray(manuscript.faq) ? manuscript.faq.length : 0;
 
 /** Produce an uncommitted English draft. The host UI must review and save it through normal product CAS. */
 export async function publicationTranslationRequest(request: Request, context: PublicationProductContext): Promise<Response> {
@@ -643,7 +630,7 @@ export async function publicationTranslationRequest(request: Request, context: P
   if (!PRODUCT_ID.test(productId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
   const parsed = await parseJson(request);
-  if (parsed instanceof Response || !exactKeys(parsed, ["japanese"]) || !validLocaleManuscript(parsed.japanese)) return responseError("INVALID_INPUT", 400);
+  if (parsed instanceof Response || !exactKeys(parsed, ["japanese"]) || !validPublicationLocaleManuscript(parsed.japanese)) return responseError("INVALID_INPUT", 400);
   const prepared = await prepareHost("OWNER");
   if (!prepared.ok) return prepared.response;
   const translator = anthropicTranslator({ timeoutMs: 45_000 });
@@ -651,12 +638,13 @@ export async function publicationTranslationRequest(request: Request, context: P
   const japanese = parsed.japanese;
   try { await prepared.repository.getProduct(prepared.context.actor, productId); }
   catch (error) { return mapStoreError(error); }
-  const sourceFingerprint = createHash("sha256").update(canonicalJson(japanese), "utf8").digest("hex");
+  const sourceFingerprint = publicationManuscriptFingerprint(japanese);
   const translated = await translator(experienceManuscriptToEnglish(japanese));
   if (!translated.ok) return responseError("TRANSLATION_UNAVAILABLE", 503);
   let english: unknown;
   try { english = JSON.parse(translated.text); } catch { return responseError("TRANSLATION_UNAVAILABLE", 503); }
-  if (!validLocaleManuscript(english)) return responseError("TRANSLATION_UNAVAILABLE", 503);
+  // The draft must keep the same FAQ rows as the source (none, or one translated row per Japanese row).
+  if (!validPublicationLocaleManuscript(english) || faqLength(english) !== faqLength(japanese)) return responseError("TRANSLATION_UNAVAILABLE", 503);
   return noStoreJson({ sourceFingerprint, english });
 }
 

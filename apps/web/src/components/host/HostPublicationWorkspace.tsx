@@ -16,6 +16,7 @@ import { publicationCanPublish, publicationNextAction } from "./publication-work
 import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishPublicationManuscript } from "./publication-confirmation";
 import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-rights";
 import { reapplyProviderMediaEdits } from "./publication-conflict";
+import { PUBLICATION_FAQ_LIMITS, publicationContentFaqProblem, publicationFaqProblem, publicationFaqRows, withPublicationFaq, type PublicationFaqRow } from "./publication-faq";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
 type SaleTerms = {
@@ -56,7 +57,7 @@ type Product = {
 };
 type ProductResponse = { product: Product; publicationConsentVersion?: string };
 type TimelineItem = { time: string; title: string; text: string; photoIndex: number | null };
-type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[] };
+type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[]; faq?: PublicationFaqRow[] };
 type Props = {
   productId?: string;
   create?: boolean;
@@ -137,7 +138,10 @@ function isRecord(value: unknown): value is Record<string, unknown> { return typ
 function lines(value: unknown): string { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("\n") : ""; }
 function japaneseManuscript(content: Record<string, unknown>): LocaleManuscript {
   const source = isRecord(content.ja) ? content.ja : {};
+  // FAQ is optional: no key unless rows exist, so a pre-FAQ manuscript keeps its exact shape and fingerprint.
+  const faq = publicationFaqRows(source.faq);
   return {
+    ...(faq.length ? { faq } : {}),
     title: typeof source.title === "string" ? source.title : "", lead: typeof source.lead === "string" ? source.lead : "",
     description: typeof source.description === "string" ? source.description : "", language: typeof source.language === "string" ? source.language : "",
     highlights: Array.isArray(source.highlights) ? source.highlights.filter((item): item is string => typeof item === "string") : [],
@@ -275,6 +279,17 @@ export function HostPublicationWorkspace({
     const next = { ...japaneseSourceRef.current, [key]: value } as LocaleManuscript;
     japaneseSourceRef.current = next;
     setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+  }
+
+  function updateFaq(locale: "en" | "ja", rows: PublicationFaqRow[]) {
+    if (locale === "ja") {
+      const next = withPublicationFaq(japaneseSourceRef.current, rows);
+      japaneseSourceRef.current = next;
+      setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+      return;
+    }
+    englishDraftRef.current = { ...englishDraftRef.current, content: withPublicationFaq(englishDraftRef.current.content, rows) };
+    setContent((current) => withPublicationFaq({ ...current, translation: { ...(isRecord(current.translation) ? current.translation : {}), confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null } }, rows));
   }
 
   function updateEnglishTitle(value: string) {
@@ -442,6 +457,8 @@ export function HostPublicationWorkspace({
 
   async function createProduct(event: React.FormEvent) {
     event.preventDefault(); if (busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null) return;
+    const faqProblem = publicationContentFaqProblem(content);
+    if (faqProblem) { setError(faqProblem); return; }
     setBusy(true); setError(""); setNotice("");
     const draftContent = { ...blankContent, ...content };
     try {
@@ -475,6 +492,8 @@ export function HostPublicationWorkspace({
     const amount = asPublicationPrice(unitAmount);
     const saleTerms = publicationTermsPayload(terms, product.saleTerms);
     if (draftDirty && amount === null) { setError("料金は無料なら0円、有料なら50円以上の整数で入力してください。"); return; }
+    const faqProblem = draftDirty ? publicationContentFaqProblem(content) : null;
+    if (faqProblem) { setError(`${faqProblem}入力はこのブラウザーに保持しています。`); return; }
     if (!draftDirty && !mediaDirty && !termsDirty && !providerMediaDirty) return;
     if (termsDirty && !saleTerms && !draftDirty && !mediaDirty && !providerMediaDirty) {
       setError("料金・取消条件はまだ保存できません。人数と、確定した取消期限・返金割合を入力してください。入力はこのブラウザーに保持しています。");
@@ -713,6 +732,8 @@ export function HostPublicationWorkspace({
     if (!product || translationBusy || busy) return;
     const japanese = japaneseSourceRef.current;
     if (!japanese.title.trim() || !japanese.lead.trim() || !japanese.description.trim()) { setError("日本語の商品名・紹介文・説明を入力してください。"); return; }
+    const faqProblem = publicationFaqProblem(publicationFaqRows(japanese.faq), "日本語");
+    if (faqProblem) { setError(faqProblem); return; }
     const snapshot = canonicalJson(japanese);
     const englishSnapshot = canonicalJson(englishDraftRef.current);
     setTranslationBusy(true); setError(""); setNotice("");
@@ -726,12 +747,13 @@ export function HostPublicationWorkspace({
       if (canonicalJson(englishDraftRef.current) !== englishSnapshot) { setNotice("翻訳中に英語原稿が編集されたため、結果を破棄しました。入力した英語は保持しています。"); return; }
       if (typeof result.sourceFingerprint !== "string" || !isRecord(result.english)) throw new Error("翻訳結果を確認できませんでした。原稿は変更していません。");
       const english = result.english as unknown as LocaleManuscript;
-      const nextContent = {
+      // The translation keeps the Japanese FAQ rows (the server checks the count); none removes the English FAQ.
+      const nextContent = withPublicationFaq({
         ...englishDraftRef.current.content, lead: english.lead, description: english.description, facts: { language: english.language },
         highlights: english.highlights, included: english.included, notIncluded: english.notIncluded,
         knowBeforeYouGo: english.knowBeforeYouGo, notSuitableFor: english.notSuitableFor, timeline: english.timeline,
         translation: { sourceFingerprint: result.sourceFingerprint, confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null },
-      };
+      }, publicationFaqRows(english.faq));
       englishDraftRef.current = { title: english.title, content: nextContent };
       setTitle(english.title);
       setContent(nextContent);
@@ -875,6 +897,26 @@ export function HostPublicationWorkspace({
     </div>)}
     {!items.length ? <p className="text-sm text-muted">当日の流れを表示する場合は項目を追加してください。</p> : null}
   </section>;
+  const faqSection = (locale: "en" | "ja") => {
+    const rows = publicationFaqRows(locale === "ja" ? (isRecord(content.ja) ? content.ja.faq : undefined) : content.faq);
+    const language = locale === "ja" ? "日本語" : "英語";
+    const problem = publicationFaqProblem(rows, language);
+    const full = rows.length >= PUBLICATION_FAQ_LIMITS.maxItems;
+    const change = (index: number, key: keyof PublicationFaqRow, value: string) => updateFaq(locale, rows.map((row, at) => at === index ? { ...row, [key]: value } : row));
+    return <section className="space-y-3 rounded-xl border border-line p-3" aria-labelledby={`publication-faq-${locale}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h3 id={`publication-faq-${locale}`} className="font-bold">よくある質問（{language}・任意）</h3><button type="button" disabled={busy || full} className={consoleButtonClass("secondary", "md", "min-h-11")} onClick={() => updateFaq(locale, [...rows, { question: "", answer: "" }])}>質問を追加</button></div>
+      <p className="text-xs text-muted">{locale === "ja" ? "予約前によく聞かれることを質問と答えの組で書きます。書かなければ公開ページに表示しません。" : "英語ページに表示する質問と答えです。日本語から英語案を作成すると翻訳案が入ります。"}最大{PUBLICATION_FAQ_LIMITS.maxItems}件、質問{PUBLICATION_FAQ_LIMITS.questionMaxLength}文字・答え{PUBLICATION_FAQ_LIMITS.answerMaxLength}文字まで。</p>
+      {rows.map((row, index) => <div key={`${locale}-faq-${index}`} className="grid gap-2 rounded-xl bg-sand/40 p-3">
+        <Field label={`質問${index + 1}（${language}）`} value={row.question} onChange={(next) => change(index, "question", next)} />
+        <p className={`text-right text-xs ${row.question.length > PUBLICATION_FAQ_LIMITS.questionMaxLength ? "font-bold text-danger" : "text-muted"}`}>{row.question.length}/{PUBLICATION_FAQ_LIMITS.questionMaxLength}文字</p>
+        <Field label={`答え${index + 1}（${language}）`} value={row.answer} multiline rows={3} onChange={(next) => change(index, "answer", next)} />
+        <p className={`text-right text-xs ${row.answer.length > PUBLICATION_FAQ_LIMITS.answerMaxLength ? "font-bold text-danger" : "text-muted"}`}>{row.answer.length}/{PUBLICATION_FAQ_LIMITS.answerMaxLength}文字</p>
+        <button type="button" disabled={busy} className={`${consoleButtonClass("ghost", "md", "min-h-11")} justify-self-start`} onClick={() => updateFaq(locale, rows.filter((_, at) => at !== index))}>この質問を削除</button>
+      </div>)}
+      {full ? <p className="text-sm text-muted">質問は{PUBLICATION_FAQ_LIMITS.maxItems}件まで追加できます。</p> : null}
+      <p aria-live="polite" className="text-sm font-bold text-danger">{problem ?? ""}</p>
+    </section>;
+  };
   const updatePhoto = (id: string, patch: Partial<Pick<Media, "altText" | "altTextJa" | "publicCredit">>) => setMediaDraft((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   const updateProviderPhoto = (id: string, patch: Partial<Pick<ProviderMedia, "altText" | "altTextJa" | "publicCredit">>) => setProviderMediaDraft((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   const movePhoto = (id: string, direction: -1 | 1) => setMediaDraft((current) => {
@@ -1006,6 +1048,8 @@ export function HostPublicationWorkspace({
       <h2 className="font-extrabold">当日の流れ</h2>
       {timelineSection("en", timelineItems(content.timeline))}
       {timelineSection("ja", japaneseManuscript(content).timeline)}
+      {faqSection("en")}
+      {faqSection("ja")}
     </section>
     </fieldset>
     <section className={`${HOST_SURFACE} mt-4 p-4 md:p-6`}><h2 className="font-extrabold">開催日程</h2><p className="mt-1 text-sm text-ink-soft">日程と定員はカレンダーで登録します。商品を保存してから開催枠を追加してください。</p><Link className={`${consoleButtonClass("secondary")} mt-3 inline-flex`} href={calendarHref}>カレンダーを開く</Link></section>
