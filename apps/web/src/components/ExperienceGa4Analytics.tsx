@@ -3,6 +3,7 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
 import { doNotTrackEnabled, isPrivateLandingPath, sanitizeUmamiPayload } from "@/lib/analytics";
+import { GA4_COOKIE_EXPIRES_SECONDS, ga4ConsentDefaults } from "@/lib/ga4-consent";
 import { createGtagQueue, type GtagCommand } from "@/lib/ga4-queue";
 
 const EXPERIENCE_ORIGIN = "https://experience.niho.life";
@@ -52,6 +53,8 @@ function installGoogleTag(measurementId: string, page: SafePageView, pageReferre
   const gtag = window.gtag;
   if (window.__nihoGa4MeasurementId !== measurementId) {
     window.__nihoGa4MeasurementId = measurementId;
+    // Consent defaults first (docs/growth/analytics-decision.md): no advertising storage anywhere, no analytics cookie in the EEA, UK and Switzerland.
+    for (const defaults of ga4ConsentDefaults()) gtag("consent", "default", defaults);
     gtag("js", new Date());
     gtag("config", measurementId, {
       send_page_view: false,
@@ -60,6 +63,7 @@ function installGoogleTag(measurementId: string, page: SafePageView, pageReferre
       page_referrer: pageReferrer,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
+      cookie_expires: GA4_COOKIE_EXPIRES_SECONDS,
     });
 
     const script = document.createElement("script");

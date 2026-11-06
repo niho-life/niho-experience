@@ -22,7 +22,7 @@ function List({ children }: { children: ReactNode }) {
  * It says what the code does and nothing more (docs/guest-booking.md, docs/guest-questions.md): the wording is for the owner to
  * review before production. `policyUrl` is NIHO's privacy policy (EXPERIENCE_PRIVACY_POLICY_URL); empty leaves the link out.
  */
-export function PrivacyNotice({ policyUrl }: { policyUrl: string }) {
+export function PrivacyNotice({ policyUrl, analytics = false }: { policyUrl: string; analytics?: boolean }) {
   return (
     <div className="container-page max-w-2xl py-10 sm:py-16">
       <p className="eyebrow">How we handle your details</p>
@@ -86,8 +86,27 @@ export function PrivacyNotice({ policyUrl }: { policyUrl: string }) {
             scripts on the page (HttpOnly). It lasts until 30 days after the experience at the latest, and sooner if you sign out or don&apos;t open the page
             for 30 days.
           </p>
+          {analytics ? (
+            <p>
+              Outside the EEA, the UK and Switzerland, Google Analytics sets cookies on our public pages to tell visits apart. They last up to 60 days. In
+              the EEA, the UK and Switzerland it sets none. Advertising cookies are never set.
+            </p>
+          ) : null}
           <p>Your booking page and the reply page don&apos;t send anything to our analytics.</p>
         </Section>
+        {analytics ? (
+          <Section id="privacy-analytics" title="Visit counts">
+            <p>
+              We use Google Analytics (Google LLC) to count visits to our public pages, so we can see which pages travelers read. When you open a
+              public page, your browser sends Google the page address and title, the site you came from, your browser and device type, an approximate
+              location and your IP address. We use this only to count visits. Nothing about your name, email address or booking is sent.
+            </p>
+            <p>
+              We have turned off Google signals and ad personalization, and Google keeps this data for 2 months. If your browser sends a Do Not Track
+              signal, we send nothing.
+            </p>
+          </Section>
+        ) : null}
         <Section id="privacy-contact" title="Questions or requests">
           <p>
             To ask about your details, or to ask us to correct or delete them, reply to any booking email or go to{" "}
