@@ -158,6 +158,7 @@ describe("notifyHostDevices", () => {
     let peak = 0;
     const subscriptions: HostPushDeps["subscriptions"] = {
       recipients: vi.fn(async () => Object.keys(statuses).map(device)),
+      ownerRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       productRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       recordSent: vi.fn(async (id: string) => { log.push(`sent ${id}`); }),
       recordFailure: vi.fn(async (id: string) => { log.push(`failure ${id}`); }),
@@ -191,6 +192,15 @@ describe("notifyHostDevices", () => {
     expect(await notifyHostDevices({ ...event, productId: "tea" }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
     expect(run.subscriptions.productRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "tea", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
     expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+  });
+
+  it("sends an operations suspension to the OWNER's devices only (#109)", async () => {
+    const run = deps({ 1: 201 });
+    // (This sender double answers only high-urgency sends, so the recipients are what is checked here; the kind's own words and urgency are covered above.)
+    expect(await notifyHostDevices({ ...event, ownerOnly: true }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
+    expect(run.subscriptions.ownerRecipients).toHaveBeenCalledWith("sample-provider-kitchen", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+    expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+    expect(run.subscriptions.productRecipients).not.toHaveBeenCalled();
   });
 
   it("refuses an event that would leave the app before sending anything", async () => {

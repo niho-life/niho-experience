@@ -255,18 +255,20 @@ describe("hostPushEventFromOutbox", () => {
       .toEqual({ ok: false, reason: "stale" });
   });
 
-  it("turns an operations suspension or its clearing into a push to the product's people that opens the product (#109)", async () => {
+  it("turns an operations suspension or its clearing into a push to the OWNER only that opens the product (#109)", async () => {
     const listing = { v: 1, productId: "sample-product-tea", experienceTitle: "Synthetic Tea Ceremony", change: "SUSPENDED" };
     const suspended = hostPushEventFromOutbox(row("host.notify.listing_suspension", listing), NOW);
     expect(suspended.ok).toBe(true);
     if (!suspended.ok) return;
     expect(suspended.event).toEqual({
       providerId: "provider-a", kind: "LISTING_SUSPENSION", experienceTitle: "Synthetic Tea Ceremony", listing: { change: "SUSPENDED" },
-      productId: "sample-product-tea", url: "/host/experiences/sample-product-tea?providerId=provider-a", tag: expect.stringMatching(/^listing-[0-9a-f]{32}$/),
+      ownerOnly: true, url: "/host/experiences/sample-product-tea?providerId=provider-a", tag: expect.stringMatching(/^listing-[0-9a-f]{32}$/),
     });
+    // The screen it opens is the OWNER's: a product operator would be refused there, so none is sent it.
+    expect(suspended.event).not.toHaveProperty("productId");
     expect(JSON.parse(hostPushPayload(suspended.event))).toMatchObject({ title: "運営が掲載を停止しました", body: "Synthetic Tea Ceremony" });
     const cleared = hostPushEventFromOutbox(row("host.notify.listing_suspension", { ...listing, change: "CLEARED" }), NOW);
-    expect(cleared.ok && cleared.event).toMatchObject({ kind: "LISTING_SUSPENSION", listing: { change: "CLEARED" }, productId: "sample-product-tea" });
+    expect(cleared.ok && cleared.event).toMatchObject({ kind: "LISTING_SUSPENSION", listing: { change: "CLEARED" }, ownerOnly: true });
     // One notification per product on the device: the clearing replaces the suspension; another product has its own.
     expect(cleared.ok && cleared.event.tag).toBe(suspended.event.tag);
     const other = hostPushEventFromOutbox(row("host.notify.listing_suspension", { ...listing, productId: "sample-product-other" }), NOW);

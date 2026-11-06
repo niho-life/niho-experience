@@ -47,6 +47,8 @@ export interface HostPushEvent {
   guestName?: string;
   /** Only this product's people (its OWNER and operators) get it, instead of every member of the provider. */
   productId?: string;
+  /** Only the provider's OWNER gets it (an operations suspension: only the OWNER can resume the listing). */
+  ownerOnly?: true;
   /**
    * Operations stopped this listing or cleared that stop (#109, LISTING_SUSPENSION): it sets the title, and a clearing adds
    * the line that the OWNER still resumes it. Never the reason; the host reads it in /host.

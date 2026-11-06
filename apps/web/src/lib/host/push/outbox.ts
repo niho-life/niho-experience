@@ -248,8 +248,8 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         kind: "LISTING_SUSPENSION",
         experienceTitle: payload.experienceTitle,
         listing: { change: payload.change },
-        // The product's OWNER and operators only, as with an OTA booking.
-        productId: payload.productId,
+        // The OWNER only: the screen below is the OWNER's (a product operator is refused there), and only the OWNER can resume.
+        ownerOnly: true,
         // 体験の編集, where the listing's state (運営停止中・再公開が必要) and its 再公開 are.
         url: withQuery(`${HOST_EXPERIENCES_PATH}/${encodeURIComponent(payload.productId)}`, { providerId }),
         // A clearing replaces the suspension on the device.

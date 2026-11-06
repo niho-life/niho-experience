@@ -345,8 +345,17 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       const since = new Date(Date.now() - 60_000);
       const endpoints = async () => (await subscriptions.productRecipients("provider-a", "tea", since)).map((item) => item.endpoint).sort();
       assert.deepEqual(await endpoints(), [endpointOf("operator-tea"), endpointOf("owner-a")].sort());
+      // An operations suspension (#109) goes to the OWNER only: not the product's operator, an EDITOR, or another provider's OWNER.
+      const ownerEndpoints = async (seenAfter = since) => (await subscriptions.ownerRecipients("provider-a", seenAfter)).map((item) => item.endpoint).sort();
+      assert.deepEqual(await ownerEndpoints(), [endpointOf("owner-a")]);
+      assert.deepEqual(await ownerEndpoints(new Date(Date.now() + 60_000)), []);
+      await assert.rejects(() => subscriptions.ownerRecipients("", since), StoreValidationError);
+      await assert.rejects(() => subscriptions.ownerRecipients("provider-a", new Date(Number.NaN)), StoreValidationError);
       await pool.query("UPDATE product_operator_grants SET active=false,revoked_at=clock_timestamp() WHERE niho_user_id='operator-tea'");
       assert.deepEqual(await endpoints(), [endpointOf("owner-a")]);
+      await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='owner-a'");
+      assert.deepEqual(await ownerEndpoints(), [], "a former OWNER gets nothing");
+      await pool.query("UPDATE provider_memberships SET active=true WHERE provider_id='provider-a' AND niho_user_id='owner-a'");
       await assert.rejects(() => bookings.listForHost(teaOperator, window), StoreAccessDeniedError);
 
       // The push job's completion drops the name from the row; a row never sent loses it after 48 hours.
