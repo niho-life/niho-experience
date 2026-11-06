@@ -89,7 +89,7 @@ export function createGygEnsureOccurrence({
   async function findExistingOccurrence() {
     assertActive();
     const reads = guard.appReads;
-    await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+    await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
     if (guard.fatalWrite) throw guard.fatalWrite;
     if (!await guard.waitForAppRead(reads, APP_READ_TIMEOUT_MS)) return authOrDrift();
     await page.waitForLoadState("networkidle", { timeout: AGENDA_IDLE_MS }).catch(() => {});
@@ -130,7 +130,7 @@ export function createGygEnsureOccurrence({
 
   async function openScheduleEditor(name) {
     assertActive();
-    await page.goto(productUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+    await page.goto(productUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
     if (guard.fatalWrite) throw guard.fatalWrite;
     await page.getByTestId(`product-option-edit-button-${job.target.externalOptionId}`).first()
       .waitFor({ state: "attached" }).catch(() => authOrDrift());
@@ -192,7 +192,7 @@ export function createGygEnsureOccurrence({
     try { after = await readSchedule(); } catch { throw unknownAfterSave(); }
     if (!sameSchedule(after, plan.expectedAfter)) throw unknownAfterSave();
     try {
-      await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+      await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
       return await observeAtCurrentPage();
     } catch {
       throw unknownAfterSave();

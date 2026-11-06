@@ -27,7 +27,7 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
     const expectedEndHm = endLocal.slice(11, 16);
     let stopping = false;
     let stopPromise = null;
-    const authOrDrift = () => assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern: /ログイン|sign in|log in|認証/i });
+    const authOrDrift = (cause) => assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern: /ログイン|sign in|log in|認証/i, cause });
     const assertActive = () => { if (stopping) throw new ContractError("DRIVER_STOPPED"); };
 
     async function verifyAccount() {
@@ -141,8 +141,8 @@ export async function createJalanDriver({ job, cloud, config, now = () => new Da
         read = await receiveSummary(() => link.click(), { targetRequired: true });
       } else {
         read = await receiveSummary(() => mode === "navigate"
-          ? page.goto(stockUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift())
-          : page.reload({ waitUntil: "domcontentloaded" }).catch(() => authOrDrift()), { targetRequired: false });
+          ? page.goto(stockUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error))
+          : page.reload({ waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error)), { targetRequired: false });
         await verifyAccount();
         if (!read.selected) read = await moveToTargetDate();
       }

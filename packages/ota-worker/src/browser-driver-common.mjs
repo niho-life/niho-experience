@@ -40,14 +40,37 @@ export async function prepareGuardedPage({ browser, guard, supplierOrigin }) {
   return page;
 }
 
-export async function assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern }) {
+// A navigation that never finishes or cannot reach the supplier says nothing
+// about the supplier's layout. The worker retries TIMEOUT and NETWORK_ERROR,
+// while DOM_DRIFT halts the account for staff review, so these must not be
+// reported as drift.
+export function navigationFailureCode(error) {
+  if (error?.name === "TimeoutError") return "TIMEOUT";
+  if (/\bnet::ERR_(?:CONNECTION_|NETWORK_|INTERNET_|NAME_|TIMED_OUT|EMPTY_RESPONSE|ADDRESS_|SOCKET_|PROXY_)/.test(String(error?.message))) return "NETWORK_ERROR";
+  return null;
+}
+
+// A locator count has no timeout of its own. After a navigation that never
+// committed it stays pending, so the sign-in probe is bounded and counts as
+// "no sign-in text" when it cannot answer in time.
+export async function countWithin(locator, timeoutMs = 5_000) {
+  let timer;
+  try {
+    return await Promise.race([locator.count().catch(() => 0), new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs, 0); })]);
+  } finally { clearTimeout(timer); }
+}
+
+// `cause` is the error of the navigation or action that failed just before
+// this check. It keeps the real reason on the thrown error instead of losing it.
+export async function assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern, cause }) {
   const current = new URL(page.url());
-  const signIn = await page.getByText(signInPattern).count().catch(() => 0);
+  const signIn = await countWithin(page.getByText(signInPattern));
   const movedExternal = ["http:", "https:"].includes(current.protocol) && current.origin !== supplierOrigin;
   if (guard.externalNavigationBlocked || movedExternal || /login|signin|challenge|captcha|auth/i.test(current.pathname) || signIn > 0) {
     throw new ContractError("AUTH_REQUIRED");
   }
-  throw new ContractError("DOM_DRIFT");
+  const options = cause === undefined ? undefined : { cause };
+  throw new ContractError(navigationFailureCode(cause) ?? "DOM_DRIFT", undefined, options);
 }
 
 // Session headers the supplier app sends on its own read queries. Callers keep

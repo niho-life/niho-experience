@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { chmod, mkdir } from "node:fs/promises";
 import { CDN_ORIGIN, SUPPLIER_ORIGIN } from "./constants.mjs";
+import { countWithin, navigationFailureCode } from "./browser-driver-common.mjs";
 import { startManagedBrowser } from "./managed-browser.mjs";
 import { createNetworkGuard } from "./network-guard.mjs";
 import { ContractError, validateObservation } from "./validation.mjs";
@@ -58,18 +59,18 @@ export async function createGygDriver({ job, cloud, config, now = () => new Date
     if (stopping) throw new ContractError("DRIVER_STOPPED");
   }
 
-  async function authOrDrift() {
+  async function authOrDrift(cause) {
     const current = new URL(page.url());
-    const signIn = await page.getByText(/sign in|log in/i).count().catch(() => 0);
+    const signIn = await countWithin(page.getByText(/sign in|log in/i));
     const movedExternal = ["http:", "https:"].includes(current.protocol) && current.origin !== supplierOrigin;
     if (guard.externalNavigationBlocked || movedExternal || /login|signin|challenge|captcha/i.test(current.pathname) || signIn > 0) throw new ContractError("AUTH_REQUIRED");
-    throw new ContractError("DOM_DRIFT");
+    throw new ContractError(navigationFailureCode(cause) ?? "DOM_DRIFT", undefined, cause === undefined ? undefined : { cause });
   }
 
   async function verifyAccount() {
     assertActive();
     if (accountVerified) return;
-    await page.goto(companyUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+    await page.goto(companyUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
     if (guard.fatalWrite) throw guard.fatalWrite;
     const label = page.getByText("Supplier ID:", { exact: true });
     await label.waitFor({ state: "visible" }).catch(() => authOrDrift());
@@ -110,7 +111,7 @@ export async function createGygDriver({ job, cloud, config, now = () => new Date
   async function observeTarget() {
     assertActive();
     await verifyAccount();
-    await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+    await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
     return observeAtCurrentPage();
   }
 
@@ -150,8 +151,8 @@ export async function createGygDriver({ job, cloud, config, now = () => new Date
   async function verifyAfterReload() {
     assertActive();
     await verifyAccount();
-    if (new URL(page.url()).pathname !== "/manage/availability") await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
-    else await page.reload({ waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+    if (new URL(page.url()).pathname !== "/manage/availability") await page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
+    else await page.reload({ waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
     const observation = await observeAtCurrentPage();
     if (job.action === "SET_CLOSED" && (!observation.manuallyBlocked || observation.bookable)) throw new ContractError("VERIFY_FAILED");
     if (job.action === "SET_OPEN" && (observation.manuallyBlocked || !observation.bookable)) throw new ContractError("VERIFY_FAILED");
