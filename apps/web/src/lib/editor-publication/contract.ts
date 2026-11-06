@@ -29,6 +29,16 @@ export const EDITOR_CURSOR = /^[A-Za-z0-9._~-]{1,512}$/;
 export const GUIDE_PREVIEW_TOKEN = /^pv_[A-Za-z0-9_-]{43}$/;
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/**
+ * A publication's slug may be as long as the contract allows (`SLUG_MAX_LENGTH`, 160; `/guides/[slug]` takes the same).
+ * Static guides keep their own 80 (`GUIDE_LIMITS.slugMaxLength`), and so do category and related-experience slugs here.
+ */
+export const EDITOR_SLUG_MAX_LENGTH = 160;
+/**
+ * A photo credit may be as long as the editor lets a writer enter it (its asset credit limit, 500), not the 300 of a
+ * static guide's caption: a shorter limit here would leave out the whole article because of one long credit.
+ */
+export const EDITOR_CREDIT_MAX_LENGTH = 500;
 /** `/guides/preview` is the preview route, so no guide may take that slug. */
 const RESERVED_SLUGS: ReadonlySet<string> = new Set(["preview"]);
 const ISO_TIME = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -46,7 +56,7 @@ export const editorPublicationPaths = {
 } as const;
 
 export function isEditorGuideSlug(value: unknown): value is string {
-  return typeof value === "string" && value.length <= GUIDE_LIMITS.slugMaxLength && SLUG.test(value) && !RESERVED_SLUGS.has(value);
+  return typeof value === "string" && value.length <= EDITOR_SLUG_MAX_LENGTH && SLUG.test(value) && !RESERVED_SLUGS.has(value);
 }
 
 /** The contract carries no category label: `walks` → `Walks`, `day-trips` → `Day trips`. */
@@ -55,12 +65,18 @@ export function editorCategoryLabel(slug: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** A photo. v1 carries no pixel size and no sharing rights (see convert.ts). `alt` may be empty. */
+/**
+ * A photo. v1 carries no pixel size (see convert.ts). Sharing rights are not on the asset: a list item says
+ * `coverShareable` for its cover only. `alt` may be empty.
+ */
 export type EditorAsset = Readonly<{ id: string; url: string; alt: string; credit?: string }>;
 
 export type EditorCategory = Readonly<{ slug: string; label: string; labelJa?: string; order?: number; revision?: number }>;
-/** The publish-time author. The contract's `handle` and `url` are checked but not kept: the page shows the name only. */
-export type EditorAuthor = Readonly<{ name: string; url: string | null }>;
+/**
+ * The publish-time author. The contract's `handle` is checked but not kept. `role` and `bio` come from the optional
+ * top-level `authorProfile` (the writer's public introduction, fixed at publish time), each only when written.
+ */
+export type EditorAuthor = Readonly<{ name: string; url: string | null; role?: string; bio?: string }>;
 
 /** One entry of the published list: what a listing needs. `range` decides where it shows. */
 export type EditorArticleSummary = Readonly<{
@@ -71,6 +87,8 @@ export type EditorArticleSummary = Readonly<{
   title: string;
   lead: string | null;
   cover?: EditorAsset;
+  /** Present only when the writer confirmed the cover may also be the share image (Open Graph, `Article.image`). */
+  coverShareable?: true;
   category: EditorCategory;
   author: EditorAuthor;
   /** Original canonical declared by Editor. Optional for old ordinary-guide publications; app cards require it. */
@@ -95,6 +113,7 @@ export type EditorPreview = Readonly<{
   slug?: string;
   lead?: string;
   cover?: EditorAsset;
+  coverShareable?: true;
   category?: EditorCategory;
   author?: EditorAuthor;
   assets: readonly EditorAsset[];
@@ -128,10 +147,13 @@ type Fields = Record<string, unknown>;
 const isRecord = (value: unknown): value is Fields => typeof value === "object" && value !== null && !Array.isArray(value);
 const absent = (value: unknown) => value === undefined || value === null;
 
+/** Characters are counted as the editor counts them: code points (an emoji is one). */
+const characters = (value: string) => Array.from(value).length;
+
 function text(value: unknown, label: string, max: number): string {
   if (typeof value !== "string" || !value.trim()) throw new Invalid(`${label} is missing`);
   const trimmed = value.trim();
-  if (trimmed.length > max) throw new Invalid(`${label} is longer than ${max} characters`);
+  if (characters(trimmed) > max) throw new Invalid(`${label} is longer than ${max} characters`);
   return trimmed;
 }
 
@@ -165,7 +187,7 @@ function asset(value: unknown, label: string): EditorAsset {
   if (typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) throw new Invalid(`${label}.sha256 is invalid`);
   // Empty alt is allowed: the editor sends what the writer entered.
   if (typeof value.alt !== "string") throw new Invalid(`${label}.alt is not text`);
-  const credit = value.credit === null ? undefined : text(value.credit, `${label}.credit`, GUIDE_LIMITS.captionMaxLength);
+  const credit = value.credit === null ? undefined : text(value.credit, `${label}.credit`, EDITOR_CREDIT_MAX_LENGTH);
   return { id: value.id, url: value.url, alt: value.alt, ...(credit === undefined ? {} : { credit }) };
 }
 
@@ -180,6 +202,27 @@ function category(value: unknown, display?: unknown): EditorCategory {
     || !Number.isSafeInteger(display.displayOrder) || (display.displayOrder as number) < 0 || (display.displayOrder as number) > 1_000_000
     || !Number.isSafeInteger(display.revision) || (display.revision as number) < 1) throw new Invalid("categoryDisplay is invalid");
   return { slug: value, label: display.labelEn, labelJa: display.labelJa, order: display.displayOrder as number, revision: display.revision as number };
+}
+
+/**
+ * The optional top-level `authorProfile`: exactly `role` and `bio`, each null or non-blank text within the guide limits, not
+ * both null. It is never inside `author`, which stays the contract's strict three fields.
+ */
+function authorProfile(value: unknown): Readonly<{ role?: string; bio?: string }> {
+  if (absent(value)) return {};
+  if (!isRecord(value) || Object.keys(value).sort().join(",") !== "bio,role") throw new Invalid("authorProfile is invalid");
+  const role = nullableText(value.role, "authorProfile.role", GUIDE_LIMITS.authorMaxLength);
+  const bio = nullableText(value.bio, "authorProfile.bio", GUIDE_LIMITS.authorBioMaxLength);
+  if (role === null && bio === null) throw new Invalid("authorProfile is empty");
+  return { ...(role === null ? {} : { role }), ...(bio === null ? {} : { bio }) };
+}
+
+/** Optional and only ever `true`; anything else, or a share permission without a cover, is not the contract. */
+function coverShareable(value: unknown, cover: EditorAsset | undefined): boolean {
+  if (value === undefined) return false;
+  if (value !== true) throw new Invalid("coverShareable is invalid");
+  if (cover === undefined) throw new Invalid("coverShareable is set without a cover");
+  return true;
 }
 
 function author(value: unknown): EditorAuthor {
@@ -234,6 +277,8 @@ function summary(item: Fields): EditorArticleSummary {
   if (item.range !== "live" && item.range !== "unlisted") throw new Invalid("range is missing or unknown");
   if (item.lang !== "en") throw new Invalid("lang is not en");
   const canonicalUrl = optionalCanonicalUrl(item.canonicalUrl);
+  const cover = absent(item.cover) ? undefined : asset(item.cover, "cover");
+  const shareable = coverShareable(item.coverShareable, cover);
   return {
     id: item.id,
     version: Number.isSafeInteger(item.version) && (item.version as number) > 0 ? item.version as number : (() => { throw new Invalid("version is invalid"); })(),
@@ -241,9 +286,10 @@ function summary(item: Fields): EditorArticleSummary {
     range: item.range,
     title: text(item.title, "title", GUIDE_LIMITS.titleMaxLength),
     lead: nullableText(item.lead, "lead", GUIDE_LIMITS.descriptionMaxLength),
-    ...(absent(item.cover) ? {} : { cover: asset(item.cover, "cover") }),
+    ...(cover === undefined ? {} : { cover }),
+    ...(shareable ? { coverShareable: true as const } : {}),
     category: category(item.category, item.categoryDisplay),
-    author: author(item.author),
+    author: { ...author(item.author), ...authorProfile(item.authorProfile) },
     ...(canonicalUrl === undefined ? {} : { canonicalUrl }),
     extras: extras(item.extras),
     related: relatedSlugs(item.related, "related"),
@@ -322,8 +368,11 @@ export function parseEditorPreview(json: unknown): EditorPreviewResult {
   if (typeof json.markdown !== "string") return { ok: false, reason: "The draft has no body." };
   const lead = lenient(() => optionalText(json.lead, "lead", Number.MAX_SAFE_INTEGER));
   const cover = absent(json.cover) ? undefined : lenient(() => asset(json.cover, "cover"));
+  const shareable = lenient(() => coverShareable(json.coverShareable, cover)) === true;
   const draftCategory = lenient(() => category(json.category));
   const draftAuthor = lenient(() => author(json.author));
+  // The editor does not bind the profile to previews today; read it the same lenient way if it ever comes.
+  const draftProfile = lenient(() => authorProfile(json.authorProfile)) ?? {};
   const publishedAt = lenient(() => isoTime(json.publishedAt, "publishedAt"));
   return {
     ok: true,
@@ -333,8 +382,9 @@ export function parseEditorPreview(json: unknown): EditorPreviewResult {
       ...(isEditorGuideSlug(json.slug) ? { slug: json.slug } : {}),
       ...(lead === undefined ? {} : { lead }),
       ...(cover === undefined ? {} : { cover }),
+      ...(shareable ? { coverShareable: true as const } : {}),
       ...(draftCategory === undefined ? {} : { category: draftCategory }),
-      ...(draftAuthor === undefined ? {} : { author: draftAuthor }),
+      ...(draftAuthor === undefined ? {} : { author: { ...draftAuthor, ...draftProfile } }),
       assets: Array.isArray(json.assets) ? json.assets.flatMap((item, index) => lenient(() => [asset(item, `assets[${index}]`)]) ?? []) : [],
       related: lenient(() => relatedSlugs(json.related, "related")) ?? [],
       ...(publishedAt === undefined ? {} : { publishedAt }),

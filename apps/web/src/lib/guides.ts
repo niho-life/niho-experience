@@ -1,6 +1,7 @@
 import type { PublicGuideArticle } from "@niho-experience/experience-store";
 import type { Guide, GuideFaqItem, GuideHero, GuidePillar, GuideTranslation } from "@/content/guides/types";
 import { guideFigureSources, guideInlineText, guideLinkHref, parseGuideAnswer, parseGuideMarkdown, type GuideBlock } from "./guide-markdown";
+import { seoDescription } from "./seo-description";
 import { publicVideoProblems } from "./videos";
 
 /**
@@ -304,9 +305,45 @@ export function guidesForExperience(guides: readonly Guide[], experienceSlug: st
   return sortGuides(guides.filter((guide) => guide.relatedExperienceSlugs.includes(experienceSlug))).slice(0, limit);
 }
 
-/** The guide's related guides that exist, in the guide's order. */
+/**
+ * The guide's related guides that exist, in the guide's order. An editor.niho.life publication names none (the contract
+ * has no field for it), so one with a category gets the newest other listed guides of that category instead.
+ */
 export function relatedGuidesOf(guides: readonly Guide[], guide: Guide): Guide[] {
+  if (!guide.relatedGuideSlugs.length && guide.editorPublication && guide.category) {
+    const category = guide.category.slug;
+    return sortGuides(guides.filter((candidate) => candidate.slug !== guide.slug && !candidate.unlisted && candidate.category?.slug === category)).slice(0, GUIDE_LIMITS.relatedGuidesMax);
+  }
   return guide.relatedGuideSlugs.flatMap((slug) => guides.filter((candidate) => candidate.slug === slug && candidate.slug !== guide.slug)).slice(0, GUIDE_LIMITS.relatedGuidesMax);
+}
+
+/**
+ * The guide's summary for search and share snippets (meta description, Open Graph, `Article.description`, listings): its
+ * description (the lead), or, when it has none (an editor publication's lead is optional), the opening paragraphs of
+ * the body as plain text, cut to 160 characters at a sentence end, else at a word with "…" (seoDescription). Headings,
+ * photos, lists, tables and notes are skipped; links and emphasis keep their words. "" when the body has no paragraph.
+ * The lead under the title on the article page stays the description only (the opening paragraph is right below it).
+ */
+export function guideSummary(guide: Pick<Guide, "description" | "body">): string {
+  if (guide.description.trim()) return guide.description;
+  let blocks: GuideBlock[];
+  try {
+    blocks = parseGuideMarkdown(guide.body);
+  } catch {
+    return "";
+  }
+  const paragraphs: string[] = [];
+  let length = 0;
+  for (const block of blocks) {
+    if (block.type !== "paragraph") continue;
+    const paragraph = guideInlineText(block.children).replace(/\s+/g, " ").trim();
+    if (!paragraph) continue;
+    paragraphs.push(paragraph);
+    length += paragraph.length + 1;
+    // Enough text to cut at 160; the rest of the body is not read.
+    if (length > 160) break;
+  }
+  return seoDescription(paragraphs.join(" "));
 }
 
 /** The guide's related experience slugs that the catalogue lists, in the guide's order. */

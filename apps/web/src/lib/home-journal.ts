@@ -1,6 +1,6 @@
 import type { Guide } from "@/content/guides";
 import { guideLinkHref } from "./guide-markdown";
-import { formatGuideDate, GUIDE_PILLARS, guidePillarDetails, guideReadMinutes } from "./guides";
+import { formatGuideDate, GUIDE_PILLARS, guidePillarDetails, guideReadMinutes, guideSummary } from "./guides";
 
 /** Guides on the home journal (the feature included); the rest are one "See all" away on /guides. */
 export const HOME_JOURNAL_LIMIT = 10;
@@ -47,7 +47,8 @@ export function homeJournal(guides: readonly Guide[], { featured = null, draftSl
     return {
       slug: guide.slug,
       title: guide.title,
-      description: guide.description,
+      // A lead-less editor publication shows the opening of its body instead (guideSummary).
+      description: guideSummary(guide),
       topic: homeJournalTopic(guide),
       badge: draftSlugs.includes(guide.slug) ? "Draft" : guide.unlisted ? "Editorial preview" : null,
       image: src && guide.hero ? { src, alt: guide.hero.alt } : null,
