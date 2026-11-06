@@ -110,6 +110,40 @@ async function hostAccountSellerAccount(client: PoolClient, providerId: string):
   return row ? String(row.stripe_connect_account_ref) : null;
 }
 
+/**
+ * The consent that counts now for `account` (the provider's registered payout account), read in the caller's
+ * transaction: active, for that account, given by a host account that is still an active ACTIVE OWNER. null otherwise.
+ */
+async function countingConsent(client: PoolClient, providerId: string, account: string): Promise<DbRow | null> {
+  const found = await client.query<DbRow>(
+    `SELECT ${CONSENT_COLUMNS} FROM provider_payout_account_consents consent
+      WHERE consent.provider_id=$1 AND consent.revoked_at IS NULL AND consent.stripe_connect_account_ref=$2
+        AND EXISTS (
+          SELECT 1 FROM provider_memberships owner
+            JOIN host_accounts owner_account ON owner_account.id=owner.niho_user_id AND owner_account.status='ACTIVE'
+           WHERE owner.provider_id=consent.provider_id AND owner.niho_user_id=consent.consented_by_niho_user_id
+             AND owner.active=true AND owner.role='OWNER'
+        )`,
+    [providerId, account],
+  );
+  return found.rows[0] ?? null;
+}
+
+/**
+ * For the readiness snapshot's write (ExperiencePublicationRepository.refreshReadiness), inside its transaction, which
+ * holds the provider's inventory lock that `revoke` takes first: whether the consent a snapshot claims still counts, for
+ * this account and version. A consent read before a withdrawal can then never be written back after it.
+ */
+export async function payoutConsentStillCounts(
+  client: PoolClient,
+  input: { readonly providerId: string; readonly stripeConnectAccountRef: string; readonly consentVersion: string; readonly consentedAtUtc: string },
+): Promise<boolean> {
+  const row = await countingConsent(client, input.providerId, input.stripeConnectAccountRef);
+  if (!row) return false;
+  const consent = consentFromRow(row);
+  return consent.consentVersion === input.consentVersion && consent.consentedAtUtc === input.consentedAtUtc;
+}
+
 export class ProviderPayoutAccountConsents {
   readonly #pool: Pool;
 
@@ -127,18 +161,8 @@ export class ProviderPayoutAccountConsents {
       await requireHostAccountOwner(client, actor);
       const account = await hostAccountSellerAccount(client, actor.providerId);
       if (account === null) return null;
-      const found = await client.query<DbRow>(
-        `SELECT ${CONSENT_COLUMNS} FROM provider_payout_account_consents consent
-          WHERE consent.provider_id=$1 AND consent.revoked_at IS NULL AND consent.stripe_connect_account_ref=$2
-            AND EXISTS (
-              SELECT 1 FROM provider_memberships owner
-                JOIN host_accounts owner_account ON owner_account.id=owner.niho_user_id AND owner_account.status='ACTIVE'
-               WHERE owner.provider_id=consent.provider_id AND owner.niho_user_id=consent.consented_by_niho_user_id
-                 AND owner.active=true AND owner.role='OWNER'
-            )`,
-        [actor.providerId, account],
-      );
-      return found.rows[0] ? consentFromRow(found.rows[0]) : null;
+      const row = await countingConsent(client, actor.providerId, account);
+      return row ? consentFromRow(row) : null;
     });
   }
 

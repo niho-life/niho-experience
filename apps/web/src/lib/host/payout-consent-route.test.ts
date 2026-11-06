@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StoreAccessDeniedError, StoreConflictError, type HostSession as StoredHostSession } from "@niho-experience/experience-store";
+import { StoreAccessDeniedError, StoreConflictError, StoreValidationError, type HostSession as StoredHostSession } from "@niho-experience/experience-store";
 
 /** 受取口座の利用同意 (ADR 0003 slice 3): the consent route and the sign-in it asks for, against stubbed stores. Synthetic data only. */
 const state = vi.hoisted(() => ({
@@ -209,6 +209,16 @@ describe("the sign-in a sensitive change asks for comes back to 受取口座", (
       return [pair.slice(0, pair.indexOf("=")), { value: pair.slice(pair.indexOf("=") + 1), attributes: attributes.join("; ") }] as const;
     }));
     const kept = cookies.get(RETURN_PATH_COOKIE)!;
+    // The 「メールを確認してください」 page is still this sign-in's: it keeps the return page (and, when asked, why).
+    expect(new URL(emailed.headers.get("location")!, SITE).searchParams.get("next")).toBe(next);
+    const reauthSent = await requestLink(new NextRequest(`${SITE}/host/auth/email`, { method: "POST", headers: form, body: body({ email: "owner@example.test", next, reauth: "1" }) }));
+    const reauthLocation = new URL(reauthSent.headers.get("location")!, SITE);
+    expect([reauthLocation.searchParams.get("sent"), reauthLocation.searchParams.get("reauth"), reauthLocation.searchParams.get("next")]).toEqual(["1", "1", next]);
+    // A malformed address goes back to the same re-sign-in form, not to the home.
+    accounts.requestLogin.mockRejectedValueOnce(new StoreValidationError("email must be an email address of 3-254 characters."));
+    const mistyped = await requestLink(new NextRequest(`${SITE}/host/auth/email`, { method: "POST", headers: form, body: body({ email: "not an address", next, reauth: "1" }) }));
+    const mistypedLocation = new URL(mistyped.headers.get("location")!, SITE);
+    expect([mistypedLocation.pathname, mistypedLocation.searchParams.get("error"), mistypedLocation.searchParams.get("reauth"), mistypedLocation.searchParams.get("next")]).toEqual(["/host/auth/sign-in", "email", "1", next]);
     expect(kept.attributes).toMatch(/Path=\/host\/auth(;|$)/);
     expect(kept.attributes).toMatch(/HttpOnly/);
     expect(kept.attributes).toMatch(/Max-Age=900/);
