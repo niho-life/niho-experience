@@ -76,6 +76,8 @@ Admin の `/admin/api/channels` は action allowlist だけを受け、任意 qu
 
 ## 監視・heartbeat・復旧
 
+運用の手順（障害別・止める／戻す・有効にする前の確認）は [OTA 運用 runbook](ota-runbook.md) にまとめた。
+
 対象: #240。[worker詳細設計](ota-studio-worker-design.md)「9. 監視、失敗、費用」の server 側を実装する。scheduler・通知先・本番 flag はこの slice で作成・有効化しない。
 
 ### heartbeat と新規OPENの保留
