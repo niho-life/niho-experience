@@ -10,13 +10,13 @@ import { translationFromMessage, type TranslationResult } from "./prompts";
  * tracing are off so no text reaches a log or a trace. One attempt per call: the caller decides what
  * happens next (the job tries again later, the host writes the English).
  */
-export type Translator = (request: MessageCreateParamsNonStreaming) => Promise<TranslationResult>;
+export type Translator = (request: MessageCreateParamsNonStreaming, options?: { readonly maxLength?: number }) => Promise<TranslationResult>;
 
 type CreateMessage = (body: MessageCreateParamsNonStreaming, options: { timeout: number; maxRetries: number }) => Promise<Pick<BetaMessage, "content" | "stop_reason">>;
 
 /** A translator over `create` (the SDK's beta messages, or a stub in tests). Any thrown error is `unavailable`. */
 export function createTranslator(create: CreateMessage, timeoutMs: number): Translator {
-  return async (request) => {
+  return async (request, options) => {
     let message: Pick<BetaMessage, "content" | "stop_reason">;
     try {
       message = await create(request, { timeout: timeoutMs, maxRetries: 0 });
@@ -24,7 +24,7 @@ export function createTranslator(create: CreateMessage, timeoutMs: number): Tran
       // Timeout, network, rate limit, overload, a refused key: nothing about the text is kept.
       return { ok: false, failure: "unavailable" };
     }
-    return translationFromMessage(message);
+    return translationFromMessage(message, options?.maxLength);
   };
 }
 

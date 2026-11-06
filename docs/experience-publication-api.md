@@ -102,6 +102,8 @@ An absent business logo is represented as `null`. The seller's configured displa
 
 `POST /host/api/products/{productId}/translation` accepts the product's Japanese manuscript and returns an English draft plus the source fingerprint. It uses the same current OWNER session boundary as product writes. The browser discards the result if either manuscript changed while the request was running. Translation output is never published until the host edits and confirms it; publication checks both source and English fingerprints again.
 
+The manuscript may carry an optional FAQ: `content.faq` (English) and `content.ja.faq` (Japanese), each a list of `{ "question", "answer" }` plain-text pairs (at most 30, question ≤ 200 and answer ≤ 1200 characters, no blank or repeated questions). Create, save and translation reject an invalid FAQ with `INVALID_INPUT`. An absent and an empty FAQ are the same manuscript and are excluded from both fingerprints, so confirmations recorded before FAQ existed stay valid; a non-empty FAQ is part of both fingerprints. A translation draft must keep the Japanese FAQ row count. The public projection exposes `content.faq` and `japanese.faq` (always a list, empty when none). See `docs/host-publication.md`.
+
 Published photo alts are localized in the public DTO. English and Japanese product routes have locale-specific canonical URLs; `ja`/`en`/`x-default` hreflang and sitemap entries exist only when the current publication includes confirmed Japanese copy and the Japanese site chrome can render.
 
 An operations suspension uses a separate Admin session. Clearing it does not publish; the OWNER must explicitly publish again.

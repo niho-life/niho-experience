@@ -329,6 +329,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(state.version, 1);
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic tea");
+      assert.deepEqual((await publications.getPublicBySlug(original.slug))?.content.faq, [], "a manuscript without FAQ publishes no FAQ");
       assert.equal(await publications.claimsSlug(original.slug), true);
       assert.equal((await publications.getPublicBySlug(original.slug))?.photos[0]?.src,
         "/api/public/experience-media/00000000-0000-4000-8000-000000000330");
@@ -396,13 +397,20 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         id: original.id,
         slug: original.slug,
         publicTitle: "Synthetic tea, revised",
-        content: manuscript("A revised synthetic manuscript."),
+        content: { ...manuscript("A revised synthetic manuscript."), faq: [
+          { question: "Can children join?", answer: "Yes, from age 6." },
+          { question: "Is it held in rain?", answer: "Yes, indoors." },
+        ] },
         currency: "JPY",
         unitAmount: 4_500,
         cancellationTermsRef: "cancellation-synthetic-v2",
       }, original.version, state.version, CHECKS);
       assert.equal(changed.publicationUpdated, true);
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic tea, revised");
+      assert.deepEqual((await publications.getPublicBySlug(original.slug))?.content.faq, [
+        { question: "Can children join?", answer: "Yes, from age 6." },
+        { question: "Is it held in rain?", answer: "Yes, indoors." },
+      ], "the saved FAQ survives jsonb and reaches the public projection in order");
       await assert.rejects(
         publications.saveDraft(EDITOR, { ...changed.draft, id: original.id }, original.version, state.version, CHECKS),
         StoreConflictError,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH,
   GUEST_TO_JAPANESE_SYSTEM,
   guestMessageToJapanese,
   HOST_TO_ENGLISH_SYSTEM,
@@ -74,5 +75,16 @@ describe("translationFromMessage", () => {
       expect(translationFromMessage({ stop_reason: "end_turn", content: [text(value)] as never })).toEqual({ ok: false, failure: "unusable" });
     }
     expect(translationFromMessage({ stop_reason: "end_turn", content: [text("あ".repeat(TRANSLATION_MAX_LENGTH))] as never }).ok).toBe(true);
+  });
+
+  it("takes a limit per request: an experience manuscript with a FAQ is far longer than a message (#146)", () => {
+    const manuscript = JSON.stringify({ description: "a".repeat(2_000), faq: Array.from({ length: 4 }, () => ({ question: "Q", answer: "a".repeat(1_000) })) });
+    expect(manuscript.length).toBeGreaterThan(TRANSLATION_MAX_LENGTH);
+    expect(translationFromMessage({ stop_reason: "end_turn", content: [text(manuscript)] as never })).toEqual({ ok: false, failure: "unusable" });
+    expect(translationFromMessage({ stop_reason: "end_turn", content: [text(manuscript)] as never }, EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH)).toEqual({ ok: true, text: manuscript });
+    // A manuscript limit does not make anything unlimited, and the message limit stays the default.
+    const absurd = "a".repeat(EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH + 1);
+    expect(translationFromMessage({ stop_reason: "end_turn", content: [text(absurd)] as never }, EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH)).toEqual({ ok: false, failure: "unusable" });
+    expect(translationFromMessage({ stop_reason: "end_turn", content: [text("a".repeat(EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH))] as never }, EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH).ok).toBe(true);
   });
 });
