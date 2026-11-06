@@ -119,6 +119,19 @@ node scripts/experience/provision-host-account.mjs register <input.json> --yes
 - `seller` なし：提供者は先に存在している必要がある。アカウントが無ければ作り（同じアドレスなら同じアカウント）、`grantProviderOwner` で OWNER にする。既存の権限は変えない。
 - `seller` あり（3 段目）：先にホストアカウント用の販売者を登録する（`SiteSaleRegistration.provisionHostAccountSeller`。提供者が無ければ作る。NIHO の ID は受け取らない。`sel_` の参照をここで作る）。**migration の identity で実行する**（runtime の role は販売者 profile を書けない）。新しく登録するときは `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` で口座を Stripe に照会し、`ready` でなければ何も書かない。同じ内容なら何もしない。違う内容の profile、NIHO 用の profile、他の販売者が使っている口座は拒む（変えるのは別の確認済みの手順）。手数料の設定・商品・利用同意は作らない（手数料とサポートの同意は OWNER が設定 › NIHOサポートで、利用同意は設定 › 受取口座で行う）。
 
+### NIHO 方式の販売者を移す
+
+NIHO ログインの時期に登録した販売者（NIHO の key を持つもの）は、同じ提供者・同じ口座・同じ名前のまま、ホストアカウントの方式へ移す。`seller` を次の形にする。
+
+```json
+{ "email": "…", "providerId": "…", "seller": { "convertFromNiho": true, "stripeConnectAccountRef": "acct_…" } }
+```
+
+- 口座は、いま登録されているものと一致していなければ止まる（別の口座への変更は、審査した販売者変更の手順で行う）。
+- NIHO の key を外し、`sel_` の参照を新しく作る。提供者の商品（下書き）は新しい参照に移り、`version` が上がる。公開済みの版（履歴と、それで成立した予約）は変えない。
+- Stripe への照会はしない（口座は変わらず、公開のたびに照会する）。Stripe のキーは要らない。migration の identity で実行する。
+- NIHO の OWNER の権限はそのまま残る。同じ実行で、`email` のホストアカウントを OWNER にする。口座の利用同意は、その OWNER が改めて記録する。
+
 ### 最初の販売者（コミュニティディナー）
 
 1. Stripe のダッシュボードで、既存の接続済み口座（NIHO で接続したもの）の ID・国（JP）・通貨（JPY）・決済と入金が有効なことを確かめる。販売者名（特商法の販売者名。Stripe の口座の表示名ではない）と事業者を確かめる。

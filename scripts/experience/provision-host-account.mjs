@@ -6,6 +6,12 @@
 // exist and nothing but the account and its OWNER membership is written. It never changes an existing membership or
 // seller profile, writes no fee setting, creates no product and records no payout consent (the OWNER does, in /host).
 //
+// A provider whose seller is mapped to NIHO (the NIHO login era) moves onto host accounts with
+// `"seller": { "convertFromNiho": true, "stripeConnectAccountRef": "acct_..." }`: the same account and names, a new `sel_`
+// seller reference, and the provider's products following it (SiteSaleRegistration.convertNihoSellerToHostAccounts). The
+// account must be the one already registered; it is not checked with Stripe here (it does not change, and every
+// publication checks it), so no Stripe key is needed for this.
+//
 //   node scripts/experience/provision-host-account.mjs [plan|register] <input.json> [--yes]
 //
 // input.json (kept outside git; see host-account.example.json):
@@ -33,6 +39,7 @@ const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CONNECT_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,250}$/;
 const CONTROL = /[\u0000-\u001F\u007F]/;
 const SELLER_FIELDS = ["providerDisplayName", "sellerDisplayName", "stripeConnectAccountRef"];
+const CONVERT_FIELDS = ["convertFromNiho", "stripeConnectAccountRef"];
 const out = (line) => console.log(line);
 const masked = (value) => `…${value.slice(-4)}`;
 
@@ -68,6 +75,15 @@ function parseSeller(raw, problems) {
     problems.push("input.seller must be an object");
     return null;
   }
+  if (raw.convertFromNiho !== undefined) {
+    // Moving a seller mapped to NIHO: only the account it already uses, to make sure it is the one meant.
+    for (const key of Object.keys(raw)) if (!CONVERT_FIELDS.includes(key)) problems.push(`input.seller.${key} is not taken when moving a seller from NIHO (its names stay)`);
+    if (raw.convertFromNiho !== true) problems.push("input.seller.convertFromNiho must be true");
+    if (typeof raw.stripeConnectAccountRef !== "string" || !CONNECT_ACCOUNT_ID.test(raw.stripeConnectAccountRef)) {
+      problems.push("input.seller.stripeConnectAccountRef must be a Stripe connected account ID (acct_…)");
+    }
+    return { convertFromNiho: true, stripeConnectAccountRef: raw.stripeConnectAccountRef };
+  }
   for (const key of Object.keys(raw)) if (!SELLER_FIELDS.includes(key)) problems.push(`input.seller.${key} is not a known field (no NIHO ID is taken)`);
   oneLine(raw.providerDisplayName, "input.seller.providerDisplayName", problems);
   oneLine(raw.sellerDisplayName, "input.seller.sellerDisplayName", problems);
@@ -91,6 +107,11 @@ function parseInput(raw) {
 }
 
 function sellerOutcome(state, seller) {
+  if (seller.convertFromNiho) {
+    if (state.sellerProfile === null) return "conflict: the provider has no seller to move from NIHO";
+    if (state.sellerProfile.stripeConnectAccountRef !== seller.stripeConnectAccountRef) return "conflict: the provider's seller uses another Stripe account";
+    return state.sellerProfile.kind === "niho" ? "move from NIHO (same Stripe account and names)" : "unchanged";
+  }
   if (state.sellerProfile === null) return state.accountUsedElsewhere ? "conflict: another seller uses this Stripe account" : "register (no NIHO ID)";
   if (state.sellerProfile.kind === "niho") return "conflict: the provider has a seller mapped to NIHO";
   const same = state.sellerProfile.providerDisplayName === seller.providerDisplayName
@@ -131,7 +152,7 @@ async function run(command, input, yes, pool, stripeKey) {
     out(`Experience provider ${input.providerId}: ${state.providerExists ? "registered" : input.seller ? "create" : "not found"}`);
     if (input.seller) {
       out(`Seller for host accounts: ${sellerPlan}`);
-      out(`Stripe connected account ${masked(input.seller.stripeConnectAccountRef)}: ${sellerPlan === "unchanged" ? "registered" : "verify with Stripe and register"}`);
+      out(`Stripe connected account ${masked(input.seller.stripeConnectAccountRef)}: ${sellerPlan === "unchanged" || input.seller.convertFromNiho ? "registered" : "verify with Stripe and register"}`);
     }
     out(`Host account: ${state.account ? `${state.account.id} (${state.account.status})` : "create (ACTIVE)"}`);
     out(`OWNER membership: ${membershipOutcome(state)}`);
@@ -156,7 +177,10 @@ async function run(command, input, yes, pool, stripeKey) {
         out("This database connection cannot write seller profiles (the runtime role cannot, by design). Use the migration identity. Nothing was written.");
         return EXIT.failed;
       }
-      if (sellerPlan !== "unchanged") {
+      if (input.seller.convertFromNiho) {
+        const moved = await registration.convertNihoSellerToHostAccounts({ providerId: input.providerId, stripeConnectAccountRef: input.seller.stripeConnectAccountRef });
+        out(`Registered: seller moved from NIHO=${moved.outcome}, products following the new seller reference=${moved.productsUpdated}.`);
+      } else if (sellerPlan !== "unchanged") {
         if (!stripeKey) {
           out("Refused: EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY is not set (the Stripe account is verified first). Nothing was written.");
           return EXIT.failed;
@@ -169,8 +193,10 @@ async function run(command, input, yes, pool, stripeKey) {
           return EXIT.failed;
         }
       }
-      const seller = await registration.provisionHostAccountSeller({ providerId: input.providerId, ...input.seller });
-      out(`Registered: provider=${seller.provider}, seller for host accounts=${seller.sellerProfile}.`);
+      if (!input.seller.convertFromNiho) {
+        const seller = await registration.provisionHostAccountSeller({ providerId: input.providerId, ...input.seller });
+        out(`Registered: provider=${seller.provider}, seller for host accounts=${seller.sellerProfile}.`);
+      }
     }
     const nowUtc = new Date().toISOString();
     const provisioned = await accounts.provisionHostAccount({ email: input.email, nowUtc });

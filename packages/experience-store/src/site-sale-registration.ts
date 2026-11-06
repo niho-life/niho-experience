@@ -96,8 +96,8 @@ export interface HostAccountSellerState {
   readonly providerExists: boolean;
   readonly sellerProfile:
     | null
-    /** A seller mapped to NIHO: this registration refuses to replace it. */
-    | { readonly kind: "niho" }
+    /** A seller mapped to NIHO: this registration refuses to replace it; convertNihoSellerToHostAccounts moves it. */
+    | { readonly kind: "niho"; readonly stripeConnectAccountRef: string }
     | { readonly kind: "host-account"; readonly providerDisplayName: string; readonly sellerDisplayName: string; readonly stripeConnectAccountRef: string };
   /** Another provider's seller already uses this Stripe account. */
   readonly accountUsedElsewhere: boolean;
@@ -322,7 +322,8 @@ export class SiteSaleRegistration {
     return {
       providerExists: provider.rows[0] !== undefined,
       sellerProfile: row === undefined ? null
-        : row.legacy_provider_id !== null || !isHostSellerRef(row.seller_niho_account_ref) ? { kind: "niho" }
+        : row.legacy_provider_id !== null || !isHostSellerRef(row.seller_niho_account_ref)
+          ? { kind: "niho", stripeConnectAccountRef: String(row.stripe_connect_account_ref) }
         : {
           kind: "host-account",
           providerDisplayName: String(row.provider_display_name),
@@ -374,6 +375,54 @@ export class SiteSaleRegistration {
       if (isUniqueViolation(error)) throw new StoreConflictError("The Stripe account is already registered for another Experience seller.");
       throw error;
     }
+  }
+
+  /**
+   * Moves the provider's seller mapped to NIHO onto Experience host accounts (ADR 0003): the same provider, Stripe account
+   * and display names; the NIHO lookup key goes and a `sel_` seller reference is minted, as for a seller registered for
+   * host accounts. The account is not checked with Stripe here: it does not change, and every publication checks it.
+   *
+   * Under the provider's inventory lock (publishing and creating products take it too), the provider's products move to
+   * the new reference with their version raised (a draft open elsewhere reads it again); published versions keep theirs,
+   * as history and for the sales they made. The old NIHO OWNER membership stays as it is; a host account's OWNER is
+   * granted separately (HostAccounts.grantProviderOwner), and the host-account OWNER consents to the account again.
+   *
+   * UNCHANGED when the seller already moved with this account. StoreConflictError when the provider has no seller, or its
+   * seller uses another Stripe account than `stripeConnectAccountRef` (the reviewed seller-change process changes that).
+   */
+  async convertNihoSellerToHostAccounts(input: { readonly providerId: string; readonly stripeConnectAccountRef: string }): Promise<{ readonly outcome: "CONVERTED" | "UNCHANGED"; readonly productsUpdated: number }> {
+    assertStoreIdentifier(input?.providerId, "providerId");
+    if (typeof input.stripeConnectAccountRef !== "string" || !/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) {
+      throw new StoreValidationError("stripeConnectAccountRef must be a Stripe connected account ID.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, input.providerId);
+      const existing = await client.query<DbRow>(
+        `SELECT legacy_provider_id,seller_niho_account_ref,stripe_connect_account_ref
+           FROM experience_host_seller_profiles WHERE provider_id=$1 FOR UPDATE`,
+        [input.providerId],
+      );
+      const row = existing.rows[0];
+      if (!row) throw new StoreConflictError("The provider has no seller to move onto host accounts.");
+      if (String(row.stripe_connect_account_ref) !== input.stripeConnectAccountRef) {
+        throw new StoreConflictError("The provider's seller uses another Stripe account; use the reviewed seller-change process.");
+      }
+      if (row.legacy_provider_id === null && isHostSellerRef(row.seller_niho_account_ref)) return { outcome: "UNCHANGED" as const, productsUpdated: 0 };
+      const previousRef = String(row.seller_niho_account_ref);
+      const sellerRef = `sel_${randomBytes(16).toString("hex")}`;
+      await client.query(
+        `UPDATE experience_host_seller_profiles
+            SET legacy_provider_id=NULL,seller_niho_account_ref=$2,updated_at=clock_timestamp()
+          WHERE provider_id=$1`,
+        [input.providerId, sellerRef],
+      );
+      const products = await client.query(
+        `UPDATE experience_products SET seller_niho_account_ref=$3,version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND seller_niho_account_ref=$2`,
+        [input.providerId, previousRef, sellerRef],
+      );
+      return { outcome: "CONVERTED" as const, productsUpdated: products.rowCount ?? 0 };
+    });
   }
 
   /** Read-only seller setup state. It contains no product, reservation, or host session data. */

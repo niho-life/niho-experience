@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { HostAccounts } from "../src/host-accounts.ts";
+import { isHostSellerRef } from "../src/host-sellers.ts";
 import { HOST_BIO_CONSENT_VERSION } from "../src/host-bio-rules.ts";
 import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
 import { ProviderHostBioRepository } from "../src/provider-host-bios.ts";
@@ -139,7 +140,7 @@ describe("sellers registered for Experience host accounts", { skip }, () => {
       await assert.rejects(() => registration.provisionHostAccountSeller(seller("provider-copy")), StoreConflictError);
       // A NIHO-mapped seller is not replaced.
       await nihoSeller(pool, "provider-niho", "niho-user-synthetic-1", OTHER_ACCOUNT);
-      assert.deepEqual((await registration.currentHostAccountSellerState({ providerId: "provider-niho", stripeConnectAccountRef: OTHER_ACCOUNT })).sellerProfile, { kind: "niho" });
+      assert.deepEqual((await registration.currentHostAccountSellerState({ providerId: "provider-niho", stripeConnectAccountRef: OTHER_ACCOUNT })).sellerProfile, { kind: "niho", stripeConnectAccountRef: OTHER_ACCOUNT });
       await assert.rejects(() => registration.provisionHostAccountSeller(seller("provider-niho", { stripeConnectAccountRef: OTHER_ACCOUNT })), StoreConflictError);
       for (const bad of [{ sellerDisplayName: " padded" }, { providerDisplayName: "" }, { sellerDisplayName: "two\nlines" }, { stripeConnectAccountRef: "acct_1" }]) {
         await assert.rejects(() => registration.provisionHostAccountSeller(seller("provider-bad", bad)), StoreValidationError, JSON.stringify(bad));
@@ -157,6 +158,55 @@ describe("sellers registered for Experience host accounts", { skip }, () => {
         `INSERT INTO experience_host_seller_profiles (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
          VALUES ('provider-raw',NULL,'Raw','niho-user-raw','acct_SyntheticRaw00001','Raw Seller')`,
       ), (error: { code?: string }) => error.code === "23514");
+    });
+  });
+});
+
+describe("moving a seller mapped to NIHO onto host accounts", { skip }, () => {
+  it("keeps the provider, account and names, mints a seller reference, and moves the products but not the published versions", async () => {
+    await withDb(async (pool) => {
+      const registration = new SiteSaleRegistration(pool);
+      await nihoSeller(pool, "provider-moving", "niho-user-moving", ACCOUNT);
+      const nihoOwner: HostActor = { providerId: "provider-moving", nihoUserId: "niho-user-moving" };
+      await listedProduct(pool, nihoOwner, "synthetic-moving-listed");
+      await pool.query(
+        `INSERT INTO experience_products
+           (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+         VALUES ('provider-moving','synthetic-moving-draft','synthetic-moving-draft','DRAFT','Synthetic draft','{}','JPY',5000,'synthetic-terms',
+                 'niho-user-moving',$1,'NIHO Legal Seller')`,
+        [ACCOUNT],
+      );
+      const versionsBefore = new Map((await pool.query("SELECT id,version FROM experience_products WHERE provider_id='provider-moving'")).rows.map((row) => [row.id, Number(row.version)]));
+
+      // Another account than the registered one, or a provider without a seller, is refused and changes nothing.
+      await assert.rejects(() => registration.convertNihoSellerToHostAccounts({ providerId: "provider-moving", stripeConnectAccountRef: OTHER_ACCOUNT }), StoreConflictError);
+      await assert.rejects(() => registration.convertNihoSellerToHostAccounts({ providerId: "provider-none", stripeConnectAccountRef: ACCOUNT }), StoreConflictError);
+      assert.equal(await sellerRef(pool, "provider-moving"), "niho-user-moving");
+
+      assert.deepEqual(await registration.convertNihoSellerToHostAccounts({ providerId: "provider-moving", stripeConnectAccountRef: ACCOUNT }), { outcome: "CONVERTED", productsUpdated: 2 });
+      const profile = (await pool.query("SELECT legacy_provider_id,seller_niho_account_ref,stripe_connect_account_ref,provider_display_name,seller_display_name FROM experience_host_seller_profiles WHERE provider_id='provider-moving'")).rows[0]!;
+      assert.equal(profile.legacy_provider_id, null);
+      assert.ok(isHostSellerRef(profile.seller_niho_account_ref));
+      assert.deepEqual([profile.stripe_connect_account_ref, profile.provider_display_name, profile.seller_display_name], [ACCOUNT, "NIHO mapped provider", "NIHO Legal Seller"]);
+      // The products follow the new reference with their version raised; the published version keeps its own.
+      const products = (await pool.query("SELECT id,version,seller_niho_account_ref FROM experience_products WHERE provider_id='provider-moving' ORDER BY id")).rows;
+      for (const product of products) {
+        assert.equal(product.seller_niho_account_ref, profile.seller_niho_account_ref);
+        assert.equal(Number(product.version), versionsBefore.get(product.id)! + 1);
+      }
+      assert.equal((await pool.query("SELECT seller_niho_account_ref FROM experience_product_publications WHERE provider_id='provider-moving'")).rows[0]!.seller_niho_account_ref, "niho-user-moving");
+      assert.deepEqual((await registration.currentHostAccountSellerState({ providerId: "provider-moving", stripeConnectAccountRef: ACCOUNT })).sellerProfile, {
+        kind: "host-account", providerDisplayName: "NIHO mapped provider", sellerDisplayName: "NIHO Legal Seller", stripeConnectAccountRef: ACCOUNT,
+      });
+
+      // Again: UNCHANGED, the same reference. A host-account OWNER then resolves this seller.
+      assert.deepEqual(await registration.convertNihoSellerToHostAccounts({ providerId: "provider-moving", stripeConnectAccountRef: ACCOUNT }), { outcome: "UNCHANGED", productsUpdated: 0 });
+      assert.equal(await sellerRef(pool, "provider-moving"), profile.seller_niho_account_ref);
+      const owner = await hostMember(pool, "provider-moving", "moving-owner@example.test", "OWNER");
+      const resolved = await new ExperiencePublicationRepository(pool).currentHostAccountSellerProfile(owner.nihoUserId);
+      assert.equal(resolved.kind, "ready");
+      await assert.rejects(() => registration.convertNihoSellerToHostAccounts({ providerId: "provider-moving", stripeConnectAccountRef: "acct_1" }), StoreValidationError);
     });
   });
 });
