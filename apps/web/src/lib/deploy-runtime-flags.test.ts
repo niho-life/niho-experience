@@ -382,9 +382,10 @@ describe("the deploy workflows' feature flags", () => {
 describe("the deploy workflows", () => {
   const workflow = (name: string) => readFileSync(new URL(`.github/workflows/${name}`, repo), "utf8");
   const WORKFLOWS = [
-    { file: "deploy-production.yml", target: "prod", jobs: ["deploy", "promote"] },
-    { file: "deploy-host-staging.yml", target: "stg", jobs: ["deploy"] },
+    { file: "deploy-production.yml", target: "prod", jobs: ["deploy", "promote"], originReadback: /select\(\.name == "GUIDE_EDITOR_SITE_ORIGIN"\) \| \.value' <<< "\$revision_json"\)" = https:\/\/editor\.niho\.life/ },
+    { file: "deploy-host-staging.yml", target: "stg", jobs: ["deploy"], originReadback: /GUIDE_EDITOR_SITE_ORIGIN:"https:\/\/editor\.niho\.life"/ },
   ] as const;
+  const EDITOR_SITE_ORIGIN = "GUIDE_EDITOR_SITE_ORIGIN";
 
   /** A job's text, from its key to the next job. */
   function job(text: string, name: string): string {
@@ -394,7 +395,7 @@ describe("the deploy workflows", () => {
     return next < 0 ? text.slice(start) : text.slice(start, start + 1 + next);
   }
 
-  for (const { file, target, jobs } of WORKFLOWS) {
+  for (const { file, target, jobs, originReadback } of WORKFLOWS) {
     it(`${file} resolves the flags with the table before authenticating, and checks the revision with its names`, () => {
       const text = workflow(file);
       for (const name of jobs) {
@@ -413,6 +414,16 @@ describe("the deploy workflows", () => {
       for (const name of tableNames()) {
         expect(text, name).not.toMatch(new RegExp(`\\b${name}[=:]`));
       }
+    });
+
+    it(`${file} sets the writers' entrance origin on every revision and reads it back, as a fixed value outside the table (#254)`, () => {
+      // The entrance is independent of every flag. A name of the table is checked as absent from a revision whose flag is
+      // off, so the origin in the table would fail the readback of any revision the workflow gave it by hand.
+      expect(tableNames()).not.toContain(EDITOR_SITE_ORIGIN);
+      const text = workflow(file);
+      expect(text.split(`${EDITOR_SITE_ORIGIN}=https://editor.niho.life`).length - 1).toBe(1);
+      expect(text).toMatch(originReadback);
+      if (target === "prod") expect(text.match(new RegExp(originReadback.source, "g"))?.length).toBe(jobs.length);
     });
   }
 });
