@@ -120,7 +120,7 @@ stg（`niho-app-stg`）と本番（`niho-app-prd`）に同じ名前で用意し�
 | alert policy `experience-ota-runtime-incident` | `jsonPayload.event="ota_runtime_incident"` のログごとに通知（5分の rate limit）。件名に kind と transition |
 | alert policy `experience-ota-watchdog-scheduler-failed` | watchdog job の実行失敗（1時間の rate limit） |
 
-Cloud Run 側の値は配備 workflow だけが入れる。stg は repository variable `STG_CHANNEL_WATCHDOG_ENABLED=true`、本番は `PROD_CHANNEL_WATCHDOG_ENABLED=true` かつ `enable_host_calendar=true`（watchdog は体験 DB を使うため）のときだけ、`EXPERIENCE_CHANNEL_WATCHDOG_ENABLED/AUDIENCE/SERVICE_ACCOUNT_EMAIL` を付けて検査する。有効化の順序は、DB migration と runtime 権限 → 変数を true にして候補配備・昇格 → Scheduler を `gcloud scheduler jobs resume` → Admin の「監視」表示とアラートの受信を確認。止めるときは Scheduler を pause してから変数を戻す。本番では既存の `ops-critical-scheduler-http-failures` も全 job の HTTP 失敗を拾うため、未配備のまま resume しない。
+Cloud Run 側の値は配備 workflow だけが入れる。watchdog は公式配備の機能のフラグの表（`scripts/deploy/runtime-flags.mjs`、[production-deploy.md「機能のフラグ」](production-deploy.md#機能のフラグ84)）の 1 項目で、variable は今までと同じ `STG_CHANNEL_WATCHDOG_ENABLED` / `PROD_CHANNEL_WATCHDOG_ENABLED`。前提はホストの画面と体験 DB（watchdog は体験 DB を使うため。本番は `enable_host_calendar=true`）で、欠ければ資格情報を得る前に配備を止める。`true` のときだけ、表が `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED/AUDIENCE/SERVICE_ACCOUNT_EMAIL`（audience はサービスのベース URL、service account は `experience-ota-watchdog@<project>`）を付け、配備後に revision の値と照合する。有効化の順序は、DB migration と runtime 権限 → 変数を true にして候補配備・昇格 → Scheduler を `gcloud scheduler jobs resume` → Admin の「監視」表示とアラートの受信を確認。止めるときは Scheduler を pause してから変数を戻す。本番では既存の `ops-critical-scheduler-http-failures` も全 job の HTTP 失敗を拾うため、未配備のまま resume しない。
 
 ### Admin の稼働状況と手動復旧
 
