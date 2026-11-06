@@ -1,25 +1,20 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";
 import { ChannelRuntime } from "../src/channels.ts";
 import { ProductOperatorRepository } from "../src/product-operators.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (value: number) => `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 
 describe("PostgreSQL product operators", { skip: databaseUrl === undefined }, () => {
   it("isolates products, accepts once, and serializes revoke before calendar command replay", async () => {
-    const { Pool } = await import("pg");
-    const schema = `product_operators_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "product_operators", { max: 6 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER'),('provider-b','owner-b','OWNER')");
       const store = new ExperienceStore(pool);
@@ -133,8 +128,7 @@ describe("PostgreSQL product operators", { skip: databaseUrl === undefined }, ()
       assert.deepEqual(await store.listCalendarProducts(expiredActor), []);
       await assert.rejects(() => store.listSchedule(expiredActor, "tea-a"), StoreAccessDeniedError);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

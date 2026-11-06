@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   GoogleChannelAnchorRepository,
@@ -13,6 +12,7 @@ vi.mock("server-only", () => ({}));
 
 import { executeGoogleChannelAnchor } from "./google-channel-anchor";
 import { sealGoogleRefreshToken } from "./google-token-crypto";
+import { createIsolatedDatabase } from "../../../../../packages/experience-store/test/helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const actor: HostActor = { providerId: "provider-a", nihoUserId: "owner-a", calendarRoleCeiling: "OWNER" };
@@ -22,14 +22,8 @@ const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).pa
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 async function fixture(desiredState: "OPEN" | "CLOSED" = "OPEN") {
-  const { Pool } = await import("pg");
-  const schema = `google_anchor_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 10, options: `-c search_path=${schema}` });
-  await pool.query(`CREATE SCHEMA "${schema}"`);
-  const migrationUrl = new URL("../../../../../packages/experience-store/migrations/", import.meta.url);
-  for (const name of (await readdir(migrationUrl)).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-    await pool.query(await readFile(new URL(name, migrationUrl), "utf8"));
-  }
+  const db = await createIsolatedDatabase(databaseUrl, "google_anchor", { max: 10 });
+  const pool = db.pool;
   await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
   await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
   await pool.query(`INSERT INTO experience_products
@@ -68,12 +62,11 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "OPEN") {
            'NIHO Airbnb | Synthetic','READY_FOR_CONNECTION','output-a'
       FROM channel_external_accounts a WHERE a.id='account-a'`,
   [command(900), "a".repeat(64), randomUUID(), generation, "b".repeat(64)]);
-  return { pool, schema };
+  return { pool, db };
 }
 
 async function cleanup(value: Fixture) {
-  await value.pool.query(`DROP SCHEMA IF EXISTS "${value.schema}" CASCADE`).catch(() => undefined);
-  await value.pool.end();
+  await value.db.dispose();
 }
 
 function dependencies(fetchImpl: typeof fetch) {

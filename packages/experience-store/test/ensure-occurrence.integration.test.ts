@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { ChannelRuntime, type ChannelAction, type ChannelCapabilities, type ChannelResultInput, type ClaimedChannelJob, type WorkerIdentity } from "../src/channels.ts";
 import { StoreConflictError, StoreValidationError } from "../src/errors.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const now = new Date("2099-01-01T00:00:00.000Z");
@@ -34,15 +34,9 @@ const hourAfter = (iso: string) => new Date(Date.parse(iso) + 3_600_000).toISOSt
 
 /** `deployedCreate: false` runs the runtime under a deployment whose adapter has no canCreate. */
 async function withRuntime(prefix: string, listings: Readonly<Record<string, ListingKind>>, body: (context: Context) => Promise<void>, deployedCreate = true): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `${prefix}_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
-  let created = false;
+  const db = await createIsolatedDatabase(databaseUrl, prefix, { max: 4 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    created = true;
-    const names = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of names) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider')");
     await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider','owner','OWNER')");
     await pool.query(`INSERT INTO experience_products
@@ -70,8 +64,7 @@ async function withRuntime(prefix: string, listings: Readonly<Record<string, Lis
     await runtime.consumeCalendarOutbox();
     await body({ pool, runtime, store, worker });
   } finally {
-    if (created) await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 

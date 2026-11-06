@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { GoogleBookingCalendarEvents } from "../src/google-booking-calendar.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -32,14 +32,9 @@ async function booking(pool: Pool, productId: string, startUtc: string, status: 
 
 describe("Google booking calendar events", { skip: databaseUrl === undefined }, () => {
   it("writes confirmed bookings once, rewrites moved ones, deletes cancelled ones and starts over on a reconnect", async () => {
-    const { Pool } = await import("pg");
-    const schema = `google_booking_events_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "google_booking_events", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER'),('provider-b','owner-b','OWNER')");
       for (const [provider, id, title] of [["provider-a", "tea", "Tea   ceremony"], ["provider-b", "zen", "Zen"]] as const) {
@@ -144,20 +139,14 @@ describe("Google booking calendar events", { skip: databaseUrl === undefined }, 
       await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id='provider-a'");
       assert.deepEqual(await events.claimDue(10, 60_000), []);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-      await pool.end();
+      await db.dispose();
     }
   });
 
   it("never hands one booking to two runs", async () => {
-    const { Pool } = await import("pg");
-    const schema = `google_booking_race_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "google_booking_race", { max: 6 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       await pool.query(
@@ -181,8 +170,7 @@ describe("Google booking calendar events", { skip: databaseUrl === undefined }, 
       assert.equal(new Set(claims.map((work) => work.bookingId)).size, claims.length);
       assert.ok(claims.length <= 3);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

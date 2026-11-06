@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GOOGLE_SCOPES } from "@niho-experience/google-calendar";
 
@@ -14,6 +12,7 @@ vi.mock("./google-token-crypto", () => ({
 }));
 
 import { refreshResourceGoogleOwnerSnapshot, syncOneDueResourceGoogle } from "./resource-google";
+import { createIsolatedDatabase } from "../../../../../packages/experience-store/test/helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const originalEnabled = process.env.EXPERIENCE_RESOURCE_GOOGLE_ENABLED;
@@ -30,15 +29,9 @@ describe.skipIf(!databaseUrl)("resource Google sync epochs", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it("rejects old settings and reconnect ABA responses after external freebusy", async () => {
-    const { Pool } = await import("pg");
-    const schema = `resource_google_sync_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 3, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "resource_google_sync", { max: 3 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrationUrl = new URL("../../../../../packages/experience-store/migrations/", import.meta.url);
-      for (const name of (await readdir(migrationUrl)).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-        await pool.query(await readFile(new URL(name, migrationUrl), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       await pool.query("INSERT INTO inventory_resources (provider_id,id,kind,display_name) VALUES ('provider-a','room-a','VENUE','Room A')");
@@ -116,15 +109,13 @@ describe.skipIf(!databaseUrl)("resource Google sync epochs", () => {
       expect((await pool.query("SELECT sync_status FROM resource_google_calendars WHERE provider_id='provider-a' AND resource_id='room-a'")).rows[0].sync_status).toBe("STALE");
       expect((await pool.query("SELECT outcome FROM resource_google_sync_receipts ORDER BY created_at")).rows.map((row) => row.outcome)).toEqual(["SUPERSEDED", "SUPERSEDED"]);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-      await pool.end();
+      await db.dispose();
     }
   });
 
   it("keeps prior busy data when leases or worker authority change, backs off failures, and commits outbox with receipts", async () => {
-    const { Pool } = await import("pg");
-    const schema = `resource_google_authority_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 3, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "resource_google_authority", { max: 3 });
+    const pool = db.pool;
     const worker = { workerId: "studio-1", credentialVersion: 1 } as const;
     const resetDue = async () => {
       await pool.query(
@@ -152,11 +143,6 @@ describe.skipIf(!databaseUrl)("resource Google sync epochs", () => {
       return { startedPromise, release };
     };
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrationUrl = new URL("../../../../../packages/experience-store/migrations/", import.meta.url);
-      for (const name of (await readdir(migrationUrl)).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-        await pool.query(await readFile(new URL(name, migrationUrl), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       await pool.query("INSERT INTO inventory_resources (provider_id,id,kind,display_name) VALUES ('provider-a','room-a','VENUE','Room A')");
@@ -307,8 +293,7 @@ describe.skipIf(!databaseUrl)("resource Google sync epochs", () => {
       const isolated = (await pool.query("SELECT resource_id,sync_status FROM resource_google_calendars ORDER BY resource_id")).rows;
       expect(isolated).toEqual([{ resource_id: "room-a", sync_status: "FAILED" }, { resource_id: "room-b", sync_status: "FRESH" }]);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

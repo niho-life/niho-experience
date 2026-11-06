@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { StoreAccessDeniedError, StoreRateLimitedError, StoreValidationError } from "../src/errors.ts";
@@ -9,18 +8,15 @@ import { HOST_MAIL_TOPICS } from "../src/host-mail-shared.ts";
 import { HostNotificationAddresses } from "../src/host-notification-addresses.ts";
 import { enqueueCancellationNotification, enqueueNewBookingNotification, enqueueOtaBookingNotification, HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { withTransaction } from "../src/transaction.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 // ホストへのメールの宛先とメール (#194, owner decision 2026-11-01). Synthetic users and addresses only.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 async function withSchema(name: string, work: (pool: Pool) => Promise<void>): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `${name}_${randomUUID().replaceAll("-", "")}`;
-  const pool: Pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, `${name}`, { max: 4 });
+  const pool: Pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((file) => /^\d{4}.*\.sql$/.test(file)).sort();
-    for (const file of migrations) await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
     await pool.query(
       `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES
@@ -52,8 +48,7 @@ async function withSchema(name: string, work: (pool: Pool) => Promise<void>): Pr
     }
     await work(pool);
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 

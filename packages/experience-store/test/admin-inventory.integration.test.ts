@@ -1,27 +1,20 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "../src/errors.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
 
 describe("PostgreSQL Admin shared inventory", { skip: databaseUrl === undefined }, () => {
   it("uses a dedicated Admin actor without weakening host membership or tenant/version fences", async () => {
-    const { Pool } = await import("pg");
-    const schema = `admin_inventory_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "admin_inventory", { max: 4 });
+    const pool = db.pool;
     const admin = { nihoUserId: "verified-admin" } as const;
     const owner = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
-    let schemaCreated = false;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      schemaCreated = true;
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       await pool.query(
@@ -85,8 +78,7 @@ describe("PostgreSQL Admin shared inventory", { skip: databaseUrl === undefined 
       assert.equal(Number((await pool.query("SELECT count(*) FROM calendar_commands WHERE provider_id='provider-a' AND action IN ('inventory_resource.save','product_inventory.save')")).rows[0]?.count), 3);
       assert.equal(Number((await pool.query("SELECT count(*) FROM calendar_outbox_events WHERE provider_id='provider-a' AND aggregate_type IN ('inventory_resource','product_inventory')")).rows[0]?.count), 3);
     } finally {
-      if (schemaCreated) await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

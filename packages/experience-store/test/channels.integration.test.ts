@@ -1,27 +1,21 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { ChannelRuntime } from "../src/channels.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { enqueueCalendarRecalculation } from "../src/inventory-outbox.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}`;
 
 describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () => {
   it("scopes registry writes and keeps claims, preflight, results, outbox, and expiry fail-closed", async () => {
-    const { Pool } = await import("pg");
-    const schema = `channel_runtime_test_${randomUUID().replaceAll("-", "")}`;
-    const quotedSchema = `"${schema}"`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "channel_runtime_test", { max: 6 });
+    const pool = db.pool;
     let now = new Date("2099-01-01T00:00:00.000Z");
     try {
-      await pool.query(`CREATE SCHEMA ${quotedSchema}`);
-      const names = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of names) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER'),('provider-b','owner-b','OWNER')");
       for (const providerId of ["provider-a", "provider-b"]) {
@@ -229,14 +223,12 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       const cursor = await pool.query<{ processed_at: Date | null }>("SELECT processed_at FROM calendar_outbox_events WHERE command_id=$1::uuid", [command("16")]);
       assert.equal(cursor.rows[0]?.processed_at, null);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
   it("rejects assignment ABA and stale CLOSE, and resumes fan-out beyond 2,000 occurrences", async () => {
-    const { Pool } = await import("pg");
-    const schema = `channel_regression_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "channel_regression", { max: 4 });
+    const pool = db.pool;
     const admin = { nihoUserId: "synthetic-admin" };
     const actor = { providerId: "provider", nihoUserId: "owner" };
     const now = new Date("2099-01-01T00:00:00.000Z");
@@ -244,9 +236,6 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       supportedAdapters: { "GetYourGuide/gyg-browser@1": { canObserve: true, canClose: true, canOpen: true } } });
     const store = new ExperienceStore(pool);
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const names = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of names) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider','owner','OWNER')");
       await pool.query(`INSERT INTO experience_products
@@ -372,8 +361,7 @@ describe("PostgreSQL channel runtime", { skip: databaseUrl === undefined }, () =
       assert.equal(Number((await pool.query("SELECT count(*) FROM channel_desired_states d JOIN channel_listings l ON l.id=d.listing_id WHERE l.active")).rows[0]?.count), 2_016);
       assert.equal((await runtime.consumeCalendarOutbox()).events, 0);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 

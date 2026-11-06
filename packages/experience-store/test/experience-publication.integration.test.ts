@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";
@@ -8,6 +7,7 @@ import { ExperiencePublicationBlockedError, ExperiencePublicationRepository } fr
 import { ExperienceStore } from "../src/repository.ts";
 import { HostNotificationOutbox } from "../src/host-notification-outbox.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "provider-synthetic", nihoUserId: "owner-synthetic" } as const;
@@ -59,13 +59,9 @@ const readiness = (overrides: Partial<Parameters<ExperiencePublicationRepository
 
 describe("Experience publication persistence (#330 #369)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("serializes slug claims across providers for publish and save-and-publish", async () => {
-    const { Pool } = await import("pg");
-    const schema = `experience_publication_slug_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "experience_publication_slug", { max: 8 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
 
       const firstOwner = { providerId: "provider-slug-first", nihoUserId: "owner-slug-first" } as const;
       const secondOwner = { providerId: "provider-slug-second", nihoUserId: "owner-slug-second" } as const;
@@ -166,19 +162,14 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal(draftResults.filter((result) => result.blockers.includes("SLUG_IN_USE")).length, 1);
       assert.equal((await publications.listPublic()).filter(({ slug }) => slug === "shared-draft-slug").length, 1);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 
   it("publishes only through a current OWNER, preserves an older public copy on incomplete saves, and fails closed", async () => {
-    const { Pool } = await import("pg");
-    const schema = `experience_publication_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "experience_publication", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [OWNER.providerId]);
       await pool.query(
         `INSERT INTO experience_host_seller_profiles
@@ -605,8 +596,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.deepEqual(afterSnapshots.rows, beforeSnapshots.rows);
       assert.equal((await pool.query("SELECT count(*)::int AS count FROM bookings WHERE public_booking_id=$1::uuid", [booking.publicBookingId])).rows[0]?.count, 1);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

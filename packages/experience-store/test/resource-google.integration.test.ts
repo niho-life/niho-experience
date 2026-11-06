@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Occurrence } from "@niho-experience/experience-domain";
 import { StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { evaluateStoredInventory } from "../src/inventory.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { ResourceGoogleRepository } from "../src/resource-google.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -18,16 +17,11 @@ const occurrence = (startUtc = "2099-01-01T02:00:00.000Z", endUtc = "2099-01-01T
 
 describe("resource Google inventory", { skip: databaseUrl === undefined }, () => {
   it("isolates resources, respects half-open buffers, fails closed, rejects ABA, and rolls command/outbox back together", async () => {
-    const { Pool } = await import("pg");
-    const schema = `resource_google_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "resource_google", { max: 4 });
+    const pool = db.pool;
     const actor = { providerId: "provider-a", nihoUserId: "owner-a", calendarRoleCeiling: "OWNER" as const };
     let sequence = 1;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER'),('provider-a','operator-a','EDITOR')");
       const store = new ExperienceStore(pool);
@@ -112,8 +106,7 @@ describe("resource Google inventory", { skip: databaseUrl === undefined }, () =>
       assert.equal((await pool.query("SELECT 1 FROM resource_google_calendars WHERE provider_id='provider-a' AND resource_id='room-b'")).rowCount, 0);
       assert.equal((await pool.query("SELECT 1 FROM calendar_commands WHERE provider_id='provider-a' AND command_id=$1", [rollbackCommand])).rowCount, 0);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

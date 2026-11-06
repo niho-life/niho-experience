@@ -1,21 +1,16 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { StoreAccessDeniedError, StoreValidationError } from "../src/errors.ts";
 import { HOST_NOTIFICATION_KEYS, ProviderNotificationSettings } from "../src/notification-settings.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("PostgreSQL provider notification settings (#109)", { skip: databaseUrl === undefined }, () => {
   it("lets only the OWNER change the three stoppable notifications and tells senders", async () => {
-    const { Pool } = await import("pg");
-    const schema = `notification_settings_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "notification_settings", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query(
         `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES
@@ -76,8 +71,7 @@ describe("PostgreSQL provider notification settings (#109)", { skip: databaseUrl
         { notification_key: "NEW_REVIEW", updated_by_niho_user_id: "owner-a" },
       ]);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });
