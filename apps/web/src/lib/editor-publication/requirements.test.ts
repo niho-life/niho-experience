@@ -41,8 +41,10 @@ const KIND_KEYS: Record<string, { allowed: string[]; required: string[] }> = {
   headings: { allowed: ["min"], required: ["min"] },
   noConfirm: { allowed: [], required: [] },
   relatedLive: { allowed: [], required: [] },
+  title: { allowed: ["max"], required: ["max"] },
+  images: { allowed: ["alt"], required: ["alt"] },
 };
-const LIMITS = { maxLabel: 80, maxMessage: 200, maxConditions: 32, maxCategories: 100, maxCategoryLength: 160, maxLead: 10_000, maxHeadings: 100, maxHost: 253, maxPath: 64 };
+const LIMITS = { maxLabel: 80, maxMessage: 200, maxConditions: 32, maxCategories: 100, maxCategoryLength: 160, maxLead: 10_000, maxHeadings: 100, maxTitle: 500, maxHost: 253, maxPath: 64 };
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]|\p{Cs}/u;
 const CONDITION_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -115,6 +117,8 @@ function declarationIssues(input: unknown): string[] {
     if (kind === "cover" && typeof fields.consent !== "boolean") issues.push(`${path}.consent`);
     if (kind === "lead" && fields.max !== undefined) intAt(fields.max, `${path}.max`, 1, LIMITS.maxLead);
     if (kind === "headings") intAt(fields.min, `${path}.min`, 1, LIMITS.maxHeadings);
+    if (kind === "title") intAt(fields.max, `${path}.max`, 1, LIMITS.maxTitle);
+    if (kind === "images" && typeof fields.alt !== "boolean") issues.push(`${path}.alt`);
     if (kind === "category" && fields.oneOf !== undefined) {
       const oneOf = fields.oneOf;
       if (!Array.isArray(oneOf) || !oneOf.length || oneOf.length > LIMITS.maxCategories || new Set(oneOf).size !== oneOf.length) issues.push(`${path}.oneOf`);
@@ -146,6 +150,8 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
         { id: "headings", kind: "headings", min: 1, message: "本文に見出しを 1 つ以上入れてください", fix: "body" },
         { id: "no-confirm", kind: "noConfirm", message: "未確認の印（CONFIRM）を解消してください", fix: "body" },
         { id: "related-live", kind: "relatedLive", message: "掲載中の関連する体験を選んでください", fix: "related" },
+        { id: "title", kind: "title", max: GUIDE_LIMITS.titleMaxLength, message: `題名を ${GUIDE_LIMITS.titleMaxLength} 字以内にしてください`, fix: "body" },
+        { id: "image-alt", kind: "images", alt: true, message: "写真に代替テキスト（alt）を入れてください", fix: "body" },
       ],
     });
     expect(guidePublicationRequirements("https://experience.niho.life").host).toBe("experience.niho.life");
@@ -161,7 +167,10 @@ describe("the destination declaration (#253, editor declaration schema 1)", () =
       [(d) => { d.path = "/guides"; }, "$.path"],
       [(d) => { d.extras = ["guides"]; }, "$.extras"],
       [(d) => { d.accepts = { blocks: ["table"], marks: [] }; }, "$.accepts.blocks"],
-      [(d) => { d.requires.push({ id: "title", kind: "title", message: "x", fix: "body" }); }, "$.requires[7].kind"],
+      [(d) => { d.requires.push({ id: "word-count", kind: "wordCount", message: "x", fix: "body" }); }, "$.requires[9].kind"],
+      [(d) => { delete d.requires[7]!.max; }, "$.requires[7].max"],
+      [(d) => { d.requires[7]!.max = 501; }, "$.requires[7].max"],
+      [(d) => { d.requires[8]!.alt = "yes"; }, "$.requires[8].alt"],
       [(d) => { d.requires[0]!.maxLength = 1; }, "$.requires[0].maxLength"],
       [(d) => { d.requires[1]!.fix = "photo"; }, "$.requires[1].fix"],
       [(d) => { d.requires[2]!.max = 0; }, "$.requires[2].max"],
