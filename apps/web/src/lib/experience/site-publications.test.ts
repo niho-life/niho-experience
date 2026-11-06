@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   },
   bookings: { publicBookingTerms: vi.fn() },
   disclosures: { getPublicBySlug: vi.fn() },
+  hostBios: { getPublicBySlug: vi.fn() },
 }));
 
 vi.mock("server-only", () => ({}));
@@ -18,6 +19,7 @@ vi.mock("@/lib/experience/store-server", () => ({
   experiencePublicationRepository: () => mocks.publications,
   guestBookingRepository: () => mocks.bookings,
   providerSellerDisclosureRepository: () => mocks.disclosures,
+  providerHostBioRepository: () => mocks.hostBios,
 }));
 
 import { getSitePublicExperience, publicExperienceRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
@@ -55,6 +57,7 @@ describe("Experience site publication selection", () => {
     mocks.publications.listClaimedSlugs.mockResolvedValue([publication.slug, "stopped-experience"]);
     mocks.bookings.publicBookingTerms.mockResolvedValue(terms);
     mocks.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" });
+    mocks.hostBios.getPublicBySlug.mockResolvedValue({ ja: "合成の紹介文", en: "Synthetic bio" });
   });
 
   it("projects native sale terms without Experience IDs and keeps stopped slugs reserved", async () => {
@@ -63,7 +66,9 @@ describe("Experience site publication selection", () => {
       publication,
       saleTerms: expect.objectContaining({ sellerDisplayName: "Synthetic seller", offers: terms.offers }),
       sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" },
+      hostBio: { ja: "合成の紹介文", en: "Synthetic bio" },
     } });
+    expect(mocks.hostBios.getPublicBySlug).toHaveBeenCalledWith(publication.slug);
     expect(published?.kind === "published" ? published.item.saleTerms : null).not.toHaveProperty("providerId");
     expect(published?.kind === "published" ? published.item.saleTerms : null).not.toHaveProperty("productId");
 
@@ -71,6 +76,19 @@ describe("Experience site publication selection", () => {
     mocks.publications.claimsSlug.mockResolvedValue(true);
     expect(await getSitePublicExperience("stopped-experience")).toEqual({ kind: "reserved" });
     expect(mocks.bookings.publicBookingTerms).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the page without a host bio when the bio read fails", async () => {
+    mocks.hostBios.getPublicBySlug.mockRejectedValueOnce(new Error("bio store down"));
+    const published = await getSitePublicExperience(publication.slug);
+    expect(published?.kind).toBe("published");
+    expect(published?.kind === "published" ? published.item.hostBio : undefined).toBeNull();
+  });
+
+  it("does not read host bios for catalog cards", async () => {
+    const result = await listSitePublicExperiences();
+    expect(result.experiences[0]?.hostBio).toBeNull();
+    expect(mocks.hostBios.getPublicBySlug).not.toHaveBeenCalled();
   });
 
   it("omits a disclosure when current sale terms name another seller", async () => {

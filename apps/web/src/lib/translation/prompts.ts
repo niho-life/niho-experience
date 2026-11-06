@@ -103,6 +103,21 @@ export function experienceManuscriptToEnglish(japanese: Readonly<Record<string, 
   return request(system, JSON.stringify(japanese));
 }
 
+/** ホスト紹介文 (#146): the host's own Japanese bio, published on every experience page of that host. */
+export const HOST_BIO_TO_ENGLISH_SYSTEM = [
+  "You translate the self-introduction that the host of a cultural experience in Japan writes about themselves.",
+  "It is published on the host's experience pages as \"About your host\" for travelers.",
+  "Translate the host's Japanese text in <bio> into natural, warm English written in the same person (usually the first person).",
+  "Do not add facts, career history, qualifications, awards, years, places or promises that are not in the text.",
+  "Do not add phone numbers, email addresses, URLs, social media handles or addresses that are not in the text.",
+  RULES,
+].join("\n");
+
+/** The host's Japanese bio as an English draft that the host checks before it is published. */
+export function hostBioToEnglish(japanese: string): MessageCreateParamsNonStreaming {
+  return request(HOST_BIO_TO_ENGLISH_SYSTEM, inTag("bio", japanese));
+}
+
 export type TranslationFailure = "unavailable" | "refused" | "unusable";
 export type TranslationResult = { ok: true; text: string } | { ok: false; failure: TranslationFailure };
 

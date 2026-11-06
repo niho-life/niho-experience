@@ -26,6 +26,7 @@ const sale = {
 };
 const native = (slug: string, saleTerms: typeof sale | null = sale): SitePublicExperience => ({
   sellerDisclosure: null,
+  hostBio: null,
   saleTerms,
   publication: {
     slug, publicTitle: `Native ${slug}`,
