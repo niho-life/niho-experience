@@ -4,7 +4,12 @@ import type { JourneyReviews, Occurrence } from "@niho-experience/api-client";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 
-const state = vi.hoisted(() => ({ reviews: null as JourneyReviews | null, nextDates: [] as unknown[] }));
+const state = vi.hoisted(() => ({
+  reviews: null as JourneyReviews | null,
+  nextDates: [] as unknown[],
+  guides: { guides: [] as unknown[], draftSlugs: [] as string[] },
+  related: [] as unknown[],
+}));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: {
   siteUrl: "https://experience.example.test",
@@ -15,6 +20,8 @@ vi.mock("@/lib/config", () => ({ config: {
 } }));
 vi.mock("@/lib/journey", () => ({ getLiveReviews: vi.fn(async () => state.reviews) }));
 vi.mock("@/lib/guest-booking-source", () => ({ siteNextDates: vi.fn(async () => state.nextDates) }));
+vi.mock("@/lib/guide-registry", () => ({ guidesAboutExperience: vi.fn(async () => state.guides) }));
+vi.mock("@/lib/experience/site-related", () => ({ relatedSiteExperienceCards: vi.fn(async () => state.related) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/Analytics", () => ({ TrackView: () => null }));
 vi.mock("@/components/DetailGallery", () => ({ DesktopGallery: () => null, MobileGallery: () => null }));
@@ -22,6 +29,9 @@ vi.mock("@/components/Photo", () => ({ Photo: () => null }));
 
 import { getLiveReviews } from "@/lib/journey";
 import { siteNextDates } from "@/lib/guest-booking-source";
+import { guidesAboutExperience } from "@/lib/guide-registry";
+import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
+import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { config } from "@/lib/config";
 import { SitePublicationPage } from "./SitePublicationPage";
 
@@ -191,5 +201,97 @@ describe("native publication FAQ", () => {
     expect(html.indexOf("Can I bring my child?")).toBeLessThan(html.indexOf("Is it held in rain?"));
     expect(html).toContain("Yes, from age 6.\nAn adult must join.");
     for (const node of jsonLd(html)) expect(JSON.stringify(node)).not.toContain("FAQPage");
+  });
+});
+
+describe("native publication context under the title and below the sections (#146)", () => {
+  const guide = (slug: string, pillar: "hosts" | "planning") => ({
+    slug, title: `Guide ${slug}`, description: `About ${slug}.`, pillar, author: { name: "Synthetic Editor" },
+    publishedAt: "2026-10-01", updatedAt: "2026-10-02", relatedExperienceSlugs: ["native-review-page"], relatedGuideSlugs: [], faq: [], body: "Body.",
+  });
+  const withOverview = (meetingOverview: string | null): SitePublicExperience => ({ ...item, publication: { ...item.publication, meetingOverview } });
+  const japanese: NonNullable<SitePublicExperience["publication"]["japanese"]> = {
+    title: "日本語の題名", lead: "導入", description: "説明", language: "日本語", highlights: [], included: ["材料"], notIncluded: [],
+    knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [],
+  };
+  const page = async (locale: "en" | "ja" = "en", withItem: SitePublicExperience = item) => {
+    state.reviews = null;
+    return renderToStaticMarkup(await SitePublicationPage({ item: withItem, locale }));
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    state.nextDates = [];
+    state.guides = { guides: [], draftSlugs: [] };
+    state.related = [];
+  });
+
+  it("says where it is under the title, and adds the station walk only when the meeting overview names one", async () => {
+    const html = await page();
+    expect(html).toContain("Kamakura · 1 hour from Tokyo<");
+    expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeGreaterThan(html.indexOf("<h1"));
+    expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeLessThan(html.indexOf("Offered by"));
+    expect(await page("en", withOverview("Meet at the gate. It is a 2-minute walk from Kamakura Station."))).toContain("Kamakura · 1 hour from Tokyo · 2-minute walk from Kamakura Station");
+    expect(await page("en", withOverview("Meet near the nearest station."))).toContain("Kamakura · 1 hour from Tokyo<");
+  });
+
+  it("says it in Japanese too, without carrying an English station into the Japanese page", async () => {
+    const ja = { ...withOverview("It is a 2-minute walk from Kamakura Station."), publication: { ...item.publication, meetingOverview: "It is a 2-minute walk from Kamakura Station.", japanese } } as SitePublicExperience;
+    const html = await page("ja", ja);
+    expect(html).toContain("鎌倉・東京から1時間<");
+    expect(html).not.toContain("Kamakura Station");
+  });
+
+  it("links the host story and shows the related guides under a heading that names the place, English only", async () => {
+    state.guides = { guides: [guide("meet-the-host", "hosts"), guide("rainy-day", "planning")], draftSlugs: [] };
+    const html = await page();
+    expect(guidesAboutExperience).toHaveBeenCalledWith("native-review-page");
+    expect(html).toMatch(/<h2[^>]*>Plan your (morning|evening|day) in Kamakura<\/h2>/);
+    expect(html).toContain("Guide meet-the-host");
+    expect(html).toContain("Guide rainy-day");
+    expect(html).toContain('href="/guides/meet-the-host"');
+    expect(html).toContain("Read the host story");
+    // The related guides come after the FAQ position and before the price card; the story link is up with the host line.
+    expect(html.indexOf("Read the host story")).toBeLessThan(html.indexOf("What you’ll do"));
+    expect(html.indexOf("Plan your")).toBeGreaterThan(html.indexOf("What’s included"));
+
+    const ja = await page("ja", { ...item, publication: { ...item.publication, japanese } } as SitePublicExperience);
+    expect(ja).not.toContain("Read the host story");
+    expect(ja).not.toContain("Guide meet-the-host");
+    expect(guidesAboutExperience).toHaveBeenCalledTimes(1);
+  });
+
+  it("links no host story without a hosts guide, or when it is only a draft; the other guides still show", async () => {
+    state.guides = { guides: [guide("rainy-day", "planning")], draftSlugs: [] };
+    const html = await page();
+    expect(html).not.toContain("Read the host story");
+    expect(html).toContain("Guide rainy-day");
+    state.guides = { guides: [guide("meet-the-host", "hosts")], draftSlugs: ["meet-the-host"] };
+    expect(await page()).not.toContain("Read the host story");
+  });
+
+  it("shows no guides section at all when none relate, and a failing lookup does not break the page", async () => {
+    expect(await page()).not.toContain("detail-guides-heading");
+    vi.mocked(guidesAboutExperience).mockRejectedValueOnce(new Error("catalogue unavailable"));
+    const html = await page();
+    expect(html).toContain("Native review page");
+    expect(html).not.toContain("detail-guides-heading");
+  });
+
+  it("suggests other experiences after the page content, English only, and nothing when there are none", async () => {
+    const other = { ...item, publication: { ...item.publication, slug: "another-experience", publicTitle: "Another experience" } } as SitePublicExperience;
+    state.related = [sitePublicationCard(other)];
+    const html = await page();
+    expect(relatedSiteExperienceCards).toHaveBeenCalledWith("native-review-page");
+    expect(html).toMatch(/<h2[^>]*>More experiences in Kamakura<\/h2>/);
+    expect(html).toContain('href="/experiences/another-experience"');
+    // Full width, after the price card rather than inside the two-column body.
+    expect(html.indexOf("More experiences in Kamakura")).toBeGreaterThan(html.indexOf("</aside>"));
+
+    const ja = await page("ja", { ...item, publication: { ...item.publication, japanese } } as SitePublicExperience);
+    expect(ja).not.toContain("More experiences in Kamakura");
+    expect(relatedSiteExperienceCards).toHaveBeenCalledTimes(1);
+
+    state.related = [];
+    expect(await page()).not.toContain("More experiences in Kamakura");
   });
 });
