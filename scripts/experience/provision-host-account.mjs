@@ -1,26 +1,40 @@
 #!/usr/bin/env node
-// Registers an Experience host account (ADR 0003, docs/host-accounts.md) by email and makes it the first OWNER of an
-// existing provider. The host then signs in to /host with an emailed link (EXPERIENCE_HOST_ACCOUNTS_ENABLED). It does
-// not create a provider, a seller profile, a product or a payout account, and it never changes an existing membership.
+// Registers an Experience host account (ADR 0003, docs/host-accounts.md) by email and makes it the first OWNER of a
+// provider. The host then signs in to /host with an emailed link (EXPERIENCE_HOST_ACCOUNTS_ENABLED). With `seller`, the
+// same run first registers the provider's seller for host accounts (slice 3): the provider when it is missing, its names
+// and its existing Stripe connected account, verified with Stripe, with no NIHO ID. Without `seller` the provider must
+// exist and nothing but the account and its OWNER membership is written. It never changes an existing membership or
+// seller profile, writes no fee setting, creates no product and records no payout consent (the OWNER does, in /host).
 //
 //   node scripts/experience/provision-host-account.mjs [plan|register] <input.json> [--yes]
 //
-// input.json (kept outside git; see host-account.example.json): { "email": "...", "providerId": "..." }
+// input.json (kept outside git; see host-account.example.json):
+//   { "email": "...", "providerId": "...",
+//     "seller": { "providerDisplayName": "...", "sellerDisplayName": "...", "stripeConnectAccountRef": "acct_..." } }
 //
 // Environment (never printed):
-//   EXPERIENCE_DATABASE_URL    Experience DB
-//   EXPERIENCE_DATABASE_ROLE   optional role to act as (SET ROLE)
+//   EXPERIENCE_DATABASE_URL                 Experience DB (the migration identity when `seller` is given: the runtime
+//                                           role cannot write seller profiles, by design)
+//   EXPERIENCE_DATABASE_ROLE                optional role to act as (SET ROLE)
+//   EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY   register with `seller`: verifies the connected account with Stripe
 //
-// Prints IDs (the host account ID, the provider ID) and outcome kinds only: never the address or connection details.
+// Prints IDs (the host account ID, the provider ID, the account's last 4 characters) and outcome kinds only: never the
+// address, a name or connection details.
 import { readFile } from "node:fs/promises";
 import pg from "pg";
+import { retrieveConnectedAccount } from "@niho-experience/experience-payments";
 import { HostAccounts, normalizeHostEmail, StoreError } from "@niho-experience/experience-store";
+import { SiteSaleRegistration } from "@niho-experience/experience-store/site-sale-registration";
 
 const EXIT = { ok: 0, failed: 1, unexpected: 2 };
 const USAGE = "Usage: node scripts/experience/provision-host-account.mjs [plan|register] <input.json> [--yes]";
 const ROLE = /^[a-z_][a-z0-9_]{0,62}$/;
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+const CONNECT_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,250}$/;
+const CONTROL = /[\u0000-\u001F\u007F]/;
+const SELLER_FIELDS = ["providerDisplayName", "sellerDisplayName", "stripeConnectAccountRef"];
 const out = (line) => console.log(line);
+const masked = (value) => `…${value.slice(-4)}`;
 
 function refuse(problems) {
   for (const problem of problems) console.error(`Invalid: ${problem}`);
@@ -41,16 +55,48 @@ function parseArguments(argv) {
   return { command, inputPath, yes };
 }
 
-/** Exactly `email` and `providerId`. The address is checked by the store's rule and never echoed. */
+function oneLine(value, path, problems) {
+  if (typeof value !== "string" || value.trim() !== value || value.length < 1 || value.length > 300 || CONTROL.test(value)) {
+    problems.push(`${path} must be one line of 1-300 characters without surrounding spaces`);
+  }
+}
+
+/** The seller for host accounts: exactly the provider's name, the legal seller name and the existing Stripe account. */
+function parseSeller(raw, problems) {
+  if (raw === undefined) return null;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    problems.push("input.seller must be an object");
+    return null;
+  }
+  for (const key of Object.keys(raw)) if (!SELLER_FIELDS.includes(key)) problems.push(`input.seller.${key} is not a known field (no NIHO ID is taken)`);
+  oneLine(raw.providerDisplayName, "input.seller.providerDisplayName", problems);
+  oneLine(raw.sellerDisplayName, "input.seller.sellerDisplayName", problems);
+  if (typeof raw.stripeConnectAccountRef !== "string" || !CONNECT_ACCOUNT_ID.test(raw.stripeConnectAccountRef)) {
+    problems.push("input.seller.stripeConnectAccountRef must be a Stripe connected account ID (acct_…)");
+  }
+  return { providerDisplayName: raw.providerDisplayName, sellerDisplayName: raw.sellerDisplayName, stripeConnectAccountRef: raw.stripeConnectAccountRef };
+}
+
+/** `email`, `providerId` and optionally `seller`. The address is checked by the store's rule and never echoed. */
 function parseInput(raw) {
   const problems = [];
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { problems: ["input must be an object"] };
-  for (const key of Object.keys(raw)) if (key !== "email" && key !== "providerId") problems.push(`input.${key} is not a known field`);
+  for (const key of Object.keys(raw)) if (key !== "email" && key !== "providerId" && key !== "seller") problems.push(`input.${key} is not a known field`);
   let emailKey = "";
   try { emailKey = normalizeHostEmail(raw.email); }
   catch { problems.push("input.email must be one email address of 3-254 characters"); }
   if (typeof raw.providerId !== "string" || !PROVIDER_ID.test(raw.providerId)) problems.push("input.providerId must be an Experience provider ID");
-  return problems.length > 0 ? { problems } : { email: raw.email, emailKey, providerId: raw.providerId };
+  const seller = parseSeller(raw.seller, problems);
+  return problems.length > 0 ? { problems } : { email: raw.email, emailKey, providerId: raw.providerId, seller };
+}
+
+function sellerOutcome(state, seller) {
+  if (state.sellerProfile === null) return state.accountUsedElsewhere ? "conflict: another seller uses this Stripe account" : "register (no NIHO ID)";
+  if (state.sellerProfile.kind === "niho") return "conflict: the provider has a seller mapped to NIHO";
+  const same = state.sellerProfile.providerDisplayName === seller.providerDisplayName
+    && state.sellerProfile.sellerDisplayName === seller.sellerDisplayName
+    && state.sellerProfile.stripeConnectAccountRef === seller.stripeConnectAccountRef;
+  return same ? "unchanged" : "conflict: the registered seller differs";
 }
 
 /** What register would do, from reads only. */
@@ -73,22 +119,58 @@ function membershipOutcome(state) {
   return state.membership.role === "OWNER" && state.membership.active ? "already OWNER" : "conflict: an existing membership is changed by hand only";
 }
 
-async function run(command, input, yes, pool) {
+async function run(command, input, yes, pool, stripeKey) {
   const accounts = new HostAccounts(pool);
+  const registration = new SiteSaleRegistration(pool);
   try {
     const state = await currentState(pool, input);
-    out(`Experience provider ${input.providerId}: ${state.providerExists ? "registered" : "not found"}`);
+    const sellerState = input.seller
+      ? await registration.currentHostAccountSellerState({ providerId: input.providerId, stripeConnectAccountRef: input.seller.stripeConnectAccountRef })
+      : null;
+    const sellerPlan = input.seller ? sellerOutcome(sellerState, input.seller) : null;
+    out(`Experience provider ${input.providerId}: ${state.providerExists ? "registered" : input.seller ? "create" : "not found"}`);
+    if (input.seller) {
+      out(`Seller for host accounts: ${sellerPlan}`);
+      out(`Stripe connected account ${masked(input.seller.stripeConnectAccountRef)}: ${sellerPlan === "unchanged" ? "registered" : "verify with Stripe and register"}`);
+    }
     out(`Host account: ${state.account ? `${state.account.id} (${state.account.status})` : "create (ACTIVE)"}`);
     out(`OWNER membership: ${membershipOutcome(state)}`);
-    out("Provider, seller profile, product and payout account: not created by this operation");
+    out(input.seller
+      ? "Fee setting, product and payout consent: not created by this operation (the OWNER consents in /host)"
+      : "Provider, seller profile, product and payout account: not created by this operation");
     if (command === "plan") return EXIT.ok;
     if (!yes) {
       out("Nothing was written. Run register again with --yes to write.");
       return EXIT.failed;
     }
-    if (!state.providerExists) {
+    if (!input.seller && !state.providerExists) {
       out("Refused: the provider does not exist. Nothing was written.");
       return EXIT.failed;
+    }
+    if (input.seller) {
+      if (sellerPlan.startsWith("conflict:")) {
+        out(`Refused: ${sellerPlan.slice("conflict: ".length)}. Nothing was written.`);
+        return EXIT.failed;
+      }
+      if (!await registration.canProvisionHostAccountSeller()) {
+        out("This database connection cannot write seller profiles (the runtime role cannot, by design). Use the migration identity. Nothing was written.");
+        return EXIT.failed;
+      }
+      if (sellerPlan !== "unchanged") {
+        if (!stripeKey) {
+          out("Refused: EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY is not set (the Stripe account is verified first). Nothing was written.");
+          return EXIT.failed;
+        }
+        const stripe = await retrieveConnectedAccount({ accountId: input.seller.stripeConnectAccountRef, platformStripeKey: stripeKey });
+        if (stripe.kind !== "ready") {
+          out(stripe.kind === "unreachable"
+            ? `Refused: Stripe does not show account ${masked(input.seller.stripeConnectAccountRef)} to this platform key. Nothing was written.`
+            : `Refused: Stripe account ${masked(input.seller.stripeConnectAccountRef)} is not ready (${stripe.problems.join(", ")}). Nothing was written.`);
+          return EXIT.failed;
+        }
+      }
+      const seller = await registration.provisionHostAccountSeller({ providerId: input.providerId, ...input.seller });
+      out(`Registered: provider=${seller.provider}, seller for host accounts=${seller.sellerProfile}.`);
     }
     const nowUtc = new Date().toISOString();
     const provisioned = await accounts.provisionHostAccount({ email: input.email, nowUtc });
@@ -96,6 +178,7 @@ async function run(command, input, yes, pool) {
     out(`Registered: host account=${provisioned.hostAccountId} (${provisioned.created ? "created" : "existing"}), OWNER=${granted.kind}.`);
     if (granted.kind !== "granted" && granted.kind !== "already-owner") return EXIT.failed;
     out("The host signs in at /host with a link sent to the address (EXPERIENCE_HOST_ACCOUNTS_ENABLED=true).");
+    if (input.seller) out("Next: the OWNER signs in, consents to the payout account in 設定 › 受取口座, then publishes.");
     return EXIT.ok;
   } catch (error) {
     if (error instanceof StoreError) {
@@ -127,6 +210,7 @@ async function main() {
   if (!databaseUrl) return refuse(["EXPERIENCE_DATABASE_URL is not set"]);
   const role = process.env.EXPERIENCE_DATABASE_ROLE;
   if (role !== undefined && role !== "" && !ROLE.test(role)) return refuse(["EXPERIENCE_DATABASE_ROLE is not a role name"]);
+  const stripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim() || undefined;
 
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 2, ...(role ? { options: `-c role=${role}` } : {}) });
   pool.on("error", () => {});
@@ -135,7 +219,7 @@ async function main() {
       const current = await pool.query("SELECT current_user AS name");
       if (current.rows[0]?.name !== role) return refuse(["EXPERIENCE_DATABASE_ROLE did not apply (remove `options` from EXPERIENCE_DATABASE_URL)"]);
     }
-    return await run(args.command, input, args.yes, pool);
+    return await run(args.command, input, args.yes, pool, stripeKey);
   } finally {
     await pool.end().catch(() => {});
   }

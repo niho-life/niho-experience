@@ -6,6 +6,7 @@ import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-
 import { BookingUnavailableError, StoreAccessDeniedError, StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -219,15 +220,10 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
   });
 
   it("keeps host push subscriptions per endpoint and per connection (#177)", async () => {
-    const { Pool } = await import("pg");
-    const schema = `experience_push_test_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 2, options: `-c search_path=${schema}` });
-    const quotedSchema = `"${schema}"`;
+    // The whole current schema: the recipient queries also read host_accounts (ADR 0003, migration 0064).
+    const db = await createIsolatedDatabase(databaseUrl, "push_subscriptions", { max: 2 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA ${quotedSchema}`);
-      for (const name of ["0001_experience_store.sql", "0002_google_oauth.sql", "0003_google_busy_coverage.sql", "0004_host_push_subscriptions.sql", "0005_guide_cms.sql", "0006_calendar_commands_and_sales_state.sql"]) {
-        await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", ["provider-a"]);
       await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role) VALUES ($1,'user-a','OWNER'), ($1,'user-b','EDITOR')", ["provider-a"]);
       const store = new HostPushSubscriptions(pool);
@@ -265,8 +261,7 @@ describe("PostgreSQL booking transaction", { skip: databaseUrl === undefined }, 
       assert.equal((await pool.query("SELECT 1 FROM host_push_subscriptions")).rowCount, 0);
       await assert.rejects(() => store.save({ nihoUserId: "user-a", connectionId: "conn-a", endpoint: "http://web.push.apple.com/x", ...keys, deviceLabel: "iphone" }));
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

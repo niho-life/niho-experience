@@ -192,6 +192,15 @@ function sameHash(stored: unknown, given: Uint8Array): boolean {
 const REVOKE_ACCOUNT_SESSIONS = `UPDATE host_sessions SET revoked_at = GREATEST($2::timestamptz, created_at)
   WHERE host_account_id = $1 AND revoked_at IS NULL`;
 
+/**
+ * Every push subscription of an account (`$1`), deleted with its sessions: a device signed out everywhere or of a
+ * suspended account gets no more booking notifications (some carry a guest's name).
+ */
+const FORGET_ACCOUNT_PUSH = "DELETE FROM host_push_subscriptions WHERE niho_user_id = $1";
+
+/** The push subscriptions of one signed-out session (`$1` its session_ref, which the subscriptions hold as connection_id). */
+const FORGET_SESSION_PUSH = "DELETE FROM host_push_subscriptions WHERE connection_id = $1";
+
 /** Host accounts, their sign-in links and sessions, and the first OWNER membership Admin/ops give one. */
 export class HostAccounts {
   readonly #pool: Pool;
@@ -413,22 +422,28 @@ export class HostAccounts {
    */
   async revokeSession(input: HostSessionRevocation): Promise<boolean> {
     const at = now(input?.nowUtc);
+    let statement: string;
+    let params: unknown[];
     if ("sessionToken" in input) {
       if (!isSecret(input.sessionToken)) return false;
-      const revoked = await this.#pool.query(
-        "UPDATE host_sessions SET revoked_at = GREATEST($2::timestamptz, created_at) WHERE session_hash = $1 AND revoked_at IS NULL",
-        [digest(input.sessionToken), at],
-      );
-      return (revoked.rowCount ?? 0) > 0;
+      statement = `UPDATE host_sessions SET revoked_at = GREATEST($2::timestamptz, created_at)
+                    WHERE session_hash = $1 AND revoked_at IS NULL RETURNING session_ref::text AS session_ref`;
+      params = [digest(input.sessionToken), at];
+    } else {
+      const account = hostAccountId(input.hostAccountId);
+      if (typeof input.sessionRef !== "string" || !UUID.test(input.sessionRef)) return false;
+      statement = `UPDATE host_sessions SET revoked_at = GREATEST($3::timestamptz, created_at)
+                    WHERE host_account_id = $1 AND session_ref = $2::uuid AND revoked_at IS NULL RETURNING session_ref::text AS session_ref`;
+      params = [account, input.sessionRef.toLowerCase(), at];
     }
-    const account = hostAccountId(input.hostAccountId);
-    if (typeof input.sessionRef !== "string" || !UUID.test(input.sessionRef)) return false;
-    const revoked = await this.#pool.query(
-      `UPDATE host_sessions SET revoked_at = GREATEST($3::timestamptz, created_at)
-        WHERE host_account_id = $1 AND session_ref = $2::uuid AND revoked_at IS NULL`,
-      [account, input.sessionRef.toLowerCase(), at],
-    );
-    return (revoked.rowCount ?? 0) > 0;
+    // The session and its devices' push end together: a signed-out device gets no more notifications.
+    return withTransaction(this.#pool, async (client) => {
+      const revoked = await client.query<DbRow>(statement, params);
+      const ref = revoked.rows[0];
+      if (!ref) return false;
+      await client.query(FORGET_SESSION_PUSH, [text(ref, "session_ref")]);
+      return true;
+    });
   }
 
   /** Signs out everywhere: every session and every unused link of the account stops working. StoreNotFoundError for no account. */
@@ -443,6 +458,7 @@ export class HostAccounts {
       );
       if ((bumped.rowCount ?? 0) === 0) throw new StoreNotFoundError("Host account");
       await client.query(REVOKE_ACCOUNT_SESSIONS, [account, at]);
+      await client.query(FORGET_ACCOUNT_PUSH, [account]);
     });
   }
 
@@ -465,6 +481,7 @@ export class HostAccounts {
         [account, at],
       );
       await client.query(REVOKE_ACCOUNT_SESSIONS, [account, at]);
+      await client.query(FORGET_ACCOUNT_PUSH, [account]);
       return "CHANGED";
     });
   }

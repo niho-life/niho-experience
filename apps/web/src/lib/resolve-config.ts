@@ -298,8 +298,8 @@ function hostMailSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled:
 
 /**
  * The flags whose code sends the signed-in host's NIHO access token to NIHO. With Experience host accounts there is no
- * such token (ADR 0003), so none of them may be on at the same time. The NIHO Connect projection of the host publication
- * API is not here: that boundary closes itself for an Experience session (publication-host-boundary.ts).
+ * such token (ADR 0003), so none of them may be on at the same time. The host publication API is not here: for an
+ * Experience session it reads Stripe and the experience DB instead of NIHO (publication-host-boundary.ts, slice 3).
  */
 export const NIHO_HOST_TOKEN_FLAGS = Object.freeze([
   "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED",
@@ -494,7 +494,24 @@ function guestBookingSettings(apiMode: "mock" | "http", env: Env, hostConsoleEna
   return { enabled: true, consentVersion };
 }
 
-function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean) {
+/**
+ * 受取口座の利用同意 (ADR 0003 slice 3, docs/host-accounts.md): with Experience host accounts the host publication API
+ * reads the payout account from Stripe and the OWNER's consent from the experience DB instead of NIHO, so it needs the
+ * consent version the OWNER agrees to (the same shape as the publication consent version) and the Stripe platform key.
+ * The NIHO audience is not needed then: no NIHO call is made for the publication API.
+ */
+function payoutAccountConsentSetting(env: Env, hostAccountsEnabled: boolean, hostApiEnabled: boolean): string {
+  const version = env.EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION?.trim() ?? "";
+  if (version.length > 160) throw new Error("EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION must be at most 160 characters");
+  if (!hostAccountsEnabled || !hostApiEnabled) return version;
+  if (!version) throw new Error("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true with EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true needs EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION in http mode");
+  if (!env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim()) {
+    throw new Error("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true with EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY in http mode (payout readiness is read from Stripe)");
+  }
+  return version;
+}
+
+function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean) {
   const requested = env.EXPERIENCE_PUBLICATIONS_ENABLED === "true";
   const hostApiRequested = env.EXPERIENCE_HOST_PUBLICATION_API_ENABLED === "true";
   const nihoAudience = env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim() ?? "";
@@ -512,7 +529,8 @@ function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostC
   if (requested && apiMode === "http" && !env.EXPERIENCE_PUBLIC_MEDIA_BUCKET?.trim()) {
     throw new Error("EXPERIENCE_PUBLICATIONS_ENABLED=true needs EXPERIENCE_PUBLIC_MEDIA_BUCKET");
   }
-  if (requested && hostApiRequested && apiMode === "http" && !nihoAudience) {
+  // With Experience host accounts the API reads Stripe and the experience DB, never NIHO (ADR 0003).
+  if (requested && hostApiRequested && apiMode === "http" && !nihoAudience && !hostAccountsEnabled) {
     throw new Error("EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
   }
   if (nihoAudience) {
@@ -526,11 +544,13 @@ function experiencePublicationSettings(apiMode: "mock" | "http", env: Env, hostC
     }
   }
   if (consentVersion.length > 160) throw new Error("EXPERIENCE_PUBLICATION_CONSENT_VERSION must be at most 160 characters");
+  const hostApiEnabled = apiMode === "http" && hostConsoleEnabled && requested && hostApiRequested && (Boolean(nihoAudience) || hostAccountsEnabled);
   return {
     enabled: apiMode === "http" && hostConsoleEnabled && requested && databaseConfigured && consentVersion.length > 0,
-    hostApiEnabled: apiMode === "http" && hostConsoleEnabled && requested && hostApiRequested && Boolean(nihoAudience),
+    hostApiEnabled,
     nihoAudience,
     consentVersion,
+    payoutAccountConsentVersion: payoutAccountConsentSetting(env, hostAccountsEnabled, hostApiEnabled),
   };
 }
 
@@ -752,7 +772,6 @@ export function resolveConfig(env: Env) {
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
-  const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled);
   // 対面通訳 (#181): Experience予約はExperience DBで所属・状態を検証する。旧NIHO予約経路は使わない。
   // site bookingは別のguest-booking flagが無いと画面・BFFとも閉じたまま。通訳自体は販売flagに依存しない。
   // http opens only after the selected NIHO API is deployed and accepted, per environment.
@@ -771,6 +790,8 @@ export function resolveConfig(env: Env) {
   const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // ホストのアカウント (ADR 0003): /host signs in with Experience's own accounts instead of NIHO; see hostAccountsSetting.
   const hostAccountsEnabled = hostAccountsSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
+  // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
+  const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
   const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
   // OTA の枠管理: start-up gates only; the routes still read their flags from process.env (see channelWatchdogSetting).
@@ -904,6 +925,8 @@ export function resolveConfig(env: Env) {
     experiencePublicationConsentVersion: experiencePublication.consentVersion,
     experienceHostPublicationApiEnabled: experiencePublication.hostApiEnabled,
     nihoExperienceHostCommonContractAudience: experiencePublication.nihoAudience,
+    // 受取口座の利用同意 (ADR 0003): the version the OWNER agrees to with host accounts; may be empty otherwise.
+    experiencePayoutAccountConsentVersion: experiencePublication.payoutAccountConsentVersion,
     hostAttendanceEnabled,
     // The mail job (empty while off). SMTP credentials are not here: they are read where they are used.
     guestMailEnabled: guestMail.enabled,

@@ -1,4 +1,9 @@
 {
   "email": "synthetic-host-0001@example.com",
-  "providerId": "experience-provider-synthetic-0001"
+  "providerId": "experience-provider-synthetic-0001",
+  "seller": {
+    "providerDisplayName": "Synthetic Experience provider",
+    "sellerDisplayName": "Synthetic seller",
+    "stripeConnectAccountRef": "acct_SyntheticSeller0001"
+  }
 }

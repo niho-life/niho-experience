@@ -64,6 +64,8 @@ type Props = {
   create?: boolean;
   bookingGuideHref?: string;
   paymentConsentHref?: string;
+  /** The button to the payment consent: NIHO's page by default; 設定 › 受取口座 with Experience host accounts. */
+  paymentConsentLabel?: string;
   mode?: "host" | "admin-draft";
   apiBase?: string;
   experiencesBase?: string;
@@ -92,7 +94,7 @@ const readError: Record<string, string> = {
 };
 
 const BLOCKER_COPY: Record<string, string> = {
-  ACCOUNT_NOT_USABLE: "NIHOアカウントが利用できる状態か確認してください。",
+  ACCOUNT_NOT_USABLE: "ログインしているアカウントが利用できる状態か確認してください。",
   CANCELLATION_TERMS_REQUIRED: "取消期限と返金割合を入力してください。",
   CONNECT_NOT_READY: "販売者の受取口座を確認してください。",
   CONSENT_OUTDATED: "掲載条件が更新されました。最新の条件を確認して公開してください。",
@@ -101,14 +103,14 @@ const BLOCKER_COPY: Record<string, string> = {
   MANUSCRIPT_REQUIRED: "日本語原稿と確認済みの英語原稿を完成させてください。",
   OPERATIONS_SUSPENDED: "運営停止中のため再開できません。",
   OWNER_NOT_CURRENT: "最新のOWNER権限を確認できません。ログインし直してください。",
-  PAYMENT_REUSE_CONSENT_REQUIRED: "受取口座の再利用同意をNIHOで確認してください。",
+  PAYMENT_REUSE_CONSENT_REQUIRED: "受取口座で売上を受け取ることへの同意を確認してください。",
   PHOTOS_REQUIRED: "商品写真を追加し、日本語と英語の説明を入力してください。",
   PRICE_REQUIRED: "有効な商品価格を入力してください。",
   PUBLIC_CONTENT_INVALID: "公開原稿の入力内容を確認してください。",
   READINESS_EXPIRED: "販売者と受取口座の確認が期限切れです。販売者本人がHost画面で最新状態を確認した後、再度読み込んでください。",
   READINESS_MISSING: "販売者の最新状態を確認できません。販売者本人がHost画面で最新状態を確認した後、再度読み込んでください。",
   SCHEDULE_REQUIRED: "販売できる開催枠をカレンダーに追加してください。",
-  SELLER_MISMATCH: "販売者情報をNIHOの本人情報と確認できません。",
+  SELLER_MISMATCH: "販売者情報と受取口座が、登録されている販売者と一致しません。",
   SLUG_IN_USE: "この公開URLはすでに使われています。別のURLを入力してください。",
 };
 
@@ -225,6 +227,7 @@ export function HostPublicationWorkspace({
   create = false,
   bookingGuideHref,
   paymentConsentHref,
+  paymentConsentLabel = "NIHOで受取口座を確認",
   mode = "host",
   apiBase = "/host/api/products",
   experiencesBase = "/host/experiences",
@@ -871,7 +874,7 @@ export function HostPublicationWorkspace({
             : nextAction === "SUPPORT"
               ? <Link className={consoleButtonClass("primary")} href="/host/settings#settings-support">サポート・手数料の条件を確認</Link>
             : nextAction === "PAYMENT_CONSENT" && paymentConsentHref
-              ? <a className={consoleButtonClass("primary")} href={paymentConsentHref} referrerPolicy="no-referrer">NIHOで受取口座を確認</a>
+              ? <a className={consoleButtonClass("primary")} href={paymentConsentHref} referrerPolicy="no-referrer">{paymentConsentLabel}</a>
             : nextAction === "PUBLISH"
               ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>同意して公開</button>
               : nextAction === "LIVE" && publicHref

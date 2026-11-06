@@ -3,7 +3,7 @@ import { config } from "@/lib/config";
 import { nihoConnectUrl } from "@/lib/host/niho-auth";
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_EMAIL_SIGN_IN_PATH, HOST_MOCK_LOGIN_PATH, invitationIdOrNull, preparationCaseIdOrNull } from "@/lib/host/routes";
+import { HOST_EMAIL_SIGN_IN_PATH, HOST_MOCK_LOGIN_PATH, hostInvitationPath, invitationIdOrNull, preparationCaseIdOrNull, withQuery } from "@/lib/host/routes";
 import { hostNotFound, isHostMock, noStoreJson, seeOther, setLoginCookie, siteOrigin } from "@/lib/host/server";
 import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
 
@@ -14,10 +14,11 @@ import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
  */
 export function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled) return hostNotFound();
-  if (config.hostAccountsEnabled) return seeOther(HOST_EMAIL_SIGN_IN_PATH);
+  const invitationId = invitationIdOrNull(request.nextUrl.searchParams.get("invitationId"));
+  // The email form keeps an invitation as the page the opened link returns to (hostReturnPathOrNull).
+  if (config.hostAccountsEnabled) return seeOther(invitationId ? withQuery(HOST_EMAIL_SIGN_IN_PATH, { next: hostInvitationPath(invitationId) }) : HOST_EMAIL_SIGN_IN_PATH);
   const providerId = nihoIdOrNull(request.nextUrl.searchParams.get("providerId"));
   const preparationCaseId = preparationCaseIdOrNull(request.nextUrl.searchParams.get("preparationCaseId"));
-  const invitationId = invitationIdOrNull(request.nextUrl.searchParams.get("invitationId"));
   const surface = request.nextUrl.searchParams.get("surface") === "app" ? "app" : undefined;
   if (preparationCaseId && invitationId) return noStoreJson({ error: "conflicting_login_intent" }, 400);
 

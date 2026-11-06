@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { hostAccounts } from "@/lib/experience/store-server";
-import { clearLinkBindingCookie, isOpaqueSecret, linkBindingHash, nowUtc, readSingleFieldForm, setAccountSessionCookie } from "@/lib/host/accounts";
+import { clearLinkBindingCookie, clearReturnPathCookie, isOpaqueSecret, linkBindingHash, nowUtc, readSingleFieldForm, returnPathFromCookie, setAccountSessionCookie } from "@/lib/host/accounts";
 import { forgetHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, HOST_LOGIN_LINK_PATH, withQuery } from "@/lib/host/routes";
 import { hostNotFound, noStoreJson, siteOrigin } from "@/lib/host/server";
-import { ACCOUNT_SESSION_COOKIE, LINK_BINDING_COOKIE } from "@/lib/host/session";
+import { ACCOUNT_SESSION_COOKIE, LINK_BINDING_COOKIE, RETURN_PATH_COOKIE } from "@/lib/host/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,9 +29,10 @@ const PAGE_HEADERS = {
  * answer to the post is 204 with the session cookie, after which the page moves into the console, or 400 for a link
  * that cannot be used, which goes to the page that says why. A plain 204 (not a redirect the script cannot read) keeps
  * the cookie on an ordinary response in every browser. A scanner that runs the page has not got the browser's link cookie,
- * so it opens nothing, and the link still works in the browser that asked for it.
+ * so it opens nothing, and the link still works in the browser that asked for it. `destination` is the console's home,
+ * or the allowlisted page the sign-in was asked for (the return cookie, ADR 0003 slice 3).
  */
-function linkPage(): string {
+function linkPage(destination: string): string {
   const script = `(()=>{const t=new URLSearchParams(location.hash.slice(1)).get("t");`
     + `if(location.hash)history.replaceState(history.state,"",location.pathname+location.search);`
     + `const s=document.getElementById("status"),b=document.getElementById("retry");`
@@ -41,7 +42,7 @@ function linkPage(): string {
     + `const open=()=>{b.hidden=true;s.textContent="ログインしています…";`
     + `fetch(${JSON.stringify(HOST_LOGIN_LINK_PATH)},{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:"t="+t,`
     + `credentials:"same-origin",cache:"no-store",redirect:"error",referrerPolicy:"same-origin"})`
-    + `.then((r)=>{if(r.status===204)return location.replace(${JSON.stringify(HOST_HOME_PATH)});`
+    + `.then((r)=>{if(r.status===204)return location.replace(${JSON.stringify(destination)});`
     + `if(r.status===400)return closed();failed();},failed);};`
     + `b.addEventListener("click",open);open();})();`;
   return `<!doctype html>
@@ -72,9 +73,11 @@ button{min-height:3rem;padding:0 1.5rem;border:0;border-radius:999px;background:
 </html>`;
 }
 
-export function GET(): Response {
+export function GET(request?: NextRequest): Response {
   if (!config.hostConsoleEnabled || !config.hostAccountsEnabled) return hostNotFound();
-  return new Response(linkPage(), { status: 200, headers: PAGE_HEADERS });
+  const destination = returnPathFromCookie(request?.cookies.get(RETURN_PATH_COOKIE)?.value) ?? HOST_HOME_PATH;
+  // An allowlisted path (letters, digits and URL punctuation, never `<`): JSON.stringify keeps it one string literal.
+  return new Response(linkPage(destination), { status: 200, headers: PAGE_HEADERS });
 }
 
 /** Expired, used, unknown, or not this browser's (no link cookie, or another one): the store does not say which. */
@@ -121,5 +124,6 @@ export async function POST(request: NextRequest) {
   const response = new NextResponse(null, { status: 204, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" } });
   setAccountSessionCookie(response, opened.sessionToken, opened.absoluteExpiresAtUtc, now);
   clearLinkBindingCookie(response);
+  if (request.cookies.get(RETURN_PATH_COOKIE)) clearReturnPathCookie(response);
   return response;
 }

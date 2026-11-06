@@ -14,6 +14,14 @@ Status: implementation contract for #169 / #330 / #369 / #377. The host UI consu
 - `sellerDisplayName` is the seller's public legal/trade display. It is not copied from Stripe's account label. For the first community dinner, Panasonic is both seller and payout owner; “NIHOkamakura” is only the Stripe account label.
 - The host checks current identity, local Experience OWNER permission, exact account mapping, and NIHO Connect readiness when it reads or changes a product. The public catalog is the durable publication snapshot and does not expire when this short-lived check expires. A different seller and recipient are not modeled for this flow.
 
+### With Experience host accounts (ADR 0003 slice 3)
+
+With `EXPERIENCE_HOST_ACCOUNTS_ENABLED=true` the same routes call no NIHO API ([host-accounts.md](host-accounts.md)「受取口座と公開の判定」):
+
+- The person is the Experience host account of the session (`hst_…`). The seller is the one provider it is the active OWNER of, with a seller profile Admin/ops registered for host accounts (no `legacyProviderId`; `seller_niho_account_ref` is the provider-scoped `sel_…` reference). None → `403 FORBIDDEN`; more than one → `409 SELLER_PROFILE_AMBIGUOUS`; no such profile → `409 SELLER_SETUP_REQUIRED`.
+- `accountUsable` is the host account's `ACTIVE` status; `connectReady` is Stripe's own answer for the profile's `stripeConnectAccountRef` (`retrieveConnectedAccount` with the platform key: charges, payouts, details submitted, JP, JPY); the payment consent is the OWNER's Experience consent (`provider_payout_account_consents`) at `EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION` for that same account. The snapshot stands five minutes, as above.
+- An account Stripe does not show to the platform is `CONNECT_NOT_READY` at publication. A Stripe or consent read that fails answers `502 READINESS_UNAVAILABLE` after recording a closed snapshot, so an earlier success is never reused (not by an Admin proxy publication either).
+
 ## Host operations
 
 All host responses use `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Robots-Tag: noindex, nofollow`. Mutations require same-origin requests. The server derives the seller from the session; no route accepts a `providerId` or seller ID from the browser.
@@ -147,16 +155,16 @@ The host keeps one opaque `version` per product and sends it as `version` on mut
 | HTTP | `error.code` | Meaning |
 | --- | --- | --- |
 | 400 | `INVALID_INPUT` | Malformed or unsupported fields |
-| 401 | `SESSION_ENDED` / `SESSION_REFRESH_REQUIRED` | NIHO host session is absent, revoked, or needs refresh |
+| 401 | `SESSION_ENDED` / `SESSION_REFRESH_REQUIRED` | The host session (NIHO, or an Experience host account) is absent, revoked, or needs refresh |
 | 403 | `FORBIDDEN` | The current user is not the active OWNER |
 | 404 | `NOT_FOUND` | Product is absent or not visible to this seller |
-| 409 | `SELLER_PROFILE_AMBIGUOUS` / `SELLER_SETUP_REQUIRED` | NIHO has multiple OWNER seller profiles or the seller lacks a Connect destination |
+| 409 | `SELLER_PROFILE_AMBIGUOUS` / `SELLER_SETUP_REQUIRED` | The person is the OWNER of more than one seller, or the seller lacks a registered payout account |
 | 409 | `VERSION_CONFLICT` | The product changed; reread before retry |
 | 422 | `INVALID_INPUT` | Structurally valid JSON contains unsupported product values |
 | 422 | `PUBLICATION_BLOCKED` | Stable blocker-code array; nothing is partially published |
 | 422 | `PHOTO_RIGHTS_CONFIRMATION_REQUIRED` | The seller has not confirmed rights to the uploaded photo |
 | 415 | `UNSUPPORTED_FORMAT` | Public host media accepts JPEG and PNG input |
-| 502 | `READINESS_UNAVAILABLE` | NIHO identity/Connect state could not be verified |
+| 502 | `READINESS_UNAVAILABLE` | NIHO identity/Connect state, or (host accounts) Stripe or the payout consent, could not be verified |
 | 503 | `UNAVAILABLE` | Experience database or required media service is unavailable |
 | 413 | `INVALID_INPUT` | Request body exceeds the BFF limit |
 

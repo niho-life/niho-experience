@@ -49,6 +49,14 @@ function recipientFromRow(row: DbRow): HostPushRecipient {
  * The host app's Web Push subscriptions (#177 P2, migration 0004). Every statement is
  * parameterised; the endpoint never leaves this class in an error.
  */
+/**
+ * A device of an Experience host account (ADR 0003, `hst_` IDs) gets booking notifications only while that account is
+ * ACTIVE: a suspension also deletes its subscriptions (HostAccounts), and this keeps a missed one silent. A NIHO user's
+ * subscription is not affected.
+ */
+const ACTIVE_HOST_ACCOUNT = `(s.niho_user_id !~ '^hst_[0-9a-f]{32}$'
+               OR EXISTS (SELECT 1 FROM host_accounts ha WHERE ha.id = s.niho_user_id AND ha.status = 'ACTIVE'))`;
+
 export class HostPushSubscriptions {
   readonly #pool: Pool;
 
@@ -141,6 +149,7 @@ export class HostPushSubscriptions {
         WHERE m.provider_id = $1
           AND m.active = true
           AND s.last_seen_at >= $2
+          AND ${ACTIVE_HOST_ACCOUNT}
         ORDER BY s.id`,
       [providerId, seenAfter.toISOString()],
     );
@@ -160,6 +169,7 @@ export class HostPushSubscriptions {
         WHERE s.last_seen_at >= $2
           AND EXISTS (SELECT 1 FROM provider_memberships m
                        WHERE m.provider_id = $1 AND m.niho_user_id = s.niho_user_id AND m.active = true AND m.role = 'OWNER')
+          AND ${ACTIVE_HOST_ACCOUNT}
         ORDER BY s.id`,
       [providerId, seenAfter.toISOString()],
     );
@@ -184,6 +194,7 @@ export class HostPushSubscriptions {
                OR EXISTS (SELECT 1 FROM product_operator_grants g
                            WHERE g.provider_id = $1 AND g.product_id = $2 AND g.niho_user_id = s.niho_user_id AND g.active = true
                              AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp())))
+          AND ${ACTIVE_HOST_ACCOUNT}
         ORDER BY s.id`,
       [providerId, productId, seenAfter.toISOString()],
     );

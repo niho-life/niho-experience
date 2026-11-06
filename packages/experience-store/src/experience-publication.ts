@@ -18,7 +18,10 @@ import {
   type ProductSaleTermsInput,
 } from "./guest-bookings.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
+import { isHostAccountId } from "./host-accounts.ts";
+import { payoutConsentStillCounts } from "./payout-account-consents.ts";
 import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
+import { isHostSellerRef } from "./host-sellers.ts";
 import {
   projectPublicExperiencePublication,
   projectPublicExperiencePublicationManuscript,
@@ -187,19 +190,43 @@ export interface ProviderPublicationReadiness extends ProviderPublicationReadine
   readonly updatedAtUtc: string;
 }
 
-/** Explicit bridge from an Experience seller to NIHO's legacy Connect lookup key. */
+/**
+ * An operator-provisioned Experience seller: its legal seller name, its payout account and either an explicit bridge to
+ * NIHO's legacy Connect lookup key (the NIHO login), or none (a seller registered for Experience host accounts, ADR 0003,
+ * whose readiness is read from Stripe directly and whose seller reference is a provider-scoped `sel_` reference).
+ */
 export interface ExperienceHostSellerProfile {
   readonly providerId: string;
-  readonly legacyProviderId: string;
+  /** NIHO's legacy Connect lookup key; null for a seller registered for Experience host accounts. */
+  readonly legacyProviderId: string | null;
   readonly providerDisplayName: string;
   readonly sellerNihoAccountRef: string;
   readonly stripeConnectAccountRef: string;
   readonly sellerDisplayName: string;
 }
 
-export interface ExperienceHostProviderMembership extends ExperienceHostSellerProfile {
+/** A seller mapped to a NIHO user and NIHO's legacy Connect lookup key (the NIHO login). */
+export interface NihoMappedSellerProfile extends ExperienceHostSellerProfile {
+  readonly legacyProviderId: string;
+}
+
+/** A seller registered for Experience host accounts (ADR 0003): no NIHO key, a `sel_` seller reference. */
+export interface HostAccountSellerProfile extends ExperienceHostSellerProfile {
+  readonly legacyProviderId: null;
+}
+
+export interface ExperienceHostProviderMembership extends NihoMappedSellerProfile {
   readonly memberRole: "OWNER" | "EDITOR";
 }
+
+export type HostAccountSellerProfileResolution =
+  /** The host account is the active OWNER of no provider. */
+  | { readonly kind: "none" }
+  /** It is the active OWNER of more than one provider: the host screens resolve exactly one. */
+  | { readonly kind: "ambiguous" }
+  /** Its provider has no seller registered for host accounts (none, or one mapped to NIHO instead). */
+  | { readonly kind: "setup-required"; readonly providerId: string }
+  | { readonly kind: "ready"; readonly profile: HostAccountSellerProfile; readonly hostAccountActive: boolean };
 
 /** Name-only seller choice exposed by the Admin draft BFF. */
 export interface ExperienceAdminDraftSeller {
@@ -491,7 +518,7 @@ async function adminDraftSeller(client: PoolClient, providerId: string): Promise
   const row = result.rows[0];
   if (!row) throw new StoreNotFoundError("seller workspace");
   return {
-    providerId: String(row.provider_id), legacyProviderId: String(row.legacy_provider_id),
+    providerId: String(row.provider_id), legacyProviderId: row.legacy_provider_id === null ? null : String(row.legacy_provider_id),
     providerDisplayName: String(row.provider_display_name), sellerNihoAccountRef: String(row.seller_niho_account_ref),
     stripeConnectAccountRef: String(row.stripe_connect_account_ref), sellerDisplayName: String(row.seller_display_name),
   };
@@ -1391,9 +1418,10 @@ export class ExperiencePublicationRepository {
     assertStoreIdentifier(nihoUserId, "nihoUserId");
     return withTransaction(this.#pool, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 47))", [`experience-host-owner:${nihoUserId}`]);
+      // A seller registered for Experience host accounts (no NIHO key) is never bound to a NIHO identity.
       const mapped = await client.query<DbRow>(
         `SELECT provider_id FROM experience_host_seller_profiles
-          WHERE seller_niho_account_ref=$1 ORDER BY provider_id COLLATE "C" FOR SHARE`,
+          WHERE seller_niho_account_ref=$1 AND legacy_provider_id IS NOT NULL ORDER BY provider_id COLLATE "C" FOR SHARE`,
         [nihoUserId],
       );
       if (mapped.rows.length === 0) return { kind: "no-mapping" } as const;
@@ -1425,14 +1453,17 @@ export class ExperiencePublicationRepository {
     });
   }
 
-  /** Host choices come from current Experience membership, never a NIHO provider directory. */
+  /**
+   * Host choices come from current Experience membership, never a NIHO provider directory. The NIHO login lists sellers
+   * mapped to NIHO only (a seller registered for Experience host accounts has no NIHO key to read Connect with).
+   */
   async listHostProviders(nihoUserId: string): Promise<readonly ExperienceHostProviderMembership[]> {
     assertStoreIdentifier(nihoUserId, "nihoUserId");
     const result = await this.#pool.query<DbRow>(
       `SELECT p.provider_id,p.legacy_provider_id,p.provider_display_name,p.seller_niho_account_ref,
               p.stripe_connect_account_ref,p.seller_display_name,m.role
          FROM provider_memberships m
-         JOIN experience_host_seller_profiles p ON p.provider_id=m.provider_id
+         JOIN experience_host_seller_profiles p ON p.provider_id=m.provider_id AND p.legacy_provider_id IS NOT NULL
         WHERE m.niho_user_id=$1 AND m.active=true AND m.role IN ('OWNER','EDITOR')
         ORDER BY p.provider_display_name COLLATE "C",p.provider_id COLLATE "C"`,
       [nihoUserId],
@@ -1448,12 +1479,15 @@ export class ExperiencePublicationRepository {
     }));
   }
 
-  /** Resolve exactly one current Experience OWNER and its explicit seller mapping. */
+  /**
+   * Resolve exactly one current Experience OWNER and its explicit NIHO seller mapping (the NIHO login). A seller
+   * registered for Experience host accounts has no NIHO key: setup-required here (see currentHostAccountSellerProfile).
+   */
   async currentOwnerSellerProfile(nihoUserId: string): Promise<
     | { readonly kind: "none" }
     | { readonly kind: "ambiguous" }
     | { readonly kind: "setup-required" }
-    | { readonly kind: "ready"; readonly profile: ExperienceHostSellerProfile }
+    | { readonly kind: "ready"; readonly profile: NihoMappedSellerProfile }
   > {
     assertStoreIdentifier(nihoUserId, "nihoUserId");
     const result = await this.#pool.query<DbRow>(
@@ -1477,6 +1511,45 @@ export class ExperiencePublicationRepository {
       stripeConnectAccountRef: String(row.stripe_connect_account_ref),
       sellerDisplayName: String(row.seller_display_name),
     } };
+  }
+
+  /**
+   * The seller an Experience host account (ADR 0003) acts for: the one provider it is the active OWNER of, and that
+   * provider's seller registered for host accounts (no NIHO key, a `sel_` seller reference). A provider without one, or
+   * with a seller mapped to NIHO instead, is setup-required: Admin/ops register it. `hostAccountActive` is the account's
+   * status as read here. Reads the experience DB only: no NIHO and no Stripe.
+   */
+  async currentHostAccountSellerProfile(hostAccountId: string): Promise<HostAccountSellerProfileResolution> {
+    if (!isHostAccountId(hostAccountId)) throw new StoreValidationError("hostAccountId must be a host account ID.");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT m.provider_id,a.status AS account_status,p.provider_id AS profile_provider_id,p.legacy_provider_id,
+              p.provider_display_name,p.seller_niho_account_ref,p.stripe_connect_account_ref,p.seller_display_name
+         FROM provider_memberships m
+         JOIN host_accounts a ON a.id=m.niho_user_id
+         LEFT JOIN experience_host_seller_profiles p ON p.provider_id=m.provider_id
+        WHERE m.niho_user_id=$1 AND m.active=true AND m.role='OWNER'
+        ORDER BY m.provider_id COLLATE "C"`,
+      [hostAccountId],
+    );
+    if (result.rows.length === 0) return { kind: "none" };
+    if (result.rows.length !== 1) return { kind: "ambiguous" };
+    const row = result.rows[0]!;
+    const providerId = String(row.provider_id);
+    if (row.profile_provider_id === null || row.legacy_provider_id !== null || !isHostSellerRef(row.seller_niho_account_ref)) {
+      return { kind: "setup-required", providerId };
+    }
+    return {
+      kind: "ready",
+      hostAccountActive: row.account_status === "ACTIVE",
+      profile: {
+        providerId,
+        legacyProviderId: null,
+        providerDisplayName: String(row.provider_display_name),
+        sellerNihoAccountRef: String(row.seller_niho_account_ref),
+        stripeConnectAccountRef: String(row.stripe_connect_account_ref),
+        sellerDisplayName: String(row.seller_display_name),
+      },
+    };
   }
 
   /** Current owner-owned drafts; provider and payment references are never part of the host DTO. */
@@ -1555,6 +1628,19 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       const membership = await requireMembership(client, actor, ["OWNER"]);
+      // A host account's payout consent (ADR 0003) is read before Stripe answers, and may be withdrawn meanwhile. A
+      // withdrawal takes this inventory lock first, so under it the claim is checked again: a consent read before a
+      // withdrawal is written as no consent, never back as a valid one.
+      let consent = { accepted: input.paymentReuseConsentAccepted, version: input.paymentReuseConsentVersion, at: input.paymentReuseConsentedAtUtc };
+      if (consent.accepted && isHostAccountId(membership.nihoUserId)) {
+        const counts = consent.version !== null && consent.at !== null && await payoutConsentStillCounts(client, {
+          providerId: actor.providerId,
+          stripeConnectAccountRef: input.stripeConnectAccountRef,
+          consentVersion: consent.version,
+          consentedAtUtc: consent.at,
+        });
+        if (!counts) consent = { accepted: false, version: null, at: null };
+      }
       const result = await client.query<DbRow>(
         `INSERT INTO provider_publication_readiness
            (provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
@@ -1580,7 +1666,7 @@ export class ExperiencePublicationRepository {
            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
            required_consent_version,observed_at,valid_until,version,updated_at`,
         [actor.providerId, membership.nihoUserId, input.accountUsable, input.connectReady,
-          input.paymentReuseConsentAccepted, input.paymentReuseConsentVersion, input.paymentReuseConsentedAtUtc,
+          consent.accepted, consent.version, consent.at,
           input.sellerDisplayReady, input.sellerNihoAccountRef, input.stripeConnectAccountRef,
           input.sellerDisplayName, input.requiredConsentVersion, input.observedAtUtc, input.validUntilUtc],
       );

@@ -49,6 +49,11 @@ export interface HostSettingsFormProps {
   account: ReactNode;
   /** 設定 › 通知 › 宛先 (#194): this person's address for this site's emails; "error" when unreadable; null while none are sent. */
   notificationAddress: HostNotificationAddressView | "error" | null;
+  /**
+   * 受取口座 rendered by the page instead of NIHO's payout panel (Experience host accounts, ADR 0003 slice 3: Stripe's
+   * state and the OWNER's consent, with its own forms outside this one). `payout` still feeds the review row.
+   */
+  payoutPanel?: ReactNode;
 }
 
 /**
@@ -68,7 +73,7 @@ export interface HostSettingsFormProps {
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
  * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
@@ -329,7 +334,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
 
         </form>
 
-        {owner ? <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} preview={preview} /> : null}
+        {owner ? payoutPanel ?? <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} preview={preview} /> : null}
 
         {preview ? <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview /> :
           liveCalendar?.status === "live" ? <HostLiveCalendarPanel providerId={providerId} load={liveCalendar} /> :

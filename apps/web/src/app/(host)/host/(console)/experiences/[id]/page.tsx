@@ -11,7 +11,7 @@ import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody } from "@/components/host/ui";
 import { hostPageContext, loadHostExperienceEditor } from "@/host/data";
 import { config } from "@/lib/config";
-import { HOST_EXPERIENCES_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_EXPERIENCES_PATH, HOST_SETTINGS_PATH, hostPayoutSettingsPath, withProvider } from "@/lib/host/routes";
 import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 
 export const metadata: Metadata = { title: "体験の編集" };
@@ -42,7 +42,12 @@ function EditorUnavailable({ backHref }: { backHref: string }) {
 /** 体験の編集 (#89): the page, its photos and offers, and its one listing state. */
 export default async function HostExperiencePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  if (config.experienceHostPublicationApiEnabled) return <HostPublicationWorkspace productId={id} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} />;
+  if (config.experienceHostPublicationApiEnabled) {
+    // With Experience host accounts the OWNER consents in 設定 › 受取口座 (ADR 0003 slice 3), not on NIHO.
+    return config.hostAccountsEnabled
+      ? <HostPublicationWorkspace productId={id} paymentConsentHref={hostPayoutSettingsPath(null)} paymentConsentLabel="受取口座の同意へ" />
+      : <HostPublicationWorkspace productId={id} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} />;
+  }
   const context = await hostPageContext(query);
   if (!context) return null;
   const { provider, linkProviderId } = context;

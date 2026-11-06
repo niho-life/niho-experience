@@ -9,11 +9,14 @@ import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
 import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsPanel";
+import { HostPayoutAccountPanel } from "@/components/host/HostPayoutAccountPanel";
 import { HostArticleLinksPanel } from "@/components/host/HostArticleLinksPanel";
 import { consoleButtonClass } from "@/components/host/host-ui";
 import { AccountAvatar, HostPageBody, PageHead } from "@/components/host/ui";
 import { loadHostCalendar } from "@/host/calendar-server";
-import { hostPageContext, loadHostConsoleData, loadHostPayout } from "@/host/data";
+import { hostPageContext, loadHostConsoleData, loadHostPayout, type HostPayoutData } from "@/host/data";
+import { hostPayoutLoadOf, PAYOUT_CONSENT_OUTCOMES, payoutConsentOutcomeOrNull, type ExperiencePayoutLoad } from "@/host/payout-account";
+import { loadExperiencePayout } from "@/host/payout-account-server";
 import { NOTIFICATION_ADDRESS_TEXT, previewNotificationAddress } from "@/host/notification-address";
 import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
@@ -92,10 +95,19 @@ async function OperatorSettings({ providerId, session }: { providerId: string; s
   );
 }
 
+/** 受取口座 with Experience host accounts (ADR 0003 slice 3): Stripe and the OWNER's consent, never NIHO. */
+async function loadAccountPayout(session: HostSession, provider: Parameters<typeof loadExperiencePayout>[1]): Promise<{ payout: HostPayoutData; experience: ExperiencePayoutLoad } | null> {
+  if (session.kind !== "experience") return null;
+  const experience = await loadExperiencePayout(session, provider);
+  return { experience, payout: { load: hostPayoutLoadOf(experience), notice: null, redirectTo: null } };
+}
+
 /**
  * 設定 (mock v2): provider (and its review), payout account, calendar (#109), default meeting point,
  * notifications (#109, and their address #194), this device as an app and its push (#177, HOST_PWA_ENABLED / HOST_PUSH_ENABLED) and the NIHO account. `?connect=return` (back from Stripe's page) reads the account from Stripe
- * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one.
+ * again first; `?connect=refresh` (its link expired) sends the host back to Stripe with a new one. With Experience host
+ * accounts 受取口座 is the account Admin/ops registered, read from Stripe, with the OWNER's consent (`?payout=` after its
+ * form says what happened).
  */
 export default async function HostSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -110,9 +122,10 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   }
   // Stripe's way back belongs to the provider it names, never to the one shown in its place.
   const connect = providerNotFound ? null : connectStep(query.connect);
+  const accountPayout = await loadAccountPayout(session, provider);
   const [{ settings, googleConnection }, payout, liveCalendar, addressLoad] = await Promise.all([
     loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
-    loadHostPayout(provider, { connect }),
+    accountPayout ? accountPayout.payout : loadHostPayout(provider, { connect }),
     // カレンダー in http mode (#109): the OWNER's Google connection and bookings feed.
     isHostMock() ? null : loadHostCalendar(provider, { feed: true }),
     // 宛先 (#194): the person's own address (the session's NIHO user); the preview's stays on screen.
@@ -138,6 +151,10 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   ) : null;
 
   const accountPanel = <AccountPanel session={session} />;
+  const payoutOutcome = providerNotFound ? null : payoutConsentOutcomeOrNull(query.payout);
+  const payoutPanel = accountPayout
+    ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
+    : undefined;
 
   return (
     <HostPageBody>
@@ -154,6 +171,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         liveCalendar={liveCalendar}
         preview={isHostMock()}
         notificationAddress={notificationAddress}
+        payoutPanel={payoutPanel}
         account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} />{provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <div className="mt-3.5"><HostArticleLinksPanel providerId={provider.id} /></div> : null}<div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>

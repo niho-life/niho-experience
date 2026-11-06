@@ -532,8 +532,45 @@ describe("admin support console settings", () => {
       expect(() => resolveConfig({ ...on, [name]: "true" }), name).toThrow(`EXPERIENCE_HOST_ACCOUNTS_ENABLED=true cannot be on with ${name}=true`);
       expect(resolveConfig({ ...on, [name]: "false" }).hostAccountsEnabled, name).toBe(true);
     }
-    // The publication API stays allowed: its boundary closes itself for an Experience session (slice 3 replaces it).
-    expect(resolveConfig({ ...on, EXPERIENCE_PUBLICATIONS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_PUBLICATION_CONSENT_VERSION: "v1", EXPERIENCE_PUBLIC_MEDIA_BUCKET: "bucket", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }).hostAccountsEnabled).toBe(true);
+    // The publication API stays allowed with its payout settings (slice 3, the next test).
+    const publication = {
+      EXPERIENCE_PUBLICATIONS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_PUBLICATION_CONSENT_VERSION: "v1",
+      EXPERIENCE_PUBLIC_MEDIA_BUCKET: "bucket", EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION: "payout-v1", EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic",
+    };
+    expect(resolveConfig({ ...on, ...publication, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }).hostAccountsEnabled).toBe(true);
+  });
+
+  it("opens the host publication API with host accounts from Stripe and the payout consent version, without NIHO (ADR 0003 slice 3)", () => {
+    const on = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+      HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key",
+      EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true",
+      EXPERIENCE_PUBLICATIONS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_PUBLICATION_CONSENT_VERSION: "listing-v1",
+      EXPERIENCE_PUBLIC_MEDIA_BUCKET: "bucket",
+      EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION: " payout-account-v1 ", EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic",
+    };
+    const config = resolveConfig(on);
+    expect(config.experienceHostPublicationApiEnabled).toBe(true);
+    expect(config.experiencePayoutAccountConsentVersion).toBe("payout-account-v1");
+    // No NIHO audience is needed: nothing calls NIHO for the publication API with host accounts.
+    expect(config.nihoExperienceHostCommonContractAudience).toBe("");
+    expect(() => resolveConfig({ ...on, EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION: "" }))
+      .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true with EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true needs EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION");
+    expect(() => resolveConfig({ ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: " " }))
+      .toThrow("needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
+    expect(() => resolveConfig({ ...on, EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION: "v".repeat(161) }))
+      .toThrow("EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION must be at most 160 characters");
+    // Either flag off: neither setting is required, and the NIHO login keeps needing its audience.
+    const withoutPayout = Object.fromEntries(Object.entries(on).filter(([key]) => key !== "EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION" && key !== "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY"));
+    expect(resolveConfig({ ...withoutPayout, EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "false" }).experiencePayoutAccountConsentVersion).toBe("");
+    expect(() => resolveConfig({ ...withoutPayout, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false" }))
+      .toThrow("EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+    expect(resolveConfig({ ...withoutPayout, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }).experienceHostPublicationApiEnabled).toBe(true);
   });
 
   it("sends guest mail only in http mode with its own flag, and refuses to start without SMTP, the senders and the job identity (#285)", () => {
