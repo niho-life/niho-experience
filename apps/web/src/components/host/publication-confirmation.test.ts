@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { publicationManuscriptFingerprint, publicationManuscriptReview } from "@niho-experience/experience-store";
-import { canonicalPublicationJson, confirmPublicationEnglish, englishPublicationManuscript } from "./publication-confirmation";
+import { canonicalPublicationJson, confirmPublicationEnglish, englishIsConfirmed, englishPublicationManuscript, liveEnglishStaleNote } from "./publication-confirmation";
 
 const japanese = {
   title: "合成の体験", lead: "合成の紹介", description: "合成の説明", language: "英語",
@@ -97,5 +97,24 @@ describe("optional FAQ in the OWNER confirmation", () => {
       .rejects.toThrow("日本語のよくある質問1件目");
     await expect(confirmPublicationEnglish(() => ({ japanese, english: englishPublicationManuscript(title, { ...content, faq: [...faq, faq[0]] }) })))
       .rejects.toThrow("英語のよくある質問2件目の質問が前の質問と同じ");
+  });
+});
+
+describe("the live English after a Japanese edit (#110)", () => {
+  const confirmed = { sourceFingerprint: "a".repeat(64), confirmedSourceFingerprint: "a".repeat(64), confirmedEnglishFingerprint: "b".repeat(64) };
+
+  it("is confirmed only while the confirmation names the current Japanese source", () => {
+    expect(englishIsConfirmed(confirmed)).toBe(true);
+    expect(englishIsConfirmed({ ...confirmed, confirmedSourceFingerprint: null })).toBe(false);
+    expect(englishIsConfirmed({ ...confirmed, confirmedSourceFingerprint: "c".repeat(64) })).toBe(false);
+    // An edit clears both fingerprints (null === null must not count as confirmed).
+    expect(englishIsConfirmed({ sourceFingerprint: null, confirmedSourceFingerprint: null })).toBe(false);
+    for (const value of [null, undefined, "x", 3, [], {}]) expect(englishIsConfirmed(value)).toBe(false);
+  });
+
+  it("tells a live experience's host that the public English still predates the edit, and only then", () => {
+    expect(liveEnglishStaleNote("PUBLISHED", false)).toContain("公開中の英語ページは、日本語を変更する前の英語のまま");
+    expect(liveEnglishStaleNote("PUBLISHED", true)).toBeNull();
+    for (const status of ["DRAFT", "STOPPED", "RESTART_REQUIRED", "SUSPENDED"]) expect(liveEnglishStaleNote(status, false)).toBeNull();
   });
 });
