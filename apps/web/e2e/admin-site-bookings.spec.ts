@@ -27,6 +27,9 @@ const row = (publicBookingId: string, overrides: Record<string, unknown> = {}) =
 interface Backend {
   /** The answer to the next financial POST: ok, a conflict, or the session gone. */
   nextSend: "ok" | "conflict" | "session";
+  /** The answer to the next contact POST: sent, or the server unavailable (the result is then unknown). */
+  nextContact: "ok" | "unavailable";
+  contacts: Record<string, unknown>[];
   sends: Record<string, unknown>[];
   previews: Record<string, unknown>[];
   caseSaves: Record<string, unknown>[];
@@ -40,7 +43,7 @@ interface Backend {
 const json = (route: Route, status: number, body: unknown) => route.fulfill({ status, contentType: "application/json", headers: { "cache-control": "private, no-store" }, body: JSON.stringify(body) });
 
 async function installStubs(page: Page): Promise<Backend> {
-  const backend: Backend = { nextSend: "ok", sends: [], previews: [], caseSaves: [], bookingQueries: [], cancelled: new Set(), caseRevision: 0, memo: null, assignee: null };
+  const backend: Backend = { nextSend: "ok", nextContact: "ok", contacts: [], sends: [], previews: [], caseSaves: [], bookingQueries: [], cancelled: new Set(), caseRevision: 0, memo: null, assignee: null };
   const current = (id: string) => {
     const known: Record<string, ReturnType<typeof row>> = {
       [IDS.confirmed]: row(IDS.confirmed),
@@ -96,6 +99,12 @@ async function installStubs(page: Page): Promise<Backend> {
     if (url.pathname === "/admin/api/site-bookings" && method === "GET") return json(route, 200, { cancellationRequests: [], paymentReviews: [], refunds: [] });
     if (url.pathname === "/admin/api/site-bookings" && method === "POST") {
       const body = request.postDataJSON() as Record<string, unknown>;
+      if (body.action === "CONTACT_GUEST") {
+        backend.contacts.push(body);
+        const contactOutcome = backend.nextContact;
+        backend.nextContact = "ok";
+        return contactOutcome === "unavailable" ? json(route, 503, { error: "unavailable" }) : json(route, 200, { outcome: "CONTACT_SENT", repeated: false });
+      }
       backend.sends.push(body);
       const outcome = backend.nextSend;
       backend.nextSend = "ok";
@@ -193,6 +202,38 @@ test("opens a booking by its number, and says when it is malformed or not a supp
   await expect(opened.getByText("Admin案件 · 担当・内部メモ・操作履歴")).toBeVisible();
   expect(backend.bookingQueries).toEqual([`?publicBookingId=${IDS.off}`, `?publicBookingId=${IDS.lookupOnly}`]);
   await expectNoAxeViolations(page);
+});
+
+test("keeps the opened booking, and opens no other, while a contact's result is unknown", async ({ page }) => {
+  const backend = await openPage(page);
+  const input = page.getByRole("textbox", { name: "予約番号で開く" });
+  const open = page.getByRole("button", { name: "開く", exact: true });
+  await input.fill(IDS.lookupOnly);
+  await input.press("Enter");
+  const opened = page.getByRole("list", { name: "予約番号で開いた予約" });
+  await opened.getByText("Admin案件 · 担当・内部メモ・操作履歴").click();
+  await opened.getByRole("textbox", { name: /予約者へNIHOサポートから連絡/ }).fill("Synthetic contact text");
+
+  // The server cannot say whether the contact was sent: the command must be repeated from this very panel.
+  backend.nextContact = "unavailable";
+  await opened.getByRole("button", { name: "NIHOサポートとして連絡" }).click();
+  const retry = opened.getByRole("button", { name: "同じ連絡を再試行" });
+  await expect(retry).toBeVisible();
+  // Searching again would replace this panel and lose the command and the lock's owner, locking the screen until a reload.
+  await expect(input).toBeDisabled();
+  await expect(open).toBeDisabled();
+  await expect(page.getByText("いまの操作（結果の確認を含む）を終えるまで、別の予約は開けません。")).toBeVisible();
+  await expect(opened).toContainText("Sample Guest F");
+  await expectNoAxeViolations(page);
+  await expectNoHorizontalScroll(page);
+
+  // The same command goes again from the same panel; once it is settled the search opens again.
+  await retry.click();
+  await expect(input).toBeEnabled();
+  await expect(open).toBeEnabled();
+  expect(backend.contacts).toHaveLength(2);
+  expect(backend.contacts[1]!.commandId).toBe(backend.contacts[0]!.commandId);
+  expect(backend.contacts[1]!.message).toBe("Synthetic contact text");
 });
 
 test("cancels from a row in two steps, asks to check again after a conflict, and shows the new state", async ({ page }) => {
