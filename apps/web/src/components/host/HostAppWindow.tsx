@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { HOST_PUSH_MESSAGE, isStandaloneDisplay, subscribeDisplayMode } from "@/lib/host/display";
 import { HOST_LAUNCH_PATH, withQuery } from "@/lib/host/routes";
+import { sharedPhotoState } from "@/lib/host/shared-photo";
 
 /** True inside the installed app (#177). False on the server and while hydrating, so the first render matches. */
 export function useStandaloneDisplay(): boolean {
@@ -51,7 +52,8 @@ export function HostResumeRefresh({ enabled }: { enabled: boolean }) {
   const standalone = useStandaloneDisplay();
   useEffect(() => {
     if (!enabled || !standalone) return;
-    const unsaved = () => window.__nihoHostHistoryGuard?.dirty === true;
+    // A shared photo waiting for the form (P3) lives only in this page's memory: a reload would drop it.
+    const unsaved = () => window.__nihoHostHistoryGuard?.dirty === true || sharedPhotoState().photo !== null;
     let hiddenAt = document.visibilityState === "hidden" ? Date.now() : null;
     let pushedWhileAway = false;
     const onVisibility = () => {

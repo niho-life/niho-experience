@@ -9,6 +9,19 @@ export const HOST_DISPLAY_STANDALONE = "standalone";
 export const HOST_APP_SIGN_IN_REQUIRED = "app_sign_in_required";
 /** What /host/sw.js posts to open console pages when a push arrives (#177 P2): read the server again. */
 export const HOST_PUSH_MESSAGE = "niho-host-push";
+/**
+ * A photo shared to the app from Android's share sheet (#177 P3). The worker keeps it in memory for a few minutes;
+ * the page that follows asks for it once over a MessageChannel with this message and then holds it in its own memory.
+ * Nothing is written to the device.
+ */
+export const HOST_SHARE_TAKE_MESSAGE = "niho-host-share-take";
+export const HOST_SHARE_FIELD = "photos";
+/** What 体験's photo form takes (the same as its file input), and the server's 10 MB limit. */
+export const HOST_SHARE_PHOTO_TYPES = ["image/jpeg", "image/png"] as const;
+export const HOST_SHARE_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
+/** How long the worker keeps a shared photo for the page that follows, and the page keeps it for the host. */
+export const HOST_SHARE_WORKER_HOLD_MS = 5 * 60 * 1000;
+export const HOST_SHARE_PAGE_HOLD_MS = 30 * 60 * 1000;
 
 const STANDALONE_QUERY = "(display-mode: standalone)";
 

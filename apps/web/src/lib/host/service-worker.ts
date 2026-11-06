@@ -1,6 +1,6 @@
-import { HOST_PUSH_MESSAGE } from "./display";
+import { HOST_PUSH_MESSAGE, HOST_SHARE_FIELD, HOST_SHARE_PHOTO_MAX_BYTES, HOST_SHARE_PHOTO_TYPES, HOST_SHARE_TAKE_MESSAGE, HOST_SHARE_WORKER_HOLD_MS } from "./display";
 import { HOST_APP_ICONS } from "./pwa";
-import { HOST_API_PREFIX, HOST_APP_SCOPE, HOST_HOME_PATH } from "./routes";
+import { HOST_API_PREFIX, HOST_APP_SCOPE, HOST_EXPERIENCES_PATH, HOST_HOME_PATH, HOST_SHARE_TARGET_PATH, HOST_SHARED_QUERY } from "./routes";
 
 /**
  * /host/sw.js (#177, docs/host-pwa.md). It answers page loads under the app's scope from the
@@ -8,6 +8,8 @@ import { HOST_API_PREFIX, HOST_APP_SCOPE, HOST_HOME_PATH } from "./routes";
  * booking, guest, message or sales page is kept on the device, and it stays out of the sign-in and
  * Google round trips and the API relay. P2: it shows pushes (lib/host/push/payload.ts) as
  * notifications that open a page under /host/, and re-subscribes when the browser rotates a subscription.
+ * P3: it receives a photo shared from Android's share sheet (manifest `share_target`), keeps it in its own memory
+ * for a few minutes (never on the device) and hands it once to the page that follows.
  */
 export const HOST_SW_PASSTHROUGH = ["/host/auth", "/host/invitations", "/host/calendar/google", "/host/api"] as const;
 
@@ -56,6 +58,18 @@ const ICON = ${JSON.stringify(HOST_APP_ICONS.icon192)};
 const FALLBACK_TITLE = "NIHO 体験ホストにお知らせがあります";
 const SUBSCRIPTIONS = ${JSON.stringify(`${HOST_API_PREFIX}push-subscriptions`)};
 const PUSH_MESSAGE = ${JSON.stringify(HOST_PUSH_MESSAGE)};
+const SHARE_PATH = ${JSON.stringify(HOST_SHARE_TARGET_PATH)};
+const SHARE_LANDING = ${JSON.stringify(HOST_EXPERIENCES_PATH)};
+const SHARE_QUERY = ${JSON.stringify(HOST_SHARED_QUERY)};
+const SHARE_FIELD = ${JSON.stringify(HOST_SHARE_FIELD)};
+const SHARE_TYPES = ${JSON.stringify(HOST_SHARE_PHOTO_TYPES)};
+const SHARE_MAX_BYTES = ${HOST_SHARE_PHOTO_MAX_BYTES};
+const SHARE_HOLD_MS = ${HOST_SHARE_WORKER_HOLD_MS};
+const SHARE_TAKE = ${JSON.stringify(HOST_SHARE_TAKE_MESSAGE)};
+
+// A photo shared to the app (P3). It waits here, in this worker's memory only, until the page that follows takes it.
+// A worker that was stopped meanwhile has lost it, and the page says so.
+let sharedPhoto = null;
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -65,11 +79,40 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (request.mode !== "navigate" || request.method !== "GET") return;
   const url = new URL(request.url);
+  // The share sheet posts the photo as a page navigation. This is the only POST the worker answers.
+  if (request.method === "POST") {
+    if (request.mode === "navigate" && url.origin === self.location.origin && url.pathname === SHARE_PATH) event.respondWith(receiveShare(request));
+    return;
+  }
+  if (request.mode !== "navigate" || request.method !== "GET") return;
   if (url.origin !== self.location.origin || !url.pathname.startsWith(SCOPE)) return;
   if (PASSTHROUGH.some((path) => url.pathname === path || url.pathname.startsWith(path + "/"))) return;
   event.respondWith(fetch(request).catch(() => new Response(OFFLINE_HTML, { status: 503, headers: OFFLINE_HEADERS })));
+});
+
+// Keeps the first usable photo of a share (the form takes one at a time) and sends the host on to 体験.
+async function receiveShare(request) {
+  let photo = null;
+  try {
+    const form = await request.formData();
+    photo = form.getAll(SHARE_FIELD).find((value) => value && typeof value === "object" && typeof value.arrayBuffer === "function"
+      && SHARE_TYPES.includes(value.type) && value.size > 0 && value.size <= SHARE_MAX_BYTES) || null;
+  } catch (error) {
+    photo = null;
+  }
+  sharedPhoto = photo ? { photo, at: Date.now() } : null;
+  return Response.redirect(new URL(SHARE_LANDING + "?" + SHARE_QUERY + "=" + (photo ? "photo" : "none"), self.location.origin).href, 303);
+}
+
+// The page that follows asks once, over a channel it opens, and the worker forgets the photo as it answers.
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  const port = event.ports && event.ports[0];
+  if (!data || data.type !== SHARE_TAKE || !port || !inScope(event.source && event.source.url)) return;
+  const held = sharedPhoto && Date.now() - sharedPhoto.at <= SHARE_HOLD_MS ? sharedPhoto.photo : null;
+  sharedPhoto = null;
+  port.postMessage({ type: SHARE_TAKE, photo: held });
 });
 
 // An absolute URL on this site under /host/, or null: a notification never leads out of the app.
@@ -87,7 +130,26 @@ async function windows() {
   return self.clients.matchAll({ type: "window", includeUncontrolled: true });
 }
 
+// What follows any push, however the notification itself came: the app icon's count and a word to the open pages.
+async function afterPush(badge) {
+  const nav = self.navigator;
+  if (typeof badge === "number" && nav && typeof nav.setAppBadge === "function") {
+    await (badge > 0 ? nav.setAppBadge(badge) : nav.clearAppBadge()).catch(() => undefined);
+  }
+  for (const client of await windows()) client.postMessage({ type: PUSH_MESSAGE });
+}
+
 self.addEventListener("push", (event) => {
+  // A Declarative Web Push with mutable: true (Push API, receiving a push message) arrives with no data and the notification
+  // the browser has ready as event.notification. The browser shows it unless this handler shows one, so none is shown here: a
+  // generic notice would take its place and the real one (its words, tag and page) would be lost. The app badge is in the
+  // notification's data (payload.ts); the open pages are told as for any push.
+  const ready = event.notification;
+  if (ready && typeof ready === "object") {
+    const info = ready.data && typeof ready.data === "object" ? ready.data : null;
+    event.waitUntil(afterPush(info && typeof info.badge === "number" ? info.badge : undefined));
+    return;
+  }
   let data = null;
   try {
     data = event.data ? event.data.json() : null;
@@ -108,11 +170,7 @@ self.addEventListener("push", (event) => {
       data: { url },
       icon: ICON,
     });
-    const nav = self.navigator;
-    if (typeof data.badge === "number" && nav && typeof nav.setAppBadge === "function") {
-      await (data.badge > 0 ? nav.setAppBadge(data.badge) : nav.clearAppBadge()).catch(() => undefined);
-    }
-    for (const client of await windows()) client.postMessage({ type: PUSH_MESSAGE });
+    await afterPush(data.badge);
   })());
 });
 

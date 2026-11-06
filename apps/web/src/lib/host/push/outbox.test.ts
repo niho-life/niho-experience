@@ -153,13 +153,16 @@ describe("hostPushEventFromOutbox", () => {
       },
     });
     if (parsed.ok) {
-      expect(JSON.parse(hostPushPayload(parsed.event))).toEqual({
+      const message = JSON.parse(hostPushPayload(parsed.event));
+      expect(message).toMatchObject({
         v: 1,
         title: "予約前の質問が届きました",
         body: "Synthetic Tea Ceremony",
         url: `/host/messages?thread=${THREAD}&providerId=provider-a`,
         tag: `question-${THREAD}`,
       });
+      // The declarative copy (#177 P3) says the same and replaces the device's earlier one by the same tag.
+      expect(message.notification).toMatchObject({ title: message.title, body: message.body, navigate: message.url, tag: message.tag });
     }
   });
 

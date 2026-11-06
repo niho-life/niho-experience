@@ -36,9 +36,9 @@ function load(source: string, network: (input: RequestInfo | URL, init?: Request
   new Function("self", "caches", "fetch", "Response", "URL", source)(self, caches, fetch, Response, URL);
 
   /** A request's fate: what the page got, or null when the worker left it to the browser. */
-  const request = (path: string, init: { mode?: string; method?: string; origin?: string } = {}) => {
+  const request = (path: string, init: { mode?: string; method?: string; origin?: string; formData?: () => Promise<FormData> } = {}) => {
     let answer: Promise<Response> | null = null;
-    listeners.get("fetch")?.({ request: { mode: init.mode ?? "navigate", method: init.method ?? "GET", url: `${init.origin ?? ORIGIN}${path}` }, respondWith: (value: Promise<Response>) => { answer = value; } });
+    listeners.get("fetch")?.({ request: { mode: init.mode ?? "navigate", method: init.method ?? "GET", url: `${init.origin ?? ORIGIN}${path}`, formData: init.formData }, respondWith: (value: Promise<Response>) => { answer = value; } });
     return answer as Promise<Response> | null;
   };
   /** Fires an event and waits for what it handed to waitUntil. */
@@ -123,6 +123,33 @@ describe("host service worker: push (#177 P2)", () => {
     expect(worker.self.navigator.clearAppBadge).toHaveBeenCalledOnce();
   });
 
+  it("leaves a Declarative Web Push (mutable: true) to the browser: no data, only event.notification, and no notice of its own", async () => {
+    const page = windowAt("/host/home");
+    const worker = load(source, undefined, [page]);
+    const declarative = (data: unknown) => ({ data: null, notification: { title: "新しい予約・申込", body: message.body, tag: "booking-1", data } });
+    await worker.dispatch("push", declarative({ url: `${ORIGIN}/host/bookings?filter=pending`, badge: 3 }));
+    // Showing one here would replace the browser's notification with a generic one.
+    expect(worker.self.registration.showNotification).not.toHaveBeenCalled();
+    expect(worker.self.navigator.setAppBadge).toHaveBeenCalledWith(3);
+    expect(page.postMessage).toHaveBeenCalledWith({ type: "niho-host-push" });
+    await worker.dispatch("push", declarative({ url: `${ORIGIN}/host/bookings`, badge: 0 }));
+    expect(worker.self.navigator.clearAppBadge).toHaveBeenCalledOnce();
+    // No count (or data of another shape): the badge is left alone, the pages are still told, the browser still shows its notification.
+    await worker.dispatch("push", declarative(undefined));
+    await worker.dispatch("push", declarative("text"));
+    await worker.dispatch("push", declarative({ badge: "3" }));
+    expect(worker.self.navigator.setAppBadge).toHaveBeenCalledOnce();
+    expect(worker.self.registration.showNotification).not.toHaveBeenCalled();
+    expect(page.postMessage).toHaveBeenCalledTimes(5);
+  });
+
+  it("a declarative notification the worker is handed is opened by a tap through its data.url, like any other", async () => {
+    const page = windowAt("/host/settings");
+    const worker = load(source, undefined, [page]);
+    await worker.dispatch("notificationclick", { notification: { close: vi.fn(), data: { url: `${ORIGIN}/host/messages?thread=t1`, badge: 2 } } });
+    expect(page.navigate).toHaveBeenCalledWith(`${ORIGIN}/host/messages?thread=t1`);
+  });
+
   it("turns pushes it cannot read or that would lead out of the app into a plain notice for ホーム", async () => {
     const worker = load(source);
     await worker.dispatch("push", { data: { json: () => { throw new SyntaxError("bad"); } } });
@@ -172,6 +199,91 @@ describe("host service worker: push (#177 P2)", () => {
   });
 });
 
+describe("host service worker: a photo shared from Android's share sheet (#177 P3)", () => {
+  const source = hostServiceWorkerSource(true);
+  const photo = (type = "image/jpeg", size = 8, name = "kitchen.jpg") => new File([new Uint8Array(size).fill(1)], name, { type });
+  const share = (...files: File[]) => async () => {
+    const form = new FormData();
+    for (const file of files) form.append("photos", file);
+    return form;
+  };
+  /** The page that follows asks over a channel; what the worker answered, or "silent". */
+  const take = async (worker: ReturnType<typeof load>, from = `${ORIGIN}/host/experiences`, data: unknown = { type: "niho-host-share-take" }) => {
+    const port = { postMessage: vi.fn() };
+    await worker.dispatch("message", { data, ports: [port], source: { url: from } });
+    return port.postMessage.mock.calls.length ? (port.postMessage.mock.calls[0]![0] as { type: string; photo: File | null }) : "silent";
+  };
+
+  it("keeps the photo in memory, sends the host on to 体験 and gives it up once", async () => {
+    const worker = load(source);
+    const answer = worker.request("/host/share-target", { method: "POST", formData: share(photo()) });
+    expect(answer).not.toBeNull();
+    const response = await answer!;
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/host/experiences?shared=photo`);
+    expect(worker.fetch).not.toHaveBeenCalled();
+    const first = await take(worker);
+    expect(first).not.toBe("silent");
+    expect((first as { photo: File }).photo.name).toBe("kitchen.jpg");
+    // The worker forgot it as it answered.
+    expect(((await take(worker)) as { photo: File | null }).photo).toBeNull();
+  });
+
+  it("takes the first usable image of several, and turns away anything else", async () => {
+    const worker = load(source);
+    const redirectOf = async (...files: File[]) => (await worker.request("/host/share-target", { method: "POST", formData: share(...files) })!).headers.get("location");
+    expect(await redirectOf(photo("application/pdf"), photo("image/png", 4, "second.png"), photo("image/jpeg", 4, "third.jpg"))).toBe(`${ORIGIN}/host/experiences?shared=photo`);
+    expect(((await take(worker)) as { photo: File }).photo.name).toBe("second.png");
+    for (const files of [[], [photo("image/webp")], [photo("image/gif")], [photo("image/jpeg", 0)], [photo("image/jpeg", 10 * 1024 * 1024 + 1)]]) {
+      expect(await redirectOf(...files), String(files[0]?.type)).toBe(`${ORIGIN}/host/experiences?shared=none`);
+      expect(((await take(worker)) as { photo: File | null }).photo).toBeNull();
+    }
+    const unreadable = await worker.request("/host/share-target", { method: "POST", formData: async () => { throw new TypeError("not a form"); } })!;
+    expect(unreadable.headers.get("location")).toBe(`${ORIGIN}/host/experiences?shared=none`);
+  });
+
+  it("a share that fails drops the photo the worker held before", async () => {
+    const worker = load(source);
+    await worker.request("/host/share-target", { method: "POST", formData: share(photo()) })!;
+    await worker.request("/host/share-target", { method: "POST", formData: share() })!;
+    expect(((await take(worker)) as { photo: File | null }).photo).toBeNull();
+  });
+
+  it("forgets the photo after five minutes", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = load(source);
+      await worker.request("/host/share-target", { method: "POST", formData: share(photo()) })!;
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+      expect(((await take(worker)) as { photo: File | null }).photo).toBeNull();
+      await worker.request("/host/share-target", { method: "POST", formData: share(photo()) })!;
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      expect(((await take(worker)) as { photo: File | null }).photo?.name).toBe("kitchen.jpg");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("answers only the share route's page-navigation POST, and only pages of the console", async () => {
+    const worker = load(source);
+    expect(worker.request("/host/share-target", { method: "POST", mode: "cors", formData: share(photo()) })).toBeNull();
+    expect(worker.request("/host/share-target", { method: "POST", origin: "https://niho.example.test", formData: share(photo()) })).toBeNull();
+    expect(worker.request("/host/share-target/other", { method: "POST", formData: share(photo()) })).toBeNull();
+    expect(worker.request("/host/experiences", { method: "POST", formData: share(photo()) })).toBeNull();
+    // A GET of the route is an ordinary page load, handled (and refused) by the server.
+    expect(await (await worker.request("/host/share-target")!).text()).toBe("page");
+    await worker.request("/host/share-target", { method: "POST", formData: share(photo()) })!;
+    expect(await take(worker, `${ORIGIN}/experiences`)).toBe("silent");
+    expect(await take(worker, "https://evil.example.test/host/experiences")).toBe("silent");
+    expect(await take(worker, undefined, { type: "something-else" })).toBe("silent");
+    expect(await take(worker, undefined, null)).toBe("silent");
+    // No channel to answer on: nothing to do, and nothing taken.
+    await worker.dispatch("message", { data: { type: "niho-host-share-take" }, ports: [], source: { url: `${ORIGIN}/host/experiences` } });
+    // None of those took the photo.
+    expect(((await take(worker)) as { photo: File | null }).photo?.name).toBe("kitchen.jpg");
+  });
+});
+
 describe("host service worker (HOST_PWA_ENABLED=false)", () => {
   const source = hostServiceWorkerSource(false);
 
@@ -183,5 +295,6 @@ describe("host service worker (HOST_PWA_ENABLED=false)", () => {
     await worker.lifecycle("activate");
     expect(worker.self.registration.unregister).toHaveBeenCalledOnce();
     expect(source).not.toMatch(/caches\.open|cache\.put/);
+    expect(source).not.toMatch(/share-target|sharedPhoto/);
   });
 });
