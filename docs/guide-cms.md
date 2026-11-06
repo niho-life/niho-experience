@@ -272,9 +272,9 @@ npm -w @niho-experience/web run dev
 **残る差・オーナー判断が要る点**（勝手に緩めていない）:
 
 1. **カテゴリ**：解消済み。EditorはExperienceのactiveカテゴリを公開ごとに読み、選択slugを`category`、英日表示名・順序・revisionを任意の`categoryDisplay` snapshotとして固定する。activeが空、取得失敗、または選択slugが停止済みなら次の公開は503/不許可で、既存公開版とそのsnapshot表示名は維持する。
-2. **共有の権利と OG 画像**：editor v1 は写真の共有権利を宣言しないので OG・`Article.image` は出ない。editor が Asset に明示の宣言（例：共有可否）を足せば、`licensed` に写像する。
-3. **写真の寸法**：契約に無い。editor が `width`・`height` を Asset に足せば名目値をやめられる（互換を壊さない追加）。
-4. **著者の役割・紹介文・プロフィール URL**：契約に `role`・`bio` が無く、`handle`・`url` は使っていない。著者ページを作る判断は別。
+2. **共有の権利と OG 画像**：解消済み。editor は著者がカバーに「共有画像にも使う許諾」を付けたときだけ、トップレベルの任意項目 `coverShareable: true` を出す（niho-life/niho-editor#316）。それを `hero.licensed` に写像し、OG・`Article.image` に使う。無い公開版は従来どおり共有しない。
+3. **写真の寸法**：契約に無い。editor のカバーは `hero.sizeAssumed` として名目値で描き、OG 画像には `width`・`height` を出さない。editor が寸法を足せば名目値をやめられる（互換を壊さない追加）。
+4. **著者の役割・紹介文**：解消済み。editor が公開時点の肩書・紹介文をトップレベルの任意項目 `authorProfile { role, bio }` で出し（editor#316）、画面と `Article.author` の `jobTitle`・`description` に使う。`handle`・`url` は使っていない。著者ページを作る判断は別。
 5. **「体験ページに載せる」（`extras.xp`）**：未対応。宣言は `extras: []` で、editor に選択肢を出さない。関連体験を選べば、体験の詳細に記事が出る（従来どおり）。
 6. **`movedTo`**：NIHO の別の面へ移した記事の 410 に付くが、旧 URL から新 URL への転送は実装していない（`/guides` へ 307）。
 7. **`checkedOn`（確認日）**：v1 に無いので editor 記事では表示しない。

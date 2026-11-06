@@ -82,6 +82,7 @@ function BookingFacts({ booking, extra }: { booking: SupportQueueBooking; extra?
         {booking.freeCancellationUntilUtc ? ` · 無料取消 ${japanTime(booking.freeCancellationUntilUtc)} まで` : booking.cancellationPolicy === "NONE" ? " · 返金なしの条件" : ""}
       </p>
       <p className="text-xs text-muted">予約番号 {booking.publicBookingId} · 提供者 {booking.providerId}</p>
+      {booking.mailUndeliverable ? <p role="note" className="text-xs font-bold text-warn">予約者のメールアドレスにメールが届きません。この予約者へのメールは送られていません。連絡は電話など別の方法で行ってください。</p> : null}
       {extra}
     </div>
   );

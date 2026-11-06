@@ -160,6 +160,7 @@ export function siteBooking(stored: HostGuestBooking): HostBooking {
             : [SUPPORT_ACTION_LABELS[entry.action ?? ""] ?? "NIHOサポート対応", SUPPORT_OUTCOME_LABELS[entry.outcome ?? ""]].filter(Boolean).join(" · "),
         })),
       } : {}),
+      ...(stored.mailUndeliverable ? { guestEmailUndeliverable: true as const } : {}),
     },
   };
 }

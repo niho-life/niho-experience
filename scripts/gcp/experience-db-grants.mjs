@@ -124,10 +124,15 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   guide_publication_product_links: { write: I },
   guide_publications: { write: IU },
   guide_writer_grants: { write: IU },
+  // ホストのアカウント (ADR 0003, 0064): an account is suspended, never deleted. Sign-in link requests (their own mail
+  // queue) and sessions are deleted by the mail job once they can no longer open or read anything.
+  host_accounts: { write: IU },
+  host_login_requests: { write: IUD },
   // ホストへのメールの宛先 (#194, 0038): the sign-in's copy and the host's choice; DELETE when access ends (the mail job).
   host_notification_address_confirmations: { write: IUD },
   host_notification_addresses: { write: IUD },
   host_push_subscriptions: { write: IUD },
+  host_sessions: { write: IUD },
   inventory_resources: { write: IU },
   // Read by the host notification and guest mail jobs, which also mark rows done and move their lease.
   outbox_messages: { write: IU },
