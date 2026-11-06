@@ -12,6 +12,7 @@ import type {
   ClaimedBookingLink,
   ClaimedBookingMeetingGuide,
   ClaimedBookingMessage,
+  ClaimedSupportBookingMessage,
   ClaimedGuestQuestionReply,
   ClaimedQuestionReply,
   ClaimedGuestTranslation,
@@ -52,6 +53,15 @@ const bookingMessageFor = (n: number): ClaimedBookingMessage => ({
   guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`, guestLanguage: "EN", experienceTitle: "Synthetic walk",
   hostDisplayName: "Sample Host", english: "See you at the station.", attempt: 1,
   publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+  deliveryRef: `ex1_${(0x200 + n).toString(16).padStart(32, "0")}`,
+});
+
+/** An Admin's NIHO support contact in a booking's thread: the same booking mail feedback reference. */
+const supportMessageFor = (n: number): ClaimedSupportBookingMessage => ({
+  ...bookingMessageFor(n),
+  kind: "BOOKING_SUPPORT",
+  messageId: `00000000-0000-4000-8000-00000000030${n}`,
+  deliveryRef: `ex1_${(0x300 + n).toString(16).padStart(32, "0")}`,
 });
 
 const facts = (n: number): BookingConfirmationEmail => ({
@@ -388,6 +398,16 @@ describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => 
     expect(s.sent[1]!.text).toContain(`${SITE}/questions/reply#t=${replyFor(2).replyToken}`);
     expect(s.questions.recordReplyDelivery.mock.calls).toEqual([[bookingMessageFor(1).messageId, "SENT"], [replyFor(2).messageId, "SENT"]]);
     expect(JSON.stringify(counts)).not.toContain(GRANT);
+  });
+
+  it("stamps the bounce-feedback reference on booking thread mail only, never on a reply before booking (#128)", async () => {
+    s.questions.claimReplyDeliveries.mockImplementation(oneAtATime<ClaimedGuestQuestionReply>([bookingMessageFor(1), supportMessageFor(2), replyFor(3)]));
+    const counts = await runExperienceJobs(s.deps);
+    expect(counts.questionReplies).toEqual({ claimed: 3, sent: 3, retried: 0, failed: 0 });
+    expect(s.sent.map((message) => message.deliveryRef)).toEqual([bookingMessageFor(1).deliveryRef, supportMessageFor(2).deliveryRef, undefined]);
+    expect("deliveryRef" in s.sent[2]!).toBe(false);
+    expect(s.sent[1]!.subject).toContain("NIHO support sent you a message about your booking");
+    expect(JSON.stringify(counts)).not.toContain("ex1_");
   });
 
   it("emails a host message about a booking without a link while the page is off or no grant can be issued", async () => {
