@@ -65,6 +65,11 @@ export interface HostDeclarativeNotification {
   lang: "ja";
   dir: "ltr";
   icon?: string;
+  /**
+   * What /host/sw.js reads when the browser hands it this notification as `event.notification` (mutable: true): where a tap goes
+   * and the app icon's count. `badge` is kept for zero too, which the worker turns into clearAppBadge.
+   */
+  data: { url: string; badge?: number };
   /** The app icon's count as WebKit's examples write it: a string. Left out for zero; the worker clears it. */
   app_badge?: string;
 }
@@ -72,8 +77,9 @@ export interface HostDeclarativeNotification {
 /**
  * The JSON of a push. The legacy fields (`v` to `badge`) are what /host/sw.js reads (lib/host/service-worker.ts) in a
  * browser without declarative push. A browser with it reads `web_push` and `notification` and ignores the rest.
- * `mutable` keeps the worker's push event (the app badge and the open pages' refresh) and lets it replace the
- * notification; the browser shows its own only when the worker shows none. Same `tag` on both: one notification, never two.
+ * `mutable: true` keeps the worker's push event, which then has no data and gets this notification as `event.notification`
+ * (Push API §10.3): the worker sets the app badge and tells the open pages, and shows nothing itself, so the browser shows this
+ * one. A worker that shows a notification replaces it. Browsers without declarative push read the legacy fields instead.
  */
 export interface HostPushMessage {
   v: 1;
@@ -183,6 +189,7 @@ function pushMessage(input: { title: string; body: string; url: string; tag: str
       tag: input.tag,
       lang: "ja",
       dir: "ltr",
+      data: { url: absolute(input.url), ...(badge !== undefined ? { badge } : {}) },
       ...(origin ? { icon: absolute(HOST_APP_ICONS.icon192) } : {}),
       ...(badge !== undefined && badge > 0 ? { app_badge: String(badge) } : {}),
     },

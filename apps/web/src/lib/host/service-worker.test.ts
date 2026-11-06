@@ -123,6 +123,33 @@ describe("host service worker: push (#177 P2)", () => {
     expect(worker.self.navigator.clearAppBadge).toHaveBeenCalledOnce();
   });
 
+  it("leaves a Declarative Web Push (mutable: true) to the browser: no data, only event.notification, and no notice of its own", async () => {
+    const page = windowAt("/host/home");
+    const worker = load(source, undefined, [page]);
+    const declarative = (data: unknown) => ({ data: null, notification: { title: "新しい予約・申込", body: message.body, tag: "booking-1", data } });
+    await worker.dispatch("push", declarative({ url: `${ORIGIN}/host/bookings?filter=pending`, badge: 3 }));
+    // Showing one here would replace the browser's notification with a generic one.
+    expect(worker.self.registration.showNotification).not.toHaveBeenCalled();
+    expect(worker.self.navigator.setAppBadge).toHaveBeenCalledWith(3);
+    expect(page.postMessage).toHaveBeenCalledWith({ type: "niho-host-push" });
+    await worker.dispatch("push", declarative({ url: `${ORIGIN}/host/bookings`, badge: 0 }));
+    expect(worker.self.navigator.clearAppBadge).toHaveBeenCalledOnce();
+    // No count (or data of another shape): the badge is left alone, the pages are still told, the browser still shows its notification.
+    await worker.dispatch("push", declarative(undefined));
+    await worker.dispatch("push", declarative("text"));
+    await worker.dispatch("push", declarative({ badge: "3" }));
+    expect(worker.self.navigator.setAppBadge).toHaveBeenCalledOnce();
+    expect(worker.self.registration.showNotification).not.toHaveBeenCalled();
+    expect(page.postMessage).toHaveBeenCalledTimes(5);
+  });
+
+  it("a declarative notification the worker is handed is opened by a tap through its data.url, like any other", async () => {
+    const page = windowAt("/host/settings");
+    const worker = load(source, undefined, [page]);
+    await worker.dispatch("notificationclick", { notification: { close: vi.fn(), data: { url: `${ORIGIN}/host/messages?thread=t1`, badge: 2 } } });
+    expect(page.navigate).toHaveBeenCalledWith(`${ORIGIN}/host/messages?thread=t1`);
+  });
+
   it("turns pushes it cannot read or that would lead out of the app into a plain notice for ホーム", async () => {
     const worker = load(source);
     await worker.dispatch("push", { data: { json: () => { throw new SyntaxError("bad"); } } });

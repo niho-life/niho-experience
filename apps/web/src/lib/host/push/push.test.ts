@@ -34,6 +34,7 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
         tag: "booking-bk-2041",
         lang: "ja",
         dir: "ltr",
+        data: { url: "/host/bookings?filter=pending&booking=bk-2041", badge: 2 },
         app_badge: "2",
       },
     });
@@ -53,11 +54,13 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
       tag: message.tag,
       lang: "ja",
       dir: "ltr",
+      // The worker gets this as event.notification (mutable: true): where a tap goes, and the count (0 clears the badge).
+      data: { url: `${origin}/host/bookings?filter=pending&booking=bk-2041`, badge: 0 },
       icon: `${origin}/host-app/icon-192.png`,
     });
-    // Zero clears the badge in the worker; the declarative part sets none.
+    // Zero clears the badge in the worker; the declarative app_badge sets none.
     expect(message.notification).not.toHaveProperty("app_badge");
-    expect(Object.keys(JSON.parse(hostPushTestPayload(origin)).notification).sort()).toEqual(["body", "dir", "icon", "lang", "navigate", "tag", "title"]);
+    expect(Object.keys(JSON.parse(hostPushTestPayload(origin)).notification).sort()).toEqual(["body", "data", "dir", "icon", "lang", "navigate", "tag", "title"]);
     expect(JSON.parse(hostPushTestPayload(origin)).notification.navigate).toBe(`${origin}/host/settings#settings-device`);
   });
 

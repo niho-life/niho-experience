@@ -80,17 +80,18 @@
 {
   "v": 1, "title": "...", "body": "...", "url": "/host/bookings?...", "tag": "...", "badge": 2,
   "web_push": 8030, "mutable": true,
-  "notification": { "title": "...", "body": "...", "navigate": "https://<site>/host/bookings?...", "tag": "...", "lang": "ja", "dir": "ltr", "icon": "https://<site>/host-app/icon-192.png", "app_badge": "2" }
+  "notification": { "title": "...", "body": "...", "navigate": "https://<site>/host/bookings?...", "tag": "...", "lang": "ja", "dir": "ltr", "data": { "url": "https://<site>/host/bookings?...", "badge": 2 }, "icon": "https://<site>/host-app/icon-192.png", "app_badge": "2" }
 }
 ```
 
 - **対応するブラウザ（iOS 18.4+ の Safari・ホーム画面のアプリ）**は `web_push: 8030` を見て、worker を起こさずに自分で通知を出す。worker が止まっていても通知が出るので、「通知を出さない push が続くと購読が取り消される」心配が減る。
 - **対応しないブラウザ（Chrome・Firefox・古い Safari）**は従来どおり worker の `push` が `v`〜`badge` を読む。余分なキーは無視される。
-- `mutable: true` で worker の `push` event も呼ばれる（アプリのバッジ・開いている画面の更新はこちらが行う）。worker が同じ `tag` で通知を出せば宣言的な通知を置き換え、出さなければブラウザが宣言的な通知を出す。**同じ `tag` なので、通知が 2 つ並ぶことはない。**
+- `mutable: true` で worker の `push` event も呼ばれる（アプリのバッジ・開いている画面の更新を worker が行うため）。**この event には `event.data` が無く（null）、ブラウザが用意した通知が `event.notification` で渡る**（[Push API の push message の受信](https://www.w3.org/TR/push-api/#receiving-a-push-message)）。ブラウザは、worker が `showNotification()` を呼ばなかったときに、用意した通知を出す。そのため worker は**通知を出さない**（出すと、本物の通知の代わりに汎用の通知が出てしまう。#426 のレビューで指摘された）。worker は `event.notification.data.badge` でアプリのバッジを付け（0 は消す）、開いている画面に更新を伝えるだけ。タップ先は `event.notification.data.url`（`notificationclick` が従来どおり読む）。
+- `event.notification` が無い通知（Chrome・Firefox・宣言的でない Safari）は、従来どおり `event.data` の `v`〜`badge` を読んで worker が通知を出す。
 - `navigate` は `/host/` 配下だけ（`hostPushUrl` が今までどおり検査する）。サイトの origin が分かるとき（本番の job・テスト通知）は絶対 URL、分からないときは path（ブラウザが購読の scope で解く）。`icon` も同じ。
 - `app_badge` は WebKit の例どおり**文字列**で、0 のときは付けない（0 で消すのは worker の `clearAppBadge`）。W3C の草案には無いメンバーで、対応しないブラウザは無視する。
 - ロック画面に出す内容は変わらない（種類・体験名・日時・人数。OTA の予約だけ予約者の名前）。本文は 3 KB 以内を今までどおり検査する。
-- **実機は未確認。** iOS 18.4+ の実機で、(1) 宣言的な通知が 1 つだけ出る、(2) worker が止まっていても出る、(3) タップで `navigate` が開く、(4) `app_badge` が付く、を確かめる（[実機の受入](#実機の受入stg) 8）。余分なキーを拒む実装だった場合も、従来の worker 経路にそのまま戻るだけで、通知は出る。
+- **実機は未確認。** iOS 18.4+ の実機で、(1) 宣言的な通知が 1 つだけ出る（汎用の「お知らせがあります」に置き換わらず、本文・タップ先が正しい）、(2) worker が止まっていても出る、(3) タップで `navigate` が開く、(4) `app_badge` が付く、を確かめる（[実機の受入](#実機の受入stg) 8）。余分なキーを拒む実装だった場合も、従来の worker 経路にそのまま戻るだけで、通知は出る。
 
 ## 共有された写真（P3）
 

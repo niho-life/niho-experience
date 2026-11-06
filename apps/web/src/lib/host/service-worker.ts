@@ -130,7 +130,26 @@ async function windows() {
   return self.clients.matchAll({ type: "window", includeUncontrolled: true });
 }
 
+// What follows any push, however the notification itself came: the app icon's count and a word to the open pages.
+async function afterPush(badge) {
+  const nav = self.navigator;
+  if (typeof badge === "number" && nav && typeof nav.setAppBadge === "function") {
+    await (badge > 0 ? nav.setAppBadge(badge) : nav.clearAppBadge()).catch(() => undefined);
+  }
+  for (const client of await windows()) client.postMessage({ type: PUSH_MESSAGE });
+}
+
 self.addEventListener("push", (event) => {
+  // A Declarative Web Push with mutable: true (Push API, receiving a push message) arrives with no data and the notification
+  // the browser has ready as event.notification. The browser shows it unless this handler shows one, so none is shown here: a
+  // generic notice would take its place and the real one (its words, tag and page) would be lost. The app badge is in the
+  // notification's data (payload.ts); the open pages are told as for any push.
+  const ready = event.notification;
+  if (ready && typeof ready === "object") {
+    const info = ready.data && typeof ready.data === "object" ? ready.data : null;
+    event.waitUntil(afterPush(info && typeof info.badge === "number" ? info.badge : undefined));
+    return;
+  }
   let data = null;
   try {
     data = event.data ? event.data.json() : null;
@@ -151,11 +170,7 @@ self.addEventListener("push", (event) => {
       data: { url },
       icon: ICON,
     });
-    const nav = self.navigator;
-    if (typeof data.badge === "number" && nav && typeof nav.setAppBadge === "function") {
-      await (data.badge > 0 ? nav.setAppBadge(data.badge) : nav.clearAppBadge()).catch(() => undefined);
-    }
-    for (const client of await windows()) client.postMessage({ type: PUSH_MESSAGE });
+    await afterPush(data.badge);
   })());
 });
 
