@@ -330,6 +330,12 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       assert.equal("mailUndeliverable" in await context.guests.getGuestBookingForHost(ownerA, fine.publicBookingId), false);
       const listed = (await context.guests.listGuestBookingsForHost(ownerA)).bookings.find((item) => item.publicBookingId === refused.publicBookingId);
       assert.equal(listed?.mailUndeliverable, "NO_SUCH_DOMAIN");
+      // A booking of the same address made after the bounce is never mailed either (the suppression is per address), though
+      // no mail of its own was refused: the host is told for it too.
+      const later = await confirmedGuest(context, "shown-later", { guestEmail: "Shown@Example.com", occurrenceDate: day(4) });
+      assert.equal((await context.guests.getGuestBookingForHost(ownerA, later.publicBookingId)).mailUndeliverable, "NO_SUCH_DOMAIN");
+      const listedLater = (await context.guests.listGuestBookingsForHost(ownerA)).bookings.find((item) => item.publicBookingId === later.publicBookingId);
+      assert.equal(listedLater?.mailUndeliverable, "NO_SUCH_DOMAIN");
       assert.ok(!JSON.stringify(shown).includes("shown@example.com"));
     });
   });

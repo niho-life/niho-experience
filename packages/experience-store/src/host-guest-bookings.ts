@@ -258,6 +258,20 @@ export async function listBoundary(client: PoolClient, from: unknown): Promise<s
  * Everything the host sees of the provider's guest bookings, one row each: never `guest_email` or
  * `guest_email_key`. The current sale terms name the answered questions.
  */
+/**
+ * The mail suppression that applies to this guest's address at this provider, from any of its bookings (#375). A
+ * confirmed undeliverable address stops the mail of every booking of the same address at the provider (the mail
+ * outbox's `GUEST_ROW` checks `booking_guests` by `provider_id` and `guest_email_key`), so a booking made after the
+ * bounce shows the state too, though no mail of its own was ever refused. `g` is the booking's `booking_guests` row;
+ * a guest whose details were erased has no address key and gets NULL.
+ */
+export const GUEST_MAIL_SUPPRESSION_CLASSIFICATION = `(
+  SELECT s.mail_suppression_classification FROM booking_guests s
+   WHERE s.provider_id = g.provider_id AND s.guest_email_key = g.guest_email_key AND s.mail_suppressed_at IS NOT NULL
+   ORDER BY s.mail_suppressed_at DESC, s.booking_id
+   LIMIT 1
+) AS mail_suppression_classification`;
+
 const SELECT_HOST_BOOKINGS = `
   SELECT b.public_booking_id::text AS public_booking_id, b.product_id, p.public_title, b.status,
          b.occurrence_snapshot, b.pricing_snapshot, b.created_at, b.cancelled_at,
@@ -266,7 +280,7 @@ const SELECT_HOST_BOOKINGS = `
             WHERE e.provider_id = b.provider_id AND e.booking_id = b.id AND e.outcome IN ('CONFIRMED', 'PAYMENT_REVIEW')
          )) AS paid_at,
          g.guest_name, g.guest_phone, g.note, g.answers, g.guest_language, g.adult_count, g.child_count,
-         g.pii_erased_at IS NOT NULL AS erased, g.mail_suppression_classification, t.booking_questions,
+         g.pii_erased_at IS NOT NULL AS erased, ${GUEST_MAIL_SUPPRESSION_CLASSIFICATION}, t.booking_questions,
          b.cancelled_by, b.cancellation_reason, b.cancellation_note,
          (SELECT COALESCE(sum(r.amount) FILTER (WHERE r.status = 'SUCCEEDED'), 0)::text
             FROM booking_refunds r WHERE r.provider_id = b.provider_id AND r.booking_id = b.id) AS refunded_amount,

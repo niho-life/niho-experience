@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { sessionBookingRef } from "./booking-access.ts";
 import { cancellationTermsOf, freeCancellationDeadlineUtc } from "./cancellation-terms.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
-import { publicBookingIdOf, requireBookingsOwner, sessionKeyOf, type HostGuestSessionKey } from "./host-guest-bookings.ts";
+import { GUEST_MAIL_SUPPRESSION_CLASSIFICATION, publicBookingIdOf, requireBookingsOwner, sessionKeyOf, type HostGuestSessionKey } from "./host-guest-bookings.ts";
 import { enqueueCancellationNotification } from "./host-notification-outbox.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
@@ -880,7 +880,7 @@ async function settleRefund(
 
 const QUEUE_BOOKING = `
   b.public_booking_id::text AS public_booking_id, b.provider_id, b.status, b.occurrence_snapshot, b.pricing_snapshot,
-  g.guest_name, g.mail_suppression_classification, p.public_title`;
+  g.guest_name, ${GUEST_MAIL_SUPPRESSION_CLASSIFICATION}, p.public_title`;
 const QUEUE_JOINS = `
   JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
   JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id`;

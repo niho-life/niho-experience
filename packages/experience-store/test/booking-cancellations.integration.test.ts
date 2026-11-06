@@ -1145,9 +1145,13 @@ describe("PostgreSQL support-ON bookings for the Admin (#121/#128)", { skip: dat
           WHERE booking_id=(SELECT id FROM bookings WHERE public_booking_id=$1::uuid)`,
         [refused.publicBookingId],
       );
+      // A booking of the same address made after the bounce is never mailed either (the suppression is per address), though
+      // no mail of its own was refused and its own row carries no classification.
+      const later = await paid(context, { guestEmail: "Refused@Example.com", occurrenceDate: day(7) });
       const page = await cancellations.supportEnabledBookings();
       const byId = new Map(page.bookings.map((booking) => [booking.publicBookingId, booking]));
       assert.equal(byId.get(refused.publicBookingId)!.mailUndeliverable, "NO_SUCH_DOMAIN");
+      assert.equal(byId.get(later.publicBookingId)!.mailUndeliverable, "NO_SUCH_DOMAIN");
       assert.equal("mailUndeliverable" in byId.get(fine.publicBookingId)!, false);
       assert.ok(!JSON.stringify(page).includes("@example.com"));
     }, "FREE_UNTIL_48H", undefined, true);
