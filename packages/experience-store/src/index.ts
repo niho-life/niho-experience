@@ -218,6 +218,17 @@ export type {
   GuestRefundView,
   OpenedBookingSession,
 } from "./booking-access.ts";
+export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
+export type {
+  GrantProviderOwnerResult,
+  HostAccountChange,
+  HostLoginLinkIssue,
+  HostLoginRequestAccepted,
+  HostLoginResult,
+  HostSession,
+  HostSessionRevocation,
+  ProvisionedHostAccount,
+} from "./host-accounts.ts";
 export {
   BOOKING_CANCELLATION_LIMITS,
   BookingCancellations,
