@@ -51,8 +51,8 @@ export function guidePublicationRequirements(siteUrl: string, categories: readon
       { id: "category", kind: "category", oneOf: categories.map((item) => item.slug), message: "カテゴリを選んでください", fix: "category" },
       { id: "headings", kind: "headings", min: 1, message: "本文に見出しを 1 つ以上入れてください", fix: "body" },
       { id: "no-confirm", kind: "noConfirm", message: "未確認の印（CONFIRM）を解消してください", fix: "body" },
-      // Whether each related experience is live is the editor server's check (unknown counts as not met).
-      { id: "related-live", kind: "relatedLive", message: "掲載中の関連する体験を選んでください", fix: "related" },
+      // No `relatedLive`: a related experience is optional (owner 2026-11-07), and the editor's `relatedLive` would require one.
+      // A related experience still links only when this site re-checks the writer's permission and the listing on read (#255).
       // This site leaves out a publication whose title is longer (the `Article.headline` limit): stop it in the editor instead.
       { id: "title", kind: "title", max: titleMax, message: `題名を ${titleMax} 字以内にしてください`, fix: "body" },
       // Every photo (body and cover) needs alt text: the page's only description of a photo for search and screen readers.
