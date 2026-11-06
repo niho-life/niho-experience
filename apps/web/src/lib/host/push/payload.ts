@@ -47,6 +47,11 @@ export interface HostPushEvent {
   guestName?: string;
   /** Only this product's people (its OWNER and operators) get it, instead of every member of the provider. */
   productId?: string;
+  /**
+   * Operations stopped this listing or cleared that stop (#109, LISTING_SUSPENSION): it sets the title, and a clearing adds
+   * the line that the OWNER still resumes it. Never the reason; the host reads it in /host.
+   */
+  listing?: { change: "SUSPENDED" | "CLEARED" };
 }
 
 /**
@@ -101,11 +106,15 @@ export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   DAY_BEFORE_SUMMARY: "明日の参加者のまとめ",
   NEW_REVIEW: "新しいレビュー",
   EMAIL_DELIVERY_FAILED: "予約者へのメールが届きませんでした",
-  LISTING_REVIEW: "掲載の審査結果",
+  LISTING_SUSPENSION: "運営が掲載を停止しました",
   GOOGLE_CALENDAR_ATTENTION: "Googleカレンダーを確認してください",
 };
 
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
+
+/** A clearing of an operations stop: the listing stays off until the OWNER resumes it (owner_resume_required). */
+export const HOST_PUSH_LISTING_CLEARED_TITLE = "運営による停止が解除されました";
+export const HOST_PUSH_LISTING_CLEARED_NOTE = "オーナーが再公開すると、掲載に戻ります";
 
 /** A booking on a reservation site: the site's name goes first, so the host sees where it came from. */
 export function hostPushOtaTitle(ota: NonNullable<HostPushEvent["ota"]>): string {
@@ -161,6 +170,7 @@ function whenLine(event: HostPushEvent): string | null {
 export function hostPushLines(event: HostPushEvent): { title: string; experience: string | null; when: string | null; guest: string | null; seats: string | null } {
   return {
     title: event.ota ? hostPushOtaTitle(event.ota)
+      : event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_TITLE
       : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
     experience: titleLine(event.experienceTitle),
     when: whenLine(event),
@@ -203,7 +213,8 @@ export function hostPushPayload(event: HostPushEvent, origin?: string): string {
   const lines = hostPushLines(event);
   const message = pushMessage({
     title: lines.title,
-    body: event.note ?? [lines.experience, lines.when, lines.guest ? `${lines.guest} 様` : null, lines.seats].filter(Boolean).join(" · "),
+    body: event.note ?? [lines.experience, lines.when, lines.guest ? `${lines.guest} 様` : null, lines.seats,
+      event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_NOTE : null].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
     badgeCount: event.badgeCount,

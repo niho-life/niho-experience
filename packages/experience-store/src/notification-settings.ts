@@ -15,7 +15,7 @@ export const HOST_NOTIFICATION_KEYS = [
   "DAY_BEFORE_SUMMARY",
   "NEW_REVIEW",
   "EMAIL_DELIVERY_FAILED",
-  "LISTING_REVIEW",
+  "LISTING_SUSPENSION",
 ] as const;
 export type HostNotificationKey = (typeof HOST_NOTIFICATION_KEYS)[number];
 

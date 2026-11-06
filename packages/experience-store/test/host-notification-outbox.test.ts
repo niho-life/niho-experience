@@ -11,8 +11,10 @@ import {
   enqueueGuestQuestionNotification,
   enqueueNewBookingNotification,
   enqueueNewReviewNotification,
+  enqueueListingSuspensionNotification,
   enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
+  LISTING_SUSPENSION_FALLBACK_TITLE,
   HostNotificationOutbox,
   parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
@@ -21,6 +23,7 @@ import {
   parseGuestQuestionPayload,
   parseNewBookingPayload,
   parseNewReviewPayload,
+  parseListingSuspensionPayload,
   parseOtaBookingPayload,
 } from "../src/host-notification-outbox.ts";
 
@@ -252,7 +255,7 @@ describe("HostNotificationOutbox input checks", () => {
       HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
       HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage, HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
       HOST_NOTIFICATION_TOPICS.otaBooking, HOST_NOTIFICATION_TOPICS.newReview, HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed,
-      HOST_NOTIFICATION_TOPICS.dayBeforeSummary,
+      HOST_NOTIFICATION_TOPICS.dayBeforeSummary, HOST_NOTIFICATION_TOPICS.listingSuspension,
     ], 10, 60_000]);
   });
 
@@ -326,5 +329,52 @@ describe("OTA booking notifications (#194)", () => {
     await outbox.complete("7", 1);
     assert.match(queries[0]!.sql, /payload - 'guestName'/);
     assert.equal(queries[0]!.params[3], HOST_NOTIFICATION_TOPICS.otaBooking);
+  });
+});
+
+describe("listing suspension notifications (#109)", () => {
+  const listing = { v: 1, productId: "sample-product-tea", experienceTitle: "Synthetic Tea Ceremony", change: "SUSPENDED" };
+
+  it("reads exactly the closed shape: the product, its title and the change, never why or who", () => {
+    assert.equal(HOST_NOTIFICATION_TOPICS.listingSuspension, "host.notify.listing_suspension");
+    assert.deepEqual(parseListingSuspensionPayload(listing), listing);
+    assert.deepEqual(parseListingSuspensionPayload({ ...listing, change: "CLEARED" }), { ...listing, change: "CLEARED" });
+    for (const bad of [
+      { ...listing, reasonCode: "POLICY_REVIEW" }, { ...listing, actorNihoUserId: "niho-user-1" },
+      { v: 1, productId: "sample-product-tea", change: "SUSPENDED" }, { v: 1, experienceTitle: "Synthetic Tea Ceremony", change: "SUSPENDED" },
+      { ...listing, v: 2 }, { ...listing, change: "STOPPED" }, { ...listing, change: null }, { ...listing, productId: 7 },
+      { ...listing, productId: "" }, { ...listing, productId: "-x" }, { ...listing, productId: "a b" }, { ...listing, productId: "p".repeat(257) },
+      { ...listing, experienceTitle: "" }, { ...listing, experienceTitle: "体".repeat(201) }, { ...listing, experienceTitle: 1 }, null, [listing], "x",
+    ]) assert.equal(parseListingSuspensionPayload(bad), null, JSON.stringify(bad)?.slice(0, 80));
+  });
+
+  it("writes one row per state version under the product, with a clipped title or a fixed word when it has none", async () => {
+    const { client, calls } = recordingClient();
+    await enqueueListingSuspensionNotification(client, {
+      providerId: "provider-a", productId: "sample-product-tea", experienceTitle: `  ${"体".repeat(250)} `, change: "SUSPENDED", stateVersion: 4,
+    });
+    const [providerId, aggregateType, aggregateId, topic, key, payload, availableAt] = calls[0]!.params as string[];
+    assert.deepEqual([providerId, aggregateType, aggregateId, topic, availableAt], ["provider-a", "experience_product", "sample-product-tea", HOST_NOTIFICATION_TOPICS.listingSuspension, null]);
+    assert.match(key!, /^host-push:listing-suspension:[0-9a-f]{32}:4$/);
+    const stored = JSON.parse(payload!);
+    assert.deepEqual(Object.keys(stored).sort(), ["change", "experienceTitle", "productId", "v"]);
+    assert.equal(stored.experienceTitle.length, 200);
+    assert.ok(stored.experienceTitle.endsWith("…"));
+    await enqueueListingSuspensionNotification(client, { providerId: "provider-a", productId: "sample-product-tea", experienceTitle: null, change: "CLEARED", stateVersion: 5 });
+    assert.equal(JSON.parse(String(calls[1]!.params[5])).experienceTitle, LISTING_SUSPENSION_FALLBACK_TITLE);
+    assert.notEqual(calls[1]!.params[4], key);
+    // A long product ID still makes a key the table holds.
+    await enqueueListingSuspensionNotification(client, { providerId: "provider-a", productId: "p".repeat(256), experienceTitle: "Synthetic", change: "CLEARED", stateVersion: 1 });
+    assert.ok(String(calls[2]!.params[4]).length <= 256);
+  });
+
+  it("refuses invalid input before touching the database", async () => {
+    const { client, calls } = recordingClient();
+    const input = { providerId: "provider-a", productId: "sample-product-tea", experienceTitle: "Synthetic", change: "SUSPENDED" as const, stateVersion: 2 };
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, providerId: "" }), StoreValidationError);
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, productId: "a b" }), StoreValidationError);
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, stateVersion: 0 }), StoreValidationError);
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, change: "STOPPED" as never }), StoreValidationError);
+    assert.equal(calls.length, 0);
   });
 });

@@ -26,7 +26,7 @@ describe("notification definitions", () => {
       ["DAY_BEFORE_SUMMARY", "前日の参加者のまとめ", "毎日 18:00 · 翌日に確定の予約があるときだけ", true],
       ["NEW_REVIEW", "新しいレビュー", "投稿されたとき · すぐに", true],
       ["EMAIL_DELIVERY_FAILED", "予約者へのメールの不達", "相手のメールサーバーが不達を返したとき", false],
-      ["LISTING_REVIEW", "掲載と審査の結果", "掲載の承認・差し戻し・停止", false],
+      ["LISTING_SUSPENSION", "掲載の運営停止・解除", "運営が掲載を止めたとき・止めた掲載を戻せるようになったとき", false],
     ]);
     expect(NOTIFICATIONS.filter((definition) => definition.stoppable).map((definition) => definition.key)).toEqual([...STOPPABLE_NOTIFICATION_KEYS]);
   });
@@ -43,7 +43,7 @@ describe("notificationRows", () => {
       ["DAY_BEFORE_SUMMARY", true, false],
       ["NEW_REVIEW", false, false],
       ["EMAIL_DELIVERY_FAILED", true, true],
-      ["LISTING_REVIEW", true, true],
+      ["LISTING_SUSPENSION", true, true],
     ]);
   });
 
@@ -62,7 +62,7 @@ describe("notificationRows", () => {
       ["DAY_BEFORE_SUMMARY", true, false],
       ["NEW_REVIEW", false, false],
       ["EMAIL_DELIVERY_FAILED", true, true],
-      ["LISTING_REVIEW", true, true],
+      ["LISTING_SUSPENSION", true, true],
     ]);
     expect(notificationRows([])).toEqual(notificationRows(AS_NIHO_ANSWERS));
   });
@@ -72,12 +72,12 @@ describe("notificationRows", () => {
       { key: "DAY_BEFORE_SUMMARY", enabled: false, locked: true },
       // An answer outside the spec cannot turn off (or unlock) a notification that always comes.
       { key: "NEW_BOOKING", enabled: false, locked: false },
-      { key: "LISTING_REVIEW", enabled: false, locked: true },
+      { key: "LISTING_SUSPENSION", enabled: false, locked: true },
     ]);
     const byKey = Object.fromEntries(rows.map((row) => [row.key, [row.enabled, row.locked]]));
     expect(byKey.DAY_BEFORE_SUMMARY).toEqual([false, true]);
     expect(byKey.NEW_BOOKING).toEqual([true, true]);
-    expect(byKey.LISTING_REVIEW).toEqual([true, true]);
+    expect(byKey.LISTING_SUSPENSION).toEqual([true, true]);
   });
 });
 

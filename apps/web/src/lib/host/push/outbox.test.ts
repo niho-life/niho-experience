@@ -268,6 +268,37 @@ describe("hostPushEventFromOutbox", () => {
       .toEqual({ ok: false, reason: "stale" });
   });
 
+  it("turns an operations suspension or its clearing into a push to the product's people that opens the product (#109)", async () => {
+    const listing = { v: 1, productId: "sample-product-tea", experienceTitle: "Synthetic Tea Ceremony", change: "SUSPENDED" };
+    const suspended = hostPushEventFromOutbox(row("host.notify.listing_suspension", listing), NOW);
+    expect(suspended.ok).toBe(true);
+    if (!suspended.ok) return;
+    expect(suspended.event).toEqual({
+      providerId: "provider-a", kind: "LISTING_SUSPENSION", experienceTitle: "Synthetic Tea Ceremony", listing: { change: "SUSPENDED" },
+      productId: "sample-product-tea", url: "/host/experiences/sample-product-tea?providerId=provider-a", tag: expect.stringMatching(/^listing-[0-9a-f]{32}$/),
+    });
+    expect(JSON.parse(hostPushPayload(suspended.event))).toMatchObject({ title: "運営が掲載を停止しました", body: "Synthetic Tea Ceremony" });
+    const cleared = hostPushEventFromOutbox(row("host.notify.listing_suspension", { ...listing, change: "CLEARED" }), NOW);
+    expect(cleared.ok && cleared.event).toMatchObject({ kind: "LISTING_SUSPENSION", listing: { change: "CLEARED" }, productId: "sample-product-tea" });
+    // One notification per product on the device: the clearing replaces the suspension; another product has its own.
+    expect(cleared.ok && cleared.event.tag).toBe(suspended.event.tag);
+    const other = hostPushEventFromOutbox(row("host.notify.listing_suspension", { ...listing, productId: "sample-product-other" }), NOW);
+    expect(other.ok && other.event.tag).not.toBe(suspended.event.tag);
+    if (cleared.ok) {
+      expect(JSON.parse(hostPushPayload(cleared.event))).toMatchObject({
+        title: "運営による停止が解除されました", body: "Synthetic Tea Ceremony · オーナーが再公開すると、掲載に戻ります",
+      });
+    }
+    for (const bad of [{ ...listing, reasonCode: "POLICY_REVIEW" }, { ...listing, change: "STOPPED" }, { ...listing, productId: "" },
+      { ...listing, productId: "../x" }, { ...listing, experienceTitle: " " }, { v: 1, productId: "sample-product-tea", change: "SUSPENDED" }]) {
+      expect(hostPushEventFromOutbox(row("host.notify.listing_suspension", bad), NOW)).toEqual({ ok: false, reason: "invalid" });
+    }
+    expect(hostPushEventFromOutbox(row("host.notify.listing_suspension", listing, { createdAt: new Date(NOW - 25 * 60 * MINUTE).toISOString() }), NOW))
+      .toEqual({ ok: false, reason: "stale" });
+    // 設定 › 通知's 掲載の運営停止・解除 cannot be turned off.
+    expect(await hostNotificationAllowed("provider-a", "LISTING_SUSPENSION", () => ({ enabledFor: async () => false }))).toBe(true);
+  });
+
   it("sends a cancellation whatever the OWNER turned off in 設定 › 通知", async () => {
     expect(await hostNotificationAllowed("provider-a", "CANCELLATION", () => ({ enabledFor: async () => false }))).toBe(true);
   });

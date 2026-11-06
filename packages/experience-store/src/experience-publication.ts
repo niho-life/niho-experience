@@ -18,6 +18,7 @@ import {
   type ProductSaleTermsInput,
 } from "./guest-bookings.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
+import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
 import {
   projectPublicExperiencePublication,
   projectPublicExperiencePublicationManuscript,
@@ -659,6 +660,28 @@ async function lockedState(client: PoolClient, providerId: string, productId: st
     [providerId, productId],
   );
   return result.rows[0] ? stateFromRow(result.rows[0]) : null;
+}
+
+/**
+ * Tells the product's OWNER and operators that operations stopped or cleared its listing (#109), in the transaction that
+ * changed the state. The title is the current publication's (what the public saw), else the draft's.
+ */
+async function notifyListingSuspension(client: PoolClient, row: DbRow, change: ListingSuspensionChange): Promise<void> {
+  const state = stateFromRow(row);
+  const titled = await client.query<{ title: string | null }>(
+    `SELECT COALESCE(pub.public_title, p.public_title) AS title
+       FROM experience_products p
+       LEFT JOIN experience_product_publications pub ON pub.id=$3 AND pub.provider_id=p.provider_id AND pub.product_id=p.id
+      WHERE p.provider_id=$1 AND p.id=$2`,
+    [state.providerId, state.productId, state.currentPublicationId],
+  );
+  await enqueueListingSuspensionNotification(client, {
+    providerId: state.providerId,
+    productId: state.productId,
+    experienceTitle: titled.rows[0]?.title ?? null,
+    change,
+    stateVersion: state.version,
+  });
 }
 
 async function readinessRow(client: PoolClient, providerId: string, lock = false): Promise<DbRow | null> {
@@ -2211,6 +2234,11 @@ export class ExperiencePublicationRepository {
     validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
+      // A second suspension of a suspended listing (another reason code) is not news to the host.
+      const before = await client.query<{ suspended: boolean }>(
+        "SELECT operations_suspended_at IS NOT NULL AS suspended FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2",
+        [providerId, productId],
+      );
       const result = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
             SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
@@ -2222,6 +2250,7 @@ export class ExperiencePublicationRepository {
         [providerId, productId, expectedStateVersion, reasonCode, actor.nihoUserId],
       );
       if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
+      if (before.rows[0]?.suspended !== true) await notifyListingSuspension(client, result.rows[0], "SUSPENDED");
       return stateFromRow(result.rows[0]);
     });
   }
@@ -2248,6 +2277,7 @@ export class ExperiencePublicationRepository {
         [providerId, productId, expectedStateVersion],
       );
       if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or operations suspension not found.");
+      await notifyListingSuspension(client, result.rows[0], "CLEARED");
       return stateFromRow(result.rows[0]);
     });
   }
