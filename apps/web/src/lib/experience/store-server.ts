@@ -1,7 +1,7 @@
 import "server-only";
 import { config } from "@/lib/config";
 import { Pool } from "pg";
-import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderNotificationSettings, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -30,6 +30,12 @@ export function experiencePublicationRepository(): ExperiencePublicationReposito
 export function providerSellerDisclosureRepository(): ProviderSellerDisclosureRepository | null {
   const pool = experiencePool();
   return pool ? new ProviderSellerDisclosureRepository(pool) : null;
+}
+
+/** ホスト紹介文 (#146): the OWNER-written public bio, one per provider. */
+export function providerHostBioRepository(): ProviderHostBioRepository | null {
+  const pool = experiencePool();
+  return pool ? new ProviderHostBioRepository(pool) : null;
 }
 
 /** Private owner-edited logistics captured into a booking snapshot at payment confirmation. */

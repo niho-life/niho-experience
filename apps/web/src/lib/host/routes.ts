@@ -39,6 +39,8 @@ export const HOST_NOTIFICATION_EMAIL_PATH = "/host/notification-email";
 export const HOST_SUPPORT_PATH = "/host/support";
 /** OWNERが公開専用の販売者情報を入力・撤回する独立画面。 */
 export const HOST_SELLER_PATH = "/host/seller";
+/** ホスト紹介 (#146): OWNERが提供者ごとに1つの公開用ホスト紹介文を書く・撤回する画面。 */
+export const HOST_PROFILE_PATH = "/host/profile";
 /** メッセージ (#106): a screen under ホーム, not in the menu. */
 export const HOST_MESSAGES_PATH = "/host/messages";
 /** レビュー (#108): a screen under ホーム, not in the menu. */

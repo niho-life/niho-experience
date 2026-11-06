@@ -13,6 +13,18 @@ export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOc
 export { ExperienceStore } from "./repository.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, publicationManuscriptReview } from "./experience-publication.ts";
 export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
+export { EMPTY_HOST_BIO_STATE, ProviderHostBioRepository, hostBioSourceFingerprint } from "./provider-host-bios.ts";
+export type { HostBioState, PublicHostBio, SaveHostBioCommand } from "./provider-host-bios.ts";
+export {
+  HOST_BIO_CONSENT_VERSION,
+  HOST_BIO_LIMITS,
+  hostBioLength,
+  hostBioTextIssue,
+  normalizeHostBioText,
+  validateHostBioInput,
+  validateHostBioText,
+} from "./host-bio-rules.ts";
+export type { HostBioInput, HostBioTextIssue } from "./host-bio-rules.ts";
 export { ProviderMediaCleanupRepository } from "./public-media-cleanup.ts";
 export type { ClaimedProviderMediaCleanup } from "./public-media-cleanup.ts";
 export type {

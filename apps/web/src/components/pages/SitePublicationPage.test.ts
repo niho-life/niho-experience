@@ -46,6 +46,7 @@ const item = {
     japanese: null, publishedAtUtc: "2026-11-05T00:00:00.000Z",
   },
   saleTerms,
+  hostBio: null,
 } as SitePublicExperience;
 
 const review = (index: number) => ({
@@ -191,5 +192,42 @@ describe("native publication FAQ", () => {
     expect(html.indexOf("Can I bring my child?")).toBeLessThan(html.indexOf("Is it held in rain?"));
     expect(html).toContain("Yes, from age 6.\nAn adult must join.");
     for (const node of jsonLd(html)) expect(JSON.stringify(node)).not.toContain("FAQPage");
+  });
+});
+
+describe("native publication host bio (#146)", () => {
+  const japanese = { title: "合成の体験", lead: "日本語の紹介", description: "日本語の説明", language: "日本語", highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] };
+  const withBio = (hostBio: SitePublicExperience["hostBio"]): SitePublicExperience => ({
+    ...item, hostBio, publication: { ...item.publication, japanese } as SitePublicExperience["publication"],
+  });
+  const renderJa = async (page: SitePublicExperience) => {
+    state.reviews = null;
+    return renderToStaticMarkup(await SitePublicationPage({ item: page, locale: "ja" }));
+  };
+
+  it("shows the confirmed English bio as plain text with the host name, before reviews", async () => {
+    const html = await render(ok(2), withBio({ ja: "鎌倉で茶道を教えています。", en: "I teach tea ceremony.\n\n<b>Synthetic</b> host." }));
+    expect(html).toContain('<section id="host" aria-labelledby="host-heading"');
+    expect(html).toMatch(/<h2 id="host-heading"[^>]*>About your host<\/h2>/);
+    expect(html).toContain("Synthetic Host");
+    expect(html).toContain("I teach tea ceremony.\n\n&lt;b&gt;Synthetic&lt;/b&gt; host.");
+    expect(html).not.toContain("鎌倉で茶道を教えています。");
+    expect(html.indexOf('id="host"')).toBeLessThan(html.indexOf('id="reviews"'));
+  });
+
+  it("shows no English section while the English is missing or unconfirmed, and no section without a bio", async () => {
+    for (const page of [withBio({ ja: "鎌倉で茶道を教えています。", en: null }), withBio(null)]) {
+      const html = await render(null, page);
+      expect(html).not.toContain('id="host"');
+      expect(html).not.toContain("About your host");
+    }
+  });
+
+  it("shows the Japanese bio on the Japanese page, and nothing there without one", async () => {
+    const html = await renderJa(withBio({ ja: "鎌倉で茶道を教えています。\n合成データです。", en: null }));
+    expect(html).toMatch(/<h2 id="host-heading"[^>]*>ホストについて<\/h2>/);
+    expect(html).toContain("鎌倉で茶道を教えています。\n合成データです。");
+    expect(html).not.toContain("About your host");
+    expect(await renderJa(withBio(null))).not.toContain('id="host"');
   });
 });

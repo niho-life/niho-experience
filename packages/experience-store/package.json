@@ -22,6 +22,10 @@
       "types": "./src/site-sale-script.ts",
       "default": "./src/site-sale-script.ts"
     },
+    "./host-bio-rules": {
+      "types": "./src/host-bio-rules.ts",
+      "default": "./src/host-bio-rules.ts"
+    },
     "./host-seller-provisioning": {
       "types": "./src/host-seller-provisioning.ts",
       "default": "./src/host-seller-provisioning.ts"
