@@ -77,9 +77,27 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
   });
 
   it("leaves out what it does not know, and has a title for every kind", () => {
-    expect(JSON.parse(hostPushPayload({ providerId: "p", kind: "LISTING_REVIEW", url: "/host/experiences", tag: "listing-1" })).body).toBe("");
+    expect(JSON.parse(hostPushPayload({ providerId: "p", kind: "LISTING_SUSPENSION", url: "/host/experiences", tag: "listing-1" })).body).toBe("");
     expect(JSON.parse(hostPushPayload({ ...event, startsAt: "not a date", seats: 0 })).body).toBe("Kamakura Community Dinner with Locals");
-    expect(Object.keys(HOST_PUSH_TITLES)).toEqual(["NEW_BOOKING", "APPROVAL_DEADLINE", "CANCELLATION", "GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW", "EMAIL_DELIVERY_FAILED", "LISTING_REVIEW", "GOOGLE_CALENDAR_ATTENTION"]);
+    expect(Object.keys(HOST_PUSH_TITLES)).toEqual(["NEW_BOOKING", "CANCELLATION", "GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW", "EMAIL_DELIVERY_FAILED", "LISTING_SUSPENSION", "GOOGLE_CALENDAR_ATTENTION"]);
+  });
+
+  it("says that operations stopped a listing, or cleared it and the OWNER still resumes it, never why (#109)", () => {
+    const listing: HostPushEvent = {
+      providerId: "sample-provider-kitchen", kind: "LISTING_SUSPENSION", experienceTitle: "Kamakura Community Dinner with Locals",
+      listing: { change: "SUSPENDED" }, productId: "sample-product-dinner",
+      url: "/host/experiences/sample-product-dinner?providerId=sample-provider-kitchen", tag: "listing-abc",
+    };
+    const origin = "https://experience.example.test";
+    const suspended = JSON.parse(hostPushPayload(listing, origin));
+    expect(suspended).toMatchObject({ title: "運営が掲載を停止しました", body: "Kamakura Community Dinner with Locals", tag: "listing-abc" });
+    expect(suspended.notification.navigate).toBe(`${origin}/host/experiences/sample-product-dinner?providerId=sample-provider-kitchen`);
+    expect(JSON.parse(hostPushPayload({ ...listing, listing: { change: "CLEARED" } }))).toMatchObject({
+      title: "運営による停止が解除されました", body: "Kamakura Community Dinner with Locals · オーナーが再公開すると、掲載に戻ります",
+    });
+    const smuggled = { ...listing, reasonCode: "POLICY_REVIEW", operator: "niho-user-admin-1" } as HostPushEvent;
+    expect(hostPushPayload(smuggled)).not.toMatch(/POLICY_REVIEW|niho-user-admin-1|sample-product-dinner"/);
+    expect(Buffer.byteLength(hostPushPayload({ ...listing, listing: { change: "CLEARED" }, experienceTitle: "体".repeat(500) }, origin))).toBeLessThanOrEqual(3 * 1024);
   });
 
   it("carries no names, message text or amounts, even when a caller passes them", () => {
@@ -118,9 +136,8 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
     expect(Buffer.byteLength(hostPushPayload({ ...event, experienceTitle: "体".repeat(500) }))).toBeLessThanOrEqual(3 * 1024);
   });
 
-  it("sends time-critical kinds at once and lets deadlines expire", () => {
+  it("sends time-critical kinds at once and lets a summary expire", () => {
     expect(hostPushDelivery("NEW_BOOKING")).toEqual({ urgency: "high", ttlSeconds: 86_400 });
-    expect(hostPushDelivery("APPROVAL_DEADLINE")).toEqual({ urgency: "high", ttlSeconds: 3_600 });
     expect(hostPushDelivery("GUEST_MESSAGE").urgency).toBe("high");
     expect(hostPushDelivery("CANCELLATION").urgency).toBe("high");
     expect(hostPushDelivery("DAY_BEFORE_SUMMARY")).toEqual({ urgency: "normal", ttlSeconds: 43_200 });
@@ -141,6 +158,7 @@ describe("notifyHostDevices", () => {
     let peak = 0;
     const subscriptions: HostPushDeps["subscriptions"] = {
       recipients: vi.fn(async () => Object.keys(statuses).map(device)),
+      ownerRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       productRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       recordSent: vi.fn(async (id: string) => { log.push(`sent ${id}`); }),
       recordFailure: vi.fn(async (id: string) => { log.push(`failure ${id}`); }),
@@ -174,6 +192,15 @@ describe("notifyHostDevices", () => {
     expect(await notifyHostDevices({ ...event, productId: "tea" }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
     expect(run.subscriptions.productRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "tea", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
     expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+  });
+
+  it("sends an operations suspension to the OWNER's devices only (#109)", async () => {
+    const run = deps({ 1: 201 });
+    // (This sender double answers only high-urgency sends, so the recipients are what is checked here; the kind's own words and urgency are covered above.)
+    expect(await notifyHostDevices({ ...event, ownerOnly: true }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
+    expect(run.subscriptions.ownerRecipients).toHaveBeenCalledWith("sample-provider-kitchen", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+    expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+    expect(run.subscriptions.productRecipients).not.toHaveBeenCalled();
   });
 
   it("refuses an event that would leave the app before sending anything", async () => {

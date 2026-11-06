@@ -2,19 +2,23 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { TrackView } from "@/components/Analytics";
 import { DesktopGallery, MobileGallery } from "@/components/DetailGallery";
+import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
 import { HandIcon } from "@/components/HandIcon";
 import { JsonLd } from "@/components/JsonLd";
 import { NextDateBand } from "@/components/NextDateBand";
 import { Photo } from "@/components/Photo";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { config } from "@/lib/config";
+import { detailFromTokyoLine, detailGuideHeading } from "@/lib/detail-page";
 import { siteNextDates } from "@/lib/guest-booking-source";
+import { guidesAboutExperience } from "@/lib/guide-registry";
 import { formatDuration, formatYen } from "@/lib/format";
 import { iconForText } from "@/lib/themes";
 import { publicMetadata } from "@/lib/public-metadata";
 import { seoDescription } from "@/lib/seo-description";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
+import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
 import { getLiveReviews } from "@/lib/journey";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
 import { reviewsForJsonLd, sitePublicationJsonLd } from "@/lib/structured-data";
@@ -33,6 +37,8 @@ export function sitePublicationMetadata(item: SitePublicExperience, locale: "en"
     robots: config.indexingAllowed ? undefined : { index: false, follow: false },
   };
 }
+
+const NO_GUIDES: Awaited<ReturnType<typeof guidesAboutExperience>> = { guides: [], draftSlugs: [] };
 
 export async function SitePublicationPage({ item, cancelled = false, locale = "en" }: { item: SitePublicExperience; cancelled?: boolean; locale?: "en" | "ja" }) {
   const { publication, saleTerms, sellerDisclosure, hostBio } = item;
@@ -57,6 +63,15 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const faq = content ? content.faq : publication.content.faq;
   // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
   const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
+  // Every experience sold here is in Kamakura for now (the catalogue is one region). The station and walk come only from an
+  // explicit "N-minute walk from X Station" in the public meeting overview; otherwise the line says no more than the region.
+  const locationLine = detailFromTokyoLine(ja ? "鎌倉" : "Kamakura", publication.meetingOverview, locale);
+  // Guides and other experiences are English-only for now, as on the NIHO-sourced page. Both are optional and never break the page.
+  const [relatedGuides, relatedCards] = ja ? [NO_GUIDES, []] : await Promise.all([
+    guidesAboutExperience(publication.slug).catch(() => NO_GUIDES),
+    relatedSiteExperienceCards(publication.slug),
+  ]);
+  const hostStoryGuide = relatedGuides.guides.find((guide) => "pillar" in guide && guide.pillar === "hosts" && !relatedGuides.draftSlugs.includes(guide.slug));
 
   return <>
     <JsonLd data={structured.touristTrip} />
@@ -72,11 +87,13 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
         {cancelled ? <p role="status" className="mt-5 rounded-2xl bg-sand p-4">{ja ? "決済がキャンセルされました。予約は完了していません。" : "Checkout was cancelled. Your booking was not completed."}</p> : null}
         <header className="pt-5 lg:pt-3.5">
           <h1 className="text-[2.125rem] leading-[1.1] lg:max-w-[20ch] lg:text-[3.25rem]">{title}</h1>
+          <p className="mt-2.5 text-[0.9375rem] font-bold text-ink-soft">{locationLine}</p>
           {headline ? headline.href
             ? <Link href={headline.href} aria-label={headline.accessibleLabel} className="mt-3 inline-flex font-extrabold text-moss hover:underline">{headline.label}</Link>
             : <span className="mt-3 inline-flex rounded-full bg-sand px-3 py-1 text-sm font-extrabold">{headline.label}</span>
           : null}
           <p className="mt-4 text-[0.9375rem] text-ink-soft">{ja ? "提供者: " : "Offered by "}<b className="text-ink">{publication.sellerDisplayName}</b>{sellerDisclosure ? <> · <a className="font-bold text-ink underline" href={sellerDisclosure.method === "EXTERNAL" ? sellerDisclosure.externalUrl : `/experiences/${encodeURIComponent(publication.slug)}/seller`} rel="noopener noreferrer">{ja ? "販売者情報" : "Seller information"}</a></> : null}</p>
+          {hostStoryGuide ? <p className="mt-2"><Link href={`/guides/${hostStoryGuide.slug}`} className="link-leaf">Read the host story</Link></p> : null}
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">{ja ? "所要時間" : "Duration"}</span><p className="font-extrabold">{durations}</p></li> : null}
             {language ? <li><span className="eyebrow">{ja ? "対応言語" : "Language"}</span><p className="font-extrabold">{language}</p></li> : null}
@@ -151,6 +168,11 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 </details>)}
               </div>
             </section> : null}
+            {relatedGuides.guides.length ? <section aria-labelledby="detail-guides-heading" className="pt-12">
+              <p className="eyebrow">Guides</p>
+              <h2 id="detail-guides-heading" className="mt-1 mb-[18px] text-[1.75rem] lg:text-[2rem]">{detailGuideHeading("Kamakura", publication.meetingOverview, offers.map((offer) => offer.startTime))}</h2>
+              <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} columns="three" variant="detail" />
+            </section> : null}
           </div>
 
           <aside className="h-max rounded-[var(--radius-card)] border border-line bg-white p-5 lg:sticky lg:top-24">
@@ -166,6 +188,10 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             </> : <p className="text-ink-soft">{ja ? "この体験は現在予約できません。" : "Online booking is not available for this experience yet."}</p>}
           </aside>
         </div>
+        {relatedCards.length ? <section aria-labelledby="related-experiences-heading" className="pt-14">
+          <h2 id="related-experiences-heading" className="mb-6 text-[1.75rem] lg:text-[2rem]">More experiences in Kamakura</h2>
+          <ExperienceCardGrid cards={relatedCards} />
+        </section> : null}
       </div>
     </div>
   </>;

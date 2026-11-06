@@ -50,6 +50,9 @@ export const BOOKING_CANCELLATION_LIMITS = {
   /** A refund Stripe accepted but has not finished for this long shows there too (to look at in Stripe). */
   unfinishedRefundDays: 7,
   queueLimitMax: 200,
+  /** サポートONの予約の一覧 (#121/#128): one page's default and maximum. */
+  supportBookingsLimitDefault: 50,
+  supportBookingsLimitMax: 100,
   /** Bookings one session's cancellation may take. */
   sessionBookingsMax: 500,
   /**
@@ -254,6 +257,22 @@ export interface SupportQueue {
   readonly paymentReviews: readonly SupportQueueReview[];
   /** Refunds Stripe has not answered for unansweredRefundMinutes or finished for unfinishedRefundDays, and failed ones nobody closed. */
   readonly refunds: readonly SupportQueueRefund[];
+}
+
+/** One page of the bookings accepted with current-version support ON consent, newest first. */
+export interface SupportEnabledBookingsPage {
+  readonly bookings: readonly SupportQueueBooking[];
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  readonly nextCursor: string | null;
+}
+
+export interface SupportEnabledBookingsOptions {
+  /** 1 to supportBookingsLimitMax (default supportBookingsLimitDefault). */
+  readonly limit?: number;
+  /** The `nextCursor` of the page before (a booking's public ID). */
+  readonly cursor?: string | null;
+  /** Exactly this booking (0 or 1 rows); the cursor is then not allowed. */
+  readonly publicBookingId?: string;
 }
 
 /* ---------- validation ---------- */
@@ -864,6 +883,25 @@ const QUEUE_JOINS = `
   JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
   JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id`;
 
+/*
+ * The same test as queueBookingFromRow's (and lockedFromRow's) supportEligible, in SQL, on the booking's own snapshot
+ * only: never the provider's current settings. Each cast sits behind a CASE on jsonb_typeof, so a malformed snapshot is
+ * simply not eligible instead of failing the read (AND does not fix the order Postgres evaluates in).
+ */
+const FEE = "b.pricing_snapshot->'platformFee'";
+const SUPPORT_ELIGIBLE_SQL = `(
+  jsonb_typeof(${FEE}) = 'object'
+  AND ${FEE}->'supportEnabled' = 'true'::jsonb
+  AND CASE WHEN jsonb_typeof(${FEE}->'basisPoints') = 'number' THEN (${FEE}->>'basisPoints')::numeric = 1500 ELSE false END
+  AND CASE WHEN jsonb_typeof(${FEE}->'supportConsentVersion') = 'string' THEN length(${FEE}->>'supportConsentVersion') > 0 ELSE false END
+  AND CASE WHEN jsonb_typeof(${FEE}->'supportAgreementRevision') = 'number'
+        THEN (${FEE}->>'supportAgreementRevision')::numeric BETWEEN 1 AND 9007199254740991
+         AND (${FEE}->>'supportAgreementRevision')::numeric = trunc((${FEE}->>'supportAgreementRevision')::numeric)
+        ELSE false END
+)`;
+/** Paid bookings support may act on or answer for; holds and expired holds never were paid. */
+const SUPPORT_LIST_STATUSES = "b.status IN ('CONFIRMED', 'PAYMENT_REVIEW', 'CANCELLED')";
+
 function queueBookingFromRow(row: DbRow): SupportQueueBooking {
   const occurrence = record(row.occurrence_snapshot);
   const pricing = record(row.pricing_snapshot);
@@ -1463,6 +1501,41 @@ export class BookingCancellations {
         createdAtUtc: isoValue(row, "refund_created_at"),
       })),
     };
+  }
+
+  /**
+   * サポートONの予約 (#121/#128): the paid bookings whose own snapshot records current-version support ON consent,
+   * newest first, so support can open one that is not in supportQueue (an ordinary confirmed booking). What a row
+   * carries is the queue's (the guest's name only). The cursor is the last row's public booking ID: rows strictly
+   * older than it, by (created_at, id). With `publicBookingId`, that booking alone if it qualifies.
+   */
+  async supportEnabledBookings(options: SupportEnabledBookingsOptions = {}): Promise<SupportEnabledBookingsPage> {
+    const limit = options.limit ?? BOOKING_CANCELLATION_LIMITS.supportBookingsLimitDefault;
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > BOOKING_CANCELLATION_LIMITS.supportBookingsLimitMax) {
+      throw new StoreValidationError(`limit must be an integer from 1 to ${BOOKING_CANCELLATION_LIMITS.supportBookingsLimitMax}.`);
+    }
+    const cursor = options.cursor === undefined || options.cursor === null ? null : publicBookingIdOf(options.cursor);
+    const exact = options.publicBookingId === undefined ? null : publicBookingIdOf(options.publicBookingId);
+    if (exact !== null && cursor !== null) throw new StoreValidationError("publicBookingId and cursor cannot be combined.");
+    if (cursor !== null) {
+      const known = await this.#pool.query("SELECT 1 FROM bookings WHERE public_booking_id = $1::uuid", [cursor]);
+      if (known.rowCount === 0) throw new StoreValidationError("cursor is not a known booking.");
+    }
+    const result = await this.#pool.query<DbRow>(
+      `SELECT ${QUEUE_BOOKING}
+         FROM bookings b ${QUEUE_JOINS}
+        WHERE ${SUPPORT_LIST_STATUSES} AND ${SUPPORT_ELIGIBLE_SQL}
+          AND ($1::uuid IS NULL OR b.public_booking_id = $1::uuid)
+          AND ($2::uuid IS NULL OR (b.created_at, b.id) < (SELECT c.created_at, c.id FROM bookings c WHERE c.public_booking_id = $2::uuid))
+        ORDER BY b.created_at DESC, b.id DESC
+        LIMIT $3`,
+      [exact, cursor, limit + 1],
+    );
+    const page = result.rows.slice(0, limit);
+    // The SQL already holds the rule; this keeps the invariant even if the two were ever to drift apart.
+    const bookings = page.map(queueBookingFromRow).filter((booking) => booking.supportEligible);
+    const last = page.at(-1);
+    return { bookings, nextCursor: result.rows.length > limit && last ? text(last.public_booking_id, "public_booking_id") : null };
   }
 
   /* ---------- sending refunds again ---------- */

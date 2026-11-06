@@ -1,11 +1,12 @@
 # OTA channel runtime
 
-対象: #194、#196、#197、#198、#234、#235、#236、#240。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)、外部予約取込のserver契約は[OTA外部予約台帳](ota-external-reservations.md)に記録する。Host の開催枠詳細はこの read model を表示する。実OTA予約readerとGoogleへの枠制御出力は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
+対象: #194、#196、#197、#198、#234、#235、#236、#240。外部掲載先の account/listing 対応表と、Studio executor が利用する耐久 job 契約を定義する。共有在庫は[OTA共有在庫](ota-inventory.md)、外部予約取込のserver契約は[OTA外部予約台帳](ota-external-reservations.md)に記録する。Host の開催枠詳細はこの read model を表示する。GetYourGuide の予約 reader（`packages/ota-worker` の `gyg-reservation-reader.mjs`、既定OFF）と、Airbnb公式Google経路でのGoogleへの枠制御出力（[OTA Google出力](ota-google-output-protocol.md)、既定OFF）は実装済みである。Airbnb・Viator・じゃらんの予約 reader は未実装である。本番の自動実行、scheduler、launchd、外部サイト接続も有効化しない。
 
 ## 既定で閉じるゲート
 
 - Admin API は `apiMode=http` かつ `EXPERIENCE_CHANNEL_MANAGER_ENABLED=true` の場合だけ開く。NIHO がその時点で検証した Admin HTTP session が必要で、mock/preview cookie は利用できない。
 - worker API は別の `EXPERIENCE_CHANNEL_RUNTIME_ENABLED=true` が必要である。人間用 cookie は認可に使わず、worker bearer を `Authorization` header だけで受け取る。
+- 公式配備の flag 表（`scripts/deploy/runtime-flags.mjs`）には、この runtime の flag（`EXPERIENCE_CHANNEL_MANAGER_ENABLED`、`EXPERIENCE_CHANNEL_RUNTIME_ENABLED`、`EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS`、`EXPERIENCE_RESOURCE_GOOGLE_*`、`EXPERIENCE_AIRBNB_GOOGLE_*`）はまだ載っていない。これらは `resolve-config.ts` を介さず `process.env` を直接読む。表は flag ごとに `resolve-config.ts` の検査（足りない設定の拒否）と対応させる決まりなので、載せるには `resolve-config.ts` への追加と、JSON である `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` を `--set-env-vars`（値にカンマを持てない）で渡す方法の設計が要る。stg・本番で OTA を動かす前の作業として残っている。
 - DB 未設定は `503` とし、HTTP 失敗から mock へ切り替えない。両 flag の既定値は false である。
 - 監視 endpoint は別の `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true` と、audience・service account email の両方が揃う場合だけ開く（[監視・heartbeat・復旧](#監視heartbeat復旧)）。
 - capability は account/listing 作成だけでは有効にならない。配備設定 `EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS` に明示された `site/adapter@version` の boolean だけを Admin が保存でき、claim/preflight/result でも同じ配備 allowlist を再確認する。未設定・不正設定は全 capability false となり、live job は claim されない。
@@ -25,7 +26,7 @@ account の site・外部 account ID・委任・失効・active・profile 変更
 worker credential の初回 mint と account assignment 作成は `expectedVersion: null`、rotation・再 assignment と revoke は現在の正の version を必須とする。raw credential を再表示する idempotent replay は行わず、同じ mint command の再送は conflict とする。
 
 listing を active にしただけでは外部操作を作らない。Admin の deterministic `reconcile`、または `calendar_outbox_events` consumer が現在の schedule から desired state を再構築する。
-active mapping の開催時刻変更は、旧外部枠を確実に閉じてから新 target へ移す P2 の手順が未実装である。この slice は古い時刻の preflight/result を拒否して quarantine するだけで、外部 reschedule を対応済みとはしない。従って runtime flag は引き続き無効にする。
+active mapping の開催時刻変更は、旧外部枠を確実に閉じてから新 target へ移す。予約のない回だけ、旧時刻の枠を既存の停止能力で閉じて読戻しで確認し、閉じられなければ「要確認」として回に表示する（`channel_slot_retirements`、#290）。GOOGLE の掲載は対象外（Google専用の出力 calendar は別の経路）。新時刻側は、掲載先に枠が無いときだけ `ENSURE_OCCURRENCE` で作る（GetYourGuide のみ、既定OFF。[GetYourGuide pilot](ota-getyourguide-pilot.md)）。予約のある回の時刻変更は自動では動かさない。古い時刻の preflight/result は拒否して quarantine する。runtime flag は引き続き無効にする。
 
 ### Admin の掲載先設定
 

@@ -7,12 +7,12 @@ import { assertStoreIdentifier } from "./validation.ts";
 
 /**
  * Host push notifications persisted in `outbox_messages` (#177 P2). Guest questions and booking messages,
- * site bookings and cancellations, approval deadlines, Google calendar attention, OTA changes and new reviews
- * are written by their owning transactions. The existing host push job produces the next-day summary. This
+ * site bookings and cancellations, Google calendar attention, OTA changes, new reviews and
+ * operations suspensions of a listing (and their clearing) are written by their owning transactions. The existing host push job produces the next-day summary. This
  * class claims only the explicitly listed `host.notify.*` topics; guest mail and payment topics stay untouched.
+ * There is no approval-deadline reminder: bookings here are confirmed on payment and the host approves nothing (#109).
  */
 export const HOST_NOTIFICATION_TOPICS = {
-  approvalDeadline: "host.notify.approval_deadline",
   guestMessage: "host.notify.guest_message",
   guestQuestion: "host.notify.guest_question",
   newBooking: "host.notify.new_booking",
@@ -23,6 +23,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   newReview: "host.notify.new_review",
   guestEmailDeliveryFailed: "host.notify.guest_email_delivery_failed",
   dayBeforeSummary: "host.notify.day_before_summary",
+  listingSuspension: "host.notify.listing_suspension",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -34,16 +35,6 @@ const QUESTION_AGGREGATE_TYPE = "guest_question_thread";
  * What a row may carry: the booking, the experience, its date and time and the party size. There
  * is deliberately no field for a guest's name, a message's text or an amount.
  */
-export interface ApprovalDeadlinePayload {
-  readonly v: 1;
-  readonly bookingId: string;
-  readonly experienceTitle: string;
-  /** Canonical UTC instant (`toISOString`). */
-  readonly startsAt: string;
-  readonly seats: number;
-  readonly approvalDeadlineAt: string;
-}
-
 export interface GuestMessagePayload {
   readonly v: 1;
   readonly bookingId: string;
@@ -150,6 +141,22 @@ export interface OtaBookingPayload {
   readonly guestName?: string;
 }
 
+/** 運営停止 (`SUSPENDED`) or its clearing by operations (`CLEARED`, #109/#369). */
+export const LISTING_SUSPENSION_CHANGES = ["SUSPENDED", "CLEARED"] as const;
+export type ListingSuspensionChange = (typeof LISTING_SUSPENSION_CHANGES)[number];
+
+/**
+ * Operations stopped one listing, or cleared that stop (#109, #369: 旧事前審査の結果通知 is gone; this replaces it).
+ * The product and its title only: never the reason code, the operator's NIHO user ID or the product's text. The host
+ * reads the details in /host. A clearing does not put the listing back: the OWNER still resumes it there.
+ */
+export interface ListingSuspensionPayload {
+  readonly v: 1;
+  readonly productId: string;
+  readonly experienceTitle: string;
+  readonly change: ListingSuspensionChange;
+}
+
 /** One claimed row. `id` is the row's bigint as text; the payload is parsed by the consumer. */
 export interface ClaimedHostNotification {
   readonly id: string;
@@ -167,7 +174,6 @@ const ROW_ID = /^[1-9][0-9]{0,18}$/;
 const TITLE_MAX = 200;
 const SEATS_MAX = 500;
 const HOUR_MS = 60 * 60 * 1000;
-const APPROVAL_KEYS = ["approvalDeadlineAt", "bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const MESSAGE_KEYS = ["bookingId", "experienceTitle", "messageId", "seats", "startsAt", "v"];
 const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
@@ -177,6 +183,11 @@ const NEW_REVIEW_KEYS = ["experienceTitle", "reviewId", "v"];
 const GUEST_EMAIL_DELIVERY_FAILED_KEYS = ["bookingId", "classification", "experienceTitle", "seats", "startsAt", "v"];
 const DAY_BEFORE_SUMMARY_KEYS = ["bookingCount", "localDate", "participantCount", "v"];
 const OTA_BOOKING_KEYS = ["change", "experienceTitle", "productId", "ref", "seats", "site", "startsAt", "v"];
+const LISTING_SUSPENSION_KEYS = ["change", "experienceTitle", "productId", "v"];
+/** The store's product identifier (validation.ts), so a row's product is one the store could have written. */
+const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+/** What a listing's push says when its title cannot be read (a product title is never empty, so this is a fallback only). */
+export const LISTING_SUSPENSION_FALLBACK_TITLE = "体験";
 const OTA_SITE = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
 const HOST_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const GUEST_NAME_MAX = 200;
@@ -202,14 +213,6 @@ function hasExactKeys(record: Record<string, unknown>, keys: readonly string[]):
 
 /** A stored instant: a string already canonical, so a hand-written row in another form (or a JSON null) is refused. */
 const storedInstant = (value: unknown): value is string => typeof value === "string" && canonicalInstant(value) === value;
-
-/** The approval reminder's payload, or null for anything else (an unknown key, a wrong type). */
-export function parseApprovalDeadlinePayload(value: unknown): ApprovalDeadlinePayload | null {
-  if (!isRecord(value) || !hasExactKeys(value, APPROVAL_KEYS) || value.v !== 1) return null;
-  const { bookingId, experienceTitle, startsAt, seats: count, approvalDeadlineAt } = value;
-  if (!publicId(bookingId) || !title(experienceTitle) || !storedInstant(startsAt) || !seats(count) || !storedInstant(approvalDeadlineAt)) return null;
-  return { v: 1, bookingId, experienceTitle, startsAt, seats: count, approvalDeadlineAt };
-}
 
 /** The guest message's payload, or null for anything else. */
 export function parseGuestMessagePayload(value: unknown): GuestMessagePayload | null {
@@ -301,6 +304,15 @@ export function parseOtaBookingPayload(value: unknown): OtaBookingPayload | null
   };
 }
 
+/** The listing suspension's payload, or null for anything else (an unknown key, a wrong type, another change). */
+export function parseListingSuspensionPayload(value: unknown): ListingSuspensionPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, LISTING_SUSPENSION_KEYS) || value.v !== 1) return null;
+  const { productId, experienceTitle, change } = value;
+  if (typeof productId !== "string" || !PRODUCT_ID.test(productId) || !title(experienceTitle)
+    || !(LISTING_SUSPENSION_CHANGES as readonly unknown[]).includes(change)) return null;
+  return { v: 1, productId, experienceTitle, change: change as ListingSuspensionChange };
+}
+
 /**
  * An experience's title as a row carries it: a product title may be longer than a row allows (300
  * against 200), and a notification must not fail the guest's question or the payment over it.
@@ -367,54 +379,6 @@ export async function enqueueNewReviewNotification(
     payload: { v: 1, reviewId: input.reviewId, experienceTitle } satisfies NewReviewPayload,
     availableAt: null,
   });
-}
-
-/**
- * A booking waiting for the host's approval: reminders 6 hours and 1 hour before its deadline (the
- * host console's 設定 › 通知 promises both). A reminder whose time has passed is skipped; with less
- * than an hour left, the 1-hour one is due now; past the deadline, nothing. Called in the booking's
- * own transaction. The number of new rows (a repeat adds none).
- */
-export async function enqueueApprovalDeadlineReminders(
-  client: PoolClient,
-  input: BookingFacts & { readonly approvalDeadlineAt: string; readonly now: Date },
-): Promise<number> {
-  const { startsAt } = validBooking(input);
-  const approvalDeadlineAt = canonicalInstant(input.approvalDeadlineAt);
-  if (approvalDeadlineAt === null) throw new StoreValidationError("approvalDeadlineAt must be an ISO 8601 instant.");
-  const now = input.now.getTime();
-  if (!Number.isFinite(now)) throw new StoreValidationError("now must be a valid time.");
-  const deadline = Date.parse(approvalDeadlineAt);
-  if (deadline <= now) return 0;
-
-  const payload: ApprovalDeadlinePayload = { v: 1, bookingId: input.bookingId, experienceTitle: input.experienceTitle, startsAt, seats: input.seats, approvalDeadlineAt };
-  const due: [string, number][] = [];
-  if (deadline - 6 * HOUR_MS > now) due.push(["6h", deadline - 6 * HOUR_MS]);
-  due.push(["1h", Math.max(deadline - HOUR_MS, now)]);
-  let inserted = 0;
-  for (const [lead, at] of due) {
-    inserted += await insertRow(client, {
-      providerId: input.providerId,
-      bookingId: input.bookingId,
-      topic: HOST_NOTIFICATION_TOPICS.approvalDeadline,
-      deduplicationKey: `host-push:approval-deadline:${input.bookingId}:${lead}`,
-      payload,
-      availableAt: new Date(at).toISOString(),
-    });
-  }
-  return inserted;
-}
-
-/** Approved, declined, cancelled or expired: the booking's unsent reminders are closed. The number closed. */
-export async function cancelApprovalDeadlineReminders(client: PoolClient, input: { readonly providerId: string; readonly bookingId: string }): Promise<number> {
-  assertStoreIdentifier(input.providerId, "providerId");
-  if (!publicId(input.bookingId)) throw new StoreValidationError("bookingId must contain 1-48 letters, digits, '_' or '-'.");
-  const result = await client.query(
-    `UPDATE outbox_messages SET processed_at = clock_timestamp()
-      WHERE provider_id = $1 AND topic = $2 AND aggregate_type = $3 AND aggregate_id = $4 AND processed_at IS NULL`,
-    [input.providerId, HOST_NOTIFICATION_TOPICS.approvalDeadline, AGGREGATE_TYPE, input.bookingId],
-  );
-  return result.rowCount ?? 0;
 }
 
 /** A guest wrote to the host: one notification per message, due now. 1 when added, 0 for a repeat. */
@@ -627,6 +591,45 @@ export async function enqueueOtaBookingNotification(
     deduplicationKey: `ota-booking:${input.ref}:${input.localRevision}`, payload: mailPayload, productId: input.productId,
   });
   return added;
+}
+
+/**
+ * Operations stopped a listing (`SUSPENDED`) or cleared that stop (`CLEARED`): one push per state change (設定 › 通知's
+ * 掲載の運営停止・解除, which cannot be turned off), due now, to the product's OWNER and operators only. Called in the
+ * transaction that changed the state, right after it, with the state's new version: a retry of the same change adds
+ * nothing, and a change that fails or conflicts rolls this row back with it. A blank title becomes a fixed word rather
+ * than failing the operation. 1 when added, 0 for a repeat.
+ */
+export async function enqueueListingSuspensionNotification(
+  client: PoolClient,
+  input: {
+    readonly providerId: string;
+    readonly productId: string;
+    readonly experienceTitle: string | null;
+    readonly change: ListingSuspensionChange;
+    /** The publication state's version after the change. */
+    readonly stateVersion: number;
+  },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  assertStoreIdentifier(input.productId, "productId");
+  if (!Number.isSafeInteger(input.stateVersion) || input.stateVersion < 1) throw new StoreValidationError("stateVersion must be a positive integer.");
+  const clipped = typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "";
+  const payload: ListingSuspensionPayload = {
+    v: 1, productId: input.productId, experienceTitle: clipped || LISTING_SUSPENSION_FALLBACK_TITLE, change: input.change,
+  };
+  // The same check the push job makes: a row it would drop is refused here instead.
+  if (parseListingSuspensionPayload(payload) === null) throw new StoreValidationError("The listing suspension notification is invalid.");
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.productId,
+    aggregateType: "experience_product",
+    topic: HOST_NOTIFICATION_TOPICS.listingSuspension,
+    // A digest keeps the key within 256 characters however long the product ID is.
+    deduplicationKey: `host-push:listing-suspension:${createHash("sha256").update(input.productId).digest("hex").slice(0, 32)}:${input.stateVersion}`,
+    payload,
+    availableAt: null,
+  });
 }
 
 function assertRowId(id: string): void {

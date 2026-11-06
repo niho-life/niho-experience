@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { ChannelRuntime, type ExternalReservationObservation, type WorkerIdentity } from "../src/channels.ts";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const T0 = Date.parse("2099-01-01T00:00:00.000Z");
@@ -32,16 +32,10 @@ const observation = (
 
 describe("PostgreSQL external reservation attention", { skip: databaseUrl === undefined }, () => {
   it("queues conflicts for staff and measures detection-to-verified-close without touching reservations", { timeout: 120_000 }, async () => {
-    const { Pool } = await import("pg");
-    const schema = `reservation_attention_${randomUUID().replaceAll("-", "")}`;
-    const pool: Pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
-    let created = false;
+    const db = await createIsolatedDatabase(databaseUrl, "reservation_attention", { max: 8 });
+    const pool: Pool = db.pool;
     const clock = { now: new Date(T0) };
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      created = true;
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((file) => /^\d{4}.*\.sql$/.test(file)).sort();
-      for (const file of migrations) await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       for (const id of ["tea", "solo"]) {
@@ -335,8 +329,7 @@ describe("PostgreSQL external reservation attention", { skip: databaseUrl === un
       assert.equal(metrics.truncated, false);
       assert.doesNotMatch(JSON.stringify(metrics), /ext-air|ext-gyg|R\d/);
     } finally {
-      if (created) await pool.query(`DROP SCHEMA "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

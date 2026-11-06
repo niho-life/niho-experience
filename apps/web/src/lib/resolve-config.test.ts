@@ -274,6 +274,10 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_OPERATIONS_API_ENABLED: "true" }).adminOperationsApiEnabled).toBe(true);
     expect(resolveConfig({ ADMIN_OPERATIONS_PREVIEW_ENABLED: "true" }).adminOperationsPreviewEnabled).toBe(true);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_OPERATIONS_PREVIEW_ENABLED: "true" }).adminOperationsPreviewEnabled).toBe(false);
+    expect(resolveConfig({}).adminSiteBookingsPreviewEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED: "1" }).adminSiteBookingsPreviewEnabled).toBe(false);
+    expect(resolveConfig({ ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED: "true" }).adminSiteBookingsPreviewEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED: "true" }).adminSiteBookingsPreviewEnabled).toBe(false);
     expect(resolveConfig({ HOST_SUPPORT_HISTORY_API_ENABLED: "true" }).hostSupportHistoryApiEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", HOST_SUPPORT_HISTORY_API_ENABLED: "true" }).hostSupportHistoryApiEnabled).toBe(true);
     expect(resolveConfig({ HOST_SUPPORT_SETTINGS_API_ENABLED: "true" }).hostSupportSettingsApiEnabled).toBe(false);
@@ -788,5 +792,155 @@ describe("editor console settings", () => {
     expect(() => resolveConfig({ ...configured, SITE_URL: "http://experience.example", NIHO_EXPERIENCE_EDITOR_ORIGIN: "http://experience.example" })).toThrow(/HTTPS/);
     expect(() => resolveConfig({ ...configured, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "http://niho.example" })).toThrow(/NEXT_PUBLIC_NIHO_WEB_ORIGIN.*HTTPS/);
     expect(resolveConfig({ ...configured, SITE_URL: "http://localhost:3000", NIHO_EXPERIENCE_EDITOR_ORIGIN: "http://localhost:3000" }).editorOrigin).toBe("http://localhost:3000");
+  });
+});
+
+describe("OTA channel flags (start-up gate for the deploy table)", () => {
+  // Synthetic values only. The host and Admin consoles complete, the experience DB and the Google OAuth client.
+  const base = {
+    EXPERIENCE_API_MODE: "http",
+    SITE_URL: "https://experience.example",
+    HOST_CONSOLE_ENABLED: "true",
+    HOST_SESSION_SECRET: "s".repeat(32),
+    ADMIN_SUPPORT_CONSOLE_ENABLED: "true",
+    ADMIN_SESSION_SECRET: "a".repeat(32),
+    NIHO_FIREBASE_WEB_API_KEY: "firebase-key",
+    NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://experience.example",
+    EXPERIENCE_DATABASE_URL: "postgresql://synthetic.invalid/experience",
+    EXPERIENCE_GOOGLE_CLIENT_ID: "synthetic-client-id",
+    EXPERIENCE_GOOGLE_CLIENT_SECRET: "synthetic-client-secret",
+    EXPERIENCE_GOOGLE_TOKEN_KEY: "synthetic-token-key",
+  };
+  const watchdog = {
+    EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "true",
+    EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE: "https://experience.example",
+    EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL: "experience-ota-watchdog@sample-project.iam.gserviceaccount.com",
+  };
+  const manager = { EXPERIENCE_CHANNEL_MANAGER_ENABLED: "true" };
+  const runtime = {
+    ...watchdog,
+    ...manager,
+    EXPERIENCE_CHANNEL_RUNTIME_ENABLED: "true",
+    EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS: "GetYourGuide/gyg-browser@1=observe+close+open+create;Airbnb/airbnb-google-busy@1=observe+open+close",
+  };
+  const resourceGoogle = { EXPERIENCE_RESOURCE_GOOGLE_ENABLED: "true" };
+  const resourceGoogleWatch = {
+    ...resourceGoogle,
+    EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED: "true",
+    EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL: "https://experience.example/api/google/calendar/watch",
+  };
+  const airbnbSetup = { EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED: "true" };
+  const airbnbDelivery = { ...runtime, EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED: "true" };
+
+  // What each console and backing setting takes in http mode, so a row can start with only what it needs.
+  const HOST = ["HOST_CONSOLE_ENABLED", "HOST_SESSION_SECRET"];
+  const ADMIN = ["ADMIN_SUPPORT_CONSOLE_ENABLED", "ADMIN_SESSION_SECRET", "NIHO_FIREBASE_WEB_API_KEY", "NIHO_EXPERIENCE_ADMIN_ORIGIN"];
+  const DB = ["EXPERIENCE_DATABASE_URL"];
+  const OAUTH = ["EXPERIENCE_GOOGLE_CLIENT_ID", "EXPERIENCE_GOOGLE_CLIENT_SECRET", "EXPERIENCE_GOOGLE_TOKEN_KEY"];
+
+  type Row = {
+    key: keyof ReturnType<typeof resolveConfig>;
+    env: string;
+    vars: Record<string, string>;
+    /** The base settings it takes, directly or through the flags it needs. */
+    context: readonly string[];
+    /** Each setting it needs: removed (or the console turned off), the start-up names it. */
+    needs: readonly string[];
+  };
+  const rows: Row[] = [
+    { key: "channelWatchdogEnabled", env: "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED", vars: watchdog, context: [...HOST, ...DB], needs: ["HOST_CONSOLE_ENABLED", "EXPERIENCE_DATABASE_URL", "EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE", "EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL"] },
+    { key: "channelManagerEnabled", env: "EXPERIENCE_CHANNEL_MANAGER_ENABLED", vars: manager, context: [...ADMIN, ...DB], needs: ["ADMIN_SUPPORT_CONSOLE_ENABLED", "EXPERIENCE_DATABASE_URL"] },
+    { key: "channelRuntimeEnabled", env: "EXPERIENCE_CHANNEL_RUNTIME_ENABLED", vars: runtime, context: [...HOST, ...ADMIN, ...DB], needs: ["EXPERIENCE_CHANNEL_MANAGER_ENABLED", "EXPERIENCE_CHANNEL_WATCHDOG_ENABLED", "EXPERIENCE_DATABASE_URL", "EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS"] },
+    { key: "resourceGoogleEnabled", env: "EXPERIENCE_RESOURCE_GOOGLE_ENABLED", vars: resourceGoogle, context: [...HOST, ...DB, ...OAUTH], needs: ["HOST_CONSOLE_ENABLED", "EXPERIENCE_DATABASE_URL", ...OAUTH] },
+    { key: "resourceGoogleWatchEnabled", env: "EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED", vars: resourceGoogleWatch, context: [...HOST, ...DB, ...OAUTH], needs: ["EXPERIENCE_RESOURCE_GOOGLE_ENABLED", "EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL"] },
+    { key: "airbnbGoogleSetupEnabled", env: "EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED", vars: airbnbSetup, context: [...HOST, ...DB, ...OAUTH], needs: ["HOST_CONSOLE_ENABLED", "EXPERIENCE_DATABASE_URL", ...OAUTH] },
+    { key: "airbnbGoogleActivationEnabled", env: "EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED", vars: { ...airbnbSetup, EXPERIENCE_AIRBNB_GOOGLE_ACTIVATION_ENABLED: "true" }, context: [...HOST, ...DB, ...OAUTH], needs: ["EXPERIENCE_AIRBNB_GOOGLE_SETUP_ENABLED"] },
+    { key: "airbnbGoogleDeliveryEnabled", env: "EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED", vars: airbnbDelivery, context: [...HOST, ...ADMIN, ...DB], needs: ["EXPERIENCE_CHANNEL_RUNTIME_ENABLED"] },
+    { key: "airbnbGoogleObservationEnabled", env: "EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED", vars: { ...airbnbDelivery, EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED: "true" }, context: [...HOST, ...ADMIN, ...DB], needs: ["EXPERIENCE_AIRBNB_GOOGLE_DELIVERY_ENABLED"] },
+  ];
+  const minimal = (row: Row): Record<string, string> => ({
+    EXPERIENCE_API_MODE: "http",
+    SITE_URL: base.SITE_URL,
+    ...Object.fromEntries(row.context.map((name) => [name, base[name as keyof typeof base]])),
+    ...row.vars,
+  });
+
+  /** Without one setting: a console or flag is turned off, anything else is removed. */
+  function without(env: Record<string, string>, setting: string): Record<string, string> {
+    const copy = { ...env };
+    if (setting.endsWith("_ENABLED")) copy[setting] = "false";
+    else delete copy[setting];
+    return copy;
+  }
+
+  it("keeps every flag off by default and in mock mode", () => {
+    const keys = rows.map((row) => row.key);
+    expect(resolveConfig({})).toMatchObject(Object.fromEntries(keys.map((key) => [key, false])));
+    expect(resolveConfig(base)).toMatchObject(Object.fromEntries(keys.map((key) => [key, false])));
+  });
+
+  it.each(rows)("$env turns $key on with what it needs only", (row) => {
+    expect(resolveConfig(minimal(row))[row.key]).toBe(true);
+    expect(resolveConfig({ ...base, ...row.vars })[row.key]).toBe(true);
+    // Flags are exact "true".
+    expect(resolveConfig({ ...minimal(row), [row.env]: "1" })[row.key]).toBe(false);
+  });
+
+  it.each(rows)("$env stops the start-up when one of its needs is missing, naming it", (row) => {
+    for (const setting of row.needs) {
+      const message = (() => {
+        try {
+          resolveConfig(without(minimal(row), setting));
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return "";
+      })();
+      expect(message, setting).toContain(setting);
+      expect(message, setting).toMatch(/needs .* in http mode$/);
+      // It names the setting, never a value.
+      expect(message, setting).not.toMatch(/synthetic|sample-project|experience\.example/);
+    }
+  });
+
+  it.each(rows)("$env stays false in mock mode even with everything set, without stopping", ({ key, vars }) => {
+    expect(resolveConfig({ ...base, ...vars, EXPERIENCE_API_MODE: "mock" })[key]).toBe(false);
+    expect(resolveConfig({ ...vars, EXPERIENCE_API_MODE: "mock" })[key]).toBe(false);
+  });
+
+  it("refuses a watchdog audience that is not an https origin, and a malformed service account", () => {
+    for (const audience of ["", "http://experience.example", "https://experience.example/internal/ota", "https://experience.example?x=1", "https://user:pw@experience.example", "experience.example"]) {
+      expect(() => resolveConfig({ ...base, ...watchdog, EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE: audience }), audience).toThrow(/EXPERIENCE_CHANNEL_WATCHDOG_ENABLED=true needs EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE/);
+    }
+    expect(resolveConfig({ ...base, ...watchdog, EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE: "https://experience.example/" }).channelWatchdogEnabled).toBe(true);
+    for (const email of ["", "watchdog@example.com", "Watchdog@sample-project.iam.gserviceaccount.com"]) {
+      expect(() => resolveConfig({ ...base, ...watchdog, EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL: email }), email).toThrow(/EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL/);
+    }
+  });
+
+  it("refuses the worker runtime with an empty or malformed adapter allowlist, and accepts the JSON form", () => {
+    for (const adapters of ["", "{}", "{not json", '{"GetYourGuide/gyg-browser@1":{"canObserve":"yes"}}', "GetYourGuide/gyg-browser@1=observe,close", "GetYourGuide/gyg-browser@1=fly"]) {
+      expect(() => resolveConfig({ ...base, ...runtime, EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS: adapters }), adapters).toThrow(/EXPERIENCE_CHANNEL_RUNTIME_ENABLED=true needs EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS/);
+    }
+    expect(resolveConfig({ ...base, ...runtime, EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS: '{"GetYourGuide/gyg-browser@1":{"canObserve":true,"canReadReservations":false,"canClose":true,"canOpen":true}}' }).channelRuntimeEnabled).toBe(true);
+  });
+
+  it("refuses a Google watch webhook that is not the public https /api/google/calendar/watch", () => {
+    for (const url of [
+      "",
+      "http://experience.example/api/google/calendar/watch",
+      "https://localhost/api/google/calendar/watch",
+      "https://127.0.0.1/api/google/calendar/watch",
+      "https://experience.example/api/google/calendar",
+      "https://experience.example/api/google/calendar/watch/",
+      "https://experience.example/",
+      "/api/google/calendar/watch",
+    ]) {
+      expect(() => resolveConfig({ ...base, ...resourceGoogleWatch, EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL: url }), url).toThrow(/EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED=true needs EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL/);
+    }
+  });
+
+  it("keeps the watchdog deploys of today starting (host console, DB, audience and service account)", () => {
+    expect(resolveConfig({ ...base, ADMIN_SUPPORT_CONSOLE_ENABLED: "false", ...watchdog })).toMatchObject({ channelWatchdogEnabled: true, channelManagerEnabled: false, channelRuntimeEnabled: false });
   });
 });

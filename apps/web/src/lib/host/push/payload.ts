@@ -47,6 +47,13 @@ export interface HostPushEvent {
   guestName?: string;
   /** Only this product's people (its OWNER and operators) get it, instead of every member of the provider. */
   productId?: string;
+  /** Only the provider's OWNER gets it (an operations suspension: only the OWNER can resume the listing). */
+  ownerOnly?: true;
+  /**
+   * Operations stopped this listing or cleared that stop (#109, LISTING_SUSPENSION): it sets the title, and a clearing adds
+   * the line that the OWNER still resumes it. Never the reason; the host reads it in /host.
+   */
+  listing?: { change: "SUSPENDED" | "CLEARED" };
 }
 
 /**
@@ -95,17 +102,20 @@ export interface HostPushMessage {
 
 export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   NEW_BOOKING: "新しい予約・申込",
-  APPROVAL_DEADLINE: "承認の期限が近づいています",
   CANCELLATION: "予約が取り消されました",
   GUEST_MESSAGE: "予約者から連絡があります",
   DAY_BEFORE_SUMMARY: "明日の参加者のまとめ",
   NEW_REVIEW: "新しいレビュー",
   EMAIL_DELIVERY_FAILED: "予約者へのメールが届きませんでした",
-  LISTING_REVIEW: "掲載の審査結果",
+  LISTING_SUSPENSION: "運営が掲載を停止しました",
   GOOGLE_CALENDAR_ATTENTION: "Googleカレンダーを確認してください",
 };
 
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
+
+/** A clearing of an operations stop: the listing stays off until the OWNER resumes it (owner_resume_required). */
+export const HOST_PUSH_LISTING_CLEARED_TITLE = "運営による停止が解除されました";
+export const HOST_PUSH_LISTING_CLEARED_NOTE = "オーナーが再公開すると、掲載に戻ります";
 
 /** A booking on a reservation site: the site's name goes first, so the host sees where it came from. */
 export function hostPushOtaTitle(ota: NonNullable<HostPushEvent["ota"]>): string {
@@ -161,6 +171,7 @@ function whenLine(event: HostPushEvent): string | null {
 export function hostPushLines(event: HostPushEvent): { title: string; experience: string | null; when: string | null; guest: string | null; seats: string | null } {
   return {
     title: event.ota ? hostPushOtaTitle(event.ota)
+      : event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_TITLE
       : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
     experience: titleLine(event.experienceTitle),
     when: whenLine(event),
@@ -203,7 +214,8 @@ export function hostPushPayload(event: HostPushEvent, origin?: string): string {
   const lines = hostPushLines(event);
   const message = pushMessage({
     title: lines.title,
-    body: event.note ?? [lines.experience, lines.when, lines.guest ? `${lines.guest} 様` : null, lines.seats].filter(Boolean).join(" · "),
+    body: event.note ?? [lines.experience, lines.when, lines.guest ? `${lines.guest} 様` : null, lines.seats,
+      event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_NOTE : null].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
     badgeCount: event.badgeCount,
@@ -218,12 +230,12 @@ export function hostPushTestPayload(origin?: string): string {
   return JSON.stringify(pushMessage({ title: "テスト通知", body: "この端末に NIHO 体験ホストの通知が届きます。", url: "/host/settings#settings-device", tag: "host-push-test" }, origin));
 }
 
-/** Time-critical kinds go out at once; a deadline or a summary is useless once it has passed. */
+/** Time-critical kinds go out at once; a summary is useless once it has passed. */
 export function hostPushDelivery(kind: HostPushKind): { urgency: "high" | "normal"; ttlSeconds: number } {
   // A calendar that cannot be read keeps new bookings closed until the host acts.
-  const urgent = kind === "NEW_BOOKING" || kind === "APPROVAL_DEADLINE" || kind === "GUEST_MESSAGE" || kind === "CANCELLATION"
+  const urgent = kind === "NEW_BOOKING" || kind === "GUEST_MESSAGE" || kind === "CANCELLATION"
     || kind === "GOOGLE_CALENDAR_ATTENTION";
-  const ttlSeconds = kind === "APPROVAL_DEADLINE" ? 60 * 60 : kind === "DAY_BEFORE_SUMMARY" ? 12 * 60 * 60 : 24 * 60 * 60;
+  const ttlSeconds = kind === "DAY_BEFORE_SUMMARY" ? 12 * 60 * 60 : 24 * 60 * 60;
   return { urgency: urgent ? "high" : "normal", ttlSeconds };
 }
 

@@ -1,7 +1,7 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import {
   HOST_NOTIFICATION_TOPICS,
-  parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseDayBeforeSummaryPayload,
@@ -9,6 +9,7 @@ import {
   parseGuestEmailDeliveryFailedPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
+  parseListingSuspensionPayload,
   parseNewBookingPayload,
   parseNewReviewPayload,
   parseOtaBookingPayload,
@@ -19,7 +20,7 @@ import {
   type StoppableHostNotificationKey,
 } from "@niho-experience/experience-store";
 import { providerNotificationSettings } from "@/lib/experience/store-server";
-import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, withQuery } from "../routes";
+import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_EXPERIENCES_PATH, HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, withQuery } from "../routes";
 import { notifyHostDevices, type HostPushDeps, type HostPushReport } from "./notify";
 import type { HostPushEvent, HostPushKind } from "./payload";
 
@@ -46,7 +47,7 @@ const GUEST_EMAIL_DELIVERY_FAILURE_NOTES = {
 const MESSAGE_STALE_MS = 24 * 60 * 60 * 1000;
 const RETRY_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 
-export type HostPushEventFromOutbox = { ok: true; event: HostPushEvent } | { ok: false; reason: "invalid" | "expired" | "stale" };
+export type HostPushEventFromOutbox = { ok: true; event: HostPushEvent } | { ok: false; reason: "invalid" | "stale" };
 
 /** A message, question or booking older than a day is no longer news on a lock screen. */
 function staleness(message: ClaimedHostNotification, now: number): HostPushEventFromOutbox | null {
@@ -56,30 +57,12 @@ function staleness(message: ClaimedHostNotification, now: number): HostPushEvent
 }
 
 /**
- * One row as a push event, or why it is not sent: a row of another shape, an approval deadline that
- * has passed, or a message, question or new booking older than a day. The event carries the experience,
- * its time and the party size only (a question: the experience only).
+ * One row as a push event, or why it is not sent: a row of another shape, or a message, question or new
+ * booking older than a day. The event carries the experience, its time and the party size only (a question:
+ * the experience only).
  */
 export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: number): HostPushEventFromOutbox {
   const providerId = message.providerId;
-  if (message.topic === HOST_NOTIFICATION_TOPICS.approvalDeadline) {
-    const payload = parseApprovalDeadlinePayload(message.payload);
-    if (!payload) return { ok: false, reason: "invalid" };
-    if (Date.parse(payload.approvalDeadlineAt) <= now) return { ok: false, reason: "expired" };
-    return {
-      ok: true,
-      event: {
-        providerId,
-        kind: "APPROVAL_DEADLINE",
-        experienceTitle: payload.experienceTitle,
-        startsAt: payload.startsAt,
-        seats: payload.seats,
-        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
-        // The 1-hour reminder replaces the 6-hour one on the device.
-        tag: `approval-${payload.bookingId}`,
-      },
-    };
-  }
   if (message.topic === HOST_NOTIFICATION_TOPICS.guestMessage) {
     const payload = parseGuestMessagePayload(message.payload);
     if (!payload) return { ok: false, reason: "invalid" };
@@ -250,6 +233,27 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         url: withQuery(HOST_BOOKINGS_PATH, { ota: payload.ref, providerId }),
         // A later change of the same booking replaces the earlier notification.
         tag: `ota-${payload.ref}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.listingSuspension) {
+    const payload = parseListingSuspensionPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "LISTING_SUSPENSION",
+        experienceTitle: payload.experienceTitle,
+        listing: { change: payload.change },
+        // The OWNER only: the screen below is the OWNER's (a product operator is refused there), and only the OWNER can resume.
+        ownerOnly: true,
+        // 体験の編集, where the listing's state (運営停止中・再公開が必要) and its 再公開 are.
+        url: withQuery(`${HOST_EXPERIENCES_PATH}/${encodeURIComponent(payload.productId)}`, { providerId }),
+        // A clearing replaces the suspension on the device.
+        tag: `listing-${createHash("sha256").update(payload.productId).digest("hex").slice(0, 32)}`,
       },
     };
   }

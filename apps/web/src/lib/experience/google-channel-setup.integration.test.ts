@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   ExperienceStore,
@@ -17,6 +16,7 @@ vi.mock("server-only", () => ({}));
 import { executeGoogleChannelSetup } from "./google-channel-setup";
 import { saveGoogleConnection } from "./google-connection";
 import { sealGoogleRefreshToken } from "./google-token-crypto";
+import { createIsolatedDatabase } from "../../../../../packages/experience-store/test/helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -27,14 +27,8 @@ const tokenKey = Buffer.alloc(32, 7);
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 async function fixture() {
-  const { Pool } = await import("pg");
-  const schema = `google_setup_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 10, options: `-c search_path=${schema}` });
-  await pool.query(`CREATE SCHEMA "${schema}"`);
-  const migrationUrl = new URL("../../../../../packages/experience-store/migrations/", import.meta.url);
-  for (const name of (await readdir(migrationUrl)).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-    await pool.query(await readFile(new URL(name, migrationUrl), "utf8"));
-  }
+  const db = await createIsolatedDatabase(databaseUrl, "google_setup", { max: 10 });
+  const pool = db.pool;
   await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
   await pool.query(`INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES
     ('provider-a','owner-a','OWNER'),('provider-a','other-owner','OWNER'),('provider-b','owner-b','OWNER')`);
@@ -53,12 +47,11 @@ async function fixture() {
     (provider_id,connected_by_niho_user_id,encrypted_refresh_token,granted_scopes,busy_calendar_id,booking_calendar_id)
     VALUES ('provider-a','owner-a',$1,$3,'busy-a','booking-a'),('provider-b','owner-b',$2,$3,'busy-b','booking-b')`,
   [sealGoogleRefreshToken(tokenKey, "provider-a", "synthetic-refresh-a"), sealGoogleRefreshToken(tokenKey, "provider-b", "synthetic-refresh-b"), [...GOOGLE_SCOPES]]);
-  return { pool, schema };
+  return { pool, db };
 }
 
 async function cleanup(value: Fixture): Promise<void> {
-  await value.pool.query(`DROP SCHEMA IF EXISTS "${value.schema}" CASCADE`).catch(() => undefined);
-  await value.pool.end();
+  await value.db.dispose();
 }
 
 function injected(fetchImpl: typeof fetch) {

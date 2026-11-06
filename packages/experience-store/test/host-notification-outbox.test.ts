@@ -4,23 +4,23 @@ import type { PoolClient } from "pg";
 import { StoreValidationError } from "../src/errors.ts";
 import { HOST_MAIL_TOPICS } from "../src/host-mail-shared.ts";
 import {
-  cancelApprovalDeadlineReminders,
-  enqueueApprovalDeadlineReminders,
   enqueueBookingMessageNotification,
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
   enqueueNewBookingNotification,
   enqueueNewReviewNotification,
+  enqueueListingSuspensionNotification,
   enqueueOtaBookingNotification,
   HOST_NOTIFICATION_TOPICS,
+  LISTING_SUSPENSION_FALLBACK_TITLE,
   HostNotificationOutbox,
-  parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseDayBeforeSummaryPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
   parseNewBookingPayload,
   parseNewReviewPayload,
+  parseListingSuspensionPayload,
   parseOtaBookingPayload,
 } from "../src/host-notification-outbox.ts";
 
@@ -35,14 +35,11 @@ function recordingClient() {
 }
 
 describe("host notification payloads (#177 P2)", () => {
-  const approval = { v: 1, bookingId: "bk-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2, approvalDeadlineAt: "2026-11-02T00:00:00.000Z" };
   const message = { v: 1, bookingId: "bk-1", messageId: "msg-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2 };
 
-  it("reads exactly the closed shapes", () => {
-    assert.deepEqual(parseApprovalDeadlinePayload(approval), approval);
+  it("reads exactly the closed shape", () => {
     assert.deepEqual(parseGuestMessagePayload(message), message);
-    assert.equal(parseApprovalDeadlinePayload(message), null);
-    assert.equal(parseGuestMessagePayload(approval), null);
+    assert.equal(parseGuestMessagePayload({ ...message, messageId: undefined }), null);
   });
 
   it("parses date-scoped host summaries without accepting guest or message details", () => {
@@ -55,14 +52,11 @@ describe("host notification payloads (#177 P2)", () => {
   });
 
   it("refuses a stored JSON null where an instant belongs", () => {
-    assert.equal(parseApprovalDeadlinePayload({ ...approval, approvalDeadlineAt: null }), null);
-    assert.equal(parseApprovalDeadlinePayload({ ...approval, startsAt: null }), null);
     assert.equal(parseGuestMessagePayload({ ...message, startsAt: null }), null);
   });
 
   it("refuses unknown keys, missing keys, wrong types and out-of-range values", () => {
     for (const extra of [{ guestName: "合成 予約者" }, { body: "synthetic text" }, { amount: 12000 }]) {
-      assert.equal(parseApprovalDeadlinePayload({ ...approval, ...extra }), null);
       assert.equal(parseGuestMessagePayload({ ...message, ...extra }), null);
     }
     const { seats: _seats, ...missing } = message;
@@ -72,7 +66,6 @@ describe("host notification payloads (#177 P2)", () => {
       { ...message, experienceTitle: " " }, { ...message, experienceTitle: "体".repeat(201) }, { ...message, seats: 0 }, { ...message, seats: 501 },
       { ...message, seats: 1.5 }, { ...message, seats: "2" }, { ...message, startsAt: "2026-11-20" }, { ...message, startsAt: "2026-11-20T10:00:00+09:00" },
     ]) assert.equal(parseGuestMessagePayload(bad), null, JSON.stringify(bad));
-    assert.equal(parseApprovalDeadlinePayload({ ...approval, approvalDeadlineAt: "tomorrow" }), null);
   });
 });
 
@@ -182,25 +175,6 @@ describe("booking message payloads (#285 slice 6b)", () => {
 });
 
 describe("host notification producers (#177 P2)", () => {
-  it("schedules reminders 6 hours and 1 hour before the deadline, skipping passed ones", async () => {
-    const at = async (hoursLeft: number) => {
-      const { client, calls } = recordingClient();
-      const inserted = await enqueueApprovalDeadlineReminders(client, { ...booking, approvalDeadlineAt: new Date(NOW.getTime() + hoursLeft * HOUR).toISOString(), now: NOW });
-      return { inserted, rows: calls.map(({ params }) => ({ key: params[4], availableAt: params[6], topic: params[3], aggregate: [params[1], params[2]] })) };
-    };
-    const far = await at(10);
-    assert.equal(far.inserted, 2);
-    assert.deepEqual(far.rows.map((row) => [row.key, row.availableAt]), [
-      ["host-push:approval-deadline:bk-1:6h", "2026-11-01T04:00:00.000Z"],
-      ["host-push:approval-deadline:bk-1:1h", "2026-11-01T09:00:00.000Z"],
-    ]);
-    assert.ok(far.rows.every((row) => row.topic === HOST_NOTIFICATION_TOPICS.approvalDeadline && row.aggregate[0] === "booking" && row.aggregate[1] === "bk-1"));
-    assert.deepEqual((await at(6)).rows.map((row) => [row.key, row.availableAt]), [["host-push:approval-deadline:bk-1:1h", "2026-11-01T05:00:00.000Z"]]);
-    assert.deepEqual((await at(0.5)).rows.map((row) => [row.key, row.availableAt]), [["host-push:approval-deadline:bk-1:1h", NOW.toISOString()]]);
-    assert.deepEqual(await at(0), { inserted: 0, rows: [] });
-    assert.deepEqual(await at(-1), { inserted: 0, rows: [] });
-  });
-
   it("stores canonical instants and only the closed payload", async () => {
     const { client, calls } = recordingClient();
     await enqueueGuestMessageNotification(client, { ...booking, messageId: "msg-1", guestName: "合成 予約者" } as typeof booking & { messageId: string });
@@ -213,25 +187,17 @@ describe("host notification producers (#177 P2)", () => {
 
   it("refuses invalid input before touching the database", async () => {
     const { client, calls } = recordingClient();
-    const deadline = { approvalDeadlineAt: "2026-11-02T00:00:00.000Z", now: NOW };
     for (const bad of [
       { ...booking, providerId: "" }, { ...booking, bookingId: "bk 1" }, { ...booking, experienceTitle: "" }, { ...booking, seats: 0 }, { ...booking, startsAt: "soon" },
     ]) {
-      await assert.rejects(() => enqueueApprovalDeadlineReminders(client, { ...bad, ...deadline }), StoreValidationError);
       await assert.rejects(() => enqueueGuestMessageNotification(client, { ...bad, messageId: "msg-1" }), StoreValidationError);
     }
-    await assert.rejects(() => enqueueApprovalDeadlineReminders(client, { ...booking, approvalDeadlineAt: "later", now: NOW }), StoreValidationError);
-    await assert.rejects(() => enqueueApprovalDeadlineReminders(client, { ...booking, ...deadline, now: new Date(Number.NaN) }), StoreValidationError);
     await assert.rejects(() => enqueueGuestMessageNotification(client, { ...booking, messageId: "msg/1" }), StoreValidationError);
-    await assert.rejects(() => cancelApprovalDeadlineReminders(client, { providerId: "provider-a", bookingId: "" }), StoreValidationError);
     assert.equal(calls.length, 0);
   });
 
-  it("closes only the booking's unprocessed approval reminders", async () => {
-    const { client, calls } = recordingClient();
-    await cancelApprovalDeadlineReminders(client, { providerId: "provider-a", bookingId: "bk-1" });
-    assert.match(calls[0]!.sql, /processed_at IS NULL/);
-    assert.deepEqual(calls[0]!.params, ["provider-a", HOST_NOTIFICATION_TOPICS.approvalDeadline, "booking", "bk-1"]);
+  it("has no approval-deadline topic: bookings are confirmed on payment and the host approves nothing (#109)", () => {
+    assert.ok(!Object.values(HOST_NOTIFICATION_TOPICS).some((topic) => topic.includes("approval")));
   });
 });
 
@@ -249,10 +215,10 @@ describe("HostNotificationOutbox input checks", () => {
     assert.equal(queries.length, 0);
     assert.deepEqual(await outbox.claimDue(10, 60_000), []);
     assert.deepEqual(queries[0], [[
-      HOST_NOTIFICATION_TOPICS.approvalDeadline, HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
+      HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
       HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage, HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
       HOST_NOTIFICATION_TOPICS.otaBooking, HOST_NOTIFICATION_TOPICS.newReview, HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed,
-      HOST_NOTIFICATION_TOPICS.dayBeforeSummary,
+      HOST_NOTIFICATION_TOPICS.dayBeforeSummary, HOST_NOTIFICATION_TOPICS.listingSuspension,
     ], 10, 60_000]);
   });
 
@@ -326,5 +292,52 @@ describe("OTA booking notifications (#194)", () => {
     await outbox.complete("7", 1);
     assert.match(queries[0]!.sql, /payload - 'guestName'/);
     assert.equal(queries[0]!.params[3], HOST_NOTIFICATION_TOPICS.otaBooking);
+  });
+});
+
+describe("listing suspension notifications (#109)", () => {
+  const listing = { v: 1, productId: "sample-product-tea", experienceTitle: "Synthetic Tea Ceremony", change: "SUSPENDED" };
+
+  it("reads exactly the closed shape: the product, its title and the change, never why or who", () => {
+    assert.equal(HOST_NOTIFICATION_TOPICS.listingSuspension, "host.notify.listing_suspension");
+    assert.deepEqual(parseListingSuspensionPayload(listing), listing);
+    assert.deepEqual(parseListingSuspensionPayload({ ...listing, change: "CLEARED" }), { ...listing, change: "CLEARED" });
+    for (const bad of [
+      { ...listing, reasonCode: "POLICY_REVIEW" }, { ...listing, actorNihoUserId: "niho-user-1" },
+      { v: 1, productId: "sample-product-tea", change: "SUSPENDED" }, { v: 1, experienceTitle: "Synthetic Tea Ceremony", change: "SUSPENDED" },
+      { ...listing, v: 2 }, { ...listing, change: "STOPPED" }, { ...listing, change: null }, { ...listing, productId: 7 },
+      { ...listing, productId: "" }, { ...listing, productId: "-x" }, { ...listing, productId: "a b" }, { ...listing, productId: "p".repeat(257) },
+      { ...listing, experienceTitle: "" }, { ...listing, experienceTitle: "体".repeat(201) }, { ...listing, experienceTitle: 1 }, null, [listing], "x",
+    ]) assert.equal(parseListingSuspensionPayload(bad), null, JSON.stringify(bad)?.slice(0, 80));
+  });
+
+  it("writes one row per state version under the product, with a clipped title or a fixed word when it has none", async () => {
+    const { client, calls } = recordingClient();
+    await enqueueListingSuspensionNotification(client, {
+      providerId: "provider-a", productId: "sample-product-tea", experienceTitle: `  ${"体".repeat(250)} `, change: "SUSPENDED", stateVersion: 4,
+    });
+    const [providerId, aggregateType, aggregateId, topic, key, payload, availableAt] = calls[0]!.params as string[];
+    assert.deepEqual([providerId, aggregateType, aggregateId, topic, availableAt], ["provider-a", "experience_product", "sample-product-tea", HOST_NOTIFICATION_TOPICS.listingSuspension, null]);
+    assert.match(key!, /^host-push:listing-suspension:[0-9a-f]{32}:4$/);
+    const stored = JSON.parse(payload!);
+    assert.deepEqual(Object.keys(stored).sort(), ["change", "experienceTitle", "productId", "v"]);
+    assert.equal(stored.experienceTitle.length, 200);
+    assert.ok(stored.experienceTitle.endsWith("…"));
+    await enqueueListingSuspensionNotification(client, { providerId: "provider-a", productId: "sample-product-tea", experienceTitle: null, change: "CLEARED", stateVersion: 5 });
+    assert.equal(JSON.parse(String(calls[1]!.params[5])).experienceTitle, LISTING_SUSPENSION_FALLBACK_TITLE);
+    assert.notEqual(calls[1]!.params[4], key);
+    // A long product ID still makes a key the table holds.
+    await enqueueListingSuspensionNotification(client, { providerId: "provider-a", productId: "p".repeat(256), experienceTitle: "Synthetic", change: "CLEARED", stateVersion: 1 });
+    assert.ok(String(calls[2]!.params[4]).length <= 256);
+  });
+
+  it("refuses invalid input before touching the database", async () => {
+    const { client, calls } = recordingClient();
+    const input = { providerId: "provider-a", productId: "sample-product-tea", experienceTitle: "Synthetic", change: "SUSPENDED" as const, stateVersion: 2 };
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, providerId: "" }), StoreValidationError);
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, productId: "a b" }), StoreValidationError);
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, stateVersion: 0 }), StoreValidationError);
+    await assert.rejects(() => enqueueListingSuspensionNotification(client, { ...input, change: "STOPPED" as never }), StoreValidationError);
+    assert.equal(calls.length, 0);
   });
 });

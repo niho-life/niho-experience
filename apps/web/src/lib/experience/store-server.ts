@@ -1,5 +1,6 @@
 import "server-only";
 import { config } from "@/lib/config";
+import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
 import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
@@ -50,24 +51,9 @@ export function productOperatorRepository(): ProductOperatorRepository | null {
   return pool ? new ProductOperatorRepository(pool) : null;
 }
 
+/** A malformed allowlist grants nothing (every capability false), as an unset one does. */
 function supportedChannelAdapters(): Readonly<Record<string, ChannelCapabilities>> {
-  const raw = process.env.EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS;
-  if (!raw) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const result: Record<string, ChannelCapabilities> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (!value || typeof value !== "object" || Array.isArray(value) || key.length > 300) return {};
-      const record = value as Record<string, unknown>;
-      if (Object.keys(record).some((name) => !["canObserve", "canReadReservations", "canClose", "canOpen", "canCreate"].includes(name))) return {};
-      if (Object.values(record).some((item) => typeof item !== "boolean")) return {};
-      result[key] = record as ChannelCapabilities;
-    }
-    return result;
-  } catch {
-    return {};
-  }
+  return parseChannelAdapters(process.env.EXPERIENCE_CHANNEL_SUPPORTED_ADAPTERS) ?? {};
 }
 
 export function googleAirbnbObservationEnabled(): boolean {

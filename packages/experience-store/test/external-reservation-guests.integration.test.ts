@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
@@ -13,6 +12,7 @@ import { HOST_NOTIFICATION_TOPICS, HostNotificationOutbox, parseOtaBookingPayloa
 import { HostOtaBookings } from "../src/host-ota-bookings.ts";
 import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 // 予約者の情報つきの OTA の予約 (#194, owner decision 2026-11-01). Synthetic data only.
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -45,16 +45,10 @@ const observation = (
 
 describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === undefined }, () => {
   it("keeps the guest's details, tells the product's people, shows them to them only, and erases them after a year", { timeout: 180_000 }, async () => {
-    const { Pool } = await import("pg");
-    const schema = `ota_guests_${randomUUID().replaceAll("-", "")}`;
-    const pool: Pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
-    let created = false;
+    const db = await createIsolatedDatabase(databaseUrl, "ota_guests", { max: 8 });
+    const pool: Pool = db.pool;
     const clock = { now: new Date(T0) };
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      created = true;
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((file) => /^\d{4}.*\.sql$/.test(file)).sort();
-      for (const file of migrations) await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query(
         `INSERT INTO provider_memberships (provider_id,niho_user_id,role)
@@ -345,8 +339,17 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       const since = new Date(Date.now() - 60_000);
       const endpoints = async () => (await subscriptions.productRecipients("provider-a", "tea", since)).map((item) => item.endpoint).sort();
       assert.deepEqual(await endpoints(), [endpointOf("operator-tea"), endpointOf("owner-a")].sort());
+      // An operations suspension (#109) goes to the OWNER only: not the product's operator, an EDITOR, or another provider's OWNER.
+      const ownerEndpoints = async (seenAfter = since) => (await subscriptions.ownerRecipients("provider-a", seenAfter)).map((item) => item.endpoint).sort();
+      assert.deepEqual(await ownerEndpoints(), [endpointOf("owner-a")]);
+      assert.deepEqual(await ownerEndpoints(new Date(Date.now() + 60_000)), []);
+      await assert.rejects(() => subscriptions.ownerRecipients("", since), StoreValidationError);
+      await assert.rejects(() => subscriptions.ownerRecipients("provider-a", new Date(Number.NaN)), StoreValidationError);
       await pool.query("UPDATE product_operator_grants SET active=false,revoked_at=clock_timestamp() WHERE niho_user_id='operator-tea'");
       assert.deepEqual(await endpoints(), [endpointOf("owner-a")]);
+      await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id='provider-a' AND niho_user_id='owner-a'");
+      assert.deepEqual(await ownerEndpoints(), [], "a former OWNER gets nothing");
+      await pool.query("UPDATE provider_memberships SET active=true WHERE provider_id='provider-a' AND niho_user_id='owner-a'");
       await assert.rejects(() => bookings.listForHost(teaOperator, window), StoreAccessDeniedError);
 
       // The push job's completion drops the name from the row; a row never sent loses it after 48 hours.
@@ -401,8 +404,7 @@ describe("PostgreSQL OTA reservation guests (#194)", { skip: databaseUrl === und
       assert.equal((await guestRow("R2"))?.guest_name, null);
       assert.equal("guestName" in (await notifications())[2]!.payload, true, "a row younger than 48 hours waits for the push job");
     } finally {
-      if (created) await pool.query(`DROP SCHEMA "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

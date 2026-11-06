@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
@@ -14,6 +13,7 @@ import { HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { ExperienceSupportRepository } from "../src/support-settlement.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 /** 取消と返金 (#285 slice 7) against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -58,13 +58,9 @@ async function withSchema(
   customCancellation?: { readonly windowMinutes: number | null; readonly refundBasisPoints: number },
   supportEnabled = false,
 ): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `cancellations_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "cancellations", { max: 6 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
     await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ('provider-a','owner-a','OWNER',true), ('provider-a','editor-a','EDITOR',true)");
     await pool.query(
@@ -96,8 +92,7 @@ async function withSchema(
     await seedTestPublications(pool);
     await run({ pool, store, guests, access: new GuestBookingAccess(pool), cancellations: new BookingCancellations(pool), outbox: new GuestMailOutbox(pool) });
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 
@@ -1128,6 +1123,99 @@ describe("PostgreSQL Admin case timeline: what survives a reload", { skip: datab
       await pool.query("DELETE FROM guest_question_messages WHERE command_id=$1::uuid", [commandId]);
       const [event] = (await reader.getCase(support, made.publicBookingId))!.events.filter((item) => item.type === "GUEST_CONTACT_SENT");
       assert.deepEqual([event?.commandId, event?.delivery], [commandId, null]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+});
+
+describe("PostgreSQL support-ON bookings for the Admin (#121/#128)", { skip: databaseUrl === undefined }, () => {
+  /** Rewrites a booking's snapshot (the snapshot trigger is off for this test schema only). */
+  async function rewriteFee(pool: Pool, publicBookingId: string, sql: string): Promise<void> {
+    await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+    await pool.query(`UPDATE bookings SET pricing_snapshot = ${sql} WHERE public_booking_id=$1`, [publicBookingId]);
+    await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+  }
+
+  it("lists only paid bookings whose own snapshot records current support ON consent, newest first", async () => {
+    await withSchema(async (context) => {
+      const { pool, guests, cancellations } = context;
+      const first = await paid(context, { guestEmail: "on-1@example.com", occurrenceDate: day(5) });
+      const second = await paid(context, { guestEmail: "on-2@example.com", occurrenceDate: day(6) });
+      const review = await paid(context, { guestEmail: "on-review@example.com", occurrenceDate: day(7) }, 500);
+      const cancelled = await paid(context, { guestEmail: "on-cancelled@example.com", occurrenceDate: day(8) });
+      await cancellations.cancelAsSupport(support, cancelled.publicBookingId, { commandId: randomUUID(), reason: "OTHER", refund: { kind: "FULL" } });
+      const hold = await guests.startGuestBooking(request({ guestEmail: "on-hold@example.com", occurrenceDate: day(9) }));
+      const legacy = await paid(context, { guestEmail: "legacy@example.com", occurrenceDate: day(10) });
+      await rewriteFee(pool, legacy.publicBookingId, "pricing_snapshot #- '{platformFee,supportConsentVersion}' #- '{platformFee,supportAgreementRevision}'");
+      const textFee = await paid(context, { guestEmail: "text-fee@example.com", occurrenceDate: day(11) });
+      await rewriteFee(pool, textFee.publicBookingId, `jsonb_set(jsonb_set(pricing_snapshot, '{platformFee,basisPoints}', '"1500"'), '{platformFee,supportAgreementRevision}', '"abc"')`);
+      const fraction = await paid(context, { guestEmail: "fraction@example.com", occurrenceDate: day(12) });
+      await rewriteFee(pool, fraction.publicBookingId, `jsonb_set(pricing_snapshot, '{platformFee,supportAgreementRevision}', '1.5')`);
+      const emptyVersion = await paid(context, { guestEmail: "empty-version@example.com", occurrenceDate: day(13) });
+      await rewriteFee(pool, emptyVersion.publicBookingId, `jsonb_set(pricing_snapshot, '{platformFee,supportConsentVersion}', '""')`);
+      const notObject = await paid(context, { guestEmail: "not-object@example.com", occurrenceDate: day(14) });
+      await rewriteFee(pool, notObject.publicBookingId, `jsonb_set(pricing_snapshot, '{platformFee}', '"ON"')`);
+
+      // The host turns support OFF afterwards: earlier bookings stay listed, a booking made now is not.
+      const settings = await guests.getProviderSupportSettings(ownerA);
+      await guests.setProviderSupportSettings(ownerA, { supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: settings!.version });
+      const off = await paid(context, { guestEmail: "off@example.com", occurrenceDate: day(15) });
+
+      const page = await cancellations.supportEnabledBookings();
+      assert.deepEqual(page.bookings.map((booking) => booking.publicBookingId), [cancelled, review, second, first].map((made) => made.publicBookingId));
+      assert.deepEqual(page.bookings.map((booking) => booking.status), ["CANCELLED", "PAYMENT_REVIEW", "CONFIRMED", "CONFIRMED"]);
+      assert.equal(page.nextCursor, null);
+      assert.ok(page.bookings.every((booking) => booking.supportEligible));
+      for (const excluded of [hold, legacy, textFee, fraction, emptyVersion, notObject, off]) {
+        assert.ok(!page.bookings.some((booking) => booking.publicBookingId === excluded.publicBookingId));
+        assert.equal((await cancellations.supportEnabledBookings({ publicBookingId: excluded.publicBookingId })).bookings.length, 0);
+      }
+      // The guest's name only: no email, phone, Stripe reference or internal memo.
+      const keys = new Set(page.bookings.flatMap((booking) => Object.keys(booking)));
+      for (const forbidden of ["guestEmail", "email", "guestPhone", "phone", "stripePaymentRef", "connectedAccountId", "internalMemo", "note"]) assert.ok(!keys.has(forbidden), forbidden);
+      assert.ok(!JSON.stringify(page).includes("@example.com"));
+      assert.ok(!JSON.stringify(page).includes("pi_sample_"));
+      assert.equal(page.bookings[0]!.guestName, "Sample Guest");
+
+      // Turning it ON again does not bring back the booking made while OFF.
+      await guests.setProviderSupportSettings(ownerA, { supportEnabled: true, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: settings!.version + 1 });
+      assert.deepEqual((await cancellations.supportEnabledBookings()).bookings.map((booking) => booking.publicBookingId), page.bookings.map((booking) => booking.publicBookingId));
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("walks every page once by cursor, finds one booking by ID, and validates its input", async () => {
+    await withSchema(async (context) => {
+      const { cancellations } = context;
+      const made: string[] = [];
+      for (let index = 0; index < 5; index += 1) made.push((await paid(context, { guestEmail: `page-${index}@example.com`, occurrenceDate: day(5 + index) })).publicBookingId);
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: Awaited<ReturnType<typeof cancellations.supportEnabledBookings>> = await cancellations.supportEnabledBookings({ limit: 2, cursor });
+        seen.push(...page.bookings.map((booking) => booking.publicBookingId));
+        cursor = page.nextCursor;
+        pages += 1;
+      } while (cursor !== null && pages < 10);
+      assert.equal(pages, 3);
+      assert.deepEqual(seen, [...made].reverse());
+      // An exact page leaves no cursor behind it.
+      assert.equal((await cancellations.supportEnabledBookings({ limit: 5 })).nextCursor, null);
+      assert.ok((await cancellations.supportEnabledBookings({ limit: 4 })).nextCursor);
+
+      const one = await cancellations.supportEnabledBookings({ publicBookingId: made[2]!.toUpperCase() });
+      assert.deepEqual(one.bookings.map((booking) => booking.publicBookingId), [made[2]]);
+      assert.equal(one.nextCursor, null);
+      assert.equal((await cancellations.supportEnabledBookings({ publicBookingId: randomUUID() })).bookings.length, 0);
+
+      assert.equal((await cancellations.supportEnabledBookings({ limit: 1 })).bookings.length, 1);
+      assert.equal((await cancellations.supportEnabledBookings({ limit: BOOKING_CANCELLATION_LIMITS.supportBookingsLimitMax })).bookings.length, 5);
+      for (const limit of [0, -1, 1.5, BOOKING_CANCELLATION_LIMITS.supportBookingsLimitMax + 1, Number.NaN, "10" as unknown as number]) {
+        await assert.rejects(() => cancellations.supportEnabledBookings({ limit }), StoreValidationError);
+      }
+      await assert.rejects(() => cancellations.supportEnabledBookings({ cursor: "not-a-uuid" }), StoreValidationError);
+      await assert.rejects(() => cancellations.supportEnabledBookings({ cursor: randomUUID() }), StoreValidationError);
+      await assert.rejects(() => cancellations.supportEnabledBookings({ publicBookingId: "1 OR 1=1" }), StoreValidationError);
+      await assert.rejects(() => cancellations.supportEnabledBookings({ publicBookingId: made[0]!, cursor: made[1]! }), StoreValidationError);
     }, "FREE_UNTIL_48H", undefined, true);
   });
 });

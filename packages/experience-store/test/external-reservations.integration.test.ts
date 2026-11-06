@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { expandOccurrences, occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { ChannelRuntime, type ClaimedChannelJob, type ExternalReservationObservation } from "../src/channels.ts";
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";
 import { evaluateStoredInventory } from "../src/inventory.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const target = {
@@ -16,17 +16,11 @@ const target = {
 
 describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undefined }, () => {
   it("keeps read generations, receipts, tombstones, movement, and shared inventory atomic", { timeout: 60_000 }, async () => {
-    const { Pool } = await import("pg");
-    const schema = `external_reservation_test_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
-    let schemaCreated = false;
+    const db = await createIsolatedDatabase(databaseUrl, "external_reservation_test", { max: 6 });
+    const pool = db.pool;
     const now = new Date("2099-01-01T00:00:00.000Z");
     let releasePausedHold = () => {};
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      schemaCreated = true;
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
       for (const [id, slug] of [["tea", "tea"], ["craft", "craft"], ["remote", "remote"], ["empty", "empty"]] as const) {
@@ -763,8 +757,7 @@ describe("PostgreSQL external reservation ledger", { skip: databaseUrl === undef
         now.toISOString(), 1)).availability.reason, "EXTERNAL_RESERVATION_READ_UNAVAILABLE");
     } finally {
       releasePausedHold();
-      if (schemaCreated) await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

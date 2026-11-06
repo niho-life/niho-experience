@@ -19,6 +19,8 @@ NIHOは共通ログインと現在の本人・Connect状態を提供する。Exp
 3. サーバーが必要条件を検証し、掲載条件への同意を受け取って公開する。
 4. 公開後は通常編集で掲載を維持する。本人は停止・再開でき、運営停止は本人の再開では解除できない。
 
+運営停止と解除は、その状態変更と同じ transaction で提供者の OWNER へ push で知らせる（再公開できるのは OWNER だけ）（#109、`host.notify.listing_suspension`。理由は載せない。詳細は [host-pwa.md](host-pwa.md)）。解除しても掲載は戻らず、OWNER の再公開が要る。
+
 初回利用前に運営がExperience seller／本人ID・Connect口座対応／承認済みfeeを登録する。これはNIHO v1が提供者一覧・Connect変更APIを持たないための明示設定で、商品やOWNER membershipは作らない。初回のNIHO認証時に現在本人IDとの完全一致を確認してからExperience OWNERを結ぶ。登録条件の詳細は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。旧商品データの移行、旧NIHO販売停止確認、旧予約席の取り込みは行わず、Experienceで作成した商品だけを公開・販売する。
 
 ## 販売条件
@@ -63,3 +65,14 @@ Admin代理公開では、手入力の日英原稿をAdmin reviewとして別の
 FAQは原稿の唯一の任意キーで、それ以外の未知キーは従来どおり拒否する。互換規則として、`faq` が無い原稿と空配列の原稿は同じ原稿として扱い、空の `faq` は日英どちらのfingerprintにも含めない。FAQ導入前に確認済みの原稿はfingerprintがバイト単位で変わらず、確認状態も公開もそのまま維持される。FAQを書いた場合は日英のfingerprintに含まれ、編集すると英語原稿の確認が解除される。「日本語から英語案を作成」は日本語FAQも同じ件数で翻訳し、件数が合わない翻訳案は使わない。
 
 公開版はFAQを公開projectionへ写し、英語の詳細ページは「Questions before you book」、日本語ページは確認済み日本語原稿の「よくある質問」として、各質問をh3にしたnative `details` で初期HTMLに出す。FAQが無ければ節を出さず、固定文の代替FAQも出さない。FAQPageの構造化データは付けない。
+
+## 公開ページの文脈（#146）
+
+公開済みの体験の詳細ページ（`SitePublicationPage`。http modeの本番はこちらで、`ExperiencePageContent` はmock/previewだけ）は、予約前の不安を減らす次の要素を出す。どれも任意で、読めない・無いときは出さず、ページ本体を壊さない。
+
+- **場所の一行**（h1の直下）：「Kamakura · 1 hour from Tokyo」（日本語は「鎌倉・東京から1時間」）。体験は今のところすべて鎌倉なので地域名は固定値。駅と徒歩は、公開の集合案内（`meetingOverview`）に「2-minute walk from Kamakura Station」のように駅名と分数が明示されているときだけ足す（`detailFromTokyoLine`）。日本語ページは日本語の記述からだけ拾い、英語の駅名を持ち込まない。
+- **次の開催日の帯**：予約が開いていて販売条件があるときだけ。締切（Book by）は開催回の `bookingClosesAt` から出す。
+- **ホスト物語リンク**（「提供者」の行の下）と **関連ガイド**（FAQの下）：この体験に結ばれたガイドから出す。物語リンクは `hosts` の柱のガイドで、下書きは出さない。ガイドの見出しは集合案内の駅名（無ければ地域名）と開始時刻から決める。ガイドは英語だけなので、関連ガイドと物語リンクは英語ページだけに出す（NIHO経路の詳細ページと同じ判断）。
+- **他の体験2〜3件**（ページ末尾、全幅）：一覧ページと同じ集合（販売中の自サイトの体験と、このサイトが所有しないNIHOの体験）から、現在の体験を除いて選ぶ（`relatedSiteExperienceCards`）。このサイトが所有する slug と同じ NIHO の体験は出さない。所有する slug を読めないときは何も出さない。英語ページだけ。
+
+ホスト紹介文（bio）は、公開projectionに置き場所がまだ無いため出していない。

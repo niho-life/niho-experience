@@ -9,13 +9,12 @@ import { assertStoreIdentifier } from "./validation.ts";
 /** Every notification a provider gets, in the order 設定 › 通知 lists them. */
 export const HOST_NOTIFICATION_KEYS = [
   "NEW_BOOKING",
-  "APPROVAL_DEADLINE",
   "CANCELLATION",
   "GUEST_MESSAGE",
   "DAY_BEFORE_SUMMARY",
   "NEW_REVIEW",
   "EMAIL_DELIVERY_FAILED",
-  "LISTING_REVIEW",
+  "LISTING_SUSPENSION",
 ] as const;
 export type HostNotificationKey = (typeof HOST_NOTIFICATION_KEYS)[number];
 

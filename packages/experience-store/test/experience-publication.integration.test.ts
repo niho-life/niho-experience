@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";
 import { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { HostNotificationOutbox } from "../src/host-notification-outbox.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "provider-synthetic", nihoUserId: "owner-synthetic" } as const;
@@ -58,13 +59,9 @@ const readiness = (overrides: Partial<Parameters<ExperiencePublicationRepository
 
 describe("Experience publication persistence (#330 #369)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("serializes slug claims across providers for publish and save-and-publish", async () => {
-    const { Pool } = await import("pg");
-    const schema = `experience_publication_slug_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "experience_publication_slug", { max: 8 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
 
       const firstOwner = { providerId: "provider-slug-first", nihoUserId: "owner-slug-first" } as const;
       const secondOwner = { providerId: "provider-slug-second", nihoUserId: "owner-slug-second" } as const;
@@ -165,19 +162,14 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal(draftResults.filter((result) => result.blockers.includes("SLUG_IN_USE")).length, 1);
       assert.equal((await publications.listPublic()).filter(({ slug }) => slug === "shared-draft-slug").length, 1);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 
   it("publishes only through a current OWNER, preserves an older public copy on incomplete saves, and fails closed", async () => {
-    const { Pool } = await import("pg");
-    const schema = `experience_publication_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "experience_publication", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [OWNER.providerId]);
       await pool.query(
         `INSERT INTO experience_host_seller_profiles
@@ -452,9 +444,26 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic incomplete draft");
       assert.ok(state.firstPublishedAtUtc);
 
+      // The host hears of an operations suspension and its clearing (#109), never of its own stop, publish or resume.
+      const listingRows = async () => (await pool.query<{ provider_id: string; aggregate_type: string; aggregate_id: string; payload: Record<string, unknown> }>(
+        "SELECT provider_id, aggregate_type, aggregate_id, payload FROM outbox_messages WHERE topic='host.notify.listing_suspension' ORDER BY id",
+      )).rows;
+      assert.deepEqual(await listingRows(), [], "the host's own stop and publish write no listing notification");
+
+      await assert.rejects(publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version - 1), StoreConflictError);
+      assert.deepEqual(await listingRows(), [], "a suspension that conflicts writes nothing");
       state = await publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
       assert.equal(await publications.claimsSlug(original.slug), true);
+      const suspendedRows = await listingRows();
+      assert.deepEqual(suspendedRows, [{
+        provider_id: OWNER.providerId, aggregate_type: "experience_product", aggregate_id: original.id,
+        payload: { v: 1, productId: original.id, experienceTitle: "Synthetic incomplete draft", change: "SUSPENDED" },
+      }]);
+      assert.doesNotMatch(JSON.stringify(suspendedRows), /POLICY_REVIEW|operations-synthetic/, "neither the reason nor the operator reaches the host");
+      await assert.rejects(publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version - 1), StoreConflictError);
+      state = await publications.suspendByOperations(OPS, OWNER.providerId, original.id, "TERMS_VIOLATION", state.version);
+      assert.equal((await listingRows()).length, 1, "a stale retry or a second suspension of a suspended listing adds no notification");
       await assert.rejects(
         publications.publish(OWNER, original.id, {
           expectedDraftVersion: incomplete.draft.version,
@@ -464,9 +473,16 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         }),
         (error: unknown) => error instanceof ExperiencePublicationBlockedError && error.blockers.includes("OPERATIONS_SUSPENDED"),
       );
+      await assert.rejects(publications.clearOperationsSuspension(OPS, OWNER.providerId, original.id, state.version - 1), StoreConflictError);
+      assert.equal((await listingRows()).length, 1, "a clearing that conflicts writes nothing");
       state = await publications.clearOperationsSuspension(OPS, OWNER.providerId, original.id, state.version);
       assert.equal(state.ownerResumeRequired, true);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.deepEqual((await listingRows()).map((row) => [row.provider_id, row.payload.change]), [[OWNER.providerId, "SUSPENDED"], [OWNER.providerId, "CLEARED"]]);
+      await assert.rejects(publications.clearOperationsSuspension(OPS, OWNER.providerId, original.id, state.version), StoreConflictError);
+      assert.equal((await listingRows()).length, 2, "clearing a listing that is not suspended adds nothing");
+      const claimed = (await new HostNotificationOutbox(pool).claimDue(200, 60_000)).filter((row) => row.topic === "host.notify.listing_suspension");
+      assert.deepEqual(claimed.map((row) => [row.providerId, (row.payload as { change: string }).change]), [[OWNER.providerId, "SUSPENDED"], [OWNER.providerId, "CLEARED"]], "the push job claims them");
       state = await publications.publish(OWNER, original.id, {
         expectedDraftVersion: incomplete.draft.version,
         expectedStateVersion: state.version,
@@ -475,6 +491,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(state.ownerResumeRequired, false);
       assert.ok(await publications.getPublicBySlug(original.slug));
+      assert.equal((await listingRows()).length, 2, "the OWNER's resume writes no listing notification");
 
       const extraAssetId = randomUUID();
       const beforePhotoAdd = await publications.getPublicBySlug(original.slug);
@@ -579,8 +596,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.deepEqual(afterSnapshots.rows, beforeSnapshots.rows);
       assert.equal((await pool.query("SELECT count(*)::int AS count FROM bookings WHERE public_booking_id=$1::uuid", [booking.publicBookingId])).rows[0]?.count, 1);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });
