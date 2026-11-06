@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { HOST_ACCOUNT_LIMITS } from "@niho-experience/experience-store";
 import { hostButtonClass, HOST_HEADING } from "@/components/host/host-ui";
 import { config } from "@/lib/config";
-import { HOST_EMAIL_LOGIN_PATH, HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_INTRO_PATH, hostReturnPathOrNull } from "@/lib/host/routes";
+import { HOST_EMAIL_LOGIN_PATH, HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_INTRO_PATH, hostReturnPathOrNull, withQuery } from "@/lib/host/routes";
 import { readHostSession, requireHostConsole } from "@/lib/host/server";
 
 export const metadata: Metadata = { title: "ログイン", robots: { index: false, follow: false } };
@@ -28,9 +28,13 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
   const query = await searchParams;
   const next = hostReturnPathOrNull(query.next);
   const reauth = query.reauth === "1" && next !== null;
-  if (!reauth && await readHostSession()) redirect(next ?? HOST_HOME_PATH);
   const sent = query.sent === "1";
   const error = query.error === "email" || query.error === "unavailable" ? ERRORS[query.error] : null;
+  // The 「メールを確認してください」 and error states stay here even for a signed-in host (a recent sign-in was asked for,
+  // or the form needs fixing); otherwise a signed-in host goes on to the page it came for.
+  if (!reauth && !sent && !error && await readHostSession()) redirect(next ?? HOST_HOME_PATH);
+  /** This form again, with the page it returns to and why a sign-in was asked for. */
+  const again = withQuery(HOST_EMAIL_SIGN_IN_PATH, { reauth: reauth ? "1" : null, next });
   const minutes = HOST_ACCOUNT_LIMITS.linkTtlMinutes;
 
   if (sent) {
@@ -46,7 +50,7 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
           <li>届かないときは、迷惑メールのフォルダも確かめてください。続けて送る場合は 30 秒ほど空けてください。</li>
         </ul>
         <div className="mt-8 flex flex-wrap gap-3">
-          <a href={HOST_EMAIL_SIGN_IN_PATH} className={hostButtonClass("secondary")}>もう一度送る</a>
+          <a href={again} className={hostButtonClass("secondary")}>もう一度送る</a>
           <a href={HOST_INTRO_PATH} className={hostButtonClass("secondary")}>体験の提供について</a>
         </div>
       </main>
@@ -66,6 +70,7 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
       {/* A plain form: the route answers with a redirect, and the page works without JavaScript. */}
       <form method="post" action={HOST_EMAIL_LOGIN_PATH} className="mt-6 grid gap-4" data-niho-navigation-form>
         {next ? <input type="hidden" name="next" value={next} /> : null}
+        {reauth ? <input type="hidden" name="reauth" value="1" /> : null}
         <label className="grid gap-1.5 font-bold">
           メールアドレス
           <input

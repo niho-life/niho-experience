@@ -309,6 +309,35 @@ describe("the OWNER's payout-account consent", { skip }, () => {
     });
   });
 
+  it("never writes back a consent read before its withdrawal: a stale snapshot is stored without it, and publishing stays closed", async () => {
+    await withDb(async (pool) => {
+      const { owner, consents } = await supper(pool);
+      const publications = new ExperiencePublicationRepository(pool);
+      await consents.record(owner, { stripeConnectAccountRef: ACCOUNT, consentVersion: VERSION, nowUtc: at(1) });
+      // The boundary read this consent, then waited for Stripe; meanwhile another request withdrew it.
+      const read = await consents.current(owner);
+      assert.ok(read);
+      assert.equal((await consents.revoke(owner, { nowUtc: at(2) })).outcome, "REVOKED");
+      const observed = new Date(Date.now() - 1_000);
+      const snapshot = {
+        accountUsable: true, connectReady: true, paymentReuseConsentAccepted: true, paymentReuseConsentVersion: read.consentVersion,
+        paymentReuseConsentedAtUtc: read.consentedAtUtc, sellerDisplayReady: true, sellerNihoAccountRef: await sellerRef(pool, "provider-supper"),
+        stripeConnectAccountRef: ACCOUNT, sellerDisplayName: "Synthetic Legal Seller KK", requiredConsentVersion: "publication-v1",
+        observedAtUtc: observed.toISOString(), validUntilUtc: new Date(observed.getTime() + 5 * 60_000).toISOString(),
+      };
+      const stale = await publications.refreshReadiness(owner, snapshot);
+      assert.deepEqual([stale.paymentReuseConsentAccepted, stale.paymentReuseConsentVersion, stale.paymentReuseConsentedAtUtc], [false, null, null]);
+
+      // A new consent counts again, but only the one the snapshot names: the old consent's time no longer matches.
+      const renewed = await consents.record(owner, { stripeConnectAccountRef: ACCOUNT, consentVersion: VERSION, nowUtc: at(3) });
+      assert.equal((await publications.refreshReadiness(owner, snapshot)).paymentReuseConsentAccepted, false);
+      const fresh = await publications.refreshReadiness(owner, { ...snapshot, paymentReuseConsentedAtUtc: renewed.consent.consentedAtUtc });
+      assert.equal(fresh.paymentReuseConsentAccepted, true);
+      // Another account or version than the active consent's is not it either.
+      assert.equal((await publications.refreshReadiness(owner, { ...snapshot, paymentReuseConsentVersion: "another-version", paymentReuseConsentedAtUtc: renewed.consent.consentedAtUtc })).paymentReuseConsentAccepted, false);
+    });
+  });
+
   it("keeps one active consent under concurrent records", async () => {
     await withDb(async (pool) => {
       const { owner, consents } = await supper(pool);

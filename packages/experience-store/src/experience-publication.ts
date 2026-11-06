@@ -19,6 +19,7 @@ import {
 } from "./guest-bookings.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { isHostAccountId } from "./host-accounts.ts";
+import { payoutConsentStillCounts } from "./payout-account-consents.ts";
 import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
 import { isHostSellerRef } from "./host-sellers.ts";
 import {
@@ -1627,6 +1628,19 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       const membership = await requireMembership(client, actor, ["OWNER"]);
+      // A host account's payout consent (ADR 0003) is read before Stripe answers, and may be withdrawn meanwhile. A
+      // withdrawal takes this inventory lock first, so under it the claim is checked again: a consent read before a
+      // withdrawal is written as no consent, never back as a valid one.
+      let consent = { accepted: input.paymentReuseConsentAccepted, version: input.paymentReuseConsentVersion, at: input.paymentReuseConsentedAtUtc };
+      if (consent.accepted && isHostAccountId(membership.nihoUserId)) {
+        const counts = consent.version !== null && consent.at !== null && await payoutConsentStillCounts(client, {
+          providerId: actor.providerId,
+          stripeConnectAccountRef: input.stripeConnectAccountRef,
+          consentVersion: consent.version,
+          consentedAtUtc: consent.at,
+        });
+        if (!counts) consent = { accepted: false, version: null, at: null };
+      }
       const result = await client.query<DbRow>(
         `INSERT INTO provider_publication_readiness
            (provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
@@ -1652,7 +1666,7 @@ export class ExperiencePublicationRepository {
            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
            required_consent_version,observed_at,valid_until,version,updated_at`,
         [actor.providerId, membership.nihoUserId, input.accountUsable, input.connectReady,
-          input.paymentReuseConsentAccepted, input.paymentReuseConsentVersion, input.paymentReuseConsentedAtUtc,
+          consent.accepted, consent.version, consent.at,
           input.sellerDisplayReady, input.sellerNihoAccountRef, input.stripeConnectAccountRef,
           input.sellerDisplayName, input.requiredConsentVersion, input.observedAtUtc, input.validUntilUtc],
       );
