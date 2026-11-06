@@ -12,7 +12,9 @@ import { cookieSealer } from "./cookie-seal";
 import { createMockHostFetch, MOCK_ACCESS_TOKEN_PREFIX, mockToken } from "./mock-niho";
 import { refreshConnection, type NihoAuthDeps } from "./niho-auth";
 import { usableProviders, type HostProvider } from "./providers";
+import { listExperienceHostProviders, readExperienceHostSession } from "./accounts";
 import {
+  ACCOUNT_SESSION_COOKIE,
   decodeSession,
   encodeLoginState,
   encodeSession,
@@ -27,6 +29,7 @@ import {
   startSession,
   type HostLoginState,
   type HostSession,
+  type NihoHostSession,
 } from "./session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
 import { parseBearerToken } from "./bearer-token";
@@ -43,23 +46,37 @@ export function requireHostConsole() {
   if (!config.hostConsoleEnabled) notFound();
 }
 
-/** The signed-in host for this request, or null. Read once per request. */
+/**
+ * The signed-in host for this request, or null. Read once per request. With Experience host accounts
+ * (EXPERIENCE_HOST_ACCOUNTS_ENABLED) only their session cookie counts, read from the experience DB (a store failure
+ * throws); otherwise only the NIHO login's sealed cookie.
+ */
 export const readHostSession = cache(async (): Promise<HostSession | null> => {
   if (!config.hostConsoleEnabled) return null;
   const jar = await cookies();
+  if (config.hostAccountsEnabled) return readExperienceHostSession(jar.get(ACCOUNT_SESSION_COOKIE)?.value);
   return decodeSession(sessionSealer(), jar.get(SESSION_COOKIE)?.value, Date.now());
 });
+
+/** 「メールでログイン」 with Experience host accounts, 「NIHO でログイン」 otherwise: the console's sign-in buttons. */
+export function hostLoginLabel(): string {
+  return config.hostAccountsEnabled ? "メールでログイン" : "NIHO でログイン";
+}
 
 export function nihoAuthDeps(): NihoAuthDeps {
   return { fetch, nihoOrigin: config.nihoWebOrigin };
 }
 
 /** NIHO request transport: the real origin in http mode, the synthetic one in mock mode. */
-export function nihoApiFetch(session: HostSession): typeof fetch {
+export function nihoApiFetch(session: NihoHostSession): typeof fetch {
   return isHostMock() ? createMockHostFetch(session.mockScenario ?? "default") : fetch;
 }
 
 export type ProvidersLoad =
+  /**
+   * `nihoUserId` is the identity the experience DB's `*_niho_user_id` columns hold for this person: the NIHO user ID
+   * with the NIHO login, the Experience host account ID (`hst_` + 32 hex) with host accounts (ADR 0003).
+   */
   | { status: "ok"; nihoUserId: string; providers: HostProvider[] }
   | { status: "signed-out" }
   /** The NIHO Web access token is (nearly) expired: the browser refreshes, then reloads. */
@@ -69,7 +86,7 @@ export type ProvidersLoad =
   | { status: "error" };
 
 /** Legacy provider client for synthetic preview only; live consumers use the selected Host v1 client. */
-export function hostApiClient(session: HostSession): ExperienceHostApiClient {
+export function hostApiClient(session: NihoHostSession): ExperienceHostApiClient {
   if (!isHostMock()) throw new Error("NIHO legacy host operations are outside contract v1.0.0");
   return createLegacyExperienceHostApiClient({
     nihoWebOrigin: config.nihoWebOrigin,
@@ -79,7 +96,7 @@ export function hostApiClient(session: HostSession): ExperienceHostApiClient {
 }
 
 /** NIHO host common contract v1.0.0: identity and legacy Connect projection only. */
-export async function selectedHostApiClient(session: HostSession, options: { legacyProviderId?: string } = {}): Promise<SelectedExperienceHostApiClient> {
+export async function selectedHostApiClient(session: NihoHostSession, options: { legacyProviderId?: string } = {}): Promise<SelectedExperienceHostApiClient> {
   const serviceIdToken = isHostMock()
     ? MOCK_EXPERIENCE_HOST_SERVICE_TOKEN
     : await (async () => {
@@ -108,10 +125,23 @@ export async function selectedHostApiClient(session: HostSession, options: { leg
   });
 }
 
-/** Resolve the signed-in NIHO identity to local Experience seller memberships without request memoization. */
+/**
+ * Resolve the signed-in identity to local Experience seller memberships without request memoization: the NIHO identity
+ * (Host v1) with the NIHO login, or the Experience host account's memberships in the experience DB, with no call to NIHO.
+ */
 export async function loadHostProvidersFresh(): Promise<ProvidersLoad> {
-  const session = await readHostSession();
+  let session: HostSession | null;
+  try { session = await readHostSession(); }
+  catch { return { status: "error" }; }
   if (!session) return { status: "signed-out" };
+  if (session.kind === "experience") {
+    try {
+      const providers = await listExperienceHostProviders(session);
+      return providers ? { status: "ok", nihoUserId: session.hostAccountId, providers } : { status: "error" };
+    } catch {
+      return { status: "error" };
+    }
+  }
   if (!accessTokenUsable(session, Date.now())) return { status: "refresh" };
   try {
     const identityResult = await (await selectedHostApiClient(session)).getIdentity();
@@ -176,17 +206,17 @@ export async function loadHostProvidersFresh(): Promise<ProvidersLoad> {
 export const loadHostProviders = cache(loadHostProvidersFresh);
 
 export type Renewal =
-  | { outcome: "refreshed"; session: HostSession }
+  | { outcome: "refreshed"; session: NihoHostSession }
   /** NIHO ended the connection (expired, revoked, or an old refresh token): sign in again. */
   | { outcome: "rejected" }
   /** Try again later. Store `session`: NIHO may already have rotated the refresh token. */
-  | { outcome: "unavailable"; session: HostSession };
+  | { outcome: "unavailable"; session: NihoHostSession };
 
 /**
  * Exchanges the connection's refresh token for a new one and a new NIHO Web access token.
  * Only /host/auth/refresh (serialised by the browser across tabs) and logout call this.
  */
-export async function renewSession(session: HostSession): Promise<Renewal> {
+export async function renewSession(session: NihoHostSession): Promise<Renewal> {
   if (isHostMock()) {
     const now = Date.now();
     return { outcome: "refreshed", session: startSession({ ...session, refreshToken: mockToken("mock-refresh-token."), accessToken: mockToken(MOCK_ACCESS_TOKEN_PREFIX), accessTokenExpiresAt: now + MOCK_ACCESS_TOKEN_TTL_MS }, now) };
@@ -194,7 +224,7 @@ export async function renewSession(session: HostSession): Promise<Renewal> {
   const deps = nihoAuthDeps();
   const refreshed = await refreshConnection(deps, session.refreshToken);
   if (!refreshed.ok) return refreshed.reason === "rejected" ? { outcome: "rejected" } : { outcome: "unavailable", session };
-  const rotated: HostSession = { ...session, refreshToken: refreshed.value.refreshToken, connectionExpiresAt: refreshed.value.connectionExpiresAt };
+  const rotated: NihoHostSession = { ...session, refreshToken: refreshed.value.refreshToken, connectionExpiresAt: refreshed.value.connectionExpiresAt };
   return { outcome: "refreshed", session: startSession({ ...rotated, accessToken: refreshed.value.accessToken, accessTokenExpiresAt: refreshed.value.accessTokenExpiresAt }, Date.now()) };
 }
 
@@ -216,7 +246,7 @@ export function seeOther(location: string): NextResponse {
   return new NextResponse(null, { status: 303, headers: { location, "cache-control": NO_STORE } });
 }
 
-export function setSessionCookie(response: NextResponse, session: HostSession, now: number) {
+export function setSessionCookie(response: NextResponse, session: NihoHostSession, now: number) {
   response.cookies.set(SESSION_COOKIE, encodeSession(sessionSealer(), session), hostCookieOptions(SESSION_COOKIE_PATH, sessionMaxAgeSeconds(session, now)));
 }
 

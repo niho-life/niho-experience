@@ -7,6 +7,7 @@
 - 対象はホストの画面だけ（scope `/host/`）。旅行者のページ（`(site)`・`(ja)`）と英語の紹介 `/host` は範囲外で、manifest も Service Worker も出さない。
 - 入口はホストの root layout（`(host)/host/layout.tsx`）だけ。`HOST_PWA_ENABLED=true` のとき manifest・apple-touch-icon・`apple-mobile-web-app-*` を出し、`HostPwaRegistrar` が `/host/sw.js` を登録する。`viewportFit: "cover"` は付けない（上端の safe area は今のまま）。
 - 起動先は `/host/launch`（console の枠の外）。アプリ内で始めたログインのセッションならホームへ、それ以外はログイン画面を出す。ブラウザで開いてセッションがあればホームへ進む。
+- Experience 自前のホストアカウント（`EXPERIENCE_HOST_ACCOUNTS_ENABLED`、[host-accounts.md](host-accounts.md)）では、ログインはメールのリンクで、回す refresh token が無いので、どこでログインしたセッションもアプリで使う（surface の印は使わない）。iOS のアプリの中でリクエストしたリンクはアプリで開けない（同じ文書の「注意」）。
 - アプリでは、ログアウト（アプリ内でログインしたセッション）と、画面が見つけたセッション切れの行き先を `/host` ではなく `/host/launch` にする（範囲の外へ出ない）。`HOST_PWA_ENABLED=true` のとき、cookie が無い・期限切れの状態で console の URL を開いた場合の転送先も `/host/launch`（ブラウザでも日本語のログイン画面になる）。1 分以上裏にいたあと戻るとページを読み込み直す（編集中は除く。予約・メッセージは一覧を画面側で持つので、`router.refresh()` ではなく全体を読み込む）。裏にいる間に push が届いていれば、1 分未満でも戻ったときに読み込み直す。表示中に届いた push はサーバー側の部分（ホームのやること・アイコンの数）だけ更新する（P2）。
 - 設定に「この端末」を足す（「アプリ」の行。追加済み・Chromium の追加ボタン・iPhone/iPad と Mac Safari の手順）。`HOST_PUSH_ENABLED=true` なら「通知」の行も出す（P2）。
 

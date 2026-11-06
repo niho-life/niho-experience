@@ -138,4 +138,32 @@ describe("Experience publication NIHO contract v1 boundary", () => {
     expect(mocks.clear).toHaveBeenCalledTimes(1);
     expect(mocks.getConnect).not.toHaveBeenCalled();
   });
+
+  it("takes an Experience host account from its session, never calls NIHO, and stays closed until slice 3 (ADR 0003)", async () => {
+    const hostAccountId = `hst_${"c".repeat(32)}`;
+    mocks.read.mockResolvedValue({ kind: "experience", hostAccountId, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e" });
+    for (const [resolved, status, code] of [
+      [{ kind: "ready", profile }, 409, "SELLER_SETUP_REQUIRED"],
+      [{ kind: "setup-required" }, 409, "SELLER_SETUP_REQUIRED"],
+      [{ kind: "ambiguous" }, 409, "SELLER_PROFILE_AMBIGUOUS"],
+      [{ kind: "none" }, 403, "FORBIDDEN"],
+    ] as const) {
+      mocks.ownerProfile.mockResolvedValueOnce(resolved);
+      for (const operation of ["READ", "EDIT", "OWNER"] as const) {
+        if (operation !== "READ") mocks.ownerProfile.mockResolvedValueOnce(resolved);
+        const result = await publicationHostBoundary(operation);
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.response.status).toBe(status);
+          expect(await result.response.json()).toEqual({ error: { code } });
+        }
+      }
+    }
+    expect(mocks.ownerProfile).toHaveBeenCalledWith(hostAccountId);
+    expect(mocks.selectedClient).not.toHaveBeenCalled();
+    expect(mocks.getIdentity).not.toHaveBeenCalled();
+    expect(mocks.getConnect).not.toHaveBeenCalled();
+    expect(mocks.ensureOwner).not.toHaveBeenCalled();
+    expect(mocks.clear).not.toHaveBeenCalled();
+  });
 });

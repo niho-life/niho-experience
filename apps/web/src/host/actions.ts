@@ -5,7 +5,7 @@ import type { ExperienceHostApiClient, ExperienceHostApiFailure, ExperienceProvi
 import { nihoIdOrNull, type HostProviderReviewStatus } from "@/lib/host/providers";
 import { HOST_MOCK_LOGIN_PATH } from "@/lib/host/routes";
 import { hostApiClient, isHostMock, readHostSession } from "@/lib/host/server";
-import { accessTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable, nihoSessionOrNull } from "@/lib/host/session";
 import { openStripe, stepNotice, syncStripe } from "./connect";
 import { readMockHostPayout } from "./data";
 import { pageTextFromInput } from "./editor";
@@ -41,9 +41,11 @@ type LegacyRun<T extends object> = (client: ExperienceHostApiClient) => Promise<
 async function withLegacyHostMock<T extends object>(run: LegacyRun<T>): Promise<HostActionResult<T>> {
   const session = await readHostSession();
   if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
-  if (!isHostMock()) return { ok: false, message: LEGACY_HOST_OPERATION_UNAVAILABLE };
+  // The synthetic preview's NIHO sessions only: an Experience host account has no NIHO token to send.
+  const niho = nihoSessionOrNull(session);
+  if (!isHostMock() || !niho) return { ok: false, message: LEGACY_HOST_OPERATION_UNAVAILABLE };
   try {
-    return await run(hostApiClient(session));
+    return await run(hostApiClient(niho));
   } catch {
     return { ok: false, message: HOST_NETWORK_ERROR_TEXT };
   }

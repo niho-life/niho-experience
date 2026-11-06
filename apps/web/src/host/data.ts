@@ -3,7 +3,7 @@ import type { ExperienceHostApiClient as SelectedExperienceHostApiClient } from 
 import type { ExperienceHostApiClient as LegacyExperienceHostApiClient, ExperienceProviderConsent } from "@niho-experience/api-client/legacy-host";
 import { nihoIdOrNull, selectProvider, type HostProvider } from "@/lib/host/providers";
 import { hostApiClient, isHostMock, loadHostProviders, readHostSession, selectedHostApiClient } from "@/lib/host/server";
-import { accessTokenUsable, type HostSession } from "@/lib/host/session";
+import { accessTokenUsable, nihoSessionOrNull, type HostSession, type NihoHostSession } from "@/lib/host/session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
 import { openStripe, stepNotice, syncStripe } from "./connect";
 import {
@@ -60,9 +60,12 @@ export interface HostConsoleData {
   googleConnection: HostGoogleConnection | null;
 }
 
-/** The session when its NIHO Web access token can still be sent (the console layout refreshes it otherwise). */
-async function usableSession(): Promise<HostSession | null> {
-  const session = await readHostSession();
+/**
+ * The NIHO login's session when its NIHO Web access token can still be sent (the console layout refreshes it otherwise).
+ * null for an Experience host account (ADR 0003): it has no NIHO token, so nothing below calls NIHO for it.
+ */
+async function usableNihoSession(): Promise<NihoHostSession | null> {
+  const session = nihoSessionOrNull(await readHostSession());
   return session && accessTokenUsable(session, Date.now()) ? session : null;
 }
 
@@ -77,7 +80,7 @@ async function loadMeetingDefaults(provider: Pick<HostProvider, "id" | "memberRo
 
 /** The contract mock retains provider detail/consent for the old preview screens only. */
 async function loadMockProviderDetail(provider: HostProvider) {
-  const session = await usableSession();
+  const session = await usableNihoSession();
   if (!session || !isHostMock()) return null;
   try {
     const result = await hostApiClient(session).getExperienceProvider(provider.id);
@@ -273,7 +276,9 @@ export interface HostPayoutData {
  */
 export async function loadHostPayout(provider: HostProvider, options: { candidates?: boolean; connect?: "return" | "refresh" | null } = {}): Promise<HostPayoutData> {
   if (provider.memberRole !== "OWNER") return { load: { status: "not-owner" }, notice: null, redirectTo: null };
-  const session = await usableSession();
+  // An Experience host account (ADR 0003) has no NIHO session: NIHO's Connect projection is not read, and 受取口座 reads
+  // as unreadable until slice 3 reads the account from Stripe directly.
+  const session = await usableNihoSession();
   if (!session) return { load: { status: "error" }, notice: null, redirectTo: null };
   try {
     if (isHostMock()) {
@@ -296,7 +301,7 @@ export async function loadHostPayout(provider: HostProvider, options: { candidat
 /** Contract v1 intentionally has no NIHO provider-terms endpoint; synthetic terms are preview-only. */
 export async function loadRegistrationConsent(): Promise<ExperienceProviderConsent | null> {
   if (!isHostMock()) return null;
-  const session = await usableSession();
+  const session = await usableNihoSession();
   if (!session) return null;
   try {
     const result = await hostApiClient(session).listExperienceProviders();

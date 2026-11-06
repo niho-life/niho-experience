@@ -2,7 +2,7 @@ import "server-only";
 import type { HostActor, ExperienceHostSellerProfile, ProviderPublicationReadinessInput } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { clearSessionCookie, noStoreJson, readHostSession, selectedHostApiClient } from "@/lib/host/server";
-import { accessTokenUsable } from "@/lib/host/session";
+import { accessTokenUsable, type ExperienceHostSession } from "@/lib/host/session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
 
 type Operation = "READ" | "EDIT" | "OWNER";
@@ -25,18 +25,37 @@ function endedSession(): Response {
 }
 
 /**
+ * An Experience host account (ADR 0003 slice 2): the person is the session's host account, with no call to NIHO. NIHO's
+ * Connect projection (account, readiness, reuse consent) is not read for it either, so every operation stays closed
+ * with the typed outcome a seller without a usable setup gets: SELLER_SETUP_REQUIRED for the provider's OWNER, FORBIDDEN
+ * for anyone else. Slice 3 replaces this with Stripe's own readiness and an Experience consent.
+ */
+async function experienceAccountBoundary(session: ExperienceHostSession, repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>): Promise<PublicationHostBoundaryResult> {
+  let resolved: Awaited<ReturnType<typeof repository.currentOwnerSellerProfile>>;
+  try { resolved = await repository.currentOwnerSellerProfile(session.hostAccountId); }
+  catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
+  if (resolved.kind === "none") return { ok: false, response: error("FORBIDDEN", 403) };
+  if (resolved.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
+  return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
+}
+
+/**
  * Establish the current person from NIHO v1, then resolve Experience membership and the
  * operator-provisioned Connect mapping locally. Neither identity nor seller selection is
- * inferred from a legacy NIHO provider directory or its nihoUserId field.
+ * inferred from a legacy NIHO provider directory or its nihoUserId field. With Experience
+ * host accounts the person comes from their session instead (experienceAccountBoundary).
  */
 export async function publicationHostBoundary(_operation: Operation): Promise<PublicationHostBoundaryResult> {
   if (!config.experienceHostPublicationApiEnabled) return { ok: false, response: error("NOT_FOUND", 404) };
-  const session = await readHostSession();
+  let session: Awaited<ReturnType<typeof readHostSession>>;
+  try { session = await readHostSession(); }
+  catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
   if (!session) return { ok: false, response: endedSession() };
   if (!accessTokenUsable(session, Date.now())) return { ok: false, response: error("SESSION_REFRESH_REQUIRED", 401) };
 
   const repository = experiencePublicationRepository();
   if (!repository) return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
+  if (session.kind === "experience") return experienceAccountBoundary(session, repository);
 
   try {
     const client = await selectedHostApiClient(session);

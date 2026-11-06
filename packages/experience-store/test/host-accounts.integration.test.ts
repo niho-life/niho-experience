@@ -431,4 +431,36 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       assert.deepEqual(raced.map((result) => result.kind).sort(), ["granted", "provider-has-host-owner"]);
     });
   });
+
+  it("lists an account's OWNER and EDITOR providers for /host by name, with or without a NIHO seller profile", async () => {
+    await withAccounts(async ({ pool, accounts }) => {
+      await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-named'), ('provider-bare'), ('provider-viewer'), ('provider-inactive'), ('provider-other')");
+      // Only one provider has a (NIHO-era) seller profile: its name is used; the others fall back to their ID.
+      await pool.query(
+        `INSERT INTO experience_host_seller_profiles (provider_id, legacy_provider_id, provider_display_name, seller_niho_account_ref, stripe_connect_account_ref, seller_display_name)
+         VALUES ('provider-named', 'legacy-named', 'Zen Kitchen', 'niho-user-synthetic', 'acct_synthetic12345678', 'Synthetic seller')`,
+      );
+      const host = await provision(accounts, "host@example.com");
+      const other = await provision(accounts, "other@example.com");
+      assert.deepEqual(await accounts.grantProviderOwner({ providerId: "provider-bare", hostAccountId: host, nowUtc: at(0) }), { kind: "granted" });
+      await pool.query(
+        `INSERT INTO provider_memberships (provider_id, niho_user_id, role, active) VALUES
+           ('provider-named', $1, 'EDITOR', true), ('provider-viewer', $1, 'VIEWER', true), ('provider-inactive', $1, 'EDITOR', false),
+           ('provider-other', $2, 'OWNER', true)`,
+        [host, other],
+      );
+
+      // By name in byte order (COLLATE "C", as listHostProviders): "Zen Kitchen" before "provider-bare".
+      assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: host }), [
+        { providerId: "provider-named", displayName: "Zen Kitchen", memberRole: "EDITOR", legacyProviderId: "legacy-named" },
+        { providerId: "provider-bare", displayName: "provider-bare", memberRole: "OWNER", legacyProviderId: null },
+      ]);
+      assert.deepEqual((await accounts.listProviderMemberships({ hostAccountId: other })).map((row) => row.providerId), ["provider-other"]);
+      // A suspended or unknown account opens nothing; a NIHO user ID is not a host account ID.
+      await accounts.suspendHostAccount({ hostAccountId: host, nowUtc: at(MINUTE) });
+      assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: host }), []);
+      assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: `hst_${"0".repeat(32)}` }), []);
+      await assert.rejects(accounts.listProviderMemberships({ hostAccountId: "niho-user-synthetic" }), StoreValidationError);
+    });
+  });
 });

@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -113,6 +113,16 @@ export function hostNotificationAddresses(): HostNotificationAddresses | null {
   if (!config.hostMailEnabled) return null;
   const pool = experiencePool();
   return pool ? new HostNotificationAddresses(pool) : null;
+}
+
+/**
+ * ホストのアカウント (ADR 0003): Experience's own host accounts, sign-in links and sessions. null until
+ * EXPERIENCE_HOST_ACCOUNTS_ENABLED is on (which needs the experience DB).
+ */
+export function hostAccounts(): HostAccounts | null {
+  if (!config.hostAccountsEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new HostAccounts(pool) : null;
 }
 
 /**

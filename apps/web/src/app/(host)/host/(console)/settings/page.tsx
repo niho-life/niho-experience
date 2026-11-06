@@ -32,19 +32,25 @@ function connectStep(value: string | string[] | undefined): "return" | "refresh"
   return value === "return" || value === "refresh" ? value : null;
 }
 
-/** アカウント: the NIHO account and ログアウト (its form cannot sit inside the settings form). */
-function AccountPanel({ session }: { session: Pick<HostSession, "displayName" | "iconUrl"> }) {
+/**
+ * アカウント: the NIHO account (or, with Experience host accounts, the address the host signs in with) and ログアウト
+ * (its form cannot sit inside the settings form).
+ */
+function AccountPanel({ session }: { session: Pick<HostSession, "kind" | "displayName" | "iconUrl"> }) {
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
+  const experience = session.kind === "experience";
   return (
     <FieldSection id="settings-account" title="アカウント">
-      <FieldRow label="NIHO アカウント" labelId="settings-account-label">
+      <FieldRow label={experience ? "ログインのメール" : "NIHO アカウント"} labelId="settings-account-label">
         <div role="group" aria-labelledby="settings-account-label" className="flex min-h-10 flex-wrap items-center gap-2.5">
           <AccountAvatar account={account} className="size-6 text-[0.75rem]" />
-          <span>{account.displayName || "NIHO アカウント"}</span>
-          <a href={config.nihoWebOrigin} className={consoleButtonClass("secondary", "sm")}>
-            <HostIcon name="external" className="size-3.5" />
-            NIHO アプリ
-          </a>
+          <span className="[overflow-wrap:anywhere]">{account.displayName || (experience ? "" : "NIHO アカウント")}</span>
+          {experience ? null : (
+            <a href={config.nihoWebOrigin} className={consoleButtonClass("secondary", "sm")}>
+              <HostIcon name="external" className="size-3.5" />
+              NIHO アプリ
+            </a>
+          )}
         </div>
       </FieldRow>
       <div className="border-t border-line pt-3 md:pl-[184px]">

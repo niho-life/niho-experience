@@ -296,6 +296,39 @@ function hostMailSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled:
   return true;
 }
 
+/**
+ * The flags whose code sends the signed-in host's NIHO access token to NIHO. With Experience host accounts there is no
+ * such token (ADR 0003), so none of them may be on at the same time. The NIHO Connect projection of the host publication
+ * API is not here: that boundary closes itself for an Experience session (publication-host-boundary.ts).
+ */
+export const NIHO_HOST_TOKEN_FLAGS = Object.freeze([
+  "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED",
+  "EXPERIENCE_PROVIDER_PAGES_API_ENABLED",
+  "EXPERIENCE_TRANSLATE_API_ENABLED",
+  "HOST_SUPPORT_SETTINGS_API_ENABLED",
+  "HOST_SUPPORT_HISTORY_API_ENABLED",
+  "EXPERIENCE_FEE_SUMMARY_API_ENABLED",
+  "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
+] as const);
+
+/**
+ * ホストのアカウント (ADR 0003 slice 2, docs/host-accounts.md): /host signs hosts in with Experience's own accounts (a
+ * single-use link emailed to them) and reads their providers from the experience DB, with no call to NIHO for identity.
+ * HTTP only, off by default (the NIHO login is unchanged while off). The links go out through the mail job
+ * (EXPERIENCE_GUEST_MAIL_ENABLED) and the accounts live in the experience DB: turned on without them, or together with a
+ * flag that sends a NIHO host access token (NIHO_HOST_TOKEN_FLAGS), the server stops at start-up.
+ */
+function hostAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, guestMailEnabled: boolean): boolean {
+  if (apiMode !== "http" || env.EXPERIENCE_HOST_ACCOUNTS_ENABLED !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL in http mode");
+  if (!guestMailEnabled) throw new Error("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true (the mail job sends the sign-in links) in http mode");
+  for (const name of NIHO_HOST_TOKEN_FLAGS) {
+    if (env[name] === "true") throw new Error(`EXPERIENCE_HOST_ACCOUNTS_ENABLED=true cannot be on with ${name}=true (it sends a NIHO host access token to NIHO)`);
+  }
+  return true;
+}
+
 /*
  * OTA の枠管理 (docs/ota-runtime.md, docs/ota-google-channel-flow.md). These settings are the start-up gate and the deploy
  * table's counterpart (scripts/deploy/runtime-flags.mjs): a flag turned on without what it needs stops the server, naming
@@ -736,6 +769,8 @@ export function resolveConfig(env: Env) {
   const otaBooking = otaBookingSettings(apiMode, env, guestMail.enabled, hostPushEnabled);
   // ホストへのメール (#194): the sign-in's verified address, the host's own choice and the booking emails; see hostMailSetting.
   const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
+  // ホストのアカウント (ADR 0003): /host signs in with Experience's own accounts instead of NIHO; see hostAccountsSetting.
+  const hostAccountsEnabled = hostAccountsSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
   const googleCalendarJobs = googleCalendarJobSettings(apiMode, env);
   // OTA の枠管理: start-up gates only; the routes still read their flags from process.env (see channelWatchdogSetting).
@@ -884,6 +919,8 @@ export function resolveConfig(env: Env) {
     otaGuestDetailsEnabled: otaBooking.guestDetails,
     otaBookingNotificationsEnabled: otaBooking.notifications,
     hostMailEnabled,
+    // Experience host accounts (ADR 0003): the emailed sign-in link and server-side sessions replace the NIHO login.
+    hostAccountsEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,

@@ -1,6 +1,6 @@
 import "server-only";
 import type { Pool } from "pg";
-import { BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostMailOutbox, HostNotificationAddresses, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
+import { BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
@@ -34,6 +34,8 @@ export interface ExperienceJobDependencies {
   readonly refundSubmitter?: () => RefundSendDeps["submit"];
   /** Whether hosts get emails (#194, EXPERIENCE_HOST_MAIL_ENABLED): their address confirmations and booking emails. */
   readonly hostMail?: boolean;
+  /** Whether hosts sign in with Experience accounts (ADR 0003, EXPERIENCE_HOST_ACCOUNTS_ENABLED): their sign-in links. */
+  readonly hostAccounts?: boolean;
   readonly settlementReconciliation?: (pool: Pool) => SettlementReconciliationDeps | null;
   readonly mediaStorage?: () => ExperiencePublicMediaStorage | null;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
@@ -101,6 +103,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       otaGuests: new ExternalReservationGuests(pool),
       hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
       hostAddresses: new HostNotificationAddresses(pool),
+      hostLogins: (dependencies.hostAccounts ?? config.hostAccountsEnabled) ? new HostAccounts(pool) : null,
       providerMediaCleanup: mediaStorage ? {
         repository: new ProviderMediaCleanupRepository(pool),
         storage: mediaStorage,

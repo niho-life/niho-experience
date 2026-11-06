@@ -20,6 +20,7 @@ import type {
   ClaimedHostBookingMail,
   HostAddressConfirmationClaim,
   HostBookingMailClaim,
+  HostLoginLinkIssue,
   RefundStatus,
   RefundSubmission,
   StripeRefundAnswer,
@@ -827,5 +828,68 @@ describe("host emails (#194)", () => {
     expect(mail!.text).toContain("心当たりがなければ、このメールは無視してください。");
     // The token is in the fragment only.
     expect(mail!.text).not.toContain(`?t=${HOST_TOKEN}`);
+  });
+});
+
+describe("sign-in links of Experience host accounts (ADR 0003)", () => {
+  const LOGIN_TOKEN = "loginToken".padEnd(43, "Q");
+  const ids = ["7c9e6679-7425-40de-944b-e07fc1f90ae7", "16fd2706-8baf-433b-82eb-8c7fada847da", "0f8fad5b-d9cb-469f-a165-70867728950e"];
+  const send = (n: number) => ({ kind: "send" as const, token: `${LOGIN_TOKEN.slice(0, -1)}${n}`, toEmail: `host${n}@example.test`, expiresAtUtc: "2026-11-01T00:15:00.000Z" });
+  function hostLogins(issues: ({ kind: "skip" } | ReturnType<typeof send>)[], pending = ids) {
+    return {
+      listPendingLoginRequests: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<readonly string[]>>(async () => [...pending]),
+      issueLoginLink: vi.fn<(input: { requestId: string; nowUtc: string }) => Promise<HostLoginLinkIssue>>(async () => issues.shift() ?? { kind: "skip" }),
+      purgeExpired: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<number>>(async () => 4),
+    };
+  }
+
+  it("sends each pending link once, first in the run, with the token in the fragment only, and skips one that can no longer go", async () => {
+    const logins = hostLogins([send(1), { kind: "skip" }, send(3)]);
+    const counts = await runExperienceJobs({ ...s.deps, hostLogins: logins });
+    expect(counts.hostLoginLinks).toEqual({ claimed: 3, sent: 2, skipped: 1, failed: 0 });
+    expect(counts.hostAccountPurge).toEqual({ purged: 4 });
+    expect(logins.listPendingLoginRequests).toHaveBeenCalledWith({ nowUtc: NOW.toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostLoginLinks });
+    expect(logins.issueLoginLink.mock.calls.map(([input]) => input)).toEqual(ids.map((requestId) => ({ requestId, nowUtc: NOW.toISOString() })));
+    expect(logins.purgeExpired).toHaveBeenCalledWith({ nowUtc: NOW.toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostAccountsPurgedPerStep });
+    // Before every other email of the run: the host is waiting for it.
+    expect(logins.listPendingLoginRequests.mock.invocationCallOrder[0]).toBeLessThan(s.questions.claimReplyDeliveries.mock.invocationCallOrder[0]!);
+    expect(s.sent.map((mail) => mail.to)).toEqual(["host1@example.test", "host3@example.test"]);
+    const [mail] = s.sent;
+    expect(mail!.subject).toBe("NIHO 体験ホストへのログイン");
+    expect(mail!.text).toContain(`${SITE}/host/auth/open#t=${send(1).token}`);
+    expect(mail!.html).toContain(`${SITE}/host/auth/open#t=${send(1).token}`);
+    expect(mail!.text).toContain("11/1 09:15 まで（15 分間）、1 回だけ使えます。");
+    expect(mail!.text).toContain("リンクは、リクエストしたブラウザで開いてください。");
+    expect(mail!.text).not.toContain(`?t=${send(1).token}`);
+    expect(mail).not.toHaveProperty("deliveryRef");
+  });
+
+  it("never sends a link again after a failed send, and a transient failure ends the step for this run", async () => {
+    const logins = hostLogins([send(1), send(2), send(3)]);
+    s.results.push({ ok: false, failure: "permanent" }, { ok: false, failure: "transient" });
+    const counts = await runExperienceJobs({ ...s.deps, hostLogins: logins });
+    expect(counts.hostLoginLinks).toEqual({ claimed: 2, sent: 0, skipped: 0, failed: 2 });
+    // The third request is not minted: it waits for the next run, within its 15 minutes.
+    expect(logins.issueLoginLink).toHaveBeenCalledTimes(2);
+    expect(s.mailer.sendMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("never logs or reports a token or an address, even when a step fails", async () => {
+    const output = [vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")].map((spy) => spy.mockImplementation(() => {}));
+    const logins = hostLogins([send(1)]);
+    logins.purgeExpired.mockRejectedValueOnce(new Error(`purge failed for ${send(1).toEmail} ${send(1).token}`));
+    const counts = await runExperienceJobs({ ...s.deps, hostLogins: logins });
+    expect(counts.hostAccountPurge).toEqual({ error: "unavailable" });
+    expect(s.onStepError).toHaveBeenCalledWith("hostAccountPurge", "Error");
+    const reported = JSON.stringify(counts) + JSON.stringify(s.onStepError.mock.calls) + JSON.stringify(output.flatMap((spy) => spy.mock.calls));
+    expect(reported).not.toContain(send(1).token);
+    expect(reported).not.toContain("host1@example.test");
+    for (const spy of output) spy.mockRestore();
+  });
+
+  it("does not run while host accounts are off", async () => {
+    const counts = await runExperienceJobs({ ...s.deps, hostLogins: null });
+    expect(counts).not.toHaveProperty("hostLoginLinks");
+    expect(counts).not.toHaveProperty("hostAccountPurge");
   });
 });

@@ -23,13 +23,13 @@ vi.mock("@/lib/host/server", () => ({
   noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }),
 }));
 
-import type { HostSession } from "./session";
+import type { NihoHostSession } from "./session";
 import { HostArticleLinkClient, hostArticleLinkFailure, loadHostGuideLinkContext } from "./guide-link-api-server";
 
 const SESSION = {
   accessToken: "opaque-host-token",
   accessTokenExpiresAt: Date.now() + 3_600_000,
-} as HostSession;
+} as NihoHostSession;
 const ID = "00000000-0000-4000-8000-000000000042";
 const LINK = {
   id: ID, state: "PENDING", providerName: "Synthetic Provider", inviterName: "Synthetic Host", writerName: "Synthetic Writer",

@@ -19,13 +19,24 @@ const MAX_BODY_BYTES = 4096;
 
 export type PushBffRequest = { response: NextResponse } | { session: HostSession; nihoUserId: string; body: Record<string, unknown> };
 
+/**
+ * What a device's subscription follows (`host_push_subscriptions.connection_id`, text of 1-256 characters): the NIHO
+ * login's connection ID, or an Experience session's non-secret `sessionRef` (a UUID; ADR 0003). Logout and an ended
+ * session remove the devices of that key, so push follows the session either way. No migration: the column holds both.
+ */
+export function pushConnectionKey(session: HostSession): string {
+  return session.kind === "experience" ? session.sessionRef : session.connectionId;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** 404 while push is off, then same-origin, the signed-in host and a small JSON object. */
 export async function openPushBff(request: NextRequest): Promise<PushBffRequest> {
   if (!config.hostPushEnabled) return { response: hostNotFound() };
   if (!mutationFromSameOrigin(request.method, request.headers, siteOrigin())) return { response: noStoreJson({ error: "cross_site_request" }, 403) };
-  const session = await readHostSession();
+  let session: HostSession | null;
+  try { session = await readHostSession(); }
+  catch { return { response: pushUnavailable() }; }
   if (!session) return { response: noStoreJson({ error: "signed_out" }, 401) };
   const body = await readBoundedJson(request, MAX_BODY_BYTES);
   if (!body.ok) {

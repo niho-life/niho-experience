@@ -133,6 +133,7 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 - **legacy NIHO provider pages** は `STG_PROVIDER_PAGES_API_ENABLED` を開かない。Experience商品をNIHO旧商品APIで登録・編集しない。
 - **Experience独自の質問**（「Ask the host」）は `STG_GUEST_QUESTIONS_ENABLED=true` で別に受け入れる。この受入では `STG_PROVIDER_OPERATIONS_API_ENABLED` を `false` または未設定にし、Experience DBの質問と `/questions/reply` を確認する。2つのメッセージ経路は同時に有効化できないため、両方を受け入れるときは別々の候補revisionで行う。
 - **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
+- **ホストのアカウント**（ADR 0003、メールのログインリンク）は `STG_HOST_ACCOUNTS_ENABLED=true` で開く。`STG_GUEST_MAIL_ENABLED=true` が要り、`STG_PROVIDER_OPERATIONS_API_ENABLED`・`STG_PROVIDER_PAGES_API_ENABLED`・`STG_TRANSLATE_API_ENABLED`・`STG_HOST_ARTICLE_LINKS_ENABLED` とは併用できない（配備前に止まる）。新しい Secret は無い。手順と受入は [host-accounts.md](host-accounts.md) の「staging で開く」。
 - **Secret の名前を固定**して検査する（`secret-name:数字version`）：
 
 | Environment Variable | Secret 名（値は書かない） | Cloud Run 環境変数 | 使うフラグ |

@@ -12,7 +12,8 @@ const UPSTREAM_TIMEOUT_MS = 20_000;
  * Photos never pass through here: the browser posts them to a signed GCS URL.
  */
 async function relay(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
-  if (!config.hostConsoleEnabled) return hostNotFound();
+  // Experience host accounts (ADR 0003) have no NIHO token, and a NIHO cookie left from before is never used.
+  if (!config.hostConsoleEnabled || config.hostAccountsEnabled) return hostNotFound();
   const { path } = await context.params;
   const method = request.method;
   const upstreamPath = relayUpstreamPath(method, path);

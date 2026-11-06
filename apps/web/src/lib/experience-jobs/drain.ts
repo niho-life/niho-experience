@@ -1,10 +1,10 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, StoreConflictError, StoreNotFoundError, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
-import { hostAddressConfirmationEmail, hostBookingEmail } from "@/lib/mail/host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostLoginLinkEmail } from "@/lib/mail/host-templates";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
@@ -72,6 +72,10 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostAddressesPurgedPerStep: 200,
   /** Revoked, unselected provider identity images physically removed per run. */
   providerMediaCleanup: 20,
+  /** ホストのアカウント (ADR 0003): sign-in link emails a run sends (first, as the host is waiting for one). */
+  hostLoginLinks: 20,
+  /** Old sign-in requests and ended host sessions deleted per run (each kind). */
+  hostAccountsPurgedPerStep: 500,
 } as const;
 
 export interface QuestionReplyCounts {
@@ -142,6 +146,18 @@ export interface ErasureCounts {
   readonly erased: number;
 }
 
+/**
+ * The sign-in links of Experience host accounts (ADR 0003). Claimed: a pending request the store was asked to mint a
+ * link for; skipped: one that could no longer be sent (expired, account suspended or signed out everywhere since).
+ * Failed: an email that did not go; its link was minted once and is not sent again (the host asks for a new one).
+ */
+export interface HostLoginLinkCounts {
+  readonly claimed: number;
+  readonly sent: number;
+  readonly skipped: number;
+  readonly failed: number;
+}
+
 /** A step that threw: what it did before is not reported, and the next step still runs. */
 export interface FailedStep {
   readonly error: "unavailable";
@@ -170,6 +186,9 @@ export interface ExperienceJobCounts {
   /** Off when public media storage is not configured; claims remain unfinished in that case. */
   readonly providerMediaCleanup: ProviderMediaCleanupCounts | StepOff | FailedStep;
   readonly settlementReconciliation?: SettlementReconciliationCounts | StepOff | FailedStep;
+  /** Only with Experience host accounts (EXPERIENCE_HOST_ACCOUNTS_ENABLED): their sign-in links, then the purge. */
+  readonly hostLoginLinks?: HostLoginLinkCounts | FailedStep;
+  readonly hostAccountPurge?: PurgeCounts | FailedStep;
 }
 
 export interface ExperienceJobDeps {
@@ -221,6 +240,11 @@ export interface ExperienceJobDeps {
   readonly now: () => Date;
   /** Actual Stripe fee/refund reconciliation and durable NIHO compensation transfers. */
   readonly settlementReconciliation?: SettlementReconciliationDeps;
+  /**
+   * Experience host accounts (ADR 0003), present only while EXPERIENCE_HOST_ACCOUNTS_ENABLED is on: the sign-in links to
+   * send and the old requests and ended sessions to delete.
+   */
+  readonly hostLogins?: Pick<HostAccounts, "listPendingLoginRequests" | "issueLoginLink" | "purgeExpired"> | null;
   /** Called once per failed step with the error's class name only (a database message can quote row values). */
   readonly onStepError?: (step: keyof ExperienceJobCounts, errorName: string) => void;
 }
@@ -628,7 +652,40 @@ async function sendHostBookingMails(deps: ExperienceJobDeps, hostMail: HostMail)
   return counts;
 }
 
+/**
+ * ホストのアカウント (ADR 0003): the sign-in links hosts asked for, oldest first. The store mints each link once, right
+ * before its email (only the token's SHA-256 is kept); the raw token goes into this email's URL fragment and nowhere
+ * else. An email that does not go is not tried again with the same link: the host asks for a new one. A transient
+ * failure ends the step (the rest wait for the next run, within their 15 minutes).
+ */
+async function sendHostLoginLinks(deps: ExperienceJobDeps, hostLogins: NonNullable<ExperienceJobDeps["hostLogins"]>): Promise<HostLoginLinkCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, skipped: 0, failed: 0 };
+  const pending = await hostLogins.listPendingLoginRequests({ nowUtc: deps.now().toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostLoginLinks });
+  for (const requestId of pending) {
+    if (!mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostLoginLinks)) break;
+    counts.claimed += 1;
+    const issued = await hostLogins.issueLoginLink({ requestId, nowUtc: deps.now().toISOString() });
+    if (issued.kind === "skip") {
+      counts.skipped += 1;
+      continue;
+    }
+    const email = hostLoginLinkEmail({ siteUrl: deps.siteUrl, token: issued.token, expiresAt: issued.expiresAtUtc, minutes: HOST_ACCOUNT_LIMITS.linkTtlMinutes });
+    const result = await deps.mailer.sendMail({ to: issued.toEmail, ...email });
+    if (result.ok) {
+      counts.sent += 1;
+      continue;
+    }
+    counts.failed += 1;
+    if (result.failure === "transient") break;
+  }
+  return counts;
+}
+
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {
+  const hostLogins = deps.hostLogins ?? null;
+  // First: a host is waiting for this email.
+  const hostLoginLinks = hostLogins ? await step(deps, "hostLoginLinks", () => sendHostLoginLinks(deps, hostLogins)) : undefined;
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
   const meetingGuides = deps.meetingGuides
@@ -695,6 +752,11 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const settlementReconciliation = deps.settlementReconciliation
     ? await step(deps, "settlementReconciliation", () => runSettlementReconciliation(deps.settlementReconciliation!))
     : { off: true } as const;
+  const hostAccountPurge = hostLogins
+    ? await step(deps, "hostAccountPurge", async () => ({
+      purged: await hostLogins.purgeExpired({ nowUtc: deps.now().toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostAccountsPurgedPerStep }),
+    }))
+    : undefined;
   return {
     questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
     bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge, providerMediaCleanup,
@@ -702,6 +764,8 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ...(meetingGuideSnapshotPurge ? { meetingGuideSnapshotPurge } : {}),
     ...(reviewInvitations ? { reviewInvitations } : {}),
     ...(meetingGuides ? { meetingGuides } : {}),
+    ...(hostLoginLinks ? { hostLoginLinks } : {}),
+    ...(hostAccountPurge ? { hostAccountPurge } : {}),
   };
 }
 

@@ -21,7 +21,9 @@ export function hostSupportSettingsFailureJson(failure: ExperienceHostSupportSet
 /** Fixed Host OWNER BFF. The sealed session token never crosses into browser JavaScript. */
 export async function loadHostSupportSettingsClient() {
   if (!isHostSupportSettingsEnabled()) return { ok: false as const, response: hostNotFound() };
-  const session = await readHostSession();
+  // NIHO's API with the host's NIHO token: an Experience host account reads as signed out (its flag is refused with them).
+  const current = await readHostSession();
+  const session = current?.kind === "experience" ? null : current;
   if (!session) return { ok: false as const, response: noStoreJson({ error: "unauthenticated" }, 401) };
   if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: noStoreJson({ error: "session_refresh_required" }, 401) };
   return { ok: true as const, client: createExperienceHostSupportSettingsApiClient({ nihoWebOrigin: config.nihoWebOrigin, accessToken: session.accessToken, fetch }) };
