@@ -127,6 +127,13 @@ describe("siteBooking", () => {
     expect([asked.site?.cancellation?.requested, siteCancellationLines(asked)]).toEqual([true, []]);
   });
 
+  it("flags a booking whose guest address was refused, with no address in it (#375)", () => {
+    expect(siteBooking(STORED).site?.guestEmailUndeliverable).toBeUndefined();
+    const refused = siteBooking({ ...STORED, mailUndeliverable: "NO_SUCH_ADDRESS" });
+    expect(refused.site?.guestEmailUndeliverable).toBe(true);
+    expect(JSON.stringify(refused.site)).not.toContain("NO_SUCH_ADDRESS");
+  });
+
   it("shares only support action, outcome, and time with the host", () => {
     const booking = siteBooking({ ...STORED, supportHistory: [
       { type: "SUPPORT_ACTION", action: "SUPPORT_APPROVE", outcome: "CANCELLED", occurredAtUtc: "2026-11-01T00:00:00.000Z" },

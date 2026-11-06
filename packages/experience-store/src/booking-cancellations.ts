@@ -230,6 +230,8 @@ export interface SupportQueueBooking {
   readonly freeCancellationUntilUtc: string | null;
   /** True only when this booking itself records current-version ON consent. */
   readonly supportEligible: boolean;
+  /** The guest's mail server refused the address (#375), so the booking's emails are not sent. Only the kind; absent while mail is delivered. */
+  readonly mailUndeliverable?: "NO_SUCH_ADDRESS" | "NO_SUCH_DOMAIN";
 }
 
 export interface SupportQueueRequest extends SupportQueueBooking {
@@ -878,7 +880,7 @@ async function settleRefund(
 
 const QUEUE_BOOKING = `
   b.public_booking_id::text AS public_booking_id, b.provider_id, b.status, b.occurrence_snapshot, b.pricing_snapshot,
-  g.guest_name, p.public_title`;
+  g.guest_name, g.mail_suppression_classification, p.public_title`;
 const QUEUE_JOINS = `
   JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
   JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id`;
@@ -930,6 +932,8 @@ function queueBookingFromRow(row: DbRow): SupportQueueBooking {
       && fee.supportConsentVersion.length > 0
       && Number.isSafeInteger(fee.supportAgreementRevision)
       && Number(fee.supportAgreementRevision) > 0,
+    ...(row.mail_suppression_classification === "NO_SUCH_ADDRESS" || row.mail_suppression_classification === "NO_SUCH_DOMAIN"
+      ? { mailUndeliverable: row.mail_suppression_classification } : {}),
   };
 }
 

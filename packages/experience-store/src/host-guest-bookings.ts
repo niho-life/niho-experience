@@ -112,6 +112,12 @@ export interface HostGuestBooking {
   readonly cancellationRequested: boolean;
   /** Only support operations and support contact timestamps; private case events are never selected. */
   readonly supportHistory?: readonly HostSupportHistoryEntry[];
+  /**
+   * The guest's mail server said the address or its domain does not exist (#375), so the emails of this
+   * guest's bookings are no longer sent. Only the kind, never the address. Absent while mail is delivered
+   * (and once the guest's details were erased).
+   */
+  readonly mailUndeliverable?: "NO_SUCH_ADDRESS" | "NO_SUCH_DOMAIN";
 }
 
 export interface HostGuestBookingPage {
@@ -260,7 +266,7 @@ const SELECT_HOST_BOOKINGS = `
             WHERE e.provider_id = b.provider_id AND e.booking_id = b.id AND e.outcome IN ('CONFIRMED', 'PAYMENT_REVIEW')
          )) AS paid_at,
          g.guest_name, g.guest_phone, g.note, g.answers, g.guest_language, g.adult_count, g.child_count,
-         g.pii_erased_at IS NOT NULL AS erased, t.booking_questions,
+         g.pii_erased_at IS NOT NULL AS erased, g.mail_suppression_classification, t.booking_questions,
          b.cancelled_by, b.cancellation_reason, b.cancellation_note,
          (SELECT COALESCE(sum(r.amount) FILTER (WHERE r.status = 'SUCCEEDED'), 0)::text
             FROM booking_refunds r WHERE r.provider_id = b.provider_id AND r.booking_id = b.id) AS refunded_amount,
@@ -544,5 +550,7 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
     refundFailed: row.refund_failed === true,
     cancellationRequested: row.cancellation_requested === true,
     supportHistory,
+    ...(!erased && (row.mail_suppression_classification === "NO_SUCH_ADDRESS" || row.mail_suppression_classification === "NO_SUCH_DOMAIN")
+      ? { mailUndeliverable: row.mail_suppression_classification } : {}),
   };
 }

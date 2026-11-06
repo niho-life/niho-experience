@@ -314,6 +314,26 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
     });
   });
 
+  it("shows the host a refused address as a kind only, for that guest's bookings and no other (#375)", async () => {
+    await withSchema(async (context) => {
+      const refused = await confirmedGuest(context, "shown-refused", { guestEmail: "shown@example.com" });
+      const fine = await confirmedGuest(context, "shown-fine", { guestEmail: "fine@example.com", occurrenceDate: day(3) });
+      assert.equal("mailUndeliverable" in await context.guests.getGuestBookingForHost(ownerA, refused.publicBookingId), false);
+      const claim = await context.outbox.claimBookingConfirmations({ limit: 5, leaseSeconds: 60 });
+      const confirmation = claim.confirmations.find((item) => item.email?.publicBookingId === refused.publicBookingId)!;
+      assert.equal(await context.outbox.recordDeliveryFeedback({
+        eventId: "niho_feedback_shown_01", deliveryRef: confirmation.deliveryRef, reportType: "BOUNCE",
+        verification: "CORRELATED_DSN", classification: "NO_SUCH_DOMAIN", reportedAt: new Date("2026-11-04T03:00:00.000Z"),
+      }), "RECORDED");
+      const shown = await context.guests.getGuestBookingForHost(ownerA, refused.publicBookingId);
+      assert.equal(shown.mailUndeliverable, "NO_SUCH_DOMAIN");
+      assert.equal("mailUndeliverable" in await context.guests.getGuestBookingForHost(ownerA, fine.publicBookingId), false);
+      const listed = (await context.guests.listGuestBookingsForHost(ownerA)).bookings.find((item) => item.publicBookingId === refused.publicBookingId);
+      assert.equal(listed?.mailUndeliverable, "NO_SUCH_DOMAIN");
+      assert.ok(!JSON.stringify(shown).includes("shown@example.com"));
+    });
+  });
+
   it("records an unverified complaint candidate but does not suppress or notify", async () => {
     await withSchema(async (context) => {
       const booking = await confirmedGuest(context, "arf-candidate", { guestEmail: "arf@example.com" });
