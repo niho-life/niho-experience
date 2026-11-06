@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GUIDE_LIMITS } from "../guides";
 import {
+  EDITOR_CREDIT_MAX_LENGTH,
+  EDITOR_SLUG_MAX_LENGTH,
   EditorContractError,
   editorCategoryLabel,
   editorPublicationPaths,
@@ -124,7 +126,7 @@ describe("the published list (contract v1)", () => {
       [{ lang: undefined }, "lang is not en"],
       [{ lang: "ja" }, "lang is not en"],
       [{ slug: "preview" }, "slug is invalid or reserved"],
-      [{ slug: "a".repeat(81) }, "slug is invalid or reserved"],
+      [{ slug: "a".repeat(EDITOR_SLUG_MAX_LENGTH + 1) }, "slug is invalid or reserved"],
       [{ id: "ed-1" }, "id is invalid"],
       [{ id: ID.toUpperCase() }, "id is invalid"],
       [{ title: "x".repeat(GUIDE_LIMITS.titleMaxLength + 1) }, `title is longer than ${GUIDE_LIMITS.titleMaxLength} characters`],
@@ -153,7 +155,19 @@ describe("the published list (contract v1)", () => {
       [{ cover: cover({ sha256: "AB".repeat(32) }) }, "cover.sha256 is invalid"],
       [{ cover: cover({ alt: null }) }, "cover.alt is not text"],
       [{ cover: cover({ credit: "" }) }, "cover.credit is missing"],
-      [{ cover: cover({ credit: "c".repeat(GUIDE_LIMITS.captionMaxLength + 1) }) }, `cover.credit is longer than ${GUIDE_LIMITS.captionMaxLength} characters`],
+      [{ cover: cover({ credit: "c".repeat(EDITOR_CREDIT_MAX_LENGTH + 1) }) }, `cover.credit is longer than ${EDITOR_CREDIT_MAX_LENGTH} characters`],
+      [{ coverShareable: false }, "coverShareable is invalid"],
+      [{ coverShareable: "true" }, "coverShareable is invalid"],
+      [{ coverShareable: null }, "coverShareable is invalid"],
+      [{ coverShareable: true }, "coverShareable is set without a cover"],
+      [{ authorProfile: "Guide" }, "authorProfile is invalid"],
+      [{ authorProfile: { role: "Guide" } }, "authorProfile is invalid"],
+      [{ authorProfile: { role: "Guide", bio: null, avatar: "https://writer.example/a.jpg" } }, "authorProfile is invalid"],
+      [{ authorProfile: { role: null, bio: null } }, "authorProfile is empty"],
+      [{ authorProfile: { role: " ", bio: null } }, "authorProfile.role is missing"],
+      [{ authorProfile: { role: 7, bio: null } }, "authorProfile.role is missing"],
+      [{ authorProfile: { role: "r".repeat(GUIDE_LIMITS.authorMaxLength + 1), bio: null } }, `authorProfile.role is longer than ${GUIDE_LIMITS.authorMaxLength} characters`],
+      [{ authorProfile: { role: null, bio: "b".repeat(GUIDE_LIMITS.authorBioMaxLength + 1) } }, `authorProfile.bio is longer than ${GUIDE_LIMITS.authorBioMaxLength} characters`],
     ];
     for (const [overrides, reason] of cases) expect(parseOne(overrides).skipped, reason).toEqual([expect.objectContaining({ reason })]);
     expect(parseOne({ dest: "niho" }).skipped).toEqual([{ id: ID, slug: "a-sample-guide", reason: "dest is not exp" }]);
@@ -181,6 +195,36 @@ describe("the published list (contract v1)", () => {
     });
     expect(items[0]!.author).toEqual({ name: "Sample Writer", url: null });
     expect(items[0]!.cover).toEqual({ id: "c", url: "https://assets.editor.example/a.jpg", alt: "", credit: "Photo: Sample" });
+  });
+
+  it("takes slugs up to the contract's 160 and credits up to the editor's 500, keeping the other slug limits", () => {
+    expect(EDITOR_SLUG_MAX_LENGTH).toBe(160);
+    expect(EDITOR_CREDIT_MAX_LENGTH).toBe(500);
+    for (const length of [81, 160]) {
+      const slug = `${"a".repeat(length - 2)}-b`;
+      expect(parseOne({ slug }).items[0]?.slug, String(length)).toBe(slug);
+      expect(isEditorGuideSlug(slug)).toBe(true);
+    }
+    expect(isEditorGuideSlug("a".repeat(161))).toBe(false);
+    expect(parseOne({ cover: cover({ credit: "c".repeat(EDITOR_CREDIT_MAX_LENGTH) }) }).items[0]?.cover?.credit).toHaveLength(EDITOR_CREDIT_MAX_LENGTH);
+    // Counted as the editor counts: an emoji is one character.
+    expect(parseOne({ title: "🌊".repeat(GUIDE_LIMITS.titleMaxLength) }).items).toHaveLength(1);
+    // Category and related-experience slugs keep the guide limit of 80.
+    expect(parseOne({ category: "c".repeat(81) }).skipped).toEqual([expect.objectContaining({ reason: "category is not a slug" })]);
+    expect(parseOne({ related: ["r".repeat(81), "kept"] }).items[0]?.related).toEqual(["kept"]);
+  });
+
+  it("reads the cover's share permission: absent is false, true only with a cover", () => {
+    expect(parseOne({ cover: cover() }).items[0]).not.toHaveProperty("coverShareable");
+    expect(parseOne({ cover: cover(), coverShareable: true }).items[0]).toMatchObject({ coverShareable: true, cover: { id: "c" } });
+  });
+
+  it("adds the author's published role and introduction to the author, never inside the strict author object", () => {
+    const profile = { role: "Coastal walk guide", bio: "Writes about mornings by the sea." };
+    expect(parseOne({ authorProfile: profile }).items[0]?.author).toEqual({ name: "Sample Writer", url: "https://writer.example/", ...profile });
+    expect(parseOne({ authorProfile: { role: null, bio: " A short bio. " } }).items[0]?.author).toEqual({ name: "Sample Writer", url: "https://writer.example/", bio: "A short bio." });
+    expect(parseOne({ authorProfile: null }).items[0]?.author).toEqual({ name: "Sample Writer", url: "https://writer.example/" });
+    expect(parseOne({ authorProfile: { role: "r".repeat(GUIDE_LIMITS.authorMaxLength), bio: "b".repeat(GUIDE_LIMITS.authorBioMaxLength) } }).items).toHaveLength(1);
   });
 
   it("labels a category from its slug", () => {
@@ -238,6 +282,15 @@ describe("a preview draft", () => {
       preview: { title: "T", markdown: "", assets: [{ id: "f", url: "https://assets.editor.example/a.jpg", alt: "x" }], related: ["ok-slug"] },
     });
     expect(parseEditorPreview(draft({ category: "walks", lead: "A lead.", related: "x" }))).toMatchObject({ ok: true, preview: { category: { slug: "walks", label: "Walks" }, lead: "A lead.", related: [] } });
+  });
+
+  it("reads the cover's share permission and an author profile leniently: a malformed one counts as not given", () => {
+    const shared = parseEditorPreview(draft({ cover: cover(), coverShareable: true, authorProfile: { role: "Guide", bio: null } }));
+    expect(shared).toMatchObject({ ok: true, preview: { coverShareable: true, author: { name: "Sample Writer", role: "Guide" } } });
+    const malformed = parseEditorPreview(draft({ coverShareable: true, authorProfile: { role: null, bio: null } }));
+    expect(malformed.ok && malformed.preview).not.toHaveProperty("coverShareable");
+    expect(malformed.ok && malformed.preview.author).toEqual({ name: "Sample Writer", url: null });
+    expect(parseEditorPreview(draft({ cover: cover(), coverShareable: "yes" }))).toMatchObject({ ok: true, preview: { cover: { id: "c" } } });
   });
 
   it("refuses a draft without a title or body, or of another contract version; another destination's draft is foreign", () => {
