@@ -41,7 +41,7 @@ export function sitePublicationMetadata(item: SitePublicExperience, locale: "en"
 const NO_GUIDES: Awaited<ReturnType<typeof guidesAboutExperience>> = { guides: [], draftSlugs: [] };
 
 export async function SitePublicationPage({ item, cancelled = false, locale = "en" }: { item: SitePublicExperience; cancelled?: boolean; locale?: "en" | "ja" }) {
-  const { publication, saleTerms, sellerDisclosure } = item;
+  const { publication, saleTerms, sellerDisclosure, hostBio } = item;
   const ja = locale === "ja";
   const content = ja ? publication.japanese! : null;
   const title = content?.title ?? publication.publicTitle;
@@ -61,6 +61,8 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const nextDates = config.bookingsEnabled && config.guestBookingEnabled && offers.length ? await siteNextDates(publication.slug) : [];
   // Host-written FAQ in the page's language; none written means no section (never a filler FAQ).
   const faq = content ? content.faq : publication.content.faq;
+  // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
+  const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
   // Every experience sold here is in Kamakura for now (the catalogue is one region). The station and walk come only from an
   // explicit "N-minute walk from X Station" in the public meeting overview; otherwise the line says no more than the region.
   const locationLine = detailFromTokyoLine(ja ? "鎌倉" : "Kamakura", publication.meetingOverview, locale);
@@ -145,6 +147,11 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 <p className="font-extrabold">{publication.meetingPoint.name}</p>
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
+            </section> : null}
+            {hostBioText ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+              <h2 id="host-heading" className="text-2xl">{ja ? "ホストについて" : "About your host"}</h2>
+              <p className="mt-4 font-extrabold">{publication.sellerDisplayName}</p>
+              <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p>
             </section> : null}
             {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "レビュー" : "Reviews"}</h2>

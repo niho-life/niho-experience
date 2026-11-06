@@ -528,7 +528,8 @@ export class GuestMailOutbox {
   }
 
   /**
-   * Persist a post-accept report from NIHO against the local opaque delivery reference. NIHO forwards
+   * Persist a post-accept report from NIHO against the local opaque delivery reference: a guest booking mail of
+   * this outbox, or a booking thread's message (`guest_question_messages`). NIHO forwards
    * no address, subject, body, or diagnostic. Only a correlated hard DSN suppresses later mail; an ARF
    * candidate remains unverified and has no automatic host or delivery effect.
    */
@@ -569,7 +570,22 @@ export class GuestMailOutbox {
           FOR UPDATE OF g`,
         [input.deliveryRef, [...GUEST_BOOKING_MAIL_TOPICS]],
       );
-      const row = source.rows[0];
+      // A booking thread's host reply or NIHO support contact carries the same kind of reference (#128). A
+      // question before booking has none, so it never matches here.
+      const message = source.rows[0] ? null : await client.query<DbRow>(
+        `SELECT m.provider_id, b.id::text AS booking_id, b.public_booking_id::text AS public_booking_id,
+                b.occurrence_snapshot, g.guest_email_key, p.public_title,
+                (g.adult_count + g.child_count)::int AS seats
+           FROM guest_question_messages m
+           JOIN guest_question_threads t ON t.provider_id=m.provider_id AND t.id=m.thread_id
+           JOIN bookings b ON b.provider_id=t.provider_id AND b.id=t.booking_id
+           JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+           JOIN experience_products p ON p.provider_id=b.provider_id AND p.id=b.product_id
+          WHERE m.mail_delivery_ref=$1 AND m.author IN ('HOST','SUPPORT')
+          FOR UPDATE OF g`,
+        [input.deliveryRef],
+      );
+      const row = source.rows[0] ?? message?.rows[0];
       if (!row || typeof row.guest_email_key !== "string") return "UNMATCHED";
 
       const inserted = await client.query(

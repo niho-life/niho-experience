@@ -152,6 +152,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // (actor, request fingerprint, action and applied version) and never duplicate disclosure/contact bodies.
   provider_seller_disclosures: { write: IU },
   provider_seller_disclosure_commands: { write: I },
+  // ホスト紹介文 (#146): the current OWNER saves and withdraws (DELETE) the provider's one public bio. No history.
+  provider_host_bios: { write: IUD },
   // Explicit Connect lookup mappings are written by the operator registration script only. The BFF's FOR SHARE
   // needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path changes it.
   experience_host_seller_profiles: { write: [], updateColumns: ["updated_at"] },

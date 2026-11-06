@@ -283,7 +283,10 @@ async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionRep
         linkTtlDays: EXPERIENCE_JOB_LIMITS.replyLinkTtlDays,
       });
     }
-    const result = await deps.mailer.sendMail({ to: reply.guestEmail, ...email });
+    // A booking thread's message carries its bounce-feedback reference (#128); a reply before booking has none.
+    const result = await deps.mailer.sendMail(reply.kind === "QUESTION"
+      ? { to: reply.guestEmail, ...email }
+      : { to: reply.guestEmail, ...email, deliveryRef: reply.deliveryRef });
     const status = await deps.questions.recordReplyDelivery(reply.messageId, result.ok ? "SENT" : result.failure === "transient" ? "RETRY" : "FAILED");
     if (status === "SENT") sent += 1;
     else if (status === "FAILED") failed += 1;

@@ -1,8 +1,8 @@
 import "server-only";
-import type { PublicExperiencePublication, PublicSellerDisclosure } from "@niho-experience/experience-store";
+import type { PublicExperiencePublication, PublicHostBio, PublicSellerDisclosure } from "@niho-experience/experience-store";
 import type { PublicBookingTerms } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { experiencePublicationRepository, guestBookingRepository, providerSellerDisclosureRepository } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, guestBookingRepository, providerHostBioRepository, providerSellerDisclosureRepository } from "@/lib/experience/store-server";
 
 /** Public checkout terms without the internal Experience provider/product keys. */
 export type SitePublicSaleTerms = Omit<PublicBookingTerms, "providerId" | "productId">;
@@ -11,6 +11,8 @@ export type SitePublicExperience = {
   readonly publication: PublicExperiencePublication;
   readonly saleTerms: SitePublicSaleTerms | null;
   readonly sellerDisclosure: PublicSellerDisclosure | null;
+  /** ホスト紹介文 (#146), read for the detail page only; catalog cards carry null. */
+  readonly hostBio: PublicHostBio | null;
 };
 export type SitePublicExperienceLookup =
   | { readonly kind: "published"; readonly item: SitePublicExperience }
@@ -34,6 +36,15 @@ export function projectSitePublicSaleTerms(terms: PublicBookingTerms | null): Si
     conditionsVersion: terms.conditionsVersion,
   };
 }
+/** The bio is optional page content: an unavailable store or a failed read shows no bio and never breaks the page. */
+async function readHostBio(slug: string): Promise<PublicHostBio | null> {
+  try {
+    return await providerHostBioRepository()?.getPublicBySlug(slug) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read the Experience-owned published manuscript and, when enabled, its current sale terms. */
 export async function getSitePublicExperience(slug: string): Promise<SitePublicExperienceLookup> {
   if (config.apiMode !== "http") return null;
@@ -51,6 +62,7 @@ export async function getSitePublicExperience(slug: string): Promise<SitePublicE
     publication,
     saleTerms,
     sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null,
+    hostBio: await readHostBio(slug),
   } };
 }
 
@@ -64,7 +76,7 @@ export async function listSitePublicExperiences(): Promise<SitePublicCatalog> {
   const items = await publications.listPublic();
   const disclosures = providerSellerDisclosureRepository();
   if (!config.guestBookingEnabled) return {
-    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null }))),
+    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null }))),
     claimedSlugs,
   };
   const bookings = guestBookingRepository();
@@ -75,7 +87,7 @@ export async function listSitePublicExperiences(): Promise<SitePublicCatalog> {
       disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
     ]);
     const saleTerms = projectSitePublicSaleTerms(terms);
-    return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null };
+    return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null, hostBio: null };
   }));
   return { experiences: sales, claimedSlugs };
 }

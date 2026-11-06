@@ -31,6 +31,7 @@ const item = {
     publishedAtUtc: "2026-11-04T00:00:00.000Z",
   },
   saleTerms: { title: SAMPLE_TERMS.title, currency: SAMPLE_TERMS.currency, sellerDisplayName: SAMPLE_TERMS.sellerDisplayName, offers: SAMPLE_TERMS.offers, conditionsVersion: SAMPLE_TERMS.conditionsVersion },
+  hostBio: null,
 } as unknown as SitePublicExperience;
 
 describe("Experience publication Japanese sale presentation", () => {

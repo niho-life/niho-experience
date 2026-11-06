@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { BookingMessagesClosedError, StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
+import { BookingMessagesClosedError, StoreAccessDeniedError, StoreConflictError, StoreError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
 import { enqueueBookingMessageNotification, enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
@@ -146,6 +146,11 @@ export interface ClaimedQuestionReply extends ClaimedHostMessage {
 export interface ClaimedBookingMessage extends ClaimedHostMessage {
   readonly kind: "BOOKING";
   readonly publicBookingId: string;
+  /**
+   * The opaque single-recipient reference for NIHO's post-accept bounce feedback (`X-NIHO-Mail-Ref`), stamped on
+   * the first claim and kept across retries, as the booking outbox mails (#395). A question reply has none.
+   */
+  readonly deliveryRef: string;
   /** The occurrence as booked (the snapshot), in its own time zone. */
   readonly localDate: string;
   readonly localStartTime: string;
@@ -156,6 +161,8 @@ export interface ClaimedBookingMessage extends ClaimedHostMessage {
 export interface ClaimedSupportBookingMessage extends ClaimedHostMessage {
   readonly kind: "BOOKING_SUPPORT";
   readonly publicBookingId: string;
+  /** As ClaimedBookingMessage.deliveryRef. */
+  readonly deliveryRef: string;
   readonly localDate: string;
   readonly localStartTime: string;
   readonly timeZone: string;
@@ -756,7 +763,9 @@ export class GuestQuestionRepository {
    * whose lease ran out, with attempts left. Each becomes SENDING for `leaseSeconds`. A reply to a question gets a
    * fresh one-time reply link valid for `linkTtlDays` (only its SHA-256 is stored); a message in a booking's thread
    * (#285 slice 6b) gets none (the worker links to the booking page) and is sent to the booking's guest record. One
-   * whose guest record was erased meanwhile has no one to go to: it becomes FAILED and is not returned.
+   * whose guest record was erased meanwhile has no one to go to: it becomes FAILED and is not returned. A booking
+   * thread's message gets a mail delivery reference on its first claim, kept across retries (#128); one whose guest
+   * address was suppressed after a confirmed hard bounce becomes FAILED once due, without another attempt.
    */
   async claimReplyDeliveries(options: { limit: number; leaseSeconds: number; linkTtlDays: number }): Promise<ClaimedGuestQuestionReply[]> {
     const limit = boundedInteger(options?.limit, "limit", 1, 50);
@@ -769,6 +778,20 @@ export class GuestQuestionRepository {
           WHERE delivery_status = 'SENDING' AND lease_until <= clock_timestamp() AND delivery_attempts >= $1`,
         [GUEST_QUESTION_LIMITS.deliveryAttempts],
       );
+      // As the booking outbox mails: a confirmed undeliverable address for this provider gets no further booking
+      // thread mail. The message is not retried and is not marked sent. A question before booking has no booking
+      // guest record and is left as it was.
+      await client.query(
+        `UPDATE guest_question_messages m SET delivery_status = 'FAILED', lease_until = NULL
+          WHERE m.delivery_status IN ('PENDING', 'SENDING')
+            AND (m.lease_until IS NULL OR m.lease_until <= clock_timestamp())
+            AND EXISTS (SELECT 1 FROM guest_question_threads t
+                          JOIN booking_guests g ON g.provider_id = t.provider_id AND g.booking_id = t.booking_id
+                         WHERE t.provider_id = m.provider_id AND t.id = m.thread_id AND g.guest_email_key IS NOT NULL
+                           AND EXISTS (SELECT 1 FROM booking_guests suppressed
+                                        WHERE suppressed.provider_id = g.provider_id AND suppressed.guest_email_key = g.guest_email_key
+                                          AND suppressed.mail_suppressed_at IS NOT NULL))`,
+      );
       const claimed = await client.query<DbRow>(
         `WITH due AS (
            SELECT provider_id, id FROM guest_question_messages
@@ -780,10 +803,15 @@ export class GuestQuestionRepository {
          )
          UPDATE guest_question_messages m
             SET delivery_status = 'SENDING', delivery_attempts = m.delivery_attempts + 1,
-                lease_until = clock_timestamp() + make_interval(secs => $2)
+                lease_until = clock_timestamp() + make_interval(secs => $2),
+                mail_delivery_ref = CASE
+                  WHEN m.mail_delivery_ref IS NOT NULL THEN m.mail_delivery_ref
+                  WHEN EXISTS (SELECT 1 FROM guest_question_threads t
+                                WHERE t.provider_id = m.provider_id AND t.id = m.thread_id AND t.booking_id IS NOT NULL)
+                    THEN 'ex1_' || replace(gen_random_uuid()::text, '-', '') END
            FROM due
           WHERE m.provider_id = due.provider_id AND m.id = due.id
-         RETURNING m.id, m.provider_id, m.thread_id, m.author, m.body, m.delivery_attempts, m.created_at`,
+         RETURNING m.id, m.provider_id, m.thread_id, m.author, m.body, m.delivery_attempts, m.created_at, m.mail_delivery_ref`,
         [limit, leaseSeconds, GUEST_QUESTION_LIMITS.deliveryAttempts],
       );
       const rows = [...claimed.rows].sort((a, b) => isoValue(a, "created_at").localeCompare(isoValue(b, "created_at")) || String(a.id).localeCompare(String(b.id)));
@@ -815,10 +843,14 @@ export class GuestQuestionRepository {
             await client.query("UPDATE guest_question_messages SET delivery_status = 'FAILED', lease_until = NULL WHERE provider_id = $1 AND id = $2::uuid", [row.provider_id, row.id]);
             continue;
           }
+          if (typeof row.mail_delivery_ref !== "string" || !/^ex1_[0-9a-f]{32}$/.test(row.mail_delivery_ref)) {
+            throw new StoreError("Database returned an invalid mail_delivery_ref.");
+          }
           const occurrence = (detail.occurrence_snapshot ?? {}) as Record<string, unknown>;
           const bookingFields = {
             ...base,
             publicBookingId: String(detail.public_booking_id),
+            deliveryRef: row.mail_delivery_ref,
             localDate: String(occurrence.localDate),
             localStartTime: String(occurrence.localStartTime),
             timeZone: String(occurrence.timeZone),
