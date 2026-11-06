@@ -12,6 +12,8 @@ export interface HostPushDeps {
   vapid: VapidKeys;
   fetch: typeof fetch;
   now: number;
+  /** This site's origin: a declarative message (#177 P3) names absolute addresses with it. */
+  origin?: string;
 }
 
 export interface HostPushReport {
@@ -53,7 +55,7 @@ export async function deliverHostPush(recipient: HostPushRecipient, message: Hos
  * consumes `outbox_messages` calls it (outbox.ts, docs/host-pwa.md).
  */
 export async function notifyHostDevices(event: HostPushEvent, deps: HostPushDeps): Promise<HostPushReport> {
-  const message: HostPushSend = { payload: hostPushPayload(event), ...hostPushDelivery(event.kind), topic: hostPushTopic(event.tag) };
+  const message: HostPushSend = { payload: hostPushPayload(event, deps.origin), ...hostPushDelivery(event.kind), topic: hostPushTopic(event.tag) };
   const seenAfter = new Date(deps.now - HOST_PUSH_SEEN_WITHIN_MS);
   const recipients = event.productId === undefined
     ? await deps.subscriptions.recipients(event.providerId, seenAfter)

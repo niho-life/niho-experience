@@ -1,6 +1,6 @@
 # ホストの画面をアプリとして使う（PWA）
 
-[#177](https://github.com/niho-life/niho-experience/issues/177)。P1 で、ホストが `/host/` をスマホのホーム画面・Mac の Dock・PC のアプリとして追加し、アプリの窓で使えるようにした。P2 で、その端末へのプッシュ通知（Web Push）を足す（[プッシュ通知](#プッシュ通知p2)）。
+[#177](https://github.com/niho-life/niho-experience/issues/177)。P1 で、ホストが `/host/` をスマホのホーム画面・Mac の Dock・PC のアプリとして追加し、アプリの窓で使えるようにした。P2 で、その端末へのプッシュ通知（Web Push）を足す（[プッシュ通知](#プッシュ通知p2)）。P3 で、iOS 18.4+ / Safari の Declarative Web Push と、Android の共有シートからの写真の受け取りを足す（[Declarative Web Push](#declarative-web-pushp3)・[共有された写真](#共有された写真p3)）。
 
 ## 範囲
 
@@ -22,6 +22,7 @@
 | `display` / `lang` | `standalone` / `ja` |
 | 色 | `background_color`・`theme_color` とも `#ffffff`（layout の themeColor と同じ） |
 | アイコン | `public/host-app/`。サイトの印（`app/icon.svg`）を leaf（`#B2D67C`）の地に置く。192・512・maskable 512（印は中央の安全な円の内側）・apple-touch-icon 180。元の SVG は同じフォルダ |
+| `share_target`（P3） | `POST /host/share-target`・`multipart/form-data`・画像（`image/jpeg`・`image/png`）の `photos` だけ。title・text・url は受けない。Android（WebAPK）の共有シートに「体験ホスト」が出る。iOS・PC は対象外 |
 | shortcuts | 承認待ち `/host/bookings?filter=pending`・今日の回 `/host/bookings`（これからの一覧。ホームの「今日の開催」は開催の無い日に出ない）・メッセージ・カレンダー。Android と PC だけ |
 
 ## cookie の複製と surface の印
@@ -42,6 +43,7 @@
 - 担当はオフラインの案内だけ。同一 origin の `/host/` 配下のページ遷移（`mode: navigate` の GET）をネットワークへ流し、失敗したら端末内で作る日本語の案内（再読み込みボタン・外部参照なし・`no-store`）を返す。
 - 次には介入しない：`/host/auth/*`（NIHO ログインの往復）、`/host/calendar/google/*`（Google カレンダー接続）、`/host/api/*`、ページ遷移以外の要求、旅行者のページ。
 - Cache Storage は使わない（`caches.open`・`cache.put` を呼ばない。origin を旅行者のページと共有するので、既存の cache も消さない）。予約・参加者・メッセージ・売上の HTML/API を端末に保存しない。
+- P3：共有シートからの写真を受ける（[共有された写真](#共有された写真p3)）。`POST /host/share-target` のページ遷移だけを答え、ほかの POST には介入しない。写真は worker のメモリにだけ置く（Cache Storage も IndexedDB も使わない）。
 - P2：`push` を通知として出し（読めない内容や `/host/` 外を開く内容は、ホームを開く「お知らせがあります」に置き換える。通知を出さない push が続くと iOS・Chrome が購読を取り消すため）、タップで開いているアプリの窓をそのページへ移す（無ければ開く）。`pushsubscriptionchange` では同じ鍵で購読し直して BFF へ登録し、古い endpoint を消す。
 
 ## プッシュ通知（P2）
@@ -70,6 +72,41 @@
 
 - 鍵を替えると既存の購読は使えなくなる。設定を開くと鍵の違う購読はオフと表示して再登録を案内し、「この端末で通知を受け取る」で作り直す。解除時にブラウザとサーバーの両方が失敗した場合はオン表示を維持して再試行を案内する。
 
+## Declarative Web Push（P3）
+
+送る JSON は、これまでの `{ v: 1, title, body, url, tag, badge? }` に、[W3C Push API §3.3](https://www.w3.org/TR/push-api/) の宣言的な形を足した 1 つのまま（`lib/host/push/payload.ts`）。
+
+```json
+{
+  "v": 1, "title": "...", "body": "...", "url": "/host/bookings?...", "tag": "...", "badge": 2,
+  "web_push": 8030, "mutable": true,
+  "notification": { "title": "...", "body": "...", "navigate": "https://<site>/host/bookings?...", "tag": "...", "lang": "ja", "dir": "ltr", "icon": "https://<site>/host-app/icon-192.png", "app_badge": "2" }
+}
+```
+
+- **対応するブラウザ（iOS 18.4+ の Safari・ホーム画面のアプリ）**は `web_push: 8030` を見て、worker を起こさずに自分で通知を出す。worker が止まっていても通知が出るので、「通知を出さない push が続くと購読が取り消される」心配が減る。
+- **対応しないブラウザ（Chrome・Firefox・古い Safari）**は従来どおり worker の `push` が `v`〜`badge` を読む。余分なキーは無視される。
+- `mutable: true` で worker の `push` event も呼ばれる（アプリのバッジ・開いている画面の更新はこちらが行う）。worker が同じ `tag` で通知を出せば宣言的な通知を置き換え、出さなければブラウザが宣言的な通知を出す。**同じ `tag` なので、通知が 2 つ並ぶことはない。**
+- `navigate` は `/host/` 配下だけ（`hostPushUrl` が今までどおり検査する）。サイトの origin が分かるとき（本番の job・テスト通知）は絶対 URL、分からないときは path（ブラウザが購読の scope で解く）。`icon` も同じ。
+- `app_badge` は WebKit の例どおり**文字列**で、0 のときは付けない（0 で消すのは worker の `clearAppBadge`）。W3C の草案には無いメンバーで、対応しないブラウザは無視する。
+- ロック画面に出す内容は変わらない（種類・体験名・日時・人数。OTA の予約だけ予約者の名前）。本文は 3 KB 以内を今までどおり検査する。
+- **実機は未確認。** iOS 18.4+ の実機で、(1) 宣言的な通知が 1 つだけ出る、(2) worker が止まっていても出る、(3) タップで `navigate` が開く、(4) `app_badge` が付く、を確かめる（[実機の受入](#実機の受入stg) 8）。余分なキーを拒む実装だった場合も、従来の worker 経路にそのまま戻るだけで、通知は出る。
+
+## 共有された写真（P3）
+
+Android の共有シート（ギャラリー・カメラ・Google フォトなど）で写真を選び、共有先に「体験ホスト」を選ぶと、その写真を体験の写真の入力へ渡せる。
+
+1. 共有シートがマニフェストの `share_target`（`POST /host/share-target`）へ写真を送る。
+2. `/host/sw.js` がそのページ遷移を答える。**最初の使える画像 1 枚**（JPEG か PNG・10 MB 以下。体験の写真の入力と同じ条件）を自分のメモリに置き、`/host/experiences?shared=photo` へ 303 で送る。使える画像が無ければ `?shared=none`。
+3. 移った先で `HostSharedPhotoReceiver`（ホストの root layout）が worker に **1 回だけ**写真を求め（`MessageChannel`。worker は渡した時点で忘れる）、URL から `shared` を消し、ページのメモリ（`lib/host/shared-photo.ts`）に置く。
+4. コンソールの上に「共有された写真「…」を受け取りました」が出る（`HostSharedPhotoNotice`。受け取れなかったときは「受け取れませんでした。もう一度共有してください」）。体験の編集画面の写真の入力の上に「この写真を使う」が出て（`HostSharedPhotoOffer`）、押すとその写真が選ばれた状態になる。
+5. **写真の説明（英語・日本語）と権利の確認、アップロードの操作は、通常の写真と同じ。** 共有しただけで写真が保存されたり公開されたりすることはない。
+
+- **端末にもサーバーにも保存しない。** worker のメモリ（最長 5 分）とページのメモリ（最長 30 分）だけ。URL・Cache Storage・IndexedDB・localStorage・サーバーのどこにも置かない。`/host/share-target` の route は、worker が答えなかったときの受け皿で、アップロードを読まず `?shared=none` へ 303 を返すだけ。
+- 保持中の写真はアプリの「裏から戻ると読み込み直す」動き（`HostResumeRefresh`）の対象外（未保存の編集と同じ扱い）。ページを読み込み直すか、worker が止まっていた場合は写真が消えるので、もう一度共有してもらう。
+- 管理画面（`/admin`）の商品編集には出ない（root layout の受け取りがホストの画面だけにある）。
+- `HOST_PWA_ENABLED=false` では、マニフェストと `/host/share-target` は 404、worker は自分を解除する。
+
 ## 切り替えと戻し方
 
 - `HOST_PWA_ENABLED`（既定 `false`。`HOST_CONSOLE_ENABLED=true` のときだけ効く）。mock のプレビュー（`deploy-preview.yml`）と stg（`deploy-host-staging.yml`）は `true`、本番は未設定。
@@ -81,6 +118,8 @@
 
 - Android・PC の Chromium はブラウザとアプリで cookie を共有する。アプリで初めて開いたときに 1 回ログインが増え、ブラウザ側も印つきのセッションに置き換わる。古い接続は使われないまま NIHO の期限（最後の利用から 180 日）で切れる。
 - 印のない複製 cookie のままアプリでログアウトすると（`HOST_PWA_ENABLED=false` のときなど、console の枠が `/host/launch` へ移す前）、共有している接続が消えてブラウザ側もログアウトになる。
+- 共有シートから写真を受け取れるのは Android（インストール済みの PWA）だけ。iOS・PC の Safari は `share_target` に対応しない。
+- 共有された写真は worker のメモリに置くため、共有から 5 分以上たつ・worker が止まる・ページを読み込み直すと消える。そのときはもう一度共有する。ログインが切れていると `/host/experiences` からログインに移るので、ログインしてから共有する。
 - Chromium の追加の申し出（`beforeinstallprompt`）が画面の準備より先に来ると、次にページを読み込むまで設定に追加ボタンが出ない。
 
 ## 実機の受入（stg）
@@ -94,3 +133,5 @@ iPhone・iPad・Android・Mac Safari・PC Chrome のそれぞれで確かめる�
 5. ログアウト：アプリでログアウトすると `/host/launch` に戻る。
 6. オフライン：機内モードでページを移ると、オフラインの案内が出て、通信が戻れば再読み込みで戻る。
 7. 通知（P2・stg で `HOST_PUSH_ENABLED=true` にしてから）：設定 › この端末 › 通知で許可→「テスト通知を送る」がロック画面に届き、タップでアプリの設定が開く。iPhone ではブラウザのタブに「ホーム画面に追加したアプリから」と出る。別の端末でログアウトすると、その端末の設定を開き直したとき「オフ」になる。
+8. Declarative Web Push（P3・iPhone / iPad の iOS 18.4+ と macOS の Safari）：「テスト通知を送る」と、実際の通知（承認期限・新しい予約など）で、(1) 通知が 1 つだけ出る（2 つ並ばない）、(2) アプリを完全に終了してからでも出る、(3) タップでその予約・スレッドが開く、(4) アイコンのバッジが付く、を確かめる。Chrome（Android・PC）では従来どおり 1 つだけ出る。
+9. 共有された写真（P3・Android の Chrome でインストールしたアプリ）：ギャラリーで写真を選んで共有→「体験ホスト」を選ぶ。(1) アプリが開き 体験 に「共有された写真「…」を受け取りました」が出る、(2) ホームなどへ移っても残る、(3) 体験の編集画面で「この写真を使う」を押すと写真の入力が選ばれた状態になり、説明と権利の確認の入力は通常どおり、(4) 「この写真を使わない」で消える、(5) PDF など画像以外を共有すると「受け取れませんでした」が出る、(6) アプリを入れた直後（worker がまだ無い）に共有しても「受け取れませんでした」になり、もう一度共有すれば受け取れる。

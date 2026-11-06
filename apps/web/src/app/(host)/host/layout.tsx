@@ -5,6 +5,7 @@ import "@niho/experience-presentation/v1/styles.css";
 import Script from "next/script";
 import type { Metadata, Viewport } from "next";
 import { HostPwaRegistrar } from "@/components/host/HostPwaRegistrar";
+import { HostSharedPhotoReceiver } from "@/components/host/HostSharedPhoto";
 import { config } from "@/lib/config";
 import { HOST_APP_ICONS, HOST_APP_SHORT_NAME, HOST_APP_THEME_COLOR } from "@/lib/host/pwa";
 import { HOST_MANIFEST_PATH } from "@/lib/host/routes";
@@ -47,6 +48,7 @@ export default function HostRootLayout({ children }: { children: React.ReactNode
       <body className="flex min-h-dvh flex-col bg-canvas">
         <Script src="/host-history-guard.js" strategy="beforeInteractive" />
         <HostPwaRegistrar enabled={config.hostPwaEnabled} />
+        <HostSharedPhotoReceiver enabled={config.hostPwaEnabled} />
         <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-white">
           本文へ移動
         </a>

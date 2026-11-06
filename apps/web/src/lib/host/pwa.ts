@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import type { BookingFilter } from "@/host/bookings";
-import { HOST_APP_SCOPE, HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_LAUNCH_PATH, HOST_MESSAGES_PATH, withQuery } from "./routes";
+import { HOST_SHARE_FIELD, HOST_SHARE_PHOTO_TYPES } from "./display";
+import { HOST_APP_SCOPE, HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_LAUNCH_PATH, HOST_MESSAGES_PATH, HOST_SHARE_TARGET_PATH, withQuery } from "./routes";
 
 /**
  * The console as an installable app (#177, docs/host-pwa.md). Named apart from NIHO's own
@@ -19,8 +20,21 @@ export const HOST_APP_ICONS = {
 
 const PENDING: BookingFilter = "pending";
 
+/**
+ * The Web Share Target a photo is posted to (#177 P3): Android's share sheet lists the installed app for images. Next's
+ * `MetadataRoute.Manifest` types `params.files` as DOM `File`s, not the `{ name, accept }` descriptors the manifest holds.
+ */
+export interface HostShareTarget {
+  action: string;
+  method: "POST";
+  enctype: "multipart/form-data";
+  params: { files: { name: string; accept: string[] }[] };
+}
+
+export type HostWebManifest = Omit<MetadataRoute.Manifest, "share_target"> & { share_target: HostShareTarget };
+
 /** /host/manifest.webmanifest. Shortcuts show on Android and computers only. */
-export function hostWebManifest(): MetadataRoute.Manifest {
+export function hostWebManifest(): HostWebManifest {
   return {
     id: HOST_APP_SCOPE,
     name: HOST_APP_NAME,
@@ -45,6 +59,13 @@ export function hostWebManifest(): MetadataRoute.Manifest {
       { name: "メッセージ", url: HOST_MESSAGES_PATH },
       { name: "カレンダー", url: HOST_CALENDAR_PATH },
     ],
+    // Photos only, no title, text or URL: a shared link or note is not something the console can use. iOS ignores this.
+    share_target: {
+      action: HOST_SHARE_TARGET_PATH,
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: { files: [{ name: HOST_SHARE_FIELD, accept: [...HOST_SHARE_PHOTO_TYPES] }] },
+    },
   };
 }
 

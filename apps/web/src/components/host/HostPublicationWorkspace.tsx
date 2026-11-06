@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, PageHead } from "./ui";
+import { HostSharedPhotoOffer } from "./HostSharedPhoto";
 import {
   asPublicationPrice,
   publicationTermsForm,
@@ -251,6 +252,8 @@ export function HostPublicationWorkspace({
   const [providerMediaBaseline, setProviderMediaBaseline] = useState("");
   const [photoRights, setPhotoRights] = useState<PhotoRightsConfirmation<File> | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  // The photo came from Android's share sheet (#177 P3): the file input cannot show it, so its name is shown beside it.
+  const [sharedPhotoName, setSharedPhotoName] = useState<string | null>(null);
   const rightsConfirmed = photoRightsConfirmed(photoRights, selectedPhoto, product?.id ?? null, photoPlacement);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [sellerConfirmationMethod, setSellerConfirmationMethod] = useState<"" | "VERBAL" | "WRITTEN">("");
@@ -774,7 +777,7 @@ export function HostPublicationWorkspace({
         setProduct(next); setMediaDraft(next.media);
         setNotice("体験写真を追加しました。保存すると公開中の商品にも反映されます。");
       }
-      setSelectedPhoto(null); setPhotoRights(null); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
+      setSelectedPhoto(null); setSharedPhotoName(null); setPhotoRights(null); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "写真を追加できませんでした。選択した写真と入力を保持しています。"); }
     finally { setBusy(false); }
   }
@@ -995,7 +998,9 @@ export function HostPublicationWorkspace({
         <label className="block text-sm font-bold text-ink-soft">写真の説明（英語）<input value={photoAlt} onChange={(event) => setPhotoAlt(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal" /></label>
         <label className="block text-sm font-bold text-ink-soft">写真の説明（日本語）<input value={photoAltJa} onChange={(event) => setPhotoAltJa(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal" /></label>
         <Field label="写真クレジット（任意）" value={photoCredit} onChange={setPhotoCredit} />
-        <label className="block text-sm"><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setPhotoRights(null); }} className="block" /></label>
+        {!adminDraft ? <HostSharedPhotoOffer disabled={busy || !!conflictProduct} onUse={(photo) => { setSelectedPhoto(photo); setSharedPhotoName(photo.name); setPhotoRights(null); }} /> : null}
+        <label className="block text-sm"><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setSharedPhotoName(null); setPhotoRights(null); }} className="block" /></label>
+        {sharedPhotoName && selectedPhoto ? <p className="text-sm text-ink-soft">共有された写真を選択中: <span className="[overflow-wrap:anywhere]">{sharedPhotoName}</span>。写真の説明と権利の確認はこの下の入力で行います。</p> : null}
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
         <button type="button" disabled={busy || !!conflictProduct || !selectedPhoto || !rightsConfirmed || !photoAlt.trim() || !photoAltJa.trim()} className={consoleButtonClass("secondary")} onClick={() => void uploadPhoto()}>写真を追加・差し替え</button>
       </section>
