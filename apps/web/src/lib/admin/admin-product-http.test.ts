@@ -26,7 +26,7 @@ vi.mock("@/lib/experience/store-server", () => ({
   experienceStore: () => null,
 }));
 vi.mock("@/lib/experience/public-media-storage", () => ({ experiencePublicMediaStorage: () => null }));
-vi.mock("@/lib/editor/guide-cover-image", () => ({
+vi.mock("@/lib/guide-cover-image", () => ({
   GuideCoverImageError: class extends Error {},
   processGuideCoverImage: vi.fn(),
   readGuideCoverInput: vi.fn(),

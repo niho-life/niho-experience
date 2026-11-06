@@ -47,7 +47,7 @@ vi.mock("./publication-host-boundary", () => ({
 vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository, guestMeetingGuideRepository: () => mocks.meetingGuides }));
 vi.mock("@/lib/translation/anthropic", () => ({ anthropicTranslator: () => mocks.translator }));
 vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => mocks.mediaStorage }));
-vi.mock("@/lib/editor/guide-cover-image", () => ({
+vi.mock("@/lib/guide-cover-image", () => ({
   GuideCoverImageError: class extends Error { code = "invalid_image"; },
   processGuideCoverImage: mocks.coverImage,
   readGuideCoverInput: mocks.coverInput,

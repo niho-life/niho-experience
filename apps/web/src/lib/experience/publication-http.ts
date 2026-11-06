@@ -32,7 +32,7 @@ import {
   type PublicationHostContext,
 } from "./publication-host-boundary";
 import { experiencePublicMediaStorage } from "./public-media-storage";
-import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/editor/guide-cover-image";
+import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/guide-cover-image";
 import { anthropicTranslator } from "@/lib/translation/anthropic";
 import { EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH, experienceManuscriptToEnglish } from "@/lib/translation/prompts";
 

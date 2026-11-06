@@ -114,7 +114,6 @@ describe("article authority settings", () => {
       EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "true",
       NIHO_ARTICLE_AUTHORITY_ORIGIN: authority.NIHO_ARTICLE_AUTHORITY_ORIGIN,
       NIHO_ARTICLE_LINKS_AUDIENCE: "https://niho.example.invalid/experience-guide-links",
-      EDITOR_CONSOLE_ENABLED: "false",
     };
     expect(resolveConfig(host)).toMatchObject({ hostArticleLinksEnabled: true, articleAuthorityApiEnabled: false, nihoArticleAuthorityAudience: "", nihoArticleLinksAudience: host.NIHO_ARTICLE_LINKS_AUDIENCE });
     expect(() => resolveConfig({ ...host, HOST_CONSOLE_ENABLED: "false" })).toThrow(/HOST_CONSOLE_ENABLED/);
@@ -757,41 +756,6 @@ describe("editor public guide source (#252, contract v1)", () => {
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "http://assets.editor.example" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "https://assets.editor.example/photos" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
     expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "assets" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
-  });
-});
-
-describe("editor console settings", () => {
-  const configured = {
-    EXPERIENCE_API_MODE: "http",
-    EDITOR_CONSOLE_ENABLED: "true",
-    EDITOR_SESSION_SECRET: "e".repeat(32),
-    NIHO_FIREBASE_WEB_API_KEY: "firebase-key",
-    NIHO_EXPERIENCE_EDITOR_ORIGIN: "https://experience.example",
-    SITE_URL: "https://experience.example",
-  };
-
-  it("stays closed by default, in mock mode, or when any dedicated setting is missing", () => {
-    expect(resolveConfig({})).toMatchObject({ editorConsoleEnabled: false, editorSessionSecret: "", editorOrigin: "" });
-    expect(resolveConfig({ ...configured, EXPERIENCE_API_MODE: "mock" }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, EDITOR_CONSOLE_ENABLED: "1" }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, EDITOR_SESSION_SECRET: "" }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, EDITOR_SESSION_SECRET: "short" }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, HOST_SESSION_SECRET: configured.EDITOR_SESSION_SECRET }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, ADMIN_SESSION_SECRET: configured.EDITOR_SESSION_SECRET }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, NIHO_FIREBASE_WEB_API_KEY: "" }).editorConsoleEnabled).toBe(false);
-    expect(resolveConfig({ ...configured, NIHO_EXPERIENCE_EDITOR_ORIGIN: "" }).editorConsoleEnabled).toBe(false);
-  });
-
-  it("opens only for an exact secure origin and an independently keyed cookie", () => {
-    expect(resolveConfig(configured)).toMatchObject({
-      editorConsoleEnabled: true,
-      editorSessionSecret: "e".repeat(32),
-      editorOrigin: "https://experience.example",
-    });
-    expect(() => resolveConfig({ ...configured, NIHO_EXPERIENCE_EDITOR_ORIGIN: "https://other.example" })).toThrow(/exactly match/);
-    expect(() => resolveConfig({ ...configured, SITE_URL: "http://experience.example", NIHO_EXPERIENCE_EDITOR_ORIGIN: "http://experience.example" })).toThrow(/HTTPS/);
-    expect(() => resolveConfig({ ...configured, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "http://niho.example" })).toThrow(/NEXT_PUBLIC_NIHO_WEB_ORIGIN.*HTTPS/);
-    expect(resolveConfig({ ...configured, SITE_URL: "http://localhost:3000", NIHO_EXPERIENCE_EDITOR_ORIGIN: "http://localhost:3000" }).editorOrigin).toBe("http://localhost:3000");
   });
 });
 
