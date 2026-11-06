@@ -6,9 +6,14 @@
 
 英語を原文・既定URLとし、承認済み日本語releaseを `/ja` でSSR表示する。英日ともコードの描画部品を使い、公開PageDocument・chrome・presentation provenanceをレイアウトへ採用しない。装飾文書、renderer identity、画像digestの欠損や変更は、コード描画を停止する理由にしない。
 
-公開画面は、342-key UI copy、体験紹介を含む公開業務DTO、静的ページのroute・SEOを取得する。翻訳生成、AUTO/manual値の更新、再翻訳候補、公開承認、権限はNIHO側が正本である。提供者の `/host` 原稿編集・予約管理は維持する。Kamakura-siteのCMSもこの凍結の対象ではない。
+公開画面は、342-key UI copy、体験紹介を含む公開業務DTO、静的ページのroute・SEOを使う。取得元は2通りある。
 
-`EXPERIENCE_PRESENTATION_SOURCE_DISPLAY_ENABLED` は廃止し、既存環境に値が残っていても表示を変更しない。`EXPERIENCE_JAPANESE_SITE_ENABLED` は承認済みreleaseの実配備受入後に有効化する（下の「有効化の前に確かめること」）。2026-10-31時点でどの環境にも設定が無く（`.env.example` は `false`）、実質オフである。オフの間は `/ja` が「未公開」だけを表示し、日本語のhreflang・sitemap・言語切替を一切出さず、日本語APIへも通信しない。今回の分離だけでは、日本語の運用開始や全サイト日英化の完了を意味しない。
+- **このサイトが公開する体験（http mode かつ `EXPERIENCE_PUBLICATIONS_ENABLED`、オーナー決定 2026-11-06）**: UI文言342キーと静的4ページ（`/ja`・`/ja/experiences`・`/ja/host`・`/ja/help`）のroute・SEOは、このリポジトリが持つ（`apps/web/src/lib/ja-static-copy.ts`、`localized-content.ts` の `localJapaneseRelease()`）。NIHOからは何も取らない。体験の日本語は、ホストが書いて所有者が確認した日本語原稿の公開データ（`publication.japanese`）から描画する。releaseは固定の `experience-local-ja-v1` で、copy・4ページが常に同じreleaseになる。
+- **それ以外（NIHOのカタログを使うpreview、旧販売）**: 従来どおりNIHOが配る承認済みreleaseを使う。翻訳生成、AUTO/manual値の更新、再翻訳候補、公開承認、権限はNIHO側が正本である。
+
+提供者の `/host` 原稿編集・予約管理は維持する。Kamakura-siteのCMSもこの凍結の対象ではない。
+
+`EXPERIENCE_PRESENTATION_SOURCE_DISPLAY_ENABLED` は廃止し、既存環境に値が残っていても表示を変更しない。`EXPERIENCE_JAPANESE_SITE_ENABLED` は、日本語文言の確認と実機確認の後に有効化する（下の「有効化の前に確かめること」）。2026-10-31時点でどの環境にも設定が無く（`.env.example` は `false`）、実質オフである。オフの間は `/ja` が「未公開」だけを表示し、日本語のhreflang・sitemap・言語切替を一切出さず、日本語APIへも通信しない。今回の分離だけでは、日本語の運用開始や全サイト日英化の完了を意味しない。
 
 ## 引き続き検査すること
 
@@ -44,8 +49,9 @@
 
 `EXPERIENCE_JAPANESE_SITE_ENABLED=true` は、次がそろってから専用の変更PRで入れる。公式配備の表（`scripts/deploy/runtime-flags.mjs`）には載っており、GitHub variable `STG_JAPANESE_SITE_ENABLED` / `PROD_JAPANESE_SITE_ENABLED` を `true` にして配備すると ON になる（未設定は OFF。[production-deploy.md](production-deploy.md)「機能のフラグ」）。
 
-- 承認済みの日本語 release が NIHO の stg・prod に実配備されている（copy・静的4ページ・catalog・detail が同じ `releaseId`）。
-- `verify:live` で公開APIの契約を確認する。今の `verify:live` は日本語の `/api/public/experiences/v1.2/ja/*` と `pages/localized/*` を読まないので、日本語の検査を足すか、同じ観点で手動確認して記録する。
+- **このサイトが公開する体験の場合**: `ja-static-copy.ts` の訳文342キーをオーナーが確認している（初稿は #59 の PR で追加したもの。`ja-static-copy.test.ts` が、キーの過不足・プレースホルダー・`{em}` の対応・英語の取り残しがないことを検査する）。NIHO の release は要らない。
+- **NIHO の release を使う場合（preview・旧販売）**: 承認済みの日本語 release が NIHO の stg・prod に実配備されている（copy・静的4ページ・catalog・detail が同じ `releaseId`）。
+- NIHO の release を使う場合は、`verify:live` で公開APIの契約を確認する。今の `verify:live` は日本語の `/api/public/experiences/v1.2/ja/*` と `pages/localized/*` を読まないので、日本語の検査を足すか、同じ観点で手動確認して記録する。
 - 実機で、`/sitemap.xml` の英日の組と `xhtml:link`、英語詳細・日本語詳細の `<head>` の hreflang が互いを指すこと、言語切替が同じ体験へ移ることを確かめる（`SITE_INDEXING=allow` の環境で）。
 
 ## 残る統合受入

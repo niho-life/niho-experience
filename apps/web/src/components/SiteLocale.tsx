@@ -9,6 +9,7 @@ import {
 } from "@niho/experience-presentation/v1";
 import type { SiteLocale } from "@/lib/localized-content";
 import { isSupportedPublicPath } from "@/lib/locale-links";
+import { createJapaneseCopy } from "@/lib/ja-copy";
 
 type SiteLocaleValue = Readonly<{
   locale: SiteLocale;
@@ -32,7 +33,7 @@ export function SiteLocaleProvider({ locale, releaseId = null, values, children 
   values?: StaticCopyValuesV1;
   children: ReactNode;
 }) {
-  const value = useMemo<SiteLocaleValue>(() => ({ locale, releaseId, prefix: locale === "ja" ? "/ja" : "", copy: createStaticCopyV1(values ?? defaultStaticCopyValuesV1()) }), [locale, releaseId, values]);
+  const value = useMemo<SiteLocaleValue>(() => ({ locale, releaseId, prefix: locale === "ja" ? "/ja" : "", copy: locale === "ja" ? createJapaneseCopy(values ?? defaultStaticCopyValuesV1()) : createStaticCopyV1(values ?? defaultStaticCopyValuesV1()) }), [locale, releaseId, values]);
   return <SiteLocaleContext.Provider value={value}>{children}</SiteLocaleContext.Provider>;
 }
 
