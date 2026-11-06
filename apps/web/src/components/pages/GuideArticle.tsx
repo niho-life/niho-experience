@@ -48,6 +48,9 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
   const listed = await readListedExperiences(query);
   const featured = listed ? listedExperienceSlugs(guide, listed).flatMap((slug) => listed.filter((item) => item.slug === slug)) : [];
   const [ctaCard, ...otherCards] = await cardsFor(featured, query);
+  const ctaAfter = ctaCard ? guideCtaInsertAfter(blocks, outline) : null;
+  // The experiences the page really shows as booking cards, for the article's `mentions` (structured-data.ts).
+  const shownExperiences = [...(ctaCard && ctaAfter !== null ? [ctaCard] : []), ...otherCards].map((card) => ({ slug: card.slug, name: card.title }));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, sources: await guestBookingSources(featured.map((item) => item.slug)) };
   const hero = guide.hero ? { ...guide.hero, href: guideLinkHref(guide.hero.src)?.href ?? null } : null;
   const pillar = guidePillarDetails(guide.pillar);
@@ -56,7 +59,7 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
 
   return (
     <>
-      {structuredData ? <JsonLd data={guideArticleJsonLd(guide, config.siteUrl, SITE_NAME)} /> : null}
+      {structuredData ? <JsonLd data={guideArticleJsonLd(guide, config.siteUrl, SITE_NAME, shownExperiences)} /> : null}
       {structuredData ? <JsonLd data={breadcrumbJsonLd(config.siteUrl, [{ name: "Home", path: "/" }, { name: "Guides", path: "/guides" }, { name: guide.title, path: `/guides/${guide.slug}` }])} /> : null}
       <article className="container-page pt-6 sm:pt-9">
         <div className="mx-auto max-w-[46rem]">
@@ -110,7 +113,7 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
             <GuideBody
               blocks={blocks}
               outline={outline}
-              insertAfter={ctaCard ? guideCtaInsertAfter(blocks, outline) : null}
+              insertAfter={ctaAfter}
               insertion={ctaCard ? <GuideExperienceCta card={ctaCard} dates={cardDates} /> : null}
               figureSrc={(figure) => figure.assetId ? publicFigures.get(figure.assetId.toLowerCase())?.src ?? null : null}
               figureCredit={(assetId) => publicFigures.get(assetId.toLowerCase())?.credit}

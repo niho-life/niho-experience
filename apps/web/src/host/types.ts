@@ -424,6 +424,8 @@ export interface HostSiteBookingTerms {
   cancellation?: HostSiteCancellation;
   /** NIHO support actions shared with this provider, without Admin identity or private notes. */
   supportHistory?: readonly { at: string; text: string }[];
+  /** The guest's mail server refused the address (#375): emails to the guest are not sent. Absent while mail is delivered. */
+  guestEmailUndeliverable?: true;
 }
 
 /** A booking made on this site, cancelled or asked to be: what 予約's detail says of it. */

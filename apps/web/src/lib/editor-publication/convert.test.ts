@@ -37,6 +37,7 @@ describe("an editor publication as a guide", () => {
           alt: "A quiet lane at dusk (sample photo)",
           width: 1600,
           height: 900,
+          sizeAssumed: true,
           licensed: false,
           caption: "Photo: Sample Studio",
         },
@@ -57,6 +58,21 @@ describe("an editor publication as a guide", () => {
     const jsonLd = guideArticleJsonLd(result.guide, SITE, "NIHO Experience");
     expect(jsonLd).not.toHaveProperty("image");
     expect(jsonLd.author).toEqual({ "@type": "Person", name: "Sample Writer" });
+  });
+
+  it("shares the cover only with the writer's share permission, and adds a published role and introduction", () => {
+    const live = article("live-1");
+    const result = editorArticleToGuide({ ...live, coverShareable: true, author: { ...live.author, role: "Coastal walk guide", bio: "Writes about mornings by the sea." } }, policy);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.guide.hero).toMatchObject({ licensed: true, sizeAssumed: true, width: 1600, height: 900 });
+    expect(shareableGuideImage(result.guide, SITE)).toBe("https://assets.editor.example/photos/cover-1.jpg");
+    expect(result.guide.author).toEqual({ name: "Sample Writer", role: "Coastal walk guide", bio: "Writes about mornings by the sea." });
+    const jsonLd = guideArticleJsonLd(result.guide, SITE, "NIHO Experience");
+    expect(jsonLd.image).toEqual(["https://assets.editor.example/photos/cover-1.jpg"]);
+    expect(jsonLd.author).toEqual({ "@type": "Person", name: "Sample Writer", jobTitle: "Coastal walk guide", description: "Writes about mornings by the sea." });
+    // A role without an introduction: the role only.
+    const roleOnly = editorArticleToGuide({ ...live, author: { ...live.author, role: "Guide" } }, policy);
+    expect(roleOnly.ok && roleOnly.guide.author).toEqual({ name: "Sample Writer", role: "Guide" });
   });
 
   it("keeps an empty alt, shows no caption without a credit, labels a two-word category and marks unlisted", () => {
@@ -145,5 +161,14 @@ describe("a preview draft as a guide", () => {
     });
     const unsafeCover = { ...draft("pv_synthetic-preview-not-a-secret-draft-000001"), cover: { id: "c", url: "https://elsewhere.example/c.jpg", alt: "x" } };
     expect(editorPreviewToGuide(unsafeCover, policy, "2026-10-31")).toMatchObject({ ok: false, reason: "cover is not an https URL on an allowed host" });
+  });
+
+  it("follows the draft's share permission and author profile like a publication", () => {
+    const base = draft("pv_synthetic-preview-not-a-secret-draft-000001");
+    const cover = { id: "c", url: `${FIXTURE_ASSET_ORIGIN}/photos/draft-cover.jpg`, alt: "x" };
+    const shared = editorPreviewToGuide({ ...base, cover, coverShareable: true, author: { name: "Sample Writer", url: null, bio: "A short bio." } }, policy, "2026-10-31");
+    expect(shared).toMatchObject({ ok: true, guide: { hero: { licensed: true, sizeAssumed: true }, author: { name: "Sample Writer", bio: "A short bio." } } });
+    const unshared = editorPreviewToGuide({ ...base, cover }, policy, "2026-10-31");
+    expect(unshared).toMatchObject({ ok: true, guide: { hero: { licensed: false, sizeAssumed: true } } });
   });
 });

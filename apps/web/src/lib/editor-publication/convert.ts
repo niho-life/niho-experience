@@ -1,6 +1,6 @@
-import type { Guide, GuideHero } from "@/content/guides/types";
+import type { Guide, GuideAuthor, GuideHero } from "@/content/guides/types";
 import { GUIDE_ASSET_URI_PREFIX, GuideMarkdownError, guideLinkHref, parseGuideMarkdown } from "../guide-markdown";
-import type { EditorArticle, EditorAsset, EditorPreview } from "./contract";
+import type { EditorArticle, EditorAsset, EditorAuthor, EditorPreview } from "./contract";
 
 /**
  * Editor publications → the one display model every guide uses (pure). The body is rendered by the same safe Markdown
@@ -19,7 +19,8 @@ export const EDITOR_CATEGORY_DEFAULT_ORDER = 1000;
 
 /**
  * The size a cover is declared with. Contract v1 sends no pixel size for a photo, and `<img>` needs one; the page lays the
- * hero out with `h-auto`, so the photo still shows in its own ratio. Never used for a share image (covers are not licensed).
+ * hero out with `h-auto`, so the photo still shows in its own ratio. The hero says `sizeAssumed`, so a share image never
+ * declares this size as the photo's (the Open Graph image goes without width and height).
  */
 export const EDITOR_COVER_ASSUMED_SIZE = { width: 1600, height: 900 } as const;
 
@@ -55,16 +56,23 @@ function contentProblem(markdown: string, cover: EditorAsset | undefined, assets
   return null;
 }
 
-function hero(cover: EditorAsset, policy: EditorPhotoPolicy): GuideHero {
+function hero(cover: EditorAsset, shareable: boolean, policy: EditorPhotoPolicy): GuideHero {
   return {
     src: editorPhotoUrl(cover.url, policy)!,
     alt: cover.alt,
     ...EDITOR_COVER_ASSUMED_SIZE,
-    // Only an explicit declaration of sharing rights opens Open Graph and `Article.image` (shareableGuideImage). Contract
-    // v1 declares none (the editor's consent is permission to publish on the page), so an editor cover is never shared.
-    licensed: false,
+    sizeAssumed: true,
+    // Only an explicit declaration of sharing rights opens Open Graph and `Article.image` (shareableGuideImage). The
+    // editor's consent alone is permission to publish on the page; `coverShareable` is the writer's separate permission to
+    // share the cover too, so only that makes it licensed.
+    licensed: shareable,
     ...(cover.credit === undefined ? {} : { caption: cover.credit }),
   };
+}
+
+/** The author as the page shows them: the name, and the role and introduction when the writer published them. */
+function guideAuthor(author: EditorAuthor): GuideAuthor {
+  return { name: author.name, ...(author.role === undefined ? {} : { role: author.role }), ...(author.bio === undefined ? {} : { bio: author.bio }) };
 }
 
 const dateOf = (isoTime: string) => isoTime.slice(0, 10);
@@ -83,10 +91,10 @@ export function editorArticleToGuide(article: EditorArticle, policy: EditorPhoto
       description: article.lead ?? "",
       category: { slug: article.category.slug, label: article.category.label, ...(article.category.labelJa === undefined ? {} : { labelJa: article.category.labelJa }), displayOrder: article.category.order ?? EDITOR_CATEGORY_DEFAULT_ORDER, ...(article.category.revision === undefined ? {} : { revision: article.category.revision }) },
       editorPublication: { id: article.id, version: article.version },
-      author: { name: article.author.name },
+      author: guideAuthor(article.author),
       publishedAt: dateOf(article.publishedAt),
       updatedAt: dateOf(article.updatedAt),
-      ...(article.cover ? { hero: hero(article.cover, policy) } : {}),
+      ...(article.cover ? { hero: hero(article.cover, article.coverShareable === true, policy) } : {}),
       relatedExperienceSlugs: [...new Set(article.related)],
       relatedGuideSlugs: [],
       faq: [],
@@ -118,10 +126,10 @@ export function editorPreviewToGuide(preview: EditorPreview, policy: EditorPhoto
       ...(preview.category
         ? { category: { slug: preview.category.slug, label: preview.category.label, displayOrder: preview.category.order ?? EDITOR_CATEGORY_DEFAULT_ORDER } }
         : {}),
-      author: preview.author ? { name: preview.author.name } : EDITOR_PREVIEW_AUTHOR,
+      author: preview.author ? guideAuthor(preview.author) : EDITOR_PREVIEW_AUTHOR,
       publishedAt,
       updatedAt: today < publishedAt ? publishedAt : today,
-      ...(preview.cover ? { hero: hero(preview.cover, policy) } : {}),
+      ...(preview.cover ? { hero: hero(preview.cover, preview.coverShareable === true, policy) } : {}),
       relatedExperienceSlugs: [...preview.related],
       relatedGuideSlugs: [],
       faq: [],

@@ -4,7 +4,7 @@ import { GuideArticle } from "@/components/pages/GuideArticle";
 import { config } from "@/lib/config";
 import type { SearchParams } from "@/lib/filters";
 import { findGuide, missingGuideRedirect } from "@/lib/guide-registry";
-import { guideAlternates, shareableGuideImage } from "@/lib/guides";
+import { guideAlternates, guideSummary, shareableGuideImage } from "@/lib/guides";
 import { publicMetadata, SITE_NAME } from "@/lib/public-metadata";
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams> };
@@ -19,20 +19,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
   const { guide, draft, unlisted } = found;
   const canonical = `${config.siteUrl}/guides/${guide.slug}`;
-  const base = publicMetadata(guide.title, guide.description, canonical);
-  // Only a hero whose rights cover sharing becomes the share image (docs/seo.md).
+  // The lead, or the opening of the body when the guide has no lead (an editor publication's lead is optional).
+  const description = guideSummary(guide);
+  const base = publicMetadata(guide.title, description, canonical);
+  // Only a hero whose rights cover sharing becomes the share image (docs/seo.md). A stand-in size (an editor cover has
+  // none of its own) is never declared as the image's.
   const image = shareableGuideImage(guide, config.siteUrl);
-  const images = image && guide.hero ? [{ url: image, width: guide.hero.width, height: guide.hero.height, alt: guide.hero.alt }] : [];
+  const images = image && guide.hero
+    ? [{ url: image, ...(guide.hero.sizeAssumed ? {} : { width: guide.hero.width, height: guide.hero.height }), alt: guide.hero.alt }]
+    : [];
   return {
     ...base,
     // No /ja/guides route yet (#59): en and x-default only, whatever translations a guide carries.
     alternates: guideAlternates(guide, canonical, null),
     authors: [{ name: guide.author.name }],
     openGraph: {
-      title: guide.title, description: guide.description, url: canonical, siteName: SITE_NAME, locale: "en_US", type: "article",
+      title: guide.title, description, url: canonical, siteName: SITE_NAME, locale: "en_US", type: "article",
       publishedTime: guide.publishedAt, modifiedTime: guide.updatedAt, authors: [guide.author.name], images,
     },
-    twitter: { card: "summary", title: guide.title, description: guide.description, images: image ? [image] : [] },
+    twitter: { card: "summary", title: guide.title, description, images: image ? [image] : [] },
     // Drafts and direct-link editorial previews stay out of search, even if site indexing opens later.
     ...(draft || unlisted ? { robots: { index: false, follow: false } } : {}),
   };

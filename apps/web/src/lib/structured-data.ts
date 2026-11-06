@@ -2,7 +2,7 @@ import type { JourneyReviews } from "@niho-experience/api-client";
 import type { Guide } from "@/content/guides/types";
 import type { ExperienceDetailForSite } from "./experience-types";
 import type { SitePublicExperience } from "./experience/site-publications";
-import { shareableGuideImage } from "./guides";
+import { guidePillarDetails, guideSummary, shareableGuideImage } from "./guides";
 import { reviewDisplay } from "./reviews-ui";
 import { safeHttpsUrl } from "./safe-url";
 
@@ -166,28 +166,44 @@ export function siteJsonLd(siteUrl: string, siteName: string, listingName: strin
   };
 }
 
+/** An experience the guide page shows as a booking card. */
+export type GuideMentionedExperience = Readonly<{ slug: string; name: string }>;
+
 /**
- * A guide as an `Article`, saying only what the page shows: the title, description, author (name and role), the published and
- * updated dates and the URL. The publisher is the site's `Organization` (the same `@id`, name and URL as the home page's).
- * The hero is included only when its rights cover sharing (`hero.licensed`). Unlike experiences, the sample guides of the
- * mock preview carry it too: the article says nothing beyond the page, and preview pages are `noindex`.
+ * A guide as an `Article`, saying only what the page shows: the title, summary (the meta description: `guideSummary`), the
+ * section label above the title (the category, else the pillar), author (name, role and introduction), the published and
+ * updated dates, the URL, and the experiences shown as booking cards (`mentions`, none when none are shown). The publisher
+ * is the site's `Organization` (the same `@id`, name and URL as the home page's). The hero is included only when its rights
+ * cover sharing (`hero.licensed`). Unlike experiences, the sample guides of the mock preview carry it too: the article says
+ * nothing beyond the page, and preview pages are `noindex`.
  */
-export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: string): JsonLd {
+export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: string, mentioned: readonly GuideMentionedExperience[] = []): JsonLd {
   const url = `${siteUrl}/guides/${guide.slug}`;
   const image = shareableGuideImage(guide, siteUrl);
+  const section = guide.category?.label ?? guidePillarDetails(guide.pillar)?.label;
+  const description = guideSummary(guide);
   return {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: guide.title,
-    description: guide.description,
+    ...(description ? { description } : {}),
     url,
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     inLanguage: "en",
-    author: { "@type": "Person", name: guide.author.name, ...(guide.author.role ? { jobTitle: guide.author.role } : {}) },
+    ...(section ? { articleSection: section } : {}),
+    author: {
+      "@type": "Person",
+      name: guide.author.name,
+      ...(guide.author.role ? { jobTitle: guide.author.role } : {}),
+      ...(guide.author.bio ? { description: guide.author.bio } : {}),
+    },
     datePublished: guide.publishedAt,
     dateModified: guide.updatedAt,
     publisher: { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: siteName, url: `${siteUrl}/` },
     ...(image ? { image: [image] } : {}),
+    ...(mentioned.length
+      ? { mentions: mentioned.map((item) => ({ "@type": "TouristTrip", name: item.name, url: `${siteUrl}/experiences/${item.slug}` })) }
+      : {}),
   };
 }
 
