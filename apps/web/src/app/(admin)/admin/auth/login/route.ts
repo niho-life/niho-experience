@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
 import {
   adminJson,
-  isAdminHttp,
+  isAdminNihoLogin,
   setAdminHttpLoginCookie,
 } from "@/lib/admin/server";
 import { ADMIN_HTTP_LOGIN_MAX_AGE_SECONDS } from "@/lib/admin/http-session";
@@ -12,7 +12,8 @@ import { safeAdminReturnTo } from "@/lib/admin/routes";
 import { NextResponse } from "next/server";
 
 export function GET(request: NextRequest) {
-  if (!isAdminHttp()) return adminJson({ error: "not_found" }, 404);
+  // Closed with the Google login (ADR 0003): /admin/auth/google signs in instead, and NIHO is not called.
+  if (!isAdminNihoLogin()) return adminJson({ error: "not_found" }, 404);
   const verifier = createPkceVerifier();
   const state = createLoginState();
   const response = new NextResponse(null, {

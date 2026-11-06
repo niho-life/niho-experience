@@ -28,7 +28,7 @@ function failure(error: unknown): Response {
 
 async function signedIn(): Promise<{ ok: true; actor: SupportActor } | { ok: false; response: Response }> {
   const loaded = await loadAdminHttpSession();
-  if (loaded.status === "ok") return { ok: true, actor: { nihoUserId: loaded.verified.actor.id } };
+  if (loaded.status === "ok") return { ok: true, actor: { nihoUserId: loaded.actor.id } };
   return { ok: false, response: adminJson({ error: loaded.status === "error" ? "unavailable" : "unauthenticated" }, loaded.status === "error" ? 503 : 401) };
 }
 

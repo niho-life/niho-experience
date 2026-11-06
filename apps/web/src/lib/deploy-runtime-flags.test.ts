@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveConfig } from "./resolve-config";
+import { NIHO_ADMIN_TOKEN_FLAGS, resolveConfig } from "./resolve-config";
 
 /*
  * The feature flags the staging and production deploy workflows put on a revision (scripts/deploy/runtime-flags.mjs,
@@ -62,6 +62,7 @@ const SETTING: Record<string, string> = {
   cloudRunServiceUrl: "https://niho-experience-sample-an.a.run.app",
   serviceAccountList: "caller@sample-project.iam.gserviceaccount.com",
   serviceAccountEmail: "admin@sample-project.iam.gserviceaccount.com",
+  adminAllowedEmails: "admin.sample@niho.life;ops.sample@niho.life",
   vapidPublicKey: `B${"A".repeat(86)}`,
   vapidSubject: "mailto:ops@example.com",
   channelAdapters: "GetYourGuide/gyg-browser@1=observe+close+open",
@@ -102,6 +103,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
   EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "channelWatchdogEnabled",
   EXPERIENCE_CHANNEL_MANAGER_ENABLED: "channelManagerEnabled",
+  EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED: "adminGoogleLoginEnabled",
   EXPERIENCE_CHANNEL_RUNTIME_ENABLED: "channelRuntimeEnabled",
   EXPERIENCE_RESOURCE_GOOGLE_ENABLED: "resourceGoogleEnabled",
   EXPERIENCE_RESOURCE_GOOGLE_WATCH_ENABLED: "resourceGoogleWatchEnabled",
@@ -407,6 +409,31 @@ describe("the deploy workflows' feature flags", () => {
         // The server would refuse the same revision at start-up.
         const forced = resolve(target, closure(target, accounts.env));
         expect(() => resolveConfig({ ...revision(target, forced), [conflict]: "true" }), conflict).toThrow(`cannot be on with ${conflict}=true`);
+      }
+    }
+  });
+
+  it("opens the Admin's Google login with the Admin console and its allowlist, and refuses it with a NIHO admin token flag (ADR 0003)", () => {
+    for (const target of ["stg", "prod"] as const) {
+      const name = (variable: string) => `${PREFIX[target]}_${variable}`;
+      const vars = closure(target, "EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED");
+      expect(vars[name("ADMIN_SUPPORT_CONSOLE_ENABLED")]).toBe("true");
+      const resolved = resolve(target, vars);
+      expect(resolved.problems).toEqual([]);
+      expect(resolved.env.EXPERIENCE_ADMIN_ALLOWED_EMAILS).toBe(SETTING.adminAllowedEmails);
+      const config = resolveConfig(revision(target, resolved));
+      expect(config).toMatchObject({ adminGoogleLoginEnabled: true, adminAllowedEmails: ["admin.sample@niho.life", "ops.sample@niho.life"], adminOrigin: SITE[target] });
+      // Missing or outside niho.life, the allowlist is named before anything is deployed, never its value.
+      for (const bad of ["", "admin.sample@example.com", "admin.sample@niho.life,ops.sample@niho.life", "Admin.Sample@niho.life", "admin.sample@niho.life; ops.sample@niho.life"]) {
+        const problems = resolve(target, { ...vars, [name("ADMIN_ALLOWED_EMAILS")]: bad }).problems;
+        expect(problems, bad).toHaveLength(1);
+        expect(problems[0], bad).toContain(name("ADMIN_ALLOWED_EMAILS"));
+        if (bad) expect(problems[0], bad).not.toContain(bad);
+      }
+      // The flags whose code sends NIHO's admin token are not in the table; the server refuses them at start-up.
+      for (const flag of NIHO_ADMIN_TOKEN_FLAGS) {
+        expect(tableNames(), flag).not.toContain(flag);
+        expect(() => resolveConfig({ ...revision(target, resolved), [flag]: "true" }), flag).toThrow(`cannot be on with ${flag}=true`);
       }
     }
   });

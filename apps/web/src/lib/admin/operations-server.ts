@@ -1,7 +1,7 @@
 import "server-only";
 import { createExperienceAdminOperationsApiClient, type ExperienceAdminOperationsApiClient, type ExperienceAdminOperationsFailure } from "@niho-experience/api-client/admin-operations";
 import { config } from "@/lib/config";
-import { adminJson, clearAdminHttpSessionCookie, isAdminHttp, isAdminHttpRead, isAdminPreview, isAdminReadPreview, loadAdminHttpSession } from "./server";
+import { adminJson, clearAdminHttpSessionCookie, isAdminHttp, isAdminHttpRead, isAdminPreview, isAdminReadPreview, loadNihoAdminHttpSession } from "./server";
 
 export const isAdminHttpOperations = () => isAdminHttpRead() && config.adminOperationsApiEnabled;
 export const isAdminOperationsPreview = () => isAdminReadPreview() && config.adminOperationsPreviewEnabled;
@@ -19,7 +19,7 @@ export function adminOperationsFailureJson(failure: ExperienceAdminOperationsFai
 /** Every operations BFF call re-verifies the dedicated current ADMIN session. */
 export async function loadAdminOperationsClient(): Promise<{ ok: true; client: ExperienceAdminOperationsApiClient } | { ok: false; response: Response }> {
   if (!isAdminHttpOperations() || !isAdminHttp()) return { ok: false, response: adminJson({ error: "not_found" }, 404) };
-  const load = await loadAdminHttpSession();
+  const load = await loadNihoAdminHttpSession();
   if (load.status === "ok") return { ok: true, client: createExperienceAdminOperationsApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: load.session.idToken, fetch }) };
   if (load.status === "error") return { ok: false, response: adminJson({ error: "unavailable" }, 503) };
   const response = adminJson({ error: load.status === "refresh" ? "refresh_required" : "signed_out" }, 401);

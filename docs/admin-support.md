@@ -8,7 +8,7 @@
 
 `/admin/bookings` は、複数ホストの申込一覧、絞り込み、予約詳細、支援条件、相談、担当、運営メモ、連絡先の種類、Admin本人の対応履歴を確認する画面である。`/admin/notifications` は、サポートONで受け付けた合成予約について、新規申込、変更、取消、返金確認、新しい連絡の受信を確認する画面である。`EXPERIENCE_API_MODE=mock` と `ADMIN_SUPPORT_CONSOLE_ENABLED=true` の両方が設定されたときだけ、明示的な合成Adminログイン、合成予約、合成通知を表示する。フラグの既定値はOFFである。
 
-HTTPモードは、選別済み v1.0.0 契約によるAdmin専用app-connect認証を使う。NIHOで現在のplatform ADMINと専用clientを確認できた場合に、検証済みactorと8時間の絶対期限を表示する。予約・通知のread契約もv1.0.0で固定済みだが未配備で、独立した `ADMIN_SUPPORT_READ_API_ENABLED` は既定OFFである。OFFの間は各画面を「準備中」とし、実予約、通知本文、未読件数、操作成功を表示しない。
+HTTPモードは、選別済み v1.0.0 契約によるAdmin専用app-connect認証を使う（`EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED=true` のときは NIHO を使わず、`niho.life` の Google アカウントと Experience の許可リストでログインする。ADR 0003 の 4、[admin-auth.md](admin-auth.md)。この方式では下の NIHO の読取・担当・操作・手数料の API は起動時に拒否し、`/admin/bookings`・`/admin/notifications` はログイン中の管理者と期限だけを表示する）。NIHOで現在のplatform ADMINと専用clientを確認できた場合に、検証済みactorと8時間の絶対期限を表示する。予約・通知のread契約もv1.0.0で固定済みだが未配備で、独立した `ADMIN_SUPPORT_READ_API_ENABLED` は既定OFFである。OFFの間は各画面を「準備中」とし、実予約、通知本文、未読件数、操作成功を表示しない。
 
 認証の契約配布物は `packages/api-client/contract/experience-admin-auth-api.openapi.json`（source `b1bee0090e`）に固定する。予約・通知の読取契約は別配布物 `experience-admin-read-api.openapi.json`（source `08736836328976b130b919bef0ebcdad7d5ba7bb`、SHA `054bcc96e3f3818066512a185fdeeffe6da447f44340ea005d600eb63c8c4d8a`）に固定する。どちらもmanifestに未配備状態を記録し、API配備・三者受入・app-connect scope接続が完了するまで本番でread flagをONにしない。
 
@@ -66,7 +66,7 @@ read flagをONにしたHTTP画面は、予約一覧・deep link詳細・通知�
 - logoutは自分のNIHO接続の失効を試み、通信結果にかかわらずlocal cookieを消す。2xxまたは既に接続がない404だけを解除確認済みとし、401・その他の失敗・通信失敗では、端末からのlogout完了、NIHO側の解除未確認、接続が発行から最長8時間で失効することを表示する。
 - `/admin` 全体を `private, no-store`、`noindex, nofollow` とし、旅行者向けの分析・計測を読み込まない。公開cacheやイベント計測へ予約者・ホスト情報を送らない。
 
-HTTPでAdmin認証を有効にするには `ADMIN_SUPPORT_CONSOLE_ENABLED=true`、専用の `ADMIN_SESSION_SECRET`、Firebase Web API key、`SITE_URL` と完全一致する `NIHO_EXPERIENCE_ADMIN_ORIGIN` が必要である。予約・通知の読取には、これらに加えて配備・受入後に `ADMIN_SUPPORT_READ_API_ENABLED=true` を設定する。担当・内部メモにはさらに `ADMIN_SUPPORT_CASE_API_ENABLED=true`、予約操作には独立して`ADMIN_OPERATIONS_API_ENABLED=true`が必要である。ホスト履歴はhost consoleと`HOST_SUPPORT_HISTORY_API_ENABLED=true`、実料金・精算は各console/sessionと共通の`EXPERIENCE_FEE_SUMMARY_API_ENABLED=true`が必要である。すべてAPI先行配備・三者受入まではOFFにする。originは本番HTTPS、ローカルはloopback HTTPだけを許し、NIHO側の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN` と同じ値を明示する。公開ドメインはコードへ固定しない。
+HTTPでAdmin認証（NIHO のログイン）を有効にするには `ADMIN_SUPPORT_CONSOLE_ENABLED=true`、専用の `ADMIN_SESSION_SECRET`、Firebase Web API key、`SITE_URL` と完全一致する `NIHO_EXPERIENCE_ADMIN_ORIGIN` が必要である。Google のログインの設定（Firebase key と NIHO の origin は不要、DB・Google OAuth クライアント・許可リストが必要）は [admin-auth.md](admin-auth.md) にまとめる。予約・通知の読取には、これらに加えて配備・受入後に `ADMIN_SUPPORT_READ_API_ENABLED=true` を設定する。担当・内部メモにはさらに `ADMIN_SUPPORT_CASE_API_ENABLED=true`、予約操作には独立して`ADMIN_OPERATIONS_API_ENABLED=true`が必要である。ホスト履歴はhost consoleと`HOST_SUPPORT_HISTORY_API_ENABLED=true`、実料金・精算は各console/sessionと共通の`EXPERIENCE_FEE_SUMMARY_API_ENABLED=true`が必要である。すべてAPI先行配備・三者受入まではOFFにする。originは本番HTTPS、ローカルはloopback HTTPだけを許し、NIHO側の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN` と同じ値を明示する。公開ドメインはコードへ固定しない。
 
 ## NIHO側に必要な契約
 

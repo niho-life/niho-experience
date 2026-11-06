@@ -44,7 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.csrf = true;
   mocks.config = { guestBookingEnabled: true, siteUrl: "https://experience.example" };
-  mocks.load.mockResolvedValue({ status: "ok", verified: { actor: { id: "admin-a" } } });
+  mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "admin-a", displayName: null }, verified: { actor: { id: "admin-a" } } });
   mocks.store = {
     supportQueue: vi.fn(async () => ({ cancellationRequests: [], paymentReviews: [], refunds: [] })),
     cancelAsSupport: vi.fn(async () => cancelled),
@@ -81,6 +81,14 @@ describe("Admin site bookings BFF", () => {
     expect(await response.json()).toEqual({ outcome: "CANCELLED", repeated: false, bookingIds: [BOOKING], refunds: [{ refundId: REFUND_ID, status: "PENDING" }] });
     expect(mocks.store.cancelAsSupport).toHaveBeenCalledWith(ACTOR, BOOKING, { commandId: COMMAND, expectedSnapshot: SNAPSHOT, reason: "HOST_UNAVAILABLE", note: "By agreement", refund: { kind: "PARTIAL", amount: 3000 } });
     expect(mocks.submit).toHaveBeenCalledWith({ refund: SUBMISSION, platformStripeKey: "sk_test_synthetic_platform_key_only" });
+  });
+
+  it("acts as an admin signed in with Google (ADR 0003) by their adm_ actor ID, from the experience DB alone", async () => {
+    const admin = `adm_${"0123456789abcdef".repeat(2)}`;
+    mocks.load.mockResolvedValue({ status: "ok", kind: "experience", actor: { id: admin, displayName: "admin.sample@niho.life" }, session: { kind: "experience" } });
+    const response = await POST(post({ action: "RESOLVE_PAYMENT_REVIEW", commandId: COMMAND, expectedSnapshot: SNAPSHOT, publicBookingId: BOOKING }));
+    expect(response.status).toBe(200);
+    expect(mocks.store.resolvePaymentReview).toHaveBeenCalledWith({ nihoUserId: admin }, BOOKING, { commandId: COMMAND, expectedSnapshot: SNAPSHOT });
   });
 
   it("answers requests, resolves late payments and retries or closes refunds", async () => {

@@ -893,3 +893,22 @@ describe("sign-in links of Experience host accounts (ADR 0003)", () => {
     expect(counts).not.toHaveProperty("hostAccountPurge");
   });
 });
+
+describe("ended sessions of the Admin's Google login (ADR 0003)", () => {
+  it("deletes them while the flag is on, reports a failure by its class only, and does not run while it is off", async () => {
+    const adminSessions = { purgeExpired: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<number>>(async () => 3) };
+    const counts = await runExperienceJobs({ ...s.deps, adminSessions });
+    expect(counts.adminSessionPurge).toEqual({ purged: 3 });
+    expect(adminSessions.purgeExpired).toHaveBeenCalledWith({ nowUtc: NOW.toISOString(), limit: EXPERIENCE_JOB_LIMITS.adminSessionsPurgedPerStep });
+    expect(experienceJobActivity(counts).active).toBe(true);
+
+    adminSessions.purgeExpired.mockRejectedValueOnce(new Error("purge failed for admin.sample@niho.life"));
+    const failed = await runExperienceJobs({ ...s.deps, adminSessions });
+    expect(failed.adminSessionPurge).toEqual({ error: "unavailable" });
+    expect(s.onStepError).toHaveBeenCalledWith("adminSessionPurge", "Error");
+    expect(JSON.stringify(failed) + JSON.stringify(s.onStepError.mock.calls)).not.toContain("admin.sample@niho.life");
+
+    expect(await runExperienceJobs({ ...s.deps, adminSessions: null })).not.toHaveProperty("adminSessionPurge");
+    expect(await runExperienceJobs(s.deps)).not.toHaveProperty("adminSessionPurge");
+  });
+});

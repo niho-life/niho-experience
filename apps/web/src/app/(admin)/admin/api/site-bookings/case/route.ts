@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const repository = experienceSupportRepository();
   if (!repository) return adminJson({ error: "unavailable" }, 503);
   try {
-    return adminJson({ case: await repository.getCase({ nihoUserId: session.verified.actor.id }, publicBookingId), currentAdminUserId: session.verified.actor.id });
+    return adminJson({ case: await repository.getCase({ nihoUserId: session.actor.id }, publicBookingId), currentAdminUserId: session.actor.id });
   } catch (error) {
     return failed(error);
   }
@@ -50,12 +50,15 @@ export async function POST(request: Request) {
     || (body.internalMemo !== null && typeof body.internalMemo !== "string")) return adminJson({ error: "invalid_input" }, 400);
   const repository = experienceSupportRepository();
   if (!repository) return adminJson({ error: "unavailable" }, 503);
-  const actor = { nihoUserId: session.verified.actor.id };
+  const actor = { nihoUserId: session.actor.id };
   try {
     const assignedAdminUserId = body.assignedAdminUserId === "SELF" ? actor.nihoUserId : body.assignedAdminUserId as string | null;
     if (assignedAdminUserId !== null && assignedAdminUserId !== actor.nihoUserId) {
       const current = await repository.getCase(actor, body.publicBookingId);
       if (current?.assignedAdminUserId !== assignedAdminUserId) {
+        // The other admins are NIHO's list, read with the NIHO admin token: with the Google login (ADR 0003) a case is
+        // assigned to oneself only.
+        if (session.kind !== "niho") return adminJson({ error: "assignee_unavailable" }, 409);
         const candidates = await adminSupportCaseApiClient(session.session.idToken).listSupportAdmins();
         if (!candidates.ok) return adminSupportCaseFailureJson(candidates);
         if (!candidates.data.admins.some((admin) => admin.id === assignedAdminUserId)) return adminJson({ error: "assignee_unavailable" }, 409);

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostAccounts, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
+import { AdminSessions, BookingCancellations, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestQuestionRepository, GuestQuestionTranslations, HostAccounts, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
 
 /** The experience mail job's trigger (#285 slice 5) with a synthetic Google identity, pool, mailer and run. */
 const mocks = vi.hoisted(() => ({
@@ -218,6 +218,22 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     expect(run.mock.calls[0]![0].hostLogins).toBeInstanceOf(HostAccounts);
     expect((await call(false)).status).toBe(200);
     expect(run.mock.calls[1]![0].hostLogins).toBeNull();
+  });
+
+  it("deletes ended Admin sessions only while the Admin's Google login is on (ADR 0003)", async () => {
+    const run = vi.fn<(deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>>(async () => idle as ExperienceJobCounts);
+    const call = (adminGoogleLogin: boolean) => experienceJobsDrainResponse(new Request(URL, { method: "POST", headers: { authorization: "Bearer synthetic.jwt.token" } }), {
+      settings: { enabled: true, audience: mocks.config.experienceJobsAudience, serviceAccountEmail: mocks.config.experienceJobsServiceAccountEmail },
+      verifier: { verify: vi.fn().mockResolvedValue({ ok: true, claims: { iss: "accounts.google.com", aud: mocks.config.experienceJobsAudience, email: mocks.config.experienceJobsServiceAccountEmail, emailVerified: true, exp: Math.floor(Date.now() / 1000) + 60 } }) },
+      pool: () => fakePool as never,
+      mailer: () => fakeMailer,
+      adminGoogleLogin,
+      run,
+    });
+    expect((await call(true)).status).toBe(200);
+    expect(run.mock.calls[0]![0].adminSessions).toBeInstanceOf(AdminSessions);
+    expect((await call(false)).status).toBe(200);
+    expect(run.mock.calls[1]![0].adminSessions).toBeNull();
   });
 
   it("puts no booking page link in the emails while booking on this site is off", async () => {

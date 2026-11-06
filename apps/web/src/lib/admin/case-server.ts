@@ -12,7 +12,7 @@ import {
   isAdminHttpRead,
   isAdminPreview,
   isAdminReadPreview,
-  loadAdminHttpSession,
+  loadNihoAdminHttpSession,
 } from "./server";
 
 export const isAdminHttpSupportCase = () => isAdminHttpRead() && config.adminSupportCaseApiEnabled;
@@ -38,7 +38,7 @@ export function adminSupportCaseFailureJson(failure: ExperienceAdminSupportCaseF
 /** Re-verifies the dedicated client, current ADMIN role and absolute session on every case BFF request. */
 export async function loadAdminSupportCaseClient(): Promise<{ ok: true; client: ExperienceAdminSupportCaseApiClient } | { ok: false; response: Response }> {
   if (!isAdminHttpSupportCase() || !isAdminHttp()) return { ok: false, response: adminJson({ error: "not_found" }, 404) };
-  const load = await loadAdminHttpSession();
+  const load = await loadNihoAdminHttpSession();
   if (load.status === "ok") return { ok: true, client: adminSupportCaseApiClient(load.session.idToken) };
   if (load.status === "error") return { ok: false, response: adminJson({ error: "unavailable" }, 503) };
   const response = adminJson({ error: load.status === "refresh" ? "refresh_required" : "signed_out" }, 401);

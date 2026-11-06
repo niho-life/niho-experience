@@ -40,6 +40,7 @@ const ADDRESS = "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+";
 const HTTPS_URL = "https://[a-z0-9-]+(\\.[a-z0-9-]+)+(/[A-Za-z0-9._~%/-]*)?";
 const SERVICE_ACCOUNT = "[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\\.iam\\.gserviceaccount\\.com";
 const CHANNEL_CAPABILITY = "(observe|readReservations|close|open|create)";
+const ADMIN_EMAIL = "[a-z0-9._%+-]{1,64}@niho\\.life";
 const CHANNEL_ADAPTER = `[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9]+=${CHANNEL_CAPABILITY}(\\+${CHANNEL_CAPABILITY})*`;
 
 /** Plain settings' shapes: what resolve-config accepts, narrowed to what --set-env-vars carries (never a comma). */
@@ -53,6 +54,8 @@ export const SHAPES = Object.freeze({
   // Semicolons preserve the two callers as one gcloud value; the runtime accepts the same closed list.
   serviceAccountList: { pattern: new RegExp(`^${SERVICE_ACCOUNT}(;${SERVICE_ACCOUNT})*$`), words: "service account emails separated by semicolons, without spaces" },
   serviceAccountEmail: { pattern: new RegExp(`^${SERVICE_ACCOUNT}$`), words: "a single service account email" },
+  // The Admin allowlist (ADR 0003): the runtime compares them in lower case and refuses any other domain.
+  adminAllowedEmails: { pattern: new RegExp(`^${ADMIN_EMAIL}(;${ADMIN_EMAIL})*$`), words: "@niho.life addresses separated by semicolons, without spaces" },
   vapidPublicKey: { pattern: /^B[A-Za-z0-9_-]{86}$/, words: "an uncompressed P-256 public key in base64url" },
   vapidSubject: { pattern: new RegExp(`^(mailto:${ADDRESS}|${HTTPS_URL})$`), words: "mailto: an address, or an https URL" },
   // The OTA adapters' short form (apps/web/src/lib/experience/channel-adapters.ts): only its shape; the runtime refuses
@@ -279,6 +282,16 @@ export const FLAGS = Object.freeze([
     fixed: { EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE: siteUrl, EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL: serviceAccount("experience-ota-watchdog") },
   },
   { env: "EXPERIENCE_CHANNEL_MANAGER_ENABLED", variable: "CHANNEL_MANAGER_ENABLED", needs: ["ADMIN_SUPPORT_CONSOLE_ENABLED", "DATABASE"] },
+  // Admin のログイン (ADR 0003 decision 4, docs/admin-auth.md): /admin signs in with a niho.life Google account on this
+  // allowlist, with sessions in the experience DB, instead of NIHO's Admin session. It uses the host console's Google
+  // OAuth client (the operator adds the redirect URI to it first). No flag whose code sends a NIHO admin token may be on
+  // with it (resolve-config.ts NIHO_ADMIN_TOKEN_FLAGS; none of them is in this table).
+  {
+    env: "EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED",
+    variable: "ADMIN_GOOGLE_LOGIN_ENABLED",
+    needs: ["ADMIN_SUPPORT_CONSOLE_ENABLED", "HOST_CONSOLE", "DATABASE"],
+    settings: [{ env: "EXPERIENCE_ADMIN_ALLOWED_EMAILS", variable: "ADMIN_ALLOWED_EMAILS", shape: "adminAllowedEmails" }],
+  },
   {
     env: "EXPERIENCE_CHANNEL_RUNTIME_ENABLED",
     variable: "CHANNEL_RUNTIME_ENABLED",

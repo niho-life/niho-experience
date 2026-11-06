@@ -15,6 +15,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   admin_product_draft_audit_events: { write: I },
   admin_product_english_reviews: { write: I },
   admin_proxy_publication_audit_events: { write: I },
+  // Admin のログイン (ADR 0003, 0066): sessions of admins signed in with Google; the mail job deletes ended ones.
+  admin_sessions: { write: IUD },
   // DELETE: the mail job removes grants and sessions that can no longer open or read a booking.
   booking_access_grants: { write: IUD },
   // 出欠 (#107): one row per booking, its mark replaced when the host corrects it.

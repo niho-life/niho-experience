@@ -1,5 +1,5 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
@@ -76,6 +76,8 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostLoginLinks: 20,
   /** Old sign-in requests and ended host sessions deleted per run (each kind). */
   hostAccountsPurgedPerStep: 500,
+  /** Admin のログイン (ADR 0003): ended admin sessions deleted per run. */
+  adminSessionsPurgedPerStep: 500,
 } as const;
 
 export interface QuestionReplyCounts {
@@ -189,6 +191,8 @@ export interface ExperienceJobCounts {
   /** Only with Experience host accounts (EXPERIENCE_HOST_ACCOUNTS_ENABLED): their sign-in links, then the purge. */
   readonly hostLoginLinks?: HostLoginLinkCounts | FailedStep;
   readonly hostAccountPurge?: PurgeCounts | FailedStep;
+  /** Only with the Admin's Google login (EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED): ended admin sessions. */
+  readonly adminSessionPurge?: PurgeCounts | FailedStep;
 }
 
 export interface ExperienceJobDeps {
@@ -245,6 +249,8 @@ export interface ExperienceJobDeps {
    * send and the old requests and ended sessions to delete.
    */
   readonly hostLogins?: Pick<HostAccounts, "listPendingLoginRequests" | "issueLoginLink" | "purgeExpired"> | null;
+  /** The Admin's Google login (ADR 0003), present only while EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED is on: ended sessions to delete. */
+  readonly adminSessions?: Pick<AdminSessions, "purgeExpired"> | null;
   /** Called once per failed step with the error's class name only (a database message can quote row values). */
   readonly onStepError?: (step: keyof ExperienceJobCounts, errorName: string) => void;
 }
@@ -757,6 +763,12 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
       purged: await hostLogins.purgeExpired({ nowUtc: deps.now().toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostAccountsPurgedPerStep }),
     }))
     : undefined;
+  const adminSessions = deps.adminSessions ?? null;
+  const adminSessionPurge = adminSessions
+    ? await step(deps, "adminSessionPurge", async () => ({
+      purged: await adminSessions.purgeExpired({ nowUtc: deps.now().toISOString(), limit: EXPERIENCE_JOB_LIMITS.adminSessionsPurgedPerStep }),
+    }))
+    : undefined;
   return {
     questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
     bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge, providerMediaCleanup,
@@ -766,6 +778,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ...(meetingGuides ? { meetingGuides } : {}),
     ...(hostLoginLinks ? { hostLoginLinks } : {}),
     ...(hostAccountPurge ? { hostAccountPurge } : {}),
+    ...(adminSessionPurge ? { adminSessionPurge } : {}),
   };
 }
 

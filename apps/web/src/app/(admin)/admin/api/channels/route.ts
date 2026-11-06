@@ -144,7 +144,7 @@ export async function POST(request: Request) {
   if (loaded.status !== "ok") return channelJson({ error: loaded.status === "error" ? "unavailable" : "unauthenticated" }, loaded.status === "error" ? 503 : 401);
   const runtime = channelRuntime();
   if (!runtime) return channelJson({ error: "runtime_unavailable" }, 503);
-  const actor = { nihoUserId: loaded.verified.actor.id };
+  const actor = { nihoUserId: loaded.actor.id };
   try {
     if (body.action === "listAccounts" && exactKeys(body, ["action", "providerId"]) && typeof body.providerId === "string") {
       return channelJson({ accounts: (await runtime.listExternalAccounts(actor, body.providerId)).map(accountDto) });

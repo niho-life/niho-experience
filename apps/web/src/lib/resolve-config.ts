@@ -329,6 +329,56 @@ function hostAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnab
   return true;
 }
 
+/**
+ * The flags whose code sends the signed-in admin's NIHO admin token (NIHO's Admin session) to NIHO. With the Google
+ * login (ADR 0003 decision 4) there is no such token, so none of them may be on at the same time. The fee summary is
+ * here for its Admin side (it is one gate for Admin and /host).
+ */
+export const NIHO_ADMIN_TOKEN_FLAGS = Object.freeze([
+  "ADMIN_SUPPORT_READ_API_ENABLED",
+  "ADMIN_SUPPORT_CASE_API_ENABLED",
+  "ADMIN_OPERATIONS_API_ENABLED",
+  "EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED",
+  "EXPERIENCE_FEE_SUMMARY_API_ENABLED",
+] as const);
+
+/** The Google Workspace domain whose accounts may sign in to /admin (the `hd` claim and every allowlisted address). */
+export const ADMIN_GOOGLE_HOSTED_DOMAIN = "niho.life";
+
+const ADMIN_ALLOWED_EMAIL = /^[a-z0-9._%+-]{1,64}@niho\.life$/;
+
+/**
+ * EXPERIENCE_ADMIN_ALLOWED_EMAILS: one or more addresses separated by semicolons, each in @niho.life (trimmed, compared
+ * in lower case). null for an empty list, an empty entry or any other address. Its values are never logged.
+ */
+export function parseAdminAllowedEmails(value: string | undefined): readonly string[] | null {
+  const entries = (value ?? "").split(";").map((entry) => entry.trim().toLowerCase());
+  if (entries.some((entry) => !ADMIN_ALLOWED_EMAIL.test(entry))) return null;
+  return Object.freeze([...new Set(entries)]);
+}
+
+/**
+ * Admin のログイン (ADR 0003 decision 4, docs/admin-auth.md): /admin signs staff in with Google (a niho.life Workspace
+ * account) and authorizes them from EXPERIENCE_ADMIN_ALLOWED_EMAILS, with server-side sessions in the experience DB and
+ * no call to NIHO. HTTP only, off by default (the NIHO admin login is unchanged while off). It uses the Google OAuth
+ * client the host console already has. Turned on without the Admin console, the experience DB, that client or a valid
+ * allowlist, or together with a flag that sends a NIHO admin token (NIHO_ADMIN_TOKEN_FLAGS), the server stops at start-up.
+ */
+function adminGoogleLoginSettings(apiMode: "mock" | "http", env: Env, adminSupportConsoleEnabled: boolean): { enabled: boolean; allowedEmails: readonly string[] } {
+  const name = "EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return { enabled: false, allowedEmails: Object.freeze([]) };
+  if (!adminSupportConsoleEnabled) throw new Error(`${name}=true needs ADMIN_SUPPORT_CONSOLE_ENABLED=true in http mode`);
+  requireSettings(name, env, ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_GOOGLE_CLIENT_ID", "EXPERIENCE_GOOGLE_CLIENT_SECRET"]);
+  const allowedEmails = parseAdminAllowedEmails(env.EXPERIENCE_ADMIN_ALLOWED_EMAILS);
+  if (!allowedEmails) {
+    throw new Error(`${name}=true needs EXPERIENCE_ADMIN_ALLOWED_EMAILS (one or more @${ADMIN_GOOGLE_HOSTED_DOMAIN} addresses separated by semicolons) in http mode`);
+  }
+  for (const flag of NIHO_ADMIN_TOKEN_FLAGS) {
+    if (env[flag] === "true") throw new Error(`${name}=true cannot be on with ${flag}=true (it sends a NIHO admin token to NIHO)`);
+  }
+  return { enabled: true, allowedEmails };
+}
+
 /*
  * OTA の枠管理 (docs/ota-runtime.md, docs/ota-google-channel-flow.md). These settings are the start-up gate and the deploy
  * table's counterpart (scripts/deploy/runtime-flags.mjs): a flag turned on without what it needs stops the server, naming
@@ -797,6 +847,8 @@ export function resolveConfig(env: Env) {
   // OTA の枠管理: start-up gates only; the routes still read their flags from process.env (see channelWatchdogSetting).
   const channelWatchdogEnabled = channelWatchdogSetting(apiMode, env, hostConsoleEnabled);
   const channelManagerEnabled = channelManagerSetting(apiMode, env, adminSupportConsoleEnabled);
+  // Admin のログイン (ADR 0003): /admin signs in with Google and Experience's allowlist instead of NIHO; see adminGoogleLoginSettings.
+  const adminGoogleLogin = adminGoogleLoginSettings(apiMode, env, adminSupportConsoleEnabled);
   const channelRuntimeEnabled = channelRuntimeSetting(apiMode, env, channelManagerEnabled, channelWatchdogEnabled);
   const resourceGoogle = resourceGoogleSettings(apiMode, env, hostConsoleEnabled);
   const airbnbGoogle = airbnbGoogleSettings(apiMode, env, hostConsoleEnabled, channelRuntimeEnabled);
@@ -824,6 +876,7 @@ export function resolveConfig(env: Env) {
       env.SITE_URL ?? "http://localhost:3000",
       adminOriginSetting,
       env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life",
+      adminGoogleLogin.enabled,
     )
     : "";
 
@@ -895,6 +948,10 @@ export function resolveConfig(env: Env) {
     hostPushJobAudience: hostPushJob.audience,
     hostPushJobServiceAccountEmail: hostPushJob.serviceAccountEmail,
     adminSupportConsoleEnabled,
+    // Admin のログイン (ADR 0003): Google and Experience's own sessions instead of NIHO's Admin session (docs/admin-auth.md).
+    adminGoogleLoginEnabled: adminGoogleLogin.enabled,
+    // The lower-case @niho.life addresses that may sign in to /admin (empty while off). Never logged.
+    adminAllowedEmails: adminGoogleLogin.allowedEmails,
     adminSupportReadApiEnabled,
     adminSupportReadPreviewEnabled,
     adminSupportCaseApiEnabled,
@@ -993,22 +1050,27 @@ function assertHostConsoleSecrets(secret: string) {
   }
 }
 
-/** Real Admin auth is closed unless its independent cookie key and exact callback origin are configured. */
-function assertAdminConsoleSettings(secret: string, firebaseWebApiKey: string, siteUrl: string, configuredOrigin: string, nihoWebOrigin: string): string {
+/**
+ * Real Admin auth is closed unless its independent cookie key and exact callback origin are configured. With the Google
+ * login (ADR 0003) NIHO is not called: the Firebase key and NIHO's admin origin are not needed, and the origin is
+ * SITE_URL's (NIHO_EXPERIENCE_ADMIN_ORIGIN, when set, must still match it). The key seals the sign-in's state.
+ */
+function assertAdminConsoleSettings(secret: string, firebaseWebApiKey: string, siteUrl: string, configuredOrigin: string, nihoWebOrigin: string, googleLogin: boolean): string {
   const keys = secret.split(",").map((key) => key.trim()).filter(Boolean);
   if (keys.length === 0 || keys.some((key) => key.length < MIN_ADMIN_SESSION_SECRET_LENGTH || key === DEV_ONLY_HOST_SESSION_SECRET)) {
     throw new Error(`ADMIN_SUPPORT_CONSOLE_ENABLED=true needs ADMIN_SESSION_SECRET (each key at least ${MIN_ADMIN_SESSION_SECRET_LENGTH} characters) in http mode`);
   }
-  if (!firebaseWebApiKey) throw new Error("ADMIN_SUPPORT_CONSOLE_ENABLED=true needs NIHO_FIREBASE_WEB_API_KEY in http mode");
-  if (!configuredOrigin) throw new Error("ADMIN_SUPPORT_CONSOLE_ENABLED=true needs NIHO_EXPERIENCE_ADMIN_ORIGIN in http mode");
-  const adminOrigin = deploymentOrigin(configuredOrigin, "NIHO_EXPERIENCE_ADMIN_ORIGIN");
-  deploymentOrigin(nihoWebOrigin, "NEXT_PUBLIC_NIHO_WEB_ORIGIN");
   let siteOrigin: string;
   try {
     siteOrigin = new URL(siteUrl).origin;
   } catch {
     throw new Error("SITE_URL must be an absolute URL");
   }
+  if (googleLogin && !configuredOrigin) return deploymentOrigin(siteOrigin, "SITE_URL");
+  if (!googleLogin && !firebaseWebApiKey) throw new Error("ADMIN_SUPPORT_CONSOLE_ENABLED=true needs NIHO_FIREBASE_WEB_API_KEY in http mode");
+  if (!configuredOrigin) throw new Error("ADMIN_SUPPORT_CONSOLE_ENABLED=true needs NIHO_EXPERIENCE_ADMIN_ORIGIN in http mode");
+  const adminOrigin = deploymentOrigin(configuredOrigin, "NIHO_EXPERIENCE_ADMIN_ORIGIN");
+  if (!googleLogin) deploymentOrigin(nihoWebOrigin, "NEXT_PUBLIC_NIHO_WEB_ORIGIN");
   if (adminOrigin !== siteOrigin) throw new Error("NIHO_EXPERIENCE_ADMIN_ORIGIN must exactly match the SITE_URL origin");
   return adminOrigin;
 }

@@ -15,7 +15,7 @@ type CurrentAdmin =
 
 async function currentAdmin(): Promise<CurrentAdmin> {
   const session = await loadAdminHttpSession();
-  if (session.status === "ok") return { kind: "ok", actor: { nihoUserId: session.verified.actor.id } };
+  if (session.status === "ok") return { kind: "ok", actor: { nihoUserId: session.actor.id } };
   return { kind: "error", response: adminJson({ error: session.status === "error" ? "unavailable" : "unauthenticated" }, session.status === "error" ? 503 : 401) };
 }
 

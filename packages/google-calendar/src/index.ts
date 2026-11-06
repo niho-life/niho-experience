@@ -3,6 +3,7 @@ import { asRecord, boundedJson, GOOGLE_API, GoogleCalendarError, googleRequest a
 import { sha256Base32Hex } from "./ids.ts";
 export { GoogleCalendarError } from "./http.ts";
 export * from "./managed-block.ts";
+export * from "./sign-in.ts";
 export interface GoogleConfig {
   clientId: string;
   clientSecret: string;

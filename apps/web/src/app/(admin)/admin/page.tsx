@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { AdminRefreshGate, AdminSessionEndGate } from "@/components/admin/AdminSessionKeeper";
 import { HOST_SURFACE } from "@/components/host/host-ui";
-import { ADMIN_BOOKINGS_PATH, ADMIN_LOGIN_PATH } from "@/lib/admin/routes";
-import { isAdminHttp, isAdminPreview, loadAdminHttpSession, readAdminSession, requireAdminConsole } from "@/lib/admin/server";
+import { ADMIN_BOOKINGS_PATH, ADMIN_GOOGLE_LOGIN_PATH, ADMIN_LOGIN_PATH } from "@/lib/admin/routes";
+import { isAdminGoogleLogin, isAdminHttp, isAdminPreview, loadAdminHttpSession, readAdminSession, requireAdminConsole } from "@/lib/admin/server";
 
 export default async function AdminEntryPage() {
   requireAdminConsole();
@@ -16,6 +16,8 @@ export default async function AdminEntryPage() {
   if (load.status === "ok") redirect(ADMIN_BOOKINGS_PATH);
   if (load.status === "refresh") return <main id="main" className="grid min-h-dvh place-items-center bg-sand/45 px-4 py-10"><section className={`${HOST_SURFACE} w-full max-w-lg p-6 md:p-8`}><AdminRefreshGate /></section></main>;
   if (load.status === "rejected") return <main id="main" className="grid min-h-dvh place-items-center bg-sand/45 px-4 py-10"><section className={`${HOST_SURFACE} w-full max-w-lg p-6 md:p-8`}><AdminSessionEndGate /></section></main>;
+  // ADR 0003: a niho.life Google account on Experience's allowlist, without NIHO.
+  if (isAdminGoogleLogin()) return <main id="main" className="grid min-h-dvh place-items-center bg-sand/45 px-4 py-10"><section className={`${HOST_SURFACE} w-full max-w-lg p-6 md:p-8`}><p className="text-xs font-extrabold tracking-[0.08em] text-moss">NIHO EXPERIENCE</p><h1 className="mt-2 font-display text-2xl font-medium">予約支援の管理画面</h1><p className="mt-3 text-ink-soft">niho.life の Google アカウントでログインします。管理者として登録されたアカウントだけが使えます。ログインは2時間使わないと終わり、長くても12時間で終わります。</p>{load.status === "error" ? <p role="alert" className="mt-3 text-sm font-bold text-warn">現在のログインを確認できませんでした。時間をおいて、もう一度お試しください。</p> : null}<a href={ADMIN_GOOGLE_LOGIN_PATH} className="mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-leaf px-6 font-extrabold hover:bg-leaf-hover">Google でログイン</a></section></main>;
   return <main id="main" className="grid min-h-dvh place-items-center bg-sand/45 px-4 py-10"><section className={`${HOST_SURFACE} w-full max-w-lg p-6 md:p-8`}><p className="text-xs font-extrabold tracking-[0.08em] text-moss">NIHO EXPERIENCE</p><h1 className="mt-2 font-display text-2xl font-medium">予約支援の管理画面</h1><p className="mt-3 text-ink-soft">NIHOで管理者権限を確認して接続します。接続は8時間で終了します。</p>{load.status === "error" ? <p role="alert" className="mt-3 text-sm font-bold text-warn">現在の接続を確認できませんでした。再接続すると新しいセッションを開始します。</p> : null}<a href={ADMIN_LOGIN_PATH} className="mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-leaf px-6 font-extrabold hover:bg-leaf-hover">NIHOでログイン</a><p className="mt-3 text-xs text-muted">予約の参照・操作APIは準備中です。</p></section></main>;
 }
 

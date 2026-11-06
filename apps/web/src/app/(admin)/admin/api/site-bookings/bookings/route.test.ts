@@ -37,7 +37,7 @@ beforeEach(() => {
   mocks.config = { guestBookingEnabled: true };
   mocks.http = true;
   mocks.available = true;
-  mocks.load.mockResolvedValue({ status: "ok", verified: { actor: { id: "admin-a" } } });
+  mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "admin-a", displayName: null }, verified: { actor: { id: "admin-a" } } });
   mocks.store.supportEnabledBookings.mockResolvedValue({ bookings: [ROW], nextCursor: CURSOR });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, DEV_ONLY_HOST_SESSION_SECRET, NIHO_HOST_TOKEN_FLAGS, resolveConfig } from "./resolve-config";
+import { DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, DEV_ONLY_HOST_SESSION_SECRET, NIHO_ADMIN_TOKEN_FLAGS, NIHO_HOST_TOKEN_FLAGS, parseAdminAllowedEmails, resolveConfig } from "./resolve-config";
 
 describe("public API version rollout gate", () => {
   it("keeps v1.0 when the runtime flag is absent", () => {
@@ -700,6 +700,69 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig({ ...configured, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "http://niho.example" })).toThrow(/NEXT_PUBLIC_NIHO_WEB_ORIGIN.*HTTPS/);
     expect(resolveConfig(configured)).toMatchObject({ adminSessionSecret: "a".repeat(32), adminOrigin: "https://experience.example" });
     expect(resolveConfig({ ...configured, SITE_URL: "http://localhost:3000", NIHO_EXPERIENCE_ADMIN_ORIGIN: "http://localhost:3000" }).adminOrigin).toBe("http://localhost:3000");
+  });
+
+  describe("the Admin's Google login (ADR 0003 decision 4)", () => {
+    const google = {
+      EXPERIENCE_API_MODE: "http",
+      ADMIN_SUPPORT_CONSOLE_ENABLED: "true",
+      SITE_URL: "https://experience.example",
+      ADMIN_SESSION_SECRET: "a".repeat(32),
+      EXPERIENCE_DATABASE_URL: "postgresql://sample@localhost/sample",
+      EXPERIENCE_GOOGLE_CLIENT_ID: "sample-client",
+      EXPERIENCE_GOOGLE_CLIENT_SECRET: "sample-secret",
+      EXPERIENCE_ADMIN_ALLOWED_EMAILS: " Admin.Sample@niho.life;ops.sample@niho.life;admin.sample@niho.life ",
+      EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED: "true",
+    };
+
+    it("stays off unless exactly true in http mode, and leaves the NIHO admin login as it was", () => {
+      expect(resolveConfig({}).adminGoogleLoginEnabled).toBe(false);
+      expect(resolveConfig({}).adminAllowedEmails).toEqual([]);
+      expect(resolveConfig({ ...google, EXPERIENCE_API_MODE: "mock" }).adminGoogleLoginEnabled).toBe(false);
+      expect(resolveConfig({ ...google, EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED: "1", NIHO_FIREBASE_WEB_API_KEY: "key", NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://experience.example" }).adminGoogleLoginEnabled).toBe(false);
+      // Off, the NIHO login still needs its Firebase key.
+      expect(() => resolveConfig({ ...google, EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED: "false" })).toThrow(/NIHO_FIREBASE_WEB_API_KEY/);
+    });
+
+    it("needs neither NIHO's Firebase key nor NIHO's admin origin, and takes SITE_URL's origin", () => {
+      const config = resolveConfig(google);
+      expect(config).toMatchObject({ adminGoogleLoginEnabled: true, adminOrigin: "https://experience.example" });
+      // Lower case, trimmed, once each.
+      expect(config.adminAllowedEmails).toEqual(["admin.sample@niho.life", "ops.sample@niho.life"]);
+      expect(resolveConfig({ ...google, NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://experience.example" }).adminOrigin).toBe("https://experience.example");
+      expect(() => resolveConfig({ ...google, NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://other.example" })).toThrow(/exactly match/);
+      expect(() => resolveConfig({ ...google, SITE_URL: "http://experience.example" })).toThrow(/HTTPS/);
+      expect(() => resolveConfig({ ...google, ADMIN_SESSION_SECRET: "" })).toThrow(/ADMIN_SESSION_SECRET/);
+    });
+
+    it("refuses to start without the Admin console, the experience DB, the Google client or a valid allowlist, naming never a value", () => {
+      expect(() => resolveConfig({ ...google, ADMIN_SUPPORT_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED=true needs ADMIN_SUPPORT_CONSOLE_ENABLED=true");
+      for (const name of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_GOOGLE_CLIENT_ID", "EXPERIENCE_GOOGLE_CLIENT_SECRET"]) {
+        expect(() => resolveConfig({ ...google, [name]: "" }), name).toThrow(`EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED=true needs ${name}`);
+      }
+      for (const allowed of [undefined, "", ";", "admin.sample@niho.life;", "admin.sample@example.com", "admin.sample@niho.life.example", "admin sample@niho.life", "admin.sample@niho.life,ops.sample@niho.life", "@niho.life"]) {
+        const env = { ...google, EXPERIENCE_ADMIN_ALLOWED_EMAILS: allowed };
+        expect(() => resolveConfig(env), String(allowed)).toThrow("needs EXPERIENCE_ADMIN_ALLOWED_EMAILS");
+        // The message names the setting; no address in it ever comes from the value.
+        try { resolveConfig(env); } catch (error) { expect(String(error), String(allowed)).not.toContain("sample"); }
+      }
+    });
+
+    it("refuses to start with a flag that sends a NIHO admin token", () => {
+      expect([...NIHO_ADMIN_TOKEN_FLAGS].sort()).toEqual([
+        "ADMIN_OPERATIONS_API_ENABLED", "ADMIN_SUPPORT_CASE_API_ENABLED", "ADMIN_SUPPORT_READ_API_ENABLED", "EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED", "EXPERIENCE_FEE_SUMMARY_API_ENABLED",
+      ]);
+      for (const name of NIHO_ADMIN_TOKEN_FLAGS) {
+        expect(() => resolveConfig({ ...google, [name]: "true" }), name).toThrow(`EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED=true cannot be on with ${name}=true`);
+        expect(resolveConfig({ ...google, [name]: "false" }).adminGoogleLoginEnabled, name).toBe(true);
+      }
+    });
+
+    it("parses the allowlist on its own", () => {
+      expect(parseAdminAllowedEmails("a@niho.life")).toEqual(["a@niho.life"]);
+      expect(parseAdminAllowedEmails(undefined)).toBeNull();
+      expect(parseAdminAllowedEmails("a@niho.life;;b@niho.life")).toBeNull();
+    });
   });
 });
 

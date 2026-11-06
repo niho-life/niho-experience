@@ -9,7 +9,7 @@ import {
   type ExperiencePreparationHostApiClient,
 } from "@niho-experience/api-client/experience-preparations";
 import { config } from "@/lib/config";
-import { clearAdminHttpSessionCookie, loadAdminHttpSession } from "@/lib/admin/server";
+import { clearAdminHttpSessionCookie, loadNihoAdminHttpSession } from "@/lib/admin/server";
 import { cookieSealer } from "@/lib/host/cookie-seal";
 import { clearSessionCookie, siteOrigin } from "@/lib/host/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
@@ -72,7 +72,7 @@ export function preparationFailureJson(failure: ExperiencePreparationFailure, ac
 
 export async function loadPreparationAdminClient(): Promise<{ ok: true; client: ExperiencePreparationAdminApiClient } | { ok: false; response: NextResponse }> {
   if (!isPreparationHttpEnabled()) return { ok: false, response: preparationJson({ error: "not_found" }, 404) };
-  const load = await loadAdminHttpSession();
+  const load = await loadNihoAdminHttpSession();
   if (load.status === "ok") return { ok: true, client: createExperiencePreparationAdminApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: load.session.idToken, fetch }) };
   if (load.status === "error") return { ok: false, response: preparationJson({ error: "unavailable" }, 503) };
   const response = preparationJson({ error: load.status === "refresh" ? "refresh_required" : "signed_out" }, 401);

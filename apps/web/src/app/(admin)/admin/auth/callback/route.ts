@@ -9,7 +9,7 @@ import {
   adminHttpLoginSealer,
   clearAdminHttpLoginCookie,
   clearAdminHttpSessionCookie,
-  isAdminHttp,
+  isAdminNihoLogin,
   setAdminHttpSessionCookie,
 } from "@/lib/admin/server";
 import { ADMIN_HTTP_LOGIN_COOKIE, decodeAdminHttpLogin, startAdminHttpSession } from "@/lib/admin/http-session";
@@ -26,7 +26,8 @@ function failed() {
 
 /** Callback values are consumed server-side and always leave the browser on a query-free Admin URL. */
 export async function GET(request: NextRequest) {
-  if (!isAdminHttp()) return adminJson({ error: "not_found" }, 404);
+  // Closed with the Google login (ADR 0003): /admin/auth/google signs in instead, and NIHO is not called.
+  if (!isAdminNihoLogin()) return adminJson({ error: "not_found" }, 404);
   const login = decodeAdminHttpLogin(adminHttpLoginSealer(), request.cookies.get(ADMIN_HTTP_LOGIN_COOKIE)?.value, Date.now());
   const state = request.nextUrl.searchParams.get("state");
   if (!login || !loginStatesMatch(login.state, state) || request.nextUrl.searchParams.has("error")) return failed();

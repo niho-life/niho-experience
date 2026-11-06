@@ -68,7 +68,7 @@ async function context() {
   if (loaded.status !== "ok") return channelJson({ error: loaded.status === "error" ? "unavailable" : "unauthenticated" }, loaded.status === "error" ? 503 : 401);
   const store = experienceStore();
   if (!store) return channelJson({ error: "runtime_unavailable" }, 503);
-  return { store, actor: { nihoUserId: loaded.verified.actor.id } };
+  return { store, actor: { nihoUserId: loaded.actor.id } };
 }
 
 export async function GET(request: Request) {
