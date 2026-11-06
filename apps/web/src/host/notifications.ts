@@ -20,7 +20,6 @@ export interface NotificationDefinition {
 
 export const NOTIFICATIONS: readonly NotificationDefinition[] = [
   { key: "NEW_BOOKING", label: "新しい予約・申込", when: "承認待ちの申込と予約の確定 · すぐに", stoppable: false },
-  { key: "APPROVAL_DEADLINE", label: "承認の期限が近い", when: "期限の 6 時間前と 1 時間前", stoppable: false },
   { key: "CANCELLATION", label: "予約の取消", when: "予約者の取消・取消の依頼・期限切れ", stoppable: false },
   { key: "GUEST_MESSAGE", label: "予約前の質問・予約者からの連絡", when: "日本語訳つきで届きます", stoppable: true },
   { key: "DAY_BEFORE_SUMMARY", label: "前日の参加者のまとめ", when: "毎日 18:00 · 翌日に確定の予約があるときだけ", stoppable: true },

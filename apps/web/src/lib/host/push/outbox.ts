@@ -2,7 +2,6 @@ import "server-only";
 import { createHash } from "node:crypto";
 import {
   HOST_NOTIFICATION_TOPICS,
-  parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseDayBeforeSummaryPayload,
@@ -48,7 +47,7 @@ const GUEST_EMAIL_DELIVERY_FAILURE_NOTES = {
 const MESSAGE_STALE_MS = 24 * 60 * 60 * 1000;
 const RETRY_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 
-export type HostPushEventFromOutbox = { ok: true; event: HostPushEvent } | { ok: false; reason: "invalid" | "expired" | "stale" };
+export type HostPushEventFromOutbox = { ok: true; event: HostPushEvent } | { ok: false; reason: "invalid" | "stale" };
 
 /** A message, question or booking older than a day is no longer news on a lock screen. */
 function staleness(message: ClaimedHostNotification, now: number): HostPushEventFromOutbox | null {
@@ -58,30 +57,12 @@ function staleness(message: ClaimedHostNotification, now: number): HostPushEvent
 }
 
 /**
- * One row as a push event, or why it is not sent: a row of another shape, an approval deadline that
- * has passed, or a message, question or new booking older than a day. The event carries the experience,
- * its time and the party size only (a question: the experience only).
+ * One row as a push event, or why it is not sent: a row of another shape, or a message, question or new
+ * booking older than a day. The event carries the experience, its time and the party size only (a question:
+ * the experience only).
  */
 export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: number): HostPushEventFromOutbox {
   const providerId = message.providerId;
-  if (message.topic === HOST_NOTIFICATION_TOPICS.approvalDeadline) {
-    const payload = parseApprovalDeadlinePayload(message.payload);
-    if (!payload) return { ok: false, reason: "invalid" };
-    if (Date.parse(payload.approvalDeadlineAt) <= now) return { ok: false, reason: "expired" };
-    return {
-      ok: true,
-      event: {
-        providerId,
-        kind: "APPROVAL_DEADLINE",
-        experienceTitle: payload.experienceTitle,
-        startsAt: payload.startsAt,
-        seats: payload.seats,
-        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
-        // The 1-hour reminder replaces the 6-hour one on the device.
-        tag: `approval-${payload.bookingId}`,
-      },
-    };
-  }
   if (message.topic === HOST_NOTIFICATION_TOPICS.guestMessage) {
     const payload = parseGuestMessagePayload(message.payload);
     if (!payload) return { ok: false, reason: "invalid" };
