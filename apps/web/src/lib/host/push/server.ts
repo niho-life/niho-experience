@@ -86,6 +86,7 @@ export function hostPushDeps(subscriptions: HostPushDeps["subscriptions"]): Host
     vapid: { subject: config.hostPushVapidSubject, publicKey: config.hostPushVapidPublicKey, privateKey: config.hostPushVapidPrivateKey },
     fetch,
     now: Date.now(),
+    origin: siteOrigin(),
   };
 }
 

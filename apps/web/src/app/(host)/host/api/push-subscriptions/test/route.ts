@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { noStoreJson } from "@/lib/host/server";
+import { noStoreJson, siteOrigin } from "@/lib/host/server";
 import { deliverHostPush } from "@/lib/host/push/notify";
 import { hostPushTestPayload, hostPushTopic } from "@/lib/host/push/payload";
 import { hostPushDeps, hostPushStore, isPushPreview, openPushBff, pushEndpointFrom, pushNotConfigured, pushUnavailable, takePushTestSlot } from "@/lib/host/push/server";
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     return pushUnavailable();
   }
   if (!recipient) return noStoreJson({ error: "not_subscribed" }, 404);
-  const outcome = await deliverHostPush(recipient, { payload: hostPushTestPayload(), urgency: "high", ttlSeconds: 60, topic: hostPushTopic("host-push-test") }, hostPushDeps(store));
+  const outcome = await deliverHostPush(recipient, { payload: hostPushTestPayload(siteOrigin()), urgency: "high", ttlSeconds: 60, topic: hostPushTopic("host-push-test") }, hostPushDeps(store));
   if (outcome === "sent") return noStoreJson({ sent: true });
   if (outcome === "gone") return noStoreJson({ error: "subscription_gone" }, 410);
   return noStoreJson({ error: "push_failed" }, 502);

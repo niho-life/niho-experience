@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { publicationManuscriptFingerprint, publicationManuscriptReview } from "@niho-experience/experience-store";
 import { canonicalPublicationJson, confirmPublicationEnglish, englishPublicationManuscript } from "./publication-confirmation";
 
 const japanese = {
@@ -61,5 +62,40 @@ describe("OWNER confirmation of manually prepared English", () => {
   it("keeps incomplete copy unconfirmed", async () => {
     await expect(confirmPublicationEnglish(() => ({ japanese, english: { ...english, language: " " } })))
       .rejects.toThrow("当日の言語を入力");
+  });
+});
+
+describe("optional FAQ in the OWNER confirmation", () => {
+  const { title, language, ...copy } = english;
+  const content = { ...copy, facts: { language } };
+  const faq = [{ question: "Can children join?", answer: "Yes, from age 6." }];
+  const faqJa = [{ question: "子どもも参加できますか？", answer: "6歳から参加できます。" }];
+
+  it("fingerprints an absent and an empty FAQ exactly like a manuscript written before FAQ existed", async () => {
+    const before = await confirmPublicationEnglish(() => ({ japanese, english: englishPublicationManuscript(title, content) }));
+    expect(before.sourceFingerprint).toBe(hash(japanese));
+    expect(before.confirmedEnglishFingerprint).toBe(hash(english));
+    const empty = await confirmPublicationEnglish(() => ({ japanese: { ...japanese, faq: [] }, english: englishPublicationManuscript(title, { ...content, faq: [] }) }));
+    expect(empty).toEqual(before);
+    expect(englishPublicationManuscript(title, { ...content, faq: [] })).not.toHaveProperty("faq");
+  });
+
+  it("includes a written FAQ in both fingerprints and matches the server's review byte for byte", async () => {
+    const confirmed = await confirmPublicationEnglish(() => ({ japanese: { ...japanese, faq: faqJa }, english: englishPublicationManuscript(title, { ...content, faq }) }));
+    expect(confirmed.sourceFingerprint).not.toBe(hash(japanese));
+    expect(confirmed.confirmedEnglishFingerprint).not.toBe(hash(english));
+    expect(confirmed.sourceFingerprint).toBe(publicationManuscriptFingerprint({ ...japanese, faq: faqJa }));
+    const review = publicationManuscriptReview({
+      ...content, meetingOverview: null, meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null,
+      faq, ja: { ...japanese, faq: faqJa }, translation: confirmed,
+    }, title);
+    expect(review).toMatchObject({ ownerConfirmed: true, japaneseFingerprint: confirmed.sourceFingerprint, englishFingerprint: confirmed.confirmedEnglishFingerprint });
+  });
+
+  it("does not confirm an incomplete FAQ row", async () => {
+    await expect(confirmPublicationEnglish(() => ({ japanese: { ...japanese, faq: [{ question: "質問", answer: "" }] }, english: englishPublicationManuscript(title, content) })))
+      .rejects.toThrow("日本語のよくある質問1件目");
+    await expect(confirmPublicationEnglish(() => ({ japanese, english: englishPublicationManuscript(title, { ...content, faq: [...faq, faq[0]] }) })))
+      .rejects.toThrow("英語のよくある質問2件目の質問が前の質問と同じ");
   });
 });

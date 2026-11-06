@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { shortDateWithWeekdayJa, todayInJapan } from "@/host/format";
 import { otaSiteLabel } from "@/host/ota-sites";
 import type { HostNotificationKey } from "@/host/types";
+import { HOST_APP_ICONS } from "../pwa";
 import { HOST_APP_SCOPE } from "../routes";
 
 /**
@@ -48,7 +49,38 @@ export interface HostPushEvent {
   productId?: string;
 }
 
-/** The JSON the service worker reads (lib/host/service-worker.ts). */
+/**
+ * Declarative Web Push (#177 P3; W3C Push API §3.3, Safari 18.4+): a message with this `web_push` value is shown by the
+ * browser itself, without waking the service worker, so it still appears when the worker cannot run.
+ */
+export const HOST_DECLARATIVE_PUSH = 8030;
+
+/** The `notification` of a declarative message: the same words as the legacy fields, and where a tap goes. */
+export interface HostDeclarativeNotification {
+  title: string;
+  body: string;
+  /** Absolute when the site's origin is known, else the path (a browser resolves it against the registration's scope). */
+  navigate: string;
+  tag: string;
+  lang: "ja";
+  dir: "ltr";
+  icon?: string;
+  /**
+   * What /host/sw.js reads when the browser hands it this notification as `event.notification` (mutable: true): where a tap goes
+   * and the app icon's count. `badge` is kept for zero too, which the worker turns into clearAppBadge.
+   */
+  data: { url: string; badge?: number };
+  /** The app icon's count as WebKit's examples write it: a string. Left out for zero; the worker clears it. */
+  app_badge?: string;
+}
+
+/**
+ * The JSON of a push. The legacy fields (`v` to `badge`) are what /host/sw.js reads (lib/host/service-worker.ts) in a
+ * browser without declarative push. A browser with it reads `web_push` and `notification` and ignores the rest.
+ * `mutable: true` keeps the worker's push event, which then has no data and gets this notification as `event.notification`
+ * (Push API §10.3): the worker sets the app badge and tells the open pages, and shows nothing itself, so the browser shows this
+ * one. A worker that shows a notification replaces it. Browsers without declarative push read the legacy fields instead.
+ */
 export interface HostPushMessage {
   v: 1;
   title: string;
@@ -56,6 +88,9 @@ export interface HostPushMessage {
   url: string;
   tag: string;
   badge?: number;
+  web_push: typeof HOST_DECLARATIVE_PUSH;
+  mutable: true;
+  notification: HostDeclarativeNotification;
 }
 
 export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
@@ -134,27 +169,53 @@ export function hostPushLines(event: HostPushEvent): { title: string; experience
   };
 }
 
-export function hostPushPayload(event: HostPushEvent): string {
+/** The legacy fields and the declarative `notification` for one message (see HostPushMessage). */
+function pushMessage(input: { title: string; body: string; url: string; tag: string; badgeCount?: number }, origin?: string): HostPushMessage {
+  const badge = Number.isInteger(input.badgeCount) && input.badgeCount! >= 0 ? input.badgeCount! : undefined;
+  const absolute = (path: string) => (origin ? new URL(path, origin).href : path);
+  return {
+    v: 1,
+    title: input.title,
+    body: input.body,
+    url: input.url,
+    tag: input.tag,
+    ...(badge !== undefined ? { badge } : {}),
+    web_push: HOST_DECLARATIVE_PUSH,
+    mutable: true,
+    notification: {
+      title: input.title,
+      body: input.body,
+      navigate: absolute(input.url),
+      tag: input.tag,
+      lang: "ja",
+      dir: "ltr",
+      data: { url: absolute(input.url), ...(badge !== undefined ? { badge } : {}) },
+      ...(origin ? { icon: absolute(HOST_APP_ICONS.icon192) } : {}),
+      ...(badge !== undefined && badge > 0 ? { app_badge: String(badge) } : {}),
+    },
+  };
+}
+
+/** `origin` is this site's (https://experience.niho.life): with it a declarative message names absolute addresses. */
+export function hostPushPayload(event: HostPushEvent, origin?: string): string {
   const tag = event.tag.trim();
   if (!tag || tag.length > TAG_MAX) throw new Error("A host push tag must be 1-64 characters");
   const lines = hostPushLines(event);
-  const message: HostPushMessage = {
-    v: 1,
+  const message = pushMessage({
     title: lines.title,
     body: event.note ?? [lines.experience, lines.when, lines.guest ? `${lines.guest} 様` : null, lines.seats].filter(Boolean).join(" · "),
     url: hostPushUrl(event.url),
     tag,
-    ...(Number.isInteger(event.badgeCount) && event.badgeCount! >= 0 ? { badge: event.badgeCount } : {}),
-  };
+    badgeCount: event.badgeCount,
+  }, origin);
   const json = JSON.stringify(message);
   if (Buffer.byteLength(json) > HOST_PUSH_MAX_BYTES) throw new Error("A host push payload must stay within 3 KB");
   return json;
 }
 
 /** 設定 › この端末's テスト通知: the same shape, nothing about a booking. */
-export function hostPushTestPayload(): string {
-  const message: HostPushMessage = { v: 1, title: "テスト通知", body: "この端末に NIHO 体験ホストの通知が届きます。", url: "/host/settings#settings-device", tag: "host-push-test" };
-  return JSON.stringify(message);
+export function hostPushTestPayload(origin?: string): string {
+  return JSON.stringify(pushMessage({ title: "テスト通知", body: "この端末に NIHO 体験ホストの通知が届きます。", url: "/host/settings#settings-device", tag: "host-push-test" }, origin));
 }
 
 /** Time-critical kinds go out at once; a deadline or a summary is useless once it has passed. */

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { HostAppSurfaceGuard, HostLoginLink, HostResumeRefresh } from "@/components/host/HostAppWindow";
+import { HostSharedPhotoNotice } from "@/components/host/HostSharedPhoto";
 import { HostRefreshGate, HostSessionKeeper } from "@/components/host/HostSessionKeeper";
 import { HostShell } from "@/components/host/HostShell";
 import { hostButtonClass, HOST_HEADING, HOST_PAGE } from "@/components/host/host-ui";
@@ -77,7 +78,10 @@ export default async function HostConsoleLayout({ children }: { children: React.
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
       <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl={config.guideEditorSiteOrigin ? "/write" : ""} preview={isHostMock()}>
         {load.status === "ok" ? (
-          children
+          <>
+            {config.hostPwaEnabled ? <HostSharedPhotoNotice /> : null}
+            {children}
+          </>
         ) : (
           <HostPageBody>
             <ProvidersProblem status={load.status} />

@@ -53,6 +53,8 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   // Only where a guest can book: otherwise there is nothing to book by, and a failed read shows none.
   const bookingHref = `${ja ? "/ja" : ""}/experiences/${publication.slug}/book`;
   const nextDates = config.bookingsEnabled && config.guestBookingEnabled && offers.length ? await siteNextDates(publication.slug) : [];
+  // Host-written FAQ in the page's language; none written means no section (never a filler FAQ).
+  const faq = content ? content.faq : publication.content.faq;
 
   return <>
     <JsonLd data={structured.touristTrip} />
@@ -130,6 +132,17 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "レビュー" : "Reviews"}</h2>
               <div className="mt-4"><ReviewsSection slug={publication.slug} reviews={reviews} locale={locale} preview={false} nihoWebOrigin={config.nihoWebOrigin} /></div>
+            </section> : null}
+            {faq.length ? <section id="faq" aria-labelledby="faq-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+              <h2 id="faq-heading" className="text-2xl">{ja ? "よくある質問" : "Questions before you book"}</h2>
+              <div className="mt-4 border-t border-line">
+                {faq.map((item, index) => <details key={`${index}-${item.question}`} className="group border-b border-line">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center py-4 [&::-webkit-details-marker]:hidden">
+                    <h3 className="flex w-full items-center justify-between gap-4 font-sans text-[1.0625rem] leading-[1.5] font-extrabold tracking-normal"><span>{item.question}</span><span aria-hidden className="text-xl text-moss transition-transform group-open:rotate-45">+</span></h3>
+                  </summary>
+                  <p className="pb-4 whitespace-pre-line text-ink-soft">{item.answer}</p>
+                </details>)}
+              </div>
             </section> : null}
           </div>
 

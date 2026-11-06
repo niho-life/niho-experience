@@ -6,6 +6,7 @@ vi.mock("@/lib/config", () => ({ config: state.config, isPreview: true }));
 
 import { GET as manifestRoute } from "@/app/(host)/host/manifest.webmanifest/route";
 import { GET as workerRoute } from "@/app/(host)/host/sw.js/route";
+import { POST as shareTargetRoute } from "@/app/(host)/host/share-target/route";
 import { hostInstallGuide, hostPushAvailability, hostWebManifest, type HostInstallDevice } from "./pwa";
 
 afterEach(() => {
@@ -38,14 +39,43 @@ describe("the app's manifest (#177)", () => {
     for (const url of [manifest.start_url, ...(manifest.shortcuts ?? []).map((shortcut) => shortcut.url)]) expect(url!.startsWith("/host/")).toBe(true);
   });
 
+  it("takes photos from Android's share sheet (#177 P3): one POST route in the scope, images only", () => {
+    const { share_target: target } = hostWebManifest();
+    expect(target).toEqual({
+      action: "/host/share-target",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: { files: [{ name: "photos", accept: ["image/jpeg", "image/png"] }] },
+    });
+    expect(target.action.startsWith(hostWebManifest().scope!)).toBe(true);
+    // Not a share of a link or a note: no title, text or url parameters.
+    expect(Object.keys(target.params)).toEqual(["files"]);
+  });
+
   it("is served only while HOST_PWA_ENABLED is on", async () => {
     const on = manifestRoute();
     expect(on.status).toBe(200);
     expect(on.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8");
     expect(on.headers.get("cache-control")).toBe("private, no-store");
-    expect(await on.json()).toMatchObject({ id: "/host/", start_url: "/host/launch?source=pwa" });
+    expect(await on.json()).toMatchObject({ id: "/host/", start_url: "/host/launch?source=pwa", share_target: { action: "/host/share-target" } });
     state.config.hostPwaEnabled = false;
     expect(manifestRoute().status).toBe(404);
+  });
+});
+
+describe("/host/share-target (#177 P3)", () => {
+  it("when no worker took the share, sends the host to 体験 saying the photo did not arrive, and keeps nothing", () => {
+    const response = shareTargetRoute();
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/host/experiences?shared=none");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("is not there while HOST_PWA_ENABLED is off", () => {
+    state.config.hostPwaEnabled = false;
+    const response = shareTargetRoute();
+    expect(response.status).toBe(404);
+    expect(response.headers.get("location")).toBeNull();
   });
 });
 

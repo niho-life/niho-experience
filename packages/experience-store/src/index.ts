@@ -28,6 +28,13 @@ export type {
   WithdrawSellerDisclosureCommand,
 } from "./provider-seller-disclosures.ts";
 export { projectPublicExperiencePublicationManuscript } from "./experience-publication-projection.ts";
+export {
+  EXPERIENCE_PUBLICATION_FAQ_LIMITS,
+  publicationFaqIssue,
+  publicationManuscriptFingerprint,
+  validPublicationLocaleManuscript,
+} from "./experience-publication-manuscript.ts";
+export type { ExperiencePublicationFaqItem } from "./experience-publication-manuscript.ts";
 export type {
   ExperienceHostSaleTerms,
   ExperienceHostSaleOffer,

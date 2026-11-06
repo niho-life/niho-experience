@@ -55,3 +55,11 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 OWNERはAI翻訳の生成履歴がなくても、現在の日英原稿を照合して「英語原稿を確認」を実行できる。事務局が準備した原稿も同じ操作で引き継ぐ。確認は現在の日本語と英語それぞれのfingerprintへ結び、確認処理中の変更は受け付けない。日本語・英語の再編集は確認を解除する。確認操作は外部翻訳APIを呼ばず、保存・公開時のサーバーによる原稿・fingerprint・OWNER・掲載同意の検証を通す。
 
 Admin代理公開では、手入力の日英原稿をAdmin reviewとして別のimmutable行に記録する。OWNER本人が確認した表示やdraft内のOWNER確認fingerprintは作らない。公開transactionは現在revisionと日英fingerprintに一致する同じAdmin actorのreviewを要求し、原稿再編集後は再reviewが必要になる。
+
+## よくある質問（FAQ・任意）
+
+ホストは日本語原稿（`content.ja.faq`）と英語原稿（`content.faq`）に、予約前によくある質問を「質問・答え」の組で書ける（#146）。書式なしの文で、最大30件、質問200文字・答え1200文字まで（`EXPERIENCE_FAQ_LIMITS` と同じ値）。保存時はサーバーが厳格に検証し、空の質問・答え、上限超過、30件超、同じ質問の重複（前後の空白を除き大文字小文字を区別しない）、`question`/`answer` 以外のキーを含む行を `INVALID_INPUT` で拒否する。黙って落とさず、Host画面も保存前に該当行を示す。
+
+FAQは原稿の唯一の任意キーで、それ以外の未知キーは従来どおり拒否する。互換規則として、`faq` が無い原稿と空配列の原稿は同じ原稿として扱い、空の `faq` は日英どちらのfingerprintにも含めない。FAQ導入前に確認済みの原稿はfingerprintがバイト単位で変わらず、確認状態も公開もそのまま維持される。FAQを書いた場合は日英のfingerprintに含まれ、編集すると英語原稿の確認が解除される。「日本語から英語案を作成」は日本語FAQも同じ件数で翻訳し、件数が合わない翻訳案は使わない。
+
+公開版はFAQを公開projectionへ写し、英語の詳細ページは「Questions before you book」、日本語ページは確認済み日本語原稿の「よくある質問」として、各質問をh3にしたnative `details` で初期HTMLに出す。FAQが無ければ節を出さず、固定文の代替FAQも出さない。FAQPageの構造化データは付けない。

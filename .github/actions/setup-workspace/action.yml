@@ -1,0 +1,14 @@
+# Node (the version in .nvmrc, with the npm cache) and `npm ci` for the whole repository.
+# One lockfile for every workspace (npm workspaces), so every CI job that runs repository code starts here.
+# Call it after `actions/checkout`: a local action is read from the checked-out tree.
+name: Set up the workspace
+description: Install Node from .nvmrc and run npm ci at the repository root.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+    - run: npm ci
+      shell: bash

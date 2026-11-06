@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   responses: new Map<string, unknown | null>(),
   catalog: null as { releaseId: string; slugs: string[] } | null,
   catalogReads: 0,
+  copyReads: 0,
   nativeFailed: false,
   native: [] as { publication: { slug: string; japanese: { title: string } | null }; saleTerms: { offers: unknown[] } | null }[],
   config: { apiMode: "mock" as "mock" | "http", experiencePublicationsEnabled: true, bookingsEnabled: true, guestBookingEnabled: true, japaneseSiteEnabled: true, nihoWebOrigin: "https://niho.example", siteUrl: "https://experience.example.com", indexingAllowed: true },
@@ -20,7 +21,7 @@ vi.mock("./experience/site-publications", () => ({ listSitePublicExperiences: as
 } }));
 vi.mock("./api", () => ({
   getApi: async () => ({
-    getJapaneseSiteCopy: async () => ({ ok: true as const, data: { schemaVersion: 2, releaseId: state.releaseId, locale: "ja", values: defaultStaticCopyValuesV1() } }),
+    getJapaneseSiteCopy: async () => (state.copyReads += 1, { ok: true as const, data: { schemaVersion: 2, releaseId: state.releaseId, locale: "ja", values: defaultStaticCopyValuesV1() } }),
     listJapaneseExperiences: async () => (state.catalogReads += 1, state.catalog)
       ? { ok: true as const, data: { releaseId: state.catalog.releaseId, locale: "ja", displayLocale: "ja", copySchemaVersion: 2, experiences: state.catalog.slugs.map((slug) => ({ slug })) } }
       : { ok: false as const, kind: "not_found" as const },
@@ -55,9 +56,11 @@ beforeEach(() => {
   state.responses.clear();
   state.catalog = null;
   state.catalogReads = 0;
+  state.copyReads = 0;
   state.native = [];
   state.nativeFailed = false;
   state.config.apiMode = "mock";
+  state.config.experiencePublicationsEnabled = true;
   state.config.bookingsEnabled = true;
   state.config.guestBookingEnabled = true;
   state.config.japaneseSiteEnabled = true;
@@ -202,5 +205,71 @@ describe("native publication language counterparts", () => {
     expect(release.pages).toHaveLength(4);
     expect(release.experiences.size).toBe(0);
     expect(state.catalogReads).toBe(0);
+  });
+});
+
+describe("the site's own Japanese release (#59)", () => {
+  beforeEach(() => {
+    state.config.apiMode = "http";
+    state.config.experiencePublicationsEnabled = true;
+  });
+
+  it("reads the copy and the four static pages from this repository, and fetches nothing from NIHO", async () => {
+    const { getJapaneseCopy, getJapanesePage } = await import("./localized-content");
+    const copy = await getJapaneseCopy();
+    expect(copy.releaseId).toBe("experience-local-ja-v1");
+    expect(copy.values["home.heroTitle"]).toBe("鎌倉をつくる人たちと出会う");
+    expect(copy.copy.text("chrome.help")).toBe("ヘルプ");
+
+    const home = await getJapanesePage("home");
+    expect(home).toMatchObject({
+      releaseId: copy.releaseId, locale: "ja",
+      route: { pageId: "home", sourcePath: "/", path: "/ja", indexable: true },
+      seo: { pageId: "home", title: copy.values["meta.siteTitle"], description: copy.values["meta.description"], indexable: true },
+    });
+    expect(await getJapanesePage("experiences")).toMatchObject({ route: { path: "/ja/experiences", indexable: true }, seo: { title: copy.values["catalogue.metaTitle"], description: copy.values["catalogue.metaDescription"] } });
+    expect(await getJapanesePage("host")).toMatchObject({ route: { path: "/ja/host", indexable: true }, seo: { title: copy.values["host.metaTitle"], description: copy.values["host.metaDescription"] } });
+    // Help is not indexed in English either, so it has no hreflang pair.
+    const help = await getJapanesePage("help");
+    expect(help).toMatchObject({ route: { path: "/ja/help", indexable: false }, seo: { title: copy.values["help.metaTitle"], indexable: false } });
+    expect(help.seo).not.toHaveProperty("description");
+    await expect(getJapanesePage("booking" as never)).rejects.toMatchObject({ reason: "invalid" });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(state.copyReads).toBe(0);
+    expect(state.catalogReads).toBe(0);
+  });
+
+  it("prepares the whole release from them: one release id, the language switch for the static pages and the published manuscripts", async () => {
+    state.native = [{ publication: { slug: "native-only", japanese: { title: "公開日本語" } }, saleTerms: { offers: [{}] } }];
+    const { getPreparedJapaneseStaticRelease, getJapaneseStaticCounterparts } = await import("./localized-content");
+    const release = await getPreparedJapaneseStaticRelease();
+    expect(release.releaseId).toBe("experience-local-ja-v1");
+    expect(release.pages).toHaveLength(4);
+    expect(new Set(release.pages.map((page) => page.releaseId))).toEqual(new Set([release.releaseId]));
+    const counterparts = await getJapaneseStaticCounterparts();
+    expect(counterparts).toMatchObject({ "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help", "/experiences/native-only": "/ja/experiences/native-only" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(state.copyReads).toBe(0);
+  });
+
+  it("stays closed while the Japanese site flag is off: this repository's copy is not a way around it", async () => {
+    state.config.japaneseSiteEnabled = false;
+    const { getJapaneseCopy, getJapanesePage, getJapaneseStaticCounterparts } = await import("./localized-content");
+    await expect(getJapaneseCopy()).rejects.toMatchObject({ reason: "disabled" });
+    await expect(getJapanesePage("home")).rejects.toMatchObject({ reason: "disabled" });
+    await expect(getJapaneseStaticCounterparts()).rejects.toMatchObject({ reason: "disabled" });
+  });
+
+  it.each([
+    ["the API is mock (the preview catalogue)", "mock", true],
+    ["this site's publications are off (the former sale)", "http", false],
+  ] as const)("still uses the release NIHO serves when %s", async (_name, apiMode, publications) => {
+    state.config.apiMode = apiMode;
+    state.config.experiencePublicationsEnabled = publications;
+    const { getJapaneseCopy, getJapanesePage } = await import("./localized-content");
+    expect((await getJapaneseCopy()).releaseId).toBe("release-1");
+    expect(state.copyReads).toBe(1);
+    expect((await getJapanesePage("home")).seo.title).toBe("Japanese home");
   });
 });

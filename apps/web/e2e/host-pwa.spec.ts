@@ -54,6 +54,70 @@ test("the manifest opens the console's start page and stays inside /host/", asyn
   const worker = await request.get("/host/sw.js");
   expect(worker.headers()["content-type"]).toBe("text/javascript; charset=utf-8");
   expect(await worker.text()).not.toContain("caches.open");
+
+  // Photos from Android's share sheet (#177 P3): one POST route inside the scope.
+  expect(manifest.share_target).toEqual({ action: "/host/share-target", method: "POST", enctype: "multipart/form-data", params: { files: [{ name: "photos", accept: ["image/jpeg", "image/png"] }] } });
+  // Without a worker, the route keeps nothing and tells 体験 the photo did not arrive.
+  const shared = await request.post("/host/share-target", { multipart: { photos: { name: "kitchen.jpg", mimeType: "image/jpeg", buffer: Buffer.from([255, 216, 255]) } }, maxRedirects: 0 });
+  expect(shared.status()).toBe(303);
+  expect(shared.headers()["location"]).toBe("/host/experiences?shared=none");
+  expect(shared.headers()["cache-control"]).toContain("no-store");
+});
+
+/** What Android's share sheet does: a multipart POST of the photo to the manifest's action, as a page navigation. */
+async function shareFromTheSheet(page: Page, file: { name: string; type: string }) {
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) await new Promise((resolve) => navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true }));
+  });
+  await page.evaluate(({ name, type }) => {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/host/share-target";
+    form.enctype = "multipart/form-data";
+    const input = document.createElement("input");
+    input.type = "file";
+    input.name = "photos";
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array([255, 216, 255, 224])], name, { type }));
+    input.files = transfer.files;
+    form.append(input);
+    document.body.append(form);
+    form.submit();
+  }, file);
+}
+
+test("a photo shared from the share sheet is held by the worker, shown in the console and let go on request (#177 P3)", async ({ page }) => {
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  const notice = page.getByRole("status").filter({ hasText: "共有された写真" });
+
+  await shareFromTheSheet(page, { name: "kitchen.jpg", type: "image/jpeg" });
+  // The worker answered the POST itself and the page took the photo; the parameter is gone, so a reload does not look again.
+  await expect(page).toHaveURL(/\/host\/experiences$/);
+  await expect(notice).toContainText("共有された写真「kitchen.jpg」を受け取りました");
+  // It stays while the host moves about the console, and points back to 体験.
+  await page.getByRole("link", { name: "ホーム" }).first().click();
+  await page.waitForURL(/\/host\/home$/);
+  await expect(notice).toContainText("kitchen.jpg");
+  await expect(notice.getByRole("link", { name: "体験を開く" })).toHaveAttribute("href", "/host/experiences");
+  await notice.getByRole("button", { name: "この写真を使わない" }).click();
+  await expect(notice).toHaveCount(0);
+
+  // A reload finds nothing to take: the worker gave the photo up, and the notice does not come back.
+  await page.reload();
+  await expect(notice).toHaveCount(0);
+});
+
+test("a share that is not a usable image is said to have failed, and can be closed (#177 P3)", async ({ page }) => {
+  await page.goto("/host/auth/mock-login?surface=app");
+  await page.waitForURL(/\/host\/home$/);
+  await shareFromTheSheet(page, { name: "notes.pdf", type: "application/pdf" });
+  await expect(page).toHaveURL(/\/host\/experiences$/);
+  const notice = page.getByRole("status").filter({ hasText: "共有された写真を受け取れませんでした" });
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: "閉じる" }).click();
+  await expect(notice).toHaveCount(0);
 });
 
 test("in a browser, /host/launch signs in as usual and forwards a signed-in host to ホーム", async ({ page }) => {

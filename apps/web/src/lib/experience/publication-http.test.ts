@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
     revokeProviderMedia: vi.fn(),
   },
   meetingGuides: { readForProduct: vi.fn(), saveForProduct: vi.fn() },
+  translator: vi.fn(),
   state: {} as Record<string, unknown>,
 }));
 
@@ -44,6 +45,7 @@ vi.mock("./publication-host-boundary", () => ({
   publicationHostMutationAllowed: mocks.mutationAllowed,
 }));
 vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository, guestMeetingGuideRepository: () => mocks.meetingGuides }));
+vi.mock("@/lib/translation/anthropic", () => ({ anthropicTranslator: () => mocks.translator }));
 vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => mocks.mediaStorage }));
 vi.mock("@/lib/editor/guide-cover-image", () => ({
   GuideCoverImageError: class extends Error { code = "invalid_image"; },
@@ -60,6 +62,8 @@ import { POST as uploadProductMedia } from "@/app/(host)/host/api/products/[prod
 import { GET as readProviderMedia, PUT as saveProviderMedia } from "@/app/(host)/host/api/provider-media/route";
 import { POST as uploadProviderMedia } from "@/app/(host)/host/api/provider-media/upload/route";
 import { GET as readBookingGuide, PUT as saveBookingGuide } from "@/app/(host)/host/api/products/[productId]/booking-guide/route";
+import { POST as translateProduct } from "@/app/(host)/host/api/products/[productId]/translation/route";
+import { publicationManuscriptFingerprint } from "@niho-experience/experience-store";
 
 const actor = { providerId: "provider-private", nihoUserId: "niho-user-private" };
 const hostContext = {
@@ -360,5 +364,80 @@ describe("Experience owner product API", () => {
     const denied = await saveProduct(request(`/host/api/products/${product.id}`, "PATCH", { version: "x", draft }), context);
     expect(denied.status).toBe(403);
     expect(mocks.boundary).not.toHaveBeenCalled();
+  });
+
+  describe("optional FAQ (#146)", () => {
+    const faq = [{ question: "Can children join?", answer: "Yes, from age 6." }];
+    const japanese = {
+      title: "合成の夕食", lead: "合成の紹介", description: "合成の説明", language: "英語",
+      highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [],
+    };
+
+    it("accepts a complete FAQ in either manuscript on create and save and passes it to the store unchanged", async () => {
+      const withFaq = { ...draft, content: { ...draft.content, faq, ja: { ...japanese, faq: [{ question: "子どもも参加できますか？", answer: "6歳から参加できます。" }] } } };
+      const created = await createProduct(request("/host/api/products", "POST", withFaq));
+      expect(created.status).toBe(201);
+      expect(mocks.repository.createDraft).toHaveBeenCalledWith(actor, withFaq);
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      const saved = await saveProduct(request(`/host/api/products/${product.id}`, "PATCH", { version, draft: withFaq }), context);
+      expect(saved.status).toBe(200);
+      expect(mocks.repository.saveDraft).toHaveBeenCalledWith(actor, expect.objectContaining({ content: withFaq.content }), 4, 3, expect.any(Object));
+    });
+
+    it.each([
+      ["a blank answer", { faq: [{ question: "Q", answer: " " }] }],
+      ["a repeated question", { faq: [...faq, { question: " can children JOIN? ", answer: "Again." }] }],
+      ["an unknown row key", { faq: [{ ...faq[0], private: "x" }] }],
+      ["a non-list", { faq: "Q: A" }],
+      ["an over-long question", { faq: [{ question: "q".repeat(201), answer: "A" }] }],
+      ["31 rows", { faq: Array.from({ length: 31 }, (_, index) => ({ question: `Q${index}`, answer: "A" })) }],
+      ["an invalid Japanese FAQ", { ja: { ...japanese, faq: [{ question: "", answer: "答え" }] } }],
+    ])("rejects %s with INVALID_INPUT before the store", async (_name, patch) => {
+      const invalid = { ...draft, content: { ...draft.content, ...patch } };
+      const created = await createProduct(request("/host/api/products", "POST", invalid));
+      expect(created.status).toBe(400);
+      expect((await created.json()).error.code).toBe("INVALID_INPUT");
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      expect((await saveProduct(request(`/host/api/products/${product.id}`, "PATCH", { version, draft: invalid }), context)).status).toBe(400);
+      expect(mocks.repository.createDraft).not.toHaveBeenCalled();
+      expect(mocks.repository.saveDraft).not.toHaveBeenCalled();
+    });
+
+    it("translates the Japanese FAQ with the same row count and fingerprints an empty FAQ like an absent one", async () => {
+      const english = { ...japanese, title: "Synthetic dinner", lead: "Lead", description: "Description", language: "English", faq };
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify(english) });
+      const source = { ...japanese, faq: [{ question: "子どもも参加できますか？", answer: "6歳から参加できます。" }] };
+      const translated = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: source }), context);
+      expect(translated.status).toBe(200);
+      expect(await translated.json()).toEqual({ sourceFingerprint: publicationManuscriptFingerprint(source), english });
+
+      const withoutFaq = { ...english, faq: undefined };
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify(withoutFaq) });
+      expect((await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: source }), context)).status).toBe(503);
+
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify(withoutFaq) });
+      const empty = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: { ...japanese, faq: [] } }), context);
+      expect(empty.status).toBe(200);
+      expect((await empty.json()).sourceFingerprint).toBe(publicationManuscriptFingerprint(japanese));
+    });
+
+    it("asks the translator for a manuscript-sized answer: a FAQ makes the JSON longer than a message may be (#146)", async () => {
+      const longFaq = Array.from({ length: 4 }, (_, index) => ({ question: `Q${index}?`, answer: "a".repeat(1_000) }));
+      const source = { ...japanese, faq: longFaq.map(({ question }) => ({ question, answer: "こ".repeat(1_000) })) };
+      const english = { ...japanese, title: "Synthetic dinner", lead: "Lead", description: "Description", language: "English", faq: longFaq };
+      expect(JSON.stringify(english).length).toBeGreaterThan(4_000);
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify(english) });
+      const translated = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: source }), context);
+      expect(translated.status).toBe(200);
+      expect(mocks.translator).toHaveBeenLastCalledWith(expect.anything(), { maxLength: 64_000 });
+    });
+
+    it("rejects an incomplete Japanese FAQ or an unknown manuscript key before calling the translator", async () => {
+      for (const source of [{ ...japanese, faq: [{ question: "質問", answer: "" }] }, { ...japanese, notes: "x" }]) {
+        const response = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: source }), context);
+        expect(response.status).toBe(400);
+      }
+      expect(mocks.translator).not.toHaveBeenCalled();
+    });
   });
 });
