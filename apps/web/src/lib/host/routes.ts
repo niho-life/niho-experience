@@ -125,6 +125,38 @@ export function hostSupportPath(kind?: "SPOT" | "EXPERIENCE_PROVIDER" | null, id
 }
 
 /**
+ * 受取口座の利用同意 (ADR 0003 slice 3, EXPERIENCE_HOST_ACCOUNTS_ENABLED): the form of 設定 › 受取口座 posts here, and the
+ * section's anchor on 設定.
+ */
+export const HOST_PAYOUT_CONSENT_PATH = "/host/api/payout-account-consent";
+export const HOST_SETTINGS_PAYOUT_ANCHOR = "settings-payout";
+
+/** 設定 › 受取口座 of a provider: where the consent form returns, and where a sign-in for it comes back to. */
+export function hostPayoutSettingsPath(providerId: string | null): string {
+  return `${withProvider(HOST_SETTINGS_PATH, providerId)}#${HOST_SETTINGS_PAYOUT_ANCHOR}`;
+}
+
+const RETURN_PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+/**
+ * A page an emailed sign-in may return to (a sensitive change asked for a recent sign-in first): only 設定 › 受取口座, with
+ * at most its `providerId`. Anything else (another path, another origin, another query) is null, so the value can never
+ * send a host off this site or to a page it was not meant for.
+ */
+export function hostReturnPathOrNull(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 300 || !value.startsWith("/host/") || value.includes("\\")) return null;
+  let url: URL;
+  try { url = new URL(value, "https://return.invalid"); }
+  catch { return null; }
+  if (url.origin !== "https://return.invalid" || url.pathname !== HOST_SETTINGS_PATH || url.hash !== `#${HOST_SETTINGS_PAYOUT_ANCHOR}`) return null;
+  const keys = [...url.searchParams.keys()];
+  if (keys.length > 1 || (keys.length === 1 && keys[0] !== "providerId")) return null;
+  const providerId = url.searchParams.get("providerId");
+  if (providerId !== null && !RETURN_PROVIDER_ID.test(providerId)) return null;
+  return hostPayoutSettingsPath(providerId);
+}
+
+/**
  * Where a signed-in host lands from /host: the home, or 設定 when Stripe sends them back from the
  * payout account's page (`?connect=return|refresh`, which 設定 handles). Only `providerId` and a
  * known `connect` are carried.

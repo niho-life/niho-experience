@@ -3,10 +3,13 @@ import type { HostActor, ExperienceHostSellerProfile, ProviderPublicationReadine
 import { config } from "@/lib/config";
 import { clearSessionCookie, noStoreJson, readHostSession, selectedHostApiClient } from "@/lib/host/server";
 import { accessTokenUsable, type ExperienceHostSession } from "@/lib/host/session";
+import { payoutConsentCurrent, readHostPayoutAccount } from "@/lib/experience/host-payout-account";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
 
 type Operation = "READ" | "EDIT" | "OWNER";
 const error = (code: string, status: number) => noStoreJson({ error: { code } }, status);
+/** How long a readiness snapshot stands (the store allows ten minutes at most). */
+const READINESS_VALIDITY_MS = 5 * 60 * 1000;
 
 export interface PublicationHostContext {
   readonly actor: HostActor;
@@ -24,19 +27,52 @@ function endedSession(): Response {
   return response;
 }
 
+type Repository = NonNullable<ReturnType<typeof experiencePublicationRepository>>;
+
 /**
- * An Experience host account (ADR 0003 slice 2): the person is the session's host account, with no call to NIHO. NIHO's
- * Connect projection (account, readiness, reuse consent) is not read for it either, so every operation stays closed
- * with the typed outcome a seller without a usable setup gets: SELLER_SETUP_REQUIRED for the provider's OWNER, FORBIDDEN
- * for anyone else. Slice 3 replaces this with Stripe's own readiness and an Experience consent.
+ * An Experience host account (ADR 0003 slice 3): the person is the session's host account and NIHO is never called. The
+ * seller is the one provider the account is the active OWNER of, with its seller registered for host accounts; the
+ * payout account's readiness comes from Stripe directly and the payment consent from the OWNER's Experience consent at
+ * the configured version. The snapshot stands five minutes, as on the NIHO path. A Stripe or consent read that fails
+ * answers READINESS_UNAVAILABLE and first records a closed snapshot (Connect not ready, no consent), so an earlier
+ * success is never used again, not even by an Admin proxy publication; an account Stripe does not show to the platform
+ * is CONNECT_NOT_READY at publication.
  */
-async function experienceAccountBoundary(session: ExperienceHostSession, repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>): Promise<PublicationHostBoundaryResult> {
-  let resolved: Awaited<ReturnType<typeof repository.currentOwnerSellerProfile>>;
-  try { resolved = await repository.currentOwnerSellerProfile(session.hostAccountId); }
-  catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
-  if (resolved.kind === "none") return { ok: false, response: error("FORBIDDEN", 403) };
-  if (resolved.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
-  return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
+async function experienceAccountBoundary(session: ExperienceHostSession, repository: Pick<Repository, "refreshReadiness">): Promise<PublicationHostBoundaryResult> {
+  const read = await readHostPayoutAccount(session.hostAccountId);
+  if (read.kind === "none") return { ok: false, response: error("FORBIDDEN", 403) };
+  if (read.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
+  if (read.kind === "setup-required") return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
+  if (read.kind === "unavailable") return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
+  const { actor, profile } = read;
+  const now = Date.now();
+  const closed: ProviderPublicationReadinessInput = {
+    accountUsable: read.hostAccountActive,
+    connectReady: false,
+    paymentReuseConsentAccepted: false,
+    paymentReuseConsentVersion: null,
+    paymentReuseConsentedAtUtc: null,
+    sellerDisplayReady: profile.sellerDisplayName.trim().length > 0,
+    sellerNihoAccountRef: profile.sellerNihoAccountRef,
+    stripeConnectAccountRef: profile.stripeConnectAccountRef,
+    sellerDisplayName: profile.sellerDisplayName.trim(),
+    requiredConsentVersion: config.experiencePublicationConsentVersion,
+    observedAtUtc: new Date(now).toISOString(),
+    validUntilUtc: new Date(now + READINESS_VALIDITY_MS).toISOString(),
+  };
+  if (read.kind === "stripe-unavailable") {
+    try { await repository.refreshReadiness(actor, closed); } catch { /* The request fails closed either way. */ }
+    return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
+  }
+  const consent = payoutConsentCurrent(read.consent, profile, config.experiencePayoutAccountConsentVersion) ? read.consent : null;
+  const readiness: ProviderPublicationReadinessInput = {
+    ...closed,
+    connectReady: read.stripe.kind === "ready",
+    paymentReuseConsentAccepted: consent !== null,
+    paymentReuseConsentVersion: consent?.consentVersion ?? null,
+    paymentReuseConsentedAtUtc: consent?.consentedAtUtc ?? null,
+  };
+  return { ok: true, value: { actor, provider: profile, readiness } };
 }
 
 /**

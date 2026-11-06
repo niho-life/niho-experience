@@ -63,6 +63,9 @@ export type {
   ExperiencePublicationContentChecks,
   ExperienceHostSellerProfile,
   ExperienceHostProviderMembership,
+  HostAccountSellerProfile,
+  HostAccountSellerProfileResolution,
+  NihoMappedSellerProfile,
   ExperiencePublicationDraftInput,
   ExperiencePublicationState,
   ExperiencePublicationDraftCreateInput,
@@ -219,6 +222,9 @@ export type {
   OpenedBookingSession,
 } from "./booking-access.ts";
 export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
+export { isHostSellerRef } from "./host-sellers.ts";
+export { ProviderPayoutAccountConsents } from "./payout-account-consents.ts";
+export type { PayoutAccountConsent, PayoutAccountConsentRecord, PayoutAccountConsentWithdrawal } from "./payout-account-consents.ts";
 export type {
   GrantProviderOwnerResult,
   HostAccountChange,

@@ -411,6 +411,31 @@ describe("the deploy workflows' feature flags", () => {
     }
   });
 
+  it("carries the payout settings with Experience host accounts, so the publication API starts with them (ADR 0003 slice 3)", () => {
+    for (const target of ["stg", "prod"] as const) {
+      const vars = { ...closure(target, "EXPERIENCE_HOST_PUBLICATION_API_ENABLED"), ...closure(target, "EXPERIENCE_HOST_ACCOUNTS_ENABLED") };
+      const resolved = resolve(target, vars);
+      expect(resolved.problems).toEqual([]);
+      expect(resolved.env.EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION).toBe(SETTING.consentVersion);
+      expect(Object.keys(resolved.secrets)).toContain("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
+      const config = resolveConfig(revision(target, resolved));
+      expect(config.hostAccountsEnabled).toBe(true);
+      expect(config.experienceHostPublicationApiEnabled).toBe(true);
+      expect(config.experiencePayoutAccountConsentVersion).toBe(SETTING.consentVersion);
+      // Missing, they are named before anything is deployed.
+      const name = (variable: string) => `${PREFIX[target]}_${variable}`;
+      const without = Object.fromEntries(Object.entries(vars).filter(([key]) => key !== name("PAYOUT_ACCOUNT_CONSENT_VERSION") && key !== name("STRIPE_PLATFORM_SECRET_KEY_REF")));
+      const problems = resolve(target, without).problems.join("\n");
+      expect(problems).toContain(name("PAYOUT_ACCOUNT_CONSENT_VERSION"));
+      expect(problems).toContain(name("STRIPE_PLATFORM_SECRET_KEY_REF"));
+      // The server would refuse that revision at start-up too.
+      const forced = resolve(target, { ...vars });
+      const env = revision(target, forced);
+      delete env.EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION;
+      expect(() => resolveConfig(env)).toThrow("needs EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION");
+    }
+  });
+
   it("production: every flag needs enable_host_calendar=true (the host console and its database)", () => {
     for (const flag of FLAGS) {
       const { problems } = resolve("prod", closure("prod", flag.env), false);

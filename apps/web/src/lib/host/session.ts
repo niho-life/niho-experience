@@ -23,6 +23,12 @@ export const ACCOUNT_SESSION_COOKIE_PATH = "/";
 export const LINK_BINDING_COOKIE = "__Secure-niho_host_link";
 export const LINK_BINDING_COOKIE_PATH = "/host/auth";
 export const LINK_BINDING_MAX_AGE_SECONDS = 15 * 60;
+/**
+ * Where a sign-in asked for by a sensitive change returns (設定 › 受取口座, ADR 0003 slice 3): the allowlisted path in
+ * base64url, beside the link cookie on the auth path for the link's 15 minutes. Read again only through
+ * hostReturnPathOrNull, so a forged value can only lead to the console's home.
+ */
+export const RETURN_PATH_COOKIE = "__Secure-niho_host_return";
 /** Browsers drop cookies whose name and value exceed 4096 bytes. */
 export const COOKIE_BYTES_LIMIT = 4096;
 

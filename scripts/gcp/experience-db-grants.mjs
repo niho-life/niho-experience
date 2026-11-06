@@ -152,6 +152,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // The publication BFF binds only the verified NIHO identity to its explicitly mapped Experience seller.
   provider_memberships: { write: IU },
   provider_notification_preferences: { write: IU },
+  // 受取口座の利用同意 (ADR 0003, 0065): the current host-account OWNER records a consent; a withdrawal or a replacement
+  // only marks the active row revoked (the rows are the consent's history: no DELETE, no other column changes).
+  provider_payout_account_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_niho_user_id"] },
   provider_publication_readiness: { write: IU },
   // Current OWNER writes only explicitly public seller fields. Idempotency receipts are append-only metadata
   // (actor, request fingerprint, action and applied version) and never duplicate disclosure/contact bodies.
@@ -159,8 +162,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   provider_seller_disclosure_commands: { write: I },
   // ホスト紹介文 (#146): the current OWNER saves and withdraws (DELETE) the provider's one public bio. No history.
   provider_host_bios: { write: IUD },
-  // Explicit Connect lookup mappings are written by the operator registration script only. The BFF's FOR SHARE
-  // needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path changes it.
+  // Explicit Connect lookup mappings and host-account sellers (0065) are written by the operator registration scripts
+  // only. The BFF's FOR SHARE needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path
+  // changes it.
   experience_host_seller_profiles: { write: [], updateColumns: ["updated_at"] },
   provider_sale_settings: { write: IU },
   resource_google_busy_intervals: { write: ID },

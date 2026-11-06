@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" },
+  config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", experiencePayoutAccountConsentVersion: "payout-v1", siteUrl: "https://experience.example.test" },
   read: vi.fn(),
   usable: vi.fn(),
   selectedClient: vi.fn(),
@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   getConnect: vi.fn(),
   ownerProfile: vi.fn(),
   ensureOwner: vi.fn(),
+  hostAccountProfile: vi.fn(),
+  refreshReadiness: vi.fn(),
+  currentConsent: vi.fn(),
+  retrieve: vi.fn(),
   clear: vi.fn(),
 }));
 
@@ -25,8 +29,12 @@ vi.mock("@/lib/experience/store-server", () => ({
   experiencePublicationRepository: () => ({
     currentOwnerSellerProfile: mocks.ownerProfile,
     ensureMappedOwnerMembership: mocks.ensureOwner,
+    currentHostAccountSellerProfile: mocks.hostAccountProfile,
+    refreshReadiness: mocks.refreshReadiness,
   }),
+  payoutAccountConsents: () => ({ current: mocks.currentConsent }),
 }));
+vi.mock("@niho-experience/experience-payments", () => ({ retrieveConnectedAccount: mocks.retrieve }));
 
 import { publicationHostBoundary } from "./publication-host-boundary";
 
@@ -52,7 +60,7 @@ const connect = {
 describe("Experience publication NIHO contract v1 boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.assign(mocks.config, { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" });
+    Object.assign(mocks.config, { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", experiencePayoutAccountConsentVersion: "payout-v1", siteUrl: "https://experience.example.test" });
     mocks.read.mockResolvedValue({ accessToken: "synthetic-session-token" });
     mocks.usable.mockReturnValue(true);
     mocks.selectedClient.mockResolvedValue({ getIdentity: mocks.getIdentity, getLegacyConnectAccount: mocks.getConnect });
@@ -139,31 +147,136 @@ describe("Experience publication NIHO contract v1 boundary", () => {
     expect(mocks.getConnect).not.toHaveBeenCalled();
   });
 
-  it("takes an Experience host account from its session, never calls NIHO, and stays closed until slice 3 (ADR 0003)", async () => {
+  describe("with an Experience host account (ADR 0003 slice 3)", () => {
     const hostAccountId = `hst_${"c".repeat(32)}`;
-    mocks.read.mockResolvedValue({ kind: "experience", hostAccountId, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e" });
-    for (const [resolved, status, code] of [
-      [{ kind: "ready", profile }, 409, "SELLER_SETUP_REQUIRED"],
-      [{ kind: "setup-required" }, 409, "SELLER_SETUP_REQUIRED"],
-      [{ kind: "ambiguous" }, 409, "SELLER_PROFILE_AMBIGUOUS"],
-      [{ kind: "none" }, 403, "FORBIDDEN"],
-    ] as const) {
-      mocks.ownerProfile.mockResolvedValueOnce(resolved);
-      for (const operation of ["READ", "EDIT", "OWNER"] as const) {
-        if (operation !== "READ") mocks.ownerProfile.mockResolvedValueOnce(resolved);
-        const result = await publicationHostBoundary(operation);
+    const sellerRef = `sel_${"d".repeat(32)}`;
+    const hostProfile = { ...profile, legacyProviderId: null, sellerNihoAccountRef: sellerRef };
+    const summary = { idLast4: "5678", country: "JP", defaultCurrency: "jpy", chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true };
+    const consent = { stripeConnectAccountRef: profile.stripeConnectAccountRef, consentVersion: "payout-v1", consentedAtUtc: "2026-11-07T01:00:00.000Z", consentedByHostAccountId: hostAccountId };
+
+    beforeEach(() => {
+      vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic");
+      mocks.read.mockResolvedValue({ kind: "experience", hostAccountId, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e" });
+      mocks.hostAccountProfile.mockResolvedValue({ kind: "ready", profile: hostProfile, hostAccountActive: true });
+      mocks.retrieve.mockResolvedValue({ kind: "ready", account: summary });
+      mocks.currentConsent.mockResolvedValue(consent);
+      mocks.refreshReadiness.mockResolvedValue({});
+    });
+
+    afterEach(() => {
+      // NIHO is never called in this mode, whatever the outcome.
+      expect(mocks.selectedClient).not.toHaveBeenCalled();
+      expect(mocks.getIdentity).not.toHaveBeenCalled();
+      expect(mocks.getConnect).not.toHaveBeenCalled();
+      expect(mocks.ownerProfile).not.toHaveBeenCalled();
+      expect(mocks.ensureOwner).not.toHaveBeenCalled();
+      expect(mocks.clear).not.toHaveBeenCalled();
+    });
+
+    it("takes the seller from the host account's OWNER profile, readiness from Stripe and the consent from Experience", async () => {
+      const result = await publicationHostBoundary("OWNER");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(mocks.hostAccountProfile).toHaveBeenCalledWith(hostAccountId);
+      expect(mocks.retrieve).toHaveBeenCalledWith({ accountId: profile.stripeConnectAccountRef, platformStripeKey: "sk_test_synthetic" });
+      expect(mocks.currentConsent).toHaveBeenCalledWith({ providerId: profile.providerId, nihoUserId: hostAccountId });
+      expect(result.value.actor).toEqual({ providerId: profile.providerId, nihoUserId: hostAccountId });
+      expect(result.value.provider).toEqual(hostProfile);
+      const { observedAtUtc, validUntilUtc, ...rest } = result.value.readiness;
+      expect(rest).toEqual({
+        accountUsable: true,
+        connectReady: true,
+        paymentReuseConsentAccepted: true,
+        paymentReuseConsentVersion: "payout-v1",
+        paymentReuseConsentedAtUtc: "2026-11-07T01:00:00.000Z",
+        sellerDisplayReady: true,
+        sellerNihoAccountRef: sellerRef,
+        stripeConnectAccountRef: profile.stripeConnectAccountRef,
+        sellerDisplayName: profile.sellerDisplayName,
+        requiredConsentVersion: "listing-v1",
+      });
+      expect(Date.parse(validUntilUtc) - Date.parse(observedAtUtc)).toBe(5 * 60 * 1000);
+      expect(mocks.refreshReadiness).not.toHaveBeenCalled();
+    });
+
+    it("keeps an account Stripe shows not ready, or not to this platform, closed (CONNECT_NOT_READY at publication)", async () => {
+      for (const check of [
+        { kind: "not_ready", account: { ...summary, payoutsEnabled: false }, problems: ["PAYOUTS_DISABLED"] },
+        { kind: "not_ready", account: { ...summary, country: "US", defaultCurrency: "usd" }, problems: ["NOT_JAPAN", "NOT_JPY"] },
+        { kind: "unreachable" },
+      ]) {
+        mocks.retrieve.mockResolvedValueOnce(check);
+        const result = await publicationHostBoundary("OWNER");
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value.readiness).toMatchObject({ connectReady: false, paymentReuseConsentAccepted: true, stripeConnectAccountRef: profile.stripeConnectAccountRef });
+      }
+    });
+
+    it("fails closed when Stripe or the consent cannot be read, recording a closed snapshot first", async () => {
+      for (const failing of [() => mocks.retrieve.mockRejectedValueOnce(new Error("stripe down")), () => mocks.currentConsent.mockRejectedValueOnce(new Error("db down"))]) {
+        mocks.refreshReadiness.mockClear();
+        failing();
+        const result = await publicationHostBoundary("READ");
         expect(result.ok).toBe(false);
         if (!result.ok) {
-          expect(result.response.status).toBe(status);
-          expect(await result.response.json()).toEqual({ error: { code } });
+          expect(result.response.status).toBe(502);
+          expect(await result.response.json()).toEqual({ error: { code: "READINESS_UNAVAILABLE" } });
+        }
+        expect(mocks.refreshReadiness).toHaveBeenCalledOnce();
+        expect(mocks.refreshReadiness.mock.calls[0]![0]).toEqual({ providerId: profile.providerId, nihoUserId: hostAccountId });
+        expect(mocks.refreshReadiness.mock.calls[0]![1]).toMatchObject({ connectReady: false, paymentReuseConsentAccepted: false, paymentReuseConsentVersion: null, paymentReuseConsentedAtUtc: null });
+      }
+      // A failing snapshot write does not open anything either.
+      mocks.retrieve.mockRejectedValueOnce(new Error("stripe down"));
+      mocks.refreshReadiness.mockRejectedValueOnce(new Error("db down"));
+      const result = await publicationHostBoundary("OWNER");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.response.status).toBe(502);
+    });
+
+    it("accepts the consent only at the configured version and for the profile's account", async () => {
+      for (const current of [
+        { ...consent, consentVersion: "payout-v0" },
+        { ...consent, stripeConnectAccountRef: "acct_another12345678" },
+        null,
+      ]) {
+        mocks.currentConsent.mockResolvedValueOnce(current);
+        const result = await publicationHostBoundary("OWNER");
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value.readiness).toMatchObject({ connectReady: true, paymentReuseConsentAccepted: false, paymentReuseConsentVersion: null, paymentReuseConsentedAtUtc: null });
+      }
+      mocks.config.experiencePayoutAccountConsentVersion = "";
+      const result = await publicationHostBoundary("OWNER");
+      if (result.ok) expect(result.value.readiness.paymentReuseConsentAccepted).toBe(false);
+    });
+
+    it("marks a suspended account unusable and refuses without a resolvable seller, the store or the Stripe key", async () => {
+      mocks.hostAccountProfile.mockResolvedValueOnce({ kind: "ready", profile: hostProfile, hostAccountActive: false });
+      const suspended = await publicationHostBoundary("OWNER");
+      if (suspended.ok) expect(suspended.value.readiness.accountUsable).toBe(false);
+      for (const [resolved, status, code] of [
+        [{ kind: "setup-required", providerId: profile.providerId }, 409, "SELLER_SETUP_REQUIRED"],
+        [{ kind: "ambiguous" }, 409, "SELLER_PROFILE_AMBIGUOUS"],
+        [{ kind: "none" }, 403, "FORBIDDEN"],
+      ] as const) {
+        for (const operation of ["READ", "EDIT", "OWNER"] as const) {
+          mocks.hostAccountProfile.mockResolvedValueOnce(resolved);
+          const result = await publicationHostBoundary(operation);
+          expect(result.ok).toBe(false);
+          if (!result.ok) {
+            expect(result.response.status).toBe(status);
+            expect(await result.response.json()).toEqual({ error: { code } });
+          }
         }
       }
-    }
-    expect(mocks.ownerProfile).toHaveBeenCalledWith(hostAccountId);
-    expect(mocks.selectedClient).not.toHaveBeenCalled();
-    expect(mocks.getIdentity).not.toHaveBeenCalled();
-    expect(mocks.getConnect).not.toHaveBeenCalled();
-    expect(mocks.ensureOwner).not.toHaveBeenCalled();
-    expect(mocks.clear).not.toHaveBeenCalled();
+      mocks.hostAccountProfile.mockRejectedValueOnce(new Error("db down"));
+      const failed = await publicationHostBoundary("OWNER");
+      if (!failed.ok) expect(await failed.response.json()).toEqual({ error: { code: "READINESS_UNAVAILABLE" } });
+      vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "");
+      const keyless = await publicationHostBoundary("OWNER");
+      expect(keyless.ok).toBe(false);
+      if (!keyless.ok) expect(await keyless.response.json()).toEqual({ error: { code: "READINESS_UNAVAILABLE" } });
+      expect(mocks.retrieve).toHaveBeenCalledTimes(1);
+    });
   });
 });

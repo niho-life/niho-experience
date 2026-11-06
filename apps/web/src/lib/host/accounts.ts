@@ -4,6 +4,7 @@ import type { NextResponse } from "next/server";
 import type { HostAccounts } from "@niho-experience/experience-store";
 import { hostAccounts } from "@/lib/experience/store-server";
 import { usableProviders, type HostProvider } from "./providers";
+import { hostReturnPathOrNull } from "./routes";
 import {
   ACCOUNT_SESSION_COOKIE,
   ACCOUNT_SESSION_COOKIE_PATH,
@@ -11,6 +12,7 @@ import {
   LINK_BINDING_COOKIE,
   LINK_BINDING_COOKIE_PATH,
   LINK_BINDING_MAX_AGE_SECONDS,
+  RETURN_PATH_COOKIE,
   type ExperienceHostSession,
 } from "./session";
 
@@ -80,12 +82,22 @@ export async function listExperienceHostProviders(session: ExperienceHostSession
 const FORM_TYPE = /^application\/x-www-form-urlencoded(?:\s*;|$)/i;
 
 export type SingleFieldForm = { ok: true; value: string } | { ok: false; status: 400 | 413 | 415 };
+export type SmallForm = { ok: true; values: ReadonlyMap<string, string> } | { ok: false; status: 400 | 413 | 415 };
 
 /**
  * One field of a small urlencoded form, reading the actual request stream (a missing or false Content-Length cannot
  * get past the cap). Anything else in the form, the field twice, or invalid UTF-8 is a 400.
  */
 export async function readSingleFieldForm(request: Request, field: string, maxBytes: number): Promise<SingleFieldForm> {
+  const form = await readSmallForm(request, [field], [field], maxBytes);
+  return form.ok ? { ok: true, value: form.values.get(field)! } : form;
+}
+
+/**
+ * A small urlencoded form of known fields, read as readSingleFieldForm reads one: each field at most once, every
+ * `required` one present, nothing else (400), within `maxBytes` (413), urlencoded only (415).
+ */
+export async function readSmallForm(request: Request, fields: readonly string[], required: readonly string[], maxBytes: number): Promise<SmallForm> {
   if (!FORM_TYPE.test(request.headers.get("content-type") ?? "")) return { ok: false, status: 415 };
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, status: 413 };
@@ -109,8 +121,12 @@ export async function readSingleFieldForm(request: Request, field: string, maxBy
     try { await reader.cancel(); } catch { /* The size or decoding answer stays. */ }
     finally { reader.releaseLock(); }
   }
-  const entries = [...new URLSearchParams(text).entries()];
-  return entries.length === 1 && entries[0]![0] === field ? { ok: true, value: entries[0]![1] } : { ok: false, status: 400 };
+  const values = new Map<string, string>();
+  for (const [name, value] of new URLSearchParams(text).entries()) {
+    if (!fields.includes(name) || values.has(name)) return { ok: false, status: 400 };
+    values.set(name, value);
+  }
+  return required.every((name) => values.has(name)) ? { ok: true, values } : { ok: false, status: 400 };
 }
 
 /** The session cookie: the opaque token, HttpOnly, Secure, SameSite=Lax, Path=/, living no longer than the session. */
@@ -130,4 +146,21 @@ export function setLinkBindingCookie(response: NextResponse, value: string) {
 
 export function clearLinkBindingCookie(response: NextResponse) {
   response.cookies.set(LINK_BINDING_COOKIE, "", hostCookieOptions(LINK_BINDING_COOKIE_PATH, 0));
+}
+
+/** Where the sign-in returns (an allowlisted path only), beside the link cookie for the link's 15 minutes. */
+export function setReturnPathCookie(response: NextResponse, path: string) {
+  const allowed = hostReturnPathOrNull(path);
+  if (!allowed) return;
+  response.cookies.set(RETURN_PATH_COOKIE, Buffer.from(allowed, "utf8").toString("base64url"), hostCookieOptions(LINK_BINDING_COOKIE_PATH, LINK_BINDING_MAX_AGE_SECONDS));
+}
+
+export function clearReturnPathCookie(response: NextResponse) {
+  response.cookies.set(RETURN_PATH_COOKIE, "", hostCookieOptions(LINK_BINDING_COOKIE_PATH, 0));
+}
+
+/** The allowlisted path a return cookie holds, or null for none or anything else. */
+export function returnPathFromCookie(value: string | undefined): string | null {
+  if (!value || value.length > 600 || !/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  return hostReturnPathOrNull(Buffer.from(value, "base64url").toString("utf8"));
 }

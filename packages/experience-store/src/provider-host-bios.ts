@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "./errors.ts";
 import { validateHostBioInput } from "./host-bio-rules.ts";
+import { sellerOwnerSql } from "./host-sellers.ts";
 import type { HostActor } from "./types.ts";
 import { withTransaction } from "./transaction.ts";
 import { assertStoreIdentifier } from "./validation.ts";
@@ -162,8 +163,9 @@ export class ProviderHostBioRepository {
           AND publication.stripe_connect_account_ref=profile.stripe_connect_account_ref
           AND EXISTS (
             SELECT 1 FROM provider_memberships owner
-             WHERE owner.provider_id=publication.provider_id AND owner.niho_user_id=profile.seller_niho_account_ref
+             WHERE owner.provider_id=publication.provider_id
                AND owner.active=true AND owner.role='OWNER'
+               AND ${sellerOwnerSql("owner", "profile")}
           )
         ORDER BY publication.published_at DESC,publication.id DESC LIMIT 1`,
       [slug],

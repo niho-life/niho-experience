@@ -252,12 +252,17 @@ export const FLAGS = Object.freeze([
   { env: "EXPERIENCE_HOST_MAIL_ENABLED", variable: "HOST_MAIL_ENABLED", needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"] },
   // ホストのアカウント (ADR 0003, docs/host-accounts.md): /host signs in with Experience's own accounts and an emailed link
   // (sent by the mail job) instead of NIHO. No flag whose code sends a NIHO host access token may be on with it
-  // (resolve-config.ts NIHO_HOST_TOKEN_FLAGS; the others of that list are not in this table).
+  // (resolve-config.ts NIHO_HOST_TOKEN_FLAGS; the others of that list are not in this table). In this mode 受取口座 is
+  // read from Stripe with the platform key and the OWNER consents to it at a version (slice 3): resolve-config needs both
+  // once the host publication API is on too; the table asks for them with the flag, so turning that API on later never
+  // finds them missing.
   {
     env: "EXPERIENCE_HOST_ACCOUNTS_ENABLED",
     variable: "HOST_ACCOUNTS_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"],
     conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
+    secrets: [{ env: "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", variable: "STRIPE_PLATFORM_SECRET_KEY_REF", stg: "STRIPE_CONNECT_PLATFORM_SECRET_KEY" }],
+    settings: [{ env: "EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION", variable: "PAYOUT_ACCOUNT_CONSENT_VERSION", shape: "consentVersion" }],
   },
   // 日本語サイト (#59): /ja の detail・sitemap・hreflang。公開サイト側の機能だが、flag は host console を配線する経路の
   // revision にだけ渡るので HOST_CONSOLE を要する。NIHO の日本語 release の実配備と実機確認が済むまで ON にしない

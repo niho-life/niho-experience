@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { addLocalDays } from "@niho-experience/experience-domain";
 import type { Pool, PoolClient } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
@@ -24,6 +25,7 @@ import {
   type ProductSaleTermsInput,
   type ProviderSaleSettings,
 } from "./guest-bookings.ts";
+import { hasExperienceActorShape, isHostSellerRef } from "./host-sellers.ts";
 import { PRODUCT_COLUMNS } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { productFromRow, type DbRow } from "./rows.ts";
@@ -33,7 +35,8 @@ import { assertMoney, assertNonEmptyText, assertStoreIdentifier } from "./valida
 
 /*
  * Operator registration for legacy site-sale cutover and seller bootstrap. Every method here is called only by
- * scripts/experience/register-site-sale.mjs or scripts/experience/provision-host-seller.mjs:
+ * scripts/experience/register-site-sale.mjs, scripts/experience/provision-host-seller.mjs or
+ * scripts/experience/provision-host-account.mjs (a seller registered for Experience host accounts, ADR 0003):
  * it takes no HostActor and checks no membership, so it must never be reachable from a route. This file
  * is not exported from index.ts (only from the `./site-sale-registration` subpath the script imports),
  * apps/web never imports it, and scripts/gcp/experience-db-grants.mjs lists it in OPERATOR_ONLY_SOURCES:
@@ -74,6 +77,30 @@ export interface RegisterHostSellerProfileInput {
 export interface HostSellerProvisioningInput extends RegisterHostSellerProfileInput {
   /** Explicit NIHO-approved platform fee configuration; never inferred or defaulted. */
   readonly supportEnabled: boolean;
+}
+
+/**
+ * A seller registered for Experience host accounts (ADR 0003): the provider, its names and its existing Stripe connected
+ * account. No NIHO ID: the seller reference is minted here (`sel_` + 32 hex) and the OWNER is the provider's host account.
+ */
+export interface HostAccountSellerInput {
+  readonly providerId: string;
+  readonly providerDisplayName: string;
+  /** The legal seller name shown to travelers (seller disclosure, receipts). */
+  readonly sellerDisplayName: string;
+  readonly stripeConnectAccountRef: string;
+}
+
+/** What the database holds for a host-account seller registration (the plan compares it with the input). */
+export interface HostAccountSellerState {
+  readonly providerExists: boolean;
+  readonly sellerProfile:
+    | null
+    /** A seller mapped to NIHO: this registration refuses to replace it. */
+    | { readonly kind: "niho" }
+    | { readonly kind: "host-account"; readonly providerDisplayName: string; readonly sellerDisplayName: string; readonly stripeConnectAccountRef: string };
+  /** Another provider's seller already uses this Stripe account. */
+  readonly accountUsedElsewhere: boolean;
 }
 
 export interface HostSellerProvisioningState {
@@ -201,6 +228,24 @@ function assertExpectedVersion(expectedVersion: number | undefined): void {
   }
 }
 
+/** A NIHO seller reference must be a NIHO user ID: never the shape of an Experience host account or host-account seller. */
+function assertNihoSellerRef(value: string): void {
+  if (hasExperienceActorShape(value)) throw new StoreValidationError("sellerProfile.sellerNihoAccountRef must be a NIHO user ID, not an Experience host account or seller reference.");
+}
+
+function validHostAccountSeller(input: HostAccountSellerInput): void {
+  if (input === null || typeof input !== "object") throw new StoreValidationError("seller profile must be an object.");
+  assertStoreIdentifier(input.providerId, "sellerProfile.providerId");
+  for (const [value, path] of [[input.providerDisplayName, "sellerProfile.providerDisplayName"], [input.sellerDisplayName, "sellerProfile.sellerDisplayName"]] as const) {
+    if (typeof value !== "string" || value.trim() !== value) throw new StoreValidationError(`${path} must be one line without surrounding spaces.`);
+    assertNonEmptyText(value, path, 300);
+    if (/[\u0000-\u001F\u007F]/.test(value)) throw new StoreValidationError(`${path} must be one line without surrounding spaces.`);
+  }
+  if (typeof input.stripeConnectAccountRef !== "string" || !/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) {
+    throw new StoreValidationError("sellerProfile.stripeConnectAccountRef is invalid.");
+  }
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "23505";
 }
@@ -254,6 +299,83 @@ export class SiteSaleRegistration {
     return result.rows[0]?.allowed === true;
   }
 
+  /** The least-privilege writer for a host-account seller (ADR 0003): the provider and its seller profile. */
+  async canProvisionHostAccountSeller(): Promise<boolean> {
+    const result = await this.#pool.query<DbRow>(
+      `SELECT has_table_privilege(current_user, 'experience_providers', 'INSERT')
+          AND has_table_privilege(current_user, 'experience_host_seller_profiles', 'INSERT') AS allowed`,
+    );
+    return result.rows[0]?.allowed === true;
+  }
+
+  /** Read only: the provider, its seller profile and whether another seller uses the account. */
+  async currentHostAccountSellerState(input: { readonly providerId: string; readonly stripeConnectAccountRef: string }): Promise<HostAccountSellerState> {
+    assertStoreIdentifier(input.providerId, "providerId");
+    const [provider, profile, elsewhere] = await Promise.all([
+      this.#pool.query("SELECT 1 FROM experience_providers WHERE id=$1", [input.providerId]),
+      this.#pool.query<DbRow>(
+        `SELECT legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name
+           FROM experience_host_seller_profiles WHERE provider_id=$1`, [input.providerId]),
+      this.#pool.query("SELECT 1 FROM experience_host_seller_profiles WHERE stripe_connect_account_ref=$1 AND provider_id<>$2", [input.stripeConnectAccountRef, input.providerId]),
+    ]);
+    const row = profile.rows[0];
+    return {
+      providerExists: provider.rows[0] !== undefined,
+      sellerProfile: row === undefined ? null
+        : row.legacy_provider_id !== null || !isHostSellerRef(row.seller_niho_account_ref) ? { kind: "niho" }
+        : {
+          kind: "host-account",
+          providerDisplayName: String(row.provider_display_name),
+          sellerDisplayName: String(row.seller_display_name),
+          stripeConnectAccountRef: String(row.stripe_connect_account_ref),
+        },
+      accountUsedElsewhere: elsewhere.rows[0] !== undefined,
+    };
+  }
+
+  /**
+   * Registers a seller for Experience host accounts (ADR 0003): creates the provider when it is missing and its seller
+   * profile with no NIHO ID and a newly minted `sel_` seller reference. The same input again is UNCHANGED. An existing
+   * profile that differs, or one mapped to NIHO, is never replaced here (StoreConflictError), nor is an account another
+   * seller uses. It grants no OWNER, writes no fee setting, creates no product and records no consent.
+   */
+  async provisionHostAccountSeller(input: HostAccountSellerInput): Promise<{ readonly provider: RegistrationOutcome; readonly sellerProfile: RegistrationOutcome }> {
+    validHostAccountSeller(input);
+    try {
+      return await withTransaction(this.#pool, async (client) => {
+        const created = await client.query("INSERT INTO experience_providers (id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id", [input.providerId]);
+        await client.query("SELECT id FROM experience_providers WHERE id=$1 FOR UPDATE", [input.providerId]);
+        const provider = created.rows[0] === undefined ? "UNCHANGED" as const : "CREATED" as const;
+        const existing = await client.query<DbRow>(
+          `SELECT legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name
+             FROM experience_host_seller_profiles WHERE provider_id=$1 FOR UPDATE`,
+          [input.providerId],
+        );
+        const row = existing.rows[0];
+        if (row) {
+          if (row.legacy_provider_id !== null || !isHostSellerRef(row.seller_niho_account_ref)) {
+            throw new StoreConflictError("The provider has a seller mapped to NIHO; it is not replaced by a host-account seller.");
+          }
+          const same = String(row.provider_display_name) === input.providerDisplayName
+            && String(row.seller_display_name) === input.sellerDisplayName
+            && String(row.stripe_connect_account_ref) === input.stripeConnectAccountRef;
+          if (!same) throw new StoreConflictError("An existing seller profile differs; use the reviewed seller-change process.");
+          return { provider, sellerProfile: "UNCHANGED" as const };
+        }
+        await client.query(
+          `INSERT INTO experience_host_seller_profiles
+             (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+           VALUES ($1,NULL,$2,$3,$4,$5)`,
+          [input.providerId, input.providerDisplayName, `sel_${randomBytes(16).toString("hex")}`, input.stripeConnectAccountRef, input.sellerDisplayName],
+        );
+        return { provider, sellerProfile: "CREATED" as const };
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new StoreConflictError("The Stripe account is already registered for another Experience seller.");
+      throw error;
+    }
+  }
+
   /** Read-only seller setup state. It contains no product, reservation, or host session data. */
   async currentHostSellerState(providerId: string): Promise<HostSellerProvisioningState> {
     assertStoreIdentifier(providerId, "providerId");
@@ -270,7 +392,8 @@ export class SiteSaleRegistration {
       providerExists: provider.rows[0] !== undefined,
       sellerProfile: row === undefined ? null : {
         providerId: String(row.provider_id),
-        legacyProviderId: String(row.legacy_provider_id),
+        // A host-account seller has none: never equal to a NIHO key, so the NIHO plan shows a conflict.
+        legacyProviderId: row.legacy_provider_id === null ? "" : String(row.legacy_provider_id),
         providerDisplayName: String(row.provider_display_name),
         sellerNihoAccountRef: String(row.seller_niho_account_ref),
         stripeConnectAccountRef: String(row.stripe_connect_account_ref),
@@ -297,6 +420,7 @@ export class SiteSaleRegistration {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(input.legacyProviderId)) throw new StoreValidationError("sellerProfile.legacyProviderId is invalid.");
     assertNonEmptyText(input.providerDisplayName, "sellerProfile.providerDisplayName", 300);
     assertNonEmptyText(input.sellerNihoAccountRef, "sellerProfile.sellerNihoAccountRef", 256);
+    assertNihoSellerRef(input.sellerNihoAccountRef);
     if (!/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) throw new StoreValidationError("sellerProfile.stripeConnectAccountRef is invalid.");
     assertNonEmptyText(input.sellerDisplayName, "sellerProfile.sellerDisplayName", 300);
     try {
@@ -396,7 +520,7 @@ export class SiteSaleRegistration {
       providerExists: provider.rows[0] !== undefined,
       sellerProfile: sellerProfile.rows[0] === undefined ? null : {
         providerId: String(sellerProfile.rows[0].provider_id),
-        legacyProviderId: String(sellerProfile.rows[0].legacy_provider_id),
+        legacyProviderId: sellerProfile.rows[0].legacy_provider_id === null ? "" : String(sellerProfile.rows[0].legacy_provider_id),
         providerDisplayName: String(sellerProfile.rows[0].provider_display_name),
         sellerNihoAccountRef: String(sellerProfile.rows[0].seller_niho_account_ref),
         stripeConnectAccountRef: String(sellerProfile.rows[0].stripe_connect_account_ref),
@@ -433,6 +557,7 @@ export class SiteSaleRegistration {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(input.legacyProviderId)) throw new StoreValidationError("sellerProfile.legacyProviderId is invalid.");
     assertNonEmptyText(input.providerDisplayName, "sellerProfile.providerDisplayName", 300);
     assertNonEmptyText(input.sellerNihoAccountRef, "sellerProfile.sellerNihoAccountRef", 256);
+    assertNihoSellerRef(input.sellerNihoAccountRef);
     if (!/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) throw new StoreValidationError("sellerProfile.stripeConnectAccountRef is invalid.");
     assertNonEmptyText(input.sellerDisplayName, "sellerProfile.sellerDisplayName", 300);
     try {
